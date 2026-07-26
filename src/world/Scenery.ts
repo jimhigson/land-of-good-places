@@ -451,7 +451,9 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
       group.add(cap);
     }
 
-    collision.addWall(x1, z1, x2, z2, 0.22);
+    // Real wall height, not the `Infinity` default — this is what lets a jump
+    // clear a low or mid wall while a tall one still stops you (Collision.ts).
+    collision.addWall(x1, z1, x2, z2, 0.22, run.height);
   }
 
   return group;
@@ -531,7 +533,8 @@ function buildStoneWalls(collision: CollisionWorld): Group {
       });
     }
 
-    collision.addWall(x1, z1, x2, z2, 0.34);
+    // Real wall height, not the `Infinity` default — see the wooden walls above.
+    collision.addWall(x1, z1, x2, z2, 0.34, run.height);
   }
 
   group.add(
