@@ -5,6 +5,7 @@ import { clamp01, damp, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import type { Expression } from '../../art/style/faces';
+import { NameLabel } from '../../ui/NameLabel';
 
 /**
  * A rider: a little cart on the rail with a kid standing on it.
@@ -30,6 +31,12 @@ export interface RacerOptions {
   readonly cart: number;
   /** Bunches for the player, other styles for the rivals — tell them apart. */
   readonly hairStyle?: 'bunches' | 'bob' | 'short';
+  /**
+   * Only the player gets one: the floating name pill the park already puts
+   * above a walking character (`ui/NameLabel`), reused here so a race full of
+   * near-identical carts still has one unmistakable "that's me".
+   */
+  readonly label?: { readonly text: string; readonly accent: number };
 }
 
 export interface RacerModel {
@@ -120,6 +127,19 @@ export function createRacer(options: RacerOptions): RacerModel {
   rider.add(kid.root);
   cart.add(rider);
 
+  // --- the name pill ---------------------------------------------------------
+  // Same sprite the park hangs over a walking character's head, just scaled
+  // down with the rest of the rider so it keeps the same proportion to its
+  // owner. Rivals get `options.label` left undefined, so only the player's
+  // cart carries one — the whole point of it.
+  let nameLabel: NameLabel | null = null;
+  if (options.label) {
+    nameLabel = new NameLabel(options.label.text, options.label.accent);
+    nameLabel.sprite.scale.multiplyScalar(RIDER_SCALE);
+    nameLabel.sprite.position.set(0, 0.83 + RIDER_SCALE * kid.height + 0.32, 0);
+    cart.add(nameLabel.sprite);
+  }
+
   let duck = 0;
   let lean = 0;
   let expression: Expression = 'happy';
@@ -187,6 +207,7 @@ export function createRacer(options: RacerOptions): RacerModel {
       cartMaterial.dispose();
       cartDarkMaterial.dispose();
       metalMaterial.dispose();
+      nameLabel?.dispose();
     },
   };
 }

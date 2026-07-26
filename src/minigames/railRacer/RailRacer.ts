@@ -22,8 +22,12 @@ import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
  *
  * You ride a little cart along a rail against three cheerful rivals. There is
  * exactly one control: **hold to go faster, let go to coast**. Sparking gates
- * and low branches cross the track, and the only way under one is to be slow
- * enough that your rider ducks — so the whole game is learning *when to let go*.
+ * and low branches cross the track, and the rule for getting under one is the
+ * simplest one that survived a family playtest: *if you are not holding when
+ * you pass under it, you duck it clean — however fast you are still going.*
+ * Hold through one and you bonk. There is no speed threshold to beat and no
+ * grace period while you are underneath it, so the whole game is learning
+ * *when to let go*, not how slow to coast down first.
  *
  * Three rules keep it a Land of Good Places game rather than a race:
  *
@@ -85,19 +89,33 @@ const RACE_TIME_LIMIT = 150;
 /**
  * Camera framing: side-on, with just enough pitch to stack the four lanes into
  * separate rows of the picture.
- *
- * The view height is the number that matters. Too tight and the riders loom,
- * the hazards arrive with no warning and the backdrop never gets seen; 24
- * metres puts a two-metre cart at about a twelfth of the screen and gives a
- * second and a half of visible track ahead at racing speed, which is the whole
- * reaction budget the game is tuned around.
  */
-const VIEW_HEIGHT = 24;
 const CAMERA_YAW = 0.17;
 const CAMERA_PITCH = 0.3;
 const CAMERA_DISTANCE = 90;
 /** The rider sits left of centre, so most of the screen is what is coming. */
 const CAMERA_LEAD = 7;
+
+/**
+ * The frustum is sized by WIDTH, not height, and on purpose: a phone in
+ * portrait and a monitor in landscape must show the same amount of track
+ * *coming*, or a hazard a portrait player had a second to react to is already
+ * past a landscape player's nose. `resize` fixes the horizontal span in
+ * metres and derives the vertical span from the aspect ratio, so a narrow
+ * viewport grows the view *taller* — more sky, more grass — instead of
+ * cropping the road ahead.
+ *
+ * `LOOKAHEAD` and `TRAILING` are the guarantee, in metres of track, measured
+ * from the rider — not from the lead-shifted point the camera actually looks
+ * at, which is why `CAMERA_LEAD` has to be added back on both sides to get
+ * the half-width. The two happen to demand exactly the same half-width here,
+ * and at a 1280×800 landscape aspect it comes out within a metre of the old
+ * fixed-24m-tall view, so nothing changes for the desktop and tablet players
+ * this was already tuned for — only narrow phones get materially taller.
+ */
+const LOOKAHEAD = 26;
+const TRAILING = 12;
+const VIEW_HALF_WIDTH = Math.max(LOOKAHEAD - CAMERA_LEAD, TRAILING + CAMERA_LEAD);
 
 /** The three rivals. Cheerful, beatable, and each one rides a bit differently. */
 const RIVALS = [
@@ -232,19 +250,27 @@ class RailRacer implements MiniGame {
       });
     });
 
-    // The player rides as themselves: same hair and outfit as the kid standing
-    // in the park, so the rider on the front rail is recognisably *you*.
+    // The player rides as themselves, but only halfway: their own hair colour
+    // carries over from the park, while the outfit is overridden to the same
+    // bright pink as the cart. Playtesting found the park's own outfit colour
+    // could still read close enough to a rival's to leave a kid unsure which
+    // cart was theirs — a single unclaimed, saturated colour on both the cart
+    // and the outfit is a much louder answer, and the floating "YOU" pill
+    // (see racer.ts) makes it unmissable even at a glance.
     const model = createRacer({
       hair: player.hairColour,
-      outfit: player.outfitColour,
+      outfit: PALETTE.markerPink,
       cart: PALETTE.markerPink,
       hairStyle: 'bunches',
+      label: { text: 'YOU', accent: PALETTE.markerPink },
     });
     group.add(model.root);
     this.riders.push({
       model,
       colour: PALETTE.markerPink,
       isPlayer: true,
+      // `PLAYER_LANE` is the last (nearest-camera, bottom-of-picture) entry in
+      // `LANES` — see the "far to near" note on that array in course.ts.
       lane: LANES[PLAYER_LANE] ?? 0,
       strength: 1,
       caution: 1,
@@ -375,11 +401,20 @@ class RailRacer implements MiniGame {
     return distance > needed + 1.5;
   }
 
-  /** Did anyone just go under a bar too fast? */
+  /**
+   * Did anyone just go under a bar while holding?
+   *
+   * Straight from the family's playtest verbatim: "so long as not holding
+   * when passing under the barrier that should be enough to avoid it." So
+   * this reads `rider.holding` — the actual button state this frame — and
+   * nothing else. No speed threshold, no minimum coast time beforehand, no
+   * grace window while still underneath: let go at all, however late, and
+   * you duck it clean; hold through it and you bonk, however slow you were.
+   */
   private checkHazards(rider: Rider): void {
     let hazard = HAZARDS[rider.hazardIndex];
     while (hazard && hazard.x <= rider.x) {
-      if (rider.speed > hazard.safeSpeed) this.bonk(rider);
+      if (rider.holding) this.bonk(rider);
       rider.hazardIndex += 1;
       // Draw this rider's judgement of the *next* hazard now, so a rival's
       // mistakes are decided in advance and are the same every race.
@@ -404,7 +439,10 @@ class RailRacer implements MiniGame {
     const player = this.player;
     const hazard = HAZARDS[player.hazardIndex];
     if (!hazard) return;
-    if (hazard.x - player.x < 34 && hold && player.speed > hazard.safeSpeed) {
+    // Speed no longer matters to the rule (see checkHazards), so neither does
+    // it here: still holding as the bar gets close is the only thing worth a
+    // nudge about.
+    if (hazard.x - player.x < 34 && hold) {
       this.toldToLetGo = true;
       this.hud?.shout('Let go to duck!', 2);
     }
@@ -464,13 +502,13 @@ class RailRacer implements MiniGame {
       }
     }
 
-    // Hazard lamps: amber while you are too fast for the next one, mint the
-    // moment you are slow enough to duck under it.
+    // Hazard lamps: amber while you are still holding, mint the moment you
+    // let go — the lamp now tells exactly the same story the bonk rule does.
     const player = this.player;
     for (const prop of this.course?.hazards ?? []) {
       const distance = prop.hazard.x - player.x;
       const closeness = distance < -3 ? 0 : clamp01(1 - distance / ALERT_RANGE);
-      prop.setAlert(closeness, player.speed <= prop.hazard.safeSpeed, elapsed);
+      prop.setAlert(closeness, !player.holding, elapsed);
     }
   }
 
@@ -523,11 +561,13 @@ class RailRacer implements MiniGame {
 
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
-    const halfHeight = VIEW_HEIGHT / 2;
+    // Width is fixed at VIEW_HALF_WIDTH metres either side of centre; height
+    // is whatever that takes at this aspect. See the note on VIEW_HALF_WIDTH.
+    const halfHeight = VIEW_HALF_WIDTH / this.aspect;
+    this.camera.left = -VIEW_HALF_WIDTH;
+    this.camera.right = VIEW_HALF_WIDTH;
     this.camera.top = halfHeight;
     this.camera.bottom = -halfHeight;
-    this.camera.left = -halfHeight * this.aspect;
-    this.camera.right = halfHeight * this.aspect;
     this.camera.updateProjectionMatrix();
   }
 

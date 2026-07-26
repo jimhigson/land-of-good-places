@@ -30,6 +30,17 @@ export interface PurchaseSpec {
 type Listener = (state: GameState) => void;
 
 /**
+ * The kinds of thing that walk or float behind you.
+ *
+ * Everything else — treats, hats, stickers, eggs — rides in the backpack, which
+ * is where the peeking heads come from. Kept here rather than in the parade
+ * system so that an inventory entry knows what it is the moment it is bought,
+ * and the Cute-o-dex can say "this one can come out with you" without asking
+ * anything in `entities/`.
+ */
+const PARADE_KINDS: ReadonlySet<InventoryKind> = new Set<InventoryKind>(['toy', 'pet', 'balloon']);
+
+/**
  * A tiny observable store — the single source of truth for money, the
  * collection, the clock and the game mode.
  *
@@ -134,12 +145,21 @@ class GameStore {
       shopId: spec.shopId,
       acquiredAt: this.gameTime(),
       carryable: spec.carryable,
+      paradeable: PARADE_KINDS.has(spec.kind),
+      // Everything comes out of the shop keen to join in. A thing that cannot
+      // parade is stowed for good — nothing ever un-stows it.
+      stowed: !PARADE_KINDS.has(spec.kind),
     };
     this.state.inventory.push(item);
     if (item.carryable) this.state.carriedUid = item.uid;
-    // Placement is what the parade system (step 5) will read; carried things
-    // start in the hands, everything else waits in the backpack.
-    this.collect(item.id, item.displayName, item.category, item.carryable ? 'carried' : 'backpack');
+    // Placement is what the parade reads; the newest carryable thing goes into
+    // the hands, a toy or a pet falls in behind you, and the rest wait in the bag.
+    this.collect(
+      item.id,
+      item.displayName,
+      item.category,
+      item.carryable ? 'carried' : item.paradeable ? 'parade' : 'backpack',
+    );
     this.notify();
     return item;
   }
@@ -148,8 +168,62 @@ class GameStore {
   setCarried(uid: string | null): void {
     if (uid !== null && !this.state.inventory.some((item) => item.uid === uid)) return;
     if (this.state.carriedUid === uid) return;
+    const previous = this.state.inventory.find((item) => item.uid === this.state.carriedUid);
     this.state.carriedUid = uid;
+    // Picking a thing up takes it out of the parade, and putting it down hands
+    // it back — both are just a placement refresh on the ids either side.
+    if (previous) this.refreshPlacement(previous.id);
+    const next = this.state.inventory.find((item) => item.uid === uid);
+    if (next) this.refreshPlacement(next.id);
     this.notify();
+  }
+
+  /**
+   * Sends one owned thing to the backpack, or brings it back out.
+   *
+   * This is what tapping a member of the parade does. Only paradeable things
+   * can come *out* — asking for a candy floss to walk behind you is quietly
+   * ignored rather than treated as an error, because the only caller that could
+   * ask is a mis-click.
+   */
+  setStowed(uid: string, stowed: boolean): void {
+    const item = this.state.inventory.find((entry) => entry.uid === uid);
+    if (!item) return;
+    if (!stowed && !item.paradeable) return;
+    if (item.stowed === stowed) return;
+    item.stowed = stowed;
+    // Coming out of the bag also means letting go of it — a thing cannot be in
+    // your hands and walking behind you at the same time.
+    if (!stowed && this.state.carriedUid === uid) this.state.carriedUid = null;
+    this.refreshPlacement(item.id);
+    this.notify();
+  }
+
+  /**
+   * Stows or un-stows *every* copy of a catalogue id.
+   *
+   * The Cute-o-dex is a book of kinds, not of individual purchases: a child who
+   * bought three bunnies pressed one bunny picture, and expects all three to do
+   * the same thing.
+   */
+  setStowedById(id: string, stowed: boolean): void {
+    let changed = false;
+    for (const item of this.state.inventory) {
+      if (item.id !== id) continue;
+      if (!stowed && !item.paradeable) continue;
+      if (item.stowed === stowed) continue;
+      item.stowed = stowed;
+      if (!stowed && this.state.carriedUid === item.uid) this.state.carriedUid = null;
+      changed = true;
+    }
+    if (!changed) return;
+    this.refreshPlacement(id);
+    this.notify();
+  }
+
+  /** True when at least one copy of this catalogue id is out of the bag. */
+  isOut(id: string): boolean {
+    return this.state.inventory.some((item) => item.id === id && item.paradeable && !item.stowed);
   }
 
   /** The park clock, as a value an inventory entry can keep. */
@@ -206,6 +280,22 @@ class GameStore {
   }
 
   // ------------------------------------------------------------ internal
+
+  /**
+   * Re-derives a Cute-o-dex entry's placement from the copies actually owned.
+   *
+   * `CuteThing.placement` is one word about a whole kind, so it takes the most
+   * interesting answer: in your hands beats walking behind you, which beats
+   * sitting in the bag.
+   */
+  private refreshPlacement(id: string): void {
+    const entry = this.state.collection[id];
+    if (!entry) return;
+    const copies = this.state.inventory.filter((item) => item.id === id);
+    if (copies.some((item) => item.uid === this.state.carriedUid)) entry.placement = 'carried';
+    else if (copies.some((item) => item.paradeable && !item.stowed)) entry.placement = 'parade';
+    else entry.placement = 'backpack';
+  }
 
   private notify(): void {
     if (this.notifyQueued) return;

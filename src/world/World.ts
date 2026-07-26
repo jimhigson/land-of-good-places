@@ -13,6 +13,7 @@ import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import { NpcSystem } from '../entities/npc';
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -38,6 +39,7 @@ export class World implements GameSystem {
   readonly building: Building;
   readonly stalls: MiniGameStalls;
   readonly dayNight: DayNight;
+  readonly npcs: NpcSystem;
 
   constructor(scene: Scene, sky: Sky) {
     this.garden = new Garden(this.collision);
@@ -53,12 +55,20 @@ export class World implements GameSystem {
     this.stalls = new MiniGameStalls(this.collision);
     this.dayNight = new DayNight(scene, sky);
 
+    // The other children in the park. Built last, because the waypoint graph
+    // they wander is validated against the finished collision world — every
+    // route is walked at build time and dropped if a wall or a tree is in the
+    // way — and because they walk the building's ground floor, so they need the
+    // same ground sampler the player gets.
+    this.npcs = new NpcSystem(this.collision, (x, z, y) => this.building.surfaces.sample(x, z, y));
+
     scene.add(
       this.garden.group,
       this.scenery.group,
       this.fountain.group,
       this.fairyLights.group,
       this.anchorPlots.group,
+      this.npcs.group,
       this.stalls.group,
     );
   }
@@ -76,6 +86,7 @@ export class World implements GameSystem {
     this.fairyLights.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+    this.npcs.update(context);
     this.stalls.update(context);
   }
 
