@@ -44,8 +44,13 @@ export function createMini(): MiniHandle {
   body.add(torso);
   addOutline(torso, 0.011);
 
-  const tummy = decal(blob(0.09, belly, [1, 0.95, 0.55], 16));
-  tummy.position.set(0, 0.13, 0.075);
+  // Small and pushed well clear of the torso: a big flattened blob intersects
+  // the body and the intersection curve reads as a jagged tear.
+  // Must PROTRUDE past the torso surface (z ≈ 0.1225 here). A belly patch whose
+  // front sits inside the body only shows where it happens to poke through, and
+  // the intersection curve reads as a jagged starburst.
+  const tummy = decal(blob(0.075, belly, [1, 1, 0.55], 24));
+  tummy.position.set(0, 0.13, 0.1);
   body.add(tummy);
 
   // --- feet: flat and comically wide -------------------------------------------
@@ -63,7 +68,7 @@ export function createMini(): MiniHandle {
   // --- grabby arms ---------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftArm : limbs.rightArm;
-    pivot.position.set(side * 0.125, 0.2, 0);
+    pivot.position.set(side * 0.155, 0.2, 0);
     pivot.rotation.z = side * -0.5;
     body.add(pivot);
 
@@ -121,7 +126,7 @@ export function createMini(): MiniHandle {
     eyeGap: 0.45,
     eyeW: 0.118,
     eyeH: 0.138,
-    iris: 0xffd166,
+    iris: 0xd98f2e,
     mouth: 'grin',
     mouthW: 0.115,
     mouthDrop: 0.185,

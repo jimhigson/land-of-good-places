@@ -111,9 +111,12 @@ scene.add(bounce);
 
 // --------------------------------------------------------------- showroom floor
 
+// A soft cream-to-mint wash rather than a flat colour: a big untextured plane
+// under pastel characters goes grey and drags the whole image down.
+const floorTexture = radialWashTexture();
 const floor = new Mesh(
   new CylinderGeometry(15, 15, 0.5, 64),
-  new MeshStandardMaterial({ color: ART.stageFloor, roughness: 0.98, metalness: 0 }),
+  new MeshStandardMaterial({ map: floorTexture, roughness: 0.98, metalness: 0 }),
 );
 floor.position.y = -0.25;
 floor.receiveShadow = true;
@@ -153,17 +156,17 @@ function add(
 }
 
 // Front row: the four characters, closest to the client.
-add('ripika', 'RiPika', createRipika(), -4.85, 1.9, 0.78);
-add('biscuit', 'Biscuit', createBiscuit(), -1.6, 1.9, 0.78);
-add('eleri', 'Eleri', createKid(), 1.75, 1.9, 0.92);
-add('mini', 'Mini', createMini(), 4.75, 1.9, 0.6);
+add('ripika', 'RiPika', createRipika(), -4.85, 3.1, 0.78);
+add('biscuit', 'Biscuit', createBiscuit(), -1.6, 3.1, 0.78);
+add('eleri', 'Eleri', createKid(), 1.75, 3.1, 0.92);
+add('mini', 'Mini', createMini(), 4.75, 3.1, 0.6);
 
 // Back row: the three balloons between the two props.
-add('tree', 'Lollipop tree', createLollipopTree({ variant: 'blossom', seed: 4 }), -7.7, -3.4, 0, 0.55);
-add('dalmatian', 'Fire Pup', createBalloon('dalmatian'), -3.95, -3.4, 0.6);
-add('corgi', 'Sky Corgi', createBalloon('corgi'), -0.6, -3.4, 0.6);
-add('chicken', 'Chicken-looter', createBalloon('chicken'), 2.75, -3.4, 0.6);
-add('wall', 'Pink wall', createPinkWall({ length: 1, seed: 2 }), 6.9, -3.4, 0, 0.15);
+add('tree', 'Lollipop tree', createLollipopTree({ variant: 'blossom', seed: 4 }), -7.7, -5.2, 0, 0.55);
+add('dalmatian', 'Fire Pup', createBalloon('dalmatian'), -3.95, -5.2, 0.6);
+add('corgi', 'Sky Corgi', createBalloon('corgi'), -0.6, -5.2, 0.6);
+add('chicken', 'Chicken-looter', createBalloon('chicken'), 2.75, -5.2, 0.6);
+add('wall', 'Pink wall', createPinkWall({ length: 1, seed: 2 }), 6.9, -5.2, 0, 0.15);
 
 // Kept out of the lineup so the wide shot stays legible, but still viewable on
 // its own with ?only=woodwall.
@@ -222,7 +225,7 @@ for (const exhibit of shown) {
 
 // ---------------------------------------------------------------------- camera
 
-const focus = new Vector3(0, only ? 0.9 : 1.15, only ? 0 : -0.9);
+const focus = new Vector3(0, only ? 0.9 : 1.85, only ? 0 : -1.1);
 
 function layoutCamera(): void {
   const width = canvas.clientWidth || window.innerWidth;
@@ -238,7 +241,7 @@ function layoutCamera(): void {
     viewHeight = focusHeight(only);
     viewWidth = viewHeight * aspect;
   } else {
-    viewWidth = 19.5;
+    viewWidth = 18.2;
     viewHeight = viewWidth / aspect;
   }
 
@@ -261,16 +264,20 @@ function layoutCamera(): void {
   renderer.setSize(width, height, false);
 }
 
-function focusWidth(k: string): number {
-  if (k === 'eleri') return 4.6;
-  if (k === 'tree' || k === 'wall' || k === 'woodwall') return 6.4;
-  if (k === 'mini') return 2.4;
-  return 3.4;
+/**
+ * Vertical world units to show for a single-exhibit portrait: the exhibit plus
+ * generous headroom for its name pill, so no close-up ever crops an ear.
+ */
+function focusHeight(k: string): number {
+  const target = [...exhibits, woodwall].find((e) => e.key === k);
+  const h = target?.handle.height ?? 1.4;
+  return h * 1.62 + 0.75;
 }
 
 if (only) {
-  const target = exhibits.find((e) => e.key === only);
-  focus.y = (target?.handle.height ?? 1.4) * 0.55 + 0.25;
+  const target = [...exhibits, woodwall].find((e) => e.key === only);
+  const h = target?.handle.height ?? 1.4;
+  focus.y = h * 0.56 + 0.18;
 }
 
 window.addEventListener('resize', layoutCamera);
@@ -321,6 +328,24 @@ function frame(now: number): void {
 requestAnimationFrame(frame);
 
 // --------------------------------------------------------------------- backdrop
+
+/** The showroom floor: warm cream in the middle, cool mint at the rim. */
+function radialWashTexture(): CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('no 2d context');
+  const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grad.addColorStop(0, '#fffdf6');
+  grad.addColorStop(0.45, hexToCss(ART.stageFloor));
+  grad.addColorStop(1, '#dcefe1');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  const texture = new CanvasTexture(c);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+}
 
 /** A soft sky-to-cream vertical wash, painted rather than lit. */
 function backdropTexture(): CanvasTexture {

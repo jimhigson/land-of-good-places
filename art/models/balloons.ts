@@ -60,7 +60,7 @@ function stickOnEllipsoid(
 
 function makeString(parent: Group): void {
   const string = decal(
-    new Mesh(new CylinderGeometry(0.008, 0.008, STRING_LENGTH, 6), toonMaterial(ART.balloonString)),
+    new Mesh(new CylinderGeometry(0.014, 0.014, STRING_LENGTH, 6), toonMaterial(ART.balloonString)),
   );
   string.position.y = STRING_LENGTH / 2;
   parent.add(string);
@@ -296,7 +296,6 @@ export function createCorgiBalloon(): BalloonHandle {
 /** Chicken-looter: white and red, and up to no good. */
 export function createChickenBalloon(): BalloonHandle {
   const { root, balloon } = balloonBase('chicken', ART.chickenWhite);
-  const white = toonMaterial(ART.chickenWhite);
   const shade = toonMaterial(ART.chickenShade);
   const red = toonMaterial(ART.chickenComb);
   const beakMat = toonMaterial(ART.chickenBeak);

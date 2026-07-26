@@ -162,9 +162,9 @@ function drawEye(
     ctx.beginPath();
     ctx.ellipse(cx, cy, ex, ey, 0, 0, Math.PI * 2);
     ctx.clip();
-    const grad = ctx.createRadialGradient(cx, cy + ey * 0.35, 0, cx, cy + ey * 0.35, ex * 1.25);
-    grad.addColorStop(0, `${css(o.iris)}ff`);
-    grad.addColorStop(0.75, `${css(o.iris)}aa`);
+    const grad = ctx.createRadialGradient(cx, cy + ey * 0.3, 0, cx, cy + ey * 0.3, ex * 0.95);
+    grad.addColorStop(0, `${css(o.iris)}ee`);
+    grad.addColorStop(0.6, `${css(o.iris)}9a`);
     grad.addColorStop(1, `${css(o.iris)}00`);
     ctx.fillStyle = grad;
     ctx.fillRect(cx - ex, cy - ey, ex * 2, ey * 2);

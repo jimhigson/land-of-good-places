@@ -90,7 +90,7 @@ export const ART = {
   lollipopBerry: 0xff8f8f,
 
   // --- gallery staging only (NOT for the game world) ------------------------
-  stageFloor: 0xfff1e0,
+  stageFloor: 0xfdf7ec,
   stagePlinthA: 0xffd9ec,
   stagePlinthB: 0xc9edff,
   stagePlinthC: 0xd8f5cf,

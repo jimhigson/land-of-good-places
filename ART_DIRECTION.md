@@ -1,0 +1,265 @@
+# Art Direction — Land of Good Places
+
+The style bible. If you are about to add anything the player can see, read this
+first. Reference implementations live in `art/models/`; you can look at all of
+them at once by running `npm run dev` and opening **`/art-samples.html`**.
+
+The client is Eleri, age 6. The bar is not "looks nice" — it is **"CUTE!"** said
+out loud on sight.
+
+---
+
+## 1. The one-paragraph version
+
+Everything in this park is a **painted wooden toy**. Chunky rounded shapes, no
+sharp edges, no thin parts, no realistic proportions. Colours are bright but
+softened towards cream, and the darkest value anywhere is a warm plum
+(`PALETTE.ink`, `0x4a3a52`) — **there is no black in this game**. Toys are
+toon-shaded with a gentle four-band ramp; ground, water and glass are not.
+Faces are painted onto a curved patch, not built out of geometry. Every
+character has eyes far bigger than anatomy allows, and a blush.
+
+---
+
+## 2. Materials — the decision
+
+| Thing | Material | Why |
+| --- | --- | --- |
+| Characters, creatures, props, shop shells, ride parts, walls, trees | `toonMaterial()` — `MeshToonMaterial` + shared 4-band ramp | Flat, sticker-bright, holds its colour at distance |
+| Terrain, paths, water, glass, sky | `softMaterial()` — `MeshStandardMaterial`, roughness ~0.62, metalness 0 | Banding a 140-metre lawn looks like a rendering bug, not a style |
+| Outlines, eye catchlights | `MeshBasicMaterial` | Must not shade |
+
+**Never** use `MeshBasicMaterial` for anything solid, and never set `metalness`
+above 0. A toy in this park is matte painted wood, not plastic.
+
+### The toon ramp
+
+`TOON_RAMP = [0.42, 0.64, 0.85, 1.0]` (linear light space, in
+`art/style/materials.ts`). Four bands, boundaries at N·L = −0.5, 0, +0.5.
+Perceived brightness comes out around 68% / 82% / 94% / 100%.
+
+It is **deliberately gentle**. Hard two-tone cel shading reads as "anime
+action", not "soft plush toy". The lit side must stay the true palette colour
+and the shadow side must obviously be the same colour, only cosier.
+
+> Do not darken the first band. Every time someone drops it below ~0.35 the
+> whole park looks like it is under a storm cloud.
+
+### Outlines
+
+Inverted-hull, via `addOutline(mesh, thickness)`. Vertices are pushed along
+their own normals **in local metres** and drawn back-face-only, so the line
+stays an even width on squashed and stretched parts — which matters, because
+almost every part of every character here is a squashed sphere.
+
+- Thickness: **0.010–0.014** on small creatures, **0.016–0.022** on the kid and
+  on props. Scale with the object, not with the camera.
+- Colour: `inkTint(baseColour)` — the part's own colour mixed 62% toward the
+  plum ink and darkened. **Never black.** A black line around a pastel yellow
+  mouse looks like clip-art; a dark-plum-yellow line looks hand-painted.
+- Apply **only to silhouette parts**: head, body, ears, limbs, big props.
+  Outlining every little sphere fills the character with internal lines and it
+  stops reading as one creature.
+
+---
+
+## 3. Faces — painted, not built
+
+Every character wears a **face patch**: a thin curved shell hugging the front of
+the head sphere, carrying a transparent canvas texture
+(`createFacePatch()` in `art/style/faces.ts`).
+
+This is the highest-leverage decision in the whole art direction:
+
+- eyes can be far bigger than sphere geometry allows before they poke out of the
+  skull, and big eyes are 80% of cuteness;
+- blinking and expressions are a **texture swap**, not an animation rig;
+- the shell curves with the head, so eyes wrap correctly at the iso angle
+  instead of sliding off the way a flat decal does;
+- it costs one draw call and one canvas per expression set.
+
+### Canvas sizes (the whole game sticks to these)
+
+| Use | Size |
+| --- | --- |
+| Hero heads (player kid, RiPika, Biscuit) | 512² |
+| Small creatures, muzzles, balloon animals | 256² |
+
+### Drawing rules
+
+- **Ink**: fill with `PALETTE.ink`. Never `#000`.
+- **Eyes**: one solid ink oval, **taller than wide** (height ≈ 1.3 × width). No
+  white sclera — cartoon toys read cuter with a full dark eye.
+- **Size**: `eyeW` ≥ **0.10** of the patch, `eyeH` ≥ 0.13. Anything smaller
+  stops reading as an eye at gameplay distance and the character goes dead.
+  This was the single biggest fix between v1 and v2 of every model.
+- **Catchlights**: always **two**. A big one high and outboard (~0.36 of the eye
+  width), a tiny one low and inboard (~0.17). One catchlight looks like a doll's
+  eye; two look alive.
+- **Iris** (optional, hero characters): a soft coloured pool in the lower eye,
+  gradient stopping at 0.95 of the eye radius so **an ink rim always survives**.
+  A flooded eye loses its pupil and looks eerie rather than sweet.
+- **Blush**: always present. `soft` (airbrushed gradient) for kids and bears,
+  `disc` (solid, with a top highlight) for RiPika. Sits just below and outboard
+  of the eyes.
+- **Mouth**: stroked, round caps, line width ~2.6% of the canvas. `cat` (the "w"
+  mouth) for mice and small creatures; `smile` for people and bears; `grin`
+  (with two small **rounded** teeth) for mischief.
+- **Muzzled animals** (bears, pups, corgis) wear a **second, smaller patch on
+  the muzzle** carrying only the mouth, while the eyes stay on the head patch.
+  A muzzle patch is a child of the muzzle mesh, so it already inherits the
+  muzzle's squash — applying that scale again sinks it inside the snout and the
+  smile vanishes.
+
+### Expressions
+
+`paintExpressions()` returns the full set in one call:
+`neutral | blink | happy | surprised | sad`. Callers keep the record and swap
+`material.map`. **That is the entire expression system** — nothing else in the
+game animates a face.
+
+---
+
+## 4. Proportions — where "cute" actually comes from
+
+| Character | Head as % of total height |
+| --- | --- |
+| Mini | 65% |
+| RiPika | 62% |
+| Biscuit | ~60% |
+| Player kid | 47% |
+
+Rules that matter more than the numbers:
+
+- **Head wider than the torso.** If the body is as wide as the head the
+  character reads as a lump.
+- **Limbs short and fat.** Thin limbs are never cute. Minimum limb radius ~0.06
+  on a 1 m creature.
+- **Feet oversized.** Big round shoes/paws read as "toy" from the iso camera.
+- **Eyes set low and wide** on the skull. Low = baby. Wide = friendly.
+- **Nothing is plumb.** Trunks lean a few degrees, ears tilt, tails cant. A
+  perfectly symmetrical upright object looks like a placeholder.
+- **Squash every sphere.** Uniform spheres look like beach balls; a sphere
+  squashed 10–25% on one axis looks sewn and stuffed. Use `blob()`.
+- **Break the silhouette.** Every head gets one asymmetric feature — a cowlick,
+  a tuft, a bunch — so it is not a perfect circle in outline.
+
+---
+
+## 5. Colour
+
+`src/core/palette.ts` (`PALETTE`) is the world's colour bible and takes
+precedence. `art/style/artPalette.ts` (`ART`) **extends** it with character and
+prop colours. Never introduce a colour outside these two files, and never
+redefine something the world already names — a second definition of "pink stone"
+is how a park ends up with two slightly different pinks.
+
+Test for a new colour: *would it look right on a plastic toy?* Bright and
+saturated, but softened towards cream rather than white. Never neon. Never
+washed out. Never black.
+
+### Markings
+
+Belly patches, spots and blazes are separate meshes laid on the surface. Two
+traps, both hit during this run:
+
+1. A patch must **protrude past the body surface**. If its front sits inside the
+   body, only the parts that happen to poke through show, and the intersection
+   curve reads as a jagged starburst.
+2. On an ellipsoid, place it with `stickOnEllipsoid()` (in `balloons.ts`), not by
+   eye — `Object3D.lookAt` uses world space and will aim your spot at the floor.
+
+---
+
+## 6. Lighting the art is authored under
+
+Copied from `src/core/Engine.ts` so a sample that looks great in the gallery
+looks the same in the game:
+
+- `NeutralToneMapping`, exposure 1. **Not ACES** — ACES desaturates bright
+  colours towards white, exactly wrong for a park made of sweets.
+- `VSMShadowMap`. Genuinely soft edges, which suits chunky rounded geometry far
+  better than hard PCF.
+- Hemisphere key (sky `ambientDay`, ground `grass`) + a warm directional sun +
+  a cool opposite fill. The ramp handles shape; the fill handles colour
+  temperature on the shadow side.
+
+---
+
+## 7. Contract with builders
+
+**Builder-made and Artist-made assets must be interchangeable.** These are the
+exact conventions. Full list in `ASSET_MANIFEST.md`; this is the load-bearing
+subset.
+
+Every asset is a **factory function returning a fresh `THREE.Group`**, wrapped in
+an `AssetHandle` (`art/style/asset.ts`):
+
+```ts
+export interface AssetHandle {
+  readonly root: Group;
+  /** Total height in metres — the name label goes at `height + 0.42`. */
+  readonly height: number;
+  update?(dt: number, elapsed: number): void;
+  dispose?(): void;
+}
+
+export function createThing(options?: ThingOptions): AssetHandle;
+```
+
+| Rule | Detail |
+| --- | --- |
+| **Units** | 1 unit = 1 metre. The player kid is **1.86 m**. |
+| **Origin** | At the **feet / base**, centred on X and Z. `root.position.y = groundHeight` must seat it with no fudge factor. Balloons are the exception: their origin is the **bottom of the string**, i.e. the hand-hold point, so `kid.holdAnchor.add(balloon.root)` needs no offset. |
+| **Facing** | Forward is **+Z**. `root.rotation.y = 0` faces the camera in the default view. Rotate the root only. |
+| **Scale** | Leave `root.scale` at 1 — it is reserved for gameplay squash-and-stretch. Bake size into geometry. |
+| **`height`** | Measure to the **actual top**, including ears and hats. RiPika's is 1.24 (ear tips), not 1.06 (skull). Labels crop otherwise. |
+| **Shadows** | Solid meshes: `solid(mesh)` (casts + receives). Decals, catchlights, glows, strings: `decal(mesh)` (neither). |
+| **Naming** | `root.name` = the asset key: `'ripika'`, `'balloon.corgi'`, `'prop.lollipopTree'`. Parts an animator needs are exposed as typed fields, never looked up by string. |
+| **Colour** | Only from `PALETTE` or `ART`. No inline hex in model files. |
+| **Randomness** | Seeded `Rng` from `src/core/mathUtils.ts`. **Never `Math.random()`** in a builder — the park must look identical on reload. |
+| **Textures** | Canvas-drawn only, cached by key. Budget: face patches 512², decals 256², tiling maps 512², under 40 distinct canvas textures game-wide. Flat colours are material colours, not maps. |
+| **Import boundary** | `art/style/bridge.ts` is the **only** file that reaches into `src/`. Everything else imports from it. Relocating `art/style/` → `src/art/` is a one-line change in that one file. |
+
+### Creatures additionally implement
+
+```ts
+interface CreatureHandle extends AssetHandle {
+  readonly body: Group;   // bob / squash target — everything above ground lives here
+  readonly head: Group;   // look-at target; rotating it must not move the body
+  readonly limbs: CreatureLimbs | null;
+  setExpression(name: Expression): void;
+  setWalkPhase(phase01: number, speed01: number): void;
+}
+```
+
+`setWalkPhase` should call the shared `applyWalk()` so the parade looks like one
+family of toys rather than a pile of separately-animated assets. **Assets never
+contain follow or AI logic** — the parade system (build step 5) drives them.
+
+### Anchors
+
+Attachment points are empty `Group`s exposed on the handle, never magic offsets:
+`hatAnchor` (crown), `holdAnchor` (carried item, in the right hand),
+`backpackAnchor` (peeking head).
+
+### Instancing
+
+Trees, bushes and wall segments are the only high-count items and are authored
+instancing-friendly: geometry and materials are module-level singletons
+(`treeCanopyGeometry()`, `stoneBlockGeometry()`, …). Take those directly for an
+`InstancedMesh` with per-instance colour, or call the factory for a one-off.
+Never call a factory inside a render loop.
+
+---
+
+## 8. Quick checklist before you commit an asset
+
+- [ ] Origin at the base, facing +Z, `root.scale` untouched
+- [ ] `height` measured to the true top, ears and all
+- [ ] Eyes at least 0.10 of the face patch, two catchlights, blush present
+- [ ] Outlines on silhouette parts only, ink-tinted, never black
+- [ ] Every sphere squashed; one asymmetric feature on the head
+- [ ] Markings protrude past the surface
+- [ ] No `Math.random()`, no inline hex, no `MeshBasicMaterial` on a solid
+- [ ] Looked at it in `/art-samples.html` at gameplay distance, not just close up

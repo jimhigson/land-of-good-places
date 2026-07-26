@@ -93,12 +93,13 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   }
 
   // --- tail: a soft zig-zag flash -------------------------------------------
-  // Swung out to the character's left and canted forward so the bolt is part of
-  // the silhouette from the iso camera — a tail hidden directly behind the body
-  // may as well not exist.
+  // Mounted on the HIP, not the spine, and canted so the zig-zag fans across the
+  // screen. A tail tucked behind the body is invisible at every camera angle the
+  // game ever uses, and RiPika without its flash is just a yellow mouse.
   const tail = new Group();
-  tail.position.set(0.14, 0.3, -0.19);
-  tail.rotation.set(0.3, -0.55, 0);
+  tail.position.set(-0.25, 0.24, -0.02);
+  tail.rotation.set(0.08, 0.1, 1.05);
+  tail.scale.setScalar(1.15);
   body.add(tail);
 
   const slab = (w: number, h: number, mat: typeof yellow): Mesh =>
