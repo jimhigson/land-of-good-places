@@ -7,8 +7,8 @@ import { isTouchDevice } from './core/device';
 import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
-import { Player, TapNavigator } from './entities';
-import { Hud, TouchControls } from './ui';
+import { Parade, Player, TapNavigator } from './entities';
+import { CuteODex, Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
 import { gameStore } from './state';
@@ -41,6 +41,8 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly parade: Parade;
+  readonly cuteODex: CuteODex;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -62,6 +64,15 @@ export class Game {
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
 
+    // The parade of cute things. Built here, before the tap handler, because a
+    // tap has to be offered to the parade first — pressing your bunny means
+    // "into the backpack, please", not "walk to where the bunny is standing".
+    // It follows the player's breadcrumb trail, so it must also be constructed
+    // after `attachPlayer` installed the building's ground sampler.
+    this.parade = new Parade(this.player, this.world.collision, this.camera);
+    this.engine.scene.add(this.parade.group);
+    this.addSystem(this.parade);
+
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
     // the building installed.
@@ -71,13 +82,19 @@ export class Game {
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {
-      onTap: (point) => this.tapNavigator.handleTap(point),
+      onTap: (point) => {
+        if (this.parade.handleTap(point)) return;
+        this.tapNavigator.handleTap(point);
+      },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
     });
 
     this.hud = new Hud(uiRoot);
+    // The collection book. Mounts its own pill into the HUD's top row and owns
+    // the C key, so neither `Hud` nor the input bindings need to know about it.
+    this.cuteODex = new CuteODex(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
 
     // The fairground stalls. Walking up to one and pressing interact hands the
@@ -145,6 +162,7 @@ export class Game {
     this.touchControls?.dispose();
     this.world.dispose();
     this.player.dispose();
+    this.cuteODex.dispose();
     this.hud.dispose();
     this.sky.dispose();
     this.engine.dispose();
@@ -159,7 +177,12 @@ export class Game {
     // While a shop or the backpack is open, Escape belongs to it — see
     // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
     // park behind it.
-    if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+    if (this.cuteODex.isOpen) {
+      // The book has the screen: Escape and B close it, and nothing else.
+      if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
+        this.cuteODex.close();
+      }
+    } else if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
       gameStore.setPaused(!gameStore.get().paused);
     }
 
