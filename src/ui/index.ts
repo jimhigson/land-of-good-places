@@ -1,6 +1,10 @@
 export { Hud } from './Hud';
+export { DevBadge } from './DevBadge';
 export { ShopPanel, type ShopPanelContent, type ShopPanelItem } from './ShopPanel';
 export { InventoryDrawer } from './InventoryDrawer';
+export { CuteODex } from './CuteODex';
 export { playOpenChime, playPurchaseChime, playSurpriseChime } from './chime';
 export { NameLabel } from './NameLabel';
 export { TouchControls } from './TouchControls';
+export { WhatsNew, type WhatsNewEntry } from './WhatsNew';
+export { UpdateToast } from './UpdateToast';

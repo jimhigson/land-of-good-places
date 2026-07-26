@@ -8,12 +8,14 @@ import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
 import type { InteriorControls } from './world/building';
-import { Player, TapNavigator } from './entities';
-import { Hud, TouchControls } from './ui';
+import { Parade, Player, TapNavigator, WornFlower } from './entities';
+import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
 import { playOpenChime } from './ui/chime';
+import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
+import { SignInspector } from './SignInspector';
 import { gameStore } from './state';
 
 /**
@@ -42,9 +44,15 @@ export class Game {
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
+  readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
+  readonly signInspector: SignInspector;
+  readonly parade: Parade;
+  readonly wornFlower: WornFlower;
+  readonly cuteODex: CuteODex;
+  readonly whatsNew: WhatsNew;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -79,6 +87,21 @@ export class Game {
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
 
+    // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
+    // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
+    // needs nothing from the rest of this constructor beyond the anchor.
+    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    this.addSystem(this.wornFlower);
+
+    // The parade of cute things. Built here, before the tap handler, because a
+    // tap has to be offered to the parade first — pressing your bunny means
+    // "into the backpack, please", not "walk to where the bunny is standing".
+    // It follows the player's breadcrumb trail, so it must also be constructed
+    // after `attachPlayer` installed the building's ground sampler.
+    this.parade = new Parade(this.player, this.world.collision, this.camera);
+    this.engine.scene.add(this.parade.group);
+    this.addSystem(this.parade);
+
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
     // the building installed.
@@ -87,8 +110,21 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
 
+    // Tap a sign, and the camera swoops in to read it — see `SignInspector.ts`.
+    // Goes first in `onTap` below: a tap that lands on a sign is a "read this",
+    // never also a "walk over there".
+    this.signInspector = new SignInspector(this.player, this.camera, () =>
+      this.world.signZones(),
+    );
+
     this.pointer = new PointerControls(canvas, {
-      onTap: (point) => this.tapNavigator.handleTap(point),
+      onTap: (point) => {
+        // Order matters: a sign tap is "read this", a parade tap is "stow my
+        // bunny", and only a tap on neither is "walk there".
+        if (this.signInspector.handleTap(point)) return;
+        if (this.parade.handleTap(point)) return;
+        this.tapNavigator.handleTap(point);
+      },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
@@ -97,6 +133,15 @@ export class Game {
     // The HUD clears the overlay when it is built, so everything else that puts
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
+    // The collection book. Mounts its own pill into the HUD's top row and owns
+    // the C key, so neither `Hud` nor the input bindings need to know about it.
+    this.cuteODex = new CuteODex(uiRoot);
+    // "What's new": checks `whatsnew.json` against localStorage and shows
+    // itself, synchronously, if there is anything the player has not seen —
+    // see `ui/WhatsNew.ts`. Built here so the check happens before the first
+    // frame renders, and mounted like every other overlay, as a plain DOM
+    // child of `uiRoot` rather than anything the world needs to know about.
+    this.whatsNew = new WhatsNew(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
     this.transitions = new Transitions(uiRoot);
     this.stairMenu = new StairMenu(uiRoot, {
@@ -104,11 +149,25 @@ export class Game {
       onClose: () => undefined,
     });
 
+    // The fairground stalls. Walking up to one and pressing interact hands the
+    // frame over to the mini-game host: it freezes the park (exactly as the
+    // pause menu does, so nobody moves while you are away), wipes across to a
+    // little self-contained world of its own, and wipes back when you are done.
+    // See `minigames/MiniGameHost.ts` and ARCHITECTURE.md's mini-game appendix.
+    this.miniGames = new MiniGameHost({
+      engine: this.engine,
+      input: this.input,
+      uiRoot,
+      stalls: this.world.stalls.stalls,
+      touch: isTouchDevice(),
+    });
+
     // Shops: the join between the shop geometry, the purchase panel and the
     // store. Registered as a system so it updates after the world, which is
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
+    this.addSystem(this.signInspector);
 
     this.frameContext = {
       dt: 0,
@@ -196,12 +255,15 @@ export class Game {
   dispose(): void {
     this.stop();
     for (const system of this.systems) system.dispose?.();
+    this.miniGames.dispose();
     this.tapNavigator.dispose();
     this.touchControls?.dispose();
     this.stairMenu.dispose();
     this.transitions.dispose();
     this.world.dispose();
     this.player.dispose();
+    this.cuteODex.dispose();
+    this.whatsNew.dispose();
     this.hud.dispose();
     this.sky.dispose();
     this.engine.dispose();
@@ -213,15 +275,50 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    // While a shop, the backpack or the stairs menu is open, Escape belongs to
-    // it — see `Shopping.uiOpen`. Otherwise Escape would close the panel *and*
-    // pause the park behind it.
-    if (this.input.justPressed('menu')) {
-      if (this.stairMenu.isOpen) this.stairMenu.close();
-      else if (!this.shopping.uiOpen) gameStore.setPaused(!gameStore.get().paused);
+    // The what's-new welcome takes priority over everything else. It can only
+    // ever be open in the first moment of a session — before a shop or the
+    // Cute-o-dex could plausibly be open too — but checking it first keeps
+    // that a guarantee rather than an accident. Esc, E/Enter or B on a pad all
+    // say "got it"; there is no key-handling in `WhatsNew` itself, unlike
+    // `CuteODex`, because none of its keys need anything beyond the ordinary
+    // action vocabulary already read here.
+    //
+    // Below it: while a shop, the backpack or the stairs menu is open, Escape
+    // belongs to it — see `Shopping.uiOpen`. Same for an inspected sign: Escape
+    // is one of the "any key" gestures `SignInspector` already backs out on.
+    // And when the Cute-o-dex has the screen, Escape belongs to the book.
+    // Otherwise Escape would close the panel *and* pause the park behind it.
+    if (this.whatsNew.isOpen) {
+      if (
+        this.input.justPressed('menu') ||
+        this.input.justPressed('cancel') ||
+        this.input.justPressed('interact')
+      ) {
+        this.whatsNew.close();
+      }
+    } else if (this.cuteODex.isOpen) {
+      // The book has the screen: Escape and B close it, and nothing else.
+      if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
+        this.cuteODex.close();
+      }
+    } else if (this.stairMenu.isOpen) {
+      // The stairs menu has the screen: Escape backs out without choosing.
+      if (this.input.justPressed('menu')) {
+        this.stairMenu.close();
+      }
+    } else if (
+      this.input.justPressed('menu') &&
+      !this.shopping.uiOpen &&
+      !this.signInspector.active
+    ) {
+      gameStore.setPaused(!gameStore.get().paused);
     }
 
-    const paused = gameStore.get().paused;
+    // Mini-games run on the loop's real delta, not the frame context's: the
+    // context's is about to be zeroed by the very freeze they ask for.
+    this.miniGames.update(tick.dt, this.frameContext);
+
+    const paused = gameStore.get().paused || this.miniGames.frozen;
     this.world.dayNight.setPaused(paused);
 
     // Fast-forward is a *time* effect, not an animation one: scaling the frame
@@ -274,9 +371,14 @@ export class Game {
     // The sky is a full-screen backdrop drawn first with depth testing off; the
     // depth buffer is then cleared so the world composites cleanly on top.
     renderer.clear(true, true, true);
-    this.sky.render(renderer);
-    renderer.clearDepth();
-    renderer.render(this.engine.scene, this.camera.camera);
+    // A mini-game paints its own sky, so the park's passes are skipped entirely
+    // while one is on screen — the frame costs no more than it would at home.
+    if (!this.miniGames.hidesPark) {
+      this.sky.render(renderer);
+      renderer.clearDepth();
+      renderer.render(this.engine.scene, this.camera.camera);
+    }
+    this.miniGames.render(renderer);
   }
 }
 

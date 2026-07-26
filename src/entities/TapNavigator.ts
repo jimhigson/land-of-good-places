@@ -77,6 +77,8 @@ export class TapNavigator implements GameSystem {
   private scripted: ScriptedWalk | null = null;
   private bestDistance = Infinity;
   private sinceProgress = 0;
+  /** Set by a double-tap. Holds the `sprint` action for as long as we seek. */
+  private running = false;
 
   constructor(
     private readonly player: Player,
@@ -92,6 +94,11 @@ export class TapNavigator implements GameSystem {
 
   /**
    * Handles a tap at a screen position.
+   *
+   * A double-tap (`point.doubleTap`) runs there instead of walking — same
+   * destination logic, same seek-and-arrive, just with `sprint` held for the
+   * duration (see {@link update}). A plain second tap that misses the
+   * double-tap window still retargets the walk exactly as it always has.
    *
    * Returns true if it found somewhere to go — the caller does not currently
    * care, but a "nope" sound will want to know one day.
@@ -126,9 +133,10 @@ export class TapNavigator implements GameSystem {
     else this.target.copy(this.hit);
 
     this.active = true;
+    this.running = point.doubleTap;
     this.bestDistance = this.planarDistance();
     this.sinceProgress = 0;
-    this.marker.show(this.target.x, this.target.y, this.target.z, zone !== null);
+    this.marker.show(this.target.x, this.target.y, this.target.z, zone !== null, this.running);
     return true;
   }
 
@@ -158,8 +166,10 @@ export class TapNavigator implements GameSystem {
   /** Drops the current destination. Called when the player takes over. */
   cancel(): void {
     this.active = false;
+    this.running = false;
     this.zone = null;
     this.abandonScripted();
+    this.input.setNavigationSprint(false);
   }
 
   update(context: FrameContext): void {
@@ -220,6 +230,7 @@ export class TapNavigator implements GameSystem {
       worldX * this.camera.right.x + worldZ * this.camera.right.z,
       worldX * this.camera.forward.x + worldZ * this.camera.forward.z,
     );
+    this.input.setNavigationSprint(this.running);
 
     this.marker.moveTo(this.target.x, this.target.y, this.target.z);
     this.marker.update(dt, elapsed, true);

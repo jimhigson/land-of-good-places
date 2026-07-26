@@ -302,6 +302,113 @@ or normal maps).
 
 ---
 
+## Characters and drivers
+
+The park has more than one child in it, and only one of them is you. What makes
+that cheap is a split that is worth understanding before adding anything that
+moves under its own steam.
+
+**A character is a body with no opinion about where it should go.** It knows how
+to accelerate, how to resolve against `CollisionWorld`, how to ask a
+`GroundSampler` where the floor is, and how to drive a walk cycle off distance
+travelled. It does not know whether it is being steered by a keyboard, a
+behaviour script, or a recording.
+
+**A driver supplies that opinion, one frame at a time**, as a `CharacterIntent`
+(`entities/npc/driver.ts`):
+
+```ts
+interface CharacterIntent {
+  moveX: number; moveZ: number;   // desired direction in WORLD space, 0..RUN_INTENT
+  hop: boolean; interact: boolean; // edge-triggered
+  lookAt: number | null;           // yaw to face while standing still
+  expression: Expression;          // face hint; applied only on a transition
+  wave: number;                    // 0..1 blend into the wave pose
+}
+```
+
+`update(context, intent)` fills in an intent that is allocated once per
+character and reused, so a driver never allocates. Implementations must write
+**every** field — an NPC stuck mid-wave is always a driver that forgot to clear
+`wave`.
+
+The intent is deliberately shaped like a **gamepad snapshot rather than a
+position**. That is the whole point:
+
+| Driver | Character | Status |
+| --- | --- | --- |
+| local input | `entities/Player` | today, reading `InputSystem` directly |
+| `WanderDriver` | `entities/npc/NpcCharacter` | today — the park's children |
+| remote input, fed from packets | `entities/npc/NpcCharacter` | **a future networked player is not a new kind of character** |
+| a recording | `NpcCharacter` | cut-scenes, ghost replays |
+
+A networked player is the same body with a driver that fills the intent in from
+the wire. Because both ends then run the *identical* movement and collision
+code, a remote child accelerates, turns and bumps into the same wall in the same
+place. Sending positions instead is what makes remote characters teleport and
+slide.
+
+`Player` predates this and still reads input directly. Converting it to a
+`LocalInputDriver` is a small, obvious change and the point at which the two
+bodies could merge into one.
+
+### The children
+
+`entities/npc/` is three pieces that barely know about each other:
+
+| File | What it does |
+| --- | --- |
+| `kidCrowd.ts` | **Draws** them, by instancing a prototype of the same `createKid()` the player wears |
+| `NpcCharacter.ts` | **Moves** them, with the player's movement code and collision world |
+| `wanderDriver.ts` | **Decides** for them — the only file with anything to say about behaviour |
+| `poiGraph.ts` | The waypoint graph they wander |
+| `NpcSystem.ts` | Owns the crowd, spawns twelve children and two pets, ticks them |
+
+**They walk a waypoint graph, not a steering behaviour.** There is no navmesh,
+and a dozen children homing on the fountain across a park full of tree trunks
+produces exactly what you would expect. Waypoints are authored to follow the
+real path network in `world/paths.ts`; **edges are not authored**. Every
+candidate pair is walked at build time and kept only if a character of NPC width
+fits along the whole straight line, so a child cannot path through a wall, and
+planting a tree across a shortcut removes the shortcut. That validation is why
+`NpcSystem` is constructed last in `World` — it needs the finished collision
+world.
+
+**They are drawn by reading a prototype, never by re-authoring one.** A kid is
+about twenty-five little meshes; twelve of them drawn the ordinary way is three
+hundred draw calls. `InstancedCrowd` builds one throwaway kid, walks it, and
+gives every *part* one `InstancedMesh` holding that part for every member. Each
+member gets a **skeleton** — a mirror of the hierarchy made of empty
+`Object3D`s — which you animate exactly as you would animate the real model;
+`commit()` copies each proxy's world matrix into its instance slot.
+
+The payoff is that the crowd inherits whatever the model file produces. Retune
+the kid's proportions and the crowd picks it up on the next reload, because
+nothing in `InstancedCrowd` knows what a kid *is*. Per-child colour comes from
+`instanceColor` against one shared toon material, and the roles are discovered
+by building the prototype with sentinel colours and seeing which materials come
+back red, green or blue.
+
+Three consequences worth knowing:
+
+- **Colours are set at spawn, not per frame** — there is one material for the
+  whole crowd, so a per-child colour change means rewriting an instance colour.
+- **Instanced meshes are not frustum-culled.** An `InstancedMesh`'s bounding
+  sphere is computed from where its instances *were*, and these walk about;
+  culling against a stale sphere makes children blink out at the screen edge.
+- **Only the three bulkiest parts cast shadows.** Every caster is drawn twice,
+  and a child's shadow is a head and a body — nobody looks at the ground for
+  their hair bobbles. The parts are chosen by bounding radius rather than by
+  name, so a retune still picks whatever is now doing the silhouette's work.
+
+Budget: **40 draw calls and ~310k triangles** for twelve children and two pets,
+with no measurable frame-time cost on an M-series laptop. The triangle count is
+the number to watch on a phone — the fix, if it bites, is packing visible
+members to the front of the instance buffer and lowering `InstancedMesh.count`,
+which is the only way to stop the GPU shading instances nobody can see.
+
+---
+
 ## Adding things — quick recipes
 
 **A new piece of scenery.** Build it in `world/`, take `CollisionWorld` in the
@@ -329,3 +436,13 @@ noisy for the store (the clock face, FPS) are pushed in via setters.
   but the grass could use an art-directed cheat.
 - `dist/assets/index.js` is ~610 kB (159 kB gzipped), essentially all three.js.
   Worth code-splitting only if load time becomes a complaint.
+- The children stay in the garden and on the building's ground floor. Stairs,
+  the lift, the trampoline and the slides are all driven by `Building` against
+  `Player` specifically, so letting an NPC ride one means generalising those
+  hooks to any character — worth doing, and deliberately not done in the same
+  change as introducing the NPCs.
+- `Player` still reads `InputSystem` directly rather than through a
+  `LocalInputDriver`; see "Characters and drivers".
+- NPC tuning numbers (walk speed, spawn count, wave range) live in
+  `entities/npc/` rather than in `core/constants.ts`, to keep a parallel branch
+  out of a shared file. They should move.

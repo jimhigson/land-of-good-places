@@ -21,6 +21,8 @@ export class Hud {
   private readonly debugPill: HTMLElement;
   private readonly backpackButton: HTMLButtonElement;
   private readonly promptPill: HTMLElement;
+  private readonly hintToggle: HTMLButtonElement;
+  private readonly keyHint: HTMLElement;
 
   private readonly unsubscribe: () => void;
   private clockText = '--:--';
@@ -28,6 +30,7 @@ export class Hud {
   private fps = 60;
   private backpackHandler: (() => void) | null = null;
   private promptText: string | null = null;
+  private hintOpen = false;
 
   constructor(container: HTMLElement) {
     this.root = container;
@@ -60,10 +63,32 @@ export class Hud {
     const hints = document.createElement('div');
     hints.className = 'hint-stack';
 
+    // A small "?" pill that reveals the controls hint on demand — the hint
+    // bar used to sit on screen permanently, which is a lot of real estate for
+    // something you only need to read once. Same idea for both variants below.
+    this.hintToggle = document.createElement('button');
+    this.hintToggle.type = 'button';
+    this.hintToggle.className = 'hint-toggle is-new';
+    this.hintToggle.setAttribute('aria-label', 'Show controls help');
+    this.hintToggle.setAttribute('aria-expanded', 'false');
+    this.hintToggle.textContent = '?';
+    this.hintToggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.setHintOpen(!this.hintOpen);
+    });
+    // The pulse is a one-time "look at me" for a first-time player; once they
+    // have noticed it (played, or opened it), it should not nag them again.
+    this.hintToggle.addEventListener(
+      'animationend',
+      () => this.hintToggle.classList.remove('is-new'),
+      { once: true },
+    );
+
     // Two versions of the same hint. A phone player has no keys to press, and
     // being told about WASD is how a six-year-old decides the game is broken.
-    const keyHint = pill('pill pill--soft');
-    keyHint.innerHTML = isTouchDevice()
+    this.keyHint = pill('pill pill--soft hint-panel');
+    this.keyHint.dataset.open = 'false';
+    this.keyHint.innerHTML = isTouchDevice()
       ? '<span class="emoji">👆</span>' +
         '<span><b>Tap</b> where to walk · tap a thing to use it · ' +
         '<b>hop</b> &amp; <b>turn</b> buttons · <b>pinch</b> to zoom</span>'
@@ -81,13 +106,19 @@ export class Hud {
     this.promptPill = pill('pill pill--prompt');
     this.promptPill.dataset.show = 'false';
 
-    hints.append(this.promptPill, keyHint, this.padPill);
+    hints.append(this.hintToggle, this.promptPill, this.padPill);
 
     this.debugPill = pill('pill pill--soft');
     this.debugPill.style.display = 'none';
 
     bottom.append(hints, this.debugPill);
-    this.root.append(top, bottom);
+    this.root.append(top, bottom, this.keyHint);
+
+    // Tapping/clicking anywhere that isn't the toggle or the open panel closes
+    // it — "tap elsewhere", and just as much "start playing": the very next
+    // tap-to-walk on the canvas reaches this listener too, since it is not
+    // stopped or prevented here.
+    document.addEventListener('pointerdown', this.onOutsidePointerDown, true);
 
     this.unsubscribe = gameStore.subscribe((state) => this.render(state));
   }
@@ -139,9 +170,29 @@ export class Hud {
   }
 
   dispose(): void {
+    document.removeEventListener('pointerdown', this.onOutsidePointerDown, true);
     this.unsubscribe();
     this.root.innerHTML = '';
   }
+
+  // -------------------------------------------------------------- internals
+
+  /** Shows or hides the controls hint panel, keeping the toggle's a11y state in step. */
+  private setHintOpen(open: boolean): void {
+    if (this.hintOpen === open) return;
+    this.hintOpen = open;
+    this.keyHint.dataset.open = open ? 'true' : 'false';
+    this.hintToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    this.hintToggle.setAttribute('aria-label', open ? 'Hide controls help' : 'Show controls help');
+    this.hintToggle.classList.remove('is-new');
+  }
+
+  private readonly onOutsidePointerDown = (event: PointerEvent): void => {
+    if (!this.hintOpen) return;
+    const target = event.target as Node | null;
+    if (target && (this.hintToggle.contains(target) || this.keyHint.contains(target))) return;
+    this.setHintOpen(false);
+  };
 
   private render(state: GameState): void {
     this.parkPill.innerHTML = `<span class="emoji">🎠</span><span>${escapeHtml(state.parkName)}</span>`;
@@ -150,13 +201,13 @@ export class Hud {
     this.clockPill.innerHTML =
       `<span class="emoji">${icon}</span><span>${this.clockText}${this.dayText}</span>`;
 
-    // In normal mode the purse never runs out — say so, rather than showing a
-    // number that never changes.
-    const money =
-      state.mode === 'normal'
-        ? '<span class="emoji">💰</span><span>Lots!</span>'
-        : `<span class="emoji">💰</span><span>${state.money}</span>`;
-    this.moneyPill.innerHTML = money;
+    // Money only means anything once it can run out (mayhem mode) — in normal
+    // mode there is no number worth showing, so the pill is hidden entirely
+    // rather than saying "Lots!".
+    this.moneyPill.style.display = state.moneyIsFinite ? '' : 'none';
+    if (state.moneyIsFinite) {
+      this.moneyPill.innerHTML = `<span class="emoji">💰</span><span>${state.money}</span>`;
+    }
 
     const count = state.inventory.length;
     this.backpackButton.innerHTML =
