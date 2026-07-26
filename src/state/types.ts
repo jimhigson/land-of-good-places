@@ -13,7 +13,7 @@ export type GameMode = 'normal' | 'mayhem';
 export type CharacterKind = 'kid' | 'bunny' | 'kitten' | 'mouse';
 
 /** Where a collected cute thing currently lives. */
-export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried';
+export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried' | 'worn';
 
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export type CuteCategory =
@@ -25,7 +25,14 @@ export type CuteCategory =
   | 'sticker'
   | 'pet'
   | 'egg'
+  | 'flower'
   | 'secret';
+
+/**
+ * A picked flower's colour variant — free, found in the meadow, never sold.
+ * Each is its own little hair accessory (see `entities/WornFlower.ts`).
+ */
+export type FlowerColour = 'yellow' | 'red' | 'blue' | 'violet' | 'pink' | 'white';
 
 export interface CuteThing {
   /** Stable id, e.g. `toy.ripika`. Used as the Cute-o-dex key. */
@@ -46,7 +53,7 @@ export interface CuteThing {
  * shop something came from, while the *kind* decides how the game treats it —
  * a `treat` is eaten, a `hat` is worn, a `pet` walks in the parade.
  */
-export type InventoryKind = 'toy' | 'balloon' | 'treat' | 'hat' | 'sticker' | 'pet' | 'egg';
+export type InventoryKind = 'toy' | 'balloon' | 'treat' | 'hat' | 'sticker' | 'pet' | 'egg' | 'flower';
 
 /** A moment on the park clock. `day` counts from 0, `timeOfDay` is 0..1. */
 export interface GameTime {
@@ -94,6 +101,8 @@ export interface InventoryItem {
    * the Cute-o-dex. Non-paradeable things are always stowed.
    */
   stowed: boolean;
+  /** Set only on `kind: 'flower'` entries — which colour it was picked as. */
+  readonly flowerColour?: FlowerColour;
 }
 
 export interface PlayerState {
@@ -122,6 +131,14 @@ export interface GameState {
   mode: GameMode;
   /** Infinite in normal mode — see `spend()` in the store. */
   money: number;
+  /**
+   * True once money can actually run out (mayhem mode).
+   *
+   * Kept as its own field, derived from `mode`, so UI that only cares "is this
+   * number worth showing" — the HUD money pill — doesn't have to know mode
+   * names or rules. Set by `setMode`.
+   */
+  moneyIsFinite: boolean;
   splashPoints: number;
   bestSplashPoints: number;
   player: PlayerState;
@@ -132,6 +149,8 @@ export interface GameState {
   inventory: InventoryItem[];
   /** `uid` of the item held in the hands, or null for empty-handed. */
   carriedUid: string | null;
+  /** `uid` of the flower worn in the hair, or null for none — see `WornFlower`. */
+  wornFlowerUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */

@@ -20,6 +20,7 @@ import { signTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
+import { markAsSign } from './signs';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -203,6 +204,8 @@ function buildPlaceholder(anchor: AnchorDefinition, collision: CollisionWorld): 
   boardBack.receiveShadow = true;
   boardBack.userData.baseY = 2.05;
   boardBack.name = 'sign-face';
+  // Tappable, for the "inspect" camera — see `world/signs.ts`.
+  markAsSign(boardBack, 2.6, 1.5);
   signGroup.add(boardBack);
 
   const face = new Mesh(

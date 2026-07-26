@@ -51,3 +51,6 @@ Desktop.ini
 # Test / coverage
 coverage/
 .nyc_output/
+
+# Claude agent worktrees and session files
+.claude/

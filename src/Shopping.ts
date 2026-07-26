@@ -39,6 +39,13 @@ import { playOpenChime, playPurchaseChime, playSurpriseChime } from './ui/chime'
  * arrows choose, E/Enter buys, Esc closes. The game's own `menu` binding is
  * suppressed by {@link uiOpen} so that Escape does not close the shop *and*
  * pause the park behind it.
+ *
+ * Pausing is re-derived from {@link uiOpen} every frame ({@link syncPaused}),
+ * rather than toggled at each individual open/close call site. A close
+ * affordance that forgets to tell `Shopping` about it — the backpack's own
+ * ✕ button used to close the drawer directly and leave the park paused
+ * forever — can no longer desync the pause state: whatever the panel/drawer's
+ * `isOpen` says, the next frame's `update()` puts the park back in step.
  */
 export class Shopping implements GameSystem {
   readonly name = 'shopping';
@@ -79,6 +86,7 @@ export class Shopping implements GameSystem {
     const { dt, elapsed, input } = context;
 
     this.carried.update(dt, elapsed);
+    this.syncPaused();
 
     if (this.uiOpen) {
       // Esc / B on a pad closes whatever is open; nothing else gets through.
@@ -146,24 +154,17 @@ export class Shopping implements GameSystem {
       items,
     });
     playOpenChime();
-    this.setPaused(true);
   }
 
   private toggleDrawer(): void {
     if (this.panel.isOpen) this.panel.close();
     this.drawer.toggle();
-    if (this.drawer.isOpen) {
-      playOpenChime();
-      this.setPaused(true);
-    } else {
-      this.setPaused(false);
-    }
+    if (this.drawer.isOpen) playOpenChime();
   }
 
   private closeUi(): void {
     this.panel.close();
     this.drawer.close();
-    this.setPaused(false);
   }
 
   /**
@@ -191,12 +192,19 @@ export class Shopping implements GameSystem {
   }
 
   /**
+   * Keeps the park's pause state a mirror of {@link uiOpen}, checked fresh
+   * every frame rather than threaded through every place that opens or closes
+   * a panel. That is what makes it impossible for a close path to forget to
+   * unpause: however `panel.isOpen` / `drawer.isOpen` got to their current
+   * values — the ✕ button, tap-outside, Esc, the I key, a toggle — this is the
+   * one and only place that reconciles them against `gameStore.paused`.
+   *
    * Pausing is shared with the game's own pause, so this only ever *un*-pauses
    * something it paused itself — otherwise closing a shop would resume a park a
    * grown-up had deliberately paused.
    */
-  private setPaused(paused: boolean): void {
-    if (paused) {
+  private syncPaused(): void {
+    if (this.uiOpen) {
       if (!gameStore.get().paused) {
         this.wasPausedByUs = true;
         gameStore.setPaused(true);

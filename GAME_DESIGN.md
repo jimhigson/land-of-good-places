@@ -1,7 +1,7 @@
 # Land of Good Places — Game Design
 
-Designed by **Eleri** (age 6) and her dad, July 2026. Eleri is credited in
-the game itself (title screen / credits).
+**By Eleri age 6, and Jim age 44** — July 2026. This credit line appears in
+the game itself (title screen / credits / welcome panel).
 
 A cute, cosy theme-park game you play in a web browser. You can't lose and you
 can't die — you just explore, ride rides, and collect lots of cute things.
@@ -26,7 +26,8 @@ Unless the grown-ups turn on **Mayhem mode**…
   props — was reviewed and she really likes all of it.
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
   API, **and touch on phones/tablets: tap a spot and the character walks
-  there** (tap-to-move), with tap-on-things to interact.
+  there** (tap-to-move), with tap-on-things to interact. **Double-tap a
+  spot → the character RUNS there.**
 - **PWA:** Installable as a Progressive Web App so it can play full-screen
   on phones.
 - **Day & night:** The time of day changes. At night, fairy lights come on
@@ -94,8 +95,15 @@ Money **never runs out** in normal mode. Seven shops:
 3. **Candy floss stand** — pink, blue, and a rare rainbow one that only
    appears sometimes
 4. **Ice cream parlour** — silly flavours, triple-decker rainbow cones
-5. **Hat shop** — hats your character actually wears around the park
-6. **Sticker & pet shop** — cute stickers and a little pet that follows you
+5. **Hat shop** — hats your character actually wears around the park.
+   One of them is the **RiPika hat**: a large RiPika head worn on top of
+   the wearer's own head.
+6. **Sticker & pet shop** — cute stickers and a little pet that follows you.
+   Among the pets: a **jiggly ball-shaped puff creature in pastel pink that
+   likes to sing** (bursts into little songs with musical notes floating
+   up). Available BOTH as a pet (follows you, sings) and as a hat in the
+   hat shop (sits on your head, jiggles, occasionally sings). More
+   pet-and-hat characters may follow this pattern.
 7. **Surprise egg shop** — mystery eggs with a random cute toy inside
 
 ## The rides
@@ -186,6 +194,10 @@ Every cute thing you buy or find:
 - **Photo mode** — a camera button that snaps you and your toys in a cute frame
 - **Rainbow hop** — a rainbow effect radiates out from the player whenever
   they jump
+- **Flowers grow and can be picked** — flowers on the ground grow
+  constantly, slowly but noticeably, up to a limit of objects; new ones
+  sprout as others are picked. Tap/walk up to pick a flower, and picked
+  flowers can be **worn in your hair**.
 
 ## Mayhem mode (for grown-ups)
 
@@ -258,6 +270,73 @@ Rough order of construction, each step playable:
    continuous with the outside world. Enter through the door → transition
    to a roomy interior that can be far larger than the exterior shell.
 5. **The top floor is the roof** — actually outdoors, open to the sky.
+6. **Double-tap to run** — a double-tap sends the character running to the
+   destination (single tap walks).
+7. **Controls hint hidden by default** — behind a small circular "?"
+   button; tap to show/hide. Never permanently on screen.
+8. **Tap a sign to read it** — tapping any sign zooms and aligns the camera
+   to the sign so it fills the screen; tapping anywhere returns to play.
+9. **Name labels: larger and screen-constant** — character name text is too
+   small and must NOT shrink when zooming out; size is relative to the
+   screen, not the world.
+10. **Jump over walls** — the player can jump over walls up to a moderate
+    maximum height (clears garden walls when airborne high enough; tall
+    walls still block).
+11. **Stairs and escalators get side rails** — solid walls you cannot go
+    over, so you can't accidentally walk off the sides and fall.
+12. **The fountain is jumpable** — you can jump into the middle of the
+    fountain, with basic particle splash effects.
+13. **The big rides are mini-games** — dodgems, the space ferris wheel and
+    the water fight are implemented as mini-games like the Rail Racer
+    (own self-contained worlds, entered from their plots in the park).
+14. **"What's new" welcome** — on opening the game, a cute welcome panel
+    lists what's new in the park since your last visit (kid-friendly
+    lines, from a curated whatsnew file shipped with each release).
+15. **Upgrade notice** — if a new version deploys while you're playing, a
+    gentle in-game notice appears ("A new version of the park is ready!")
+    with a tap-to-refresh.
+16. **Static camera, no rotation** — replace camera rotation entirely with
+    one fixed primary viewing angle; instead, everything in the world must
+    be rotated/authored to read clearly from that angle (signs, shops,
+    stalls face the camera). Remove Q/R keys and rotate buttons.
+17. **Fix the "teleport" ejection** — the out-of-bounds/collider push-out
+    is far too sensitive and flings the player somewhere else seemingly
+    for no reason (e.g. near the fountain). Depenetration must be gentle
+    and capped, never a fling.
+18. **Day/night only outside** — interiors keep constant cosy lighting;
+    the day/night cycle applies only when outdoors. This includes the
+    **sun-shadow effect**: no moving sun shadows indoors — interior
+    shadows come from fixed interior lights only.
+19. **Analogue clock** — replace the time text with a cute analogue clock
+    at the top of the screen; tapping it says the time OUT LOUD (speech).
+20. **Shops are the main feature of their space** — not small side
+    attractions. Novelty architecture: each shop is a little building
+    shaped like what it sells — the hat shop has a GIANT HAT on top, the
+    ice cream parlour is a giant ice-cream-shaped building, the balloon
+    shop bulges like balloons, the surprise egg shop is a giant egg, and
+    so on. They should dominate their rooms.
+21. **Starting pet + pet conversations** — the player starts with a
+    RiPika pet (chosen/confirmed at character creation). Tapping a pet
+    (or facing it and pressing E) shows a FULL-SCREEN picture of the
+    pet's current mood (their face, big) and the pet tells the player
+    where they'd like to go next (e.g. "Let's ride the ferris wheel!").
+22. **Tree climbing** — go near a tree and you're offered the option to
+    climb it; your character's head pops out of the leaves at the top.
+    NPCs also climb trees and peek out of the leaves.
+23. **No money display when infinite** — in normal mode (money never runs
+    out) the HUD simply doesn't show a money pill. It appears only in
+    Mayhem, where money is real.
+24. **The map** — the player has a map. Outdoors: a full-screen overlay
+    of the whole outdoor area over the gameplay. Indoors: shows the
+    current building floor-by-floor, up/down changes floor, starting on
+    the player's current floor and location.
+25. **The train** — a train rides around the edge of the park with a
+    couple of stations. Player AND NPCs can ride it.
+26. **DEV badge** — dev-server builds show a large red "DEV" text in the
+    bottom-right corner so dev and production are never confused.
+27. **Character creation screen** — at the start: choose name (default
+    Eleri), hair colour and style, clothes, starting hat, and starting
+    pet (RiPika featured as the suggested starter).
 
 ## Deployment
 
