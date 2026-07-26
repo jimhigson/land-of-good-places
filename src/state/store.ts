@@ -3,12 +3,47 @@ import { DAY_START_TIME, PLAYER_DEFAULT_NAME } from '../core/constants';
 import type {
   CuteCategory,
   CutePlacement,
+  FlowerColour,
   GameMode,
   GameState,
   GameTime,
   InventoryItem,
   InventoryKind,
 } from './types';
+
+/** Every flower colour there is to find, in a fixed display order. */
+export const FLOWER_COLOURS: readonly FlowerColour[] = [
+  'yellow',
+  'red',
+  'blue',
+  'violet',
+  'pink',
+  'white',
+];
+
+/** The true palette colour each flower blooms into. */
+export const FLOWER_HEX: Readonly<Record<FlowerColour, number>> = {
+  yellow: PALETTE.flowerYellow,
+  red: PALETTE.flowerRed,
+  blue: PALETTE.flowerBlue,
+  violet: PALETTE.flowerViolet,
+  pink: PALETTE.blossomPink,
+  white: PALETTE.blossomWhite,
+};
+
+/** One emoji per colour, for the HUD and the Cute-o-dex. */
+export const FLOWER_ICON: Readonly<Record<FlowerColour, string>> = {
+  yellow: '🌼',
+  red: '🌺',
+  blue: '🌷',
+  violet: '🪻',
+  pink: '🌸',
+  white: '💮',
+};
+
+function flowerDisplayName(colour: FlowerColour): string {
+  return `${colour[0]?.toUpperCase()}${colour.slice(1)} flower`;
+}
 
 /**
  * Everything a shop has to say about a thing for the store to file it away.
@@ -162,6 +197,54 @@ class GameStore {
     );
     this.notify();
     return item;
+  }
+
+  /**
+   * Picks a free flower straight out of the meadow — no shop, no price.
+   *
+   * Unlike `buy()` it never touches the purse and it is never carryable or
+   * paradeable: a picked flower's only home is the hair (`WornFlower`), which
+   * is why it goes straight to `wornFlowerUid` — "wear immediately by
+   * default, most recently picked wins" is the whole of the wearing rule.
+   */
+  collectFlower(colour: FlowerColour): InventoryItem {
+    this.purchaseCount += 1;
+    const id = `flower.${colour}`;
+    const displayName = flowerDisplayName(colour);
+    const item: InventoryItem = {
+      uid: `${id}#${this.purchaseCount}`,
+      id,
+      kind: 'flower',
+      displayName,
+      icon: FLOWER_ICON[colour],
+      category: 'flower',
+      shopId: 'meadow',
+      acquiredAt: this.gameTime(),
+      carryable: false,
+      paradeable: false,
+      stowed: true,
+      flowerColour: colour,
+    };
+    this.state.inventory.push(item);
+    this.collect(id, displayName, 'flower', 'worn');
+    this.state.wornFlowerUid = item.uid;
+    this.notify();
+    return item;
+  }
+
+  /**
+   * Wears a picked flower in the hair, or takes it off with `null`.
+   *
+   * Exposed mainly for a future Cute-o-dex / drawer toggle — picking a flower
+   * already wears it, via `collectFlower`.
+   */
+  setWornFlower(uid: string | null): void {
+    if (uid !== null && !this.state.inventory.some((item) => item.uid === uid && item.kind === 'flower')) {
+      return;
+    }
+    if (this.state.wornFlowerUid === uid) return;
+    this.state.wornFlowerUid = uid;
+    this.notify();
   }
 
   /** Puts one owned thing in the player's hands, or empties them with `null`. */
@@ -331,6 +414,7 @@ function createInitialState(): GameState {
     collection: {},
     inventory: [],
     carriedUid: null,
+    wornFlowerUid: null,
     paused: false,
     debugOverlay: false,
   };

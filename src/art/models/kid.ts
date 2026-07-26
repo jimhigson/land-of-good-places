@@ -77,6 +77,14 @@ export interface KidHandle extends CreatureHandle {
   readonly limbs: CreatureLimbs;
   /** Where a hat sits. Parent hat meshes here. */
   readonly hatAnchor: Group;
+  /**
+   * Where a single hair accessory sits — a picked flower, say.
+   *
+   * Offset from `hatAnchor` (the crown centre) rather than sharing it, so a
+   * hat and a hair flower can be worn at the same time instead of one
+   * replacing the other.
+   */
+  readonly hairAnchor: Group;
   /** Where a carried toy sits. */
   readonly holdAnchor: Group;
   /** Where a peeking creature's head pops out of the bag. */
@@ -229,6 +237,13 @@ export function createKid(options: KidOptions = {}): KidHandle {
   hatAnchor.position.set(0, 0.42 * HEAD, 0);
   crown.add(hatAnchor);
 
+  // Tucked over the left bunch, clear of the hat anchor's crown-centre mount —
+  // a flower worn here reads as "in her hair" alongside a hat rather than
+  // fighting it for the same spot.
+  const hairAnchor = new Group();
+  hairAnchor.position.set(0.32 * HEAD, 0.22 * HEAD, 0.14 * HEAD);
+  crown.add(hairAnchor);
+
   // Hair shell over the crown and back.
   // Hair shell: stops well ABOVE the eye line. Every extra degree of theta here
   // eats forehead, and a character with no forehead has nowhere to put big eyes.
@@ -317,6 +332,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     head,
     limbs,
     hatAnchor,
+    hairAnchor,
     holdAnchor,
     backpackAnchor,
     height: KID_HEIGHT,

@@ -1,4 +1,4 @@
-import { gameStore, type CuteCategory, type GameState } from '../state';
+import { FLOWER_COLOURS, FLOWER_ICON, gameStore, type CuteCategory, type FlowerColour, type GameState } from '../state';
 import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/catalogue';
 import { isTouchDevice } from '../core/device';
 
@@ -34,6 +34,9 @@ const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string 
   { category: 'hat', title: 'Hats', glyph: '👒' },
   { category: 'sticker', title: 'Stickers', glyph: '✨' },
   { category: 'egg', title: 'Surprise eggs', glyph: '🥚' },
+  // Free finds from the meadow, not sold in any shop — rendered from
+  // `FLOWER_COLOURS` rather than the shop catalogue, see `renderFlowerSection`.
+  { category: 'flower', title: 'Flowers', glyph: '🌷' },
   { category: 'secret', title: 'Secrets', glyph: '🌟' },
 ];
 
@@ -202,9 +205,12 @@ export class CuteODex {
   };
 
   private render(state: GameState): void {
-    const found = CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length;
-    this.button.innerHTML =
-      `<span class="emoji">📖</span><span>${found}/${CATALOGUE.length}</span>`;
+    const flowerFound = FLOWER_COLOURS.filter(
+      (colour) => state.collection[`flower.${colour}`]?.discovered,
+    ).length;
+    const found = CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length + flowerFound;
+    const total = CATALOGUE.length + FLOWER_COLOURS.length;
+    this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
 
     if (!this.open) return;
@@ -212,15 +218,97 @@ export class CuteODex {
     this.countEl.textContent =
       found === 0
         ? 'None found yet — the big building has seven shops!'
-        : `${found} of ${CATALOGUE.length} found`;
-    this.barFill.style.width = `${Math.round((found / CATALOGUE.length) * 100)}%`;
+        : `${found} of ${total} found`;
+    this.barFill.style.width = `${Math.round((found / total) * 100)}%`;
 
     this.pages.innerHTML = '';
     for (const section of SECTIONS) {
+      if (section.category === 'flower') {
+        this.pages.append(this.renderFlowerSection(section.title, section.glyph, state));
+        continue;
+      }
       const items = CATALOGUE.filter((item) => item.category === section.category);
       if (items.length === 0) continue;
       this.pages.append(this.renderSection(section.title, section.glyph, items, state));
     }
+  }
+
+  /**
+   * Flowers are picked, not bought, so they have no `ShopItem` and do not
+   * live in `CATALOGUE` — this reads `FLOWER_COLOURS` and the collection
+   * directly instead. Everything else about the book (sections, silhouettes,
+   * progress bar) is untouched.
+   */
+  private renderFlowerSection(title: string, glyph: string, state: GameState): HTMLElement {
+    const section = document.createElement('section');
+    section.className = 'dex-section';
+
+    const heading = document.createElement('h3');
+    heading.className = 'dex-heading';
+    const owned = FLOWER_COLOURS.filter(
+      (colour) => state.collection[`flower.${colour}`]?.discovered,
+    ).length;
+    heading.innerHTML =
+      `<span class="emoji">${glyph}</span><span>${escapeHtml(title)}</span>` +
+      `<span class="dex-tally">${owned}/${FLOWER_COLOURS.length}</span>`;
+
+    const grid = document.createElement('div');
+    grid.className = 'dex-grid';
+    for (const colour of FLOWER_COLOURS) grid.append(this.renderFlowerCard(colour, state));
+
+    section.append(heading, grid);
+    return section;
+  }
+
+  /**
+   * A picked flower's card toggles whether it is worn in the hair — the same
+   * "tap it to bring it out / put it away" idea the rest of the book uses,
+   * just wired to `gameStore.setWornFlower` instead of stow/parade. Picking a
+   * flower already wears it by default; this is the undo/switch path.
+   */
+  private renderFlowerCard(colour: FlowerColour, state: GameState): HTMLElement {
+    const id = `flower.${colour}`;
+    const entry = state.collection[id];
+    const discovered = entry?.discovered === true;
+
+    if (!discovered) {
+      const unknown = document.createElement('div');
+      unknown.className = 'dex-card';
+      unknown.dataset.owned = 'false';
+      unknown.setAttribute('aria-label', 'Not found yet');
+      unknown.innerHTML =
+        `<span class="dex-icon dex-icon--hidden">${escapeHtml(FLOWER_ICON[colour])}</span>` +
+        '<span class="dex-name">???</span>';
+      return unknown;
+    }
+
+    const owned = state.inventory.find((item) => item.flowerColour === colour);
+    const worn = owned !== undefined && owned.uid === state.wornFlowerUid;
+    const displayName = `${colour.charAt(0).toUpperCase()}${colour.slice(1)} flower`;
+    const count = entry?.count ?? 1;
+
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'dex-card';
+    card.dataset.owned = 'true';
+    card.dataset.out = worn ? 'true' : 'false';
+    card.disabled = !owned;
+
+    card.innerHTML =
+      `<span class="dex-icon">${escapeHtml(FLOWER_ICON[colour])}</span>` +
+      `<span class="dex-name">${escapeHtml(displayName)}</span>` +
+      `<span class="dex-state">${escapeHtml(worn ? 'Worn in my hair' : 'In my backpack')}</span>` +
+      (count > 1 ? `<span class="dex-badge">×${count}</span>` : '');
+
+    if (owned) {
+      card.setAttribute('aria-label', `${displayName} — ${worn ? 'take off' : 'wear in my hair'}`);
+      card.addEventListener('click', () => {
+        card.blur();
+        gameStore.setWornFlower(worn ? null : owned.uid);
+      });
+    }
+
+    return card;
   }
 
   private renderSection(
