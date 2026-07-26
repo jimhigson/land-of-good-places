@@ -19,11 +19,15 @@ export class Hud {
   private readonly moneyPill: HTMLElement;
   private readonly padPill: HTMLElement;
   private readonly debugPill: HTMLElement;
+  private readonly backpackButton: HTMLButtonElement;
+  private readonly promptPill: HTMLElement;
 
   private readonly unsubscribe: () => void;
   private clockText = '--:--';
   private dayText = '';
   private fps = 60;
+  private backpackHandler: (() => void) | null = null;
+  private promptText: string | null = null;
 
   constructor(container: HTMLElement) {
     this.root = container;
@@ -35,7 +39,20 @@ export class Hud {
     this.parkPill = pill('pill pill--park');
     this.clockPill = pill('pill pill--clock');
     this.moneyPill = pill('pill pill--money');
-    top.append(this.parkPill, this.clockPill, this.moneyPill);
+
+    // The backpack is the one HUD element you can press. It is a real button so
+    // that a finger, a mouse and a screen reader all get the same thing; the
+    // handler is injected, because the HUD still knows nothing about the game.
+    this.backpackButton = document.createElement('button');
+    this.backpackButton.type = 'button';
+    this.backpackButton.className = 'pill pill--backpack';
+    this.backpackButton.setAttribute('aria-label', 'Open my backpack');
+    this.backpackButton.addEventListener('click', () => {
+      this.backpackButton.blur();
+      this.backpackHandler?.();
+    });
+
+    top.append(this.parkPill, this.clockPill, this.moneyPill, this.backpackButton);
 
     const bottom = document.createElement('div');
     bottom.className = 'hud-row bottom';
@@ -60,7 +77,11 @@ export class Hud {
     this.padPill.innerHTML =
       '<span class="emoji">🎮</span><span>Controller connected — left stick to walk!</span>';
 
-    hints.append(keyHint, this.padPill);
+    // "Press E to shop!" — shown only when standing at something you can use.
+    this.promptPill = pill('pill pill--prompt');
+    this.promptPill.dataset.show = 'false';
+
+    hints.append(this.promptPill, keyHint, this.padPill);
 
     this.debugPill = pill('pill pill--soft');
     this.debugPill.style.display = 'none';
@@ -81,6 +102,24 @@ export class Hud {
 
   setFps(fps: number): void {
     this.fps = fps;
+  }
+
+  /** Who to tell when the backpack pill is pressed. */
+  setBackpackHandler(handler: () => void): void {
+    this.backpackHandler = handler;
+  }
+
+  /**
+   * The little "you can use this" line. Pass `null` to clear it.
+   *
+   * Called every frame by whoever is watching the player's surroundings, so it
+   * short-circuits when the text has not changed.
+   */
+  setPrompt(text: string | null): void {
+    if (text === this.promptText) return;
+    this.promptText = text;
+    this.promptPill.dataset.show = text ? 'true' : 'false';
+    if (text) this.promptPill.innerHTML = `<span class="emoji">✨</span><span>${escapeHtml(text)}</span>`;
   }
 
   /** Shows or hides the controller hint. */
@@ -118,6 +157,10 @@ export class Hud {
         ? '<span class="emoji">💰</span><span>Lots!</span>'
         : `<span class="emoji">💰</span><span>${state.money}</span>`;
     this.moneyPill.innerHTML = money;
+
+    const count = state.inventory.length;
+    this.backpackButton.innerHTML =
+      `<span class="emoji">🎒</span><span>${count === 0 ? 'Backpack' : count}</span>`;
   }
 }
 

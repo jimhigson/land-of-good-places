@@ -9,6 +9,7 @@ import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
 import { Player, TapNavigator } from './entities';
 import { Hud, TouchControls } from './ui';
+import { Shopping } from './Shopping';
 import { gameStore } from './state';
 
 /**
@@ -37,6 +38,7 @@ export class Game {
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
+  readonly shopping: Shopping;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -75,6 +77,12 @@ export class Game {
 
     this.hud = new Hud(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
+
+    // Shops: the join between the shop geometry, the purchase panel and the
+    // store. Registered as a system so it updates after the world, which is
+    // where the player's position for this frame has just been settled.
+    this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
+    this.addSystem(this.shopping);
 
     this.frameContext = {
       dt: 0,
@@ -132,7 +140,12 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    if (this.input.justPressed('menu')) gameStore.setPaused(!gameStore.get().paused);
+    // While a shop or the backpack is open, Escape belongs to it — see
+    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
+    // park behind it.
+    if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+      gameStore.setPaused(!gameStore.get().paused);
+    }
 
     const paused = gameStore.get().paused;
     this.world.dayNight.setPaused(paused);

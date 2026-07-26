@@ -10,6 +10,7 @@ export type GameAction =
   | 'jump' // hop (and later: corgi-balloon float)
   | 'cancel' // back out of a menu
   | 'menu' // open the pause / park menu
+  | 'inventory' // open the backpack drawer
   | 'photo' // photo mode shutter
   | 'sprint' // run faster
   | 'cameraLeft' // rotate the iso camera 90° anticlockwise
@@ -23,6 +24,7 @@ export const GAME_ACTIONS: readonly GameAction[] = [
   'jump',
   'cancel',
   'menu',
+  'inventory',
   'photo',
   'sprint',
   'cameraLeft',
@@ -43,6 +45,7 @@ export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   KeyF: 'interact',
   Escape: 'menu',
   Backspace: 'cancel',
+  KeyI: 'inventory',
   KeyP: 'photo',
   ShiftLeft: 'sprint',
   ShiftRight: 'sprint',
@@ -83,7 +86,7 @@ export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   5: 'cameraRight',
   6: 'zoomOut',
   7: 'zoomIn',
-  8: 'cancel',
+  8: 'inventory',
   9: 'menu',
   10: 'sprint',
 };

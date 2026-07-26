@@ -10,14 +10,17 @@ import {
   HELTER_DECK,
   HELTER_ENTRY_X,
   HELTER_ENTRY_Z,
+  SHOP_UNITS,
   TOP_DECK,
   TRAMPOLINE_RADIUS,
   TRAMPOLINE_X,
   TRAMPOLINE_Z,
   deckY,
+  shopLocalToBuilding,
   worldX,
   worldZ,
 } from './layout';
+import { SHOP_STAND_Z } from './shops/Shops';
 import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X } from '../../core/constants';
 
 /**
@@ -116,6 +119,27 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     standZ: worldZ(GIANT_SLIDE_ENTRY_Z),
     pressInteract: false,
   });
+
+  // The seven shops. Tapping a counter walks you to the serving spot and then
+  // fires `interact` on arrival, which is the same thing the E key does when a
+  // keyboard player walks up — one shop-opening path, two ways in.
+  for (const unit of SHOP_UNITS) {
+    const [counterX, counterZ] = shopLocalToBuilding(unit, 0, 1.15);
+    const [standX, standZ] = shopLocalToBuilding(unit, 0, SHOP_STAND_Z);
+    zones.push({
+      id: `shop-${unit.id}`,
+      label: unit.title,
+      x: worldX(counterX),
+      y: deckY(unit.deck),
+      z: worldZ(counterZ),
+      // Wide enough to take a tap anywhere on the kiosk — counter, shelves or
+      // the awning above it — without reaching the next shop along.
+      pickRadius: 2.3,
+      standX: worldX(standX),
+      standZ: worldZ(standZ),
+      pressInteract: true,
+    });
+  }
 
   zones.push({
     id: 'grownUp',

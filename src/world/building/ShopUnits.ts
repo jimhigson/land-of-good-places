@@ -1,6 +1,13 @@
 import { BoxGeometry, Group, Mesh, type Material } from 'three';
 import { cuteSign, interiorMaterial } from './parts';
-import { SHOP_UNITS, shopGroupName, worldX, worldZ, type ShopUnitDefinition } from './layout';
+import {
+  SHOP_UNITS,
+  shopGroupName,
+  shopLocalToBuilding,
+  worldX,
+  worldZ,
+  type ShopUnitDefinition,
+} from './layout';
 import type { CollisionWorld } from '../Collision';
 
 /**
@@ -115,20 +122,10 @@ function buildUnit(unit: ShopUnitDefinition): Group {
  * which is exactly why no two units are stacked on top of each other.
  */
 function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): void {
-  const cos = Math.cos(unit.yaw);
-  const sin = Math.sin(unit.yaw);
-  const rotate = (localX: number, localZ: number): [number, number] => [
-    localX * cos + localZ * sin,
-    -localX * sin + localZ * cos,
-  ];
-
-  const [ax, az] = rotate(-1.75, 1.15);
-  const [bx, bz] = rotate(1.75, 1.15);
-  collision.addWall(
-    worldX(unit.x + ax),
-    worldZ(unit.z + az),
-    worldX(unit.x + bx),
-    worldZ(unit.z + bz),
-    0.4,
-  );
+  const [ax, az] = shopLocalToBuilding(unit, -1.75, 1.15);
+  const [bx, bz] = shopLocalToBuilding(unit, 1.75, 1.15);
+  // Half the counter's real depth (0.7 m), not more. Because collision is
+  // height-blind this segment is an invisible wall on every other deck too, and
+  // every extra centimetre of it is a centimetre of somebody else's floor.
+  collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35);
 }

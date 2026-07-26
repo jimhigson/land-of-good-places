@@ -1,4 +1,4 @@
-export { gameStore } from './store';
+export { gameStore, type PurchaseSpec } from './store';
 export type {
   CharacterKind,
   CuteCategory,
@@ -6,6 +6,9 @@ export type {
   CuteThing,
   GameMode,
   GameState,
+  GameTime,
+  InventoryItem,
+  InventoryKind,
   PlayerState,
   WorldState,
 } from './types';
