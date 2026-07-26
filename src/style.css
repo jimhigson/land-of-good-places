@@ -730,3 +730,240 @@ kbd {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------- Cute-o-dex */
+
+.pill--dex {
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, #ffe1f0 150%);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.pill--dex:active,
+.pill--dex[data-active='true'] {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.18);
+}
+
+.cutodex {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.cutodex[data-open='false'] {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* Open, it swallows taps like a shop does — the book is the whole screen for a
+   moment, and a stray tap must not send the character wandering off behind it. */
+.cutodex[data-open='true'] {
+  pointer-events: auto;
+  background: rgba(74, 58, 82, 0.22);
+}
+
+.cutodex-card {
+  --shop-accent: var(--lgp-pink);
+  position: relative;
+  width: min(560px, 96vw);
+  max-height: min(660px, 90vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--lgp-cream);
+  border: 6px solid #fff;
+  border-radius: 26px;
+  box-shadow: 0 12px 0 rgba(74, 58, 82, 0.16);
+  overflow: hidden;
+  animation: shop-pop 260ms cubic-bezier(0.22, 1.3, 0.4, 1) both;
+}
+
+.dex-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.dex-count {
+  flex: none;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+}
+
+.dex-bar {
+  flex: 1;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(74, 58, 82, 0.12);
+  overflow: hidden;
+}
+
+.dex-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--lgp-mint), var(--lgp-pink-deep));
+  transition: width 320ms cubic-bezier(0.22, 1.3, 0.4, 1);
+}
+
+.dex-pages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dex-section {
+  margin-bottom: 14px;
+}
+
+.dex-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+}
+
+.dex-heading .emoji {
+  font-size: 20px;
+}
+
+.dex-tally {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.6;
+}
+
+.dex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.dex-card {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  /* Comfortably bigger than a fingertip: this is the page a child pokes at. */
+  min-height: 96px;
+  padding: 8px 4px;
+  border: 3px solid #fff;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 4px 0 rgba(74, 58, 82, 0.12);
+  color: var(--lgp-ink);
+  font-family: inherit;
+  text-align: center;
+  transition: transform 90ms ease, box-shadow 90ms ease, border-color 120ms ease;
+}
+
+.dex-card[data-owned='true'] {
+  cursor: pointer;
+}
+
+.dex-card[data-owned='true']:not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(74, 58, 82, 0.12);
+}
+
+.dex-card:disabled {
+  cursor: default;
+}
+
+/* Out walking with you: ringed, and tinted so a full parade reads at a glance. */
+.dex-card[data-out='true'] {
+  border-color: var(--lgp-pink-deep);
+  background: linear-gradient(180deg, #fff 0%, #ffe9f4 180%);
+}
+
+.dex-card[data-owned='false'] {
+  background: rgba(74, 58, 82, 0.06);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: none;
+}
+
+.dex-icon {
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+/* The silhouette: the real emoji with every colour crushed out of it, so the
+   shape is still a clue about what is missing. */
+.dex-icon--hidden {
+  filter: brightness(0) saturate(0);
+  opacity: 0.26;
+}
+
+.dex-name {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.dex-card[data-owned='false'] .dex-name {
+  letter-spacing: 2px;
+  opacity: 0.45;
+}
+
+.dex-state {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.6;
+}
+
+.dex-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 22px;
+  padding: 1px 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--lgp-pink-deep);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cutodex .shop-hint {
+  flex: none;
+}
+
+@media (max-width: 520px) {
+  .dex-grid {
+    grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  }
+
+  .dex-card {
+    min-height: 88px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cutodex-card {
+    animation: none;
+  }
+
+  .dex-bar-fill {
+    transition: none;
+  }
+}

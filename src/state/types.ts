@@ -78,6 +78,22 @@ export interface InventoryItem {
   readonly acquiredAt: GameTime;
   /** Can be held in the hands, and later can join the parade. */
   readonly carryable: boolean;
+  /**
+   * Can walk (or float) behind you in the parade.
+   *
+   * Toys, pets and balloons can; candy floss, ice creams, hats, stickers and
+   * eggs cannot — those live in the backpack and peek out of the top instead.
+   * Decided once, at purchase, from {@link InventoryKind}.
+   */
+  readonly paradeable: boolean;
+  /**
+   * True when the player has tucked this one away in the backpack.
+   *
+   * The one mutable field on an inventory entry, because "is my bunny out?" is
+   * a thing a child changes over and over — by tapping the bunny itself, or from
+   * the Cute-o-dex. Non-paradeable things are always stowed.
+   */
+  stowed: boolean;
 }
 
 export interface PlayerState {
