@@ -65,6 +65,74 @@ export const PLAYER_BOB_CYCLES_PER_METRE = 0.42;
 /** Peak vertical bob height in metres. */
 export const PLAYER_BOB_HEIGHT = 0.16;
 
+// ------------------------------------------------------------- the building
+
+/**
+ * The big building.
+ *
+ * Its plot centre comes from `world/anchors.ts` ('building'), but the shell is
+ * nudged towards the middle of the park so that every interior corner stays
+ * inside GARDEN_PLAY_RADIUS — otherwise the soft park boundary would push the
+ * player out of the far end of their own shopping centre.
+ */
+export const BUILDING_CENTRE_X = -28.5;
+export const BUILDING_CENTRE_Z = -30.5;
+
+/** Interior half-extents in metres — a 24 x 18 m footprint. */
+export const BUILDING_HALF_X = 12;
+export const BUILDING_HALF_Z = 9;
+
+/** Number of walkable decks. Deck 0 is the ground floor, deck 4 the slide deck. */
+export const BUILDING_FLOOR_COUNT = 5;
+
+/** Deck-to-deck rise in metres. */
+export const BUILDING_FLOOR_HEIGHT = 3.6;
+
+/** How far the ground floor sits above the highest terrain under the footprint. */
+export const BUILDING_PLINTH = 0.3;
+
+/** Thickness of a deck slab, and of the perimeter wall. */
+export const BUILDING_SLAB = 0.3;
+export const BUILDING_WALL_THICKNESS = 0.45;
+
+/**
+ * Height of the solid painted wall; a band of glass fills the gap up to the
+ * deck above.
+ *
+ * This number is the whole look of the building. Too low and the tower reads as
+ * a grey glass office block; too high and the 38° camera cannot see over the
+ * near wall into the floor you are standing on. Just over two metres loses about
+ * 2.8 m of the eighteen-metre-deep floor plate, which is a fair trade.
+ */
+export const BUILDING_PARAPET = 2.15;
+
+/** The biggest step the player can walk up without jumping. */
+export const BUILDING_STEP_UP = 0.62;
+
+/** Seconds for a floor to fade out / in when the cutaway view changes. */
+export const BUILDING_FADE_SECONDS = 0.22;
+
+/** Launch speed off the trampoline, first bounce and hardest bounce (m/s). */
+export const TRAMPOLINE_MIN_LAUNCH = 9;
+export const TRAMPOLINE_MAX_LAUNCH = 17;
+
+/** Glass lift: metres per second, and seconds it waits at each floor. */
+export const LIFT_SPEED = 2.4;
+export const LIFT_DWELL = 3.2;
+
+/** Floating bubble: metres per second, and seconds it waits at each end. */
+export const BUBBLE_SPEED = 1.5;
+export const BUBBLE_DWELL = 3.6;
+
+/** Escalator carry speed, metres per second along the ramp. */
+export const ESCALATOR_SPEED = 1.1;
+
+/** How fast you travel down a slide, in metres of spline per second. */
+export const SLIDE_SPEED = 12;
+
+/** Number of squishy balls in the ball pit. */
+export const BALL_PIT_COUNT = 190;
+
 // ----------------------------------------------------------------- camera
 
 /**

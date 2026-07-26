@@ -1,0 +1,146 @@
+import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, Quaternion, Vector3 } from 'three';
+import { BUILDING_FLOOR_HEIGHT } from '../../core/constants';
+import { PALETTE } from '../../core/palette';
+import { interiorMaterial } from './parts';
+import { stairFlights, TOP_DECK, type RampDefinition } from './layout';
+
+/** Rise of a single tread. Chunky, because everything in this park is chunky. */
+const TREAD_RISE = 0.3;
+
+/**
+ * The stairs: a switchback flight per storey, in the north-west shaft.
+ *
+ * The treads are geometry only — what the player actually walks on is the pair
+ * of ramp surfaces declared in `layout.ts`, clamped at each end so the top of
+ * flight A and the bottom of flight B share the half-landing automatically.
+ */
+export class Stairs {
+  constructor(floorGroups: readonly Group[]) {
+    for (let deck = 0; deck < TOP_DECK; deck += 1) {
+      const floor = floorGroups[deck];
+      if (!floor) continue;
+
+      const group = new Group();
+      group.name = `stairs-${deck}`;
+      floor.add(group);
+
+      const [flightA, flightB] = stairFlights(deck);
+      const bottom = deck * BUILDING_FLOOR_HEIGHT;
+      group.add(buildTreads(flightA, bottom), buildStringer(flightA, bottom));
+      group.add(buildTreads(flightB, bottom), buildStringer(flightB, bottom));
+      group.add(buildLanding(flightA, bottom));
+      group.add(buildBalustrade(flightA, flightB, bottom));
+    }
+  }
+}
+
+/**
+ * One instanced mesh per flight: every tread is the same slab.
+ *
+ * Thin slabs with a gap between them, riding on a solid stringer. An earlier
+ * version extruded each tread all the way down to the floor to save a mesh, and
+ * from above the whole flight read as one grey ramp — the shadow between the
+ * treads is the only thing that says "stairs".
+ */
+function buildTreads(flight: RampDefinition, groupBase: number): InstancedMesh {
+  const rise = flight.yTo - flight.yFrom;
+  const count = Math.max(2, Math.round(Math.abs(rise) / TREAD_RISE));
+  const run = flight.to - flight.from;
+  const width = flight.footprint.maxX - flight.footprint.minX - 0.45;
+  const depth = Math.abs(run) / count;
+
+  const treads = new InstancedMesh(
+    new BoxGeometry(width, 0.24, depth * 0.82),
+    interiorMaterial(PALETTE.buildingFloor, 0.8),
+    count,
+  );
+  treads.castShadow = false;
+  treads.receiveShadow = true;
+
+  const centreX = (flight.footprint.minX + flight.footprint.maxX) / 2;
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+
+  for (let i = 0; i < count; i += 1) {
+    const t = (i + 1) / count;
+    const top = flight.yFrom + rise * t - groupBase;
+    const z = flight.from + run * (t - 0.5 / count);
+    position.set(centreX, top - 0.12, z);
+    matrix.compose(position, rotation, scale);
+    treads.setMatrixAt(i, matrix);
+  }
+  treads.instanceMatrix.needsUpdate = true;
+  return treads;
+}
+
+/** The solid slope the treads sit on, so you cannot see through the flight. */
+function buildStringer(flight: RampDefinition, groupBase: number): Mesh {
+  const run = flight.to - flight.from;
+  const rise = flight.yTo - flight.yFrom;
+  const length = Math.hypot(run, rise);
+  const width = flight.footprint.maxX - flight.footprint.minX - 0.2;
+
+  const mesh = new Mesh(
+    new BoxGeometry(width, 0.55, length),
+    interiorMaterial(PALETTE.buildingTrim, 0.82),
+  );
+  mesh.receiveShadow = true;
+  mesh.position.set(
+    (flight.footprint.minX + flight.footprint.maxX) / 2,
+    flight.yFrom + rise / 2 - groupBase - 0.42,
+    flight.from + run / 2,
+  );
+  mesh.rotation.x = -Math.atan2(rise, run);
+  return mesh;
+}
+
+/** The half-landing where the switchback turns. */
+function buildLanding(flightA: RampDefinition, groupBase: number): Mesh {
+  const top = flightA.yTo - groupBase;
+  const mesh = new Mesh(
+    new BoxGeometry(4.9, 0.28, 1.1),
+    interiorMaterial(PALETTE.buildingFloorAlt, 0.8),
+  );
+  mesh.receiveShadow = true;
+  mesh.position.set(-9.05, top - 0.14, -2.85);
+  return mesh;
+}
+
+/** Chunky pastel balustrades so the stairwell reads as safe from above. */
+function buildBalustrade(
+  flightA: RampDefinition,
+  flightB: RampDefinition,
+  groupBase: number,
+): InstancedMesh {
+  const posts = new InstancedMesh(
+    new BoxGeometry(0.18, 1, 0.18),
+    interiorMaterial(PALETTE.buildingTrim, 0.7),
+    22,
+  );
+  posts.castShadow = false;
+  posts.receiveShadow = true;
+
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const scale = new Vector3();
+  const position = new Vector3();
+  let index = 0;
+
+  for (const flight of [flightA, flightB]) {
+    const edgeX = flight === flightA ? flight.footprint.minX + 0.2 : flight.footprint.maxX - 0.2;
+    for (let i = 0; i < 11; i += 1) {
+      const t = i / 10;
+      const z = flight.from + (flight.to - flight.from) * t;
+      const top = flight.yFrom + (flight.yTo - flight.yFrom) * t - groupBase;
+      scale.set(1, 1.05, 1);
+      position.set(edgeX, top + 0.52, z);
+      matrix.compose(position, rotation, scale);
+      posts.setMatrixAt(index, matrix);
+      index += 1;
+    }
+  }
+  posts.instanceMatrix.needsUpdate = true;
+  return posts;
+}

@@ -25,6 +25,21 @@ const SPRINT_MULTIPLIER = 1.5;
 const JUMP_SPEED = 5.4;
 const GRAVITY = 17;
 
+/** Drop further than this below the surface under your feet and you fall. */
+const FALL_THRESHOLD = 0.5;
+
+/**
+ * Answers "how high is the ground at this point?" for a character standing at
+ * height `y`.
+ *
+ * The default is `terrainHeight`, but the building installs its own so that
+ * decks, stairs, escalators, lifts and the floating bubble all become walkable
+ * without the player knowing anything about them. Passing the walker's current
+ * height is what lets the same point mean "deck three" or "the grass" depending
+ * on where they came from.
+ */
+export type GroundSampler = (x: number, z: number, y: number) => number;
+
 /**
  * The player character: movement, collision, and the walk animation.
  *
@@ -47,6 +62,12 @@ export class Player implements GameSystem {
   readonly position = new Vector3();
   readonly velocity = new Vector3();
 
+  /**
+   * Where the ground is. Left `null` the character walks on the terrain; the
+   * building swaps in its own so the decks, stairs, lift and bubble are solid.
+   */
+  groundSampler: GroundSampler | null = null;
+
   private readonly desiredVelocity = new Vector3();
   private readonly moveDirection = new Vector3();
   private readonly previousPosition = new Vector3();
@@ -60,6 +81,7 @@ export class Player implements GameSystem {
   private airborne = false;
   private blinkTimer = 2.4;
   private blinkAmount = 0;
+  private ridingFlag = false;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -96,8 +118,78 @@ export class Player implements GameSystem {
     this.group.position.copy(this.position);
   }
 
+  /** True while a ride is driving the character instead of the player. */
+  get riding(): boolean {
+    return this.ridingFlag;
+  }
+
+  /** Downward speed, negative while falling. Rides and trampolines read this. */
+  get verticalSpeed(): number {
+    return this.verticalVelocity;
+  }
+
+  get isAirborne(): boolean {
+    return this.airborne;
+  }
+
+  /** Throws the character upwards — the trampoline, later the corgi balloon. */
+  launch(speed: number): void {
+    this.verticalVelocity = speed;
+    this.airborne = true;
+  }
+
+  /**
+   * Shoves the character sideways without them asking — escalators, and any
+   * moving walkway that comes later. Collision still applies.
+   */
+  nudge(dx: number, dz: number): void {
+    this.position.x += dx;
+    this.position.z += dz;
+    this.collision.resolve(this.position, PLAYER_RADIUS);
+    this.group.position.copy(this.position);
+  }
+
+  /** Hands the character to a ride: input, collision and gravity stop applying. */
+  beginRide(): void {
+    this.ridingFlag = true;
+    this.velocity.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.airborne = false;
+  }
+
+  /** Called by the ride every frame while it owns the character. */
+  setRidePose(x: number, y: number, z: number, facing: number): void {
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.facing = facing;
+    this.group.position.copy(this.position);
+    this.group.rotation.y = facing;
+  }
+
+  /** Gives the character back, optionally still moving. */
+  endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
+    this.ridingFlag = false;
+    this.velocity.set(velocityX, 0, velocityZ);
+    this.verticalVelocity = velocityY;
+    this.airborne = true;
+  }
+
   update(context: FrameContext): void {
     const { dt, input } = context;
+
+    if (this.ridingFlag) {
+      // The ride positions us; all we do is hold a suitably delighted pose.
+      this.gait = damp(this.gait, 0, 0.1, dt);
+      this.animate(context, 0);
+      this.model.leftArm.rotation.x = -2.5;
+      this.model.rightArm.rotation.x = -2.5;
+      this.model.leftArm.rotation.z = 0.5;
+      this.model.rightArm.rotation.z = -0.5;
+      this.model.body.rotation.x = 0.3;
+      this.model.leftLeg.rotation.x = -0.7;
+      this.model.rightLeg.rotation.x = -0.55;
+      return;
+    }
 
     // --- intent -----------------------------------------------------------
     // Map stick/keys onto the camera's ground basis so "up" is always up-screen.
@@ -132,7 +224,14 @@ export class Player implements GameSystem {
       this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
     }
 
-    const groundY = terrainHeight(this.position.x, this.position.z);
+    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+
+    // Walk off the edge of a deck — or over one of the shafts inside the big
+    // building — and the surface under your feet drops away. Start falling.
+    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+      this.airborne = true;
+      this.verticalVelocity = 0;
+    }
 
     // --- hop ----------------------------------------------------------------
     if (input.justPressed('jump') && !this.airborne) {
@@ -183,6 +282,10 @@ export class Player implements GameSystem {
   }
 
   // -------------------------------------------------------------- internals
+
+  private groundAt(x: number, z: number, y: number): number {
+    return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+  }
 
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;

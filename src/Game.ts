@@ -49,6 +49,9 @@ export class Game {
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));
     this.engine.scene.add(this.player.group);
+    // The building owns "how high is the ground?" from here on, so that its
+    // decks, stairs, lift and bubble are all walkable.
+    this.world.attachPlayer(this.player);
 
     this.hud = new Hud(uiRoot);
 

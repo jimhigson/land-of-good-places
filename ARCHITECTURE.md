@@ -82,6 +82,7 @@ first and handed to each of them.
 | `Fountain.ts` | The wishing fountain. Animated water, no shader. |
 | `FairyLights.ts` | Strings of bulbs on poles around the plaza. |
 | `AnchorPlots.ts` | The five reserved building plots and their "coming soon" signs. |
+| `building/` | The big building: five decks, six ways between them, the ginormous slide and the ball pit (see below). |
 | `Sky.ts` | Full-screen sky backdrop pass: gradient, sun, moon, stars. |
 | `DayNight.ts` | The clock. Drives lights, fog, and every Sky uniform. |
 | `Collision.ts` | Circles and thick line segments; push-out resolution. |
@@ -139,8 +140,68 @@ inside that window or their colours will only ever appear after dark.
   sRGB; skip these and your shader renders dark and the wrong hue. This cost an
   hour on `Sky.ts`.
 - Anything that appears many times is an `InstancedMesh`. The park's ~1,200
-  trees, bushes and flowers cost a handful of draw calls. Current budget: about
-  **306 draw calls / 285k triangles**, comfortably 120fps on an M-series laptop.
+  trees, bushes and flowers cost a handful of draw calls.
+- **Shadow casting is opt-out, not free.** `renderer.info.render.calls` counts
+  the shadow pass too, so every caster is drawn twice. Interior fittings, applied
+  decoration (windows, balustrades, escalator steps, signs) and anything sitting
+  inside a hole are `castShadow = false`; the shell, the roof and the ginormous
+  slide still cast, which is all the shadow the eye is looking for.
+- Current budget with the building in: about **270 draw calls** indoors,
+  **355–430** at default zoom, and **~540 / 400k triangles** in the worst case
+  (the middle of the park at maximum zoom-out, with the whole park on screen).
+  That runs at **~115 fps at device pixel ratio 2** on an M-series laptop.
+
+### The big building
+
+`world/building/` fills the `building` and `ballPit` anchors. Three ideas carry
+the whole thing, and everything else is geometry.
+
+**The floor plan is data, in `building/layout.ts`.** Deck holes, stair and
+escalator ramps, doorways, shop-unit positions and the ball pit all live in one
+table, in building-local metres with `y = 0` at the ground-floor deck. Geometry
+and gameplay both read it, so a wall and the thing you walk on can never drift
+apart. The one rule that must not be broken: **every hole in a deck is fully
+spanned by a ramp, with solid deck at both ends** — otherwise walking towards the
+stairs drops you through the floor.
+
+**"How high is the ground?" is a question, not a constant.** `building/surfaces.ts`
+answers it with the highest walkable surface at a point that is within one step
+(`BUILDING_STEP_UP`) *below the walker's feet* — which is what makes the same
+`(x, z)` mean "deck three" or "the grass" depending on where you came from.
+`Player.groundSampler` is swapped to it in the `Game` constructor. Multi-storey
+floors, stairs, escalators, the lift, the floating bubble and falling through a
+hole are all consequences of that one rule; there is no physics engine.
+
+A moving platform only has to implement `MovingPlatform` (`surfaceY` + `covers`)
+and register with `WalkSurfaces.addPlatform`.
+
+**The cutaway is per-floor groups.** `BuildingShell` puts each deck in its own
+`Group`; `building/floorFade.ts` fades away every floor above the one the player
+is standing on, which is the Theme Park doll's-house look. It claims each
+material for the first floor that uses one and clones it for the rest, so
+builders can share materials freely.
+
+Two consequences worth knowing:
+
+- **`BUILDING_PARAPET` is the whole exterior look.** Low, and the tower reads as
+  a grey glass office block; high, and the 38° camera cannot see over the near
+  wall into the floor you are standing on.
+- **Collision is height-blind** (see `Collision.ts`), so a shop counter on deck
+  two is also a wall on deck four. Shop units are placed so no two stack, and
+  none of them block a doorway on the ground floor.
+
+Riding a slide is scripted: `SlideRide` sweeps a chute along a curve *and* gives
+the ride the same curve to drive the player along, so the geometry and the path
+a child travels cannot disagree. `Player.beginRide` / `setRidePose` / `endRide`
+take input, collision and gravity out of the loop while it happens.
+
+To fit out a shop (build step 4):
+
+```ts
+const unit = game.world.building.shops.getGroup('toy');   // origin at the front
+unit.add(myToyShop);                                       // of the unit, on its deck
+game.world.building.shops.setPlaceholderVisible('toy', false);
+```
 
 ### Placement is seeded
 

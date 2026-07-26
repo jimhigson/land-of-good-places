@@ -6,8 +6,10 @@ import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
+import { Building } from './building';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
+import type { Player } from '../entities/Player';
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -30,6 +32,7 @@ export class World implements GameSystem {
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
   readonly anchorPlots: AnchorPlots;
+  readonly building: Building;
   readonly dayNight: DayNight;
 
   constructor(scene: Scene, sky: Sky) {
@@ -38,6 +41,8 @@ export class World implements GameSystem {
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
+    // Built into the reserved plots, so it must come after AnchorPlots.
+    this.building = new Building(this.collision, this.anchorPlots);
     this.dayNight = new DayNight(scene, sky);
 
     scene.add(
@@ -61,6 +66,15 @@ export class World implements GameSystem {
     this.fountain.update(context);
     this.fairyLights.update(context);
     this.anchorPlots.update(context);
+    this.building.update(context);
+  }
+
+  /**
+   * Gives the building the player. Must be called once, after the player is
+   * constructed — it installs the ground sampler that makes floors walkable.
+   */
+  attachPlayer(player: Player): void {
+    this.building.attachPlayer(player);
   }
 
   dispose(): void {

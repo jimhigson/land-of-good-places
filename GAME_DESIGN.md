@@ -21,8 +21,12 @@ Unless the grown-ups turn on **Mayhem mode**…
   moves (space wheel, slides) and lighting is dynamic. Billboard sprites are
   used only for particles (confetti, splashes, hearts). The Artist agent's
   ART_DIRECTION.md is the style bible all builders must follow.
+- **Art style APPROVED by Eleri** (26 July 2026): the full sample set —
+  RiPika, Biscuit, the player kid, all three balloons, the Mini, and the
+  props — was reviewed and she really likes all of it.
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
-  API, **and on-screen touch controls** on phones and tablets.
+  API, **and touch on phones/tablets: tap a spot and the character walks
+  there** (tap-to-move), with tap-on-things to interact.
 - **PWA:** Installable as a Progressive Web App so it can play full-screen
   on phones.
 - **Day & night:** The time of day changes. At night, fairy lights come on
@@ -49,6 +53,12 @@ rides in it.
 - **Stairs**
 - **Silly ways:** a trampoline that bounces you up, a slide to whoosh down,
   and a floating bubble that carries you up
+
+### Toilets
+
+The building has cute toilets. When you use one, a **flushing sound** plays,
+then a **tap/faucet sound** as you wash your hands at the basin. (Good
+manners are part of the game!)
 
 ### The ginormous slide
 
@@ -181,8 +191,10 @@ Rough order of construction, each step playable:
 9. **Sound & music** — WebAudio-synthesised tunes and effects
 10. **Mayhem mode** — health, finite money, dangers, minis, Chicken-looter
     coin chase
-11. **Mobile & PWA** — on-screen touch controls (virtual stick + buttons)
-    and PWA manifest/service worker for full-screen play on phones
+11. **Mobile & PWA** — **PRIORITISED: built immediately after step 3**, as
+    the family plays on phones during the day. Tap-to-move touch controls
+    (tap a spot to walk there, tap objects to interact) and PWA
+    manifest/service worker for full-screen play on phones
 
 ## Deployment
 
