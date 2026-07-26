@@ -128,6 +128,7 @@ class GameStore {
   setMode(mode: GameMode): void {
     if (this.state.mode === mode) return;
     this.state.mode = mode;
+    this.state.moneyIsFinite = mode === 'mayhem';
     // Coming back to normal mode always restores the player to full beans.
     if (mode === 'normal') this.state.player.health = this.state.player.maxHealth;
     this.notify();
@@ -396,6 +397,7 @@ function createInitialState(): GameState {
     parkName: 'Land of Good Places',
     mode: 'normal',
     money: 500,
+    moneyIsFinite: false,
     splashPoints: 0,
     bestSplashPoints: 0,
     player: {

@@ -41,6 +41,7 @@ export class TapMarker {
 
   private strength = 0;
   private spin = 0;
+  private running = false;
 
   constructor() {
     this.root.name = 'tap-marker';
@@ -78,10 +79,15 @@ export class TapMarker {
    * (the lift, a slide, the grown-up) rather than a patch of ground — the ring
    * goes lemon-yellow for a thing, which is the same "come and press this"
    * colour the ride entrance signs use.
+   *
+   * `running` is the double-tap "run there" — the ring pops bigger and its
+   * sweets spin and breathe faster, so a running errand reads differently
+   * from a stroll before the character has even set off.
    */
-  show(x: number, y: number, z: number, interactive: boolean): void {
+  show(x: number, y: number, z: number, interactive: boolean, running = false): void {
     this.root.position.set(x, y, z);
     this.root.visible = true;
+    this.running = running;
     this.ringMaterial.color.setHex(interactive ? PALETTE.markerLemon : PALETTE.markerPink);
     this.dotMaterial.color.setHex(interactive ? PALETTE.markerPink : PALETTE.markerLemon);
   }
@@ -94,6 +100,7 @@ export class TapMarker {
   hide(): void {
     this.root.visible = false;
     this.strength = 0;
+    this.running = false;
     this.applyStrength();
   }
 
@@ -114,9 +121,14 @@ export class TapMarker {
     }
     this.root.visible = true;
 
-    this.spin += dt * 1.1;
-    const breathe = 1 + Math.sin(elapsed * 4.2) * 0.07;
-    const pop = 0.55 + this.strength * 0.45;
+    // Running spins and breathes noticeably faster, and sits a size class
+    // bigger overall — the same trick a bigger, quicker-pulsing "you are
+    // here" reticle uses in any map UI, just built from the sweets already
+    // orbiting the ring.
+    this.spin += dt * (this.running ? 2.4 : 1.1);
+    const breathe =
+      1 + Math.sin(elapsed * (this.running ? 7 : 4.2)) * (this.running ? 0.12 : 0.07);
+    const pop = (this.running ? 0.68 : 0.55) + this.strength * 0.45;
     this.root.scale.setScalar(pop * breathe);
 
     for (let i = 0; i < this.dots.length; i += 1) {

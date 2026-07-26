@@ -51,8 +51,13 @@ const GROUND_CLEARANCE = 0.06;
 export interface RainbowRings {
   /** Parent this in **world space** — the rings must not follow the player. */
   readonly root: Group;
-  /** Fires a ring centred on a point, in the coordinates of `root`'s parent. */
-  burst(x: number, y: number, z: number): void;
+  /**
+   * Fires a ring centred on a point, in the coordinates of `root`'s parent.
+   * `strength` scales peak opacity (1 = the usual hop rainbow) — the
+   * wall-clearing poof reuses this pool at a lower strength so it reads as a
+   * little sparkle rather than a second full rainbow.
+   */
+  burst(x: number, y: number, z: number, strength?: number): void;
   /** Advances every live ring. Safe (and free) to call when none are alive. */
   update(dt: number): void;
   dispose(): void;
@@ -111,6 +116,8 @@ export function createRainbowRings(): RainbowRings {
   const ages: number[] = [];
   /** Ground height each ring was born at, so it rises from where you jumped. */
   const bases: number[] = [];
+  /** Peak-opacity multiplier each ring was born with (see `burst`'s `strength`). */
+  const strengths: number[] = [];
   let next = 0;
   let alive = 0;
 
@@ -134,12 +141,13 @@ export function createRainbowRings(): RainbowRings {
     materials.push(material);
     ages.push(LIFETIME);
     bases.push(0);
+    strengths.push(1);
   }
 
   return {
     root,
 
-    burst(x, y, z) {
+    burst(x, y, z, strength = 1) {
       const index = next;
       next = (next + 1) % POOL_SIZE;
       const mesh = meshes[index];
@@ -149,6 +157,7 @@ export function createRainbowRings(): RainbowRings {
       mesh.visible = true;
       ages[index] = 0;
       bases[index] = y + GROUND_CLEARANCE;
+      strengths[index] = strength;
       alive += 1;
     },
 
@@ -177,7 +186,8 @@ export function createRainbowRings(): RainbowRings {
         mesh.position.y = (bases[i] ?? 0) + RISE * eased;
         // Hold full strength for the first fifth, then fade on a curve — a
         // linear fade reads as the ring being switched off.
-        material.opacity = t < 0.2 ? 0.95 : 0.95 * (1 - (t - 0.2) / 0.8) ** 1.5;
+        const peak = 0.95 * (strengths[i] ?? 1);
+        material.opacity = t < 0.2 ? peak : peak * (1 - (t - 0.2) / 0.8) ** 1.5;
       }
     },
 

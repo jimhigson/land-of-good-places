@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './Game';
+import { DevBadge } from './ui';
 
 /**
  * Entry point. Finds the canvas, builds the game, hides the splash.
@@ -18,6 +19,9 @@ function boot(): void {
 
   const game = new Game(canvas, uiRoot);
   game.start();
+
+  // Unmissable red "DEV" watermark — never present in a production build.
+  DevBadge.mountIfDev(uiRoot);
 
   // Give the first frame a moment to land before revealing the park.
   requestAnimationFrame(() => {

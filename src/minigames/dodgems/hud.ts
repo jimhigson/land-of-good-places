@@ -1,0 +1,200 @@
+/**
+ * The dodgems HUD: how long is left, how many bumps, how many tree bonks — and
+ * a picture of the thumb-stick so a child can see what their finger is doing.
+ *
+ * Plain DOM on the framework's overlay layer, and it re-uses the framework's
+ * own pill / card / shout classes rather than restyling them, so the two stalls
+ * look like they belong to the same fair. The only new CSS is the stick, which
+ * is injected from here under its own id — a mini-game must be addable without
+ * editing a line the park or the framework owns.
+ *
+ * Everything is `pointer-events: none`. The whole screen underneath is the go
+ * button and the steering stick; nothing here may steal a press from it.
+ */
+
+const STYLE_ID = 'lgp-dodgems-styles';
+
+const STYLES = `
+.dg-stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 116px;
+  height: 116px;
+  margin: -58px 0 0 -58px;
+  border-radius: 50%;
+  border: 4px solid #fff6eacc;
+  background: #ffffff26;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  z-index: 1;
+}
+.dg-stick[data-on='true'] { opacity: 1; }
+.dg-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: #ff8fc0;
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.25);
+}
+.dg-counts { display: flex; gap: 8px; flex-wrap: wrap; }
+.dg-tree { background: #d9f7c8e6 !important; }
+.dg-time { min-width: 74px; text-align: center; }
+`;
+
+export interface DodgemsHud {
+  setTime(secondsLeft: number): void;
+  setBumps(bumps: number): void;
+  setTreeBonks(bonks: number): void;
+  /** Big centred number for the 3-2-1. `null` clears it. */
+  setCount(text: string | null): void;
+  /** A short cheerful interjection. */
+  shout(text: string, seconds?: number): void;
+  /** Draws the thumb-stick where the finger is, or hides it with `null`. */
+  setStick(
+    stick: { readonly originX: number; readonly originY: number; readonly x: number; readonly y: number } | null,
+  ): void;
+  showResult(title: string, line: string, hint: string): void;
+  update(dt: number): void;
+  dispose(): void;
+}
+
+export function createDodgemsHud(container: HTMLElement): DodgemsHud {
+  if (!document.getElementById(STYLE_ID)) {
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = STYLES;
+    document.head.append(style);
+  }
+
+  const root = document.createElement('div');
+  root.style.display = 'contents';
+
+  const topRow = document.createElement('div');
+  topRow.className = 'mg-toprow dg-counts';
+
+  const timePill = document.createElement('div');
+  timePill.className = 'mg-pill dg-time';
+  timePill.innerHTML = '<b>60</b>s';
+
+  const bumpPill = document.createElement('div');
+  bumpPill.className = 'mg-pill';
+  bumpPill.innerHTML = '💥 <b>0</b> bumps';
+
+  const treePill = document.createElement('div');
+  treePill.className = 'mg-pill dg-tree';
+  treePill.innerHTML = '🌳 <b>0</b> tree bonks';
+
+  topRow.append(timePill, bumpPill, treePill);
+
+  const centre = document.createElement('div');
+  centre.className = 'mg-centre';
+
+  const stick = document.createElement('div');
+  stick.className = 'dg-stick';
+  stick.dataset.on = 'false';
+  const knob = document.createElement('div');
+  knob.className = 'dg-stick-knob';
+  stick.append(knob);
+
+  root.append(topRow, centre, stick);
+  container.append(root);
+
+  let shoutElement: HTMLElement | null = null;
+  let shoutTimer = 0;
+  let countElement: HTMLElement | null = null;
+  let lastTime = -1;
+
+  return {
+    setTime(secondsLeft: number): void {
+      const whole = Math.max(0, Math.ceil(secondsLeft));
+      if (whole === lastTime) return;
+      lastTime = whole;
+      timePill.innerHTML = `<b>${whole}</b>s`;
+    },
+
+    setBumps(bumps: number): void {
+      bumpPill.innerHTML = `💥 <b>${bumps}</b> bump${bumps === 1 ? '' : 's'}`;
+    },
+
+    setTreeBonks(bonks: number): void {
+      treePill.innerHTML = `🌳 <b>${bonks}</b> tree bonk${bonks === 1 ? '' : 's'}`;
+    },
+
+    setCount(text: string | null): void {
+      if (text === null) {
+        countElement?.remove();
+        countElement = null;
+        return;
+      }
+      if (countElement?.textContent === text) return;
+      countElement?.remove();
+      countElement = document.createElement('div');
+      countElement.className = 'mg-count';
+      countElement.textContent = text;
+      centre.append(countElement);
+    },
+
+    shout(text: string, seconds = 1.4): void {
+      // A new shout replaces the old one rather than queueing: during a good
+      // pile-up three of these arrive in the same second.
+      if (shoutElement?.textContent === text && shoutTimer > 0.3) {
+        shoutTimer = seconds;
+        return;
+      }
+      shoutElement?.remove();
+      shoutElement = document.createElement('div');
+      shoutElement.className = 'mg-shout';
+      shoutElement.textContent = text;
+      centre.append(shoutElement);
+      shoutTimer = seconds;
+    },
+
+    setStick(reading): void {
+      if (!reading) {
+        stick.dataset.on = 'false';
+        return;
+      }
+      stick.dataset.on = 'true';
+      stick.style.transform = `translate(${reading.originX}px, ${reading.originY}px)`;
+      const dx = reading.x - reading.originX;
+      const dy = reading.y - reading.originY;
+      const distance = Math.hypot(dx, dy);
+      const clamped = distance > 46 ? 46 / distance : 1;
+      knob.style.transform = `translate(${dx * clamped}px, ${dy * clamped}px)`;
+    },
+
+    showResult(title: string, line: string, hint: string): void {
+      const card = document.createElement('div');
+      card.className = 'mg-card';
+      const heading = document.createElement('h2');
+      heading.textContent = title;
+      const paragraph = document.createElement('p');
+      paragraph.textContent = line;
+      const small = document.createElement('p');
+      small.className = 'mg-sub';
+      small.textContent = hint;
+      card.append(heading, paragraph, small);
+      centre.append(card);
+    },
+
+    update(dt: number): void {
+      if (shoutTimer > 0) {
+        shoutTimer -= dt;
+        if (shoutTimer <= 0) {
+          shoutElement?.remove();
+          shoutElement = null;
+        }
+      }
+    },
+
+    dispose(): void {
+      root.remove();
+    },
+  };
+}
