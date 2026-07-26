@@ -9,9 +9,9 @@ import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
+import { SignReader } from './ui/SignReader';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
-import { SignInspector } from './SignInspector';
 import { gameStore } from './state';
 
 /**
@@ -42,7 +42,7 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
-  readonly signInspector: SignInspector;
+  readonly signReader: SignReader;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly cuteODex: CuteODex;
@@ -91,18 +91,13 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
 
-    // Tap a sign, and the camera swoops in to read it — see `SignInspector.ts`.
-    // Goes first in `onTap` below: a tap that lands on a sign is a "read this",
-    // never also a "walk over there".
-    this.signInspector = new SignInspector(this.player, this.camera, () =>
-      this.world.signZones(),
-    );
-
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
-        // Order matters: a sign tap is "read this", a parade tap is "stow my
-        // bunny", and only a tap on neither is "walk there".
-        if (this.signInspector.handleTap(point)) return;
+        // Tapping a sign is deliberately NOT handled here any more — it used
+        // to swoop the camera in to read it, which fired by accident and was
+        // jarring (family complaint, 26 Jul 2026; see `ui/SignReader.ts`).
+        // A tap near a sign now just walks there like any other patch of
+        // ground; reading one is a proximity+facing gate and a button.
         if (this.parade.handleTap(point)) return;
         this.tapNavigator.handleTap(point);
       },
@@ -141,7 +136,19 @@ export class Game {
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
-    this.addSystem(this.signInspector);
+
+    // "Read" a sign: a HUD button when close and facing one, a full-screen
+    // overlay of its own painted face when pressed — see `ui/SignReader.ts`.
+    // Signs never move once the world has finished building, so its zone list
+    // is captured once here rather than walked afresh every frame.
+    this.signReader = new SignReader(uiRoot, this.player, this.world.signZones(), () =>
+      this.shopping.uiOpen ||
+      this.cuteODex.isOpen ||
+      this.whatsNew.isOpen ||
+      this.miniGames.frozen ||
+      this.player.riding,
+    );
+    this.addSystem(this.signReader);
 
     this.frameContext = {
       dt: 0,
@@ -211,9 +218,9 @@ export class Game {
     // action vocabulary already read here.
     //
     // Below it: while a shop or the backpack is open, Escape belongs to it —
-    // see `Shopping.uiOpen`. Same for an inspected sign: Escape is one of the
-    // "any key" gestures `SignInspector` already backs out on. And when the
-    // Cute-o-dex has the screen, Escape belongs to the book.
+    // see `Shopping.uiOpen`. Same for a sign that is open full-screen: Escape
+    // is one of the ordinary "back out" actions `SignReader` already closes
+    // on. And when the Cute-o-dex has the screen, Escape belongs to the book.
     if (this.whatsNew.isOpen) {
       if (
         this.input.justPressed('menu') ||
@@ -230,7 +237,7 @@ export class Game {
     } else if (
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
-      !this.signInspector.active
+      !this.signReader.active
     ) {
       gameStore.setPaused(!gameStore.get().paused);
     }

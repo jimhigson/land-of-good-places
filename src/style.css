@@ -1211,3 +1211,114 @@ kbd {
     transition: opacity 120ms ease;
   }
 }
+
+/* --------------------------------------------------------- reading a sign */
+
+/* The "Read" button: styled like every other HUD pill (`.pill--prompt`,
+   `.pill--backpack`), fading in/out rather than snapping — but see
+   `.sign-reader` below for why the full-screen overlay it opens does NOT get
+   the same treatment. Anchored bottom-right, just above where the touch hop
+   button sits (`.touch-controls`), so a thumb already resting near the action
+   buttons reaches it without moving — see `ui/SignReader.ts`. */
+.pill--read {
+  position: absolute;
+  right: calc(14px + env(safe-area-inset-right));
+  bottom: calc(178px + env(safe-area-inset-bottom));
+  z-index: 5;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-mint) 150%);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.pill--read[data-show='false'] {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
+.pill--read:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.18);
+}
+
+@media (max-height: 460px) {
+  .pill--read {
+    bottom: calc(156px + env(safe-area-inset-bottom));
+  }
+}
+
+/* The full-screen sign, and deliberately the one overlay in the whole game
+   with NO transition, NO fade and NO entrance animation anywhere in this
+   block: it replaces a camera swoop that the family found jarring, so opening
+   and closing it must be an instant cut, not a softer version of the same
+   idea. `display` flips straight from `none` to `grid` for exactly that
+   reason — nothing here is ever `opacity`-animated. */
+.sign-reader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(74, 58, 82, 0.6);
+  z-index: 30;
+}
+
+.sign-reader[data-open='true'] {
+  display: grid;
+  pointer-events: auto;
+}
+
+.sign-reader-frame {
+  position: relative;
+  width: min(760px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px;
+  background: var(--lgp-cream);
+  border: 10px solid #fff;
+  border-radius: 32px;
+  box-shadow: 0 14px 0 rgba(74, 58, 82, 0.2);
+}
+
+/* The sign's own painted canvas, moved here wholesale rather than redrawn —
+   see `world/signs.ts`'s `findSignCanvas` — so it reads exactly as it does on
+   the board in the park, just big enough for a six-year-old to read at
+   arm's length. */
+.sign-reader-face {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.sign-reader-face canvas {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  border-radius: 18px;
+}
+
+.sign-reader-close {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+}
+
+@media (max-width: 520px) {
+  .sign-reader-frame {
+    padding: 14px;
+    gap: 6px;
+  }
+
+  .sign-reader-close {
+    top: -10px;
+    right: -10px;
+  }
+}
