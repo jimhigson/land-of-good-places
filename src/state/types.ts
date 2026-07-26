@@ -39,6 +39,47 @@ export interface CuteThing {
   discovered: boolean;
 }
 
+/**
+ * What sort of thing an inventory entry is.
+ *
+ * Coarser than {@link CuteCategory} on purpose: the Cute-o-dex groups by which
+ * shop something came from, while the *kind* decides how the game treats it —
+ * a `treat` is eaten, a `hat` is worn, a `pet` walks in the parade.
+ */
+export type InventoryKind = 'toy' | 'balloon' | 'treat' | 'hat' | 'sticker' | 'pet' | 'egg';
+
+/** A moment on the park clock. `day` counts from 0, `timeOfDay` is 0..1. */
+export interface GameTime {
+  readonly day: number;
+  readonly timeOfDay: number;
+}
+
+/**
+ * One thing the player owns.
+ *
+ * Entries are *individual purchases*, not stack counts: buy two pink candy
+ * flosses and there are two entries. That is what lets the parade (build step 5)
+ * put two of them behind you, and what lets `acquiredAt` mean something. The
+ * Cute-o-dex still wants counts, so `gameStore.buy` also files the purchase in
+ * `collection`, which is keyed by catalogue id.
+ */
+export interface InventoryItem {
+  /** Unique per purchase — `${id}#${n}`. This is what `carriedUid` points at. */
+  readonly uid: string;
+  /** Catalogue id, e.g. `toy.ripika`. Shared by every copy the player owns. */
+  readonly id: string;
+  readonly kind: InventoryKind;
+  readonly displayName: string;
+  /** One emoji, for the HUD list. The 3D model comes from the shop catalogue. */
+  readonly icon: string;
+  readonly category: CuteCategory;
+  /** Which shop unit sold it. */
+  readonly shopId: string;
+  readonly acquiredAt: GameTime;
+  /** Can be held in the hands, and later can join the parade. */
+  readonly carryable: boolean;
+}
+
 export interface PlayerState {
   name: string;
   kind: CharacterKind;
@@ -71,6 +112,10 @@ export interface GameState {
   world: WorldState;
   /** Cute-o-dex contents, keyed by `CuteThing.id`. */
   collection: Record<string, CuteThing>;
+  /** Everything bought, oldest first. One entry per purchase. */
+  inventory: InventoryItem[];
+  /** `uid` of the item held in the hands, or null for empty-handed. */
+  carriedUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */

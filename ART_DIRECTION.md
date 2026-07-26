@@ -27,7 +27,7 @@ character has eyes far bigger than anatomy allows, and a blush.
 | --- | --- | --- |
 | Characters, creatures, props, shop shells, ride parts, walls, trees | `toonMaterial()` — `MeshToonMaterial` + shared 4-band ramp | Flat, sticker-bright, holds its colour at distance |
 | Terrain, paths, water, glass, sky | `softMaterial()` — `MeshStandardMaterial`, roughness ~0.62, metalness 0 | Banding a 140-metre lawn looks like a rendering bug, not a style |
-| Outlines, eye catchlights | `MeshBasicMaterial` | Must not shade |
+| Outlines, eye catchlights, effects | `MeshBasicMaterial` | Must not shade |
 
 **Never** use `MeshBasicMaterial` for anything solid, and never set `metalness`
 above 0. A toy in this park is matte painted wood, not plastic.
@@ -122,12 +122,48 @@ game animates a face.
 
 ## 4. Proportions — where "cute" actually comes from
 
-| Character | Head as % of total height |
-| --- | --- |
-| Mini | 65% |
-| RiPika | 62% |
-| Biscuit | ~60% |
-| Player kid | 47% |
+Measured consistently as **skull height ÷ total height** — the bare head, not
+counting ears, horns or hair. Ratios below are after the **cartoon pass of 26
+July 2026**, when the family asked for heads about double the size.
+
+| Character | Head scale-up | Skull as % of total height | Total height |
+| --- | --- | --- | --- |
+| Player kid | ×1.5 | 45% → **59%** | 1.86 m → **2.12 m** |
+| Mini | ×1.3 | 65% → **67%** | 0.56 m → **0.72 m** |
+| RiPika | ×1.32 | 49% → **55%** | 1.24 m → **1.46 m** |
+| Biscuit | ×1.32 | 59% → **65%** | 0.96 m → **1.15 m** |
+
+Three things about that table are load-bearing:
+
+- **"Double" means ×1.5 linear, not ×2.** A head scaled 1.5× covers 2.25× the
+  screen area, and *area* is what the eye reads as "twice as big". A literal
+  doubling of the kid's skull makes her 2.5 m tall and she stops fitting under
+  her own shopping centre.
+- **The creatures got less than the kid, on purpose.** A mini that is already
+  two-thirds skull has no room to double; past about 70% the body stops being a
+  body and the creature reads as a balloon with feet. Scale each character to a
+  *target ratio*, never by a global multiplier.
+- **The body shortens when the head grows.** The kid lost 0.08 m of torso and
+  0.06 m of leg. A big head on a full-length body reads as wrong; a big head on
+  a stumpy body reads as a toy. Nothing else changed about her.
+
+Every model exposes the scale-up as a single module constant called `HEAD`, and
+every number inside the head group is written `x * HEAD`. Retuning a character's
+head is a one-line change, and the painted face patch — sized from `skullR` —
+comes along for free.
+
+### Heads and the isometric camera
+
+The camera looks down at 38°. Past about 55% skull, an upright head presents the
+player with the top of a hairstyle and no face at all. Two fixes, and which one
+you use depends on whether the character has hair:
+
+- **Hair (the kid):** tip the whole head back ~10° (`HEAD_TILT`) inside a
+  `crown` group nested in `head`, so the animator can still rotate `head` on top
+  of it. Moving the face patch up instead just slides it under the fringe.
+- **No hair (RiPika, Biscuit, the mini):** raise the face patch on the skull with
+  the existing `tilt` option on `createFacePatch`. Cheaper, and the patch keeps
+  the skull's curvature so the eyes still wrap correctly.
 
 Rules that matter more than the numbers:
 
@@ -168,6 +204,31 @@ traps, both hit during this run:
    curve reads as a jagged starburst.
 2. On an ellipsoid, place it with `stickOnEllipsoid()` (in `balloons.ts`), not by
    eye — `Object3D.lookAt` uses world space and will aim your spot at the floor.
+
+---
+
+### Effects
+
+Effects live in `src/art/effects/` and are the **one** place `MeshBasicMaterial`
+is allowed on something you can see through. The rainbow hop ring
+(`rainbowRing.ts`) is the reference implementation, and the rules it establishes
+apply to every splash, confetti burst and sparkle that follows:
+
+- **Pigment, not light.** Normal blending, never additive. Additive was tried on
+  the hop ring first and it blew out to a flat white halo the instant it crossed
+  the pale sand path — the rainbow only survived over grass. In a park made of
+  painted things, an effect is paint.
+- **Colour ramps go in the vertex colours**, baked once into a shared geometry.
+  No custom shaders: a shader is one more thing that has to be kept in step with
+  the park's lighting, and a gradient is free as an attribute.
+- **A fixed pool, allocated at construction.** Never `new` a mesh per trigger.
+  A six-year-old will hold the jump button down.
+- **Fade on a curve, hold at the start.** A linear fade reads as the effect
+  being switched off rather than dissipating.
+- Effects are `decal()` — they cast no shadow and catch none — with
+  `depthWrite: false` and a `renderOrder` above the world.
+- Rainbow colours come from `ART.rainbow`. Six bands, all pulled well towards
+  cream. Six is as many as survives being forty pixels wide on a phone.
 
 ---
 
@@ -256,7 +317,9 @@ Never call a factory inside a render loop.
 ## 8. Quick checklist before you commit an asset
 
 - [ ] Origin at the base, facing +Z, `root.scale` untouched
-- [ ] `height` measured to the true top, ears and all
+- [ ] `height` measured to the true top, ears and all — and **re-measured** if
+      you touched the head, or the name label will sit in the character's hair
+- [ ] Head scale expressed as a single `HEAD` constant, ratio checked against §4
 - [ ] Eyes at least 0.10 of the face patch, two catchlights, blush present
 - [ ] Outlines on silhouette parts only, ink-tinted, never black
 - [ ] Every sphere squashed; one asymmetric feature on the head

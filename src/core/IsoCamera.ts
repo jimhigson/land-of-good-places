@@ -3,6 +3,7 @@ import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
   CAMERA_LOOK_AHEAD,
+  CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
   CAMERA_ROTATE_DURATION,
   CAMERA_VIEW_HEIGHT,
@@ -147,8 +148,19 @@ export class IsoCamera {
     this.camera.updateMatrixWorld();
   }
 
+  /**
+   * Sizes the orthographic box.
+   *
+   * Framing is height-led — the same vertical slice of park on every machine —
+   * but with a **minimum width**, because a portrait phone's aspect is under
+   * 0.5 and height-led framing alone hands it a letterbox barely wider than the
+   * fountain. When the floor bites, the view grows *taller* to keep the aspect
+   * honest; nothing is ever stretched. The floor is applied before the zoom
+   * divide, so pinching to zoom in still zooms in on a phone.
+   */
   private applyFrustum(): void {
-    const halfHeight = CAMERA_VIEW_HEIGHT / 2 / this.zoomValue;
+    const base = Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+    const halfHeight = base / this.zoomValue;
     const halfWidth = halfHeight * this.aspect;
     this.camera.left = -halfWidth;
     this.camera.right = halfWidth;
@@ -165,4 +177,6 @@ export class IsoCamera {
   }
 }
 
-const TEMP_LIFT = new Vector3(0, 1.1, 0);
+// Raised with the closer framing: the aim point wants to sit around chest height
+// on the character, and the character's chest went up when her head did.
+const TEMP_LIFT = new Vector3(0, 1.25, 0);

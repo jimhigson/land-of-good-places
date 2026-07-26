@@ -1,6 +1,31 @@
 import { PALETTE } from '../core/palette';
 import { DAY_START_TIME, PLAYER_DEFAULT_NAME } from '../core/constants';
-import type { CuteCategory, CutePlacement, GameMode, GameState } from './types';
+import type {
+  CuteCategory,
+  CutePlacement,
+  GameMode,
+  GameState,
+  GameTime,
+  InventoryItem,
+  InventoryKind,
+} from './types';
+
+/**
+ * Everything a shop has to say about a thing for the store to file it away.
+ *
+ * The catalogue (`world/building/shops/catalogue.ts`) owns the prices, the
+ * models and the icons; the store only wants the bit it remembers.
+ */
+export interface PurchaseSpec {
+  readonly id: string;
+  readonly kind: InventoryKind;
+  readonly displayName: string;
+  readonly icon: string;
+  readonly category: CuteCategory;
+  readonly shopId: string;
+  readonly price: number;
+  readonly carryable: boolean;
+}
 
 type Listener = (state: GameState) => void;
 
@@ -24,6 +49,8 @@ type Listener = (state: GameState) => void;
 class GameStore {
   private state: GameState = createInitialState();
   private readonly listeners = new Set<Listener>();
+  /** Only ever counts up; it is what makes an inventory `uid` unique. */
+  private purchaseCount = 0;
   /** Guards against re-entrant notifications when a listener writes back. */
   private notifyQueued = false;
 
@@ -79,6 +106,55 @@ class GameStore {
     this.state.money -= amount;
     this.notify();
     return true;
+  }
+
+  /**
+   * Buys one thing.
+   *
+   * Returns the new inventory entry, or `null` if the purse said no (which in
+   * normal mode it never does). One entry per purchase rather than a stack
+   * count, because the parade needs to put *two* toys behind you if you bought
+   * two — the Cute-o-dex keeps the counts, and is updated here as well so the
+   * two can never disagree.
+   *
+   * The newest carryable thing goes straight into the player's hands, which is
+   * how a six-year-old finds out the purchase worked.
+   */
+  buy(spec: PurchaseSpec): InventoryItem | null {
+    if (!this.spend(spec.price)) return null;
+
+    this.purchaseCount += 1;
+    const item: InventoryItem = {
+      uid: `${spec.id}#${this.purchaseCount}`,
+      id: spec.id,
+      kind: spec.kind,
+      displayName: spec.displayName,
+      icon: spec.icon,
+      category: spec.category,
+      shopId: spec.shopId,
+      acquiredAt: this.gameTime(),
+      carryable: spec.carryable,
+    };
+    this.state.inventory.push(item);
+    if (item.carryable) this.state.carriedUid = item.uid;
+    // Placement is what the parade system (step 5) will read; carried things
+    // start in the hands, everything else waits in the backpack.
+    this.collect(item.id, item.displayName, item.category, item.carryable ? 'carried' : 'backpack');
+    this.notify();
+    return item;
+  }
+
+  /** Puts one owned thing in the player's hands, or empties them with `null`. */
+  setCarried(uid: string | null): void {
+    if (uid !== null && !this.state.inventory.some((item) => item.uid === uid)) return;
+    if (this.state.carriedUid === uid) return;
+    this.state.carriedUid = uid;
+    this.notify();
+  }
+
+  /** The park clock, as a value an inventory entry can keep. */
+  gameTime(): GameTime {
+    return { day: this.state.world.dayCount, timeOfDay: this.state.world.timeOfDay };
   }
 
   /** Records a cute thing in the Cute-o-dex, creating the entry if it is new. */
@@ -163,6 +239,8 @@ function createInitialState(): GameState {
       lightsOn: false,
     },
     collection: {},
+    inventory: [],
+    carriedUid: null,
     paused: false,
     debugOverlay: false,
   };

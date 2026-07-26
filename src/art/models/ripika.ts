@@ -20,7 +20,16 @@ import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/
  *    big enough to touch the eyes. Modelled cheeks catch shadow and go muddy.
  *  - A cream tummy and a cream collar flash break up the yellow so the body does
  *    not read as one undifferentiated blob at distance.
+ *
+ * **Cartoon pass (26 July 2026).** The head is authored at {@link HEAD} × its
+ * original size. RiPika did not get the kid's full 1.5×: it started at half its
+ * own height in skull alone, and a literal doubling leaves a mouse with no room
+ * for a mouse. 1.32× puts the skull at 62% of the total and the ears still fit
+ * on the screen.
  */
+
+/** Head scale-up over the original authoring. The one knob for RiPika's skull. */
+const HEAD = 1.32;
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;
@@ -125,17 +134,17 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
 
   // --- head ------------------------------------------------------------------
   const head = new Group();
-  head.position.y = 0.68;
+  head.position.y = 0.75;
   body.add(head);
 
-  const skullR = 0.315;
+  const skullR = 0.315 * HEAD;
   const skull = blob(skullR, yellow, [1.06, 0.97, 1], 32);
   head.add(skull);
   addOutline(skull, 0.014);
 
   // Cowlick — one little tuft so the silhouette is not a perfect circle.
-  const tuft = blob(0.07, yellowDeep, [0.7, 1.25, 0.7], 14);
-  tuft.position.set(-0.05, 0.31, -0.03);
+  const tuft = blob(0.07 * HEAD, yellowDeep, [0.7, 1.25, 0.7], 14);
+  tuft.position.set(-0.05 * HEAD, 0.31 * HEAD, -0.03 * HEAD);
   tuft.rotation.z = -0.45;
   head.add(tuft);
 
@@ -144,26 +153,26 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   // is the fastest way to make a cute creature look spiky.
   for (const side of [-1, 1] as const) {
     const ear = new Group();
-    ear.position.set(side * 0.185, 0.235, -0.02);
+    ear.position.set(side * 0.185 * HEAD, 0.235 * HEAD, -0.02 * HEAD);
     ear.rotation.z = side * 0.44;
     ear.rotation.x = -0.14;
     head.add(ear);
 
-    const shaft = solid(new Mesh(new CylinderGeometry(0.036, 0.105, 0.24, 18, 1), yellow));
-    shaft.position.y = 0.11;
+    const shaft = solid(new Mesh(new CylinderGeometry(0.036 * HEAD, 0.105 * HEAD, 0.24 * HEAD, 18, 1), yellow));
+    shaft.position.y = 0.11 * HEAD;
     ear.add(shaft);
     addOutline(shaft, 0.011);
 
-    const base = blob(0.1, yellow, [1, 0.75, 1], 16);
+    const base = blob(0.1 * HEAD, yellow, [1, 0.75, 1], 16);
     ear.add(base);
 
-    const tipCone = solid(new Mesh(new CylinderGeometry(0.014, 0.038, 0.1, 16, 1), cocoa));
-    tipCone.position.y = 0.27;
+    const tipCone = solid(new Mesh(new CylinderGeometry(0.014 * HEAD, 0.038 * HEAD, 0.1 * HEAD, 16, 1), cocoa));
+    tipCone.position.y = 0.27 * HEAD;
     ear.add(tipCone);
     addOutline(tipCone, 0.009);
 
-    const tipBall = solid(blob(0.016, cocoa, [1, 1, 1], 10));
-    tipBall.position.y = 0.318;
+    const tipBall = solid(blob(0.016 * HEAD, cocoa, [1, 1, 1], 10));
+    tipBall.position.y = 0.318 * HEAD;
     ear.add(tipBall);
   }
 
@@ -172,7 +181,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
     radius: skullR,
     spreadX: 1.85,
     spreadY: 1.85,
-    tilt: 0.14,
+    tilt: 0.2,
     size: 512,
     eyeY: 0.44,
     eyeGap: 0.46,
@@ -206,7 +215,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
     tail,
     limbs,
     // Measured to the ear tips, not the skull — the name label must clear them.
-    height: 1.24,
+    height: 1.46,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => {
       applyWalk(limbs, body, phase, speed, 0.7, 0.06);

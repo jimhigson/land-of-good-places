@@ -333,9 +333,21 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
     accent: PALETTE.markerPink,
   },
   {
+    // Moved west from x = 7.5, which put the whole shop inside HELTER_SHAFT:
+    // the helter-skelter's chute wound down through its awning and a customer
+    // standing at the counter could see nothing but purple slide. It has to
+    // come this far: the camera looks in along the +X+Z diagonal, so a shop is
+    // hidden by anything on that diagonal, not just by what is in front of it.
     id: 'balloon',
     deck: 0,
-    x: 7.5,
+    // Threading a needle. The camera looks in along the +X+Z diagonal, so a
+    // shop is hidden by anything on *that line*, however far away it is:
+    // further east and the glass lift's 18 m frame stands in front of it, a
+    // little east of that and the floating bubble does, and further east again
+    // is the helter-skelter. This is the clear lane. Nearly stacked with the hat
+    // shop two decks up, which costs nothing — two units on one footprint share
+    // a single counter collision segment instead of leaving two.
+    x: -3.5,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Balloon Shop',
@@ -343,9 +355,13 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
     accent: PALETTE.markerSky,
   },
   {
+    // Moved east from x = -9. Collision is height-blind, so this counter is
+    // also an invisible wall on every other deck — and at -9 it ran straight
+    // across the spot a child stands on to be served at the toy shop
+    // downstairs, which shoved them backwards out of their own shop.
     id: 'candyFloss',
     deck: 1,
-    x: -9,
+    x: -6.2,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Candy Floss',
@@ -385,7 +401,9 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'surpriseEgg',
     deck: 3,
-    x: -9,
+    // Stacked with the candy floss stand two decks down, and moved with it for
+    // the same reason.
+    x: -6.2,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Surprise Eggs',
@@ -397,6 +415,25 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
 /** Scene-graph name for a shop unit's anchor group. */
 export function shopGroupName(id: string): string {
   return `shop:${id}`;
+}
+
+/**
+ * Unit-local metres to building-local metres.
+ *
+ * A unit's anchor group is translated to `(x, z)` and rotated by `yaw`, so its
+ * own +Z points into the room whichever wall it is on. Anything that has to
+ * agree with the geometry from *outside* the group — the counter's collision
+ * segment, the spot a child stands on to be served — goes through here rather
+ * than re-deriving the rotation, so the two can never drift apart.
+ */
+export function shopLocalToBuilding(
+  unit: ShopUnitDefinition,
+  localX: number,
+  localZ: number,
+): [number, number] {
+  const cos = Math.cos(unit.yaw);
+  const sin = Math.sin(unit.yaw);
+  return [unit.x + localX * cos + localZ * sin, unit.z - localX * sin + localZ * cos];
 }
 
 // --------------------------------------------------------------- ball pit

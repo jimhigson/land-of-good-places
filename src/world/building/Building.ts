@@ -22,6 +22,7 @@ import { GlassLift } from './GlassLift';
 import { GrownUp } from './GrownUp';
 import { BuildingShell } from './Shell';
 import { ShopUnits } from './ShopUnits';
+import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
 import { Stairs } from './Stairs';
 import { Trampoline } from './Trampoline';
@@ -84,7 +85,9 @@ interface ActiveRide {
 export class Building implements GameSystem {
   readonly name = 'building';
   readonly surfaces = new WalkSurfaces();
-  readonly shops: ShopUnits;
+  readonly units: ShopUnits;
+  /** The fitted-out shops: stock, shopkeepers, and where you stand to buy. */
+  readonly shops: Shops;
   readonly ballPit = new BallPit();
 
   /** Everything in building-local space; `y = 0` is the ground-floor deck. */
@@ -112,7 +115,10 @@ export class Building implements GameSystem {
     this.root.name = 'the-big-building';
     this.root.add(this.shell.group);
 
-    this.shops = new ShopUnits(this.shell.floorGroups, collision);
+    this.units = new ShopUnits(this.shell.floorGroups, collision);
+    // Fitted out straight away, and before the floor fader claims materials —
+    // anything added to a floor group after that is not part of the cutaway.
+    this.shops = new Shops(this.units);
     // Stairs are pure geometry: what you walk on is declared in `layout.ts`.
     new Stairs(this.shell.floorGroups);
     this.escalators = new Escalators(this.shell.floorGroups);
@@ -201,6 +207,7 @@ export class Building implements GameSystem {
     }
 
     this.grownUp.update(dt, elapsed, this.grownUpComing);
+    this.shops.update(dt, elapsed);
     this.updateCutaway(player);
     this.fader.update(dt);
   }
@@ -210,6 +217,9 @@ export class Building implements GameSystem {
   private updateCutaway(player: Player): void {
     const floor = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
     this.fader.setVisibleUpTo(floor);
+    // Shop stock is only drawn on the deck the player is actually standing on;
+    // the floors below are visible but their shelves are not worth the budget.
+    this.shops.setVisibleDeck(floor);
 
     // The grown-up and the ginormous slide both belong to the top deck but live
     // outside the fader (they have to stay visible during a ride, when the
