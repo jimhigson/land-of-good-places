@@ -4,11 +4,15 @@ import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
 import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
-import { CAMERA_ZOOM_STEP } from './core/constants';
+import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
+import type { InteriorControls } from './world/building';
 import { Player, TapNavigator } from './entities';
 import { Hud, TouchControls } from './ui';
+import { StairMenu, type StairDirection } from './ui/StairMenu';
+import { Transitions } from './ui/Transitions';
+import { playOpenChime } from './ui/chime';
 import { Shopping } from './Shopping';
 import { gameStore } from './state';
 
@@ -39,11 +43,22 @@ export class Game {
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
   readonly shopping: Shopping;
+  readonly transitions: Transitions;
+  readonly stairMenu: StairMenu;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
   private readonly frameContext: MutableFrameContext;
   private started = false;
+
+  /**
+   * How fast the world runs. 1 normally; the stair ride winds it up so a child
+   * arrives on the next floor before they wonder what is happening.
+   */
+  private timeScale = 1;
+  /** Game time, accumulated at `timeScale`, for every animation phase. */
+  private elapsed = 0;
+  private stairMenuDeck = 0;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.engine = new Engine(canvas);
@@ -51,7 +66,11 @@ export class Game {
     this.input = new InputSystem();
     this.sky = new Sky();
 
-    this.world = new World(this.engine.scene, this.sky);
+    // The building needs a way to move the camera, the clock and the screen
+    // wipe when a child walks through its front door into its own space. It is
+    // handed one rather than reaching up in here; the closures are only ever
+    // called from a frame, long after everything below is built.
+    this.world = new World(this.engine.scene, this.sky, this.interiorControls());
 
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));
@@ -75,8 +94,15 @@ export class Game {
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
     });
 
+    // The HUD clears the overlay when it is built, so everything else that puts
+    // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
+    this.transitions = new Transitions(uiRoot);
+    this.stairMenu = new StairMenu(uiRoot, {
+      onChoose: (direction) => this.takeStairs(direction),
+      onClose: () => undefined,
+    });
 
     // Shops: the join between the shop geometry, the purchase panel and the
     // store. Registered as a system so it updates after the world, which is
@@ -107,6 +133,47 @@ export class Game {
     this.systems.push(system);
   }
 
+  /**
+   * What the building is allowed to do to the rest of the game.
+   *
+   * Every one of these is something the building genuinely needs and genuinely
+   * does not own: the camera has to be *snapped* rather than followed when a
+   * child changes space, the clock has to run fast while the stairs carry them,
+   * and the iris has to be closed over both.
+   */
+  private interiorControls(): InteriorControls {
+    return {
+      walkTo: (x, y, z, handlers) => this.tapNavigator.navigateTo(x, y, z, handlers),
+      cancelWalk: () => this.tapNavigator.cancel(),
+      setTimeScale: (scale) => {
+        this.timeScale = scale;
+      },
+      setWhoosh: (on) => this.transitions.setWhoosh(on),
+      iris: (midpoint) => this.transitions.irisWipe(midpoint),
+      flash: () => this.transitions.flash(),
+      snapCamera: () => this.camera.snapTo(this.player.position),
+      openStairMenu: (deck) => this.openStairMenu(deck),
+      closeStairMenu: () => this.stairMenu.close(),
+    };
+  }
+
+  private openStairMenu(deck: number): void {
+    if (this.stairMenu.isOpen || this.player.riding) return;
+    this.stairMenuDeck = deck;
+    playOpenChime();
+    this.stairMenu.show({
+      floorLabel: floorName(deck),
+      canClimb: deck < BUILDING_FLOOR_COUNT - 1,
+      canDescend: deck > 0,
+      upLabel: `up to ${floorName(deck + 1).toLowerCase()}`,
+      downLabel: `down to ${floorName(deck - 1).toLowerCase()}`,
+    });
+  }
+
+  private takeStairs(direction: StairDirection): void {
+    this.world.building.takeStairs(this.stairMenuDeck, direction);
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -127,6 +194,8 @@ export class Game {
     for (const system of this.systems) system.dispose?.();
     this.tapNavigator.dispose();
     this.touchControls?.dispose();
+    this.stairMenu.dispose();
+    this.transitions.dispose();
     this.world.dispose();
     this.player.dispose();
     this.hud.dispose();
@@ -140,18 +209,27 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    // While a shop or the backpack is open, Escape belongs to it — see
-    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
-    // park behind it.
-    if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
-      gameStore.setPaused(!gameStore.get().paused);
+    // While a shop, the backpack or the stairs menu is open, Escape belongs to
+    // it — see `Shopping.uiOpen`. Otherwise Escape would close the panel *and*
+    // pause the park behind it.
+    if (this.input.justPressed('menu')) {
+      if (this.stairMenu.isOpen) this.stairMenu.close();
+      else if (!this.shopping.uiOpen) gameStore.setPaused(!gameStore.get().paused);
     }
 
     const paused = gameStore.get().paused;
     this.world.dayNight.setPaused(paused);
 
-    this.frameContext.dt = paused ? 0 : tick.dt;
-    this.frameContext.elapsed = tick.elapsed;
+    // Fast-forward is a *time* effect, not an animation one: scaling the frame
+    // delta speeds the clock, the sky, the escalators, the walk cycle and the
+    // stair ride all at once, and nothing downstream needs to know about it.
+    // Pausing still runs `elapsed` at normal speed so idle animations keep
+    // breathing behind the pause screen, exactly as they always have.
+    const scaled = paused ? tick.dt : tick.dt * this.timeScale;
+    this.elapsed += paused ? tick.dt : scaled;
+
+    this.frameContext.dt = paused ? 0 : scaled;
+    this.frameContext.elapsed = this.elapsed;
     this.frameContext.frame = tick.frame;
 
     // Between the input scan and the player, and it has to be exactly here:
@@ -204,6 +282,13 @@ export class Game {
  * The context object is allocated once and rewritten each frame — systems see
  * it as fully readonly, which stops anyone stashing and mutating it.
  */
+/** What to call each level, for the stairs menu. */
+function floorName(deck: number): string {
+  if (deck <= 0) return 'Ground floor';
+  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'The roof';
+  return `Floor ${deck}`;
+}
+
 interface MutableFrameContext {
   dt: number;
   elapsed: number;

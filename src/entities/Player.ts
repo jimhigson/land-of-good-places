@@ -127,11 +127,26 @@ export class Player implements GameSystem {
 
   /** Puts the character somewhere immediately, clearing momentum. */
   teleport(x: number, z: number): void {
-    this.position.set(x, terrainHeight(x, z), z);
+    this.teleportTo(x, this.groundAt(x, z, Infinity), z);
+  }
+
+  /**
+   * The same, but you say how high as well.
+   *
+   * Needed by anything that moves the character between the park and the
+   * building's own space, where "the ground" is not a function of the terrain
+   * and asking for it at the destination before you are there gives the wrong
+   * answer.
+   */
+  teleportTo(x: number, y: number, z: number, facing?: number): void {
+    this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
+    this.airborne = false;
+    if (facing !== undefined) this.facing = facing;
     this.group.position.copy(this.position);
+    this.group.rotation.y = this.facing;
   }
 
   /** True while a ride is driving the character instead of the player. */

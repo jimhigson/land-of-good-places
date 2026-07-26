@@ -5,6 +5,12 @@ import {
   BUILDING_FLOOR_HEIGHT,
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
+  GARDEN_PLAY_RADIUS,
+  INTERIOR_HALF_X,
+  INTERIOR_HALF_Z,
+  INTERIOR_ORIGIN_X,
+  INTERIOR_ORIGIN_Z,
+  INTERIOR_PLAY_RADIUS,
   SLIDE_SPEED,
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
@@ -13,6 +19,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { AnchorPlots } from '../AnchorPlots';
 import type { Player } from '../../entities/Player';
+import type { StairDirection } from '../../ui/StairMenu';
 
 import { BallPit } from './BallPit';
 import { Bubble } from './Bubble';
@@ -24,7 +31,9 @@ import { BuildingShell } from './Shell';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
 import { SlideRide } from './SlideRide';
+import { StairRide } from './StairRide';
 import { Stairs } from './Stairs';
+import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces } from './surfaces';
 import { buildingInteractZones } from './interactZones';
@@ -48,10 +57,17 @@ import {
   HELTER_MOUTH_X,
   HELTER_SEMI_X,
   HELTER_SEMI_Z,
+  INTERIOR_DOOR_MAX_X,
+  INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
   LIFT_SHAFT,
+  STAIR_STAND_X,
+  STAIR_STAND_Z,
+  TOILET_DECK,
   TOP_DECK,
+  facadeX,
+  facadeZ,
   worldX,
   worldZ,
 } from './layout';
@@ -60,6 +76,9 @@ const RIDER_LIFT = 0.06;
 /** How far behind you the grown-up rides, in metres of slide. */
 const GROWN_UP_TRAIL = 2.6;
 
+/** Seconds after a change of space before another one may be triggered. */
+const SPACE_COOLDOWN = 0.9;
+
 interface ActiveRide {
   readonly slide: SlideRide;
   readonly giant: boolean;
@@ -67,13 +86,71 @@ interface ActiveRide {
 }
 
 /**
+ * Everything the building needs from the rest of the game, in one seam.
+ *
+ * The building owns two *places*, and moving a child between them means moving
+ * the camera, the collision boundary and a screen wipe as well — none of which
+ * are the building's to own. Rather than reach up into `Game`, it is handed this
+ * on construction and calls back through it.
+ */
+export interface InteriorControls {
+  /** Walk the character somewhere under orders. Used by the stair ride. */
+  walkTo(
+    x: number,
+    y: number,
+    z: number,
+    handlers: { onArrive(): void; onAbandon(): void },
+  ): void;
+  /** Stop whatever the character was told to do. */
+  cancelWalk(): void;
+  /** Multiply the world clock and every animation rate by this. */
+  setTimeScale(scale: number): void;
+  /** The fast-forward speed-lines. */
+  setWhoosh(on: boolean): void;
+  /** Close the iris, run `midpoint` behind it, open it again. */
+  iris(midpoint: () => void): void;
+  /** A soft blink. */
+  flash(): void;
+  /** Put the camera exactly on the player, with no travelling. */
+  snapCamera(): void;
+  /** Show the Climb / Descend menu for a deck. */
+  openStairMenu(deck: number): void;
+  /** Take the stairs menu down again — the player has left, or is riding. */
+  closeStairMenu(): void;
+}
+
+/**
  * The big building, and everything inside its shell.
  *
- * Five decks with seven empty shop units, and six different ways to get between
- * them: stairs, an escalator per storey, a self-driving glass lift on the
- * outside wall, a trampoline that throws you two floors up, a floating bubble,
- * and a helter-skelter to whoosh back down. From the top deck the ginormous
- * slide swoops out of the building and lands in the ball pit in the garden.
+ * ## Bigger on the inside
+ *
+ * The family asked for the classic trick, and this is how it is done: the
+ * building is **two places**. Out in the garden stands a facade — a 24 x 18 m
+ * tower with a door in it, which is scenery. Walking through that door does not
+ * walk you into the tower above; it transitions you into the building's *own
+ * space*, a 60 x 44 m floor plate parked six hundred metres from the park, past
+ * the terrain disc and past the far fog plane, so neither place can ever appear
+ * in a frame of the other.
+ *
+ * **Why a far offset rather than a second scene.** Everything in this game that
+ * asks "where am I?" — the ground sampler, the collision world, the tap
+ * navigator's ray march, the camera rig, the sun that follows the player — takes
+ * world coordinates and does not care what they are. Putting the interior at an
+ * offset therefore kept *all* of it working unchanged: one scene, one renderer,
+ * one collision world, one sampler. A second scene graph would have meant a
+ * second of each and a seam through every system in the game, for a trick the
+ * player is never supposed to notice. Only two things had to learn about it: the
+ * soft play boundary (`CollisionWorld.setPlayBounds`) and the camera, which is
+ * snapped rather than followed across the join — both behind a closed iris, so
+ * neither is ever seen doing it.
+ *
+ * ## The rest of it
+ *
+ * Five levels, and the top one is the **roof** — genuinely outdoors, open to the
+ * sky, where the ginormous slide launches from. Six ways between them: the tap
+ * stairs, an escalator per storey, a glass lift on the outside wall, a
+ * trampoline, a floating bubble and a helter-skelter. Seven shops with proper
+ * room to breathe, and the toilets on deck one.
  *
  * Two things make it work without a physics engine:
  *
@@ -90,17 +167,28 @@ export class Building implements GameSystem {
   readonly shops: Shops;
   readonly ballPit = new BallPit();
 
-  /** Everything in building-local space; `y = 0` is the ground-floor deck. */
-  private readonly root = new Group();
-  private readonly shell = new BuildingShell();
+  /**
+   * The building's own space. Added straight to the scene rather than to the
+   * `building` anchor plot, because it is nowhere near the plot — that is the
+   * whole idea.
+   */
+  readonly interiorRoot = new Group();
+
+  private readonly shell = new BuildingShell('interior');
+  private readonly facade = new BuildingShell('facade');
+  /** The facade, the ginormous slide, and the grown-up while they ride it. */
+  private readonly gardenRoot = new Group();
+
   private readonly escalators: Escalators;
   private readonly lift: GlassLift;
   private readonly trampoline = new Trampoline();
   private readonly bubble = new Bubble();
   private readonly fader = new FloorFader();
   private readonly grownUp = new GrownUp();
+  private readonly toilets: Toilets;
   private readonly helterSkelter: SlideRide;
   private readonly ginormousSlide: SlideRide;
+  private readonly stairRide: StairRide;
 
   private player: Player | null = null;
   private ride: ActiveRide | null = null;
@@ -108,12 +196,27 @@ export class Building implements GameSystem {
   private wasOnPad = false;
   private wasAirborne = false;
 
+  /** True while the player is in the building's own space. */
+  private inside = false;
+  /** True from the moment an iris starts closing until the space has changed. */
+  private changingSpace = false;
+  private spaceCooldown = 0;
+
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
 
-  constructor(collision: CollisionWorld, anchorPlots: AnchorPlots) {
-    this.root.name = 'the-big-building';
-    this.root.add(this.shell.group);
+  constructor(
+    private readonly collision: CollisionWorld,
+    anchorPlots: AnchorPlots,
+    private readonly controls: InteriorControls,
+  ) {
+    // ---------------------------------------------------------- the interior
+    this.interiorRoot.name = 'the-big-building-inside';
+    this.interiorRoot.position.set(INTERIOR_ORIGIN_X, BUILDING_BASE_Y, INTERIOR_ORIGIN_Z);
+    this.interiorRoot.add(this.shell.group);
+    // Nobody is in there yet, and six hundred metres of nothing still costs a
+    // frustum test per object.
+    this.interiorRoot.visible = false;
 
     this.units = new ShopUnits(this.shell.floorGroups, collision);
     // Fitted out straight away, and before the floor fader claims materials —
@@ -122,51 +225,77 @@ export class Building implements GameSystem {
     // Stairs are pure geometry: what you walk on is declared in `layout.ts`.
     new Stairs(this.shell.floorGroups);
     this.escalators = new Escalators(this.shell.floorGroups);
+    this.toilets = new Toilets(this.shell.floorGroups);
     this.lift = new GlassLift(collision);
-    this.root.add(this.lift.group);
+    this.interiorRoot.add(this.lift.group);
 
     const ground = this.shell.floorGroups[0];
     if (ground) ground.add(this.trampoline.group);
-    this.root.add(this.bubble.group);
+    this.interiorRoot.add(this.bubble.group);
 
     this.helterSkelter = buildHelterSkelter();
-    this.ginormousSlide = buildGinormousSlide();
-    this.root.add(this.helterSkelter.group, this.ginormousSlide.group);
+    this.interiorRoot.add(this.helterSkelter.group);
 
     addRideEntrances(this.shell.floorGroups);
+    this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
-    this.root.add(this.grownUp.root);
 
     // Walkable surfaces that are not part of a deck.
     this.surfaces.addPlatform(this.lift);
     this.surfaces.addPlatform(this.bubble);
     this.surfaces.addPlatform(this.trampoline);
 
-    registerShellCollision(collision);
+    registerInteriorCollision(collision);
 
-    // Slot into the reserved plots and clear their "coming soon" dressing.
+    // The cutaway needs the floors registered bottom to top. There is no
+    // separate roof layer any more: the roof *is* the top floor.
+    for (const floor of this.shell.floorGroups) this.fader.addLayer(floor);
+
+    // ------------------------------------------------------------ the garden
+    this.gardenRoot.name = 'the-big-building-outside';
+    this.gardenRoot.add(this.facade.group);
+
+    // The ginormous slide is a fact about the park, not about the interior: it
+    // leaves the roof and lands in the ball pit on the grass, and both of those
+    // are out here. Riding it from the roof terrace inside therefore *changes
+    // space* — see `startGiantSlide`.
+    this.ginormousSlide = buildGinormousSlide();
+    this.gardenRoot.add(this.ginormousSlide.group);
+
+    registerFacadeCollision(collision);
+
     const plot = anchorPlots.getGroup('building');
     const plotAnchor = plot.position;
-    this.root.position.set(
+    this.gardenRoot.position.set(
       BUILDING_CENTRE_X - plotAnchor.x,
       BUILDING_BASE_Y - plotAnchor.y,
       BUILDING_CENTRE_Z - plotAnchor.z,
     );
-    plot.add(this.root);
+    plot.add(this.gardenRoot);
     anchorPlots.setPlaceholderVisible('building', false);
 
     const pitPlot = anchorPlots.getGroup('ballPit');
     pitPlot.add(this.ballPit.group);
     anchorPlots.setPlaceholderVisible('ballPit', false);
 
-    // The cutaway needs the floors registered bottom to top, roof last.
-    for (const floor of this.shell.floorGroups) this.fader.addLayer(floor);
-    this.fader.addLayer(this.shell.roofGroup);
+    // ------------------------------------------------------------ the stairs
+    this.stairRide = new StairRide(this.surfaces, {
+      walkTo: (x, y, z, handlers) => this.controls.walkTo(x, y, z, handlers),
+      setTimeScale: (scale) => this.controls.setTimeScale(scale),
+      setWhoosh: (on) => this.controls.setWhoosh(on),
+      playerY: () => this.player?.position.y ?? BUILDING_BASE_Y,
+      onArrived: () => this.controls.flash(),
+    });
+  }
+
+  /** True while the player is in the building's own space. */
+  get playerIsInside(): boolean {
+    return this.inside;
   }
 
   /**
-   * Everything inside the building a finger can point at, with the two moving
-   * ones (the lift's doors, the bubble) at wherever they currently are.
+   * Everything in the building a finger can point at, with the two moving ones
+   * (the lift's doors, the bubble) at wherever they currently are.
    *
    * Rebuilt per call rather than cached — it is a handful of object literals and
    * it is only ever called on a tap.
@@ -175,6 +304,11 @@ export class Building implements GameSystem {
     return buildingInteractZones({
       bubbleSurfaceY: this.bubble.surfaceY,
       trampolineSurfaceY: this.trampoline.surfaceY,
+      doorstepY: this.surfaces.sample(
+        facadeX(1.5),
+        facadeZ(BUILDING_HALF_Z + 1.4),
+        BUILDING_BASE_Y + 1,
+      ),
     });
   }
 
@@ -184,26 +318,38 @@ export class Building implements GameSystem {
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
   }
 
+  /** The Climb / Descend menu was answered. */
+  takeStairs(deck: number, direction: StairDirection): void {
+    if (!this.player || this.player.riding || !this.inside) return;
+    this.stairRide.start(deck, direction);
+  }
+
   update(context: FrameContext): void {
     const { dt, elapsed, input } = context;
+
+    if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
 
     this.callLiftIfWaiting();
     this.lift.update(dt, this.riderInLift(), input.justPressed('interact'));
     this.bubble.update(dt, elapsed);
     this.escalators.update(dt);
     this.trampoline.update(dt);
+    this.toilets.update(dt, elapsed);
     this.ballPit.update(dt, elapsed);
 
     const player = this.player;
     if (!player) return;
 
+    this.stairRide.update(dt);
+
     if (this.ride) {
       this.advanceRide(dt, player);
-    } else {
-      this.handleGrownUpRequest(player, input.justPressed('interact'));
+    } else if (!this.changingSpace) {
+      this.handleInteractPress(player, input.justPressed('interact'));
       this.handleTrampoline(player);
       this.handleEscalator(player, dt);
       this.checkRideTriggers(player);
+      this.checkDoorways(player);
     }
 
     this.grownUp.update(dt, elapsed, this.grownUpComing);
@@ -212,28 +358,98 @@ export class Building implements GameSystem {
     this.fader.update(dt);
   }
 
-  // ------------------------------------------------------------- cutaway
+  // -------------------------------------------------------- changing space
+
+  /**
+   * Walking through a door.
+   *
+   * Both directions are the same shape: notice the character has crossed a
+   * threshold, close the iris, move them (and the camera, and the play boundary)
+   * while nobody can see, open it again.
+   */
+  private checkDoorways(player: Player): void {
+    if (this.spaceCooldown > 0) return;
+    if (Math.abs(player.position.y - BUILDING_BASE_Y) > 1.6) return;
+
+    if (!this.inside) {
+      const localX = player.position.x - BUILDING_CENTRE_X;
+      const localZ = player.position.z - BUILDING_CENTRE_Z;
+      if (localX < ENTRANCE_MIN_X - 0.4 || localX > ENTRANCE_MAX_X + 0.4) return;
+      if (localZ > BUILDING_HALF_Z + 0.5 || localZ < BUILDING_HALF_Z - 2.2) return;
+      this.changeSpace(() => this.enterInterior());
+      return;
+    }
+
+    const localX = player.position.x - INTERIOR_ORIGIN_X;
+    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
+    if (localZ < INTERIOR_HALF_Z + 1.7) return;
+    if (localX < INTERIOR_DOOR_MIN_X - 1.4 || localX > INTERIOR_DOOR_MAX_X + 1.4) return;
+    this.changeSpace(() => this.leaveInterior());
+  }
+
+  private changeSpace(midpoint: () => void): void {
+    this.changingSpace = true;
+    this.controls.cancelWalk();
+    this.controls.closeStairMenu();
+    this.stairRide.stop(false);
+    this.controls.iris(() => {
+      midpoint();
+      this.controls.snapCamera();
+      this.changingSpace = false;
+      this.spaceCooldown = SPACE_COOLDOWN;
+    });
+  }
+
+  private enterInterior(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.interiorRoot.visible = true;
+    this.collision.setPlayBounds(INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS);
+    // Just inside the door, facing north into the room.
+    player.teleportTo(worldX(0), BUILDING_BASE_Y, worldZ(INTERIOR_HALF_Z - 1.8), Math.PI);
+  }
+
+  private leaveInterior(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = false;
+    this.interiorRoot.visible = false;
+    this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
+
+    const x = facadeX(1.5);
+    const z = facadeZ(BUILDING_HALF_Z + 2.4);
+    // Facing +Z, out into the park — which is also the way the camera looks.
+    player.teleportTo(x, this.surfaces.sample(x, z, BUILDING_BASE_Y + 1), z, 0);
+  }
+
+  // ---------------------------------------------------------------- cutaway
 
   private updateCutaway(player: Player): void {
+    if (!this.inside && !this.ride) {
+      this.fader.setVisibleUpTo(null);
+      this.shops.setVisibleDeck(null);
+      this.grownUp.root.visible = false;
+      return;
+    }
+
     const floor = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
     this.fader.setVisibleUpTo(floor);
     // Shop stock is only drawn on the deck the player is actually standing on;
     // the floors below are visible but their shelves are not worth the budget.
     this.shops.setVisibleDeck(floor);
 
-    // The grown-up and the ginormous slide both belong to the top deck but live
-    // outside the fader (they have to stay visible during a ride, when the
-    // player is nowhere near a floor). Hide them by hand instead.
-    const topDeckShown = this.ride !== null || floor === null || floor >= TOP_DECK;
-    this.grownUp.root.visible = topDeckShown;
-    this.ginormousSlide.group.visible = topDeckShown;
+    // The grown-up belongs to the roof but lives outside the fader — they have
+    // to stay visible during a ride, when the player is nowhere near a floor.
+    this.grownUp.root.visible = this.ride !== null || floor === null || floor >= TOP_DECK;
   }
 
-  // ---------------------------------------------------------------- rides
+  // ------------------------------------------------------------------ rides
 
   private checkRideTriggers(player: Player): void {
-    const localX = player.position.x - BUILDING_CENTRE_X;
-    const localZ = player.position.z - BUILDING_CENTRE_Z;
+    if (!this.inside) return;
+    const localX = player.position.x - INTERIOR_ORIGIN_X;
+    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
     const localY = player.position.y - BUILDING_BASE_Y;
 
     if (
@@ -245,14 +461,45 @@ export class Building implements GameSystem {
     }
 
     if (
-      near(localX, localZ, GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, 1.7) &&
-      Math.abs(localY - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.2
+      near(localX, localZ, GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, 1.9) &&
+      Math.abs(localY - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.4
     ) {
-      this.startRide(this.ginormousSlide, true, player);
+      this.startGiantSlide(player);
     }
   }
 
+  /**
+   * The ginormous slide, the one ride that crosses between the two spaces.
+   *
+   * You step onto it on the roof terrace inside; you land in the ball pit on the
+   * grass outside. Rather than try to make a spline span six hundred metres of
+   * nothing, the launch *is* the transition: the iris closes on the roof, the
+   * world becomes the garden, and it opens again with the chute already carrying
+   * you out over the park. From a child's seat it is one continuous whoosh.
+   */
+  private startGiantSlide(player: Player): void {
+    this.changeSpace(() => {
+      this.inside = false;
+      this.interiorRoot.visible = false;
+      this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
+
+      // The grown-up rides in the garden, so they have to be in the garden.
+      this.gardenRoot.add(this.grownUp.root);
+
+      this.ginormousSlide.pointAt(0, this.point);
+      player.teleportTo(
+        this.point.x + BUILDING_CENTRE_X,
+        this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
+        this.point.z + BUILDING_CENTRE_Z,
+      );
+      this.startRide(this.ginormousSlide, true, player);
+    });
+  }
+
   private startRide(slide: SlideRide, giant: boolean, player: Player): void {
+    this.controls.cancelWalk();
+    this.controls.closeStairMenu();
+    this.stairRide.stop(false);
     this.ride = { slide, giant, distance: 0 };
     player.beginRide();
   }
@@ -269,12 +516,17 @@ export class Building implements GameSystem {
       return;
     }
 
+    // The helter-skelter is inside and the ginormous slide is out in the park —
+    // each is authored around its own origin, so each is ridden around it too.
+    const originX = ride.giant ? BUILDING_CENTRE_X : INTERIOR_ORIGIN_X;
+    const originZ = ride.giant ? BUILDING_CENTRE_Z : INTERIOR_ORIGIN_Z;
+
     ride.slide.pointAt(t, this.point);
     ride.slide.tangentAt(t, this.tangent);
     player.setRidePose(
-      this.point.x + BUILDING_CENTRE_X,
+      this.point.x + originX,
       this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
-      this.point.z + BUILDING_CENTRE_Z,
+      this.point.z + originZ,
       Math.atan2(this.tangent.x, this.tangent.z),
     );
 
@@ -289,13 +541,16 @@ export class Building implements GameSystem {
   }
 
   private finishRide(ride: ActiveRide, player: Player): void {
+    const originX = ride.giant ? BUILDING_CENTRE_X : INTERIOR_ORIGIN_X;
+    const originZ = ride.giant ? BUILDING_CENTRE_Z : INTERIOR_ORIGIN_Z;
+
     ride.slide.pointAt(1, this.point);
     ride.slide.tangentAt(1, this.tangent);
 
     const worldPosition = new Vector3(
-      this.point.x + BUILDING_CENTRE_X,
+      this.point.x + originX,
       this.point.y + BUILDING_BASE_Y,
-      this.point.z + BUILDING_CENTRE_Z,
+      this.point.z + originZ,
     );
     player.setRidePose(
       worldPosition.x,
@@ -308,31 +563,51 @@ export class Building implements GameSystem {
     if (ride.giant) {
       this.ballPit.splash(worldPosition.x - BALL_PIT_X, worldPosition.z - BALL_PIT_Z, 1.15);
       this.grownUpComing = false;
+      // Back up onto the roof, to wait for the next one.
+      this.interiorRoot.add(this.grownUp.root);
       this.placeGrownUp();
+      this.spaceCooldown = SPACE_COOLDOWN;
     }
     this.ride = null;
   }
 
-  private handleGrownUpRequest(player: Player, pressed: boolean): void {
-    if (!pressed) return;
-    const localX = player.position.x - BUILDING_CENTRE_X;
-    const localZ = player.position.z - BUILDING_CENTRE_Z;
-    const localY = player.position.y - BUILDING_BASE_Y;
-    if (Math.abs(localY - TOP_DECK * BUILDING_FLOOR_HEIGHT) > 1.4) return;
-    if (!near(localX, localZ, GROWN_UP_X, GROWN_UP_Z, 4)) return;
-    this.grownUpComing = !this.grownUpComing;
+  /**
+   * One interact press, shared out.
+   *
+   * Each thing checks its own little patch of floor and the first to claim the
+   * press wins, which is the same rule the tap zones use — so pressing E and
+   * tapping a thing can never disagree about what you meant.
+   */
+  private handleInteractPress(player: Player, pressed: boolean): void {
+    if (!pressed || !this.inside) return;
+    const localX = player.position.x - INTERIOR_ORIGIN_X;
+    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
+    const deck = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
+
+    if (deck !== null && near(localX, localZ, STAIR_STAND_X, STAIR_STAND_Z, 3.6)) {
+      this.controls.openStairMenu(deck);
+      return;
+    }
+
+    if (deck === TOILET_DECK && near(localX, localZ, this.toilets.standX, this.toilets.standZ, 3)) {
+      this.toilets.use();
+      return;
+    }
+
+    if (
+      Math.abs(player.position.y - BUILDING_BASE_Y - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.4 &&
+      near(localX, localZ, GROWN_UP_X, GROWN_UP_Z, 4)
+    ) {
+      this.grownUpComing = !this.grownUpComing;
+    }
   }
 
   private placeGrownUp(): void {
-    this.grownUp.root.position.set(
-      GROWN_UP_X,
-      TOP_DECK * BUILDING_FLOOR_HEIGHT,
-      GROWN_UP_Z,
-    );
+    this.grownUp.root.position.set(GROWN_UP_X, TOP_DECK * BUILDING_FLOOR_HEIGHT, GROWN_UP_Z);
     this.grownUp.root.rotation.y = Math.PI * 0.75;
   }
 
-  // ------------------------------------------------------------ machinery
+  // -------------------------------------------------------------- machinery
 
   /**
    * Standing at the lift doors fetches the car.
@@ -343,10 +618,10 @@ export class Building implements GameSystem {
    */
   private callLiftIfWaiting(): void {
     const player = this.player;
-    if (!player || player.riding) return;
-    const localX = player.position.x - BUILDING_CENTRE_X;
-    const localZ = player.position.z - BUILDING_CENTRE_Z;
-    if (localX < BUILDING_HALF_X - 2.5 || localX > LIFT_SHAFT.maxX) return;
+    if (!player || player.riding || !this.inside) return;
+    const localX = player.position.x - INTERIOR_ORIGIN_X;
+    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
+    if (localX < INTERIOR_HALF_X - 2.5 || localX > LIFT_SHAFT.maxX) return;
     if (localZ < LIFT_DOOR_MIN_Z - 0.6 || localZ > LIFT_DOOR_MAX_Z + 0.6) return;
 
     const deck = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
@@ -376,10 +651,10 @@ export class Building implements GameSystem {
   }
 
   private handleEscalator(player: Player, dt: number): void {
-    if (player.isAirborne) return;
+    if (player.isAirborne || !this.inside) return;
     const carry = this.escalators.carry(
-      player.position.x - BUILDING_CENTRE_X,
-      player.position.z - BUILDING_CENTRE_Z,
+      player.position.x - INTERIOR_ORIGIN_X,
+      player.position.z - INTERIOR_ORIGIN_Z,
       player.position.y,
       BUILDING_BASE_Y,
       dt,
@@ -388,7 +663,7 @@ export class Building implements GameSystem {
   }
 }
 
-// -------------------------------------------------------------- geometry
+// ---------------------------------------------------------------- geometry
 
 function near(x: number, z: number, targetX: number, targetZ: number, radius: number): boolean {
   const dx = x - targetX;
@@ -398,7 +673,7 @@ function near(x: number, z: number, targetX: number, targetZ: number, radius: nu
 
 /**
  * The helter-skelter: 1.75 anticlockwise oval turns from deck two down to the
- * ground floor, wound round the north-east shaft.
+ * ground floor, wound round the east shaft.
  *
  * The turns go anticlockwise so that the tangent where the helix begins already
  * points the way the lead-in was heading — start it the other way round and the
@@ -429,8 +704,8 @@ function buildHelterSkelter(): SlideRide {
   }
 
   points.push(
-    new Vector3(7.4, 0.45, HELTER_CENTRE_Z + 2.2),
-    new Vector3(5.8, 0.28, HELTER_CENTRE_Z + 2.4),
+    new Vector3(HELTER_CENTRE_X - 2.2, 0.45, HELTER_CENTRE_Z + 2.6),
+    new Vector3(HELTER_CENTRE_X - 4.4, 0.28, HELTER_CENTRE_Z + 3),
   );
 
   const slide = new SlideRide(points, {
@@ -445,7 +720,7 @@ function buildHelterSkelter(): SlideRide {
 
 /**
  * The ginormous slide. Authored in world coordinates because the shape of it is
- * a fact about the park, not about the building, then shifted into local space.
+ * a fact about the park, not about the building, then shifted into facade space.
  */
 function buildGinormousSlide(): SlideRide {
   const b = BUILDING_BASE_Y;
@@ -476,7 +751,7 @@ function buildGinormousSlide(): SlideRide {
   });
 }
 
-/** Little painted pads and signs so a child can see where a slide begins. */
+/** Little painted pads and signs so a child can see where a thing begins. */
 function addRideEntrances(floorGroups: readonly Group[]): void {
   const helterFloor = floorGroups[HELTER_DECK];
   if (helterFloor) {
@@ -492,20 +767,40 @@ function addRideEntrances(floorGroups: readonly Group[]): void {
     );
   }
 
+  // The stairs get a pad and a board on every deck. This is the one thing in the
+  // building you press a button at rather than walk up, so it has to be the most
+  // obvious thing on the floor.
+  for (let deck = 0; deck < floorGroups.length; deck += 1) {
+    const floor = floorGroups[deck];
+    if (!floor) continue;
+    floor.add(
+      entrancePad(STAIR_STAND_X, STAIR_STAND_Z, PALETTE.markerMint),
+      entranceSign(
+        STAIR_STAND_X,
+        STAIR_STAND_Z + 1.7,
+        'Stairs',
+        '🪜',
+        PALETTE.markerMint,
+        'tap for a ride up or down!',
+      ),
+    );
+  }
+
   const topFloor = floorGroups[TOP_DECK];
   if (topFloor) {
     topFloor.add(
       entrancePad(GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, PALETTE.slideChute),
       entranceSign(
         GIANT_SLIDE_ENTRY_X,
-        GIANT_SLIDE_ENTRY_Z + 2.2,
+        GIANT_SLIDE_ENTRY_Z - 2.4,
         'Ginormous Slide',
         '🎢',
         PALETTE.slideChute,
+        'off the roof to the ball pit!',
       ),
       entranceSign(
         GROWN_UP_X,
-        GROWN_UP_Z + 1.4,
+        GROWN_UP_Z - 1.6,
         'Press E',
         '🤗',
         PALETTE.grownUpScarf,
@@ -537,27 +832,55 @@ function entranceSign(
   return sign;
 }
 
-// ------------------------------------------------------------- collision
+// --------------------------------------------------------------- collision
 
 /**
- * The shell is solid apart from its two doorways. Collision is height-blind, so
- * these walls hold on every deck at once — which is exactly what you want for a
- * building, and the reason the lift shaft gets its own three sides.
+ * The interior shell is solid apart from its two doorways. Collision is
+ * height-blind, so these walls hold on every deck at once — which is exactly
+ * what you want for a building, and the reason the lift shaft gets its own
+ * three sides.
  */
-function registerShellCollision(collision: CollisionWorld): void {
-  const west = worldX(-BUILDING_HALF_X);
-  const east = worldX(BUILDING_HALF_X);
-  const north = worldZ(-BUILDING_HALF_Z);
-  const south = worldZ(BUILDING_HALF_Z);
+function registerInteriorCollision(collision: CollisionWorld): void {
+  const west = worldX(-INTERIOR_HALF_X);
+  const east = worldX(INTERIOR_HALF_X);
+  const north = worldZ(-INTERIOR_HALF_Z);
+  const south = worldZ(INTERIOR_HALF_Z);
 
   collision.addWall(west, north, east, north, 0.3);
   collision.addWall(west, north, west, south, 0.3);
 
-  // South face, minus the front door.
-  collision.addWall(west, south, worldX(ENTRANCE_MIN_X), south, 0.3);
-  collision.addWall(worldX(ENTRANCE_MAX_X), south, east, south, 0.3);
+  // South face, minus the way out.
+  collision.addWall(west, south, worldX(INTERIOR_DOOR_MIN_X), south, 0.3);
+  collision.addWall(worldX(INTERIOR_DOOR_MAX_X), south, east, south, 0.3);
 
   // East face, minus the way into the lift.
   collision.addWall(east, north, east, worldZ(LIFT_DOOR_MIN_Z), 0.3);
   collision.addWall(east, worldZ(LIFT_DOOR_MAX_Z), east, south, 0.3);
+}
+
+/**
+ * The facade out in the garden is a solid block with a doorway in it.
+ *
+ * The doorway leads to a metre and a half of lobby and then a wall, because
+ * there is nothing behind it: cross that threshold and the game takes you
+ * somewhere else entirely. The back wall is what stops a child who keeps walking
+ * during the quarter-second the iris takes to close from ending up inside a
+ * solid tower.
+ */
+function registerFacadeCollision(collision: CollisionWorld): void {
+  const west = facadeX(-BUILDING_HALF_X);
+  const east = facadeX(BUILDING_HALF_X);
+  const north = facadeZ(-BUILDING_HALF_Z);
+  const south = facadeZ(BUILDING_HALF_Z);
+
+  collision.addWall(west, north, east, north, 0.3);
+  collision.addWall(west, north, west, south, 0.3);
+  collision.addWall(east, north, east, south, 0.3);
+
+  collision.addWall(west, south, facadeX(ENTRANCE_MIN_X), south, 0.3);
+  collision.addWall(facadeX(ENTRANCE_MAX_X), south, east, south, 0.3);
+
+  // The back of the lobby.
+  const lobbyZ = facadeZ(BUILDING_HALF_Z - 1.8);
+  collision.addWall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ, 0.3);
 }

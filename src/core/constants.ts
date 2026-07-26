@@ -78,11 +78,38 @@ export const PLAYER_BOB_HEIGHT = 0.16;
 export const BUILDING_CENTRE_X = -28.5;
 export const BUILDING_CENTRE_Z = -30.5;
 
-/** Interior half-extents in metres — a 24 x 18 m footprint. */
+/** Exterior half-extents in metres — a 24 x 18 m footprint. */
 export const BUILDING_HALF_X = 12;
 export const BUILDING_HALF_Z = 9;
 
-/** Number of walkable decks. Deck 0 is the ground floor, deck 4 the slide deck. */
+/**
+ * The building is bigger on the inside.
+ *
+ * Walking through the front door does not walk you into the shell above — it
+ * transitions you into the building's *own space*, which lives at
+ * (INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z), six hundred metres from the park and
+ * therefore utterly separate from it. Nothing about the two spaces is
+ * continuous, which is the whole point: the interior floor plate is 60 x 44 m
+ * inside a shell that is 24 x 18 m outside.
+ *
+ * Six hundred is chosen to be far past TERRAIN_RADIUS *and* past FOG_FAR, so
+ * neither space can ever appear in a frame of the other, while staying small
+ * enough that single-precision float positions are still exact to a millimetre.
+ */
+export const INTERIOR_ORIGIN_X = 600;
+export const INTERIOR_ORIGIN_Z = 600;
+
+/** Interior half-extents in metres — a roomy 60 x 44 m floor plate. */
+export const INTERIOR_HALF_X = 30;
+export const INTERIOR_HALF_Z = 22;
+
+/** How far the interior's plaza floor sits below the ground-floor deck. */
+export const INTERIOR_PLAZA_DROP = 1.2;
+
+/** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
+export const INTERIOR_PLAY_RADIUS = 46;
+
+/** Number of walkable decks. Deck 0 is the ground floor, deck 4 is the roof. */
 export const BUILDING_FLOOR_COUNT = 5;
 
 /** Deck-to-deck rise in metres. */
@@ -111,6 +138,22 @@ export const BUILDING_STEP_UP = 0.62;
 
 /** Seconds for a floor to fade out / in when the cutaway view changes. */
 export const BUILDING_FADE_SECONDS = 0.22;
+
+/** Seconds the iris takes to close, and to open again, on a space change. */
+export const IRIS_CLOSE_SECONDS = 0.28;
+export const IRIS_OPEN_SECONDS = 0.42;
+
+/**
+ * How much faster the world runs while a stair ride is carrying you.
+ *
+ * Fast enough that four metres of switchback is over before a six-year-old
+ * wonders what is happening, slow enough that the walk cycle still reads as
+ * walking rather than as a glitch.
+ */
+export const STAIR_RIDE_TIME_SCALE = 3.5;
+
+/** Seconds the fast-forward whoosh takes to fade in and out. */
+export const STAIR_RIDE_FADE_SECONDS = 0.18;
 
 /** Launch speed off the trampoline, first bounce and hardest bounce (m/s). */
 export const TRAMPOLINE_MIN_LAUNCH = 9;

@@ -28,7 +28,7 @@ export class Stairs {
       const bottom = deck * BUILDING_FLOOR_HEIGHT;
       group.add(buildTreads(flightA, bottom), buildStringer(flightA, bottom));
       group.add(buildTreads(flightB, bottom), buildStringer(flightB, bottom));
-      group.add(buildLanding(flightA, bottom));
+      group.add(buildLanding(flightA, flightB, bottom));
       group.add(buildBalustrade(flightA, flightB, bottom));
     }
   }
@@ -96,15 +96,30 @@ function buildStringer(flight: RampDefinition, groupBase: number): Mesh {
   return mesh;
 }
 
-/** The half-landing where the switchback turns. */
-function buildLanding(flightA: RampDefinition, groupBase: number): Mesh {
+/**
+ * The half-landing where the switchback turns.
+ *
+ * Derived from the flights rather than typed in, so moving the stairwell — as
+ * the roomier interior did, by fourteen metres — cannot leave the landing behind
+ * in the old shaft.
+ */
+function buildLanding(
+  flightA: RampDefinition,
+  flightB: RampDefinition,
+  groupBase: number,
+): Mesh {
   const top = flightA.yTo - groupBase;
+  const width = flightB.footprint.maxX - flightA.footprint.minX;
   const mesh = new Mesh(
-    new BoxGeometry(4.9, 0.28, 1.1),
+    new BoxGeometry(width, 0.28, 1.1),
     interiorMaterial(PALETTE.buildingFloorAlt, 0.8),
   );
   mesh.receiveShadow = true;
-  mesh.position.set(-9.05, top - 0.14, -2.85);
+  mesh.position.set(
+    (flightA.footprint.minX + flightB.footprint.maxX) / 2,
+    top - 0.14,
+    flightA.to - 0.45,
+  );
   return mesh;
 }
 

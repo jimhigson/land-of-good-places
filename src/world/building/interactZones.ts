@@ -11,23 +11,39 @@ import {
   HELTER_ENTRY_X,
   HELTER_ENTRY_Z,
   SHOP_UNITS,
+  STAIR_STAND_X,
+  STAIR_STAND_Z,
+  TOILET_DECK,
+  TOILET_STAND_X,
+  TOILET_STAND_Z,
   TOP_DECK,
   TRAMPOLINE_RADIUS,
   TRAMPOLINE_X,
   TRAMPOLINE_Z,
   deckY,
+  facadeX,
+  facadeZ,
   shopLocalToBuilding,
   worldX,
   worldZ,
 } from './layout';
 import { SHOP_STAND_Z } from './shops/Shops';
-import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X } from '../../core/constants';
+import {
+  BUILDING_FLOOR_COUNT,
+  BUILDING_HALF_Z,
+  INTERIOR_HALF_X,
+} from '../../core/constants';
 
 /**
  * Everything in the building a finger can point at.
  *
  * See `world/interact.ts` for why these exist. The numbers all come from
  * `layout.ts`, so a tap target can never drift away from the thing it names.
+ *
+ * Almost all of these are in the building's *own* space, hundreds of metres from
+ * the park. Exactly one is not — the facade's front door out in the garden,
+ * which is how you get in. Zones are picked by world position, so the two sets
+ * can never be mistaken for one another.
  */
 
 /**
@@ -40,8 +56,8 @@ import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X } from '../../core/constants';
  * making. Standing here calls the car (`Building.callLiftIfWaiting`) and the
  * arriving interact press cuts short its wait at wherever it was.
  */
-const LIFT_STAND_X = BUILDING_HALF_X - 1.1;
-const LIFT_PICK_X = BUILDING_HALF_X + 0.6;
+const LIFT_STAND_X = INTERIOR_HALF_X - 1.1;
+const LIFT_PICK_X = INTERIOR_HALF_X + 0.6;
 const LIFT_DOOR_Z = 5;
 
 export interface BuildingZoneState {
@@ -49,14 +65,30 @@ export interface BuildingZoneState {
   readonly bubbleSurfaceY: number;
   /** Current top surface of the trampoline pad, in world units. */
   readonly trampolineSurfaceY: number;
+  /** Ground height at the facade's front door, out in the garden. */
+  readonly doorstepY: number;
 }
 
 export function buildingInteractZones(state: BuildingZoneState): InteractZone[] {
   const zones: InteractZone[] = [];
 
-  // The lift doors, once per deck: whichever one you can see is the one you are
-  // standing next to, and the height tolerance in `pickInteractZone` keeps the
-  // other four out of the way.
+  // The way in, out in the garden. A tap on the tower walks a child to the top
+  // of the front steps, and stepping over the threshold does the rest.
+  zones.push({
+    id: 'frontDoor',
+    label: 'The Big Building',
+    x: facadeX(1.5),
+    y: state.doorstepY,
+    z: facadeZ(BUILDING_HALF_Z + 1.4),
+    pickRadius: 3.4,
+    standX: facadeX(1.5),
+    standZ: facadeZ(BUILDING_HALF_Z - 0.7),
+    pressInteract: false,
+  });
+
+  // The lift doors and the stairs, once per deck: whichever one you can see is
+  // the one you are standing next to, and the height tolerance in
+  // `pickInteractZone` keeps the other four out of the way.
   for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
     zones.push({
       id: `lift-${deck}`,
@@ -67,6 +99,23 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       pickRadius: 2.8,
       standX: worldX(LIFT_STAND_X),
       standZ: worldZ(LIFT_DOOR_Z),
+      pressInteract: true,
+    });
+
+    // Tapping the stairs walks you to the foot of the flight and then fires
+    // `interact`, which opens the Climb / Descend menu. The whole point is that
+    // the flights themselves are never walked by hand.
+    zones.push({
+      id: `stairs-${deck}`,
+      label: 'Stairs',
+      x: worldX(STAIR_STAND_X),
+      y: deckY(deck),
+      z: worldZ(STAIR_STAND_Z - 2.4),
+      // Wide: the target is a whole stairwell, and it is the one thing in the
+      // building a child should be able to hit without aiming.
+      pickRadius: 4.2,
+      standX: worldX(STAIR_STAND_X),
+      standZ: worldZ(STAIR_STAND_Z),
       pressInteract: true,
     });
   }
@@ -114,10 +163,22 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     x: worldX(GIANT_SLIDE_ENTRY_X),
     y: deckY(TOP_DECK),
     z: worldZ(GIANT_SLIDE_ENTRY_Z),
-    pickRadius: 2.1,
+    pickRadius: 2.4,
     standX: worldX(GIANT_SLIDE_ENTRY_X),
     standZ: worldZ(GIANT_SLIDE_ENTRY_Z),
     pressInteract: false,
+  });
+
+  zones.push({
+    id: 'toilets',
+    label: 'Toilets',
+    x: worldX(TOILET_STAND_X),
+    y: deckY(TOILET_DECK),
+    z: worldZ(TOILET_STAND_Z - 2.6),
+    pickRadius: 3.2,
+    standX: worldX(TOILET_STAND_X),
+    standZ: worldZ(TOILET_STAND_Z),
+    pressInteract: true,
   });
 
   // The seven shops. Tapping a counter walks you to the serving spot and then
