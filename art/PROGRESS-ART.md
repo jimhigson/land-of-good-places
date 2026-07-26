@@ -1,0 +1,21 @@
+# Artist progress
+
+- [x] Read GAME_DESIGN.md, palette.ts, textures.ts, Engine.ts, CharacterModel.ts
+- [x] ASSET_MANIFEST.md drafted and sent to the Architect (approved, answers folded in)
+- [x] art/style/bridge.ts — the single import boundary into src/
+- [x] art/style/artPalette.ts — character/prop colours extending PALETTE
+- [x] art/style/materials.ts — toon ramp, toonMaterial, ink outlines
+- [x] art/style/faces.ts — canvas face patches + expression sets
+- [x] art/style/shapes.ts — heart, star
+- [x] art/style/asset.ts — AssetHandle/CreatureHandle contract, blob/stub, walk cycle
+- [x] art/models/ripika.ts
+- [x] art/models/biscuit.ts
+- [x] art/models/kid.ts
+- [x] art/models/balloons.ts (dalmatian, corgi, chicken)
+- [x] art/models/mini.ts
+- [x] art/models/props.ts (lollipop tree, pink wall, wood wall)
+- [x] art/samples/main.ts + art-samples.html
+- [ ] first screenshots
+- [ ] iteration pass
+- [ ] ART_DIRECTION.md
+- [ ] art/integration/ toon-swap patch

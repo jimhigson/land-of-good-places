@@ -311,7 +311,7 @@ export function signTexture(options: SignOptions): CanvasTexture {
  * Not cached by key alone — names change when the player renames themselves —
  * so callers should dispose the previous texture when they rebuild it.
  */
-export function nameLabelTexture(name: string, accent = PALETTE.markerPink): CanvasTexture {
+export function nameLabelTexture(name: string, accent: number = PALETTE.markerPink): CanvasTexture {
   const width = 512;
   const height = 160;
   const canvas = document.createElement('canvas');

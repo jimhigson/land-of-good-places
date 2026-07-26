@@ -16,6 +16,11 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Look:** Inspired by *Theme Park* — pseudo-isometric camera, but really
   rendered in 3D. Very cute, Pokémon-inspired style: bright colours, big
   eyes, chunky shapes, soft shadows.
+- **Art approach (decided):** true 3D models built procedurally from chunky
+  primitives with canvas-painted faces — not sprites — because the camera
+  moves (space wheel, slides) and lighting is dynamic. Billboard sprites are
+  used only for particles (confetti, splashes, hearts). The Artist agent's
+  ART_DIRECTION.md is the style bible all builders must follow.
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
   API, **and on-screen touch controls** on phones and tablets.
 - **PWA:** Installable as a Progressive Web App so it can play full-screen
@@ -181,6 +186,10 @@ Rough order of construction, each step playable:
 
 ## Deployment
 
+- **Aim:** the game deploys autonomously and is viewable on Jim's phone
+  throughout the day as features are added. The Deploy Manager agent is
+  responsible for this end-to-end — there must always be a working live URL.
 - Code lives in a **private GitHub repo** (created with `gh`)
 - Deploys automatically on merge to `main`, to **Cloudflare Workers**
   (static assets) — or GitHub Pages if that turns out simpler
+- After each build milestone, the latest game is deployed to the live URL

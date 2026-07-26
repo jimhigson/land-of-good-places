@@ -27,7 +27,13 @@ export interface AnchorDefinition {
   readonly boundingRadius: number;
   /** Where the path spur arrives, [x, z]. The sign stands here. */
   readonly entrance: readonly [number, number];
-  /** Yaw in radians the sign faces. 0 looks down +Z. */
+  /**
+   * Yaw in radians the sign faces. 0 looks down +Z.
+   *
+   * These all sit near +45°, which is where the default isometric camera looks
+   * from — a sign a child cannot read without rotating the view is no use.
+   * Small per-anchor variation stops them looking like a row of billboards.
+   */
   readonly signYaw: number;
   readonly signTitle: string;
   readonly signSubtitle: string;
@@ -44,7 +50,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
     boundingRadius: 19,
     entrance: [-27, -20],
-    signYaw: Math.PI * 0.12,
+    signYaw: Math.PI * 0.29,
     signTitle: 'The Big Building',
     signSubtitle: 'lots of floors coming soon!',
     glyph: '🏬',
@@ -61,7 +67,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
     entrance: [-6, -8],
-    signYaw: Math.PI * 0.95,
+    signYaw: Math.PI * 0.21,
     signTitle: 'Ball Pit',
     signSubtitle: 'the ginormous slide lands here!',
     glyph: '🎉',
@@ -77,7 +83,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     footprint: { kind: 'circle', radius: 11 },
     boundingRadius: 13,
     entrance: [26, -17],
-    signYaw: -Math.PI * 0.2,
+    signYaw: Math.PI * 0.3,
     signTitle: 'Space Ferris Wheel',
     signSubtitle: 'all the way up to space!',
     glyph: '🎡',
@@ -93,7 +99,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     footprint: { kind: 'rect', halfX: 12, halfZ: 10 },
     boundingRadius: 15,
     entrance: [23, 15],
-    signYaw: -Math.PI * 0.72,
+    signYaw: Math.PI * 0.2,
     signTitle: 'Dodgems',
     signSubtitle: 'bonk the wobbly tree!',
     glyph: '🚗',
@@ -109,7 +115,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
     boundingRadius: 15,
     entrance: [-22, 18],
-    signYaw: Math.PI * 0.78,
+    signYaw: Math.PI * 0.27,
     signTitle: 'Water Fight',
     signSubtitle: 'very big water guns!',
     glyph: '💦',

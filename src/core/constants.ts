@@ -14,8 +14,28 @@ export const GARDEN_HALF_SIZE = 62;
 /** Player is pushed back inside this radius from the centre (soft boundary). */
 export const GARDEN_PLAY_RADIUS = 58;
 
-/** Number of segments per side on the terrain mesh. Higher = smoother hills. */
-export const TERRAIN_SEGMENTS = 96;
+/**
+ * Where the ground stops.
+ *
+ * The park is a diorama on a hilltop: the terrain is a disc that ends a little
+ * beyond the boundary wall, so that walking to the edge of the park reveals the
+ * sky, the sunset and the distant hills. With an orthographic camera an endless
+ * ground plane would fill the frame forever and the sky would never be seen.
+ * The cut edge is hidden behind the treeline (see Scenery).
+ */
+export const TERRAIN_RADIUS = 72;
+
+/**
+ * The hilltop crest. Between RIM_START and RIM_END the ground falls away by
+ * RIM_DROP metres, which is steeper than the camera pitch — so the slope hides
+ * itself and the horizon appears just above the boundary wall.
+ */
+export const RIM_START = 61;
+export const RIM_END = 71;
+export const RIM_DROP = 17;
+
+/** Rings on the terrain disc. Higher = smoother hills. */
+export const TERRAIN_SEGMENTS = 72;
 
 /** Vertical scale of the gentle rolling hills. Deliberately small — "flat-ish". */
 export const TERRAIN_HEIGHT_SCALE = 0.55;
@@ -60,7 +80,7 @@ export const CAMERA_PITCH_DEGREES = 38;
 export const CAMERA_YAW_DEGREES = 45;
 
 /** Vertical world-units visible at default zoom (orthographic frustum height). */
-export const CAMERA_VIEW_HEIGHT = 26;
+export const CAMERA_VIEW_HEIGHT = 22;
 
 export const CAMERA_ZOOM_MIN = 0.55;
 export const CAMERA_ZOOM_MAX = 1.9;
@@ -90,8 +110,8 @@ export const DAY_LENGTH_SECONDS = 150;
 export const DAY_START_TIME = 0.34;
 
 /** Normalised time when fairy lights switch on / off (dusk, dawn). */
-export const FAIRY_LIGHT_ON = 0.76;
-export const FAIRY_LIGHT_OFF = 0.26;
+export const FAIRY_LIGHT_ON = 0.735;
+export const FAIRY_LIGHT_OFF = 0.245;
 
 // ---------------------------------------------------------------- renderer
 
@@ -103,9 +123,16 @@ export const SHADOW_MAP_SIZE = 2048;
 /** Half-extent of the sun's shadow frustum; it follows the player. */
 export const SHADOW_AREA = 34;
 
-/** Fog distances at the default zoom. Scaled by zoom at runtime. */
-export const FOG_NEAR = 46;
-export const FOG_FAR = 168;
+/**
+ * Fog distances.
+ *
+ * Careful: fog is measured from the *camera*, and an orthographic rig parks its
+ * camera CAMERA_DISTANCE away from the action. So these are offsets from that,
+ * not from the player — otherwise the entire park sits inside the fog and the
+ * whole game turns milky.
+ */
+export const FOG_NEAR = CAMERA_DISTANCE + 42;
+export const FOG_FAR = CAMERA_DISTANCE + 168;
 
 // ------------------------------------------------------------------ input
 

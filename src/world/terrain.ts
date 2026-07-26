@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
-import { TERRAIN_HEIGHT_SCALE } from '../core/constants';
+import { RIM_DROP, RIM_END, RIM_START, TERRAIN_HEIGHT_SCALE } from '../core/constants';
+import { smoothstep } from '../core/mathUtils';
 
 /**
  * The shape of the ground, as a pure function.
@@ -17,7 +18,15 @@ export function terrainHeight(x: number, z: number): number {
   const broad = Math.sin(x * 0.055) * Math.cos(z * 0.048) * 0.62;
   const medium = Math.sin(x * 0.108 + 1.7) * Math.sin(z * 0.094 - 0.6) * 0.3;
   const fine = Math.cos((x + z) * 0.031) * 0.34;
-  return (broad + medium + fine) * TERRAIN_HEIGHT_SCALE;
+  const base = (broad + medium + fine) * TERRAIN_HEIGHT_SCALE;
+
+  // Outside the boundary wall the ground falls away steeply, putting the park
+  // on top of a hill. This is what makes the sky visible: the drop is steeper
+  // than the camera's 38° pitch, so everything past the crest is hidden and the
+  // horizon appears just above the wall. Without it an endless flat plane fills
+  // the screen and the whole day/night cycle goes unseen.
+  const radius = Math.hypot(x, z);
+  return base - smoothstep(RIM_START, RIM_END, radius) * RIM_DROP;
 }
 
 /** Surface normal at a point, from finite differences. */

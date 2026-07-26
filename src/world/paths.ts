@@ -221,9 +221,11 @@ function addRibbon(
     const rx = point.x - (nx / length) * half;
     const rz = point.z - (nz / length) * half;
 
+    // Right edge before left edge: that ordering makes the quads wind
+    // anticlockwise seen from above, so the ribbon faces the sky.
     const v = travelled / Math.max(1, width);
-    builder.vertex(lx, terrainHeight(lx, lz) + lift, lz, 0, v);
-    builder.vertex(rx, terrainHeight(rx, rz) + lift, rz, 1, v);
+    builder.vertex(rx, terrainHeight(rx, rz) + lift, rz, 0, v);
+    builder.vertex(lx, terrainHeight(lx, lz) + lift, lz, 1, v);
 
     if (i > 0) {
       const base = builder.vertexCount - 4;
@@ -259,7 +261,7 @@ function addDisc(
       const b = a + 1;
       const c = a + stride;
       const d = c + 1;
-      builder.quad(a, c, b, d);
+      builder.quad(a, b, c, d);
     }
   }
 }
@@ -270,8 +272,10 @@ function addDisc(
  */
 class GeometryBuilder {
   private readonly positions: number[] = [];
+  private readonly normals: number[] = [];
   private readonly uvs: number[] = [];
   private readonly indices: number[] = [];
+  private readonly scratchNormal = new Vector3();
 
   get vertexCount(): number {
     return this.positions.length / 3;
@@ -279,6 +283,12 @@ class GeometryBuilder {
 
   vertex(x: number, y: number, z: number, u: number, v: number): void {
     this.positions.push(x, y, z);
+    // Normals come from the terrain function rather than computeVertexNormals():
+    // the plaza fan has degenerate triangles at its centre, which would leave
+    // those vertices with a zero-length normal and a black splodge in the middle
+    // of the paving.
+    const normal = terrainNormal(x, z, this.scratchNormal);
+    this.normals.push(normal.x, normal.y, normal.z);
     this.uvs.push(u, v);
   }
 
@@ -290,9 +300,9 @@ class GeometryBuilder {
   build(): BufferGeometry {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
+    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
     geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uvs), 2));
     geometry.setIndex(this.indices);
-    geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     return geometry;
   }

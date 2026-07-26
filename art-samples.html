@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Land of Good Places — art samples</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎨</text></svg>"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #eaf4ff;
+        font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+        color: #4a3a52;
+      }
+      #gallery-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        padding: 14px 20px 26px;
+        pointer-events: none;
+        text-align: center;
+        background: linear-gradient(#fff8ee 0%, #fff8ee55 55%, #fff8ee00 100%);
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(18px, 2.6vw, 30px);
+        letter-spacing: 0.4px;
+      }
+      p {
+        margin: 3px 0 0;
+        font-size: clamp(11px, 1.3vw, 15px);
+        opacity: 0.72;
+      }
+      #gallery-loading {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 20px;
+        background: #eaf4ff;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gallery-canvas"></canvas>
+    <header>
+      <h1>Land of Good Places — art samples</h1>
+      <p>character &amp; prop turntable · for Eleri to look at</p>
+    </header>
+    <div id="gallery-loading">painting the toys…</div>
+    <script type="module" src="/art/samples/main.ts"></script>
+  </body>
+</html>

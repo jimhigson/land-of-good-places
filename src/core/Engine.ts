@@ -1,10 +1,10 @@
 import {
-  ACESFilmicToneMapping,
   Color,
   Fog,
-  PCFSoftShadowMap,
+  NeutralToneMapping,
   Scene,
   SRGBColorSpace,
+  VSMShadowMap,
   WebGLRenderer,
 } from 'three';
 import { FOG_FAR, FOG_NEAR, MAX_PIXEL_RATIO } from './constants';
@@ -39,15 +39,24 @@ export class Engine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
     this.renderer.outputColorSpace = SRGBColorSpace;
-    // Filmic tone mapping keeps the saturated pastels from blowing out into
-    // white where the sun hits, which is what made early builds look washed.
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    // Neutral rather than ACES: ACES filmic desaturates bright colours towards
+    // white, which is exactly the wrong look for a park made of sweets. Neutral
+    // rolls off the highlights without draining the pinks and greens.
+    this.renderer.toneMapping = NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    // PCFSoftShadowMap is deprecated in current three; VSM gives genuinely soft
+    // edges, which suits the chunky, rounded geometry far better than hard PCF.
+    this.renderer.shadowMap.type = VSMShadowMap;
+    // The Sky system draws a full-screen backdrop pass before the world, so the
+    // game owns clearing (see Game.render).
+    this.renderer.autoClear = false;
+    this.renderer.setClearColor(new Color(PALETTE.skyDayBottom), 1);
 
     this.scene = new Scene();
-    this.scene.background = new Color(PALETTE.skyDayBottom);
+    // Left null on purpose: the sky pass has already painted the frame, and a
+    // scene background here would draw straight over it.
+    this.scene.background = null;
     // Linear fog gives the cosy "the park fades into a nice day" feeling. The
     // DayNight system re-tints this colour as the sun moves.
     this.scene.fog = new Fog(PALETTE.skyDayBottom, FOG_NEAR, FOG_FAR);

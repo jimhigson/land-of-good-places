@@ -16,6 +16,8 @@ export interface FrameContext {
   readonly input: InputSystem;
   /** Where the player is right now — handy for LOD, shadows and proximity. */
   readonly playerPosition: Vector3;
+  /** Ground-plane direction the camera is looking, i.e. "up the screen". */
+  readonly cameraForward: Readonly<Vector3>;
   /** Frame counter, useful for "do this every N frames" work. */
   readonly frame: number;
 }
