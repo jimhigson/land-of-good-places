@@ -37,12 +37,41 @@ or typecheck stops the deploy, so `main` only ever ships something that builds.
 The site is served from the root of a `workers.dev` URL, which keeps things
 simple for the PWA that's coming later.
 
+### Secrets
+
 Deploys need two repository secrets:
 
-| Secret                  | What it is                                        |
-| ----------------------- | ------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account to deploy into              |
-| `CLOUDFLARE_API_TOKEN`  | Token with the **Edit Cloudflare Workers** template |
+| Secret                  | What it is                                          | Set? |
+| ----------------------- | --------------------------------------------------- | ---- |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account to deploy into                | yes  |
+| `CLOUDFLARE_API_TOKEN`  | Token with the **Edit Cloudflare Workers** template  | no   |
 
-To deploy by hand from a laptop instead: `npm run build && npx wrangler deploy`
-(after `npx wrangler login`).
+To add the token: create it at
+<https://dash.cloudflare.com/profile/api-tokens> (Create Token → **Edit
+Cloudflare Workers** template → Account = your account → Create), then:
+
+```sh
+gh secret set CLOUDFLARE_API_TOKEN --repo jimhigson/land-of-good-places
+```
+
+### Deploying by hand
+
+```sh
+npm run build
+npx wrangler login                       # once, opens a browser
+npx wrangler deploy                      # uses wrangler.jsonc
+```
+
+Or with a token instead of a browser login — handy for scripts and agents:
+
+```sh
+npm run build
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler deploy
+```
+
+With no Cloudflare credentials at all you can still put a build online, on a
+throwaway preview account that prints a claim URL:
+
+```sh
+npx wrangler deploy dist --temporary --name land-of-good-places
+```

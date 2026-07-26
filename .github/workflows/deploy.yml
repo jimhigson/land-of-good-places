@@ -30,12 +30,25 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # Registry hiccups are common enough to be worth retrying.
+        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
 
       - name: Build
         run: npm run build
 
+      # `wrangler deploy` is idempotent, so a flaky-network failure is safe to
+      # retry: attempt 2 only runs if attempt 1 failed.
       - name: Deploy to Cloudflare Workers
+        id: deploy
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Deploy to Cloudflare Workers (retry)
+        if: steps.deploy.outcome == 'failure'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
