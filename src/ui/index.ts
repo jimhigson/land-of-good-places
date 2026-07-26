@@ -1,4 +1,5 @@
 export { Hud } from './Hud';
+export { DevBadge } from './DevBadge';
 export { ShopPanel, type ShopPanelContent, type ShopPanelItem } from './ShopPanel';
 export { InventoryDrawer } from './InventoryDrawer';
 export { CuteODex } from './CuteODex';

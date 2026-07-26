@@ -78,17 +78,8 @@ function buildFoliage(collision: CollisionWorld): Group {
   const roundCanopies: InstanceItem[] = [];
   const coneCanopies: InstanceItem[] = [];
   const bushes: InstanceItem[] = [];
-  const flowers: InstanceItem[] = [];
 
   const canopyGreens = [PALETTE.leafMid, PALETTE.leafLight, PALETTE.leafDeep, PALETTE.leafBlue];
-  const flowerColours = [
-    PALETTE.flowerYellow,
-    PALETTE.flowerRed,
-    PALETTE.flowerBlue,
-    PALETTE.flowerViolet,
-    PALETTE.blossomPink,
-    PALETTE.blossomWhite,
-  ];
 
   // --- trees ---------------------------------------------------------------
   let attempts = 0;
@@ -213,44 +204,9 @@ function buildFoliage(collision: CollisionWorld): Group {
     bushCount += 1;
   }
 
-  // --- flowers -------------------------------------------------------------
-  // Purely decorative, no collision: you can trot straight through them.
-  // Each is a squashed bloom sitting on a short stem — from the isometric
-  // camera you mostly see them from above, so a flattened dome reads as a
-  // flower head far better than a ball floating in the grass would.
-  const stems: InstanceItem[] = [];
-  let flowerCount = 0;
-  attempts = 0;
-  while (flowerCount < 430 && attempts < 7600) {
-    attempts += 1;
-    const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 55;
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    if (isOnPath(x, z, 0.5)) continue;
-    if (insideAnyAnchor(x, z, 0.5)) continue;
-
-    const ground = terrainHeight(x, z);
-    const width = rng.range(0.16, 0.26);
-    const stemHeight = rng.range(0.16, 0.3);
-    const rotationY = rng.range(0, TAU);
-
-    stems.push({
-      position: new Vector3(x, ground + stemHeight / 2, z),
-      scale: new Vector3(1, stemHeight, 1),
-      rotationY,
-      colour: PALETTE.leafDeep,
-      shade: rng.range(0.9, 1.1),
-    });
-    flowers.push({
-      position: new Vector3(x, ground + stemHeight, z),
-      scale: new Vector3(width, width * 0.5, width),
-      rotationY,
-      colour: rng.pick(flowerColours),
-      shade: 1,
-    });
-    flowerCount += 1;
-  }
+  // Flowers used to be scattered here too, as static decoration. They are now
+  // a living, pickable population — see `world/Flowers.ts` — built and owned
+  // separately so this file stays about the things that never move.
 
   const trunkGeometry = new CylinderGeometry(0.19, 0.3, 1, 8);
   const canopyGeometry = new IcosahedronGeometry(1, 2);
@@ -258,16 +214,12 @@ function buildFoliage(collision: CollisionWorld): Group {
   // Subdivision 2 rather than 1: still faceted enough to look hand-made, but
   // rounded rather than spiky — a bush, not a lump of quartz.
   const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
-  const flowerGeometry = new SphereGeometry(1, 7, 5);
-  const stemGeometry = new CylinderGeometry(0.02, 0.028, 1, 4);
 
   group.add(
     makeInstanced('tree-trunks', trunkGeometry, foliageMaterial(0.95), trunks, true),
     makeInstanced('tree-canopies', canopyGeometry, foliageMaterial(0.85), roundCanopies, true),
     makeInstanced('tree-cones', coneGeometry, foliageMaterial(0.85), coneCanopies, true),
     makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true),
-    makeInstanced('flower-stems', stemGeometry, foliageMaterial(0.9), stems, false),
-    makeInstanced('flowers', flowerGeometry, foliageMaterial(0.7), flowers, false),
   );
 
   return group;
@@ -451,7 +403,9 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
       group.add(cap);
     }
 
-    collision.addWall(x1, z1, x2, z2, 0.22);
+    // Real wall height, not the `Infinity` default — this is what lets a jump
+    // clear a low or mid wall while a tall one still stops you (Collision.ts).
+    collision.addWall(x1, z1, x2, z2, 0.22, run.height);
   }
 
   return group;
@@ -531,7 +485,8 @@ function buildStoneWalls(collision: CollisionWorld): Group {
       });
     }
 
-    collision.addWall(x1, z1, x2, z2, 0.34);
+    // Real wall height, not the `Infinity` default — see the wooden walls above.
+    collision.addWall(x1, z1, x2, z2, 0.34, run.height);
   }
 
   group.add(

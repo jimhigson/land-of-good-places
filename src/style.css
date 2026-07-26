@@ -135,6 +135,73 @@ body {
   transform: translateY(6px);
 }
 
+/* The "?" that reveals the controls hint. Small and circular on purpose — the
+   hint text used to sit on screen all the time, which is a lot of real estate
+   for something a child reads once and never again. */
+.hint-toggle {
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-cream) 150%);
+  border: 3px solid #fff;
+  box-shadow: var(--lgp-shadow);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.hint-toggle:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.18);
+}
+
+/* One gentle "look, I'm here" on first load — finite, so it never nags. */
+.hint-toggle.is-new {
+  animation: hint-toggle-pulse 700ms ease-in-out 2;
+  animation-delay: 700ms;
+}
+
+@keyframes hint-toggle-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.16);
+  }
+}
+
+/* The hint panel itself: an overlay anchored just above the toggle, so
+   opening it never reflows the other pills. */
+.hint-panel {
+  position: absolute;
+  left: calc(16px + env(safe-area-inset-left));
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  max-width: min(80vw, 460px);
+  transform-origin: left bottom;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.hint-panel[data-open='false'] {
+  opacity: 0;
+  transform: translateY(8px) scale(0.94);
+  pointer-events: none;
+}
+
+.hint-panel[data-open='true'] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
 kbd {
   font-family: inherit;
   font-size: 12px;

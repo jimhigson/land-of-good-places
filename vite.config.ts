@@ -47,7 +47,7 @@ export default defineConfig({
       manifest: {
         name: 'Land of Good Places',
         short_name: 'Good Places',
-        description: 'A cute, cosy theme park designed by Eleri (age 6) and her dad.',
+        description: 'A cute, cosy theme park. By Eleri age 6, and Jim age 44.',
         lang: 'en-GB',
         display: 'standalone',
         // Phones get held whichever way round; the camera copes with both.
