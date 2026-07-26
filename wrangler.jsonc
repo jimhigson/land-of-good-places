@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "land-of-good-places",
+  "compatibility_date": "2026-07-26",
+  // Assets-only Worker: there is no `main` script, Cloudflare just serves the
+  // Vite build output from the edge. Served at the root of the workers.dev
+  // subdomain, which keeps PWA scope simple (no /repo-name/ sub-path).
+  "assets": {
+    "directory": "./dist",
+    // The game is a single page; unknown paths fall back to index.html.
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
