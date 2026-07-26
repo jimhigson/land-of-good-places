@@ -6,3 +6,5 @@ export { CuteODex } from './CuteODex';
 export { playOpenChime, playPurchaseChime, playSurpriseChime } from './chime';
 export { NameLabel } from './NameLabel';
 export { TouchControls } from './TouchControls';
+export { WhatsNew, type WhatsNewEntry } from './WhatsNew';
+export { UpdateToast } from './UpdateToast';
