@@ -15,15 +15,52 @@ import {
 /**
  * The player kid — Eleri by default.
  *
- * This is the toon restyle of `src/entities/CharacterModel.ts`. Proportions are
- * unchanged (1.86 m total, head 47% of height) because the camera, the collision
- * radius and the name-label height are all tuned to them. What changes is the
- * surface: toon material, painted face patch instead of sphere eyes, coloured
- * ink outlines, and a little backpack so the "cute things peek out of your bag"
- * feature has somewhere to live.
+ * This is the toon restyle of `src/entities/CharacterModel.ts`: toon material,
+ * painted face patch instead of sphere eyes, coloured ink outlines, and a little
+ * backpack so the "cute things peek out of your bag" feature has somewhere to
+ * live.
+ *
+ * **Cartoon pass (26 July 2026).** The family asked for heads about double the
+ * size. The head is authored at {@link HEAD} × the original: 1.5 linear, which
+ * is 2.25× the area it covers on screen — that is what "double" looks like once
+ * it is rendered. The body was *shortened* rather than left alone, so the kid
+ * only grew from 1.86 m to 2.12 m and the head went from 45% of her height to
+ * 59%. Shortening matters: a big head on a full-length body reads as a medical
+ * problem, a big head on a stumpy body reads as a toy.
  *
  * Every colour is a constructor option so the character creator can drive it.
  */
+
+/**
+ * How much bigger the head is than the original authoring.
+ *
+ * Every number inside the `head` group is written as `x * HEAD`, so this is the
+ * one knob. Face patches, hair, ears and the hat anchor all ride along, which is
+ * the whole reason the face is painted onto a patch sized from `skullR`.
+ */
+const HEAD = 1.5;
+
+/**
+ * Height of the head pivot above the feet, in metres.
+ *
+ * Exported because the player's animator nudges `head.position.y` for secondary
+ * motion and has to know what to nudge it *around*. It used to hard-code 1.34.
+ */
+export const KID_HEAD_HEIGHT = 1.36;
+
+/** Total height in metres, measured to the top of the hair. */
+export const KID_HEIGHT = 2.12;
+
+/**
+ * How far the head is tipped back, in radians (≈ 10°).
+ *
+ * The game camera looks down at 38°. A head this big, sitting level, presents
+ * the player with the top of a hairstyle; tipping it back brings the face — and
+ * therefore the eyes, which are 80% of the cuteness — back into view. It also
+ * reads as a chin-up, pleased-with-itself pose, which is no bad thing.
+ */
+const HEAD_TILT = 0.17;
+
 export interface KidOptions {
   skin?: number;
   hair?: number;
@@ -79,36 +116,44 @@ export function createKid(options: KidOptions = {}): KidHandle {
   const limbs = makeLimbs();
 
   // --- torso -------------------------------------------------------------------
-  const torso = stub(0.31, 0.26, outfitMat);
-  torso.position.y = 0.66;
+  // Short and wide. Under a head this big the torso is a dumpling, not a trunk:
+  // 0.80 m tall where it used to be 0.88, and the top 0.27 m of it disappears up
+  // inside the skull, which is exactly what hides the neck.
+  const torso = stub(0.325, 0.15, outfitMat);
+  torso.position.y = 0.6;
   torso.scale.set(1.06, 1, 0.92);
   body.add(torso);
   addOutline(torso, 0.02);
 
-  const collar = solid(new Mesh(new TorusGeometry(0.24, 0.055, 8, 22), outfitDarkMat));
+  // Neckline. Sits just *below* the bottom of the skull — any higher and the
+  // head swallows it whole and the jumper appears to have no opening.
+  const collar = solid(new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat));
   collar.rotation.x = Math.PI / 2;
-  collar.position.y = 0.94;
+  collar.position.y = 0.71;
   body.add(collar);
 
   // Skirt hem — a flared ring that stops the torso reading as a plain pill.
-  const hem = solid(new Mesh(new TorusGeometry(0.29, 0.075, 8, 24), outfitDarkMat));
+  const hem = solid(new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat));
   hem.rotation.x = Math.PI / 2;
-  hem.position.y = 0.44;
+  hem.position.y = 0.4;
   hem.scale.set(1.06, 1.06, 0.7);
   body.add(hem);
 
   // --- arms ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftArm : limbs.rightArm;
-    pivot.position.set(side * 0.34, 0.86, 0);
+    // Shoulders set wide and low so the arms swing clear of the skull, and wider
+    // than the skirt hem (0.32) so the hands are not swallowed by it — with a
+    // torso this short, an arm tucked inside the silhouette simply disappears.
+    pivot.position.set(side * 0.38, 0.72, 0);
     body.add(pivot);
 
-    const upper = stub(0.105, 0.2, outfitMat);
-    upper.position.y = -0.16;
+    const upper = stub(0.105, 0.16, outfitMat);
+    upper.position.y = -0.14;
     pivot.add(upper);
 
-    const hand = blob(0.125, skinMat, [1, 1, 1], 18);
-    hand.position.y = -0.34;
+    const hand = blob(0.135, skinMat, [1, 1, 1], 18);
+    hand.position.y = -0.32;
     pivot.add(hand);
     addOutline(hand, 0.012);
   }
@@ -120,16 +165,17 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // --- legs ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftLeg : limbs.rightLeg;
-    pivot.position.set(side * 0.15, 0.42, 0);
+    pivot.position.set(side * 0.155, 0.36, 0);
     body.add(pivot);
 
-    const leg = stub(0.115, 0.12, skinMat);
-    leg.position.y = -0.14;
+    const leg = stub(0.12, 0.1, skinMat);
+    leg.position.y = -0.1;
     pivot.add(leg);
 
-    // Big round shoes. Oversized feet read as "toy" from the iso camera.
-    const foot = blob(0.17, shoeMat, [1, 0.78, 1.28], 18);
-    foot.position.set(0, -0.3, 0.04);
+    // Big round shoes. Oversized feet read as "toy" from the iso camera — and
+    // they carry even more weight now, because they are most of the body.
+    const foot = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
+    foot.position.set(0, -0.22, 0.045);
     pivot.add(foot);
     addOutline(foot, 0.014);
   }
@@ -137,89 +183,111 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // --- backpack -------------------------------------------------------------------
   const backpackAnchor = new Group();
   if (backpack) {
-    const bag = solid(new Mesh(new RoundedBoxGeometry(0.34, 0.34, 0.2, 5, 0.09), bagMat));
-    bag.position.set(0, 0.72, -0.3);
+    // Dropped and pushed back so it still clears the underside of the skull —
+    // the head now overhangs to z = -0.65, and a bag tucked under it vanishes.
+    const bag = solid(new Mesh(new RoundedBoxGeometry(0.36, 0.32, 0.2, 5, 0.09), bagMat));
+    bag.position.set(0, 0.56, -0.32);
     body.add(bag);
     addOutline(bag, 0.016);
 
-    const flap = solid(new Mesh(new RoundedBoxGeometry(0.3, 0.14, 0.17, 4, 0.06), bagDarkMat));
-    flap.position.set(0, 0.86, -0.32);
+    const flap = solid(new Mesh(new RoundedBoxGeometry(0.32, 0.14, 0.17, 4, 0.06), bagDarkMat));
+    flap.position.set(0, 0.69, -0.34);
     body.add(flap);
 
     for (const side of [-1, 1] as const) {
-      const strap = solid(new Mesh(new RoundedBoxGeometry(0.07, 0.42, 0.08, 3, 0.03), bagDarkMat));
-      strap.position.set(side * 0.17, 0.8, -0.14);
+      const strap = solid(new Mesh(new RoundedBoxGeometry(0.07, 0.36, 0.08, 3, 0.03), bagDarkMat));
+      strap.position.set(side * 0.17, 0.64, -0.16);
       strap.rotation.x = -0.12;
       body.add(strap);
     }
 
-    backpackAnchor.position.set(0, 0.92, -0.28);
+    backpackAnchor.position.set(0, 0.74, -0.3);
     body.add(backpackAnchor);
   }
 
   // --- head --------------------------------------------------------------------
+  // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
+  // 1.36 rather than up by half the extra radius, because the head is meant to
+  // sit ON the shoulders like a snowman's — a big head on a visible neck wobbles.
   const head = new Group();
-  head.position.y = 1.34;
+  head.position.y = KID_HEAD_HEIGHT;
   body.add(head);
 
-  const skullR = 0.44;
-  const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 34);
-  head.add(skull);
-  addOutline(skull, 0.018);
+  // Everything visible hangs off `crown`, which is tilted back a few degrees so
+  // the face still points at the ISO CAMERA rather than at the grass. From 38°
+  // above, an untilted head this large shows the player nothing but hair.
+  const crown = new Group();
+  crown.rotation.x = -HEAD_TILT;
+  head.add(crown);
+
+  const skullR = 0.44 * HEAD;
+  const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 38);
+  crown.add(skull);
+  addOutline(skull, 0.02);
 
   const hatAnchor = new Group();
-  hatAnchor.position.set(0, 0.42, 0);
-  head.add(hatAnchor);
+  hatAnchor.position.set(0, 0.42 * HEAD, 0);
+  crown.add(hatAnchor);
 
   // Hair shell over the crown and back.
   // Hair shell: stops well ABOVE the eye line. Every extra degree of theta here
   // eats forehead, and a character with no forehead has nowhere to put big eyes.
   const cap = solid(
-    new Mesh(new SphereGeometry(0.455, 30, 22, 0, Math.PI * 2, 0, Math.PI * 0.46), hairMat),
+    new Mesh(
+      new SphereGeometry(0.455 * HEAD, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.46),
+      hairMat,
+    ),
   );
   cap.scale.set(1, 1.02, 1);
-  cap.position.y = 0.035;
+  cap.position.y = 0.035 * HEAD;
   cap.rotation.x = -0.05;
-  head.add(cap);
-  addOutline(cap, 0.016);
+  crown.add(cap);
+  addOutline(cap, 0.018);
 
   // Fringe: high and shallow, a suggestion of a sweep rather than a curtain.
-  const fringe = blob(0.17, hairMat, [1.3, 0.34, 0.48], 18);
-  fringe.position.set(0, 0.305, 0.29);
-  head.add(fringe);
+  const fringe = blob(0.17 * HEAD, hairMat, [1.3, 0.34, 0.48], 18);
+  fringe.position.set(0, 0.305 * HEAD, 0.29 * HEAD);
+  crown.add(fringe);
 
   if (hairStyle !== 'short') {
     for (const side of [-1, 1] as const) {
       const long = hairStyle === 'bob';
-      const bunch = blob(long ? 0.19 : 0.17, hairMat, long ? [0.82, 1.5, 0.9] : [0.9, 1.15, 0.9], 18);
-      bunch.position.set(side * 0.42, long ? -0.1 : 0.04, -0.12);
-      head.add(bunch);
-      addOutline(bunch, 0.013);
+      const bunch = blob(
+        (long ? 0.19 : 0.17) * HEAD,
+        hairMat,
+        long ? [0.82, 1.5, 0.9] : [0.9, 1.15, 0.9],
+        18,
+      );
+      bunch.position.set(side * 0.42 * HEAD, (long ? -0.1 : 0.04) * HEAD, -0.12 * HEAD);
+      crown.add(bunch);
+      addOutline(bunch, 0.014);
 
       if (!long) {
-        const bobble = solid(new Mesh(new TorusGeometry(0.085, 0.033, 8, 18), bobbleMat));
+        const bobble = solid(
+          new Mesh(new TorusGeometry(0.085 * HEAD, 0.033 * HEAD, 8, 18), bobbleMat),
+        );
         bobble.rotation.y = Math.PI / 2;
-        bobble.position.set(side * 0.44, 0.14, -0.12);
-        head.add(bobble);
+        bobble.position.set(side * 0.44 * HEAD, 0.14 * HEAD, -0.12 * HEAD);
+        crown.add(bobble);
       } else {
-        const tie = solid(new Mesh(new TorusGeometry(0.1, 0.03, 8, 18), bobbleMat));
+        const tie = solid(new Mesh(new TorusGeometry(0.1 * HEAD, 0.03 * HEAD, 8, 18), bobbleMat));
         tie.rotation.y = Math.PI / 2;
-        tie.position.set(side * 0.43, -0.2, -0.12);
-        head.add(tie);
+        tie.position.set(side * 0.43 * HEAD, -0.2 * HEAD, -0.12 * HEAD);
+        crown.add(tie);
       }
     }
   }
 
   for (const side of [-1, 1] as const) {
-    const ear = decal(blob(0.085, skinMat, [0.55, 1, 0.85], 12));
-    ear.position.set(side * 0.42, -0.04, 0.02);
-    head.add(ear);
+    const ear = decal(blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12));
+    ear.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
+    crown.add(ear);
   }
 
   // Small tuft at the back so the head is not a perfect ball in silhouette.
-  const tuft = decal(blob(0.13, hairDarkMat, [1, 0.7, 0.8], 14));
-  tuft.position.set(0, 0.16, -0.4);
-  head.add(tuft);
+  const tuft = decal(blob(0.13 * HEAD, hairDarkMat, [1, 0.7, 0.8], 14));
+  tuft.position.set(0, 0.16 * HEAD, -0.4 * HEAD);
+  crown.add(tuft);
 
   // --- face ------------------------------------------------------------------
   const face = createFacePatch({
@@ -241,7 +309,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     blushR: 0.1,
   });
   face.mesh.scale.set(1, 0.95, 0.98);
-  head.add(face.mesh);
+  crown.add(face.mesh);
 
   return {
     root,
@@ -251,7 +319,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hatAnchor,
     holdAnchor,
     backpackAnchor,
-    height: 1.86,
+    height: KID_HEIGHT,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
     setSkinColour: (colour: number) => skinMat.color.setHex(colour),

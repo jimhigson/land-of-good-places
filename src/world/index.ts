@@ -8,6 +8,18 @@ export { terrainHeight, terrainNormal, groundPoint } from './terrain';
 export { distanceToPath, isOnPath } from './paths';
 export { pickInteractZone, ZONE_HEIGHT_TOLERANCE, type InteractZone } from './interact';
 export {
+  EGG_PRIZES,
+  SHOP_ITEMS,
+  Shops,
+  eggPrize,
+  itemsForShop,
+  rainbowFlossAvailable,
+  shopItem,
+  type ShopId,
+  type ShopItem,
+  type ShopStand,
+} from './building';
+export {
   ANCHORS,
   ANCHORS_BY_ID,
   anchorGroupName,

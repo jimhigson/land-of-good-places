@@ -93,8 +93,11 @@ function buildFoliage(collision: CollisionWorld): Group {
   // --- trees ---------------------------------------------------------------
   let attempts = 0;
   let treeCount = 0;
-  const targetTrees = 58;
-  while (treeCount < targetTrees && attempts < 4000) {
+  // Counts went up with the cartoon pass: the camera now shows about half the
+  // ground it used to, so the old scatter left the near view looking bare. These
+  // are all InstancedMesh, so the extra plants cost vertices and nothing else.
+  const targetTrees = 72;
+  while (treeCount < targetTrees && attempts < 5200) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
@@ -178,7 +181,7 @@ function buildFoliage(collision: CollisionWorld): Group {
   // --- bushes --------------------------------------------------------------
   let bushCount = 0;
   attempts = 0;
-  while (bushCount < 84 && attempts < 4000) {
+  while (bushCount < 108 && attempts < 5200) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 55;
@@ -191,7 +194,7 @@ function buildFoliage(collision: CollisionWorld): Group {
     const colour = rng.pick(canopyGreens);
     const y = terrainHeight(x, z);
     for (let i = 0; i < blobs; i += 1) {
-      const radius = rng.range(0.62, 1.15);
+      const radius = rng.range(0.7, 1.3);
       const offset = rng.range(0, TAU);
       const spread = i === 0 ? 0 : rng.range(0.4, 0.85);
       bushes.push({
@@ -218,7 +221,7 @@ function buildFoliage(collision: CollisionWorld): Group {
   const stems: InstanceItem[] = [];
   let flowerCount = 0;
   attempts = 0;
-  while (flowerCount < 340 && attempts < 6000) {
+  while (flowerCount < 430 && attempts < 7600) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 55;

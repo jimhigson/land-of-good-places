@@ -147,11 +147,36 @@ export const CAMERA_PITCH_DEGREES = 38;
 /** Starting compass rotation in degrees (45° gives the classic iso diamond). */
 export const CAMERA_YAW_DEGREES = 45;
 
-/** Vertical world-units visible at default zoom (orthographic frustum height). */
-export const CAMERA_VIEW_HEIGHT = 22;
+/**
+ * Vertical world-units visible at default zoom (orthographic frustum height).
+ *
+ * Was 22, which put a 1.86 m character at 8% of the screen — the park read as a
+ * plain with a speck in it, and the family said so. At 15 the (now 2.12 m) kid
+ * fills about 14% of the height, the fountain and the nearest walls are properly
+ * in shot, and you can see the paint on things. Anything below about 13 and the
+ * building stops fitting on screen when you walk up to it.
+ */
+export const CAMERA_VIEW_HEIGHT = 15;
 
-export const CAMERA_ZOOM_MIN = 0.55;
-export const CAMERA_ZOOM_MAX = 1.9;
+/**
+ * The narrowest the view is ever allowed to get, in world metres across.
+ *
+ * The frustum is driven by its *height*, so on a portrait phone (aspect ≈ 0.46)
+ * the width falls out at less than half of it — at CAMERA_VIEW_HEIGHT alone a
+ * phone would see under 7 m of park and the player would be walking down a
+ * letterbox. This is a floor, not a target: on any landscape screen the height
+ * already wins and this number does nothing.
+ */
+export const CAMERA_MIN_VIEW_WIDTH = 11;
+
+/**
+ * Zoom bounds. Rebalanced around the closer default: the old 0.55 floor now
+ * means "a bit further out", so it drops to 0.42 to keep a proper overview, and
+ * the ceiling rises because a close-up of a character is worth having now that
+ * there is something to look at up close.
+ */
+export const CAMERA_ZOOM_MIN = 0.42;
+export const CAMERA_ZOOM_MAX = 2.4;
 export const CAMERA_ZOOM_STEP = 0.16;
 
 /** Distance the camera sits back from its target (affects clipping only). */
@@ -188,8 +213,14 @@ export const MAX_PIXEL_RATIO = 2;
 
 export const SHADOW_MAP_SIZE = 2048;
 
-/** Half-extent of the sun's shadow frustum; it follows the player. */
-export const SHADOW_AREA = 34;
+/**
+ * Half-extent of the sun's shadow frustum; it follows the player.
+ *
+ * Tightened from 34 alongside the closer camera. The same 2048² map now covers
+ * 52 m instead of 68, so every shadow edge in shot got about 30% crisper for
+ * free — which matters more now that you can see individual toys.
+ */
+export const SHADOW_AREA = 26;
 
 /**
  * Strength of the cool fill light, as a fraction of the key.

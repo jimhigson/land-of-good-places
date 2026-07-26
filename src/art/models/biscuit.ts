@@ -18,7 +18,15 @@ import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/
  * WIDE apart on top of the skull (close-set ears look like a cat), a button
  * nose, and short stubby arms held slightly out from the body — a teddy that
  * hangs its arms straight down looks sad.
+ *
+ * **Cartoon pass (26 July 2026).** Head authored at {@link HEAD} × the original,
+ * which puts the skull at 65% of his height. The muzzle and its mouth patch ride
+ * along, because a doubled skull with the original snout turns a teddy into a
+ * pug.
  */
+
+/** Head scale-up over the original authoring. The one knob for Biscuit's skull. */
+const HEAD = 1.32;
 export interface BiscuitHandle extends CreatureHandle {
   /** Recolours the jumper — the hat/clothes shop will want this. */
   setJumperColour(colour: number): void;
@@ -120,10 +128,10 @@ export function createBiscuit(): BiscuitHandle {
 
   // --- head --------------------------------------------------------------------
   const head = new Group();
-  head.position.y = 0.66;
+  head.position.y = 0.74;
   body.add(head);
 
-  const skullR = 0.29;
+  const skullR = 0.29 * HEAD;
   const skull = blob(skullR, fur, [1.06, 0.98, 1], 32);
   head.add(skull);
   addOutline(skull, 0.014);
@@ -131,27 +139,27 @@ export function createBiscuit(): BiscuitHandle {
   // Ears: wide apart, flattened, pink inside.
   for (const side of [-1, 1] as const) {
     const ear = new Group();
-    ear.position.set(side * 0.245, 0.19, -0.02);
+    ear.position.set(side * 0.245 * HEAD, 0.19 * HEAD, -0.02 * HEAD);
     ear.rotation.z = side * 0.22;
     head.add(ear);
 
-    const shell = blob(0.098, fur, [1, 1, 0.62], 18);
+    const shell = blob(0.098 * HEAD, fur, [1, 1, 0.62], 18);
     ear.add(shell);
     addOutline(shell, 0.012);
 
-    const inner = decal(blob(0.06, innerEar, [1, 1, 0.5], 14));
-    inner.position.z = 0.035;
+    const inner = decal(blob(0.06 * HEAD, innerEar, [1, 1, 0.5], 14));
+    inner.position.z = 0.035 * HEAD;
     ear.add(inner);
   }
 
   // Muzzle: sticks out a good way. It is what makes a bear a bear.
-  const muzzle = blob(0.135, muzzleMat, [1.18, 0.86, 0.86], 22);
-  muzzle.position.set(0, -0.09, 0.235);
+  const muzzle = blob(0.135 * HEAD, muzzleMat, [1.18, 0.86, 0.86], 22);
+  muzzle.position.set(0, -0.09 * HEAD, 0.235 * HEAD);
   head.add(muzzle);
   addOutline(muzzle, 0.011);
 
-  const nose = solid(blob(0.05, noseMat, [1.25, 0.9, 0.85], 16));
-  nose.position.set(0, 0.035, 0.115);
+  const nose = solid(blob(0.05 * HEAD, noseMat, [1.25, 0.9, 0.85], 16));
+  nose.position.set(0, 0.035 * HEAD, 0.115 * HEAD);
   muzzle.add(nose);
   addOutline(nose, 0.008);
 
@@ -168,7 +176,7 @@ export function createBiscuit(): BiscuitHandle {
   });
   const mouthPatch = decal(
     new Mesh(
-      facePatchGeometry(0.135 * 1.035, 1.7, 1.7, 0.18),
+      facePatchGeometry(0.135 * HEAD * 1.035, 1.7, 1.7, 0.18),
       toonMaterial(0xffffff, { map: mouthTexture, transparent: true }),
     ),
   );
@@ -180,7 +188,7 @@ export function createBiscuit(): BiscuitHandle {
     radius: skullR,
     spreadX: 1.8,
     spreadY: 1.8,
-    tilt: 0.02,
+    tilt: 0.12,
     size: 512,
     eyeY: 0.4,
     eyeGap: 0.46,
@@ -200,7 +208,7 @@ export function createBiscuit(): BiscuitHandle {
     body,
     head,
     limbs,
-    height: 0.96,
+    height: 1.15,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.6, 0.05),
     setJumperColour: (colour: number) => {

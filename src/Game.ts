@@ -10,6 +10,7 @@ import { Sky, World } from './world';
 import { Player, TapNavigator } from './entities';
 import { Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
+import { Shopping } from './Shopping';
 import { gameStore } from './state';
 
 /**
@@ -39,6 +40,7 @@ export class Game {
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
+  readonly shopping: Shopping;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -90,6 +92,12 @@ export class Game {
       stalls: this.world.stalls.stalls,
       touch: isTouchDevice(),
     });
+
+    // Shops: the join between the shop geometry, the purchase panel and the
+    // store. Registered as a system so it updates after the world, which is
+    // where the player's position for this frame has just been settled.
+    this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
+    this.addSystem(this.shopping);
 
     this.frameContext = {
       dt: 0,
@@ -148,7 +156,12 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    if (this.input.justPressed('menu')) gameStore.setPaused(!gameStore.get().paused);
+    // While a shop or the backpack is open, Escape belongs to it — see
+    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
+    // park behind it.
+    if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+      gameStore.setPaused(!gameStore.get().paused);
+    }
 
     // Mini-games run on the loop's real delta, not the frame context's: the
     // context's is about to be zeroed by the very freeze they ask for.

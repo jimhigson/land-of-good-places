@@ -66,6 +66,11 @@ A **ginormous slide** runs from the very top floor all the way down into the
 garden, where you land in a pit of **squishy balls**. If you're too scared to
 go alone, a **grown-up can ride down with you**.
 
+**Ball pit physics (family spec, 26 July 2026):** real simple physics —
+**AABB-only collision detection, simple forces, MTV-based collision
+resolution** — and **at least 4× the original ball count** (190 → 800+).
+Balls shove each other aside, pile up, and scatter properly when you land.
+
 ### Scenery
 
 - **Wooden walls at various heights** to run around and hide behind
@@ -128,6 +133,40 @@ big water guns**. When you splash someone:
 - Splashed kids get funny **drippy soaked hair** for a moment
 - When lots of water flies, a little **rainbow** appears
 
+## The park is full of children (NPCs)
+
+The park should feel **alive and busy**: lots of other children wander it
+doing everything the player can do — riding the rides (dodgem drivers,
+ferris wheel passengers, slide riders), browsing and buying in shops,
+carrying balloons and candy floss, walking pets, splashing in water fights,
+hopping about. They're generated cute kids (same character system as the
+player, varied colours/hair/hats).
+
+**Design note for the future:** these NPCs may later be replaced by real
+networked players, so their control layer should be cleanly separated
+(an NPC is "a character driven by a behaviour script"; a networked player
+would be "a character driven by a remote input stream"). Build characters
+so the driver is swappable.
+
+## Fairground stalls: mini-games
+
+Dotted around the park are **fun-fair stalls** that open interactive
+sub-games. Each mini-game lives in **its own little world** — not the
+global park space — usually a 2D-style playfield rendered with the 3D
+engine (side-on or similar), so each game can look and play however it
+likes. Walk up / tap a stall to play; leaving returns you to the park.
+
+### Mini-game 1: the rail racer
+
+- You ride along a **rail**, racing others.
+- **Hold one button to accelerate; let go to coast** — you must release
+  at the right moments to get safely past hazards.
+- It's a race, but **not too difficult** — cheerful, forgiving, fun.
+- Side-view 2D-style world, rendered in 3D, own colours and scenery.
+
+(More stall games to come — the stall system should make adding new
+mini-games easy.)
+
 ## Collecting cute things
 
 Every cute thing you buy or find:
@@ -145,6 +184,8 @@ Every cute thing you buy or find:
 - **RiPika roams the park** — spot it running around; wave and it bursts into
   confetti sparks
 - **Photo mode** — a camera button that snaps you and your toys in a cute frame
+- **Rainbow hop** — a rainbow effect radiates out from the player whenever
+  they jump
 
 ## Mayhem mode (for grown-ups)
 
@@ -195,6 +236,28 @@ Rough order of construction, each step playable:
     the family plays on phones during the day. Tap-to-move touch controls
     (tap a spot to walk there, tap objects to interact) and PWA
     manifest/service worker for full-screen play on phones
+12. **Fairground stalls & mini-games** — the stall framework (enter/leave a
+    self-contained mini-game world) plus the first game: the one-button
+    rail racer
+
+## Design feedback from the family (26 July 2026) — to implement
+
+1. **Bigger heads:** character heads should be roughly **double** their
+   current size — more cartoonish. (Updates the ART_DIRECTION proportion
+   rules; applies to all characters.)
+2. **The world should feel closer:** characters currently read too small
+   against the space. Make most items larger / bring the camera closer so
+   the scene feels full and near, not a tiny figure in a big empty park.
+   Tune by eye against screenshots.
+3. **Stairs are a ride, not a challenge:** tapping stairs opens a small
+   menu — "Climb" or "Descend". Choosing one auto-walks the character up or
+   down while the game speeds up (fast-forward) so they arrive quickly. No
+   precise stair movement ever needed.
+4. **The building is bigger on the inside** (like many classic games —
+   strict physics need not apply): the interior is its OWN space, not
+   continuous with the outside world. Enter through the door → transition
+   to a roomy interior that can be far larger than the exterior shell.
+5. **The top floor is the roof** — actually outdoors, open to the sky.
 
 ## Deployment
 
