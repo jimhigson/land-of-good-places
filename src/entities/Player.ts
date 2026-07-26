@@ -23,7 +23,20 @@ import { gameStore } from '../state';
 /** Extra speed multiplier while the sprint action is held. */
 const SPRINT_MULTIPLIER = 1.5;
 
-const JUMP_SPEED = 5.4;
+/**
+ * Tuned so the jump clears the low and mid garden walls but not the tall
+ * ones (design feedback #10 — "jump over walls").
+ *
+ * Wooden + stone wall heights across the garden (`Scenery.ts`), sorted:
+ * 0.7, 0.7, 0.85, 0.85, 0.95, 0.95, 0.95, 1.15, 1.2, 1.2, 1.25, 1.4 | 1.5,
+ * 1.75, 1.8, 2.1, 2.3, 2.6 — the lower two-thirds (12 of 18) top out at 1.4 m,
+ * the tallest third starts at 1.5 m. `JUMP_SPEED` gives an apex of
+ * `JUMP_SPEED² / (2·GRAVITY)` ≈ 1.28 m; added to `JUMP_CLEARANCE_GRACE` in
+ * `Collision.ts` (0.15 m) that is 1.43 m of clearance — comfortably over every
+ * wall ≤ 1.4 m, comfortably short of every wall ≥ 1.5 m. Buildings and tree
+ * trunks stay `Infinity` (unjumpable) — see `Collision.ts`.
+ */
+const JUMP_SPEED = 6.6;
 const GRAVITY = 17;
 
 /** Drop further than this below the surface under your feet and you fall. */
@@ -94,6 +107,16 @@ export class Player implements GameSystem {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * How high the feet are above the local ground right now — 0 while
+   * walking, positive mid-jump. Fed into `collision.resolve` as `clearance`
+   * so a jump can sail over a low wall (see `Collision.ts`); one frame stale
+   * by construction (this frame's value is only known after this frame's
+   * collision pass), which is well inside `JUMP_CLEARANCE_GRACE`.
+   */
+  private hopClearance = 0;
+  /** Edge-detects "just cleared a wall" so the poof effect fires once, not every frame. */
+  private wasClearingWall = false;
   private blinkTimer = 2.4;
   private blinkRemaining = 0;
   private blinking = false;
@@ -161,7 +184,7 @@ export class Player implements GameSystem {
   nudge(dx: number, dz: number): void {
     this.position.x += dx;
     this.position.z += dz;
-    this.collision.resolve(this.position, PLAYER_RADIUS);
+    this.collision.resolve(this.position, PLAYER_RADIUS, this.hopClearance);
     this.group.position.copy(this.position);
   }
 
@@ -235,7 +258,10 @@ export class Player implements GameSystem {
     this.previousPosition.copy(this.position);
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
-    this.collision.resolve(this.position, PLAYER_RADIUS);
+    // `hopClearance` (this jumper's height above local ground, as of last
+    // frame) lets a wall the player has jumped above stop pushing back — see
+    // Collision.ts. Grounded, it's 0, so every wall blocks exactly as before.
+    const clearedWall = this.collision.resolve(this.position, PLAYER_RADIUS, this.hopClearance);
 
     // Trust the resolved position over the intended one, so walking into a wall
     // actually kills the momentum instead of grinding against it.
@@ -273,6 +299,12 @@ export class Player implements GameSystem {
       // Damp onto the ground so walking over the gentle hills isn't jittery.
       this.position.y = damp(this.position.y, groundY, 0.04, dt);
     }
+    this.hopClearance = hopHeight;
+
+    // A little sparkle the moment the jump actually carries her over a wall's
+    // footprint, rather than every frame she's above it.
+    if (clearedWall && !this.wasClearingWall) this.spawnClearPoof();
+    this.wasClearingWall = clearedWall;
 
     this.group.position.copy(this.position);
 
@@ -318,6 +350,20 @@ export class Player implements GameSystem {
     if (!world) return;
     if (this.hopRings.root.parent !== world) world.add(this.hopRings.root);
     this.hopRings.burst(this.position.x, groundY, this.position.z);
+  }
+
+  /**
+   * A dinky puff at wall-top height the instant a jump clears a wall.
+   *
+   * Reuses the hop rainbow's own pool at low strength rather than building a
+   * second effect — it is already a free-floating, ground-agnostic ring, so
+   * bursting it at the current (elevated, mid-air) position just works.
+   */
+  private spawnClearPoof(): void {
+    const world = this.group.parent;
+    if (!world) return;
+    if (this.hopRings.root.parent !== world) world.add(this.hopRings.root);
+    this.hopRings.burst(this.position.x, this.position.y - 0.05, this.position.z, 0.4);
   }
 
   private groundAt(x: number, z: number, y: number): number {
