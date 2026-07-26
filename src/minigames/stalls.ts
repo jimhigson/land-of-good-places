@@ -5,6 +5,7 @@ import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
 import { createRailRacer } from './railRacer/RailRacer';
+import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
 
@@ -49,6 +50,33 @@ export const STALLS: readonly StallDefinition[] = [
     // booth and the plaza, so walking up is a straight line from the fountain.
     facing: 0.3,
     create: createRailRacer,
+  },
+  {
+    id: 'spookyHouse',
+    title: 'The Spooky House',
+    subtitle: 'ooOOoo... just for giggles!',
+    glyph: '👻',
+    accent: PALETTE.markerLilac,
+    stripe: PALETTE.markerMint,
+    // A short walk north-east of the fountain plaza, clear of every anchor
+    // plot, the Rail Racer stall and every hand-authored wall run in
+    // `Scenery.ts` by several metres. The scenery scatter is seeded (see
+    // `Scenery.ts`), not something a builder can predict by eye from the
+    // coordinate tables alone — an earlier choice out on the open lawn at
+    // [40, 0] *looked* clear on paper but turned out to have a bush planted
+    // right on top of it once the seeded scatter actually ran, so this spot
+    // was checked the same way, against the real instanced tree/bush
+    // positions read out of the running game, and also checked that the
+    // straight line tap-to-move walks from the spawn point clears the
+    // fountain by a wide margin rather than grazing its collision circle.
+    position: [13, 9],
+    // Every anchor sign and every other stall in this park uses a yaw near
+    // +0.2–0.3 regardless of where it stands, because the isometric camera
+    // never rotates (GAME_DESIGN.md #16) — "face the camera" is the same
+    // absolute direction everywhere on the map, not a direction relative to
+    // wherever a child is walking from.
+    facing: 0.25,
+    create: createSpookyHouse,
   },
 ];
 
