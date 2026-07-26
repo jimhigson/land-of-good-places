@@ -10,6 +10,16 @@
     // The game is a single page; unknown paths fall back to index.html.
     "not_found_handling": "single-page-application"
   },
+  // Pretty URL on top of the default land-of-good-places.blockstack.workers.dev.
+  // A custom domain (not a route) so the Worker owns the whole hostname at its
+  // root — which is what the PWA's service-worker scope wants. Cloudflare
+  // creates the DNS record and certificate itself.
+  "routes": [
+    {
+      "pattern": "landofgoodplaces.blockstack.ing",
+      "custom_domain": true
+    }
+  ],
   "observability": {
     "enabled": true
   }
