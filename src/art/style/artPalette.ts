@@ -89,6 +89,17 @@ export const ART = {
   lollipopLeafAlt: 0x74d489,
   lollipopBerry: 0xff8f8f,
 
+  // --- effects ---------------------------------------------------------------
+  /**
+   * The park's rainbow, inner band first. Used by the hop ring.
+   *
+   * These are toy-shop rainbow colours, not spectrum ones: every band is pulled
+   * a long way towards cream, so the ring reads as painted ribbon rather than as
+   * a neon test pattern sitting on the grass. Indigo is dropped — six bands is
+   * as many as survives being 40 pixels wide on a phone.
+   */
+  rainbow: [0xff8f8f, 0xffbe6b, 0xffe27a, 0x8fdf8a, 0x8cc9ff, 0xc9a9ff],
+
   // --- gallery staging only (NOT for the game world) ------------------------
   stageFloor: 0xfdf7ec,
   stagePlinthA: 0xffd9ec,
