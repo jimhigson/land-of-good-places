@@ -23,12 +23,13 @@ export const WALK_HALF_X = ARENA_HALF_X - 0.8;
 export const WALK_HALF_Z = ARENA_HALF_Z - 0.8;
 
 /**
- * The highest thing the camera must keep in frame, in metres.
+ * How tall a child is with their arms up, in metres.
  *
- * The rainbow arch is the tallest thing in the garden by a distance, and it is
- * the one piece of the canon that would be *most* upsetting to have cropped.
+ * `WaterFight.resize` fits the walkable lawn *plus this*, so a child standing on
+ * the far edge of the garden is never cut off at the neck by the top of the
+ * frame.
  */
-export const ARENA_TOP = 7.6;
+export const CHILD_TOP = 2.6;
 
 /** A chunky toon hedge: something to duck behind, and something to bump into. */
 export interface Hedge {

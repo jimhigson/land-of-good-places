@@ -18,55 +18,87 @@ import { decal } from '../../art/style/materials';
  *
  * Two things learned putting it up:
  *
- * - **It hangs behind the garden, not over it.** Directly overhead, an
- *   orthographic camera pitched 38° down puts the arch across the children's
- *   faces. Pushed back past the fence it sits in the sky where a rainbow
- *   belongs, and every child stays legible underneath it.
+ * - **It hangs off the camera, not off the world** — the trick the rail
+ *   racer's backdrop documents. The first version stood the arch in the garden
+ *   and pushed it back past the fence, which does nothing at all under an
+ *   orthographic camera pitched 38° down: moving something away from the
+ *   viewer moves it *up the screen*, and the whole rainbow sailed off the top
+ *   of the frame. Parented to the camera, `y` is screen metres and `z` is
+ *   simply how far in front it sits, so the arch is exactly where it was
+ *   authored whichever way the garden is framed.
+ * - **It is painted over the garden, not hung in the sky behind it**, because
+ *   in this projection there is no sky to hang it in. An orthographic camera
+ *   pitched 38° over flat ground never reaches a horizon — the lawn fills the
+ *   frame all the way to the top, exactly as it does in the park itself — so
+ *   the second attempt, which put the arch a hundred metres back, was neatly
+ *   occluded by grass. It now sits in *front* of everything with `depthTest`
+ *   off, at two-thirds opacity, which is the same call the hop ring makes: in
+ *   a park built out of painted things, a rainbow is pigment.
  * - **It fades in over half a second and out over two.** Snapping on looks like
  *   a bug; a slow fade out means the rainbow is still there for the moment
  *   after the squirting stops, which is when a child actually looks up.
  */
 
-/** Radius of the arch in metres, measured to the middle of the bands. */
-const RADIUS = 8.5;
-
-/** How thick the whole six-band ribbon is. */
-const THICKNESS = 1.3;
+/**
+ * Radius of the arch in metres, measured to the middle of the bands, and how
+ * thick the six-band ribbon is.
+ *
+ * Small, because GAME_DESIGN's word is *"a little rainbow"* — and because a big
+ * one drawn in front of the garden would have its legs planted across the
+ * children.
+ */
+const RADIUS = 4.4;
+const THICKNESS = 0.9;
 
 /**
- * Where the arch stands, in the camera's own frame.
+ * Where the arch hangs, in the camera's own frame.
  *
- * `Z` is straight away from the viewer, which with an orthographic camera moves
- * it behind everything without moving it on screen at all. `Y` sinks its feet
- * below the horizon so only the top of the arc clears the fence — a *little*
- * rainbow, which is the word GAME_DESIGN uses.
+ * `Y` is screen metres above the point the camera is looking at, chosen so both
+ * feet land beyond the fence and the whole arc sits over the far half of the
+ * garden rather than across anybody's face. `Z` is how far in front of the
+ * camera it sits — nearer than the garden, since it is painted over the top.
  */
-const OFFSET_Z = -14;
-const OFFSET_Y = -3;
+const OFFSET_Z = -40;
+const OFFSET_Y = 3;
 
 /**
  * How high the arch reaches above the point the camera is looking at.
  *
  * `WaterFight.resize` frames the garden by fitting a list of things that must
- * not be cropped, and this is one of them.
+ * not be cropped, and this is one of them. It currently comes out just under
+ * what the garden itself needs, which is the point: the rainbow costs the
+ * framing nothing, so the camera does not lurch when one appears.
  */
 export const RAINBOW_SCREEN_TOP = OFFSET_Y + RADIUS + THICKNESS / 2;
 
-/** Air-wetness at which the rainbow starts to show, and where it is fully out. */
-const FADE_IN = 0.3;
-const FADE_FULL = 0.62;
+/**
+ * Air-wetness at which the rainbow starts to show, and where it is fully out.
+ *
+ * Set against the live-droplet count in `water.ts`: one squirt in flight reads
+ * about 0.47, so a child squirting on their own stays just under the line and
+ * any two at once clear it easily. That is the design — the rainbow is the
+ * garden noticing that the fight has got bigger, so it must not come out for
+ * one person taking pot shots.
+ */
+const FADE_IN = 0.52;
+const FADE_FULL = 0.82;
 
-/** Strongest the rainbow ever gets. A rainbow you cannot see through is paint. */
-const MAX_OPACITY = 0.8;
+/**
+ * Strongest the rainbow ever gets.
+ *
+ * It is drawn in front of the garden, so this is also the number that decides
+ * whether a child standing under it is still legible. Two thirds reads clearly
+ * as a rainbow and hides nobody.
+ */
+const MAX_OPACITY = 0.66;
 
 export interface Rainbow {
+  /** Parent this to the **camera**, not the scene. See the note above. */
   readonly root: Group;
   /** True once the arch is actually visible — the HUD says a word about it. */
   readonly showing: boolean;
   /** Feed it the water system's `density` every frame. */
   update(dt: number, density: number): void;
-  /** Keeps the arch square-on to the camera when the framing yaw changes. */
-  setYaw(yaw: number): void;
   dispose(): void;
 }
 
@@ -107,15 +139,18 @@ export function createRainbow(): Rainbow {
     transparent: true,
     opacity: 0,
     depthWrite: false,
-    // Not additive, for the reason spelled out in rainbowRing.ts: in a park made
-    // of painted things, a rainbow is pigment.
+    // Off, so the arch is never cut into by the lawn behind it — see the note
+    // about there being no sky in this projection. Normal blending, not
+    // additive, for the reason spelled out in rainbowRing.ts: in a park made of
+    // painted things, a rainbow is pigment.
+    depthTest: false,
     fog: false,
   });
 
   const arch = decal(new Mesh(geometry, material));
   arch.position.set(0, OFFSET_Y, OFFSET_Z);
   arch.visible = false;
-  arch.renderOrder = 3;
+  arch.renderOrder = 20;
   root.add(arch);
 
   let strength = 0;
@@ -140,12 +175,6 @@ export function createRainbow(): Rainbow {
       // Grows into place as it appears, so it arcs over the garden rather than
       // switching on at full size.
       arch.scale.setScalar(0.88 + strength * 0.12);
-    },
-
-    setYaw(yaw: number): void {
-      // The whole group turns with the camera, which is what keeps a flat ring
-      // reading as an arch rather than as a ribbon seen edge-on.
-      root.rotation.y = yaw;
     },
 
     dispose(): void {

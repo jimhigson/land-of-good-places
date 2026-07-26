@@ -2,13 +2,11 @@ import {
   BoxGeometry,
   CanvasTexture,
   CircleGeometry,
-  ConeGeometry,
   CylinderGeometry,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
-  MeshBasicMaterial,
   Quaternion,
   SRGBColorSpace,
   SphereGeometry,
@@ -233,43 +231,74 @@ export function createGarden(): Garden {
   }
 
   // --- beyond the fence ---------------------------------------------------------
-  // Trees, blossom and three ranges of pastel hills, all of it decoration that
-  // nobody can reach. It exists so the garden has somewhere to be.
-  for (let i = 0; i < 14; i += 1) {
+  // Everything out here is decoration nobody can reach, and it all lives in a
+  // narrow band just outside the fence. That band is not a guess: the camera
+  // frames the garden and about two metres past it (see `WaterFight.resize`),
+  // so anything further out than roughly seventeen metres is never once seen.
+  // The first version scattered trees to twenty-four metres and put pastel hills
+  // at forty, and the entire lot was off screen — a garden surrounded by nothing
+  // but flat green.
+  for (let i = 0; i < 16; i += 1) {
     const angle = rng.range(0, Math.PI * 2);
-    const distance = rng.range(13, 24);
+    const distance = rng.range(10.5, 16.5);
     const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    const height = rng.range(2.6, 4.6);
+    const z = Math.sin(angle) * distance * 0.86;
+    const height = rng.range(2.4, 4.2);
 
-    const trunk = new Mesh(new CylinderGeometry(0.16, 0.22, height, 7), materials.bark);
+    const trunk = solid(new Mesh(new CylinderGeometry(0.16, 0.22, height, 7), materials.bark));
     trunk.position.set(x, height / 2, z);
     root.add(trunk);
     disposables.push(trunk.geometry);
 
-    const crownMaterial = rng.chance(0.25) ? materials.blossom : rng.chance(0.5) ? materials.leafDeep : materials.leaf;
+    const crownMaterial = rng.chance(0.25)
+      ? materials.blossom
+      : rng.chance(0.5)
+        ? materials.leafDeep
+        : materials.leaf;
     for (let p = 0; p < 3; p += 1) {
-      const puff = new Mesh(new SphereGeometry(rng.range(0.9, 1.5), 12, 9), crownMaterial);
+      const puff = solid(new Mesh(new SphereGeometry(rng.range(0.9, 1.5), 12, 9), crownMaterial));
       puff.position.set(x + rng.range(-0.7, 0.7), height + rng.range(-0.2, 0.7), z + rng.range(-0.7, 0.7));
       root.add(puff);
       disposables.push(puff.geometry);
     }
   }
 
-  const hillMaterials = [
-    new MeshBasicMaterial({ color: PALETTE.markerMint, toneMapped: false }),
-    new MeshBasicMaterial({ color: PALETTE.leafLight, toneMapped: false }),
+  // Bushes and flower dots filling the gap between the fence and the trees, so
+  // the lawn outside the garden is not a flat green field. Instanced would be
+  // overkill for forty small things that never move.
+  const flowerMaterials = [
+    toonMaterial(PALETTE.flowerYellow),
+    toonMaterial(PALETTE.flowerRed),
+    toonMaterial(PALETTE.flowerBlue),
+    toonMaterial(PALETTE.flowerViolet),
   ];
-  for (const material of hillMaterials) disposables.push(material);
-  for (let i = 0; i < 7; i += 1) {
-    const material = hillMaterials[i % hillMaterials.length];
-    if (!material) continue;
+  for (const material of flowerMaterials) disposables.push(material);
+
+  for (let i = 0; i < 40; i += 1) {
     const angle = rng.range(0, Math.PI * 2);
-    const hill = new Mesh(new ConeGeometry(rng.range(7, 13), rng.range(4, 8), 12), material);
-    hill.position.set(Math.cos(angle) * 40, -0.4, Math.sin(angle) * 40);
-    hill.renderOrder = -50;
-    root.add(hill);
-    disposables.push(hill.geometry);
+    const distance = rng.range(9.6, 16);
+    const x = Math.cos(angle) * distance;
+    const z = Math.sin(angle) * distance * 0.84;
+    // Never inside the fence: the garden's own ground is kept clear so nothing
+    // can be mistaken for a child to squirt.
+    if (Math.abs(x) < ARENA_HALF_X + 0.7 && Math.abs(z) < ARENA_HALF_Z + 0.7) continue;
+
+    if (rng.chance(0.45)) {
+      const bush = solid(new Mesh(new SphereGeometry(rng.range(0.5, 0.95), 12, 9), rng.chance(0.4) ? materials.leafDeep : materials.leaf));
+      bush.scale.set(1.15, 0.82, 1.1);
+      bush.position.set(x, 0.4, z);
+      root.add(bush);
+      disposables.push(bush.geometry);
+      continue;
+    }
+
+    const material = flowerMaterials[rng.int(0, flowerMaterials.length - 1)];
+    if (!material) continue;
+    const flower = decal(new Mesh(new SphereGeometry(0.15, 8, 6), material));
+    flower.scale.set(1, 0.5, 1);
+    flower.position.set(x, 0.1, z);
+    root.add(flower);
+    disposables.push(flower.geometry);
   }
 
   return {

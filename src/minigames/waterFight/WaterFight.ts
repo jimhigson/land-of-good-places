@@ -16,6 +16,7 @@ import { gameStore } from '../../state';
 import { createConfetti, type Confetti } from '../railRacer/confetti';
 import {
   CHILD_RADIUS,
+  CHILD_TOP,
   WALK_HALF_X,
   WALK_HALF_Z,
   keepInGarden,
@@ -242,12 +243,24 @@ class WaterFight implements MiniGame {
     this.skyTexture = paintSky();
     this.scene.background = this.skyTexture;
 
-    // The rig the art was approved under (ART_DIRECTION §6), minus shadows: the
-    // garden is a bright afternoon and a shadow pass would double the draw calls
-    // for something six children and four hundred droplets do not need.
+    // The rig the art was approved under (ART_DIRECTION §6), shadows included.
+    // The rail racer does without them because it is a flat storybook page; this
+    // is the park's own isometric view of a garden, and without a soft shadow
+    // under each child they all look like stickers floating a foot above the
+    // lawn. The shadow camera is wound right in to the garden — a default one
+    // spreads its map over hundreds of metres of nothing.
     this.scene.add(new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.15));
     const key = new DirectionalLight(PALETTE.sunDay, 2.25);
     key.position.set(18, 34, 22);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.near = 4;
+    key.shadow.camera.far = 90;
+    key.shadow.camera.left = -18;
+    key.shadow.camera.right = 18;
+    key.shadow.camera.top = 18;
+    key.shadow.camera.bottom = -18;
+    key.shadow.bias = -0.0006;
     this.scene.add(key, key.target);
     const fill = new DirectionalLight(PALETTE.skyDayBottom, 0.6);
     fill.position.set(-24, 16, -18);
@@ -259,8 +272,12 @@ class WaterFight implements MiniGame {
     this.water = createWaterSystem();
     this.scene.add(this.water.root);
 
+    // Hung off the camera, so `y` is screen metres and the 38° pitch cannot
+    // sail it off the top of the frame. That means the camera itself has to be
+    // in the scene graph, which it otherwise would not need to be.
     this.rainbow = createRainbow();
-    this.scene.add(this.rainbow.root);
+    this.camera.add(this.rainbow.root);
+    this.scene.add(this.camera);
 
     this.confetti = createConfetti();
     this.scene.add(this.confetti.root);
@@ -1009,7 +1026,7 @@ class WaterFight implements MiniGame {
     let needY = RAINBOW_SCREEN_TOP;
     for (const x of [-WALK_HALF_X, WALK_HALF_X]) {
       for (const z of [-WALK_HALF_Z, WALK_HALF_Z]) {
-        for (const y of [0, 2.6]) {
+        for (const y of [0, CHILD_TOP]) {
           needX = Math.max(needX, Math.abs(x * rightX + z * rightZ));
           needY = Math.max(needY, Math.abs(x * upX + y * upY + z * upZ));
         }
@@ -1040,7 +1057,6 @@ class WaterFight implements MiniGame {
     // The ground-plane basis the walk keys are interpreted through.
     this.forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    this.rainbow?.setYaw(this.yaw);
   }
 
   // --------------------------------------------------------------- lifecycle

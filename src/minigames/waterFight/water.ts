@@ -40,8 +40,8 @@ import { Rng, clamp01 } from '../../core/mathUtils';
  *   water blows out to a white smear the moment two squirts cross.
  */
 
-/** Droplets alive at once. Six children squirting hard peaks at about 500. */
-const DROPLET_CAPACITY = 900;
+/** Droplets alive at once. Six children squirting hard peaks at about 1,000. */
+const DROPLET_CAPACITY = 1200;
 
 /** Expanding ground rings alive at once. */
 const RING_CAPACITY = 22;
@@ -56,12 +56,17 @@ const GROUND_Y = 0.02;
  * How many droplets in the air count as "lots of water flying".
  *
  * This is the number the rainbow hangs off (GAME_DESIGN: *"when lots of water
- * flies, a little rainbow appears"*). Tuned so that one child squirting alone
- * never quite gets there, two at the same time just about do, and a proper
- * free-for-all pins it — the rainbow has to feel like a reward for the fight
- * getting bigger, not like weather.
+ * flies, a little rainbow appears"*), and it is measured as **live droplets**,
+ * not as droplets spawned this frame. The first version counted spawns, and a
+ * single muzzle burst — twenty droplets in one frame — pinned the reading at
+ * full and brought the rainbow out three seconds into the round, before anybody
+ * had squirted anything. A count of what is actually in the air rises and falls
+ * with the fight, which is the thing the rainbow is supposed to be noticing.
+ *
+ * One squirt in flight is worth about 200 droplets, so the thresholds below put
+ * a lone squirter just under the line and any two at once comfortably over it.
  */
-const DENSITY_FULL = 190;
+const DENSITY_FULL = 430;
 
 /** Half-life of the air-wetness reading, in seconds. */
 const DENSITY_HALF_LIFE = 0.75;
@@ -168,8 +173,6 @@ export function createWaterSystem(): WaterSystem {
   /** Droplets that landed since the last ring — every sixth one leaves a mark. */
   let landings = 0;
   let densityValue = 0;
-  /** Droplets spawned this frame, which is what feeds the air-wetness reading. */
-  let spawnedThisFrame = 0;
 
   function spawn(
     x: number,
@@ -186,7 +189,6 @@ export function createWaterSystem(): WaterSystem {
     const droplet = pool[alive];
     if (!droplet) return;
     alive += 1;
-    spawnedThisFrame += 1;
     droplet.x = x;
     droplet.y = y;
     droplet.z = z;
@@ -370,11 +372,10 @@ export function createWaterSystem(): WaterSystem {
       rings.visible = ringsLive;
 
       // --- how wet is the air? ----------------------------------------------
-      const target = clamp01(spawnedThisFrame / (DENSITY_FULL * Math.max(dt, 1 / 120)));
-      spawnedThisFrame = 0;
-      // Rises fast, falls slowly: the rainbow should appear the instant the
-      // fight gets big and then linger for a moment after it calms down.
-      const rate = target > densityValue ? 0.12 : DENSITY_HALF_LIFE;
+      const target = clamp01(alive / DENSITY_FULL);
+      // Rises fast, falls slowly: the rainbow should appear the moment the
+      // fight gets big and then linger for a beat after it calms down.
+      const rate = target > densityValue ? 0.14 : DENSITY_HALF_LIFE;
       densityValue = target + (densityValue - target) * Math.pow(2, -dt / rate);
     },
 

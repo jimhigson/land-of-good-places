@@ -221,8 +221,13 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
 
   for (let i = 0; i < 3; i += 1) {
     const gun = new Group();
-    gun.position.set(rackX + (i - 1) * 0.62, rackY + 1.02, rackZ);
-    gun.rotation.z = rng.range(-0.16, 0.16);
+    gun.position.set(rackX + (i - 1) * 0.62, rackY + 0.86, rackZ - 0.12);
+    // Propped barrel-up against the rail rather than lying along it: laid flat
+    // they point straight away from the isometric camera and read as three
+    // pipes, and the whole reason this prop is here is that a child should see
+    // a water gun from across the park.
+    gun.rotation.x = -1.05;
+    gun.rotation.z = rng.range(-0.18, 0.18);
     root.add(gun);
 
     const housing = solid(new Mesh(new RoundedBoxGeometry(0.26, 0.3, 0.9, 4, 0.1), materials.gunBody));
