@@ -9,6 +9,7 @@ import { DayNight } from './DayNight';
 import { Building } from './building';
 import { MiniGameStalls } from '../minigames';
 import type { InteractZone } from './interact';
+import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -86,6 +87,18 @@ export class World implements GameSystem {
    */
   interactZones(): InteractZone[] {
     return [...this.building.interactZones(), ...this.stalls.interactZones()];
+  }
+
+  /**
+   * Every tap-to-read sign in the park (see `world/signs.ts`).
+   *
+   * A traversal of `anchorPlots.group` rather than a per-builder registry: the
+   * building is built *into* the anchor plots (see the constructor), so this
+   * one call already reaches every anchor sign and every shop sign without
+   * needing to know that chain of ownership.
+   */
+  signZones(): SignZone[] {
+    return collectSignZones(this.anchorPlots.group);
   }
 
   /**

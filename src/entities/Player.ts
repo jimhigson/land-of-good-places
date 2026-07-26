@@ -384,6 +384,16 @@ export class Player implements GameSystem {
     // The name label counter-rotates so it never tips with the character.
     this.label.sprite.position.y =
       this.model.height + 0.42 + bob + Math.sin(elapsed * 1.3) * 0.03;
+    // Kept a constant size on screen rather than in the world — see
+    // `NameLabel.updateScreenSize` for why a fixed world scale is the bug.
+    // Distance is measured from what the camera is *looking at*, not from the
+    // camera's own position — this is an orthographic rig, so the camera sits
+    // a fixed distance back at every zoom level, and a straight line to it is
+    // roughly constant regardless of what's actually on screen.
+    this.label.updateScreenSize(
+      this.camera.worldUnitsPerPixel,
+      this.camera.focusPoint.distanceTo(this.position),
+    );
   }
 }
 

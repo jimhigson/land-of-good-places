@@ -11,6 +11,7 @@ import { Player, TapNavigator } from './entities';
 import { Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
+import { SignInspector } from './SignInspector';
 import { gameStore } from './state';
 
 /**
@@ -41,6 +42,7 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly signInspector: SignInspector;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -70,8 +72,18 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
 
+    // Tap a sign, and the camera swoops in to read it — see `SignInspector.ts`.
+    // Goes first in `onTap` below: a tap that lands on a sign is a "read this",
+    // never also a "walk over there".
+    this.signInspector = new SignInspector(this.player, this.camera, () =>
+      this.world.signZones(),
+    );
+
     this.pointer = new PointerControls(canvas, {
-      onTap: (point) => this.tapNavigator.handleTap(point),
+      onTap: (point) => {
+        if (this.signInspector.handleTap(point)) return;
+        this.tapNavigator.handleTap(point);
+      },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
@@ -98,6 +110,7 @@ export class Game {
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
+    this.addSystem(this.signInspector);
 
     this.frameContext = {
       dt: 0,
@@ -157,9 +170,10 @@ export class Game {
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
     // While a shop or the backpack is open, Escape belongs to it — see
-    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
-    // park behind it.
-    if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+    // `Shopping.uiOpen`. Same story for an inspected sign: Escape is one of the
+    // "any key" gestures `SignInspector` already backs out on, and letting the
+    // park's own toggle also see it would just fight over `gameStore.paused`.
+    if (this.input.justPressed('menu') && !this.shopping.uiOpen && !this.signInspector.active) {
       gameStore.setPaused(!gameStore.get().paused);
     }
 
