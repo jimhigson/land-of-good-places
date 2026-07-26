@@ -1,0 +1,301 @@
+import { Vector3 } from 'three';
+import {
+  PLAYER_BOB_CYCLES_PER_METRE,
+  PLAYER_BOB_HEIGHT,
+  PLAYER_TURN_SPEED,
+} from '../../core/constants';
+import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
+import type { CollisionWorld } from '../../world/Collision';
+import { terrainHeight } from '../../world/terrain';
+import type { GroundSampler } from '../Player';
+import type { Expression } from '../../art/style/faces';
+import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
+import type { KidAvatar } from './kidCrowd';
+
+/**
+ * A character that is not the player.
+ *
+ * Deliberately the same shape as {@link Player}: accelerate towards a desired
+ * velocity, resolve against the same {@link CollisionWorld}, ask the same
+ * ground sampler how high the floor is, and animate off distance travelled so
+ * the legs never skate. What is different is only where the intent comes from —
+ * the player reads devices, this reads a {@link CharacterDriver}.
+ *
+ * That is the whole point of the split. Swap the driver for one fed by network
+ * packets and this class becomes a remote player, with no change here: it is
+ * already running the same movement and the same collision as the local one, so
+ * a remote child bumps into the same wall at the same place.
+ *
+ * The model is not a scene-graph object. It is a rig inside a
+ * {@link KidCrowd}, so posing it means writing joint transforms and letting the
+ * crowd upload the instance matrices — see `kidCrowd.ts` for why.
+ */
+
+/** Comfortable child walking pace. A full run is this times `RUN_INTENT`. */
+const NPC_WALK_SPEED = 2.55;
+
+const NPC_ACCELERATION = 18;
+const NPC_DECELERATION = 16;
+
+/** Narrower than the player, so two children pass each other on a path. */
+export const NPC_RADIUS = 0.5;
+
+const NPC_JUMP_SPEED = 4.6;
+const GRAVITY = 17;
+
+/** Drop further than this below the surface under your feet and you fall. */
+const FALL_THRESHOLD = 0.5;
+
+export class NpcCharacter {
+  readonly avatar: KidAvatar;
+  readonly driver: CharacterDriver;
+
+  readonly position = new Vector3();
+  readonly velocity = new Vector3();
+
+  /** Where the ground is. The building installs the same sampler the player uses. */
+  groundSampler: GroundSampler | null = null;
+
+  private readonly intent: CharacterIntent = createIntent();
+  private readonly desiredVelocity = new Vector3();
+  private readonly previousPosition = new Vector3();
+
+  private facing: number;
+  private walkPhase: number;
+  private gait = 0;
+  private verticalVelocity = 0;
+  private airborne = false;
+  private expression: Expression = 'neutral';
+
+  constructor(
+    avatar: KidAvatar,
+    driver: CharacterDriver,
+    private readonly collision: CollisionWorld,
+    x: number,
+    z: number,
+    facing: number,
+  ) {
+    this.avatar = avatar;
+    this.driver = driver;
+    this.facing = facing;
+    // Offset the walk cycle per child, or the whole park marches in step.
+    this.walkPhase = 0;
+
+    this.position.set(x, terrainHeight(x, z), z);
+    this.previousPosition.copy(this.position);
+    avatar.rig.root.position.copy(this.position);
+    avatar.rig.root.rotation.y = facing;
+  }
+
+  get isAirborne(): boolean {
+    return this.airborne;
+  }
+
+  /** Nudges the walk cycle at spawn so children are not in lockstep. */
+  setWalkPhase(phase: number): void {
+    this.walkPhase = phase;
+  }
+
+  /**
+   * One frame of life. `elapsed` drives idle motion, `playerHopped` is the cue
+   * for the giggle-hop, and `dt` is the only thing that moves anybody.
+   */
+  update(
+    dt: number,
+    elapsed: number,
+    playerPosition: Readonly<Vector3>,
+    playerHopped: boolean,
+  ): void {
+    clearIntent(this.intent);
+    this.driver.update(
+      {
+        dt,
+        elapsed,
+        position: this.position,
+        playerPosition,
+        playerHopped,
+        grounded: !this.airborne,
+      },
+      this.intent,
+    );
+
+    this.move(dt);
+    this.animate(elapsed);
+  }
+
+  /**
+   * Pushes the character apart from a neighbour standing on top of them.
+   *
+   * Children are not colliders — registering a dozen moving circles with a
+   * collision world built for tree trunks would make every one of them a wall.
+   * Instead the system relaxes overlaps directly, which cannot jitter because
+   * it moves both parties half way and then stops.
+   */
+  separateFrom(other: NpcCharacter, minimum: number): void {
+    const dx = other.position.x - this.position.x;
+    const dz = other.position.z - this.position.z;
+    const distanceSquared = dx * dx + dz * dz;
+    if (distanceSquared >= minimum * minimum || distanceSquared < 1e-8) return;
+
+    const distance = Math.sqrt(distanceSquared);
+    const push = (minimum - distance) * 0.5;
+    const nx = (dx / distance) * push;
+    const nz = (dz / distance) * push;
+    this.position.x -= nx;
+    this.position.z -= nz;
+    other.position.x += nx;
+    other.position.z += nz;
+  }
+
+  /** Re-seats the model after any position change made outside `update`. */
+  syncTransform(): void {
+    this.avatar.rig.root.position.copy(this.position);
+  }
+
+  // ---------------------------------------------------------------- internals
+
+  private move(dt: number): void {
+    const intentLength = Math.hypot(this.intent.moveX, this.intent.moveZ);
+
+    if (intentLength > 1e-4) {
+      const speed = NPC_WALK_SPEED;
+      this.desiredVelocity.set(this.intent.moveX * speed, 0, this.intent.moveZ * speed);
+    } else {
+      this.desiredVelocity.set(0, 0, 0);
+    }
+
+    const rate = intentLength > 1e-4 ? NPC_ACCELERATION : NPC_DECELERATION;
+    approach(this.velocity, this.desiredVelocity, rate * dt);
+
+    this.previousPosition.copy(this.position);
+    this.position.x += this.velocity.x * dt;
+    this.position.z += this.velocity.z * dt;
+    this.collision.resolve(this.position, NPC_RADIUS);
+
+    // Trust the resolved position over the intended one, so walking into a wall
+    // kills the momentum instead of grinding against it.
+    if (dt > 0) {
+      this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
+      this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
+    }
+
+    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+
+    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+      this.airborne = true;
+      this.verticalVelocity = 0;
+    }
+
+    if (this.intent.hop && !this.airborne) {
+      this.verticalVelocity = NPC_JUMP_SPEED;
+      this.airborne = true;
+    }
+
+    if (this.airborne) {
+      this.verticalVelocity -= GRAVITY * dt;
+      this.position.y += this.verticalVelocity * dt;
+      if (this.position.y <= groundY) {
+        this.position.y = groundY;
+        this.verticalVelocity = 0;
+        this.airborne = false;
+      }
+    } else {
+      this.position.y = damp(this.position.y, groundY, 0.04, dt);
+    }
+
+    // --- facing ---------------------------------------------------------
+    const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    if (planarSpeed > 0.3) {
+      this.facing = turnTowards(
+        this.facing,
+        Math.atan2(this.velocity.x, this.velocity.z),
+        PLAYER_TURN_SPEED * dt,
+      );
+    } else if (this.intent.lookAt !== null) {
+      this.facing = turnTowards(this.facing, this.intent.lookAt, 4.5 * dt);
+    }
+
+    const root = this.avatar.rig.root;
+    root.position.copy(this.position);
+    root.rotation.y = this.facing;
+
+    this.gait = damp(this.gait, clamp01(planarSpeed / NPC_WALK_SPEED), 0.07, dt);
+    this.walkPhase += planarSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
+    if (this.walkPhase > TAU) this.walkPhase -= TAU;
+  }
+
+  /**
+   * The house walk cycle, posed onto the rig.
+   *
+   * Deliberately the same maths as `Player.animate` — bob on each step, squash
+   * at the bottom of it, arms and legs in opposition, head lagging a touch —
+   * because a park where the background children move differently from the one
+   * you are steering reads as two games stitched together.
+   *
+   * Nothing here hardcodes a joint's rest position; the head's is read off the
+   * model at build time, so retuning the kid's proportions carries through.
+   */
+  private animate(elapsed: number): void {
+    const rig = this.avatar.rig;
+    const gait = this.gait;
+    const phase = this.walkPhase;
+    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+    const hopHeight = Math.max(0, this.position.y - groundY);
+
+    const bob = Math.abs(Math.sin(phase)) * PLAYER_BOB_HEIGHT * gait;
+    const breathe = Math.sin(elapsed * 1.9 + this.walkPhase) * 0.014 * (1 - gait);
+    rig.body.position.y = bob + breathe + hopHeight * 0.12;
+
+    const squash = 1 - Math.cos(phase * 2) * 0.045 * gait;
+    rig.body.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
+
+    rig.body.rotation.x = lerp(0, -0.13, gait) + (this.airborne ? -0.1 : 0);
+    rig.body.rotation.z = Math.sin(phase) * 0.045 * gait;
+
+    rig.head.rotation.z = -Math.sin(phase) * 0.07 * gait;
+    rig.head.rotation.x = Math.sin(phase * 2 + 0.6) * 0.035 * gait + breathe * 2;
+    rig.head.position.y = this.avatar.headBaseY + Math.sin(phase * 2 + 1.2) * 0.012 * gait;
+
+    const swing = Math.sin(phase) * (0.95 * gait);
+    const armLift = this.airborne ? -0.9 : 0;
+    rig.leftArm.rotation.x = swing + armLift;
+    rig.leftArm.rotation.z = 0.12 + gait * 0.08;
+
+    // The right arm is the waving arm: it lifts over the head and wags, blended
+    // against whatever the walk cycle wanted so a child can wave mid-stride.
+    const wave = this.intent.wave;
+    const waggle = Math.sin(elapsed * 11) * 0.42;
+    rig.rightArm.rotation.x = lerp(-swing + armLift, -2.45, wave);
+    rig.rightArm.rotation.z = lerp(-0.12 - gait * 0.08, -0.75 + waggle, wave);
+
+    const legSwing = Math.sin(phase) * (0.85 * gait);
+    rig.leftLeg.rotation.x = -legSwing;
+    rig.rightLeg.rotation.x = legSwing;
+
+    // A texture swap, so only ever on a transition.
+    if (this.intent.expression !== this.expression) {
+      this.expression = this.intent.expression;
+      this.avatar.setExpression(this.expression);
+    }
+
+  }
+
+  private groundAt(x: number, z: number, y: number): number {
+    return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
+  }
+}
+
+/** Moves `current` towards `target` by at most `maxDelta`, componentwise in XZ. */
+function approach(current: Vector3, target: Vector3, maxDelta: number): void {
+  const dx = target.x - current.x;
+  const dz = target.z - current.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= maxDelta || distance < 1e-6) {
+    current.x = target.x;
+    current.z = target.z;
+    return;
+  }
+  const scale = maxDelta / distance;
+  current.x += dx * scale;
+  current.z += dz * scale;
+}

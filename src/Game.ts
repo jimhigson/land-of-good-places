@@ -9,6 +9,7 @@ import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
 import { Parade, Player, TapNavigator } from './entities';
 import { CuteODex, Hud, TouchControls } from './ui';
+import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
 import { gameStore } from './state';
 
@@ -38,6 +39,7 @@ export class Game {
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
+  readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
   readonly parade: Parade;
   readonly cuteODex: CuteODex;
@@ -95,6 +97,19 @@ export class Game {
     this.cuteODex = new CuteODex(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
 
+    // The fairground stalls. Walking up to one and pressing interact hands the
+    // frame over to the mini-game host: it freezes the park (exactly as the
+    // pause menu does, so nobody moves while you are away), wipes across to a
+    // little self-contained world of its own, and wipes back when you are done.
+    // See `minigames/MiniGameHost.ts` and ARCHITECTURE.md's mini-game appendix.
+    this.miniGames = new MiniGameHost({
+      engine: this.engine,
+      input: this.input,
+      uiRoot,
+      stalls: this.world.stalls.stalls,
+      touch: isTouchDevice(),
+    });
+
     // Shops: the join between the shop geometry, the purchase panel and the
     // store. Registered as a system so it updates after the world, which is
     // where the player's position for this frame has just been settled.
@@ -142,6 +157,7 @@ export class Game {
   dispose(): void {
     this.stop();
     for (const system of this.systems) system.dispose?.();
+    this.miniGames.dispose();
     this.tapNavigator.dispose();
     this.touchControls?.dispose();
     this.world.dispose();
@@ -170,7 +186,11 @@ export class Game {
       gameStore.setPaused(!gameStore.get().paused);
     }
 
-    const paused = gameStore.get().paused;
+    // Mini-games run on the loop's real delta, not the frame context's: the
+    // context's is about to be zeroed by the very freeze they ask for.
+    this.miniGames.update(tick.dt, this.frameContext);
+
+    const paused = gameStore.get().paused || this.miniGames.frozen;
     this.world.dayNight.setPaused(paused);
 
     this.frameContext.dt = paused ? 0 : tick.dt;
@@ -215,9 +235,14 @@ export class Game {
     // The sky is a full-screen backdrop drawn first with depth testing off; the
     // depth buffer is then cleared so the world composites cleanly on top.
     renderer.clear(true, true, true);
-    this.sky.render(renderer);
-    renderer.clearDepth();
-    renderer.render(this.engine.scene, this.camera.camera);
+    // A mini-game paints its own sky, so the park's passes are skipped entirely
+    // while one is on screen — the frame costs no more than it would at home.
+    if (!this.miniGames.hidesPark) {
+      this.sky.render(renderer);
+      renderer.clearDepth();
+      renderer.render(this.engine.scene, this.camera.camera);
+    }
+    this.miniGames.render(renderer);
   }
 }
 
