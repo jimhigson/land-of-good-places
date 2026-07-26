@@ -8,7 +8,7 @@ import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
 import { Parade, Player, TapNavigator } from './entities';
-import { CuteODex, Hud, TouchControls } from './ui';
+import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
 import { gameStore } from './state';
@@ -43,6 +43,7 @@ export class Game {
   readonly shopping: Shopping;
   readonly parade: Parade;
   readonly cuteODex: CuteODex;
+  readonly whatsNew: WhatsNew;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -95,6 +96,12 @@ export class Game {
     // The collection book. Mounts its own pill into the HUD's top row and owns
     // the C key, so neither `Hud` nor the input bindings need to know about it.
     this.cuteODex = new CuteODex(uiRoot);
+    // "What's new": checks `whatsnew.json` against localStorage and shows
+    // itself, synchronously, if there is anything the player has not seen —
+    // see `ui/WhatsNew.ts`. Built here so the check happens before the first
+    // frame renders, and mounted like every other overlay, as a plain DOM
+    // child of `uiRoot` rather than anything the world needs to know about.
+    this.whatsNew = new WhatsNew(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
 
     // The fairground stalls. Walking up to one and pressing interact hands the
@@ -163,6 +170,7 @@ export class Game {
     this.world.dispose();
     this.player.dispose();
     this.cuteODex.dispose();
+    this.whatsNew.dispose();
     this.hud.dispose();
     this.sky.dispose();
     this.engine.dispose();
@@ -174,11 +182,26 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    // While a shop or the backpack is open, Escape belongs to it — see
-    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
-    // park behind it.
-    if (this.cuteODex.isOpen) {
-      // The book has the screen: Escape and B close it, and nothing else.
+    // The what's-new welcome takes priority over everything else. It can only
+    // ever be open in the first moment of a session — before a shop or the
+    // Cute-o-dex could plausibly be open too — but checking it first keeps
+    // that a guarantee rather than an accident. Esc, E/Enter or B on a pad all
+    // say "got it"; there is no key-handling in `WhatsNew` itself, unlike
+    // `CuteODex`, because none of its keys need anything beyond the ordinary
+    // action vocabulary already read here.
+    if (this.whatsNew.isOpen) {
+      if (
+        this.input.justPressed('menu') ||
+        this.input.justPressed('cancel') ||
+        this.input.justPressed('interact')
+      ) {
+        this.whatsNew.close();
+      }
+    } else if (this.cuteODex.isOpen) {
+      // While a shop or the backpack is open, Escape belongs to it — see
+      // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause
+      // the park behind it. The book has the screen: Escape and B close it,
+      // and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
       }
