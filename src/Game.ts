@@ -57,7 +57,7 @@ export class Game {
     this.input = new InputSystem();
     this.sky = new Sky();
 
-    this.world = new World(this.engine.scene, this.sky);
+    this.world = new World(this.engine.scene, this.sky, this.camera);
 
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));

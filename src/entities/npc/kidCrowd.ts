@@ -9,6 +9,7 @@ import {
 } from 'three';
 import { createKid } from '../../art/models/kid';
 import { toonMaterial } from '../../art/style/materials';
+import { ART } from '../../art/style/artPalette';
 import type { Expression } from '../../art/style/faces';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 
@@ -75,6 +76,18 @@ const NODE_RIGHT_LEG = 'npc.rightLeg';
 
 /** Face variants, in the order they become instance variants. */
 const FACE_ORDER: readonly Expression[] = ['neutral', 'happy', 'blink'];
+
+/**
+ * Where the blue-eyed variants sit in the face material list, after the
+ * normal ones — see the `blueEyes` parameter on {@link KidCrowd.spawn}.
+ *
+ * One fixed child (Ethan — a family request) always has blue eyes, but the
+ * crowd shares one face material per expression across every member, so his
+ * blue eyes need their own material variant rather than a per-child colour.
+ * Cheaper than a second crowd: one extra texture per expression, no extra
+ * draw calls (still the same `InstancedMesh` per variant).
+ */
+const BLUE_EYE_OFFSET = FACE_ORDER.length;
 
 /** How many of the biggest parts cast a shadow. Head, hair and body. */
 const SHADOW_CASTER_PARTS = 3;
@@ -149,6 +162,31 @@ export class KidCrowd {
       handle.setExpression('neutral');
     }
 
+    // A second, throwaway kid — never added to any scene graph — exists only
+    // to paint a blue-eyed version of the same expression set. Discarded once
+    // its textures are captured below; see `BLUE_EYE_OFFSET`.
+    const blueEyedFaceMaps = new Map<Expression, Texture | null>();
+    if (faceMesh) {
+      const blueHandle = createKid({
+        skin: SENTINEL_SKIN,
+        hair: SENTINEL_HAIR,
+        outfit: SENTINEL_OUTFIT,
+        shoe: SENTINEL_SHOE,
+        backpackColour: SENTINEL_BAG,
+        hairStyle: 'bunches',
+        backpack: true,
+        eyeColour: ART.kidEyeBlue,
+      });
+      const blueFaceMesh = findFaceMesh(blueHandle.root);
+      if (blueFaceMesh) {
+        const blueMaterial = blueFaceMesh.material as MeshToonMaterial;
+        for (const expression of FACE_ORDER) {
+          blueHandle.setExpression(expression);
+          blueEyedFaceMaps.set(expression, blueMaterial.map);
+        }
+      }
+    }
+
     // One material for the entire crowd. Colour comes from `instanceColor`, so
     // white here means "whatever this child was painted".
     const bodyMaterial = toonMaterial(0xffffff);
@@ -159,6 +197,12 @@ export class KidCrowd {
       for (const expression of FACE_ORDER) {
         const clone = base.clone();
         clone.map = faceMaps.get(expression) ?? base.map;
+        faceMaterials.push(clone);
+      }
+      // Blue-eyed variants appended after the normal ones, at `BLUE_EYE_OFFSET`.
+      for (const expression of FACE_ORDER) {
+        const clone = base.clone();
+        clone.map = blueEyedFaceMaps.get(expression) ?? base.map;
         faceMaterials.push(clone);
       }
     }
@@ -189,8 +233,10 @@ export class KidCrowd {
   /**
    * Adds a child. `scale` varies height a little — children are not clones, and
    * at this camera a 6% difference in height reads more strongly than a hat.
+   * `blueEyes` selects the second face-material set baked in the constructor
+   * (see `BLUE_EYE_OFFSET`) — reserved for Ethan.
    */
-  spawn(colours: KidColours, shortHair: boolean, scale: number): KidAvatar {
+  spawn(colours: KidColours, shortHair: boolean, scale: number, blueEyes = false): KidAvatar {
     const member = this.crowd.spawn();
     member.root.scale.setScalar(scale);
 
@@ -213,7 +259,8 @@ export class KidCrowd {
       setExpression: (expression: Expression) => {
         if (facePart < 0) return;
         const variant = FACE_ORDER.indexOf(expression);
-        member.variant[facePart] = variant < 0 ? 0 : variant;
+        const base = variant < 0 ? 0 : variant;
+        member.variant[facePart] = blueEyes ? base + BLUE_EYE_OFFSET : base;
       },
     };
   }

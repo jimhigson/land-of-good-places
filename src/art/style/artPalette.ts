@@ -82,6 +82,12 @@ export const ART = {
   kidBackpack: 0x7fe3c0,
   kidBackpackDark: 0x5fc9a6,
   kidBobble: 0xffd166,
+  /** Default iris colour, named so a retune has somewhere to live. */
+  kidEye: 0x6f4b9a,
+  /** Ethan's eyes — a family request (see NpcSystem.ts). */
+  kidEyeBlue: 0x4fb0e8,
+  /** Ethan's hair — a family request (see NpcSystem.ts). */
+  kidHairBlonde: 0xf0d48a,
 
   // --- props ----------------------------------------------------------------
   lollipopStick: PALETTE.bark,

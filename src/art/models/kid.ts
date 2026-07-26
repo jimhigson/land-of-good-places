@@ -70,6 +70,8 @@ export interface KidOptions {
   hairStyle?: 'bunches' | 'bob' | 'short';
   backpack?: boolean;
   backpackColour?: number;
+  /** Iris colour. Defaults to `ART.kidEye` — every kid but Ethan wears it. */
+  eyeColour?: number;
 }
 
 export interface KidHandle extends CreatureHandle {
@@ -96,6 +98,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairStyle = 'bunches',
     backpack = true,
     backpackColour = ART.kidBackpack,
+    eyeColour = ART.kidEye,
   } = options;
 
   const root = new Group();
@@ -300,7 +303,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     eyeGap: 0.44,
     eyeW: 0.122,
     eyeH: 0.158,
-    iris: 0x6f4b9a,
+    iris: eyeColour,
     mouth: 'smile',
     mouthW: 0.075,
     mouthDrop: 0.215,
