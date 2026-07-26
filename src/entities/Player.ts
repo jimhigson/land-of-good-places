@@ -16,6 +16,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
+import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { NameLabel } from '../ui/NameLabel';
 import { gameStore } from '../state';
 
@@ -60,6 +61,17 @@ export class Player implements GameSystem {
   readonly group = new Group();
   readonly model: CharacterModel;
   readonly label: NameLabel;
+
+  /**
+   * The rainbow that flicks out from under her feet on every hop.
+   *
+   * Deliberately **not** a child of `this.group`: the ring is left behind in the
+   * world where the jump happened, so parenting it to the character would drag
+   * it along and spin it. It attaches itself to whatever the player was added
+   * to, the first time it is needed — which keeps the wiring inside this class
+   * instead of spreading a new field through Game and World.
+   */
+  readonly hopRings: RainbowRings = createRainbowRings();
 
   /** Feet position in world space. */
   readonly position = new Vector3();
@@ -181,6 +193,10 @@ export class Player implements GameSystem {
   update(context: FrameContext): void {
     const { dt, input } = context;
 
+    // Before the ride check, so a rainbow started on the ground still finishes
+    // if you hop straight onto something.
+    this.hopRings.update(dt);
+
     if (this.ridingFlag) {
       // The ride positions us; all we do is hold a suitably delighted pose.
       this.gait = damp(this.gait, 0, 0.1, dt);
@@ -241,6 +257,7 @@ export class Player implements GameSystem {
     if (input.justPressed('jump') && !this.airborne) {
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
+      this.spawnHopRing(groundY);
     }
     let hopHeight = 0;
     if (this.airborne) {
@@ -283,9 +300,25 @@ export class Player implements GameSystem {
 
   dispose(): void {
     this.label.dispose();
+    this.hopRings.root.removeFromParent();
+    this.hopRings.dispose();
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Drops a rainbow ring at the feet, in world space.
+   *
+   * The effect group is parented lazily to whatever holds the player — the
+   * scene, in practice — because a `Player` is constructed before it is added to
+   * anything, and rings pinned to the character would ride around with her.
+   */
+  private spawnHopRing(groundY: number): void {
+    const world = this.group.parent;
+    if (!world) return;
+    if (this.hopRings.root.parent !== world) world.add(this.hopRings.root);
+    this.hopRings.burst(this.position.x, groundY, this.position.z);
+  }
 
   private groundAt(x: number, z: number, y: number): number {
     return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
@@ -315,7 +348,7 @@ export class Player implements GameSystem {
     // more for the feeling of weight than anything else here.
     model.head.rotation.z = -Math.sin(phase) * 0.07 * gait;
     model.head.rotation.x = Math.sin(phase * 2 + 0.6) * 0.035 * gait + breathe * 2;
-    model.head.position.y = 1.34 + Math.sin(phase * 2 + 1.2) * 0.012 * gait;
+    model.head.position.y = model.headHeight + Math.sin(phase * 2 + 1.2) * 0.012 * gait;
 
     // Arms and legs swing in opposition.
     const swing = Math.sin(phase) * (0.95 * gait);
