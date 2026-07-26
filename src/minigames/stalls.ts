@@ -4,7 +4,9 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
+import { ANCHORS_BY_ID } from '../world/anchors';
 import { createDodgems } from './dodgems/Dodgems';
+import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createRailRacer } from './railRacer/RailRacer';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
@@ -50,6 +52,23 @@ export const STALLS: readonly StallDefinition[] = [
     // booth and the plaza, so walking up is a straight line from the fountain.
     facing: 0.3,
     create: createRailRacer,
+  },
+  {
+    id: 'spaceFerrisWheel',
+    title: 'Space Ferris Wheel',
+    subtitle: 'all the way up to space!',
+    glyph: '🎡',
+    accent: PALETTE.markerLilac,
+    stripe: PALETTE.markerSky,
+    // The one stall that is not a stall: this is the ferris wheel's ticket
+    // kiosk, and it stands *exactly* where the plot's "coming soon" sign stood
+    // — same spot, same yaw — because that sign has now come true. Putting it
+    // on the anchor's own entrance also means the path spur already leads here,
+    // and the placeholder's collision post ends up inside the booth's own walls
+    // instead of being left behind as an invisible obstacle on the lawn.
+    position: ANCHORS_BY_ID.ferrisWheel.entrance,
+    facing: ANCHORS_BY_ID.ferrisWheel.signYaw,
+    create: createSpaceFerrisWheel,
   },
   {
     id: 'dodgems',
