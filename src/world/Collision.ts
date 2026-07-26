@@ -48,6 +48,38 @@ interface WallCollider {
  */
 const JUMP_CLEARANCE_GRACE = 0.15;
 
+/**
+ * Overlaps up to this deep are ordinary contact — the everyday case of
+ * walking (even sprinting) straight into a wall, tree or fountain rim — and
+ * get corrected fully and instantly, exactly as before. That is what keeps
+ * blocking crisp.
+ *
+ * Set comfortably above the deepest a full-sprint step can bury a mover in a
+ * single frame (well under half a metre even at 60 fps), so ordinary
+ * collision never takes the gentle path below. Anything deeper than this can
+ * only really happen from spawning, teleporting or stepping *inside*
+ * geometry — being already-embedded, not freshly walking into something.
+ */
+const SHALLOW_OVERLAP = 0.5;
+
+/**
+ * The speed, in metres per second, at which a *deep* overlap (see
+ * {@link SHALLOW_OVERLAP}) is allowed to resolve.
+ *
+ * This is the fix for design feedback #17 — "the fling": previously a deep
+ * overlap (e.g. spawning inside the fountain's collider) was corrected in a
+ * single frame, however large the overlap. `Player`/`NpcCharacter` derive
+ * their velocity from how far `resolve` just moved them, so a multi-metre
+ * one-frame correction read back as a multi-metre-per-second velocity spike
+ * that barely decelerated — a launch, not a nudge. Capping the correction
+ * speed here caps that derived velocity at the source, and spreads a deep
+ * escort out over the handful of frames it actually takes, however deep the
+ * overlap. Chosen well below the player's own walking pace so being
+ * depenetrated never feels like it could be mistaken for a shove *by* the
+ * game — it reads as being calmly walked back out.
+ */
+const MAX_DEPENETRATION_SPEED = 3;
+
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
@@ -109,9 +141,68 @@ export class CollisionWorld {
    * where two colliders meet. Returns `true` if at least one collider was
    * skipped this call purely because the mover jumped clear over it — Player
    * uses this to know when to pop a little effect at the moment of clearing.
+   *
+   * `dt` is this frame's time step. It is what lets a *deep* overlap (see
+   * {@link SHALLOW_OVERLAP}) be escorted out gently across several frames
+   * instead of corrected in one — see {@link MAX_DEPENETRATION_SPEED}. It
+   * defaults to `Infinity`, i.e. "resolve fully, right now, in one call",
+   * which is exactly the old behaviour and is what one-shot placement queries
+   * (parade formation, NPC waypoint clearance) want and get for free by not
+   * passing it: they don't have a meaningful frame time to speak of, and
+   * their overlaps are corner-cutting-small anyway, so the shallow/deep
+   * distinction never bites for them either way.
+   *
+   * Returns `clearedWall` (`true` if at least one collider was skipped this
+   * call purely because the mover jumped clear over it — Player uses this to
+   * know when to pop a little effect at the moment of clearing) and
+   * `escorting` (`true` if a deep overlap was corrected this call, however
+   * little of it — a mover already embedded in something, being nudged back
+   * out).
+   *
+   * `escorting` matters to callers that derive their own velocity from how
+   * far `resolve` just moved them (Player, NpcCharacter): a deep-overlap
+   * correction is an *external* nudge, not something the mover did under
+   * their own power, and must never be read back as velocity. Reading it
+   * back as velocity is exactly how design feedback #17's "fling" happened —
+   * the escort distance got banked as speed, which then carried the mover
+   * further into (or through) the same overlap next frame under ordinary
+   * movement integration, which escorted them again, banking still more
+   * speed — a feedback loop that only stopped when something finally blocked
+   * it outright. Capping the correction speed alone (this constant) slows
+   * that loop down but doesn't break it; only refusing to treat escort
+   * distance as velocity does.
    */
-  resolve(position: Vector3, radius: number, clearance = 0): boolean {
+  resolve(
+    position: Vector3,
+    radius: number,
+    clearance = 0,
+    dt = Infinity,
+  ): { clearedWall: boolean; escorting: boolean } {
     let clearedAny = false;
+    let escorting = false;
+    // Shared across every collider and both passes below, so a mover pinned
+    // between two deep overlaps at once still escorts at a combined
+    // MAX_DEPENETRATION_SPEED overall, rather than that much again per
+    // collider that happens to touch them.
+    let depenetrationBudget = MAX_DEPENETRATION_SPEED * dt;
+
+    const applyCorrection = (correctionX: number, correctionZ: number): void => {
+      const magnitude = Math.hypot(correctionX, correctionZ);
+      if (magnitude < 1e-9) return;
+      if (magnitude <= SHALLOW_OVERLAP) {
+        // Ordinary contact — walked straight into a wall, tree or rim.
+        // Correct it fully and instantly: this is what keeps blocking crisp.
+        position.x += correctionX;
+        position.z += correctionZ;
+        return;
+      }
+      escorting = true;
+      const allowed = Math.min(magnitude, depenetrationBudget);
+      depenetrationBudget -= allowed;
+      const scale = allowed / magnitude;
+      position.x += correctionX * scale;
+      position.z += correctionZ * scale;
+    };
 
     for (let pass = 0; pass < 2; pass += 1) {
       let moved = false;
@@ -129,13 +220,12 @@ export class CollisionWorld {
         const distance = Math.sqrt(distanceSquared);
         if (distance < 1e-5) {
           // Exactly on the centre: shove in an arbitrary but stable direction.
-          position.x = circle.x + minimum;
+          applyCorrection(minimum, 0);
           moved = true;
           continue;
         }
         const push = (minimum - distance) / distance;
-        position.x += dx * push;
-        position.z += dz * push;
+        applyCorrection(dx * push, dz * push);
         moved = true;
       }
 
@@ -159,14 +249,13 @@ export class CollisionWorld {
         }
         const distance = Math.sqrt(distanceSquared);
         if (distance < 1e-5) {
-          position.x += (-az / Math.sqrt(lengthSquared)) * minimum;
-          position.z += (ax / Math.sqrt(lengthSquared)) * minimum;
+          const invLength = 1 / Math.sqrt(lengthSquared);
+          applyCorrection(-az * invLength * minimum, ax * invLength * minimum);
           moved = true;
           continue;
         }
         const push = (minimum - distance) / distance;
-        position.x += dx * push;
-        position.z += dz * push;
+        applyCorrection(dx * push, dz * push);
         moved = true;
       }
 
@@ -175,14 +264,13 @@ export class CollisionWorld {
       const limit = GARDEN_PLAY_RADIUS - radius;
       if (fromCentre > limit) {
         const scale = limit / fromCentre;
-        position.x *= scale;
-        position.z *= scale;
+        applyCorrection(position.x * scale - position.x, position.z * scale - position.z);
         moved = true;
       }
 
       if (!moved) break;
     }
 
-    return clearedAny;
+    return { clearedWall: clearedAny, escorting };
   }
 }
