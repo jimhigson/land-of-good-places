@@ -19,12 +19,16 @@ import type { StallDefinition } from './types';
  *
  * - Stay clear of every anchor plot in `world/anchors.ts` — the scenery scatter
  *   and the wall pass both honour `boundingRadius`, and a stall that crosses one
- *   will be standing in a ride later.
- * - The lawn inside 11 m of the fountain is the only ground guaranteed free of
- *   scattered trees and bushes (`Scenery.isPlantable`), so a booth sitting just
- *   off the plaza kerb will never wake up inside a tree.
- * - Face the counter towards a path or the plaza. A child walks to the stand
- *   point in front of it, and that point wants to be somewhere they already are.
+ *   will be standing in a ride later. Mind the hand-authored wall runs in
+ *   `Scenery.ts` too; they are not in any table a builder can query.
+ * - **Face the counter roughly down +Z.** The isometric camera looks from the
+ *   +X/+Z corner, so a booth facing the other way shows the player its back —
+ *   which is exactly the mistake the anchor signs' `signYaw` exists to avoid.
+ *   That means putting the stall on the far side of whatever the child walks
+ *   from, so "towards them" and "towards the camera" are the same direction.
+ * - The stand point in front of the counter must be reachable in a straight
+ *   line: tap-to-move does not path-find, and it gives up after a couple of
+ *   seconds of scraping along the side of a booth.
  */
 
 export const STALLS: readonly StallDefinition[] = [
@@ -35,12 +39,15 @@ export const STALLS: readonly StallDefinition[] = [
     glyph: '🎢',
     accent: PALETTE.markerPink,
     stripe: PALETTE.buildingWall,
-    // Just off the south-east kerb of the fountain plaza: the first thing you
-    // see from the spawn point, and inside the tree-free ring.
-    position: [7.6, 8.2],
-    // Counter faces back towards the fountain, so you walk out of the plaza
-    // straight up to it.
-    facing: Math.atan2(-7.6, -8.2),
+    // On the lawn just off the north-east kerb of the fountain plaza: a few
+    // seconds' walk from where the game starts you, clear of every anchor plot,
+    // clear of the hand-authored wall runs, and — checked in the running game —
+    // with no scattered tree or bush within four metres.
+    position: [9.8, -4.8],
+    // A shade east of +Z: the counter, the awning stripes and the sign all face
+    // the default camera, and the stand point in front of it sits between the
+    // booth and the plaza, so walking up is a straight line from the fountain.
+    facing: 0.3,
     create: createRailRacer,
   },
 ];

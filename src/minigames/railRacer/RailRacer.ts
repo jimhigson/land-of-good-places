@@ -8,6 +8,7 @@ import { LANES, PLAYER_LANE, createCourse, type Course } from './course';
 import { createRaceHud, placeName, type RaceHud } from './hud';
 import { createRacer, type RacerModel } from './racer';
 import {
+  ALERT_RANGE,
   BONK_SPEED_FACTOR,
   HAZARDS,
   TRACK_LENGTH,
@@ -81,13 +82,22 @@ const RESULT_TIMEOUT = 9;
 /** Safety net: no race may run longer than this. */
 const RACE_TIME_LIMIT = 150;
 
-/** Camera framing: side-on with just enough pitch to separate the lanes. */
-const VIEW_HEIGHT = 13.5;
+/**
+ * Camera framing: side-on, with just enough pitch to stack the four lanes into
+ * separate rows of the picture.
+ *
+ * The view height is the number that matters. Too tight and the riders loom,
+ * the hazards arrive with no warning and the backdrop never gets seen; 24
+ * metres puts a two-metre cart at about a twelfth of the screen and gives a
+ * second and a half of visible track ahead at racing speed, which is the whole
+ * reaction budget the game is tuned around.
+ */
+const VIEW_HEIGHT = 24;
 const CAMERA_YAW = 0.17;
 const CAMERA_PITCH = 0.3;
 const CAMERA_DISTANCE = 90;
 /** The rider sits left of centre, so most of the screen is what is coming. */
-const CAMERA_LEAD = 3.4;
+const CAMERA_LEAD = 7;
 
 /** The three rivals. Cheerful, beatable, and each one rides a bit differently. */
 const RIVALS = [
@@ -163,8 +173,12 @@ class RailRacer implements MiniGame {
     fill.position.set(-30, 18, 20);
     this.scene.add(fill);
 
+    // The backdrop hangs off the camera so that its x and y are screen metres —
+    // see the note in `backdrop.ts`. That means the camera itself has to be in
+    // the scene graph, which it otherwise would not need to be.
     this.backdrop = createBackdrop();
-    this.scene.add(this.backdrop.root);
+    this.camera.add(this.backdrop.root);
+    this.scene.add(this.camera);
 
     this.course = createCourse();
     this.scene.add(this.course.root);
@@ -455,7 +469,7 @@ class RailRacer implements MiniGame {
     const player = this.player;
     for (const prop of this.course?.hazards ?? []) {
       const distance = prop.hazard.x - player.x;
-      const closeness = distance < -3 ? 0 : clamp01(1 - distance / 26);
+      const closeness = distance < -3 ? 0 : clamp01(1 - distance / ALERT_RANGE);
       prop.setAlert(closeness, player.speed <= prop.hazard.safeSpeed, elapsed);
     }
   }

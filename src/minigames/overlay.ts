@@ -17,6 +17,16 @@
 const STYLE_ID = 'lgp-minigame-styles';
 
 const STYLES = `
+/* While a mini-game is on, the park's own HUD fades away. Done from here with
+   a data attribute and one rule rather than by reaching into ui/Hud.ts: the
+   framework must be addable without the park's UI knowing it exists. */
+body[data-minigame='true'] .hud-row,
+body[data-minigame='true'] .touch-controls {
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+
 .mg-layer {
   position: absolute;
   inset: 0;
@@ -266,6 +276,10 @@ export class MiniGameOverlay {
   /** Shows or hides the whole layer. Hidden means it stops eating taps too. */
   setShown(shown: boolean): void {
     this.root.dataset.shown = shown ? 'true' : 'false';
+    // Fades the park's HUD and touch buttons out from underneath us — see the
+    // rule at the top of the stylesheet.
+    if (shown) document.body.dataset.minigame = 'true';
+    else delete document.body.dataset.minigame;
     if (!shown) {
       this.pointerHeld = false;
       this.hold.dataset.held = 'false';
@@ -292,6 +306,7 @@ export class MiniGameOverlay {
   }
 
   dispose(): void {
+    delete document.body.dataset.minigame;
     this.root.removeEventListener('pointerdown', this.onPointerDown);
     this.root.removeEventListener('pointerup', this.onPointerUp);
     this.root.removeEventListener('pointercancel', this.onPointerUp);

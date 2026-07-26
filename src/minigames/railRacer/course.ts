@@ -117,23 +117,25 @@ export function createCourse(): Course {
   }
 
   // --- posts ----------------------------------------------------------------
-  const perLane = Math.floor(length / 9);
-  const postGeometry = new CylinderGeometry(0.17, 0.22, 1, 8);
+  const perLane = Math.floor(length / 11);
+  const postGeometry = new CylinderGeometry(0.15, 0.2, 1, 8);
   const posts = new InstancedMesh(postGeometry, woodMaterial, perLane * LANES.length);
   const matrix = new Matrix4();
   const quaternion = new Quaternion();
   const position = new Vector3();
   let index = 0;
-  for (const lane of LANES) {
+  LANES.forEach((lane, laneIndex) => {
     for (let i = 0; i < perLane; i += 1) {
-      const x = start + i * 9 + 4;
+      // Staggered lane by lane. Lined up, four posts at the same x read as one
+      // fat pillar and the track turns into a colonnade.
+      const x = start + i * 11 + 4 + laneIndex * 2.75;
       const top = railHeight(x) - 0.2;
       position.set(x, top / 2, lane);
       matrix.compose(position, quaternion, new Vector3(1, top, 1));
       posts.setMatrixAt(index, matrix);
       index += 1;
     }
-  }
+  });
   posts.instanceMatrix.needsUpdate = true;
   root.add(posts);
   track(postGeometry);
@@ -228,12 +230,18 @@ function buildGate(hazard: Hazard, track: Track): { group: Group; handle: Hazard
   track(frameMaterial);
   track(barMaterial);
 
-  const postHeight = HAZARD_CLEARANCE + 0.9;
+  // Everything in this group is positioned relative to the rail, so the ground
+  // is this far *below* the origin. Anything that should look like it is
+  // standing on the grass has to be built down to it — the first version left
+  // the gates and the trees hanging in mid-air five metres up.
+  const ground = -railHeight(hazard.x);
+
+  const postHeight = HAZARD_CLEARANCE + 0.9 - ground;
   const postGeometry = new CylinderGeometry(0.16, 0.19, postHeight, 8);
   track(postGeometry);
   for (const side of [-1, 1] as const) {
     const post = solid(new Mesh(postGeometry, frameMaterial));
-    post.position.set(0, postHeight / 2 - 0.4, side * SPAN);
+    post.position.set(0, ground + postHeight / 2, side * SPAN);
     group.add(post);
     addOutline(post, 0.02);
   }
@@ -243,6 +251,24 @@ function buildGate(hazard: Hazard, track: Track): { group: Group; handle: Hazard
   group.add(bar);
   addOutline(bar, 0.022);
   track(bar.geometry);
+
+  // The bar itself is the warning light. Four lamps on the posts were legible
+  // at a standstill and invisible at fourteen metres a second; a two-metre
+  // stripe of amber right where the thing you must duck under is cannot be
+  // missed. It is a sleeve around the bar rather than the bar's own material so
+  // that the toon shading underneath still shapes it.
+  const sleeveGeometry = new BoxGeometry(0.46, 0.4, SPAN * 2 - 0.02);
+  track(sleeveGeometry);
+  const sleeveMaterial = new MeshBasicMaterial({
+    color: PALETTE.signBoard,
+    toneMapped: false,
+    transparent: true,
+    opacity: 0.9,
+  });
+  track(sleeveMaterial);
+  const sleeve = decal(new Mesh(sleeveGeometry, sleeveMaterial));
+  sleeve.position.copy(bar.position);
+  group.add(sleeve);
 
   // Stubby bristles hanging off the bar. They are what tells a child it is the
   // *height* that matters, before they have ever hit one.
@@ -256,11 +282,11 @@ function buildGate(hazard: Hazard, track: Track): { group: Group; handle: Hazard
   }
 
   const lamps: Mesh[] = [];
-  const materials: MeshBasicMaterial[] = [];
-  const lampGeometry = new SphereGeometry(0.2, 12, 9);
+  const materials: MeshBasicMaterial[] = [sleeveMaterial];
+  const lampGeometry = new SphereGeometry(0.28, 12, 9);
   track(lampGeometry);
   for (const side of [-1, 1] as const) {
-    for (const height of [-0.2, HAZARD_CLEARANCE + 0.42]) {
+    for (const height of [ground + 0.5, HAZARD_CLEARANCE + 0.5]) {
       const material = new MeshBasicMaterial({ color: PALETTE.signBoard, toneMapped: false });
       materials.push(material);
       track(material);
@@ -285,11 +311,15 @@ function buildBranch(hazard: Hazard, track: Track): { group: Group; handle: Haza
   track(barkMaterial);
   track(leafMaterial);
 
-  const trunkGeometry = new CylinderGeometry(0.42, 0.58, 5.6, 9);
+  // See the note in `buildGate`: the group sits at rail height, so the grass is
+  // down here and the trunk has to be grown from it.
+  const ground = -railHeight(hazard.x);
+  const trunkHeight = HAZARD_CLEARANCE + 1.2 - ground;
+  const trunkGeometry = new CylinderGeometry(0.42, 0.62, trunkHeight, 9);
   track(trunkGeometry);
   const trunk = solid(new Mesh(trunkGeometry, barkMaterial));
-  trunk.position.set(0.3, 1.4, -SPAN - 1.6);
-  trunk.rotation.z = 0.09;
+  trunk.position.set(0.3, ground + trunkHeight / 2, -SPAN - 1.6);
+  trunk.rotation.z = 0.05;
   group.add(trunk);
   addOutline(trunk, 0.022);
 
@@ -301,6 +331,22 @@ function buildBranch(hazard: Hazard, track: Track): { group: Group; handle: Haza
   arm.position.set(0.15, HAZARD_CLEARANCE, -SPAN - 1.6 + armLength / 2);
   group.add(arm);
   addOutline(arm, 0.02);
+
+  // Fairy lights strung the length of the branch: the same warning stripe the
+  // gates wear, so both hazards say the same thing in the same colour.
+  const sleeveGeometry = new CylinderGeometry(0.3, 0.3, armLength - 0.4, 8);
+  track(sleeveGeometry);
+  const sleeveMaterial = new MeshBasicMaterial({
+    color: PALETTE.signBoard,
+    toneMapped: false,
+    transparent: true,
+    opacity: 0.75,
+  });
+  track(sleeveMaterial);
+  const sleeve = decal(new Mesh(sleeveGeometry, sleeveMaterial));
+  sleeve.rotation.x = Math.PI / 2;
+  sleeve.position.copy(arm.position);
+  group.add(sleeve);
 
   const canopyGeometry = new IcosahedronGeometry(1, 1);
   canopyGeometry.computeVertexNormals();
@@ -321,8 +367,8 @@ function buildBranch(hazard: Hazard, track: Track): { group: Group; handle: Haza
   // Glowing berries dangling at head height: the gate's warning lamps, dressed
   // as fruit, so both hazards speak the same language.
   const lamps: Mesh[] = [];
-  const materials: MeshBasicMaterial[] = [];
-  const berryGeometry = new SphereGeometry(0.19, 12, 9);
+  const materials: MeshBasicMaterial[] = [sleeveMaterial];
+  const berryGeometry = new SphereGeometry(0.26, 12, 9);
   track(berryGeometry);
   for (let i = 0; i < 7; i += 1) {
     const material = new MeshBasicMaterial({ color: PALETTE.signBoard, toneMapped: false });
@@ -347,32 +393,37 @@ function buildArch(x: number, accent: number, kind: 'start' | 'finish', track: T
   track(accentMaterial);
   track(creamMaterial);
 
-  const legHeight = 8.5;
-  const legGeometry = new CylinderGeometry(0.3, 0.38, legHeight, 10);
+  // Legs stand on the grass, which is `railHeight` below this group's origin.
+  const ground = -railHeight(x);
+  const beamY = 4.6;
+  const legHeight = beamY - ground;
+  const legGeometry = new CylinderGeometry(0.26, 0.34, legHeight, 10);
   track(legGeometry);
-  const ringGeometry = new TorusGeometry(0.36, 0.11, 6, 14);
+  const ringGeometry = new TorusGeometry(0.32, 0.1, 6, 14);
   track(ringGeometry);
 
+  const legZ = SPAN - 0.4;
+  const rings = Math.max(3, Math.round(legHeight / 1.4));
   for (const side of [-1, 1] as const) {
     const leg = solid(new Mesh(legGeometry, creamMaterial));
-    leg.position.set(0, legHeight / 2 - 2.4, side * (SPAN + 1.2));
+    leg.position.set(0, ground + legHeight / 2, side * legZ);
     group.add(leg);
     addOutline(leg, 0.024);
 
     // Barber rings, exactly as on the stall's posts, so the mini-game plainly
     // belongs to the same fairground.
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < rings; i += 1) {
       const ring = decal(new Mesh(ringGeometry, accentMaterial));
       ring.rotation.y = Math.PI / 2;
-      ring.position.set(0, -2 + i * 1.3, side * (SPAN + 1.2));
+      ring.position.set(0, ground + 0.7 + (i * (legHeight - 1.4)) / (rings - 1), side * legZ);
       group.add(ring);
     }
   }
 
-  const beamGeometry = new BoxGeometry(0.7, 0.7, SPAN * 2 + 3.4);
+  const beamGeometry = new BoxGeometry(0.62, 0.62, legZ * 2 + 0.6);
   track(beamGeometry);
   const beam = solid(new Mesh(beamGeometry, accentMaterial));
-  beam.position.set(0, 5.9, 0);
+  beam.position.set(0, beamY, 0);
   group.add(beam);
   addOutline(beam, 0.024);
 
@@ -381,10 +432,10 @@ function buildArch(x: number, accent: number, kind: 'start' | 'finish', track: T
   track(flagGeometry);
   const dark = toonMaterial(kind === 'finish' ? PALETTE.ink : PALETTE.markerLemon);
   track(dark);
-  const flags = 17;
+  const flags = 15;
   for (let i = 0; i < flags; i += 1) {
     const flag = decal(new Mesh(flagGeometry, i % 2 === 0 ? creamMaterial : dark));
-    flag.position.set(0, 5.1, -SPAN - 1 + (i * (SPAN * 2 + 2)) / (flags - 1));
+    flag.position.set(0, beamY - 0.78, -legZ + (i * legZ * 2) / (flags - 1));
     group.add(flag);
   }
 

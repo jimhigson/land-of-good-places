@@ -77,6 +77,16 @@ export const BONK_SPEED_FACTOR = 0.35;
 export const HAZARD_CLEARANCE = 1.15;
 
 /**
+ * How far ahead a hazard starts warning you, in metres.
+ *
+ * Deliberately further than the camera can see, so a hazard is already glowing
+ * amber as it slides into frame and is never a surprise. That is about two and
+ * a half seconds at racing speed, against the one second it takes to coast down
+ * to a safe pace — enough slack for a six-year-old to notice, decide and act.
+ */
+export const ALERT_RANGE = 34;
+
+/**
  * Where the hazards are.
  *
  * Built once from a fixed seed, so every race is the same course — a child
