@@ -5,6 +5,7 @@ import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
 import { createRailRacer } from './railRacer/RailRacer';
+import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
 
@@ -49,6 +50,27 @@ export const STALLS: readonly StallDefinition[] = [
     // booth and the plaza, so walking up is a straight line from the fountain.
     facing: 0.3,
     create: createRailRacer,
+  },
+  {
+    id: 'waterFight',
+    title: 'Water Fight!',
+    subtitle: 'very big water guns',
+    glyph: '💦',
+    accent: PALETTE.markerMint,
+    stripe: PALETTE.markerSky,
+    // The one stall that stands *inside* an anchor plot rather than clear of
+    // one. That is not the exception it looks like: the water fight owns the
+    // `waterFight` plot (see `waterFight/plot.ts`, which takes its "coming
+    // soon" sign down and dresses it), so this booth is the doorway into the
+    // ride the plot was reserved for, not a stall squatting on somebody else's
+    // building site.
+    position: [-27, 21.5],
+    // Faces roughly +X/+Z so the counter and sign meet the isometric camera,
+    // and — the number that actually mattered — puts the stand point between
+    // the booth and the path spur arriving at the plot entrance, so walking up
+    // is a straight line that never scrapes along the side of the booth.
+    facing: 1.1,
+    create: createWaterFight,
   },
 ];
 

@@ -8,6 +8,7 @@ import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building } from './building';
 import { MiniGameStalls } from '../minigames';
+import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import type { InteractZone } from './interact';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -48,6 +49,12 @@ export class World implements GameSystem {
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots);
+    // The water-fight garden's shop window: takes the "coming soon" sign off the
+    // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
+    // a sprinkler and a rack of very big water guns. The fight itself is a
+    // mini-game in its own world, entered from the stall standing in that plot.
+    dressWaterFightPlot(this.anchorPlots, this.collision);
+
     // Fun-fair stalls: each one is a doorway into a mini-game (see
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
