@@ -7,10 +7,11 @@ import { isTouchDevice } from './core/device';
 import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
-import { Parade, Player, TapNavigator } from './entities';
-import { CuteODex, Hud, TouchControls } from './ui';
+import { Parade, Player, TapNavigator, WornFlower } from './entities';
+import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
+import { SignInspector } from './SignInspector';
 import { gameStore } from './state';
 
 /**
@@ -41,8 +42,11 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly signInspector: SignInspector;
   readonly parade: Parade;
+  readonly wornFlower: WornFlower;
   readonly cuteODex: CuteODex;
+  readonly whatsNew: WhatsNew;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -64,6 +68,12 @@ export class Game {
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
 
+    // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
+    // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
+    // needs nothing from the rest of this constructor beyond the anchor.
+    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    this.addSystem(this.wornFlower);
+
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means
     // "into the backpack, please", not "walk to where the bunny is standing".
@@ -81,8 +91,18 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
 
+    // Tap a sign, and the camera swoops in to read it — see `SignInspector.ts`.
+    // Goes first in `onTap` below: a tap that lands on a sign is a "read this",
+    // never also a "walk over there".
+    this.signInspector = new SignInspector(this.player, this.camera, () =>
+      this.world.signZones(),
+    );
+
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // Order matters: a sign tap is "read this", a parade tap is "stow my
+        // bunny", and only a tap on neither is "walk there".
+        if (this.signInspector.handleTap(point)) return;
         if (this.parade.handleTap(point)) return;
         this.tapNavigator.handleTap(point);
       },
@@ -95,6 +115,12 @@ export class Game {
     // The collection book. Mounts its own pill into the HUD's top row and owns
     // the C key, so neither `Hud` nor the input bindings need to know about it.
     this.cuteODex = new CuteODex(uiRoot);
+    // "What's new": checks `whatsnew.json` against localStorage and shows
+    // itself, synchronously, if there is anything the player has not seen —
+    // see `ui/WhatsNew.ts`. Built here so the check happens before the first
+    // frame renders, and mounted like every other overlay, as a plain DOM
+    // child of `uiRoot` rather than anything the world needs to know about.
+    this.whatsNew = new WhatsNew(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
 
     // The fairground stalls. Walking up to one and pressing interact hands the
@@ -115,6 +141,7 @@ export class Game {
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
+    this.addSystem(this.signInspector);
 
     this.frameContext = {
       dt: 0,
@@ -163,6 +190,7 @@ export class Game {
     this.world.dispose();
     this.player.dispose();
     this.cuteODex.dispose();
+    this.whatsNew.dispose();
     this.hud.dispose();
     this.sky.dispose();
     this.engine.dispose();
@@ -174,15 +202,36 @@ export class Game {
     this.input.update();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
-    // While a shop or the backpack is open, Escape belongs to it — see
-    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
-    // park behind it.
-    if (this.cuteODex.isOpen) {
+    // The what's-new welcome takes priority over everything else. It can only
+    // ever be open in the first moment of a session — before a shop or the
+    // Cute-o-dex could plausibly be open too — but checking it first keeps
+    // that a guarantee rather than an accident. Esc, E/Enter or B on a pad all
+    // say "got it"; there is no key-handling in `WhatsNew` itself, unlike
+    // `CuteODex`, because none of its keys need anything beyond the ordinary
+    // action vocabulary already read here.
+    //
+    // Below it: while a shop or the backpack is open, Escape belongs to it —
+    // see `Shopping.uiOpen`. Same for an inspected sign: Escape is one of the
+    // "any key" gestures `SignInspector` already backs out on. And when the
+    // Cute-o-dex has the screen, Escape belongs to the book.
+    if (this.whatsNew.isOpen) {
+      if (
+        this.input.justPressed('menu') ||
+        this.input.justPressed('cancel') ||
+        this.input.justPressed('interact')
+      ) {
+        this.whatsNew.close();
+      }
+    } else if (this.cuteODex.isOpen) {
       // The book has the screen: Escape and B close it, and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
       }
-    } else if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+    } else if (
+      this.input.justPressed('menu') &&
+      !this.shopping.uiOpen &&
+      !this.signInspector.active
+    ) {
       gameStore.setPaused(!gameStore.get().paused);
     }
 

@@ -13,6 +13,7 @@ import {
 import { signTexture } from '../../core/textures';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
+import { markAsSign } from '../signs';
 import type { Region } from './layout';
 
 /**
@@ -187,6 +188,10 @@ export function cuteSign(options: CuteSignOptions): Mesh {
   const board = new Mesh(geometry, material);
   board.castShadow = false;
   board.receiveShadow = false;
+  // Tappable: the "inspect" camera (SignInspector) reads this back off the
+  // assembled scene graph rather than needing its own registry wired through
+  // every builder that calls `cuteSign`.
+  markAsSign(board, width, height);
   return board;
 }
 

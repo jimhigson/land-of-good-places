@@ -1,7 +1,7 @@
 # Land of Good Places
 
-A cute, cosy 3D theme-park game you play in a web browser — **designed by Eleri
-(age 6) and her dad**.
+A cute, cosy 3D theme-park game you play in a web browser — **By Eleri age 6,
+and Jim age 44**.
 
 You can't lose and you can't die. You just explore the park, ride the rides
 (including a ferris wheel that goes all the way to space), and collect lots of

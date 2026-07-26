@@ -2,6 +2,7 @@ import type { Scene } from 'three';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
+import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { AnchorPlots } from './AnchorPlots';
@@ -9,7 +10,9 @@ import { DayNight } from './DayNight';
 import { Building } from './building';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
+import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
+import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -33,17 +36,23 @@ export class World implements GameSystem {
   readonly collision = new CollisionWorld();
   readonly garden: Garden;
   readonly scenery: Scenery;
+  readonly flowers: Flowers;
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
+  readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
 
   constructor(scene: Scene, sky: Sky) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
+    // Living, pickable flowers — no collision (you walk straight through
+    // them, same as the old decorative scatter), so it needs nothing from
+    // the world to be built.
+    this.flowers = new Flowers();
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
@@ -59,6 +68,11 @@ export class World implements GameSystem {
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
     this.stalls = new MiniGameStalls(this.collision);
+    // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
+    // and the fake wooden tree, visible from right across the garden. Built
+    // after AnchorPlots (it fills that plot and retires its "coming soon"
+    // dressing); the ride you climb into is the mini-game behind the kiosk.
+    this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
     // The other children in the park. Built last, because the waypoint graph
@@ -71,6 +85,7 @@ export class World implements GameSystem {
     scene.add(
       this.garden.group,
       this.scenery.group,
+      this.flowers.group,
       this.fountain.group,
       this.fairyLights.group,
       this.anchorPlots.group,
@@ -94,6 +109,8 @@ export class World implements GameSystem {
     this.building.update(context);
     this.npcs.update(context);
     this.stalls.update(context);
+    this.flowers.update(context);
+    this.dodgems.update(context);
   }
 
   /**
@@ -103,7 +120,23 @@ export class World implements GameSystem {
    * built, which is why this lives on World rather than on Building.
    */
   interactZones(): InteractZone[] {
-    return [...this.building.interactZones(), ...this.stalls.interactZones()];
+    return [
+      ...this.building.interactZones(),
+      ...this.stalls.interactZones(),
+      ...this.flowers.interactZones(),
+    ];
+  }
+
+  /**
+   * Every tap-to-read sign in the park (see `world/signs.ts`).
+   *
+   * A traversal of `anchorPlots.group` rather than a per-builder registry: the
+   * building is built *into* the anchor plots (see the constructor), so this
+   * one call already reaches every anchor sign and every shop sign without
+   * needing to know that chain of ownership.
+   */
+  signZones(): SignZone[] {
+    return collectSignZones(this.anchorPlots.group);
   }
 
   /**
@@ -118,5 +151,7 @@ export class World implements GameSystem {
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.stalls.dispose();
+    this.flowers.dispose();
+    this.dodgems.dispose();
   }
 }
