@@ -7,7 +7,7 @@ import { isTouchDevice } from './core/device';
 import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
-import { Parade, Player, TapNavigator } from './entities';
+import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
@@ -44,6 +44,7 @@ export class Game {
   readonly shopping: Shopping;
   readonly signInspector: SignInspector;
   readonly parade: Parade;
+  readonly wornFlower: WornFlower;
   readonly cuteODex: CuteODex;
 
   private readonly loop: Loop;
@@ -65,6 +66,12 @@ export class Game {
     // The building owns "how high is the ground?" from here on, so that its
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
+
+    // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
+    // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
+    // needs nothing from the rest of this constructor beyond the anchor.
+    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    this.addSystem(this.wornFlower);
 
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means

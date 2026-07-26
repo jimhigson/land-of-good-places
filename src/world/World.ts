@@ -2,6 +2,7 @@ import type { Scene } from 'three';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
+import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { AnchorPlots } from './AnchorPlots';
@@ -34,6 +35,7 @@ export class World implements GameSystem {
   readonly collision = new CollisionWorld();
   readonly garden: Garden;
   readonly scenery: Scenery;
+  readonly flowers: Flowers;
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
   readonly anchorPlots: AnchorPlots;
@@ -46,6 +48,10 @@ export class World implements GameSystem {
   constructor(scene: Scene, sky: Sky) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
+    // Living, pickable flowers — no collision (you walk straight through
+    // them, same as the old decorative scatter), so it needs nothing from
+    // the world to be built.
+    this.flowers = new Flowers();
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
@@ -72,6 +78,7 @@ export class World implements GameSystem {
     scene.add(
       this.garden.group,
       this.scenery.group,
+      this.flowers.group,
       this.fountain.group,
       this.fairyLights.group,
       this.anchorPlots.group,
@@ -95,6 +102,7 @@ export class World implements GameSystem {
     this.building.update(context);
     this.npcs.update(context);
     this.stalls.update(context);
+    this.flowers.update(context);
     this.dodgems.update(context);
   }
 
@@ -105,7 +113,11 @@ export class World implements GameSystem {
    * built, which is why this lives on World rather than on Building.
    */
   interactZones(): InteractZone[] {
-    return [...this.building.interactZones(), ...this.stalls.interactZones()];
+    return [
+      ...this.building.interactZones(),
+      ...this.stalls.interactZones(),
+      ...this.flowers.interactZones(),
+    ];
   }
 
   /**
@@ -132,6 +144,7 @@ export class World implements GameSystem {
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.stalls.dispose();
+    this.flowers.dispose();
     this.dodgems.dispose();
   }
 }
