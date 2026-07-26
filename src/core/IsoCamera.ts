@@ -1,0 +1,168 @@
+import { OrthographicCamera, Vector3 } from 'three';
+import {
+  CAMERA_DISTANCE,
+  CAMERA_FOLLOW_HALF_LIFE,
+  CAMERA_LOOK_AHEAD,
+  CAMERA_PITCH_DEGREES,
+  CAMERA_ROTATE_DURATION,
+  CAMERA_VIEW_HEIGHT,
+  CAMERA_YAW_DEGREES,
+  CAMERA_ZOOM_MAX,
+  CAMERA_ZOOM_MIN,
+  CAMERA_ZOOM_STEP,
+} from './constants';
+import { clamp, damp, DEG, smoothstep } from './mathUtils';
+import type { FrameContext } from './types';
+
+/**
+ * The Theme Park camera.
+ *
+ * An orthographic camera pinned at a fixed downward pitch, looking at the player
+ * from a fixed compass angle. Orthographic (rather than perspective) is what
+ * sells the classic look: parallel lines stay parallel, so the park reads like a
+ * toy model rather than a first-person world. The player can spin the view in
+ * 90° steps — exactly what Theme Park allowed — but never tumble it freely,
+ * which keeps the world legible for a six-year-old.
+ *
+ * Movement input is interpreted through {@link forward} / {@link right} so that
+ * "up" on the stick always means "up the screen", whichever way the view faces.
+ */
+export class IsoCamera {
+  readonly camera: OrthographicCamera;
+
+  /** Point the camera orbits. Damped towards the follow target every frame. */
+  private readonly focus = new Vector3();
+  private readonly desiredFocus = new Vector3();
+  private readonly offset = new Vector3();
+
+  /** Ground-plane basis vectors, recomputed whenever the yaw changes. */
+  private readonly forwardVector = new Vector3(0, 0, -1);
+  private readonly rightVector = new Vector3(1, 0, 0);
+
+  private yaw = CAMERA_YAW_DEGREES * DEG;
+  private yawFrom = this.yaw;
+  private yawTo = this.yaw;
+  private yawTimer = 1;
+
+  private zoomValue = 1;
+  private zoomTarget = 1;
+
+  private aspect = 1;
+
+  constructor() {
+    this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
+    this.camera.position.set(0, CAMERA_DISTANCE, CAMERA_DISTANCE);
+    this.updateBasis();
+    this.applyFrustum();
+  }
+
+  /** Unit vector pointing "up the screen" along the ground. */
+  get forward(): Readonly<Vector3> {
+    return this.forwardVector;
+  }
+
+  /** Unit vector pointing "right on the screen" along the ground. */
+  get right(): Readonly<Vector3> {
+    return this.rightVector;
+  }
+
+  /** Current zoom, 1 = default framing. Larger = closer. */
+  get zoom(): number {
+    return this.zoomValue;
+  }
+
+  /** Snaps the camera straight to a position, skipping the follow smoothing. */
+  snapTo(position: Vector3): void {
+    this.focus.copy(position);
+    this.desiredFocus.copy(position);
+    this.applyTransform();
+  }
+
+  resize(width: number, height: number): void {
+    this.aspect = width / Math.max(1, height);
+    this.applyFrustum();
+  }
+
+  /** Begins a 90° rotation. Ignored while a previous rotation is in flight. */
+  rotate(steps: number): void {
+    if (this.yawTimer < 1) return;
+    this.yawFrom = this.yaw;
+    this.yawTo = this.yaw + (Math.PI / 2) * steps;
+    this.yawTimer = 0;
+  }
+
+  nudgeZoom(delta: number): void {
+    this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+  }
+
+  /**
+   * Follows `target`, leaning slightly in the direction of travel so the player
+   * can see a touch further ahead when they run.
+   */
+  update(context: FrameContext, target: Vector3, velocity: Vector3): void {
+    const { dt, input } = context;
+
+    if (input.justPressed('cameraLeft')) this.rotate(1);
+    if (input.justPressed('cameraRight')) this.rotate(-1);
+    if (input.justPressed('zoomIn')) this.nudgeZoom(CAMERA_ZOOM_STEP);
+    if (input.justPressed('zoomOut')) this.nudgeZoom(-CAMERA_ZOOM_STEP);
+
+    if (this.yawTimer < 1) {
+      this.yawTimer = Math.min(1, this.yawTimer + dt / CAMERA_ROTATE_DURATION);
+      // Smoothstep gives the turn a gentle start and stop; a linear snap felt
+      // mechanical next to everything else in the park.
+      const t = smoothstep(0, 1, this.yawTimer);
+      this.yaw = this.yawFrom + (this.yawTo - this.yawFrom) * t;
+      this.updateBasis();
+    }
+
+    const previousZoom = this.zoomValue;
+    this.zoomValue = damp(this.zoomValue, this.zoomTarget, 0.12, dt);
+    if (Math.abs(this.zoomValue - previousZoom) > 1e-4) this.applyFrustum();
+
+    this.desiredFocus
+      .copy(target)
+      .addScaledVector(velocity, CAMERA_LOOK_AHEAD)
+      // Aim a little above the player's feet so they sit slightly low on screen,
+      // leaving room to see what you are walking towards.
+      .add(TEMP_LIFT);
+
+    this.focus.x = damp(this.focus.x, this.desiredFocus.x, CAMERA_FOLLOW_HALF_LIFE, dt);
+    this.focus.y = damp(this.focus.y, this.desiredFocus.y, CAMERA_FOLLOW_HALF_LIFE * 2, dt);
+    this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
+
+    this.applyTransform();
+  }
+
+  private applyTransform(): void {
+    const pitch = CAMERA_PITCH_DEGREES * DEG;
+    const horizontal = Math.cos(pitch) * CAMERA_DISTANCE;
+    this.offset.set(
+      Math.sin(this.yaw) * horizontal,
+      Math.sin(pitch) * CAMERA_DISTANCE,
+      Math.cos(this.yaw) * horizontal,
+    );
+    this.camera.position.copy(this.focus).add(this.offset);
+    this.camera.lookAt(this.focus);
+    this.camera.updateMatrixWorld();
+  }
+
+  private applyFrustum(): void {
+    const halfHeight = CAMERA_VIEW_HEIGHT / 2 / this.zoomValue;
+    const halfWidth = halfHeight * this.aspect;
+    this.camera.left = -halfWidth;
+    this.camera.right = halfWidth;
+    this.camera.top = halfHeight;
+    this.camera.bottom = -halfHeight;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private updateBasis(): void {
+    // The camera sits at +offset and looks back at the focus, so "into the
+    // screen" is the negated horizontal part of that offset.
+    this.forwardVector.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    this.rightVector.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+  }
+}
+
+const TEMP_LIFT = new Vector3(0, 1.1, 0);

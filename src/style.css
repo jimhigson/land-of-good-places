@@ -1,0 +1,204 @@
+/* Global chrome for Land of Good Places.
+   All in-world visuals are three.js; this file only styles the HTML overlay. */
+
+:root {
+  --lgp-ink: #4a3a52;
+  --lgp-pink: #ffb4d6;
+  --lgp-pink-deep: #ff7fb6;
+  --lgp-cream: #fff6ea;
+  --lgp-mint: #b8f2d8;
+  --lgp-sky: #8fd3ff;
+  --lgp-shadow: 0 6px 0 rgba(74, 58, 82, 0.18);
+  --lgp-font: 'Baloo 2', 'Nunito', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #7ec8f0;
+  font-family: var(--lgp-font);
+  color: var(--lgp-ink);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* ---------------------------------------------------------------- overlay */
+
+#ui-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hud-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.hud-row.bottom {
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.pill {
+  background: var(--lgp-cream);
+  border: 3px solid #fff;
+  border-radius: 999px;
+  padding: 7px 16px 8px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  box-shadow: var(--lgp-shadow);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pill .emoji {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.pill--park {
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 140%);
+}
+
+.pill--clock {
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
+  min-width: 132px;
+}
+
+.pill--money {
+  background: linear-gradient(180deg, #fff 0%, #ffe9a8 150%);
+}
+
+.pill--soft {
+  background: rgba(255, 246, 234, 0.82);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 13px 7px;
+}
+
+.hint-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.pill--pad {
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-mint) 150%);
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.pill--pad[data-connected='false'] {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+kbd {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  background: #fff;
+  border: 2px solid rgba(74, 58, 82, 0.16);
+  border-bottom-width: 3px;
+  border-radius: 7px;
+  padding: 1px 6px 2px;
+}
+
+/* ------------------------------------------------------------ boot splash */
+
+#boot-splash {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 35%, #bfe9ff 0%, #7ec8f0 55%, #6bb6e6 100%);
+  transition: opacity 520ms ease;
+  z-index: 10;
+}
+
+#boot-splash.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-card {
+  text-align: center;
+  background: var(--lgp-cream);
+  border: 6px solid #fff;
+  border-radius: 28px;
+  padding: 26px 40px 30px;
+  box-shadow: 0 12px 0 rgba(74, 58, 82, 0.16);
+  animation: boot-pop 620ms cubic-bezier(0.22, 1.3, 0.4, 1) both;
+}
+
+.boot-card h1 {
+  margin: 0;
+  font-size: clamp(26px, 5vw, 44px);
+  color: var(--lgp-pink-deep);
+  text-shadow: 0 3px 0 #fff, 0 5px 0 rgba(74, 58, 82, 0.12);
+}
+
+.boot-sub {
+  margin: 6px 0 14px;
+  font-size: 16px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.boot-hint {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 0.6;
+  animation: boot-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes boot-pop {
+  from {
+    transform: scale(0.82) translateY(14px);
+    opacity: 0;
+  }
+}
+
+@keyframes boot-breathe {
+  50% {
+    opacity: 0.28;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-card,
+  .boot-hint {
+    animation: none;
+  }
+}

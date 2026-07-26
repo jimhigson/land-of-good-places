@@ -1,0 +1,98 @@
+import {
+  ACESFilmicToneMapping,
+  Color,
+  Fog,
+  PCFSoftShadowMap,
+  Scene,
+  SRGBColorSpace,
+  WebGLRenderer,
+} from 'three';
+import { FOG_FAR, FOG_NEAR, MAX_PIXEL_RATIO } from './constants';
+import { PALETTE } from './palette';
+
+/**
+ * Owns the WebGL renderer, the scene and the canvas sizing.
+ *
+ * Deliberately knows nothing about gameplay: it is the "screen" the rest of the
+ * game draws onto. Systems should never touch `renderer` directly except for
+ * the odd capability query.
+ */
+export class Engine {
+  readonly renderer: WebGLRenderer;
+  readonly scene: Scene;
+  readonly canvas: HTMLCanvasElement;
+
+  private readonly resizeCallbacks = new Set<(width: number, height: number) => void>();
+  private readonly resizeObserver: ResizeObserver;
+
+  private widthValue = 1;
+  private heightValue = 1;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+
+    this.renderer = new WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    // Filmic tone mapping keeps the saturated pastels from blowing out into
+    // white where the sun hits, which is what made early builds look washed.
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+
+    this.scene = new Scene();
+    this.scene.background = new Color(PALETTE.skyDayBottom);
+    // Linear fog gives the cosy "the park fades into a nice day" feeling. The
+    // DayNight system re-tints this colour as the sun moves.
+    this.scene.fog = new Fog(PALETTE.skyDayBottom, FOG_NEAR, FOG_FAR);
+
+    this.resizeObserver = new ResizeObserver(() => this.handleResize());
+    this.resizeObserver.observe(canvas.parentElement ?? document.body);
+    window.addEventListener('resize', this.handleResize);
+    this.handleResize();
+  }
+
+  get width(): number {
+    return this.widthValue;
+  }
+
+  get height(): number {
+    return this.heightValue;
+  }
+
+  get aspect(): number {
+    return this.widthValue / Math.max(1, this.heightValue);
+  }
+
+  /** Registers a resize handler and immediately calls it with current size. */
+  onResize(callback: (width: number, height: number) => void): () => void {
+    this.resizeCallbacks.add(callback);
+    callback(this.widthValue, this.heightValue);
+    return () => this.resizeCallbacks.delete(callback);
+  }
+
+  dispose(): void {
+    this.resizeObserver.disconnect();
+    window.removeEventListener('resize', this.handleResize);
+    this.renderer.dispose();
+  }
+
+  private readonly handleResize = (): void => {
+    const parent = this.canvas.parentElement;
+    const width = Math.max(1, Math.floor(parent?.clientWidth ?? window.innerWidth));
+    const height = Math.max(1, Math.floor(parent?.clientHeight ?? window.innerHeight));
+    if (width === this.widthValue && height === this.heightValue) return;
+
+    this.widthValue = width;
+    this.heightValue = height;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    this.renderer.setSize(width, height, false);
+    for (const callback of this.resizeCallbacks) callback(width, height);
+  };
+}
