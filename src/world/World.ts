@@ -8,6 +8,7 @@ import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building } from './building';
 import { MiniGameStalls } from '../minigames';
+import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -37,6 +38,7 @@ export class World implements GameSystem {
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
+  readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
 
@@ -52,6 +54,11 @@ export class World implements GameSystem {
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
     this.stalls = new MiniGameStalls(this.collision);
+    // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
+    // and the fake wooden tree, visible from right across the garden. Built
+    // after AnchorPlots (it fills that plot and retires its "coming soon"
+    // dressing); the ride you climb into is the mini-game behind the kiosk.
+    this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
     // The other children in the park. Built last, because the waypoint graph
@@ -87,6 +94,7 @@ export class World implements GameSystem {
     this.building.update(context);
     this.npcs.update(context);
     this.stalls.update(context);
+    this.dodgems.update(context);
   }
 
   /**
@@ -111,5 +119,6 @@ export class World implements GameSystem {
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.stalls.dispose();
+    this.dodgems.dispose();
   }
 }
