@@ -18,6 +18,9 @@ export interface TapPoint {
   readonly ndcX: number;
   /** -1 (bottom) .. +1 (top). */
   readonly ndcY: number;
+  /** True if this tap landed soon enough after, and close enough to, the last
+   *  one to count as a double-tap — the "run there" gesture. */
+  readonly doubleTap: boolean;
 }
 
 export interface PointerControlsOptions {
@@ -32,6 +35,20 @@ export interface PointerControlsOptions {
 
 /** Longer than this and it was a considered press, not a tap. */
 const TAP_MAX_MILLISECONDS = 600;
+
+/**
+ * A second tap within this long of the first counts as a double-tap ("run
+ * there") rather than two separate walks. Generous enough for small fingers,
+ * short enough that two unrelated taps in a hurry don't get mistaken for one.
+ */
+const DOUBLE_TAP_MAX_MILLISECONDS = 350;
+
+/**
+ * How far apart, in CSS pixels, the two taps of a double-tap may land and
+ * still count as "the same spot". Looser than {@link TAP_MAX_DRIFT} because
+ * it is measured between two independent touches, not one finger's wobble.
+ */
+const DOUBLE_TAP_MAX_DRIFT = 40;
 
 /**
  * How far a finger may slide and still count as a tap, in CSS pixels.
@@ -66,6 +83,13 @@ export class PointerControls {
   private readonly pointers = new Map<number, ActivePointer>();
   private pinchDistance = 0;
   private attached = false;
+
+  // Double-tap bookkeeping: remembers only the *previous accepted tap*, never
+  // a tap that was itself a double — so three quick taps read as "double,
+  // then single", not a runaway chain of doubles.
+  private lastTapTime = -Infinity;
+  private lastTapX = 0;
+  private lastTapY = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -154,13 +178,27 @@ export class PointerControls {
     capture(this.canvas, event.pointerId, false);
     if (this.pointers.size < 2) this.pinchDistance = 0;
     if (!pointer || pointer.disqualified) return;
-    if (performance.now() - pointer.startTime > TAP_MAX_MILLISECONDS) return;
+    const now = performance.now();
+    if (now - pointer.startTime > TAP_MAX_MILLISECONDS) return;
 
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
+
+    const doubleTap =
+      now - this.lastTapTime <= DOUBLE_TAP_MAX_MILLISECONDS &&
+      Math.hypot(event.clientX - this.lastTapX, event.clientY - this.lastTapY) <= DOUBLE_TAP_MAX_DRIFT;
+
+    // A tap that completed a double doesn't itself start a new pair — lifting
+    // off and tapping again starts fresh, rather than every third tap chaining
+    // into another "double".
+    this.lastTapTime = doubleTap ? -Infinity : now;
+    this.lastTapX = event.clientX;
+    this.lastTapY = event.clientY;
+
     this.options.onTap({
       ndcX: ((event.clientX - rect.left) / rect.width) * 2 - 1,
       ndcY: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      doubleTap,
     });
   };
 

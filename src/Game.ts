@@ -11,6 +11,7 @@ import { Parade, Player, TapNavigator } from './entities';
 import { CuteODex, Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
+import { SignInspector } from './SignInspector';
 import { gameStore } from './state';
 
 /**
@@ -41,6 +42,7 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly signInspector: SignInspector;
   readonly parade: Parade;
   readonly cuteODex: CuteODex;
 
@@ -81,8 +83,18 @@ export class Game {
     );
     this.engine.scene.add(this.tapNavigator.group);
 
+    // Tap a sign, and the camera swoops in to read it — see `SignInspector.ts`.
+    // Goes first in `onTap` below: a tap that lands on a sign is a "read this",
+    // never also a "walk over there".
+    this.signInspector = new SignInspector(this.player, this.camera, () =>
+      this.world.signZones(),
+    );
+
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // Order matters: a sign tap is "read this", a parade tap is "stow my
+        // bunny", and only a tap on neither is "walk there".
+        if (this.signInspector.handleTap(point)) return;
         if (this.parade.handleTap(point)) return;
         this.tapNavigator.handleTap(point);
       },
@@ -115,6 +127,7 @@ export class Game {
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
+    this.addSystem(this.signInspector);
 
     this.frameContext = {
       dt: 0,
@@ -175,14 +188,19 @@ export class Game {
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
     // While a shop or the backpack is open, Escape belongs to it — see
-    // `Shopping.uiOpen`. Otherwise Escape would close the panel *and* pause the
-    // park behind it.
+    // `Shopping.uiOpen`. Same for an inspected sign: Escape is one of the
+    // "any key" gestures `SignInspector` already backs out on. And when the
+    // Cute-o-dex has the screen, Escape belongs to the book.
     if (this.cuteODex.isOpen) {
       // The book has the screen: Escape and B close it, and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
       }
-    } else if (this.input.justPressed('menu') && !this.shopping.uiOpen) {
+    } else if (
+      this.input.justPressed('menu') &&
+      !this.shopping.uiOpen &&
+      !this.signInspector.active
+    ) {
       gameStore.setPaused(!gameStore.get().paused);
     }
 
