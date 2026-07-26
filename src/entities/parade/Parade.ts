@@ -260,6 +260,19 @@ export class Parade implements GameSystem {
         ordered.push(existing);
         continue;
       }
+      // Somebody who is halfway through poofing out has changed their mind.
+      // Reviving them beats building a second copy inside the first — which is
+      // exactly what happens when a toy is put away and taken straight back out
+      // from the Cute-o-dex, since the book pauses the park and the poof never
+      // gets a frame to finish in.
+      const returning = this.leaving.findIndex((member) => member.uid === item.uid);
+      if (returning >= 0) {
+        const member = this.leaving[returning]!;
+        this.leaving.splice(returning, 1);
+        member.cancelExit();
+        ordered.push(member);
+        continue;
+      }
       const catalogue = shopItem(item.id);
       if (!catalogue) continue;
       const member = new ParadeMember(item.uid, catalogue);

@@ -26,13 +26,37 @@ import { shopItem } from '../../world/building/shops/catalogue';
  */
 
 /** Feet height, in anchor-local metres, while tucked down inside the bag. */
-const DOWN_Y = -0.32;
+const DOWN_Y = -0.4;
 
-/** Feet height while having a look around. */
-const UP_Y = -0.1;
+/**
+ * Feet height while having a look around.
+ *
+ * Deliberately still below the rim: two thirds of the peeker shows and the rest
+ * stays in the bag, which is what makes it read as *climbing out of* the
+ * backpack rather than standing on top of it.
+ */
+const UP_Y = -0.14;
 
-/** How tall a peeker is scaled to be. Bag-sized, whatever the model started as. */
-const PEEK_HEIGHT = 0.32;
+/**
+ * How tall a peeker is scaled to be. Bag-sized, whatever the model started as.
+ *
+ * Sized against the cartoon-pass head, which is enormous and overhangs the
+ * shoulders: much smaller than this and the peeker is lost in the player's hair.
+ */
+const PEEK_HEIGHT = 0.4;
+
+/**
+ * How far to one side the peeker leans out, in metres.
+ *
+ * Straight up the middle it is invisible. The cartoon-pass head is 1.3 m across
+ * and overhangs the backpack completely, so anything rising out of the bag comes
+ * up *underneath the skull*. Climbing out at an angle brings it past the edge of
+ * her hair where the camera can see it — and a small creature craning round
+ * somebody's head to get a look at the park is the exact gesture this whole
+ * feature is for. The far edge still overlaps the bag, so it reads as coming out
+ * of it rather than floating alongside.
+ */
+const LEAN = 0.3;
 
 const RISE_SECONDS = 0.42;
 const LOOK_SECONDS = 1.9;
@@ -55,6 +79,8 @@ export class BackpackPeek {
   private lastId: string | null = null;
 
   private phase: Phase = 'waiting';
+  /** Which shoulder this one is craning round. Re-rolled for every peek. */
+  private lean = LEAN;
   private timer = 0;
   /** Seconds to sit still before the next peek. Re-rolled after every one. */
   private waitFor = 2.5;
@@ -148,6 +174,7 @@ export class BackpackPeek {
     // Scaled to the bag rather than to itself: a teddy and a sticker sheet both
     // have to fit through the same opening.
     handle.root.scale.setScalar(PEEK_HEIGHT / Math.max(0.12, handle.height));
+    this.lean = Math.random() < 0.5 ? -LEAN : LEAN;
     handle.root.position.set(0, DOWN_Y, 0);
     this.anchor.add(handle.root);
 
@@ -178,7 +205,10 @@ export class BackpackPeek {
     const handle = this.handle;
     if (!handle) return;
     const base = PEEK_HEIGHT / Math.max(0.12, handle.height);
-    handle.root.position.y = DOWN_Y + (UP_Y - DOWN_Y) * rise;
+    handle.root.position.set(this.lean * rise, DOWN_Y + (UP_Y - DOWN_Y) * rise, 0);
+    // Tipped the way it is leaning, so it looks like it is holding on to the
+    // strap and craning out rather than levitating sideways.
+    handle.root.rotation.z = -this.lean * rise * 1.1;
     handle.root.scale.setScalar(base * Math.max(0.001, pop));
     handle.root.visible = pop > 0.01;
   }
@@ -194,7 +224,8 @@ export class BackpackPeek {
       this.creature.head.rotation.z = Math.sin(elapsed * 2.2) * 0.1;
     } else {
       handle.root.rotation.y = sway * 0.5;
-      handle.root.rotation.z = Math.sin(elapsed * 2.6) * 0.12;
+      // Added to the lean rather than replacing it — `place` set that this frame.
+      handle.root.rotation.z = -this.lean * 1.1 + Math.sin(elapsed * 2.6) * 0.12;
     }
   }
 

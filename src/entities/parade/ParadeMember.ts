@@ -151,6 +151,19 @@ export class ParadeMember {
   }
 
   /**
+   * Changed your mind: the member swells back up and rejoins the line.
+   *
+   * Necessary as well as nice. Putting a toy away from the Cute-o-dex happens
+   * while the book has the park paused, so the poof-out has not moved a frame by
+   * the time it is un-stowed again — and without this it would come back as a
+   * *second* copy standing inside the first.
+   */
+  cancelExit(): void {
+    this.leaving = false;
+    this.rejoice();
+  }
+
+  /**
    * Hop, because the player just did.
    *
    * `delay` staggers the line so the hop travels down it like a Mexican wave —
