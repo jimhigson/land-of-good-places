@@ -28,25 +28,34 @@ npm run typecheck  # types only, no build
 
 ## Deployment
 
+**It's live:**
+
+| URL                                                       | What it is                    |
+| --------------------------------------------------------- | ----------------------------- |
+| <https://landofgoodplaces.blockstack.ing>                   | the one to share              |
+| <https://land-of-good-places.blockstack.workers.dev>        | always-there fallback         |
+
 Every push to `main` triggers
 [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml), which runs
 `npm ci && npm run build` and publishes `dist/` to **Cloudflare Workers** as
-static assets (config in [`wrangler.jsonc`](./wrangler.jsonc)). A failing build
-or typecheck stops the deploy, so `main` only ever ships something that builds.
+static assets (config in [`wrangler.jsonc`](./wrangler.jsonc)). No button to
+press — merge it and it's live in about 40 seconds. A failing build or
+typecheck stops the deploy, so `main` only ever ships something that builds.
 
-The site is served from the root of a `workers.dev` URL, which keeps things
-simple for the PWA that's coming later.
+Both URLs serve the game from the **root** of their domain, so the PWA's
+service worker gets the whole site in its scope and `base` stays `/` in
+`vite.config.ts`. Unknown paths fall back to `index.html`.
 
 ### Secrets
 
-Deploys need two repository secrets:
+Both repository secrets are set, and deploys work end to end:
 
 | Secret                  | What it is                                          | Set? |
 | ----------------------- | --------------------------------------------------- | ---- |
 | `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account to deploy into                | yes  |
-| `CLOUDFLARE_API_TOKEN`  | Token with the **Edit Cloudflare Workers** template  | no   |
+| `CLOUDFLARE_API_TOKEN`  | Token with the **Edit Cloudflare Workers** template  | yes  |
 
-To add the token: create it at
+If the token ever needs replacing, make a new one at
 <https://dash.cloudflare.com/profile/api-tokens> (Create Token → **Edit
 Cloudflare Workers** template → Account = your account → Create), then:
 
@@ -67,6 +76,12 @@ Or with a token instead of a browser login — handy for scripts and agents:
 ```sh
 npm run build
 CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler deploy
+```
+
+To re-run a deploy without pushing anything:
+
+```sh
+gh workflow run deploy.yml --repo jimhigson/land-of-good-places --ref main
 ```
 
 With no Cloudflare credentials at all you can still put a build online, on a
