@@ -122,6 +122,14 @@ export interface GameState {
   mode: GameMode;
   /** Infinite in normal mode — see `spend()` in the store. */
   money: number;
+  /**
+   * True once money can actually run out (mayhem mode).
+   *
+   * Kept as its own field, derived from `mode`, so UI that only cares "is this
+   * number worth showing" — the HUD money pill — doesn't have to know mode
+   * names or rules. Set by `setMode`.
+   */
+  moneyIsFinite: boolean;
   splashPoints: number;
   bestSplashPoints: number;
   player: PlayerState;
