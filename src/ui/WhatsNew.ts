@@ -145,7 +145,11 @@ export class WhatsNew {
     if (firstVisit) {
       this.show(
         'Welcome to Land of Good Places!',
-        'Designed by Eleri — here’s a few things to try:',
+        // The standard credit line (see README.md / index.html / vite.config.ts's
+        // manifest description) — kept in sync by hand rather than imported, since
+        // it is one string and pulling in a whole shared-constants module for it
+        // would be a bigger dependency than the thing it replaces.
+        'By Eleri age 6, and Jim age 44 — here’s a few things to try:',
         ENTRIES.slice(0, WELCOME_ENTRY_COUNT),
       );
       return;
