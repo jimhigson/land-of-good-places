@@ -18,8 +18,12 @@ import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/
  *  - arms permanently raised in a grabby pose, which is funny rather than
  *    threatening on something 55 cm tall.
  *
- * Head is 65% of total height — the most extreme ratio in the game.
+ * Head is the most extreme ratio in the game: after the cartoon pass the skull
+ * alone is 67% of the mini's total height.
  */
+
+/** Head scale-up over the original authoring. The one knob for the mini's skull. */
+const HEAD = 1.3;
 export interface MiniHandle extends CreatureHandle {
   /** Raise/lower the grabby arms. 0 = down, 1 = full "MINI ATTACK!". */
   setGrab(amount: number): void;
@@ -89,18 +93,18 @@ export function createMini(): MiniHandle {
 
   // --- head ----------------------------------------------------------------------
   const head = new Group();
-  head.position.y = 0.34;
+  head.position.y = 0.4;
   body.add(head);
 
-  const skullR = 0.185;
+  const skullR = 0.185 * HEAD;
   const skull = blob(skullR, lilac, [1.1, 0.98, 1], 28);
   head.add(skull);
   addOutline(skull, 0.012);
 
   // Stubby horns.
   for (const side of [-1, 1] as const) {
-    const h = solid(new Mesh(new ConeGeometry(0.038, 0.085, 12, 1), horn));
-    h.position.set(side * 0.088, 0.185, -0.01);
+    const h = solid(new Mesh(new ConeGeometry(0.038 * HEAD, 0.085 * HEAD, 12, 1), horn));
+    h.position.set(side * 0.088 * HEAD, 0.185 * HEAD, -0.01 * HEAD);
     h.rotation.z = side * 0.42;
     head.add(h);
     addOutline(h, 0.008);
@@ -108,8 +112,8 @@ export function createMini(): MiniHandle {
 
   // Big pointy ears sticking out sideways.
   for (const side of [-1, 1] as const) {
-    const ear = blob(0.075, lilacDark, [0.42, 1.05, 1.15], 14);
-    ear.position.set(side * 0.2, 0.02, -0.02);
+    const ear = blob(0.075 * HEAD, lilacDark, [0.42, 1.05, 1.15], 14);
+    ear.position.set(side * 0.2 * HEAD, 0.02 * HEAD, -0.02 * HEAD);
     ear.rotation.z = side * 0.35;
     ear.rotation.y = side * -0.3;
     head.add(ear);
@@ -120,7 +124,7 @@ export function createMini(): MiniHandle {
     radius: skullR,
     spreadX: 1.9,
     spreadY: 1.8,
-    tilt: 0.08,
+    tilt: 0.16,
     size: 256,
     eyeY: 0.42,
     eyeGap: 0.45,
@@ -144,7 +148,7 @@ export function createMini(): MiniHandle {
     body,
     head,
     limbs,
-    height: 0.56,
+    height: 0.72,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.5, 0.1),
     setGrab: (amount: number) => {

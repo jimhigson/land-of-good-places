@@ -1,16 +1,18 @@
 import type { Group } from 'three';
-import { createKid, type KidHandle, type KidOptions } from '../art/models/kid';
+import { createKid, KID_HEAD_HEIGHT, type KidHandle, type KidOptions } from '../art/models/kid';
 import type { Expression } from '../art/style/faces';
 
 /**
  * The player's character model.
  *
  * This is a thin adapter over {@link createKid} — the art system's toon kid —
- * that keeps the shape {@link Player} animates against. Proportions are
- * unchanged (1.86 m, head 47% of height, arm pivots at the shoulders, leg
- * pivots at the hips) because the camera, the collision radius and the name
- * label are all tuned to them. What changed underneath is the surface: toon
- * material, ink outlines, and a painted face patch.
+ * that keeps the shape {@link Player} animates against: arm pivots at the
+ * shoulders, leg pivots at the hips, and everything that bobs inside `body`.
+ *
+ * Sizes are **read from the model**, never restated here. After the cartoon
+ * pass the kid is 2.12 m to the top of her hair with the head pivot at 1.36 m,
+ * and an animator that hard-codes either of those breaks silently the next time
+ * the art changes.
  *
  * The one genuine behaviour change is that **there are no eye meshes any more**.
  * The face is a canvas texture on a curved patch, so blinking is
@@ -36,6 +38,9 @@ export class CharacterModel {
 
   /** Total height in metres — used to place the name label. */
   readonly height: number;
+
+  /** Resting height of the head pivot, in metres. The animator nudges around it. */
+  readonly headHeight = KID_HEAD_HEIGHT;
 
   /** Attachment points for hats, carried toys and backpack peekers. */
   readonly hatAnchor: Group;
