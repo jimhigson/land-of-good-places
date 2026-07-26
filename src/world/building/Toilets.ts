@@ -116,7 +116,6 @@ export class Toilets {
       width: 2.6,
     });
     sign.position.set(centreX, 2.5, maxZ + 0.06);
-    sign.rotation.y = Math.PI;
     room.add(sign);
   }
 

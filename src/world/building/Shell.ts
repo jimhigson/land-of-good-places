@@ -24,6 +24,7 @@ import {
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   INTERIOR_PLAZA_DROP,
+  INTERIOR_PLAZA_RADIUS,
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import {
@@ -180,7 +181,7 @@ export class BuildingShell {
     } else {
       const ground = this.floorGroups[0];
       if (ground) buildInteriorPorch(plan, ground);
-      this.group.add(buildInteriorPlaza(plan));
+      this.group.add(buildInteriorPlaza());
     }
   }
 }
@@ -558,23 +559,47 @@ function buildRoofPlanters(plan: ShellPlan): InstancedMesh {
 }
 
 /**
- * The interior's own ground, a soft pastel plaza a metre below deck zero.
+ * The interior's own ground: a soft green disc a metre below deck zero, with a
+ * skirt round its rim so you can never see under it.
  *
  * The building's space has no terrain — it is not on the hilltop, it is not
  * anywhere. Without this the windows look out on a void and the roof terrace
- * floats over nothing. One disc, one draw call, and suddenly the tower is
- * standing on something and the roof is properly high up.
+ * floats over nothing.
+ *
+ * It is a **disc**, and the radius matters, for exactly the reason the garden is
+ * a diorama on a hilltop (see `constants.ts`): the camera is orthographic, so an
+ * endless ground plane fills the frame forever and the sky is never seen. The
+ * top floor of this building is the roof and it is supposed to be *outdoors* —
+ * so the ground has to stop somewhere inside the view, and it stops at roughly
+ * the soft play boundary, by which distance the fog has already dissolved its
+ * edge into the horizon colour. Stand at the north-west parapet and there is
+ * open sky above the rim, whatever time of day it is.
  */
-function buildInteriorPlaza(plan: ShellPlan): Mesh {
-  const mesh = new Mesh(
-    new CircleGeometry(Math.max(plan.halfX, plan.halfZ) * 2.6, 48),
-    new MeshStandardMaterial({ color: PALETTE.grassLight, metalness: 0, roughness: 1 }),
+function buildInteriorPlaza(): Group {
+  const group = new Group();
+  group.name = 'interior-plaza';
+  group.position.y = -INTERIOR_PLAZA_DROP;
+
+  const ground = new MeshStandardMaterial({
+    color: PALETTE.grassLight,
+    metalness: 0,
+    roughness: 1,
+  });
+
+  const disc = new Mesh(new CircleGeometry(INTERIOR_PLAZA_RADIUS, 56), ground);
+  disc.rotation.x = -Math.PI / 2;
+  disc.receiveShadow = true;
+  group.add(disc);
+
+  // The cut edge, dropped far enough that the 38° camera never sees its bottom.
+  const skirt = new Mesh(
+    new CylinderGeometry(INTERIOR_PLAZA_RADIUS, INTERIOR_PLAZA_RADIUS, 22, 56, 1, true),
+    new MeshStandardMaterial({ color: PALETTE.grassDark, metalness: 0, roughness: 1 }),
   );
-  mesh.name = 'interior-plaza';
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -INTERIOR_PLAZA_DROP;
-  mesh.receiveShadow = true;
-  return mesh;
+  skirt.position.y = -11;
+  group.add(skirt);
+
+  return group;
 }
 
 // -------------------------------------------------------------- facade roof
@@ -791,7 +816,9 @@ function buildInteriorPorch(plan: ShellPlan, parent: Group): void {
     accent: PALETTE.markerMint,
     width: 4.4,
   });
+  // Facing +Z like every other sign in the game: the boards are painted on one
+  // face, so turning one round to "face into the room" shows its back and reads
+  // as mirror writing.
   sign.position.set(0, 4.3, 1.9);
-  sign.rotation.y = Math.PI;
   porch.add(sign);
 }

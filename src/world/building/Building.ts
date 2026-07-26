@@ -37,6 +37,7 @@ import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces } from './surfaces';
 import { buildingInteractZones } from './interactZones';
+import { dressDeck } from './dressing';
 import type { InteractZone } from '../interact';
 import { cuteSign, softMaterial } from './parts';
 import {
@@ -66,10 +67,13 @@ import {
   STAIR_STAND_Z,
   TOILET_DECK,
   TOP_DECK,
+  escalatorRamp,
   facadeX,
   facadeZ,
+  stairFlights,
   worldX,
   worldZ,
+  type RampDefinition,
 } from './layout';
 
 const RIDER_LIFT = 0.06;
@@ -237,6 +241,9 @@ export class Building implements GameSystem {
     this.interiorRoot.add(this.helterSkelter.group);
 
     addRideEntrances(this.shell.floorGroups);
+    // Roundels, planters and benches, so sixty metres of floor plate reads as a
+    // place rather than a car park. Must be before the fader claims materials.
+    this.shell.floorGroups.forEach((floor, deck) => dressDeck(deck, floor));
     this.interiorRoot.add(this.grownUp.root);
     this.placeGrownUp();
 
@@ -406,8 +413,14 @@ export class Building implements GameSystem {
     this.inside = true;
     this.interiorRoot.visible = true;
     this.collision.setPlayBounds(INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS);
-    // Just inside the door, facing north into the room.
-    player.teleportTo(worldX(0), BUILDING_BASE_Y, worldZ(INTERIOR_HALF_Z - 1.8), Math.PI);
+    // Well clear of the south wall, facing north into the room.
+    //
+    // Not on the threshold, which is the obvious place and the wrong one: the
+    // camera looks in along the +X+Z diagonal, so the south wall and its parapet
+    // are between it and anybody standing within about three metres of them. Land
+    // a child there and their first sight of the roomiest place in the game is
+    // the back of a wall.
+    player.teleportTo(worldX(0), BUILDING_BASE_Y, worldZ(INTERIOR_HALF_Z - 6.5), Math.PI);
   }
 
   private leaveInterior(): void {
@@ -856,6 +869,28 @@ function registerInteriorCollision(collision: CollisionWorld): void {
   // East face, minus the way into the lift.
   collision.addWall(east, north, east, worldZ(LIFT_DOOR_MIN_Z), 0.3);
   collision.addWall(east, worldZ(LIFT_DOOR_MAX_Z), east, south, 0.3);
+
+  // Stairs and escalator: a wall down each side of every ramp, so a wobbly
+  // step sideways meets a rail instead of open air. Footprints do not depend
+  // on which deck you asked for, and collision is height-blind, so one
+  // registration guards every storey at once. The stairs are a switchback —
+  // two flights side by side — and the shared inner edge between them is the
+  // most dangerous one of all: at any given z the two flights are mid-climb by
+  // different amounts, so stepping across it is not a level step sideways,
+  // it is stepping off a ledge into thin air. Walling both flights' full
+  // footprints on both edges covers that shared edge twice over, which costs
+  // nothing and cannot leave a gap.
+  const [stairFlightA, stairFlightB] = stairFlights(0);
+  addRampSideWalls(collision, stairFlightA);
+  addRampSideWalls(collision, stairFlightB);
+  addRampSideWalls(collision, escalatorRamp(0));
+}
+
+/** A collision wall down each long edge of a ramp's footprint. */
+function addRampSideWalls(collision: CollisionWorld, ramp: RampDefinition): void {
+  const { minX, maxX, minZ, maxZ } = ramp.footprint;
+  collision.addWall(worldX(minX), worldZ(minZ), worldX(minX), worldZ(maxZ), 0.2);
+  collision.addWall(worldX(maxX), worldZ(minZ), worldX(maxX), worldZ(maxZ), 0.2);
 }
 
 /**

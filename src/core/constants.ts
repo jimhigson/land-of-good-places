@@ -106,6 +106,17 @@ export const INTERIOR_HALF_Z = 22;
 /** How far the interior's plaza floor sits below the ground-floor deck. */
 export const INTERIOR_PLAZA_DROP = 1.2;
 
+/**
+ * Where the interior's ground stops.
+ *
+ * Same reasoning as TERRAIN_RADIUS out in the park: the camera is orthographic,
+ * so an endless ground plane fills the frame forever and the sky is never seen.
+ * The top floor here is the *roof* and it is meant to be outdoors, so the ground
+ * has to end inside the view — and at this distance the fog has already faded
+ * its rim into the horizon colour, so the cut never shows.
+ */
+export const INTERIOR_PLAZA_RADIUS = 52;
+
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;
 

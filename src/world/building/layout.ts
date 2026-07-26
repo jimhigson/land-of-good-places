@@ -7,6 +7,7 @@ import {
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
   BUILDING_PLINTH,
+  BUILDING_SLAB,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   INTERIOR_ORIGIN_X,
@@ -162,7 +163,11 @@ export const HELTER_SHAFT = rect(16.5, 23.5, -9.5, -2.5);
 
 const UPPER_DECKS = [1, 2, 3, 4] as const;
 
-export const DECK_HOLES: readonly DeckHole[] = [
+/**
+ * The fixed shafts. `DECK_HOLES` (below, defined after `SHOP_UNITS` so it can
+ * fold in each shop's sunken forecourt too) starts from this list.
+ */
+const BASE_DECK_HOLES: readonly DeckHole[] = [
   { id: 'stairwell', region: STAIRWELL, decks: UPPER_DECKS },
   { id: 'escalator', region: ESCALATOR_WELL, decks: UPPER_DECKS },
   { id: 'bubble', region: BUBBLE_SHAFT, decks: UPPER_DECKS },
@@ -394,6 +399,7 @@ export function allRamps(): RampDefinition[] {
   for (let deck = 0; deck < TOP_DECK; deck += 1) {
     ramps.push(...stairFlights(deck), escalatorRamp(deck));
   }
+  ramps.push(...shopForecourtRamps());
   return ramps;
 }
 
@@ -593,6 +599,151 @@ export function shopLocalToBuilding(
   const cos = Math.cos(unit.yaw);
   const sin = Math.sin(unit.yaw);
   return [unit.x + localX * cos + localZ * sin, unit.z - localX * sin + localZ * cos];
+}
+
+/**
+ * A shop unit's own axis-aligned footprint, in interior-local metres.
+ *
+ * Every yaw a unit actually uses (`FACE_SOUTH`, `FACE_EAST`) is a multiple of
+ * 90°, so a unit-local rectangle always maps onto an axis-aligned rectangle in
+ * interior-local space too — never a rotated one. Four corners through
+ * `shopLocalToBuilding` and a min/max is all that takes, which is why this
+ * stays a plain `RectRegion` rather than a general polygon.
+ */
+function shopFootprintRect(
+  unit: ShopUnitDefinition,
+  localMinX: number,
+  localMaxX: number,
+  localMinZ: number,
+  localMaxZ: number,
+): RectRegion {
+  const corners = [
+    shopLocalToBuilding(unit, localMinX, localMinZ),
+    shopLocalToBuilding(unit, localMaxX, localMinZ),
+    shopLocalToBuilding(unit, localMinX, localMaxZ),
+    shopLocalToBuilding(unit, localMaxX, localMaxZ),
+  ];
+  const xs = corners.map((c) => c[0]);
+  const zs = corners.map((c) => c[1]);
+  return rect(Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs));
+}
+
+/**
+ * "Shops must dominate their rooms" (design feedback, 26 July 2026): every shop
+ * gets a bigger footprint, and — everywhere the ground floor's "never has a
+ * hole" rule (see `deckIsSolid`) does not forbid it — a shallow sunken
+ * forecourt, so the counter and awning loom over a child standing in front of
+ * them instead of reading as a hut in a warehouse.
+ *
+ * `SHOP_SCALE_XZ` alone is what makes every shop bigger; it is applied to the
+ * whole kiosk+stock+shopkeeper group in `ShopUnits`, so nothing that builds a
+ * shop's contents (`shops/kiosk.ts`, `shops/fitouts.ts`) has to know it
+ * happened. Anything computed independently in *world* space — the counter's
+ * collision segment, the till spot, the keep-out zone other floor dressing
+ * respects — has to be scaled by hand alongside it; see `ShopUnits.ts`,
+ * `shops/Shops.ts` and `dressing.ts`.
+ */
+export const SHOP_SCALE_XZ = 1.6;
+
+/**
+ * How much taller a shop with a sunken forecourt gets to be, on top of
+ * `SHOP_SCALE_XZ`.
+ *
+ * A floor's clear height is only `BUILDING_FLOOR_HEIGHT - BUILDING_SLAB` (3.3 m
+ * — the kiosk's awning and sign already reach to within a few centimetres of
+ * that), so height cannot simply scale up with the footprint everywhere
+ * without poking through the slab above. Sinking the forecourt by
+ * `SHOP_RECESS_DEPTH` buys back exactly that much headroom, which is why only
+ * recessed shops (`shopHasForecourt`) get any extra height at all.
+ */
+const SHOP_SCALE_Y_RECESSED = 1.05;
+
+/**
+ * How far a shop's own forecourt sinks below its deck.
+ *
+ * Matches `BUILDING_SLAB` on purpose: the hole cut for it (see `DECK_HOLES`,
+ * below) already grows a vertical rim wall exactly `BUILDING_SLAB` deep as
+ * part of the deck slab's own extrusion, so that rim is *all* the retaining
+ * wall the pit needs — no separate riser geometry to keep in sync with it.
+ */
+export const SHOP_RECESS_DEPTH = BUILDING_SLAB;
+
+/**
+ * Ground floor decks can never carry a hole (`deckIsSolid` hard-codes deck 0
+ * solid, and that invariant is relied on elsewhere), so only shops on decks 1
+ * and up get the sunken-forecourt treatment. The two ground-floor shops (toy,
+ * balloon) still get the full footprint scale-up — only the extra height and
+ * the recess are unavailable to them.
+ */
+export function shopHasForecourt(unit: ShopUnitDefinition): boolean {
+  return unit.deck > 0;
+}
+
+/** Vertical scale for a shop's kiosk group: bigger only where there is headroom for it. */
+export function shopScaleY(unit: ShopUnitDefinition): number {
+  return shopHasForecourt(unit) ? SHOP_SCALE_Y_RECESSED : 1;
+}
+
+/** Half-width and near/far depth of a shop's forecourt, in *unit-local* metres, pre-scale. */
+const FORECOURT_HALF_X = 2.9;
+const FORECOURT_NEAR_Z = 0.25;
+const FORECOURT_FAR_Z = 3.2;
+
+/**
+ * A shop's sunken forecourt footprint, in interior-local metres — the counter,
+ * the till spot and the standing room in front of it, all scaled up with the
+ * rest of the shop. Only meaningful where `shopHasForecourt` is true; used both
+ * as the deck hole (`DECK_HOLES`, below) and as the flat "landing" ramp that
+ * fills it (`shopForecourtRamp`), so the two can never disagree about where
+ * the pit is.
+ */
+export function shopForecourtRegion(unit: ShopUnitDefinition): RectRegion {
+  return shopFootprintRect(
+    unit,
+    -FORECOURT_HALF_X * SHOP_SCALE_XZ,
+    FORECOURT_HALF_X * SHOP_SCALE_XZ,
+    FORECOURT_NEAR_Z * SHOP_SCALE_XZ,
+    FORECOURT_FAR_Z * SHOP_SCALE_XZ,
+  );
+}
+
+/** The flat "landing" ramp that fills a shop's forecourt hole. */
+function shopForecourtRamp(unit: ShopUnitDefinition): RampDefinition {
+  const y = unit.deck * BUILDING_FLOOR_HEIGHT - SHOP_RECESS_DEPTH;
+  return {
+    id: `shop-forecourt-${unit.id}`,
+    space: 'interior',
+    footprint: shopForecourtRegion(unit),
+    axis: 'z',
+    from: 0,
+    to: 1,
+    yFrom: y,
+    yTo: y,
+  };
+}
+
+/**
+ * Every fixed shaft, plus a hole for each recessed shop's forecourt.
+ *
+ * Declared here, after `SHOP_UNITS`, rather than back where `BASE_DECK_HOLES`
+ * is: it folds `SHOP_UNITS` in, so it has to be assigned after that constant
+ * exists. `deckIsSolid` (defined earlier in the file) still resolves this
+ * correctly regardless of where it sits in the file — it only reads
+ * `DECK_HOLES` when *called*, by which point the whole module has finished
+ * initialising.
+ */
+export const DECK_HOLES: readonly DeckHole[] = [
+  ...BASE_DECK_HOLES,
+  ...SHOP_UNITS.filter(shopHasForecourt).map((unit) => ({
+    id: `shop-forecourt-${unit.id}`,
+    region: shopForecourtRegion(unit),
+    decks: [unit.deck],
+  })),
+];
+
+/** Every recessed shop's forecourt ramp, folded into `allRamps()`. */
+export function shopForecourtRamps(): readonly RampDefinition[] {
+  return SHOP_UNITS.filter(shopHasForecourt).map(shopForecourtRamp);
 }
 
 // --------------------------------------------------------------- ball pit

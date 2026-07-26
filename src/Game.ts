@@ -161,12 +161,16 @@ export class Game {
     if (this.stairMenu.isOpen || this.player.riding) return;
     this.stairMenuDeck = deck;
     playOpenChime();
+    const canClimb = deck < BUILDING_FLOOR_COUNT - 1;
+    const canDescend = deck > 0;
     this.stairMenu.show({
       floorLabel: floorName(deck),
-      canClimb: deck < BUILDING_FLOOR_COUNT - 1,
-      canDescend: deck > 0,
-      upLabel: `up to ${floorName(deck + 1).toLowerCase()}`,
-      downLabel: `down to ${floorName(deck - 1).toLowerCase()}`,
+      canClimb,
+      canDescend,
+      // A greyed-out button that still names a floor reads as a bug. Say where
+      // it goes only when it goes anywhere.
+      upLabel: canClimb ? `up to ${floorName(deck + 1).toLowerCase()}` : 'this is the top!',
+      downLabel: canDescend ? `down to ${floorName(deck - 1).toLowerCase()}` : 'you are at the bottom',
     });
   }
 
