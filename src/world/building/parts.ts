@@ -2,8 +2,8 @@ import {
   BufferGeometry,
   ExtrudeGeometry,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
+  MeshToonMaterial,
   Path,
   Shape,
   Vector2,
@@ -12,6 +12,7 @@ import {
 } from 'three';
 import { signTexture } from '../../core/textures';
 import { PALETTE } from '../../core/palette';
+import { toonMaterial } from '../../art/style/materials';
 import type { Region } from './layout';
 
 /**
@@ -24,9 +25,17 @@ import type { Region } from './layout';
  * coordinates.
  */
 
-/** The house material: matte, unmetallic, faintly glossy. */
-export function softMaterial(colour: number, roughness = 0.68): MeshStandardMaterial {
-  return new MeshStandardMaterial({ color: colour, roughness, metalness: 0 });
+/**
+ * The house material for the building fabric: walls, trim, pillars, awnings,
+ * fittings, the roof and the plinth.
+ *
+ * Toon-shaded, because the tower is a toy like everything else in the park
+ * (ART_DIRECTION.md §2). `roughness` is kept in the signature so the ~30 call
+ * sites do not have to change and is deliberately ignored — under toon shading
+ * the ramp, not a roughness value, decides how a surface shades.
+ */
+export function softMaterial(colour: number, _roughness = 0.68): MeshToonMaterial {
+  return toonMaterial(colour);
 }
 
 /**
@@ -36,18 +45,23 @@ export function softMaterial(colour: number, roughness = 0.68): MeshStandardMate
  * so a physically-correct interior comes out grey and gloomy under a cutaway
  * that is supposed to look like a doll's house. A little emissive lifts it back
  * to the colour it is painted without adding a single light to the scene.
+ *
+ * Kept low: the toon ramp's darkest band already sits at 0.42, and piling
+ * emissive on top of that flattens the four bands into one flat sticker.
  */
-export function interiorMaterial(colour: number, roughness = 0.72): MeshStandardMaterial {
-  return new MeshStandardMaterial({
-    color: colour,
-    roughness,
-    metalness: 0,
-    emissive: colour,
-    emissiveIntensity: 0.22,
-  });
+export function interiorMaterial(colour: number, _roughness = 0.72): MeshToonMaterial {
+  return toonMaterial(colour, { emissive: colour, emissiveIntensity: INTERIOR_LIFT });
 }
 
-/** Glass: barely there, never casts a shadow, always lets the park through. */
+const INTERIOR_LIFT = 0.16;
+
+/**
+ * Glass: barely there, never casts a shadow, always lets the park through.
+ *
+ * Stays `MeshStandardMaterial` on purpose. Glass is on the ground/water/glass
+ * side of the material rule — banding a transparent pane looks like a rendering
+ * fault, and the faint specular is the only thing that says "window".
+ */
 export function glassMaterial(opacity = 0.24): MeshStandardMaterial {
   return new MeshStandardMaterial({
     color: PALETTE.glassTint,
@@ -140,10 +154,7 @@ export interface CuteSignOptions {
   readonly width?: number;
 }
 
-/**
- * A flat "opening soon" board: a chunky backing plate and a painted face.
- * Unlit, so it reads at every time of day — the same trick the plot signs use.
- */
+/** A flat "opening soon" board: a chunky backing plate and a painted face. */
 export function cuteSign(options: CuteSignOptions): Mesh {
   const width = options.width ?? 1.9;
   const height = width * (288 / 512);
@@ -156,9 +167,6 @@ export function cuteSign(options: CuteSignOptions): Mesh {
   // One mesh, not a board plus a separate painted face: the extruded plate
   // carries the sign texture on its front cap, and the 9 cm of edge nobody ever
   // looks at is a fair price for halving the sign count.
-  //
-  // Unlit and never a shadow caster — signs have to read at every time of day,
-  // and there are a dozen of them.
   const geometry = new ExtrudeGeometry(roundedPlate(width, height, height * 0.18), {
     depth: 0.09,
     bevelEnabled: false,
@@ -166,10 +174,18 @@ export function cuteSign(options: CuteSignOptions): Mesh {
     UVGenerator: signUVs(width, height),
   });
 
-  const board = new Mesh(
-    geometry,
-    new MeshBasicMaterial({ map: signTexture(faceOptions), toneMapped: false }),
-  );
+  // Toon-shaded like the rest of the fabric — `MeshBasicMaterial` is reserved
+  // for outlines and catchlights, never for something solid. The painted face
+  // is *also* fed in as an emissive map, which is what keeps a sign legible
+  // after dark without making it a flat sticker in daylight.
+  const face = signTexture(faceOptions);
+  const material = toonMaterial(0xffffff, { map: face });
+  material.emissive.setHex(0xffffff);
+  material.emissiveMap = face;
+  material.emissiveIntensity = 0.38;
+
+  const board = new Mesh(geometry, material);
+  board.castShadow = false;
   board.receiveShadow = false;
   return board;
 }

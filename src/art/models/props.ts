@@ -203,14 +203,19 @@ export function createPinkWall(options: WallOptions = {}): AssetHandle {
   }
 
   // Ball finials on the ends — the single detail that makes it look cared for.
+  // The coping tops out at 1.30, so the ball is seated at 1.36 and the collar
+  // widened until the three overlap. Floated clear (the ball was at 1.42) you
+  // see daylight between ball, collar and wall and the whole thing falls apart.
   for (const side of [-1, 1] as const) {
+    const endX = (side * (length * 2.4)) / 2 + side * -0.05;
+
     const finial = solid(blob(0.19, finialMat, [1, 1.15, 1], 18));
-    finial.position.set((side * (length * 2.4)) / 2 + side * -0.05, 1.42, 0);
+    finial.position.set(endX, 1.36, 0);
     root.add(finial);
     addOutline(finial, 0.014);
 
-    const collar = solid(blob(0.13, copingMat, [1.2, 0.5, 1.2], 14));
-    collar.position.set((side * (length * 2.4)) / 2 + side * -0.05, 1.28, 0);
+    const collar = solid(blob(0.13, copingMat, [1.45, 0.55, 1.45], 14));
+    collar.position.set(endX, 1.3, 0);
     root.add(collar);
   }
 

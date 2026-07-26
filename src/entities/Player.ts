@@ -28,6 +28,9 @@ const GRAVITY = 17;
 /** Drop further than this below the surface under your feet and you fall. */
 const FALL_THRESHOLD = 0.5;
 
+/** How long the eyes stay shut. Any longer and she looks sleepy, not blinking. */
+const BLINK_DURATION = 0.11;
+
 /**
  * Answers "how high is the ground at this point?" for a character standing at
  * height `y`.
@@ -80,7 +83,8 @@ export class Player implements GameSystem {
   private verticalVelocity = 0;
   private airborne = false;
   private blinkTimer = 2.4;
-  private blinkAmount = 0;
+  private blinkRemaining = 0;
+  private blinking = false;
   private ridingFlag = false;
 
   constructor(
@@ -326,14 +330,23 @@ export class Player implements GameSystem {
     model.rightLeg.rotation.x = legSwing;
 
     // Blinking: a long pause, then a quick close-and-open.
+    //
+    // The face is painted onto a canvas now rather than built out of spheres,
+    // so a blink is a texture swap. That makes it cheap, but only if it happens
+    // on the two TRANSITIONS — calling `setExpression` every frame would flip
+    // `needsUpdate` every frame and re-upload the texture to the GPU.
     this.blinkTimer -= dt;
     if (this.blinkTimer <= 0) {
       this.blinkTimer = 2.6 + Math.random() * 3.4;
-      this.blinkAmount = 1;
+      this.blinkRemaining = BLINK_DURATION;
     }
-    this.blinkAmount = Math.max(0, this.blinkAmount - dt * 9);
-    const eyeScale = 1 - this.blinkAmount * 0.92;
-    for (const eye of model.eyes) eye.scale.y = eyeScale;
+    if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
+
+    const blinking = this.blinkRemaining > 0;
+    if (blinking !== this.blinking) {
+      this.blinking = blinking;
+      model.setExpression(blinking ? 'blink' : 'neutral');
+    }
 
     // The name label counter-rotates so it never tips with the character.
     this.label.sprite.position.y =

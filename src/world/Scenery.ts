@@ -10,7 +10,7 @@ import {
   Material,
   Matrix4,
   Mesh,
-  MeshStandardMaterial,
+  MeshToonMaterial,
   Quaternion,
   SphereGeometry,
   Vector3,
@@ -19,6 +19,7 @@ import { GARDEN_HALF_SIZE, TERRAIN_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
+import { toonMaterial } from '../art/style/materials';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
@@ -36,6 +37,13 @@ import type { CollisionWorld } from './Collision';
  */
 
 type TreeKind = 'lollipop' | 'stack' | 'pine' | 'blossom';
+
+/** One straight length of wall, in world metres. */
+interface WallRun {
+  readonly from: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly height: number;
+}
 
 interface InstanceItem {
   readonly position: Vector3;
@@ -246,7 +254,7 @@ function buildFoliage(collision: CollisionWorld): Group {
   const coneGeometry = new ConeGeometry(1, 1, 10);
   // Subdivision 2 rather than 1: still faceted enough to look hand-made, but
   // rounded rather than spiky — a bush, not a lump of quartz.
-  const bushGeometry = new IcosahedronGeometry(1, 2);
+  const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
   const flowerGeometry = new SphereGeometry(1, 7, 5);
   const stemGeometry = new CylinderGeometry(0.02, 0.028, 1, 4);
 
@@ -254,7 +262,7 @@ function buildFoliage(collision: CollisionWorld): Group {
     makeInstanced('tree-trunks', trunkGeometry, foliageMaterial(0.95), trunks, true),
     makeInstanced('tree-canopies', canopyGeometry, foliageMaterial(0.85), roundCanopies, true),
     makeInstanced('tree-cones', coneGeometry, foliageMaterial(0.85), coneCanopies, true),
-    makeInstanced('bushes', bushGeometry, foliageMaterial(0.9, true), bushes, true),
+    makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true),
     makeInstanced('flower-stems', stemGeometry, foliageMaterial(0.9), stems, false),
     makeInstanced('flowers', flowerGeometry, foliageMaterial(0.7), flowers, false),
   );
@@ -312,13 +320,13 @@ function buildTreeline(): Group {
   }
 
   const trunkGeometry = new CylinderGeometry(0.2, 0.32, 1, 6);
-  const canopyGeometry = new IcosahedronGeometry(1, 1);
+  const canopyGeometry = facetted(new IcosahedronGeometry(1, 1));
 
   // No shadows out here: the treeline sits far outside the sun's shadow frustum
   // and adding it would only cost fill rate.
   group.add(
     makeInstanced('treeline-trunks', trunkGeometry, foliageMaterial(0.95), trunks, false),
-    makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9, true), canopies, false),
+    makeInstanced('treeline-canopies', canopyGeometry, foliageMaterial(0.9), canopies, false),
   );
 
   return group;
@@ -332,13 +340,29 @@ function pickTreeKind(rng: Rng): TreeKind {
   return 'pine';
 }
 
-function foliageMaterial(roughness: number, flatShading = false): MeshStandardMaterial {
-  return new MeshStandardMaterial({
-    color: 0xffffff,
-    roughness,
-    metalness: 0,
-    flatShading,
-  });
+/**
+ * Foliage is toon-shaded like every other toy object in the park.
+ *
+ * `roughness` is retained in the signature for call-site compatibility and is
+ * deliberately ignored — under toon shading it is the ramp, not a roughness
+ * value, that decides how leaves shade. (Dead parameter; delete it once nothing
+ * passes one.)
+ */
+function foliageMaterial(_roughness: number): MeshToonMaterial {
+  return toonMaterial(0xffffff);
+}
+
+/**
+ * Recomputes flat, per-face normals so a blob reads as hand-carved.
+ *
+ * `MeshToonMaterial` has no `flatShading` flag, so the facets have to come from
+ * the geometry. These are non-indexed polyhedra, which means
+ * `computeVertexNormals()` gives exactly the face normals we want — and it works
+ * for every material, not just the ones that happen to expose the flag.
+ */
+function facetted<T extends BufferGeometry>(geometry: T): T {
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot. */
@@ -370,11 +394,7 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
   const group = new Group();
   group.name = 'wooden-walls';
 
-  const runs: readonly {
-    from: readonly [number, number];
-    to: readonly [number, number];
-    height: number;
-  }[] = [
+  const runs: readonly WallRun[] = [
     { from: [8, -8], to: [17, -8], height: 1.5 },
     { from: [17, -8], to: [17, -2], height: 2.3 },
     { from: [11, -3], to: [11, 3], height: 0.95 },
@@ -387,25 +407,13 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
     { from: [-21, -8], to: [-15, -9], height: 1.15 },
   ];
 
-  const boardMaterial = new MeshStandardMaterial({
-    map: woodTexture(1, 1),
-    roughness: 0.9,
-    metalness: 0,
-  });
-  const postMaterial = new MeshStandardMaterial({
-    color: PALETTE.woodDark,
-    roughness: 0.9,
-    metalness: 0,
-  });
-  const capMaterial = new MeshStandardMaterial({
-    color: PALETTE.woodLight,
-    roughness: 0.7,
-    metalness: 0,
-  });
+  const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
+  const postMaterial = toonMaterial(PALETTE.woodDark);
+  const capMaterial = toonMaterial(PALETTE.woodLight);
   const postGeometry = new CylinderGeometry(0.19, 0.21, 1, 8);
   const capGeometry = new SphereGeometry(0.24, 10, 8);
 
-  for (const run of runs) {
+  for (const run of clearOfAnchors(runs)) {
     const [x1, z1] = run.from;
     const [x2, z2] = run.to;
     const length = Math.hypot(x2 - x1, z2 - z1);
@@ -452,11 +460,7 @@ function buildStoneWalls(collision: CollisionWorld): Group {
   const group = new Group();
   group.name = 'stone-walls';
 
-  const runs: readonly {
-    from: readonly [number, number];
-    to: readonly [number, number];
-    height: number;
-  }[] = [
+  const runs: readonly WallRun[] = [
     { from: [-13, -4], to: [-13, 4], height: 0.85 },
     { from: [13, -5], to: [13, 2], height: 0.85 },
     { from: [-7, 12], to: [7, 12], height: 0.7 },
@@ -467,18 +471,18 @@ function buildStoneWalls(collision: CollisionWorld): Group {
     { from: [-14, -22], to: [-6, -23], height: 0.95 },
   ];
 
-  const wallMaterial = new MeshStandardMaterial({
-    map: pinkStoneTexture(1, 1),
-    roughness: 0.85,
-    metalness: 0,
-  });
-  const copingMaterial = new MeshStandardMaterial({
-    color: PALETTE.stonePinkLight,
-    roughness: 0.6,
-    metalness: 0,
-  });
+  const wallMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });
+  const copingMaterial = toonMaterial(PALETTE.stonePinkLight);
+  const finialMaterial = toonMaterial(PALETTE.stonePink);
 
-  for (const run of runs) {
+  // Ball finial + collar at each end of every run — the one detail that makes a
+  // wall look cared for rather than extruded. Instanced, because two extra draw
+  // calls for the whole park is affordable and thirty-two is not.
+  const placed = clearOfAnchors(runs);
+  const finials: InstanceItem[] = [];
+  const collars: InstanceItem[] = [];
+
+  for (const run of placed) {
     const [x1, z1] = run.from;
     const [x2, z2] = run.to;
     const length = Math.hypot(x2 - x1, z2 - z1);
@@ -504,11 +508,99 @@ function buildStoneWalls(collision: CollisionWorld): Group {
     coping.receiveShadow = true;
     group.add(coping);
 
+    // Seated so the ball OVERLAPS its collar and the collar overlaps the
+    // coping. Floating them clear leaves a visible gap between ball and wall.
+    const copingTop = base + run.height + 0.16;
+    for (const [px, pz] of [run.from, run.to]) {
+      collars.push({
+        position: new Vector3(px, copingTop + 0.02, pz),
+        scale: new Vector3(1.45, 0.55, 1.45),
+        rotationY: -angle,
+        colour: PALETTE.stonePinkLight,
+        shade: 1,
+      });
+      finials.push({
+        position: new Vector3(px, copingTop + 0.16, pz),
+        scale: new Vector3(1, 1.15, 1),
+        rotationY: -angle,
+        colour: PALETTE.stonePink,
+        shade: 1,
+      });
+    }
+
     collision.addWall(x1, z1, x2, z2, 0.34);
   }
 
+  group.add(
+    makeInstanced('wall-collars', new SphereGeometry(0.13, 12, 9), copingMaterial, collars, false),
+    makeInstanced('wall-finials', new SphereGeometry(0.19, 14, 11), finialMaterial, finials, true),
+  );
+
   return group;
 }
+
+/**
+ * Trims wall runs back to the parts that clear every anchor plot.
+ *
+ * The tree and bush scatter has always honoured `anchor.boundingRadius`; the
+ * wall tables were hand-authored before the plots were built out and did not,
+ * which is how a hiding wall ended up sliced through the ball pit. A run is
+ * clipped to the parameter spans that lie outside every plot, so a wall now
+ * stops at the edge of a ride's plot instead of crossing it. Anything left
+ * shorter than {@link MIN_WALL_LENGTH} is dropped: a two-post stub reads as a
+ * mistake, not as scenery.
+ */
+function clearOfAnchors(runs: readonly WallRun[], margin = 0.6): WallRun[] {
+  const kept: WallRun[] = [];
+  for (const run of runs) {
+    const [x1, z1] = run.from;
+    const [x2, z2] = run.to;
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    const length = Math.hypot(dx, dz);
+    if (length < 1e-6) continue;
+
+    // Spans of the run, in 0..1 parameter space, still outside every plot.
+    let spans: [number, number][] = [[0, 1]];
+    for (const anchor of ANCHORS) {
+      const radius = anchor.boundingRadius + margin;
+      const ox = x1 - anchor.position[0];
+      const oz = z1 - anchor.position[1];
+      const a = dx * dx + dz * dz;
+      const b = 2 * (ox * dx + oz * dz);
+      const c = ox * ox + oz * oz - radius * radius;
+      const discriminant = b * b - 4 * a * c;
+      if (discriminant <= 0) continue; // the run's line misses this plot entirely
+
+      const root = Math.sqrt(discriminant);
+      const enter = (-b - root) / (2 * a);
+      const exit = (-b + root) / (2 * a);
+      const next: [number, number][] = [];
+      for (const [start, end] of spans) {
+        if (exit <= start || enter >= end) {
+          next.push([start, end]);
+          continue;
+        }
+        if (enter > start) next.push([start, enter]);
+        if (exit < end) next.push([exit, end]);
+      }
+      spans = next;
+    }
+
+    for (const [start, end] of spans) {
+      if ((end - start) * length < MIN_WALL_LENGTH) continue;
+      kept.push({
+        from: [x1 + dx * start, z1 + dz * start],
+        to: [x1 + dx * end, z1 + dz * end],
+        height: run.height,
+      });
+    }
+  }
+  return kept;
+}
+
+/** Shorter than this and a trimmed run is dropped rather than built. */
+const MIN_WALL_LENGTH = 1.8;
 
 // ----------------------------------------------------------------- helpers
 

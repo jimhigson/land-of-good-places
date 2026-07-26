@@ -1,4 +1,4 @@
-import { BoxGeometry, Group, Mesh, type MeshStandardMaterial } from 'three';
+import { BoxGeometry, Group, Mesh, type Material } from 'three';
 import { cuteSign, interiorMaterial } from './parts';
 import { SHOP_UNITS, shopGroupName, worldX, worldZ, type ShopUnitDefinition } from './layout';
 import type { CollisionWorld } from '../Collision';
@@ -64,7 +64,7 @@ export class ShopUnits {
  * floor plate, and there are seven of them: making them casters buys a
  * difference nobody can see for a chunk of the draw-call budget.
  */
-function shopMesh(geometry: BoxGeometry, material: MeshStandardMaterial): Mesh {
+function shopMesh(geometry: BoxGeometry, material: Material): Mesh {
   const mesh = new Mesh(geometry, material);
   mesh.receiveShadow = true;
   return mesh;

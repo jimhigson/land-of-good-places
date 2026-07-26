@@ -12,6 +12,7 @@ import {
 } from 'three';
 import { PALETTE } from '../core/palette';
 import { pinkStoneTexture } from '../core/textures';
+import { toonMaterial } from '../art/style/materials';
 import { terrainHeight } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -52,16 +53,10 @@ export class Fountain implements GameSystem {
     this.group.position.copy(this.centre);
     this.waterLevel = groundY + 0.82;
 
-    const stoneMaterial = new MeshStandardMaterial({
-      map: pinkStoneTexture(6, 1),
-      roughness: 0.85,
-      metalness: 0,
-    });
-    const trimMaterial = new MeshStandardMaterial({
-      color: PALETTE.stonePinkLight,
-      roughness: 0.55,
-      metalness: 0,
-    });
+    // Stonework is a toy object, so it bands with everything else in the park.
+    // The water below is deliberately NOT toon-shaded — see `waterMaterial`.
+    const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(6, 1) });
+    const trimMaterial = toonMaterial(PALETTE.stonePinkLight);
 
     // --- basin -----------------------------------------------------------
     const basinWall = new Mesh(
@@ -82,7 +77,7 @@ export class Fountain implements GameSystem {
 
     const floor = new Mesh(
       new CylinderGeometry(this.rimRadius, this.rimRadius, 0.16, 40),
-      new MeshStandardMaterial({ color: PALETTE.stonePinkDark, roughness: 0.95 }),
+      toonMaterial(PALETTE.stonePinkDark),
     );
     floor.position.y = 0.08;
     floor.receiveShadow = true;
@@ -94,6 +89,8 @@ export class Fountain implements GameSystem {
     const positions = this.waterGeometry.getAttribute('position') as BufferAttribute;
     this.waterBase = Float32Array.from(positions.array);
 
+    // Water stays MeshStandardMaterial on purpose: banding a transparent
+    // rippling surface looks broken, and the faint specular is what sells it.
     this.waterMaterial = new MeshStandardMaterial({
       color: PALETTE.waterTop,
       roughness: 0.08,

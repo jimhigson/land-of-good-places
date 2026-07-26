@@ -3,7 +3,14 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { createFacePatch, type Expression } from '../style/faces';
-import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
+import {
+  applyWalk,
+  blob,
+  makeLimbs,
+  stub,
+  type CreatureHandle,
+  type CreatureLimbs,
+} from '../style/asset';
 
 /**
  * The player kid — Eleri by default.
@@ -29,6 +36,8 @@ export interface KidOptions {
 }
 
 export interface KidHandle extends CreatureHandle {
+  /** The kid always has all four limbs, so callers need no null check. */
+  readonly limbs: CreatureLimbs;
   /** Where a hat sits. Parent hat meshes here. */
   readonly hatAnchor: Group;
   /** Where a carried toy sits. */

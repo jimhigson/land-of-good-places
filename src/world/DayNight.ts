@@ -12,6 +12,7 @@ import {
   DAY_START_TIME,
   FAIRY_LIGHT_OFF,
   FAIRY_LIGHT_ON,
+  FILL_LIGHT_RATIO,
   FOG_FAR,
   FOG_NEAR,
   SHADOW_AREA,
@@ -152,6 +153,8 @@ export class DayNight implements GameSystem {
   readonly name = 'dayNight';
 
   readonly keyLight: DirectionalLight;
+  /** The cool opposite fill. Casts nothing; colours the shadow side. */
+  readonly fillLight: DirectionalLight;
   readonly ambientLight: HemisphereLight;
 
   /** Normalised clock. 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset. */
@@ -187,6 +190,14 @@ export class DayNight implements GameSystem {
     this.keyLight.shadow.radius = 3;
     this.keyLight.shadow.blurSamples = 10;
     scene.add(this.keyLight, this.keyLight.target);
+
+    // The cool opposite fill (ART_DIRECTION.md §6). It shines from the far side
+    // of the sun and slightly above, never casts a shadow, and exists purely so
+    // the toon ramp's shadow band keeps a colour temperature instead of sinking
+    // into the hemisphere's green ground bounce.
+    this.fillLight = new DirectionalLight(PALETTE.skyDayBottom, 0.5);
+    this.fillLight.castShadow = false;
+    scene.add(this.fillLight);
 
     this.ambientLight = new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.1);
     scene.add(this.ambientLight);
@@ -321,6 +332,16 @@ export class DayNight implements GameSystem {
 
     this.keyLight.color.setHex(look.sun);
     this.keyLight.intensity = look.sunIntensity;
+
+    // The fill sits opposite the sun on the compass but still above the park:
+    // straight opposite would light the ground from underneath and every toy
+    // would glow along its bottom edge.
+    this.fillLight.position
+      .set(-this.sunDirection.x, 0.55, -this.sunDirection.z)
+      .normalize()
+      .multiplyScalar(60);
+    this.fillLight.color.setHex(look.ambientSky);
+    this.fillLight.intensity = look.sunIntensity * FILL_LIGHT_RATIO;
 
     this.ambientLight.color.setHex(look.ambientSky);
     this.ambientLight.groundColor.setHex(look.ambientGround);

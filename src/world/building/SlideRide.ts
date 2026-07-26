@@ -5,11 +5,11 @@ import {
   DoubleSide,
   Group,
   Mesh,
-  MeshStandardMaterial,
   TubeGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
+import { toonMaterial } from '../../art/style/materials';
 
 /** Cross-section of a chute, as (across, up) pairs in metres. */
 const PROFILE: readonly (readonly [number, number])[] = [
@@ -59,23 +59,16 @@ export class SlideRide {
 
     const chute = new Mesh(
       buildChute(frames),
-      new MeshStandardMaterial({
-        color: options.colour ?? PALETTE.slideChute,
-        roughness: 0.5,
-        metalness: 0,
-        side: DoubleSide,
-      }),
+      // A ride part, so it is toon-shaded like the rest of the park's toys.
+      // DoubleSide because you see the inside of the chute all the way down.
+      toonMaterial(options.colour ?? PALETTE.slideChute, { side: DoubleSide }),
     );
     chute.name = `${options.name}-chute`;
     chute.castShadow = true;
     chute.receiveShadow = true;
     this.group.add(chute);
 
-    const railMaterial = new MeshStandardMaterial({
-      color: options.railColour ?? PALETTE.slideRail,
-      roughness: 0.5,
-      metalness: 0,
-    });
+    const railMaterial = toonMaterial(options.railColour ?? PALETTE.slideRail);
     for (const side of [-1, 1] as const) {
       const rail = new Mesh(
         new TubeGeometry(railCurve(frames, side), steps, 0.11, 7, false),

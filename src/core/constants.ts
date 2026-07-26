@@ -192,6 +192,19 @@ export const SHADOW_MAP_SIZE = 2048;
 export const SHADOW_AREA = 34;
 
 /**
+ * Strength of the cool fill light, as a fraction of the key.
+ *
+ * The third light in the rig the art was authored and approved under
+ * (ART_DIRECTION.md §6): hemisphere key, warm directional sun, cool opposite
+ * fill. Under toon shading the ramp handles *shape* and the fill handles
+ * *colour temperature on the shadow side* — without it the shadow band falls
+ * back on the hemisphere's green ground bounce alone and skin goes grey-green.
+ * 0.24 matches the gallery's 0.55-against-2.35. It casts no shadow, so it is
+ * one extra light and no extra draw calls.
+ */
+export const FILL_LIGHT_RATIO = 0.24;
+
+/**
  * Fog distances.
  *
  * Careful: fog is measured from the *camera*, and an orthographic rig parks its

@@ -232,13 +232,13 @@ satisfies it, it drops in.
 | **Up** | +Y. |
 | **Ground** | Never bake in a height. Call `terrainHeight(x, z)` from `world/terrain.ts` and set `position.y` from it. |
 | **Shadows** | Set `castShadow` and `receiveShadow` on meshes; nothing does it for you. |
-| **Materials** | `MeshStandardMaterial`, `metalness: 0`, `roughness` 0.5–1.0. The park has no metal. Unlit elements (bulbs, signs, plot markers) use `MeshBasicMaterial` so they read correctly at every time of day. |
+| **Materials** | Toy objects — characters, props, walls, trees, the building fabric — use `toonMaterial()` from `src/art/style/materials.ts`. Ground, paths, water and glass keep `MeshStandardMaterial` with `metalness: 0`. Unlit elements (bulbs, signs, plot markers) use `MeshBasicMaterial` so they read correctly at every time of day. The park has no metal. See ART_DIRECTION.md §2. |
 | **Colours** | From `core/palette.ts` where one fits. |
 
 ### Swapping the character model
 
-`entities/CharacterModel.ts` is the reference implementation. It exposes exactly
-what the animator in `Player.animate()` touches:
+`entities/CharacterModel.ts` is a thin adapter over `art/models/kid.ts`. It
+exposes exactly what the animator in `Player.animate()` touches:
 
 ```ts
 class CharacterModel {
@@ -247,12 +247,18 @@ class CharacterModel {
   readonly head: Group;
   readonly leftArm, rightArm: Group;   // pivots at the shoulders
   readonly leftLeg, rightLeg: Group;   // pivots at the hips
-  readonly eyes: Object3D[];           // scaled on Y to blink
   readonly height: number;             // used to place the name label
-  setOutfitColour(colour: number): void;
-  setHairColour(colour: number): void;
+  readonly hatAnchor, holdAnchor, backpackAnchor: Group;
+  setExpression(name: Expression): void;   // blink / happy / surprised / sad
+  setWalkPhase(phase01: number, speed01: number): void;
+  setSkinColour, setHairColour, setOutfitColour, setShoeColour(c: number): void;
 }
 ```
+
+**There are no eye meshes.** The face is a canvas texture on a curved patch
+(ART_DIRECTION.md §3), so blinking is `setExpression('blink' | 'neutral')` — and
+because it swaps a texture and flips `needsUpdate`, callers must only fire it on
+a *transition*, never per frame.
 
 An authored replacement must provide the same members. The important detail is
 that **arm and leg pivots sit at the joint, not at the limb's centre** — a

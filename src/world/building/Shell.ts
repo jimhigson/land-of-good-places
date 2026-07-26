@@ -86,7 +86,7 @@ export class BuildingShell {
       this.group.add(floor);
 
       floor.add(buildDeck(deck));
-      floor.add(buildWalls(deck, BUILDING_PARAPET, 0, wallColour(deck)));
+      floor.add(buildWalls(deck, BUILDING_PARAPET, 0));
       floor.add(buildGlass(deck));
       floor.add(buildTrimBand(deck));
       floor.add(buildCornerPillars());
@@ -118,7 +118,7 @@ function buildDeck(deck: number): Mesh {
 
   const mesh = new Mesh(
     extrudePlan([slab], BUILDING_SLAB),
-    interiorMaterial(deck % 2 === 0 ? PALETTE.buildingFloor : PALETTE.buildingFloorAlt, 0.82),
+    interiorMaterial(storeyColours(deck).floor, 0.82),
   );
   mesh.receiveShadow = true;
   // Only the ground slab casts: the ones above it are hidden by the cutaway
@@ -167,13 +167,41 @@ function wallShapes(deck: number): Shape[] {
   return shapes;
 }
 
-function wallColour(deck: number): number {
-  return deck % 2 === 0 ? PALETTE.buildingWall : PALETTE.buildingWallDark;
+/**
+ * The layer-cake: storeys alternate between a cream one and a blossom-pink one,
+ * and the trim, floor plate and window glazing all flip with them.
+ *
+ * One function so a storey can never end up with cream walls and the pink
+ * storey's trim. Every colour comes from `PALETTE`, which is the world's colour
+ * bible — `ART` only ever *adds* colours for specific cute things, and the
+ * building's are already named here (ART_DIRECTION.md §5).
+ */
+interface StoreyColours {
+  readonly wall: number;
+  readonly trim: number;
+  readonly floor: number;
+  readonly glazing: number;
 }
 
-function buildWalls(deck: number, height: number, baseY: number, colour: number): Mesh {
+function storeyColours(deck: number): StoreyColours {
+  return deck % 2 === 0
+    ? {
+        wall: PALETTE.buildingWall,
+        trim: PALETTE.buildingTrim,
+        floor: PALETTE.buildingFloor,
+        glazing: PALETTE.buildingWindow,
+      }
+    : {
+        wall: PALETTE.buildingWallDark,
+        trim: PALETTE.buildingTrimDeep,
+        floor: PALETTE.buildingFloorAlt,
+        glazing: PALETTE.buildingWindowWarm,
+      };
+}
+
+function buildWalls(deck: number, height: number, baseY: number): Mesh {
   const mesh = castAndReceive(
-    new Mesh(extrudePlan(wallShapes(deck), height), softMaterial(colour, 0.78)),
+    new Mesh(extrudePlan(wallShapes(deck), height), softMaterial(storeyColours(deck).wall, 0.78)),
   );
   mesh.name = `walls-${deck}`;
   mesh.position.y = baseY;
@@ -195,7 +223,7 @@ function buildGlass(deck: number): Mesh {
 function buildTrimBand(deck: number): Mesh {
   const mesh = new Mesh(
     extrudePlan(wallShapes(deck), BUILDING_FLOOR_HEIGHT - GLASS_TOP),
-    softMaterial(deck % 2 === 0 ? PALETTE.buildingTrim : PALETTE.buildingTrimDeep, 0.7),
+    softMaterial(storeyColours(deck).trim, 0.7),
   );
   mesh.receiveShadow = true;
   mesh.name = `trim-${deck}`;
@@ -242,15 +270,18 @@ function buildWindows(deck: number): InstancedMesh[] {
     }
   }
 
-  const warm = deck % 2 === 0;
+  const storey = storeyColours(deck);
   const frames = new InstancedMesh(
     new BoxGeometry(WINDOW_WIDTH + 0.3, WINDOW_HEIGHT + 0.3, 0.16),
-    softMaterial(warm ? PALETTE.buildingTrim : PALETTE.buildingTrimDeep, 0.72),
+    softMaterial(storey.trim, 0.72),
     slots.length,
   );
+  // The panes are applied decoration on a painted wall, not see-through glass,
+  // so they are toon like the rest of the fabric — a hint of self-light keeps
+  // them looking lit from inside once the sun is down.
   const panes = new InstancedMesh(
     new BoxGeometry(WINDOW_WIDTH, WINDOW_HEIGHT, 0.18),
-    softMaterial(warm ? PALETTE.buildingWindow : PALETTE.buildingWindowWarm, 0.35),
+    interiorMaterial(storey.glazing, 0.35),
     slots.length,
   );
   frames.name = `window-frames-${deck}`;

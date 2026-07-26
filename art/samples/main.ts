@@ -16,16 +16,16 @@ import {
   VSMShadowMap,
   WebGLRenderer,
 } from 'three';
-import { hexToCss, nameLabelTexture, PALETTE } from '../style/bridge';
-import { ART } from '../style/artPalette';
-import { toonMaterial } from '../style/materials';
-import type { AssetHandle, CreatureHandle } from '../style/asset';
-import { createRipika } from '../models/ripika';
-import { createBiscuit } from '../models/biscuit';
-import { createKid } from '../models/kid';
-import { createMini } from '../models/mini';
-import { createBalloon } from '../models/balloons';
-import { createLollipopTree, createPinkWall, createWoodWall } from '../models/props';
+import { hexToCss, nameLabelTexture, PALETTE } from '../../src/art/style/bridge';
+import { ART } from '../../src/art/style/artPalette';
+import { toonMaterial } from '../../src/art/style/materials';
+import type { AssetHandle, CreatureHandle } from '../../src/art/style/asset';
+import { createRipika } from '../../src/art/models/ripika';
+import { createBiscuit } from '../../src/art/models/biscuit';
+import { createKid } from '../../src/art/models/kid';
+import { createMini } from '../../src/art/models/mini';
+import { createBalloon } from '../../src/art/models/balloons';
+import { createLollipopTree, createPinkWall, createWoodWall } from '../../src/art/models/props';
 
 /**
  * The art sample gallery — a soft-lit showroom for the client (Eleri, age 6).
