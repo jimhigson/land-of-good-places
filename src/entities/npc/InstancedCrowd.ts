@@ -78,7 +78,16 @@ export interface CrowdOptions {
    * Returning an empty array drops the part from the crowd entirely.
    */
   materialsFor(source: Mesh): readonly Material[];
-  castShadow?: boolean;
+  /**
+   * Whether this part casts a shadow. Defaults to nothing casting.
+   *
+   * Shadow casting is not free — `renderer.info.render.calls` counts the shadow
+   * pass, so every caster is drawn twice. A crowd wants this on for the two or
+   * three parts that carry the silhouette and off for the rest: a child's
+   * shadow is a head and a body, and nobody has ever looked at the ground for
+   * their hair bobbles.
+   */
+  castShadowFor?(source: Mesh): boolean;
   receiveShadow?: boolean;
 }
 
@@ -111,7 +120,7 @@ export class InstancedCrowd {
       const variants = materials.map((material) => {
         const mesh = new InstancedMesh(source.geometry, material, capacity);
         mesh.name = `crowd:${source.name || source.geometry.type}`;
-        mesh.castShadow = options.castShadow ?? false;
+        mesh.castShadow = options.castShadowFor?.(source) ?? false;
         mesh.receiveShadow = options.receiveShadow ?? false;
         // See the note in the class doc: these walk, so a cached bounding
         // sphere would cull them at the wrong moment.

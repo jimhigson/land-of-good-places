@@ -1,4 +1,12 @@
-import { Color, Mesh, MeshToonMaterial, Object3D, type Material, type Texture } from 'three';
+import {
+  Color,
+  Mesh,
+  MeshBasicMaterial,
+  MeshToonMaterial,
+  Object3D,
+  type Material,
+  type Texture,
+} from 'three';
 import { createKid } from '../../art/models/kid';
 import { toonMaterial } from '../../art/style/materials';
 import type { Expression } from '../../art/style/faces';
@@ -67,6 +75,9 @@ const NODE_RIGHT_LEG = 'npc.rightLeg';
 
 /** Face variants, in the order they become instance variants. */
 const FACE_ORDER: readonly Expression[] = ['neutral', 'happy', 'blink'];
+
+/** How many of the biggest parts cast a shadow. Head, hair and body. */
+const SHADOW_CASTER_PARTS = 3;
 
 /** The joints a walk cycle needs, resolved once per child. */
 export interface KidRig {
@@ -152,12 +163,16 @@ export class KidCrowd {
       }
     }
 
+    // Only the parts that carry the silhouette cast a shadow. Every caster is
+    // drawn again in the shadow pass, so a whole child casting is twice a
+    // child's worth of draw calls for a soft blob on the grass that a head and
+    // a body already produce.
+    const casters = new Set(largestParts(this.prototype, SHADOW_CASTER_PARTS));
+
     this.crowd = new InstancedCrowd(this.prototype, capacity, {
       materialsFor: (source) =>
         source === faceMesh && faceMaterials.length > 0 ? faceMaterials : [bodyMaterial],
-      // Background children do not cast shadows — see NpcSystem, which grounds
-      // them with a single instanced contact patch instead.
-      castShadow: false,
+      castShadowFor: (source) => casters.has(source),
       receiveShadow: false,
     });
 
@@ -282,6 +297,30 @@ function isSideHair(mesh: Mesh, role: ColourRole): boolean {
   if (role === 'skin' || role === 'face') return false;
   if (mesh.parent?.name !== NODE_HEAD) return false;
   return Math.abs(mesh.position.x) > 0.25;
+}
+
+/**
+ * The `count` bulkiest meshes in a model, by bounding radius.
+ *
+ * Chosen by size rather than by name so that retuning the model — or renaming
+ * a part, or swapping the hair for a hat — still picks whatever is now doing
+ * the work of being the character's outline.
+ */
+function largestParts(prototype: Object3D, count: number): Mesh[] {
+  const measured: { mesh: Mesh; radius: number }[] = [];
+  prototype.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    // Skip the ink outlines: an outline is by construction bigger than the part
+    // it wraps, so it would win every size contest, and the crowd does not draw
+    // them anyway.
+    if (object.material instanceof MeshBasicMaterial) return;
+    if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere();
+    const radius = object.geometry.boundingSphere?.radius ?? 0;
+    const scale = Math.max(object.scale.x, object.scale.y, object.scale.z);
+    measured.push({ mesh: object, radius: radius * scale });
+  });
+  measured.sort((a, b) => b.radius - a.radius);
+  return measured.slice(0, count).map((entry) => entry.mesh);
 }
 
 function findFaceMesh(prototype: Object3D): Mesh | null {
