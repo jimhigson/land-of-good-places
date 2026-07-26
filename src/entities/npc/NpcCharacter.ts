@@ -67,6 +67,13 @@ export class NpcCharacter {
   private airborne = false;
   private expression: Expression = 'neutral';
 
+  // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
+  // Deliberately the same shape as Player's beginRide/setRidePose/endRide:
+  // something outside the normal move/gravity/collision loop needs to take
+  // over positioning for a moment. `move()` is skipped entirely while this
+  // flag is set; `TreeClimbing` drives the pose directly every frame instead.
+  private climbingFlag = false;
+
   constructor(
     avatar: KidAvatar,
     driver: CharacterDriver,
@@ -89,6 +96,33 @@ export class NpcCharacter {
 
   get isAirborne(): boolean {
     return this.airborne;
+  }
+
+  /** True while `TreeClimbing` owns this character's position instead of `move()`. */
+  get climbing(): boolean {
+    return this.climbingFlag;
+  }
+
+  /** Hands the character to a climb: gravity and collision stop applying. */
+  beginClimb(): void {
+    this.climbingFlag = true;
+    this.velocity.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.airborne = false;
+  }
+
+  /** Called by `TreeClimbing` every frame while it owns the pose. */
+  setClimbPose(x: number, y: number, z: number, facing: number): void {
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.facing = facing;
+    this.avatar.rig.root.position.copy(this.position);
+    this.avatar.rig.root.rotation.y = facing;
+  }
+
+  /** Gives the character back to the wander driver, standing wherever it now is. */
+  endClimb(): void {
+    this.climbingFlag = false;
   }
 
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
@@ -119,7 +153,12 @@ export class NpcCharacter {
       this.intent,
     );
 
-    this.move(dt);
+    // While a climb owns the pose, `setClimbPose` is doing the positioning —
+    // running `move()` too would immediately drag the character back down to
+    // the ground via gravity and the ground sampler. `animate()` still runs
+    // so blink/expression transitions (driven by `intent`, set above) and the
+    // idle breathing motion keep working while perched.
+    if (!this.climbingFlag) this.move(dt);
     this.animate(elapsed);
   }
 
@@ -132,6 +171,10 @@ export class NpcCharacter {
    * it moves both parties half way and then stops.
    */
   separateFrom(other: NpcCharacter, minimum: number): void {
+    // A climbing character's (x, z) is the tree it is up, not somewhere it is
+    // standing — shoving it "apart" from a passer-by at ground level would
+    // knock it out of setClimbPose's next call for nothing visible in return.
+    if (this.climbingFlag || other.climbingFlag) return;
     const dx = other.position.x - this.position.x;
     const dz = other.position.z - this.position.z;
     const distanceSquared = dx * dx + dz * dz;

@@ -6,7 +6,7 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
-import { Sky, World } from './world';
+import { Sky, TreeClimbing, World } from './world';
 import { Parade, Player, TapNavigator } from './entities';
 import { CuteODex, Hud, TouchControls } from './ui';
 import { MiniGameHost } from './minigames';
@@ -41,6 +41,7 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly treeClimbing: TreeClimbing;
   readonly parade: Parade;
   readonly cuteODex: CuteODex;
 
@@ -75,14 +76,24 @@ export class Game {
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
-    // the building installed.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () =>
-      this.world.interactZones(),
-    );
+    // the building installed. `treeClimbing` is constructed further down (it
+    // needs the HUD), but this closure only reads it once play starts, by
+    // which point construction has finished.
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () => [
+      ...this.world.interactZones(),
+      ...this.treeClimbing.interactZones(),
+    ]);
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // Up a tree, a tap anywhere means "come down" — it is not a place to
+        // walk to, and the character cannot walk while riding the climb
+        // anyway (see `Player.riding`).
+        if (this.treeClimbing.playerClimbing) {
+          this.treeClimbing.requestDescend();
+          return;
+        }
         if (this.parade.handleTap(point)) return;
         this.tapNavigator.handleTap(point);
       },
@@ -115,6 +126,20 @@ export class Game {
     // where the player's position for this frame has just been settled.
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
+
+    // Tree climbing (family design feedback: NPCs — and the player — climb
+    // trees and peek out of the leaves). Registered after `shopping` so its
+    // HUD prompt wins when both would otherwise want the same line — trees
+    // and shops never actually overlap, but the ordering costs nothing and
+    // keeps the two systems from fighting over `hud.setPrompt` if they ever
+    // did. See `world/TreeClimbing.ts`.
+    this.treeClimbing = new TreeClimbing(
+      this.player,
+      this.world.npcs,
+      this.hud,
+      this.world.scenery.climbableTrees,
+    );
+    this.addSystem(this.treeClimbing);
 
     this.frameContext = {
       dt: 0,

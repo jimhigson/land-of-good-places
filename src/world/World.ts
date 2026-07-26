@@ -59,7 +59,16 @@ export class World implements GameSystem {
     // route is walked at build time and dropped if a wall or a tree is in the
     // way — and because they walk the building's ground floor, so they need the
     // same ground sampler the player gets.
-    this.npcs = new NpcSystem(this.collision, (x, z, y) => this.building.surfaces.sample(x, z, y));
+    //
+    // `scenery.climbableTrees` is threaded straight through to every wander
+    // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
+    // occasionally climb one — the actual climbing (posing, hiding the body)
+    // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
+    this.npcs = new NpcSystem(
+      this.collision,
+      (x, z, y) => this.building.surfaces.sample(x, z, y),
+      this.scenery.climbableTrees,
+    );
 
     scene.add(
       this.garden.group,
