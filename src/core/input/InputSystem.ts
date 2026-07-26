@@ -58,6 +58,7 @@ export class InputSystem {
   // Virtual state (on-screen buttons, tap-to-move) -------------------------
   private readonly virtualPresses = new Map<GameAction, number>();
   private manualMoveActiveValue = false;
+  private navigationSprintValue = false;
 
   // Merged logical state --------------------------------------------------
   private readonly down = new Set<GameAction>();
@@ -160,8 +161,20 @@ export class InputSystem {
     this.moveAmountValue = clamp(Math.hypot(x, y), 0, 1);
   }
 
+  /**
+   * Holds the `sprint` action on the tap-navigator's behalf, for a double-tap
+   * "run there". Mirrors {@link setNavigationMove}: call it every frame with
+   * the desired state, `false` once nothing needs it. It only ever adds to
+   * `sprint`, never masks it, so a real Shift held at the same time still
+   * works exactly as it always did.
+   */
+  setNavigationSprint(active: boolean): void {
+    this.navigationSprintValue = active;
+  }
+
   /** True for every frame the action is held. */
   isDown(action: GameAction): boolean {
+    if (action === 'sprint' && this.navigationSprintValue) return true;
     return this.down.has(action);
   }
 
