@@ -9,6 +9,9 @@ dist-ssr/
 build/
 *.local
 
+# vite-plugin-pwa's dev-mode service worker scratch directory
+dev-dist/
+
 # Vite / tooling caches
 .vite/
 node_modules/.vite/

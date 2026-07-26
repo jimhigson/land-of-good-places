@@ -2,10 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- viewport-fit=cover lets the park fill the screen behind the notch; the
+         HUD keeps clear of it with env(safe-area-inset-*) in style.css. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#8fd3ff" />
+    <meta name="description" content="A cute, cosy 3D theme-park game designed by Eleri (age 6) and her dad." />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- iOS ignores the manifest's display mode; these are how it gets the -->
+    <!-- full-screen, no-browser-chrome look when added to the home screen. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Good Places" />
     <title>Land of Good Places</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎡</text></svg>" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
   </head>
   <body>
     <div id="app">

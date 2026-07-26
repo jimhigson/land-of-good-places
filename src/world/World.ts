@@ -7,6 +7,7 @@ import { FairyLights } from './FairyLights';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building } from './building';
+import type { InteractZone } from './interact';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -67,6 +68,16 @@ export class World implements GameSystem {
     this.fairyLights.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+  }
+
+  /**
+   * Every tap target in the park (see `world/interact.ts`).
+   *
+   * Only the building has any for now; garden rides add theirs here as they are
+   * built, which is why this lives on World rather than on Building.
+   */
+  interactZones(): InteractZone[] {
+    return this.building.interactZones();
   }
 
   /**

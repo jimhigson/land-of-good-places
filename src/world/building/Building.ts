@@ -26,6 +26,8 @@ import { SlideRide } from './SlideRide';
 import { Stairs } from './Stairs';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces } from './surfaces';
+import { buildingInteractZones } from './interactZones';
+import type { InteractZone } from '../interact';
 import { cuteSign, softMaterial } from './parts';
 import {
   BALL_PIT_X,
@@ -154,6 +156,20 @@ export class Building implements GameSystem {
     // The cutaway needs the floors registered bottom to top, roof last.
     for (const floor of this.shell.floorGroups) this.fader.addLayer(floor);
     this.fader.addLayer(this.shell.roofGroup);
+  }
+
+  /**
+   * Everything inside the building a finger can point at, with the two moving
+   * ones (the lift's doors, the bubble) at wherever they currently are.
+   *
+   * Rebuilt per call rather than cached — it is a handful of object literals and
+   * it is only ever called on a tap.
+   */
+  interactZones(): InteractZone[] {
+    return buildingInteractZones({
+      bubbleSurfaceY: this.bubble.surfaceY,
+      trampolineSurfaceY: this.trampoline.surfaceY,
+    });
   }
 
   /** Hands the building the player, so it can carry, bounce and ride them. */

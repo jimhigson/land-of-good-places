@@ -2,11 +2,13 @@ import { Vector3 } from 'three';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
-import { InputSystem } from './core/input';
+import { InputSystem, PointerControls } from './core/input';
+import { isTouchDevice } from './core/device';
+import { CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
-import { Player } from './entities';
-import { Hud } from './ui';
+import { Player, TapNavigator } from './entities';
+import { Hud, TouchControls } from './ui';
 import { gameStore } from './state';
 
 /**
@@ -32,6 +34,9 @@ export class Game {
   readonly world: World;
   readonly player: Player;
   readonly hud: Hud;
+  readonly tapNavigator: TapNavigator;
+  readonly pointer: PointerControls;
+  readonly touchControls: TouchControls | null;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -53,7 +58,23 @@ export class Game {
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
 
+    // Tap-to-move. Built after the world so it can ask the building where its
+    // tap targets are, and after the player so it can borrow the ground sampler
+    // the building installed.
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () =>
+      this.world.interactZones(),
+    );
+    this.engine.scene.add(this.tapNavigator.group);
+
+    this.pointer = new PointerControls(canvas, {
+      onTap: (point) => this.tapNavigator.handleTap(point),
+      // Pinching is the touch equivalent of the +/- keys, expressed in the same
+      // units, so it lands in the camera's existing clamped zoom target.
+      onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
+    });
+
     this.hud = new Hud(uiRoot);
+    this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
 
     this.frameContext = {
       dt: 0,
@@ -82,6 +103,7 @@ export class Game {
     if (this.started) return;
     this.started = true;
     this.input.attach();
+    this.pointer.attach();
     this.loop.start();
   }
 
@@ -89,11 +111,14 @@ export class Game {
     this.started = false;
     this.loop.stop();
     this.input.detach();
+    this.pointer.detach();
   }
 
   dispose(): void {
     this.stop();
     for (const system of this.systems) system.dispose?.();
+    this.tapNavigator.dispose();
+    this.touchControls?.dispose();
     this.world.dispose();
     this.player.dispose();
     this.hud.dispose();
@@ -116,6 +141,13 @@ export class Game {
     this.frameContext.elapsed = tick.elapsed;
     this.frameContext.frame = tick.frame;
 
+    // Between the input scan and the player, and it has to be exactly here:
+    // `input.update()` has just overwritten the movement stick from the real
+    // devices, and the navigator pushes it back on the character's behalf before
+    // anybody reads it. Registered as an ordinary system it would be a frame
+    // late — which, since the scan happens first, means never moving at all.
+    if (!paused) this.tapNavigator.update(this.frameContext);
+
     if (!paused) this.player.update(this.frameContext);
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
@@ -131,6 +163,9 @@ export class Game {
     this.hud.setClock(this.world.dayNight.formatClock(), gameStore.get().world.dayCount);
     this.hud.setFps(tick.fps);
     this.hud.setGamepadConnected(this.input.gamepadConnected);
+    // Nothing to hop or turn while a slide has hold of you, and the buttons sit
+    // right where the view of the ride is.
+    this.touchControls?.setVisible(!this.player.riding);
     this.hud.updateDebug([
       `x ${this.player.position.x.toFixed(1)} z ${this.player.position.z.toFixed(1)}`,
       `zoom ${this.camera.zoom.toFixed(2)}`,

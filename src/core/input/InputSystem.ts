@@ -23,7 +23,16 @@ export interface InputSnapshot {
 }
 
 /**
- * Merges keyboard and Gamepad API input into one logical state.
+ * How many `update()` calls a virtual (on-screen) button press stays held for.
+ *
+ * It must be at least one, or a tap that lands and lifts inside a single frame
+ * would never be seen. Two gives the edge a frame of slack without a stray
+ * double-hop, since everything bound to a touch button is a `justPressed` query.
+ */
+const VIRTUAL_PRESS_FRAMES = 2;
+
+/**
+ * Merges keyboard, Gamepad API and on-screen touch input into one logical state.
  *
  * Lifecycle: construct once, call {@link attach} to start listening, call
  * {@link update} exactly once at the top of every frame, then read from it for
@@ -31,11 +40,24 @@ export interface InputSnapshot {
  * `update` and the next.
  *
  * Gameplay systems should depend on this class and never on DOM events.
+ *
+ * Touch play joins in through two doors, both of them *after* the device scan:
+ *
+ * - {@link pressVirtual} — an on-screen button firing a named action, which then
+ *   behaves exactly like the key it stands in for.
+ * - {@link setNavigationMove} — tap-to-move steering, which pushes the movement
+ *   stick on the character's behalf. It defers to the hands: the moment a real
+ *   key or stick is touched ({@link manualMoveActive}) the navigation input is
+ *   ignored, so walking manually always wins.
  */
 export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
   private gamepadIndex: number | null = null;
+
+  // Virtual state (on-screen buttons, tap-to-move) -------------------------
+  private readonly virtualPresses = new Map<GameAction, number>();
+  private manualMoveActiveValue = false;
 
   // Merged logical state --------------------------------------------------
   private readonly down = new Set<GameAction>();
@@ -94,6 +116,48 @@ export class InputSystem {
 
   get lastDevice(): 'keyboard' | 'gamepad' {
     return this.lastDeviceUsed;
+  }
+
+  /**
+   * True when a real key or stick is asking for movement this frame.
+   *
+   * Tap-to-move watches this and gives way immediately: pressing W while the
+   * character is walking to a tapped spot cancels the walk rather than fighting
+   * it.
+   */
+  get manualMoveActive(): boolean {
+    return this.manualMoveActiveValue;
+  }
+
+  /**
+   * Fires an action from something that is not a key or a button — an on-screen
+   * touch control, or a tap that arrived at what it was walking towards.
+   *
+   * The press is held for a couple of frames so that `justPressed` sees a clean
+   * edge even if the finger was quicker than the frame.
+   */
+  pressVirtual(action: GameAction): void {
+    this.virtualPresses.set(action, VIRTUAL_PRESS_FRAMES);
+  }
+
+  /**
+   * Pushes the movement stick on the character's behalf, in the same
+   * camera-relative axes as {@link moveX} / {@link moveY}.
+   *
+   * Call it *after* {@link update} and before anything reads the movement, once
+   * per frame — the navigator passes `(0, 0)` when it has nowhere to be. Real
+   * input always wins: if {@link manualMoveActive} this call does nothing.
+   */
+  setNavigationMove(x: number, y: number): void {
+    if (this.manualMoveActiveValue) return;
+    const length = Math.hypot(x, y);
+    if (length > 1) {
+      x /= length;
+      y /= length;
+    }
+    this.moveXValue = x;
+    this.moveYValue = y;
+    this.moveAmountValue = clamp(Math.hypot(x, y), 0, 1);
   }
 
   /** True for every frame the action is held. */
@@ -178,6 +242,15 @@ export class InputSystem {
     }
     const padActive = Math.hypot(padX, padY) > 0;
 
+    // --- on-screen buttons ----------------------------------------------
+    // Merged in with the devices so that a thumb on the hop button is
+    // indistinguishable, downstream, from a thumb on the space bar.
+    for (const [action, framesLeft] of this.virtualPresses) {
+      this.down.add(action);
+      if (framesLeft <= 1) this.virtualPresses.delete(action);
+      else this.virtualPresses.set(action, framesLeft - 1);
+    }
+
     // --- merge ----------------------------------------------------------
     // Whichever device is being pushed hardest wins, so a resting stick never
     // fights the keyboard and vice versa.
@@ -191,6 +264,9 @@ export class InputSystem {
       if (keyboardActive) this.lastDeviceUsed = 'keyboard';
     }
     this.moveAmountValue = clamp(Math.hypot(this.moveXValue, this.moveYValue), 0, 1);
+    // Recorded before tap-to-move gets a look in, so it means "hands on the
+    // controls", not "the character is moving".
+    this.manualMoveActiveValue = keyboardActive || padActive;
 
     // --- edges ----------------------------------------------------------
     this.pressed.clear();

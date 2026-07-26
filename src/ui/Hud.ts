@@ -1,4 +1,5 @@
 import { gameStore, type GameState } from '../state';
+import { isTouchDevice } from '../core/device';
 
 /**
  * The on-screen overlay: park name, clock, purse, and the control hints.
@@ -42,12 +43,17 @@ export class Hud {
     const hints = document.createElement('div');
     hints.className = 'hint-stack';
 
+    // Two versions of the same hint. A phone player has no keys to press, and
+    // being told about WASD is how a six-year-old decides the game is broken.
     const keyHint = pill('pill pill--soft');
-    keyHint.innerHTML =
-      '<span class="emoji">🕹️</span>' +
-      '<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to walk · ' +
-      '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · <kbd>Q</kbd>/<kbd>R</kbd> turn view · ' +
-      '<kbd>+</kbd>/<kbd>−</kbd> zoom</span>';
+    keyHint.innerHTML = isTouchDevice()
+      ? '<span class="emoji">👆</span>' +
+        '<span><b>Tap</b> where to walk · tap a thing to use it · ' +
+        '<b>hop</b> &amp; <b>turn</b> buttons · <b>pinch</b> to zoom</span>'
+      : '<span class="emoji">🕹️</span>' +
+        '<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to walk · ' +
+        '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · <kbd>Q</kbd>/<kbd>R</kbd> turn view · ' +
+        '<kbd>+</kbd>/<kbd>−</kbd> zoom · or just <b>click</b> where to go</span>';
 
     this.padPill = pill('pill pill--pad');
     this.padPill.dataset.connected = 'false';

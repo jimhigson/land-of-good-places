@@ -6,6 +6,7 @@ export { AnchorPlots } from './AnchorPlots';
 export { Fountain } from './Fountain';
 export { terrainHeight, terrainNormal, groundPoint } from './terrain';
 export { distanceToPath, isOnPath } from './paths';
+export { pickInteractZone, ZONE_HEIGHT_TOLERANCE, type InteractZone } from './interact';
 export {
   ANCHORS,
   ANCHORS_BY_ID,

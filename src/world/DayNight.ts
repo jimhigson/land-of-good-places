@@ -16,8 +16,8 @@ import {
   FOG_FAR,
   FOG_NEAR,
   SHADOW_AREA,
-  SHADOW_MAP_SIZE,
 } from '../core/constants';
+import { shadowMapSize } from '../core/device';
 import { PALETTE } from '../core/palette';
 import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathUtils';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -173,7 +173,10 @@ export class DayNight implements GameSystem {
   ) {
     this.keyLight = new DirectionalLight(PALETTE.sunDay, 2.2);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+    // One notch down on a modest phone: the shadow pass is fill-rate bound, and
+    // VSM's blur hides most of what the resolution loses.
+    const shadowSize = shadowMapSize();
+    this.keyLight.shadow.mapSize.set(shadowSize, shadowSize);
     const shadowCamera = this.keyLight.shadow.camera;
     shadowCamera.left = -SHADOW_AREA;
     shadowCamera.right = SHADOW_AREA;

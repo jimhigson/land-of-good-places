@@ -1,4 +1,5 @@
 export { InputSystem, type InputSnapshot } from './InputSystem';
+export { PointerControls, type PointerControlsOptions, type TapPoint } from './PointerControls';
 export {
   GAME_ACTIONS,
   GAMEPAD_ACTION_BINDINGS,

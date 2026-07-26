@@ -7,7 +7,8 @@ import {
   VSMShadowMap,
   WebGLRenderer,
 } from 'three';
-import { FOG_FAR, FOG_NEAR, MAX_PIXEL_RATIO } from './constants';
+import { FOG_FAR, FOG_NEAR } from './constants';
+import { pixelRatioCap } from './device';
 import { PALETTE } from './palette';
 
 /**
@@ -37,7 +38,7 @@ export class Engine {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    this.renderer.setPixelRatio(pixelRatioCap());
     this.renderer.outputColorSpace = SRGBColorSpace;
     // Neutral rather than ACES: ACES filmic desaturates bright colours towards
     // white, which is exactly the wrong look for a park made of sweets. Neutral
@@ -100,7 +101,7 @@ export class Engine {
 
     this.widthValue = width;
     this.heightValue = height;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    this.renderer.setPixelRatio(pixelRatioCap());
     this.renderer.setSize(width, height, false);
     for (const callback of this.resizeCallbacks) callback(width, height);
   };
