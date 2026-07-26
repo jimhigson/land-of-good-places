@@ -139,7 +139,7 @@ export function buildDodgemsPlot(
     const z = Math.sin(angle) * (RINK_RADIUS + 0.4);
     const pad = solid(new Mesh(segmentGeometry, i % 2 === 0 ? padA : padB));
     pad.position.set(x, deck + 0.5, z);
-    pad.rotation.y = -angle;
+    pad.rotation.y = -angle + Math.PI / 2; // tangent to the ring, not radial
     root.add(pad);
 
     // Solid: a child should bounce off the outside of the ride, not walk

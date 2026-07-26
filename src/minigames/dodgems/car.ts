@@ -84,16 +84,18 @@ export function createCar(options: CarOptions): CarModel {
   // --- bumper ---------------------------------------------------------------
   // A fat torus squashed flat. It is the widest thing on the car, which is what
   // makes a bump look like rubber meeting rubber rather than paint meeting paint.
-  const bumper = solid(new Mesh(new TorusGeometry(1.02, 0.3, 10, 28), bumperMaterial));
+  const bumper = solid(new Mesh(new TorusGeometry(0.96, 0.26, 10, 28), bumperMaterial));
   bumper.rotation.x = Math.PI / 2;
   bumper.scale.set(1, 1.06, 1);
-  bumper.position.y = 0.34;
+  bumper.position.y = 0.3;
   chassis.add(bumper);
   addOutline(bumper, 0.022);
 
   // --- tub ------------------------------------------------------------------
-  const tub = solid(new Mesh(new RoundedBoxGeometry(1.5, 0.66, 1.72, 5, 0.32), bodyMaterial));
-  tub.position.y = 0.58;
+  // Tall enough to read from above: the first pass had a tub so shallow that a
+  // car was a cream ring with a head in the middle of it.
+  const tub = solid(new Mesh(new RoundedBoxGeometry(1.44, 0.92, 1.7, 5, 0.32), bodyMaterial));
+  tub.position.y = 0.66;
   chassis.add(tub);
   addOutline(tub, 0.024);
 
@@ -101,19 +103,19 @@ export function createCar(options: CarOptions): CarModel {
   // five cars are still telling themselves apart when they are all in a heap.
   for (const side of [-1, 1] as const) {
     const stripe = decal(new Mesh(new RoundedBoxGeometry(0.1, 0.2, 1.3, 3, 0.08), trimMaterial));
-    stripe.position.set(side * 0.74, 0.6, 0.02);
+    stripe.position.set(side * 0.72, 0.68, 0.02);
     chassis.add(stripe);
   }
 
   // The back of the seat, so the driver has something to be thrown against.
   const seat = solid(new Mesh(new RoundedBoxGeometry(1.1, 0.72, 0.28, 4, 0.12), deepMaterial));
-  seat.position.set(0, 0.95, -0.62);
+  seat.position.set(0, 1.16, -0.6);
   chassis.add(seat);
 
   // Nose and tail bulges: the tub alone is a bar of soap.
   const nose = solid(new Mesh(new SphereGeometry(0.42, 16, 12), deepMaterial));
   nose.scale.set(1.5, 0.7, 0.9);
-  nose.position.set(0, 0.62, 0.84);
+  nose.position.set(0, 0.7, 0.82);
   chassis.add(nose);
 
   // --- wheels ---------------------------------------------------------------
@@ -132,18 +134,18 @@ export function createCar(options: CarOptions): CarModel {
 
   // --- steering wheel -------------------------------------------------------
   const column = solid(new Mesh(new CylinderGeometry(0.06, 0.06, 0.44, 8), metalMaterial));
-  column.position.set(0, 1.0, 0.5);
+  column.position.set(0, 1.14, 0.5);
   column.rotation.x = 0.5;
   chassis.add(column);
 
   const steeringWheel = solid(new Mesh(new TorusGeometry(0.24, 0.055, 8, 18), metalMaterial));
-  steeringWheel.position.set(0, 1.19, 0.6);
+  steeringWheel.position.set(0, 1.33, 0.6);
   steeringWheel.rotation.x = 1.05;
   chassis.add(steeringWheel);
 
   // --- pole and star --------------------------------------------------------
   const pole = new Group();
-  pole.position.set(0, 1.0, -0.72);
+  pole.position.set(0, 1.2, -0.7);
   chassis.add(pole);
 
   const poleMesh = solid(new Mesh(new CylinderGeometry(0.045, 0.06, 2.0, 8), metalMaterial));
@@ -179,7 +181,7 @@ export function createCar(options: CarOptions): CarModel {
   );
   // Sunk into the tub so only the top half shows — the whole joke of a dodgem
   // is a big head sticking out of a small car.
-  driverWrapper.position.set(0, options.driver.kind === 'ripika' ? 0.72 : 0.42, -0.12);
+  driverWrapper.position.set(0, options.driver.kind === 'ripika' ? 0.96 : 0.66, -0.12);
   driverWrapper.add(driver.root);
   chassis.add(driverWrapper);
 
@@ -226,7 +228,7 @@ export function createCar(options: CarOptions): CarModel {
       driver.body.rotation.x = squashNow * 0.4 - clamp01(speed / 7) * 0.08;
       driver.head.rotation.z = -lean * 1.2 + Math.sin(elapsed * 22) * 0.3 * squashNow;
       driverWrapper.position.y =
-        (options.driver.kind === 'ripika' ? 0.72 : 0.42) + squashNow * 0.12;
+        (options.driver.kind === 'ripika' ? 0.96 : 0.66) + squashNow * 0.12;
     },
 
     setExpression(next: Expression): void {

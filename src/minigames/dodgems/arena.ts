@@ -128,7 +128,11 @@ export function createArena(): Arena {
       0.55,
       Math.sin(angle) * (ARENA_RADIUS + 0.55),
     );
-    pad.rotation.y = -angle;
+    // Tangent, not radius: a Y-rotation maps local +X to (cos φ, -sin φ) in
+    // (x, z), so the tangent at θ wants φ = -θ + π/2. Getting this wrong leaves
+    // the wall as a ring of blocks all facing the middle, which is exactly what
+    // it looked like the first time.
+    pad.rotation.y = -angle + Math.PI / 2;
     // Leaned out a few degrees, like a real bumper wall — it also means the
     // camera sees the painted face rather than the top edge.
     pad.rotation.x = 0.08;
@@ -215,18 +219,22 @@ export function createArena(): Arena {
   surround.receiveShadow = true;
   root.add(surround);
 
-  const buntingMaterials = BULB_COLOURS.map((colour) => toonMaterial(colour));
+  // Bushes, mostly green with the odd flowering one — from above, a ring of
+  // bright discs reads as spilled confetti rather than as planting.
+  const bushMaterials = [
+    toonMaterial(PALETTE.leafMid),
+    toonMaterial(PALETTE.leafDeep),
+    toonMaterial(PALETTE.leafLight),
+    toonMaterial(PALETTE.leafBlue),
+    toonMaterial(PALETTE.blossomPink),
+  ];
   for (let i = 0; i < 26; i += 1) {
     const angle = (i / 26) * TAU + 0.12;
-    const radius = ARENA_RADIUS + rng.range(5, 11);
-    const bush = solid(
-      new Mesh(
-        new SphereGeometry(rng.range(0.7, 1.4), 12, 9),
-        buntingMaterials[i % buntingMaterials.length] ?? padA,
-      ),
-    );
-    bush.position.set(Math.cos(angle) * radius, 0.2, Math.sin(angle) * radius);
-    bush.scale.y = 0.72;
+    const radius = ARENA_RADIUS + rng.range(4, 11);
+    const material = bushMaterials[i % 5 === 4 ? 4 : rng.int(0, 3)];
+    const bush = solid(new Mesh(new SphereGeometry(rng.range(0.9, 1.7), 12, 9), material ?? padA));
+    bush.position.set(Math.cos(angle) * radius, 0.35, Math.sin(angle) * radius);
+    bush.scale.y = 0.86;
     root.add(bush);
   }
 
@@ -269,7 +277,7 @@ export function createArena(): Arena {
       railMaterial.dispose();
       postMaterial.dispose();
       for (const material of bulbMaterials) material.dispose();
-      for (const material of buntingMaterials) material.dispose();
+      for (const material of bushMaterials) material.dispose();
       root.traverse((object) => {
         const mesh = object as Partial<Mesh>;
         mesh.geometry?.dispose();

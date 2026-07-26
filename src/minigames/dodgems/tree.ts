@@ -277,8 +277,10 @@ export function createWobblyTree(): WobblyTree {
     toneMapped: false,
   });
   const bubble = new Sprite(bubbleMaterial);
-  bubble.scale.set(2.3, 1.5, 1);
-  bubble.position.set(1.25, 1.5, 0);
+  bubble.scale.set(2.5, 1.6, 1);
+  // Up and to the side, clear of the bird itself: the first pass put the bubble
+  // squarely in front of the one thing it is drawing attention to.
+  bubble.position.set(1.5, 1.15, 0);
   bubble.visible = false;
   bird.root.add(bubble);
 
@@ -503,10 +505,10 @@ export function createWobblyTree(): WobblyTree {
         const up = BIRD_UP_SECONDS - birdTimer;
         const rise = up < 0.35 ? Math.sin((up / 0.35) * 1.9) * 1.14 : 1;
         birdHeight = damp(birdHeight, birdTimer > 0.5 ? rise : 0, 0.09, dt);
-        bird.root.position.y = birdHome + birdHeight * 2.4;
+        bird.root.position.y = birdHome + birdHeight * 3.1;
         bird.root.rotation.y = Math.sin(elapsed * 7) * 0.55;
         bird.flap(elapsed);
-        bubble.position.y = 1.4 + Math.sin(elapsed * 8) * 0.06;
+        bubble.position.y = 1.15 + Math.sin(elapsed * 8) * 0.06;
         bubbleMaterial.opacity = clamp01(birdTimer * 1.6);
         if (birdTimer === 0) {
           bird.root.visible = false;

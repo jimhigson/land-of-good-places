@@ -1,4 +1,13 @@
-import { DirectionalLight, Group, HemisphereLight, OrthographicCamera, Scene } from 'three';
+import {
+  DirectionalLight,
+  Group,
+  HemisphereLight,
+  Mesh,
+  MeshBasicMaterial,
+  OrthographicCamera,
+  RingGeometry,
+  Scene,
+} from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU, clamp, clamp01, damp, turnTowards } from '../../core/mathUtils';
 import { gameStore } from '../../state';
@@ -66,6 +75,16 @@ const TURN_RATE = 5.2;
 
 /** Seconds a driver looks startled after a wallop. */
 const SURPRISE_SECONDS = 0.7;
+/**
+ * Seconds before the same car can set the tree off again.
+ *
+ * Without this, a car held against the trunk re-bonks every frame: the counter
+ * ran to five in a second and a half of the first playtest, and the four gags
+ * restarted so often that none of them ever got to finish.
+ */
+const TREE_GAP = 0.9;
+/** Same idea for the bump counter, so leaning on somebody is not a score. */
+const BUMP_GAP = 0.22;
 /** Seconds between giggle bubbles from the same car, so a pile-up is not a wall of text. */
 const GIGGLE_GAP = 0.55;
 
@@ -78,13 +97,19 @@ const GIGGLE_GAP = 0.55;
  * a game about steering is how a six-year-old ends up driving into the wall.
  */
 const CAMERA_YAW = 0.42;
-const CAMERA_PITCH = 0.98;
+/**
+ * 42° above the horizon — a shade steeper than the park's 38°, and a long way
+ * off straight down. Authored at 56° first, which showed the player the roofs
+ * of the cars and the tops of the drivers' heads; the faces are the whole point
+ * of the drivers, so the camera came back down until they read.
+ */
+const CAMERA_PITCH = 0.74;
 const CAMERA_DISTANCE = 70;
 /** World radius the framing tries to keep on screen. */
 const FRAME_RADIUS = ARENA_RADIUS + 2.6;
 /** Never zoom out past this, however narrow the phone is — see `resize`. */
 const MAX_VIEW_HEIGHT = 42;
-const MIN_VIEW_HEIGHT = 27;
+const MIN_VIEW_HEIGHT = 21;
 
 /** The rivals. Cheerful, varied, and all of them fond of that tree. */
 const RIVALS: readonly { name: string; car: number; driver: DriverKind }[] = [
@@ -130,6 +155,8 @@ interface Car {
   squash: number;
   surprise: number;
   giggleCooldown: number;
+  treeCooldown: number;
+  bumpCooldown: number;
   /** Rival brain: where it is pottering off to, and for how long. */
   targetX: number;
   targetZ: number;
@@ -151,6 +178,8 @@ class Dodgems implements MiniGame {
   private steering: Steering | null = null;
   private readonly cars: Car[] = [];
   private readonly rng = new Rng(0xd0d63e);
+  /** The ring painted on the floor under the player's car — "this one is you". */
+  private youMarker: Mesh | null = null;
 
   private phase: Phase = 'countdown';
   private countdown = COUNTDOWN;
@@ -196,6 +225,24 @@ class Dodgems implements MiniGame {
     this.scene.add(this.giggles.root);
 
     this.buildCars();
+
+    // Six near-identical little cars in a circle, and one of them is yours: the
+    // ring is how a child finds theirs again after a four-car pile-up. Painted
+    // on the floor rather than floated above the car, because from this angle
+    // anything above a car ends up over somebody else's.
+    this.youMarker = new Mesh(
+      new RingGeometry(1.15, 1.4, 32),
+      new MeshBasicMaterial({
+        color: PALETTE.blossomWhite,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    this.youMarker.rotation.x = -Math.PI / 2;
+    this.youMarker.renderOrder = 1;
+    this.scene.add(this.youMarker);
 
     this.steering = createSteering();
     this.hud = createDodgemsHud(context.overlay);
@@ -261,11 +308,16 @@ class Dodgems implements MiniGame {
       z: Math.sin(angle) * radius,
       vx: 0,
       vz: 0,
-      // Facing the middle. Yaw 0 looks down +Z, the park's convention.
-      yaw: Math.atan2(-Math.cos(angle) * radius, -Math.sin(angle) * radius),
+      // Facing round the rink, not at the tree. Six cars all pointed at the
+      // middle turned the first two seconds of every ride into one pile-up in
+      // the centre, which is funny once and then is simply where the ride is.
+      // Yaw 0 looks down +Z, the park's convention.
+      yaw: Math.atan2(-Math.sin(angle), Math.cos(angle)),
       squash: 0,
       surprise: 0,
       giggleCooldown: 0,
+      treeCooldown: 0,
+      bumpCooldown: 0,
       targetX: 0,
       targetZ: 0,
       targetTimer: 0,
@@ -396,6 +448,8 @@ class Dodgems implements MiniGame {
       car.squash = Math.max(0, car.squash - dt * 2.2);
       car.surprise = Math.max(0, car.surprise - dt);
       car.giggleCooldown = Math.max(0, car.giggleCooldown - dt);
+      car.treeCooldown = Math.max(0, car.treeCooldown - dt);
+      car.bumpCooldown = Math.max(0, car.bumpCooldown - dt);
     }
   }
 
@@ -416,7 +470,7 @@ class Dodgems implements MiniGame {
     car.targetTimer = this.rng.range(2.4, 4.6);
     const roll = this.rng.unit();
 
-    if (roll < 0.34) {
+    if (roll < 0.28) {
       // Off to bonk the tree. Aims a little past it so it arrives at speed.
       const angle = this.rng.range(0, TAU);
       car.targetX = Math.cos(angle) * 0.6;
@@ -542,7 +596,9 @@ class Dodgems implements MiniGame {
       car.squash = Math.min(1, car.squash + 0.35 + power * 0.5);
       car.surprise = SURPRISE_SECONDS;
     }
-    if (a.isPlayer || b.isPlayer) {
+    if ((a.isPlayer || b.isPlayer) && a.bumpCooldown <= 0 && b.bumpCooldown <= 0) {
+      a.bumpCooldown = BUMP_GAP;
+      b.bumpCooldown = BUMP_GAP;
       this.bumps += 1;
       this.hud?.setBumps(this.bumps);
     }
@@ -551,7 +607,20 @@ class Dodgems implements MiniGame {
 
   /** Somebody drove into the tree. Everything happens at once — that is the joke. */
   private bonkTree(car: Car, nx: number, nz: number, impact: number): void {
+    if (car.treeCooldown > 0) return;
+    car.treeCooldown = TREE_GAP;
     const power = clamp01(impact / 6);
+
+    // A rival that has just bonked goes off somewhere else, so the tree gets
+    // fresh runs at it rather than one car grinding against the trunk.
+    if (!car.isPlayer) {
+      const angle = this.rng.range(0, TAU);
+      const radius = this.rng.range(ARENA_RADIUS * 0.55, ARENA_RADIUS - 2.5);
+      car.targetX = Math.cos(angle) * radius;
+      car.targetZ = Math.sin(angle) * radius;
+      car.targetTimer = this.rng.range(2.4, 4.6);
+    }
+
     // The wallop travelled *inwards*, so the tree leans away from the car.
     this.tree?.bonk(-nx, -nz, power);
     this.sparks?.spark(car.x - nx * 0.6, 1.1, car.z - nz * 0.6, 14, 0.9);
@@ -603,6 +672,12 @@ class Dodgems implements MiniGame {
       const turn = Math.atan2(Math.sin(drift), Math.cos(drift));
       car.model.animate(dt, elapsed, speed, clamp(turn, -1, 1), car.squash);
       car.model.setExpression(car.surprise > 0 ? 'surprised' : 'happy');
+    }
+
+    const player = this.cars[this.cars.length - 1];
+    if (this.youMarker && player) {
+      this.youMarker.position.set(player.x, 0.03, player.z);
+      this.youMarker.scale.setScalar(1 + Math.sin(elapsed * 4) * 0.04);
     }
   }
 
@@ -705,13 +780,14 @@ class Dodgems implements MiniGame {
 
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
-    // Fit the rink's width if we can; stop at MAX_VIEW_HEIGHT and let the
-    // camera pan instead once the screen gets too narrow to be worth it.
-    this.viewHeight = clamp(
-      (FRAME_RADIUS * 2) / Math.max(this.aspect, 0.1),
-      MIN_VIEW_HEIGHT,
-      MAX_VIEW_HEIGHT,
-    );
+    // Fit the rink both ways: on screen it is an ellipse, squashed vertically by
+    // the camera's pitch, so the height it needs is far less than its width.
+    // Take whichever of the two is the binding constraint, then stop at
+    // MAX_VIEW_HEIGHT and let the camera pan once a phone gets too narrow for
+    // zooming out to be worth it.
+    const needHeight = FRAME_RADIUS * 2 * Math.sin(CAMERA_PITCH) + 3.5;
+    const needWidth = (FRAME_RADIUS * 2) / Math.max(this.aspect, 0.1);
+    this.viewHeight = clamp(Math.max(needHeight, needWidth), MIN_VIEW_HEIGHT, MAX_VIEW_HEIGHT);
     const halfHeight = this.viewHeight / 2;
     this.camera.top = halfHeight;
     this.camera.bottom = -halfHeight;
@@ -724,6 +800,9 @@ class Dodgems implements MiniGame {
   dispose(): void {
     for (const car of this.cars) car.model.dispose();
     this.cars.length = 0;
+    this.youMarker?.geometry.dispose();
+    (this.youMarker?.material as MeshBasicMaterial | undefined)?.dispose();
+    this.youMarker = null;
     this.arena?.dispose();
     this.tree?.dispose();
     this.sparks?.dispose();
