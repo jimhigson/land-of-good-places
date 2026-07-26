@@ -10,6 +10,10 @@
     // The game is a single page; unknown paths fall back to index.html.
     "not_found_handling": "single-page-application"
   },
+  // Adding `routes` would otherwise switch the workers.dev URL off; keep it as
+  // a always-there fallback that works even if the domain is ever moved.
+  "workers_dev": true,
+  "preview_urls": true,
   // Pretty URL on top of the default land-of-good-places.blockstack.workers.dev.
   // A custom domain (not a route) so the Worker owns the whole hostname at its
   // root — which is what the PWA's service-worker scope wants. Cloudflare
