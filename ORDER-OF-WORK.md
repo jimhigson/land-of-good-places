@@ -178,6 +178,13 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **If night should be darker, start here.** The park has **14** point lights,
+  not the 9 previously recorded: `prop.ferrisWheel` is a `PointLight` at
+  intensity **12** — the brightest in the park — plus the locomotive headlight.
+  Neither was touched by the lighting work, and the ferris wheel is the most
+  plausible single contributor to "midnight looks like daylight". Look at it
+  before touching `MOON_INTENSITY` or re-scaling the lamp pools.
+
 Slot in whenever an agent is free; none of these block anything.
 
 - Cute-o-dex widening: rides **and deeds** ("climb a tree", jump in the

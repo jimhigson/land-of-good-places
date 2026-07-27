@@ -50,6 +50,21 @@ foreground page steals the user's focus and switches macOS Spaces, which is
 horrible when they are doing something else. Close every page you open and
 kill your dev server when you finish. See QA-PLAYBOOK.md.
 
+## A stale service worker will waste your hour
+
+This is a PWA. A service worker precached from **another agent's dev server on
+a different port** can keep serving old JS to yours: your code changes silently
+do not appear, and a field you just added looks like it has vanished from your
+own class. If the game is behaving as though your edits do not exist, this is
+why. In the page console:
+
+```js
+navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
+```
+
+then hard-reload. Suspect it early rather than debugging code that is correct.
+
 ## Handoff files
 
 You can be pulled at zero warning. Keep a short `HANDOFF-<your-task>.md` on
