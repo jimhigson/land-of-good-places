@@ -431,12 +431,17 @@ export class DayNight implements GameSystem {
       smoothstep(1.45, 0.85, Math.abs(moonRelative)) * smoothstep(0.02, 0.2, -this.sunDirection.y);
 
     // --- lights ----------------------------------------------------------
-    // The sun and the moon each rise and set on their own arc and cross-fade
-    // through the horizon. Both windows are deliberately narrow but offset, so
-    // at the moment the sun touches the horizon neither light is contributing
-    // much and the hand-over is invisible.
-    const sunUp = smoothstep(-0.02, 0.10, this.sunDirection.y);
-    const moonUp = smoothstep(-0.02, 0.16, -this.sunDirection.y);
+    // The sun and the moon cross-fade through the horizon, in **mirrored**
+    // windows — `moonUp` is `1 - sunUp` by construction. That matters: the
+    // first version of this used two narrow offset windows, and measuring the
+    // whole day's light curve showed that for the few seconds either side of
+    // sunrise and sunset *neither* light was contributing, so the park went
+    // briefly flat and ambient-only. Mirrored windows mean the two always sum
+    // to one light's worth. For those few seconds both are lit at part
+    // strength, from opposite sides — which is exactly what dusk looks like
+    // with the moon already up.
+    const sunUp = smoothstep(-0.12, 0.12, this.sunDirection.y);
+    const moonUp = 1 - sunUp;
     const sunStrength = look.sunIntensity * sunUp;
     const moonStrength = MOON_INTENSITY * moonUp;
 
