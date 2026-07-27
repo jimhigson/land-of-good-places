@@ -341,6 +341,20 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     heldScale: 0.7,
     rare: false,
   },
+  {
+    id: 'hat.ripikaHat',
+    shopId: 'hat',
+    displayName: 'RiPika Head',
+    blurb: 'Wear the whole of RiPika on your head. Very silly.',
+    icon: '⚡',
+    price: 30,
+    kind: 'hat',
+    category: 'hat',
+    carryable: true,
+    model: () => createHat('ripikaHat'),
+    heldScale: 0.7,
+    rare: false,
+  },
 
   // ------------------------------------------------------- stickers and pets
   {
