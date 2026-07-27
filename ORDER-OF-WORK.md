@@ -180,6 +180,19 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **Show the Swishy Pony in the character creator.** The floor-length physics
+  ponytail hangs directly behind the character, occluded by her own body and
+  the pet, and the preview turntable's +-31 degrees cannot swing it into view.
+  It is the best style in the set and the one a child cannot see before
+  choosing it. Re-tune `VIEW_DIRECTION` or the turntable range for that style
+  (deliberately — the preview framing was tuned by item 1.7/1.8).
+- **The update toast covers the controls.** "A new version of the park is
+  ready!" sits over the character-creation card, obstructing the hair-style
+  row. Pre-existing, and a real obstruction in production, not just in dev.
+- **Balloon strings allocate every frame** (found by the hair agent, belongs on
+  the GC suspect list): `BalloonString.rebuildGeometry` allocates a fresh
+  `CatmullRomCurve3` and `TubeGeometry` per balloon per frame. The fix is the
+  trick the hair ponytail uses — write transforms onto pre-built meshes.
 - **Collapse the top bar behind one menu button**, and **remove the clock
   entirely**. Family-reported; the pills eat too much screen.
 - **Lift call panel** — call button near the lift styled as an elevator
