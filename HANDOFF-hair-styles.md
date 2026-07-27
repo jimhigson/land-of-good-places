@@ -55,7 +55,7 @@ Simpson, messy hair"*.
   through the torso or the backpack;
 - ground clamp so it drags rather than sinking.
 
-## Status
+## Status — complete, PR raised, not merged
 
 - [x] design + read of balloon string / crowd / hats / char creation
 - [x] `art/models/hair.ts`, `art/models/ponytail.ts`
@@ -63,10 +63,43 @@ Simpson, messy hair"*.
 - [x] `kidCrowd` per-style part hiding, `NpcSystem` style roll
 - [x] character creator picker + preview
 - [x] `npm run build` green
+- [x] headless numerical probe of heights + chain stability
 - [ ] visual QA — nobody has looked at this in a browser yet
 
-## Not done / for QA to tune
+## The headless probe (how to redo it)
+
+The browser was not available, so the model and the chain were verified
+numerically instead: a throwaway `hairprobe.ts` at the worktree root, built
+with `npx vite build --ssr hairprobe.ts --outDir .probe` and run with
+`node .probe/hairprobe.js`. It has to live **inside** the repo or node cannot
+resolve `three`. `buildHair` and `PonytailChain` are DOM-free so they run
+headless; the whole `createKid` is not (face patches paint canvases).
+
+It found three real bugs, all now fixed, and is worth rebuilding if the hair
+is retuned:
+
+| Symptom | Cause |
+| --- | --- |
+| every style measured 2.26 m, not 2.12 | `visibleTop` took the AABB of an AABB; rotations inflate it |
+| `messy` measured 2.63 m, taller than the spikes | tufts too high, cant too strong |
+| tail streamed horizontal at a sprint, 9 s to settle | `GRAVITY` 3.4 far too low for a 1.3 m chain |
+
+Final chain numbers at the player's real top speed of 11.1 m/s
+(`PLAYER_MAX_SPEED` 7.4 × `SPRINT_MULTIPLIER` 1.5): swings ~16°, hangs still
+1.0 s after stopping, never more than 0.93 m from the body axis, zero NaN
+across sprinting, 8× `timeScale`, a 2 s stalled frame, `dt = 0`, a 150 m
+teleport, spinning at 70 rad/s and five seconds of continuous jumping.
+
+## Coordination
+
+`WornHat` is shared with the backpack → wear route (item 1.6). The change
+there is deliberately additive — one optional trailing constructor callback,
+and the on/off edge is detected in `update()` from `this.mesh` rather than
+fired from inside `sync()`, precisely so that `sync` can be rewritten by that
+work without breaking this. One call site in `Game.ts`.
+
+## For visual QA
 
 Exact positions of the hanging styles were derived on paper from the head
-tilt (`HEAD_TILT` 0.17 rad) and the backpack's bounds, not by eye. The
-things to look at are listed in the PR body.
+tilt (`HEAD_TILT` 0.17 rad) and the backpack's bounds, not by eye. The list is
+in the PR body.
