@@ -44,6 +44,8 @@ export class CharacterModel {
 
   /** Attachment points for hats, carried toys and backpack peekers. */
   readonly hatAnchor: Group;
+  /** Where a single hair accessory (a picked flower) sits — see `WornFlower`. */
+  readonly hairAnchor: Group;
   readonly holdAnchor: Group;
   readonly backpackAnchor: Group;
 
@@ -60,6 +62,7 @@ export class CharacterModel {
     this.rightLeg = this.kid.limbs.rightLeg;
     this.height = this.kid.height;
     this.hatAnchor = this.kid.hatAnchor;
+    this.hairAnchor = this.kid.hairAnchor;
     this.holdAnchor = this.kid.holdAnchor;
     this.backpackAnchor = this.kid.backpackAnchor;
   }

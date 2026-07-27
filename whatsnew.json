@@ -1,0 +1,59 @@
+{
+  "_comment": "CONTRIBUTING (for future agents / the Overseer): this file feeds the 'What's new' welcome panel (src/ui/WhatsNew.ts). When you merge a feature a player would actually notice, append ONE entry to the front of `entries` (highest id, newest first) — do not edit or remove old entries, they are history for a returning player who missed a while. Bump `id` by 1 from the current highest. Keep the voice kid-friendly (Eleri is 6): short, one line, plain words, exclamation marks welcome, emoji that matches the thing. Schema per entry: { id: number, emoji: string, title: string, line: string }.",
+  "entries": [
+    {
+      "id": 9,
+      "emoji": "🎠",
+      "title": "Rail Racer!",
+      "line": "Find the stripy stall and race — hold to go fast, let go to duck!"
+    },
+    {
+      "id": 8,
+      "emoji": "🎒",
+      "title": "Your Parade & Cute-o-dex",
+      "line": "Cute things you find follow you in a parade or peek out of your backpack — collect them all in your Cute-o-dex!"
+    },
+    {
+      "id": 7,
+      "emoji": "🏀",
+      "title": "900 Balls In The Ball Pit!",
+      "line": "The ball pit at the bottom of the ginormous slide got WAY more balls — they shove, pile up and scatter properly when you land!"
+    },
+    {
+      "id": 6,
+      "emoji": "🧒",
+      "title": "Other Kids To Meet",
+      "line": "The park is full of other children riding rides, shopping and having fun — say hello!"
+    },
+    {
+      "id": 5,
+      "emoji": "🌈",
+      "title": "Extra Cute Cartoon Look",
+      "line": "Everyone got bigger, cuter heads, the camera came in close, and a rainbow pops out whenever you hop!"
+    },
+    {
+      "id": 4,
+      "emoji": "🛍️",
+      "title": "Seven Shops To Explore!",
+      "line": "Buy toys, balloons, candy floss, ice cream, hats, stickers and surprise eggs — money never runs out!"
+    },
+    {
+      "id": 3,
+      "emoji": "📱",
+      "title": "Play On Your Phone",
+      "line": "Tap where you want to walk, tap things to use them, and add the game to your home screen to play full-screen!"
+    },
+    {
+      "id": 2,
+      "emoji": "🏰",
+      "title": "The Castle & Ginormous Slide",
+      "line": "Ride the glass lift, escalators or stairs up the castle — then whoosh down the GINORMOUS slide into the ball pit!"
+    },
+    {
+      "id": 1,
+      "emoji": "🌳",
+      "title": "Welcome To The Garden Park",
+      "line": "Explore a big garden full of trees, bushes, paths and a wishing fountain — toss in a coin and see what happens!"
+    }
+  ]
+}

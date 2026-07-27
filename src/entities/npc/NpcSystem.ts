@@ -235,6 +235,18 @@ export class NpcSystem implements GameSystem {
     for (const character of this.characters) character.groundSampler = sampler;
   }
 
+  /**
+   * The children themselves.
+   *
+   * Exposed for rides that carry a character rather than steer one: a driver
+   * produces intent and has no business owning a position, so something that
+   * physically moves a child — the park train's carriages — needs the bodies.
+   * Read-only: nothing outside may add or remove one.
+   */
+  get riders(): readonly NpcCharacter[] {
+    return this.characters;
+  }
+
   /** How many draw calls the crowd costs. Reported in the debug overlay. */
   get drawCallCost(): number {
     return this.kids.crowd.partCount + this.pets.partCount;
