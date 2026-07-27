@@ -16,6 +16,7 @@ import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
 import type { InteractZone } from './interact';
+import { highlightInstance } from './highlight';
 import type { FrameContext, GameSystem } from '../core/types';
 import { FLOWER_COLOURS, FLOWER_HEX, gameStore } from '../state';
 
@@ -214,6 +215,12 @@ export class Flowers implements GameSystem {
         standX: this.posX[i] ?? 0,
         standZ: this.posZ[i] ?? 0,
         pressInteract: true,
+        // The HIGHLIGHT RULE's interesting case: there is no flower object to
+        // point at, only row `i` of an instance buffer. The highlight system
+        // shares one shell across every instance of the head mesh and reads the
+        // instance's own matrix each frame, so the rainbow grows with the
+        // flower and vanishes with it when it is picked.
+        highlight: highlightInstance(this.heads, i),
       });
     }
     return zones;
