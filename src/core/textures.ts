@@ -231,6 +231,30 @@ export function woodTexture(repeatX = 3, repeatY = 1): CanvasTexture {
   });
 }
 
+/* ---------------------------------------------------------------------------
+   Canvas-painted text and the TEXT RULE (GAME_DESIGN.md).
+
+   A canvas texture has no "font size on screen" of its own: what a child
+   actually sees is the font's size *as a fraction of the canvas*, multiplied
+   by however many screen pixels the thing wearing that texture covers. So the
+   rule is kept in two places, and both are exported from here rather than
+   being copied around:
+
+   - the fractions below say how big the text is relative to its canvas;
+   - the caller (`ui/NameLabel.ts`, `ui/SpeechBubble.ts`, `.sign-reader-face`
+     in style.css) sizes the canvas on screen so that fraction lands at or
+     above `uiScale.ts`'s `minTextPx()`.
+--------------------------------------------------------------------------- */
+
+/** Canvas height of the name pill (see {@link nameLabelTexture}). */
+export const NAME_LABEL_CANVAS_HEIGHT = 160;
+/** Font size the name is painted at inside that canvas. */
+export const NAME_LABEL_FONT_PX = 62;
+/** Canvas width of a sign board (see {@link signTexture}). */
+export const SIGN_CANVAS_WIDTH = 512;
+/** The smallest text on a sign board: its subtitle. */
+export const SIGN_SUBTITLE_FONT_PX = 40;
+
 export interface SignOptions {
   /** Main line, e.g. "Ferris wheel". */
   title: string;
@@ -251,7 +275,7 @@ export interface SignOptions {
 export function signTexture(options: SignOptions): CanvasTexture {
   const key = `sign:${options.title}|${options.subtitle ?? ''}|${options.glyph ?? ''}|${options.background ?? 0}|${options.accent ?? 0}`;
   return cached(key, () => {
-    const width = 512;
+    const width = SIGN_CANVAS_WIDTH;
     const height = 288;
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -286,15 +310,21 @@ export function signTexture(options: SignOptions): CanvasTexture {
       textCentre = height / 2 + 34;
     }
 
-    ctx.font = 'bold 52px "Trebuchet MS", "Segoe UI", sans-serif';
+    // `fillText`'s max-width argument condenses a long title rather than
+    // letting it run off the board — the alternative (shrinking the font) is
+    // exactly what the TEXT RULE forbids.
+    ctx.font = 'bold 56px "Trebuchet MS", "Segoe UI", sans-serif';
     ctx.fillStyle = hexToCss(accent);
-    ctx.fillText(options.title, width / 2, textCentre);
+    ctx.fillText(options.title, width / 2, textCentre, width - 80);
 
     if (options.subtitle) {
-      ctx.font = 'bold 34px "Trebuchet MS", "Segoe UI", sans-serif';
+      // Bumped from 34px: at the size the sign reader shows a board (see
+      // `.sign-reader-face` in style.css) this is the line that decides
+      // whether the smallest text on a sign clears the minimum.
+      ctx.font = `bold ${SIGN_SUBTITLE_FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
       ctx.fillStyle = hexToCss(PALETTE.ink);
       ctx.globalAlpha = 0.75;
-      ctx.fillText(options.subtitle, width / 2, textCentre + 48);
+      ctx.fillText(options.subtitle, width / 2, textCentre + 52, width - 80);
       ctx.globalAlpha = 1;
     }
 
@@ -313,14 +343,14 @@ export function signTexture(options: SignOptions): CanvasTexture {
  */
 export function nameLabelTexture(name: string, accent: number = PALETTE.markerPink): CanvasTexture {
   const width = 512;
-  const height = 160;
+  const height = NAME_LABEL_CANVAS_HEIGHT;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('2D canvas context unavailable');
 
-  ctx.font = 'bold 62px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.font = `bold ${NAME_LABEL_FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
   const textWidth = ctx.measureText(name).width;
   const pillWidth = Math.min(width - 16, textWidth + 96);
   const pillX = (width - pillWidth) / 2;
