@@ -142,6 +142,17 @@ export class FacePaintPanel {
     this.root.dataset.open = 'true';
   }
 
+  /**
+   * Tells the panel what the player is now wearing, without rebuilding it.
+   *
+   * The picker stays up after the reveal, so "Wash it off" has to come alive
+   * the moment a design actually lands — `openWith` alone would only catch it
+   * the *next* time the stall was opened.
+   */
+  setWearing(current: FacePaintDesign | null): void {
+    this.washOffButton.disabled = current === null;
+  }
+
   close(): void {
     if (!this.open) return;
     this.open = false;
