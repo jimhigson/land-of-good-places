@@ -13,6 +13,10 @@ Do not start a wave until the one above it has landed.
 
 ## Wave 0 — before anything else
 
+**0.0 FIX THE FACE-PAINT CRASH (P0, live).** Using the face painting stall
+freezes the game completely. It is merged and live now. Fix before anything
+else — a crash a child can hit outranks every other item in this document.
+
 **0.1 QA sweep of the unverified merges.** The last seven PRs are
 **build-verified only** — the shared browser profile was locked all session,
 so the castle exterior, indoor lighting, shaft guards, shop re-spacing, NPC
@@ -144,6 +148,11 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **More hair styles** — physics ponytail (springy chain, like the balloon
+  strings), long hanging hair, ponytail, bowl cut, spiky, messy. Applies to
+  NPCs too. *Graphic-design agent for the modelling.*
+- **Save / continue** — autosave every 5s and on unload; on return, offer
+  continue or start again. Versioned format from day one.
 - **Dust cloud behind the player when running** — pooled particles, no
   per-puff allocation (see Wave 1b)
 - Water-fight portraits: bigger heads/names, split left+right in landscape,

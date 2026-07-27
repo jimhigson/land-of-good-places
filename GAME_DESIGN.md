@@ -69,11 +69,36 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Day & night:** The time of day changes. At night, fairy lights come on
   and the ferris wheel lights up.
 
+## Saving and coming back (27 July 2026 — queued, not started)
+
+- **Auto-save to local storage every 5 seconds**, and again when the window
+  is unloading, so nothing is ever lost.
+- **Reloading the page — or coming back later — offers a choice:**
+  **continue from the last save**, or **start again** and run character
+  creation afresh.
+- What must be saved: the character (name, hair, skin, eyes, clothes, worn
+  hat), everything owned, the Cute-o-dex, the parade and what is stowed,
+  splash-point bests, where the player was standing, the time of day, and
+  which one-time things have already been seen (the what's-new panel and
+  the cat-bus arrival both already persist flags — fold them in rather than
+  keeping three separate schemes).
+- *Note: this needs a **versioned** save format from day one. The game is
+  changing fast; a save written today must not break the game next week —
+  on an unreadable or older save, fall back to offering a fresh start
+  rather than crashing.*
+
 ## The player
 
 At the start you choose to play as either:
 
 1. **A kid you customise** — pick hair colour, clothes, and a name, or
+   **More hair styles needed (27 July 2026 — queued):** a **long ponytail
+   with physics** that swings and reaches the ground (like Rumi in KPop
+   Demon Hunters), **long hair hanging naturally**, a **regular ponytail**,
+   a **bowl cut**, **spiky hair** (Bart Simpson-ish), and **messy hair**.
+   *The physics ponytail is the only hard one — a springy chain like the
+   balloon strings, not a rigid mesh. Everything else is modelling. Applies
+   to NPCs too, so the crowd varies.*
 2. **A cute animal** — e.g. a bunny, kitten, or little mouse.
 
 The default character name is **Eleri**.
@@ -777,6 +802,16 @@ Rough order of construction, each step playable:
     fine and hard to see on smaller screens.
 31b. **Arrows on the floor** near escalator tops and bottoms, so it's
     obvious what they are and which way they go.
+31c-BUG. **Using the face painting stall CRASHES the game (27 July 2026 —
+    P0, live).** It freezes completely at the moment of use. Merged today
+    **build-verified only** — the browser was locked, so it was never seen
+    running, and this is exactly what the QA sweep exists to catch.
+    *First places to look: `createFacePaintOverlay` is called with a 512px
+    canvas for the player and 256px per NPC, and the crowd bakes a shared
+    face-texture set — a freeze at the moment of use smells like synchronous
+    canvas work, or a per-NPC overlay being built for the whole crowd at
+    once. The texture budget is already ~4x over, so an allocation storm is
+    plausible. Confirm by profiling rather than guessing.*
 31c. **Face painting stall** outside in the garden — the player AND NPCs
     visit and get their faces painted in various cute designs.
 31d. **Player–NPC collision** — the player and NPCs cannot walk through
