@@ -25,6 +25,7 @@ import {
 } from '../art/style/faces';
 import { collectSignZones, markAsSign, type SignZone } from './signs';
 import type { InteractZone } from './interact';
+import { highlightObject } from './highlight';
 import { terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -248,6 +249,9 @@ export class FacePaintStall implements GameSystem {
         standX: this.standX,
         standZ: this.standZ,
         pressInteract: true,
+        // GAME_DESIGN.md's HIGHLIGHT RULE: the booth itself outlines in
+        // rainbow when it is about to be used (see `world/highlight.ts`).
+        highlight: highlightObject(this.group),
       },
     ];
   }

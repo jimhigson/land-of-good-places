@@ -91,6 +91,20 @@ export class ActionButton implements GameSystem {
     return this.nearbyZone !== null;
   }
 
+  /**
+   * The zone the button is currently offering, or null.
+   *
+   * This is, by definition, "what pressing E would use right now" — so it is
+   * what GAME_DESIGN.md's HIGHLIGHT RULE outlines in rainbow while E is primed
+   * (see `world/Highlights.ts`). Exposed rather than re-derived on purpose: two
+   * copies of this pick, with their own hysteresis, would eventually disagree
+   * about what a child is standing next to, and the pill and the outline
+   * pointing at different things is worse than either being wrong alone.
+   */
+  get zone(): InteractZone | null {
+    return this.nearbyZone;
+  }
+
   update(_context: FrameContext): void {
     if (this.isBlocked()) {
       this.setNearby(null);

@@ -1,3 +1,5 @@
+import type { HighlightTarget } from './highlight';
+
 /**
  * The tap-target registry.
  *
@@ -46,6 +48,19 @@ export interface InteractZone {
    * one from `id` for every zone that doesn't.
    */
   readonly verb?: string;
+
+  /**
+   * What to draw the rainbow around, for GAME_DESIGN.md's HIGHLIGHT RULE — the
+   * `Object3D` (or the one `InstancedMesh` instance) this zone stands for. See
+   * `world/highlight.ts` for the helpers, `world/Highlights.ts` for the system.
+   *
+   * Optional, and deliberately so: **a zone that omits it is still
+   * highlighted**, with a rainbow ring sized from its own `pickRadius`. Naming
+   * an object upgrades that ring to an outline of the real silhouette. So the
+   * rule holds for everything registered here whether or not anybody remembered
+   * it, which is the point of having built it once.
+   */
+  readonly highlight?: HighlightTarget;
 }
 
 /**

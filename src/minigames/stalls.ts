@@ -4,6 +4,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
+import { highlightObject } from '../world/highlight';
 import { ANCHORS_BY_ID } from '../world/anchors';
 import { createDodgems } from './dodgems/Dodgems';
 import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
@@ -157,6 +158,12 @@ export interface StallInstance {
   /** Where a child stands to be served. */
   readonly standX: number;
   readonly standZ: number;
+  /**
+   * The booth's own geometry. Here so the thing and its tap target cannot
+   * drift apart — the HIGHLIGHT RULE outlines this exact group when the stall
+   * is about to be used (see `world/highlight.ts`).
+   */
+  readonly booth: Group;
 }
 
 export class MiniGameStalls implements GameSystem {
@@ -190,6 +197,7 @@ export class MiniGameStalls implements GameSystem {
         definition,
         x,
         z,
+        booth: prop.root,
         standX: x + forwardX * STALL_STAND_DISTANCE,
         standZ: z + forwardZ * STALL_STAND_DISTANCE,
       });
@@ -215,6 +223,12 @@ export class MiniGameStalls implements GameSystem {
       standX: stall.standX,
       standZ: stall.standZ,
       pressInteract: true,
+      // The whole booth lights up in rainbow when you can use it (GAME_DESIGN's
+      // HIGHLIGHT RULE). `props` is filled in step with `stalls` in the
+      // constructor above, one prop per instance, in order.
+      // The whole booth lights up in rainbow when you can use it — see
+      // GAME_DESIGN.md's HIGHLIGHT RULE and `world/highlight.ts`.
+      highlight: highlightObject(stall.booth),
     }));
   }
 

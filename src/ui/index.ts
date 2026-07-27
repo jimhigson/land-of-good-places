@@ -10,3 +10,4 @@ export { NameLabel } from './NameLabel';
 export { TouchControls } from './TouchControls';
 export { WhatsNew, type WhatsNewEntry } from './WhatsNew';
 export { UpdateToast } from './UpdateToast';
+export { TapBurst } from './TapBurst';

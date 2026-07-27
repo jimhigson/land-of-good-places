@@ -5,9 +5,11 @@ import {
   Mesh,
   MeshBasicMaterial,
   RingGeometry,
+  Vector3,
 } from 'three';
 import { ART } from '../style/artPalette';
 import { decal } from '../style/materials';
+import { starGeometry } from '../style/shapes';
 
 /**
  * The rainbow hop ring.
@@ -70,10 +72,12 @@ export interface RainbowRings {
  * distance from the origin is exactly how far across the band it sits. The ramp
  * is interpolated rather than stepped: hard band edges look like a colour chart,
  * and a rainbow that has been through a bit of sky is softer than that.
+ *
+ * Exported because the interaction highlight (`world/Highlights.ts`) draws the
+ * same ring around anything that has not named an object to outline — one
+ * rainbow motif, built once, rather than a second one that drifts out of step.
  */
-function rainbowRingGeometry(): RingGeometry {
-  const inner = 0.62;
-  const outer = 1;
+export function rainbowRingGeometry(inner = 0.62, outer = 1): RingGeometry {
   const geometry = new RingGeometry(inner, outer, 56, ART.rainbow.length * 2);
 
   const position = geometry.getAttribute('position');
@@ -194,6 +198,132 @@ export function createRainbowRings(): RainbowRings {
     dispose() {
       geometry.dispose();
       for (const material of materials) material.dispose();
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------
+ * The "you touched it" sparkles.
+ *
+ * The second half of the activation flash in GAME_DESIGN.md's HIGHLIGHT RULE:
+ * the ring above radiates, and a handful of little rainbow stars scatter with
+ * it. They live in this file rather than a new one on purpose — they are the
+ * same motif, they take their colours from the same `ART.rainbow`, and a
+ * separate module is how two rainbows end up drifting apart.
+ *
+ * Same rules as everything else in here: a fixed pool allocated once, normal
+ * blending, and a fade on a curve. A six-year-old confirming every tap will
+ * fire this hundreds of times a session, and nothing about that may allocate.
+ * ------------------------------------------------------------------------- */
+
+/** Stars alive at once. Two full bursts overlapping, which is as many as a fast tapper gets. */
+const SPARK_POOL_SIZE = 16;
+const SPARKS_PER_BURST = 8;
+const SPARK_LIFETIME = 0.52;
+/** How far a star travels from the burst point, as a multiple of the burst radius. */
+const SPARK_TRAVEL = 0.85;
+/** How far it lifts as it goes, in metres — enough to arc rather than skate. */
+const SPARK_RISE = 0.55;
+
+export interface RainbowSparks {
+  /** Parent this in **world space**. */
+  readonly root: Group;
+  /** Scatters a burst of stars from a point. `radius` is roughly the size of the thing touched. */
+  burst(x: number, y: number, z: number, radius: number): void;
+  update(dt: number): void;
+  dispose(): void;
+}
+
+interface Spark {
+  readonly mesh: Mesh;
+  readonly material: MeshBasicMaterial;
+  readonly origin: Vector3;
+  readonly direction: Vector3;
+  distance: number;
+  age: number;
+}
+
+export function createRainbowSparks(): RainbowSparks {
+  const root = new Group();
+  root.name = 'effect.rainbowSparks';
+
+  const geometry = starGeometry(0.13, 0.02, 5);
+  const sparks: Spark[] = [];
+  let next = 0;
+  let alive = 0;
+
+  for (let i = 0; i < SPARK_POOL_SIZE; i += 1) {
+    // One material per star: the pool is small, and per-star opacity is what
+    // makes "fade and shrink" a single line rather than a shared-material dance.
+    const material = new MeshBasicMaterial({
+      color: ART.rainbow[i % ART.rainbow.length] ?? 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const mesh = decal(new Mesh(geometry, material));
+    mesh.visible = false;
+    mesh.renderOrder = 5;
+    root.add(mesh);
+    sparks.push({
+      mesh,
+      material,
+      origin: new Vector3(),
+      direction: new Vector3(),
+      distance: 1,
+      age: SPARK_LIFETIME,
+    });
+  }
+
+  return {
+    root,
+
+    burst(x, y, z, radius) {
+      for (let i = 0; i < SPARKS_PER_BURST; i += 1) {
+        const spark = sparks[next];
+        next = (next + 1) % SPARK_POOL_SIZE;
+        if (!spark) continue;
+        // Evenly around the compass with a fixed quarter-turn offset per burst
+        // slot, so two bursts in the same place do not land star-on-star.
+        const angle = ((i + next * 0.25) / SPARKS_PER_BURST) * Math.PI * 2;
+        if (spark.age >= SPARK_LIFETIME) alive += 1;
+        spark.origin.set(x, y + radius * 0.35, z);
+        spark.direction.set(Math.cos(angle), 0, Math.sin(angle));
+        spark.distance = Math.max(0.7, radius) * SPARK_TRAVEL;
+        spark.age = 0;
+        spark.mesh.visible = true;
+      }
+    },
+
+    update(dt) {
+      if (alive === 0) return;
+      for (const spark of sparks) {
+        if (spark.age >= SPARK_LIFETIME) continue;
+        spark.age += dt;
+        if (spark.age >= SPARK_LIFETIME) {
+          spark.mesh.visible = false;
+          spark.material.opacity = 0;
+          alive -= 1;
+          continue;
+        }
+
+        const t = spark.age / SPARK_LIFETIME;
+        const eased = easeOut(t);
+        spark.mesh.position
+          .copy(spark.origin)
+          .addScaledVector(spark.direction, spark.distance * eased)
+          // Up fast, then over the top: a star that only travels outwards
+          // reads as a diagram of an explosion rather than a sparkle.
+          .setY(spark.origin.y + SPARK_RISE * Math.sin(eased * Math.PI * 0.9));
+        spark.mesh.rotation.z = t * 3.4;
+        spark.mesh.scale.setScalar(1 - 0.45 * t);
+        spark.material.opacity = t < 0.25 ? 0.95 : 0.95 * (1 - (t - 0.25) / 0.75) ** 1.4;
+      }
+    },
+
+    dispose() {
+      geometry.dispose();
+      for (const spark of sparks) spark.material.dispose();
     },
   };
 }

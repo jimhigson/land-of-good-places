@@ -93,6 +93,16 @@ export class SignReader implements GameSystem {
     return this.openSign !== null;
   }
 
+  /**
+   * The sign the "Read" button is currently offering, or null — what the
+   * HIGHLIGHT RULE outlines in rainbow while Read is primed. Same reasoning as
+   * `ActionButton.zone`: one pick, read by both the pill and the outline, so
+   * they cannot point at different signs.
+   */
+  get nearby(): SignZone | null {
+    return this.nearbySign;
+  }
+
   update(context: FrameContext): void {
     this.syncPaused();
 
