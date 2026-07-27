@@ -9,6 +9,523 @@ sources you actually read.
 
 ---
 
+## Decision 4 — The park replan: a railway through the park, not a ring around it
+
+*(This is item **2.1** in ORDER-OF-WORK.md. It gates all of Wave 4.)*
+
+**Date:** 27 July 2026 · **Status:** decided, not yet implemented
+**Sources read:** GAME_DESIGN.md ("Replan the whole park around a real
+railway", "The train ride, first person", "The train needs paths to its
+stations", the spooky-house items, the CONTROL RULE), ORDER-OF-WORK.md Wave 4,
+decisions 1 and 2 below plus the family answers to decision 1 §6 (two-track
+coaster, first person only), and the code on `main` at 4876f69:
+`src/world/train/route.ts`, `track.ts`, `station.ts`, `ParkTrain.ts`,
+`src/world/terrain.ts`, `src/world/building/surfaces.ts` (`WalkSurfaces`),
+`src/world/AnchorPlots.ts`, `src/world/anchors.ts`, `src/world/paths.ts`,
+`src/world/Garden.ts`, `src/world/Collision.ts`,
+`src/world/entrance/layout.ts`, `src/entities/npc/poiGraph.ts`,
+`src/minigames/ferrisWheel/look.ts`, `src/core/constants.ts`.
+
+### 0. The rulings, in one screen
+
+1. **Nothing is ever dug.** The terrain heightfield and `terrainHeight()` are
+   untouched; the rails sit at `terrainHeight + RAIL_HEIGHT` for every metre
+   of the loop, exactly as `track.ts` builds them today. All verticality is
+   **built up**: a tunnel is a hill *shell* placed over grade-level track; a
+   path crossing is a *walkable deck* humped over it (§2).
+2. **The attractions do not move** — castle, ball pit, ferris wheel, dodgems,
+   water fight, fountain plaza all stay where they are. The **railway** is
+   what changes shape: it keeps hugging the wall behind the four big plots
+   and **dives inward through the four gaps between them** (§3). The one
+   placement change: the **spooky house becomes a sixth anchor** at the north
+   edge, on a little island the railway cuts off (§3).
+3. **`route.ts`'s solver survives; its taste changes.** Authored *intent*
+   (a per-bearing target profile with four inward dips), solved *legality*
+   (the existing bounds/repair/scenery-nudge machinery, plus three new
+   asserts). Not a hand-typed spline — the reasons route.ts gives for
+   solving are truer than ever now the track runs where people build (§4).
+4. **Four built structures**, one parametric construct: the **entrance
+   tunnel** (every visitor walks over the railway to enter the park), the
+   **spooky bridge**, the **picnic bridge**, and a **decorative tunnel hill**
+   behind the ferris wheel. Crossings are *computed at boot* from the solved
+   curve, so they can never drift off the track (§5).
+5. **Track exclusion is generated, not decorated**: continuous invisible
+   walls offset from the solved curve on both sides, with visible dressing
+   only where a child can actually get (§6).
+6. **Two rail systems, one toolkit** stands (decision 1 §1), amended: the
+   coaster is elevated, two-track, and re-validated against the *new* train
+   curve at boot. Its Decision-1 route sketch survives (§7).
+7. **One `RideCamera`, built by extraction, adopted three times**: lift the
+   ferris wheel's proven look-around out of `minigames/ferrisWheel/`, make
+   the ferris its first consumer with pixel-for-pixel parity, then the
+   first-person train, then the coaster. Never write a second look-around
+   (§8).
+8. **NPCs reach the platforms on the graph**: new spurs and platform nodes in
+   `poiGraph`, and the train-trip behaviour's improvised off-graph steering
+   is retired after the Wave-3 `Activity` extraction (§9).
+
+### 1. What survives of Decision 1, and what does not
+
+The replan supersedes Decision 1's *premise* — "train owns the outer band
+r 48–58, coaster owns the middle band" — so, plainly:
+
+**Superseded:**
+- *"The train's territory is the outer band."* The train now spans r ≈ 29–58.
+  Territory is no longer what tells the two systems apart.
+- *"They cross exactly twice, near the ferris wheel."* Crossing count is now
+  an output of the boot validator, not a design constant. The clearance rule
+  is what survives, generalised: **≥ 5.5 m rail-over-rail wherever the
+  coaster's plan position comes within 4 m of the train centreline**.
+- *"Passing loops"* were already superseded by the family's two-track answer
+  (see "Family answers" below decision 1); that stands.
+
+**Survives, and is now load-bearing:**
+- Train = calm transport, coaster = elevated thrill; **legible at a glance by
+  height, look and speed** (no longer by territory). Do not merge them.
+- The entire §2 camera plan — `RideCamera` + `Game.cameraOverride` +
+  curtain-blink + the suspension-guard table — now serving the train too.
+- The in-world-ride concept (§4): park keeps running during the ride.
+- The coaster route sketch, station anchor at (10, −5), `world/rails/`
+  toolkit, ambient NPC carts, and the PR shapes — folded into §10 here.
+- Decision 2 (queues) is untouched structurally: queues attach to stations
+  wherever the stations are. Its PR-D simply lands against the new platform
+  positions.
+
+### 2. The one physical rule: build up, never dig
+
+The question "how do tunnels work when the terrain is a heightfield and
+walking is `WalkSurfaces.sample`?" has a sharp answer: **a real dug tunnel is
+not representable at all** — a heightfield stores one height per (x, z), and
+ground-above-train-below needs two. Something must be *built* either way. So
+the cheap and honest version is ruled in:
+
+- **The rails never leave grade.** Every existing piece of train code that
+  drapes on `terrainHeight` — `track.ts` ballast/sleepers/rails, carriage
+  floors, `station.ts` — survives unchanged.
+- **A "tunnel" is a shell**: a mound mesh (grass-textured, flowers on top,
+  portal arches at both ends, lamps inside for the first-person rider)
+  straddling the track. From outside, the train vanishes into a hill. From
+  the inside — and the rider is *first person*, which is why this works at
+  all — it is a real tunnel: dark, lamp-lit, then daylight again.
+- **A path crossing is a deck**: a gentle hump (ramps ≤ 1:3.5, kerbs,
+  lanterns) carrying the path over the track. Underside clearance =
+  railhead + the train's measured height + 0.4 m — measure the train model's
+  bounding box at boot rather than hard-coding a number that rots. Walk
+  surface lands ≈ 3.2 m up; total structure ≈ 24–28 m long, deck 4.2 m wide.
+- **Walkers stand on decks via one small extension to `WalkSurfaces`**:
+
+  ```ts
+  interface WalkPatch { heightAt(x: number, z: number): number | null }
+  WalkSurfaces.addPatch(patch: WalkPatch): void
+  ```
+
+  Sampled in `sample()` exactly like platforms, but with a per-point height —
+  which `MovingPlatform`'s single `surfaceY` cannot express and ramps
+  (axis-aligned, building-local) cannot either. Decision 3 (castle floors)
+  has since ruled: it rewrites `surfaces.ts` smaller but keeps `sample()`'s
+  signature, keeps the registrable-surface pattern, and keeps
+  `MovingPlatform` unchanged — a `WalkPatch` is the same shape and lives in
+  the garden space, so it survives that rewrite as-is. The two edits to
+  `surfaces.ts` (this decision's T2, decision 3's S2) must simply be
+  **sequenced, not parallelised** — T2 is ~15 lines and should land first.
+- **Path ribbons learn one trick**: `RouteDefinition` in `paths.ts` gains an
+  optional `elevation?: (x, z) => number | null`; `addRibbon` uses it instead
+  of `terrainHeight` where it returns non-null. The bridge module supplies
+  the hump profile; every other route passes nothing and builds exactly as
+  today.
+- Deck meshes register with `pickWalkable` so tap-to-move works over a
+  bridge; NPC graph edges across decks validate exactly like any other edge
+  (clearance from `CollisionWorld`, height for free from ground sampling).
+
+Two consequences worth saying out loud: the player is **never inside a
+tunnel** (only the train is — the walker is always on top, in full view of
+the fixed camera, which is what the family's bridge answer promised); and the
+steam **puffs must be suppressed while the engine is under a deck or shell**,
+or they will rise through it (one check against the crossing spans, listed in
+§10).
+
+### 3. The new map
+
+The park reads exactly as it does today from the middle — plaza, castle,
+ferris wheel, dodgems, water fight, ball pit all in their places — but the
+railway now breathes: out to the wall behind each big plot, **in through each
+of the four gaps between them**. Two of the inward dips carry stations; the
+other two dive under crossings. Beyond the rails, three pockets of lawn
+become *places*:
+
+- **The entrance forecourt** (south): the gate at (0, 60) and the cat-bus
+  stop at (0, 52) already live here. Arriving now means walking up and over
+  **Welcome Hill** — the entrance tunnel — while the train chuffs underneath.
+  The first thing every visitor does is cross the railway. That is the
+  postcard.
+- **The Spooky Island** (north): the ghost head (GAME_DESIGN's giant ghost
+  with the spider — new anchor `spookyHouse` at (−4, −46), footprint circle
+  r 7) sits beyond the rails, reached only by the **spooky bridge**. "Slightly
+  set apart" is now literally true.
+- **The Picnic Island** (east): lawn between the east dip and the wall,
+  reached by the **picnic bridge** near Sunny Side station. Benches, flowers,
+  and the best train-watching in the park.
+
+The west pocket is the one place deliberately *not* reachable: the **Statue
+Garden**, where the trackside statues and dancing characters (Wave 4.7) live
+— visible from Bluebell Halt and the ring road, up close only from the train.
+
+```
+                                N
+                       (spooky island)
+                  ##### __GHOST HEAD__ #####
+              ###       (spider on top)     ###
+           ##       ===[spooky bridge]==          ##
+         #     ====      |        ====TUNNEL====     #
+        # ===castle       |     ==     HILL     ==     #
+       # =[squeeze]      .|.       ( FERRIS  )    ==    #
+      #   +---------+   . | .      (  WHEEL  )      =    #
+     #    | CASTLE  |  .  |  .     (         )       =    #
+     #    | (bldg)  | .  ring  .    ~~coaster~~      =     #
+     #    +---------+ .  road  . ~~~    overhead      =    #
+    # STATUE   (ball .    |    .    ~~~ on pylons ~~   =    #
+    # GARDEN    pit) .    |     .        ~            =      #
+    # =         . .  .  plaza ...(coaster stn)....[SUNNY      #
+    # =[BLUEBELL].. .   ( F )  .            ~     SIDE]= picnic#
+    # =[  HALT ]..  .  fountain .          ~          =[bridge]#
+    #  =        .    .         .          ~           = PICNIC #
+     # =        .     .. ring ..         ~           =  ISLAND#
+     #  ==       .      road  .      ....           =        #
+      #   ==    +--------+   .      .    +--------+ =       #
+       #    ==  | WATER  |  .       .    | DODGEMS| =      #
+        #     ==| FIGHT  | .        .    |        |=      #
+         #      +--------+ .   .    .    +--------+      #
+          ##      ====      .  .   ====WELCOME====     ##
+             ###      ====== [ HILL  TUNNEL ] ====  ###
+                ####          .(esplanade).      ####
+                     ######    .cat-bus .  ######
+                            ## [ GATE ] ##
+                                  S
+   ==  railway (ground level)      ~~ coaster (overhead, two rails)
+   ..  paths                       [] built structure / station
+```
+
+*Schematic, not survey — the solver owns the exact metres.* The numbers that
+are binding (everything else is the solver's business):
+
+| thing | position / target | note |
+| --- | --- | --- |
+| N dip (spooky bridge) | r ≈ 30 at bearing 270° | crossing computed at boot |
+| E dip (Sunny Side) | r ≈ 40 at bearing ~355° | corridor is narrow: ferris + dodgems corners |
+| S dip (entrance tunnel) | r ≈ 29 at bearing 90° | widest corridor; gate/bus already at (0,60)/(0,52) |
+| W dip (Bluebell Halt) | r ≈ 35 at bearing ~178° | |
+| behind dodgems / water / castle / ferris | ≈ 56.2 / 57.4 / 58.1 / 54.5 | wall-hugs as today; castle squeeze (2.95 m) kept — it is the best moment of the ride |
+| `spookyHouse` anchor | (−4, −46), circle r 7 | sixth entry in `anchors.ts`; stall row keeps the mini-game, loses the booth prop |
+| coaster station anchor | (10, −5) | per decision 1; small footprint, elevated track owns no plot |
+
+Loop length comes out around 350–380 m — roughly 90 s per lap at the train's
+4 m/s, two stops, which is a proper little journey without being a commute.
+The stations keep their existing placement mechanism **unchanged**:
+`ParkTrain` already seats them with `route.distanceNear(±60, 0)` — east and
+west — so when the dips pull the track inward, **the stations ride inward
+with it automatically**, landing a short spur from the ring road. That single
+fact is why "paths to both stations" (Wave 4.5) becomes cheap.
+
+**What the anchor-plot system does in all this: it survives untouched.** The
+five plots stay the source of truth for placement, path spurs and scenery
+exclusion; `spookyHouse` joins as the sixth; the coaster station as the
+seventh. The railway itself is deliberately *not* an anchor — it is linear
+infrastructure, like the paths, and like the paths it is its own system.
+
+### 4. The route: authored intent, solved legality
+
+Does `route.ts`'s solve-against-collision approach survive? **Yes — because
+its shape happens to be exactly right for the new brief.** The solver
+represents the loop as a radius per bearing, and a winding loop with four
+inward dips is *still* a radius per bearing — no self-crossings (which the
+build-up-never-dig rule forbids anyway, since two grade-level rails cannot
+cross). What changes is one idea and three guards, all in
+`src/world/train/route.ts` plus one new file:
+
+- **`src/world/train/profile.ts` (new):** the authored intent. A short list
+  of (bearing, radius) knots — the table in §3 — interpolated smoothly. The
+  solver's pull term changes from "pull toward the constant
+  `NOMINAL_RADIUS`" to "pull toward `targetRadius(bearing)`". The knots are
+  the *design*, readable and tunable in one place; the solver still owns
+  legality. A hand-typed spline is explicitly rejected for the same reason
+  route.ts already documents: the park keeps being built by other agents,
+  and the track now runs where they build.
+- **`RING_KEEP_OUT = 28.5` (new, explicit):** today the solver only stays off
+  the ring road by luck (the obstacle-free fallback happens to be ~28.1).
+  Make it a named lower bound: the track never comes within clearance of the
+  ring road or plaza paving.
+- **Obstacles now choose a side.** Today every plot pushes the track
+  *outward*. The spooky island, the entrance gate, the bus stop and its
+  shelter sit **beyond** the track, so for any obstacle whose radial interval
+  lies outside the target profile at that bearing, the constraint flips to an
+  *upper* bound (track passes inside it). Mechanical change in
+  `solveProfile`'s lower/upper construction; the `repair()` corner logic
+  needs the matching signed variant.
+- **Three new boot asserts** (fail loudly, like the existing solver docs
+  demand):
+  1. minimum turn radius ≥ 7 m everywhere (the dips' flanks are the risk —
+     if a dip cannot be reached at legal curvature, the solver shallows it
+     and the assert tells you by how much);
+  2. every declared crossing path intersects the solved curve exactly the
+     number of times its definition says (once per bridge/tunnel), at ≥ 55°
+     incidence, so crossings stay square-ish and short;
+  3. the two stations' `distanceNear` seats land within 3 m of their target
+     dips (catches a solver regression that would silently strand a station
+     out at the wall).
+- **`profile.ts` also exports the railway reserve**: the strip within 4.5 m
+  of the target centreline (plus the coaster's pylon corridor, §7).
+  `Scenery` refuses to plant in it — which means `nudgeOffScenery` becomes a
+  belt-and-braces safety net rather than a load-bearing pass, and the solved
+  route lands close to the authored intent deterministically. Without the
+  reserve, a seeded bush inside a tunnel shell is a *when*, not an *if*.
+
+`track.ts`, `station.ts` and `ParkTrain.ts` need **no structural change**:
+draping, platform side-selection ("park side" = toward centre — still true at
+every dip) and station seeding all survive as written.
+
+### 5. Crossings: one parametric construct, computed at boot
+
+**`src/world/train/crossings.ts` (new).** A crossing is declared, not
+placed:
+
+```ts
+interface CrossingDefinition {
+  readonly pathRoute: string;        // name of the route in paths.ts
+  readonly style: 'bridge' | 'tunnel';
+  readonly name: string;             // "Welcome Hill", "Spooky Bridge"…
+}
+```
+
+At boot, after the route solves: intersect the named path's centreline with
+the solved curve, orient the structure along the *track* tangent, and build
+everything from parameters — deck or shell mesh, portal arches, the
+`WalkPatch` for `WalkSurfaces`, the `elevation` callback handed to
+`paths.ts`, hedge funnels and their collision, `pickWalkable` registration,
+and two-or-three `poiGraph` nodes along the deck. **If the solver moves the
+track a metre to dodge something, every crossing moves with it.** Nothing is
+authored twice.
+
+The four instances:
+
+| name | style | path | notes |
+| --- | --- | --- | --- |
+| **Welcome Hill** | tunnel | `entrance-esplanade` (new route: gate → bus stop → over the hill → ring road at (0, 22)) | the big one: mound ≈ 22 m long; the esplanade is the only way in and out of the forecourt. The cat-bus scripted arrivals (`entrance/disembarkingKids.ts`) must walk it — audit that walk in the same PR |
+| **Spooky Bridge** | bridge | `spur-spooky` (new: ring (0, −21) → winds north → ghost head door) | arched, slightly rickety-cute, lanterns |
+| **Picnic Bridge** | bridge | `spur-picnic` (new: short hop east of Sunny Side) | benches on the island side |
+| **Fern Hill** | tunnel | *none* | decorative shell on the NE bulge behind the ferris wheel — no path, flowers on top; exists so the ride "dives underground" twice per lap |
+
+(A decorative tunnel takes the same construct with no path/deck parts — the
+`pathRoute` is simply absent and it anchors at an authored distance along the
+curve instead.)
+
+First-person dressing inside shells — lamps, a whistle on portal entry,
+chuff reverb — is polish, listed in §10, not architecture.
+
+### 6. Keeping feet off the rails without fencing the park in
+
+**`src/world/rails/guards.ts` (new, shared — the coaster station reuses
+it).** Generated from the solved curve, never hand-placed:
+
+- Two collision polylines offset **±2.0 m** from the track centreline
+  (`CollisionWorld.addWall` segments every ~2.5 m), height 2.5 m,
+  `autoHoppable: false` — above the jump-fling's reach, so Wave-1.4's
+  airborne clearance path cannot skip them.
+- **Declared gaps only**: none. Platform faces get their own full-length
+  invisible wall at the platform edge instead (boarding is `beginRide`, not
+  walking across the rails, so the wall never fights the ride). Tunnel
+  portals sit *between* the two offset walls, so they need no gap. The two
+  bridges span *over* the walls. Boot assert: each offset polyline is closed.
+- **Visible dressing is separate from collision, and only where feet can
+  actually arrive**: low picket fence + flowerbeds along the two station
+  dips and both sides of each crossing approach; hedges funnelling onto the
+  bridges; a raised ballast shoulder (embankment look) along the reachable
+  parts of the N and S dips. The wall-hugging stretches behind the plots get
+  **nothing visible at all** — the plots themselves screen them, and that is
+  what keeps the park from reading as a cage. A child sees pretty borders at
+  exactly the places she could have stepped onto the rails, and open lawn
+  everywhere else.
+- The NPC waypoint graph needs no special handling: edges validate against
+  the collision world at boot, so the new walls silently drop any edge that
+  used to cross the track's new course. Tap-to-move resolves against the
+  same walls.
+
+The three outer pockets (forecourt, two islands) are bounded by
+rails-plus-wall and connected only via their crossings — that is the safety
+story *and* the charm: the railway genuinely separates land, the way real
+railways do, and bridges are how you get over one.
+
+### 7. Two rail systems, one toolkit — the coaster under the replan
+
+Everything in decision 1 §1 about identity stands: the train is calm ground
+transport, the coaster is an elevated thrill, and a six-year-old tells them
+apart by height, look and speed. The two-track family answer stands: the
+coaster is a **pair** of parallel curves at 2.2 m gauge, side by side the
+whole circuit. What the replan changes:
+
+- **The coaster's Decision-1 control-point sketch survives** (station at
+  (10, −5), the ferris wrap, the castle faces, the west run) — it lives 4–8 m
+  up on pylons and consumes no ground the replan reassigns. It must simply be
+  **re-validated against the new train curve**: ≥ 5.5 m vertical clearance
+  wherever its plan position comes within 4 m of the train centreline (the
+  old "crosses exactly twice" count is retired — the validator reports
+  however many crossings the new geometry produces, and each is a postcard,
+  not a problem), pylon feet ≥ 2.5 m clear of the train centreline and out of
+  the crossings' footprints, and ≥ 3.5 m over walkable ground as before.
+- **`src/world/rails/` becomes real now** (decision 1 deferred it):
+  `rails/path.ts` — arc-length-parameterised curve with a lateral-offset
+  twin for the two-track pair; `rails/guards.ts` (§6); the boot-time
+  clearance validator. The train does **not** get rebased onto it yet —
+  `TrainRoute` exposes its curve through a thin adapter where the validator
+  and guards need it, and the old PR-6 "re-base TrainRoute onto rails/"
+  stays a quiet-period refactor.
+- Build order consequence (unchanged from decision 1, now with more riding
+  on it): **coaster constructs after the train** in `World`, because the
+  validator and the guards both read the solved train curve.
+
+### 8. `RideCamera`: extract the ferris wheel's look-around, build once
+
+Wave 4.8's instruction is "build the shared `RideCamera` once — ferris,
+train, coaster all want it". The ferris wheel already *has* a working,
+family-approved look-around (`minigames/ferrisWheel/look.ts` plus the gondola
+camera in `SpaceFerrisWheel.ts`), and GAME_DESIGN.md records its directions
+as **confirmed correct — do not disturb**. Those two facts pick the plan:
+
+1. **Extract, never rewrite.** Move `look.ts` verbatim to
+   `src/core/rideLook.ts` (it is already self-contained and ride-agnostic —
+   drag sets a turn rate, keyboard adds, deadzone distinguishes drag from
+   hold). Build `src/core/RideCamera.ts` around it: a `PerspectiveCamera`
+   (FOV ~60°), a **mount** callback the ride supplies each frame (eye
+   position + base orientation — gondola seat, train bench, coaster cart),
+   yaw/pitch offsets driven by `rideLook` with per-ride clamps, and the same
+   drift-to-rest feel the ferris has. The gondola-camera maths moves *into*
+   `RideCamera`; the ferris becomes its **first consumer in the same PR**,
+   and the acceptance test is behavioural parity — same directions, same
+   feel, or the PR does not merge.
+2. **`Game.cameraOverride`** lands exactly as decision 1 §2 specified (~10
+   lines, third render state, park keeps updating, curtain-blink entry/exit,
+   the suspension-guard table: tap-nav, sign inspector, labels, HUD). One
+   integration, three riders.
+3. **Train adopts second** (`src/world/train/ride.ts`): boarding runs the
+   existing `beginRide` flow, then curtain-blinks to the `RideCamera`
+   mounted at the seated eye point (~1.05 m above the bench). Free 360° yaw,
+   pitch clamped ±45°. The CONTROL RULE is satisfied by construction:
+   rotation input exists only here, in first person. Getting off keeps the
+   train's existing grammar — while stopped at a platform, any *movement*
+   input alights; `rideLook`'s `dragging` flag already exists precisely so
+   look-drags don't count as "let me off". Statues, tunnel lamps and bridge
+   undersides are what the camera is *for*; the ride needs no game logic
+   beyond what `ParkTrain` has.
+4. **Coaster adopts third**, with tighter clamps (yaw ±120°, pitch ±35°) and
+   banking fed by the rail pair, per decision 1.
+
+The known risk moves with the camera: **`Sky.ts` and the fog constants are
+tuned for the iso rig** (decision 1 flagged it from 7 m up; a ground-level
+train camera looking outward at the rim is a harder case than the coaster).
+The train-ride PR therefore *includes* a Sky/fog tuning pass for the
+perspective camera — a per-ride fog override is acceptable, a milky horizon
+is not.
+
+### 9. NPCs: the graph reaches the platforms; off-graph steering retires
+
+New `poiGraph` seeds, all cheap because the stations now sit a short spur
+off the ring road (§3): two or three nodes along each station spur ending at
+a platform node (`interesting: true`), nodes over each bridge deck, a chain
+along the entrance esplanade, and island nodes (picnic lawn, ghost head
+door). Edge validation against the finished collision world does the rest —
+including automatically dropping every old edge the new track severs.
+
+The train-trip behaviour keeps its *ride* logic (claiming seats, riding,
+alighting) but its walk-to-the-platform phase becomes ordinary graph
+navigation to the platform node, deleting the improvised steer-and-sidestep
+code and its stuck detection — which existed, as GAME_DESIGN.md notes, only
+because there was no paving to walk. **Sequencing rule: this lands after the
+Wave-3 `Activity` extraction** (the trip block becomes
+`activities/trainTrip.ts` first, then shrinks), so nobody edits
+`wanderDriver.ts` twice in conflicting directions.
+
+### 10. Order of work
+
+| PR | What | Owns (files) | After |
+| --- | --- | --- | --- |
+| **T1** | Route: `profile.ts` (knots + reserve export), solver pull-to-profile, `RING_KEEP_OUT`, side-choosing obstacles, three asserts; `Scenery` honours the reserve. Stations land at the dips for free. | `src/world/train/route.ts`, `src/world/train/profile.ts` (new), `src/world/Scenery.ts` | — |
+| **T2** | Walk-height plumbing: `WalkSurfaces.addPatch`, `RouteDefinition.elevation`, `pickWalkable` deck registration. Tiny, enabling, no visible change. | `src/world/building/surfaces.ts`, `src/world/paths.ts`, `src/world/pickWalkable.ts` | — (parallel with T1) |
+| **T3** | Crossings: `crossings.ts`, the four instances, new path routes (esplanade, spooky spur, picnic spur), disembarking-kids esplanade audit, puff suppression under decks/shells. | `src/world/train/crossings.ts` (new), `src/world/paths.ts` (route rows), `src/world/entrance/disembarkingKids.ts`, `src/world/train/puffs.ts` | T1, T2 |
+| **T4** | Guards: `rails/guards.ts`, offset walls, platform-face walls, visible dressing at the reachable stretches, closure assert. | `src/world/rails/guards.ts` (new), small hooks in `src/world/train/ParkTrain.ts` | T1 (parallel with T3) |
+| **T5** | Stations & graph: station paving aprons, `poiGraph` seeds (spurs, platforms, decks, islands, esplanade), train-trip walk phase moves onto the graph. | `src/entities/npc/poiGraph.ts`, `src/entities/npc/activities/trainTrip.ts` | T1, T3, **and Wave 3** |
+| **C1** | `RideCamera` by extraction: `core/rideLook.ts` (moved), `core/RideCamera.ts`, ferris adopts with parity, `Game.cameraOverride` + suspension guards. | `src/core/RideCamera.ts`, `src/core/rideLook.ts` (new/moved), `src/minigames/ferrisWheel/*`, `src/Game.ts` | — (parallel with T1–T5) |
+| **C2** | First-person train ride: `train/ride.ts`, boarding blink, alight grammar, Sky/fog perspective tuning pass, tunnel lamps + portal whistle. | `src/world/train/ride.ts` (new), `src/world/Sky.ts` tuning | C1, T3 |
+| **C3** | `rails/path.ts` + elevated two-track mesh + pylons + clearance validator (decision 1 PR-2, amended for the pair). | `src/world/rails/*` (new) | T1 |
+| **C4** | Coaster presence: anchors row, station, ambient NPC carts, World wiring, route re-validation. | `src/world/coaster/*` (new), `src/world/anchors.ts`, `src/world/World.ts` | C3 |
+| **C5** | Coaster ride: first person, race vs rival on the twin rail, hazards, results (decision 1 PR-4 + two-track answer). Then decision 1's PR-5 (retire the Rail Racer stall). | `src/world/coaster/ride*.ts` | C1, C4 |
+| **S1** | Spooky island: `spookyHouse` anchor, ghost-head prop (Wave 4.6), stall row re-pointed, booth prop retired. | `src/world/anchors.ts`, `src/world/spooky/*` (new), `src/minigames/stalls.ts` | T1, T3 |
+| **S2** | Trackside statues & dancers (Wave 4.7): placed *parametrically at distances along the solved curve* (Statue Garden + approaches), never at absolute coordinates. | `src/world/train/trackside.ts` (new) | T1 |
+
+**Must NOT be parallelised:**
+- **T1 is alone in `route.ts`/`Scenery.ts` and lands first.** Every geometric
+  fact in T3–T5, S1, S2 and the coaster re-validation hangs off the solved
+  curve; done earlier, it is Wave-4 work built on a map that is about to
+  change — the exact trap ORDER-OF-WORK.md's list names.
+- **C1 → C2 → C5 is a strict chain.** The camera is built once, by
+  extraction, with a parity gate; writing the train's camera fresh "to go
+  faster" builds the thing twice, which is trap 6.
+- **T5 waits for Wave 3.** One owner in `wanderDriver.ts`/activities at a
+  time.
+- `Game.ts` is touched by C1 only. `paths.ts` is touched by T2 then T3 —
+  same agent or strict sequence.
+- **T2 and decision 3's S2 both edit `building/surfaces.ts`** — land T2
+  (tiny) before the castle split's rewrite, and S2 carries the patch list
+  over.
+
+**Thrown away if done in the wrong order:** any placement work before T1
+(statues, ghost head, station aprons, queue paths from decision 2, scenery
+near the track); any first-person camera code outside C1; dodgems-style
+dressing along track stretches that T1 later moves; decision 2's PR-D if
+attempted before T5 lands the platforms' graph nodes.
+
+Decision 2's queue PRs slot in **after** T5 exactly as Wave 6 already says.
+
+Small follow-ups this decision creates (anytime, non-blocking): the park map
+UI (`ui/ParkMap.ts`) should draw the railway and its crossings from the
+solved curve; the save system note — saving mid-ride records the boarding
+station; `whatsnew.json` entries per shipped PR.
+
+### 11. Questions for the family (parent-answerable, none blocking)
+
+1. **Names.** The tunnel hills and the picnic island need names ("Welcome
+   Hill" and "Fern Hill" are placeholders). Eleri names things — one at a
+   time.
+2. **A third stop?** Should the train one day also stop at a tiny "Ghost
+   Halt" on the spooky island, or is walking the spooky bridge the whole
+   point? *(Memo default: two stations; the bridge is the point.)*
+3. **The whistle.** Should the train whistle every time it dives into a
+   tunnel? *(Memo default: yes, quietly.)*
+
+### Uncertainties, stated plainly
+
+- **The dip flanks are the geometric risk.** The N and W corridors are wide
+  enough on paper, but the castle and water-fight corners pinch the descent;
+  the curvature assert will force the solver to shallow a dip rather than
+  kink the rail. If N ends nearer r 33 than 29, nothing downstream breaks —
+  crossings and stations self-locate — but the map picture above should be
+  re-agreed with the family if any dip shallows by more than ~4 m.
+- **Sky and fog at ground level in first person** is decision 1's flagged
+  risk, harder here. Confidence it tunes out: high; confidence it is free:
+  low. It is why C2 owns a named tuning pass and a per-ride fog override.
+- **The ferris extraction** is a parity refactor of a thing the family has
+  signed off. The parity gate makes it safe; skipping the gate to save a day
+  is how "confirmed correct, do not disturb" gets disturbed.
+- **The entrance esplanade audit** touches scripted arrivals
+  (cat-bus, disembarking kids, the player's own spawn walk). It is a
+  checklist item in T3, and the one place this replan touches a first-run
+  experience — QA the new-player path explicitly.
+- **The hump height** (~3.2 m walk surface) is chosen from the measured
+  train height, not taste. If it reads too steep for small hands on a phone,
+  flatten by lowering the funnel (the train's tallest point) before touching
+  the 1:3.5 ramp rule.
+
+---
+
+
 ## Decision 3 — Castle floors become separate spaces (Wave 2 item 2.2)
 
 **Date:** 27 July 2026 · **Status:** decided, not yet implemented — gates all
