@@ -267,11 +267,15 @@ Other dodgems have cute drivers — sometimes RiPika drives one.
 
 **Steering is wrong in two ways (27 July 2026 — BUG, queued).**
 
-1. **Left and right are inverted.** Likely the same root cause as the ferris
-   wheel's inverted look-around, fixed earlier the same day: three.js turns
-   an object *left* as `rotation.y` increases, so feeding screen-space
-   "right" straight into yaw reverses it. Check `dodgems/steering.ts`
-   against that fix rather than flipping a sign blind.
+1. **Left and right are inverted.** Confirmed by play: **the ferris wheel
+   now reads correctly, the dodgems do not** — so the two rides disagree
+   with each other. The ferris wheel was fixed by negating its yaw input
+   (three.js turns an object *left* as `rotation.y` increases, so feeding
+   screen-space "right" straight into yaw reverses it); the dodgems still
+   has the unfixed version of that same mistake. `dodgems/steering.ts` is
+   the file the ferris wheel's `look.ts` was originally modelled on, which
+   is exactly how the error propagated. Apply the same correction there, and
+   check nothing else copied `steering.ts` before it was fixed.
 2. **The car cannot keep turning** — with the keyboard it sticks at a
    minimum and maximum angle instead of rotating freely, so you cannot
    simply drive in a circle.
