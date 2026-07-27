@@ -34,6 +34,17 @@ run in the background from minute one and cost nothing.
 
 ## Wave 1 — global mechanisms, and fixes that depend on nothing
 
+- **1.0b HOPPABILITY GAP (live on main, found 27 July 22:45).**
+  `autoHopClears` calls anything up to **1.43 m** hoppable, but the jump only
+  actually carries the player across walls up to **~1.33 m** — above that the
+  apex window is too brief to cross the footprint. The park has a **1.4 m wall
+  at `[3,19]→[-4,20]`** sitting in that gap. Since route finding now
+  deliberately plans *over* hoppable walls, a route can be planned across a
+  wall she cannot actually cross — she would walk up to it and stop, which is
+  exactly the "stuck on scenery" complaint route finding was built to end.
+  Pre-existing, but route finding makes it reachable. Fix by narrowing the
+  predicate to what the flight really clears, and add a boot assert that no
+  wall sits in the gap.
 - **1.0 ROUTE FINDING (high priority, family-reported).** Tap-to-move gets
   stuck on scenery; the player must route *around* obstacles. Core feel, not
   polish — it is how a six-year-old plays. The NPC `poiGraph` already solves
