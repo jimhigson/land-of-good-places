@@ -34,8 +34,24 @@
  * asks. A new scene that wants to steer something has one obvious thing to
  * call, and cannot invent a fifth convention.
  *
- * The park's camera never rotates, and neither does any mini-game's, so a
- * basis is solved once at construction and then simply read.
+ * ---------------------------------------------------------------------------
+ * A basis belongs to a yaw, not to a scene — do not cache one blindly
+ * ---------------------------------------------------------------------------
+ * Solve the basis wherever the yaw is *decided*, and solve it again whenever
+ * that yaw changes. Some cameras here really are fixed: the park's `IsoCamera`
+ * yaw is a module constant, and so is the dodgems rink's, so both solve once
+ * and read the result for ever.
+ *
+ * **But not every camera is fixed.** The water-fight garden reframes between
+ * landscape and portrait, swinging from 45° to 88° (`WaterFight.ts`,
+ * `LANDSCAPE_YAW`/`PORTRAIT_YAW`), so it re-solves inside `resize()` — a child
+ * turning a phone sideways mid-fight rotates the camera, and a basis cached at
+ * construction would then be pointing the wrong way while she is still
+ * pressing the same direction.
+ *
+ * So: a basis is only valid for the yaw it was solved from. Cache it only
+ * where the yaw is provably constant, and re-derive on every camera or
+ * viewport change anywhere it is not.
  *
  * ---------------------------------------------------------------------------
  * The maths, so nobody has to re-derive it
@@ -57,7 +73,10 @@
  * expressed as a vector, not an angle.
  */
 
-/** A camera's ground-plane axes. Solve once with {@link screenBasis}, then read. */
+/**
+ * A camera's ground-plane axes, as solved by {@link screenBasis} for one yaw.
+ * Only valid for that yaw — re-solve if the camera can turn (see above).
+ */
 export interface ScreenBasis {
   /** Unit vector pointing right on the screen, along the ground. */
   readonly rightX: number;

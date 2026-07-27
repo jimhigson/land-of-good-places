@@ -3,8 +3,29 @@
 **Branch:** `feat/no-tank-controls`
 **Worktree:** `.claude/worktrees/no-tank-controls` (the main checkout is shared
 with the P0 face-paint agent and the UI-scale agent — do **not** work in it)
-**Status:** complete, built green (`npm run build`, exit 0), PR raised, awaiting
-two peer reviews + QA. Nothing left to do unless review asks for it.
+
+## Review round 1 (PR #46) — what is being changed and where it is up to
+
+Rebased onto `origin/main` (`c602bc4`, face-paint P0 + both decisions + the
+rem/root-scale UI rework) and force-pushed. Peer review found nothing
+structurally wrong; all four asks are comment/claim corrections.
+
+- [x] **1. `screenBasis.ts` false invariant** — it said no camera in the game
+      rotates. `WaterFight.ts:1045` swings its yaw 45°→88° on orientation
+      change. Comment rewritten: a basis belongs to a *yaw*, cache only where
+      the yaw is provably constant, re-derive on camera/viewport change.
+- [ ] **2. analogue magnitude** — `steering.ts` returns 0..1, `Dodgems.ts:475`
+      normalises it away. Decision: **deliver it**. Trap: `going = hold ||
+      wants`, and keys are all-or-nothing, so only an analogue stick may get
+      partial thrust — a key/button press must stay at full.
+- [ ] **3a. `TURN_RATE` doc** — claims zero changes nothing; false, it would
+      freeze the no-direction heading for ever.
+- [ ] **3b. `car.turn` units** — radians of drift → fraction of max slew, same
+      `0.34` multiplier, so gentle leans are ~3x deeper. Keeping it, but saying
+      so in the code and in the PR QA list.
+- [ ] Housekeeping: HUD steering hint got ~40% longer — QA it for wrap/clip on
+      a narrow phone.
+- [ ] Update PR body QA checklist + reply to the review comment.
 
 ## The rule
 

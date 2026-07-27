@@ -1092,6 +1092,10 @@ class WaterFight implements MiniGame {
     // The ground-plane basis the walk keys are interpreted through. Shared
     // with the park and the dodgems rink so "up the screen" means the same
     // thing everywhere — see `core/screenBasis.ts` and the CONTROL RULE.
+    // Re-solved here rather than cached at construction, because this is the
+    // one camera in the game that turns: `resize` swings the yaw between the
+    // landscape and portrait framings, and the controls must swing with it the
+    // moment a child tips the phone over.
     const basis = screenBasis(this.yaw);
     this.forward.set(basis.upX, 0, basis.upZ);
     this.right.set(basis.rightX, 0, basis.rightZ);
