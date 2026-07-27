@@ -114,6 +114,37 @@ const STYLES = `
 @media (prefers-reduced-motion: reduce) {
   .fw-shout, .fw-card { animation: none; }
 }
+
+/* The look-around stick — the dodgems' own .dg-stick, copied rather than
+   shared: two mini-games importing from each other's folders is worse than
+   forty lines of identical CSS (see look.ts). */
+.fw-stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 116px;
+  height: 116px;
+  margin: -58px 0 0 -58px;
+  border-radius: 50%;
+  border: 4px solid #fff6eacc;
+  background: #ffffff26;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  z-index: 1;
+}
+.fw-stick[data-on='true'] { opacity: 1; }
+.fw-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: #87c9ff;
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.25);
+}
 `;
 
 export interface RideHud {
@@ -125,6 +156,10 @@ export interface RideHud {
   setHomeHold(progress: number, holding: boolean): void;
   /** The end-of-ride card. */
   showCard(title: string, line: string, hint: string): void;
+  /** Draws the look-around stick where the finger is, or hides it with `null`. */
+  setStick(
+    stick: { readonly originX: number; readonly originY: number; readonly x: number; readonly y: number } | null,
+  ): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -151,10 +186,19 @@ export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
   const ring = document.createElement('span');
   ring.className = 'fw-ring';
   const homeText = document.createElement('span');
-  homeText.textContent = touch ? 'Hold anywhere to go home' : 'Hold Space to go home';
+  // "Hold anywhere" would now also describe dragging to look around — say
+  // "hold still" instead, so the two gestures read as different things.
+  homeText.textContent = touch ? 'Hold still to go home' : 'Hold Space to go home';
   home.append(ring, homeText);
 
-  root.append(title, centre, home);
+  const stick = document.createElement('div');
+  stick.className = 'fw-stick';
+  stick.dataset.on = 'false';
+  const knob = document.createElement('div');
+  knob.className = 'fw-stick-knob';
+  stick.append(knob);
+
+  root.append(title, centre, home, stick);
   container.append(root);
 
   let shoutElement: HTMLElement | null = null;
@@ -193,6 +237,20 @@ export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
       small.textContent = hint;
       card.append(cardHeading, paragraph, small);
       centre.append(card);
+    },
+
+    setStick(reading): void {
+      if (!reading) {
+        stick.dataset.on = 'false';
+        return;
+      }
+      stick.dataset.on = 'true';
+      stick.style.transform = `translate(${reading.originX}px, ${reading.originY}px)`;
+      const dx = reading.x - reading.originX;
+      const dy = reading.y - reading.originY;
+      const distance = Math.hypot(dx, dy);
+      const clamped = distance > 46 ? 46 / distance : 1;
+      knob.style.transform = `translate(${dx * clamped}px, ${dy * clamped}px)`;
     },
 
     update(dt: number): void {
