@@ -26,7 +26,9 @@ import type { CuteCategory, InventoryKind } from '../../../state';
  * holding" are the same asset at two scales.
  *
  * Prices are here for flavour and for Mayhem mode. In normal mode the purse is
- * bottomless (`gameStore.spend`) and the HUD says "Lots!".
+ * bottomless (`gameStore.spend`) and the HUD hides the money pill entirely —
+ * which is why the panel says *Collect* rather than *Buy* there (see
+ * `state/wording.ts`).
  */
 export type ShopId =
   | 'toy'
@@ -152,7 +154,7 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     id: 'balloon.chicken',
     shopId: 'balloon',
     displayName: 'Chicken-looter',
-    blurb: 'A white and red chicken. Watch your coins!',
+    blurb: 'A white and red chicken. Watch your snacks!',
     icon: '🐔',
     price: 28,
     kind: 'balloon',
