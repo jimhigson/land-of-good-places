@@ -119,6 +119,24 @@ park getting tiny, then the whole **Earth below**. At the top:
 
 At night the wheel lights up before it climbs.
 
+## The train ride, first person (27 July 2026 — queued, not started)
+
+- **Riding the train switches to FIRST PERSON** for the duration of the
+  ride, then back to the normal fixed camera when you get off.
+- **Alongside the track**: a range of **statues** and **real-life characters
+  from the game** — RiPika, Biscuit, the balloons, the puff, the minis and
+  the rest — in various poses, **dancing**, waving, mid-leap. The point is
+  that the train ride becomes a little parade of everything you have
+  collected or might still find, seen up close as you glide past.
+
+*Engineering note:* the first-person switch should reuse the `RideCamera` +
+`Game.cameraOverride` mechanism specified in ARCHITECTURE-DECISIONS.md
+Decision 1 for the rollercoaster — one camera abstraction serving both rides
+rather than two. Decision 1 also already rules that the park keeps updating
+during an in-world ride (unlike a stall mini-game, which freezes it), which
+is exactly what this needs: the statues and dancers are part of the living
+park, not a separate scene.
+
 ## Ride queues (27 July 2026)
 
 Every ride has a **queue area** with NPCs waiting in line — it's what makes
