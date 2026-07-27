@@ -48,11 +48,17 @@ export interface ShopWords {
   /**
    * Whether a price is worth showing.
    *
-   * `true` today in **both** modes, which is deliberately not a decision: the
-   * family raised the question — a price a child can always afford is
-   * decoration rather than information — and have not answered it yet. This is
-   * the one line that changes when they do, and the recommendation is in the
-   * PR rather than in the code.
+   * GAME_DESIGN.md, 27 July 2026, the family's words: *"no prices shown unless
+   * in mayhem mode"* — the question this field was left open for, now answered.
+   *
+   * Outside Mayhem a price is decoration rather than information, on three
+   * counts at once: the number names no currency, the money pill it would be
+   * counted against is already hidden, and `spend()` tops the purse back up so
+   * nothing can ever be unaffordable. A number a child cannot act on and
+   * cannot run out of is a number that only asks to be read and then ignored.
+   *
+   * In Mayhem money is finite, so the same number is the one thing she needs
+   * to decide with, and it comes straight back.
    */
   readonly showPrice: boolean;
 }
@@ -64,7 +70,7 @@ const COLLECT: ShopWords = {
   glyph: '🧺',
   buttonLabel: '🧺 Collect',
   unavailable: 'not out today',
-  showPrice: true,
+  showPrice: false,
 };
 
 const BUY: ShopWords = {

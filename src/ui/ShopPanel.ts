@@ -320,9 +320,9 @@ export class ShopPanel {
     text.append(name, blurb);
 
     // Shown or not by the one wording switch, not by a check on the mode here
-    // — see `ShopWords.showPrice`, which is where the family's open question
-    // about whether a price a child can always afford is worth showing at all
-    // will be answered.
+    // — see `ShopWords.showPrice`. Outside Mayhem there is no price on a row
+    // at all; the pill is still built so that the only difference between the
+    // two modes stays one boolean rather than two shapes of row.
     const price = document.createElement('span');
     price.className = 'row-price';
     price.hidden = !words.showPrice;
