@@ -167,6 +167,12 @@ export class DayNight implements GameSystem {
   private nightFactorValue = 0;
   private lightsOnValue = false;
   private paused = false;
+  /**
+   * True while the player is indoors under a ceiling (`Building.
+   * playerInRoofedInterior`, item 18). The sun stops moving and stops
+   * shining the moment this flips on — see `update`.
+   */
+  private indoors = false;
 
   private readonly sunDirection = new Vector3(0, 1, 0);
   private readonly fogColour = new Color();
@@ -240,6 +246,20 @@ export class DayNight implements GameSystem {
     this.paused = paused;
   }
 
+  /**
+   * Told once a frame by `World`, from `Building.playerInRoofedInterior`.
+   *
+   * The building's interior is a separate continuum from the park (item 30c)
+   * and keeps its own constant lighting (item 18): the sun, its fill light and
+   * the sky's ambient all switch off rather than tracking the player in there,
+   * so nothing here casts a shadow indoors and nothing about the look changes
+   * with the time of day. `InteriorLighting` takes over instead. Stepping out
+   * onto the roof — genuinely outdoors — clears this straight back to normal.
+   */
+  setIndoors(indoors: boolean): void {
+    this.indoors = indoors;
+  }
+
   /** Human-readable clock for the HUD, e.g. "14:35". */
   formatClock(): string {
     const totalMinutes = Math.floor(this.time * 24 * 60);
@@ -257,8 +277,21 @@ export class DayNight implements GameSystem {
       }
     }
 
-    this.applyLook(this.time, context.cameraForward);
-    this.followPlayer(context.playerPosition);
+    // The clock itself always keeps running — the park outside must be
+    // exactly the right time of day the instant the player steps back out —
+    // but while indoors none of that is allowed to touch the actual lights:
+    // no sun position, no shadow camera chasing the player, no colour drift.
+    // Simply not visible is enough: an invisible light contributes nothing to
+    // either the lit scene or the shadow pass, and needs no further per-frame
+    // work (see `InteriorLighting`, which is what lights the room instead).
+    this.keyLight.visible = !this.indoors;
+    this.fillLight.visible = !this.indoors;
+    this.ambientLight.visible = !this.indoors;
+
+    if (!this.indoors) {
+      this.applyLook(this.time, context.cameraForward);
+      this.followPlayer(context.playerPosition);
+    }
     this.sky.setTime(context.elapsed);
 
     gameStore.setTimeOfDay(this.time, this.days, this.lightsOnValue);
