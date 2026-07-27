@@ -14,6 +14,8 @@ import {
   FILL_LIGHT_RATIO,
   FOG_FAR,
   FOG_NEAR,
+  NIGHT_FOG_FAR,
+  NIGHT_FOG_NEAR,
   SHADOW_AREA,
 } from '../core/constants';
 import { shadowMapSize } from '../core/device';
@@ -54,6 +56,25 @@ interface SkyKey {
   readonly fog: number;
 }
 
+/**
+ * The colour distance fades to at midnight.
+ *
+ * Deliberately **darker than the night sky's own horizon band**
+ * (`skyNightBottom`, 0x36407a), and close to the top of the sky
+ * (`skyNightTop`, 0x121a3d). Fog that matches the horizon makes distant things
+ * *vanish*; fog darker than it makes them read as silhouettes against a
+ * lighter sky, which is what "distant items are less visible" actually looks
+ * like at night — and it is the half of this the distances cannot do on their
+ * own. It was 0x354272, near enough the horizon band to read as pale mist.
+ *
+ * Still a colour and not black: deep indigo, in keeping with ART_DIRECTION's
+ * rule that nothing in this park bottoms out at black.
+ */
+const NIGHT_FOG_COLOUR = 0x1a2145;
+
+/** {@link NIGHT_FOG_COLOUR} as a Color, so the per-frame blend allocates nothing. */
+const NIGHT_FOG = new Color(NIGHT_FOG_COLOUR);
+
 const SKY_KEYS: readonly SkyKey[] = [
   {
     t: 0.0, // deep night
@@ -75,7 +96,7 @@ const SKY_KEYS: readonly SkyKey[] = [
     ambientSky: 0x5d6cad,
     ambientGround: 0x3a3f66,
     ambientIntensity: 0.62,
-    fog: 0x354272,
+    fog: NIGHT_FOG_COLOUR,
   },
   {
     t: 0.21, // first light
@@ -365,6 +386,20 @@ export class DayNight implements GameSystem {
     if (!this.indoors) {
       this.applyLook(this.time, context.cameraForward);
       this.followPlayer(context.playerPosition);
+    } else {
+      // Fog is the one thing in this method that is *not* a light, so it does
+      // not switch off with them — and `scene.fog` is shared, so whatever the
+      // park was last set to follows the player indoors. That never showed
+      // before, because night fog only reached full 96 m out and no room is
+      // that big. Now that midnight fog closes at 50 m it would hang a dark
+      // haze across the far end of the castle's floors, so the interior is
+      // given the open daytime distances explicitly. Its own constant lighting
+      // is `InteriorLighting`'s job; this is the same idea for depth.
+      const fog = this.scene.fog;
+      if (fog instanceof Fog) {
+        fog.near = FOG_NEAR;
+        fog.far = FOG_FAR;
+      }
     }
     this.sky.setTime(context.elapsed);
 
@@ -488,9 +523,23 @@ export class DayNight implements GameSystem {
     const fog = this.scene.fog;
     if (fog instanceof Fog) {
       fog.color.copy(this.fogColour);
-      // Night pulls the fog in a little; it makes the lit park feel snug.
-      fog.near = lerp(FOG_NEAR, FOG_NEAR * 0.7, this.nightFactorValue);
-      fog.far = lerp(FOG_FAR, FOG_FAR * 0.72, this.nightFactorValue);
+      // ...but pulled to the night colour by `nightFactor`, not by the clock.
+      //
+      // Found on screen: at 03:18 the park is still pitch dark — the sun does
+      // not clear the horizon until nearly 06:00 — yet the fog had already
+      // interpolated two thirds of the way from midnight towards the "first
+      // light" keyframe's peach, so the distance was a pale pink haze in the
+      // middle of the night. The keyframe table is a *clock*, and dawn colours
+      // belong to it; how dark the distance is belongs to how dark it actually
+      // is. Blending here keeps both: dusk still fades through its mauve, and
+      // every hour that is genuinely night gets the genuinely dark fog.
+      fog.color.lerp(NIGHT_FOG, this.nightFactorValue);
+      // Night pulls the fog right in, so distance falls away into the dark
+      // while the ground under the lamps stays bright and legible — see
+      // NIGHT_FOG_NEAR. The old 0.7/0.72 scaling put full fog 96 m out, which
+      // is further than the far side of the park, so it never did anything.
+      fog.near = lerp(FOG_NEAR, NIGHT_FOG_NEAR, this.nightFactorValue);
+      fog.far = lerp(FOG_FAR, NIGHT_FOG_FAR, this.nightFactorValue);
     }
   }
 }

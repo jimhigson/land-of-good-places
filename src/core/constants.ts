@@ -323,6 +323,38 @@ export const FILL_LIGHT_RATIO = 0.24;
 export const FOG_NEAR = CAMERA_DISTANCE + 42;
 export const FOG_FAR = CAMERA_DISTANCE + 168;
 
+/**
+ * Fog distances at midnight, interpolated towards by `nightFactor`.
+ *
+ * The family asked for "a dark fog so distant items are less visible while the
+ * foreground is well lit by street lamps" — the point is the *contrast*, near
+ * ground bright under the lamps and distance falling away into darkness.
+ *
+ * Expressed as offsets from CAMERA_DISTANCE for the same reason the daytime
+ * pair are, and read the same way: by day the park fades between 42 m and
+ * 168 m from the action, at night between 8 m and 50 m. Night fog used to be
+ * the daytime distances scaled by 0.7 and 0.72, which put full fog 96 m out —
+ * further than the far side of the park, so it never actually did anything.
+ *
+ * Both numbers were settled on screen at midnight rather than reasoned out,
+ * after trying four pairs:
+ *
+ * - **`near` is exactly `CAMERA_DISTANCE`**, which is to say the fog starts at
+ *   the player and everything nearer the camera than she is stays perfectly
+ *   clear. Pulling `near` closer than this (86, and 78) put the child herself
+ *   inside the haze, which looks like a mistake rather than like weather.
+ * - **`far` is +32**, not the +50 first tried. The camera looks down at 38°,
+ *   so a screenful of ground spans about 46 m of camera depth at the furthest
+ *   zoom-out and only about 19 m at the default zoom. +50 put full fog beyond
+ *   anything ever on screen and the distance barely darkened at all; +16 (the
+ *   78/106 pair) swallowed the fountain plaza and the stalls whole. +32 lands
+ *   the far plane just past the top of the frame: the treeline and the far
+ *   side of the park go to darkness, the plaza is still legible as a place,
+ *   and the ground the player is standing on is untouched.
+ */
+export const NIGHT_FOG_NEAR = CAMERA_DISTANCE;
+export const NIGHT_FOG_FAR = CAMERA_DISTANCE + 32;
+
 // ------------------------------------------------------------------ input
 
 /** Radial dead-zone applied to gamepad sticks. */
