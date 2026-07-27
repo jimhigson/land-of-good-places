@@ -131,11 +131,18 @@ export type FacePaintId = string | null;
 export interface PlayerState {
   name: string;
   kind: CharacterKind;
+  /**
+   * Chosen in the character creator. A bare hex number, like `hairColour` —
+   * see `HairStyle`'s doc comment for why `state/` never imports `art/`.
+   */
+  skinColour: number;
   /** Chosen in the character creator (step 7). Hex numbers, three.js friendly. */
   hairColour: number;
   /** Chosen in the character creator — see `HairStyle` for why it's a bare union. */
   hairStyle: HairStyle;
   outfitColour: number;
+  /** Iris colour, chosen in the character creator. Defaults to the game's violet. */
+  eyeColour: number;
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
   maxHealth: number;

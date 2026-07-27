@@ -179,16 +179,17 @@ export class Player implements GameSystem {
     const playerState = gameStore.get().player;
     this.model = new CharacterModel(
       {
-        skin: PALETTE.skin,
+        skin: playerState.skinColour,
         hair: playerState.hairColour,
         outfit: playerState.outfitColour,
         shoe: PALETTE.shoe,
       },
-      // Hair style is chosen in the character creator (`ui/CharacterCreation.ts`)
-      // and has already been written to the store by the time this constructor
-      // runs — see `main.ts`'s `boot()`, which applies it before `Game` (and
-      // therefore `Player`) is ever built.
-      { hairStyle: playerState.hairStyle },
+      // Hair style, skin tone and eye colour are chosen in the character
+      // creator (`ui/CharacterCreation.ts`) and have already been written to
+      // the store by the time this constructor runs — see `main.ts`'s
+      // `boot()`, which applies them before `Game` (and therefore `Player`)
+      // is ever built.
+      { hairStyle: playerState.hairStyle, eyeColour: playerState.eyeColour },
     );
     this.group.add(this.model.root);
 

@@ -13,7 +13,8 @@ import {
 import { PALETTE } from '../core/palette';
 import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
-import { createKid } from '../art/models/kid';
+import { createKid, type KidHandle } from '../art/models/kid';
+import type { Expression } from '../art/style/faces';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -34,6 +35,13 @@ import { shopItem } from '../world/building/shops/catalogue';
  * a hair *style* change (bunches/bob/short) swaps meshes, not just a colour,
  * so "always rebuild" is both the simplest code and the only option that
  * covers every kind of change with one code path.
+ *
+ * **Not a frozen doll.** The kid blinks on the same irregular timer
+ * `Player.ts` uses, and drifts through a happy or surprised look every few
+ * seconds so she reads as a person waiting for you rather than a mannequin.
+ * Every {@link update} call — which is every time the child taps a swatch —
+ * also holds a brief happy face, the same "it worked!" beat the parade and
+ * the carried-item pop use elsewhere in the game.
  */
 export interface PreviewChoice {
   readonly skin: number;
@@ -46,9 +54,19 @@ export interface PreviewChoice {
    */
   readonly hairStyle: 'bunches' | 'bob' | 'short';
   readonly outfit: number;
+  readonly eye: number;
   readonly hatId: string;
   readonly petId: string;
 }
+
+/** How long the eyes stay shut — same beat as `Player.ts`'s blink. */
+const BLINK_DURATION = 0.11;
+
+/** Seconds a "just picked something" happy face is held before idling resumes. */
+const REACT_SECONDS = 1.2;
+
+/** Seconds a spontaneous idle mood (happy/surprised) is held. */
+const MOOD_HOLD_SECONDS = 1.3;
 
 export class CharacterPreview {
   readonly canvas: HTMLCanvasElement;
@@ -60,6 +78,7 @@ export class CharacterPreview {
   private readonly stage = new Group();
 
   private character: Group | null = null;
+  private kid: KidHandle | null = null;
   private rafHandle: number | null = null;
   private elapsed = 0;
   private lastTime = 0;
@@ -67,6 +86,18 @@ export class CharacterPreview {
   /** Same accessibility rule the rest of the game's CSS animations follow. */
   private readonly spinsAllowed =
     typeof window === 'undefined' || !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  // --- face life: blink timer, idle mood drift, and the "you picked something"
+  // reaction. Mirrors `Player.ts`'s own blink state machine so the preview kid
+  // and the in-game one feel like the same character. ------------------------
+  private blinkTimer = 1.4 + Math.random() * 2.2;
+  private blinkRemaining = 0;
+  private moodTimer = 3 + Math.random() * 3;
+  private mood: Expression = 'neutral';
+  private moodRemaining = 0;
+  /** Elapsed-time deadline until which a fresh choice's happy face holds. */
+  private reactUntil = 0;
+  private currentExpression: Expression = 'neutral';
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -120,6 +151,7 @@ export class CharacterPreview {
       this.stage.remove(this.character);
       disposeTree(this.character);
       this.character = null;
+      this.kid = null;
     }
 
     const group = new Group();
@@ -129,8 +161,17 @@ export class CharacterPreview {
       hair: choice.hair,
       hairStyle: choice.hairStyle,
       outfit: choice.outfit,
+      eyeColour: choice.eye,
     });
+    // A fresh choice gets an immediate happy face — the same "it worked!"
+    // beat a purchase or a pet pick gets everywhere else in the game — and
+    // `reactUntil` keeps `frame()`'s idle blink/mood logic from stepping on
+    // it for a moment.
     kid.setExpression('happy');
+    this.currentExpression = 'happy';
+    this.reactUntil = this.elapsed + REACT_SECONDS;
+    this.moodRemaining = 0;
+    this.kid = kid;
     group.add(kid.root);
 
     // Same attachment every worn hat uses in the real game — see
@@ -172,7 +213,49 @@ export class CharacterPreview {
     // A lazy turntable — enough life to feel like a toy on a shelf, slow
     // enough to actually see the choice you just made rather than a blur.
     if (this.spinsAllowed) this.stage.rotation.y = Math.sin(this.elapsed * 0.35) * 0.55;
+    this.updateFace(dt);
     this.renderer.render(this.scene, this.camera);
     this.rafHandle = requestAnimationFrame(this.frame);
   };
+
+  /**
+   * Blinks on an irregular timer, drifts through a happy or surprised look
+   * every few seconds while idle, and holds a happy face for a moment right
+   * after a fresh choice (see {@link update}'s `reactUntil`).
+   *
+   * Same layering `Player.ts`'s `animate()` uses: a resting expression, with
+   * a blink punched through it on transition only, since `setExpression` is a
+   * texture re-upload and must never be called every frame.
+   */
+  private updateFace(dt: number): void {
+    const kid = this.kid;
+    if (!kid) return;
+
+    this.blinkTimer -= dt;
+    if (this.blinkTimer <= 0) {
+      this.blinkTimer = 2.2 + Math.random() * 3.4;
+      this.blinkRemaining = BLINK_DURATION;
+    }
+    if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
+
+    const reacting = this.elapsed < this.reactUntil;
+    if (!reacting) {
+      if (this.moodRemaining > 0) {
+        this.moodRemaining -= dt;
+      } else {
+        this.moodTimer -= dt;
+        if (this.moodTimer <= 0) {
+          this.moodTimer = 4 + Math.random() * 5;
+          this.mood = Math.random() < 0.5 ? 'happy' : 'surprised';
+          this.moodRemaining = MOOD_HOLD_SECONDS;
+        }
+      }
+    }
+
+    const resting: Expression = reacting ? 'happy' : this.moodRemaining > 0 ? this.mood : 'neutral';
+    const desired: Expression = this.blinkRemaining > 0 ? 'blink' : resting;
+    if (desired === this.currentExpression) return;
+    this.currentExpression = desired;
+    kid.setExpression(desired);
+  }
 }

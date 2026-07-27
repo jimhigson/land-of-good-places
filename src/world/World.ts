@@ -103,11 +103,21 @@ export class World implements GameSystem {
     this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
+    // The face-painting stall (additive): built here, before the NPCs, because
+    // it registers four walls with `this.collision` and `NpcSystem` must be
+    // built last of all (see below) — the order genuinely matters for the
+    // waypoint graph's edge validation, even though the wander-target registry
+    // it also registers with (`wanderDriver.ts`) does not care which order the
+    // two are constructed in, since every `WanderDriver` reads that
+    // module-level target on its own next update regardless.
+    this.facePaintStall = new FacePaintStall(this.collision);
+
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every
     // route is walked at build time and dropped if a wall or a tree is in the
-    // way — and because they walk the building's ground floor, so they need the
-    // same ground sampler the player gets.
+    // way, which is exactly why the stall above has to come first — and
+    // because they walk the building's ground floor, so they need the same
+    // ground sampler the player gets.
     //
     // `scenery.climbableTrees` is threaded straight through to every wander
     // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
@@ -119,14 +129,6 @@ export class World implements GameSystem {
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
     );
-
-    // The face-painting stall (additive): registers its own position with the
-    // NPC wander graph's face-paint block as it builds itself, so it must come
-    // after `npcs` above only in the sense that "after" makes the intent
-    // clearer to read — `wanderDriver.ts`'s registry works whichever order
-    // these two are constructed in, since every `WanderDriver` reads the same
-    // module-level target on its own next update.
-    this.facePaintStall = new FacePaintStall(this.collision);
 
     scene.add(
       this.garden.group,
@@ -148,6 +150,10 @@ export class World implements GameSystem {
   }
 
   update(context: FrameContext): void {
+    // Read before `building.update()` runs this frame, so it is a frame behind
+    // — invisible in practice, since every doorway crossing already happens
+    // behind a closed iris (see `Building.changeSpace`).
+    this.dayNight.setIndoors(this.building.playerInRoofedInterior);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read

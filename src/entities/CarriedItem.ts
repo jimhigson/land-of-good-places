@@ -20,6 +20,16 @@ import { gameStore, type GameState } from '../state';
  *
  * Models come from the shop catalogue at their `heldScale`, so the toy in your
  * hand is the same asset as the toy on the shelf.
+ *
+ * **Balloons opt out.** A freshly-bought balloon is `carryable`, so it still
+ * becomes `carriedUid` same as any other purchase — but held forward at arm's
+ * length, tipped like a toy, is wrong for something on a string: a balloon is
+ * *held*, floating above the player on a bending string, whether or not it
+ * happens to be the newest purchase. `entities/HeldBalloon.ts` owns every
+ * balloon the player has not stowed unconditionally, so this class simply
+ * declines to also render whichever one is `carriedUid`; without that carve-out
+ * the same balloon would be drawn twice, once at each system's idea of where
+ * it belongs.
  */
 
 /** Seconds the pop-in takes. Long enough to notice, short enough not to wait. */
@@ -74,6 +84,8 @@ export class CarriedItem {
 
     const owned = state.inventory.find((entry) => entry.uid === state.carriedUid);
     if (!owned) return;
+    // Balloons are `HeldBalloon.ts`'s job entirely — see the class doc comment.
+    if (owned.kind === 'balloon') return;
     const item = shopItem(owned.id);
     if (!item) return;
 

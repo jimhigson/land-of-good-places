@@ -1,6 +1,7 @@
-import { Color, Group, Object3D, Vector3 } from 'three';
+import { Group, Object3D, Vector3 } from 'three';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
+import { KID_SKIN_TONES } from '../../art/models/kid';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -8,12 +9,17 @@ import { circleSeparation, MAX_DEPENETRATION_SPEED, type CollisionWorld } from '
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { GroundSampler, Player } from '../Player';
 import { NameLabel } from '../../ui/NameLabel';
+import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
-import { KidCrowd, type KidColours } from './kidCrowd';
+import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
+// Chatting (see the additive block in wanderDriver.ts): the shared budget
+// that caps how many children may be mid-chat at once, and the speed below
+// which the player counts as "stood still" for that same block.
+import { CHAT_STATIONARY_SPEED_EPS, type ChatBudget } from './chatActivity';
 import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
@@ -23,6 +29,13 @@ import type { ClimbableTreeSeed } from '../../world/Scenery';
  * putting half the crowd up in the branches at the same time.
  */
 const MAX_CONCURRENT_CLIMBERS = 3;
+
+/**
+ * How many children may be mid-chat across the whole park at once (see the
+ * chatting block in `wanderDriver.ts`) — the brief's "at most one or two",
+ * so standing still reads as being noticed rather than being mobbed.
+ */
+const MAX_CONCURRENT_CHATTERS = 2;
 
 /**
  * The children who were already in the park when you arrived.
@@ -144,15 +157,19 @@ const LABEL_HEIGHT_OFFSET = 0.34;
 /** Only the nearest handful of labels show at once — a dozen name pills is clutter. */
 const VISIBLE_LABEL_CAP = 10;
 
+/** A speech bubble floats a little higher than the name pill it shares a head with. */
+const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
+
 /**
  * Colour choices, all of them already named in `PALETTE` or `ART`.
  *
- * Skin tones are the palette's one skin colour scaled — the same trick the kid
- * model uses for its own shading, which keeps every child on the one warm hue
- * the park is lit for instead of introducing five new colours nobody art
- * directed.
+ * Skin tones are drawn from `KID_SKIN_TONES` — the same hand-picked, inclusive
+ * range the character creator offers the player (see `art/models/kid.ts`),
+ * rather than one base hue scaled darker: a uniform scale drifts warm skin
+ * towards grey at the low end, and never actually reaches a deep tone. Every
+ * child in the park should look plausibly reachable from the creator's own
+ * swatch row.
  */
-const SKIN_SCALES = [1, 0.95, 0.88, 0.78, 0.66, 0.56] as const;
 
 const HAIR_COLOURS = [
   PALETTE.hair,
@@ -216,6 +233,17 @@ export class NpcSystem implements GameSystem {
   private readonly characters: NpcCharacter[] = [];
   private readonly petList: Pet[] = [];
   private readonly labels: NameLabel[] = [];
+  /** Parallel to `characters` — kept as the concrete class (rather than the
+   *  narrower `CharacterDriver`) purely to read `chatBubbleText` back out; see
+   *  the chatting block in `wanderDriver.ts`. */
+  private readonly wanderDrivers: WanderDriver[] = [];
+  /** Parallel to `characters`. Most sit empty (`setText(null)` is a no-op) —
+   *  only the one or two children mid-chat ever have anything to show. */
+  private readonly bubbles: SpeechBubble[] = [];
+  private readonly chatBudget: ChatBudget = { active: 0, max: MAX_CONCURRENT_CHATTERS };
+  /** How long the player has been standing still — see `CHAT_STATIONARY_SPEED_EPS`. */
+  private playerStationaryFor = 0;
+  private readonly lastPlayerPosition = new Vector3();
   /** Scratch distance-to-camera per character, reused every frame — see `updateLabels`. */
   private readonly labelDistances: Float32Array;
   /** Character indices, kept sorted nearest-first every frame. */
@@ -273,8 +301,13 @@ export class NpcSystem implements GameSystem {
       const shortHairRoll = rng.chance(0.35);
       const shortHair = isEthan ? true : shortHairRoll;
 
-      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), isEthan);
-      // Forces the face variant to match `isEthan` immediately — otherwise a
+      // Ethan's blue eyes are pinned to their own variant; everyone else
+      // rolls across the crowd's whole eye-colour range (see `kidCrowd.ts`'s
+      // `EYE_VARIANT_COUNT`), same spirit as the skin/hair/outfit rolls above.
+      const eyeVariant = isEthan ? BLUE_EYE_VARIANT : rng.int(0, EYE_VARIANT_COUNT - 1);
+
+      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), eyeVariant);
+      // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default
       // 'neutral' would never call `setExpression` and Ethan would show the
       // crowd's normal (non-blue) eyes until the first blink.
@@ -287,7 +320,9 @@ export class NpcSystem implements GameSystem {
         pace: rng.range(0.85, 1.12),
         climbableTrees,
         climberBudget,
+        chatBudget: this.chatBudget,
       });
+      this.wanderDrivers.push(driver);
 
       const character = new NpcCharacter(
         avatar,
@@ -311,6 +346,15 @@ export class NpcSystem implements GameSystem {
       this.group.add(label.sprite);
       this.labels.push(label);
       this.labelOrder.push(i);
+
+      const bubble = new SpeechBubble(NPC_LABEL_ACCENT);
+      bubble.sprite.position.set(
+        character.position.x,
+        character.position.y + avatar.height + BUBBLE_HEIGHT_OFFSET,
+        character.position.z,
+      );
+      this.group.add(bubble.sprite);
+      this.bubbles.push(bubble);
     }
 
     this.labelDistances = new Float32Array(this.characters.length);
@@ -398,6 +442,16 @@ export class NpcSystem implements GameSystem {
     // than the Player keeps this system's only dependency the collision world.
     const playerHopped = context.input.justPressed('jump');
 
+    // Chatting (additive): how long the player has stood still, and whether
+    // they have a hat on — computed once per frame here, rather than in every
+    // driver, and handed down through `NpcCharacter.update`. See
+    // `DriverContext.playerStationaryFor`/`playerWearingHat` in `driver.ts`.
+    const playerSpeed = dt > 0 ? this.playerPosition.distanceTo(this.lastPlayerPosition) / dt : 0;
+    this.playerStationaryFor =
+      playerSpeed > CHAT_STATIONARY_SPEED_EPS ? 0 : this.playerStationaryFor + dt;
+    this.lastPlayerPosition.copy(this.playerPosition);
+    const playerWearingHat = this.player?.wornHat != null;
+
     for (let i = 0; i < this.characters.length; i += 1) {
       const character = this.characters[i];
       if (!character) continue;
@@ -409,7 +463,14 @@ export class NpcSystem implements GameSystem {
         FAR_DISTANCE * FAR_DISTANCE;
       if (far && (this.frame + i) % 2 !== 0) continue;
 
-      character.update(far ? dt * 2 : dt, elapsed, this.playerPosition, playerHopped);
+      character.update(
+        far ? dt * 2 : dt,
+        elapsed,
+        this.playerPosition,
+        playerHopped,
+        this.playerStationaryFor,
+        playerWearingHat,
+      );
     }
 
     this.separate();
@@ -423,12 +484,14 @@ export class NpcSystem implements GameSystem {
 
     this.updatePets(dt, elapsed);
     this.updateLabels();
+    this.updateBubbles();
   }
 
   dispose(): void {
     this.kids.dispose();
     this.pets.dispose();
     for (const label of this.labels) label.dispose();
+    for (const bubble of this.bubbles) bubble.dispose();
   }
 
   // ---------------------------------------------------------------- internals
@@ -589,11 +652,38 @@ export class NpcSystem implements GameSystem {
       label.updateScreenSize(camera.worldUnitsPerPixel, this.labelDistances[i] ?? 0);
     }
   }
+
+  /**
+   * Floats a {@link SpeechBubble} over whichever child (or two) is mid-chat —
+   * see the chatting block in `wanderDriver.ts`. Reads `chatBubbleText`
+   * straight off each child's own `WanderDriver`, the same way `TreeClimbing`
+   * reads `climbPhase`: the driver owns the state, this just draws it.
+   *
+   * No distance cap of its own beyond what `SpeechBubble.updateScreenSize`
+   * already does — the shared chat budget already caps how many are ever
+   * showing at once, so there is no clutter to guard against here.
+   */
+  private updateBubbles(): void {
+    const camera = this.camera;
+
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      const driver = this.wanderDrivers[i];
+      const bubble = this.bubbles[i];
+      if (!character || !bubble) continue;
+
+      bubble.setText(driver?.chatBubbleText ?? null);
+      bubble.sprite.position.set(
+        character.position.x,
+        character.position.y + character.avatar.height + BUBBLE_HEIGHT_OFFSET,
+        character.position.z,
+      );
+      bubble.updateScreenSize(camera.worldUnitsPerPixel, character.position.distanceTo(camera.focusPoint));
+    }
+  }
 }
 
 // ------------------------------------------------------------------ helpers
-
-const scratchColour = new Color();
 
 /**
  * Draws `count` names from {@link KID_NAMES} without replacement (and without
@@ -612,9 +702,8 @@ function pickNames(rng: Rng, count: number): string[] {
 }
 
 function pickColours(rng: Rng): KidColours {
-  const skinScale = rng.pick(SKIN_SCALES);
   return {
-    skin: scratchColour.setHex(PALETTE.skin).multiplyScalar(skinScale).getHex(),
+    skin: rng.pick(KID_SKIN_TONES).colour,
     hair: rng.pick(HAIR_COLOURS),
     outfit: rng.pick(OUTFIT_COLOURS),
     shoe: rng.pick(SHOE_COLOURS),

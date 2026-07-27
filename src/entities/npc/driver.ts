@@ -66,6 +66,15 @@ export interface DriverContext {
   readonly playerHopped: boolean;
   /** False while the character is in the air; most scripts pause then. */
   readonly grounded: boolean;
+  /**
+   * Seconds since the player was last moving faster than a gentle nudge —
+   * `0` while they are walking or running. The cue for the chatting feature
+   * (see `entities/npc/chatActivity.ts`): nobody starts a conversation with
+   * someone on the move.
+   */
+  readonly playerStationaryFor: number;
+  /** Whether the player currently has a hat on — the "notices you" touch in a chat. */
+  readonly playerWearingHat: boolean;
 }
 
 /**

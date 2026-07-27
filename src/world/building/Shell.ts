@@ -1,8 +1,11 @@
 import {
   BoxGeometry,
+  BufferGeometry,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
   Group,
   InstancedMesh,
   Matrix4,
@@ -11,6 +14,7 @@ import {
   Quaternion,
   Shape,
   SphereGeometry,
+  TorusGeometry,
   Vector3,
 } from 'three';
 import {
@@ -77,9 +81,12 @@ const ROOF_PARAPET = 1.05;
  *
  * `interior` is the place you walk about in — big floor plate, holes for the
  * shafts, and a roof terrace on top that is open to the sky. `facade` is the
- * tower standing in the garden: the same layer-cake look, solid all the way up,
- * with the plinth, the front steps and the welcoming canopy. It is the door you
- * go in through, and nothing more.
+ * castle standing in the garden (GAME_DESIGN.md item 31): continuous walls, a
+ * courtyard, corner towers, a battlement, a grand arch and a rose window over
+ * the front door. It is scenery — the door you go in through, and nothing
+ * more — and shares nothing structurally with `interior` beyond the plan
+ * footprint and the door coordinates, because item 30c means it never has to:
+ * the two are disconnected worlds, and this file is the seam between them.
  */
 export type ShellKind = 'interior' | 'facade';
 
@@ -144,6 +151,15 @@ export class BuildingShell {
     const plan = planFor(kind);
     this.group.name = kind === 'interior' ? 'building-shell' : 'building-facade';
 
+    if (kind === 'facade') {
+      // The castle has no decks at all — it is a single storybook shape, not
+      // five stacked storeys (item 31). `floorGroups` stays empty; nothing
+      // outside this file ever reads a facade shell's floors (see `Building`,
+      // which only ever touches `facade.group`).
+      buildCastle(plan, this.group);
+      return;
+    }
+
     for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
       const floor = new Group();
       floor.name = `${this.group.name}-floor-${deck}`;
@@ -164,25 +180,9 @@ export class BuildingShell {
       }
     }
 
-    if (kind === 'facade') {
-      // A lid, because the facade's top deck is not somewhere you ever stand.
-      const lid = new Group();
-      lid.name = 'facade-roof';
-      lid.position.y = BUILDING_FLOOR_COUNT * BUILDING_FLOOR_HEIGHT;
-      buildFacadeRoof(plan, lid);
-      this.group.add(lid);
-
-      const ground = this.floorGroups[0];
-      if (ground) {
-        ground.add(buildPlinth(plan));
-        ground.add(buildEntranceSteps());
-        buildEntranceCanopy(ground);
-      }
-    } else {
-      const ground = this.floorGroups[0];
-      if (ground) buildInteriorPorch(plan, ground);
-      this.group.add(buildInteriorPlaza());
-    }
+    const ground = this.floorGroups[0];
+    if (ground) buildInteriorPorch(plan, ground);
+    this.group.add(buildInteriorPlaza());
   }
 }
 
@@ -602,61 +602,435 @@ function buildInteriorPlaza(): Group {
   return group;
 }
 
-// -------------------------------------------------------------- facade roof
+// -------------------------------------------------------------- the castle
 
-function buildFacadeRoof(plan: ShellPlan, roof: Group): void {
+/** Height of the front doorway, before the wall closes up solid above it. */
+const CASTLE_DOOR_HEIGHT = 3.6;
+/** Total height of the curtain wall, battlement included. One number, one
+ * colour, the whole way round — which is what stops it reading as storeys. */
+const CASTLE_WALL_HEIGHT = 8.8;
+
+const CASTLE_MERLON_WIDTH = 0.85;
+const CASTLE_MERLON_DEPTH = 0.5;
+const CASTLE_MERLON_HEIGHT = 1.05;
+const CASTLE_MERLON_PITCH = 1.7;
+
+const TOWER_RADIUS = 2.05;
+const TOWER_HEIGHT = 10.6;
+const TOWER_ROOF_HEIGHT = 4.2;
+
+const DOOR_CENTRE_X = (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2;
+const DOOR_ARCH_RADIUS = (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4;
+const DOOR_ARCH_TUBE = 0.42;
+
+const ROSE_WINDOW_RADIUS = 1.35;
+const ROSE_WINDOW_Y = CASTLE_DOOR_HEIGHT + DOOR_ARCH_RADIUS + 1.9;
+
+/**
+ * The castle: what actually stands in the garden (GAME_DESIGN.md item 31).
+ *
+ * One continuous curtain wall — a solid band below the doorway's height and
+ * another, equally solid, above it, both the same colour — four corner towers
+ * with conical roofs and pennants, a battlement along the top, a big stone
+ * arch framing the front door, and a rose window over it. No deck, no
+ * storey-by-storey window rows: the family's repeated complaint about the old
+ * "layer cake" look (item 31) was specifically that it read as stacked floors,
+ * so nothing here is authored per floor at all. What is actually inside the
+ * castle is a different place entirely (item 30c) and none of it has to agree
+ * with this shape — which is exactly why this function never touches
+ * `floorGroups`.
+ */
+function buildCastle(plan: ShellPlan, group: Group): void {
+  group.add(buildPlinth(plan));
+  group.add(buildEntranceSteps());
+  group.add(buildCourtyard(plan));
+  group.add(buildCastleWalls(plan));
+  group.add(buildCrenellations(plan));
+  group.add(buildCornerTowers(plan));
+  group.add(buildEntranceArch(plan));
+  group.add(buildRoseWindow(plan));
+  group.add(buildEntranceSign(plan));
+}
+
+/** One ring of four walls in plan, with the given gaps left in the south face. */
+function ringShapes(plan: ShellPlan, southGaps: readonly (readonly [number, number])[]): Shape[] {
+  const shapes: Shape[] = [];
   const ox = outerX(plan);
   const oz = outerZ(plan);
 
-  const slab = castAndReceive(
+  shapes.push(planRect(-ox, ox, -oz, -plan.halfZ + HALF_WALL));
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
+    shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
+  }
+  shapes.push(
+    planRect(plan.halfX - HALF_WALL, ox, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
+  );
+  shapes.push(
+    planRect(-ox, -plan.halfX + HALF_WALL, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
+  );
+
+  return shapes;
+}
+
+/**
+ * The curtain wall itself, in two solid extrusions rather than one per floor:
+ * a lower band with the doorway gap, and an upper band with no gaps at all,
+ * both the same wall colour. That seam is exactly as tall as the doorway and
+ * invisible, because nothing about it changes — no trim band, no window row,
+ * no colour flip — which is what turns "two extrusions" into "one wall" to
+ * the eye.
+ */
+function buildCastleWalls(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'castle-walls';
+
+  const lower = castAndReceive(
     new Mesh(
-      extrudePlan([planRect(-ox - 0.5, ox + 0.5, -oz - 0.5, oz + 0.5)], 0.4),
-      softMaterial(PALETTE.stonePinkLight, 0.85),
+      extrudePlan(ringShapes(plan, [[plan.doorMinX, plan.doorMaxX]]), CASTLE_DOOR_HEIGHT),
+      softMaterial(PALETTE.buildingWall, 0.78),
     ),
   );
-  slab.position.y = -0.4;
-  roof.add(slab);
+  lower.name = 'castle-wall-lower';
+  group.add(lower);
 
-  const pavilion = castAndReceive(
-    new Mesh(new BoxGeometry(7.6, 2.7, 6.4), softMaterial(PALETTE.buildingWall, 0.78)),
-  );
-  pavilion.position.set(-6.5, 1.35, -1);
-  roof.add(pavilion);
-
-  const pavilionRoof = castAndReceive(
-    new Mesh(new ConeGeometry(5.2, 2.2, 4), softMaterial(PALETTE.buildingRoofDeep, 0.72)),
-  );
-  pavilionRoof.position.set(-6.5, 3.75, -1);
-  pavilionRoof.rotation.y = Math.PI / 4;
-  roof.add(pavilionRoof);
-
-  const lip = receiveOnly(
+  const upper = castAndReceive(
     new Mesh(
-      extrudePlan(
-        [
-          planRect(-ox - 0.5, ox + 0.5, -oz - 0.5, -oz + 0.1),
-          planRect(-ox - 0.5, ox + 0.5, oz - 0.1, oz + 0.5),
-          planRect(-ox - 0.5, -ox + 0.1, -oz + 0.1, oz - 0.1),
-          planRect(ox - 0.1, ox + 0.5, -oz + 0.1, oz - 0.1),
-        ],
-        0.85,
-      ),
-      softMaterial(PALETTE.buildingRoofDeep, 0.72),
+      extrudePlan(ringShapes(plan, []), CASTLE_WALL_HEIGHT - CASTLE_DOOR_HEIGHT),
+      softMaterial(PALETTE.buildingWall, 0.78),
     ),
   );
-  roof.add(lip);
+  upper.name = 'castle-wall-upper';
+  upper.position.y = CASTLE_DOOR_HEIGHT;
+  group.add(upper);
 
-  const mast = receiveOnly(
-    new Mesh(new CylinderGeometry(0.12, 0.16, 3.4, 8), softMaterial(PALETTE.woodLight, 0.85)),
-  );
-  mast.position.set(0, 1.7, 0);
-  roof.add(mast);
+  return group;
+}
 
-  const bobble = receiveOnly(
-    new Mesh(new SphereGeometry(0.62, 18, 14), softMaterial(PALETTE.markerPink, 0.5)),
+/**
+ * The courtyard: a plain pavement filling the footprint, well below the wall
+ * top.
+ *
+ * The castle has no lid — a flat cap across the whole footprint is exactly
+ * the "top of a building" look this rebuild removes. Without *something* down
+ * here, though, glancing over the battlement from the camera's 38° would show
+ * empty air where the old top storey used to be; a courtyard floor is what a
+ * curtain wall like this actually encloses in a real castle, so it is a
+ * better answer than a lid, not just a cheaper one.
+ */
+function buildCourtyard(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'castle-courtyard';
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+
+  const floor = new Mesh(
+    extrudePlan([planRect(-ox, ox, -oz, oz)], BUILDING_SLAB),
+    interiorMaterial(PALETTE.stonePinkLight, 0.85),
   );
-  bobble.position.set(0, 3.7, 0);
-  roof.add(bobble);
+  floor.name = 'castle-courtyard-floor';
+  floor.position.y = -BUILDING_SLAB;
+  floor.receiveShadow = true;
+  floor.castShadow = false;
+  group.add(floor);
+
+  const emblem = receiveOnly(
+    new Mesh(new CylinderGeometry(2.6, 2.6, 0.1, 28), softMaterial(PALETTE.buildingTrim, 0.7)),
+  );
+  emblem.name = 'castle-courtyard-emblem';
+  emblem.position.y = 0.03;
+  group.add(emblem);
+
+  return group;
+}
+
+/** Slots for {@link buildCrenellations}: one instance per merlon, right round the wall. */
+function crenellationSlots(plan: ShellPlan): WindowSlot[] {
+  const slots: WindowSlot[] = [];
+  const ox = outerX(plan);
+  const oz = outerZ(plan);
+  // Kept well clear of the corner towers, which stand outside this ring.
+  for (const x of spread(plan.halfX - 0.9, CASTLE_MERLON_PITCH)) {
+    slots.push({ x, z: -oz, yaw: 0 });
+    slots.push({ x, z: oz, yaw: 0 });
+  }
+  for (const z of spread(plan.halfZ - 0.9, CASTLE_MERLON_PITCH)) {
+    slots.push({ x: -ox, z, yaw: Math.PI / 2 });
+    slots.push({ x: ox, z, yaw: Math.PI / 2 });
+  }
+  return slots;
+}
+
+/** The battlement: a merlon standing on top of the wall at every slot, one draw call. */
+function buildCrenellations(plan: ShellPlan): InstancedMesh {
+  const slots = crenellationSlots(plan);
+  const merlons = new InstancedMesh(
+    new BoxGeometry(CASTLE_MERLON_WIDTH, CASTLE_MERLON_HEIGHT, CASTLE_MERLON_DEPTH),
+    softMaterial(PALETTE.buildingTrim, 0.72),
+    slots.length,
+  );
+  merlons.name = 'crenellations';
+  merlons.castShadow = true;
+  merlons.receiveShadow = true;
+
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const axis = new Vector3(0, 1, 0);
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+
+  slots.forEach((slot, index) => {
+    rotation.setFromAxisAngle(axis, slot.yaw);
+    position.set(slot.x, CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT / 2, slot.z);
+    matrix.compose(position, rotation, scale);
+    merlons.setMatrixAt(index, matrix);
+  });
+  merlons.instanceMatrix.needsUpdate = true;
+  return merlons;
+}
+
+/**
+ * Four corner towers, each a cylinder, a conical roof, a little mast and a
+ * flag — the part of the silhouette that reads as "castle" from clear across
+ * the garden, well above the battlement line.
+ */
+function buildCornerTowers(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'castle-towers';
+
+  const corners: readonly (readonly [number, number])[] = [
+    [-outerX(plan), -outerZ(plan)],
+    [outerX(plan), -outerZ(plan)],
+    [-outerX(plan), outerZ(plan)],
+    [outerX(plan), outerZ(plan)],
+  ];
+  const flagColours = [
+    PALETTE.markerPink,
+    PALETTE.markerSky,
+    PALETTE.markerLemon,
+    PALETTE.markerLilac,
+  ];
+
+  const bodies = new InstancedMesh(
+    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * 1.08, TOWER_HEIGHT, 16),
+    softMaterial(PALETTE.buildingWall, 0.78),
+    corners.length,
+  );
+  bodies.name = 'tower-bodies';
+  bodies.castShadow = true;
+  bodies.receiveShadow = true;
+
+  // A true cone (16 segments), unlike the roof pavilion's four-sided pyramid —
+  // this one is meant to read as a proper witch's-hat tower roof up close.
+  const roofs = new InstancedMesh(
+    new ConeGeometry(TOWER_RADIUS + 0.4, TOWER_ROOF_HEIGHT, 16),
+    softMaterial(PALETTE.buildingRoofDeep, 0.72),
+    corners.length,
+  );
+  roofs.name = 'tower-roofs';
+  roofs.castShadow = true;
+  roofs.receiveShadow = true;
+
+  const masts = new InstancedMesh(
+    new CylinderGeometry(0.07, 0.09, 1.6, 8),
+    softMaterial(PALETTE.woodLight, 0.85),
+    corners.length,
+  );
+  masts.name = 'tower-masts';
+  masts.castShadow = false;
+  masts.receiveShadow = false;
+
+  const finials = new InstancedMesh(
+    new SphereGeometry(0.26, 14, 10),
+    softMaterial(PALETTE.markerLemon, 0.55),
+    corners.length,
+  );
+  finials.name = 'tower-finials';
+  finials.castShadow = false;
+  finials.receiveShadow = false;
+
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+  const roofTopY = TOWER_HEIGHT + TOWER_ROOF_HEIGHT;
+
+  corners.forEach(([x, z], index) => {
+    position.set(x, TOWER_HEIGHT / 2, z);
+    matrix.compose(position, rotation, scale);
+    bodies.setMatrixAt(index, matrix);
+
+    position.set(x, TOWER_HEIGHT + TOWER_ROOF_HEIGHT / 2, z);
+    matrix.compose(position, rotation, scale);
+    roofs.setMatrixAt(index, matrix);
+
+    position.set(x, roofTopY + 0.8, z);
+    matrix.compose(position, rotation, scale);
+    masts.setMatrixAt(index, matrix);
+
+    position.set(x, roofTopY + 1.65, z);
+    matrix.compose(position, rotation, scale);
+    finials.setMatrixAt(index, matrix);
+
+    const flag = buildPennant(flagColours[index % flagColours.length] ?? PALETTE.markerPink);
+    flag.position.set(x, roofTopY + 1.15, z);
+    group.add(flag);
+  });
+
+  bodies.instanceMatrix.needsUpdate = true;
+  roofs.instanceMatrix.needsUpdate = true;
+  masts.instanceMatrix.needsUpdate = true;
+  finials.instanceMatrix.needsUpdate = true;
+
+  group.add(bodies, roofs, masts, finials);
+  return group;
+}
+
+/** A little three-cornered pennant, big enough to read from across the garden. */
+function pennantGeometry(width: number, height: number): BufferGeometry {
+  const geometry = new BufferGeometry();
+  const positions = new Float32Array([0, 0, 0, 0, height, 0, width, height * 0.5, 0]);
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  geometry.setIndex([0, 1, 2]);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** One flag flying from a mast. Double-sided: a flag has no "back" worth hiding. */
+function buildPennant(colour: number): Mesh {
+  const material = softMaterial(colour, 0.6);
+  material.side = DoubleSide;
+  const mesh = new Mesh(pennantGeometry(0.85, 0.55), material);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.position.y -= 0.3;
+  return mesh;
+}
+
+/**
+ * The grand entrance: a stone half-arch over the doorway and a pillar either
+ * side, so the door reads as one grand surround rather than a hole in a wall
+ * with a rainbow stuck above it. The doorway opening itself stays the plain
+ * rectangle {@link ringShapes} already cuts — this is decoration standing
+ * proud of it, not a re-shaped hole.
+ */
+function buildEntranceArch(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'entrance-arch';
+  const oz = outerZ(plan);
+  const pillarHeight = CASTLE_DOOR_HEIGHT + DOOR_ARCH_RADIUS;
+
+  // `TorusGeometry`'s ring lies in the XY plane and its arc sweeps from +X
+  // through +Y — exactly the top half of a ring, i.e. an arch — when `arc` is
+  // Ï€, with no rotation needed to face the camera (see the rose window, same
+  // trick, full circle).
+  const arch = castAndReceive(
+    new Mesh(
+      new TorusGeometry(DOOR_ARCH_RADIUS, DOOR_ARCH_TUBE, 10, 24, Math.PI),
+      softMaterial(PALETTE.buildingTrim, 0.72),
+    ),
+  );
+  arch.name = 'entrance-arch-ring';
+  arch.position.set(DOOR_CENTRE_X, CASTLE_DOOR_HEIGHT, oz + 0.05);
+  group.add(arch);
+
+  const pillars = new InstancedMesh(
+    new CylinderGeometry(0.32, 0.37, pillarHeight, 10),
+    softMaterial(PALETTE.buildingTrimDeep, 0.7),
+    2,
+  );
+  pillars.name = 'entrance-pillars';
+  pillars.castShadow = false;
+  pillars.receiveShadow = true;
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+  [plan.doorMinX - 0.55, plan.doorMaxX + 0.55].forEach((x, index) => {
+    position.set(x, pillarHeight / 2, oz - 0.1);
+    matrix.compose(position, rotation, scale);
+    pillars.setMatrixAt(index, matrix);
+  });
+  pillars.instanceMatrix.needsUpdate = true;
+  group.add(pillars);
+
+  return group;
+}
+
+/**
+ * A rose window over the door: a ring, a tinted glass disc and four spokes
+ * through the centre — cute stained-glass tracery rather than a hole
+ * punched in the wall, and the one touch that says "storybook palace" as
+ * clearly as the towers do.
+ */
+function buildRoseWindow(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'rose-window';
+  const z = outerZ(plan) + 0.06;
+
+  const ring = castAndReceive(
+    new Mesh(
+      new TorusGeometry(ROSE_WINDOW_RADIUS, 0.16, 10, 28),
+      softMaterial(PALETTE.buildingTrim, 0.72),
+    ),
+  );
+  ring.position.set(DOOR_CENTRE_X, ROSE_WINDOW_Y, z);
+  group.add(ring);
+
+  const glass = new Mesh(
+    new CircleGeometry(ROSE_WINDOW_RADIUS - 0.14, 28),
+    glassMaterial(0.42),
+  );
+  glass.position.set(DOOR_CENTRE_X, ROSE_WINDOW_Y, z - 0.05);
+  glass.receiveShadow = false;
+  glass.castShadow = false;
+  group.add(glass);
+
+  const spokeCount = 4;
+  const spokes = new InstancedMesh(
+    new BoxGeometry(ROSE_WINDOW_RADIUS * 1.9, 0.12, 0.1),
+    softMaterial(PALETTE.buildingTrim, 0.72),
+    spokeCount,
+  );
+  spokes.name = 'rose-window-spokes';
+  spokes.castShadow = false;
+  spokes.receiveShadow = false;
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const axis = new Vector3(0, 0, 1);
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+  for (let i = 0; i < spokeCount; i += 1) {
+    rotation.setFromAxisAngle(axis, (Math.PI / spokeCount) * i);
+    position.set(DOOR_CENTRE_X, ROSE_WINDOW_Y, z - 0.02);
+    matrix.compose(position, rotation, scale);
+    spokes.setMatrixAt(i, matrix);
+  }
+  spokes.instanceMatrix.needsUpdate = true;
+  group.add(spokes);
+
+  return group;
+}
+
+/**
+ * The one sign the castle needs: what it is, right by the door.
+ *
+ * Everything else that used to hang off the old canopy (the little awning, its
+ * two posts) is gone — the stone arch is the grand thing over the doorway now,
+ * and a free-standing tent roof would only compete with it.
+ */
+function buildEntranceSign(plan: ShellPlan): Mesh {
+  const oz = outerZ(plan);
+  const sign = cuteSign({
+    title: 'The Castle',
+    subtitle: 'come in and look around!',
+    glyph: '🏰',
+    accent: PALETTE.markerSky,
+    width: 4.6,
+  });
+  // Left of the door, facing +Z like every sign in the game (the static
+  // camera, item 16, never needs to see the back of one).
+  sign.position.set(plan.doorMinX - 2.3, 3.2, oz + 1.6);
+  return sign;
 }
 
 // ---------------------------------------------------------------- entrance
@@ -716,56 +1090,6 @@ function buildEntranceSteps(): InstancedMesh {
   }
   steps.instanceMatrix.needsUpdate = true;
   return steps;
-}
-
-function buildEntranceCanopy(parent: Group): void {
-  const centreX = (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2;
-  const canopy = new Group();
-  canopy.name = 'entrance-canopy';
-  canopy.position.set(centreX, 0, BUILDING_HALF_Z + 1.3);
-  parent.add(canopy);
-
-  const roof = castAndReceive(
-    new Mesh(new BoxGeometry(7.4, 0.32, 3.4), softMaterial(PALETTE.markerPink, 0.7)),
-  );
-  roof.position.y = 3.05;
-  canopy.add(roof);
-
-  const valance = receiveOnly(
-    new Mesh(new BoxGeometry(7.4, 0.5, 0.26), softMaterial(PALETTE.blossomWhite, 0.75)),
-  );
-  valance.position.set(0, 2.68, 1.66);
-  canopy.add(valance);
-
-  const posts = new InstancedMesh(
-    new CylinderGeometry(0.17, 0.2, 2.9, 10),
-    softMaterial(PALETTE.buildingTrimDeep, 0.7),
-    2,
-  );
-  posts.castShadow = false;
-  posts.receiveShadow = true;
-  const matrix = new Matrix4();
-  const rotation = new Quaternion();
-  const scale = new Vector3(1, 1, 1);
-  const position = new Vector3();
-  [-3.4, 3.4].forEach((x, index) => {
-    position.set(x, 1.45, 1.5);
-    matrix.compose(position, rotation, scale);
-    posts.setMatrixAt(index, matrix);
-  });
-  posts.instanceMatrix.needsUpdate = true;
-  canopy.add(posts);
-
-  const sign = cuteSign({
-    title: 'The Big Building',
-    subtitle: 'come in and look around!',
-    glyph: '🏬',
-    accent: PALETTE.markerSky,
-    width: 5.2,
-  });
-  // Facing +Z, out towards the park and the default camera angle.
-  sign.position.set(0, 4.6, 1.75);
-  canopy.add(sign);
 }
 
 /**

@@ -77,9 +77,11 @@ export interface PurchaseSpec {
  */
 export interface CharacterCreationChoice {
   readonly name: string;
+  readonly skinColour: number;
   readonly hairColour: number;
   readonly hairStyle: HairStyle;
   readonly outfitColour: number;
+  readonly eyeColour: number;
   readonly hat: PurchaseSpec;
   readonly pet: PurchaseSpec;
 }
@@ -175,9 +177,11 @@ class GameStore {
   completeCharacterCreation(choice: CharacterCreationChoice): void {
     const trimmedName = choice.name.trim();
     this.state.player.name = trimmedName.length > 0 ? trimmedName : PLAYER_DEFAULT_NAME;
+    this.state.player.skinColour = choice.skinColour;
     this.state.player.hairColour = choice.hairColour;
     this.state.player.hairStyle = choice.hairStyle;
     this.state.player.outfitColour = choice.outfitColour;
+    this.state.player.eyeColour = choice.eyeColour;
 
     const hatItem = this.grantFree(choice.hat, true);
     this.state.wornHatUid = hatItem.uid;
@@ -497,9 +501,11 @@ function createInitialState(): GameState {
     player: {
       name: PLAYER_DEFAULT_NAME,
       kind: 'kid',
+      skinColour: PALETTE.skin,
       hairColour: PALETTE.hair,
       hairStyle: 'bunches',
       outfitColour: PALETTE.outfit,
+      eyeColour: PALETTE.iris,
       health: 5,
       maxHealth: 5,
       facePaint: null,

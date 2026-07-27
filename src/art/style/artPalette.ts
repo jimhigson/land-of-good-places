@@ -83,9 +83,18 @@ export const ART = {
   kidBackpackDark: 0x5fc9a6,
   kidBobble: 0xffd166,
   /** Default iris colour, named so a retune has somewhere to live. */
-  kidEye: 0x6f4b9a,
+  kidEye: PALETTE.iris,
   /** Ethan's eyes — a family request (see NpcSystem.ts). */
   kidEyeBlue: 0x4fb0e8,
+  /**
+   * Extra eye colours baked into the NPC crowd's instanced face-material set
+   * (see `entities/npc/kidCrowd.ts`'s `EYE_VARIANTS`) alongside the default
+   * violet and Ethan's blue. The character creator offers a couple more
+   * (hazel, grey) that only ever paint the player's own, non-instanced face,
+   * so they don't need a texture set of their own here.
+   */
+  kidEyeBrown: 0x6b4a30,
+  kidEyeGreen: 0x4f9a70,
   /** Ethan's hair — a family request (see NpcSystem.ts). */
   kidHairBlonde: 0xf0d48a,
 

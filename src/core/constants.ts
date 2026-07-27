@@ -184,8 +184,12 @@ export const ESCALATOR_SPEED = 1.1;
 /** How fast you travel down a slide, in metres of spline per second. */
 export const SLIDE_SPEED = 12;
 
-/** Number of squishy balls in the ball pit. */
-export const BALL_PIT_COUNT = 190;
+/**
+ * Number of squishy balls in the ball pit. Four-plus times the old
+ * spring-based pit's count — comfortably inside the per-frame physics budget
+ * on a desktop core with the AABB/MTV solver (see `BallPit.ts`).
+ */
+export const BALL_PIT_COUNT = 900;
 
 // ----------------------------------------------------------------- camera
 

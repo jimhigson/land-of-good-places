@@ -3,6 +3,27 @@ import { clamp01 } from '../../core/mathUtils';
 import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../art/style/faces';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
+// Chatting (see the additive block near the bottom of this file). Content —
+// what a child says and when — lives in its own module so this file stays
+// about timing and state, not word lists.
+import {
+  CHAT_APPROACH_TIMEOUT,
+  CHAT_COOLDOWN_MIN,
+  CHAT_COOLDOWN_RANGE,
+  CHAT_GIVEUP_RADIUS,
+  CHAT_GOODBYE_DURATION,
+  CHAT_RADIUS,
+  CHAT_ROLL_MAX,
+  CHAT_ROLL_MIN,
+  CHAT_START_CHANCE,
+  CHAT_STOP_DISTANCE,
+  CHAT_TALK_MAX,
+  CHAT_TALK_MIN,
+  CHAT_TRIGGER_STATIONARY,
+  pickChatLine,
+  pickGoodbyeLine,
+  type ChatBudget,
+} from './chatActivity';
 // The park train. Used only by the additive block at the bottom of this file,
 // and only through a singleton that is `null` in a world without one.
 import { trainService } from '../../world/train/service';
@@ -191,6 +212,8 @@ export interface WanderOptions {
   readonly climbableTrees?: readonly ClimbableTreeSeed[];
   /** Shared across every child, to keep the whole-park total gentle. */
   readonly climberBudget?: ClimberBudget;
+  /** Shared across every child, so standing still draws one or two chatters, not a mob. */
+  readonly chatBudget?: ChatBudget;
 }
 
 export class WanderDriver implements CharacterDriver {
@@ -247,6 +270,17 @@ export class WanderDriver implements CharacterDriver {
   faceZ = 0;
   faceYaw = 0;
 
+  // ---- chatting (additive — see the block above the `WanderDriver` class,
+  // and the state machine near the bottom of it) ----
+  private readonly chatBudget: ChatBudget | undefined;
+  private chatState: 'none' | 'approaching' | 'talking' | 'leaving' = 'none';
+  private chatCooldown: number;
+  private chatRollTimer = 0;
+  private chatElapsed = 0;
+  private chatTalkRemaining = 0;
+  private chatLeaveRemaining = 0;
+  private chatLine: string | null = null;
+
   constructor(options: WanderOptions) {
     this.graph = options.graph;
     this.rng = options.rng;
@@ -257,6 +291,7 @@ export class WanderDriver implements CharacterDriver {
     this.blinkTimer = this.rng.range(1.5, 5.5);
     this.climbableTrees = options.climbableTrees ?? [];
     this.climberBudget = options.climberBudget;
+    this.chatBudget = options.chatBudget;
     // Staggered like the first pause below, so the park doesn't decide to
     // climb in step either — and nobody is eligible in the first minute.
     this.climbCooldown = this.rng.range(10, 70);
@@ -271,6 +306,8 @@ export class WanderDriver implements CharacterDriver {
     const startNode = this.graph.node(options.startNode);
     this.faceX = startNode?.x ?? 0;
     this.faceZ = startNode?.z ?? 0;
+    // Stagger the first chat roll too, so nobody is eligible in the opening seconds.
+    this.chatCooldown = this.rng.range(3, 20);
     wanderDrivers.add(this);
   }
 
@@ -306,6 +343,17 @@ export class WanderDriver implements CharacterDriver {
     return { x: this.climbStartX, z: this.climbStartZ };
   }
 
+  /**
+   * What this child is saying right now, for `NpcSystem` to show in a
+   * {@link SpeechBubble} — `null` whenever they are not mid-chat. `null`
+   * during `approaching` on purpose: the line is chosen on arrival, not
+   * before, so the bubble appears exactly when they stop and turn to face
+   * the player.
+   */
+  get chatBubbleText(): string | null {
+    return this.chatState === 'talking' || this.chatState === 'leaving' ? this.chatLine : null;
+  }
+
   update(context: DriverContext, intent: CharacterIntent): void {
     const { dt } = context;
 
@@ -328,49 +376,57 @@ export class WanderDriver implements CharacterDriver {
 
     this.reactToPlayer(context);
 
-    // Catching the park train, if there is one and this child fancies it. The
-    // whole behaviour is in the additive block at the bottom of this file; when
-    // it is handling the frame, it has filled the intent in itself.
-    if (this.updateTrainTrip(context, intent)) return;
+    // Chatting (additive): claims the frame — in place of the train trip and
+    // the face-paint visit below — while a chat is starting, happening, or
+    // being said goodbye to. See the block near the bottom of this file for
+    // the state machine; every other method on this class is unchanged.
+    const chatting = this.updateChatActivity(context, intent, dt);
 
-    // --- where am I trying to be? -------------------------------------------
-    // Face painting stall (additive): a child mid-visit — or one who has just
-    // decided to start one — has movement handled entirely by
-    // `driveFacePaintVisit` for this frame, in place of the ordinary node
-    // logic below. See the block above the class for the state this reads
-    // and writes; every other method on this class is unchanged.
-    if (!this.driveFacePaintVisit(context, intent, dt)) {
-      const node = this.graph.node(this.target);
+    if (!chatting) {
+      // Catching the park train, if there is one and this child fancies it. The
+      // whole behaviour is in the additive block at the bottom of this file; when
+      // it is handling the frame, it has filled the intent in itself.
+      if (this.updateTrainTrip(context, intent)) return;
 
-      if (this.pausing) {
-        this.pauseRemaining -= dt;
-        this.updateLook(context, dt);
-        if (this.pauseRemaining <= 0) {
-          this.pausing = false;
-          this.chooseNext();
-        }
-      } else if (node) {
-        this.legElapsed += dt;
-        const dx = node.x - context.position.x;
-        const dz = node.z - context.position.z;
-        const distance = Math.hypot(dx, dz);
+      // --- where am I trying to be? -------------------------------------------
+      // Face painting stall (additive): a child mid-visit — or one who has just
+      // decided to start one — has movement handled entirely by
+      // `driveFacePaintVisit` for this frame, in place of the ordinary node
+      // logic below. See the block above the class for the state this reads
+      // and writes; every other method on this class is unchanged.
+      if (!this.driveFacePaintVisit(context, intent, dt)) {
+        const node = this.graph.node(this.target);
 
-        if (distance <= ARRIVE_RADIUS) {
-          this.arrive(context);
-        } else {
-          const speed = this.running ? RUN_INTENT : 1;
-          const scale = (speed * this.pace) / distance;
-          intent.moveX = dx * scale;
-          intent.moveZ = dz * scale;
-        }
+        if (this.pausing) {
+          this.pauseRemaining -= dt;
+          this.updateLook(context, dt);
+          if (this.pauseRemaining <= 0) {
+            this.pausing = false;
+            this.chooseNext();
+          }
+        } else if (node) {
+          this.legElapsed += dt;
+          const dx = node.x - context.position.x;
+          const dz = node.z - context.position.z;
+          const distance = Math.hypot(dx, dz);
 
-        // A child who has been walking at the same waypoint for a quarter of a
-        // minute is stuck on something the edge test did not catch.
-        // Re-choosing is a cheaper and far less visible fix than a rescue
-        // teleport.
-        if (this.legElapsed > LEG_TIMEOUT) {
-          this.current = this.target;
-          this.chooseNext();
+          if (distance <= ARRIVE_RADIUS) {
+            this.arrive(context);
+          } else {
+            const speed = this.running ? RUN_INTENT : 1;
+            const scale = (speed * this.pace) / distance;
+            intent.moveX = dx * scale;
+            intent.moveZ = dz * scale;
+          }
+
+          // A child who has been walking at the same waypoint for a quarter of a
+          // minute is stuck on something the edge test did not catch.
+          // Re-choosing is a cheaper and far less visible fix than a rescue
+          // teleport.
+          if (this.legElapsed > LEG_TIMEOUT) {
+            this.current = this.target;
+            this.chooseNext();
+          }
         }
       }
     }
@@ -846,6 +902,167 @@ export class WanderDriver implements CharacterDriver {
     }
     this.chooseNext();
     return false;
+  }
+
+  // ===========================================================================
+  // ADDITIVE BLOCK — chatting with the player (`entities/npc/chatActivity.ts`).
+  //
+  // The fourth additive block in this file (train, tree climbing, face paint,
+  // and now this) — see ARCHITECTURE-DECISIONS.md, Decision 2: the architect's
+  // standing recommendation is that a proper `Activity` abstraction is now
+  // warranted to absorb these mechanically. Not done here, on purpose — this
+  // block is kept exactly the same shape as its three neighbours (self-
+  // contained state, one call from `update`, a single tuning/content module
+  // alongside it) specifically so that future refactor can lift it wholesale.
+  //
+  // The shape of a chat: notice the player has stood still for a couple of
+  // seconds, walk over, stop short of them, say something, wave and smile for
+  // a few seconds, then say goodbye and go back to ordinary wandering — early,
+  // if the player wanders off first. `NpcSystem` reads `chatBubbleText` (see
+  // the getter above) to float a `SpeechBubble` over whichever child is
+  // talking; this file never touches rendering.
+  // ===========================================================================
+
+  /**
+   * One frame of "on the way to, mid, or waving goodbye from, a chat with the
+   * player". Returns `true` the moment it has taken the frame over — the
+   * caller (`update`) skips the train trip and the face-paint visit entirely
+   * while this is happening, exactly as those two already skip each other.
+   *
+   * Every early `return false` leaves state exactly where the caller expects
+   * it, so a child who is never eligible (busy, out of range, capped by the
+   * shared budget, unlucky on the roll) costs this method nothing beyond the
+   * cooldown bookkeeping at the top.
+   */
+  private updateChatActivity(context: DriverContext, intent: CharacterIntent, dt: number): boolean {
+    this.chatCooldown -= dt;
+
+    if (this.chatState === 'none') {
+      this.chatRollTimer -= dt;
+      if (this.chatCooldown > 0) return false;
+      // Never poaches a child already committed to the train or the paint
+      // stall — and a climbing child never reaches this line at all, since
+      // `update` returns out of `updateClimb` before getting here.
+      if (this.trainMode !== 'none' || this.paintVisit !== 'none') return false;
+      if (this.chatRollTimer > 0) return false;
+      this.chatRollTimer = this.rng.range(CHAT_ROLL_MIN, CHAT_ROLL_MAX);
+
+      if (context.playerStationaryFor < CHAT_TRIGGER_STATIONARY) return false;
+
+      const dx = context.playerPosition.x - context.position.x;
+      const dz = context.playerPosition.z - context.position.z;
+      if (dx * dx + dz * dz > CHAT_RADIUS * CHAT_RADIUS) return false;
+
+      if (!this.chatBudget || this.chatBudget.active >= this.chatBudget.max) {
+        // Capped for the whole park right now — try again soon rather than
+        // queuing, exactly like a full face-paint stall.
+        this.chatCooldown = this.rng.range(2, 5);
+        return false;
+      }
+      if (!this.rng.chance(CHAT_START_CHANCE)) return false;
+
+      this.chatBudget.active += 1;
+      this.chatState = 'approaching';
+      this.chatElapsed = 0;
+    }
+
+    if (this.chatState === 'approaching') {
+      this.chatElapsed += dt;
+      const dx = context.playerPosition.x - context.position.x;
+      const dz = context.playerPosition.z - context.position.z;
+      const distance = Math.hypot(dx, dz);
+
+      // The player wandered off, or this is taking too long (stuck on
+      // something) — give up quietly rather than chasing forever.
+      if (distance > CHAT_GIVEUP_RADIUS || this.chatElapsed > CHAT_APPROACH_TIMEOUT) {
+        this.endChat(context);
+        return false;
+      }
+
+      if (distance <= CHAT_STOP_DISTANCE) {
+        // Arrived: turn to face them, pick a line, and start talking. Stopping
+        // at `CHAT_STOP_DISTANCE` — well outside `PLAYER_SEPARATION` in
+        // `NpcSystem.ts` — is what keeps this a friendly stop rather than a
+        // shoving match once player↔NPC collision gets involved.
+        this.chatState = 'talking';
+        this.chatTalkRemaining = this.rng.range(CHAT_TALK_MIN, CHAT_TALK_MAX);
+        this.chatLine = pickChatLine(this.rng, context.playerWearingHat);
+        intent.moveX = 0;
+        intent.moveZ = 0;
+        intent.lookAt = Math.atan2(dx, dz);
+        // Piggy-backs the ordinary wave/happy blend in `update`'s tail — see
+        // that field's own doc comment.
+        this.waveRemaining = Math.max(this.waveRemaining, 0.5);
+        return true;
+      }
+
+      const scale = this.pace / distance;
+      intent.moveX = dx * scale;
+      intent.moveZ = dz * scale;
+      intent.lookAt = Math.atan2(dx, dz);
+      return true;
+    }
+
+    if (this.chatState === 'talking') {
+      const dx = context.playerPosition.x - context.position.x;
+      const dz = context.playerPosition.z - context.position.z;
+      const distance = Math.hypot(dx, dz);
+
+      intent.moveX = 0;
+      intent.moveZ = 0;
+      intent.lookAt = Math.atan2(dx, dz);
+      this.waveRemaining = Math.max(this.waveRemaining, 0.3);
+
+      this.chatTalkRemaining -= dt;
+      // `playerStationaryFor` drops to zero the instant the player takes a
+      // step — the cue to wrap up "as soon as the player moves away" rather
+      // than waiting out the timer.
+      const playerLeft = distance > CHAT_GIVEUP_RADIUS || context.playerStationaryFor <= 0;
+
+      if (playerLeft || this.chatTalkRemaining <= 0) {
+        this.chatState = 'leaving';
+        this.chatLeaveRemaining = CHAT_GOODBYE_DURATION;
+        this.chatLine = pickGoodbyeLine(this.rng);
+      }
+      return true;
+    }
+
+    // 'leaving': a brief goodbye wave, still facing the player, before handing
+    // back to ordinary wandering.
+    const dx = context.playerPosition.x - context.position.x;
+    const dz = context.playerPosition.z - context.position.z;
+    intent.moveX = 0;
+    intent.moveZ = 0;
+    intent.lookAt = Math.atan2(dx, dz);
+    this.waveRemaining = Math.max(this.waveRemaining, 0.3);
+
+    this.chatLeaveRemaining -= dt;
+    if (this.chatLeaveRemaining <= 0) {
+      this.endChat(context);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Ends a chat, whatever state it got to — abandoned mid-approach or a
+   * completed goodbye. Always frees the shared budget slot exactly once (it
+   * is claimed exactly once, on starting) and sends the child back into
+   * ordinary wandering from wherever they ended up — the same re-anchor-to-
+   * the-graph move `driveFacePaintVisit` makes on its own way out.
+   */
+  private endChat(context: DriverContext): void {
+    if (this.chatBudget) this.chatBudget.active = Math.max(0, this.chatBudget.active - 1);
+    this.chatState = 'none';
+    this.chatLine = null;
+    this.chatCooldown = this.rng.range(CHAT_COOLDOWN_MIN, CHAT_COOLDOWN_MIN + CHAT_COOLDOWN_RANGE);
+
+    const nearest = this.graph.nearest(context.position.x, context.position.z);
+    if (nearest) {
+      this.current = nearest.index;
+      this.previous = nearest.index;
+    }
+    this.chooseNext();
   }
 }
 

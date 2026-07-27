@@ -1,14 +1,15 @@
 import { hexToCss, PALETTE } from '../core/palette';
 import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
+import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
 import type { CharacterCreationChoice, HairStyle } from '../state';
 import { CharacterPreview } from './characterCreationPreview';
 
 /**
- * The character creator: name, hair colour and style, clothes colour, a
- * starting hat and a starting pet — the front door of the game, per
- * GAME_DESIGN.md's "The player" section and design-feedback item 27.
+ * The character creator: name, skin tone, hair colour and style, eye colour,
+ * clothes colour, a starting hat and a starting pet — the front door of the
+ * game, per GAME_DESIGN.md's "The player" section and design-feedback item 27.
  *
  * Runs once, before `Game` exists at all — see `main.ts`'s `boot()`, which
  * constructs this instead of `Game` on a brand-new browser, and only builds
@@ -81,9 +82,11 @@ export class CharacterCreation {
   private readonly handlers: CharacterCreationHandlers;
   private readonly resizeObserver: ResizeObserver;
 
+  private skinColour: number = ART.kidSkin;
   private hairColour: number = PALETTE.hair;
   private hairStyle: HairStyle = 'bunches';
   private outfitColour: number = PALETTE.outfit;
+  private eyeColour: number = ART.kidEye;
   private hatId = DEFAULT_HAT_ID;
   private petId = DEFAULT_PET_ID;
 
@@ -163,6 +166,17 @@ export class CharacterCreation {
     });
     nameSection.append(nameLabel, this.nameInput);
 
+    // Skin tone ---------------------------------------------------------------
+    const skinToneSection = this.buildSwatchSection(
+      'Skin tone',
+      KID_SKIN_TONES,
+      this.skinColour,
+      (colour) => {
+        this.skinColour = colour;
+        this.refreshPreview();
+      },
+    );
+
     // Hair colour ------------------------------------------------------------
     const hairColourSection = this.buildSwatchSection(
       'Hair colour',
@@ -204,6 +218,17 @@ export class CharacterCreation {
     }
     hairStyleSection.append(hairStyleLabel, hairStyleRow);
 
+    // Eye colour ---------------------------------------------------------------
+    const eyeColourSection = this.buildSwatchSection(
+      'Eye colour',
+      KID_EYE_COLOURS,
+      this.eyeColour,
+      (colour) => {
+        this.eyeColour = colour;
+        this.refreshPreview();
+      },
+    );
+
     // Clothes colour ---------------------------------------------------------
     const outfitSection = this.buildSwatchSection(
       'Clothes colour',
@@ -235,8 +260,10 @@ export class CharacterCreation {
 
     controls.append(
       nameSection,
+      skinToneSection,
       hairColourSection,
       hairStyleSection,
+      eyeColourSection,
       outfitSection,
       hatSection,
       petSection,
@@ -373,10 +400,11 @@ export class CharacterCreation {
 
   private refreshPreview(): void {
     this.preview.update({
-      skin: PALETTE.skin,
+      skin: this.skinColour,
       hair: this.hairColour,
       hairStyle: this.hairStyle,
       outfit: this.outfitColour,
+      eye: this.eyeColour,
       hatId: this.hatId,
       petId: this.petId,
     });
@@ -394,9 +422,11 @@ export class CharacterCreation {
     if (hat && pet) {
       const choice: CharacterCreationChoice = {
         name: this.nameInput.value,
+        skinColour: this.skinColour,
         hairColour: this.hairColour,
         hairStyle: this.hairStyle,
         outfitColour: this.outfitColour,
+        eyeColour: this.eyeColour,
         hat,
         pet,
       };
