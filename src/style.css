@@ -64,7 +64,14 @@ html {
      ring, the water-fight rainbow and the in-world highlight outline all use.
      A DOM button and a shop counter must light up in the same colours or the
      HIGHLIGHT RULE reads as two unrelated effects. */
-  --lgp-rainbow: #ff8f8f, #ffbe6b, #ffe27a, #8fdf8a, #8cc9ff, #c9a9ff;
+  --lgp-rainbow-1: #ff8f8f;
+  --lgp-rainbow-2: #ffbe6b;
+  --lgp-rainbow-3: #ffe27a;
+  --lgp-rainbow-4: #8fdf8a;
+  --lgp-rainbow-5: #8cc9ff;
+  --lgp-rainbow-6: #c9a9ff;
+  --lgp-rainbow: var(--lgp-rainbow-1), var(--lgp-rainbow-2), var(--lgp-rainbow-3),
+    var(--lgp-rainbow-4), var(--lgp-rainbow-5), var(--lgp-rainbow-6);
   /* Ring thickness. In rem, so it grows with the root scale like everything else. */
   --lgp-highlight-width: 0.14rem;
   /* Seconds for the rainbow to travel one full cycle. Matches the in-world
@@ -224,8 +231,111 @@ body {
   }
 }
 
+/* --------------------------------------------------- the activation flash
+
+   "You touched it": half a second of rainbow radiating off whatever was just
+   pressed. Hover is quiet and steady; this expands and fades. It matters most
+   on a phone, where there is no hover to have seen in the first place.
+
+   Drawn as an overlay positioned over the button by `ui/TapBurst.ts` (a pool
+   of four, allocated once) rather than as another pseudo-element on the button
+   itself: that keeps the button's `::after` free for the steady outline above,
+   survives a panel with `overflow: hidden`, and cannot disturb any layout. */
+
+.lgp-burst {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 90;
+}
+
+.lgp-burst[data-play='true'] {
+  animation: lgp-burst-ring 0.55s ease-out;
+}
+
+/* The ring itself: the same masked rainbow rim as the hover outline, blown
+   outward. Sitting on its own element means it can scale without dragging the
+   button's text with it. */
+.lgp-burst::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: calc(var(--lgp-highlight-width) * 1.35);
+  background: linear-gradient(115deg, var(--lgp-rainbow), var(--lgp-rainbow));
+  background-size: 200% 100%;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+/* The sparks: six dots, one per rainbow band, thrown outward from the middle.
+   `box-shadow` copies of a single dot, so the whole scatter is one element and
+   scaling it is what makes them fly. */
+.lgp-burst::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.26rem;
+  height: 0.26rem;
+  margin: -0.13rem 0 0 -0.13rem;
+  border-radius: 50%;
+  background: var(--lgp-rainbow-1);
+  box-shadow:
+    0 -1.5rem 0 var(--lgp-rainbow-2),
+    1.3rem -0.75rem 0 var(--lgp-rainbow-3),
+    1.3rem 0.75rem 0 var(--lgp-rainbow-4),
+    0 1.5rem 0 var(--lgp-rainbow-5),
+    -1.3rem 0.75rem 0 var(--lgp-rainbow-6),
+    -1.3rem -0.75rem 0 var(--lgp-rainbow-1);
+  opacity: 0;
+}
+
+.lgp-burst[data-play='true']::after {
+  animation: lgp-burst-sparks 0.55s ease-out;
+}
+
+@keyframes lgp-burst-ring {
+  0% {
+    opacity: 0.95;
+    transform: scale(1);
+  }
+  /* Held briefly at full strength before it goes: a fade that starts on the
+     first frame reads as the effect being switched off rather than expanding. */
+  18% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.28);
+  }
+}
+
+@keyframes lgp-burst-sparks {
+  0% {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
 /* A child who has asked their machine to calm down gets the rainbow, still —
-   it is how the game says "you can press this" — but it stops moving. */
+   it is how the game says "you can press this" — but it stops moving. The
+   activation flash still plays: it is not decoration, it is the answer to
+   "did that work?", and half a second of it is not what anybody means by
+   too much motion. */
 @media (prefers-reduced-motion: reduce) {
   :is(button, summary, a[href], [role='button'])::after {
     animation: none;

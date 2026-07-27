@@ -11,7 +11,7 @@ import { Highlights } from './world/Highlights';
 import type { InteractZone } from './world/interact';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
-import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
+import { CuteODex, Hud, TapBurst, TouchControls, WhatsNew } from './ui';
 import { ActionButton } from './ui/ActionButton';
 import { ParkMap } from './ui/ParkMap';
 import { SignReader } from './ui/SignReader';
@@ -55,6 +55,7 @@ export class Game {
   readonly signReader: SignReader;
   readonly actionButton: ActionButton;
   readonly highlights: Highlights;
+  readonly tapBurst: TapBurst;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly parade: Parade;
@@ -184,6 +185,11 @@ export class Game {
     // The HUD clears the overlay when it is built, so everything else that puts
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
+    // The HIGHLIGHT RULE's activation flash, for the interface: press any
+    // button anywhere and the same rainbow radiates off it. One delegated
+    // listener and a pool of four overlays — see `ui/TapBurst.ts`; no panel
+    // has to know it exists.
+    this.tapBurst = new TapBurst(uiRoot);
     // ...including the world's own HUD. The face-painting stall owns a picker
     // panel and a proximity hint, and `World` was built ~80 lines ago, so it
     // could not have mounted them itself without the line above deleting them.
@@ -416,6 +422,7 @@ export class Game {
     this.started = true;
     this.input.attach();
     this.pointer.attach();
+    this.tapBurst.attach();
     this.loop.start();
   }
 
@@ -424,6 +431,7 @@ export class Game {
     this.loop.stop();
     this.input.detach();
     this.pointer.detach();
+    this.tapBurst.detach();
   }
 
   dispose(): void {
@@ -431,6 +439,7 @@ export class Game {
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();
     this.tapNavigator.dispose();
+    this.tapBurst.dispose();
     this.touchControls?.dispose();
     this.stairMenu.dispose();
     this.transitions.dispose();
