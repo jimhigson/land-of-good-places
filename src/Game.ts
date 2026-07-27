@@ -162,6 +162,11 @@ export class Game {
         // ground; reading one is a proximity+facing gate and a button.
         if (this.parade.handleTap(point)) return;
         this.tapNavigator.handleTap(point);
+        // The HIGHLIGHT RULE's activation flash. Fired here, on the tap itself,
+        // rather than on arrival: a phone has no hover at all, so this burst is
+        // the only thing that tells a child her tap landed on the thing she
+        // aimed at. Tapping open ground is already answered by the tap marker.
+        this.highlights.flashZone(this.tapNavigator.destinationZone);
       },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.

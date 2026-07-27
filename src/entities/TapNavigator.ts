@@ -163,6 +163,18 @@ export class TapNavigator implements GameSystem {
     return this.active;
   }
 
+  /**
+   * The interactable the current walk is headed for, or null for plain ground.
+   *
+   * Read straight after {@link handleTap} to find out what a finger actually
+   * landed on — which is what the HIGHLIGHT RULE's activation flash needs, since
+   * on a phone a tap must be confirmed the moment it lands rather than when the
+   * walk it started finishes.
+   */
+  get destinationZone(): InteractZone | null {
+    return this.zone;
+  }
+
   /** Drops the current destination. Called when the player takes over. */
   cancel(): void {
     this.active = false;

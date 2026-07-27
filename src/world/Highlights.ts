@@ -15,7 +15,13 @@ import {
 } from 'three';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
-import { rainbowRingGeometry } from '../art/effects/rainbowRing';
+import {
+  createRainbowRings,
+  createRainbowSparks,
+  rainbowRingGeometry,
+  type RainbowRings,
+  type RainbowSparks,
+} from '../art/effects/rainbowRing';
 import {
   buildHighlightShell,
   createRainbowOutlineMaterial,
@@ -85,6 +91,16 @@ const MAX_HOVER_DISTANCE = 90;
 const PULSE_HZ = 0.5;
 const PULSE_DEPTH = 0.12;
 
+/**
+ * The clock the activation flash runs on when the park's has stopped.
+ *
+ * Pressing E on a shop opens a panel, and a panel pauses the park — so the very
+ * flash that says "you touched it" would freeze half-played, which reads as a
+ * glitch rather than as confirmation. The flash is UI feedback, not gameplay, so
+ * it keeps its own nominal tick while everything else is held still.
+ */
+const FROZEN_DT = 1 / 60;
+
 export interface HighlightSources {
   /** Every interactable in the park this frame — the same list the action button walks. */
   zones(): readonly InteractZone[];
@@ -117,6 +133,26 @@ export class Highlights implements GameSystem {
   private readonly scratchPoint = new Vector3();
   private hasCursor = false;
 
+  /**
+   * The activation flash: the hop rainbow's own pool, fired at whatever was
+   * just used. Reused rather than rewritten — it is already a rainbow that
+   * flicks outward, rises and fades over six-tenths of a second, which is
+   * exactly what the rule asks for, and a second implementation of that would
+   * be a second rainbow to keep in step with this one.
+   */
+  private readonly rings: RainbowRings;
+  private readonly sparks: RainbowSparks;
+
+  /**
+   * What was primed on the last frame the park was being played.
+   *
+   * The press that uses something is the same press that opens the panel over
+   * it, and by the time this system runs that frame the action button has
+   * already gone dark. Flashing what was primed a moment ago is what lets a
+   * shop, a ride or a mini-game confirm the tap that started it.
+   */
+  private lastPrimed: InteractZone | null = null;
+
   constructor(
     scene: Scene,
     private readonly camera: IsoCamera,
@@ -138,6 +174,10 @@ export class Highlights implements GameSystem {
       transparent: true,
       depthWrite: false,
     });
+
+    this.rings = createRainbowRings();
+    this.sparks = createRainbowSparks();
+    this.group.add(this.rings.root, this.sparks.root);
 
     for (let i = 0; i < SLOT_COUNT; i += 1) {
       const slot = new HighlightSlot(this.material, this.ringGeometry, this.ringMaterial);
@@ -162,7 +202,32 @@ export class Highlights implements GameSystem {
     this.hasCursor = false;
   }
 
+  /**
+   * "You touched it": half a second of radiating rainbow and a scatter of
+   * stars, at whatever was just used.
+   *
+   * Public because a tap is confirmed the moment it lands, not when the walk it
+   * started finishes — `Game` calls this from the tap handler. Every other way
+   * of using something (E, the pad, the action pill, arriving somewhere you
+   * tapped) comes through the `interact` action and is picked up in
+   * {@link update}, so there is one flash however you played.
+   */
+  flashZone(zone: InteractZone | null): void {
+    if (!zone) return;
+    const radius = Math.max(0.7, zone.pickRadius);
+    // Small things get a quieter flash: the hop ring is sized for a child
+    // landing, and a full-strength one around a single flower is a firework.
+    this.rings.burst(zone.x, zone.y, zone.z, Math.min(1, 0.5 + radius * 0.18));
+    this.sparks.burst(zone.x, zone.y, zone.z, radius);
+  }
+
   update(context: FrameContext): void {
+    // The flash keeps its own clock — see FROZEN_DT. Everything else here is
+    // free to stop when the park does.
+    const effectDt = context.dt > 0 ? context.dt : FROZEN_DT;
+    this.rings.update(effectDt);
+    this.sparks.update(effectDt);
+
     // The sweep runs even while nothing is highlighted, so a highlight that
     // appears mid-sweep is already in step with the next one.
     const map = this.material.map;
@@ -172,7 +237,17 @@ export class Highlights implements GameSystem {
     this.material.opacity = pulse;
     this.ringMaterial.opacity = pulse * 0.9;
 
+    // Every input method meets here: the E key, a pad button, the action pill
+    // and a tap that has just walked somewhere all raise `interact`.
+    const activated = context.input.justPressed('interact');
+
     if (this.sources.blocked()) {
+      // The press that used the thing is the press that opened the panel over
+      // it, so this frame is where a shop, a ride or a stall gets confirmed.
+      if (activated) {
+        this.flashZone(this.lastPrimed);
+        this.lastPrimed = null;
+      }
       for (const slot of this.slots) slot.hide();
       this.setPointerCursor(false);
       return;
@@ -184,6 +259,9 @@ export class Highlights implements GameSystem {
     const primed = this.sources.primedZone();
     const sign = this.sources.primedSign();
 
+    if (activated) this.flashZone(primed ?? this.lastPrimed);
+    this.lastPrimed = primed;
+
     this.showZone(0, hovered);
     // Never draw the same thing twice: standing next to the very thing you are
     // pointing at is the common case, not the exception.
@@ -192,6 +270,8 @@ export class Highlights implements GameSystem {
   }
 
   dispose(): void {
+    this.rings.dispose();
+    this.sparks.dispose();
     for (const slot of this.slots) slot.dispose();
     for (const shell of this.shells.values()) shell?.geometry.dispose();
     this.shells.clear();
