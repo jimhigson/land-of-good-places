@@ -76,6 +76,14 @@ Unless the grown-ups turn on **Mayhem mode**…
   any ride or mode, now or in future. Any existing control scheme that turns
   a vehicle by holding a direction must be converted to "press a direction,
   travel that way".
+
+  *Where this lives in the code (27 July 2026):* `src/core/screenBasis.ts` —
+  the one place that answers "which way is up the screen, on the ground",
+  and where the rule and its reasoning are written down for whoever builds
+  the next steerable thing. Every camera rig (the park, the dodgems rink,
+  the water-fight garden) reads its ground axes from it, so a direction
+  means the same thing in every scene and in the castle interior, which
+  sits six hundred metres away in world space but under the same camera.
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
   API, **and touch on phones/tablets: tap a spot and the character walks
   there** (tap-to-move), with tap-on-things to interact. **Double-tap a

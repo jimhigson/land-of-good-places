@@ -350,8 +350,13 @@ function isButtonPressed(pad: Gamepad, index: number): boolean {
 /**
  * Radial dead-zone: kills stick drift near centre while keeping the full 0..1
  * analogue range beyond it, so a gentle push really is a gentle walk.
+ *
+ * Exported because a mini-game that reads the pad itself — the dodgems, which
+ * needs a *direction* and so cannot go through the framework's one-button
+ * input — must feel identical to walking about the park. One stick, one feel,
+ * whichever side of a stall door the child is on.
  */
-function applyRadialDeadzone(x: number, y: number, deadzone: number): [number, number] {
+export function applyRadialDeadzone(x: number, y: number, deadzone: number): [number, number] {
   const length = Math.hypot(x, y);
   if (length < deadzone) return [0, 0];
   const scaled = Math.min(1, (length - deadzone) / (1 - deadzone)) / length;

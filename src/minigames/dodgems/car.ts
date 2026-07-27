@@ -53,8 +53,9 @@ export interface CarModel {
   /**
    * Per-frame animation.
    *
-   * `speed` is m/s, `turn` is the signed turn rate in rad/s, `squash` is 0..1
-   * of "just got walloped".
+   * `speed` is m/s, `turn` is how hard the nose is swinging round to face the
+   * way the car is travelling (-1..1, signed; 1 = slewing flat out), `squash`
+   * is 0..1 of "just got walloped".
    */
   animate(dt: number, elapsed: number, speed: number, turn: number, squash: number): void;
   setExpression(expression: Expression): void;
@@ -206,6 +207,14 @@ export function createCar(options: CarOptions): CarModel {
     animate(dt: number, elapsed: number, speed: number, turn: number, squash: number): void {
       // Lean into the corner. Damped rather than driven straight from `turn`,
       // so a car flicked sideways by a bump rocks instead of snapping.
+      //
+      // 0.34 is unchanged, but `turn` no longer means what it did: it was
+      // radians of nose-vs-velocity drift, a couple of tenths in ordinary
+      // driving, and is now a 0..1 fraction of the maximum slew rate that pins
+      // at 1 through a decisive change of direction. Same multiplier, so the
+      // lean is roughly three times deeper than it used to be in the gentle
+      // cases. Deliberate — see the note in `Dodgems.animate` — and this is
+      // the number to lower if the family says the cars heel over too far.
       lean = damp(lean, clamp01(Math.abs(speed) / 6) * turn * 0.34, 0.1, dt);
       chassis.rotation.z = -lean;
       chassis.rotation.x = clamp01(speed / 7) * 0.06;

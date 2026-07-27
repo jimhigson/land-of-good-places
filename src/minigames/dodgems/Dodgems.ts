@@ -9,7 +9,8 @@ import {
   Scene,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { Rng, TAU, clamp, clamp01, damp, turnTowards } from '../../core/mathUtils';
+import { Rng, TAU, angleDelta, clamp, clamp01, damp, turnTowards } from '../../core/mathUtils';
+import { screenBasis, screenToWorldX, screenToWorldZ } from '../../core/screenBasis';
 import { gameStore } from '../../state';
 import { createArena, type Arena } from './arena';
 import { createCar, type CarModel, type DriverKind } from './car';
@@ -43,9 +44,13 @@ import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
  *   rivals go for it too so it goes off even when the player is doing something
  *   else, and hitting it fires all four gags at once.
  *
- * Driving is deliberately the simplest thing that is still fun: hold to go,
- * point where you want to be. There is no brake, no reverse and no handbrake,
- * because there is no situation in this rink where a six-year-old needs one.
+ * Driving is deliberately the simplest thing that is still fun: **press a
+ * direction and the car goes that way**, immediately, and holding the button
+ * with no direction carries on. There is no brake, no reverse and no
+ * handbrake, because there is no situation in this rink where a six-year-old
+ * needs one — and there is nothing to steer *round*, because the car does not
+ * turn before it goes. See {@link Dodgems.driveCars} for the CONTROL RULE this
+ * obeys and the two bugs it deleted.
  */
 
 // ------------------------------------------------------------------- tuning
@@ -63,6 +68,22 @@ const RESULT_TIMEOUT = 11;
 
 /** Push while the go button is held, m/s². */
 const THRUST = 13;
+/**
+ * Thrust for the gentlest ask that still counts as one, as a fraction of full.
+ *
+ * The player's push is scaled by how far the stick or thumb is pushed, so a
+ * gentle push really is a gentle drive — but not scaled all the way down to
+ * nothing. A thumb a hair past the dead-zone, or a child resting a thumb while
+ * leaning on the go button, would otherwise ask for ~2% thrust and the car
+ * would sit there looking broken. From here to full is the analogue range: it
+ * settles at about 2.2 m/s against 3.8 m/s flat out, so half speed for a
+ * feather-touch, which is a difference a child can feel and steer by.
+ *
+ * Only ever reached by a genuinely analogue control. Keys and the d-pad are
+ * all-or-nothing and hand in a full-length direction, so they get full thrust,
+ * as does the go button pressed with no direction at all.
+ */
+const GENTLEST_PUSH = 0.4;
 /** Everything on this floor slides to a stop eventually. */
 const DRAG = 1.65;
 /** Cruising speed under power. Rivals get less. */
@@ -70,8 +91,31 @@ const PLAYER_TOP_SPEED = 7.4;
 const RIVAL_TOP_SPEED = 5.9;
 /** Nothing may exceed this, however hard it is hit. */
 const SPEED_LIMIT = 13;
-/** How fast a car swings its nose round, rad/s. Snappy: this is not a lorry. */
+/**
+ * How fast a car swings its nose round to face the way it is **already**
+ * travelling, rad/s. Snappy: this is not a lorry.
+ *
+ * All but cosmetic, and deliberately so — see the CONTROL RULE note on
+ * {@link Dodgems.driveCars}. No *steering* is downstream of it: while a
+ * direction is being asked for, the car drives that way whatever its nose is
+ * doing, and this number only decides how quickly the model catches up.
+ *
+ * The one exception, and the reason this is "all but" rather than "purely":
+ * the go-button-with-no-direction branch drives along `car.yaw`, so at zero
+ * the nose would never catch up with anything and that branch would drive the
+ * spawn heading for ever. It is also the divisor for `car.turn`, the lean
+ * signal, which would be undefined at zero.
+ */
 const TURN_RATE = 5.2;
+
+/**
+ * Below this speed the nose stops chasing the velocity, m/s.
+ *
+ * A car nudging along at a hundredth of a metre a second has a direction of
+ * travel that is mostly noise, and a model that snapped round to face it would
+ * shiver. Mirrors `Player`'s own facing threshold for the same reason.
+ */
+const FACING_SPEED = 0.4;
 
 /** Seconds a driver looks startled after a wallop. */
 const SURPRISE_SECONDS = 0.7;
@@ -105,6 +149,16 @@ const CAMERA_YAW = 0.42;
  */
 const CAMERA_PITCH = 0.74;
 const CAMERA_DISTANCE = 70;
+
+/**
+ * The rink's ground-plane axes, solved once from the fixed camera yaw.
+ *
+ * Steering, and the camera's own panning, both read this — so "up the screen"
+ * cannot come to mean one thing to the child's thumb and another to the view
+ * that thumb is looking at. See `core/screenBasis.ts` for the CONTROL RULE.
+ */
+const BASIS = screenBasis(CAMERA_YAW);
+
 /** World radius the framing tries to keep on screen. */
 const FRAME_RADIUS = ARENA_RADIUS + 2.6;
 /** Never zoom out past this, however narrow the phone is — see `resize`. */
@@ -151,7 +205,10 @@ interface Car {
   z: number;
   vx: number;
   vz: number;
+  /** Which way the model points. Follows the velocity; never steers it. */
   yaw: number;
+  /** How hard the nose is swinging this frame, -1..1. Drives the lean only. */
+  turn: number;
   squash: number;
   surprise: number;
   giggleCooldown: number;
@@ -316,6 +373,7 @@ class Dodgems implements MiniGame {
       // the centre, which is funny once and then is simply where the ride is.
       // Yaw 0 looks down +Z, the park's convention.
       yaw: Math.atan2(-Math.sin(angle), Math.cos(angle)),
+      turn: 0,
       squash: 0,
       surprise: 0,
       giggleCooldown: 0,
@@ -392,23 +450,46 @@ class Dodgems implements MiniGame {
    * only the choice of direction differs. That is deliberate: it means a rival
    * bumping the player and the player bumping a rival feel identical, and it
    * leaves one set of numbers to tune rather than two.
+   *
+   * **The CONTROL RULE, which this method exists to obey** (GAME_DESIGN.md;
+   * the reasoning lives in `core/screenBasis.ts`). Press a direction and the
+   * car goes *that way*, straight away. The car's own heading is never part of
+   * deciding where the next push goes — the push is aimed by the thumb alone,
+   * through the rink's fixed screen basis, and the model is turned afterwards
+   * to face however the car ends up travelling.
+   *
+   * This replaced a scheme where the stick chose a **target heading**, the car
+   * swung its nose towards it at {@link TURN_RATE} and thrust along the nose.
+   * Two family-reported bugs fall out of that design rather than out of any
+   * one line of it, and both are gone by construction here:
+   *
+   * - **"Left and right are inverted."** They were not, but a car that keeps
+   *   its old momentum while its nose swings round *reads* as inverted: press
+   *   left at speed and the car carried on rightwards for the best part of a
+   *   second, pointing the wrong way while it did. Now the leftward push lands
+   *   on the velocity the same frame the key goes down.
+   * - **"The car cannot rotate all the way round."** Holding left aimed at a
+   *   fixed compass direction, so the car turned until it faced screen-left
+   *   and then stopped — an angle clamp, from a child's point of view. There
+   *   is no target angle here to be clamped at.
+   *
+   * **How hard, as well as which way.** The player's push is scaled by how far
+   * the stick or thumb is deflected, floored at {@link GENTLEST_PUSH} — a nudge
+   * is a potter, full lock is flat out. Only the player: a rival's ask is
+   * metres to wherever it is going, which says nothing about speed.
    */
   private driveCars(dt: number, playerGo: boolean, steerX: number, steerY: number): void {
-    // Screen up/right, on the ground plane. Steering is given in screen space
-    // because that is what the child's thumb means: "up" is away from them.
-    const upX = -Math.sin(CAMERA_YAW);
-    const upZ = -Math.cos(CAMERA_YAW);
-    const rightX = Math.cos(CAMERA_YAW);
-    const rightZ = -Math.sin(CAMERA_YAW);
-
     for (const car of this.cars) {
+      // Where this car is asking to go, in world metres. The player's ask is
+      // screen-space (that is what a thumb means: "up" is away from the
+      // child); a rival's is simply the way to wherever it is pottering off to.
       let wantX = 0;
       let wantZ = 0;
       let going = false;
 
       if (car.isPlayer) {
-        wantX = rightX * steerX + upX * steerY;
-        wantZ = rightZ * steerX + upZ * steerY;
+        wantX = screenToWorldX(BASIS, steerX, steerY);
+        wantZ = screenToWorldZ(BASIS, steerX, steerY);
         going = playerGo;
       } else {
         this.thinkRival(car, dt);
@@ -417,23 +498,50 @@ class Dodgems implements MiniGame {
         going = true;
       }
 
-      const length = Math.hypot(wantX, wantZ);
-      if (length > 0.001) {
-        car.yaw = turnTowards(car.yaw, Math.atan2(wantX, wantZ), TURN_RATE * dt);
+      // Split the ask into a pure direction and, for the player only, how hard
+      // it was asked for.
+      //
+      // The direction is all a rival's ask has to say: two metres from its
+      // target and twenty metres from it are both simply "that way", so its
+      // length is metres and gets normalised away.
+      //
+      // The player's length is not metres, it is how far the stick or thumb is
+      // pushed (`steering.ts` clips it to a unit circle, so a diagonal is a
+      // diagonal), and throwing that away would make every deflection past the
+      // dead-zone full throttle. It is kept, floored at {@link GENTLEST_PUSH}
+      // so the gentlest ask still drives, and used to scale the push below.
+      let driveX = 0;
+      let driveZ = 0;
+      let throttle = 1;
+      const wantLength = Math.hypot(wantX, wantZ);
+      if (wantLength > 0.001) {
+        driveX = wantX / wantLength;
+        driveZ = wantZ / wantLength;
+        if (car.isPlayer) {
+          throttle = GENTLEST_PUSH + (1 - GENTLEST_PUSH) * Math.min(1, wantLength);
+        }
+      } else if (going) {
+        // Go pressed with nothing else said — a child who only ever holds the
+        // button, or a thumb parked dead centre. Carry on the way the car is
+        // already pointing, which is the one-button game the framework
+        // promises. Not tank controls: no input ever *changes* this heading,
+        // it only ever follows the car's own travel.
+        driveX = Math.sin(car.yaw);
+        driveZ = Math.cos(car.yaw);
       }
 
-      // Forward is +Z at yaw 0 — the park's asset convention, so the driver
-      // model needs no fudge rotation.
-      const forwardX = Math.sin(car.yaw);
-      const forwardZ = Math.cos(car.yaw);
-
-      if (going) {
-        const speed = Math.hypot(car.vx, car.vz);
+      if (going && (driveX !== 0 || driveZ !== 0)) {
         // Ease the push off as the car approaches its cruising speed, so top
-        // speed is a gentle ceiling rather than a wall.
-        const room = clamp01(1 - speed / car.topSpeed);
-        car.vx += forwardX * THRUST * room * dt;
-        car.vz += forwardZ * THRUST * room * dt;
+        // speed is a gentle ceiling rather than a wall. Measured **along the
+        // asked-for direction**, not as raw speed: a car already flat out to
+        // the right has no room left rightwards, but must still get a full
+        // push when the child asks for left — measuring raw speed would leave
+        // a fast car unable to change direction at all, which is the very
+        // sluggishness this rework is here to delete.
+        const along = car.vx * driveX + car.vz * driveZ;
+        const room = clamp01(1 - along / car.topSpeed);
+        car.vx += driveX * THRUST * throttle * room * dt;
+        car.vz += driveZ * THRUST * throttle * room * dt;
       }
 
       car.vx -= car.vx * DRAG * dt;
@@ -447,6 +555,22 @@ class Dodgems implements MiniGame {
 
       car.x += car.vx * dt;
       car.z += car.vz * dt;
+
+      // --- the model catches up ------------------------------------------
+      // Last, and pointedly so: the nose follows the *velocity*, which by this
+      // point is already decided. Nothing above reads `car.yaw` except the
+      // "go pressed, nothing asked" case, which is only ever this same
+      // travel direction handed back. `atan2(x, z)` is the park's heading
+      // convention — it increases anticlockwise about +Y, exactly as
+      // three.js's own `rotation.y` does, so the model needs no fudge.
+      const previousYaw = car.yaw;
+      if (speed > FACING_SPEED) {
+        car.yaw = turnTowards(car.yaw, Math.atan2(car.vx, car.vz), TURN_RATE * dt);
+      }
+      // How hard the car is swinging round, -1..1 (1 = the nose is slewing
+      // flat out). The model leans on this — a car flicked sideways by a
+      // bump rocks, a car changing its mind at speed heels over into it.
+      car.turn = dt > 0 ? clamp(angleDelta(previousYaw, car.yaw) / (TURN_RATE * dt), -1, 1) : 0;
 
       car.squash = Math.max(0, car.squash - dt * 2.2);
       car.surprise = Math.max(0, car.surprise - dt);
@@ -669,11 +793,22 @@ class Dodgems implements MiniGame {
       car.model.root.position.set(car.x, 0, car.z);
       car.model.root.rotation.y = car.yaw;
       const speed = Math.hypot(car.vx, car.vz);
-      // Signed turn: which way the nose is swinging relative to where the car
-      // is actually sliding. That is what the model leans into.
-      const drift = Math.atan2(car.vx, car.vz) - car.yaw;
-      const turn = Math.atan2(Math.sin(drift), Math.cos(drift));
-      car.model.animate(dt, elapsed, speed, clamp(turn, -1, 1), car.squash);
+      // The lean comes from how hard the nose swung this frame (computed in
+      // `driveCars`). It used to be measured as the nose's drift away from the
+      // velocity — which is always near zero now that the nose simply follows
+      // the velocity, so the signal moved to the swing itself.
+      //
+      // **This is a visual re-tune, not just a refactor, and it is meant.**
+      // The units changed with the signal: `car.turn` used to be radians of
+      // drift (clamped ±1, but in practice a couple of tenths in ordinary
+      // driving), and is now a fraction of the maximum slew rate, which sits
+      // near ±1 through any decisive change of direction. `car.ts` still
+      // multiplies by the same 0.34, so the cars heel over roughly three times
+      // deeper than they did in the gentle cases. That is the look we want
+      // from a game about throwing a bumper car about — but it is a real
+      // change to how the ride reads, so it wants the family's eyes on it, and
+      // it is one number in `car.ts` to back off if it is too much.
+      car.model.animate(dt, elapsed, speed, car.turn, car.squash);
       car.model.setExpression(car.surprise > 0 ? 'surprised' : 'happy');
     }
 
@@ -693,7 +828,12 @@ class Dodgems implements MiniGame {
     if (this.rideTime > 2.5) {
       this.taughtSteering = true;
       const touch = this.context?.touch ?? false;
-      this.hud?.shout(touch ? 'Slide your thumb to steer!' : 'Steer with the arrow keys!', 3);
+      // Says what the controls now actually do: a direction is a place to go,
+      // not a wheel to turn (the CONTROL RULE — see `driveCars`).
+      this.hud?.shout(
+        touch ? 'Slide your thumb where you want to go!' : 'Press an arrow to go that way!',
+        3,
+      );
     }
   }
 
@@ -748,10 +888,7 @@ class Dodgems implements MiniGame {
     const halfHeight = this.viewHeight / 2;
     const sinPitch = Math.sin(CAMERA_PITCH);
 
-    const upX = -Math.sin(CAMERA_YAW);
-    const upZ = -Math.cos(CAMERA_YAW);
-    const rightX = Math.cos(CAMERA_YAW);
-    const rightZ = -Math.sin(CAMERA_YAW);
+    const { upX, upZ, rightX, rightZ } = BASIS;
 
     // How far the focus may wander before the rink's edge would leave the frame.
     const panRight = Math.max(0, FRAME_RADIUS - halfWidth);

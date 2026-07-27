@@ -12,6 +12,7 @@ import {
   CAMERA_ZOOM_STEP,
 } from './constants';
 import { clamp, damp, DEG } from './mathUtils';
+import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
 
 /**
@@ -65,9 +66,14 @@ export class IsoCamera {
     );
 
     // The camera sits at +offset and looks back at the focus, so "into the
-    // screen" is the negated horizontal part of that offset.
-    this.forwardVector = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
-    this.rightVector = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+    // screen" is the negated horizontal part of that offset. Solved by the
+    // shared `screenBasis` rather than inline, so the park, the dodgems rink
+    // and the water-fight garden cannot drift into three different ideas of
+    // which way "up on the stick" points — see `core/screenBasis.ts`, which
+    // is also where the CONTROL RULE is written down.
+    const basis = screenBasis(yaw);
+    this.forwardVector = new Vector3(basis.upX, 0, basis.upZ);
+    this.rightVector = new Vector3(basis.rightX, 0, basis.rightZ);
 
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
     this.camera.position.copy(this.offset);
