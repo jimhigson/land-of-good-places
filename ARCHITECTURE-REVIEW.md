@@ -492,3 +492,50 @@ audited at all.
 **Deferred until 19:00**, and no time is lost by that: runtime profiling
 needs a working browser, and the shared browser profile has been locked all
 session. A Claude Code restart clears it.
+
+---
+
+## Review 3 — the control/camera churn (27 July 2026, 21:50)
+
+Reviewed the hour's highest-churn area: `screenBasis` and the three systems
+that adopted it, plus the highlight system that landed alongside.
+
+**What is genuinely good, and worth not undoing.** The asset contract holds:
+`Highlights` never touches `root.scale` or `body.scale` — outline shells are
+separate meshes carrying a copy of the target's world matrix. No per-frame
+allocation: scratch `Matrix4`/`Vector3` are fields, three outline slots are
+allocated at construction. The TEXT/UI-SCALE rule is now machine-enforced —
+`scripts/check-text-sizes.mjs` runs as the first build step and passes on
+main. The HIGHLIGHT rule is enforced *by construction*: a zone that supplies
+no highlight target still gets a ring sized from its own `pickRadius`, so
+registering a tap target is registering a highlight and no call site can
+forget. That is the right shape for an absolute rule.
+
+**F1 — `WaterFight` hard-codes the park's camera pitch and claims it matches
+(actionable).** `src/minigames/waterFight/WaterFight.ts:108` reads:
+
+    /** Camera pitch, matching the park's `CAMERA_PITCH_DEGREES`. */
+    const CAMERA_PITCH = 38 * DEG;
+
+The file imports nothing from `core/constants.ts`. `CAMERA_PITCH_DEGREES` is
+38 today, so the comment is true *today* — and stays written down as true
+after someone changes the constant, at which point the water fight silently
+keeps a pitch the rest of the game has left behind. Import the constant.
+
+This is the **same defect class** the peer review caught in `screenBasis.ts`
+an hour ago (a comment asserting an invariant the code does not guarantee),
+which suggests it is a habit in this codebase rather than one slip. A comment
+that says "matching X" without importing X is a claim with no mechanism.
+
+**F2 — the eye-offset formula is duplicated (actionable, small).**
+`IsoCamera`'s constructor and `WaterFight.applyCamera` both compute
+`(sin(yaw)·h, sin(pitch)·d, cos(yaw)·h)` with `h = cos(pitch)·d`. The
+`screenBasis` extraction unified the *ground basis* derivation but left the
+*camera placement* in two places. The water fight is the one camera in the
+game whose yaw moves, so it cannot simply use `IsoCamera` — but the offset
+formula itself should be one exported function taking a yaw.
+
+**Not a finding:** `railRacer` and `spookyHouse` do not import `screenBasis`.
+Verified they have no lateral or directional control, so there is nothing for
+a basis to interpret. `Dodgems` deliberately uses its own pitch (0.74 rad)
+and distance — a different camera on purpose, not drift.

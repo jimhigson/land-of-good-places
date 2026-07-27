@@ -183,6 +183,12 @@ Slot in whenever an agent is free; none of these block anything.
   NPCs too. *Graphic-design agent for the modelling.*
 - **Save / continue** — autosave every 5s and on unload; on return, offer
   continue or start again. Versioned format from day one.
+- **Camera-constant duplication (Review 3, F1/F2)** — `WaterFight` hard-codes
+  `38 * DEG` with a comment claiming it matches the park's
+  `CAMERA_PITCH_DEGREES` while importing nothing; and the eye-offset formula
+  is copied between `IsoCamera` and `WaterFight`. Import the constant, and
+  export the offset formula as one function taking a yaw. Small, and it stops
+  a silent divergence the next time the camera is tuned.
 - **Dust cloud behind the player when running** — pooled particles, no
   per-puff allocation (see Wave 1b)
 - Water-fight portraits: bigger heads/names, split left+right in landscape,
