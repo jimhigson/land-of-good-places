@@ -1,4 +1,5 @@
 import {
+  Box3,
   Group,
   InstancedMesh,
   Matrix4,
@@ -102,15 +103,45 @@ export const PUFF_DISPLAY_NAME = 'Trilla';
  * matching, because `root.scale` is reserved for squash-and-stretch by the
  * asset contract and `body.scale` is written every frame by `applyWalk`.
  */
-const PET_RENDER_HEIGHT = 1.46;
+export const PET_RENDER_HEIGHT = 1.46;
 
-/** Wraps `body` in a group scaled so the creature stands `PET_RENDER_HEIGHT` tall. */
-function sizeToStandard(root: Group, body: Group, naturalHeight: number): void {
+/**
+ * Opens the sizer. Call before building the body; close it with
+ * {@link sizeToStandard} once every last ear is on.
+ */
+function petSizer(root: Group, body: Group): Group {
   const sizer = new Group();
   sizer.name = 'petSizer';
-  sizer.scale.setScalar(PET_RENDER_HEIGHT / naturalHeight);
   sizer.add(body);
   root.add(sizer);
+  return sizer;
+}
+
+/**
+ * Scales the sizer so the finished creature stands exactly
+ * {@link PET_RENDER_HEIGHT} tall — **measured, never hand-written**.
+ *
+ * This used to take a natural height as a literal argument, and every recipe
+ * pet passed the same `0.52`. That number was the top of the *skull*, so the
+ * ears — the whole point of a bunny — were left out of the sum and then
+ * multiplied by the sizer along with everything else. The result was the exact
+ * opposite of what this function is for: a bunny rendered **2.12 m** tall (as
+ * tall as the player), a mouse 1.80, a kitten 1.71, and only the earless puff
+ * anywhere near 1.46. It also put every pet's name label, which the parade
+ * hangs at `height + 0.42`, somewhere inside its head.
+ *
+ * Measuring the built body closes that off for good: add a taller ear, a hat,
+ * a horn, and the pet is still 1.46 m tall without anybody remembering to
+ * re-measure by hand. It costs one `Box3` per pet, at construction only.
+ *
+ * The box is taken from the origin (the paws — the asset contract puts every
+ * origin at the base) up to the highest point, outline hulls and all.
+ */
+function sizeToStandard(sizer: Group, body: Group): void {
+  sizer.scale.setScalar(1);
+  sizer.updateMatrixWorld(true);
+  const natural = new Box3().setFromObject(body).max.y;
+  if (natural > 1e-4) sizer.scale.setScalar(PET_RENDER_HEIGHT / natural);
 }
 
 export function createPet(kind: PetKind): PetHandle {
@@ -123,7 +154,7 @@ export function createPet(kind: PetKind): PetHandle {
   const root = new Group();
   root.name = `pet.${kind}`;
   const body = new Group();
-  sizeToStandard(root, body, 0.52);
+  const sizer = petSizer(root, body);
 
   const furMat = toonMaterial(recipe.fur);
 
@@ -194,6 +225,9 @@ export function createPet(kind: PetKind): PetHandle {
   feet.position.set(0, 0.045, 0.09);
   feet.scale.set(2.1, 0.7, 1.2);
   body.add(feet);
+
+  // Ears and all, now that they are on.
+  sizeToStandard(sizer, body);
 
   return {
     root,
@@ -321,8 +355,8 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
   const body = new Group();
   // As a pet it matches every other pet's height; as a hat it keeps the size
   // that sits correctly on a head.
-  if (variant === 'pet') sizeToStandard(root, body, 0.5);
-  else root.add(body);
+  const sizer = variant === 'pet' ? petSizer(root, body) : null;
+  if (!sizer) root.add(body);
 
   const head = new Group();
   body.add(head);
@@ -368,6 +402,10 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
   }
 
   head.position.y = PUFF_CENTRE_Y;
+
+  // Measured before the song notes join the head: a burst of floating notes is
+  // not part of how tall the creature is.
+  if (sizer) sizeToStandard(sizer, body);
 
   // A pet's origin is the ground, so this is 0; a hat's is the crown anchor,
   // so `hats.ts` passes how far this body needs to sink below it.
