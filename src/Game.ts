@@ -106,6 +106,9 @@ export class Game {
     // above, parented to the head instead of the hairline.
     this.wornHat = new WornHat(this.player.model.hatAnchor);
     this.addSystem(this.wornHat);
+    // So the name label can size itself off whatever hat is actually worn —
+    // see `Player.labelTopHeight`.
+    this.player.wornHat = this.wornHat;
 
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means

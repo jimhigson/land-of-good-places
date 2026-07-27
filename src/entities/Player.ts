@@ -20,6 +20,7 @@ import type { Expression } from '../art/style/faces';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { NameLabel } from '../ui/NameLabel';
 import { gameStore } from '../state';
+import type { WornHat } from './WornHat';
 
 /** Extra speed multiplier while the sprint action is held. */
 const SPRINT_MULTIPLIER = 1.5;
@@ -115,6 +116,14 @@ export class Player implements GameSystem {
    */
   groundSampler: GroundSampler | null = null;
 
+  /**
+   * The system that draws whatever hat is currently worn — left `null` until
+   * `Game` wires it up (it is built just after `Player`, from
+   * `this.model.hatAnchor`; see `Game.ts`). Read only to size the name label
+   * so it clears the hat instead of sitting at a fixed bare-head height.
+   */
+  wornHat: WornHat | null = null;
+
   private readonly desiredVelocity = new Vector3();
   private readonly moveDirection = new Vector3();
   private readonly previousPosition = new Vector3();
@@ -184,7 +193,7 @@ export class Player implements GameSystem {
     this.group.add(this.model.root);
 
     this.label = new NameLabel(playerState.name);
-    this.label.sprite.position.y = this.model.height + 0.42;
+    this.label.sprite.position.y = this.labelTopHeight() + 0.42;
     this.group.add(this.label.sprite);
 
     this.position.copy(spawn);
@@ -467,6 +476,21 @@ export class Player implements GameSystem {
     return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
   }
 
+  /**
+   * Top of the character right now, in metres above the feet, for the name
+   * label to clear — bare hair height normally, or the top of whatever hat is
+   * worn when that reaches higher. `Math.max` rather than a straight swap
+   * because a few hats (the flower crown, say) sit lower than the hair itself
+   * does; only a hat that actually reaches above the hair should ever move
+   * the label, so a bare-headed child's label — or one in a low hat — stays
+   * exactly where it always was.
+   */
+  private labelTopHeight(): number {
+    const hatHeight = this.wornHat?.hatHeight ?? null;
+    if (hatHeight === null) return this.model.height;
+    return Math.max(this.model.height, this.model.hatAnchorHeight + hatHeight);
+  }
+
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;
     const gait = this.gait;
@@ -526,8 +550,7 @@ export class Player implements GameSystem {
     }
 
     // The name label counter-rotates so it never tips with the character.
-    this.label.sprite.position.y =
-      this.model.height + 0.42 + bob + Math.sin(elapsed * 1.3) * 0.03;
+    this.label.sprite.position.y = this.labelTopHeight() + 0.42 + bob + Math.sin(elapsed * 1.3) * 0.03;
     // Kept a constant size on screen rather than in the world — see
     // `NameLabel.updateScreenSize` for why a fixed world scale is the bug.
     // Distance is measured from what the camera is *looking at*, not from the

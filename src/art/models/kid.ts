@@ -1,4 +1,4 @@
-import { Color, Group, Mesh, SphereGeometry, TorusGeometry } from 'three';
+import { Color, Group, Mesh, SphereGeometry, TorusGeometry, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
@@ -79,6 +79,14 @@ export interface KidHandle extends CreatureHandle {
   readonly limbs: CreatureLimbs;
   /** Where a hat sits. Parent hat meshes here. */
   readonly hatAnchor: Group;
+  /**
+   * Height of {@link hatAnchor} above the feet, in metres — the crown of the
+   * (bare) head. A worn hat's own `height` (`art/models/hats.ts`, measured
+   * from that same anchor point to its tip) adds on top of this, which is
+   * what lets a name label clear whatever is currently worn instead of
+   * sitting at a fixed height tuned only for bare hair.
+   */
+  readonly hatAnchorHeight: number;
   /**
    * Where a single hair accessory sits — a picked flower, say.
    *
@@ -329,12 +337,23 @@ export function createKid(options: KidOptions = {}): KidHandle {
   face.mesh.scale.set(1, 0.95, 0.98);
   crown.add(face.mesh);
 
+  // Measured rather than hand-derived from `KID_HEAD_HEIGHT` + the anchor's
+  // own local offset: the anchor rides on `crown`, which is tipped back by
+  // `HEAD_TILT`, and reading the real world position is one call instead of
+  // a trigonometry sum that would need re-deriving every time the head rig
+  // changes. `root` has no transform of its own, so this world position is
+  // already "above the feet".
+  root.updateMatrixWorld(true);
+  const hatAnchorWorldPosition = new Vector3();
+  hatAnchor.getWorldPosition(hatAnchorWorldPosition);
+
   return {
     root,
     body,
     head,
     limbs,
     hatAnchor,
+    hatAnchorHeight: hatAnchorWorldPosition.y,
     hairAnchor,
     holdAnchor,
     backpackAnchor,
