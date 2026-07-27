@@ -6,8 +6,6 @@ import {
   Object3D,
   SphereGeometry,
   TorusGeometry,
-  Vector3,
-  type BufferAttribute,
   type Material,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -494,43 +492,6 @@ export function buildHair(options: HairOptions): HairRig {
       apply();
     },
   };
-}
-
-/**
- * The tallest visible point of a model, in metres above its origin.
- *
- * Measured rather than tabulated, because the answer changes with the style —
- * spikes reach a quarter of a metre higher than a bob — and a name label placed
- * from a hard-coded number sits in the character's hair the first time somebody
- * retunes anything. Only *visible* meshes count, and only if every ancestor is
- * visible too: the crowd's prototype carries every style at once, and measuring
- * the hidden ones would report the spikes' height for a child in a bowl cut.
- *
- * **Vertices, not bounding boxes.** The obvious implementation — transform each
- * geometry's `boundingBox` by its world matrix — takes the axis-aligned box of
- * an axis-aligned box, and every rotation in the chain inflates it. On this
- * kid, whose hair sits inside a crown tipped back ten degrees, that reported
- * 2.26 m for a character who is actually 2.11 m: a name label floating a
- * hand's width above her head. Walking the position attribute is exact, and
- * this runs at construction, not per frame.
- */
-export function visibleTop(root: Object3D): number {
-  root.updateMatrixWorld(true);
-  const point = new Vector3();
-  let top = 0;
-  root.traverse((object) => {
-    if (!(object instanceof Mesh) || !object.visible) return;
-    for (let node = object.parent; node; node = node.parent) {
-      if (!node.visible) return;
-    }
-    const position = object.geometry.getAttribute('position');
-    if (!position) return;
-    for (let i = 0; i < position.count; i += 1) {
-      point.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(object.matrixWorld);
-      if (point.y > top) top = point.y;
-    }
-  });
-  return top;
 }
 
 // ------------------------------------------------------------------ helpers

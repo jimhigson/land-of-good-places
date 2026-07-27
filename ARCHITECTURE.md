@@ -270,6 +270,29 @@ satisfies it, it drops in.
 | **Materials** | Toy objects — characters, props, walls, trees, the building fabric — use `toonMaterial()` from `src/art/style/materials.ts`. Ground, paths, water and glass keep `MeshStandardMaterial` with `metalness: 0`. Unlit elements (bulbs, signs, plot markers) use `MeshBasicMaterial` so they read correctly at every time of day. The park has no metal. See ART_DIRECTION.md §2. |
 | **Colours** | From `core/palette.ts` where one fits. |
 
+### The contract is checked
+
+`npm run check:assets` (part of `npm run build`) builds every asset the shop
+catalogue sells plus every character, hat, pet, balloon and prop, measures the
+finished object with `art/style/measure.ts`'s `visibleBounds`, and compares it
+against what the `AssetHandle` declares: total height, base at the origin, and
+`root.scale` still at 1.
+
+It exists because none of it was checked before, and a height is written by hand
+a hundred lines from the geometry that decides it. `art/models/pets.ts` scaled
+every pet from a hand-written natural height of 0.52 that was the top of the
+*skull* — so the ears were left out of the sum and then scaled up along with
+everything else, and the bunny stood 2.12 m tall against a 1.46 m standard for
+weeks while a function called `sizeToStandard` reported success.
+
+**A number an author writes down is a claim; a number derived from the built
+object is a fact.** Prefer measuring: `visibleTop(root)` is one vertex walk at
+construction, and `kid.ts` and `pets.ts` already do it.
+
+Deviations that predate the check are written down in its `KNOWN_DRIFT` table,
+which is a ratchet — an asset may not drift further than its recorded figure,
+and a new asset gets no allowance. They are recorded, not accepted.
+
 ### Swapping the character model
 
 `entities/CharacterModel.ts` is a thin adapter over `art/models/kid.ts`. It
