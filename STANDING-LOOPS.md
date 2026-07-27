@@ -27,10 +27,17 @@ alongside the loops above.
 
 | Cadence | Cron | Task |
 | --- | --- | --- |
+| Daily 12:40 | `40 12 * * *` | **Landing call.** Tell every in-flight agent the pause is imminent: bring work to a safe, shippable state, start nothing new. **Flex scope, not quality** — an incomplete but useful feature is fine to ship if it regresses nothing, builds green, and meets the same QA-PLAYBOOK standards as any other PR. Cut scope, not corners. Anything unfinished gets committed, pushed and opened as a PR with the gaps listed as follow-ups, never left uncommitted in a worktree. |
 | Daily 12:48 | `48 12 * * *` | **Pause.** Harvest every in-flight agent's work (build, commit, push, PR), merge what is green, stop all agents, kill servers and browser pages, and delete the three loops above so nothing fires during the pause. Fires 12 minutes early on purpose — winding down properly takes time, and the aim is that work has actually stopped by 1pm. |
 | Daily 19:00 | `0 19 * * *` | **Resume.** Re-arm the three loops from this file, reload ARCHITECTURE-REVIEW.md and GAME_DESIGN.md, check what state the repo was left in, and restart work on the highest-priority outstanding items. |
 
-The pause job must not delete the pause/resume jobs themselves.
+The pause job must not delete the landing-call or pause/resume jobs
+themselves — only the three development loops.
+
+**The rule that matters most here:** when time is short, reduce what a
+feature does; never reduce how well it is checked. A half-built feature
+behind a green build and an honest PR body is fine. A finished-looking
+feature with skipped QA is not.
 
 Minutes are deliberately off :00 and :30, and offset from each other, so the
 three jobs never fire together.
