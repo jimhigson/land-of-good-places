@@ -178,6 +178,23 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **P1 — she can walk through any wall when the frame stutters.** At
+  `MAX_FRAME_DELTA` while sprinting, one integration step is **0.93 m**, which
+  is wider than a wall's footprint — so she tunnels straight through, at any
+  height (a 2 m wall was cleared in simulation). Pre-existing, found while
+  measuring hop clearance. Reachable in ordinary play on any phone that
+  stutters, and exactly the sort of thing a six-year-old finds by accident and
+  cannot explain. Needs swept/substepped collision for the movement step, not
+  a smaller `MAX_FRAME_DELTA` (which would just make the game lurch instead).
+
+- **Four walls sit above the true hop ceiling — a level-design call.** The
+  measured clearance is 1.045 m for 0.34 m stone and 1.100 m for 0.22 m wood.
+  These "worked" before only via an ejection glitch and are now correctly
+  solid, so routes go around them: wooden `[3,19]->[-4,20]` 1.40 m, wooden
+  `[-16,9]->[-8,10]` 1.25 m, wooden `[-21,-8]->[-15,-9]` 1.15 m, stone
+  `[22,-6]->[22,4]` 1.20 m, stone `[-24,4]->[-24,12]` 1.20 m. Lower them if
+  they were meant to be hoppable; leave them if they are meant to be barriers.
+
 - **Indoor navigation does not exist.** The waypoint graph has three "indoors"
   nodes and the castle architect found they are **dead nodes sitting inside
   the garden facade** — so NPCs cannot reach the interior at all, and
