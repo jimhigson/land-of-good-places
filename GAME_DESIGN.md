@@ -400,6 +400,21 @@ input-freeze bug lived.
 
 ## Rides count towards the Cute-o-dex (27 July 2026 — queued, not started)
 
+**And things you DO, not only things you ride (27 July 2026).**
+**"Climb a tree" should be an aim in the Cute-o-dex** — a thing to
+discover and tick off, alongside the rides. That opens the door to a whole
+category of little achievements the park already supports but never
+rewards: jump in the fountain, get your face painted, ride the ginormous
+slide, wear a hat, have a chat with another child, eat an ice cream, pick
+a flower, land in the ball pit, wave at RiPika. Each is a `???` until you
+manage it.
+
+*Design note: this is the third thing widening what the dex is — owned
+objects, then rides, now deeds. It should probably be organised in
+sections (Cute Things · Rides · Things To Do) rather than one flat list,
+and the completion prize must count all three or it becomes unachievable.*
+
+
 Riding a ride should **fill in an entry in the Cute-o-dex**, the same way
 buying a cute thing does. Ride the dodgems, the space ferris wheel, the
 water fight, the ginormous slide, the train, the spooky house, the rail
