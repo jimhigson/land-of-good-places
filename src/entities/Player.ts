@@ -153,6 +153,17 @@ export class Player implements GameSystem {
   private hopClearance = 0;
   /** Edge-detects "just cleared a wall" so the poof effect fires once, not every frame. */
   private wasClearingWall = false;
+  /**
+   * True while an escort out of a deep overlap is still running — see the
+   * velocity read-back in `update`.
+   *
+   * Being walked back out of something is a *process*, several frames long,
+   * and only its first frames are deep enough for `resolve` to call them an
+   * escort. Latching it here, and holding it until the corrections stop
+   * altogether, is what stops the shallow tail of an escort being mistaken
+   * for ordinary contact and banked as speed.
+   */
+  private escorting = false;
   private blinkTimer = 2.4;
   private blinkRemaining = 0;
   private currentExpression: Expression = 'neutral';
@@ -228,6 +239,8 @@ export class Player implements GameSystem {
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
+    // Whatever she was being walked out of, she is not in it any more.
+    this.escorting = false;
     if (facing !== undefined) this.facing = facing;
     this.group.position.copy(this.position);
     this.group.rotation.y = this.facing;
@@ -287,6 +300,9 @@ export class Player implements GameSystem {
     this.velocity.set(velocityX, 0, velocityZ);
     this.verticalVelocity = velocityY;
     this.airborne = true;
+    // A ride hands back a fresh velocity of its own choosing; nothing about
+    // the overlap she was in before it took over still applies.
+    this.escorting = false;
   }
 
   update(context: FrameContext): void {
@@ -343,25 +359,53 @@ export class Player implements GameSystem {
     // shove — see `Collision.ts`'s `MAX_DEPENETRATION_SPEED` (design feedback
     // #17, "the fling"). Ordinary shallow contact against a wall is
     // unaffected and stays exactly as crisp as before.
-    const { clearedWall, escorting } = this.collision.resolve(
+    const { clearedWall, escorting, corrected } = this.collision.resolve(
       this.position,
       PLAYER_RADIUS,
       this.hopClearance,
       dt,
     );
 
+    // An escort runs until the pushing stops, not until it goes quiet.
+    //
+    // `escorting` is true only while *this frame's* correction is deeper than
+    // ordinary contact, and the last frames of any escort are shallow by
+    // definition — the overlap is nearly gone, which is the point of it. So
+    // the flag drops while the mover is still being pushed, and the frame it
+    // drops on gets its correction banked as velocity after all.
+    //
+    // That is the wall fling ("jumping over walls the player sometimes gets a
+    // burst of extreme speed"): a wall the jump only just clears stops being
+    // solid at the apex, goes solid again under her on the way down while she
+    // is inside its footprint, and the resulting escort's tail is still ~0.4 m
+    // — a hair under `SHALLOW_OVERLAP`, so it is called ordinary contact and
+    // read back as ~25 m/s against a walking pace of 7.4. Same feedback loop
+    // as design feedback #17, entered through the door the #17 fix left open.
+    //
+    // Latching until `corrected` goes false closes it: the whole escort, deep
+    // frames and shallow tail alike, is treated as the external nudge it is.
+    this.escorting = corrected && (escorting || this.escorting);
+
     // Trust the resolved position over the intended one, so walking into a wall
-    // actually kills the momentum instead of grinding against it — but *not*
-    // while being escorted out of a deep overlap: that distance is an
-    // external nudge, not something achieved under her own power, and reading
-    // it back as velocity is exactly what caused the fling (design feedback
-    // #17) — the escort got banked as speed, which then carried her further
-    // into the same overlap next frame, which escorted her again, banking
-    // more speed still. Leaving velocity alone here lets it simply decelerate
-    // normally, as if nothing solid were there at all.
-    if (dt > 0 && !escorting) {
-      this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
-      this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
+    // actually kills the momentum instead of grinding against it — but never
+    // while an escort is running: that distance is an external nudge, not
+    // something achieved under her own power. Leaving velocity alone lets it
+    // simply decelerate normally, as if nothing solid were there at all.
+    if (dt > 0 && !this.escorting) {
+      const previousSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+      const derivedX = (this.position.x - this.previousPosition.x) / dt;
+      const derivedZ = (this.position.z - this.previousPosition.z) / dt;
+      // Second line of defence, and an invariant worth stating outright:
+      // being blocked is a *constraint*, so it can only ever take speed away.
+      // If a resolved position ever implies she came out of a collision going
+      // faster than she went in, that is not her walking into a wall, whatever
+      // produced it — so decline it rather than launch a six-year-old across
+      // the park. Never fires on ordinary contact, where the correction can
+      // only undo part of the step that caused it.
+      if (Math.hypot(derivedX, derivedZ) <= previousSpeed) {
+        this.velocity.x = derivedX;
+        this.velocity.z = derivedZ;
+      }
     }
 
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
