@@ -1,7 +1,7 @@
 import { CanvasTexture, Mesh, SphereGeometry, SRGBColorSpace } from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from './artPalette';
-import { decal, toonMaterial } from './materials';
+import { decal, markShared, ownTextures, toonMaterial } from './materials';
 
 /**
  * Faces are PAINTED, not built.
@@ -414,6 +414,10 @@ export function createFacePatch(options: FacePatchOptions): FacePatch {
   const expressions = paintExpressions(paint);
   const material = toonMaterial(0xffffff, { map: expressions.neutral, transparent: true });
   material.alphaTest = 0.02;
+  // Five canvases painted, one in `material.map` at a time. Without this the
+  // other four are invisible to `disposeTree` and leak on every rebuild — which
+  // is exactly what the character creator's preview does on every single tap.
+  ownTextures(material, Object.values(expressions));
   const mesh = decal(new Mesh(facePatchGeometry(radius * 1.012, spreadX, spreadY, tilt), material));
   mesh.name = 'facePatch';
   mesh.renderOrder = 2;
@@ -696,7 +700,7 @@ export function facePaintOverlayTexture(design: FacePaintDesign, size = 512): Ca
   const key = `${design}:${size}`;
   let texture = overlayTextureCache.get(key);
   if (!texture) {
-    texture = paintFacePaintOverlay(design, size);
+    texture = markShared(paintFacePaintOverlay(design, size));
     overlayTextureCache.set(key, texture);
   }
   return texture;

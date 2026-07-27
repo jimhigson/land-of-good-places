@@ -1,6 +1,6 @@
 import { CanvasTexture, Mesh, PlaneGeometry, SRGBColorSpace } from 'three';
 import { ART } from '../../art/style/artPalette';
-import { decal, toonMaterial } from '../../art/style/materials';
+import { decal, markShared, toonMaterial } from '../../art/style/materials';
 import { hexToCss, PALETTE } from '../../core/palette';
 
 /**
@@ -58,7 +58,7 @@ function floorArrowTexture(): CanvasTexture {
   paintChevron(ctx, size * 0.5, size * 0.42, size * 0.15);
   paintChevron(ctx, size * 0.5, size * 0.61, size * 0.15);
 
-  const texture = new CanvasTexture(canvas);
+  const texture = markShared(new CanvasTexture(canvas));
   texture.colorSpace = SRGBColorSpace;
   texture.needsUpdate = true;
   arrowTexture = texture;

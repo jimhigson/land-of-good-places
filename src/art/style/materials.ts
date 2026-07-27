@@ -43,6 +43,62 @@ import { ART } from './artPalette';
  */
 export const TOON_RAMP = [0.42, 0.64, 0.85, 1.0] as const;
 
+// =============================================================================
+// Ownership: who is allowed to free what.
+//
+// {@link disposeTree} walks a subtree and frees its GPU resources. That is only
+// safe for resources the subtree OWNS. This game leans hard on module-level
+// caches — one toon ramp for every material in the park (`toonRamp` below), one
+// face per pet species (`sharedFace.ts`), one canvas per wall pattern
+// (`core/textures.ts`) — and freeing one of those because a single wearer of it
+// was thrown away corrupts every *other* wearer. That is a far worse bug than
+// the leak it would be fixing, and it is invisible until something re-renders.
+//
+// So resources carry their ownership on `userData`:
+//
+//  - {@link markShared} — "a cache owns me; never free me from a tree walk."
+//    Applied at the point of caching, so a new cache cannot forget it by being
+//    added somewhere `disposeTree` was never considered.
+//  - {@link ownTextures} — "this material owns these textures even though it is
+//    not currently pointing at them." The face system needs this: a face patch
+//    paints FIVE expression canvases and `material.map` only ever references
+//    one of them, so scanning the material's slots finds a fifth of the leak.
+//
+// Caches free their own resources through their own teardown functions
+// (`disposeMaterialCache`, `disposeSharedFaces`), which is the only correct
+// place to do it.
+// =============================================================================
+
+const SHARED_FLAG = 'lgpShared';
+const OWNED_TEXTURES = 'lgpOwnedTextures';
+
+interface HasUserData {
+  userData: Record<string, unknown>;
+}
+
+/** Marks a cached texture/geometry/material so {@link disposeTree} leaves it alone. */
+export function markShared<T extends HasUserData>(resource: T): T {
+  resource.userData[SHARED_FLAG] = true;
+  return resource;
+}
+
+/** True if `resource` belongs to a module-level cache — see {@link markShared}. */
+export function isShared(resource: Partial<HasUserData> | null | undefined): boolean {
+  return resource?.userData?.[SHARED_FLAG] === true;
+}
+
+/**
+ * Declares textures a material owns but does not currently reference.
+ *
+ * Only needed where a material swaps between several textures it alone paid
+ * for — expression sets, essentially. A texture that is always in a material
+ * slot (`map`, `emissiveMap`, …) needs nothing: {@link disposeTree} finds it by
+ * scanning the slots.
+ */
+export function ownTextures(material: Material, textures: Iterable<Texture>): void {
+  (material as unknown as HasUserData).userData[OWNED_TEXTURES] = [...textures];
+}
+
 let rampTexture: DataTexture | null = null;
 
 /** The shared 4-step gradient map. Built once, reused by every toon material. */
@@ -57,6 +113,10 @@ export function toonRamp(): DataTexture {
   texture.magFilter = NearestFilter;
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
+  // The single most important `markShared` in the game: this one texture is the
+  // `gradientMap` of EVERY toon material there is. A `disposeTree` that freed it
+  // would blank the whole park's shading, not just the tree it was called on.
+  markShared(texture);
   rampTexture = texture;
   return texture;
 }
@@ -188,13 +248,57 @@ export function disposeMaterialCache(): void {
   rampTexture = null;
 }
 
-/** Convenience for disposing a mesh tree built by an asset factory. */
+/** Frees `texture` unless a cache owns it, or this walk has already freed it. */
+function disposeTexture(value: unknown, freed: Set<Texture>): void {
+  const texture = value as (Texture & { isTexture?: boolean }) | null | undefined;
+  if (!texture || texture.isTexture !== true) return;
+  if (isShared(texture) || freed.has(texture)) return;
+  freed.add(texture);
+  texture.dispose();
+}
+
+/**
+ * Frees a material and every texture it owns.
+ *
+ * The slots are found by scanning the material's own properties for anything
+ * with `isTexture`, rather than by listing `map`, `emissiveMap`, `alphaMap` and
+ * the rest by hand: a hand-written list is a list somebody will forget to
+ * extend, and the whole reason this function exists is that the old one only
+ * ever looked at `map`.
+ */
+function disposeMaterial(material: Material, freed: Set<Texture>): void {
+  if (isShared(material)) return;
+  const owned = (material as unknown as HasUserData).userData[OWNED_TEXTURES];
+  if (Array.isArray(owned)) for (const texture of owned) disposeTexture(texture, freed);
+  for (const value of Object.values(material as unknown as Record<string, unknown>)) {
+    disposeTexture(value, freed);
+  }
+  material.dispose();
+}
+
+/**
+ * Frees a mesh tree built by an asset factory: geometries, materials, and the
+ * materials' textures.
+ *
+ * **Textures were the missing third of this** until 27 July 2026. The character
+ * creator's preview rebuilds its kid from scratch on every single tap — every
+ * swatch, every hat, every pet — and each rebuild paints a fresh set of five
+ * 512² face canvases (`faces.ts`, `paintExpressions`). Disposing only geometry
+ * and materials left all five stranded on the GPU, so a child idly trying on
+ * hats could run a phone out of texture memory before ever reaching the park.
+ *
+ * Shared resources are skipped — see the ownership note at the top of this file.
+ * That is not a nicety: the pet models the same preview builds wear a face from
+ * `sharedFace.ts`, whose geometry AND textures are cached across every pet in
+ * the game, and this function was already freeing that shared geometry.
+ */
 export function disposeTree(root: { traverse(cb: (o: unknown) => void): void }): void {
+  const freed = new Set<Texture>();
   root.traverse((object) => {
     const mesh = object as Partial<Mesh>;
-    mesh.geometry?.dispose();
+    if (mesh.geometry && !isShared(mesh.geometry)) mesh.geometry.dispose();
     const material = mesh.material as Material | Material[] | undefined;
-    if (Array.isArray(material)) for (const m of material) m.dispose();
-    else material?.dispose();
+    if (Array.isArray(material)) for (const one of material) disposeMaterial(one, freed);
+    else if (material) disposeMaterial(material, freed);
   });
 }
