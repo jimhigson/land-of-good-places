@@ -4,28 +4,35 @@
 **Worktree:** `.claude/worktrees/no-tank-controls` (the main checkout is shared
 with the P0 face-paint agent and the UI-scale agent — do **not** work in it)
 
-## Review round 1 (PR #46) — what is being changed and where it is up to
+## Review round 1 (PR #46) — applied
 
-Rebased onto `origin/main` (`c602bc4`, face-paint P0 + both decisions + the
-rem/root-scale UI rework) and force-pushed. Peer review found nothing
-structurally wrong; all four asks are comment/claim corrections.
+Rebased onto `origin/main` (`c602bc4`: face-paint P0, both architecture
+decisions, the rem/root-scale UI rework and its `check:text` build step) and
+force-pushed. The review found nothing structurally wrong; every ask was a
+comment or a claim, except one that was settled by making the code true.
 
-- [x] **1. `screenBasis.ts` false invariant** — it said no camera in the game
-      rotates. `WaterFight.ts:1045` swings its yaw 45°→88° on orientation
-      change. Comment rewritten: a basis belongs to a *yaw*, cache only where
-      the yaw is provably constant, re-derive on camera/viewport change.
-- [ ] **2. analogue magnitude** — `steering.ts` returns 0..1, `Dodgems.ts:475`
-      normalises it away. Decision: **deliver it**. Trap: `going = hold ||
-      wants`, and keys are all-or-nothing, so only an analogue stick may get
-      partial thrust — a key/button press must stay at full.
-- [ ] **3a. `TURN_RATE` doc** — claims zero changes nothing; false, it would
-      freeze the no-direction heading for ever.
-- [ ] **3b. `car.turn` units** — radians of drift → fraction of max slew, same
-      `0.34` multiplier, so gentle leans are ~3x deeper. Keeping it, but saying
-      so in the code and in the PR QA list.
-- [ ] Housekeeping: HUD steering hint got ~40% longer — QA it for wrap/clip on
-      a narrow phone.
-- [ ] Update PR body QA checklist + reply to the review comment.
+1. **`screenBasis.ts` asserted a false invariant.** It said no camera in the
+   game rotates, so a basis could be solved at construction and read for ever.
+   `WaterFight.resize` swings its yaw 45°→88° between landscape and portrait.
+   Reworded: a basis belongs to a *yaw*, not a scene — cache only where the yaw
+   is provably constant (the park, the rink), re-derive on any camera or
+   viewport change. `WaterFight.applyCamera` says why it re-solves.
+2. **The analogue-magnitude claim is now delivered**, not dropped.
+   `driveCars` splits the ask into a direction and a strength; rivals still
+   normalise (their length is metres), the player's length scales the push.
+   `GENTLEST_PUSH = 0.4` floors it, which is what handles `going = hold ||
+   wants` — a thumb resting just past the dead-zone potters at ~2.2 m/s rather
+   than stalling at ~2% thrust. Keys and the d-pad hand in a full-length
+   direction, so they are unaffected and still get everything.
+3. **`TURN_RATE`'s doc** no longer claims zero would change nothing (the
+   go-with-no-direction branch would drive the spawn heading for ever).
+4. **The lean re-tune is now flagged, not buried.** `car.turn` changed units
+   (radians of drift → fraction of max slew) under the same `0.34`, so the
+   gentle cases lean ~3x deeper. Kept deliberately; said plainly in
+   `Dodgems.animate`, in `car.ts` at the multiplier, and in the PR's QA list.
+
+Open for QA (no browser this session): the lean depth, and whether the longer
+HUD steering hint wraps or clips on a narrow phone.
 
 ## The rule
 
@@ -79,7 +86,11 @@ Everything else audited and clean: `Player.ts`, `TapNavigator`, `WaterFight`,
 - Dodgems: left/right/up/down each send the car that way on the screen, keys,
   WASD, stick and thumb; diagonals work.
 - Dodgems: the car can be driven round and round indefinitely — no clamp.
-- Dodgems: model still leans into a change of direction and rocks after a bump.
+- Dodgems: a gentle thumb/stick push gives a gentle drive; keys still give full.
+- Dodgems: the model leans into a change of direction and rocks after a bump —
+  **deliberately about 3x deeper than before**; ask the family if it is too far
+  (lower the `0.34` in `car.ts`).
+- Dodgems: the steering hint does not wrap or clip on a narrow phone.
 - Ferris wheel look-around: unchanged.
 - Park walking, and walking inside the castle interior (600 m away): "up" still
   means the same screen direction in both.
