@@ -153,12 +153,23 @@ supersedes the premise of that decision** — a winding, tunnelled route is
 not a band. Decision 1's routing section, its "legible at a glance" argument
 (height, territory, speed) and its PR plan all need revisiting.
 
-The architect should rule on: the new park layout as a whole; both rail
-routes together; how tunnels work given the terrain is a shallow disc and
-the camera is a fixed 38° isometric (a tunnel the camera cannot see into is
-a tunnel the player is lost in); what happens to the anchor-plot system that
-every ride currently registers against; and how much of the existing world
-generation survives. It should also fold in the already-queued items that
+**The visibility problem is already answered (27 July 2026).** The concern
+was that a fixed 38° isometric camera cannot see into a tunnel, so a player
+inside one would simply vanish. The family's answer resolves it:
+
+- **The train ride is FIRST PERSON with look-around**, exactly like the
+  space ferris wheel — so while you are on the train you *are* the camera.
+  Being underground is a feature, not a blackout. Reuse the same
+  `RideCamera` mechanism.
+- **Where a path crosses the railway, a small bridge carries the path over
+  the track** — and a small bridge does not obscure a player walking on it.
+  So the crossings work in both directions: the rider sees the bridge pass
+  overhead, the walker stays visible.
+
+The architect should still rule on: the new park layout as a whole; both
+rail routes together; what happens to the anchor-plot system that every ride
+currently registers against; and how much of the existing world generation
+survives. It should also fold in the already-queued items that
 touch placement: paths to the stations, the spooky house moving to the edge,
 and the trackside statues.
 
