@@ -190,6 +190,9 @@ class Dodgems implements MiniGame {
   private celebrationBurst = 0;
   private aspect = 1;
   private viewHeight = MIN_VIEW_HEIGHT;
+  /** CSS pixels, kept only so the giggle bubbles can be sized on screen rather
+   *  than in the world — see `worldUnitsPerPixel` below. */
+  private viewportHeight = 1;
   private focusX = 0;
   private focusZ = 0;
   private taughtSteering = false;
@@ -374,9 +377,9 @@ class Dodgems implements MiniGame {
 
     this.resolveCollisions();
     this.animate(dt, elapsed);
-    this.tree?.update(dt, elapsed, this.appleTargets());
+    this.tree?.update(dt, elapsed, this.appleTargets(), this.worldUnitsPerPixel);
     this.sparks?.update(dt);
-    this.giggles?.update(dt);
+    this.giggles?.update(dt, this.worldUnitsPerPixel);
     this.arena?.update(elapsed);
     this.hud?.update(dt);
     this.updateCamera(dt);
@@ -778,8 +781,17 @@ class Dodgems implements MiniGame {
 
   // ------------------------------------------------------------- lifecycle
 
+  /**
+   * World units spanned by one CSS pixel, exactly as `IsoCamera` defines it —
+   * the number anything that must read at a fixed size *on screen* needs.
+   */
+  private get worldUnitsPerPixel(): number {
+    return this.viewHeight / this.viewportHeight;
+  }
+
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
+    this.viewportHeight = Math.max(1, height);
     // Fit the rink both ways: on screen it is an ellipse, squashed vertically by
     // the camera's pitch, so the height it needs is far less than its width.
     // Take whichever of the two is the binding constraint, then stop at

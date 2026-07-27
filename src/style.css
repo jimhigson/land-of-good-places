@@ -1960,7 +1960,13 @@ kbd {
   flex-direction: column;
   align-items: center;
   gap: 0.625rem;
-  padding: 1.25rem;
+  /* Kept tight on purpose. A sign board is a canvas, so its text is only as
+     big as the board is wide: the subtitle is painted at
+     `SIGN_SUBTITLE_FONT_PX` of a 512-wide canvas, which clears the minimum
+     text size as long as the board is displayed at least ~256 CSS px across.
+     Padding is the only thing standing between the frame and that width on a
+     320px phone, so it stays small. */
+  padding: 0.9rem;
   background: var(--lgp-cream);
   border: 0.625rem solid #fff;
   border-radius: 2rem;

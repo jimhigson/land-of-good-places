@@ -23,6 +23,7 @@ import { Rng, TAU, clamp01, damp, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { createFacePatch } from '../../art/style/faces';
 import { CAR_RADIUS } from './layout';
+import { minTextPx } from '../../core/uiScale';
 
 /**
  * **The fake wooden tree.** The whole reason the dodgems exist.
@@ -84,7 +85,17 @@ export interface WobblyTree {
   bonk(dirX: number, dirZ: number, strength: number): void;
   /** True while the bird is out — the HUD uses it to keep the cheer on screen. */
   readonly birdOut: boolean;
-  update(dt: number, elapsed: number, cars: readonly AppleTarget[]): void;
+  /**
+   * `worldUnitsPerPixel` sizes the "TWEET!?" bubble on screen rather than in
+   * the world, the same way `ui/NameLabel.ts` sizes a name pill — see the
+   * TEXT RULE in GAME_DESIGN.md.
+   */
+  update(
+    dt: number,
+    elapsed: number,
+    cars: readonly AppleTarget[],
+    worldUnitsPerPixel: number,
+  ): void;
   dispose(): void;
 }
 
@@ -374,7 +385,12 @@ export function createWobblyTree(): WobblyTree {
       bubbleMaterial.opacity = 1;
     },
 
-    update(dt: number, elapsed: number, cars: readonly AppleTarget[]): void {
+    update(
+      dt: number,
+      elapsed: number,
+      cars: readonly AppleTarget[],
+      worldUnitsPerPixel: number,
+    ): void {
       // --- wobble ---------------------------------------------------------
       if (wobble > 0) {
         wobble = Math.max(0, wobble - dt * 0.62);
@@ -509,6 +525,13 @@ export function createWobblyTree(): WobblyTree {
         bird.root.rotation.y = Math.sin(elapsed * 7) * 0.55;
         bird.flap(elapsed);
         bubble.position.y = 1.15 + Math.sin(elapsed * 8) * 0.06;
+        // Sized on screen, not in the world (GAME_DESIGN.md's TEXT RULE): the
+        // word is painted at TWEET_FONT_PX on a TWEET_CANVAS_HEIGHT-tall
+        // canvas, so this is the world height that makes it read at the
+        // minimum text size whatever the dodgems camera is doing.
+        const bubbleHeight =
+          worldUnitsPerPixel * TWEET_CANVAS_HEIGHT * (minTextPx() / TWEET_FONT_PX);
+        bubble.scale.set(bubbleHeight * (TWEET_CANVAS_WIDTH / TWEET_CANVAS_HEIGHT), bubbleHeight, 1);
         bubbleMaterial.opacity = clamp01(birdTimer * 1.6);
         if (birdTimer === 0) {
           bird.root.visible = false;
@@ -650,6 +673,12 @@ function createBird(): Bird {
 
 let tweetTextureCache: CanvasTexture | null = null;
 
+/** Canvas the word is painted on, and the size it is painted at. The sprite is
+ *  scaled in the world so it lands on the minimum text size — see `update`. */
+const TWEET_CANVAS_WIDTH = 512;
+const TWEET_CANVAS_HEIGHT = 320;
+const TWEET_FONT_PX = 96;
+
 /**
  * The "TWEET!?" bubble.
  *
@@ -659,8 +688,8 @@ let tweetTextureCache: CanvasTexture | null = null;
 function tweetTexture(): CanvasTexture {
   if (tweetTextureCache) return tweetTextureCache;
 
-  const width = 512;
-  const height = 320;
+  const width = TWEET_CANVAS_WIDTH;
+  const height = TWEET_CANVAS_HEIGHT;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -702,7 +731,7 @@ function tweetTexture(): CanvasTexture {
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 96px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.font = `bold ${TWEET_FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
   ctx.fillStyle = hexToCss(PALETTE.markerSky);
   ctx.strokeStyle = hexToCss(PALETTE.ink);
   ctx.lineWidth = 7;
