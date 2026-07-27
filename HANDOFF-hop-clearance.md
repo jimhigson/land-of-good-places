@@ -76,10 +76,48 @@ stone 0.7, 0.7, 0.85, 0.85, 0.95, 0.95, 1.2, 1.2.
 Hoppable under today's 1.4312 ceiling: 0.7×2, 0.85×2, 0.95×4, 1.15, 1.2×2,
 1.25, **1.4** ← the strand. Under the new 1.04 ceiling: 0.7×2, 0.85×2, 0.95×4.
 
-## State
+## What landed
 
-- [x] Measurement done, numbers above.
-- [ ] Predicate narrowed in `Collision.ts`.
-- [ ] Boot-time assert.
-- [ ] Build + browser verification.
-- [ ] PR.
+- `clearsTop(topHeight, clearance)` — the in-flight test, unchanged behaviour,
+  used by `resolve`. **The manual jump button is untouched.**
+- `autoHopClears(topHeight, apexClearance)` — the *planning* test, now
+  `clearsTop(...) && topHeight <= MAX_AUTO_HOP_HEIGHT` (1.00 m). Used by
+  `wouldAutoHopClear` and `NavGrid`. One definition, as before.
+- `CollisionWorld.checkHoppableColliders(moverRadius, apexClearance)`, called
+  from `Game` before the lattice is first baked. Catches a collider too tall
+  for its width (via `measuredHopCeiling`), an `autoHoppable` one with
+  `Infinity` topHeight, and a jump apex that has moved since the measurement.
+  Reports and demotes to solid; never throws, never moves level geometry.
+- `scripts/measure-hop-clearance.mts` + `ts-extension-resolver*.mjs` — the
+  measurement itself, kept so the constant has a mechanism behind it.
+
+## What the check found
+
+Nothing on the park as it now stands (`problems` is empty; boot console clean).
+Run against the **old** 1.4312 m predicate it would have fired on **five**
+walls, not one:
+
+| wall | height |
+| --- | --- |
+| wooden `[3,19]→[-4,20]` | 1.40 m ← the known strand |
+| wooden `[-16,9]→[-8,10]` | 1.25 m |
+| wooden `[-21,-8]→[-15,-9]` | 1.15 m |
+| stone `[22,-6]→[22,4]` | 1.20 m |
+| stone `[-24,4]→[-24,12]` | 1.20 m |
+
+Only the 1.4 m one stranded outright; the other four "worked" by pop-through.
+
+## Verified
+
+- `npm run build` exit 0.
+- Live park, `checkHoppableColliders` → `[]`, no console output at boot.
+- Live `NavGrid.findRoute`, closest approach to each wall's centre line:
+  routes **over** 0.70/0.85/0.95 m (approach 0.00 m), **around** 1.20/1.25/1.40 m
+  (approach 1.18/1.23/1.06 m against a block radius of 0.96/0.84/0.84 m).
+- Live `wouldAutoHopClear`: fires at 0.70/0.85/0.95, not at 1.20/1.25/1.40.
+- Live driven walk over the 0.85 m stone wall: peak hop 1.20 m, wall crossed.
+
+Driving longer scripted walks through `Game.tick` with a synthetic `LoopTick`
+proved unreliable (the frame counter feeds the zone cache) — **the remaining
+item is human visual QA**: tap across a low garden wall and watch the hop, and
+tap across the 1.4 m wall at `[3,19]→[-4,20]` and watch her walk round it.
