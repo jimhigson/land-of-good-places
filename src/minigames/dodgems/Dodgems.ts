@@ -797,6 +797,17 @@ class Dodgems implements MiniGame {
       // `driveCars`). It used to be measured as the nose's drift away from the
       // velocity — which is always near zero now that the nose simply follows
       // the velocity, so the signal moved to the swing itself.
+      //
+      // **This is a visual re-tune, not just a refactor, and it is meant.**
+      // The units changed with the signal: `car.turn` used to be radians of
+      // drift (clamped ±1, but in practice a couple of tenths in ordinary
+      // driving), and is now a fraction of the maximum slew rate, which sits
+      // near ±1 through any decisive change of direction. `car.ts` still
+      // multiplies by the same 0.34, so the cars heel over roughly three times
+      // deeper than they did in the gentle cases. That is the look we want
+      // from a game about throwing a bumper car about — but it is a real
+      // change to how the ride reads, so it wants the family's eyes on it, and
+      // it is one number in `car.ts` to back off if it is too much.
       car.model.animate(dt, elapsed, speed, car.turn, car.squash);
       car.model.setExpression(car.surprise > 0 ? 'surprised' : 'happy');
     }
