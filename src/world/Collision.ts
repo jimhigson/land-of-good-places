@@ -84,6 +84,27 @@ export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
 
+  /**
+   * The soft boundary you can never walk out of.
+   *
+   * It used to be a constant round the origin, which was fine while the park was
+   * the only place there was. The building is bigger on the inside now and lives
+   * six hundred metres away in its own space, so whoever moves the player
+   * between the two moves the boundary with them — otherwise stepping through
+   * the front door drops a child outside their own park boundary and the
+   * resolver drags them back across half a kilometre of nothing.
+   */
+  private boundsX = 0;
+  private boundsZ = 0;
+  private boundsRadius = GARDEN_PLAY_RADIUS;
+
+  /** Recentres the soft boundary. Used on every change of space. */
+  setPlayBounds(centreX: number, centreZ: number, radius: number): void {
+    this.boundsX = centreX;
+    this.boundsZ = centreZ;
+    this.boundsRadius = radius;
+  }
+
   addCircle(x: number, z: number, radius: number, topHeight = Infinity): void {
     this.circles.push({ x, z, radius, topHeight });
   }
@@ -259,12 +280,18 @@ export class CollisionWorld {
         moved = true;
       }
 
-      // Soft garden boundary — you can never walk out of the park.
-      const fromCentre = Math.hypot(position.x, position.z);
-      const limit = GARDEN_PLAY_RADIUS - radius;
+      // Soft boundary — you can never walk out of the park, nor off the edge of
+      // the building's own space.
+      const offsetX = position.x - this.boundsX;
+      const offsetZ = position.z - this.boundsZ;
+      const fromCentre = Math.hypot(offsetX, offsetZ);
+      const limit = this.boundsRadius - radius;
       if (fromCentre > limit) {
         const scale = limit / fromCentre;
-        applyCorrection(position.x * scale - position.x, position.z * scale - position.z);
+        applyCorrection(
+          this.boundsX + offsetX * scale - position.x,
+          this.boundsZ + offsetZ * scale - position.z,
+        );
         moved = true;
       }
 

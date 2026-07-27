@@ -5,17 +5,25 @@ import { Scenery } from './Scenery';
 import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
+import { LampPosts } from './LampPosts';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
-import { Building } from './building';
+import { Building, type InteriorControls } from './building';
+import { ParkTrain } from './train';
 import { MiniGameStalls } from '../minigames';
+import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
 import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
+// Face painting stall (additive — see FacePaintStall.ts's own file-ownership
+// note). Not a mini-game, so it is wired in here rather than through
+// `minigames/`.
+import { FacePaintStall } from './FacePaintStall';
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -38,14 +46,18 @@ export class World implements GameSystem {
   readonly flowers: Flowers;
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
+  readonly lampPosts: LampPosts;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
+  readonly train: ParkTrain;
   readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
+  /** The face-painting stall (additive). See `FacePaintStall.ts`. */
+  readonly facePaintStall: FacePaintStall;
 
-  constructor(scene: Scene, sky: Sky) {
+  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
     // Living, pickable flowers — no collision (you walk straight through
@@ -54,13 +66,35 @@ export class World implements GameSystem {
     this.flowers = new Flowers();
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
+    // Lamp posts along the paths — the family's "night is too dark" feedback.
+    // Built after FairyLights (which rings the fountain plaza) and before
+    // AnchorPlots so it only needs the static ANCHORS list, not the built
+    // plots themselves, to keep its lamps out of the reserved ride footprints.
+    this.lampPosts = new LampPosts(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots);
+    this.building = new Building(this.collision, this.anchorPlots, interiorControls);
+    // The water-fight garden's shop window: takes the "coming soon" sign off the
+    // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
+    // a sprinkler and a rack of very big water guns. The fight itself is a
+    // mini-game in its own world, entered from the stall standing in that plot.
+    dressWaterFightPlot(this.anchorPlots, this.collision);
+
     // Fun-fair stalls: each one is a doorway into a mini-game (see
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
     this.stalls = new MiniGameStalls(this.collision);
+
+    // The park train. Built after everything solid, because it does not have a
+    // route until it has one: it solves its loop against the finished collision
+    // world, so a tree planted across the park edge bends the track rather than
+    // growing through it (see `train/route.ts`). Built before the NPCs, so the
+    // waypoint graph is validated against its station posts too.
+    this.train = new ParkTrain(this.collision);
+    // The platforms and the carriage floors are things you stand on, so they go
+    // to the same sampler the lift and the bubble use.
+    for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
+
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
     // after AnchorPlots (it fills that plot and retires its "coming soon"
@@ -73,7 +107,25 @@ export class World implements GameSystem {
     // route is walked at build time and dropped if a wall or a tree is in the
     // way — and because they walk the building's ground floor, so they need the
     // same ground sampler the player gets.
-    this.npcs = new NpcSystem(this.collision, (x, z, y) => this.building.surfaces.sample(x, z, y));
+    //
+    // `scenery.climbableTrees` is threaded straight through to every wander
+    // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
+    // occasionally climb one — the actual climbing (posing, hiding the body)
+    // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
+    this.npcs = new NpcSystem(
+      this.collision,
+      camera,
+      (x, z, y) => this.building.surfaces.sample(x, z, y),
+      this.scenery.climbableTrees,
+    );
+
+    // The face-painting stall (additive): registers its own position with the
+    // NPC wander graph's face-paint block as it builds itself, so it must come
+    // after `npcs` above only in the sense that "after" makes the intent
+    // clearer to read — `wanderDriver.ts`'s registry works whichever order
+    // these two are constructed in, since every `WanderDriver` reads the same
+    // module-level target on its own next update.
+    this.facePaintStall = new FacePaintStall(this.collision);
 
     scene.add(
       this.garden.group,
@@ -81,9 +133,16 @@ export class World implements GameSystem {
       this.flowers.group,
       this.fountain.group,
       this.fairyLights.group,
+      this.lampPosts.group,
       this.anchorPlots.group,
+      // The building is bigger on the inside: its interior is its own place,
+      // six hundred metres from the park rather than inside the plot the facade
+      // stands on, so it joins the scene on its own rather than through a plot.
+      this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
+      this.facePaintStall.group,
+      this.train.group,
     );
   }
 
@@ -93,15 +152,29 @@ export class World implements GameSystem {
     // Fan the time-of-day out to everything that changes with it. Systems read
     // a plain number rather than subscribing, which keeps the ordering obvious.
     const night = this.dayNight.nightFactor;
+    const eveningGlow = this.dayNight.lightsOn ? night : night * 0.25;
     this.fountain.nightFactor = night;
-    this.fairyLights.nightFactor = this.dayNight.lightsOn ? night : night * 0.25;
+    this.fairyLights.nightFactor = eveningGlow;
+    this.lampPosts.nightFactor = eveningGlow;
+
+    this.train.nightFactor = night;
 
     this.fountain.update(context);
     this.fairyLights.update(context);
+    this.lampPosts.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+
+    // The train runs before the children, and it has to: it carries the ones
+    // who are aboard by writing their position, and their own movement code —
+    // which runs inside `npcs.update` — is what commits it to the crowd's
+    // instance buffer. The other way round they would ride a frame behind.
+    this.train.update(context);
+    this.train.carryPassengers(this.npcs.riders);
+
     this.npcs.update(context);
     this.stalls.update(context);
+    this.facePaintStall.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
   }
@@ -116,6 +189,8 @@ export class World implements GameSystem {
     return [
       ...this.building.interactZones(),
       ...this.stalls.interactZones(),
+      ...this.facePaintStall.interactZones(),
+      ...this.train.interactZones(),
       ...this.flowers.interactZones(),
     ];
   }
@@ -129,21 +204,28 @@ export class World implements GameSystem {
    * needing to know that chain of ownership.
    */
   signZones(): SignZone[] {
-    return collectSignZones(this.anchorPlots.group);
+    return [...collectSignZones(this.anchorPlots.group), ...this.facePaintStall.signZones()];
   }
 
   /**
-   * Gives the building the player. Must be called once, after the player is
-   * constructed — it installs the ground sampler that makes floors walkable.
+   * Gives the building — and the face-painting stall — the player. Must be
+   * called once, after the player is constructed: the building installs the
+   * ground sampler that makes floors walkable, and the stall hangs the paint
+   * overlay mesh on the player's actual head (see `FacePaintStall.attachPlayer`).
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
+    this.facePaintStall.attachPlayer(player);
+    this.train.attachPlayer(player);
   }
 
   dispose(): void {
     this.fountain.dispose();
     this.fairyLights.dispose();
+    this.lampPosts.dispose();
     this.stalls.dispose();
+    this.facePaintStall.dispose();
+    this.train.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }

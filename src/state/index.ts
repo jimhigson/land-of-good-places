@@ -10,6 +10,7 @@ export type {
   CuteCategory,
   CutePlacement,
   CuteThing,
+  FacePaintId,
   FlowerColour,
   GameMode,
   GameState,

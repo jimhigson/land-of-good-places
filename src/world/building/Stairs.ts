@@ -28,8 +28,9 @@ export class Stairs {
       const bottom = deck * BUILDING_FLOOR_HEIGHT;
       group.add(buildTreads(flightA, bottom), buildStringer(flightA, bottom));
       group.add(buildTreads(flightB, bottom), buildStringer(flightB, bottom));
-      group.add(buildLanding(flightA, bottom));
+      group.add(buildLanding(flightA, flightB, bottom));
       group.add(buildBalustrade(flightA, flightB, bottom));
+      group.add(buildHandrails(flightA, bottom), buildHandrails(flightB, bottom));
     }
   }
 }
@@ -96,19 +97,42 @@ function buildStringer(flight: RampDefinition, groupBase: number): Mesh {
   return mesh;
 }
 
-/** The half-landing where the switchback turns. */
-function buildLanding(flightA: RampDefinition, groupBase: number): Mesh {
+/**
+ * The half-landing where the switchback turns.
+ *
+ * Derived from the flights rather than typed in, so moving the stairwell — as
+ * the roomier interior did, by fourteen metres — cannot leave the landing behind
+ * in the old shaft.
+ */
+function buildLanding(
+  flightA: RampDefinition,
+  flightB: RampDefinition,
+  groupBase: number,
+): Mesh {
   const top = flightA.yTo - groupBase;
+  const width = flightB.footprint.maxX - flightA.footprint.minX;
   const mesh = new Mesh(
-    new BoxGeometry(4.9, 0.28, 1.1),
+    new BoxGeometry(width, 0.28, 1.1),
     interiorMaterial(PALETTE.buildingFloorAlt, 0.8),
   );
   mesh.receiveShadow = true;
-  mesh.position.set(-9.05, top - 0.14, -2.85);
+  mesh.position.set(
+    (flightA.footprint.minX + flightB.footprint.maxX) / 2,
+    top - 0.14,
+    flightA.to - 0.45,
+  );
   return mesh;
 }
 
-/** Chunky pastel balustrades so the stairwell reads as safe from above. */
+/**
+ * Chunky pastel balustrade posts, both sides of both flights.
+ *
+ * Posts alone used to stand only on each flight's outer edge, on the
+ * understanding that the other edge was "the middle" and therefore safe. It is
+ * not: this is a switchback, so at any given point along it the two flights
+ * are mid-climb by different amounts, and the shared inner edge between them
+ * is a bigger drop than either outer one. Every edge gets posts.
+ */
 function buildBalustrade(
   flightA: RampDefinition,
   flightB: RampDefinition,
@@ -117,7 +141,7 @@ function buildBalustrade(
   const posts = new InstancedMesh(
     new BoxGeometry(0.18, 1, 0.18),
     interiorMaterial(PALETTE.buildingTrim, 0.7),
-    22,
+    44,
   );
   posts.castShadow = false;
   posts.receiveShadow = true;
@@ -129,18 +153,57 @@ function buildBalustrade(
   let index = 0;
 
   for (const flight of [flightA, flightB]) {
-    const edgeX = flight === flightA ? flight.footprint.minX + 0.2 : flight.footprint.maxX - 0.2;
-    for (let i = 0; i < 11; i += 1) {
-      const t = i / 10;
-      const z = flight.from + (flight.to - flight.from) * t;
-      const top = flight.yFrom + (flight.yTo - flight.yFrom) * t - groupBase;
-      scale.set(1, 1.05, 1);
-      position.set(edgeX, top + 0.52, z);
-      matrix.compose(position, rotation, scale);
-      posts.setMatrixAt(index, matrix);
-      index += 1;
+    for (const edgeX of [flight.footprint.minX + 0.2, flight.footprint.maxX - 0.2]) {
+      for (let i = 0; i < 11; i += 1) {
+        const t = i / 10;
+        const z = flight.from + (flight.to - flight.from) * t;
+        const top = flight.yFrom + (flight.yTo - flight.yFrom) * t - groupBase;
+        scale.set(1, 1.05, 1);
+        position.set(edgeX, top + 0.52, z);
+        matrix.compose(position, rotation, scale);
+        posts.setMatrixAt(index, matrix);
+        index += 1;
+      }
     }
   }
   posts.instanceMatrix.needsUpdate = true;
   return posts;
+}
+
+/**
+ * A solid handrail bar along each edge of one flight, matching the escalator's
+ * treatment (`Escalators.ts`'s `buildBalustrades`) so the two ways up read as
+ * the same family of furniture. The posts above are decoration; this is the
+ * part that reads, from a child's eye height, as "you cannot fall off here."
+ *
+ * The matching collision walls live in `Building.ts` (`addRampSideWalls`),
+ * registered straight from this flight's footprint so the solid rail and the
+ * invisible one can never disagree about where the edge is.
+ */
+function buildHandrails(flight: RampDefinition, groupBase: number): InstancedMesh {
+  const run = flight.to - flight.from;
+  const rise = flight.yTo - flight.yFrom;
+  const length = Math.hypot(run, rise);
+  const angle = -Math.atan2(rise, run);
+
+  const rails = new InstancedMesh(
+    new BoxGeometry(0.22, 0.95, length),
+    interiorMaterial(PALETTE.buildingTrim, 0.72),
+    2,
+  );
+  rails.castShadow = false;
+  rails.receiveShadow = true;
+
+  const matrix = new Matrix4();
+  const rotation = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), angle);
+  const scale = new Vector3(1, 1, 1);
+  const position = new Vector3();
+
+  [flight.footprint.minX + 0.11, flight.footprint.maxX - 0.11].forEach((x, index) => {
+    position.set(x, flight.yFrom + rise / 2 - groupBase + 0.46, flight.from + run / 2);
+    matrix.compose(position, rotation, scale);
+    rails.setMatrixAt(index, matrix);
+  });
+  rails.instanceMatrix.needsUpdate = true;
+  return rails;
 }

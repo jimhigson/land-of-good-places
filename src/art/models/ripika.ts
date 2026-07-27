@@ -40,6 +40,115 @@ export interface RipikaHandle extends CreatureHandle {
   readonly tail: Group;
 }
 
+/** What {@link buildRipikaHead} hands back — everything a wearer needs. */
+export interface RipikaHeadHandle {
+  /** Skull, ears, tuft and painted face, all parented under one group. The
+   *  group's origin is the skull centre — exactly where `head` sits on
+   *  RiPika's own body, so a caller mounting the whole group elsewhere (the
+   *  hat shop, for one) gets the same head with no offset maths. */
+  readonly group: Group;
+  /** The bare skull radius (before ears/tuft), for callers sizing around it. */
+  readonly skullR: number;
+  setExpression(name: Expression): void;
+}
+
+/**
+ * Builds RiPika's head — skull, cowlick, ears, painted face, optional space
+ * helmet — at any scale. `createRipika` below is one caller, authored at
+ * {@link HEAD}; the RiPika hat (`src/art/models/hats.ts`) is another, authored
+ * much bigger. Keeping this in one place means the two never drift apart by
+ * accident.
+ */
+export function buildRipikaHead(scale: number, options: RipikaOptions = {}): RipikaHeadHandle {
+  const head = new Group();
+  head.name = 'ripikaHead';
+
+  const yellow = toonMaterial(ART.ripikaYellow);
+  const yellowDeep = toonMaterial(ART.ripikaYellowDeep);
+  const cocoa = toonMaterial(ART.ripikaTip);
+
+  const skullR = 0.315 * scale;
+  const skull = blob(skullR, yellow, [1.06, 0.97, 1], 32);
+  head.add(skull);
+  addOutline(skull, 0.014);
+
+  // Cowlick — one little tuft so the silhouette is not a perfect circle.
+  const tuft = blob(0.07 * scale, yellowDeep, [0.7, 1.25, 0.7], 14);
+  tuft.position.set(-0.05 * scale, 0.31 * scale, -0.03 * scale);
+  tuft.rotation.z = -0.45;
+  head.add(tuft);
+
+  // Ears: chunky tapered cones with rounded cocoa caps. Built from a tapered
+  // CYLINDER rather than a cone so the tip has width — a needle-sharp ear point
+  // is the fastest way to make a cute creature look spiky.
+  for (const side of [-1, 1] as const) {
+    const ear = new Group();
+    ear.position.set(side * 0.185 * scale, 0.235 * scale, -0.02 * scale);
+    ear.rotation.z = side * 0.44;
+    ear.rotation.x = -0.14;
+    head.add(ear);
+
+    const shaft = solid(
+      new Mesh(new CylinderGeometry(0.036 * scale, 0.105 * scale, 0.24 * scale, 18, 1), yellow),
+    );
+    shaft.position.y = 0.11 * scale;
+    ear.add(shaft);
+    addOutline(shaft, 0.011);
+
+    const base = blob(0.1 * scale, yellow, [1, 0.75, 1], 16);
+    ear.add(base);
+
+    const tipCone = solid(
+      new Mesh(new CylinderGeometry(0.014 * scale, 0.038 * scale, 0.1 * scale, 16, 1), cocoa),
+    );
+    tipCone.position.y = 0.27 * scale;
+    ear.add(tipCone);
+    addOutline(tipCone, 0.009);
+
+    const tipBall = solid(blob(0.016 * scale, cocoa, [1, 1, 1], 10));
+    tipBall.position.y = 0.318 * scale;
+    ear.add(tipBall);
+  }
+
+  // --- face ------------------------------------------------------------------
+  const face = createFacePatch({
+    radius: skullR,
+    spreadX: 1.85,
+    spreadY: 1.85,
+    tilt: 0.2,
+    size: 512,
+    eyeY: 0.44,
+    eyeGap: 0.46,
+    eyeW: 0.118,
+    eyeH: 0.15,
+    mouth: 'cat',
+    mouthW: 0.082,
+    mouthDrop: 0.235,
+    nose: ART.ripikaTip,
+    blush: ART.ripikaCheek,
+    blushStyle: 'disc',
+    blushR: 0.105,
+  });
+  face.mesh.scale.set(1.06, 0.97, 1);
+  head.add(face.mesh);
+
+  if (options.space) {
+    const helmet = new Mesh(
+      face.mesh.geometry.clone(),
+      toonMaterial(0xffffff, { transparent: true, opacity: 0.34 }),
+    );
+    helmet.scale.setScalar(1.55);
+    helmet.name = 'spaceHelmet';
+    head.add(helmet);
+  }
+
+  return {
+    group: head,
+    skullR,
+    setExpression: (name: Expression) => face.setExpression(name),
+  };
+}
+
 export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   const root = new Group();
   root.name = 'ripika';
@@ -133,90 +242,22 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   addOutline(t1, 0.012);
 
   // --- head ------------------------------------------------------------------
-  const head = new Group();
-  head.position.y = 0.75;
-  body.add(head);
+  const headPivot = new Group();
+  headPivot.position.y = 0.75;
+  body.add(headPivot);
 
-  const skullR = 0.315 * HEAD;
-  const skull = blob(skullR, yellow, [1.06, 0.97, 1], 32);
-  head.add(skull);
-  addOutline(skull, 0.014);
-
-  // Cowlick — one little tuft so the silhouette is not a perfect circle.
-  const tuft = blob(0.07 * HEAD, yellowDeep, [0.7, 1.25, 0.7], 14);
-  tuft.position.set(-0.05 * HEAD, 0.31 * HEAD, -0.03 * HEAD);
-  tuft.rotation.z = -0.45;
-  head.add(tuft);
-
-  // Ears: chunky tapered cones with rounded cocoa caps. Built from a tapered
-  // CYLINDER rather than a cone so the tip has width — a needle-sharp ear point
-  // is the fastest way to make a cute creature look spiky.
-  for (const side of [-1, 1] as const) {
-    const ear = new Group();
-    ear.position.set(side * 0.185 * HEAD, 0.235 * HEAD, -0.02 * HEAD);
-    ear.rotation.z = side * 0.44;
-    ear.rotation.x = -0.14;
-    head.add(ear);
-
-    const shaft = solid(new Mesh(new CylinderGeometry(0.036 * HEAD, 0.105 * HEAD, 0.24 * HEAD, 18, 1), yellow));
-    shaft.position.y = 0.11 * HEAD;
-    ear.add(shaft);
-    addOutline(shaft, 0.011);
-
-    const base = blob(0.1 * HEAD, yellow, [1, 0.75, 1], 16);
-    ear.add(base);
-
-    const tipCone = solid(new Mesh(new CylinderGeometry(0.014 * HEAD, 0.038 * HEAD, 0.1 * HEAD, 16, 1), cocoa));
-    tipCone.position.y = 0.27 * HEAD;
-    ear.add(tipCone);
-    addOutline(tipCone, 0.009);
-
-    const tipBall = solid(blob(0.016 * HEAD, cocoa, [1, 1, 1], 10));
-    tipBall.position.y = 0.318 * HEAD;
-    ear.add(tipBall);
-  }
-
-  // --- face ------------------------------------------------------------------
-  const face = createFacePatch({
-    radius: skullR,
-    spreadX: 1.85,
-    spreadY: 1.85,
-    tilt: 0.2,
-    size: 512,
-    eyeY: 0.44,
-    eyeGap: 0.46,
-    eyeW: 0.118,
-    eyeH: 0.15,
-    mouth: 'cat',
-    mouthW: 0.082,
-    mouthDrop: 0.235,
-    nose: ART.ripikaTip,
-    blush: ART.ripikaCheek,
-    blushStyle: 'disc',
-    blushR: 0.105,
-  });
-  face.mesh.scale.set(1.06, 0.97, 1);
-  head.add(face.mesh);
-
-  if (options.space) {
-    const helmet = new Mesh(
-      face.mesh.geometry.clone(),
-      toonMaterial(0xffffff, { transparent: true, opacity: 0.34 }),
-    );
-    helmet.scale.setScalar(1.55);
-    helmet.name = 'spaceHelmet';
-    head.add(helmet);
-  }
+  const ripikaHead = buildRipikaHead(HEAD, options);
+  headPivot.add(ripikaHead.group);
 
   const handle: RipikaHandle = {
     root,
     body,
-    head,
+    head: headPivot,
     tail,
     limbs,
     // Measured to the ear tips, not the skull — the name label must clear them.
     height: 1.46,
-    setExpression: (name: Expression) => face.setExpression(name),
+    setExpression: (name: Expression) => ripikaHead.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => {
       applyWalk(limbs, body, phase, speed, 0.7, 0.06);
       tail.rotation.z = Math.sin(phase * Math.PI * 4) * 0.18 * speed;

@@ -3,7 +3,17 @@ import { PALETTE } from '../../../core/palette';
 import { ART } from '../../../art/style/artPalette';
 import { createKeeper, type KeeperHandle } from '../../../art/models/keeper';
 import { gameStore } from '../../../state';
-import { SHOP_UNITS, deckY, shopLocalToBuilding, worldX, worldZ, type ShopUnitDefinition } from '../layout';
+import {
+  SHOP_RECESS_DEPTH,
+  SHOP_SCALE_XZ,
+  SHOP_UNITS,
+  deckY,
+  shopHasForecourt,
+  shopLocalToBuilding,
+  worldX,
+  worldZ,
+  type ShopUnitDefinition,
+} from '../layout';
 import type { ShopUnits } from '../ShopUnits';
 import { buildKiosk } from './kiosk';
 import { buildFitout, type Fitout } from './fitouts';
@@ -24,10 +34,16 @@ import { rainbowFlossAvailable, type ShopId } from './catalogue';
  * the park put together. Walk in and the shop you are in is complete.
  */
 
-/** Where a child stands to be served, in unit-local metres. */
-export const SHOP_STAND_Z = 2.4;
-/** How close to that spot counts as "at the counter". */
-export const SHOP_REACH = 2.2;
+/**
+ * Where a child stands to be served, in unit-local metres.
+ *
+ * Scaled by `SHOP_SCALE_XZ` along with the rest of the shop: a bigger counter
+ * needs the standing spot to recede with it, or a child would be asked to
+ * stand inside the (now bigger) counter itself.
+ */
+export const SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ;
+/** How close to that spot counts as "at the counter". Scaled the same way. */
+export const SHOP_REACH = 2.2 * SHOP_SCALE_XZ;
 
 export interface ShopStand {
   readonly id: ShopId;
@@ -191,7 +207,10 @@ export class Shops {
         deck: unit.deck,
         x: worldX(standX),
         z: worldZ(standZ),
-        y: deckY(unit.deck),
+        // Recessed shops stand a child SHOP_RECESS_DEPTH lower than the deck
+        // around them — the stand point has to agree, or shopAt()'s height
+        // check would reject a child standing exactly where the game put them.
+        y: deckY(unit.deck) - (shopHasForecourt(unit) ? SHOP_RECESS_DEPTH : 0),
       });
     }
 

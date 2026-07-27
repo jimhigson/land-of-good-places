@@ -134,9 +134,16 @@ export class InventoryDrawer {
     this.list.innerHTML = '';
 
     if (this.entries.length === 0) {
-      const empty = document.createElement('p');
+      // A friendly illustration rather than a bare line of text — and, just
+      // as importantly, one with enough presence that the drawer never
+      // collapses down into a thin, see-through stub (see the note on
+      // `align-content` in style.css for why that used to happen).
+      const empty = document.createElement('div');
       empty.className = 'backpack-empty';
-      empty.textContent = 'Nothing yet! There are seven shops in the big building.';
+      empty.innerHTML =
+        '<span class="backpack-empty-emoji" aria-hidden="true">🎒</span>' +
+        '<p class="backpack-empty-title">Your backpack is empty!</p>' +
+        '<p class="backpack-empty-hint">Go and find some cute things to put in it.</p>';
       this.list.append(empty);
       this.rows = [];
       return;
