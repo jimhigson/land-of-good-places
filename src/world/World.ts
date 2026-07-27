@@ -6,6 +6,7 @@ import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { LampPosts } from './LampPosts';
+import { TreeLights } from './TreeLights';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
@@ -48,6 +49,7 @@ export class World implements GameSystem {
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
   readonly lampPosts: LampPosts;
+  readonly treeLights: TreeLights;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
@@ -96,6 +98,15 @@ export class World implements GameSystem {
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
 
+    // Garlands of lights strung tree to tree. Nothing about them is authored:
+    // they are generated from where `Scenery` actually planted the trees and
+    // from the railway's *solved* centre line, so both the next tree scatter
+    // and Decision 4's replanned railway move them on their own. That is what
+    // puts it here — it needs the train's route, and the train does not have
+    // one until it has solved for it against the finished collision world.
+    // It registers no collision itself; the wires hang overhead.
+    this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
+
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
     // after AnchorPlots (it fills that plot and retires its "coming soon"
@@ -137,6 +148,7 @@ export class World implements GameSystem {
       this.fountain.group,
       this.fairyLights.group,
       this.lampPosts.group,
+      this.treeLights.group,
       this.anchorPlots.group,
       // The building is bigger on the inside: its interior is its own place,
       // six hundred metres from the park rather than inside the plot the facade
@@ -163,12 +175,14 @@ export class World implements GameSystem {
     this.fountain.nightFactor = night;
     this.fairyLights.nightFactor = eveningGlow;
     this.lampPosts.nightFactor = eveningGlow;
+    this.treeLights.nightFactor = eveningGlow;
 
     this.train.nightFactor = night;
 
     this.fountain.update(context);
     this.fairyLights.update(context);
     this.lampPosts.update(context);
+    this.treeLights.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
 
@@ -256,6 +270,7 @@ export class World implements GameSystem {
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.lampPosts.dispose();
+    this.treeLights.dispose();
     this.stalls.dispose();
     this.facePaintStall.dispose();
     this.train.dispose();
