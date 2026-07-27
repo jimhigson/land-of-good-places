@@ -605,6 +605,35 @@ Rough order of construction, each step playable:
     visit and get their faces painted in various cute designs.
 31d. **Player–NPC collision** — the player and NPCs cannot walk through
     each other.
+31f. **Each castle floor becomes its OWN space (27 July 2026 — queued;
+    needs an architect decision first).** The floors should stop existing
+    in one continuous 3D space stacked on top of each other. Each floor is
+    its own separate space, the way the interior as a whole is already
+    separate from the park. **They do not have to line up with each other** —
+    a floor can be any shape or size regardless of the one below it. This is
+    the same "bigger on the inside" idea applied one level down.
+31g. **Trampolines become tap-and-go (27 July 2026 — queued).** No manual
+    fine control: **tap a trampoline and the character walks there and
+    bounces up one floor automatically.** One tap, one floor. The current
+    version needs you to walk onto the pad and time repeated bounces, which
+    is fiddly for a six-year-old. Same spirit as the tap-stairs Climb /
+    Descend menu.
+    *Note:* this becomes much simpler once 31f lands — with floors as
+    separate spaces, "go up one floor" is a transition rather than a
+    physical arc that has to clear a hole in a slab.
+
+    **Why 31f needs the architect first:** a great deal currently assumes
+    one continuous interior — `WalkSurfaces` samples the highest walkable
+    surface within a step of your feet across all decks, the floor-fader
+    hides decks above you for the cutaway view, and the lift, escalators,
+    stairs, bubble, helter-skelter, ginormous slide and ball pit are all
+    built as things that physically span between deck heights. Splitting the
+    floors changes what every one of those *is*. It also interacts with the
+    just-landed shaft guards and the deck-hole invariant in `layout.ts`. The
+    architect should rule on how floors connect, what happens to each
+    traversal device, and whether this is one refactor or a staged one,
+    before any of it is built.
+
 31e. **The castle INTERIOR must be fairy-tale themed too.** Checked
     27 July 2026: it is not. Inside is a shopping centre — flat deck
     floors with alternating cream/blossom storeys, a floor roundel,
