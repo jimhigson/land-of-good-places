@@ -323,6 +323,28 @@ export const FILL_LIGHT_RATIO = 0.24;
 export const FOG_NEAR = CAMERA_DISTANCE + 42;
 export const FOG_FAR = CAMERA_DISTANCE + 168;
 
+/**
+ * Fog distances at midnight, interpolated towards by `nightFactor`.
+ *
+ * The family asked for "a dark fog so distant items are less visible while the
+ * foreground is well lit by street lamps" — the point is the *contrast*, near
+ * ground bright under the lamps and distance falling away into darkness.
+ *
+ * Expressed as offsets from CAMERA_DISTANCE for the same reason the daytime
+ * pair are, and read the same way: by day the park fades between 42 m and
+ * 168 m from the action, at night between 8 m and 50 m. Night fog used to be
+ * the daytime distances scaled by 0.7 and 0.72, which put full fog 96 m out —
+ * further than the far side of the park, so it never actually did anything.
+ *
+ * 50 m is chosen against how much ground the camera can actually see: at 38°
+ * a screenful is about 24 m of ground deep at the default zoom and 58 m at the
+ * furthest zoom-out, so full fog at 50 m dissolves the treeline and the tops of
+ * the castle and the ferris wheel while leaving everything the player is
+ * walking through untouched.
+ */
+export const NIGHT_FOG_NEAR = CAMERA_DISTANCE + 8;
+export const NIGHT_FOG_FAR = CAMERA_DISTANCE + 50;
+
 // ------------------------------------------------------------------ input
 
 /** Radial dead-zone applied to gamepad sticks. */
