@@ -10,6 +10,9 @@ import {
   HELTER_DECK,
   HELTER_ENTRY_X,
   HELTER_ENTRY_Z,
+  LIFT_DOOR_Z,
+  LIFT_PICK_X,
+  LIFT_STAND_X,
   SHOP_UNITS,
   STAIR_STAND_X,
   STAIR_STAND_Z,
@@ -28,11 +31,7 @@ import {
   worldZ,
 } from './layout';
 import { SHOP_STAND_Z } from './shops/Shops';
-import {
-  BUILDING_FLOOR_COUNT,
-  BUILDING_HALF_Z,
-  INTERIOR_HALF_X,
-} from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_HALF_Z } from '../../core/constants';
 
 /**
  * Everything in the building a finger can point at.
@@ -45,20 +44,6 @@ import {
  * which is how you get in. Zones are picked by world position, so the two sets
  * can never be mistaken for one another.
  */
-
-/**
- * Where you wait for the lift: just inside the east doorway, on the building
- * side of the threshold.
- *
- * Deliberately *not* inside the car. The car is only at one deck at a time, and
- * the shaft below it is a five-storey drop — walking a six-year-old into an open
- * lift shaft because they tapped the pretty glass box is not the game we are
- * making. Standing here calls the car (`Building.callLiftIfWaiting`) and the
- * arriving interact press cuts short its wait at wherever it was.
- */
-const LIFT_STAND_X = INTERIOR_HALF_X - 1.1;
-const LIFT_PICK_X = INTERIOR_HALF_X + 0.6;
-const LIFT_DOOR_Z = 5;
 
 export interface BuildingZoneState {
   /** Current top surface of the floating bubble, in world units. */
@@ -90,6 +75,13 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   // the one you are standing next to, and the height tolerance in
   // `pickInteractZone` keeps the other four out of the way.
   for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
+    // Tapping the lift walks you to the doors and stops there. Arriving is the
+    // whole interaction now: standing in the lobby is what puts the lift's own
+    // control panel on screen (`world/building/liftRide.ts`,
+    // `ui/LiftPanel.ts`), and that panel is a far better affordance for a
+    // six-year-old than a one-word "Ride" pill. Hence `pressInteract: false`
+    // — there is no press for arriving to fire, and the action pill stays out
+    // of the way of the panel.
     zones.push({
       id: `lift-${deck}`,
       label: 'Glass lift',
@@ -99,7 +91,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       pickRadius: 2.8,
       standX: worldX(LIFT_STAND_X),
       standZ: worldZ(LIFT_DOOR_Z),
-      pressInteract: true,
+      pressInteract: false,
     });
 
     // Tapping the stairs walks you to the foot of the flight and then fires

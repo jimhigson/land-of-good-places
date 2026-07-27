@@ -1,10 +1,5 @@
 import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, Quaternion, Vector3 } from 'three';
-import {
-  BUILDING_FLOOR_COUNT,
-  BUILDING_FLOOR_HEIGHT,
-  LIFT_DWELL,
-  LIFT_SPEED,
-} from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, LIFT_SPEED } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { castAndReceive, extrudePlan, glassMaterial, planRect, softMaterial } from './parts';
 import {
@@ -20,13 +15,22 @@ import type { MovingPlatform } from './surfaces';
 import type { CollisionWorld } from '../Collision';
 
 /**
- * The glass lift.
+ * The glass lift — the car and the shaft, and nothing else.
  *
  * It hangs off the east face in its own glass shaft so that riding it really
- * does show you the park sliding past. It runs itself — up a floor, wait, up a
- * floor, and back down again from the top — which means a six-year-old only has
- * to walk in and stand still. Pressing the interact key while inside sends it on
- * straight away rather than waiting out the dwell.
+ * does show you the park sliding past.
+ *
+ * **It is a piece of machinery, not a ride.** Ask it for a floor and it goes
+ * there, non-stop, and stays there until it is asked again. Who asks, when the
+ * character steps in, and what the panel on the wall says are all
+ * {@link LiftRide}'s business (`liftRide.ts`) — which is what lets the whole
+ * riding experience be rebuilt on ARCHITECTURE-DECISIONS Decision 3's
+ * `floors()` / `go(n)` seam without this file caring.
+ *
+ * It used to run itself: up a floor, wait 3.2 s, up a floor, and back down
+ * again from the top, for ever. That is why the family said the lift was too
+ * hard to ride — the car you want is somewhere else, moving away from you, and
+ * catching it is a game of timing. It now sits still until it is called.
  */
 export class GlassLift implements MovingPlatform {
   readonly group = new Group();
@@ -35,11 +39,8 @@ export class GlassLift implements MovingPlatform {
 
   private readonly car = new Group();
   private floorIndex = 0;
-  private direction = 1;
-  private dwellTimer = LIFT_DWELL;
-  private travelling = false;
-  /** Floor somebody is waiting on. Overrides the idle up-and-down cycle. */
-  private called: number | null = null;
+  /** Where the car is going, or null when it is parked and waiting. */
+  private target: number | null = null;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'glass-lift';
@@ -129,42 +130,41 @@ export class GlassLift implements MovingPlatform {
     );
   }
 
-  /**
-   * Somebody is standing at the doors on `floor`. Fetches the car, unless it is
-   * already moving or already there.
-   */
-  callTo(floor: number): void {
-    if (this.travelling || floor === this.floorIndex) return;
-    this.called = floor;
-    this.dwellTimer = 0;
+  /** The floor the car is parked at. Meaningless while {@link moving}. */
+  get floor(): number {
+    return this.floorIndex;
   }
 
-  update(dt: number, riderAboard: boolean, interactPressed: boolean): void {
-    if (this.travelling) {
-      const target = targetHeight(this.floorIndex + this.direction);
-      const step = LIFT_SPEED * dt;
-      const remaining = target - this.surfaceY;
-      if (Math.abs(remaining) <= step) {
-        this.surfaceY = target;
-        this.floorIndex += this.direction;
-        this.travelling = false;
-        this.dwellTimer = LIFT_DWELL;
-        if (this.called === this.floorIndex) this.called = null;
-        if (this.floorIndex >= BUILDING_FLOOR_COUNT - 1) this.direction = -1;
-        else if (this.floorIndex <= 0) this.direction = 1;
-      } else {
-        this.surfaceY += Math.sign(remaining) * step;
-      }
+  /** True while the car is on its way somewhere. */
+  get moving(): boolean {
+    return this.target !== null;
+  }
+
+  /**
+   * Go to `floor`, now, without stopping on the way.
+   *
+   * Called both to fetch the car for somebody waiting and to carry a rider —
+   * they are the same journey and there is no reason for the machinery to know
+   * which is which.
+   */
+  callTo(floor: number): void {
+    const wanted = clampFloor(floor);
+    if (wanted === this.floorIndex && this.target === null) return;
+    this.target = wanted;
+  }
+
+  update(dt: number): void {
+    if (this.target === null) return;
+
+    const targetY = targetHeight(this.target);
+    const step = LIFT_SPEED * dt;
+    const remaining = targetY - this.surfaceY;
+    if (Math.abs(remaining) <= step) {
+      this.surfaceY = targetY;
+      this.floorIndex = this.target;
+      this.target = null;
     } else {
-      this.dwellTimer -= dt;
-      // Riding and impatient: go now rather than waiting out the dwell.
-      if (riderAboard && interactPressed) this.dwellTimer = 0;
-      if (this.dwellTimer <= 0) {
-        if (this.called !== null && this.called !== this.floorIndex) {
-          this.direction = Math.sign(this.called - this.floorIndex);
-        }
-        this.travelling = true;
-      }
+      this.surfaceY += Math.sign(remaining) * step;
     }
     this.applyCarHeight();
   }
@@ -174,9 +174,12 @@ export class GlassLift implements MovingPlatform {
   }
 }
 
+function clampFloor(floorIndex: number): number {
+  return Math.max(0, Math.min(BUILDING_FLOOR_COUNT - 1, Math.round(floorIndex)));
+}
+
 function targetHeight(floorIndex: number): number {
-  const clamped = Math.max(0, Math.min(BUILDING_FLOOR_COUNT - 1, floorIndex));
-  return BUILDING_BASE_Y + clamped * BUILDING_FLOOR_HEIGHT;
+  return BUILDING_BASE_Y + clampFloor(floorIndex) * BUILDING_FLOOR_HEIGHT;
 }
 
 /** Four candy-coloured corner posts for the shaft. */

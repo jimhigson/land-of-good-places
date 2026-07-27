@@ -26,6 +26,7 @@ import { Bubble } from './Bubble';
 import { Escalators } from './Escalators';
 import { FloorFader } from './floorFade';
 import { GlassLift } from './GlassLift';
+import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
 import { buildShaftGuards } from './ShaftGuards';
 import { InteriorLighting } from './InteriorLighting';
@@ -64,7 +65,6 @@ import {
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
   LIFT_DOOR_MIN_Z,
-  LIFT_SHAFT,
   STAIR_STAND_X,
   STAIR_STAND_Z,
   TOILET_DECK,
@@ -187,6 +187,7 @@ export class Building implements GameSystem {
 
   private readonly escalators: Escalators;
   private readonly lift: GlassLift;
+  private readonly liftRide: LiftRide;
   private readonly trampoline = new Trampoline();
   private readonly bubble = new Bubble();
   private readonly fader = new FloorFader();
@@ -238,6 +239,16 @@ export class Building implements GameSystem {
     this.toilets = new Toilets(this.shell.floorGroups);
     this.lift = new GlassLift(collision);
     this.interiorRoot.add(this.lift.group);
+    // The lift's *experience* — call panel, automatic boarding, straight to the
+    // floor you pressed — lives in `liftRide.ts` behind Decision 3's
+    // `floors()` / `go(n)` seam, so the castle floor split can replace all of
+    // it without touching the car, the shaft or this file. See that file.
+    this.liftRide = new LiftRide({
+      lift: this.lift,
+      surfaces: this.surfaces,
+      cancelWalk: () => this.controls.cancelWalk(),
+      isInside: () => this.inside,
+    });
     // Off until the player is actually indoors under a ceiling (see `update`);
     // starts invisible for the same reason `interiorRoot` does.
     this.interiorRoot.add(this.interiorLighting.group);
@@ -353,7 +364,20 @@ export class Building implements GameSystem {
   attachPlayer(player: Player): void {
     this.player = player;
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
+    this.liftRide.attachPlayer(player);
     this.ballPit.attachPlayer(player);
+  }
+
+  /**
+   * The lift's control panel, as `ui/LiftPanel.ts` sees it.
+   *
+   * Typed as {@link LiftPanelSource} rather than as `LiftRide` on purpose: the
+   * UI must only ever reach Decision 3's `floors()` / `go(n)` seam and the two
+   * pieces of glue beside it, so that the castle floor split can swap the
+   * implementation out from under it.
+   */
+  get liftPanel(): LiftPanelSource {
+    return this.liftRide;
   }
 
   /** The Climb / Descend menu was answered. */
@@ -372,8 +396,7 @@ export class Building implements GameSystem {
     // press (see `handleInteractPress`'s "first claimant wins" doc comment).
     const interactPressed = input.justPressed('interact');
 
-    this.callLiftIfWaiting();
-    this.lift.update(dt, this.riderInLift(), interactPressed);
+    this.liftRide.update(dt);
     this.bubble.update(dt, elapsed);
     this.escalators.update(dt);
     this.trampoline.update(dt);
@@ -387,7 +410,7 @@ export class Building implements GameSystem {
 
     if (this.ride) {
       this.advanceRide(dt, player);
-    } else if (!this.changingSpace) {
+    } else if (!this.changingSpace && !player.riding) {
       this.handleInteractPress(player, interactPressed);
       this.handleTrampoline(player);
       this.handleEscalator(player, dt);
@@ -682,34 +705,6 @@ export class Building implements GameSystem {
   }
 
   // -------------------------------------------------------------- machinery
-
-  /**
-   * Standing at the lift doors fetches the car.
-   *
-   * Without this the lift is a lottery: five floors at three seconds a stop
-   * means half a minute of waiting, which is not a thing to ask of a
-   * six-year-old who can see the stairs from where they are standing.
-   */
-  private callLiftIfWaiting(): void {
-    const player = this.player;
-    if (!player || player.riding || !this.inside) return;
-    const localX = player.position.x - INTERIOR_ORIGIN_X;
-    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
-    if (localX < INTERIOR_HALF_X - 2.5 || localX > LIFT_SHAFT.maxX) return;
-    if (localZ < LIFT_DOOR_MIN_Z - 0.6 || localZ > LIFT_DOOR_MAX_Z + 0.6) return;
-
-    const deck = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
-    if (deck !== null) this.lift.callTo(deck);
-  }
-
-  private riderInLift(): boolean {
-    const player = this.player;
-    if (!player) return false;
-    return (
-      this.lift.covers(player.position.x, player.position.z) &&
-      Math.abs(player.position.y - this.lift.surfaceY) < 0.5
-    );
-  }
 
   private handleTrampoline(player: Player): void {
     const onPad =

@@ -1504,6 +1504,268 @@ kbd {
   opacity: 0.66;
 }
 
+/* --------------------------------------------------- the lift's own panel
+
+   GAME_DESIGN.md, "Riding the lift": walk near the lift and a call button
+   appears "styled like a real elevator control panel — a lovely toy version of
+   one, in the house style".
+
+   So: a plate screwed to the side of the screen, with four screw heads, a
+   little readout that says where the car is, and round glowing buttons. The
+   metal is brushed the way everything in this park is made — painted wood
+   pretending, warm rather than steely, and never anywhere near black
+   (ART_DIRECTION: the darkest value in the game is the plum `--lgp-ink`).
+
+   Anchored centre-left because that is the one edge of the screen with nothing
+   on it: the HUD pills live top and bottom-left, the action/read pill and the
+   thumb buttons live bottom-right. It only exists while a child is standing at
+   the lift doors or riding in the car. */
+.lift-panel {
+  position: absolute;
+  left: calc(0.875rem + env(safe-area-inset-left));
+  top: 50%;
+  z-index: 6;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.lift-panel[data-show='false'] {
+  opacity: 0;
+  transform: translateY(-50%) translateX(-0.75rem);
+  visibility: hidden;
+}
+
+.lift-plate {
+  position: relative;
+  pointer-events: auto;
+  width: 12.5rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  padding: 0.625rem 0.5rem 0.75rem;
+  color: var(--lgp-ink);
+  border: 0.25rem solid #fff;
+  border-radius: 1.25rem;
+  box-shadow: 0 0.5rem 0 rgba(74, 58, 82, 0.18);
+  /* Four screw heads, then the brush, then the plate itself. Painted as
+     background layers rather than as elements so the whole plate is one box a
+     child can never knock apart. */
+  background-image: radial-gradient(
+      circle at 0.6rem 0.6rem,
+      rgba(74, 58, 82, 0.22) 0 0.1rem,
+      transparent 0.11rem
+    ),
+    radial-gradient(circle at calc(100% - 0.6rem) 0.6rem, rgba(74, 58, 82, 0.22) 0 0.1rem, transparent 0.11rem),
+    radial-gradient(circle at 0.6rem calc(100% - 0.6rem), rgba(74, 58, 82, 0.22) 0 0.1rem, transparent 0.11rem),
+    radial-gradient(
+      circle at calc(100% - 0.6rem) calc(100% - 0.6rem),
+      rgba(74, 58, 82, 0.22) 0 0.1rem,
+      transparent 0.11rem
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.85) 0 0.0625rem,
+      rgba(74, 58, 82, 0.045) 0.0625rem 0.125rem
+    ),
+    linear-gradient(155deg, #f6f3f8 0%, #e7e1ec 55%, #f8f5fa 100%);
+}
+
+/* The readout. Plum with cream digits — a lift indicator's dark window, in the
+   one dark value this game has. */
+.lift-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.5rem 0.375rem;
+  border-radius: 0.75rem;
+  background: var(--lgp-ink);
+  color: var(--lgp-cream);
+  box-shadow: inset 0 0.125rem 0 rgba(255, 255, 255, 0.14);
+}
+
+.lift-head-glyph {
+  font-size: var(--lgp-text-md);
+  line-height: 1;
+}
+
+.lift-indicator {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+  letter-spacing: 0.0125rem;
+}
+
+/* ---- waiting at the doors: one enormous glowing button ---- */
+
+.lift-call {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.25rem 0.25rem 0.5rem;
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 1rem;
+}
+
+.lift-call-disc {
+  display: grid;
+  place-items: center;
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #fff 0%, var(--lgp-mint) 72%);
+  border: 0.25rem solid #fff;
+  box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.22), 0 0 0 0.3rem rgba(184, 242, 216, 0.55);
+  animation: lift-glow 1.7s ease-in-out infinite;
+}
+
+.lift-call-arrows {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.lift-call-word {
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+}
+
+.lift-call:active .lift-call-disc {
+  transform: translateY(0.25rem);
+  box-shadow: 0 0.0625rem 0 rgba(74, 58, 82, 0.22);
+}
+
+/* Called, and on its way: the button stops inviting and starts working. */
+.lift-panel[data-mode='coming'] .lift-call {
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.lift-panel[data-mode='coming'] .lift-call-arrows {
+  animation: lift-bob 0.8s ease-in-out infinite;
+}
+
+@keyframes lift-glow {
+  50% {
+    box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.22), 0 0 0 0.75rem rgba(184, 242, 216, 0.22);
+  }
+}
+
+@keyframes lift-bob {
+  50% {
+    transform: translateY(-0.25rem);
+  }
+}
+
+/* ---- in the car: every floor, one press each ---- */
+
+.lift-floors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+  margin-top: 0.625rem;
+}
+
+.lift-floor {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 3.125rem;
+  padding: 0.1875rem 0.625rem 0.1875rem 0.1875rem;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: rgba(255, 255, 255, 0.74);
+  border: 0.1875rem solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.14);
+  transition: transform 90ms ease, box-shadow 90ms ease, background 160ms ease;
+}
+
+.lift-floor:active:not(:disabled) {
+  transform: translateY(0.1875rem);
+  box-shadow: 0 0 0 rgba(74, 58, 82, 0.14);
+}
+
+.lift-floor:disabled {
+  opacity: 0.5;
+}
+
+.lift-floor-disc {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  font-size: var(--lgp-text-lg);
+  font-weight: 800;
+  background: radial-gradient(circle at 34% 28%, #fff 0%, #ffe9a8 76%);
+  border: 0.1875rem solid #fff;
+  box-shadow: inset 0 -0.125rem 0 rgba(74, 58, 82, 0.12);
+}
+
+.lift-floor-name,
+.lift-floor-here {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+/* The floor she is at — or, while the car is moving, the one she asked for —
+   is the lit button, exactly as on a real panel. */
+.lift-floor[data-here='true'] {
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-mint) 190%);
+}
+
+.lift-floor[data-here='true'] .lift-floor-disc {
+  background: radial-gradient(circle at 34% 28%, #fff 0%, var(--lgp-mint) 76%);
+  box-shadow: 0 0 0 0.25rem rgba(184, 242, 216, 0.55);
+}
+
+/* Standing still on the floor you are on, the lit button means "let me out
+   here" — which is the whole of getting out, and needs no second control.
+   While the car is travelling it means "this is where we are going", so the
+   swap is scoped to the mode where it is true. */
+.lift-floor-here {
+  display: none;
+}
+
+.lift-panel[data-mode='floors'] .lift-floor[data-here='true'] .lift-floor-name {
+  display: none;
+}
+
+.lift-panel[data-mode='floors'] .lift-floor[data-here='true'] .lift-floor-here {
+  display: block;
+}
+
+.lift-panel[data-mode='call'] .lift-floors,
+.lift-panel[data-mode='coming'] .lift-floors {
+  display: none;
+}
+
+.lift-panel[data-mode='floors'] .lift-call,
+.lift-panel[data-mode='going'] .lift-call {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift-call-disc,
+  .lift-call-arrows {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------ transitions */
 
 /* The iris. A circle with a colossal box-shadow: shrink the circle and the
