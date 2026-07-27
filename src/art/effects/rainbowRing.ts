@@ -70,10 +70,12 @@ export interface RainbowRings {
  * distance from the origin is exactly how far across the band it sits. The ramp
  * is interpolated rather than stepped: hard band edges look like a colour chart,
  * and a rainbow that has been through a bit of sky is softer than that.
+ *
+ * Exported because the interaction highlight (`world/Highlights.ts`) draws the
+ * same ring around anything that has not named an object to outline — one
+ * rainbow motif, built once, rather than a second one that drifts out of step.
  */
-function rainbowRingGeometry(): RingGeometry {
-  const inner = 0.62;
-  const outer = 1;
+export function rainbowRingGeometry(inner = 0.62, outer = 1): RingGeometry {
   const geometry = new RingGeometry(inner, outer, 56, ART.rainbow.length * 2);
 
   const position = geometry.getAttribute('position');
