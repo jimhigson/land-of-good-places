@@ -593,6 +593,24 @@ Rough order of construction, each step playable:
     one fixed primary viewing angle; instead, everything in the world must
     be rotated/authored to read clearly from that angle (signs, shops,
     stalls face the camera). Remove Q/R keys and rotate buttons.
+17b. **Jumping over a wall sometimes flings the player (27 July 2026 —
+    BUG, queued).** Clearing a wall occasionally produces a burst of
+    extreme speed. The player should simply land, at ordinary walking or
+    running speed, every time.
+    *Almost certainly the same root cause as item 17, and the fix for that
+    is already in the codebase and known to work: `Collision.resolve()`
+    used to correct any overlap in a single frame, and `Player.update()`
+    derives velocity from how far `resolve()` just moved the position — so
+    a deep correction read back as an enormous velocity, which then got
+    integrated forward. The fix was a capped, gentle escort plus a flag
+    telling `Player` **not** to re-derive velocity while escorting. The
+    likely gap: the airborne / jump-clearance path added later (colliders
+    carrying `topHeight`, `resolve()` taking a `clearance` argument) does
+    not go through that same escorting guard, so a mid-air correction still
+    banks itself as momentum. Check that path specifically rather than
+    re-capping speed at the end — clamping the symptom would also clamp
+    legitimate movement.*
+
 17. **Fix the "teleport" ejection** — the out-of-bounds/collider push-out
     is far too sensitive and flings the player somewhere else seemingly
     for no reason (e.g. near the fountain). Depenetration must be gentle
