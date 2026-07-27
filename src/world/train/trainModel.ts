@@ -101,7 +101,7 @@ export function createLocomotive(): Locomotive {
   root.add(chassis);
 
   // --- boiler --------------------------------------------------------------
-  const boiler = solidMesh(new CylinderGeometry(0.55, 0.55, 2.2, 18), bodyMaterial);
+  const boiler = solidMesh(new CylinderGeometry(0.55, 0.55, 2.2, 18), bodyMaterial, true);
   boiler.rotation.x = Math.PI / 2;
   boiler.position.set(0, CAR_FLOOR_Y + 0.55, 0.55);
   root.add(boiler);
@@ -117,7 +117,7 @@ export function createLocomotive(): Locomotive {
 
   // --- smokebox: the face goes on this ------------------------------------
   const faceRadius = 0.56;
-  const smokebox = solidMesh(new SphereGeometry(faceRadius, 20, 14), bodyMaterial);
+  const smokebox = solidMesh(new SphereGeometry(faceRadius, 20, 14), bodyMaterial, true);
   smokebox.position.set(0, CAR_FLOOR_Y + 0.55, 1.62);
   smokebox.scale.z = 0.86;
   root.add(smokebox);
@@ -142,7 +142,7 @@ export function createLocomotive(): Locomotive {
   smokebox.add(face.mesh);
 
   // --- funnel --------------------------------------------------------------
-  const funnel = solidMesh(new CylinderGeometry(0.2, 0.16, 0.62, 14), darkMaterial);
+  const funnel = solidMesh(new CylinderGeometry(0.2, 0.16, 0.62, 14), darkMaterial, true);
   funnel.position.set(0, CAR_FLOOR_Y + 1.4, 1.25);
   root.add(funnel);
 
@@ -163,11 +163,11 @@ export function createLocomotive(): Locomotive {
   root.add(whistle);
 
   // --- cab -----------------------------------------------------------------
-  const cab = solidMesh(new BoxGeometry(BODY_HALF_WIDTH * 2, 1.15, 1.25), creamMaterial);
+  const cab = solidMesh(new BoxGeometry(BODY_HALF_WIDTH * 2, 1.15, 1.25), creamMaterial, true);
   cab.position.set(0, CAR_FLOOR_Y + 0.58, -1.05);
   root.add(cab);
 
-  const cabRoof = solidMesh(new BoxGeometry(BODY_HALF_WIDTH * 2 + 0.24, 0.14, 1.5), bodyMaterial);
+  const cabRoof = solidMesh(new BoxGeometry(BODY_HALF_WIDTH * 2 + 0.24, 0.14, 1.5), bodyMaterial, true);
   cabRoof.position.set(0, CAR_FLOOR_Y + 1.2, -1.05);
   root.add(cabRoof);
 
@@ -189,7 +189,7 @@ export function createLocomotive(): Locomotive {
   root.add(lamp);
   lamps.push(lampMaterial);
 
-  addWheels(root, wheels, darkMaterial, trimMaterial, [-1.2, -0.35, 0.9], 0.26);
+  addWheels(root, wheels, darkMaterial, trimMaterial, [-1.2, -0.35, 0.9], 0.26, true);
 
   return { root, wheels, seats: [], lamps, funnelTip, face };
 }
@@ -222,6 +222,7 @@ export function createCarriage(colour: number, index: number): TrainCar {
     const wall = solidMesh(
       new BoxGeometry(0.12, sideHeight, CARRIAGE_LENGTH - 0.1),
       bodyMaterial,
+      true,
     );
     wall.position.set(side * (BODY_HALF_WIDTH - 0.06), CAR_FLOOR_Y + sideHeight / 2, 0);
     root.add(wall);
@@ -283,7 +284,8 @@ export function createCarriage(colour: number, index: number): TrainCar {
   root.add(lantern);
   lamps.push(lanternMaterial);
 
-  addWheels(root, wheels, darkMaterial, trimMaterial, [-0.78, 0.78], 0.2);
+  // No hub caps on the carriages: eight more little cylinders nobody looks at.
+  addWheels(root, wheels, darkMaterial, trimMaterial, [-0.78, 0.78], 0.2, false);
 
   return { root, wheels, seats, lamps };
 }
@@ -301,6 +303,7 @@ function addWheels(
   hubMaterial: Material,
   positions: readonly number[],
   radius: number,
+  hubs: boolean,
 ): void {
   const tyreGeometry = new CylinderGeometry(radius, radius, 0.12, 14);
   const hubGeometry = new CylinderGeometry(radius * 0.42, radius * 0.42, 0.14, 10);
@@ -315,10 +318,12 @@ function addWheels(
       tyre.rotation.z = Math.PI / 2;
       axle.add(tyre);
 
-      const hub = solidMesh(hubGeometry, hubMaterial);
-      hub.rotation.z = Math.PI / 2;
-      hub.position.x = side * 0.02;
-      axle.add(hub);
+      if (hubs) {
+        const hub = solidMesh(hubGeometry, hubMaterial);
+        hub.rotation.z = Math.PI / 2;
+        hub.position.x = side * 0.02;
+        axle.add(hub);
+      }
 
       root.add(axle);
       wheels.push(axle);
@@ -326,9 +331,19 @@ function addWheels(
   }
 }
 
-function solidMesh(geometry: BufferGeometry, material: Material): Mesh {
+/**
+ * A part of the train.
+ *
+ * `casts` defaults to **false**, and that is the important half of this
+ * function. Shadow casting is opt-out, not free: `renderer.info.render.calls`
+ * counts the shadow pass, so every caster is drawn twice, and a train made of
+ * eighty little cylinders that all cast costs a hundred and sixty draw calls to
+ * put one train-shaped shadow on the grass. Only the shapes doing the
+ * silhouette's work — the boiler, the cab, the carriage sides — say yes.
+ */
+function solidMesh(geometry: BufferGeometry, material: Material, casts = false): Mesh {
   const mesh = new Mesh(geometry, material);
-  mesh.castShadow = true;
+  mesh.castShadow = casts;
   mesh.receiveShadow = true;
   return mesh;
 }

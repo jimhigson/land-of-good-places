@@ -85,8 +85,20 @@ const BEARINGS = 360;
  */
 export const TRACK_CLEARANCE = 1.3;
 
-/** Where the profile settles when nothing is pushing it outwards. */
-const NOMINAL_RADIUS = 48;
+/**
+ * Where the profile settles when nothing is pushing it outwards.
+ *
+ * Deliberately past 55, and that is the single most useful number in this file:
+ * `Scenery.isPlantable` refuses to plant anything more than 55 m from the middle
+ * of the park, and the treeline outside the wall starts at 63. So a loop that
+ * stays out here is **tree-free by construction** — no dodging, no swerves, no
+ * rail bent round a bush that a later scatter will move anyway. It also puts the
+ * train exactly where the brief wants it: out at the edge, past the attractions,
+ * with the boundary wall for company.
+ *
+ * The dodge below is kept as a safety net for whatever the next builder plants.
+ */
+const NOMINAL_RADIUS = 56.2;
 
 /** Inner face of the pink boundary wall (see `Garden.buildBoundaryWall`). */
 const WALL_INNER_RADIUS = GARDEN_HALF_SIZE - 2 - 0.45;
@@ -99,15 +111,28 @@ const PULL = 0.003;
 /**
  * Beyond this radius the collision probe is skipped.
  *
- * Two reasons, and both matter. `Scenery` plants nothing past r = 55, so there
- * is nothing out there to dodge; and `CollisionWorld.resolve` also applies the
- * `GARDEN_PLAY_RADIUS` clamp, which would drag the wall-hugging sections back in
- * and undo the only part of the route that has no slack.
+ * `CollisionWorld.resolve` also applies the `GARDEN_PLAY_RADIUS` clamp — it is
+ * written for walkers, and the train is not one — which above 56.7 would drag
+ * the wall-hugging sections back in and undo the only part of the route with no
+ * slack in it. Nothing is planted out there anyway.
  */
-const PROBE_LIMIT = 56;
+const PROBE_LIMIT = 56.7;
 
 /** Control points the finished curve is built from — every 5°. */
 const CONTROL_STRIDE = 5;
+
+/** Steps the swerve-round-a-tree search takes, and how far it will go. */
+const SEARCH_STEP = 0.25;
+const SEARCH_LIMIT = 5;
+
+/**
+ * Bearings either side of a tree the swerve is spread over.
+ *
+ * At r ≈ 48 one bearing is 0.84 m of track, so twelve of them is a ten-metre
+ * run-in and a ten-metre run-out for a two-metre sidestep. Anything much
+ * tighter and the rail has a visible kink in it.
+ */
+const SWERVE_WIDTH = 12;
 
 interface RectObstacle {
   readonly centreX: number;
@@ -288,7 +313,17 @@ function solveProfile(collision: CollisionWorld): Float64Array {
     radii = next;
   }
 
-  nudgeOffScenery(radii, collision);
+  // Every later pass has to go back through the same bounds. Smoothing a
+  // profile that was legal is not: a swerve round a tree averaged out with its
+  // neighbours drifts back inside the plot it was clamped out of, which is
+  // exactly how the track first ended up crossing a corner of the dodgems.
+  const constrain = (index: number, radius: number): number => {
+    const angle = (index / BEARINGS) * Math.PI * 2;
+    const repaired = repair(radius, Math.cos(angle), Math.sin(angle), rects, circles);
+    return clamp(repaired, lower[index] ?? 0, upper[index] ?? repaired);
+  };
+
+  nudgeOffScenery(radii, collision, constrain);
   return radii;
 }
 
@@ -345,47 +380,77 @@ function repair(
  * part of however far it moved. Two passes of light smoothing between rounds
  * keep the dodge a gentle swerve rather than a kink in the rail.
  */
-function nudgeOffScenery(radii: Float64Array, collision: CollisionWorld): void {
+function nudgeOffScenery(
+  radii: Float64Array,
+  collision: CollisionWorld,
+  constrain: (index: number, radius: number) => number,
+): void {
   const probe = new Vector3();
 
-  for (let round = 0; round < 24; round += 1) {
-    let moved = false;
+  /** Is the track clear of everything solid at this radius on this bearing? */
+  const isClear = (index: number, radius: number): boolean => {
+    if (radius >= PROBE_LIMIT) return true;
+    const angle = (index / BEARINGS) * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+
+    probe.set(x, 0, z);
+    collision.resolve(probe, TRACK_CLEARANCE);
+    const pushX = probe.x - x;
+    const pushZ = probe.z - z;
+    return pushX * pushX + pushZ * pushZ < 1e-6;
+  };
+
+  /**
+   * The nearest radius on this bearing that clears everything, searched
+   * outwards first.
+   *
+   * Following the push out of a collider looks like the obvious thing and is
+   * not: `resolve` leaves by the *nearest* edge, so a track sample wedged
+   * between two bushes is shoved back and forth between them for ever. A search
+   * commits to a direction and arrives somewhere, and preferring outwards keeps
+   * the swerve on the side where there is a boundary wall's worth of room.
+   */
+  const findClear = (index: number, radius: number): number => {
+    if (isClear(index, radius)) return radius;
+    for (let step = SEARCH_STEP; step <= SEARCH_LIMIT; step += SEARCH_STEP) {
+      for (const direction of [1, -1] as const) {
+        const candidate = constrain(index, radius + direction * step);
+        if (candidate !== radius && isClear(index, candidate)) return candidate;
+      }
+    }
+    return radius;
+  };
+
+  for (let round = 0; round < 14; round += 1) {
+    const bumps = new Float64Array(BEARINGS);
+    let blocked = false;
 
     for (let i = 0; i < BEARINGS; i += 1) {
       const radius = radii[i] ?? 0;
-      if (radius >= PROBE_LIMIT) continue;
+      if (isClear(i, radius)) continue;
+      blocked = true;
 
-      const angle = (i / BEARINGS) * Math.PI * 2;
-      const dirX = Math.cos(angle);
-      const dirZ = Math.sin(angle);
-      const x = dirX * radius;
-      const z = dirZ * radius;
-
-      probe.set(x, 0, z);
-      collision.resolve(probe, TRACK_CLEARANCE);
-      const pushX = probe.x - x;
-      const pushZ = probe.z - z;
-      if (pushX * pushX + pushZ * pushZ < 1e-6) continue;
-
-      // Only the radial component is available to us: the loop is a radius per
-      // bearing, so sideways is not a direction it can move in. A push that is
-      // almost entirely sideways still gets a shove outwards, which on the next
-      // round becomes a radial one.
-      const radial = pushX * dirX + pushZ * dirZ;
-      radii[i] = radius + (Math.abs(radial) > 0.05 ? radial : Math.hypot(pushX, pushZ));
-      moved = true;
+      // Move the whole neighbourhood, not the one bearing that is fouled.
+      // Displacing a single sample leaves a step in the rail — and a step is
+      // both ugly and, measured as curvature, a hairpin. A raised cosine
+      // spread over SWERVE_WIDTH bearings is a swerve a train could take.
+      const delta = findClear(i, radius) - radius;
+      for (let j = -SWERVE_WIDTH; j <= SWERVE_WIDTH; j += 1) {
+        const index = (i + j + BEARINGS) % BEARINGS;
+        const falloff = 0.5 * (1 + Math.cos((Math.PI * j) / SWERVE_WIDTH));
+        const bump = delta * falloff;
+        // Overlapping swerves take the largest, rather than adding up into a
+        // detour nobody asked for.
+        const existing = bumps[index] ?? 0;
+        if (Math.abs(bump) > Math.abs(existing)) bumps[index] = bump;
+      }
     }
 
-    if (!moved) break;
+    if (!blocked) break;
 
-    for (let smooth = 0; smooth < 2; smooth += 1) {
-      const before = Float64Array.from(radii);
-      for (let i = 0; i < BEARINGS; i += 1) {
-        const a = before[(i - 1 + BEARINGS) % BEARINGS] ?? 0;
-        const b = before[i] ?? 0;
-        const c = before[(i + 1) % BEARINGS] ?? 0;
-        radii[i] = b + 0.3 * (a + c - 2 * b);
-      }
+    for (let i = 0; i < BEARINGS; i += 1) {
+      radii[i] = constrain(i, (radii[i] ?? 0) + (bumps[i] ?? 0));
     }
   }
 }

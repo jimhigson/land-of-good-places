@@ -49,6 +49,10 @@ const PLATFORM_OFFSET = 2.15;
 
 const CANOPY_HEIGHT = 2.9;
 
+/** The sheltered end: how much of the platform it covers, and where. */
+const CANOPY_LENGTH = 3.4;
+const CANOPY_CENTRE = -1.4;
+
 export interface StationOptions {
   readonly index: number;
   readonly name: string;
@@ -186,14 +190,25 @@ export class Station {
     this.group.add(stripe);
 
     // --- canopy --------------------------------------------------------------
+    // A shelter over one end of the platform, not a roof over all of it.
+    //
+    // The camera is fixed at 38° and the park has two stations on opposite
+    // sides, so whichever way a full-length canopy faces, one of them ends up
+    // with its roof between the camera and the child standing under it. Half a
+    // platform of shelter reads exactly as well and always leaves somewhere to
+    // watch the train come in from.
+    //
+    // Only the deck and the roof cast: every caster is drawn twice, and a
+    // station's shadow is a slab and an awning. Nobody looks for the shadow of
+    // a bench leg (ARCHITECTURE.md, *rendering notes*).
     const postGeometry = new CylinderGeometry(0.1, 0.12, CANOPY_HEIGHT, 8);
     // Along the back of the platform, so the canopy never stands between the
     // train and the child waiting for it.
     const postX = -trackSide * (PLATFORM_WIDTH / 2 - 0.35);
-    for (const along of [-2.4, 0, 2.4] as const) {
+    for (const along of [-2.6, -0.2] as const) {
       const post = new Mesh(postGeometry, postMaterial);
       post.position.set(postX, PLATFORM_HEIGHT + CANOPY_HEIGHT / 2, along);
-      post.castShadow = true;
+      post.castShadow = false;
       post.receiveShadow = true;
       this.group.add(post);
 
@@ -206,10 +221,10 @@ export class Station {
     }
 
     const roof = new Mesh(
-      new BoxGeometry(PLATFORM_WIDTH + 0.7, 0.16, PLATFORM_LENGTH - 0.6),
+      new BoxGeometry(PLATFORM_WIDTH + 0.5, 0.16, CANOPY_LENGTH),
       roofMaterial,
     );
-    roof.position.set(trackSide * 0.1, PLATFORM_HEIGHT + CANOPY_HEIGHT, 0);
+    roof.position.set(trackSide * 0.1, PLATFORM_HEIGHT + CANOPY_HEIGHT, CANOPY_CENTRE);
     // Tipped down towards the track, the way a platform awning sheds rain.
     roof.rotation.z = trackSide * 0.06;
     roof.castShadow = true;
@@ -219,13 +234,13 @@ export class Station {
     // Scalloped valance along the front — the one detail that turns a slab of
     // roof into a seaside station.
     const valance = new Mesh(
-      new BoxGeometry(0.12, 0.34, PLATFORM_LENGTH - 0.6),
+      new BoxGeometry(0.12, 0.34, CANOPY_LENGTH),
       toonMaterial(ART.cream),
     );
     valance.position.set(
-      trackSide * (PLATFORM_WIDTH / 2 + 0.24),
+      trackSide * (PLATFORM_WIDTH / 2 + 0.14),
       PLATFORM_HEIGHT + CANOPY_HEIGHT - 0.2,
-      0,
+      CANOPY_CENTRE,
     );
     valance.castShadow = false;
     this.group.add(valance);
@@ -233,19 +248,19 @@ export class Station {
     // --- bench ---------------------------------------------------------------
     const benchSeat = new Mesh(new BoxGeometry(0.52, 0.1, 2.0), boardMaterial);
     benchSeat.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.55), PLATFORM_HEIGHT + 0.42, -1.4);
-    benchSeat.castShadow = true;
+    benchSeat.castShadow = false;
     benchSeat.receiveShadow = true;
     this.group.add(benchSeat);
 
     const benchBack = new Mesh(new BoxGeometry(0.1, 0.44, 2.0), boardMaterial);
     benchBack.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.32), PLATFORM_HEIGHT + 0.66, -1.4);
-    benchBack.castShadow = true;
+    benchBack.castShadow = false;
     this.group.add(benchBack);
 
     for (const along of [-2.3, -0.5] as const) {
       const leg = new Mesh(new BoxGeometry(0.44, 0.42, 0.12), postMaterial);
       leg.position.set(-trackSide * (PLATFORM_WIDTH / 2 - 0.55), PLATFORM_HEIGHT + 0.21, along);
-      leg.castShadow = true;
+      leg.castShadow = false;
       this.group.add(leg);
     }
 
@@ -260,12 +275,12 @@ export class Station {
 
     const signPost = new Mesh(new CylinderGeometry(0.09, 0.11, 2.1, 8), postMaterial);
     signPost.position.y = 1.05;
-    signPost.castShadow = true;
+    signPost.castShadow = false;
     signGroup.add(signPost);
 
     const board = new Mesh(new BoxGeometry(2.5, 1.0, 0.12), boardMaterial);
     board.position.y = 2.15;
-    board.castShadow = true;
+    board.castShadow = false;
     board.receiveShadow = true;
     signGroup.add(board);
 
@@ -285,7 +300,7 @@ export class Station {
     board.add(face);
 
     // --- lamps ---------------------------------------------------------------
-    for (const along of [-2.4, 2.4] as const) {
+    for (const along of [-2.6, -0.2] as const) {
       const lampMaterial = new MeshBasicMaterial({ color: PALETTE.fairyWarm, fog: true });
       const lamp = new Mesh(new SphereGeometry(0.15, 12, 9), lampMaterial);
       lamp.position.set(postX, PLATFORM_HEIGHT + CANOPY_HEIGHT - 0.32, along);
