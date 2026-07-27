@@ -481,6 +481,15 @@ Known suspects already found by earlier audits — start here, they are free:
   is near the pit.
 - `fitouts.ts` allocates a closure per frame per visible shop (two
   `forEach`es).
+- ~~`BalloonString.rebuildGeometry` allocates a fresh `CatmullRomCurve3` **and**
+  a fresh `TubeGeometry` per held balloon per frame — twelve geometry objects a
+  frame plus their vertex buffers for a bouquet of six, and a `dispose()` on
+  each discarded one.~~ **Fixed** (28 July): it now draws pre-built capsules and
+  writes a `position`/`quaternion`/scale onto each, which is what
+  `art/models/ponytail.ts` already did for the identical problem. Worth noting
+  *how* it was found: not by profiling, but by an agent reading the file while
+  building the ponytail, and then writing the divergence down in a comment
+  rather than fixing it. The comment is what made this a one-line search.
 - The character-creation preview's `disposeTree` never disposes
   `material.map` — a genuine leak, already flagged P0 in Review 2.
 
