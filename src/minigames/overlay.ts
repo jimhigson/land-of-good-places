@@ -21,10 +21,17 @@ const STYLES = `
    a data attribute and one rule rather than by reaching into ui/Hud.ts: the
    framework must be addable without the park's UI knowing it exists. */
 body[data-minigame='true'] .hud-row,
+body[data-minigame='true'] .hud-bar,
 body[data-minigame='true'] .touch-controls {
   opacity: 0;
-  transition: opacity 200ms ease;
+  /* visibility as well as opacity: several of the park's pills set
+     pointer-events: auto on themselves, which beats the none below and leaves
+     an invisible button sitting over the mini-game happily taking taps. A
+     hidden element is not hit-tested at all. Held until the fade finishes on
+     the way out, dropped instantly on the way back in. */
+  visibility: hidden;
   pointer-events: none;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
 }
 
 .mg-layer {

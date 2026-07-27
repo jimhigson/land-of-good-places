@@ -191,7 +191,8 @@ export class ParkMap {
       this.button.blur();
       this.toggle();
     });
-    (container.querySelector('.hud-row') ?? container).append(this.button);
+    // Into the HUD's menu drawer, with the other pills — see `ui/Hud.ts`.
+    (container.querySelector('.hud-menu-items') ?? container).append(this.button);
 
     this.root = document.createElement('div');
     this.root.className = 'parkmap';

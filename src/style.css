@@ -370,6 +370,89 @@ body {
   justify-content: space-between;
 }
 
+/* ------------------------------------------------------------- the menu
+
+   GAME_DESIGN.md, "The top bar takes too much space": the row of pills across
+   the top is hidden behind ONE button that expands to show them. So the top
+   of the screen is a single pill, and the park — the thing actually worth
+   looking at — gets the rest.
+
+   The drawer is absolutely positioned under the button, so opening it never
+   reflows anything and there is no layout to settle before a child can press
+   what she was reaching for. */
+.hud-bar {
+  display: flex;
+  align-items: flex-start;
+}
+
+.hud-menu {
+  position: relative;
+}
+
+/* Deliberately taller and roomier than a plain pill: it is now the only thing
+   up here, and it is the first button a six-year-old goes for. */
+.pill--menu {
+  pointer-events: auto;
+  appearance: none;
+  font-family: inherit;
+  min-height: 3rem;
+  padding: 0.4375rem 1.125rem 0.5rem;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.pill--menu:active {
+  transform: translateY(0.1875rem);
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
+}
+
+/* The same finite "look, I'm here" the controls toggle gets, for the same
+   reason: on a first run this button is the only clue the rest of it exists. */
+.pill--menu.is-new {
+  animation: hint-toggle-pulse 700ms ease-in-out 2;
+  animation-delay: 700ms;
+}
+
+.hud-menu-items {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  opacity: 0;
+  transform: translateY(-0.375rem);
+  /* `visibility`, not just `opacity`: the pills inside carry
+     `pointer-events: auto` of their own, and an invisible button that still
+     swallows a tap meant for the park is exactly the class of bug the family
+     has already been bitten by once. Held for the fade-out, dropped instantly
+     on the way in so nothing is unpressable while it arrives. */
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 0s linear 120ms;
+}
+
+.hud-menu[data-open='true'] .hud-menu-items {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill--menu.is-new {
+    animation: none;
+  }
+
+  .hud-menu-items {
+    transition: visibility 0s linear 120ms;
+  }
+
+  .hud-menu[data-open='true'] .hud-menu-items {
+    transition: visibility 0s;
+  }
+}
+
 .pill {
   background: var(--lgp-cream);
   border: 0.1875rem solid #fff;
@@ -392,11 +475,6 @@ body {
 
 .pill--park {
   background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 140%);
-}
-
-.pill--clock {
-  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
-  min-width: 9.4rem;
 }
 
 .pill--money {
