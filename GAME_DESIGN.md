@@ -248,6 +248,26 @@ Inside the castle there is a **room full of friendly snakes** — smiley,
 colourful, wiggly. You can adopt a snake as a **pet** and it appears in
 the Cute-o-dex like any cute thing.
 
+## You cannot wear things from the backpack (27 July 2026 — BUG, queued)
+
+There is currently **no way to put on a hat, or wear anything, from the
+backpack**. Items go in and stay there. Whatever you happen to be wearing
+when you buy it is what you wear.
+
+Needed: tapping an item in the backpack should **wear it** (hats, hair
+flowers, face paint if it belongs there), and tapping a worn item should
+**take it off**. Same for pets and parade members where relevant — the
+parade already supports stow/recall by tapping, so the backpack should feel
+the same way rather than being a dead end.
+
+*Note for whoever picks this up:* the wearing machinery already exists —
+`WornHat`, `WornFlower` and `CarriedItem` all attach things to the player,
+and character creation writes a starting hat straight into the worn state.
+What is missing is the **UI route from the backpack to those systems**. The
+backpack panel is `src/ui/InventoryDrawer.ts`. Mind the close-path
+discipline in QA-PLAYBOOK.md — that panel is where the original
+input-freeze bug lived.
+
 ## Rides count towards the Cute-o-dex (27 July 2026 — queued, not started)
 
 Riding a ride should **fill in an entry in the Cute-o-dex**, the same way
