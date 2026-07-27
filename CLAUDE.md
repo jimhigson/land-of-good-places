@@ -74,3 +74,9 @@ trade-off is close, pick the one a six-year-old will enjoy more.
 
 Raise with `gh pr create`. **Do not merge your own work** — every PR gets two
 peer reviews plus QA, and the Overseer merges.
+
+**Reviewers:** `gh pr review --request-changes` will be refused — every agent
+commits as the same GitHub user, so GitHub thinks you are reviewing your own
+PR. Post the review as a comment instead and **state the verdict plainly in
+the first line** ("Verdict: changes requested"). The Overseer reads the text,
+not the review state.
