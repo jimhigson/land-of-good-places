@@ -177,6 +177,17 @@ big water guns**. When you splash someone:
 - Splashed kids get funny **drippy soaked hair** for a moment
 - When lots of water flies, a little **rainbow** appears
 
+**Feedback (27 July 2026) — replace the pop-up messages.** The messages
+that pop up during a water fight obscure too much of the game. Instead:
+
+- Show each character's **head at the edge of the HUD** (a row of little
+  portraits — the player and every child in the fight).
+- When someone gets **splashed, show water on their portrait** (dripping,
+  soaked hair) so you can see at a glance who just got got.
+- When someone **scores a point, their portrait smiles**.
+
+No more pop-ups over the play area.
+
 ## The spooky house
 
 A **spooky house** attraction (fun-spooky, not scary-scary): inside, a big
