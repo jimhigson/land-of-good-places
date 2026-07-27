@@ -27,6 +27,7 @@ import { Escalators } from './Escalators';
 import { FloorFader } from './floorFade';
 import { GlassLift } from './GlassLift';
 import { GrownUp } from './GrownUp';
+import { buildShaftGuards } from './ShaftGuards';
 import { BuildingShell } from './Shell';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
@@ -253,6 +254,10 @@ export class Building implements GameSystem {
     this.surfaces.addPlatform(this.trampoline);
 
     registerInteriorCollision(collision);
+    // The trampoline well, the helter-skelter shaft and the bubble's shaft
+    // (architecture review S14) — none of these had a rail or a collider of
+    // any kind. See `ShaftGuards.ts` for why they get two different shapes.
+    buildShaftGuards(this.shell.floorGroups, collision);
 
     // The cutaway needs the floors registered bottom to top. There is no
     // separate roof layer any more: the roof *is* the top floor.
