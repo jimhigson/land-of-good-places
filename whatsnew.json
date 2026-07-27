@@ -2,6 +2,12 @@
   "_comment": "CONTRIBUTING (for future agents / the Overseer): this file feeds the 'What's new' welcome panel (src/ui/WhatsNew.ts). When you merge a feature a player would actually notice, append ONE entry to the front of `entries` (highest id, newest first) — do not edit or remove old entries, they are history for a returning player who missed a while. Bump `id` by 1 from the current highest. Keep the voice kid-friendly (Eleri is 6): short, one line, plain words, exclamation marks welcome, emoji that matches the thing. Schema per entry: { id: number, emoji: string, title: string, line: string }.",
   "entries": [
     {
+      "id": 11,
+      "emoji": "🛍️",
+      "title": "One-Press Buying!",
+      "line": "Every thing in a shop now has its own big Buy button — press it once and it is yours!"
+    },
+    {
       "id": 10,
       "emoji": "🧒",
       "title": "Make Your Own Character!",

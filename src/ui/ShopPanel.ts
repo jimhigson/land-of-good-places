@@ -3,15 +3,33 @@ import { hexToCss } from '../core/palette';
 /**
  * The purchase panel.
  *
- * Plain DOM over the canvas, in the same pill-and-cream language as the HUD, and
- * built to be used two ways at once:
+ * Plain DOM over the canvas, in the same pill-and-cream language as the HUD.
  *
- * - **Fingers.** Every row is its own big buy button (56 px minimum), plus a
- *   whopping "Buy it!" at the bottom for the highlighted thing. Money never runs
- *   out in normal mode, so a mis-tap costs nothing and a child can just prod.
- * - **Keyboard.** ↑/↓ move the highlight, Enter / E / Space buys it, Esc closes.
- *   Nothing here relies on focus, because a focused button would fire its own
- *   click on Enter *as well* as our handler and buy two of everything.
+ * **One click buys** (GAME_DESIGN.md, "Buying things", 27 July 2026). The family
+ * said choosing a thing and *then* pressing Buy was two steps too many, so there
+ * is no chosen thing any more: the panel is a list of items with their
+ * descriptions, and every one of them has its own big Buy button sitting right
+ * next to it. Press it and it is yours. No highlight to move, no confirmation to
+ * dismiss, nothing to undo — money never runs out in normal play, so a mis-tap
+ * costs a child nothing and the generous thing to do is let her prod.
+ *
+ * Three things follow from that, and they are the whole design:
+ *
+ * - **The buy buttons are ordinary `<button>`s.** That is how they pick up the
+ *   HIGHLIGHT RULE for free — the rainbow hover/focus outline, the pointer
+ *   cursor and the half-second activation flash all come from the global rules
+ *   in `style.css` and `ui/TapBurst.ts`, and nothing here hand-rolls any of it.
+ * - **Keyboard is focus, not a private highlight.** ↑/↓ move the *browser's*
+ *   focus from one Buy button to the next; Enter and Space are left entirely to
+ *   the browser, which activates the focused button natively (and fires the same
+ *   `click` the flash and the burst listen for). The old panel could not do this
+ *   — it tracked its own selection and had to keep focus off the buttons, or
+ *   Enter would fire its handler *and* the button and buy two of everything.
+ *   With one handler per button and none on Enter, that hazard is gone.
+ * - **"It's yours" is said twice.** The button itself answers back for a moment,
+ *   and the row keeps a little "Yours!" tag (with a ×count if she bought several)
+ *   for as long as the shop is open. On a phone there is no hover to have seen,
+ *   so the answer has to be in the row she just pressed.
  */
 
 export interface ShopPanelItem {
@@ -43,6 +61,21 @@ export interface ShopPanelHandlers {
 const HATCH_WOBBLE_MS = 1100;
 /** How long the prize stays up before the panel takes itself away. */
 const HATCH_SHOW_MS = 2600;
+/** How long the Buy button says "Yours!" back before going quiet again. */
+const BOUGHT_FLASH_MS = 1000;
+
+/** One item's row: the description, the Buy button, and how it answers back. */
+interface Row {
+  readonly item: ShopPanelItem;
+  readonly root: HTMLElement;
+  readonly buy: HTMLButtonElement;
+  readonly label: HTMLElement;
+  readonly tag: HTMLElement;
+  /** How many of this one she has bought since the shop opened. */
+  count: number;
+  /** Timer putting the button's label back, or 0. */
+  flashTimer: number;
+}
 
 export class ShopPanel {
   private readonly root: HTMLElement;
@@ -51,13 +84,10 @@ export class ShopPanel {
   private readonly titleEl: HTMLElement;
   private readonly greetingEl: HTMLElement;
   private readonly list: HTMLElement;
-  private readonly buyButton: HTMLButtonElement;
   private readonly surprise: HTMLElement;
 
   private readonly handlers: ShopPanelHandlers;
-  private rows: HTMLButtonElement[] = [];
-  private items: readonly ShopPanelItem[] = [];
-  private selected = 0;
+  private rows: Row[] = [];
   private open = false;
   private hatchTimers: number[] = [];
 
@@ -100,21 +130,14 @@ export class ShopPanel {
     this.list = document.createElement('div');
     this.list.className = 'shop-list';
 
-    this.buyButton = document.createElement('button');
-    this.buyButton.className = 'shop-buy';
-    this.buyButton.type = 'button';
-    this.buyButton.addEventListener('click', () => {
-      this.buyButton.blur();
-      this.buySelected();
-    });
-
     const footer = document.createElement('div');
     footer.className = 'shop-foot';
     const hint = document.createElement('p');
     hint.className = 'shop-hint';
     hint.innerHTML =
-      '<kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>E</kbd> buy · <kbd>Esc</kbd> close · or just tap!';
-    footer.append(this.buyButton, hint);
+      'Press <b>Buy</b> and it is yours — as many as you like! · ' +
+      '<kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Esc</kbd> close';
+    footer.append(hint);
 
     this.surprise = document.createElement('div');
     this.surprise.className = 'shop-surprise';
@@ -135,18 +158,9 @@ export class ShopPanel {
     return this.open;
   }
 
-  /** The catalogue id currently highlighted, or null. */
-  get selectedId(): string | null {
-    return this.items[this.selected]?.id ?? null;
-  }
-
   openWith(content: ShopPanelContent): void {
     this.clearHatch();
-    this.items = content.items;
-    this.selected = Math.max(
-      0,
-      content.items.findIndex((item) => item.available),
-    );
+    this.clearRows();
 
     const accent = hexToCss(content.accent);
     this.card.style.setProperty('--shop-accent', accent);
@@ -155,12 +169,20 @@ export class ShopPanel {
     this.greetingEl.textContent = content.greeting;
 
     this.list.innerHTML = '';
-    this.rows = content.items.map((item, index) => this.buildRow(item, index));
-    for (const row of this.rows) this.list.append(row);
+    this.rows = content.items.map((item) => this.buildRow(item));
+    for (const row of this.rows) this.list.append(row.root);
 
-    this.applySelection();
     this.open = true;
     this.root.dataset.open = 'true';
+
+    // Focus the first thing she can buy, so a keyboard player can press Enter
+    // straight away instead of hunting for the list with Tab. Next frame,
+    // because on this one the panel is still `visibility: hidden` — and an
+    // invisible element cannot take focus.
+    requestAnimationFrame(() => {
+      if (!this.open) return;
+      this.rows.find((row) => row.item.available)?.buy.focus();
+    });
   }
 
   close(): void {
@@ -168,6 +190,7 @@ export class ShopPanel {
     this.open = false;
     this.root.dataset.open = 'false';
     this.clearHatch();
+    this.clearRows();
   }
 
   /**
@@ -213,6 +236,12 @@ export class ShopPanel {
    * The game's InputSystem already listens on `window` and was registered first;
    * a second window listener could not reliably stop it. Routing through the
    * owner keeps one clear rule: while the panel is open, it gets the keys.
+   *
+   * Returning `true` means "used, and the owner should call `preventDefault`",
+   * which is why **Enter and Space are never claimed**: preventing the default
+   * on those is exactly what would stop the focused button being pressed. The
+   * browser buys for us, and the rainbow activation flash comes along with the
+   * `click` it dispatches.
    */
   handleKey(code: string): boolean {
     if (!this.open) return false;
@@ -226,22 +255,25 @@ export class ShopPanel {
     switch (code) {
       case 'ArrowDown':
       case 'KeyS':
-        this.move(1);
+        this.moveFocus(1);
         return true;
       case 'ArrowUp':
       case 'KeyW':
-        this.move(-1);
+        this.moveFocus(-1);
         return true;
-      case 'Enter':
       case 'KeyE':
       case 'KeyF':
-      case 'Space':
-        this.buySelected();
+        // E is the game's "use this" key everywhere else, so it buys whatever
+        // is focused. `click()` rather than calling the handler directly, so it
+        // goes down the one path the burst and the chime already watch.
+        this.focusedRow()?.buy.click();
         return true;
-      // Escape is deliberately NOT handled here. It is bound to the game's
-      // `menu` action, and consuming it in the DOM would close the panel a
-      // frame before the game saw the key — which is how you end up with a shop
-      // that closes and a park that pauses behind it.
+      // Enter / Space: see the doc comment. Left to the browser on purpose.
+      //
+      // Escape is deliberately NOT handled here either. It is bound to the
+      // game's `menu` action, and consuming it in the DOM would close the panel
+      // a frame before the game saw the key — which is how you end up with a
+      // shop that closes and a park that pauses behind it.
       default:
         return false;
     }
@@ -249,64 +281,106 @@ export class ShopPanel {
 
   dispose(): void {
     this.clearHatch();
+    this.clearRows();
     this.root.remove();
   }
 
   // -------------------------------------------------------------- internals
 
-  private buildRow(item: ShopPanelItem, index: number): HTMLButtonElement {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'shop-row';
-    row.dataset.available = item.available ? 'true' : 'false';
-    row.innerHTML =
-      `<span class="row-icon">${escapeHtml(item.icon)}</span>` +
-      '<span class="row-text">' +
-      `<span class="row-name">${escapeHtml(item.displayName)}</span>` +
-      `<span class="row-blurb">${escapeHtml(item.available ? item.blurb : 'back soon!')}</span>` +
-      '</span>' +
-      `<span class="row-price">${item.price}</span>`;
+  private buildRow(item: ShopPanelItem): Row {
+    const root = document.createElement('div');
+    root.className = 'shop-item';
+    root.dataset.available = item.available ? 'true' : 'false';
 
-    row.addEventListener('click', () => {
-      row.blur();
-      this.selected = index;
-      this.applySelection();
-      this.buySelected();
+    const icon = document.createElement('span');
+    icon.className = 'row-icon';
+    icon.textContent = item.icon;
+
+    const text = document.createElement('span');
+    text.className = 'row-text';
+    const name = document.createElement('span');
+    name.className = 'row-name';
+    name.textContent = item.displayName;
+    const blurb = document.createElement('span');
+    blurb.className = 'row-blurb';
+    blurb.textContent = item.available ? item.blurb : 'back soon!';
+    text.append(name, blurb);
+
+    const price = document.createElement('span');
+    price.className = 'row-price';
+    price.textContent = String(item.price);
+
+    const tag = document.createElement('span');
+    tag.className = 'shop-item-tag';
+    tag.dataset.show = 'false';
+
+    const buy = document.createElement('button');
+    buy.type = 'button';
+    buy.className = 'shop-item-buy';
+    buy.disabled = !item.available;
+    buy.setAttribute(
+      'aria-label',
+      item.available ? `Buy ${item.displayName}` : `${item.displayName} is not for sale today`,
+    );
+    const label = document.createElement('span');
+    label.className = 'buy-label';
+    buy.append(label);
+
+    root.append(icon, text, price, tag, buy);
+
+    const row: Row = { item, root, buy, label, tag, count: 0, flashTimer: 0 };
+    setBuyLabel(row, false);
+
+    buy.addEventListener('click', () => {
+      if (!item.available) return;
+      this.handlers.onBuy(item.id);
+      this.confirm(row);
     });
+
     return row;
   }
 
-  private move(delta: number): void {
-    if (this.items.length === 0) return;
-    let next = this.selected;
-    for (let step = 0; step < this.items.length; step += 1) {
-      next = (next + delta + this.items.length) % this.items.length;
-      if (this.items[next]?.available) break;
-    }
-    this.selected = next;
-    this.applySelection();
+  /**
+   * "That one is yours now."
+   *
+   * The row keeps its tag for the rest of the visit; the button says so loudly
+   * and then calms down, so the next press still reads as a fresh Buy.
+   */
+  private confirm(row: Row): void {
+    row.count += 1;
+    row.root.dataset.bought = 'true';
+    row.tag.dataset.show = 'true';
+    row.tag.textContent = row.count > 1 ? `Yours! ×${row.count}` : 'Yours!';
+
+    setBuyLabel(row, true);
+    window.clearTimeout(row.flashTimer);
+    row.flashTimer = window.setTimeout(() => {
+      row.flashTimer = 0;
+      setBuyLabel(row, false);
+    }, BOUGHT_FLASH_MS);
   }
 
-  private applySelection(): void {
-    this.rows.forEach((row, index) => {
-      row.dataset.selected = index === this.selected ? 'true' : 'false';
-    });
-    this.rows[this.selected]?.scrollIntoView({ block: 'nearest' });
-
-    const item = this.items[this.selected];
-    const buyable = item?.available ?? false;
-    this.buyButton.disabled = !buyable;
-    this.buyButton.innerHTML = item
-      ? `<span class="emoji">🛍️</span><span>${escapeHtml(
-          buyable ? `Buy ${item.displayName}!` : 'Not today…',
-        )}</span>`
-      : '<span>Nothing here!</span>';
+  /** The row whose Buy button has focus, if any. */
+  private focusedRow(): Row | null {
+    const active = document.activeElement;
+    return this.rows.find((row) => row.buy === active) ?? null;
   }
 
-  private buySelected(): void {
-    const item = this.items[this.selected];
-    if (!item || !item.available) return;
-    this.handlers.onBuy(item.id);
+  /** ↑/↓ walk the browser's focus along the buyable rows, wrapping round. */
+  private moveFocus(delta: number): void {
+    const buyable = this.rows.filter((row) => row.item.available);
+    if (buyable.length === 0) return;
+    const current = buyable.findIndex((row) => row.buy === document.activeElement);
+    const next = current < 0 ? 0 : (current + delta + buyable.length) % buyable.length;
+    const row = buyable[next];
+    if (!row) return;
+    row.buy.focus();
+    row.root.scrollIntoView({ block: 'nearest' });
+  }
+
+  private clearRows(): void {
+    for (const row of this.rows) window.clearTimeout(row.flashTimer);
+    this.rows = [];
   }
 
   private clearHatch(): void {
@@ -314,6 +388,15 @@ export class ShopPanel {
     this.hatchTimers = [];
     this.surprise.dataset.show = 'false';
   }
+}
+
+function setBuyLabel(row: Row, justBought: boolean): void {
+  if (!row.item.available) {
+    row.label.textContent = 'Not today…';
+    return;
+  }
+  row.label.textContent = justBought ? '✓ Yours!' : '🛍️ Buy';
+  row.buy.dataset.bought = justBought ? 'true' : 'false';
 }
 
 function escapeHtml(text: string): string {
