@@ -13,8 +13,6 @@ export type GameAction =
   | 'inventory' // open the backpack drawer
   | 'photo' // photo mode shutter
   | 'sprint' // run faster
-  | 'cameraLeft' // rotate the iso camera 90° anticlockwise
-  | 'cameraRight' // rotate the iso camera 90° clockwise
   | 'zoomIn'
   | 'zoomOut'
   | 'debug'; // toggle the developer overlay
@@ -27,8 +25,6 @@ export const GAME_ACTIONS: readonly GameAction[] = [
   'inventory',
   'photo',
   'sprint',
-  'cameraLeft',
-  'cameraRight',
   'zoomIn',
   'zoomOut',
   'debug',
@@ -49,10 +45,6 @@ export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   KeyP: 'photo',
   ShiftLeft: 'sprint',
   ShiftRight: 'sprint',
-  KeyQ: 'cameraLeft',
-  BracketLeft: 'cameraLeft',
-  KeyR: 'cameraRight',
-  BracketRight: 'cameraRight',
   Equal: 'zoomIn',
   NumpadAdd: 'zoomIn',
   Minus: 'zoomOut',
@@ -76,14 +68,16 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * Gamepad button indices from the W3C "standard" mapping.
  * 0 A / 1 B / 2 X / 3 Y / 4 LB / 5 RB / 6 LT / 7 RT / 8 Back / 9 Start
  * 10 L3 / 11 R3 / 12 D-up / 13 D-down / 14 D-left / 15 D-right
+ *
+ * LB/RB (4/5) are unbound: they used to rotate the camera, which no longer
+ * exists (GAME_DESIGN.md #16 — see ARCHITECTURE.md, "One camera angle,
+ * forever").
  */
 export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   0: 'jump',
   2: 'interact',
   1: 'cancel',
   3: 'photo',
-  4: 'cameraLeft',
-  5: 'cameraRight',
   6: 'zoomOut',
   7: 'zoomIn',
   8: 'inventory',

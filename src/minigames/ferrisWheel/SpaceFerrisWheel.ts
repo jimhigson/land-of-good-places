@@ -12,10 +12,18 @@ import { PALETTE } from '../../core/palette';
 import { clamp, clamp01, damp, lerp, smoothstep } from '../../core/mathUtils';
 import { createWorldBelow, type WorldBelow } from './below';
 import { createGondola, type Gondola } from './gondola';
-import { createAlienSaucer, createSpaceRipika, type SpaceFriend } from './friends';
-import { createSpaceShow, type SpaceShow } from './space';
+import {
+  createAlienSaucer,
+  createSpaceRipika,
+  createSweetieNebula,
+  createSpaceTurtles,
+  type FriendId,
+  type SpaceFriend,
+} from './friends';
+import { createSpaceShow, fromAngle, type SpaceShow } from './space';
 import { createSparks, type Sparks } from './sparks';
 import { HOLD_SECONDS, createRideHud, type RideHud } from './hud';
+import { createLookControl, type LookReading } from './look';
 import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
 
 /**
@@ -75,16 +83,71 @@ const HURRY_RATE = 4;
 
 // ------------------------------------------------------------------ the show
 
-/** When the saucer arrives, drifts and leaves. */
+/** When the saucer arrives, drifts and leaves. Off to the side and behind —
+ *  find it by turning, the way the family asked for (27 July 2026). */
 const ALIEN_IN = 34;
 const ALIEN_OUT = 68;
 
-/** When Space RiPika floats past. */
+/** When Space RiPika floats past. Dead ahead — the one beat you can watch
+ *  without ever touching the look control. */
 const RIPIKA_IN = 48;
 const RIPIKA_OUT = 78;
 
+/** When the sweetie nebula is out — present for most of the space stretch,
+ *  since it drifts on the spot rather than crossing the window. */
+const NEBULA_IN = 40;
+const NEBULA_OUT = 66;
+
+/** When the space turtles paddle by. */
+const TURTLES_IN = 56;
+const TURTLES_OUT = 82;
+
+// ---------------------------------------------------- where each beat lives
+//
+// Degrees are the same compass the free-look yaw turns through (see
+// `fromAngle` in `space.ts`): 0° is dead ahead, and the rest winds all the
+// way round. RiPika stays near 0° — the one beat a child sees without ever
+// touching the controls — and everything else is spread round the remaining
+// 360°, so turning to look around is how the rest of the show gets found.
+
+/** The alien's saucer drifts across the back of the sky. */
+const ALIEN_ANGLE_FROM = 150;
+const ALIEN_ANGLE_TO = 250;
+
+/** Space RiPika, close to dead ahead, exactly as before. */
+const RIPIKA_ANGLE_FROM = -30;
+const RIPIKA_ANGLE_TO = 40;
+
+/** The turtles paddle past behind the other shoulder from the alien. */
+const TURTLES_ANGLE_FROM = 280;
+const TURTLES_ANGLE_TO = 350;
+
+/** The sweetie nebula sits still and spirals on the spot, off to one side. */
+const NEBULA_ANGLE = 100;
+const NEBULA_DISTANCE = 50;
+const NEBULA_HEIGHT = 9;
+
 /** Field of view. Wide: you are sitting inside a small box looking out of it. */
 const FOV = 62;
+
+// ------------------------------------------------------------- look-around
+
+/** Radians per second of yaw at full stick/key deflection. Free to spin all
+ *  the way round — there is glass on every side now, so nothing stops it. */
+const YAW_RATE = 1.7;
+/** Radians per second of pitch. Slower than yaw: up and down is the axis a
+ *  small thumb overshoots on. */
+const PITCH_RATE = 1.1;
+/** How far down you can tip the view. Gentle — a six-year-old should never be
+ *  able to end up staring at the car floor. */
+const PITCH_MIN = -0.33;
+/** How far up you can tip it — generous, since the wheel's own rim and the
+ *  Moon both like to sit high. */
+const PITCH_MAX = 0.64;
+/** Half-life of the turn-rate damping, in seconds. The stick sets where the
+ *  view *wants* to be turning; this is what keeps a sudden flick from being a
+ *  snap. */
+const TURN_DAMPING = 0.16;
 
 interface Cue {
   readonly at: number;
@@ -110,6 +173,9 @@ class SpaceFerrisWheel implements MiniGame {
   private sparks: Sparks | null = null;
   private alien: SpaceFriend | null = null;
   private ripika: SpaceFriend | null = null;
+  private nebula: SpaceFriend | null = null;
+  private turtles: SpaceFriend | null = null;
+  private readonly look = createLookControl();
 
   private readonly sky = new Color();
   private readonly dayAmbient = new Color(PALETTE.ambientDay);
@@ -132,6 +198,12 @@ class SpaceFerrisWheel implements MiniGame {
 
   private yaw = 0;
   private pitch = -0.06;
+  private yawVelocity = 0;
+  private pitchVelocity = 0;
+  /** True whenever the current touch has moved past the look-stick's deadzone
+   *  — while it has, held time does not count towards going home (see
+   *  `look.ts` and {@link updateHold}). */
+  private lookDragging = false;
 
   private readonly cues: Cue[] = [];
 
@@ -167,7 +239,13 @@ class SpaceFerrisWheel implements MiniGame {
 
     this.alien = createAlienSaucer();
     this.ripika = createSpaceRipika();
-    this.scene.add(this.alien.root, this.ripika.root);
+    this.nebula = createSweetieNebula();
+    this.turtles = createSpaceTurtles();
+    // The nebula does not travel across the window like the others — it sits
+    // at its own compass point and turns on the spot — so it is placed once,
+    // here, rather than every frame in `updateFriends`.
+    this.nebula.root.position.copy(fromAngle(NEBULA_ANGLE, NEBULA_DISTANCE, NEBULA_HEIGHT));
+    this.scene.add(this.alien.root, this.ripika.root, this.nebula.root, this.turtles.root);
 
     this.sparks = createSparks();
     this.scene.add(this.sparks.root);
@@ -179,15 +257,24 @@ class SpaceFerrisWheel implements MiniGame {
       2.6,
     );
 
-    // Cues: the whole script of the ride, in one readable list.
+    // Cues: the whole script of the ride, in one readable list. The show is
+    // spread all round the gondola now, so most of these say "look around"
+    // rather than pointing at a spot on the glass — the child has to turn to
+    // find what is being talked about, which is the point of the rebuild.
+    const lookHint = context.touch ? 'drag to look around!' : 'use the arrow keys to look around!';
     this.cues.push(
       { at: BOARD_END + 3, say: 'Look how small the park is!' },
+      { at: BOARD_END + 8, say: `Try it — ${lookHint}` },
       { at: 22, say: 'Through the clouds!' },
       { at: 31, say: 'Look — the whole Earth!' },
-      { at: ALIEN_IN + 1.5, say: 'A flying saucer!' },
-      { at: ALIEN_IN + 7, say: 'Tap the alien to wave back!', unless: () => this.alien?.greeted ?? false },
+      { at: ALIEN_IN + 1.5, say: 'A flying saucer somewhere — go find it!' },
+      { at: ALIEN_IN + 8, say: 'Tap the alien to wave back!', unless: () => this.alien?.greeted ?? false },
+      { at: NEBULA_IN + 1.5, say: 'A nebula made of sweets!' },
+      { at: NEBULA_IN + 7, say: 'Tap the nebula — it sparkles!', unless: () => this.nebula?.greeted ?? false },
       { at: RIPIKA_IN + 1.5, say: "It's Space RiPika!" },
       { at: RIPIKA_IN + 7, say: 'Tap RiPika to wave!', unless: () => this.ripika?.greeted ?? false },
+      { at: TURTLES_IN + 1.5, say: 'Space turtles, paddling by!' },
+      { at: TURTLES_IN + 7, say: 'Tap the turtles to wave!', unless: () => this.turtles?.greeted ?? false },
       { at: SPACE_END + 1, say: 'Bye bye, space!' },
       { at: DESCEND_END - 3, say: 'Nearly home!' },
     );
@@ -201,7 +288,14 @@ class SpaceFerrisWheel implements MiniGame {
     const { dt, input } = frame;
 
     this.clock += dt * this.rate;
+
+    // Read the look control once a frame: `updateHold` needs to know whether
+    // the finger is dragging (looking around) rather than resting (going
+    // home), and `aimCamera` needs the same reading to turn the view.
+    const look = this.look.read();
+    this.lookDragging = look.dragging;
     this.updateHold(dt, input.hold);
+    this.hud?.setStick(look.touch);
 
     const height = rideHeight(this.clock);
     this.height = height;
@@ -221,7 +315,7 @@ class SpaceFerrisWheel implements MiniGame {
     this.space?.update(dt, this.clock);
     this.updateFriends(dt);
     this.sparks?.update(dt);
-    this.aimCamera(dt);
+    this.aimCamera(dt, look);
 
     this.fireCues();
     this.hud?.setCaption(captionFor(this.clock, this.goingHome));
@@ -243,6 +337,12 @@ class SpaceFerrisWheel implements MiniGame {
    * Deliberately not instant, and deliberately not a button in the corner: on a
    * phone the whole screen is the control a small hand can find, and the ring
    * filling up is the only thing that makes holding it safe.
+   *
+   * **Dragging does not count.** The framework's hold gesture is "press
+   * anywhere", and looking around is also "press anywhere" — so held time
+   * only accumulates while the current touch has *not* moved past the
+   * look-stick's deadzone (`look.ts`). Resting a thumb still leaves early;
+   * sliding it around the sky does not.
    */
   private updateHold(dt: number, held: boolean): void {
     if (this.cardTime >= 0) {
@@ -254,8 +354,9 @@ class SpaceFerrisWheel implements MiniGame {
       return;
     }
 
-    this.holdTime = held ? this.holdTime + dt : Math.max(0, this.holdTime - dt * 2.4);
-    this.hud?.setHomeHold(this.holdTime / HOLD_SECONDS, held);
+    const countsTowardsHome = held && !this.lookDragging;
+    this.holdTime = countsTowardsHome ? this.holdTime + dt : Math.max(0, this.holdTime - dt * 2.4);
+    this.hud?.setHomeHold(this.holdTime / HOLD_SECONDS, countsTowardsHome);
 
     if (this.holdTime >= HOLD_SECONDS) this.goHome();
   }
@@ -282,12 +383,12 @@ class SpaceFerrisWheel implements MiniGame {
     if (alien) {
       alien.setPresence(window01(this.clock, ALIEN_IN, ALIEN_OUT));
       const across = clamp01((this.clock - ALIEN_IN) / (ALIEN_OUT - ALIEN_IN));
-      // Right to left across the window, drifting closer as it comes.
-      alien.root.position.set(
-        lerp(16, -9, smoothstep(0, 1, across)),
-        lerp(2.4, 6.2, across) + Math.sin(this.clock * 0.6) * 0.6,
-        lerp(-30, -19, across),
-      );
+      const eased = smoothstep(0, 1, across);
+      // Sweeping across the back of the sky, drifting closer as it comes —
+      // a child has to turn most of the way round to find it.
+      alien.root.position
+        .copy(fromAngle(lerp(ALIEN_ANGLE_FROM, ALIEN_ANGLE_TO, eased), lerp(30, 21, eased), 0))
+        .setY(lerp(2.4, 6.2, across) + Math.sin(this.clock * 0.6) * 0.6);
       alien.update(dt, this.clock);
     }
 
@@ -295,60 +396,76 @@ class SpaceFerrisWheel implements MiniGame {
     if (ripika) {
       ripika.setPresence(window01(this.clock, RIPIKA_IN, RIPIKA_OUT));
       const across = clamp01((this.clock - RIPIKA_IN) / (RIPIKA_OUT - RIPIKA_IN));
-      // Left to right, and much closer than the saucer: this is the one a child
-      // is going to press their nose to the glass for.
-      ripika.root.position.set(
-        lerp(-4.2, 4.6, smoothstep(0, 1, across)),
-        lerp(0.4, 2.6, across) + Math.sin(this.clock * 0.8 + 1.4) * 0.35,
-        lerp(-6.4, -4.6, across),
-      );
+      const eased = smoothstep(0, 1, across);
+      // Close, and near dead ahead: this is the one a child is going to press
+      // their nose to the glass for, whether they have touched the look
+      // control yet or not.
+      ripika.root.position
+        .copy(fromAngle(lerp(RIPIKA_ANGLE_FROM, RIPIKA_ANGLE_TO, eased), lerp(7.2, 6.6, across), 0))
+        .setY(lerp(0.4, 2.6, across) + Math.sin(this.clock * 0.8 + 1.4) * 0.35);
       ripika.update(dt, this.clock);
+    }
+
+    const nebula = this.nebula;
+    if (nebula) {
+      nebula.setPresence(window01(this.clock, NEBULA_IN, NEBULA_OUT));
+      nebula.update(dt, this.clock);
+    }
+
+    const turtles = this.turtles;
+    if (turtles) {
+      turtles.setPresence(window01(this.clock, TURTLES_IN, TURTLES_OUT));
+      const across = clamp01((this.clock - TURTLES_IN) / (TURTLES_OUT - TURTLES_IN));
+      const eased = smoothstep(0, 1, across);
+      // Paddling past on the opposite shoulder from the alien, so the two
+      // flybys never compete for the same turn of the head.
+      turtles.root.position
+        .copy(fromAngle(lerp(TURTLES_ANGLE_FROM, TURTLES_ANGLE_TO, eased), lerp(26, 17, eased), 0))
+        .setY(lerp(1.1, 3.2, across) + Math.sin(this.clock * 0.5 + 2.4) * 0.4);
+      turtles.update(dt, this.clock);
     }
   }
 
   /**
-   * Where the camera looks.
+   * Where the camera looks — driven by the child, not by the show.
    *
-   * Left alone it drifts gently around straight ahead. When a friend is at the
-   * window it turns *most of* the way towards them — enough to say "look at
-   * that", never so far that the child stops being the one deciding.
+   * The old ride turned the camera towards whichever friend had just arrived,
+   * because the whole show played out in front of you and there was nothing
+   * else for the camera to do. Now the show is spread all round the gondola
+   * (see the `*_ANGLE_*` constants above), so the camera can no longer make
+   * that choice *for* the child without undoing the entire point of giving
+   * them a look control — turning to find things is meant to be theirs to do.
+   *
+   * The stick/keys set a **turn rate**, not a target angle: the further the
+   * deflection, the faster the view spins, and `TURN_DAMPING` is what turns a
+   * sudden flick into a smooth spin-up rather than a snap. Yaw is free —
+   * there is glass on every side of the rebuilt gondola, so there is always
+   * something to turn towards. Pitch is clamped gently, mostly on the way
+   * down, so a small hand cannot end up parked staring at the car floor.
    */
-  private aimCamera(dt: number): void {
-    let wantYaw = Math.sin(this.clock * 0.11) * 0.16;
-    let wantPitch = -0.06 + Math.sin(this.clock * 0.07 + 1.1) * 0.05;
+  private aimCamera(dt: number, look: LookReading): void {
+    const targetYawVelocity = look.x * YAW_RATE;
+    const targetPitchVelocity = look.y * PITCH_RATE;
+    this.yawVelocity = damp(this.yawVelocity, targetYawVelocity, TURN_DAMPING, dt);
+    this.pitchVelocity = damp(this.pitchVelocity, targetPitchVelocity, TURN_DAMPING, dt);
+
+    this.yaw += this.yawVelocity * dt;
+    this.pitch = clamp(this.pitch + this.pitchVelocity * dt, PITCH_MIN, PITCH_MAX);
+
+    // A small idle sway for a hand that is not on the controls — gone the
+    // instant a child actually asks to look somewhere, so it never fights them.
+    const idle = !look.dragging && look.x === 0 && look.y === 0;
+    const idleYaw = idle ? Math.sin(this.clock * 0.11) * 0.05 : 0;
 
     // The opening beat: while the car is still at the bottom there is nothing
     // out of the window but grass, so the ride starts by looking *up* — at the
     // spokes, the hub and the cars swinging above you. It is the establishing
-    // shot, and it costs one line.
-    if (this.clock < BOARD_END) {
-      wantPitch += 0.34 * (1 - smoothstep(0, 1, this.clock / BOARD_END));
-    }
+    // shot, layered on top of whatever the child is doing and gone within a
+    // few seconds either way.
+    const establishing = this.clock < BOARD_END ? 0.34 * (1 - smoothstep(0, 1, this.clock / BOARD_END)) : 0;
+    const pitch = clamp(this.pitch + establishing, PITCH_MIN, PITCH_MAX);
 
-    const focus = this.focusFriend();
-    if (focus) {
-      this.scratch.copy(focus.root.position);
-      this.gondola?.seat.worldToLocal(this.scratch);
-      const dx = this.scratch.x - this.camera.position.x;
-      const dy = this.scratch.y - this.camera.position.y;
-      const dz = this.scratch.z - this.camera.position.z;
-      const flat = Math.hypot(dx, dz);
-      wantYaw = lerp(wantYaw, Math.atan2(-dx, -dz), 0.62);
-      wantPitch = lerp(wantPitch, Math.atan2(dy, flat), 0.62);
-    }
-
-    // Clamped, so that a friend arriving low and behind can never spin the view
-    // round to the back wall of the car.
-    this.yaw = damp(this.yaw, clamp(wantYaw, -0.62, 0.62), 0.34, dt);
-    this.pitch = damp(this.pitch, clamp(wantPitch, -0.42, 0.42), 0.34, dt);
-    this.camera.rotation.set(this.pitch, this.yaw, 0);
-  }
-
-  /** The friend worth looking at right now, if any. */
-  private focusFriend(): SpaceFriend | null {
-    if (this.ripika?.greetable) return this.ripika;
-    if (this.alien?.greetable) return this.alien;
-    return null;
+    this.camera.rotation.set(pitch, this.yaw + idleYaw, 0);
   }
 
   private applySky(height: number): void {
@@ -391,13 +508,29 @@ class SpaceFerrisWheel implements MiniGame {
     );
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    for (const friend of [this.ripika, this.alien]) {
-      if (!friend || !friend.greetable) continue;
+    for (const friend of this.friends) {
+      if (!friend.greetable) continue;
       if (this.raycaster.intersectObject(friend.hitTarget, false).length === 0) continue;
       this.greet(friend);
       return;
     }
   };
+
+  /**
+   * Every space-show beat that currently exists, in one list.
+   *
+   * Kept as a single queryable place — each with a live `root.position`, a
+   * `greetable`/presence state, and a stable `id` — rather than four separate
+   * optional fields scattered through the class, on purpose: a future
+   * "arrow pointing off-screen at what you're missing" feature (queued in
+   * GAME_DESIGN.md, not built here) needs exactly this list, and should not
+   * have to go hunting for it.
+   */
+  private get friends(): readonly SpaceFriend[] {
+    return [this.ripika, this.alien, this.nebula, this.turtles].filter(
+      (friend): friend is SpaceFriend => friend !== null,
+    );
+  }
 
   /** Somebody waved. Everybody is delighted about it. */
   private greet(friend: SpaceFriend): void {
@@ -407,7 +540,7 @@ class SpaceFerrisWheel implements MiniGame {
     this.sparks?.burst(friend.sparkPoint(this.scratch), first ? 30 : 16, friend.id === 'ripika' ? 0.7 : 1.4);
     if (first) {
       this.waves += 1;
-      this.hud?.shout(friend.id === 'ripika' ? 'RiPika waves back!' : 'The alien waves back!', 2.2);
+      this.hud?.shout(GREETING[friend.id], 2.2);
     }
   }
 
@@ -447,11 +580,14 @@ class SpaceFerrisWheel implements MiniGame {
 
   dispose(): void {
     window.removeEventListener('pointerdown', this.onPointerDown, true);
+    this.look.dispose();
     this.gondola?.dispose();
     this.below?.dispose();
     this.space?.dispose();
     this.alien?.dispose();
     this.ripika?.dispose();
+    this.nebula?.dispose();
+    this.turtles?.dispose();
     this.sparks?.dispose();
     this.hud?.dispose();
     this.scene.clear();
@@ -524,13 +660,24 @@ function captionFor(clock: number, goingHome: boolean): string {
   return 'back in the park!';
 }
 
+/** The HUD's cheer for whichever friend just got waved at. */
+const GREETING: Record<FriendId, string> = {
+  alien: 'The alien waves back!',
+  ripika: 'RiPika waves back!',
+  nebula: 'The nebula sparkles back at you!',
+  turtles: 'The space turtles wave their flippers!',
+};
+
 function wavesLine(waves: number): string {
   switch (waves) {
     case 0:
       return 'All the way to space and back.';
     case 1:
       return 'You waved at a friend in space!';
+    case 2:
+    case 3:
+      return 'You made friends all round the sky!';
     default:
-      return 'You waved at the alien AND Space RiPika!';
+      return 'You waved at EVERYONE in space!';
   }
 }

@@ -16,6 +16,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
+import type { Expression } from '../art/style/faces';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { NameLabel } from '../ui/NameLabel';
 import { gameStore } from '../state';
@@ -38,6 +39,24 @@ const SPRINT_MULTIPLIER = 1.5;
  */
 const JUMP_SPEED = 6.6;
 const GRAVITY = 17;
+
+/**
+ * The height a jump actually reaches, in metres — the ≈1.28 m the doc above
+ * derives `JUMP_SPEED` from. Shared with the auto-hop check below so "would
+ * an automatic hop clear this?" asks the exact same question the manual jump
+ * already answers, rather than a second, independently-tuned number that
+ * could quietly drift out of step with it.
+ */
+const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
+
+/**
+ * How far ahead — in the direction actually being walked — the auto-hop
+ * feature (design feedback #30e) looks for a wall it could jump. Small: this
+ * only needs to fire a moment before contact, not give a long run-up, and a
+ * bigger number would hop over things well before they were ever really in
+ * the way.
+ */
+const AUTO_HOP_LOOKAHEAD = 0.5;
 
 /** Drop further than this below the surface under your feet and you fall. */
 const FALL_THRESHOLD = 0.5;
@@ -99,6 +118,8 @@ export class Player implements GameSystem {
   private readonly desiredVelocity = new Vector3();
   private readonly moveDirection = new Vector3();
   private readonly previousPosition = new Vector3();
+  /** Scratch point for the auto-hop lookahead — see `wouldAutoHopClear` below. */
+  private readonly hopProbe = new Vector3();
 
   /** Start facing the camera, so the first thing you see is her face. */
   private facing = CAMERA_YAW_DEGREES * DEG;
@@ -119,8 +140,25 @@ export class Player implements GameSystem {
   private wasClearingWall = false;
   private blinkTimer = 2.4;
   private blinkRemaining = 0;
-  private blinking = false;
+  private currentExpression: Expression = 'neutral';
   private ridingFlag = false;
+
+  /**
+   * Multiplies the speed limit below — 1 normally. The fountain sets this to
+   * ~0.6 while the player's feet are in its water (see `Fountain.ts`), so
+   * wading feels like wading without this class knowing anything about water.
+   * Read once per frame here; written externally by whichever system
+   * currently owns the ground underfoot. One frame stale by construction,
+   * the same tolerance `hopClearance` already documents above.
+   */
+  speedMultiplier = 1;
+
+  /**
+   * True while some other system wants the face to read happy without
+   * fighting the blink state machine in `animate()` — the fountain sets this
+   * while the player is standing in its water.
+   */
+  waterHappy = false;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -257,7 +295,8 @@ export class Player implements GameSystem {
       .addScaledVector(this.camera.forward, input.moveY);
 
     const inputLength = this.moveDirection.length();
-    const speedLimit = PLAYER_MAX_SPEED * (input.isDown('sprint') ? SPRINT_MULTIPLIER : 1);
+    const speedLimit =
+      PLAYER_MAX_SPEED * (input.isDown('sprint') ? SPRINT_MULTIPLIER : 1) * this.speedMultiplier;
 
     if (inputLength > 1e-4) {
       this.desiredVelocity.copy(this.moveDirection).multiplyScalar(speedLimit);
@@ -311,8 +350,27 @@ export class Player implements GameSystem {
       this.verticalVelocity = 0;
     }
 
+    // --- auto-hop (design feedback #30e) -------------------------------------
+    // Walking into a jumpable wall — most naturally via tap-to-move, which
+    // steers exactly like a thumbstick held down (see `TapNavigator`) — used
+    // to just stop there. A short lookahead in the direction actually being
+    // walked asks `Collision.ts` the same question the button already
+    // answers: "would a jump from here clear what's in the way?" Only
+    // `autoHoppable` colliders count — the garden's wooden and stone walls,
+    // registered that way in `Scenery.ts` — so this can never fire for the
+    // fountain rim, a deck edge (which isn't a collider at all) or a wall
+    // too tall to clear; manual jump is completely untouched.
+    let autoHopWanted = false;
+    if (!this.airborne && inputLength > 1e-4) {
+      const inverse = 1 / inputLength;
+      this.hopProbe
+        .copy(this.position)
+        .addScaledVector(this.moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
+      autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+    }
+
     // --- hop ----------------------------------------------------------------
-    if (input.justPressed('jump') && !this.airborne) {
+    if ((input.justPressed('jump') || autoHopWanted) && !this.airborne) {
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
       this.spawnHopRing(groundY);
@@ -454,9 +512,10 @@ export class Player implements GameSystem {
     if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
 
     const blinking = this.blinkRemaining > 0;
-    if (blinking !== this.blinking) {
-      this.blinking = blinking;
-      model.setExpression(blinking ? 'blink' : 'neutral');
+    const desiredExpression: Expression = blinking ? 'blink' : this.waterHappy ? 'happy' : 'neutral';
+    if (desiredExpression !== this.currentExpression) {
+      this.currentExpression = desiredExpression;
+      model.setExpression(desiredExpression);
     }
 
     // The name label counter-rotates so it never tips with the character.

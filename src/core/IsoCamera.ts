@@ -5,28 +5,30 @@ import {
   CAMERA_LOOK_AHEAD,
   CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
-  CAMERA_ROTATE_DURATION,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
   CAMERA_ZOOM_MAX,
   CAMERA_ZOOM_MIN,
   CAMERA_ZOOM_STEP,
 } from './constants';
-import { clamp, damp, DEG, smoothstep } from './mathUtils';
+import { clamp, damp, DEG } from './mathUtils';
 import type { FrameContext } from './types';
 
 /**
  * The Theme Park camera.
  *
- * An orthographic camera pinned at a fixed downward pitch, looking at the player
- * from a fixed compass angle. Orthographic (rather than perspective) is what
- * sells the classic look: parallel lines stay parallel, so the park reads like a
- * toy model rather than a first-person world. The player can spin the view in
- * 90° steps — exactly what Theme Park allowed — but never tumble it freely,
- * which keeps the world legible for a six-year-old.
+ * An orthographic camera pinned at one fixed downward pitch and one fixed
+ * compass angle, for the life of the app — see ARCHITECTURE.md, "One camera
+ * angle, forever". Theme Park itself let you spin the view in 90° steps; this
+ * park does not, so everything built into it is instead authored to read
+ * correctly from this one angle. Orthographic (rather than perspective) is
+ * what sells the classic look: parallel lines stay parallel, so the park
+ * reads like a toy model rather than a first-person world.
  *
- * Movement input is interpreted through {@link forward} / {@link right} so that
- * "up" on the stick always means "up the screen", whichever way the view faces.
+ * Movement input is interpreted through {@link forward} / {@link right} so
+ * that "up" on the stick always means "up the screen" — a fixed rig still
+ * needs a name for its own ground-plane axes, it just never has to recompute
+ * them.
  */
 export class IsoCamera {
   readonly camera: OrthographicCamera;
@@ -34,16 +36,15 @@ export class IsoCamera {
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
   private readonly desiredFocus = new Vector3();
-  private readonly offset = new Vector3();
 
-  /** Ground-plane basis vectors, recomputed whenever the yaw changes. */
-  private readonly forwardVector = new Vector3(0, 0, -1);
-  private readonly rightVector = new Vector3(1, 0, 0);
-
-  private yaw = CAMERA_YAW_DEGREES * DEG;
-  private yawFrom = this.yaw;
-  private yawTo = this.yaw;
-  private yawTimer = 1;
+  /**
+   * Ground-plane basis vectors and the camera's fixed offset from its focus.
+   * All three are solved once, here, from the one-and-only pitch and yaw —
+   * the camera angle never changes again, so neither do these.
+   */
+  private readonly forwardVector: Vector3;
+  private readonly rightVector: Vector3;
+  private readonly offset: Vector3;
 
   private zoomValue = 1;
   private zoomTarget = 1;
@@ -53,9 +54,23 @@ export class IsoCamera {
   private viewportHeight = 1;
 
   constructor() {
+    const yaw = CAMERA_YAW_DEGREES * DEG;
+    const pitch = CAMERA_PITCH_DEGREES * DEG;
+    const horizontal = Math.cos(pitch) * CAMERA_DISTANCE;
+
+    this.offset = new Vector3(
+      Math.sin(yaw) * horizontal,
+      Math.sin(pitch) * CAMERA_DISTANCE,
+      Math.cos(yaw) * horizontal,
+    );
+
+    // The camera sits at +offset and looks back at the focus, so "into the
+    // screen" is the negated horizontal part of that offset.
+    this.forwardVector = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+    this.rightVector = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
-    this.camera.position.set(0, CAMERA_DISTANCE, CAMERA_DISTANCE);
-    this.updateBasis();
+    this.camera.position.copy(this.offset);
     this.applyFrustum();
   }
 
@@ -109,14 +124,6 @@ export class IsoCamera {
     this.applyFrustum();
   }
 
-  /** Begins a 90° rotation. Ignored while a previous rotation is in flight. */
-  rotate(steps: number): void {
-    if (this.yawTimer < 1) return;
-    this.yawFrom = this.yaw;
-    this.yawTo = this.yaw + (Math.PI / 2) * steps;
-    this.yawTimer = 0;
-  }
-
   nudgeZoom(delta: number): void {
     this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
   }
@@ -128,19 +135,8 @@ export class IsoCamera {
   update(context: FrameContext, target: Vector3, velocity: Vector3): void {
     const { dt, input } = context;
 
-    if (input.justPressed('cameraLeft')) this.rotate(1);
-    if (input.justPressed('cameraRight')) this.rotate(-1);
     if (input.justPressed('zoomIn')) this.nudgeZoom(CAMERA_ZOOM_STEP);
     if (input.justPressed('zoomOut')) this.nudgeZoom(-CAMERA_ZOOM_STEP);
-
-    if (this.yawTimer < 1) {
-      this.yawTimer = Math.min(1, this.yawTimer + dt / CAMERA_ROTATE_DURATION);
-      // Smoothstep gives the turn a gentle start and stop; a linear snap felt
-      // mechanical next to everything else in the park.
-      const t = smoothstep(0, 1, this.yawTimer);
-      this.yaw = this.yawFrom + (this.yawTo - this.yawFrom) * t;
-      this.updateBasis();
-    }
 
     const previousZoom = this.zoomValue;
     this.zoomValue = damp(this.zoomValue, this.zoomTarget, 0.12, dt);
@@ -161,13 +157,6 @@ export class IsoCamera {
   }
 
   private applyTransform(): void {
-    const pitch = CAMERA_PITCH_DEGREES * DEG;
-    const horizontal = Math.cos(pitch) * CAMERA_DISTANCE;
-    this.offset.set(
-      Math.sin(this.yaw) * horizontal,
-      Math.sin(pitch) * CAMERA_DISTANCE,
-      Math.cos(this.yaw) * horizontal,
-    );
     this.camera.position.copy(this.focus).add(this.offset);
     this.camera.lookAt(this.focus);
     this.camera.updateMatrixWorld();
@@ -192,13 +181,6 @@ export class IsoCamera {
     this.camera.top = halfHeight;
     this.camera.bottom = -halfHeight;
     this.camera.updateProjectionMatrix();
-  }
-
-  private updateBasis(): void {
-    // The camera sits at +offset and looks back at the focus, so "into the
-    // screen" is the negated horizontal part of that offset.
-    this.forwardVector.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
-    this.rightVector.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
   }
 }
 

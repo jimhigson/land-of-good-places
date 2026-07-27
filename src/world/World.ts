@@ -24,6 +24,7 @@ import { NpcSystem } from '../entities/npc';
 // note). Not a mini-game, so it is wired in here rather than through
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
+import { terrainHeight } from './terrain';
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -208,15 +209,29 @@ export class World implements GameSystem {
   }
 
   /**
-   * Gives the building — and the face-painting stall — the player. Must be
-   * called once, after the player is constructed: the building installs the
-   * ground sampler that makes floors walkable, and the stall hangs the paint
-   * overlay mesh on the player's actual head (see `FacePaintStall.attachPlayer`).
+   * Gives the building, the face-painting stall and the fountain the player.
+   * Must be called once, after the player is constructed: the building
+   * installs the ground sampler that makes floors walkable, the stall hangs
+   * the paint overlay on the player's actual head, and the fountain then
+   * wraps the sampler with its own shallow-water dip inside the rim so
+   * wading works without either system knowing about the other.
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
+    // Lets the crowd push gently apart from the player instead of walking
+    // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
+    this.npcs.attachPlayer(player);
+
+    const groundBeforeFountain = player.groundSampler;
+    player.groundSampler = (x, z, y) =>
+      this.fountain.groundLevel(
+        x,
+        z,
+        groundBeforeFountain ? groundBeforeFountain(x, z, y) : terrainHeight(x, z),
+      );
+    this.fountain.attachPlayer(player);
   }
 
   dispose(): void {

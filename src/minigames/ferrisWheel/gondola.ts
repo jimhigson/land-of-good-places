@@ -48,6 +48,14 @@ import { FERRIS_CAR_COLOURS } from './wheelProp';
 /** How many of your cute things fit on the bench. */
 const SEATS = 3;
 
+/**
+ * The floor between the bench (facing the window, at `z ≈ -0.55`) and the
+ * camera (at `z ≈ 0.78`, near the back glass) is deliberately left bare. A
+ * future NPC companion sitting opposite the player (queued in GAME_DESIGN.md,
+ * not built here) belongs there, facing back towards the seat — do not fill
+ * this gap with more furniture or parade overflow.
+ */
+
 /** Interior dimensions of the car, in metres. */
 const CAR_WIDTH = 2.9;
 const CAR_DEPTH = 2.4;
@@ -111,11 +119,9 @@ export function createGondola(): Gondola {
   car.add(seat);
 
   const shellColour = FERRIS_CAR_COLOURS[0] ?? PALETTE.markerPink;
-  // Inside is cream, outside is the car's colour. You only ever see the inside
-  // from the seat, and a saturated pink filling a third of the frame competes
-  // with the one thing this ride is about, which is what is out of the window.
-  const shell = toonMaterial(PALETTE.buildingWall);
   const shellDeep = toonMaterial(PALETTE.outfitDark);
+  // The frame — posts, rails, window bars — is all one light cream, so it
+  // reads as one thin structure rather than four different walls.
   const cream = toonMaterial(PALETTE.buildingWall);
   const woodMaterial = toonMaterial(PALETTE.wood);
   const cushion = toonMaterial(PALETTE.markerLilac);
@@ -126,11 +132,20 @@ export function createGondola(): Gondola {
   const halfWidth = CAR_WIDTH / 2;
   const halfDepth = CAR_DEPTH / 2;
 
-  // --- floor, walls and roof ---------------------------------------------------
+  // --- floor and roof: slim, everything between them is glass -----------------
+  //
+  // **The gondola rebuild (27 July 2026).** The first car had opaque walls on
+  // three sides and a porthole apiece for the other two — "a box with a
+  // porthole", in the family's own words, and exactly what this rebuild
+  // removes. What is left holding the roof up is four corner posts thin
+  // enough to get a hand between, a low handrail, and glass the rest of the
+  // way round on all four sides: front, back and both flanks alike. The child
+  // is meant to feel like they are riding in a glass bubble, not a room with
+  // a window in it.
   const floor = solid(
-    new Mesh(new RoundedBoxGeometry(CAR_WIDTH, 0.18, CAR_DEPTH, 3, 0.08), woodMaterial),
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH, 0.14, CAR_DEPTH, 3, 0.06), woodMaterial),
   );
-  floor.position.y = -0.09;
+  floor.position.y = -0.07;
   car.add(floor);
 
   const rug = decal(new Mesh(new CylinderGeometry(1.0, 1.0, 0.03, 24), toonMaterial(PALETTE.markerMint)));
@@ -138,53 +153,97 @@ export function createGondola(): Gondola {
   rug.scale.set(1, 1, 0.75);
   car.add(rug);
 
-  // Side walls, low enough to see over and high enough to feel held in.
-  for (const side of [-1, 1] as const) {
-    const wall = solid(
-      new Mesh(new RoundedBoxGeometry(0.14, CAR_HEIGHT, CAR_DEPTH, 3, 0.07), shell),
-    );
-    wall.position.set(side * halfWidth, CAR_HEIGHT / 2, 0);
-    car.add(wall);
-    addOutline(wall, 0.018);
-
-    // A porthole in each side wall, because the view is not only forwards.
-    const porthole = decal(new Mesh(new CylinderGeometry(0.42, 0.42, 0.2, 20), glass));
-    porthole.rotation.z = Math.PI / 2;
-    porthole.position.set(side * halfWidth, 1.5, -0.2);
-    car.add(porthole);
-
-    const portholeRing = solid(new Mesh(new TorusGeometry(0.44, 0.07, 8, 20), cream));
-    portholeRing.position.set(side * (halfWidth + 0.02), 1.5, -0.2);
-    portholeRing.rotation.y = Math.PI / 2;
-    car.add(portholeRing);
-  }
-
-  // The back wall sits behind the camera and is never seen from the seat, so it
-  // is a plain panel — but it has to exist, or the sky shows through the car.
-  const back = solid(new Mesh(new BoxGeometry(CAR_WIDTH, CAR_HEIGHT, 0.14), shell));
-  back.position.set(0, CAR_HEIGHT / 2, halfDepth);
-  car.add(back);
-
   const roof = solid(
-    new Mesh(new RoundedBoxGeometry(CAR_WIDTH + 0.2, 0.16, CAR_DEPTH + 0.2, 3, 0.07), shellDeep),
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH + 0.16, 0.13, CAR_DEPTH + 0.16, 3, 0.06), shellDeep),
   );
   roof.position.y = CAR_HEIGHT;
   car.add(roof);
-  addOutline(roof, 0.018);
+  addOutline(roof, 0.016);
 
-  // --- the big window ----------------------------------------------------------
-  // A frame around a hole, plus a pane of the faintest glass. The whole ride is
-  // this rectangle, so it is as big as the car will allow.
+  // --- the frame: four corner posts and a handrail, and nothing else ----------
+  const postRadius = 0.05;
+  const corners: readonly (readonly [number, number])[] = [
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [-halfWidth, halfDepth],
+    [halfWidth, halfDepth],
+  ];
+  for (const [cx, cz] of corners) {
+    const post = solid(
+      new Mesh(new CylinderGeometry(postRadius, postRadius * 1.15, CAR_HEIGHT, 10), cream),
+    );
+    post.position.set(cx, CAR_HEIGHT / 2, cz);
+    car.add(post);
+    addOutline(post, 0.012);
+  }
+
+  // A low rail running the whole way round inside the glass — a real thing a
+  // child could imagine holding onto, and the one piece of "frame" that is not
+  // also a window mullion.
+  const railY = 0.98;
+  const railBar = (length: number, x: number, z: number, alongX: boolean): void => {
+    const bar = solid(
+      new Mesh(
+        new RoundedBoxGeometry(alongX ? length : 0.05, 0.05, alongX ? 0.05 : length, 2, 0.02),
+        cream,
+      ),
+    );
+    bar.position.set(x, railY, z);
+    car.add(bar);
+  };
+  railBar(CAR_WIDTH, 0, -halfDepth, true);
+  railBar(CAR_WIDTH, 0, halfDepth, true);
+  railBar(CAR_DEPTH, -halfWidth, 0, false);
+  railBar(CAR_DEPTH, halfWidth, 0, false);
+
+  // --- windows, all the way round ----------------------------------------------
+  // A frame around a hole, plus a pane of the faintest glass — on all four
+  // sides. There is no direction from the seat that looks out onto a wall.
   const windowTop = 2.2;
-  const windowBottom = 0.5;
-  const windowHalf = halfWidth - 0.22;
+  const windowBottom = 0.42;
+  const windowSpan = 0.28; // clearance eaten by each corner post
 
-  const pane = decal(new Mesh(new BoxGeometry(windowHalf * 2, windowTop - windowBottom, 0.04), glass));
-  pane.position.set(0, (windowTop + windowBottom) / 2, -halfDepth);
-  car.add(pane);
+  const frameBar = (
+    length: number,
+    height: number,
+    x: number,
+    z: number,
+    y: number,
+    alongX: boolean,
+  ): void => {
+    const bar = solid(
+      new Mesh(
+        new RoundedBoxGeometry(alongX ? length : 0.14, height, alongX ? 0.14 : length, 3, 0.05),
+        cream,
+      ),
+    );
+    bar.position.set(x, y, z);
+    car.add(bar);
+  };
 
-  // A pair of diagonal highlight streaks on the glass. Unlit, faint, and they
-  // are what stops the window reading as an open hole.
+  const glassPane = (length: number, x: number, z: number, alongX: boolean): void => {
+    const pane = decal(
+      new Mesh(new BoxGeometry(alongX ? length : 0.04, windowTop - windowBottom, alongX ? 0.04 : length), glass),
+    );
+    pane.position.set(x, (windowTop + windowBottom) / 2, z);
+    car.add(pane);
+  };
+
+  // Front and back.
+  for (const z of [-halfDepth, halfDepth] as const) {
+    glassPane(CAR_WIDTH - windowSpan, 0, z, true);
+    frameBar(CAR_WIDTH, windowBottom, 0, z, windowBottom / 2, true);
+    frameBar(CAR_WIDTH, CAR_HEIGHT - windowTop, 0, z, (CAR_HEIGHT + windowTop) / 2, true);
+  }
+  // Left and right.
+  for (const x of [-halfWidth, halfWidth] as const) {
+    glassPane(CAR_DEPTH - windowSpan, x, 0, false);
+    frameBar(CAR_DEPTH, windowBottom, x, 0, windowBottom / 2, false);
+    frameBar(CAR_DEPTH, CAR_HEIGHT - windowTop, x, 0, (CAR_HEIGHT + windowTop) / 2, false);
+  }
+
+  // A pair of diagonal highlight streaks on the front glass — enough to tell
+  // the eye there is glass there at all, without doing it on all four panes.
   const streakMaterial = new MeshBasicMaterial({
     color: PALETTE.blossomWhite,
     transparent: true,
@@ -201,18 +260,8 @@ export function createGondola(): Gondola {
     car.add(streak);
   }
 
-  const frameBar = (w: number, h: number, x: number, y: number): void => {
-    const bar = solid(new Mesh(new RoundedBoxGeometry(w, h, 0.22, 3, 0.07), cream));
-    bar.position.set(x, y, -halfDepth);
-    car.add(bar);
-  };
-  frameBar(CAR_WIDTH, windowBottom, 0, windowBottom / 2);
-  frameBar(CAR_WIDTH, CAR_HEIGHT - windowTop, 0, (CAR_HEIGHT + windowTop) / 2);
-  frameBar(0.24, CAR_HEIGHT, -halfWidth + 0.11, CAR_HEIGHT / 2);
-  frameBar(0.24, CAR_HEIGHT, halfWidth - 0.11, CAR_HEIGHT / 2);
-
-  // A cheerful scalloped valance along the top of the window, the same shape the
-  // fairground booths wear.
+  // A cheerful scalloped valance along the top of the front window, the same
+  // shape the fairground booths wear.
   const scallopMaterial = toonMaterial(PALETTE.markerLemon);
   const scallops = 7;
   for (let i = 0; i < scallops; i += 1) {

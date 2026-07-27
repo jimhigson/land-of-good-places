@@ -13,6 +13,7 @@ export {
   type InteractZone,
 } from './interact';
 export { TreeClimbing } from './TreeClimbing';
+export { FoliageFade } from './FoliageFade';
 export { type ClimbableTreeSeed } from './Scenery';
 export {
   EGG_PRIZES,

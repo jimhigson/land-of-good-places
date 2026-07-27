@@ -5,6 +5,19 @@ review). Any QA agent reads this first, runs what's relevant, appends new
 regression checks when bugs are found, and reports pass/fail per item.
 The Overseer has final say on every merge; QA sign-off covers the routine.
 
+## Browser rules (read before opening any page)
+
+1. **ALWAYS open pages in the background.** Pass `background: true` to
+   `mcp__chrome-devtools__new_page`. Without it macOS yanks focus and
+   switches Spaces, interrupting whoever is using the machine. This is not
+   optional — the user works on this Mac while agents run.
+2. **One page at a time.** Close it when the check is done.
+3. **Kill your dev server** the moment you no longer need it. A recurring
+   20-minute cull kills strays; if yours vanishes, just restart it.
+4. The browser is shared with other agents: verify `document.location.href`
+   inside every `evaluate_script` before trusting a result, and prefer
+   driving `window.game` directly over clicking UI.
+
 ## How to run a QA pass
 
 1. `npm ci` (if worktree) and `npm run build` — must be green, zero TS errors.

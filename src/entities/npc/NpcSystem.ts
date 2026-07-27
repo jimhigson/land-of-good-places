@@ -4,8 +4,9 @@ import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
-import type { CollisionWorld } from '../../world/Collision';
-import type { GroundSampler } from '../Player';
+import { circleSeparation, MAX_DEPENETRATION_SPEED, type CollisionWorld } from '../../world/Collision';
+import { PLAYER_RADIUS } from '../../core/constants';
+import type { GroundSampler, Player } from '../Player';
 import { NameLabel } from '../../ui/NameLabel';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { KidCrowd, type KidColours } from './kidCrowd';
@@ -70,6 +71,14 @@ const NPC_SEED = 20260726;
 
 /** Closer than this and two children push each other apart. */
 const SEPARATION = NPC_RADIUS * 2;
+
+/**
+ * Closer than this and a child pushes gently apart from the player instead of
+ * walking through them (design feedback #31d — "player↔NPC collision").
+ * Exactly the same combined-radii idea as {@link SEPARATION}, just with the
+ * player's own girth on one side instead of a second child's.
+ */
+const PLAYER_SEPARATION = NPC_RADIUS + PLAYER_RADIUS;
 
 /** Beyond this from the player, behaviour runs every other frame. */
 const FAR_DISTANCE = 34;
@@ -213,6 +222,14 @@ export class NpcSystem implements GameSystem {
   private readonly labelOrder: number[] = [];
   private readonly playerPosition = new Vector3();
   private frame = 0;
+  /**
+   * Set by `attachPlayer`, once the player exists — `null` for the handful of
+   * frames before `World.attachPlayer` runs. Needed (rather than just the
+   * position `FrameContext` already hands every system) because pushing the
+   * player gently apart from a child means calling `Player.nudge`, which only
+   * the real instance has.
+   */
+  private player: Player | null = null;
 
   constructor(
     collision: CollisionWorld,
@@ -335,6 +352,16 @@ export class NpcSystem implements GameSystem {
   }
 
   /**
+   * Gives the crowd the real player, once it exists — see `World.attachPlayer`
+   * and the `player` field's own doc. Lets `update` push a child gently apart
+   * from the player instead of letting them walk through each other (design
+   * feedback #31d).
+   */
+  attachPlayer(player: Player): void {
+    this.player = player;
+  }
+
+  /**
    * The children themselves.
    *
    * Exposed for rides that carry a character rather than steer one: a driver
@@ -386,6 +413,7 @@ export class NpcSystem implements GameSystem {
     }
 
     this.separate();
+    this.separateFromPlayer(dt);
 
     for (const character of this.characters) {
       character.syncTransform();
@@ -423,6 +451,61 @@ export class NpcSystem implements GameSystem {
         if (!second) continue;
         first.separateFrom(second, SEPARATION);
       }
+    }
+  }
+
+  /**
+   * Pushes a child gently apart from the player, and the player gently apart
+   * from the child — design feedback #31d, "the player and NPCs cannot walk
+   * through each other". The same relaxation `separate` already uses for
+   * child↔child (see `circleSeparation`, which this and `NpcCharacter.
+   * separateFrom` both now share), just with the player's own girth on one
+   * side.
+   *
+   * Never a hard stop: this only ever moves each side by (at most) half of
+   * however much they overlap, split evenly, so a child brushing past the
+   * player slides round them rather than snagging. `MAX_DEPENETRATION_SPEED`
+   * (see `Collision.ts` — the fix for design feedback #17's "fling") caps how
+   * far either side can be shoved in one frame, for the one case ordinary
+   * walking can never produce on its own: a child or the player arriving
+   * already embedded in the other, e.g. a teleport or a space change landing
+   * them on top of each other.
+   *
+   * The player's half goes through `Player.nudge`, which re-resolves them
+   * against the ordinary collision world — so this can never push the player
+   * through a wall or a tree to get them away from a child — and never
+   * touches `Player.velocity`, so (exactly like `resolve`'s own escorting)
+   * being nudged apart from a child can never be mistaken for player input
+   * and banked as speed.
+   */
+  private separateFromPlayer(dt: number): void {
+    const player = this.player;
+    if (!player) return;
+
+    const maxPush = MAX_DEPENETRATION_SPEED * dt;
+
+    for (const character of this.characters) {
+      // A climbing child's (x, z) is the tree it is up, not somewhere it is
+      // standing — see `NpcCharacter.separateFrom`'s identical guard.
+      if (character.climbing) continue;
+
+      const push = circleSeparation(
+        character.position.x,
+        character.position.z,
+        player.position.x,
+        player.position.z,
+        PLAYER_SEPARATION,
+      );
+      if (!push) continue;
+
+      const magnitude = Math.hypot(push.dx, push.dz);
+      const scale = magnitude > maxPush ? maxPush / magnitude : 1;
+      const dx = push.dx * scale;
+      const dz = push.dz * scale;
+
+      character.position.x -= dx;
+      character.position.z -= dz;
+      player.nudge(dx, dz);
     }
   }
 

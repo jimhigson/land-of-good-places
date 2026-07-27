@@ -9,9 +9,11 @@ import {
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
+import { CAMERA_YAW_DEGREES } from '../../core/constants';
 import { signTexture, woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
+import { DEG } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
@@ -85,6 +87,8 @@ export class Station {
   private readonly halfWidth = PLATFORM_WIDTH / 2;
   private readonly cosYaw: number;
   private readonly sinYaw: number;
+  /** The station group's own world yaw — the track tangent's own compass angle. */
+  private readonly groupYaw: number;
 
   constructor(options: StationOptions, route: TrainRoute, collision: CollisionWorld) {
     this.index = options.index;
@@ -117,6 +121,7 @@ export class Station {
     const yaw = Math.atan2(tangent.x, tangent.z);
     this.cosYaw = Math.cos(yaw);
     this.sinYaw = Math.sin(yaw);
+    this.groupYaw = yaw;
 
     this.group.name = `train-station-${options.index}`;
     this.group.position.set(this.standX, ground, this.standZ);
@@ -268,9 +273,14 @@ export class Station {
     const signGroup = new Group();
     signGroup.name = 'station-sign';
     signGroup.position.set(-trackSide * (PLATFORM_WIDTH / 2 + 0.05), PLATFORM_HEIGHT, 2.9);
-    // Turned to face out into the park, so it can be read on the walk up: the
-    // sign's own +Z has to end up pointing away from the track.
-    signGroup.rotation.y = -trackSide * (Math.PI / 2);
+    // Turned to face the camera's one fixed angle (ARCHITECTURE.md, "One
+    // camera angle, forever"), not merely "away from the track": the loop
+    // runs all the way round the park, so a station on the near side of it
+    // has "away from the track" pointing squarely away from the camera
+    // instead. Since the group itself is already turned to `groupYaw` (the
+    // track's own tangent), the sign's *local* yaw has to cancel that out and
+    // then add the camera angle back on top.
+    signGroup.rotation.y = CAMERA_YAW_DEGREES * DEG - this.groupYaw;
     this.group.add(signGroup);
 
     const signPost = new Mesh(new CylinderGeometry(0.09, 0.11, 2.1, 8), postMaterial);
