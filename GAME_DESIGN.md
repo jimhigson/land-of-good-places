@@ -192,6 +192,12 @@ that pop up during a water fight obscure too much of the game. Instead:
   soaked hair) so you can see at a glance who just got got.
 - When someone **scores a point, their portrait smiles**.
 
+**Layout feedback (27 July 2026):** the heads and names on the portraits
+need to be **bigger**. Place the portraits **down the left and right sides,
+half on each side, in landscape**, and **along the top and bottom in
+portrait** — never bunched in one corner, and never over the middle of the
+play area.
+
 No more pop-ups over the play area.
 
 ## The spooky house
