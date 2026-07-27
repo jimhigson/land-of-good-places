@@ -178,6 +178,16 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **Assert that every asset's declared height matches its measured bounds**
+  (Review 6/F5). `sizeToStandard` scaled pets from a hand-written `0.52` that
+  was the top of the skull, not the creature — so the bunny rendered at 2.12 m
+  against a 1.46 m target, for weeks, while a function named "size to
+  standard" reported success. The asset contract says 1 unit = 1 m with the
+  origin at the feet, and **nothing checks it**. Close it from a `Box3` at
+  boot or in a test. Third instance tonight of the same class: a number an
+  author writes down is a claim; a number derived from the built object is a
+  fact.
+
 - **P1 — she can walk through any wall when the frame stutters.** At
   `MAX_FRAME_DELTA` while sprinting, one integration step is **0.93 m**, which
   is wider than a wall's footprint — so she tunnels straight through, at any

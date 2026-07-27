@@ -633,3 +633,44 @@ name Decision 3's authority `SpaceManager.ts` after its export. When
 rather than keeping a second copy of the same coordinates — that is the
 duplication that would actually bite, as opposed to the filename, which merely
 confuses.
+
+---
+
+## Review 6 — the pet sizer, and a contract that was never enforced (28 July, 00:40)
+
+**F5 — `sizeToStandard` measured the wrong thing, for weeks (fixed in #72).**
+Every recipe pet passed the same hand-written `0.52` as its natural height —
+but `0.52` was the top of the **skull**, not the top of the creature. Ears sat
+above it, were excluded from the sum, and were then scaled up along with
+everything else. Measured: bunny **2.12 m** (as tall as the player), mouse
+1.80, kitten 1.71, against a `PET_RENDER_HEIGHT` of 1.46.
+
+This matters beyond the bug. The family asked in plain words for pets to be
+normalised — *"ripika is the correct size, make them all match that size"* —
+and the code contained a function called `sizeToStandard` that appeared to do
+exactly that. It reported success and delivered a rabbit a third taller than
+the target. Nobody caught it because **nothing measured the finished object**;
+the natural height was an author-supplied number, trusted.
+
+The fix closes it from a `Box3` of the finished creature. All four now measure
+exactly 1.460.
+
+**The lesson generalises, and it is the third time tonight.** Review 3 found a
+comment asserting a camera pitch it did not import. Review 4 found an
+invariant enforced by a revision counter *because* Review 3 complained. This
+is the same family: **a number an author writes down is a claim; a number
+derived from the built object is a fact.** The asset contract in
+ARCHITECTURE.md says "1 unit = 1 m, origin at feet" — but nothing checks it.
+Any model whose author mistypes its height is silently wrong, and the failure
+is visual, gradual, and easy to explain away as art.
+
+Queued: a boot-time (or test-time) assertion that every asset's declared
+`height` matches its measured bounds. Cheap, and it retires the class.
+
+**F6 — the portrait strip was ~60 canvases against a ~40 budget** (fixed in
+#77). Five expressions *per character* plus five composited canvases *per
+character*, for a six-child water fight, with the dodgems about to want their
+own set. Now painted once, cached, shared as data URLs, with skin and hair as
+a CSS gradient — five canvases total. Worth recording because the budget in
+ART_DIRECTION.md is a guideline nothing enforces, and this was found only
+because someone went looking while doing unrelated work.
