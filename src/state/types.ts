@@ -187,9 +187,10 @@ export interface GameState {
   wornFlowerUid: string | null;
   /**
    * `uid` of the hat worn on the head, or null for bare-headed — see
-   * `entities/WornHat.ts`. Set once by the character creator today; the hat
-   * shop has no "wear this" button yet, so a hat bought mid-game still only
-   * goes into the player's hands, same as before this field existed.
+   * `entities/WornHat.ts`. Set by the character creator at the start, and
+   * thereafter by tapping a hat in the backpack drawer
+   * (`gameStore.setWornHat`), which is how a hat bought mid-game gets onto the
+   * player.
    */
   wornHatUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */

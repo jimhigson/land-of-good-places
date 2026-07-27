@@ -3,6 +3,7 @@ export {
   FLOWER_COLOURS,
   FLOWER_HEX,
   FLOWER_ICON,
+  wearableSlot,
   type CharacterCreationChoice,
   type PurchaseSpec,
 } from './store';

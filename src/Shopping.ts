@@ -69,6 +69,8 @@ export class Shopping implements GameSystem {
       onClose: () => this.closeUi(),
     });
     this.drawer = new InventoryDrawer(uiRoot, {
+      // Wearing goes straight to the store from the drawer — see the note on
+      // `InventoryDrawer.useSelected`. Only the hands come through here.
       onCarry: (uid) => gameStore.setCarried(uid),
     });
     this.carried = new CarriedItem(player.model.holdAnchor);

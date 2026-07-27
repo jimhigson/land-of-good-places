@@ -100,6 +100,28 @@ type Listener = (state: GameState) => void;
 const PARADE_KINDS: ReadonlySet<InventoryKind> = new Set<InventoryKind>(['toy', 'pet', 'balloon']);
 
 /**
+ * Which bit of the player a thing goes on, or `null` for something that is not
+ * worn at all.
+ *
+ * There are exactly two slots, because there are exactly two `worn*Uid` fields
+ * and two systems that draw them: `entities/WornHat.ts` on the head and
+ * `entities/WornFlower.ts` in the hair. Deriving the slot from
+ * {@link InventoryKind} here — rather than in the drawer that happens to be the
+ * first caller — is what stops "can I wear this?" from being answered
+ * differently by the backpack, the Cute-o-dex and whatever asks next.
+ *
+ * A hat is also `carryable`, so both a wear and a carry are defensible answers
+ * to tapping one. The backpack picks wearing: a child who bought a crown wants
+ * it on their head, and a hat still lands in the hands on purchase
+ * ({@link GameStore.buy}) so nothing became unreachable.
+ */
+export function wearableSlot(kind: InventoryKind): 'hat' | 'flower' | null {
+  if (kind === 'hat') return 'hat';
+  if (kind === 'flower') return 'flower';
+  return null;
+}
+
+/**
  * A tiny observable store — the single source of truth for money, the
  * collection, the clock and the game mode.
  *
@@ -334,15 +356,48 @@ class GameStore {
   /**
    * Wears a picked flower in the hair, or takes it off with `null`.
    *
-   * Exposed mainly for a future Cute-o-dex / drawer toggle — picking a flower
-   * already wears it, via `collectFlower`.
+   * Called by the Cute-o-dex's flower cards and by the backpack drawer; picking
+   * a flower already wears it, via `collectFlower`.
    */
   setWornFlower(uid: string | null): void {
     if (uid !== null && !this.state.inventory.some((item) => item.uid === uid && item.kind === 'flower')) {
       return;
     }
     if (this.state.wornFlowerUid === uid) return;
+    const previous = this.state.inventory.find((item) => item.uid === this.state.wornFlowerUid);
     this.state.wornFlowerUid = uid;
+    if (previous) this.refreshPlacement(previous.id);
+    const next = this.state.inventory.find((item) => item.uid === uid);
+    if (next) this.refreshPlacement(next.id);
+    this.notify();
+  }
+
+  /**
+   * Puts an owned hat on the player's head, or takes it off with `null`.
+   *
+   * `setWornFlower`'s twin, and deliberately shaped the same way: the wearing
+   * systems are store subscribers (`entities/WornHat.ts`), so this one field is
+   * the whole of "what am I wearing?" and nothing has to be told twice. Only
+   * one hat at a time — asking for a second simply replaces the first, which is
+   * what a child expects from a head.
+   *
+   * A hat in the hands moves to the head rather than being in both places: the
+   * same model would otherwise be drawn twice, once at `holdAnchor` and once at
+   * `hatAnchor`.
+   */
+  setWornHat(uid: string | null): void {
+    if (uid !== null && !this.state.inventory.some((item) => item.uid === uid && item.kind === 'hat')) {
+      return;
+    }
+    if (this.state.wornHatUid === uid) return;
+    const previous = this.state.inventory.find((item) => item.uid === this.state.wornHatUid);
+    this.state.wornHatUid = uid;
+
+    const next = this.state.inventory.find((item) => item.uid === uid);
+    if (uid !== null && this.state.carriedUid === uid) this.state.carriedUid = null;
+
+    if (previous) this.refreshPlacement(previous.id);
+    if (next) this.refreshPlacement(next.id);
     this.notify();
   }
 
@@ -467,14 +522,17 @@ class GameStore {
    * Re-derives a Cute-o-dex entry's placement from the copies actually owned.
    *
    * `CuteThing.placement` is one word about a whole kind, so it takes the most
-   * interesting answer: in your hands beats walking behind you, which beats
-   * sitting in the bag.
+   * interesting answer: in your hands beats being worn, which beats walking
+   * behind you, which beats sitting in the bag.
    */
   private refreshPlacement(id: string): void {
     const entry = this.state.collection[id];
     if (!entry) return;
     const copies = this.state.inventory.filter((item) => item.id === id);
+    const isWorn = (item: InventoryItem): boolean =>
+      item.uid === this.state.wornHatUid || item.uid === this.state.wornFlowerUid;
     if (copies.some((item) => item.uid === this.state.carriedUid)) entry.placement = 'carried';
+    else if (copies.some(isWorn)) entry.placement = 'worn';
     else if (copies.some((item) => item.paradeable && !item.stowed)) entry.placement = 'parade';
     else entry.placement = 'backpack';
   }
