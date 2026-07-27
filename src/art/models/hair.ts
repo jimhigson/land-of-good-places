@@ -35,7 +35,7 @@ import { PonytailChain } from './ponytail';
  * two spheres and two bobbles is four draw calls for the park forever; the
  * same bunches built as one merged hair geometry and one merged bobble
  * geometry is two. So each style is merged down to one mesh per *material* it
- * needs, with {@link fuse}. The eight static styles together add six parts.
+ * needs, with {@link fuse}. The eight static styles together add seven parts.
  *
  * The exception is the floor-length ponytail, whose segments have to articulate
  * and therefore cannot be merged — see {@link CROWD_HAIR_STYLES}.
@@ -164,22 +164,23 @@ export function buildHair(options: HairOptions): HairRig {
   const parts: HairPart[] = [];
   let ponytail: PonytailChain | null = null;
 
-  /** Adds a part, or skips it entirely if no wanted style uses it. */
+  /**
+   * Builds a part, but **only if some wanted style uses it**.
+   *
+   * A factory rather than a finished mesh on purpose. The character creator's
+   * preview rebuilds the whole kid on every single tap — every swatch, every
+   * hat — and a version of this that built all nine styles and threw eight
+   * away would do nine styles' worth of sphere generation and geometry merging
+   * per tap, on a phone, forever. Only the crowd ever asks for more than one.
+   */
   const add = (
-    mesh: Mesh,
     styles: readonly HairStyle[],
     parent: Object3D,
+    build: () => Mesh,
     hideUnderHat = false,
   ): void => {
-    if (!styles.some((one) => wanted.has(one))) {
-      // Built but not wanted — the geometry was merged before we knew. Free it
-      // rather than leave a buffer on the GPU that nothing will ever draw.
-      mesh.geometry.dispose();
-      for (const child of mesh.children) {
-        if (child instanceof Mesh) child.geometry.dispose();
-      }
-      return;
-    }
+    if (!styles.some((one) => wanted.has(one))) return;
+    const mesh = build();
     parent.add(mesh);
     parts.push({ mesh, styles, hideUnderHat });
   };
@@ -202,77 +203,89 @@ export function buildHair(options: HairOptions): HairRig {
 
   // Stops well ABOVE the eye line. Every extra degree of theta here eats
   // forehead, and a character with no forehead has nowhere to put big eyes.
-  const cap = solid(
-    new Mesh(new SphereGeometry(0.455 * H, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.46), hair),
-  );
-  cap.scale.set(1, 1.02, 1);
-  cap.position.y = 0.035 * H;
-  cap.rotation.x = -0.05;
-  addOutline(cap, OUTLINE);
-  add(cap, without('bowl'), crown);
+  add(without('bowl'), crown, () => {
+    const cap = solid(
+      new Mesh(new SphereGeometry(0.455 * H, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.46), hair),
+    );
+    cap.scale.set(1, 1.02, 1);
+    cap.position.y = 0.035 * H;
+    cap.rotation.x = -0.05;
+    addOutline(cap, OUTLINE);
+    return cap;
+  });
 
-  // High and shallow, a suggestion of a sweep rather than a curtain.
-  const fringe = solid(
-    new Mesh(
-      new SphereGeometry(0.17 * H, 18, 14).scale(1.3, 0.34, 0.48).translate(0, 0.305 * H, 0.29 * H),
-      hair,
+  // Fringe: high and shallow, a suggestion of a sweep rather than a curtain.
+  add(without('bowl', 'spiky'), crown, () =>
+    solid(
+      new Mesh(
+        new SphereGeometry(0.17 * H, 18, 14).scale(1.3, 0.34, 0.48).translate(0, 0.305 * H, 0.29 * H),
+        hair,
+      ),
     ),
   );
-  add(fringe, without('bowl', 'spiky'), crown);
 
   // Small tuft at the back so the head is not a perfect ball in silhouette.
   // Styles that already hang hair down the back cover this spot, so they skip it.
-  const tuft = decal(
-    new Mesh(
-      new SphereGeometry(0.13 * H, 14, 10).scale(1, 0.7, 0.8).translate(0, 0.16 * H, -0.4 * H),
-      hairDark,
+  add(['bunches', 'bob', 'short', 'spiky', 'messy'], crown, () =>
+    decal(
+      new Mesh(
+        new SphereGeometry(0.13 * H, 14, 10).scale(1, 0.7, 0.8).translate(0, 0.16 * H, -0.4 * H),
+        hairDark,
+      ),
     ),
   );
-  add(tuft, ['bunches', 'bob', 'short', 'spiky', 'messy'], crown);
 
   // --- bunches ----------------------------------------------------------------
 
-  const bunches = solid(
-    fuse(hair, [
-      new SphereGeometry(0.17 * H, 18, 14).scale(0.9, 1.15, 0.9).translate(-0.42 * H, 0.04 * H, -0.12 * H),
-      // A whisker bigger on the right. Nothing in this park is plumb.
-      new SphereGeometry(0.17 * H, 18, 14).scale(0.94, 1.2, 0.92).translate(0.42 * H, 0.05 * H, -0.12 * H),
-    ]),
-  );
-  addOutline(bunches, OUTLINE_SMALL);
-  add(bunches, ['bunches'], crown);
+  add(['bunches'], crown, () => {
+    const bunches = solid(
+      fuse(hair, [
+        new SphereGeometry(0.17 * H, 18, 14)
+          .scale(0.9, 1.15, 0.9)
+          .translate(-0.42 * H, 0.04 * H, -0.12 * H),
+        // A whisker bigger on the right. Nothing in this park is plumb.
+        new SphereGeometry(0.17 * H, 18, 14)
+          .scale(0.94, 1.2, 0.92)
+          .translate(0.42 * H, 0.05 * H, -0.12 * H),
+      ]),
+    );
+    addOutline(bunches, OUTLINE_SMALL);
+    return bunches;
+  });
 
-  add(
+  add(['bunches'], crown, () =>
     solid(
       fuse(bobble, [
         ringGeometry(0.085 * H, 0.033 * H).translate(-0.44 * H, 0.14 * H, -0.12 * H),
         ringGeometry(0.085 * H, 0.033 * H).translate(0.44 * H, 0.14 * H, -0.12 * H),
       ]),
     ),
-    ['bunches'],
-    crown,
   );
 
   // --- bob --------------------------------------------------------------------
 
-  const bob = solid(
-    fuse(hair, [
-      new SphereGeometry(0.19 * H, 18, 14).scale(0.82, 1.5, 0.9).translate(-0.42 * H, -0.1 * H, -0.12 * H),
-      new SphereGeometry(0.19 * H, 18, 14).scale(0.84, 1.54, 0.9).translate(0.42 * H, -0.11 * H, -0.12 * H),
-    ]),
-  );
-  addOutline(bob, OUTLINE_SMALL);
-  add(bob, ['bob'], crown);
+  add(['bob'], crown, () => {
+    const bob = solid(
+      fuse(hair, [
+        new SphereGeometry(0.19 * H, 18, 14)
+          .scale(0.82, 1.5, 0.9)
+          .translate(-0.42 * H, -0.1 * H, -0.12 * H),
+        new SphereGeometry(0.19 * H, 18, 14)
+          .scale(0.84, 1.54, 0.9)
+          .translate(0.42 * H, -0.11 * H, -0.12 * H),
+      ]),
+    );
+    addOutline(bob, OUTLINE_SMALL);
+    return bob;
+  });
 
-  add(
+  add(['bob'], crown, () =>
     solid(
       fuse(bobble, [
         ringGeometry(0.1 * H, 0.03 * H).translate(-0.43 * H, -0.2 * H, -0.12 * H),
         ringGeometry(0.1 * H, 0.03 * H).translate(0.43 * H, -0.2 * H, -0.12 * H),
       ]),
     ),
-    ['bob'],
-    crown,
   );
 
   // --- long, hanging down -----------------------------------------------------
@@ -281,42 +294,46 @@ export function buildHair(options: HairOptions): HairRig {
   // strands framing the face. The strands stop well above the hands — an arm
   // swinging through a curtain of hair is the thing that makes long hair on a
   // walk cycle look broken.
-  const longHair = solid(
-    fuse(hair, [
-      new SphereGeometry(0.34, 20, 16).scale(1.02, 1.55, 0.36).translate(0, -0.16, -0.1),
-      new SphereGeometry(0.24, 16, 12).scale(1.15, 0.55, 0.5).translate(0, -0.6, -0.1),
-      new SphereGeometry(0.16, 14, 12).scale(0.62, 1.9, 0.62).translate(-0.6, 0.02, 0.6),
-      new SphereGeometry(0.16, 14, 12).scale(0.6, 1.76, 0.62).translate(0.6, 0.04, 0.6),
-    ]),
-  );
-  addOutline(longHair, OUTLINE);
-  add(longHair, ['long'], fall);
+  add(['long'], fall, () => {
+    const longHair = solid(
+      fuse(hair, [
+        new SphereGeometry(0.34, 20, 16).scale(1.02, 1.55, 0.36).translate(0, -0.16, -0.1),
+        new SphereGeometry(0.24, 16, 12).scale(1.15, 0.55, 0.5).translate(0, -0.6, -0.1),
+        new SphereGeometry(0.16, 14, 12).scale(0.62, 1.9, 0.62).translate(-0.6, 0.02, 0.6),
+        new SphereGeometry(0.16, 14, 12).scale(0.6, 1.76, 0.62).translate(0.6, 0.04, 0.6),
+      ]),
+    );
+    addOutline(longHair, OUTLINE);
+    return longHair;
+  });
 
   // --- ponytails --------------------------------------------------------------
   // The gather and the tie are shared by both ponytails: the difference between
   // them is entirely what hangs off the bottom.
 
-  const gather = solid(
-    fuse(hair, [new SphereGeometry(0.22, 18, 14).scale(1, 0.82, 0.95).translate(0, 0.15, -0.1)]),
-  );
-  addOutline(gather, OUTLINE_SMALL);
-  add(gather, ['ponytail', 'longPonytail'], fall);
+  add(['ponytail', 'longPonytail'], fall, () => {
+    const gather = solid(
+      fuse(hair, [new SphereGeometry(0.22, 18, 14).scale(1, 0.82, 0.95).translate(0, 0.15, -0.1)]),
+    );
+    addOutline(gather, OUTLINE_SMALL);
+    return gather;
+  });
 
-  add(
+  add(['ponytail', 'longPonytail'], fall, () =>
     solid(fuse(bobble, [ringGeometry(0.13, 0.045).translate(0, 0.02, -0.1)])),
-    ['ponytail', 'longPonytail'],
-    fall,
   );
 
-  const shortTail = solid(
-    fuse(hair, [
-      new SphereGeometry(0.17, 16, 12).scale(0.95, 1, 0.95).translate(0, -0.1, -0.06),
-      new SphereGeometry(0.145, 16, 12).scale(0.95, 1.05, 0.95).translate(0, -0.3, -0.1),
-      new SphereGeometry(0.1, 14, 10).scale(1, 1.1, 1).translate(0, -0.46, -0.14),
-    ]),
-  );
-  addOutline(shortTail, OUTLINE_SMALL);
-  add(shortTail, ['ponytail'], fall);
+  add(['ponytail'], fall, () => {
+    const shortTail = solid(
+      fuse(hair, [
+        new SphereGeometry(0.17, 16, 12).scale(0.95, 1, 0.95).translate(0, -0.1, -0.06),
+        new SphereGeometry(0.145, 16, 12).scale(0.95, 1.05, 0.95).translate(0, -0.3, -0.1),
+        new SphereGeometry(0.1, 14, 10).scale(1, 1.1, 1).translate(0, -0.46, -0.14),
+      ]),
+    );
+    addOutline(shortTail, OUTLINE_SMALL);
+    return shortTail;
+  });
 
   if (wanted.has('longPonytail')) {
     // An empty anchor rather than hanging the chain off the tie mesh: the tie
@@ -341,26 +358,38 @@ export function buildHair(options: HairOptions): HairRig {
   // lower than the ordinary cap does. The front rim is expressed as the cap's
   // own theta plus a margin rather than as an absolute height, so if the head
   // or the cap is ever retuned the fringe cannot slide down over the eyes.
-  const bowl = solid(
-    fuse(hair, [
-      // Back and sides: a 259° shell, leaving a 101° gap centred on the face.
-      new SphereGeometry(0.478 * H, 32, 20, Math.PI * 0.78, Math.PI * 1.44, 0, Math.PI * 0.62).translate(
-        0,
-        0.02 * H,
-        0,
-      ),
-      // The front, stopping 9° lower than the cap's 0.46π.
-      new SphereGeometry(0.478 * H, 24, 16, Math.PI * 0.22, Math.PI * 0.56, 0, Math.PI * 0.51).translate(
-        0,
-        0.02 * H,
-        0,
-      ),
-      // One stray strand. Even a bowl cut gets an asymmetric feature.
-      new SphereGeometry(0.07 * H, 12, 10).scale(0.8, 1.5, 0.8).translate(0.3 * H, 0.42 * H, -0.26 * H),
-    ]),
-  );
-  addOutline(bowl, OUTLINE);
-  add(bowl, ['bowl'], crown);
+  add(['bowl'], crown, () => {
+    const bowl = solid(
+      fuse(hair, [
+        // Back and sides: a 259° shell, leaving a 101° gap centred on the face.
+        new SphereGeometry(
+          0.478 * H,
+          32,
+          20,
+          Math.PI * 0.78,
+          Math.PI * 1.44,
+          0,
+          Math.PI * 0.62,
+        ).translate(0, 0.02 * H, 0),
+        // The front, stopping 9° lower than the cap's 0.46π.
+        new SphereGeometry(
+          0.478 * H,
+          24,
+          16,
+          Math.PI * 0.22,
+          Math.PI * 0.56,
+          0,
+          Math.PI * 0.51,
+        ).translate(0, 0.02 * H, 0),
+        // One stray strand. Even a bowl cut gets an asymmetric feature.
+        new SphereGeometry(0.07 * H, 12, 10)
+          .scale(0.8, 1.5, 0.8)
+          .translate(0.3 * H, 0.42 * H, -0.26 * H),
+      ]),
+    );
+    addOutline(bowl, OUTLINE);
+    return bowl;
+  });
 
   // --- spiky ------------------------------------------------------------------
   // Nine fat cones fanned off the crown. Fat, because ART_DIRECTION's "no thin
@@ -368,44 +397,59 @@ export function buildHair(options: HairOptions): HairRig {
   // where a wedge reads as hair. Kept as one merged mesh, and hidden whole when
   // a hat goes on — everything else in this file sits inside the envelope hats
   // already perch over, but a spike would go straight through the party hat.
-  const spikes: BufferGeometry[] = [];
-  for (let i = 0; i < 9; i += 1) {
-    const azimuth = (i / 9) * Math.PI * 2 + 0.24;
-    // Alternating lengths, so it reads as hacked-about rather than machined.
-    const length = (i % 3 === 0 ? 0.3 : i % 3 === 1 ? 0.25 : 0.27) * H;
-    // Leaning well out rather than straight up: it keeps the child inside
-    // about 2.33 m total instead of 2.5, which matters when the crowd she is
-    // standing in is 2.12 and the park's doorways were built for that.
-    const tilt = 0.72;
-    spikes.push(
-      new ConeGeometry(0.105 * H, length, 8)
-        .translate(0, length / 2, 0)
-        .rotateZ(tilt)
-        .rotateY(Math.PI - azimuth)
-        .translate(0.22 * H * Math.cos(azimuth), 0.42 * H, 0.22 * H * Math.sin(azimuth)),
-    );
-  }
-  const spiky = solid(fuse(hair, spikes));
-  addOutline(spiky, OUTLINE_SMALL);
-  add(spiky, ['spiky'], crown, true);
+  add(
+    ['spiky'],
+    crown,
+    () => {
+      const spikes: BufferGeometry[] = [];
+      for (let i = 0; i < 9; i += 1) {
+        const azimuth = (i / 9) * Math.PI * 2 + 0.24;
+        // Alternating lengths, so it reads as hacked-about rather than machined.
+        const length = (i % 3 === 0 ? 0.3 : i % 3 === 1 ? 0.25 : 0.27) * H;
+        // Leaning well out rather than straight up: it keeps the child inside
+        // about 2.33 m total instead of 2.5, which matters when the crowd she
+        // is standing in is 2.12 and the park's doorways were built for that.
+        const tilt = 0.72;
+        spikes.push(
+          new ConeGeometry(0.105 * H, length, 8)
+            // Cone geometry is centred on its own height, so this puts the
+            // base at the origin and the tip at +length: a spike is then aimed
+            // by rotating about that base, not about its middle.
+            .translate(0, length / 2, 0)
+            .rotateZ(tilt)
+            // `rotateZ` tips +Y towards -X, so the azimuth that lands the spike
+            // at angle `a` on the crown is π - a, not a.
+            .rotateY(Math.PI - azimuth)
+            .translate(0.22 * H * Math.cos(azimuth), 0.42 * H, 0.22 * H * Math.sin(azimuth)),
+        );
+      }
+      const spiky = solid(fuse(hair, spikes));
+      addOutline(spiky, OUTLINE_SMALL);
+      return spiky;
+    },
+    true,
+  );
 
   // --- messy ------------------------------------------------------------------
   // Tufts poking out sideways rather than upwards, deliberately: sideways stays
   // inside the hat envelope, so messy hair needs no special case, and sideways
   // is also what actual bed-hair does.
-  const messyTufts: BufferGeometry[] = [
-    tuftGeometry(0.15 * H, 0.62 * H, 0.34 * H, 0.36 * H, 1.15),
-    tuftGeometry(0.13 * H, -0.5 * H, 0.5 * H, 0.3 * H, 0.9),
-    tuftGeometry(0.17 * H, 0.18 * H, 0.5 * H, -0.5 * H, 1.3),
-    tuftGeometry(0.12 * H, -0.62 * H, 0.24 * H, -0.2 * H, 0.8),
-    tuftGeometry(0.14 * H, 0.56 * H, 0.12 * H, -0.42 * H, 1.05),
-    tuftGeometry(0.11 * H, -0.24 * H, 0.6 * H, 0.4 * H, 1.4),
-    tuftGeometry(0.13 * H, 0.02 * H, 0.34 * H, 0.56 * H, 0.7),
-    tuftGeometry(0.1 * H, -0.44 * H, 0.58 * H, -0.4 * H, 1.2),
-  ];
-  const messy = solid(fuse(hair, messyTufts));
-  addOutline(messy, OUTLINE_SMALL);
-  add(messy, ['messy'], crown);
+  add(['messy'], crown, () => {
+    const messy = solid(
+      fuse(hair, [
+        tuftGeometry(0.15 * H, 0.62 * H, 0.34 * H, 0.36 * H, 1.15),
+        tuftGeometry(0.13 * H, -0.5 * H, 0.5 * H, 0.3 * H, 0.9),
+        tuftGeometry(0.17 * H, 0.18 * H, 0.5 * H, -0.5 * H, 1.3),
+        tuftGeometry(0.12 * H, -0.62 * H, 0.24 * H, -0.2 * H, 0.8),
+        tuftGeometry(0.14 * H, 0.56 * H, 0.12 * H, -0.42 * H, 1.05),
+        tuftGeometry(0.11 * H, -0.24 * H, 0.6 * H, 0.4 * H, 1.4),
+        tuftGeometry(0.13 * H, 0.02 * H, 0.34 * H, 0.56 * H, 0.7),
+        tuftGeometry(0.1 * H, -0.44 * H, 0.58 * H, -0.4 * H, 1.2),
+      ]),
+    );
+    addOutline(messy, OUTLINE_SMALL);
+    return messy;
+  });
 
   // --------------------------------------------------------------------------
 
