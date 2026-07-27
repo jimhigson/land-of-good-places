@@ -112,7 +112,89 @@ straight over (one waypoint) while the same wall at 2.3 m is routed round; a
 - [x] `npm run build` green (exit 0)
 - [x] PR raised
 
-## Still needs visual QA — I do not own the browser
+## Browser QA — done (27 Jul, I owned the browser)
+
+The Overseer's PR-57 failure ("she walks east and stops 25 m short, x tracks
+the target but z does not") **was a probe bug, not a product bug**, and is
+resolved. `TapNavigator.navigateTo(x, y, z)` takes **y second**; it was being
+called as `navigateTo(0, 30)`, so z was never passed, and three.js's
+`Vector3.set` deliberately keeps the old `z` when handed `undefined`. Verified
+directly: `navigateTo(0, 30)` leaves the target at **(3.75, y, 3.75)** — goal
+(0, 0) is inside the fountain ring, so the router correctly pulled it back to
+the nearest reachable point on the rim at z ≈ 3.75. That is exactly the z ≈
+3.5–5.2 every trace ended at, and it is self-perpetuating: each walk leaves her
+at z ≈ 4, which becomes the next call's stale z. Called correctly as
+`navigateTo(0, y, 30)` she walks the route through both intermediate waypoints
+and arrives at (−0.3, 29.8).
+
+The blocked lattice cells at (0, 4) are the **fountain rim**, correctly
+stamped. Probing along x rather than z shows a ring, not a band: at x = 0 the
+cells at z = −5, −4 and z = 3, 4 are blocked with free cells between them.
+
+**Does routing actually fix getting stuck?** Eight fixed trips across the park,
+run twice — once normally, once with `findRoute` stubbed to 0 so the walk falls
+back to main's straight-line seek:
+
+| | arrived within 1 m | worst miss |
+|---|---|---|
+| routed | **7/8** | 1.13 m |
+| straight line (main today) | 5/8 | **28 m** |
+
+The two catastrophic straight-line failures (28 m and 25.3 m short — the exact
+complaint the family reported) become 0.41 m and 0.25 m.
+
+Also verified in the running game: a real `handleTap` routes (3 waypoints round
+the fountain); double-tap still holds sprint; a scripted walk is not routed
+(`routeLength` 0); tapping the middle of the fountain pulls the target back to
+the rim, drops the interact zone, stops her at (3.5, 4.0) with **residual speed
+0** — no jitter, no running on the spot.
+
+Timings in the real park (424 colliders): first route in a space, including
+building the lattice, **6.8–10.1 ms** — a one-off on the first tap, inside a
+single 60 fps frame. Warm routes **1.13 ms** average, 6.1 ms worst. Frame times
+while walking a route: 8.3 ms median, 9.8 ms worst. Console clean.
+
+## Item 1.4, the jump-over-wall fling — diagnosed here, deliberately NOT fixed
+
+The one remaining imperfect trip is item 1.4, and I can now characterise it
+exactly. Handing this to whoever owns 1.4 rather than fixing it here.
+
+**Repro:** walk from (18, 1) to (26, 3). There is an `autoHoppable` wall at
+x = 22 (z −6 → 4, top 1.2 m). Peak speed **26–28 m/s** against a walking speed
+of 7.4 and a sprint of 11.1, every time.
+
+**It is pre-existing and this PR does not worsen its magnitude** — measured
+with routing 26.1 m/s, with routing stubbed out (main's behaviour) 27.8 m/s.
+This PR does make it fire **more often in ordinary play**, because routes now
+deliberately cross hoppable walls instead of detouring round them, which is the
+correct behaviour and was an explicit requirement.
+
+**Root cause.** The speed peaks at x = **22.96**, which is exactly
+`22 + halfThickness 0.34 + PLAYER_RADIUS 0.62` — the surface of the dilated
+collider, i.e. the moment of depenetration. As a descending jumper's
+`hopClearance` falls back below the wall's `topHeight`, the wall becomes solid
+again while she is still inside its footprint, and `resolve` ejects her
+sideways. `Collision.resolve` corrects an overlap **fully and in one frame**
+whenever it is under `SHALLOW_OVERLAP` (0.5 m), and only sets `escorting` for
+overlaps *deeper* than that — so `Player.update`'s
+
+```ts
+if (dt > 0 && !escorting) this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
+```
+
+banks the ejection as velocity. A 0.4 m correction at 60 fps is 24 m/s, which
+is the observed number. Design feedback #17's fix closed the *deep* path only;
+this is the same bug through the shallow path, where the correction is not
+opposing her motion but ejecting her sideways.
+
+**Suggested shape of a fix (untested, for 1.4's owner):** depenetration must
+never *increase* speed. Clamping the derived velocity's magnitude to the
+pre-collision velocity's magnitude fixes the launch while leaving
+walking-into-a-wall (where the correction reduces speed) exactly as crisp as it
+is now. That is a three-line change in `Player.update` and it is 1.4's call to
+make, not this PR's.
+
+## Earlier list — needs visual QA
 
 1. Tap across the park behind a tree line: she should walk round, not stop.
 2. Tap over a **low garden wall**: she must hop it, not detour. (The most
