@@ -24,6 +24,21 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Art style APPROVED by Eleri** (26 July 2026): the full sample set —
   RiPika, Biscuit, the player kid, all three balloons, the Mini, and the
   props — was reviewed and she really likes all of it.
+- **HIGHLIGHT RULE — absolute, applies everywhere (27 July 2026):**
+  **Everything you can interact with is outlined in a rainbow effect when
+  it is about to be used.**
+  - **Mouse:** anything clickable is outlined **on hover**.
+  - **Keyboard/controller:** anything that pressing **E** would use right
+    now is outlined while E is primed — so you can always see what the key
+    is pointing at before you press it.
+  The outline is a **rainbow**, matching the game's existing rainbow motifs
+  (the hop ring, the water-fight rainbow). Build it **once** as a shared
+  highlight system that every interactable registers with, so anything added
+  later is outlined automatically and nobody has to remember the rule.
+  *Note: an inverted-hull outline already exists for characters in
+  ART_DIRECTION (ink-tinted, never black); this is a different, brighter,
+  animated thing for interaction feedback — decide whether to extend that
+  machinery or build alongside it, and say which.*
 - **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
   **minimum font size and apply it throughout the whole game**, with no
   exceptions. It should be **generously large** — this is a game for a
