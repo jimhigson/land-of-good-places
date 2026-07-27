@@ -1,4 +1,5 @@
 import { gameStore } from '../state';
+import { saveFlags } from '../state/flags';
 
 /**
  * The Cute-o-dex completion prize.
@@ -12,32 +13,20 @@ import { gameStore } from '../state';
  * count), so it owns triggering this; this file only owns *what happens*
  * once triggered.
  *
- * A `localStorage` flag remembers "has this already fired", the same way
- * everything else in this browser tab's memory of the park would be
- * remembered if there were a save file yet — there isn't one, so this is its
- * own tiny persistence rather than piggy-backing on `gameStore`, which is
- * never written to disk.
+ * A flag remembers "has this already fired". It used to be this file's own
+ * `localStorage` key (`lgp:dexPrizeSeen`) because there was no save file to
+ * put it in; it now lives in `state/flags.ts` with the other one-time things
+ * and rides to disk on the autosave.
  */
 
-const SEEN_KEY = 'lgp:dexPrizeSeen';
-
-/** True once the celebration has fired in this browser, ever. */
+/** True once the celebration has fired for this save, ever. */
 export function hasSeenDexPrize(): boolean {
-  try {
-    return localStorage.getItem(SEEN_KEY) === 'true';
-  } catch {
-    // Private browsing / storage disabled: treat every session as the first.
-    return false;
-  }
+  return saveFlags.dexPrizeSeen;
 }
 
-/** Marks the celebration as fired, so it never auto-fires again on this device. */
+/** Marks the celebration as fired, so it never auto-fires again. */
 export function markDexPrizeSeen(): void {
-  try {
-    localStorage.setItem(SEEN_KEY, 'true');
-  } catch {
-    // Nothing we can do without storage; the worst case is it fires again.
-  }
+  saveFlags.markDexPrizeSeen();
 }
 
 /** One cutie's worth of parade — just enough to draw its icon and say its name. */

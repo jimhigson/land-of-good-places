@@ -1,35 +1,25 @@
 /**
- * "Have we already done the cat bus once?" — a tiny, additive, self-contained
- * flag, checked synchronously at boot exactly like `ui/WhatsNew.ts`'s
- * `lastSeenWhatsNewId`.
+ * "Have we already done the cat bus once?"
  *
- * A brand-new player (nothing stored yet) gets the arrival sequence: the cat
- * bus rolls up, they hop out, and {@link markArrived} is called the moment they
- * are free to walk — after that, every future load (refresh, tomorrow, a new
- * tab) finds the flag set and spawns normally, on the plaza, exactly as the
- * game did before this feature existed.
+ * A brand-new player gets the arrival sequence: the cat bus rolls up, they hop
+ * out, and {@link markArrived} is called the moment they are free to walk —
+ * after that, continuing a save spawns them normally, on the plaza.
+ *
+ * This used to be its own `localStorage` key (`lgp:hasArrivedByBus`) because
+ * there was no save file to put it in. There is one now, so the flag lives in
+ * `state/flags.ts` with the other three one-time things and is written to disk
+ * by the autosave along with everything else. These two functions stay because
+ * they say what they mean at the place that will call them.
  */
 
-const STORAGE_KEY = 'lgp:hasArrivedByBus';
+import { saveFlags } from '../../state/flags';
 
-/** True once this browser has already seen the cat bus arrive. */
+/** True once this player has already seen the cat bus arrive. */
 export function hasArrivedBefore(): boolean {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === '1';
-  } catch {
-    // Safari private mode throws on *access*, not just on write — treat it as
-    // "always new", which just means the intro can play more than once. A
-    // harmless failure mode next to the alternative of throwing at boot.
-    return false;
-  }
+  return saveFlags.arrivedByBus;
 }
 
-/** Records that the player has arrived — never shown again on this device. */
+/** Records that the player has arrived — never shown again on this save. */
 export function markArrived(): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, '1');
-  } catch {
-    // Nothing to do about a full or disabled store; worst case the bus
-    // arrives again next time, which is a fine failure mode.
-  }
+  saveFlags.markArrived();
 }

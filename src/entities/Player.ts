@@ -137,7 +137,7 @@ export class Player implements GameSystem {
   private readonly hopProbe = new Vector3();
 
   /** Start facing the camera, so the first thing you see is her face. */
-  private facing = CAMERA_YAW_DEGREES * DEG;
+  private facingAngle = CAMERA_YAW_DEGREES * DEG;
   private walkPhase = 0;
   /** 0 = standing still, 1 = flat out. Smoothed, drives animation blending. */
   private gait = 0;
@@ -241,14 +241,25 @@ export class Player implements GameSystem {
     this.airborne = false;
     // Whatever she was being walked out of, she is not in it any more.
     this.escorting = false;
-    if (facing !== undefined) this.facing = facing;
+    if (facing !== undefined) this.facingAngle = facing;
     this.group.position.copy(this.position);
-    this.group.rotation.y = this.facing;
+    this.group.rotation.y = this.facingAngle;
   }
 
   /** True while a ride is driving the character instead of the player. */
   get riding(): boolean {
     return this.ridingFlag;
+  }
+
+  /**
+   * Which way she is looking, in radians — the same units `teleportTo` takes.
+   *
+   * Exposed for the autosave (`SaveSystem`): coming back to a game facing a
+   * different way than you left it is a small thing, but it is the sort of
+   * small thing a six-year-old notices immediately.
+   */
+  get facing(): number {
+    return this.facingAngle;
   }
 
   /** Downward speed, negative while falling. Rides and trampolines read this. */
@@ -289,7 +300,7 @@ export class Player implements GameSystem {
   setRidePose(x: number, y: number, z: number, facing: number): void {
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
-    this.facing = facing;
+    this.facingAngle = facing;
     this.group.position.copy(this.position);
     this.group.rotation.y = facing;
   }
@@ -469,9 +480,9 @@ export class Player implements GameSystem {
     const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     if (planarSpeed > 0.35) {
       const target = Math.atan2(this.velocity.x, this.velocity.z);
-      this.facing = turnTowards(this.facing, target, PLAYER_TURN_SPEED * dt);
+      this.facingAngle = turnTowards(this.facingAngle, target, PLAYER_TURN_SPEED * dt);
     }
-    this.group.rotation.y = this.facing;
+    this.group.rotation.y = this.facingAngle;
 
     // --- animation ----------------------------------------------------------
     this.gait = damp(this.gait, clamp01(planarSpeed / PLAYER_MAX_SPEED), 0.07, dt);
