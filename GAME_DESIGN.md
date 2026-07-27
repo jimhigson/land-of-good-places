@@ -879,6 +879,15 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+    **Scrolling is fine; overlap is not (27 July 2026 — the settled rule).**
+    The family, seeing controls overlap each other: *"It's ok to scroll, just
+    don't scroll while there's screen space available."* So: **use the space
+    genuinely available first** — wrap rows, reflow columns — and once the
+    screen honestly cannot fit the content, **scrolling is the correct
+    answer**. Never contort a layout, shrink text below the minimum, or drop
+    content merely to avoid a scrollbar. **Controls overlapping or covering
+    each other is always a bug**, at any screen size.
+
     **It scrolls when it does not need to (27 July 2026 — BUG, queued):**
     the chooser scrolls even when there is plenty of screen to show the
     whole thing at once. **Use the space that is actually available** — on a
