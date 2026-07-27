@@ -35,10 +35,17 @@ import { playOpenChime, playPurchaseChime, playSurpriseChime } from './ui/chime'
  *   serving spot and fires the same `interact` action on arrival. There is one
  *   opening path, not two.
  *
+ * Once it is open, **one press buys**: every item in the list has its own Buy
+ * button beside its description, and there is no chosen item to get wrong (see
+ * `ui/ShopPanel.ts`). Whatever is bought goes wherever that kind of thing goes
+ * — the hands, the parade behind you, or the backpack — and that routing is
+ * `gameStore.buy`'s job, not this panel's; nothing about the one-click change
+ * touched it.
+ *
  * While a panel is open the game is paused and this object owns the keyboard:
- * arrows choose, E/Enter buys, Esc closes. The game's own `menu` binding is
- * suppressed by {@link uiOpen} so that Escape does not close the shop *and*
- * pause the park behind it.
+ * arrows move between the Buy buttons, Enter/Space/E presses the focused one,
+ * Esc closes. The game's own `menu` binding is suppressed by {@link uiOpen} so
+ * that Escape does not close the shop *and* pause the park behind it.
  *
  * Pausing is re-derived from {@link uiOpen} every frame ({@link syncPaused}),
  * rather than toggled at each individual open/close call site. A close
