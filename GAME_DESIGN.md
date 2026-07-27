@@ -593,6 +593,22 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+    **Preview framing (27 July 2026 — BUG + feature, queued):** the hat you
+    are choosing is currently **cropped out of the preview** — you cannot
+    see the thing you are picking. The preview camera should **follow
+    whatever you last changed**:
+    - changed a **hat** → zoom in on the **head** and hold there until
+      something else changes
+    - changed the **pet** → zoom in on the **pet**
+    - changed **eye colour** → zoom in on the **face**
+    - changed clothes, or nothing recently → pull back to the whole
+      character
+    Move between framings smoothly rather than snapping, and make sure the
+    chosen thing is fully in frame — a tall hat must not clip the top.
+    *Note: the preview has its own small scene and camera (disposed on
+    close), so this is a camera-target change local to
+    `src/ui/CharacterCreation.ts`, not anything to do with the park camera.*
+
     **Also (27 July 2026):** choose **skin tone** and **eye colour**. The
     preview character should be alive — **blinking and cycling through
     expressions** while you customise them, not a frozen doll.
