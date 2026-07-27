@@ -343,6 +343,17 @@ size-normalised, so build the chair to fit the pet, never the reverse — and
 an empty chair should still look deliberate. *The ferris wheel's look-around
 directions are confirmed CORRECT; do not disturb them.*
 
+*Built: `minigames/ferrisWheel/gondola.ts`. The player has a raised window seat
+at the back (cushion 0.80, eye 1.80); the pets have three low tub chairs across
+the front (cushions 0.16), one each, present whether occupied or not. The car
+grew to 3.6 × 2.8 × 2.6 to hold them and the glass runs higher so the raised
+eye does not cost any sky. Balloons are tied to a chair rather than sat on it.
+`scripts/checkGondolaSightline.mjs` proves every rider's head clears the eye
+line. **`sizeToStandard` in `art/models/pets.ts` had to be fixed first** — it
+was measuring to the top of the skull, so ears were excluded and a bunny
+rendered 2.12 m tall; no chair could have fixed that. Camera rotation was not
+touched.*
+
 ### The ginormous slide
 
 A **ginormous slide** runs from the very top floor all the way down into the
