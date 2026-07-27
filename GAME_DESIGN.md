@@ -119,6 +119,31 @@ park getting tiny, then the whole **Earth below**. At the top:
 
 At night the wheel lights up before it climbs.
 
+## Ride queues (27 July 2026)
+
+Every ride has a **queue area** with NPCs waiting in line — it's what makes
+a theme park feel like a theme park.
+
+- **NPCs join the queue as they walk past**, shuffle forward as it moves,
+  board when they reach the front, ride, and get off — all at a natural,
+  unhurried cadence, so the park always looks busy and alive.
+- **The player joins the queue like everyone else** to get on a ride.
+- **A fast-forward button** lets the player skip the waiting: press it and
+  time speeds up until it's their turn (the same fast-forward idea as the
+  tap-stairs climb).
+
+### Space ferris wheel — upgrade (27 July 2026)
+
+- **Gondolas are mostly window**: a light frame with big windows all round,
+  so you can see out in every direction rather than through one pane.
+- **Look around** while riding: drag to turn the view (like the dodgems
+  on-screen joystick), or keys on a keyboard.
+- **Events happen in ALL directions**, not just out of one window — turning
+  to look around is how you find more of them.
+- **New sights**: a **nebula made of sweeties**, and a group of **space
+  Bulba-squirt** — a turtle with a plant growing on its back — flying past.
+  (Original design, like RiPika: our own creature, not a copy.)
+
 ### Dodgems
 
 Crash the cars into each other and into the **fake wooden tree**. When you
@@ -140,6 +165,25 @@ big water guns**. When you splash someone:
 - You earn **splash points** and try to beat your best score
 - Splashed kids get funny **drippy soaked hair** for a moment
 - When lots of water flies, a little **rainbow** appears
+
+## The spooky house
+
+A **spooky house** attraction (fun-spooky, not scary-scary): inside, a big
+scary face appears. **Tap its eye → the eye pops out** (boing!). **Tap its
+mouth → water squirts out at YOU** (splashes the screen/player). **Tap the
+mouth twice very quickly → CANDY comes pouring out** (collectible sweets).
+
+## The snake room
+
+Inside the castle there is a **room full of friendly snakes** — smiley,
+colourful, wiggly. You can adopt a snake as a **pet** and it appears in
+the Cute-o-dex like any cute thing.
+
+## Cute-o-dex completion prize
+
+If the player collects **ALL the items in the Cute-o-dex**, the game shows
+a special celebration screen that tells their **mummy or daddy to give
+them sweeties in real life**. 🍬
 
 ## The park is full of children (NPCs)
 
@@ -337,6 +381,66 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+28. **NPCs have names** — every NPC child has a name shown above their
+    head exactly like the player's. There is ALWAYS a boy with blonde
+    hair and blue eyes called **Ethan** somewhere in the park.
+29. **Lamp posts** — night is currently too dark outside. Cute lamp posts
+    around paths light up after dark and stay off in the day.
+30a. **Signs: REPLACE the zoom entirely (supersedes item 30).** Tapping a
+    sign must not trigger anything. Instead: when the player is CLOSE TO
+    and FACING a sign, an action button appears labelled **"Read"**.
+    Choosing it shows the sign **overlaid full screen with NO transition
+    animation** at all. Any dismiss returns instantly.
+30b. **Arrive by cat bus** — the game starts with the player arriving on a
+    bus themed like a CAT (face on the front, ears, tail), stepping off,
+    and walking into the park through an entrance.
+30c. **The castle interior is a separate continuum** — from outside the
+    castle, NOTHING of the interior renders at all (the roof is the
+    exception: it is genuinely outdoors). Interior and exterior are two
+    disconnected worlds, not one building.
+30d. **Map tap-to-travel** — pressing any location on the map makes the
+    character automatically walk there.
+30g. **Rail Racer becomes a REAL in-park ride** (major change): the rails
+    are visible all around the park, twisting around the attractions —
+    around the castle, around the ferris wheel. NPCs ride it. The ride
+    itself switches to FIRST PERSON and takes place on those real rails,
+    not in a separate mini-game world.
+    **FAMILY DECISION (27 July 2026):** it is a **TWO-TRACK coaster —
+    two rails running alongside each other the whole way** — so racing
+    is a genuine side-by-side race with no passing loops needed. And
+    **first person only**: no bird's-eye escape button, keep it simple.
+30i. **Empty backpack looks broken** — with zero items the middle of the
+    backpack dialog is invisible/see-through. It must always render as a
+    complete panel with no gaps, even when empty (add a friendly empty
+    state: "Your backpack is empty — go and find some cute things!").
+30h. **Pet stroking** — when viewing a pet's mood, you can pet and stroke
+    it to improve its mood.
+30f. **Action buttons at rides and shops** — standing next to a ride or
+    shop shows a button saying what it does ("Ride", "Enter", "Shop"),
+    so it's obvious how to use the place. In keyboard mode the button
+    shows the key to press. (Same pattern as the sign "Read" button.)
+30e. **Auto-hop small walls** — when walking (especially tap-to-move) the
+    character automatically jumps over a low wall if that's the shortest
+    path; no need to press jump. Manual jump still works.
+30. **Sign tapping is too sensitive and the zoom is jarring** — make sign
+    taps harder to trigger by accident (tighter hit target and/or require
+    the player to be nearby), and the camera move should be a simple
+    LINEAR zoom. With the static camera (item 16), nothing ever faces
+    away from the camera, so the sign transition can be greatly
+    simplified: straight zoom in, no swooping rotation.
+31a. **Escalator steps at least TWICE as big** — current steps are too
+    fine and hard to see on smaller screens.
+31b. **Arrows on the floor** near escalator tops and bottoms, so it's
+    obvious what they are and which way they go.
+31c. **Face painting stall** outside in the garden — the player AND NPCs
+    visit and get their faces painted in various cute designs.
+31d. **Player–NPC collision** — the player and NPCs cannot walk through
+    each other.
+31. **The building is THE CASTLE** — renamed everywhere user-visible.
+    From the outside it must NOT look like stacked floors: continuous
+    decorated sides, a palace/castle look (towers, battlement bits,
+    flags), since the inside is its own space and need not match the
+    outside shape at all.
 
 ## Deployment
 
