@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n --rawfile doc \"$CLAUDE_PROJECT_DIR/STANDING-LOOPS.md\" '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:$doc}}' 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

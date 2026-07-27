@@ -54,3 +54,7 @@ coverage/
 
 # Claude agent worktrees and session files
 .claude/
+# ...but the project hook config is shared, not personal
+!.claude/
+!.claude/settings.json
+
