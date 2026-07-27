@@ -9,6 +9,322 @@ sources you actually read.
 
 ---
 
+## Decision 3 — Castle floors become separate spaces (Wave 2 item 2.2)
+
+**Date:** 27 July 2026 · **Status:** decided, not yet implemented — gates all
+of ORDER-OF-WORK Wave 5
+**Sources read:** GAME_DESIGN.md items 30c, 31, 31e–31i, "Getting between
+floors", "Riding the lift" (the 27 July family addendum on `main` at
+`8f66095` — it changes the lift ruling below, see §4); ORDER-OF-WORK.md
+Wave 5; ARCHITECTURE.md ("The big building"); ARCHITECTURE-REVIEW.md Review 1
+S1/S5/S14 and Review 2 §4; and, in full: `src/world/building/layout.ts`,
+`surfaces.ts`, `floorFade.ts`, `Building.ts`, `Shell.ts`, `Stairs.ts`,
+`StairRide.ts`, `GlassLift.ts`, `Bubble.ts`, `Trampoline.ts`,
+`Escalators.ts`, `ShaftGuards.ts`, `dressing.ts`, `interactZones.ts`, plus
+`core/constants.ts` (building block), `entities/npc/poiGraph.ts`,
+`NpcSystem.ts`, `ui/StairMenu.ts` consumers, and `ParkMap.ts`'s deck usage.
+
+### The ruling, in one paragraph
+
+**Yes: split. One floor = one space.** Each castle floor becomes its own
+place at its own far-off origin, exactly the way the interior as a whole is
+already a place 600 m from the park — the same trick, applied one level down,
+which is precisely how GAME_DESIGN 31f phrases the request. We keep **one
+scene, one renderer, one `CollisionWorld`, one `WalkSurfaces`** — the whole
+reason the original interior offset cost almost no code — and we generalise
+the one mechanism that already exists in three copies (`Building.checkDoorways`
+door-in, door-out, and the ginormous-slide launch) into a small **portal**
+system that every traversal device becomes a flavour of. This is not a new
+architecture; it is the existing architecture applied consistently, and most
+of its cost is paid in **deletions**: the floor fader, the deck-hole
+invariant, the stair ride, the stair menu, the shaft guards and the
+height-blind cross-floor collision hazards all cease to exist rather than
+being migrated.
+
+### 1. Why yes — and what saying no would actually cost
+
+The honest cheaper alternative was examined: keep one continuous interior and
+deliver Wave 5 inside it (scattered straight stairs as new deck holes,
+dynamic perimeter-wall slicing hooked to the fader, trampoline as a ballistic
+arc through a shaft). It fails on four hard points:
+
+1. **5.8 is impossible in a continuous stack.** Novelty shopfronts need more
+   ceiling height; `BUILDING_FLOOR_HEIGHT` is global — `deckY()`, the fader
+   layers, the shell, the lift, the bubble and every escalator ramp all
+   assume one uniform pitch. Variable per-floor heights in one stack is a
+   rewrite the same size as the split, *keeping* all the old constraints.
+2. **Scattered stairs multiply the two standing hazards.** Every connection
+   in a continuous stack is a hole through a slab (the S5/S14 class of
+   safety bug — two of the last three P0s), and every stair's side walls cut
+   height-blind invisible walls across all five decks (the S1 class).
+   Today's design survives these only because everything vertical is
+   disciplined into one central band; 5.3's whole point is to break that
+   discipline.
+3. **31f explicitly asks for floors that need not line up** — any shape, any
+   size. A continuous stack cannot ever grant that; the snake room (5.7)
+   wants a *room*, not a region on a 60 × 44 plate.
+4. **The perimeter castle wall (5.5/31i) is dynamic in a stack, static in a
+   split.** "Sliced to the current floor and below" means fader-driven
+   slicing machinery on new geometry if the floors are stacked. If each
+   floor is its own space, the slice is *baked*: floor k's space simply
+   contains the castle wall as it exists at that height, forever, no code.
+
+What the split genuinely costs — stated honestly:
+
+- **A blink between floors.** Every floor change is an iris (0.28 s close +
+  0.42 s open). The family has already sanctioned exactly this: 31h asks for
+  "walking onto the stairs transitions you", and the door + ginormous slide
+  have used the iris since the interior split. Roof to ground by stairs is
+  four blinks; the lift (§4) and the helter exist as multi-floor hops.
+- **The doll's-house cutaway dies.** You will no longer see the floors below
+  you through faded slabs. That look is the *mall* look the family is
+  complaining about; 31i replaces it with castle wall below you. Sanctioned.
+- **The trampoline's skill-bounce dies.** Replaced by tap-and-go — which is
+  31g, verbatim, by family request.
+- **Boot builds five spaces instead of one.** Only one is ever visible
+  (`interiorRoot.visible` pattern per space); memory is the number to watch
+  on a phone, not draw calls.
+
+### 2. The shape: five spaces, one world
+
+**Origins.** Floor k lives at `(600 + 300·k, 600)` — floor 0 keeps the
+existing `(600, 600)` so the front-door transition numbers barely change.
+Garden stays at the origin. 300 m spacing is comfortably beyond
+`FOG_FAR` + the visible frame (fog completes ~168 m from the player) and far
+beyond any tap-ray or play-bounds reach; the farthest origin (1800, 600)
+keeps float32 positions exact to ~0.1 mm. New constants in
+`core/constants.ts`: `FLOOR_SPACE_SPACING = 300`, `floorSpaceOriginX(k)`,
+replacing the single `INTERIOR_ORIGIN_X` call sites. The radial
+`inInteriorSpace` test becomes `floorSpaceAt(x, z): SpaceId | null` with a
+per-space radius of 120 m.
+
+**One collision world, one sampler, purely positional.** This is the
+load-bearing choice, and it is the same one the original interior made: every
+system that asks "where am I?" keeps working unchanged because coordinates
+answer the question. The rejected variant — all floors sharing one origin
+with visibility and collision swapped by a "current space" flag — was
+examined and refused: it puts a mode flag through `CollisionWorld` and
+`WalkSurfaces`, makes the sampler impure, and forecloses NPCs ever being in a
+different space than the player. Height-blind collision becomes *harmless*
+under the split, because no two floors share a plan — the entire S1 bug
+class (counters walling off other decks) is dissolved by construction.
+
+**`WalkSurfaces` after the split** (`surfaces.ts`, rewritten smaller):
+
+- `sample(x, z, y)` keeps its exact signature and semantics — highest
+  walkable surface within one step below the feet. Implementation: resolve
+  the space from position; return that space's floor height, its local ramps
+  (shop forecourt recesses, decorative steps, the porch), and any
+  `MovingPlatform` covering the point. The five-deck top-down scan, all of
+  `DECK_HOLES`, `deckIsSolid`, and the hole invariant are **deleted**.
+- `deckAt(x, z, y)` becomes `spaceAt(x, z)` — no y needed, position alone
+  answers. `ParkMap` (floor-by-floor drawing), `DayNight.setIndoors`
+  (`playerInRoofedInterior` → current space is 0–3), and `InteriorLighting`
+  key off it.
+- `MovingPlatform` survives unchanged — the park train's carriages use it.
+  Inside the castle it simply has no members any more.
+
+**The floor fader is deleted** (`floorFade.ts`, and the material
+claiming/cloning with it — materials can be shared freely again, which the
+blown texture budget will thank us for). Per-space visibility replaces both
+the cutaway and `Shops.setVisibleDeck`.
+
+### 3. Portals — the one new concept
+
+`src/world/building/spaces.ts` (new): a `SpaceManager` owning the current
+space, per-space root groups and visibility, `setPlayBounds` per space, the
+iris + teleport + `snapCamera` + cooldown dance (lifted verbatim from
+`Building.changeSpace`), and per-frame trigger checks.
+`src/world/building/portals.ts` (new): the portal table, as data, in the
+house style of `layout.ts`:
+
+```ts
+interface PortalEnd {
+  space: SpaceId;                  // 'garden' | 0 | 1 | 2 | 3 | 4
+  trigger: Region;                 // walk-on region, space-local
+  stand: { x: number; z: number }; // where a tap walks you to
+  arrive: { x: number; z: number; yaw: number };
+}
+interface Portal {
+  id: string;
+  flavor: 'door' | 'stairs' | 'escalator' | 'trampoline' | 'bubble' | 'ride';
+  a: PortalEnd;
+  b: PortalEnd;
+  oneWay?: boolean;                // trampolines, the rides
+}
+```
+
+**Two gestures, one mechanism.** Keyboard: walking into `trigger` fires the
+transition — nothing else. Touch: tapping the device is an ordinary
+`InteractZone` whose `standX/Z` is the trigger — the tap walks you in and the
+walk-on machinery does the rest. There is no third path, no menu
+(`ui/StairMenu.ts` is deleted), no button.
+
+**Anti-ping-pong, by construction plus cooldown.** Triggers sit at the *far
+end* of each flight (top edge of the lower flight, bottom edge of the upper
+flight); `arrive` points are placed just beyond the far side of the
+destination's own trigger, facing away from it; `SPACE_COOLDOWN` (0.9 s)
+stays as the backstop. A boot-time validator (route-solver house style, fail
+loudly) asserts: the portal graph connects the garden to every floor; every
+`arrive` samples to walkable ground; no `arrive` sits inside any trigger; no
+two triggers on one floor overlap; and scattered connections honour a
+minimum separation, so "scattered" cannot silently regress to "stacked".
+
+**The theatre: pre-roll and post-roll.** Every flavour is the ginormous-slide
+launch pattern — real motion in space A, iris, real motion in space B:
+
+- **Stairs** (straight, per 31h): the lower space holds the bottom ~2 m of a
+  straight flight rising toward an archway; the upper space holds the top
+  ~2 m emerging from one. You walk up real steps, the iris blinks mid-flight,
+  you walk off the top. Both halves are local `RampDefinition`s; the treads
+  builder in `Stairs.ts` is rewritten for single straight flights (the
+  switchback, `stairFlights`, `stairRoute`, `STAIR_STAND_*` all go).
+- **Escalator**: identical, with `Escalators.ts`'s belt visuals and carry
+  nudge on the half-ramps. Per 31h, any floor pair gets stairs *or* an
+  escalator, never both.
+- **Trampoline** (31g): tap → walk to pad → squash + `Player.launch` → iris
+  at the apex → arrive falling onto a marked landing pad one floor up.
+  One-way. No shaft, no combo timing, no hole.
+- **Bubble**: the same upward pattern, floatier — see §4 for where it goes.
+- **Ride** (helter-skelter, ginormous slide): board → iris → the chute
+  carries you in the destination space. The ginormous slide *already works
+  exactly like this* and keeps its code path; the helter's helix moves to
+  the ground-floor space (§5 gives floor 0 the height for it) with its
+  boarding trigger on floor 2.
+- **Door**: the existing garden ↔ floor 0 pair, expressed as the first
+  portal. `checkDoorways` is subsumed.
+
+### 4. Device by device — including the new lift ruling
+
+| Device | Fate |
+| --- | --- |
+| Tap stairs + `StairRide` + `StairMenu` | **Deleted.** Replaced by straight stair portals. The 3.5× time-scale walk, the whoosh, the route waypoints and the Climb/Descend menu all go. (`Game.ts` keeps `setTimeScale` — Decision 2's queue skip owns it now.) |
+| Escalators | **Kept as a portal flavour.** Belt visuals and carry nudge survive on the half-ramps; the storey-spanning ramp and its well (`ESCALATOR_WELL`, S5's subject) go. |
+| **Glass lift** | **Kept — and this ruling changed while the memo was being written.** The 27 July family addendum ("Riding the lift", on `main` at `8f66095`) specifies: call panel styled as a toy elevator panel, lift comes quickly, auto-board, panel lists floors, straight to floor N. Under the split the lift becomes the castle's one **any-floor portal** and the panel is its UI: press floor N → auto-board → doors close (the iris, diegetic) → doors open in floor N's lift alcove. The `GlassLift` car/shaft state machine, `callTo`, dwell timers, `MovingPlatform` duty and shaft collision are all deleted — "comes quickly, never make a child wait" is satisfied trivially because nothing real has to travel. Every floor space has its lift alcove at the same local spot (a lift that wanders would read as broken). The panel must be built against a two-method seam — `floors(): FloorInfo[]`, `go(n: number)` — as the family note itself demands; anyone building the "lift call panel" Anytime item **before** S2 lands must target that seam (backed by today's `GlassLift`) or the work is thrown away. The lift does not undermine 5.3's exploration: it is the sanctioned easy mode, the scattered stairs are the game. |
+| Trampoline | **Tap-and-go portal** (31g). Pad + landing pad, no shaft. |
+| Bubble | **Kept as the way onto the roof** (floor 3 ↔ roof): step in, it lifts, iris, it settles onto the roof and opens. The most magical hop gets the most magical device. Family question 1 confirms. |
+| Helter-skelter | **Ride portal, floor 2 → ground floor**, helix standing in the Great Hall (§5). |
+| Ginormous slide | **Unchanged.** Already a cross-space ride; its start simply lives in the roof space. Grown-up logic untouched. |
+| Toilets | Move with floor 1, untouched otherwise. The queued privacy-roof item's note "match the cutaway fade" should be read as "fade the lid" — the cutaway itself will be gone. |
+| Ball pit | Garden object; untouched. |
+| Shaft guards | **Deleted wholesale** — there are no shafts. |
+
+**NPCs:** verified — no NPC can reach the interior today (`poiGraph` has no
+seeds near x = 600; its three `indoors` seeds sit inside the *facade's*
+footprint in the garden, behind the lobby's back wall, and are dead — flag
+for cleanup in S2). So the split migrates zero NPC behaviour, and *improves*
+the future: an interior NPC on a split floor needs a flat single-storey
+waypoint graph, not multi-deck sampling. Letting NPCs use portals is out of
+scope and gated behind the `Activity` work (Wave 3).
+
+### 5. Per-floor plans — where the castle finally gets to be a castle
+
+`layout.ts` stops being one 800-line table for one stacked building. It keeps
+the shared vocabulary (`Region`, `RampDefinition`, the facade/garden numbers)
+and each floor gets a plan module: `src/world/building/floors/floor0.ts` …
+`floor4.ts`, each declaring footprint (any shape — 31f), `clearHeight`,
+perimeter-wall slice, shop units, rooms, portal ends, dressing seeds.
+Starting values, tunable per floor forever after:
+
+- **Floor 0 — the Great Hall**: today's 60 × 44 plate, `clearHeight` ≥ 8 m,
+  which is what lets the helter's helix stand inside it as a visible tower
+  and gives the ground-floor shops room to loom.
+- **Floors 1–3**: 4.5–6 m clear — the headroom 5.8's giant ice-cream and
+  giant balloon fronts are gated on. The **snake room** (5.7) is a room on
+  floor 3, the top enclosed floor — the reward at the end of the exploration
+  chain (family question 4).
+- **Floor 4 — the roof**: open sky, parapet, pavilion, slide, grown-up — as
+  today, but its space puts the plaza disc far below and castle wall beneath
+  the parapet, so "we are very high up" finally reads.
+- **Perimeter walls** (5.5/31i): each floor's space statically contains the
+  castle-style wall for its own storey *plus the castle skirt falling away
+  below it* toward its plaza disc — the "sliced to the current floor and
+  below" view, baked, no slicing code. The style kit (stone, crenellation,
+  arches, rose windows) is extracted from `Shell.ts`'s `buildCastle` into
+  `src/world/building/castleParts.ts` and shared by the facade and every
+  floor — same *style*, deliberately not the same *dimensions* (30c: the
+  inside never has to agree with the outside's shape).
+
+`ShopUnits`/`Shops` keep their contract; their collision registration maps
+through the owning floor's origin instead of the single interior's, and
+`scripts/checkShopSpacing.mjs` becomes per-floor (cross-floor overlap is no
+longer a concept). `dressing.ts` runs per floor space unchanged in spirit.
+
+### 6. Implementation plan — PR-sized, with hard sequencing
+
+| PR | What | Owns (files) | Depends on |
+| --- | --- | --- | --- |
+| **S1** | Extract the mechanism, zero behaviour change: `SpaceManager` + `Portal` types; the door-in, door-out and giant-slide transitions become the first three portals. Game plays identically. | `spaces.ts`, `portals.ts` (new), `Building.ts`, `layout.ts` | — |
+| **S2** | **The split** (Wave 5.1–5.4): five floor spaces built from today's plans (footprints initially identical, holes gone); scattered straight stair/escalator portals; tap-and-go trampolines; bubble→roof; helter as ride portal; lift portal + panel seam; `WalkSurfaces` rewrite; deletions (`floorFade.ts`, `StairRide.ts`, `ui/StairMenu.ts`, `ShaftGuards.ts`, `GlassLift.ts` internals, `DECK_HOLES`/`deckIsSolid`, switchback stairs); boot validator; `ParkMap`, `interactZones.ts`, `World.ts`, `Game.ts`, `constants.ts` updates. Playable, still mall-themed. | **all of `src/world/building/**`**, `ui/StairMenu.ts` (delete), `ui/ParkMap.ts`, `Game.ts`, `core/constants.ts` | S1 |
+| **S3** | Castle style kit + the Great Hall (first slice of 5.5/5.6): `castleParts.ts` extracted from `Shell.ts`; floor 0 gets wall slice, stone re-theme, 8 m ceiling, helter tower. Establishes the pattern the other floors copy. | `castleParts.ts` (new), `floors/floor0.ts`, `parts.ts`, `Shell.ts` | S2 |
+| **S4–S7** | Floors 1–4 fan out, one agent per floor, in parallel: re-theme + wall slice + ceiling height (5.5/5.6), novelty shopfronts on their floor (5.8), snake room on floor 3 (5.7), roof polish. | `floors/floor1..4.ts` each; shopfront work confined to the owning floor's file + `shops/fitouts.ts` assigned to exactly one of them | S3 |
+
+**What must NOT be parallelised.** S1 and S2 are single-owner and nothing
+else may touch `src/world/building/**` (or the named UI files) while they are
+in flight — that includes the lift-panel Anytime item unless it is built
+against the §4 seam. S3 blocks S4–S7 (shared kit). ORDER-OF-WORK's note
+"5.5, 5.6 and 5.8 are the same building files — one agent, sequentially" is
+**superseded from S4 onward**: after the split the unit of parallelism is a
+*floor*, not a backlog item, because each floor owns disjoint files. That is
+itself one of the split's payoffs.
+
+**Thrown away if done in the wrong order** (each has already tempted
+someone): any interior re-theme, perimeter wall or shopfront work before S2
+(the rooms change shape and the fader's material-claiming fights new
+materials — ORDER-OF-WORK trap 4); any polish on the StairMenu, the
+switchback, the ballistic trampoline or the shaft guards (all deleted by S2);
+lift-panel work wired into `GlassLift`'s internals rather than the seam;
+`checkShopSpacing` extensions that assume cross-deck collision.
+
+### 7. What changes, what stays
+
+**Changes:** `Building.ts` shrinks to a coordinator (rides, shops, grown-up)
+over a `SpaceManager`; `surfaces.ts` loses the deck scan; `layout.ts`
+becomes shared vocabulary + per-floor plans; six files die outright;
+`Player`'s position must carry a space id when Save/Continue lands
+(versioned format from day one — note for that Anytime item).
+**Stays untouched:** `Player`'s movement/ride API and `groundSampler`
+contract; `CollisionWorld` (collider count grows ~5× interior walls — a few
+hundred segments, within Review 2's "fine at current counts" but on its
+watch list; the one-line mitigation is culling by play-bounds distance);
+`SlideRide`; the iris (`Transitions`); the tap navigator; `MovingPlatform`
+for the train; the facade in the garden; the ball pit; the mini-game host;
+and **Decision 2's park replan (2.1) is fully independent** — the castle
+interior is hundreds of metres from any park layout, and the facade is
+scenery plus one portal end, so Waves 4 and 5 can run concurrently.
+
+### 8. Questions for the family (parent-answerable; defaults are buildable)
+
+1. "Should the **floating bubble** be the special way up to the roof — you
+   float up out of the castle into the sky?" *(default: yes)*
+2. "The **helter-skelter** would stand inside a great big hall on the ground
+   floor, and you'd whoosh down into it from floor 2. Good?" *(default: yes)*
+3. "Should the **lift** look like a castle turret inside, instead of a glass
+   tube?" *(default: turret — the glass tube is the mall look; the new panel
+   works either way)*
+4. "Which floor should the **snake room** hide on?" *(default: floor 3, the
+   top one before the roof — the prize for exploring all the way up)*
+
+### Uncertainties, stated plainly
+
+- **Blink cadence** is the one felt risk: 31h sanctions transition-per-floor,
+  but four irises from roof to ground is a real sequence. The knobs already
+  exist (`IRIS_*` constants; a shorter dip for intra-castle hops is a
+  tuning change, not a design change), and the lift and rides are the
+  multi-floor expresses. Playtest before tuning.
+- **The half-flight theatre** (walk up real steps, blink, walk off the top)
+  is theatre, and theatre can read as teleporting. If it does, lengthen the
+  post-roll auto-walk a step or two — contained entirely in the stairs
+  flavour.
+- **Boot memory for five spaces** on the cheapest phone: high confidence
+  (only one space visible, geometry is primitive-based), but it is a belief,
+  not a measurement. S2 should glance at heap and boot time before merging.
+- The scattered-connection positions are authored numbers, and authored
+  numbers rot — that is exactly what the S2 boot validator exists for; do
+  not ship S2 without it.
+
+---
+
 ## Decision 2 — Ride queues
 
 **Date:** 27 July 2026 · **Status:** decided, not yet implemented
