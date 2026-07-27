@@ -6,7 +6,7 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
-import { Sky, TreeClimbing, World } from './world';
+import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
@@ -48,6 +48,7 @@ export class Game {
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
   readonly treeClimbing: TreeClimbing;
+  readonly foliageFade: FoliageFade;
   readonly signReader: SignReader;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
@@ -202,6 +203,13 @@ export class Game {
       this.world.scenery.climbableTrees,
     );
     this.addSystem(this.treeClimbing);
+
+    // Fades out any tree standing between the camera and the player — the
+    // fixed camera (design feedback #16) means one can now hide them
+    // completely for as long as they stand there. See `world/FoliageFade.ts`.
+    this.foliageFade = new FoliageFade(this.world.scenery, this.camera);
+    this.engine.scene.add(this.foliageFade.group);
+    this.addSystem(this.foliageFade);
     // "Read" a sign: a HUD button when close and facing one, a full-screen
     // overlay of its own painted face when pressed — see `ui/SignReader.ts`.
     // Signs never move once the world has finished building, so its zone list

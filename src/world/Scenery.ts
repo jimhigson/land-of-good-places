@@ -55,6 +55,24 @@ interface InstanceItem {
 }
 
 /**
+ * The three unit shapes every tree is built from — a `1`-scaled cylinder,
+ * icosahedron and cone, stretched per-instance by the matrices in `trunks` /
+ * `roundCanopies` / `coneCanopies` below.
+ *
+ * Hoisted to module scope (rather than local to `buildFoliage`) so that
+ * `world/FoliageFade.ts` can build a stand-in `Mesh` for a fading tree out of
+ * the exact same geometry the instanced original uses — sharing one
+ * `BufferGeometry` across many meshes (instanced or not) is ordinary
+ * three.js, and it is what guarantees the stand-in is pixel-identical rather
+ * than a hand-tuned approximation.
+ */
+export const FOLIAGE_GEOMETRY = {
+  trunk: new CylinderGeometry(0.19, 0.3, 1, 8),
+  round: new IcosahedronGeometry(1, 2),
+  cone: new ConeGeometry(1, 1, 10),
+};
+
+/**
  * A lollipop tree with a generous enough canopy to climb (see
  * `world/TreeClimbing.ts`). Read-only geometry facts only — Scenery has no
  * opinion about climbing itself, it just tells the truth about where its own
@@ -69,19 +87,83 @@ export interface ClimbableTreeSeed {
   readonly trunkRadius: number;
 }
 
+/**
+ * One trunk, canopy blob or cone layer belonging to a {@link FoliageOccluder}
+ * — everything a stand-in needs to look exactly like the instanced original
+ * it is briefly replacing. See `world/FoliageFade.ts`.
+ */
+export interface FoliagePart extends InstanceItem {
+  readonly kind: 'trunk' | 'round' | 'cone';
+}
+
+/**
+ * A whole tree, as far as `world/FoliageFade.ts` is concerned: enough to test
+ * "does this sit between the camera and the player" cheaply (a bounding
+ * sphere, not the real silhouette) and enough to stand a translucent
+ * look-alike in its place the moment it does. Read-only geometry facts only —
+ * Scenery has no opinion about fading itself, exactly as it has none about
+ * climbing (see {@link ClimbableTreeSeed} above).
+ */
+export interface FoliageOccluder {
+  readonly x: number;
+  readonly z: number;
+  /** Vertical centre of the tree's widest canopy blob — the occlusion test's reference point. */
+  readonly centreY: number;
+  /** Radius of that widest blob. */
+  readonly radius: number;
+  /** Trunk plus every canopy/cone blob, in world space, for a matching stand-in. */
+  readonly parts: readonly FoliagePart[];
+}
+
+/** One instance inside one of the foliage `InstancedMesh`es, hideable on demand. */
+interface HideableInstance {
+  readonly mesh: InstancedMesh;
+  readonly index: number;
+  /** The instance's real transform, to restore when it stops being hidden. */
+  readonly matrix: Matrix4;
+}
+
+/** Degenerate matrix that renders an instance as nothing — cheaper than touching instance count. */
+const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
+
 export class Scenery {
   readonly group = new Group();
   /** The subset of trees big enough to climb. See {@link ClimbableTreeSeed}. */
   readonly climbableTrees: readonly ClimbableTreeSeed[];
+  /** Every tree big enough to hide the player. See {@link FoliageOccluder}. */
+  readonly foliageOccluders: readonly FoliageOccluder[];
+  private readonly hideableInstances: readonly (readonly HideableInstance[])[];
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'scenery';
     const foliage = buildFoliage(collision);
     this.group.add(foliage.group);
     this.climbableTrees = foliage.climbableTrees;
+    this.foliageOccluders = foliage.occluders;
+    this.hideableInstances = foliage.hideableInstances;
     this.group.add(buildTreeline());
     this.group.add(buildWoodenWalls(collision));
     this.group.add(buildStoneWalls(collision));
+  }
+
+  /**
+   * Swaps one tree (indexed exactly as {@link foliageOccluders}) between its
+   * ordinary instanced rendering and invisible.
+   *
+   * `world/FoliageFade.ts` calls this the instant a tree starts (or stops)
+   * standing between the camera and the player, so it can put a translucent
+   * look-alike in its place instead — an `InstancedMesh` has no per-instance
+   * opacity to animate directly. Always flipped at full opacity on both
+   * sides (the look-alike starts solid and only fades after the swap), so
+   * there is nothing to see at the moment it happens.
+   */
+  setTreeHidden(occluderIndex: number, hidden: boolean): void {
+    const instances = this.hideableInstances[occluderIndex];
+    if (!instances) return;
+    for (const { mesh, index, matrix } of instances) {
+      mesh.setMatrixAt(index, hidden ? HIDDEN_MATRIX : matrix);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 }
 
@@ -93,6 +175,8 @@ const CLIMBABLE_MIN_RADIUS = 2.05;
 function buildFoliage(collision: CollisionWorld): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
+  occluders: FoliageOccluder[];
+  hideableInstances: HideableInstance[][];
 } {
   const group = new Group();
   group.name = 'foliage';
@@ -104,6 +188,12 @@ function buildFoliage(collision: CollisionWorld): {
   const coneCanopies: InstanceItem[] = [];
   const bushes: InstanceItem[] = [];
   const climbableTrees: ClimbableTreeSeed[] = [];
+  const occluders: FoliageOccluder[] = [];
+  // Parallel to `occluders`: which (kind, index-into-that-kind's-array) pairs
+  // make up each tree. Resolved into real `HideableInstance`s once the
+  // `InstancedMesh`es below exist — kept as plain indices until then because
+  // the meshes don't exist yet while this loop is still filling the arrays.
+  const occluderRefs: { kind: 'trunk' | 'round' | 'cone'; index: number }[][] = [];
 
   const canopyGreens = [PALETTE.leafMid, PALETTE.leafLight, PALETTE.leafDeep, PALETTE.leafBlue];
 
@@ -128,13 +218,28 @@ function buildFoliage(collision: CollisionWorld): {
     const rotationY = rng.range(0, TAU);
     const lean = rng.range(0.92, 1.1);
 
-    trunks.push({
+    // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
+    // `world/FoliageFade.ts`): every part that makes it up, in world space,
+    // plus a rough bounding sphere (the widest blob's centre and radius) —
+    // good enough for a cheap "does the sightline pass near here" test
+    // without needing the real silhouette.
+    const refs: { kind: 'trunk' | 'round' | 'cone'; index: number }[] = [];
+    const parts: FoliagePart[] = [];
+    let wideRadius = 0;
+    let wideCentreY = y + height;
+
+    const trunkColour = rng.chance(0.4) ? PALETTE.barkDark : PALETTE.bark;
+    const trunkShade = rng.range(0.92, 1.08);
+    const trunkItem: InstanceItem = {
       position: new Vector3(x, y + height / 2, z),
       scale: new Vector3(lean, height, lean),
       rotationY,
-      colour: rng.chance(0.4) ? PALETTE.barkDark : PALETTE.bark,
-      shade: rng.range(0.92, 1.08),
-    });
+      colour: trunkColour,
+      shade: trunkShade,
+    };
+    refs.push({ kind: 'trunk', index: trunks.length });
+    parts.push({ ...trunkItem, kind: 'trunk' });
+    trunks.push(trunkItem);
 
     const canopyBase = y + height;
     if (kind === 'pine') {
@@ -142,25 +247,39 @@ function buildFoliage(collision: CollisionWorld): {
       for (let i = 0; i < layers; i += 1) {
         const t = i / layers;
         const width = rng.range(1.7, 2.3) * (1 - t * 0.42);
-        coneCanopies.push({
+        const coneItem: InstanceItem = {
           position: new Vector3(x, canopyBase - 0.6 + t * 1.5, z),
           scale: new Vector3(width, rng.range(1.6, 2.2) * (1 - t * 0.2), width),
           rotationY,
           colour: rng.chance(0.5) ? PALETTE.leafDeep : PALETTE.leafMid,
           shade: rng.range(0.94, 1.06),
-        });
+        };
+        refs.push({ kind: 'cone', index: coneCanopies.length });
+        parts.push({ ...coneItem, kind: 'cone' });
+        if (width > wideRadius) {
+          wideRadius = width;
+          wideCentreY = coneItem.position.y;
+        }
+        coneCanopies.push(coneItem);
       }
     } else if (kind === 'stack') {
       const layers = 3;
       for (let i = 0; i < layers; i += 1) {
         const radius = rng.range(1.6, 2.05) * (1 - i * 0.22);
-        roundCanopies.push({
+        const canopyItem: InstanceItem = {
           position: new Vector3(x, canopyBase - 0.3 + i * radius * 0.92, z),
           scale: new Vector3(radius, radius * rng.range(0.8, 0.95), radius),
           rotationY: rotationY + i,
           colour: rng.pick(canopyGreens),
           shade: rng.range(0.95, 1.08),
-        });
+        };
+        refs.push({ kind: 'round', index: roundCanopies.length });
+        parts.push({ ...canopyItem, kind: 'round' });
+        if (radius > wideRadius) {
+          wideRadius = radius;
+          wideCentreY = canopyItem.position.y;
+        }
+        roundCanopies.push(canopyItem);
       }
     } else {
       // Lollipop and blossom: one big friendly ball, sometimes with a smaller
@@ -169,13 +288,18 @@ function buildFoliage(collision: CollisionWorld): {
       const colour = kind === 'blossom' ? PALETTE.blossomPink : rng.pick(canopyGreens);
       const canopyVScale = rng.range(0.82, 1.0);
       const canopyCentreY = canopyBase + radius * 0.42;
-      roundCanopies.push({
+      const canopyItem: InstanceItem = {
         position: new Vector3(x, canopyCentreY, z),
         scale: new Vector3(radius, radius * canopyVScale, radius),
         rotationY,
         colour,
         shade: rng.range(0.95, 1.06),
-      });
+      };
+      refs.push({ kind: 'round', index: roundCanopies.length });
+      parts.push({ ...canopyItem, kind: 'round' });
+      wideRadius = radius;
+      wideCentreY = canopyCentreY;
+      roundCanopies.push(canopyItem);
       // Climbable: a plain lollipop with plenty of canopy to hide a body in.
       // Blossom trees are excluded — a face poking out of cherry-blossom
       // fluff reads oddly, and the stacked/pine kinds have no one big canopy
@@ -191,7 +315,7 @@ function buildFoliage(collision: CollisionWorld): {
       if (rng.chance(0.55)) {
         const small = radius * rng.range(0.5, 0.72);
         const offset = rng.range(0, TAU);
-        roundCanopies.push({
+        const smallItem: InstanceItem = {
           position: new Vector3(
             x + Math.cos(offset) * radius * 0.7,
             canopyBase + radius * rng.range(0.1, 0.5),
@@ -201,9 +325,15 @@ function buildFoliage(collision: CollisionWorld): {
           rotationY: rotationY + 1.3,
           colour: kind === 'blossom' ? PALETTE.blossomWhite : colour,
           shade: rng.range(0.92, 1.04),
-        });
+        };
+        refs.push({ kind: 'round', index: roundCanopies.length });
+        parts.push({ ...smallItem, kind: 'round' });
+        roundCanopies.push(smallItem);
       }
     }
+
+    occluders.push({ x, z, centreY: wideCentreY, radius: wideRadius, parts });
+    occluderRefs.push(refs);
 
     collision.addCircle(x, z, 0.55 * lean);
     treeCount += 1;
@@ -248,21 +378,52 @@ function buildFoliage(collision: CollisionWorld): {
   // a living, pickable population — see `world/Flowers.ts` — built and owned
   // separately so this file stays about the things that never move.
 
-  const trunkGeometry = new CylinderGeometry(0.19, 0.3, 1, 8);
-  const canopyGeometry = new IcosahedronGeometry(1, 2);
-  const coneGeometry = new ConeGeometry(1, 1, 10);
   // Subdivision 2 rather than 1: still faceted enough to look hand-made, but
   // rounded rather than spiky — a bush, not a lump of quartz.
   const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
 
+  const trunkMesh = makeInstanced(
+    'tree-trunks',
+    FOLIAGE_GEOMETRY.trunk,
+    foliageMaterial(0.95),
+    trunks,
+    true,
+  );
+  const canopyMesh = makeInstanced(
+    'tree-canopies',
+    FOLIAGE_GEOMETRY.round,
+    foliageMaterial(0.85),
+    roundCanopies,
+    true,
+  );
+  const coneMesh = makeInstanced(
+    'tree-cones',
+    FOLIAGE_GEOMETRY.cone,
+    foliageMaterial(0.85),
+    coneCanopies,
+    true,
+  );
   group.add(
-    makeInstanced('tree-trunks', trunkGeometry, foliageMaterial(0.95), trunks, true),
-    makeInstanced('tree-canopies', canopyGeometry, foliageMaterial(0.85), roundCanopies, true),
-    makeInstanced('tree-cones', coneGeometry, foliageMaterial(0.85), coneCanopies, true),
+    trunkMesh,
+    canopyMesh,
+    coneMesh,
     makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true),
   );
 
-  return { group, climbableTrees };
+  // Resolve every tree's `occluderRefs` into real `HideableInstance`s now
+  // that the meshes they point into actually exist. `getMatrixAt` reads back
+  // exactly the matrix `makeInstanced` just composed, so there is no second
+  // place that has to agree with its position/rotation/scale maths.
+  const scratchMatrix = new Matrix4();
+  const hideableInstances: HideableInstance[][] = occluderRefs.map((refs) =>
+    refs.map(({ kind, index }) => {
+      const mesh = kind === 'trunk' ? trunkMesh : kind === 'round' ? canopyMesh : coneMesh;
+      mesh.getMatrixAt(index, scratchMatrix);
+      return { mesh, index, matrix: scratchMatrix.clone() };
+    }),
+  );
+
+  return { group, climbableTrees, occluders, hideableInstances };
 }
 
 /**
@@ -445,7 +606,10 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
 
     // Real wall height, not the `Infinity` default — this is what lets a jump
     // clear a low or mid wall while a tall one still stops you (Collision.ts).
-    collision.addWall(x1, z1, x2, z2, 0.22, run.height);
+    // `autoHoppable: true` is what lets `Player` clear one on its own, with no
+    // button press, the moment walking (or tap-to-move) runs into one it
+    // could jump anyway (design feedback #30e).
+    collision.addWall(x1, z1, x2, z2, 0.22, run.height, true);
   }
 
   return group;
@@ -525,8 +689,9 @@ function buildStoneWalls(collision: CollisionWorld): Group {
       });
     }
 
-    // Real wall height, not the `Infinity` default — see the wooden walls above.
-    collision.addWall(x1, z1, x2, z2, 0.34, run.height);
+    // Real wall height, not the `Infinity` default — see the wooden walls
+    // above, including why `autoHoppable` is `true` here too.
+    collision.addWall(x1, z1, x2, z2, 0.34, run.height, true);
   }
 
   group.add(

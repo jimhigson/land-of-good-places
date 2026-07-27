@@ -22,6 +22,16 @@ import { GARDEN_PLAY_RADIUS } from '../core/constants';
  * walls pass a real number (their actual visual height), which is what lets a
  * jump clear a low wall but not a tall one — see `resolve`'s `clearance`
  * parameter.
+ *
+ * A collider may also opt into `autoHoppable` — see {@link
+ * CollisionWorld.wouldAutoHopClear}, design feedback #30e. It defaults to
+ * `false`, so every existing caller keeps its current behaviour for free:
+ * only `Scenery`'s wooden and stone garden walls pass `true`. The fountain
+ * rim has a finite `topHeight` too (its own jump is a deliberate feature —
+ * design feedback #12), but is deliberately never `autoHoppable`, and nor is
+ * anything the building registers — auto-hop must never fire for something a
+ * child did not choose to jump into, which the fountain's water and a stair's
+ * side rail both are.
  */
 
 interface CircleCollider {
@@ -29,6 +39,7 @@ interface CircleCollider {
   z: number;
   radius: number;
   topHeight: number;
+  autoHoppable: boolean;
 }
 
 interface WallCollider {
@@ -38,6 +49,7 @@ interface WallCollider {
   z2: number;
   halfThickness: number;
   topHeight: number;
+  autoHoppable: boolean;
 }
 
 /**
@@ -77,8 +89,12 @@ const SHALLOW_OVERLAP = 0.5;
  * overlap. Chosen well below the player's own walking pace so being
  * depenetrated never feels like it could be mistaken for a shove *by* the
  * game — it reads as being calmly walked back out.
+ *
+ * Exported so that a second, smaller piece of depenetration (see
+ * {@link circleSeparation}, below — the player↔NPC push-apart) can cap
+ * itself at the exact same gentle speed rather than inventing its own number.
  */
-const MAX_DEPENETRATION_SPEED = 3;
+export const MAX_DEPENETRATION_SPEED = 3;
 
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
@@ -105,8 +121,8 @@ export class CollisionWorld {
     this.boundsRadius = radius;
   }
 
-  addCircle(x: number, z: number, radius: number, topHeight = Infinity): void {
-    this.circles.push({ x, z, radius, topHeight });
+  addCircle(x: number, z: number, radius: number, topHeight = Infinity, autoHoppable = false): void {
+    this.circles.push({ x, z, radius, topHeight, autoHoppable });
   }
 
   addWall(
@@ -116,8 +132,9 @@ export class CollisionWorld {
     z2: number,
     halfThickness = 0.35,
     topHeight = Infinity,
+    autoHoppable = false,
   ): void {
-    this.walls.push({ x1, z1, x2, z2, halfThickness, topHeight });
+    this.walls.push({ x1, z1, x2, z2, halfThickness, topHeight, autoHoppable });
   }
 
   /** Registers the four sides of an axis-aligned rectangle as walls. */
@@ -128,11 +145,12 @@ export class CollisionWorld {
     halfZ: number,
     halfThickness = 0.35,
     topHeight = Infinity,
+    autoHoppable = false,
   ): void {
-    this.addWall(cx - halfX, cz - halfZ, cx + halfX, cz - halfZ, halfThickness, topHeight);
-    this.addWall(cx + halfX, cz - halfZ, cx + halfX, cz + halfZ, halfThickness, topHeight);
-    this.addWall(cx + halfX, cz + halfZ, cx - halfX, cz + halfZ, halfThickness, topHeight);
-    this.addWall(cx - halfX, cz + halfZ, cx - halfX, cz - halfZ, halfThickness, topHeight);
+    this.addWall(cx - halfX, cz - halfZ, cx + halfX, cz - halfZ, halfThickness, topHeight, autoHoppable);
+    this.addWall(cx + halfX, cz - halfZ, cx + halfX, cz + halfZ, halfThickness, topHeight, autoHoppable);
+    this.addWall(cx + halfX, cz + halfZ, cx - halfX, cz + halfZ, halfThickness, topHeight, autoHoppable);
+    this.addWall(cx - halfX, cz + halfZ, cx - halfX, cz - halfZ, halfThickness, topHeight, autoHoppable);
   }
 
   get colliderCount(): number {
@@ -300,4 +318,90 @@ export class CollisionWorld {
 
     return { clearedWall: clearedAny, escorting };
   }
+
+  /**
+   * A read-only probe for the auto-hop feature (design feedback #30e — hop
+   * over a low wall with no button press, especially useful for tap-to-move).
+   *
+   * Answers "if `position` (at `radius`) sits inside an `autoHoppable`
+   * collider right now, would a jump reaching `apexClearance` above the
+   * ground clear it?" — the same question `resolve`'s own `clearance`
+   * parameter answers for a jump already in flight, with the same
+   * {@link JUMP_CLEARANCE_GRACE}, so "would clear" means the same thing in
+   * both places and a wall the manual jump clears is exactly a wall this
+   * clears too.
+   *
+   * Deliberately separate from `resolve()`, never mutates `position`, and
+   * never even looks at the soft park boundary — there is nothing to jump
+   * over there. `Player` calls this with a point a little ahead of its own
+   * feet, in the direction it is actually trying to go, so the hop can fire a
+   * moment before contact rather than after stopping dead against the wall.
+   */
+  wouldAutoHopClear(position: Vector3, radius: number, apexClearance: number): boolean {
+    const reach = apexClearance + JUMP_CLEARANCE_GRACE;
+
+    for (const circle of this.circles) {
+      if (!circle.autoHoppable || reach < circle.topHeight) continue;
+      const dx = position.x - circle.x;
+      const dz = position.z - circle.z;
+      const minimum = circle.radius + radius;
+      if (dx * dx + dz * dz < minimum * minimum) return true;
+    }
+
+    for (const wall of this.walls) {
+      if (!wall.autoHoppable || reach < wall.topHeight) continue;
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      if (lengthSquared < 1e-8) continue;
+      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const dx = position.x - (wall.x1 + ax * t);
+      const dz = position.z - (wall.z1 + az * t);
+      const minimum = wall.halfThickness + radius;
+      if (dx * dx + dz * dz < minimum * minimum) return true;
+    }
+
+    return false;
+  }
+}
+
+/**
+ * The push-apart for two moving circles that must not overlap — the player
+ * standing on a child, or a child standing on another child — as opposed to a
+ * mover and a piece of static scenery (see {@link CollisionWorld.resolve} for
+ * that). Deliberately outside `CollisionWorld`: neither side here is one of
+ * its registered colliders, and there is nothing to register them as without
+ * turning every child into a wall the others grind against (see
+ * `NpcCharacter.separateFrom`, which already does exactly this for child↔child
+ * and is the pattern this mirrors for player↔child).
+ *
+ * Splits the correction evenly and returns it rather than applying it, so the
+ * caller decides how to move each side — `Player.nudge` for the player half,
+ * a direct position write for an NPC, same as its own neighbours already get.
+ * Returns `null` when the circles do not overlap at all.
+ *
+ * This never needs `SHALLOW_OVERLAP`'s instant/escorted split the way
+ * `resolve` does: it is driven every frame while two circles overlap, so it
+ * never has the chance to build up the kind of deep, spawned-inside overlap
+ * that caused design feedback #17's fling in the first place. The caller
+ * still caps how far it is willing to move something in one frame — see
+ * `NpcSystem.separateFromPlayer`'s use of {@link MAX_DEPENETRATION_SPEED} —
+ * as a second line of defence should two characters ever end up teleported
+ * on top of each other.
+ */
+export function circleSeparation(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  minimum: number,
+): { readonly dx: number; readonly dz: number } | null {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const distanceSquared = dx * dx + dz * dz;
+  if (distanceSquared >= minimum * minimum || distanceSquared < 1e-8) return null;
+  const distance = Math.sqrt(distanceSquared);
+  const push = (minimum - distance) * 0.5;
+  return { dx: (dx / distance) * push, dz: (dz / distance) * push };
 }
