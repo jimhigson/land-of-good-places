@@ -1,27 +1,39 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
-import { Game } from './Game';
+import { Game, type GameOptions } from './Game';
 import { UpdateGate } from './ui/UpdateGate';
-import { CharacterCreation, DevBadge, hasCreatedCharacter, markCharacterCreated } from './ui';
+import { CharacterCreation, ContinueOrRestart, DevBadge } from './ui';
 import { gameStore } from './state';
+import { saveFlags } from './state/flags';
+import { clearSave, loadSave, type SaveFile } from './state/save';
 
 /**
- * Entry point. Finds the canvas, shows the character creator on a brand-new
- * browser, then builds the game and hides the splash.
+ * Entry point. Finds the canvas, offers to continue a saved park, shows the
+ * character creator when there is nothing to continue, then builds the game
+ * and hides the splash.
  *
  * The splash is dismissed on the first rendered frame rather than immediately,
  * so nobody ever sees an empty blue rectangle while the park is being built.
  *
- * **Character creation runs here, before `Game` exists** — deliberately not
- * a `Game`-owned overlay like `WhatsNew`. `Player`'s constructor reads
+ * **All of this runs before `Game` exists** — deliberately not `Game`-owned
+ * overlays like `WhatsNew`. `Player`'s constructor reads
  * `gameStore.get().player` (name, hair colour and style, outfit colour) the
- * moment it builds the kid; running the chooser first means that read simply
- * sees the family's actual choices, rather than needing a "rebuild the live
- * player model" path that nothing else in the game has (a hair *style*
- * change swaps meshes, not just a colour). It also guarantees the chooser
- * finishes before the cat-bus arrival sequence (`world/entrance/`), whenever
- * that gets wired up — nothing downstream of `new Game(...)` can run before
- * this does, because `Game` itself doesn't exist yet.
+ * moment it builds the kid, so both the save and the character creator have to
+ * have finished writing the store before that happens; there is no "rebuild
+ * the live player model" path in the game, and a hair *style* change swaps
+ * meshes rather than a colour. It also guarantees both finish before the
+ * cat-bus arrival sequence (`world/entrance/`), whenever that gets wired up —
+ * nothing downstream of `new Game(...)` can run before this does.
+ *
+ * The three ways a load can go:
+ *
+ * - **A readable save**: the welcome-back screen (`ui/ContinueOrRestart.ts`)
+ *   offers *keep playing* or *start a new game*.
+ * - **No save**: straight into the character creator, exactly as before.
+ * - **An unreadable save** — corrupt, or a schema this build cannot migrate:
+ *   `loadSave()` returns `null`, which is the same path as "no save". A
+ *   fresh start is always offered rather than a crash or a half-loaded park;
+ *   see `state/save.ts`.
  */
 function boot(): void {
   const canvas = document.getElementById('game-canvas');
@@ -32,27 +44,72 @@ function boot(): void {
     throw new Error('Land of Good Places: expected #game-canvas and #ui-root in the document.');
   }
 
-  if (hasCreatedCharacter()) {
-    launchGame(canvas, uiRoot, splash);
+  const save = loadSave();
+
+  // A save from before the character creator existed, or one where "start
+  // again" was pressed and the tab was closed mid-creation, has everything
+  // except a character. There is nothing to offer to continue, so don't ask.
+  if (save && save.flags.createdCharacter) {
+    // Both branches supply their own full-screen backdrop immediately, so the
+    // generic "building the garden…" splash card would only be a flash behind
+    // them — hide it now rather than waiting for a first game frame that is
+    // still a button press away.
+    splash?.classList.add('hidden');
+    new ContinueOrRestart(uiRoot, save, {
+      onContinue: () => continueGame(canvas, uiRoot, splash, save),
+      onStartAgain: () => startFresh(canvas, uiRoot, splash),
+    });
     return;
   }
 
-  // The chooser supplies its own full-screen backdrop immediately, so the
-  // generic "building the garden…" splash card would only be a flash behind
-  // it — hide it now rather than waiting for a first game frame that is still
-  // a form submission away.
   splash?.classList.add('hidden');
+  startFresh(canvas, uiRoot, splash);
+}
+
+/** Loads the park back exactly as it was left. */
+function continueGame(
+  canvas: HTMLCanvasElement,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  save: SaveFile,
+): void {
+  gameStore.hydrate(save);
+  saveFlags.hydrate(save.flags);
+  // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
+  const options: GameOptions = save.place ? { startPlace: save.place } : {};
+  launchGame(canvas, uiRoot, splash, options);
+}
+
+/**
+ * Throws away whatever was saved and makes a brand-new character.
+ *
+ * The save is cleared *first*, before the creator opens, so that closing the
+ * tab halfway through making a new character cannot leave the old park behind
+ * to be offered again — the child already said goodbye to it, and being asked
+ * a second time would be worse than either answer.
+ */
+function startFresh(
+  canvas: HTMLCanvasElement,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+): void {
+  clearSave();
   new CharacterCreation(uiRoot, {
     onComplete: (choice) => {
       gameStore.completeCharacterCreation(choice);
-      markCharacterCreated();
-      launchGame(canvas, uiRoot, splash);
+      saveFlags.markCharacterCreated();
+      launchGame(canvas, uiRoot, splash, {});
     },
   });
 }
 
-function launchGame(canvas: HTMLCanvasElement, uiRoot: HTMLElement, splash: HTMLElement | null): void {
-  const game = new Game(canvas, uiRoot);
+function launchGame(
+  canvas: HTMLCanvasElement,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  options: GameOptions,
+): void {
+  const game = new Game(canvas, uiRoot, options);
   game.start();
 
   // Unmissable red "DEV" watermark — never present in a production build.
