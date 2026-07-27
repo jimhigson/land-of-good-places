@@ -5,7 +5,7 @@ import { createRipika } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
-import { createPet } from '../../../art/models/pets';
+import { createPet, PUFF_DISPLAY_NAME } from '../../../art/models/pets';
 import {
   createCandyFloss,
   createIceCream,
@@ -364,6 +364,20 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     heldScale: 0.7,
     rare: false,
   },
+  {
+    id: 'hat.puff',
+    shopId: 'hat',
+    displayName: `${PUFF_DISPLAY_NAME} Hat`,
+    blurb: 'A jiggly pink puff, humming softly on your head.',
+    icon: '🎀',
+    price: 26,
+    kind: 'hat',
+    category: 'hat',
+    carryable: true,
+    model: () => createHat('puff'),
+    heldScale: 0.7,
+    rare: false,
+  },
 
   // ------------------------------------------------------- stickers and pets
   {
@@ -433,6 +447,20 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     category: 'pet',
     carryable: true,
     model: () => createPet('mouse'),
+    heldScale: 0.45,
+    rare: false,
+  },
+  {
+    id: 'pet.puff',
+    shopId: 'stickerPet',
+    displayName: PUFF_DISPLAY_NAME,
+    blurb: 'A jiggly pink puff who bursts into little songs.',
+    icon: '🎵',
+    price: 38,
+    kind: 'pet',
+    category: 'pet',
+    carryable: true,
+    model: () => createPet('puff'),
     heldScale: 0.45,
     rare: false,
   },
