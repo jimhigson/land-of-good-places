@@ -49,6 +49,8 @@ const FALL_THRESHOLD = 0.5;
 export class NpcCharacter {
   readonly avatar: KidAvatar;
   readonly driver: CharacterDriver;
+  /** This child's name, for the floating label above their head (see NpcSystem). */
+  readonly name: string;
 
   readonly position = new Vector3();
   readonly velocity = new Vector3();
@@ -81,9 +83,11 @@ export class NpcCharacter {
     x: number,
     z: number,
     facing: number,
+    name: string,
   ) {
     this.avatar = avatar;
     this.driver = driver;
+    this.name = name;
     this.facing = facing;
     // Offset the walk cycle per child, or the whole park marches in step.
     this.walkPhase = 0;

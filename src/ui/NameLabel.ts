@@ -33,9 +33,13 @@ export class NameLabel {
   private texture: CanvasTexture;
   private readonly material: SpriteMaterial;
   private accent: number;
+  /** Multiplies {@link LABEL_PIXEL_HEIGHT} — lets a crowd of labels read a
+   *  touch smaller/quieter than the one the player is wearing. */
+  private readonly sizeScale: number;
 
-  constructor(name: string, accent: number = PALETTE.markerPink) {
+  constructor(name: string, accent: number = PALETTE.markerPink, sizeScale: number = 1) {
     this.accent = accent;
+    this.sizeScale = sizeScale;
     this.texture = nameLabelTexture(name, accent);
     this.material = new SpriteMaterial({
       map: this.texture,
@@ -68,7 +72,7 @@ export class NameLabel {
     this.sprite.visible = distanceToCamera <= LABEL_MAX_DISTANCE;
     if (!this.sprite.visible) return;
 
-    const height = worldUnitsPerPixel * LABEL_PIXEL_HEIGHT;
+    const height = worldUnitsPerPixel * LABEL_PIXEL_HEIGHT * this.sizeScale;
     this.sprite.scale.set(height * LABEL_ASPECT, height, 1);
   }
 

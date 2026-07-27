@@ -3,8 +3,10 @@ import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
+import type { IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../../world/Collision';
 import type { GroundSampler } from '../Player';
+import { NameLabel } from '../../ui/NameLabel';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
@@ -74,6 +76,64 @@ const FAR_DISTANCE = 34;
 
 /** How far behind its child a pet trails, in metres. */
 const PET_TRAIL = 1.15;
+
+/**
+ * A cute, curated, deliberately international cast — the family asked for
+ * name labels, so the children needed names. No duplicates within one park:
+ * `pickNames` below draws from this pool without replacement.
+ *
+ * `ETHAN_NAME` is reserved out of the general draw — see {@link ETHAN_INDEX}.
+ */
+const ETHAN_NAME = 'Ethan';
+const KID_NAMES: readonly string[] = [
+  ETHAN_NAME,
+  'Amara',
+  'Bodhi',
+  'Cleo',
+  'Dara',
+  'Elowen',
+  'Finn',
+  'Gaia',
+  'Hana',
+  'Iris',
+  'Jasper',
+  'Kiko',
+  'Luca',
+  'Mira',
+  'Noor',
+  'Ola',
+  'Priya',
+  'Quinn',
+  'Rosa',
+  'Sana',
+  'Theo',
+  'Uma',
+  'Vera',
+  'Wren',
+  'Yara',
+  'Zara',
+  'Aiko',
+  'Hugo',
+  'Ines',
+  'Milo',
+];
+
+/**
+ * Ethan's fixed spawn slot — a family request: a blonde, blue-eyed boy named
+ * Ethan is always somewhere in the park, not just "usually". Fixed to an
+ * index rather than picked by the seeded `rng` so he survives any reordering
+ * of the random draws around him.
+ */
+const ETHAN_INDEX = 0;
+
+/** Softer and quieter than the player's pink label, so Eleri still stands out. */
+const NPC_LABEL_ACCENT = PALETTE.markerSky;
+/** A touch smaller than the player's label — see `NameLabel`'s `sizeScale`. */
+const NPC_LABEL_SCALE = 0.82;
+/** How high above a child's own height their label floats. */
+const LABEL_HEIGHT_OFFSET = 0.34;
+/** Only the nearest handful of labels show at once — a dozen name pills is clutter. */
+const VISIBLE_LABEL_CAP = 10;
 
 /**
  * Colour choices, all of them already named in `PALETTE` or `ART`.
@@ -146,11 +206,17 @@ export class NpcSystem implements GameSystem {
   private readonly graph: PoiGraph;
   private readonly characters: NpcCharacter[] = [];
   private readonly petList: Pet[] = [];
+  private readonly labels: NameLabel[] = [];
+  /** Scratch distance-to-camera per character, reused every frame — see `updateLabels`. */
+  private readonly labelDistances: Float32Array;
+  /** Character indices, kept sorted nearest-first every frame. */
+  private readonly labelOrder: number[] = [];
   private readonly playerPosition = new Vector3();
   private frame = 0;
 
   constructor(
     collision: CollisionWorld,
+    private readonly camera: IsoCamera,
     groundSampler: GroundSampler | null = null,
     // Trees big enough to climb — threaded down into every child's wander
     // driver so it can decide, on its own, whether one is worth stopping at.
@@ -160,6 +226,12 @@ export class NpcSystem implements GameSystem {
     this.group.name = 'npcs';
 
     const rng = new Rng(NPC_SEED);
+    // A separate stream for names, so shuffling the cast never shifts which
+    // colours/hairstyles/paces the seeded `rng` above hands to which slot.
+    const nameRng = new Rng(NPC_SEED + 424242);
+    const otherNames = pickNames(nameRng, NPC_COUNT - 1);
+    let nameCursor = 0;
+
     this.graph = new PoiGraph(collision);
     this.kids = new KidCrowd(NPC_COUNT);
     this.group.add(this.kids.crowd.group);
@@ -171,11 +243,25 @@ export class NpcSystem implements GameSystem {
       const node = spawnNodes[Math.floor((i / NPC_COUNT) * spawnNodes.length)];
       if (!node) break;
 
-      const avatar = this.kids.spawn(
-        pickColours(rng),
-        rng.chance(0.35),
-        rng.range(0.86, 1.04),
-      );
+      // Ethan is a family request: always present, always a blonde,
+      // blue-eyed boy. Every `rng` call below still fires in the same order
+      // for every slot — only the results for his slot are overridden — so
+      // moving him would not reshuffle anyone else's look.
+      const isEthan = i === ETHAN_INDEX;
+      const name = isEthan ? ETHAN_NAME : (otherNames[nameCursor++] ?? ETHAN_NAME);
+
+      const rolledColours = pickColours(rng);
+      const colours = isEthan ? { ...rolledColours, hair: ART.kidHairBlonde } : rolledColours;
+
+      const shortHairRoll = rng.chance(0.35);
+      const shortHair = isEthan ? true : shortHairRoll;
+
+      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), isEthan);
+      // Forces the face variant to match `isEthan` immediately — otherwise a
+      // child whose expression never transitions away from the default
+      // 'neutral' would never call `setExpression` and Ethan would show the
+      // crowd's normal (non-blue) eyes until the first blink.
+      avatar.setExpression('neutral');
 
       const driver = new WanderDriver({
         graph: this.graph,
@@ -193,11 +279,24 @@ export class NpcSystem implements GameSystem {
         node.x + rng.range(-0.8, 0.8),
         node.z + rng.range(-0.8, 0.8),
         rng.range(-Math.PI, Math.PI),
+        name,
       );
       character.groundSampler = groundSampler;
       character.setWalkPhase(rng.range(0, TAU));
       this.characters.push(character);
+
+      const label = new NameLabel(name, NPC_LABEL_ACCENT, NPC_LABEL_SCALE);
+      label.sprite.position.set(
+        character.position.x,
+        character.position.y + avatar.height + LABEL_HEIGHT_OFFSET,
+        character.position.z,
+      );
+      this.group.add(label.sprite);
+      this.labels.push(label);
+      this.labelOrder.push(i);
     }
+
+    this.labelDistances = new Float32Array(this.characters.length);
 
     // --- pets ----------------------------------------------------------------
     const petPrototype = createPetBlob();
@@ -295,11 +394,13 @@ export class NpcSystem implements GameSystem {
     this.kids.crowd.flush();
 
     this.updatePets(dt, elapsed);
+    this.updateLabels();
   }
 
   dispose(): void {
     this.kids.dispose();
     this.pets.dispose();
+    for (const label of this.labels) label.dispose();
   }
 
   // ---------------------------------------------------------------- internals
@@ -362,11 +463,70 @@ export class NpcSystem implements GameSystem {
     }
     this.pets.flush();
   }
+
+  /**
+   * Floats each child's name pill above their head, screen-constant size —
+   * the same {@link NameLabel} mechanism the player wears (design feedback:
+   * "name labels, larger and screen-constant").
+   *
+   * Only the {@link VISIBLE_LABEL_CAP} nearest to what the camera is actually
+   * looking at are shown; a park-full of pills on screen at once is clutter,
+   * not charm. `labelOrder` is sorted in place every frame rather than
+   * rebuilt, so this allocates nothing per frame beyond the sort itself.
+   */
+  private updateLabels(): void {
+    const camera = this.camera;
+
+    for (let i = 0; i < this.characters.length; i += 1) {
+      const character = this.characters[i];
+      this.labelDistances[i] = character
+        ? character.position.distanceTo(camera.focusPoint)
+        : Infinity;
+    }
+
+    this.labelOrder.sort((a, b) => (this.labelDistances[a] ?? 0) - (this.labelDistances[b] ?? 0));
+
+    for (let rank = 0; rank < this.labelOrder.length; rank += 1) {
+      const i = this.labelOrder[rank];
+      if (i === undefined) continue;
+      const character = this.characters[i];
+      const label = this.labels[i];
+      if (!character || !label) continue;
+
+      if (rank >= VISIBLE_LABEL_CAP) {
+        label.sprite.visible = false;
+        continue;
+      }
+
+      label.sprite.position.set(
+        character.position.x,
+        character.position.y + character.avatar.height + LABEL_HEIGHT_OFFSET,
+        character.position.z,
+      );
+      label.updateScreenSize(camera.worldUnitsPerPixel, this.labelDistances[i] ?? 0);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ helpers
 
 const scratchColour = new Color();
+
+/**
+ * Draws `count` names from {@link KID_NAMES} without replacement (and without
+ * `ETHAN_NAME`, which is reserved for the fixed slot) — so nobody in one park
+ * shares a name with anybody else.
+ */
+function pickNames(rng: Rng, count: number): string[] {
+  const pool = KID_NAMES.filter((n) => n !== ETHAN_NAME);
+  const picked: string[] = [];
+  for (let i = 0; i < count && pool.length > 0; i += 1) {
+    const index = Math.floor(rng.unit() * pool.length);
+    const [name] = pool.splice(index, 1);
+    if (name) picked.push(name);
+  }
+  return picked;
+}
 
 function pickColours(rng: Rng): KidColours {
   const skinScale = rng.pick(SKIN_SCALES);

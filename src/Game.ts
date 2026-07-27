@@ -78,8 +78,9 @@ export class Game {
     // The building needs a way to move the camera, the clock and the screen
     // wipe when a child walks through its front door into its own space. It is
     // handed one rather than reaching up in here; the closures are only ever
-    // called from a frame, long after everything below is built.
-    this.world = new World(this.engine.scene, this.sky, this.interiorControls());
+    // called from a frame, long after everything below is built. The camera
+    // goes in too: NPC name labels are screen-space, so the crowd needs it.
+    this.world = new World(this.engine.scene, this.sky, this.interiorControls(), this.camera);
 
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));

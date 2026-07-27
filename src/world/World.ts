@@ -18,6 +18,7 @@ import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
 
 /**
@@ -50,7 +51,7 @@ export class World implements GameSystem {
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
 
-  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls) {
+  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
     // Living, pickable flowers — no collision (you walk straight through
@@ -107,6 +108,7 @@ export class World implements GameSystem {
     // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
     this.npcs = new NpcSystem(
       this.collision,
+      camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
     );
