@@ -641,6 +641,139 @@ kbd {
   }
 }
 
+/* ---- the face-painting stall (additive) ----
+   `.facepaint-panel` also carries `.shop-panel` (see FacePaintPanel.ts), so the
+   full-screen backdrop, open/close transition and `.shop-card` frame all come
+   free from the rules above. Only what's genuinely different about this panel
+   — a design grid instead of a priced list, a lighter second button, and the
+   painting-moment brush/sparkles — needs its own rules here. */
+
+.facepaint-card {
+  --shop-accent: var(--lgp-mint);
+}
+
+.facepaint-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.facepaint-row {
+  min-height: 84px;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.facepaint-row .row-icon {
+  font-size: 34px;
+  width: auto;
+}
+
+.facepaint-row .row-name {
+  font-size: 13px;
+}
+
+.facepaint-washoff {
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: #fff;
+  border: 3px solid rgba(74, 58, 82, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.14);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.facepaint-washoff:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 rgba(74, 58, 82, 0.14);
+}
+
+.facepaint-washoff:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.facepaint-brush {
+  position: relative;
+  font-size: 64px;
+  animation: brush-wiggle 420ms ease-in-out infinite;
+}
+
+.facepaint-sparkle {
+  position: absolute;
+  font-size: 22px;
+  animation: sparkle-twinkle 900ms ease-in-out infinite;
+}
+
+.facepaint-sparkle-a {
+  top: -6px;
+  right: -14px;
+  animation-delay: 0ms;
+}
+
+.facepaint-sparkle-b {
+  bottom: 2px;
+  left: -18px;
+  animation-delay: 300ms;
+}
+
+@keyframes brush-wiggle {
+  0%,
+  100% {
+    transform: rotate(-14deg);
+  }
+  50% {
+    transform: rotate(14deg);
+  }
+}
+
+@keyframes sparkle-twinkle {
+  0%,
+  100% {
+    transform: scale(0.7) rotate(0deg);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.15) rotate(20deg);
+    opacity: 1;
+  }
+}
+
+/* The floating "tap to get painted" hint. A `.pill`, positioned on its own
+   since it is appended straight to `#ui-root` rather than into one of the
+   HUD's flex rows — it needs to float near the stall's on-screen prompt
+   regardless of what else is in the corners. */
+.facepaint-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(8px);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+
+.facepaint-hint[data-show='true'] {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ---- the backpack drawer ---- */
 
 .backpack {

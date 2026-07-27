@@ -1,4 +1,5 @@
 import { CanvasTexture, Mesh, SphereGeometry, SRGBColorSpace } from 'three';
+import { PALETTE } from '../../core/palette';
 import { ART } from './artPalette';
 import { decal, toonMaterial } from './materials';
 
@@ -422,6 +423,320 @@ export function createFacePatch(options: FacePatchOptions): FacePatch {
     setExpression(name: Expression) {
       material.map = expressions[name];
       material.needsUpdate = true;
+    },
+  };
+}
+
+// =============================================================================
+// Face paint — the face-painting stall's decoration layer (additive).
+//
+// A face patch already carries eyes, blush and a mouth for one expression at a
+// time (see `paintExpressions` above). Face *paint* is a second, independent
+// layer on top: a design like butterfly wings or cat whiskers, painted onto its
+// own transparent canvas and worn on a second decal mesh with a **higher
+// `renderOrder`** than the base face patch. Because it never touches the base
+// canvas, swapping expressions (`setExpression`) or blinking keeps working
+// completely unchanged underneath — the paint is just always drawn on top of
+// whatever the face currently looks like, exactly like a sticker over a
+// photograph.
+//
+// This is deliberately NOT folded into `paintExpressions`/`FacePaintOptions`:
+// baking paint into all five expression canvases would mean five redraws per
+// design per character, and would give the crowd's shared, cached expression
+// textures (`sharedFace.ts`) nowhere to keep a "painted" variant without
+// touching the instanced-crowd material list. A second decal is one extra draw
+// call and reuses the base face for everything it does not draw.
+// =============================================================================
+
+/** The designs on offer at the face-painting stall. */
+export type FacePaintDesign =
+  | 'butterfly'
+  | 'catWhiskers'
+  | 'rainbowCheeks'
+  | 'flowerCheeks'
+  | 'starEye'
+  | 'ripikaCheeks';
+
+export const FACE_PAINT_DESIGNS: readonly FacePaintDesign[] = [
+  'butterfly',
+  'catWhiskers',
+  'rainbowCheeks',
+  'flowerCheeks',
+  'starEye',
+  'ripikaCheeks',
+];
+
+/** Label + glyph for the picker panel and the "wearing" chip. */
+export const FACE_PAINT_INFO: Record<FacePaintDesign, { label: string; glyph: string }> = {
+  butterfly: { label: 'Butterfly Wings', glyph: '🦋' },
+  catWhiskers: { label: 'Cat Whiskers', glyph: '🐱' },
+  rainbowCheeks: { label: 'Rainbow Cheeks', glyph: '🌈' },
+  flowerCheeks: { label: 'Flower Cheeks', glyph: '🌸' },
+  starEye: { label: 'Star Eye', glyph: '⭐' },
+  ripikaCheeks: { label: 'RiPika Cheeks', glyph: '💛' },
+};
+
+/**
+ * The subset the instanced NPC crowd wears (see `world/FacePaintStall.ts` and
+ * the additive block in `entities/npc/wanderDriver.ts`).
+ *
+ * `kidCrowd.ts` gives its shared face-patch part exactly three material
+ * variants (`neutral`/`happy`/`blink` — see `FACE_ORDER` there), one
+ * `InstancedMesh` each, sized at construction time. Adding a fourth variant for
+ * "painted" would mean editing that instancing setup, which is out of scope for
+ * this PR (see the file-ownership note at the top of `FacePaintStall.ts`).
+ * Painted background children get a small floating paint decal positioned near
+ * their head instead (a second, ordinary — not instanced — mesh), cycling
+ * through **three** pre-painted designs rather than one unique canvas per
+ * child. Three keeps the park's texture budget (ASSET_MANIFEST.md, "under 40
+ * distinct canvas textures") untouched and is plenty of variety for a design
+ * nobody stands and stares at.
+ */
+export const NPC_PAINT_DESIGNS: readonly FacePaintDesign[] = ['butterfly', 'rainbowCheeks', 'ripikaCheeks'];
+
+/** Canvas-fraction landmarks shared with the default face layout (`DEFAULTS`). */
+const PAINT_EYE_Y = DEFAULTS.eyeY;
+const PAINT_GAP_HALF = DEFAULTS.eyeGap / 2;
+const PAINT_EYE_W = DEFAULTS.eyeW;
+const PAINT_EYE_H = DEFAULTS.eyeH;
+
+/** Centre of the cheek blush spot, mirroring the maths in `paintFace`. */
+function paintCheekPoint(s: number, side: -1 | 1): { x: number; y: number } {
+  const blushY = PAINT_EYE_Y * s + PAINT_EYE_H * s * 0.95;
+  const blushX = PAINT_GAP_HALF * s + PAINT_EYE_W * s * 1.25;
+  return { x: s / 2 + side * blushX, y: blushY };
+}
+
+/** A five-pointed star path, centred at `(cx, cy)`. Does not fill or stroke. */
+function starPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, outerR: number, innerR: number): void {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i += 1) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+/** One wing of the butterfly design: two lobed ellipses and a body line. */
+function drawButterflyWing(ctx: CanvasRenderingContext2D, s: number, cx: number, cy: number, side: -1 | 1): void {
+  const ink = css(ART.ink);
+  const upperColour = css(PALETTE.flowerBlue);
+  const lowerColour = css(PALETTE.blossomPink);
+  const r = s * 0.052;
+
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.01;
+  ctx.lineJoin = 'round';
+
+  ctx.fillStyle = upperColour;
+  ctx.beginPath();
+  ctx.ellipse(cx + side * r * 0.95, cy - r * 0.55, r * 1.05, r * 0.72, side * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = lowerColour;
+  ctx.beginPath();
+  ctx.ellipse(cx + side * r * 0.75, cy + r * 0.55, r * 0.72, r * 0.5, side * -0.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // A little dot on each wing so it reads as painted rather than plain shapes.
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.ellipse(cx + side * r * 0.95, cy - r * 0.55, r * 0.16, r * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // The body: a short ink line down the middle, with two antennae.
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r * 0.9);
+  ctx.lineTo(cx, cy + r * 0.9);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r * 0.85);
+  ctx.quadraticCurveTo(cx + side * r * 0.3, cy - r * 1.25, cx + side * r * 0.45, cy - r * 1.4);
+  ctx.stroke();
+}
+
+/** Cat whiskers plus a small painted nose above the mouth. */
+function drawCatWhiskers(ctx: CanvasRenderingContext2D, s: number, cx: number): void {
+  const ink = css(ART.ink);
+  const noseY = PAINT_EYE_Y * s + PAINT_EYE_H * s * 0.55;
+  const noseSize = s * 0.028;
+
+  ctx.fillStyle = css(PALETTE.cheek);
+  ctx.beginPath();
+  ctx.moveTo(cx - noseSize, noseY - noseSize * 0.6);
+  ctx.lineTo(cx + noseSize, noseY - noseSize * 0.6);
+  ctx.lineTo(cx, noseY + noseSize * 0.8);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = s * 0.009;
+  ctx.lineCap = 'round';
+  const whiskerY = noseY + noseSize * 0.3;
+  for (const side of [-1, 1] as const) {
+    for (let i = -1; i <= 1; i += 1) {
+      const startX = cx + side * s * 0.09;
+      const startY = whiskerY + i * s * 0.024;
+      const endX = cx + side * s * 0.24;
+      const endY = startY + i * s * 0.018;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
+  }
+}
+
+/** A little rainbow arc on each cheek, in the park's own six-band rainbow. */
+function drawRainbowCheek(ctx: CanvasRenderingContext2D, s: number, cx: number, cy: number): void {
+  const outerR = s * 0.1;
+  const bandWidth = outerR / ART.rainbow.length;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < ART.rainbow.length; i += 1) {
+    const radius = outerR - i * bandWidth;
+    ctx.strokeStyle = css(ART.rainbow[i] ?? ART.rainbow[0] ?? 0xffffff);
+    ctx.lineWidth = bandWidth * 0.92;
+    ctx.beginPath();
+    ctx.arc(cx, cy + outerR * 0.3, Math.max(radius, bandWidth * 0.4), Math.PI * 1.08, Math.PI * 1.92);
+    ctx.stroke();
+  }
+}
+
+/** A tiny five-petal flower on each cheek. */
+function drawFlowerCheek(ctx: CanvasRenderingContext2D, s: number, cx: number, cy: number): void {
+  const petalColours = [PALETTE.blossomPink, PALETTE.flowerViolet];
+  const petalR = s * 0.03;
+  const orbit = s * 0.034;
+  for (let i = 0; i < 5; i += 1) {
+    const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+    ctx.fillStyle = css(petalColours[i % petalColours.length] ?? PALETTE.blossomPink);
+    ctx.beginPath();
+    ctx.ellipse(cx + Math.cos(angle) * orbit, cy + Math.sin(angle) * orbit, petalR, petalR * 0.72, angle, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = css(PALETTE.flowerYellow);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, petalR * 0.62, petalR * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** A little star sticker just above the outer corner of each eye. */
+function drawStarEye(ctx: CanvasRenderingContext2D, s: number, cx: number, side: -1 | 1): void {
+  const x = cx + side * (PAINT_GAP_HALF * s + PAINT_EYE_W * s * 1.35);
+  const y = PAINT_EYE_Y * s - PAINT_EYE_H * s * 1.05;
+  ctx.fillStyle = css(PALETTE.flowerYellow);
+  ctx.strokeStyle = css(ART.ink);
+  ctx.lineWidth = s * 0.008;
+  ctx.lineJoin = 'round';
+  starPath(ctx, x, y, s * 0.042, s * 0.018);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** Paints one face-paint design onto a transparent canvas. */
+export function paintFacePaintOverlay(design: FacePaintDesign, size = 512): CanvasTexture {
+  const { canvas, ctx } = newCanvas(size);
+  const s = size;
+  const cx = s / 2;
+
+  switch (design) {
+    case 'butterfly': {
+      const left = paintCheekPoint(s, -1);
+      const right = paintCheekPoint(s, 1);
+      drawButterflyWing(ctx, s, left.x, left.y, -1);
+      drawButterflyWing(ctx, s, right.x, right.y, 1);
+      break;
+    }
+    case 'catWhiskers':
+      drawCatWhiskers(ctx, s, cx);
+      break;
+    case 'rainbowCheeks': {
+      const left = paintCheekPoint(s, -1);
+      const right = paintCheekPoint(s, 1);
+      drawRainbowCheek(ctx, s, left.x, left.y);
+      drawRainbowCheek(ctx, s, right.x, right.y);
+      break;
+    }
+    case 'flowerCheeks': {
+      const left = paintCheekPoint(s, -1);
+      const right = paintCheekPoint(s, 1);
+      drawFlowerCheek(ctx, s, left.x, left.y);
+      drawFlowerCheek(ctx, s, right.x, right.y);
+      break;
+    }
+    case 'starEye':
+      drawStarEye(ctx, s, cx, -1);
+      drawStarEye(ctx, s, cx, 1);
+      break;
+    case 'ripikaCheeks': {
+      const left = paintCheekPoint(s, -1);
+      const right = paintCheekPoint(s, 1);
+      // Bigger and bolder than the everyday blush (`DEFAULTS.blushR` 0.075) so
+      // it reads as a deliberate paint job, not just rosy cheeks.
+      drawBlush(ctx, s, left.x, left.y, ART.ripikaCheek, 'disc', s * 0.115);
+      drawBlush(ctx, s, right.x, right.y, ART.ripikaCheek, 'disc', s * 0.115);
+      break;
+    }
+  }
+
+  return finish(canvas);
+}
+
+/** Every design's texture, painted once and cached — see `FACE_PAINT_INFO`. */
+const overlayTextureCache = new Map<string, CanvasTexture>();
+
+/** Cached `paintFacePaintOverlay`. Same design + size always returns the same texture. */
+export function facePaintOverlayTexture(design: FacePaintDesign, size = 512): CanvasTexture {
+  const key = `${design}:${size}`;
+  let texture = overlayTextureCache.get(key);
+  if (!texture) {
+    texture = paintFacePaintOverlay(design, size);
+    overlayTextureCache.set(key, texture);
+  }
+  return texture;
+}
+
+export interface FacePaintOverlayHandle {
+  /** Parent this under the character's head, alongside the base face patch. */
+  readonly mesh: Mesh;
+  /** Swaps the design, or hides the paint entirely for `null` ("wash off"). */
+  setDesign(design: FacePaintDesign | null): void;
+}
+
+/**
+ * A second, transparent decal patch worn over a face patch of the given
+ * `radius` — the face-paint decoration layer.
+ *
+ * Built from the same curved geometry as {@link createFacePatch} so it wraps
+ * the skull identically, at a hair larger a radius (`× 1.02` against the base
+ * patch's `× 1.012`) purely to win the z-fight, and a higher `renderOrder` so
+ * it always draws after — and therefore over — whatever expression is showing.
+ */
+export function createFacePaintOverlay(radius: number, options: { spreadX?: number; spreadY?: number; tilt?: number; size?: number } = {}): FacePaintOverlayHandle {
+  const { spreadX = 1.7, spreadY = 1.7, tilt = 0.1, size = 512 } = options;
+  const material = toonMaterial(0xffffff, { map: facePaintOverlayTexture('butterfly', size), transparent: true });
+  material.alphaTest = 0.02;
+  const mesh = decal(new Mesh(facePatchGeometry(radius * 1.02, spreadX, spreadY, tilt), material));
+  mesh.name = 'facePaintOverlay';
+  mesh.renderOrder = 3;
+  mesh.visible = false;
+
+  return {
+    mesh,
+    setDesign(design: FacePaintDesign | null) {
+      if (!design) {
+        mesh.visible = false;
+        return;
+      }
+      material.map = facePaintOverlayTexture(design, size);
+      material.needsUpdate = true;
+      mesh.visible = true;
     },
   };
 }

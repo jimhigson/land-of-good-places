@@ -20,6 +20,10 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
+// Face painting stall (additive — see FacePaintStall.ts's own file-ownership
+// note). Not a mini-game, so it is wired in here rather than through
+// `minigames/`.
+import { FacePaintStall } from './FacePaintStall';
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -50,6 +54,8 @@ export class World implements GameSystem {
   readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
+  /** The face-painting stall (additive). See `FacePaintStall.ts`. */
+  readonly facePaintStall: FacePaintStall;
 
   constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
@@ -113,6 +119,14 @@ export class World implements GameSystem {
       this.scenery.climbableTrees,
     );
 
+    // The face-painting stall (additive): registers its own position with the
+    // NPC wander graph's face-paint block as it builds itself, so it must come
+    // after `npcs` above only in the sense that "after" makes the intent
+    // clearer to read — `wanderDriver.ts`'s registry works whichever order
+    // these two are constructed in, since every `WanderDriver` reads the same
+    // module-level target on its own next update.
+    this.facePaintStall = new FacePaintStall(this.collision);
+
     scene.add(
       this.garden.group,
       this.scenery.group,
@@ -127,6 +141,7 @@ export class World implements GameSystem {
       this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
+      this.facePaintStall.group,
       this.train.group,
     );
   }
@@ -159,6 +174,7 @@ export class World implements GameSystem {
 
     this.npcs.update(context);
     this.stalls.update(context);
+    this.facePaintStall.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
   }
@@ -173,6 +189,7 @@ export class World implements GameSystem {
     return [
       ...this.building.interactZones(),
       ...this.stalls.interactZones(),
+      ...this.facePaintStall.interactZones(),
       ...this.train.interactZones(),
       ...this.flowers.interactZones(),
     ];
@@ -187,15 +204,18 @@ export class World implements GameSystem {
    * needing to know that chain of ownership.
    */
   signZones(): SignZone[] {
-    return collectSignZones(this.anchorPlots.group);
+    return [...collectSignZones(this.anchorPlots.group), ...this.facePaintStall.signZones()];
   }
 
   /**
-   * Gives the building the player. Must be called once, after the player is
-   * constructed — it installs the ground sampler that makes floors walkable.
+   * Gives the building — and the face-painting stall — the player. Must be
+   * called once, after the player is constructed: the building installs the
+   * ground sampler that makes floors walkable, and the stall hangs the paint
+   * overlay mesh on the player's actual head (see `FacePaintStall.attachPlayer`).
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
+    this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
   }
 
@@ -204,6 +224,7 @@ export class World implements GameSystem {
     this.fairyLights.dispose();
     this.lampPosts.dispose();
     this.stalls.dispose();
+    this.facePaintStall.dispose();
     this.train.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
