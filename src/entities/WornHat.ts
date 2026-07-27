@@ -30,15 +30,26 @@ export class WornHat implements GameSystem {
 
   private readonly anchor: Group;
   private readonly unsubscribe: () => void;
+  private readonly onWornChange: ((worn: boolean) => void) | null;
 
   private mesh: Group | null = null;
   private currentUid: string | null = null;
   private currentHeight: number | null = null;
   private pop = 1;
+  /** The last value {@link onWornChange} was told. See {@link update}. */
+  private notifiedWorn = false;
 
-  /** `anchor` is the character's `hatAnchor`. */
-  constructor(anchor: Group) {
+  /**
+   * `anchor` is the character's `hatAnchor`.
+   *
+   * `onWornChange` is told whenever a hat appears or disappears, so the model
+   * can tuck away hair that would spear straight through one — see
+   * `art/models/hair.ts`. Optional, because a hat worn on a character with no
+   * hair opinions (a display stand, a future NPC) needs no such courtesy.
+   */
+  constructor(anchor: Group, onWornChange?: (worn: boolean) => void) {
     this.anchor = anchor;
+    this.onWornChange = onWornChange ?? null;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
   }
 
@@ -53,6 +64,20 @@ export class WornHat implements GameSystem {
   }
 
   update({ dt }: FrameContext): void {
+    // Deliberately here, and deliberately derived from `this.mesh` rather than
+    // fired from inside `sync`: `sync` has several early returns (an item that
+    // has gone from the inventory, a catalogue entry that no longer exists),
+    // and it is about to be rewritten by the backpack "wear this" route, which
+    // will put hats on and take them off far more often than the character
+    // creator ever did. A one-boolean-compare-per-frame edge detector cannot
+    // be broken by any of that; a notification threaded through five exit
+    // paths in somebody else's file certainly can.
+    const worn = this.mesh !== null;
+    if (worn !== this.notifiedWorn) {
+      this.notifiedWorn = worn;
+      this.onWornChange?.(worn);
+    }
+
     if (!this.mesh || this.pop >= 1) return;
     this.pop = clamp01(this.pop + dt / POP_SECONDS);
     // Same overshoot-then-settle pop every purchase and pick uses.

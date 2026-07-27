@@ -112,7 +112,9 @@ export class Game {
     // The hat chosen (or granted free) in the character creator — see
     // `entities/WornHat.ts`. Same store-subscriber shape as `wornFlower`
     // above, parented to the head instead of the hairline.
-    this.wornHat = new WornHat(this.player.model.hatAnchor);
+    this.wornHat = new WornHat(this.player.model.hatAnchor, (worn) =>
+      this.player.model.setHatWorn(worn),
+    );
     this.addSystem(this.wornHat);
     // So the name label can size itself off whatever hat is actually worn —
     // see `Player.labelTopHeight`.
