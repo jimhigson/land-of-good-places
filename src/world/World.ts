@@ -220,6 +220,9 @@ export class World implements GameSystem {
     this.building.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
+    // Lets the crowd push gently apart from the player instead of walking
+    // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
+    this.npcs.attachPlayer(player);
 
     const groundBeforeFountain = player.groundSampler;
     player.groundSampler = (x, z, y) =>

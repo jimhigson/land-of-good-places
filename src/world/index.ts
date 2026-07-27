@@ -8,6 +8,7 @@ export { terrainHeight, terrainNormal, groundPoint } from './terrain';
 export { distanceToPath, isOnPath } from './paths';
 export { pickInteractZone, ZONE_HEIGHT_TOLERANCE, type InteractZone } from './interact';
 export { TreeClimbing } from './TreeClimbing';
+export { FoliageFade } from './FoliageFade';
 export { type ClimbableTreeSeed } from './Scenery';
 export {
   EGG_PRIZES,
