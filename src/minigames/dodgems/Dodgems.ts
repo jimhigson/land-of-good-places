@@ -68,6 +68,22 @@ const RESULT_TIMEOUT = 11;
 
 /** Push while the go button is held, m/s². */
 const THRUST = 13;
+/**
+ * Thrust for the gentlest ask that still counts as one, as a fraction of full.
+ *
+ * The player's push is scaled by how far the stick or thumb is pushed, so a
+ * gentle push really is a gentle drive — but not scaled all the way down to
+ * nothing. A thumb a hair past the dead-zone, or a child resting a thumb while
+ * leaning on the go button, would otherwise ask for ~2% thrust and the car
+ * would sit there looking broken. From here to full is the analogue range: it
+ * settles at about 2.2 m/s against 3.8 m/s flat out, so half speed for a
+ * feather-touch, which is a difference a child can feel and steer by.
+ *
+ * Only ever reached by a genuinely analogue control. Keys and the d-pad are
+ * all-or-nothing and hand in a full-length direction, so they get full thrust,
+ * as does the go button pressed with no direction at all.
+ */
+const GENTLEST_PUSH = 0.4;
 /** Everything on this floor slides to a stop eventually. */
 const DRAG = 1.65;
 /** Cruising speed under power. Rivals get less. */
@@ -79,10 +95,16 @@ const SPEED_LIMIT = 13;
  * How fast a car swings its nose round to face the way it is **already**
  * travelling, rad/s. Snappy: this is not a lorry.
  *
- * Purely cosmetic, and deliberately so — see the CONTROL RULE note on
- * {@link Dodgems.driveCars}. Nothing about where the car goes is downstream of
- * this number; turn it to zero and the car would drive exactly the same line
- * sideways. It only decides how quickly the model catches up.
+ * All but cosmetic, and deliberately so — see the CONTROL RULE note on
+ * {@link Dodgems.driveCars}. No *steering* is downstream of it: while a
+ * direction is being asked for, the car drives that way whatever its nose is
+ * doing, and this number only decides how quickly the model catches up.
+ *
+ * The one exception, and the reason this is "all but" rather than "purely":
+ * the go-button-with-no-direction branch drives along `car.yaw`, so at zero
+ * the nose would never catch up with anything and that branch would drive the
+ * spawn heading for ever. It is also the divisor for `car.turn`, the lean
+ * signal, which would be undefined at zero.
  */
 const TURN_RATE = 5.2;
 
@@ -450,6 +472,11 @@ class Dodgems implements MiniGame {
    *   fixed compass direction, so the car turned until it faced screen-left
    *   and then stopped — an angle clamp, from a child's point of view. There
    *   is no target angle here to be clamped at.
+   *
+   * **How hard, as well as which way.** The player's push is scaled by how far
+   * the stick or thumb is deflected, floored at {@link GENTLEST_PUSH} — a nudge
+   * is a potter, full lock is flat out. Only the player: a rival's ask is
+   * metres to wherever it is going, which says nothing about speed.
    */
   private driveCars(dt: number, playerGo: boolean, steerX: number, steerY: number): void {
     for (const car of this.cars) {
@@ -471,16 +498,28 @@ class Dodgems implements MiniGame {
         going = true;
       }
 
-      // Reduce the ask to a pure direction: a rival two metres from its target
-      // and a rival twenty metres from it are both simply "that way", and a
-      // thumb barely off centre still asks for a whole direction, just gently
-      // (`steering.ts` already scales its own magnitude before we see it).
+      // Split the ask into a pure direction and, for the player only, how hard
+      // it was asked for.
+      //
+      // The direction is all a rival's ask has to say: two metres from its
+      // target and twenty metres from it are both simply "that way", so its
+      // length is metres and gets normalised away.
+      //
+      // The player's length is not metres, it is how far the stick or thumb is
+      // pushed (`steering.ts` clips it to a unit circle, so a diagonal is a
+      // diagonal), and throwing that away would make every deflection past the
+      // dead-zone full throttle. It is kept, floored at {@link GENTLEST_PUSH}
+      // so the gentlest ask still drives, and used to scale the push below.
       let driveX = 0;
       let driveZ = 0;
+      let throttle = 1;
       const wantLength = Math.hypot(wantX, wantZ);
       if (wantLength > 0.001) {
         driveX = wantX / wantLength;
         driveZ = wantZ / wantLength;
+        if (car.isPlayer) {
+          throttle = GENTLEST_PUSH + (1 - GENTLEST_PUSH) * Math.min(1, wantLength);
+        }
       } else if (going) {
         // Go pressed with nothing else said — a child who only ever holds the
         // button, or a thumb parked dead centre. Carry on the way the car is
@@ -501,8 +540,8 @@ class Dodgems implements MiniGame {
         // sluggishness this rework is here to delete.
         const along = car.vx * driveX + car.vz * driveZ;
         const room = clamp01(1 - along / car.topSpeed);
-        car.vx += driveX * THRUST * room * dt;
-        car.vz += driveZ * THRUST * room * dt;
+        car.vx += driveX * THRUST * throttle * room * dt;
+        car.vz += driveZ * THRUST * throttle * room * dt;
       }
 
       car.vx -= car.vx * DRAG * dt;
