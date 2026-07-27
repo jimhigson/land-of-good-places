@@ -9,6 +9,6 @@ export { playLiftDing, playOpenChime, playPurchaseChime, playSurpriseChime } fro
 export { NameLabel } from './NameLabel';
 export { TouchControls } from './TouchControls';
 export { WhatsNew, type WhatsNewEntry } from './WhatsNew';
-export { UpdateToast } from './UpdateToast';
+export { UpdateGate } from './UpdateGate';
 export { TapBurst } from './TapBurst';
 export { LiftPanel } from './LiftPanel';

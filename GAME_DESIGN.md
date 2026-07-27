@@ -230,7 +230,7 @@ replan (Decision 4), which moves everything and adds a railway the player
 must never route across. It must also handle "no route exists" gracefully —
 walk as close as possible and stop, never freeze or jitter.*
 
-### Updates are not optional (27 July 2026 — queued)
+### Updates are not optional (27 July 2026 — built)
 
 **A new version must be unskippable.** The notification becomes **full
 screen**, with **only one option: go to the new version**. No dismiss, no
@@ -243,6 +243,9 @@ supersedes that fix). Practically: `vite-plugin-pwa` is configured with
 render. Make the single button reload into the new version, and make sure a
 child cannot get behind it — no Escape, no click-outside, no focus escape. It
 should look like a friendly part of the game, not a browser error.*
+
+*Built: `ui/UpdateGate.ts` replaces `ui/UpdateToast.ts`. The toast-covering-
+the-character-creation-controls bug is superseded and closed with it.*
 
 ### The top bar takes too much space (27 July 2026 — queued)
 

@@ -186,13 +186,8 @@ Slot in whenever an agent is free; none of these block anything.
   It is the best style in the set and the one a child cannot see before
   choosing it. Re-tune `VIEW_DIRECTION` or the turntable range for that style
   (deliberately — the preview framing was tuned by item 1.7/1.8).
-- **Updates are unskippable** — full-screen notification, one button, no way
-  to decline. Supersedes the toast-covering-controls item below.
 - **"Collect", not "Buy"** — money is meaningless outside Mayhem mode. One
   place decides the word, so Mayhem can flip it back later.
-- **The update toast covers the controls.** "A new version of the park is
-  ready!" sits over the character-creation card, obstructing the hair-style
-  row. Pre-existing, and a real obstruction in production, not just in dev.
 - **Balloon strings allocate every frame** (found by the hair agent, belongs on
   the GC suspect list): `BalloonString.rebuildGeometry` allocates a fresh
   `CatmullRomCurve3` and `TubeGeometry` per balloon per frame. The fix is the
