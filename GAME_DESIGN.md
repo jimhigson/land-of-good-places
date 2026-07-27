@@ -720,6 +720,14 @@ Rough order of construction, each step playable:
     - **Tapping stairs simply ascends or descends** — no Climb/Descend menu
       to choose from, just tap and go the way the stairs lead. (Same
       tap-and-go spirit as the trampolines in 31g.)
+    - **On keyboard, simply WALKING ONTO the stairs is enough** to
+      transition to the next floor — no tap, no prompt, no button. You walk
+      at the stairs and you end up on the floor above (or below). Since each
+      floor is its own space (31f), this is a transition between two models
+      rather than a climb up a physical ramp.
+    - **All stairs are STRAIGHT.** No switchbacks, no turning a corner
+      halfway up — a single straight flight, to keep it simple to read and
+      simple to walk into.
     - **Never both between the same two floors.** Between any given pair of
       floors there are stairs *or* an escalator, never both. Each connection
       is one thing.
