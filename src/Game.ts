@@ -166,6 +166,10 @@ export class Game {
     // The HUD clears the overlay when it is built, so everything else that puts
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
+    // ...including the world's own HUD. The face-painting stall owns a picker
+    // panel and a proximity hint, and `World` was built ~80 lines ago, so it
+    // could not have mounted them itself without the line above deleting them.
+    this.world.mountUi(uiRoot);
     // The collection book. Mounts its own pill into the HUD's top row and owns
     // the C key, so neither `Hud` nor the input bindings need to know about it.
     this.cuteODex = new CuteODex(uiRoot);
@@ -238,6 +242,7 @@ export class Game {
       this.input,
       () =>
         this.shopping.uiOpen ||
+        this.world.facePaintStall.uiOpen ||
         this.cuteODex.isOpen ||
         this.whatsNew.isOpen ||
         this.miniGames.frozen ||
@@ -262,6 +267,7 @@ export class Game {
     // action zones.
     this.signReader = new SignReader(uiRoot, this.player, this.world.signZones(), () =>
       this.shopping.uiOpen ||
+      this.world.facePaintStall.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.parkMap.isOpen ||
@@ -419,6 +425,7 @@ export class Game {
     } else if (
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
+      !this.world.facePaintStall.uiOpen &&
       !this.signReader.active
     ) {
       gameStore.setPaused(!gameStore.get().paused);

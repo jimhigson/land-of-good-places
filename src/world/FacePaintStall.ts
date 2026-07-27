@@ -129,7 +129,7 @@ export class FacePaintStall implements GameSystem {
   private readonly standX: number;
   private readonly standZ: number;
 
-  private readonly panel: FacePaintPanel;
+  private panel: FacePaintPanel | null = null;
   private readonly sparkles: Mesh[] = [];
   private readonly sparkleBase: { angle: number; radius: number; rise: number }[] = [];
   private readonly sparkleRng = new Rng(0xface9a17);
@@ -137,13 +137,31 @@ export class FacePaintStall implements GameSystem {
   private readonly npcDecals: FacePaintOverlayHandle[] = [];
 
   private readonly painterUpper: Group;
-  private painterSway = 0;
+  /**
+   * `FrameContext.elapsed` as of the last frame. Kept because the DOM click
+   * handlers (`pickDesign`) fire between frames and still need the clock.
+   */
+  private frameElapsed = 0;
 
   private player: Player | null = null;
   private playerOverlay: FacePaintOverlayHandle | null = null;
 
-  private paintingElapsed = -1;
-  private paintingTarget: FacePaintDesign | null = null;
+  /**
+   * `frameElapsed` when the painting moment began, or `null` when nobody is
+   * mid-paint.
+   *
+   * Deliberately an *absolute* stamp on `FrameContext.elapsed` rather than an
+   * accumulator fed by `dt`. This cutscene is the one thing in the park that
+   * runs **while the park is paused** — and it is paused by this very object
+   * (`syncPaused`), which means `Game` has already zeroed `frameContext.dt`
+   * by the time `update` is called. An accumulator therefore never advances,
+   * the cutscene never ends, and the park stays paused forever with no way
+   * out. (This was the shipped face-paint freeze.) `elapsed` keeps running at
+   * real speed through a pause on purpose — see `Game.update` — so it is the
+   * only clock here that works. `MiniGameHost` sidesteps the same trap by
+   * taking the loop's raw delta; see the comment above its `update` call.
+   */
+  private paintingStartedAt: number | null = null;
   private wasPausedByUs = false;
 
   private hint: HTMLElement | null = null;
@@ -166,14 +184,38 @@ export class FacePaintStall implements GameSystem {
     this.buildSparklePool();
 
     registerFacePaintStall(STALL_X, STALL_Z, this.standX, this.standZ);
+  }
 
-    const uiRoot = document.getElementById('ui-root') ?? document.body;
+  /**
+   * Builds the stall's HUD (the picker panel and the proximity hint) into the
+   * overlay root.
+   *
+   * **Not done in the constructor**, and this is load-bearing: `Hud`'s own
+   * constructor starts with `uiRoot.innerHTML = ''`, and `World` — and so this
+   * stall — is built well before the HUD is (see `Game`'s constructor, which
+   * spells the rule out: everything that puts DOM in the overlay has to come
+   * after the HUD). Appending from here meant the panel and hint were wiped
+   * out of the document a few lines later, so pressing interact at the stall
+   * paused the park and then showed absolutely nothing. Called by
+   * `World.mountUi`, from `Game`, at the right moment.
+   *
+   * Until it is called the stall is simply inert: it stands there and can be
+   * walked around, but cannot be used.
+   */
+  mountUi(uiRoot: HTMLElement): void {
+    if (this.panel) return;
     this.panel = new FacePaintPanel(uiRoot, {
       onPick: (design) => this.pickDesign(design),
       onWashOff: () => this.washOff(),
       onClose: () => this.closePanel(),
     });
     this.hint = buildHint(uiRoot);
+    window.addEventListener('keydown', this.onKeyDown);
+  }
+
+  /** True while the picker or the painting moment owns the screen. Mirrors `Shopping.uiOpen`. */
+  get uiOpen(): boolean {
+    return (this.panel?.isOpen ?? false) || this.paintingStartedAt !== null;
   }
 
   /** Gives the stall the player, and puts the overlay mesh on their actual head. */
@@ -215,31 +257,30 @@ export class FacePaintStall implements GameSystem {
   }
 
   update(context: FrameContext): void {
-    const { dt, elapsed, input } = context;
+    const { elapsed, input } = context;
+    this.frameElapsed = elapsed;
 
     // A gentle idle sway on the painter, whether or not anyone is nearby —
     // the same "nothing is ever quite still" rule the stall sign/awning
     // follow everywhere else in the park.
-    this.painterSway = elapsed;
     this.painterUpper.rotation.z = Math.sin(elapsed * 1.4) * 0.05;
     this.painterUpper.rotation.x = Math.sin(elapsed * 0.9) * 0.02;
 
     this.updateNpcDecals();
-
-    if (this.paintingElapsed >= 0) this.updatePaintingCutscene(dt, elapsed);
-
+    this.updatePaintingCutscene(elapsed);
     this.syncPaused();
 
-    if (!this.player) return;
+    const panel = this.panel;
+    if (!this.player || !panel) return;
 
     const dx = context.playerPosition.x - this.standX;
     const dz = context.playerPosition.z - this.standZ;
     const inRange = Math.hypot(dx, dz) <= REACH;
-    const busy = this.panel.isOpen || this.paintingElapsed >= 0;
+    const busy = this.uiOpen;
 
     setHintVisible(this.hint, inRange && !busy);
 
-    if (this.panel.isOpen) {
+    if (panel.isOpen) {
       if (input.justPressed('menu') || input.justPressed('cancel')) this.closePanel();
       return;
     }
@@ -250,50 +291,77 @@ export class FacePaintStall implements GameSystem {
   }
 
   dispose(): void {
-    this.panel.dispose();
+    window.removeEventListener('keydown', this.onKeyDown);
+    this.panel?.dispose();
     this.hint?.remove();
     disposeGroup(this.group);
   }
 
   // -------------------------------------------------------------- internals
 
+  /**
+   * Keys for the open picker.
+   *
+   * A DOM listener rather than the `InputSystem`, for the same reason
+   * `Shopping` uses one: the panel wants the *keys* (which design, which
+   * direction), not the game's action vocabulary. It only ever acts while the
+   * picker is open, so ordinary play is untouched. `FacePaintPanel.handleKey`
+   * was written for this and had nothing calling it.
+   */
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.repeat) return;
+    const panel = this.panel;
+    if (!panel?.isOpen) return;
+    if (panel.handleKey(event.code)) event.preventDefault();
+  };
+
   private openPanel(): void {
     const current = gameStore.get().player.facePaint;
-    this.panel.openWith(isFacePaintDesign(current) ? current : null);
+    this.panel?.openWith(isFacePaintDesign(current) ? current : null);
     playOpenChime();
   }
 
   private closePanel(): void {
-    this.panel.close();
+    this.panel?.close();
   }
 
   private pickDesign(design: FacePaintDesign): void {
-    this.paintingElapsed = 0;
-    this.paintingTarget = design;
+    const panel = this.panel;
+    if (!panel) return;
+    this.paintingStartedAt = this.frameElapsed;
     this.spawnSparkles();
-    this.panel.showPaintingMoment(design, () => this.finishPainting(design));
+    panel.showPaintingMoment(design, () => this.finishPainting(design));
   }
 
   private finishPainting(design: FacePaintDesign): void {
     gameStore.setFacePaint(design);
     this.playerOverlay?.setDesign(design);
+    this.panel?.setWearing(design);
     playSurpriseChime();
   }
 
   private washOff(): void {
     gameStore.setFacePaint(null);
     this.playerOverlay?.setDesign(null);
-    this.panel.close();
+    this.panel?.close();
     playOpenChime();
   }
 
-  /** Painter leans in over the counter and a few sparkles rise, in world space. */
-  private updatePaintingCutscene(dt: number, elapsed: number): void {
-    this.paintingElapsed += dt;
-    const t = Math.min(1, this.paintingElapsed / PAINTING_DURATION);
+  /**
+   * Painter leans in over the counter and a few sparkles rise, in world space.
+   *
+   * Driven off the absolute `elapsed` clock (see `paintingStartedAt`), so it
+   * still finishes while the park is paused — which it always is, because this
+   * object pauses it.
+   */
+  private updatePaintingCutscene(elapsed: number): void {
+    const startedAt = this.paintingStartedAt;
+    if (startedAt === null) return;
+
+    const t = Math.min(1, (elapsed - startedAt) / PAINTING_DURATION);
     // Ease in, hold, ease out: lean forward for the first half, back for the second.
     const lean = t < 0.5 ? t * 2 : (1 - t) * 2;
-    this.painterUpper.rotation.x = Math.sin(this.painterSway * 0.9) * 0.02 + lean * 0.4;
+    this.painterUpper.rotation.x = Math.sin(elapsed * 0.9) * 0.02 + lean * 0.4;
     this.painterUpper.position.z = lean * 0.22;
 
     for (let i = 0; i < this.sparkles.length; i += 1) {
@@ -302,8 +370,8 @@ export class FacePaintStall implements GameSystem {
       if (!sparkle || !base) continue;
       const phase = Math.min(1, t + i * 0.05);
       const rise = phase * base.rise;
-      const fade = Math.sin(Math.min(1, phase) * Math.PI);
-      sparkle.visible = fade > 0.02 && this.paintingTarget !== null;
+      const fade = Math.sin(phase * Math.PI);
+      sparkle.visible = fade > 0.02;
       sparkle.position.set(Math.cos(base.angle) * base.radius, 1.55 + rise, Math.sin(base.angle) * base.radius);
       sparkle.scale.setScalar(0.4 + fade * 0.9);
       sparkle.rotation.y = elapsed * 3 + base.angle;
@@ -311,9 +379,9 @@ export class FacePaintStall implements GameSystem {
       material.opacity = fade;
     }
 
-    if (this.paintingElapsed >= PAINTING_DURATION) {
-      this.paintingElapsed = -1;
-      this.paintingTarget = null;
+    if (t >= 1) {
+      this.paintingStartedAt = null;
+      this.painterUpper.position.z = 0;
       for (const sparkle of this.sparkles) sparkle.visible = false;
     }
   }
@@ -338,7 +406,7 @@ export class FacePaintStall implements GameSystem {
 
   /** Mirrors `Shopping.syncPaused` — re-derived from `uiOpen` every frame. */
   private syncPaused(): void {
-    const uiOpen = this.panel.isOpen || this.paintingElapsed >= 0;
+    const { uiOpen } = this;
     if (uiOpen) {
       if (!gameStore.get().paused) {
         this.wasPausedByUs = true;
