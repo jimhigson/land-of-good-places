@@ -86,10 +86,11 @@ export class CuteODex {
       this.button.blur();
       this.toggle();
     });
-    // Slot into the HUD's own top row so it sits with the other pills and wraps
-    // with them on a phone. Falling back to the container keeps this working if
-    // the HUD is ever restructured.
-    (container.querySelector('.hud-row') ?? container).append(this.button);
+    // Slot into the HUD's menu drawer so it sits with the other pills behind
+    // the one menu button (GAME_DESIGN.md, "The top bar takes too much
+    // space"). Falling back to the container keeps this working if the HUD is
+    // ever restructured again.
+    (container.querySelector('.hud-menu-items') ?? container).append(this.button);
 
     // --- the book ---------------------------------------------------------
     this.root = document.createElement('div');

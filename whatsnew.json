@@ -2,8 +2,14 @@
   "_comment": "CONTRIBUTING (for future agents / the Overseer): this file feeds the 'What's new' welcome panel (src/ui/WhatsNew.ts). When you merge a feature a player would actually notice, append ONE entry to the front of `entries` (highest id, newest first) — do not edit or remove old entries, they are history for a returning player who missed a while. Bump `id` by 1 from the current highest. Keep the voice kid-friendly (Eleri is 6): short, one line, plain words, exclamation marks welcome, emoji that matches the thing. Schema per entry: { id: number, emoji: string, title: string, line: string }.",
   "entries": [
     {
+      "id": 13,
+      "emoji": "\ud83e\uddf9",
+      "title": "A Tidier Screen",
+      "line": "All the buttons at the top now hide behind one Menu button, so you can see more of the park!"
+    },
+    {
       "id": 12,
-      "emoji": "🛗",
+      "emoji": "\ud83d\uded7",
       "title": "The Lift Has Buttons!",
       "line": "Stand by the glass lift and a proper lift panel pops up \u2014 press the big button, hop in, then press the floor you want!"
     },

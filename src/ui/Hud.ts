@@ -2,20 +2,51 @@ import { gameStore, type GameState } from '../state';
 import { isTouchDevice } from '../core/device';
 
 /**
- * The on-screen overlay: park name, clock, purse, and the control hints.
+ * The on-screen overlay: one menu button, the things behind it, and the
+ * control hints.
  *
  * Plain DOM on top of the canvas rather than in-world geometry — it is crisp at
  * every resolution, costs nothing to render, and a six-year-old's tablet can
  * still read it. Styling lives in `src/style.css`.
  *
  * The HUD is a *subscriber*: it never reaches into game systems, it just reacts
- * to the store. Per-frame values that are too noisy for the store (the clock
- * face, the FPS counter) come in through {@link setClock} and {@link setFps}.
+ * to the store. Per-frame values that are too noisy for the store (the FPS
+ * counter) come in through {@link setFps}.
+ *
+ * ## The menu (GAME_DESIGN.md, "The top bar takes too much space")
+ *
+ * The family: *"All the buttons at the top take up too much space. Hide them
+ * behind a single menu button that expands to show them. The clock icon isn't
+ * even useful so remove it entirely."*
+ *
+ * So the top-left is now **one** button. Pressing it drops the park name, the
+ * purse, the backpack, the Cute-o-dex and the map out underneath it; pressing
+ * it again, pressing any of them, or touching anything else puts them away.
+ * The clock is **gone** — not moved in here, deleted, along with
+ * `Hud.setClock` and its call site. The day/night cycle itself is untouched;
+ * `DayNight.formatClock()` survives for the debug line and for whatever wants
+ * it later.
+ *
+ * **The menu owns no game state at all** — no pause, no input capture, no
+ * `uiOpen`. That is deliberate, and it is the lesson of the backpack bug that
+ * once left taps, hops and the camera dead after a panel closed: the fix there
+ * was `Shopping.syncPaused` re-deriving pause from `uiOpen` every frame rather
+ * than toggling it at each call site, and the same principle taken one step
+ * further says a dropdown that pauses nothing cannot leave anything paused.
+ * The one flag it does own, {@link menuOpen}, is written to the DOM in exactly
+ * one place ({@link applyMenu}) so the button, its `aria-expanded` and the
+ * panel can never disagree either.
+ *
+ * The panel is `visibility: hidden` when closed, not merely transparent, so
+ * the pills inside it — which carry `pointer-events: auto` of their own —
+ * cannot swallow a tap meant for the park.
  */
 export class Hud {
   private readonly root: HTMLElement;
+  private readonly menu: HTMLElement;
+  private readonly menuButton: HTMLButtonElement;
+  private readonly menuItems: HTMLElement;
   private readonly parkPill: HTMLElement;
-  private readonly clockPill: HTMLElement;
   private readonly moneyPill: HTMLElement;
   private readonly padPill: HTMLElement;
   private readonly debugPill: HTMLElement;
@@ -25,9 +56,8 @@ export class Hud {
   private readonly keyHint: HTMLElement;
 
   private readonly unsubscribe: () => void;
-  private clockText = '--:--';
-  private dayText = '';
   private fps = 60;
+  private menuOpen = false;
   private backpackHandler: (() => void) | null = null;
   private promptText: string | null = null;
   private hintOpen = false;
@@ -37,10 +67,47 @@ export class Hud {
     this.root.innerHTML = '';
 
     const top = document.createElement('div');
-    top.className = 'hud-row';
+    top.className = 'hud-bar';
+
+    // One button, and everything else tucked behind it.
+    this.menu = document.createElement('div');
+    this.menu.className = 'hud-menu';
+    this.menu.dataset.open = 'false';
+
+    this.menuButton = document.createElement('button');
+    this.menuButton.type = 'button';
+    // A real `<button>`, so GAME_DESIGN.md's HIGHLIGHT RULE covers it for
+    // nothing: the rainbow hover/focus outline and pointer cursor come from
+    // the global rule in `style.css`, and the activation flash from the
+    // delegated listener in `ui/TapBurst.ts`.
+    this.menuButton.className = 'pill pill--menu is-new';
+    this.menuButton.setAttribute('aria-controls', 'hud-menu-items');
+    this.menuButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      // Deliberately NOT blurred, unlike the pills that open a panel: this one
+      // is a toggle, and a keyboard player has to be able to press it again to
+      // put the menu away. A tap leaves no visible ring — `:focus-visible`
+      // only lights up for keyboard focus.
+      this.setMenuOpen(!this.menuOpen);
+    });
+    this.menuButton.addEventListener(
+      'animationend',
+      () => this.menuButton.classList.remove('is-new'),
+      { once: true },
+    );
+
+    // Carries `hud-row` as well as its own class so it keeps the pill spacing
+    // the top row always had — and `hud-menu-items` is what `CuteODex` and
+    // `ParkMap` look for when they mount their own pills, so a panel that
+    // wants a pill in the menu says so by name rather than by position.
+    this.menuItems = document.createElement('div');
+    this.menuItems.className = 'hud-row hud-menu-items';
+    this.menuItems.id = 'hud-menu-items';
+    // Choosing something is also "I am done with the menu". Delegated, so the
+    // pills mounted later by other panels are covered without them knowing.
+    this.menuItems.addEventListener('click', () => this.setMenuOpen(false));
 
     this.parkPill = pill('pill pill--park');
-    this.clockPill = pill('pill pill--clock');
     this.moneyPill = pill('pill pill--money');
 
     // The backpack is the one HUD element you can press. It is a real button so
@@ -55,7 +122,10 @@ export class Hud {
       this.backpackHandler?.();
     });
 
-    top.append(this.parkPill, this.clockPill, this.moneyPill, this.backpackButton);
+    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton);
+    this.menu.append(this.menuButton, this.menuItems);
+    top.append(this.menu);
+    this.applyMenu();
 
     const bottom = document.createElement('div');
     bottom.className = 'hud-row bottom';
@@ -123,14 +193,6 @@ export class Hud {
     this.unsubscribe = gameStore.subscribe((state) => this.render(state));
   }
 
-  /** Called every frame with the in-game time, e.g. "14:35". */
-  setClock(text: string, dayCount: number): void {
-    if (text === this.clockText && this.dayText === dayLabel(dayCount)) return;
-    this.clockText = text;
-    this.dayText = dayLabel(dayCount);
-    this.render(gameStore.get());
-  }
-
   setFps(fps: number): void {
     this.fps = fps;
   }
@@ -177,6 +239,28 @@ export class Hud {
 
   // -------------------------------------------------------------- internals
 
+  /**
+   * Opens or closes the menu.
+   *
+   * Nothing else in the game is told, because nothing else in the game needs
+   * to know: the menu pauses nothing, captures no keys and blocks no taps.
+   */
+  private setMenuOpen(open: boolean): void {
+    if (this.menuOpen === open) return;
+    this.menuOpen = open;
+    this.applyMenu();
+  }
+
+  /** The single place the menu's one flag reaches the DOM. */
+  private applyMenu(): void {
+    this.menu.dataset.open = this.menuOpen ? 'true' : 'false';
+    this.menuButton.setAttribute('aria-expanded', this.menuOpen ? 'true' : 'false');
+    this.menuButton.setAttribute('aria-label', this.menuOpen ? 'Close the menu' : 'Open the menu');
+    this.menuButton.innerHTML =
+      `<span class="emoji">${this.menuOpen ? '✕' : '☰'}</span><span>Menu</span>`;
+    if (this.menuOpen) this.menuButton.classList.remove('is-new');
+  }
+
   /** Shows or hides the controls hint panel, keeping the toggle's a11y state in step. */
   private setHintOpen(open: boolean): void {
     if (this.hintOpen === open) return;
@@ -188,18 +272,22 @@ export class Hud {
   }
 
   private readonly onOutsidePointerDown = (event: PointerEvent): void => {
-    if (!this.hintOpen) return;
     const target = event.target as Node | null;
-    if (target && (this.hintToggle.contains(target) || this.keyHint.contains(target))) return;
-    this.setHintOpen(false);
+
+    if (this.hintOpen && !(target && (this.hintToggle.contains(target) || this.keyHint.contains(target)))) {
+      this.setHintOpen(false);
+    }
+
+    // Same rule for the menu, and the same reason this listener does not stop
+    // or prevent the event: the tap that puts the menu away is also the tap
+    // that walks the character, which is what "get out of the way" means.
+    if (this.menuOpen && !(target && (this.menuButton.contains(target) || this.menuItems.contains(target)))) {
+      this.setMenuOpen(false);
+    }
   };
 
   private render(state: GameState): void {
     this.parkPill.innerHTML = `<span class="emoji">🎠</span><span>${escapeHtml(state.parkName)}</span>`;
-
-    const icon = state.world.lightsOn ? '🌙' : '☀️';
-    this.clockPill.innerHTML =
-      `<span class="emoji">${icon}</span><span>${this.clockText}${this.dayText}</span>`;
 
     // Money only means anything once it can run out (mayhem mode) — in normal
     // mode there is no number worth showing, so the pill is hidden entirely
@@ -219,10 +307,6 @@ function pill(className: string): HTMLElement {
   const element = document.createElement('div');
   element.className = className;
   return element;
-}
-
-function dayLabel(dayCount: number): string {
-  return dayCount > 0 ? ` · day ${dayCount + 1}` : '';
 }
 
 function escapeHtml(text: string): string {

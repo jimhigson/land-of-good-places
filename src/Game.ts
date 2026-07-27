@@ -626,13 +626,17 @@ export class Game {
   }
 
   private updateHud(tick: LoopTick): void {
-    this.hud.setClock(this.world.dayNight.formatClock(), gameStore.get().world.dayCount);
     this.hud.setFps(tick.fps);
     this.hud.setGamepadConnected(this.input.gamepadConnected);
     // Nothing to hop or turn while a slide has hold of you, and the buttons sit
     // right where the view of the ride is.
     this.touchControls?.setVisible(!this.player.riding);
     this.hud.updateDebug([
+      // The park clock lives here now rather than in a pill of its own: the
+      // family had the clock removed from the HUD entirely (GAME_DESIGN.md,
+      // "The top bar takes too much space"), but a grown-up debugging the
+      // day/night cycle still wants to see it.
+      `${this.world.dayNight.formatClock()} day ${gameStore.get().world.dayCount + 1}`,
       `x ${this.player.position.x.toFixed(1)} z ${this.player.position.z.toFixed(1)}`,
       `zoom ${this.camera.zoom.toFixed(2)}`,
       `night ${this.world.dayNight.nightFactor.toFixed(2)}`,
