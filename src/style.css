@@ -235,11 +235,6 @@ kbd {
   pointer-events: none;
 }
 
-.touch-row {
-  display: flex;
-  gap: 10px;
-}
-
 .touch-btn {
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
@@ -267,17 +262,6 @@ kbd {
   box-shadow: 0 1px 0 rgba(74, 58, 82, 0.22);
 }
 
-.touch-btn--turn {
-  width: 56px;
-  height: 56px;
-  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 160%);
-}
-
-.touch-btn--turn .touch-glyph {
-  font-size: 26px;
-  line-height: 1;
-}
-
 .touch-btn--hop {
   width: 88px;
   height: 88px;
@@ -303,11 +287,6 @@ kbd {
   .touch-btn--hop {
     width: 74px;
     height: 74px;
-  }
-
-  .touch-btn--turn {
-    width: 48px;
-    height: 48px;
   }
 }
 

@@ -30,9 +30,10 @@ export interface AnchorDefinition {
   /**
    * Yaw in radians the sign faces. 0 looks down +Z.
    *
-   * These all sit near +45°, which is where the default isometric camera looks
-   * from — a sign a child cannot read without rotating the view is no use.
-   * Small per-anchor variation stops them looking like a row of billboards.
+   * These all sit near +45°, which is the one fixed angle the camera ever
+   * looks from (ARCHITECTURE.md, "One camera angle, forever") — a sign facing
+   * any other way is one a child simply cannot read. Small per-anchor
+   * variation stops them looking like a row of billboards.
    */
   readonly signYaw: number;
   readonly signTitle: string;
