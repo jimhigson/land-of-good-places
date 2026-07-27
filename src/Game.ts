@@ -7,6 +7,8 @@ import { isTouchDevice } from './core/device';
 import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World } from './world';
+import { Highlights } from './world/Highlights';
+import type { InteractZone } from './world/interact';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
@@ -52,6 +54,7 @@ export class Game {
   readonly foliageFade: FoliageFade;
   readonly signReader: SignReader;
   readonly actionButton: ActionButton;
+  readonly highlights: Highlights;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly parade: Parade;
@@ -75,6 +78,9 @@ export class Game {
   /** Game time, accumulated at `timeScale`, for every animation phase. */
   private elapsed = 0;
   private stairMenuDeck = 0;
+  /** Per-frame memo for {@link currentZones}. -1 so the first call always builds. */
+  private zoneCacheFrame = -1;
+  private zoneCache: readonly InteractZone[] = [];
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.engine = new Engine(canvas);
@@ -135,10 +141,9 @@ export class Game {
     // the building installed. `treeClimbing` is constructed further down (it
     // needs the HUD), but this closure only reads it once play starts, by
     // which point construction has finished.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () => [
-      ...this.world.interactZones(),
-      ...this.treeClimbing.interactZones(),
-    ]);
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () =>
+      this.currentZones(),
+    );
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {
@@ -161,6 +166,14 @@ export class Game {
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
+      // The mouse half of the HIGHLIGHT RULE. Mouse-only, and the highlight
+      // system does the picking on the next frame rather than here, so a mouse
+      // waggled about cannot cost more than one ray a frame. `highlights` is
+      // built further down; the closure only runs once play has started.
+      onHover: (point) => {
+        if (point) this.highlights.setCursor(point.ndcX, point.ndcY);
+        else this.highlights.clearCursor();
+      },
     });
 
     // The HUD clears the overlay when it is built, so everything else that puts
@@ -238,15 +251,9 @@ export class Game {
     this.actionButton = new ActionButton(
       uiRoot,
       this.player,
-      () => [...this.world.interactZones(), ...this.treeClimbing.interactZones()],
+      () => this.currentZones(),
       this.input,
-      () =>
-        this.shopping.uiOpen ||
-        this.world.facePaintStall.uiOpen ||
-        this.cuteODex.isOpen ||
-        this.whatsNew.isOpen ||
-        this.miniGames.frozen ||
-        this.player.riding,
+      () => this.uiOwnsTheScreen(),
     );
     this.addSystem(this.actionButton);
 
@@ -265,17 +272,35 @@ export class Game {
     // since the sign is passive — folded in here as one more reason the sign
     // pill stays hidden, rather than by teaching `SignReader` anything about
     // action zones.
-    this.signReader = new SignReader(uiRoot, this.player, this.world.signZones(), () =>
-      this.shopping.uiOpen ||
-      this.world.facePaintStall.uiOpen ||
-      this.cuteODex.isOpen ||
-      this.whatsNew.isOpen ||
-      this.parkMap.isOpen ||
-      this.miniGames.frozen ||
-      this.player.riding ||
-      this.actionButton.active,
+    this.signReader = new SignReader(
+      uiRoot,
+      this.player,
+      this.world.signZones(),
+      () => this.uiOwnsTheScreen() || this.parkMap.isOpen || this.actionButton.active,
     );
     this.addSystem(this.signReader);
+
+    // GAME_DESIGN.md's HIGHLIGHT RULE, built once for the whole game: everything
+    // interactable is outlined in rainbow when it is about to be used — on hover
+    // for a mouse, and on whatever E would use while E is primed. See
+    // `world/Highlights.ts`; registering a tap target is all it takes to be
+    // covered by it.
+    //
+    // Registered last of the systems, and it has to be: it reads the picks
+    // `actionButton` and `signReader` have just made this frame, so an outline
+    // can never point somewhere different from the pill naming the action.
+    this.highlights = new Highlights(this.engine.scene, this.camera, {
+      zones: () => this.currentZones(),
+      primedZone: () => this.actionButton.zone,
+      primedSign: () => this.signReader.nearby,
+      blocked: () =>
+        this.uiOwnsTheScreen() ||
+        this.parkMap.isOpen ||
+        this.stairMenu.isOpen ||
+        this.signReader.active ||
+        gameStore.get().paused,
+    });
+    this.addSystem(this.highlights);
 
     this.frameContext = {
       dt: 0,
@@ -298,6 +323,42 @@ export class Game {
   /** Registers an extra per-frame system. Updated after the world, in order. */
   addSystem(system: GameSystem): void {
     this.systems.push(system);
+  }
+
+  /**
+   * Every interactable in the park this frame, built once and shared.
+   *
+   * Three systems want this list now — tap-to-move, the action button and the
+   * highlight system — and it is several hundred freshly-allocated zones,
+   * because a couple of them move (the lift, the bubble) and the flowers come
+   * and go. Building it three times a frame was pure waste; the memo is keyed on
+   * the frame counter, so everything inside one frame provably sees the same
+   * list, and a tap arriving between frames sees the most recent one.
+   */
+  private currentZones(): readonly InteractZone[] {
+    if (this.zoneCacheFrame !== this.frameContext.frame) {
+      this.zoneCacheFrame = this.frameContext.frame;
+      this.zoneCache = [...this.world.interactZones(), ...this.treeClimbing.interactZones()];
+    }
+    return this.zoneCache;
+  }
+
+  /**
+   * True while a panel, a book, a ride or a mini-game owns the screen.
+   *
+   * One definition, shared by the action button, the sign reader and the
+   * highlight system — three things that must agree about whether the park is
+   * being played right now, and used to say it three times over.
+   */
+  private uiOwnsTheScreen(): boolean {
+    return (
+      this.shopping.uiOpen ||
+      this.world.facePaintStall.uiOpen ||
+      this.cuteODex.isOpen ||
+      this.whatsNew.isOpen ||
+      this.miniGames.frozen ||
+      this.player.riding
+    );
   }
 
   /**

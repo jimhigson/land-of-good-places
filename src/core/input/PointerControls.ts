@@ -12,12 +12,16 @@
  * desktop without emulation.
  */
 
-/** A tap in normalised device coordinates, ready for a camera ray. */
-export interface TapPoint {
+/** A point on the canvas in normalised device coordinates, ready for a camera ray. */
+export interface ScreenPoint {
   /** -1 (left) .. +1 (right). */
   readonly ndcX: number;
   /** -1 (bottom) .. +1 (top). */
   readonly ndcY: number;
+}
+
+/** A tap in normalised device coordinates, ready for a camera ray. */
+export interface TapPoint extends ScreenPoint {
   /** True if this tap landed soon enough after, and close enough to, the last
    *  one to count as a double-tap — the "run there" gesture. */
   readonly doubleTap: boolean;
@@ -26,6 +30,18 @@ export interface TapPoint {
 export interface PointerControlsOptions {
   /** Fired when a press-and-release lands in the same spot, quickly enough. */
   onTap(point: TapPoint): void;
+  /**
+   * Where the **mouse** is, or `null` when it has left the canvas. Never fired
+   * for a finger or a pen: a touch has no hover state, and reporting the last
+   * place a finger happened to be would leave something outlined in rainbow
+   * long after it was let go of.
+   *
+   * This is the mouse half of GAME_DESIGN.md's HIGHLIGHT RULE — "anything
+   * clickable is outlined on hover" — and it is here rather than anywhere else
+   * because this is the one file in the game allowed to look at a
+   * `PointerEvent`.
+   */
+  onHover?(point: ScreenPoint | null): void;
   /**
    * Fired repeatedly while two fingers spread or close. `delta` is signed, in
    * the same units as `CAMERA_ZOOM_STEP`, so it can go straight to the camera.
@@ -103,6 +119,7 @@ export class PointerControls {
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
     this.canvas.addEventListener('pointercancel', this.onPointerCancel);
+    this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('dblclick', preventDefault);
     this.canvas.addEventListener('contextmenu', preventDefault);
     // Safari on iOS still fires its own pinch and double-tap zoom gestures on
@@ -120,6 +137,7 @@ export class PointerControls {
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
     this.canvas.removeEventListener('pointercancel', this.onPointerCancel);
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('dblclick', preventDefault);
     this.canvas.removeEventListener('contextmenu', preventDefault);
     for (const type of SAFARI_GESTURES) {
@@ -152,6 +170,11 @@ export class PointerControls {
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
+    // Hover is reported whether or not a button is down, and whether or not this
+    // pointer is one we are tracking for a tap — the highlight follows the mouse
+    // even while it is being dragged across the park.
+    if (event.pointerType === 'mouse') this.reportHover(event);
+
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
     pointer.x = event.clientX;
@@ -206,6 +229,23 @@ export class PointerControls {
     this.pointers.delete(event.pointerId);
     if (this.pointers.size < 2) this.pinchDistance = 0;
   };
+
+  /** The mouse has gone: over the HUD, out of the window, or off the screen. */
+  private readonly onPointerLeave = (event: PointerEvent): void => {
+    if (event.pointerType !== 'mouse') return;
+    this.options.onHover?.(null);
+  };
+
+  private reportHover(event: PointerEvent): void {
+    const hover = this.options.onHover;
+    if (!hover) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    hover({
+      ndcX: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      ndcY: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    });
+  }
 
   private currentPinchDistance(): number {
     const [first, second] = [...this.pointers.values()];

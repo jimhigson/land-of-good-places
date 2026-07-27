@@ -29,6 +29,13 @@ export interface SignZone {
   readonly height: number;
   /** The sign's own painted face, straight off its mesh's texture — see {@link findSignCanvas}. */
   readonly canvas: HTMLCanvasElement;
+  /**
+   * The board itself, so the HIGHLIGHT RULE can outline it in rainbow while
+   * "Read" is primed (see `world/Highlights.ts`). Free here — the traversal
+   * below is already holding the mesh — which is exactly why signs did not need
+   * a `highlight` field of their own the way {@link InteractZone} has one.
+   */
+  readonly object: Object3D;
 }
 
 /** Marks a mesh as an in-world, readable sign. Call once, right after building it. */
@@ -82,6 +89,7 @@ export function collectSignZones(root: Object3D): SignZone[] {
       width,
       height,
       canvas,
+      object: child,
     });
     index += 1;
   });
