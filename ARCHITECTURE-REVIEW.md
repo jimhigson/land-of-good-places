@@ -582,3 +582,45 @@ arrays each way, against a project with a standing GC-pause complaint.
 Fix is small and belongs to whoever implements Decision 3, not to this PR:
 key a small cache by space id and keep one lattice per floor. Five spaces at
 ~1.3 MB is affordable; rebuilding on every staircase is not.
+
+---
+
+## Review 5 — the save/UI hour (27 July 2026, 23:40)
+
+Ten files landed this hour across save/continue, the update gate, the wording
+switch and the HUD menu. Checked, and clean:
+
+- **The TEXT/UI-SCALE rule is machine-enforced and passing.**
+  `scripts/check-text-sizes.mjs` runs first in the build; main is green.
+- **The HIGHLIGHT rule held with no code.** Grepped the new UI modules
+  (`UpdateGate`, `LiftPanel`, `ContinueOrRestart`, `ShopPanel`,
+  `InventoryDrawer`) for hand-rolled outlines: none. Every new control is a
+  plain `<button>` and inherits the rainbow, cursor and tap flash from the one
+  global rule. That is the design working — three separate agents built UI
+  tonight and none of them had to think about it.
+- **`wording.ts` is keyed on `moneyIsFinite`, not on a mode name.** The right
+  axis: Mayhem is the reason, but affordability is the fact the copy depends
+  on, and a future mode with infinite money gets correct wording free.
+
+**F4 — two modules will be called `spaces.ts` (actionable, naming only).**
+`src/world/spaces.ts` landed this hour, owning the save file's *vocabulary of
+places*: a `SpaceId` and `localToWorld`, so a saved position is a space id plus
+a local offset rather than a raw world coordinate that Decision 3 would
+silently invalidate. That reasoning is correct and the file documents its own
+intended failure mode.
+
+But Decision 3 specifies **`src/world/building/spaces.ts`** holding a
+`SpaceManager` — the *runtime authority* on which space the player is in.
+Both will exist at once, in adjacent directories, sharing the word "space" for
+two different jobs: one is a persistence-facing name table, the other is live
+state. An `import ... from './spaces'` in `world/building/` will resolve to the
+wrong one silently, and the S1 implementer is being asked to write the second
+while the first already exists.
+
+Cheap fixes, either is fine, but pick one **before S1 starts**: rename the
+save-facing module to something that says what it is (`savedPlaces.ts`), or
+name Decision 3's authority `SpaceManager.ts` after its export. When
+`SpaceManager` lands, the save table should also **derive its origins from it**
+rather than keeping a second copy of the same coordinates — that is the
+duplication that would actually bite, as opposed to the filename, which merely
+confuses.

@@ -145,6 +145,11 @@ All of this is **thrown away** if done before 2.1.
 
 All of this is **thrown away** if done before 2.2.
 
+- 5.0 **Before S1: settle the `spaces.ts` name collision** (Review 5/F4).
+  `src/world/spaces.ts` (save-facing place names) already exists; Decision 3
+  specifies `src/world/building/spaces.ts` (`SpaceManager`, runtime authority).
+  Rename one, and have the save table derive its origins from `SpaceManager`
+  rather than keeping a second copy of the coordinates.
 - 5.1 Floors as separate spaces; traversal devices re-conceived.
   **Cache the nav lattice per space while doing this** (ARCHITECTURE-REVIEW
   Review 3/F3): `NavGrid` keeps exactly one lattice, so every floor
