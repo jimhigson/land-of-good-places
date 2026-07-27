@@ -92,6 +92,27 @@ export interface PetHandle extends CreatureHandle {
 export const PUFF_DISPLAY_NAME = 'Trilla';
 
 /** One small blob pet. Origin at the paws, facing +Z. */
+/**
+ * Every pet is rendered at the same height, whatever its natural proportions.
+ *
+ * RiPika is the reference (see `ripika.ts`) — a bunny that came out a third of
+ * his height read as a crumb on the grass next to him, and a parade of mixed
+ * sizes looked like a mistake rather than a collection. The models keep their
+ * own hand-tuned geometry; a sizer group between `root` and `body` does the
+ * matching, because `root.scale` is reserved for squash-and-stretch by the
+ * asset contract and `body.scale` is written every frame by `applyWalk`.
+ */
+const PET_RENDER_HEIGHT = 1.46;
+
+/** Wraps `body` in a group scaled so the creature stands `PET_RENDER_HEIGHT` tall. */
+function sizeToStandard(root: Group, body: Group, naturalHeight: number): void {
+  const sizer = new Group();
+  sizer.name = 'petSizer';
+  sizer.scale.setScalar(PET_RENDER_HEIGHT / naturalHeight);
+  sizer.add(body);
+  root.add(sizer);
+}
+
 export function createPet(kind: PetKind): PetHandle {
   if (kind === 'puff') {
     const puff = createPuffCreature({ variant: 'pet' });
@@ -102,7 +123,7 @@ export function createPet(kind: PetKind): PetHandle {
   const root = new Group();
   root.name = `pet.${kind}`;
   const body = new Group();
-  root.add(body);
+  sizeToStandard(root, body, 0.52);
 
   const furMat = toonMaterial(recipe.fur);
 
@@ -181,7 +202,7 @@ export function createPet(kind: PetKind): PetHandle {
     kind,
     displayName: recipe.displayName,
     limbs: null,
-    height: 0.52,
+    height: PET_RENDER_HEIGHT,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => applyWalk(null, body, phase, speed, 0.85, 0.075),
   };
@@ -296,7 +317,10 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
   const root = new Group();
   root.name = variant === 'pet' ? 'pet.puff' : 'hat.puff';
   const body = new Group();
-  root.add(body);
+  // As a pet it matches every other pet's height; as a hat it keeps the size
+  // that sits correctly on a head.
+  if (variant === 'pet') sizeToStandard(root, body, 0.5);
+  else root.add(body);
 
   const head = new Group();
   body.add(head);
@@ -348,7 +372,7 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
   const mountShift = options.mountShift ?? 0;
   root.position.y = mountShift;
   const topLocal = PUFF_CENTRE_Y + PUFF_BALL_RADIUS * 0.92 + PUFF_BALL_RADIUS * 0.35;
-  const height = variant === 'pet' ? 0.5 : topLocal + mountShift;
+  const height = variant === 'pet' ? PET_RENDER_HEIGHT : topLocal + mountShift;
 
   // ------------------------------------------------------------- singing
 
