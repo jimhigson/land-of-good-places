@@ -5,6 +5,7 @@ import { Scenery } from './Scenery';
 import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
+import { LampPosts } from './LampPosts';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building } from './building';
@@ -38,6 +39,7 @@ export class World implements GameSystem {
   readonly flowers: Flowers;
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
+  readonly lampPosts: LampPosts;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
@@ -54,6 +56,11 @@ export class World implements GameSystem {
     this.flowers = new Flowers();
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
+    // Lamp posts along the paths — the family's "night is too dark" feedback.
+    // Built after FairyLights (which rings the fountain plaza) and before
+    // AnchorPlots so it only needs the static ANCHORS list, not the built
+    // plots themselves, to keep its lamps out of the reserved ride footprints.
+    this.lampPosts = new LampPosts(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots);
@@ -81,6 +88,7 @@ export class World implements GameSystem {
       this.flowers.group,
       this.fountain.group,
       this.fairyLights.group,
+      this.lampPosts.group,
       this.anchorPlots.group,
       this.npcs.group,
       this.stalls.group,
@@ -93,11 +101,14 @@ export class World implements GameSystem {
     // Fan the time-of-day out to everything that changes with it. Systems read
     // a plain number rather than subscribing, which keeps the ordering obvious.
     const night = this.dayNight.nightFactor;
+    const eveningGlow = this.dayNight.lightsOn ? night : night * 0.25;
     this.fountain.nightFactor = night;
-    this.fairyLights.nightFactor = this.dayNight.lightsOn ? night : night * 0.25;
+    this.fairyLights.nightFactor = eveningGlow;
+    this.lampPosts.nightFactor = eveningGlow;
 
     this.fountain.update(context);
     this.fairyLights.update(context);
+    this.lampPosts.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
     this.npcs.update(context);
@@ -143,6 +154,7 @@ export class World implements GameSystem {
   dispose(): void {
     this.fountain.dispose();
     this.fairyLights.dispose();
+    this.lampPosts.dispose();
     this.stalls.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
