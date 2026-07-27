@@ -2613,20 +2613,42 @@ kbd {
   transform: translateY(0.1875rem);
 }
 
+/* A GRID, not a flex row. This was `display: flex` with `flex: 1` buttons,
+   which is fine for three styles and breaks badly at nine: a flex item will
+   not shrink below its own `min-content` width, and each of these contains an
+   unbreakable word, so the row simply refused to be narrower than all nine
+   labels laid end to end — 993px inside a 411px column. It did not clip or
+   wrap, it overflowed sideways *across the hat and pet columns*, and four of
+   the buttons ended up underneath the hat tiles: `elementFromPoint` on
+   "Swishy Pony" returned somebody else's `<span>`, so those styles could not
+   be pressed at all.
+
+   `auto-fit` + `minmax` is what `.charcreate-grid` below already does, and it
+   has the property this needs: the track floor is an explicit length, so it
+   overrides the automatic `min-content` floor that caused the overflow. The
+   row now takes as many columns as genuinely fit — three abreast in a normal
+   column, which lays nine styles out as a tidy 3x3 — and wraps instead of
+   escaping. */
 .charcreate-styles {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
   gap: 0.5rem;
 }
 
 .charcreate-style-btn {
   appearance: none;
   cursor: pointer;
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 0.125rem;
   min-height: 3.625rem;
+  /* Belt and braces with the grid track floor above: a two-word label like
+     "Swishy Pony" must wrap inside its button rather than widen it. */
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-align: center;
   padding: 0.375rem;
   font-family: inherit;
   font-size: var(--lgp-text-min);
