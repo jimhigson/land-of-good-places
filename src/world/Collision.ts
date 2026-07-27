@@ -61,18 +61,119 @@ interface WallCollider {
 const JUMP_CLEARANCE_GRACE = 0.15;
 
 /**
- * "Does a jump reaching `apexClearance` get over something this tall?"
+ * "Are a mover's feet, right now at `clearance`, above something this tall?"
  *
- * The one expression, used by all three places that ask: `resolve` (for a jump
- * already in flight), {@link CollisionWorld.wouldAutoHopClear} (for one about
- * to be fired), and `world/NavGrid.ts` (which leaves a wall the walker hops out
- * of the map entirely, because a route that detoured round it would be worse
- * than the straight line). They used to be able to drift apart; now they are
- * the same call, so "a wall the jump clears is exactly a wall the route hops"
- * is true by construction rather than by comment.
+ * A pure question about *this instant*, asked every frame by `resolve` for a
+ * jump already in flight. It says nothing whatever about whether the jump will
+ * get across — see {@link autoHopClears} for that, and read on, because
+ * conflating the two is what caused design feedback #30h.
+ */
+export function clearsTop(topHeight: number, clearance: number): boolean {
+  return clearance + JUMP_CLEARANCE_GRACE >= topHeight;
+}
+
+/**
+ * The wall top the jump's flight is *measured* to carry a mover across, in
+ * metres — the number {@link autoHopClears} enforces.
+ *
+ * ### Why this is measured and not derived
+ *
+ * `JUMP_APEX_HEIGHT` is 1.2812 m, so it is tempting (and it was, until design
+ * feedback #30h) to say "the hop clears anything up to the apex, plus a little
+ * grace" — 1.4312 m. Every step of that is wrong:
+ *
+ * 1. **The apex is never reached.** Integration is a fixed number of discrete
+ *    steps, so the sampled peak is below the algebraic one, and by a
+ *    frame-rate-dependent amount: 1.2538 m at 120 fps, 1.2267 at 60, 1.1733 at
+ *    30, and only 1.0195 at `MAX_FRAME_DELTA`.
+ * 2. **Being briefly above the top is not crossing.** `AUTO_HOP_LOOKAHEAD` is
+ *    0.5 m, so the hop fires half a metre before the blocking face and she
+ *    reaches that face only 0.41 m up. She is then *pinned against the near
+ *    face and rises in place* — the resolver holds her there and its own
+ *    velocity read-back zeroes her speed every frame — and is released only
+ *    once she is above the top. She must then cross the collider's whole
+ *    footprint, `2·(halfThickness + moverRadius)`, **from a standing start**,
+ *    before falling back below it.
+ * 3. **So the honest limit depends on the footprint**, and is far below the
+ *    apex. Measured (`scripts/measure-hop-clearance.mts`, worst case over
+ *    20–120 fps, walk and sprint, approach angles 0–40°, every phase of the
+ *    frame clock): 1.100 m across the 0.22 m-thick wooden walls, 1.045 m
+ *    across the 0.34 m stone ones, 0.879 m across a 0.60 m one. Square-on at
+ *    60 fps the stone figure is 1.176 m — the low numbers are the corners, and
+ *    the corners are what a route has to be planned for.
+ *
+ * A wall above this but below the old 1.4312 m did not merely feel bad. Either
+ * the wall went solid again underneath her mid-footprint and *ejected* her out
+ * the far side (up to 0.59 m in a single frame — the very shove
+ * `Player.update`'s escort latch exists to refuse to bank as velocity), or,
+ * from 1.34 m up, she was **never released at all**: pinned at the face,
+ * landing, auto-hopping, landing, forever. The park's 1.4 m wall at
+ * `[3,19]→[-4,20]` was exactly that, and `NavGrid` had started routing over it.
+ *
+ * 1.00 m sits below the measured limit for every wall thickness the park
+ * actually uses. It keeps every low garden wall hoppable — 0.7, 0.85 and 0.95 m,
+ * both materials, eight walls — and drops the four the flight never honestly
+ * managed: 1.15, 1.2, 1.2 and 1.25 m. {@link
+ * CollisionWorld.checkHoppableColliders} enforces at boot that no registered
+ * collider escapes the margin — including one too *fat* for it, which a bare
+ * height ceiling cannot see.
+ */
+export const MAX_AUTO_HOP_HEIGHT = 1.0;
+
+/**
+ * The apex {@link MAX_AUTO_HOP_HEIGHT} and {@link measuredHopCeiling} were
+ * measured against. If `JUMP_SPEED` or `GRAVITY` ever move, the measurement is
+ * stale and the numbers above are fiction — which
+ * {@link CollisionWorld.checkHoppableColliders} says out loud at boot rather
+ * than leaving as a comment nobody re-reads.
+ */
+export const MEASURED_HOP_APEX = 1.2812;
+
+/**
+ * The measured ceiling as a function of how far a mover must travel to cross a
+ * collider — `2·(halfThickness + moverRadius)`, its full footprint plus her own
+ * width on both sides.
+ *
+ * A straight line fitted *underneath* every measured point (see the table in
+ * {@link MAX_AUTO_HOP_HEIGHT}), so it is a lower bound on the truth everywhere,
+ * not a best fit through it: at 1.54 m of crossing it reads 1.112 against a
+ * measured 1.112, at 1.92 m it reads 0.998 against a measured 1.045, at 2.44 m
+ * it reads 0.842 against a measured 0.879.
+ *
+ * Used only by the boot check. The predicate itself stays a flat ceiling,
+ * because a route's idea of what is hoppable should not quietly change with the
+ * thickness of the wall it is looking at — but that flat ceiling is blind to a
+ * collider fat enough to fall below it, which is precisely what this catches.
+ */
+export function measuredHopCeiling(crossing: number): number {
+  return 1.574 - 0.3 * crossing;
+}
+
+/**
+ * "Can a hop actually *carry* a mover over something this tall?"
+ *
+ * The one expression, used by the two places that plan around the answer:
+ * {@link CollisionWorld.wouldAutoHopClear} (for a hop about to be fired) and
+ * `world/NavGrid.ts` (which leaves a wall the walker hops out of the map
+ * entirely, because a route that detoured round one would be worse than the
+ * straight line). They used to be able to drift apart; now they are the same
+ * call, so "a wall the auto-hop fires at is exactly a wall the route hops" is
+ * true by construction rather than by comment.
+ *
+ * Deliberately *not* the question `resolve` asks — that one is {@link
+ * clearsTop}, and a jump in flight is still governed by nothing but how high
+ * her feet actually are. So the manual jump button is completely untouched by
+ * this ceiling: press it at a 1.25 m wall and you get exactly the behaviour you
+ * got before. What changes is only that nothing *plans* on getting over one.
+ *
+ * Both terms matter. The apex term means weakening the jump automatically
+ * makes things stop being hoppable; the measured term means strengthening it
+ * does not automatically make more things hoppable, because the measurement
+ * would no longer apply — and {@link CollisionWorld.checkHoppableColliders}
+ * will say so.
  */
 export function autoHopClears(topHeight: number, apexClearance: number): boolean {
-  return apexClearance + JUMP_CLEARANCE_GRACE >= topHeight;
+  return clearsTop(topHeight, apexClearance) && topHeight <= MAX_AUTO_HOP_HEIGHT;
 }
 
 /**
@@ -367,7 +468,7 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (autoHopClears(circle.topHeight, clearance)) {
+        if (clearsTop(circle.topHeight, clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -397,7 +498,7 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (autoHopClears(wall.topHeight, clearance)) {
+        if (clearsTop(wall.topHeight, clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -476,6 +577,101 @@ export class CollisionWorld {
     }
 
     return false;
+  }
+
+  /**
+   * Boot-time check: **no registered collider may sit in the gap between "the
+   * predicate calls this hoppable" and "the flight actually carries her over
+   * it"**. Call it once, after the world has finished registering scenery.
+   *
+   * This is the point of the whole exercise. Fixing the park's 1.4 m wall fixes
+   * one wall; this makes the *class* of bug impossible, and the codebase has
+   * twice recorded (ARCHITECTURE-REVIEW.md, reviews 3 and 4) that it wants
+   * invariants the code enforces over invariants a comment claims.
+   *
+   * It catches three distinct ways in:
+   *
+   * - **Too tall for its width.** {@link autoHopClears} is a flat ceiling, but
+   *   the truth is a function of footprint — see {@link measuredHopCeiling}. A
+   *   1.0 m wall 0.4 m thick passes the predicate and strands her.
+   * - **Hoppable but endless.** An `autoHoppable` collider left at the default
+   *   `Infinity` `topHeight` is a contradiction in terms; today none exists,
+   *   but nothing stopped one.
+   * - **A stale measurement.** Change `JUMP_SPEED` or `GRAVITY` and every
+   *   number here silently becomes fiction. Compared against
+   *   {@link MEASURED_HOP_APEX} so it cannot pass unnoticed.
+   *
+   * Offenders are reported by name and position, and then **demoted to
+   * non-hoppable**, which is the one repair that cannot make things worse: a
+   * wall that is merely solid is a wall the router goes round, and going round
+   * is exactly what it did before hoppable walls were planned over. It does not
+   * move anybody's level design — a wall in the gap may well be deliberate, and
+   * the report is there to be read and decided on, not acted on automatically.
+   *
+   * Returns the human-readable complaints, so a caller (or a test) can assert
+   * on them rather than scraping the console.
+   */
+  checkHoppableColliders(moverRadius: number, apexClearance: number): string[] {
+    const problems: string[] = [];
+
+    if (Math.abs(apexClearance - MEASURED_HOP_APEX) > 0.001) {
+      problems.push(
+        `the jump apex is now ${apexClearance.toFixed(4)} m but MAX_AUTO_HOP_HEIGHT ` +
+          `and measuredHopCeiling() were measured at ${MEASURED_HOP_APEX.toFixed(4)} m — ` +
+          `re-run scripts/measure-hop-clearance.mts and update Collision.ts`,
+      );
+    }
+
+    const inspect = (topHeight: number, halfWidth: number, what: string): boolean => {
+      if (!autoHopClears(topHeight, apexClearance)) return false;
+      if (!Number.isFinite(topHeight)) {
+        problems.push(`${what} is autoHoppable but has no top at all (topHeight Infinity)`);
+        return true;
+      }
+      const crossing = 2 * (halfWidth + moverRadius);
+      const ceiling = measuredHopCeiling(crossing);
+      if (topHeight <= ceiling) return false;
+      problems.push(
+        `${what} is ${topHeight.toFixed(2)} m tall and the predicate calls it hoppable, but a ` +
+          `${crossing.toFixed(2)} m crossing is only flown reliably up to ${ceiling.toFixed(2)} m — ` +
+          `she would be stranded against it`,
+      );
+      return true;
+    };
+
+    let demoted = 0;
+    for (const circle of this.circles) {
+      if (!circle.autoHoppable) continue;
+      const where = `the hoppable circle at [${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}]`;
+      if (inspect(circle.topHeight, circle.radius, where)) {
+        circle.autoHoppable = false;
+        demoted += 1;
+      }
+    }
+    for (const wall of this.walls) {
+      if (!wall.autoHoppable) continue;
+      const where =
+        `the hoppable wall [${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)}] → ` +
+        `[${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}]`;
+      if (inspect(wall.topHeight, wall.halfThickness, where)) {
+        wall.autoHoppable = false;
+        demoted += 1;
+      }
+    }
+
+    // A demotion changes the map `NavGrid` bakes, so it has to invalidate the
+    // cached lattice exactly as any other mutation would.
+    if (demoted > 0) this.revisionCounter += 1;
+
+    if (problems.length > 0) {
+      console.error(
+        `Land of Good Places: ${problems.length} collider problem(s) — these have been made ` +
+          `solid so nobody gets stranded, but the level design wants a look:\n  ` +
+          problems.join('\n  '),
+      );
+    }
+
+    return problems;
   }
 }
 

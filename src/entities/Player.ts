@@ -52,17 +52,16 @@ const DUST_TRAIL = 0.3;
 const DUST_STANCE = 0.14;
 
 /**
- * Tuned so the jump clears the low and mid garden walls but not the tall
- * ones (design feedback #10 — "jump over walls").
+ * Tuned so the jump clears the low garden walls but not the tall ones (design
+ * feedback #10 — "jump over walls").
  *
- * Wooden + stone wall heights across the garden (`Scenery.ts`), sorted:
- * 0.7, 0.7, 0.85, 0.85, 0.95, 0.95, 0.95, 1.15, 1.2, 1.2, 1.25, 1.4 | 1.5,
- * 1.75, 1.8, 2.1, 2.3, 2.6 — the lower two-thirds (12 of 18) top out at 1.4 m,
- * the tallest third starts at 1.5 m. `JUMP_SPEED` gives an apex of
- * `JUMP_SPEED² / (2·GRAVITY)` ≈ 1.28 m; added to `JUMP_CLEARANCE_GRACE` in
- * `Collision.ts` (0.15 m) that is 1.43 m of clearance — comfortably over every
- * wall ≤ 1.4 m, comfortably short of every wall ≥ 1.5 m. Buildings and tree
- * trunks stay `Infinity` (unjumpable) — see `Collision.ts`.
+ * `JUMP_SPEED` gives an algebraic apex of `JUMP_SPEED² / (2·GRAVITY)` ≈ 1.28 m.
+ * **That is not how tall a wall it gets you over**, and the arithmetic that
+ * used to be written here (apex + `JUMP_CLEARANCE_GRACE` = 1.43 m, "comfortably
+ * over every wall ≤ 1.4 m") was wrong in three separate ways at once — see
+ * `Collision.ts`'s `MAX_AUTO_HOP_HEIGHT`, which carries the measured answer
+ * (1.00 m, against a measured limit of 1.07–1.10 m) and the reasons. Buildings
+ * and tree trunks stay `Infinity` (unjumpable) — see `Collision.ts`.
  */
 const JUMP_SPEED = 6.6;
 const GRAVITY = 17;
