@@ -100,6 +100,20 @@ export const CROWD_HAIR_STYLES: readonly HairStyle[] = HAIR_STYLES.filter(
   (style) => style !== 'longPonytail',
 );
 
+/**
+ * The styles whose hair hangs down the **back** — everything authored inside
+ * {@link HairRig}'s `fall` group, plus the simulated tail.
+ *
+ * Kept here, next to the authoring that makes it true, because it is a fact
+ * about the geometry rather than a preference: a curtain, a tail or a
+ * floor-length ponytail parked at `z = -FALL_BACK × HEAD` is *entirely behind
+ * the child's own head and body* in a dead-on front view, and no amount of
+ * framing distance will reveal it. The character creator's preview reads this
+ * to decide when to turn the plinth so the child can actually see what she
+ * just picked — see `ui/characterCreationPreview.ts`.
+ */
+export const TRAILING_HAIR_STYLES: readonly HairStyle[] = ['long', 'ponytail', 'longPonytail'];
+
 /** One built piece of hair, and the styles that show it. */
 export interface HairPart {
   readonly mesh: Object3D;

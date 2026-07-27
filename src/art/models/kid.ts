@@ -188,6 +188,20 @@ export interface KidHandle extends CreatureHandle {
    * game's already-time-scaled delta. Safe (and free) to call on any kid.
    */
   update(dt: number): void;
+  /**
+   * Hangs the simulated ponytail straight down from wherever its anchor is
+   * **now**, with no catch-up swing. Safe (and free) to call on any kid.
+   *
+   * Call this after moving or re-parenting a kid that has already been built:
+   * the tail is simulated in world space, so a model constructed at the origin
+   * and then added to something rotated (the character creator's turntable) or
+   * placed somewhere else has a tail that is, as far as the simulation knows,
+   * simply in the wrong place — and it will visibly whip across to catch up.
+   * `update()` recovers from that on its own only past
+   * `PonytailChain`'s teleport threshold, which a metre-scale move does not
+   * reach.
+   */
+  resetHair(): void;
 }
 
 export function createKid(options: KidOptions = {}): KidHandle {
@@ -438,6 +452,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
       measuredHeight = visibleTop(root);
     },
     update: (dt: number) => hairRig.ponytail?.update(dt),
+    resetHair: () => hairRig.ponytail?.reset(),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
     setSkinColour: (colour: number) => skinMat.color.setHex(colour),
     setHairColour: (colour: number) => {
