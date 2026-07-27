@@ -119,6 +119,23 @@ park getting tiny, then the whole **Earth below**. At the top:
 
 At night the wheel lights up before it climbs.
 
+## The train needs paths to its stations (27 July 2026 — queued, not started)
+
+The two stations (Sunny Side and Bluebell Halt) sit out at the park edge
+with **no paths leading to them** — you have to walk across open grass to
+catch the train. Add proper paved paths from the park's existing path
+network out to both platforms, in the same style as the rest of the park's
+paths, so the stations read as places you are meant to go.
+
+*Engineering note:* the path network is generated in `src/world/paths.ts`
+from control points, and other systems read it — the NPC waypoint graph
+validates its edges against the finished collision world, and stalls are
+placed relative to path spurs. So adding these spurs is not purely
+decorative: it should also give NPCs a sensible route to the platforms,
+which the train's own NPC-riding behaviour currently has to improvise
+(`wanderDriver` steers off-graph to reach the platforms and has stuck
+detection precisely because there is no paving to walk).
+
 ## The train ride, first person (27 July 2026 — queued, not started)
 
 - **Riding the train switches to FIRST PERSON** for the duration of the
