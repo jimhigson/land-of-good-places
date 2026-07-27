@@ -2,6 +2,7 @@ import { Group, Object3D, Vector3 } from 'three';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { KID_SKIN_TONES } from '../../art/models/kid';
+import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -298,15 +299,19 @@ export class NpcSystem implements GameSystem {
       const rolledColours = pickColours(rng);
       const colours = isEthan ? { ...rolledColours, hair: ART.kidHairBlonde } : rolledColours;
 
-      const shortHairRoll = rng.chance(0.35);
-      const shortHair = isEthan ? true : shortHairRoll;
+      // One `next()` off the stream, exactly as the `chance(0.35)` short-hair
+      // coin flip this replaced took — so widening the crowd from two
+      // hairstyles to eight changes what each child *wears* without reshuffling
+      // any of their other rolls, and Ethan stays where he is.
+      const styleRoll = CROWD_HAIR_STYLES[rng.int(0, CROWD_HAIR_STYLES.length - 1)] ?? 'bunches';
+      const hairStyle: HairStyle = isEthan ? 'short' : styleRoll;
 
       // Ethan's blue eyes are pinned to their own variant; everyone else
       // rolls across the crowd's whole eye-colour range (see `kidCrowd.ts`'s
       // `EYE_VARIANT_COUNT`), same spirit as the skin/hair/outfit rolls above.
       const eyeVariant = isEthan ? BLUE_EYE_VARIANT : rng.int(0, EYE_VARIANT_COUNT - 1);
 
-      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), eyeVariant);
+      const avatar = this.kids.spawn(colours, hairStyle, rng.range(0.86, 1.04), eyeVariant);
       // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default
       // 'neutral' would never call `setExpression` and Ethan would show the

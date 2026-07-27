@@ -18,6 +18,7 @@ import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
 import { createKid, type KidHandle } from '../art/models/kid';
 import type { Expression } from '../art/style/faces';
+import type { HairStyle } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -51,11 +52,11 @@ export interface PreviewChoice {
   readonly hair: number;
   /**
    * Always a real choice, never omitted — kept as the bare, non-optional
-   * union rather than `KidOptions['hairStyle']` (which is `| undefined`,
+   * `HairStyle` rather than `KidOptions['hairStyle']` (which is `| undefined`,
    * since it's an optional constructor option there) so this stays assignable
    * under `tsconfig`'s `exactOptionalPropertyTypes`.
    */
-  readonly hairStyle: 'bunches' | 'bob' | 'short';
+  readonly hairStyle: HairStyle;
   readonly outfit: number;
   readonly eye: number;
   readonly hatId: string;
@@ -265,6 +266,11 @@ export class CharacterPreview {
     // `art/models/hats.ts`'s doc comment: no offset maths needed.
     const hatAsset = shopItem(choice.hatId)?.model();
     if (hatAsset) kid.hatAnchor.add(hatAsset.root);
+    // Same courtesy `entities/WornHat.ts` does in the park: tell the model a
+    // hat is on so the spiky style tucks its spikes away instead of skewering
+    // it. The preview always puts *some* hat on, so this is always true today
+    // — written as a condition anyway, because "no hat" is one shop item away.
+    kid.setHatWorn(hatAsset !== undefined);
 
     // The chosen starting pet, stood beside the kid at its own natural scale
     // — the same scale it will actually walk behind the player at in the
@@ -301,6 +307,10 @@ export class CharacterPreview {
     // A lazy turntable — enough life to feel like a toy on a shelf, slow
     // enough to actually see the choice you just made rather than a blur.
     if (this.spinsAllowed) this.stage.rotation.y = Math.sin(this.elapsed * 0.35) * 0.55;
+    // After the turntable, so the simulated ponytail sees this frame's angle:
+    // it is driven from the anchor's WORLD position, which is exactly why the
+    // hair swishes as the plinth rocks. Free on every other style.
+    this.kid?.update(dt);
     this.updateFace(dt);
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);

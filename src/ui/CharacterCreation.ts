@@ -52,11 +52,55 @@ const OUTFIT_SWATCHES: readonly Swatch[] = [
   { colour: PALETTE.flowerRed, label: 'Coral' },
 ];
 
-const HAIR_STYLES: readonly { value: HairStyle; label: string; glyph: string }[] = [
-  { value: 'bunches', label: 'Bunches', glyph: '🎀' },
-  { value: 'bob', label: 'Bob', glyph: '💇' },
-  { value: 'short', label: 'Short', glyph: '✂️' },
+/**
+ * What a child sees on each hair-style button.
+ *
+ * A `Record` keyed on the whole `HairStyle` union rather than a list, so a
+ * style added to `art/models/hair.ts` and forgotten here does not compile —
+ * the alternative is a style that exists in the game and can never be chosen,
+ * which is exactly the kind of bug that survives a review.
+ */
+const HAIR_STYLE_OPTIONS: Readonly<Record<HairStyle, { label: string; glyph: string }>> = {
+  bunches: { label: 'Bunches', glyph: '🎀' },
+  bob: { label: 'Bob', glyph: '💇' },
+  short: { label: 'Short', glyph: '✂️' },
+  long: { label: 'Long', glyph: '💁' },
+  ponytail: { label: 'Ponytail', glyph: '🐴' },
+  longPonytail: { label: 'Swishy Pony', glyph: '✨' },
+  bowl: { label: 'Bowl Cut', glyph: '🥣' },
+  spiky: { label: 'Spiky', glyph: '⚡' },
+  messy: { label: 'Messy', glyph: '🌪️' },
+};
+
+/**
+ * The order the buttons appear in. The three that shipped first stay exactly
+ * where they were, so a child who has done this once already still finds them
+ * in the same place, and the six new ones follow.
+ */
+const HAIR_STYLE_ORDER: readonly HairStyle[] = [
+  'bunches',
+  'bob',
+  'short',
+  'long',
+  'ponytail',
+  'longPonytail',
+  'bowl',
+  'spiky',
+  'messy',
 ];
+
+/**
+ * The picker, in order — with anything missing from {@link HAIR_STYLE_ORDER}
+ * swept onto the end rather than dropped. The `Record` above is the thing the
+ * compiler guards; this makes the *order* list a preference rather than a
+ * second place a style can be lost.
+ */
+const HAIR_STYLES: readonly { value: HairStyle; label: string; glyph: string }[] = [
+  ...HAIR_STYLE_ORDER,
+  ...(Object.keys(HAIR_STYLE_OPTIONS) as HairStyle[]).filter(
+    (style) => !HAIR_STYLE_ORDER.includes(style),
+  ),
+].map((value) => ({ value, ...HAIR_STYLE_OPTIONS[value] }));
 
 /** Every hat the hat shop sells — one source of truth, no duplicated data. */
 const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');

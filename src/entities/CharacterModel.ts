@@ -36,8 +36,18 @@ export class CharacterModel {
   readonly leftLeg: Group;
   readonly rightLeg: Group;
 
-  /** Total height in metres, bare-headed — used to place the name label when nothing is worn. */
-  readonly height: number;
+  /**
+   * Total height in metres, bare-headed — used to place the name label when
+   * nothing is worn.
+   *
+   * Read live off the model rather than snapshotted, because since hair styles
+   * landed it genuinely changes: spiky hair is 0.28 m taller than a bob, and
+   * putting a hat on hides the spikes and brings it back down. See
+   * `art/models/kid.ts`'s `height` getter.
+   */
+  get height(): number {
+    return this.kid.height;
+  }
 
   /** Resting height of the head pivot, in metres. The animator nudges around it. */
   readonly headHeight = KID_HEAD_HEIGHT;
@@ -67,7 +77,6 @@ export class CharacterModel {
     this.rightArm = this.kid.limbs.rightArm;
     this.leftLeg = this.kid.limbs.leftLeg;
     this.rightLeg = this.kid.limbs.rightLeg;
-    this.height = this.kid.height;
     this.hatAnchorHeight = this.kid.hatAnchorHeight;
     this.hatAnchor = this.kid.hatAnchor;
     this.hairAnchor = this.kid.hairAnchor;
@@ -81,6 +90,31 @@ export class CharacterModel {
    */
   setExpression(name: Expression): void {
     this.kid.setExpression(name);
+  }
+
+  /**
+   * Secondary motion the model owns rather than the animator: today that is
+   * the simulated ponytail, and nothing else.
+   *
+   * Must be called **after** the frame's pose is set, not before — the tail is
+   * pinned to the world position of an anchor that hangs off `head`, which
+   * hangs off `body`, and both of those are written every frame by `Player`'s
+   * `animate`. Called first it would follow the previous frame's head and lag
+   * by a frame forever.
+   *
+   * `dt` is the game's already-time-scaled delta; the chain clamps it itself.
+   * Free on every style but the swishy ponytail.
+   */
+  update(dt: number): void {
+    this.kid.update(dt);
+  }
+
+  /**
+   * Tells the model whether a hat is being worn, so hair that would spear
+   * straight through one is tucked away. Driven by `WornHat`.
+   */
+  setHatWorn(worn: boolean): void {
+    this.kid.setHatWorn(worn);
   }
 
   /** The shared house walk cycle, if a caller would rather not pose limbs. */

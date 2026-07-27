@@ -1,4 +1,4 @@
-import { Color, Group, Mesh, SphereGeometry, TorusGeometry, Vector3 } from 'three';
+import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
@@ -11,6 +11,7 @@ import {
   type CreatureHandle,
   type CreatureLimbs,
 } from '../style/asset';
+import { buildHair, visibleTop, type HairPart, type HairStyle } from './hair';
 
 /**
  * The player kid — Eleri by default.
@@ -48,7 +49,15 @@ const HEAD = 1.5;
  */
 export const KID_HEAD_HEIGHT = 1.36;
 
-/** Total height in metres, measured to the top of the hair. */
+/**
+ * Total height in metres, measured to the top of the hair.
+ *
+ * The **default** style's height. Since hair styles landed, a kid's real height
+ * varies with what she is wearing — spikes reach a good 0.2 m higher than a bob
+ * — so every handle carries its own measured `height` and that is what a name
+ * label must use. This constant survives for callers that only need a rough
+ * idea of how big a child is.
+ */
 export const KID_HEIGHT = 2.12;
 
 /**
@@ -111,8 +120,16 @@ export interface KidOptions {
   hair?: number;
   outfit?: number;
   shoe?: number;
-  /** `bunches` (default), `bob`, or `short`. */
-  hairStyle?: 'bunches' | 'bob' | 'short';
+  /** Which style is worn. `bunches` by default. See `art/models/hair.ts`. */
+  hairStyle?: HairStyle;
+  /**
+   * Which styles are *built*, if more than the one worn.
+   *
+   * Only the NPC crowd wants this: it reads one prototype kid and instances
+   * every mesh it finds, so its prototype has to carry every style the crowd
+   * can wear at once (`CROWD_HAIR_STYLES`). Everybody else builds one.
+   */
+  hairStyles?: readonly HairStyle[];
   backpack?: boolean;
   backpackColour?: number;
   /** Iris colour. Defaults to `ART.kidEye` — every kid but Ethan wears it. */
@@ -144,10 +161,33 @@ export interface KidHandle extends CreatureHandle {
   readonly holdAnchor: Group;
   /** Where a peeking creature's head pops out of the bag. */
   readonly backpackAnchor: Group;
+  /**
+   * Every hair mesh built, each tagged with the styles that show it.
+   *
+   * Exposed as typed objects rather than found by name, so the NPC crowd can
+   * map prototype meshes onto styles without knowing what a "bunch" is — see
+   * `entities/npc/kidCrowd.ts`.
+   */
+  readonly hairParts: readonly HairPart[];
   setSkinColour(colour: number): void;
   setHairColour(colour: number): void;
   setOutfitColour(colour: number): void;
   setShoeColour(colour: number): void;
+  /**
+   * Switches which built style is shown. Only styles passed as
+   * `KidOptions.hairStyles` exist to switch to; anything else hides all hair.
+   */
+  setHairStyle(style: HairStyle): void;
+  /**
+   * Tells the model a hat is on, so anything that would spear through one is
+   * tucked away. Called by `entities/WornHat.ts` and by the creator's preview.
+   */
+  setHatWorn(worn: boolean): void;
+  /**
+   * Advances the simulated ponytail, if this kid is wearing one. `dt` is the
+   * game's already-time-scaled delta. Safe (and free) to call on any kid.
+   */
+  update(dt: number): void;
 }
 
 export function createKid(options: KidOptions = {}): KidHandle {
@@ -305,65 +345,28 @@ export function createKid(options: KidOptions = {}): KidHandle {
   hairAnchor.position.set(0.32 * HEAD, 0.22 * HEAD, 0.14 * HEAD);
   crown.add(hairAnchor);
 
-  // Hair shell over the crown and back.
-  // Hair shell: stops well ABOVE the eye line. Every extra degree of theta here
-  // eats forehead, and a character with no forehead has nowhere to put big eyes.
-  const cap = solid(
-    new Mesh(
-      new SphereGeometry(0.455 * HEAD, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.46),
-      hairMat,
-    ),
-  );
-  cap.scale.set(1, 1.02, 1);
-  cap.position.y = 0.035 * HEAD;
-  cap.rotation.x = -0.05;
-  crown.add(cap);
-  addOutline(cap, 0.018);
-
-  // Fringe: high and shallow, a suggestion of a sweep rather than a curtain.
-  const fringe = blob(0.17 * HEAD, hairMat, [1.3, 0.34, 0.48], 18);
-  fringe.position.set(0, 0.305 * HEAD, 0.29 * HEAD);
-  crown.add(fringe);
-
-  if (hairStyle !== 'short') {
-    for (const side of [-1, 1] as const) {
-      const long = hairStyle === 'bob';
-      const bunch = blob(
-        (long ? 0.19 : 0.17) * HEAD,
-        hairMat,
-        long ? [0.82, 1.5, 0.9] : [0.9, 1.15, 0.9],
-        18,
-      );
-      bunch.position.set(side * 0.42 * HEAD, (long ? -0.1 : 0.04) * HEAD, -0.12 * HEAD);
-      crown.add(bunch);
-      addOutline(bunch, 0.014);
-
-      if (!long) {
-        const bobble = solid(
-          new Mesh(new TorusGeometry(0.085 * HEAD, 0.033 * HEAD, 8, 18), bobbleMat),
-        );
-        bobble.rotation.y = Math.PI / 2;
-        bobble.position.set(side * 0.44 * HEAD, 0.14 * HEAD, -0.12 * HEAD);
-        crown.add(bobble);
-      } else {
-        const tie = solid(new Mesh(new TorusGeometry(0.1 * HEAD, 0.03 * HEAD, 8, 18), bobbleMat));
-        tie.rotation.y = Math.PI / 2;
-        tie.position.set(side * 0.43 * HEAD, -0.2 * HEAD, -0.12 * HEAD);
-        crown.add(tie);
-      }
-    }
-  }
+  // --- hair --------------------------------------------------------------------
+  // Every style lives in `art/models/hair.ts`, which hangs the head-mounted
+  // parts off `crown` and the simulated ponytail off `root`. It is a separate
+  // module because the NPC crowd needs a prototype carrying *all* the styles at
+  // once while the player needs exactly one — see that file's header.
+  const hairRig = buildHair({
+    crown,
+    root,
+    head: HEAD,
+    headTilt: HEAD_TILT,
+    hairMaterial: hairMat,
+    hairDarkMaterial: hairDarkMat,
+    bobbleMaterial: bobbleMat,
+    style: hairStyle,
+    ...(options.hairStyles ? { styles: options.hairStyles } : {}),
+  });
 
   for (const side of [-1, 1] as const) {
     const ear = decal(blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12));
     ear.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
     crown.add(ear);
   }
-
-  // Small tuft at the back so the head is not a perfect ball in silhouette.
-  const tuft = decal(blob(0.13 * HEAD, hairDarkMat, [1, 0.7, 0.8], 14));
-  tuft.position.set(0, 0.16 * HEAD, -0.4 * HEAD);
-  crown.add(tuft);
 
   // --- face ------------------------------------------------------------------
   const face = createFacePatch({
@@ -397,6 +400,12 @@ export function createKid(options: KidOptions = {}): KidHandle {
   const hatAnchorWorldPosition = new Vector3();
   hatAnchor.getWorldPosition(hatAnchorWorldPosition);
 
+  // Hang the tail straight down before measuring, so the segments are in a
+  // real rest pose rather than piled at the model's origin.
+  hairRig.ponytail?.reset();
+
+  let measuredHeight = visibleTop(root);
+
   return {
     root,
     body,
@@ -407,8 +416,28 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairAnchor,
     holdAnchor,
     backpackAnchor,
-    height: KID_HEIGHT,
+    hairParts: hairRig.parts,
+    // Measured, not `KID_HEIGHT`: spiky hair is a good 0.28 m taller than a
+    // bob, and a name label placed from a constant would sit inside it.
+    //
+    // A **getter**, because the answer changes while the character is alive:
+    // putting a hat on hides the spikes, and a height snapshotted at
+    // construction would leave the label of a spiky-haired child in a hat
+    // floating a third of a metre above her, pointing at nothing. Re-measured
+    // only when the style or the hat actually changes — never per frame.
+    get height() {
+      return measuredHeight;
+    },
     setExpression: (name: Expression) => face.setExpression(name),
+    setHairStyle: (style: HairStyle) => {
+      hairRig.setStyle(style);
+      measuredHeight = visibleTop(root);
+    },
+    setHatWorn: (worn: boolean) => {
+      hairRig.setHatWorn(worn);
+      measuredHeight = visibleTop(root);
+    },
+    update: (dt: number) => hairRig.ponytail?.update(dt),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
     setSkinColour: (colour: number) => skinMat.color.setHex(colour),
     setHairColour: (colour: number) => {
