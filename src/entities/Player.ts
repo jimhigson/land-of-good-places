@@ -16,6 +16,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
+import type { Expression } from '../art/style/faces';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { NameLabel } from '../ui/NameLabel';
 import { gameStore } from '../state';
@@ -119,8 +120,25 @@ export class Player implements GameSystem {
   private wasClearingWall = false;
   private blinkTimer = 2.4;
   private blinkRemaining = 0;
-  private blinking = false;
+  private currentExpression: Expression = 'neutral';
   private ridingFlag = false;
+
+  /**
+   * Multiplies the speed limit below — 1 normally. The fountain sets this to
+   * ~0.6 while the player's feet are in its water (see `Fountain.ts`), so
+   * wading feels like wading without this class knowing anything about water.
+   * Read once per frame here; written externally by whichever system
+   * currently owns the ground underfoot. One frame stale by construction,
+   * the same tolerance `hopClearance` already documents above.
+   */
+  speedMultiplier = 1;
+
+  /**
+   * True while some other system wants the face to read happy without
+   * fighting the blink state machine in `animate()` — the fountain sets this
+   * while the player is standing in its water.
+   */
+  waterHappy = false;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -257,7 +275,8 @@ export class Player implements GameSystem {
       .addScaledVector(this.camera.forward, input.moveY);
 
     const inputLength = this.moveDirection.length();
-    const speedLimit = PLAYER_MAX_SPEED * (input.isDown('sprint') ? SPRINT_MULTIPLIER : 1);
+    const speedLimit =
+      PLAYER_MAX_SPEED * (input.isDown('sprint') ? SPRINT_MULTIPLIER : 1) * this.speedMultiplier;
 
     if (inputLength > 1e-4) {
       this.desiredVelocity.copy(this.moveDirection).multiplyScalar(speedLimit);
@@ -454,9 +473,10 @@ export class Player implements GameSystem {
     if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
 
     const blinking = this.blinkRemaining > 0;
-    if (blinking !== this.blinking) {
-      this.blinking = blinking;
-      model.setExpression(blinking ? 'blink' : 'neutral');
+    const desiredExpression: Expression = blinking ? 'blink' : this.waterHappy ? 'happy' : 'neutral';
+    if (desiredExpression !== this.currentExpression) {
+      this.currentExpression = desiredExpression;
+      model.setExpression(desiredExpression);
     }
 
     // The name label counter-rotates so it never tips with the character.

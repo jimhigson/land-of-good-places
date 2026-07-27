@@ -20,10 +20,14 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
+<<<<<<< Updated upstream
 // Face painting stall (additive — see FacePaintStall.ts's own file-ownership
 // note). Not a mini-game, so it is wired in here rather than through
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
+=======
+import { terrainHeight } from './terrain';
+>>>>>>> Stashed changes
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -208,6 +212,7 @@ export class World implements GameSystem {
   }
 
   /**
+<<<<<<< Updated upstream
    * Gives the building — and the face-painting stall — the player. Must be
    * called once, after the player is constructed: the building installs the
    * ground sampler that makes floors walkable, and the stall hangs the paint
@@ -217,6 +222,26 @@ export class World implements GameSystem {
     this.building.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
+=======
+   * Gives the building (and the fountain) the player. Must be called once,
+   * after the player is constructed. Installs the building's ground sampler
+   * that makes floors walkable, then wraps it in the fountain's own — a
+   * shallow-water dip inside the rim, `fallback` everywhere else — so
+   * wading works without either system needing to know about the other (see
+   * `Fountain.groundLevel`).
+   */
+  attachPlayer(player: Player): void {
+    this.building.attachPlayer(player);
+
+    const groundBeforeFountain = player.groundSampler;
+    player.groundSampler = (x, z, y) =>
+      this.fountain.groundLevel(
+        x,
+        z,
+        groundBeforeFountain ? groundBeforeFountain(x, z, y) : terrainHeight(x, z),
+      );
+    this.fountain.attachPlayer(player);
+>>>>>>> Stashed changes
   }
 
   dispose(): void {
