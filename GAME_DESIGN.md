@@ -744,7 +744,11 @@ Every cute thing you buy or find:
 - Or goes in your **backpack**, where they **stick their heads out of the top
   from time to time** to peek around
 - Is recorded in the **Cute-o-dex**, a collection book showing what you've
-  found and what's still missing
+  found and what's still missing. *The book's **Secrets** page holds things
+  you have **done** rather than things you own (27 July 2026 — built): they
+  are listed in `state/secrets.ts`, count towards the total and the
+  completion prize, and show only a silhouette until you happen upon them.
+  The dust cloud is the first.*
 - Can be displayed in **your own bedroom** in the building, arranged on shelves
 - You can **carry your favourite** in your hands as you walk
 
@@ -755,12 +759,16 @@ Every cute thing you buy or find:
 - **Photo mode** — a camera button that snaps you and your toys in a cute frame
 - **Rainbow hop** — a rainbow effect radiates out from the player whenever
   they jump
-- **Dust cloud when running** (27 July 2026 — queued) — little puffs of
+- **Dust cloud when running** (27 July 2026 — built) — little puffs of
   dust kick up behind the player while they run, fading as they settle.
   Only while running, not walking, so running feels different rather than
   just faster. *Note: the pooled, no-allocation particle pattern already
   used by the hop's rainbow ring and the water-fight spray is the one to
-  follow — see the GC work, this must not allocate per puff.*
+  follow — see the GC work, this must not allocate per puff.* *Built:
+  `art/effects/dustPuff.ts`, a pool of twelve. Puffs are timed off
+  `walkPhase`, so one lands per footfall; "running" is a speed rather than
+  the sprint key, so wading with sprint held does not count. It is also the
+  first entry in the Cute-o-dex's Secrets page — see below.*
 - **Picking a flower is a little animation** (27 July 2026 — queued, not
   started): the character **bends down** to pick it, then **lifts it up and
   smells it**, with a happy expression, before it goes into the collection.

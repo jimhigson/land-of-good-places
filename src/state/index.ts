@@ -8,6 +8,7 @@ export {
   type PurchaseSpec,
 } from './store';
 export { shopWords, type ShopWords } from './wording';
+export { SECRETS, discoverSecret, type Secret } from './secrets';
 export type {
   CharacterKind,
   CuteCategory,

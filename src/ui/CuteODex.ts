@@ -1,4 +1,13 @@
-import { FLOWER_COLOURS, FLOWER_ICON, gameStore, type CuteCategory, type FlowerColour, type GameState } from '../state';
+import {
+  FLOWER_COLOURS,
+  FLOWER_ICON,
+  SECRETS,
+  gameStore,
+  type CuteCategory,
+  type FlowerColour,
+  type GameState,
+  type Secret,
+} from '../state';
 import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/catalogue';
 import { isTouchDevice } from '../core/device';
 import { DexPrize, hasSeenDexPrize, markDexPrizeSeen } from './DexPrize';
@@ -44,6 +53,8 @@ const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string 
   // Free finds from the meadow, not sold in any shop — rendered from
   // `FLOWER_COLOURS` rather than the shop catalogue, see `renderFlowerSection`.
   { category: 'flower', title: 'Flowers', glyph: '🌷' },
+  // Things you *do* rather than things you own, so they come from `SECRETS`
+  // rather than the shop catalogue — see `renderSecretSection`.
   { category: 'secret', title: 'Secrets', glyph: '🌟' },
 ];
 
@@ -246,8 +257,12 @@ export class CuteODex {
     const flowerFound = FLOWER_COLOURS.filter(
       (colour) => state.collection[`flower.${colour}`]?.discovered,
     ).length;
-    const found = CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length + flowerFound;
-    const total = CATALOGUE.length + FLOWER_COLOURS.length;
+    const secretFound = SECRETS.filter((secret) => state.collection[secret.id]?.discovered).length;
+    const found =
+      CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length +
+      flowerFound +
+      secretFound;
+    const total = CATALOGUE.length + FLOWER_COLOURS.length + SECRETS.length;
     const complete = found === total;
     this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
@@ -274,6 +289,10 @@ export class CuteODex {
     for (const section of SECTIONS) {
       if (section.category === 'flower') {
         this.pages.append(this.renderFlowerSection(section.title, section.glyph, state));
+        continue;
+      }
+      if (section.category === 'secret') {
+        this.pages.append(this.renderSecretSection(section.title, section.glyph, state));
         continue;
       }
       const items = CATALOGUE.filter((item) => item.category === section.category);
@@ -376,6 +395,60 @@ export class CuteODex {
       displayName: `${colour.charAt(0).toUpperCase()}${colour.slice(1)} flower`,
     }));
     return [...catalogueFound, ...flowersFound];
+  }
+
+  /**
+   * Secrets are things you have *done*, so no shop sells them and they are not
+   * in `CATALOGUE` — this reads `SECRETS` and the collection directly, exactly
+   * as `renderFlowerSection` does.
+   *
+   * The cards are plain `<div>`s, not buttons: there is nothing to toggle. A
+   * deed cannot be sent to the backpack or brought out for the parade, and a
+   * disabled button that never does anything is a worse promise than a card
+   * that never looked pressable.
+   */
+  private renderSecretSection(title: string, glyph: string, state: GameState): HTMLElement {
+    const section = document.createElement('section');
+    section.className = 'dex-section';
+
+    const heading = document.createElement('h3');
+    heading.className = 'dex-heading';
+    const done = SECRETS.filter((secret) => state.collection[secret.id]?.discovered).length;
+    heading.innerHTML =
+      `<span class="emoji">${glyph}</span><span>${escapeHtml(title)}</span>` +
+      `<span class="dex-tally">${done}/${SECRETS.length}</span>`;
+
+    const grid = document.createElement('div');
+    grid.className = 'dex-grid';
+    for (const secret of SECRETS) grid.append(this.renderSecretCard(secret, state));
+
+    section.append(heading, grid);
+    return section;
+  }
+
+  private renderSecretCard(secret: Secret, state: GameState): HTMLElement {
+    const discovered = state.collection[secret.id]?.discovered === true;
+
+    const card = document.createElement('div');
+    card.className = 'dex-card';
+    card.dataset.owned = discovered ? 'true' : 'false';
+
+    if (!discovered) {
+      // No hint at all beyond the shape. Being told what to do would spoil the
+      // only thing a secret has.
+      card.setAttribute('aria-label', 'Not found yet');
+      card.innerHTML =
+        `<span class="dex-icon dex-icon--hidden">${escapeHtml(secret.icon)}</span>` +
+        '<span class="dex-name">???</span>';
+      return card;
+    }
+
+    card.setAttribute('aria-label', `${secret.name} — ${secret.done}`);
+    card.innerHTML =
+      `<span class="dex-icon">${escapeHtml(secret.icon)}</span>` +
+      `<span class="dex-name">${escapeHtml(secret.name)}</span>` +
+      `<span class="dex-state">${escapeHtml(secret.done)}</span>`;
+    return card;
   }
 
   private renderSection(
