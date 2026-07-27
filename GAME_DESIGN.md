@@ -185,6 +185,18 @@ the lift's internals, because the castle floor-split decision may re-conceive
 every traversal device underneath it. The UX above must survive either
 ruling.*
 
+### It is "collect", not "buy" (27 July 2026 — queued)
+
+Money is meaningless in normal play, so the word is wrong. **Change "Buy" to
+"Collect" everywhere** — buttons, labels, shop copy, the Cute-o-dex, anywhere
+the game talks about acquiring a thing. **Only in the grown-ups-only Mayhem
+mode** (not yet implemented, where money is finite) should it say "Buy".
+
+*Note: build it so the word is chosen in one place from whether Mayhem is on,
+rather than hard-coding "Collect" everywhere and having to find them all again
+when Mayhem arrives. The coin/price display probably wants the same treatment
+— a price a child can always afford is decoration, not information.*
+
 ### Buying things (27 July 2026 — BUG/usability, queued)
 
 **Buying is too fiddly** — selecting an item and then clicking Buy is two
@@ -217,6 +229,20 @@ which is about to become one space per floor (Decision 3); and the park
 replan (Decision 4), which moves everything and adds a railway the player
 must never route across. It must also handle "no route exists" gracefully —
 walk as close as possible and stop, never freeze or jitter.*
+
+### Updates are not optional (27 July 2026 — queued)
+
+**A new version must be unskippable.** The notification becomes **full
+screen**, with **only one option: go to the new version**. No dismiss, no
+"later", no way to keep playing the old one.
+
+*Note: this replaces the small toast that currently sits over the character
+creation controls (which was separately reported as obstructing them — this
+supersedes that fix). Practically: `vite-plugin-pwa` is configured with
+`registerType: 'prompt'` and `injectRegister: false`, so the prompt is ours to
+render. Make the single button reload into the new version, and make sure a
+child cannot get behind it — no Escape, no click-outside, no focus escape. It
+should look like a friendly part of the game, not a browser error.*
 
 ### The top bar takes too much space (27 July 2026 — queued)
 
