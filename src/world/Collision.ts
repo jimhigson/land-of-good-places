@@ -288,10 +288,11 @@ export class CollisionWorld {
    *
    * Returns `clearedWall` (`true` if at least one collider was skipped this
    * call purely because the mover jumped clear over it — Player uses this to
-   * know when to pop a little effect at the moment of clearing) and
-   * `escorting` (`true` if a deep overlap was corrected this call, however
-   * little of it — a mover already embedded in something, being nudged back
-   * out).
+   * know when to pop a little effect at the moment of clearing), `escorting`
+   * (`true` if a deep overlap was corrected this call, however little of it —
+   * a mover already embedded in something, being nudged back out) and
+   * `corrected` (`true` if the position was moved at all, by any amount, deep
+   * or shallow).
    *
    * `escorting` matters to callers that derive their own velocity from how
    * far `resolve` just moved them (Player, NpcCharacter): a deep-overlap
@@ -305,15 +306,33 @@ export class CollisionWorld {
    * it outright. Capping the correction speed alone (this constant) slows
    * that loop down but doesn't break it; only refusing to treat escort
    * distance as velocity does.
+   *
+   * ### Why `corrected` exists too
+   *
+   * `escorting` answers "is *this frame's* correction deeper than ordinary
+   * contact?", but an escort is a *process*, several frames long, and its
+   * last frame or two are always shallow — the overlap is nearly gone by
+   * then, which is the whole point. So a caller watching `escorting` alone
+   * sees the guard switch off partway through the very escort it is there to
+   * protect, and banks that final correction as velocity after all. Against
+   * a wall the jump *just* clears (design feedback: "jumping over walls the
+   * player sometimes gets a burst of extreme speed") the tail of the escort
+   * is still ~0.4 m, which at 60 fps reads back as ~25 m/s — a fling, from
+   * the guarded path, by the guarded mechanism.
+   *
+   * `corrected` is what lets a caller tell where the escort actually ends:
+   * not when the correction goes quiet, but when it stops entirely. See
+   * `Player.update`, which holds the guard on until then.
    */
   resolve(
     position: Vector3,
     radius: number,
     clearance = 0,
     dt = Infinity,
-  ): { clearedWall: boolean; escorting: boolean } {
+  ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     let clearedAny = false;
     let escorting = false;
+    let corrected = false;
     // Shared across every collider and both passes below, so a mover pinned
     // between two deep overlaps at once still escorts at a combined
     // MAX_DEPENETRATION_SPEED overall, rather than that much again per
@@ -323,6 +342,7 @@ export class CollisionWorld {
     const applyCorrection = (correctionX: number, correctionZ: number): void => {
       const magnitude = Math.hypot(correctionX, correctionZ);
       if (magnitude < 1e-9) return;
+      corrected = true;
       if (magnitude <= SHALLOW_OVERLAP) {
         // Ordinary contact — walked straight into a wall, tree or rim.
         // Correct it fully and instantly: this is what keeps blocking crisp.
@@ -411,7 +431,7 @@ export class CollisionWorld {
       if (!moved) break;
     }
 
-    return { clearedWall: clearedAny, escorting };
+    return { clearedWall: clearedAny, escorting, corrected };
   }
 
   /**
