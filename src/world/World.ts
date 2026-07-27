@@ -215,6 +215,18 @@ export class World implements GameSystem {
   }
 
   /**
+   * Mounts the HUD belonging to anything in the world that owns some.
+   *
+   * Separate from the constructor because `Hud` empties `#ui-root` when it is
+   * built, and the world is built first — see `FacePaintStall.mountUi`, whose
+   * panel and hint were being wiped out of the document exactly that way.
+   * `Game` calls this once, after the HUD exists.
+   */
+  mountUi(uiRoot: HTMLElement): void {
+    this.facePaintStall.mountUi(uiRoot);
+  }
+
+  /**
    * Gives the building, the face-painting stall and the fountain the player.
    * Must be called once, after the player is constructed: the building
    * installs the ground sampler that makes floors walkable, the stall hangs
