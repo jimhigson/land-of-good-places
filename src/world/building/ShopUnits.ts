@@ -1,9 +1,14 @@
 import { BoxGeometry, Group, Mesh, type Material } from 'three';
 import { cuteSign, interiorMaterial } from './parts';
 import {
+  SHOP_RECESS_DEPTH,
+  SHOP_SCALE_XZ,
   SHOP_UNITS,
+  shopForecourtRegion,
   shopGroupName,
+  shopHasForecourt,
   shopLocalToBuilding,
+  shopScaleY,
   worldX,
   worldZ,
   type ShopUnitDefinition,
@@ -24,9 +29,23 @@ import type { CollisionWorld } from '../Collision';
  * unit.add(myToyShop);
  * building.shops.setPlaceholderVisible('toy', false);
  * ```
+ *
+ * **Shops dominate their rooms** (design feedback, 26 July 2026): what
+ * `getGroup()` actually returns is a *stage* nested one level inside the unit's
+ * anchor. The stage carries the whole "bigger, and sunk into its own forecourt"
+ * treatment — `SHOP_SCALE_XZ` bigger footprint, `shopScaleY` taller where there
+ * is headroom for it, sunk `SHOP_RECESS_DEPTH` down where `shopHasForecourt` —
+ * so anything built into it (the kiosk shell, the stock, the shopkeeper) gets
+ * the treatment for free. `getTopperHook()` returns a second, *unscaled* group
+ * on the anchor itself, sitting just above the (already enlarged) roofline —
+ * reserved for a future giant themed topper per shop (a teddy bear astride the
+ * toy shop's roof, and so on). It is empty today; scaling it from the anchor
+ * rather than the stage means a topper built into it starts from real-world
+ * metres, not from an already-doubled-up scale.
  */
 export class ShopUnits {
-  private readonly anchors = new Map<string, Group>();
+  private readonly stages = new Map<string, Group>();
+  private readonly topperHooks = new Map<string, Group>();
   private readonly placeholders = new Map<string, Group>();
 
   /** Builds every unit straight into the floor group it belongs to. */
@@ -40,21 +59,51 @@ export class ShopUnits {
       anchor.position.set(unit.x, 0, unit.z);
       anchor.rotation.y = unit.yaw;
       floor.add(anchor);
-      this.anchors.set(unit.id, anchor);
+
+      const stage = new Group();
+      stage.name = `shop-stage:${unit.id}`;
+      const scaleY = shopScaleY(unit);
+      stage.scale.set(SHOP_SCALE_XZ, scaleY, SHOP_SCALE_XZ);
+      stage.position.y = shopHasForecourt(unit) ? -SHOP_RECESS_DEPTH : 0;
+      anchor.add(stage);
+      this.stages.set(unit.id, stage);
+
+      // A safe, fixed height rather than one derived from the (rotated,
+      // tilted) awning/sign geometry: the clear height under the next deck's
+      // slab is only 3.3 m and the kiosk already reaches to within a few
+      // centimetres of it, so this is placed by known-safe measurement, not by
+      // recomputing where the roofline lands.
+      const topperHook = new Group();
+      topperHook.name = `shop-topper-hook:${unit.id}`;
+      topperHook.position.set(0, shopHasForecourt(unit) ? 3.1 : 2.9, 1.0);
+      anchor.add(topperHook);
+      this.topperHooks.set(unit.id, topperHook);
+
+      if (shopHasForecourt(unit)) floor.add(buildForecourtFloorPatch(unit));
 
       const placeholder = buildUnit(unit);
-      anchor.add(placeholder);
+      stage.add(placeholder);
       this.placeholders.set(unit.id, placeholder);
 
       registerCounter(unit, collision);
     }
   }
 
-  /** The group to build a real shop into. Origin at the unit's front-centre. */
+  /** The group to build a real shop into. Origin at the unit's front-centre, already scaled. */
   getGroup(id: string): Group {
-    const group = this.anchors.get(id);
+    const group = this.stages.get(id);
     if (!group) throw new Error(`Unknown shop unit: ${id}`);
     return group;
+  }
+
+  /**
+   * An empty, unscaled anchor just above the shop's (enlarged) roofline —
+   * reserved for a future giant themed topper. Nothing hangs off it yet.
+   */
+  getTopperHook(id: string): Group {
+    const hook = this.topperHooks.get(id);
+    if (!hook) throw new Error(`Unknown shop unit: ${id}`);
+    return hook;
   }
 
   /** Hide the empty-unit dressing once a real shop moves in. */
@@ -120,12 +169,46 @@ function buildUnit(unit: ShopUnitDefinition): Group {
  * The counter is solid; the alcove behind it is not, so you can lean over and
  * peer in. Collision is height-blind, so this holds on every deck at once —
  * which is exactly why no two units are stacked on top of each other.
+ *
+ * Scaled by `SHOP_SCALE_XZ` to match the now-bigger counter built into the
+ * stage — the counter mesh itself lives inside the scaled stage, but this wall
+ * is computed independently in world space (collision does not know about a
+ * `THREE.Group`'s scale), so it has to be scaled by hand to still land on the
+ * counter's real edges instead of on thin air a metre short of it.
  */
 function registerCounter(unit: ShopUnitDefinition, collision: CollisionWorld): void {
-  const [ax, az] = shopLocalToBuilding(unit, -1.75, 1.15);
-  const [bx, bz] = shopLocalToBuilding(unit, 1.75, 1.15);
+  const [ax, az] = shopLocalToBuilding(unit, -1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
+  const [bx, bz] = shopLocalToBuilding(unit, 1.75 * SHOP_SCALE_XZ, 1.15 * SHOP_SCALE_XZ);
   // Half the counter's real depth (0.7 m), not more. Because collision is
   // height-blind this segment is an invisible wall on every other deck too, and
   // every extra centimetre of it is a centimetre of somebody else's floor.
-  collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35);
+  collision.addWall(worldX(ax), worldZ(az), worldX(bx), worldZ(bz), 0.35 * SHOP_SCALE_XZ);
+}
+
+/**
+ * The sunken forecourt's own floor, capping the bottom of the hole cut for it
+ * (see `DECK_HOLES` in `layout.ts`) in the shop's own accent colour — a tinted
+ * pit reads as "this belongs to that shop" far better than a plain grey one.
+ *
+ * Inset a few centimetres from the hole's edges so this patch never shares a
+ * boundary edge with the slab's own punched rim — coincident faces at the same
+ * depth are exactly the recipe for z-fighting.
+ */
+function buildForecourtFloorPatch(unit: ShopUnitDefinition): Mesh {
+  const region = shopForecourtRegion(unit);
+  const inset = 0.05;
+  const width = region.maxX - region.minX - inset * 2;
+  const depth = region.maxZ - region.minZ - inset * 2;
+  const mesh = new Mesh(
+    new BoxGeometry(Math.max(0.1, width), 0.08, Math.max(0.1, depth)),
+    interiorMaterial(unit.accent, 0.55),
+  );
+  mesh.position.set(
+    (region.minX + region.maxX) / 2,
+    -SHOP_RECESS_DEPTH - 0.04,
+    (region.minZ + region.maxZ) / 2,
+  );
+  mesh.receiveShadow = true;
+  mesh.name = `shop-forecourt-floor:${unit.id}`;
+  return mesh;
 }

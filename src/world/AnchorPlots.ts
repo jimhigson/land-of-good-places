@@ -19,6 +19,7 @@ import { TAU } from '../core/mathUtils';
 import { signTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
+import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
 import { markAsSign } from './signs';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -46,6 +47,8 @@ export class AnchorPlots implements GameSystem {
   private readonly contentGroups = new Map<AnchorId, Group>();
   private readonly placeholders = new Map<AnchorId, Group>();
   private readonly signs: Mesh[] = [];
+  /** The one plot that has been built on. Null until the wheel goes up. */
+  private ferrisWheel: FerrisWheelProp | null = null;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'anchor-plots';
@@ -69,6 +72,17 @@ export class AnchorPlots implements GameSystem {
 
       const sign = placeholder.getObjectByName('sign-face');
       if (sign instanceof Mesh) this.signs.push(sign);
+
+      // The Space Ferris Wheel is built. The wheel goes up on its plot, the
+      // "coming soon" dressing comes down, and the sign that stood at the
+      // entrance is replaced by the ride's own ticket kiosk — which the
+      // mini-game framework builds from the row in `minigames/stalls.ts`, at
+      // this same entrance point. See `minigames/ferrisWheel/`.
+      if (anchor.id === 'ferrisWheel') {
+        this.ferrisWheel = createFerrisWheelProp(anchor, collision);
+        content.add(this.ferrisWheel.root);
+        placeholder.visible = false;
+      }
     }
   }
 
@@ -85,7 +99,9 @@ export class AnchorPlots implements GameSystem {
     if (placeholder) placeholder.visible = visible;
   }
 
-  update({ elapsed }: FrameContext): void {
+  update({ dt, elapsed }: FrameContext): void {
+    this.ferrisWheel?.update(dt, elapsed);
+
     // Signs sway very slightly, as if on a breezy afternoon.
     for (let i = 0; i < this.signs.length; i += 1) {
       const sign = this.signs[i];
