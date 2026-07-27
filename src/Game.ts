@@ -4,12 +4,16 @@ import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
 import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
-import { CAMERA_ZOOM_STEP } from './core/constants';
+import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, World } from './world';
+import type { InteriorControls } from './world/building';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { SignReader } from './ui/SignReader';
+import { StairMenu, type StairDirection } from './ui/StairMenu';
+import { Transitions } from './ui/Transitions';
+import { playOpenChime } from './ui/chime';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
 import { gameStore } from './state';
@@ -43,6 +47,8 @@ export class Game {
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
   readonly signReader: SignReader;
+  readonly transitions: Transitions;
+  readonly stairMenu: StairMenu;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly cuteODex: CuteODex;
@@ -53,13 +59,26 @@ export class Game {
   private readonly frameContext: MutableFrameContext;
   private started = false;
 
+  /**
+   * How fast the world runs. 1 normally; the stair ride winds it up so a child
+   * arrives on the next floor before they wonder what is happening.
+   */
+  private timeScale = 1;
+  /** Game time, accumulated at `timeScale`, for every animation phase. */
+  private elapsed = 0;
+  private stairMenuDeck = 0;
+
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.engine = new Engine(canvas);
     this.camera = new IsoCamera();
     this.input = new InputSystem();
     this.sky = new Sky();
 
-    this.world = new World(this.engine.scene, this.sky);
+    // The building needs a way to move the camera, the clock and the screen
+    // wipe when a child walks through its front door into its own space. It is
+    // handed one rather than reaching up in here; the closures are only ever
+    // called from a frame, long after everything below is built.
+    this.world = new World(this.engine.scene, this.sky, this.interiorControls());
 
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));
@@ -106,6 +125,8 @@ export class Game {
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
     });
 
+    // The HUD clears the overlay when it is built, so everything else that puts
+    // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
     // The collection book. Mounts its own pill into the HUD's top row and owns
     // the C key, so neither `Hud` nor the input bindings need to know about it.
@@ -117,6 +138,11 @@ export class Game {
     // child of `uiRoot` rather than anything the world needs to know about.
     this.whatsNew = new WhatsNew(uiRoot);
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
+    this.transitions = new Transitions(uiRoot);
+    this.stairMenu = new StairMenu(uiRoot, {
+      onChoose: (direction) => this.takeStairs(direction),
+      onClose: () => undefined,
+    });
 
     // The fairground stalls. Walking up to one and pressing interact hands the
     // frame over to the mini-game host: it freezes the park (exactly as the
@@ -173,6 +199,51 @@ export class Game {
     this.systems.push(system);
   }
 
+  /**
+   * What the building is allowed to do to the rest of the game.
+   *
+   * Every one of these is something the building genuinely needs and genuinely
+   * does not own: the camera has to be *snapped* rather than followed when a
+   * child changes space, the clock has to run fast while the stairs carry them,
+   * and the iris has to be closed over both.
+   */
+  private interiorControls(): InteriorControls {
+    return {
+      walkTo: (x, y, z, handlers) => this.tapNavigator.navigateTo(x, y, z, handlers),
+      cancelWalk: () => this.tapNavigator.cancel(),
+      setTimeScale: (scale) => {
+        this.timeScale = scale;
+      },
+      setWhoosh: (on) => this.transitions.setWhoosh(on),
+      iris: (midpoint) => this.transitions.irisWipe(midpoint),
+      flash: () => this.transitions.flash(),
+      snapCamera: () => this.camera.snapTo(this.player.position),
+      openStairMenu: (deck) => this.openStairMenu(deck),
+      closeStairMenu: () => this.stairMenu.close(),
+    };
+  }
+
+  private openStairMenu(deck: number): void {
+    if (this.stairMenu.isOpen || this.player.riding) return;
+    this.stairMenuDeck = deck;
+    playOpenChime();
+    const canClimb = deck < BUILDING_FLOOR_COUNT - 1;
+    const canDescend = deck > 0;
+    this.stairMenu.show({
+      floorLabel: floorName(deck),
+      canClimb,
+      canDescend,
+      // A greyed-out button that still names a floor reads as a bug. Say where
+      // it goes only when it goes anywhere.
+      upLabel: canClimb ? `up to ${floorName(deck + 1).toLowerCase()}` : 'this is the top!',
+      downLabel: canDescend ? `down to ${floorName(deck - 1).toLowerCase()}` : 'you are at the bottom',
+    });
+  }
+
+  private takeStairs(direction: StairDirection): void {
+    this.world.building.takeStairs(this.stairMenuDeck, direction);
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -194,6 +265,8 @@ export class Game {
     this.miniGames.dispose();
     this.tapNavigator.dispose();
     this.touchControls?.dispose();
+    this.stairMenu.dispose();
+    this.transitions.dispose();
     this.world.dispose();
     this.player.dispose();
     this.cuteODex.dispose();
@@ -217,10 +290,12 @@ export class Game {
     // `CuteODex`, because none of its keys need anything beyond the ordinary
     // action vocabulary already read here.
     //
-    // Below it: while a shop or the backpack is open, Escape belongs to it —
-    // see `Shopping.uiOpen`. Same for a sign that is open full-screen: Escape
-    // is one of the ordinary "back out" actions `SignReader` already closes
-    // on. And when the Cute-o-dex has the screen, Escape belongs to the book.
+    // Below it: while a shop, the backpack or the stairs menu is open, Escape
+    // belongs to it — see `Shopping.uiOpen`. Same for a sign that is open
+    // full-screen: Escape is one of the ordinary "back out" actions
+    // `SignReader` already closes on. And when the Cute-o-dex has the screen,
+    // Escape belongs to the book. Otherwise Escape would close the panel
+    // *and* pause the park behind it.
     if (this.whatsNew.isOpen) {
       if (
         this.input.justPressed('menu') ||
@@ -233,6 +308,11 @@ export class Game {
       // The book has the screen: Escape and B close it, and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
+      }
+    } else if (this.stairMenu.isOpen) {
+      // The stairs menu has the screen: Escape backs out without choosing.
+      if (this.input.justPressed('menu')) {
+        this.stairMenu.close();
       }
     } else if (
       this.input.justPressed('menu') &&
@@ -249,8 +329,16 @@ export class Game {
     const paused = gameStore.get().paused || this.miniGames.frozen;
     this.world.dayNight.setPaused(paused);
 
-    this.frameContext.dt = paused ? 0 : tick.dt;
-    this.frameContext.elapsed = tick.elapsed;
+    // Fast-forward is a *time* effect, not an animation one: scaling the frame
+    // delta speeds the clock, the sky, the escalators, the walk cycle and the
+    // stair ride all at once, and nothing downstream needs to know about it.
+    // Pausing still runs `elapsed` at normal speed so idle animations keep
+    // breathing behind the pause screen, exactly as they always have.
+    const scaled = paused ? tick.dt : tick.dt * this.timeScale;
+    this.elapsed += paused ? tick.dt : scaled;
+
+    this.frameContext.dt = paused ? 0 : scaled;
+    this.frameContext.elapsed = this.elapsed;
     this.frameContext.frame = tick.frame;
 
     // Between the input scan and the player, and it has to be exactly here:
@@ -308,6 +396,13 @@ export class Game {
  * The context object is allocated once and rewritten each frame — systems see
  * it as fully readonly, which stops anyone stashing and mutating it.
  */
+/** What to call each level, for the stairs menu. */
+function floorName(deck: number): string {
+  if (deck <= 0) return 'Ground floor';
+  if (deck >= BUILDING_FLOOR_COUNT - 1) return 'The roof';
+  return `Floor ${deck}`;
+}
+
 interface MutableFrameContext {
   dt: number;
   elapsed: number;

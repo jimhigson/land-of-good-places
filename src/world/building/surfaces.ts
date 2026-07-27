@@ -3,9 +3,9 @@ import {
   BUILDING_CENTRE_Z,
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
   BUILDING_STEP_UP,
+  INTERIOR_ORIGIN_X,
+  INTERIOR_ORIGIN_Z,
 } from '../../core/constants';
 import { clamp01 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
@@ -18,6 +18,8 @@ import {
   BUILDING_BASE_Y,
   deckIsSolid,
   deckY,
+  insideInterior,
+  INTERIOR_GROUND_Y,
   LIFT_SHAFT,
   regionContains,
   type RampDefinition,
@@ -38,6 +40,21 @@ export interface MovingPlatform {
 }
 
 /**
+ * Anything within this of the interior origin is in the building's own space.
+ *
+ * The two spaces are 848 m apart, so the exact number does not matter as long as
+ * it comfortably contains the interior and comes nowhere near the park.
+ */
+const INTERIOR_REGION_RADIUS = 200;
+
+/** True when a world position is inside the building's own space at all. */
+export function inInteriorSpace(x: number, z: number): boolean {
+  const dx = x - INTERIOR_ORIGIN_X;
+  const dz = z - INTERIOR_ORIGIN_Z;
+  return dx * dx + dz * dz < INTERIOR_REGION_RADIUS * INTERIOR_REGION_RADIUS;
+}
+
+/**
  * Where the ground is, for anything that walks.
  *
  * `Player` normally asks `terrainHeight()`; once the building exists it asks
@@ -45,6 +62,11 @@ export interface MovingPlatform {
  * point *and* within stepping distance below the walker's feet. That single rule
  * gives multi-storey floors, stairs, escalators, moving lifts and holes you can
  * fall through, without a physics engine anywhere in sight.
+ *
+ * It answers for **both spaces**, because the player is only ever in one of them
+ * and the two are hundreds of metres apart: out in the park it is the terrain and
+ * the facade's front steps, and in the building's own space it is the decks, the
+ * ramps and the plaza floor underneath them.
  */
 export class WalkSurfaces {
   private readonly ramps: readonly RampDefinition[] = allRamps();
@@ -59,21 +81,25 @@ export class WalkSurfaces {
    * Coordinates are world space.
    */
   sample(x: number, z: number, y: number): number {
-    const localX = x - WORLD_ORIGIN_X;
-    const localZ = z - WORLD_ORIGIN_Z;
+    const interior = inInteriorSpace(x, z);
+    const localX = x - (interior ? INTERIOR_ORIGIN_X : BUILDING_CENTRE_X);
+    const localZ = z - (interior ? INTERIOR_ORIGIN_Z : BUILDING_CENTRE_Z);
     const ceiling = y + BUILDING_STEP_UP;
 
-    let best = groundAt(x, z);
+    let best = interior ? INTERIOR_GROUND_Y : groundAt(x, z);
 
-    // Ramps and landings — stairs, escalators, the entrance steps.
+    // Ramps and landings — stairs, escalators, the facade's entrance steps.
+    const space = interior ? 'interior' : 'garden';
     for (const ramp of this.ramps) {
+      if (ramp.space !== space) continue;
       if (!regionContains(ramp.footprint, localX, localZ)) continue;
       const height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
       if (height <= ceiling && height > best) best = height;
     }
 
-    // Deck slabs, skipping any deck that has a hole here.
-    if (insideFootprint(localX, localZ)) {
+    // Deck slabs, skipping any deck that has a hole here. Only the interior has
+    // decks — the tower in the garden is a facade with a door in it.
+    if (interior && insideInterior(localX, localZ)) {
       for (let deck = BUILDING_FLOOR_COUNT - 1; deck >= 0; deck -= 1) {
         const height = deckY(deck);
         if (height > ceiling || height <= best) continue;
@@ -98,9 +124,13 @@ export class WalkSurfaces {
    * when they are not in the building at all. Used for the cutaway view.
    */
   deckAt(x: number, z: number, y: number): number | null {
-    const localX = x - WORLD_ORIGIN_X;
-    const localZ = z - WORLD_ORIGIN_Z;
-    const inShell = insideFootprint(localX, localZ, 1.2);
+    if (!inInteriorSpace(x, z)) return null;
+    const localX = x - INTERIOR_ORIGIN_X;
+    const localZ = z - INTERIOR_ORIGIN_Z;
+    // Generous margin: it also has to cover the porch outside the south door
+    // and the lift shaft hanging off the east wall, otherwise stepping onto
+    // either pops the whole tower back into view.
+    const inShell = insideInterior(localX, localZ, 4);
     const inLift = regionContains(LIFT_SHAFT, localX, localZ);
     if (!inShell && !inLift) return null;
     if (y < BUILDING_BASE_Y - 2) return null;
@@ -111,18 +141,6 @@ export class WalkSurfaces {
 }
 
 // ------------------------------------------------------------------ helpers
-
-const WORLD_ORIGIN_X = BUILDING_CENTRE_X;
-const WORLD_ORIGIN_Z = BUILDING_CENTRE_Z;
-
-function insideFootprint(localX: number, localZ: number, margin = 0): boolean {
-  return (
-    localX >= -BUILDING_HALF_X - margin &&
-    localX <= BUILDING_HALF_X + margin &&
-    localZ >= -BUILDING_HALF_Z - margin &&
-    localZ <= BUILDING_HALF_Z + margin
-  );
-}
 
 /**
  * The natural ground — the terrain, except inside the ball pit where it is
