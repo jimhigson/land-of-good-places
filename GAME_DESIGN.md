@@ -167,6 +167,12 @@ bonk the tree, all at once:
 
 Other dodgems have cute drivers — sometimes RiPika drives one.
 
+**Feedback (27 July 2026) — same fix as the water fight.** The labels in
+the middle of the screen cover up too much of the ride. Replace them with
+**portraits of the other drivers showing their mood** at the edge of the
+HUD, and **do not annotate apple bonks with text** — the wobble, the
+falling apples, the leaves and the startled bird already show it in-game.
+
 ### Water fight garden
 
 A place in the garden for water fights with the other children, using **very
@@ -208,6 +214,12 @@ a special celebration screen that tells their **mummy or daddy to give
 them sweeties in real life**. 🍬
 
 ## The park is full of children (NPCs)
+
+**Chatting (27 July 2026):** if the player **stands still**, nearby NPCs
+should come over and **chat with them** — approach, turn to face, say
+something cute in a little speech bubble, maybe wave or bounce, then
+wander off again. Standing still should feel like being noticed, not
+like being ignored.
 
 The park should feel **alive and busy**: lots of other children wander it
 doing everything the player can do — riding the rides (dodgem drivers,
