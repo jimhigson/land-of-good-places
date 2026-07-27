@@ -48,6 +48,21 @@ const PROGRESS_EPSILON = 0.12;
 /** A destination further than this is almost certainly a mis-tap on the sky. */
 const MAX_TARGET_DISTANCE = 90;
 
+/**
+ * A walk the game asked for rather than the player.
+ *
+ * The stair ride is the only user so far: it feeds the navigator one waypoint at
+ * a time up (or down) a flight, so the character *walks* the stairs with the
+ * real walk cycle, the real collision and the real surface sampler under their
+ * feet — the ride only decides where to go next and how fast the world runs
+ * while it happens. `onAbandon` fires the moment the player takes the controls
+ * back, or the seek gives up, which is what makes "cancel on any input" free.
+ */
+export interface ScriptedWalk {
+  onArrive(): void;
+  onAbandon(): void;
+}
+
 export class TapNavigator implements GameSystem {
   readonly name = 'tapNavigator';
 
@@ -59,6 +74,7 @@ export class TapNavigator implements GameSystem {
 
   private active = false;
   private zone: InteractZone | null = null;
+  private scripted: ScriptedWalk | null = null;
   private bestDistance = Infinity;
   private sinceProgress = 0;
   /** Set by a double-tap. Holds the `sprint` action for as long as we seek. */
@@ -90,6 +106,10 @@ export class TapNavigator implements GameSystem {
   handleTap(point: TapPoint): boolean {
     if (this.player.riding) return false;
 
+    // A finger on the park always beats a scripted walk: tapping somewhere while
+    // the stairs are carrying you is exactly the "cancel" gesture.
+    this.abandonScripted();
+
     this.ndc.set(point.ndcX, point.ndcY);
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
 
@@ -120,11 +140,35 @@ export class TapNavigator implements GameSystem {
     return true;
   }
 
+  /**
+   * Walks to a world point on somebody else's orders, with no tap involved.
+   *
+   * The marker still appears, because a child watching their character set off
+   * on its own should be able to see where it thinks it is going.
+   */
+  navigateTo(x: number, y: number, z: number, scripted?: ScriptedWalk): void {
+    if (this.player.riding) return;
+    this.abandonScripted();
+    this.zone = null;
+    this.scripted = scripted ?? null;
+    this.target.set(x, y, z);
+    this.active = true;
+    this.bestDistance = this.planarDistance();
+    this.sinceProgress = 0;
+    this.marker.show(x, y, z, true);
+  }
+
+  /** True while the character is walking somewhere it was told to. */
+  get isNavigating(): boolean {
+    return this.active;
+  }
+
   /** Drops the current destination. Called when the player takes over. */
   cancel(): void {
     this.active = false;
     this.running = false;
     this.zone = null;
+    this.abandonScripted();
     this.input.setNavigationSprint(false);
   }
 
@@ -213,6 +257,21 @@ export class TapNavigator implements GameSystem {
   private arrive(): void {
     if (this.zone?.pressInteract) this.input.pressVirtual('interact');
     this.input.setNavigationMove(0, 0);
-    this.cancel();
+
+    // Take the handler off first: `onArrive` is how the stair ride queues its
+    // *next* waypoint, and it must not be abandoned by the cancel below.
+    const scripted = this.scripted;
+    this.scripted = null;
+    this.active = false;
+    this.zone = null;
+    scripted?.onArrive();
+  }
+
+  /** Tells a scripted walk it has been taken over, once and once only. */
+  private abandonScripted(): void {
+    const scripted = this.scripted;
+    if (!scripted) return;
+    this.scripted = null;
+    scripted.onAbandon();
   }
 }
