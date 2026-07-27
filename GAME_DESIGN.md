@@ -469,6 +469,15 @@ Rough order of construction, each step playable:
     visit and get their faces painted in various cute designs.
 31d. **Player–NPC collision** — the player and NPCs cannot walk through
     each other.
+31e. **The castle INTERIOR must be fairy-tale themed too.** Checked
+    27 July 2026: it is not. Inside is a shopping centre — flat deck
+    floors with alternating cream/blossom storeys, a floor roundel,
+    planter rings and benches. No castle architecture at all. Needed:
+    stone-block walls, vaulted or beamed ceilings, arched doorways and
+    windows, chandeliers or torch sconces, hanging banners and
+    tapestries, a grand staircase, patterned tiled floors, and
+    stained-glass windows. The shops stay as they are (their novelty
+    fronts are item 20) — this is about the rooms around them.
 31. **The building is THE CASTLE** — renamed everywhere user-visible.
     From the outside it must NOT look like stacked floors: continuous
     decorated sides, a palace/castle look (towers, battlement bits,
