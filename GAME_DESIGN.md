@@ -144,6 +144,17 @@ a theme park feel like a theme park.
   Bulba-squirt** — a turtle with a plant growing on its back — flying past.
   (Original design, like RiPika: our own creature, not a copy.)
 
+**Queued follow-up (27 July 2026) — after the look-around lands:**
+
+- **Off-screen pointers.** When something is happening outside the current
+  view, show a **labelled arrow at the edge of the screen** pointing the way,
+  so the player knows which way to turn to see more. (e.g. an arrow reading
+  "Alien!" or "Space RiPika" at the screen edge.)
+- **A companion rides with you.** Another NPC child joins the ride and sits
+  **opposite the player** in the gondola, looking around at the attractions
+  in space too — turning their head towards whatever is happening, so the
+  ride feels shared rather than solitary.
+
 ### Dodgems
 
 Crash the cars into each other and into the **fake wooden tree**. When you
@@ -165,6 +176,17 @@ big water guns**. When you splash someone:
 - You earn **splash points** and try to beat your best score
 - Splashed kids get funny **drippy soaked hair** for a moment
 - When lots of water flies, a little **rainbow** appears
+
+**Feedback (27 July 2026) — replace the pop-up messages.** The messages
+that pop up during a water fight obscure too much of the game. Instead:
+
+- Show each character's **head at the edge of the HUD** (a row of little
+  portraits — the player and every child in the fight).
+- When someone gets **splashed, show water on their portrait** (dripping,
+  soaked hair) so you can see at a glance who just got got.
+- When someone **scores a point, their portrait smiles**.
+
+No more pop-ups over the play area.
 
 ## The spooky house
 

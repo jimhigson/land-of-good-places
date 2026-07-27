@@ -17,6 +17,7 @@ import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { blob, type AssetHandle } from '../style/asset';
 import { buildRipikaHead } from './ripika';
+import { createPuffCreature, PUFF_BALL_RADIUS, PUFF_CENTRE_Y } from './pets';
 
 /**
  * The hat shop's stock — and, from build step 5 onwards, what the player wears.
@@ -38,7 +39,7 @@ import { buildRipikaHead } from './ripika';
  * or a display plinth needs; the negative part of a brim is never more than a
  * few centimetres.
  */
-export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat';
+export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat' | 'puff';
 
 export const HAT_KINDS: readonly HatKind[] = [
   'party',
@@ -48,6 +49,7 @@ export const HAT_KINDS: readonly HatKind[] = [
   'cap',
   'flower',
   'ripikaHat',
+  'puff',
 ];
 
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
@@ -267,6 +269,48 @@ function createRipikaHat(): AssetHandle {
   return { root, height };
 }
 
+/**
+ * The singing puff, worn as a hat.
+ *
+ * Reuses `createPuffCreature` from `pets.ts` wholesale rather than building a
+ * second copy — same ball, same jiggle, same song, just settled onto the
+ * head instead of standing on its own paws. The one thing this wrapper does
+ * is the origin translation every hat needs: `createPuffCreature` puts the
+ * ground at y = 0 the way every creature does, but a hat's origin is the
+ * point that sits on `hatAnchor` (the crown), with the model sinking a
+ * little *below* that the way every other hat's base does (see `SIT`). So
+ * the whole puff is shifted down by exactly the depth of its own paws.
+ */
+function createPuffHat(): AssetHandle {
+  const puff = createPuffCreature({ variant: 'hat' });
+  puff.root.name = 'hat.puff';
+
+  // Where the ball's underside sits in the puff's own (ground-at-0) space.
+  const ballBottomLocal = PUFF_CENTRE_Y - PUFF_BALL_RADIUS * 0.92;
+  // Settle it the same shallow depth into the hair that the bobble hat's rim
+  // and the cap's dome do (SIT + ~0.02), rather than the full SIT a brim uses.
+  puff.root.position.y = SIT + 0.02 - ballBottomLocal;
+
+  // Ball top, plus a little for the curl, in the puff's own space — then
+  // carried across the same shift so `height` still measures from this hat's
+  // true origin to the tip, ears (or curls) included, per ART_DIRECTION.md §7.
+  const ballTopLocal = PUFF_CENTRE_Y + PUFF_BALL_RADIUS * 0.92;
+  const top = ballTopLocal + PUFF_BALL_RADIUS * 0.35 + puff.root.position.y;
+
+  // `puff.update`/`puff.dispose` are typed as possibly-`undefined` because
+  // `AssetHandle` declares them optional — but with `exactOptionalPropertyTypes`
+  // an optional property must be OMITTED rather than explicitly set to
+  // `undefined`. `createPuffCreature` always supplies both in practice, so
+  // build the object conditionally instead of assigning the (statically)
+  // possibly-undefined value straight through.
+  return {
+    root: puff.root,
+    height: top,
+    ...(puff.update && { update: puff.update }),
+    ...(puff.dispose && { dispose: puff.dispose }),
+  };
+}
+
 const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   party: createPartyHat,
   crown: createCrown,
@@ -275,6 +319,7 @@ const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   cap: createCap,
   flower: createFlowerCrown,
   ripikaHat: createRipikaHat,
+  puff: createPuffHat,
 };
 
 /** A fresh hat. Parent it to `hatAnchor` (head) or to a shop stand. */

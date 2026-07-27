@@ -19,7 +19,7 @@ src/
   core/              engine-level things that know nothing about the park
     Engine.ts        renderer + scene + resize handling
     Loop.ts          requestAnimationFrame loop, fixed-ish delta, FPS counter
-    IsoCamera.ts     orthographic isometric rig: follow, 90° snap-rotate, zoom
+    IsoCamera.ts     orthographic isometric rig at one fixed angle: follow, zoom
     constants.ts     every tuning number in the game
     palette.ts       every colour in the game
     mathUtils.ts     lerp/damp/smoothstep/angles + the seeded Rng
@@ -41,7 +41,7 @@ src/
    identical input, and edge queries like `justPressed` behave.
 2. **`player.update()`** — the player moves first, because the camera and the
    sun's shadow frustum both follow wherever they end up.
-3. **`camera.update()`** — follows the player, handles rotate and zoom.
+3. **`camera.update()`** — follows the player, handles zoom.
 4. **`world.update()`** — clock, sky, water ripples, fairy lights, signs.
 5. **extra systems** registered with `game.addSystem()`.
 6. **render** — the sky backdrop pass, then the world on top.
@@ -96,8 +96,9 @@ are baked into the design:
 - *The sky cannot be a dome.* A dome would render as one flat colour and the sun
   would never appear on screen. `Sky.ts` is therefore a screen-space quad drawn
   before the world, with the sun and moon positioned by mapping their compass
-  bearing relative to the camera onto the screen's x axis. It is a cheat, and it
-  tracks convincingly when the view rotates.
+  bearing relative to the camera onto the screen's x axis. It is a cheat —
+  `cameraForward` is a fixed constant now (see "One camera angle, forever"
+  below), so this is simpler than it looks, not a live recompute.
 - *Distance moves things up the screen, not toward a horizon.* A point `d` metres
   further away at height `h` lands at `d·sin(pitch) + h·cos(pitch)` up the frame.
   An early build had a ring of distant hills; all that was ever visible was their
@@ -115,6 +116,40 @@ masked by the treeline in `Scenery.ts`.
 its camera `CAMERA_DISTANCE` back, so `FOG_NEAR`/`FOG_FAR` are expressed as
 offsets from that. Setting them as if for a perspective camera puts the entire
 park inside the fog and turns the game milky.
+
+### One camera angle, forever
+
+The camera never rotates — GAME_DESIGN.md #16, asked for twice by the family
+before it landed. `IsoCamera` sits at one fixed pitch (`CAMERA_PITCH_DEGREES`)
+and one fixed compass angle (`CAMERA_YAW_DEGREES`, 45°) for the entire life of
+the app. There used to be a 90°-step rotate — Q/R, a shoulder button, two
+on-screen turn arrows — and all of it is gone, along with the yaw state and
+tweening inside `IsoCamera` that used to drive it.
+
+That collapses what used to be a handful of separately-discovered "make this
+face the camera" tricks into one rule, true everywhere: **the camera looks
+back down the +X/+Z world diagonal, so anything with a painted front — a
+sign, a shop counter, a stall awning, a station nameboard — should turn to
+face back down that same diagonal.** Concretely, give it a `rotation.y`
+somewhere in the quarter-turn between +Z (0°) and +X (90°), with **45°**
+(`CAMERA_YAW_DEGREES` itself) reading dead-on; small variation either side of
+that is fine and reads as natural, the way `world/anchors.ts`'s `signYaw`
+values (each roughly 35°–55°) or `minigames/stalls.ts`'s per-stall `facing`
+values do. Go much outside that arc and the camera sees the blank back of
+whatever it is.
+
+One trap worth naming because a builder already fell into it
+(`world/FacePaintStall.ts`'s `STALL_FACING`): mirroring a prop's *position*
+across the middle of the park does **not** mean mirroring its *facing* too.
+The camera direction is one fixed absolute compass bearing, not something
+relative to which side of the map a thing stands on — a stall built as the
+mirror image of another, sign and all, still has to face the same way
+everything else does.
+
+Exempt from all of this: anything with its own dedicated camera — a
+mini-game's play view (dodgems, rail racer, the space ferris wheel), and any
+future ride camera. Those are separate rigs solving a separate problem and are
+untouched by any of the above.
 
 ### Colours and numbers
 
@@ -430,8 +465,6 @@ noisy for the store (the clock face, FPS) are pushed in via setters.
 
 ## Known follow-ups
 
-- The plot signs face the default camera angle so a child can read them without
-  rotating the view; they are not readable from the three other 90° views.
 - Sunset is dim on horizontal surfaces — physically right (the sun is grazing)
   but the grass could use an art-directed cheat.
 - `dist/assets/index.js` is ~610 kB (159 kB gzipped), essentially all three.js.

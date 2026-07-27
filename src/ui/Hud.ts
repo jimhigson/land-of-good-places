@@ -91,10 +91,10 @@ export class Hud {
     this.keyHint.innerHTML = isTouchDevice()
       ? '<span class="emoji">👆</span>' +
         '<span><b>Tap</b> where to walk · tap a thing to use it · ' +
-        '<b>hop</b> &amp; <b>turn</b> buttons · <b>pinch</b> to zoom</span>'
+        '<b>hop</b> button · <b>pinch</b> to zoom</span>'
       : '<span class="emoji">🕹️</span>' +
         '<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to walk · ' +
-        '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · <kbd>Q</kbd>/<kbd>R</kbd> turn view · ' +
+        '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · ' +
         '<kbd>+</kbd>/<kbd>−</kbd> zoom · or just <b>click</b> where to go</span>';
 
     this.padPill = pill('pill pill--pad');

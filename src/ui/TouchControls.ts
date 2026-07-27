@@ -2,17 +2,16 @@ import type { GameAction } from '../core/input';
 import type { InputSystem } from '../core/input';
 
 /**
- * The on-screen buttons: hop, and turn the view.
+ * The on-screen buttons: hop. That's it.
  *
- * Only three of them, and only on a touch screen. Everything else a child needs
+ * Only one of them, and only on a touch screen. Everything else a child needs
  * is a tap on the park itself, which is the whole idea — a thumbstick would
  * cover a quarter of a phone screen with plastic, and this game is meant to be
- * looked at.
+ * looked at. There used to be a pair of turn buttons here too, spinning the
+ * view in 90° steps; the camera no longer rotates at all (GAME_DESIGN.md #16),
+ * so there is nothing left for them to do.
  *
- * Rotate is buttons rather than a two-finger twist because a twist is a fussy
- * gesture for small hands, and because the camera only turns in 90° steps: a
- * continuous gesture driving a discrete snap is a poor match. Zoom, which *is*
- * continuous, is a pinch instead (see `PointerControls`).
+ * Zoom, which *is* continuous, is a pinch instead (see `PointerControls`).
  *
  * Every button goes through {@link InputSystem.pressVirtual}, so downstream a
  * thumb on "hop" is indistinguishable from a thumb on the space bar.
@@ -25,17 +24,10 @@ export class TouchControls {
     this.root = document.createElement('div');
     this.root.className = 'touch-controls';
 
-    const turnRow = document.createElement('div');
-    turnRow.className = 'touch-row';
-    turnRow.append(
-      this.button('touch-btn touch-btn--turn', '↺', 'Turn view left', 'cameraLeft'),
-      this.button('touch-btn touch-btn--turn', '↻', 'Turn view right', 'cameraRight'),
-    );
-
     const hop = this.button('touch-btn touch-btn--hop', '⤴', 'Hop', 'jump');
     hop.append(hopLabel());
 
-    this.root.append(turnRow, hop);
+    this.root.append(hop);
     container.append(this.root);
   }
 

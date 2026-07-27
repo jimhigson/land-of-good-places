@@ -1,6 +1,7 @@
 import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, Quaternion, Vector3 } from 'three';
 import { BUILDING_FLOOR_HEIGHT } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
+import { createFloorArrow } from './FloorArrows';
 import { interiorMaterial } from './parts';
 import { stairFlights, TOP_DECK, type RampDefinition } from './layout';
 
@@ -31,8 +32,56 @@ export class Stairs {
       group.add(buildLanding(flightA, flightB, bottom));
       group.add(buildBalustrade(flightA, flightB, bottom));
       group.add(buildHandrails(flightA, bottom), buildHandrails(flightB, bottom));
+      group.add(buildDirectionArrows(flightA, flightB, bottom));
     }
   }
+}
+
+/**
+ * A "this way up" chevron at the very bottom and the very top of the
+ * switchback (GAME_DESIGN.md item 31b) — reusing the same painted decal the
+ * escalator uses, so the two ways up read as the same family of signage.
+ *
+ * Unlike the escalator, a switchback reverses direction partway up: flight A
+ * climbs along -Z, flight B climbs back along +Z (see `stairFlights`). So the
+ * bottom arrow (before flight A) is unrotated — same -Z default as
+ * `createFloorArrow()` — but the top one (after flight B) is turned 180° to
+ * point +Z, matching the direction you are actually walking when you reach it.
+ *
+ * That 180° turn is `rotation.z`, not `rotation.y`: the mesh is already laid
+ * flat by its own baked-in `rotation.x`, and spinning the *vertical* (world)
+ * axis of an object tilted that way means turning its local Z, not Y — Y at
+ * this point is the in-plane axis the flattening rotated *out of* horizontal.
+ * (Confirmed empirically — `rotation.y` here silently no-ops on which way the
+ * chevron points, so this is not a stylistic pick.)
+ */
+function buildDirectionArrows(
+  flightA: RampDefinition,
+  flightB: RampDefinition,
+  groupBase: number,
+): Group {
+  const group = new Group();
+  group.name = 'stairs-arrows';
+  const inset = 0.9;
+
+  const bottom = createFloorArrow();
+  bottom.position.set(
+    (flightA.footprint.minX + flightA.footprint.maxX) / 2,
+    flightA.yFrom - groupBase + 0.02,
+    flightA.from + inset,
+  );
+  group.add(bottom);
+
+  const top = createFloorArrow();
+  top.rotation.z = Math.PI;
+  top.position.set(
+    (flightB.footprint.minX + flightB.footprint.maxX) / 2,
+    flightB.yTo - groupBase + 0.02,
+    flightB.to + inset,
+  );
+  group.add(top);
+
+  return group;
 }
 
 /**

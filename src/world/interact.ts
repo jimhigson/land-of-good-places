@@ -37,6 +37,53 @@ export interface InteractZone {
    * triggers simply by being stood on (slides, the trampoline, the bubble).
    */
   readonly pressInteract: boolean;
+
+  /**
+   * The short word the action button shows — "Shop", "Ride", "Climb", "Play"
+   * — so a child can see what a place does before doing it (see
+   * `ui/ActionButton.ts`). Optional and additive: nothing that registers a
+   * zone needs to set this, because {@link defaultVerb} derives a sensible
+   * one from `id` for every zone that doesn't.
+   */
+  readonly verb?: string;
+}
+
+/**
+ * A sensible default verb for a zone that doesn't set {@link
+ * InteractZone.verb} explicitly, keyed off the `id` prefixes every
+ * registration site already uses. Order matters — more specific prefixes
+ * (individual stalls) are checked before the generic `stall:` fallback.
+ *
+ * Kept as a prefix table rather than a `kind` enum on the interface so that
+ * adding this stayed additive: every existing `interactZones()` call site
+ * above needed zero changes to keep compiling and showing a sensible word.
+ */
+const DEFAULT_VERBS: readonly (readonly [prefix: string, verb: string])[] = [
+  ['shop-', 'Shop'],
+  ['stall:dodgems', 'Ride'],
+  ['stall:spaceFerrisWheel', 'Ride'],
+  ['stall:spookyHouse', 'Enter'],
+  ['stall:', 'Play'], // railRacer, waterFight, facePaint and any future stall
+  ['frontDoor', 'Enter'],
+  ['lift-', 'Ride'],
+  ['stairs-', 'Climb'],
+  ['tree-', 'Climb'],
+  ['flower:', 'Pick'],
+  ['grownUp', 'Ask'],
+  ['toilets', 'Go'],
+  ['train-station-', 'Ride'],
+];
+
+export function defaultVerb(zone: InteractZone): string {
+  for (const [prefix, verb] of DEFAULT_VERBS) {
+    if (zone.id.startsWith(prefix)) return verb;
+  }
+  return 'Go';
+}
+
+/** The verb to show for this zone: its own if set, else {@link defaultVerb}. */
+export function zoneVerb(zone: InteractZone): string {
+  return zone.verb ?? defaultVerb(zone);
 }
 
 /** How far above or below a zone a tapped point may land and still count. */
