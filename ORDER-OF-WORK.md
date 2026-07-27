@@ -144,6 +144,8 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **Dust cloud behind the player when running** — pooled particles, no
+  per-puff allocation (see Wave 1b)
 - Water-fight portraits: bigger heads/names, split left+right in landscape,
   top+bottom in portrait
 - **Dodgems portrait HUD** — reuse the water-fight portrait strip

@@ -509,6 +509,12 @@ Every cute thing you buy or find:
 - **Photo mode** — a camera button that snaps you and your toys in a cute frame
 - **Rainbow hop** — a rainbow effect radiates out from the player whenever
   they jump
+- **Dust cloud when running** (27 July 2026 — queued) — little puffs of
+  dust kick up behind the player while they run, fading as they settle.
+  Only while running, not walking, so running feels different rather than
+  just faster. *Note: the pooled, no-allocation particle pattern already
+  used by the hop's rainbow ring and the water-fight spray is the one to
+  follow — see the GC work, this must not allocate per puff.*
 - **Picking a flower is a little animation** (27 July 2026 — queued, not
   started): the character **bends down** to pick it, then **lifts it up and
   smells it**, with a happy expression, before it goes into the collection.
