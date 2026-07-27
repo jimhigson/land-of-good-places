@@ -132,6 +132,31 @@ rides in it.
 - **Silly ways:** a trampoline that bounces you up, a slide to whoosh down,
   and a floating bubble that carries you up
 
+### Riding the lift (27 July 2026 — BUG/usability, queued)
+
+**The elevator is too difficult to ride.** It should work like this:
+
+- **Walk near it** and a **call button appears, styled like a real elevator
+  control panel** — a lovely toy version of one, in the house style.
+- **Press it** and the lift **comes quickly**. Never make a child wait.
+- **The character gets on automatically** — no walking in and lining up.
+- **The panel then shows all the floors.** Press one and you go **straight
+  there** — no holding, no stopping on the way, no fiddling.
+
+*Note: keep the panel and its "take me to floor N" contract decoupled from
+the lift's internals, because the castle floor-split decision may re-conceive
+every traversal device underneath it. The UX above must survive either
+ruling.*
+
+### Buying things (27 July 2026 — BUG/usability, queued)
+
+**Buying is too fiddly** — selecting an item and then clicking Buy is two
+steps too many. Replace it with **a list of items and their descriptions,
+each with a Buy button next to it. One click buys.** No selection state, no
+confirmation. Money is infinite in normal play, so buying should feel
+generous. Give immediate, obvious feedback that the thing is now yours, and
+make the button big enough for a small finger.
+
 ### Toilets
 
 The building has cute toilets. When you use one, a **flushing sound** plays,
@@ -160,6 +185,15 @@ game is saved mid-visit — the roof follows the character's state, so if they
 leave the room it lifts, whatever point the sequence had reached. Worth
 letting NPCs use it too; a queue outside a covered toilet is funnier than
 anything we could script.*
+
+### The space ferris wheel — the pet's seat (27 July 2026 — queued)
+
+In the ferris wheel car, **the pet sits on its own chair, lower than the
+player's**, so its head does not block the view. **Restructure the car** to
+fit properly rather than nudging the pet down into the floor. All pets are
+size-normalised, so build the chair to fit the pet, never the reverse — and
+an empty chair should still look deliberate. *The ferris wheel's look-around
+directions are confirmed CORRECT; do not disturb them.*
 
 ### The ginormous slide
 

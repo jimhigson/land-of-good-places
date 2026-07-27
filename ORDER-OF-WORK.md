@@ -158,6 +158,13 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **Lift call panel** — call button near the lift styled as an elevator
+  panel, lift comes fast, auto-board, panel lists floors, go straight there.
+  Keep decoupled from lift internals pending the castle floor-split ruling.
+- **One-click buying** — item + description + Buy button, no select step.
+- **Ferris wheel pet chair** — pet sits lower than the player so it does not
+  block the view; restructure the car to fit. Do NOT disturb the ferris
+  look-around directions, which are confirmed correct.
 - **Toilet privacy roof** — walk in, roof covers the room, flush, roof
   lifts, wash hands. Uses the existing `TOILET_ROOM` region and the existing
   flush/tap sounds. Must never trap the player under the lid.
