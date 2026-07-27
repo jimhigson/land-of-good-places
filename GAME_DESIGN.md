@@ -119,6 +119,49 @@ park getting tiny, then the whole **Earth below**. At the top:
 
 At night the wheel lights up before it climbs.
 
+## Replan the whole park around a real railway (27 July 2026 — queued;
+## ARCHITECT DECISION REQUIRED before any of it is built)
+
+The train currently runs a plain circle around the park edge. Replace it
+with a **genuinely interesting route**: it should wind, it should **dive
+into tunnels beneath the park's paths** rather than everything politely
+avoiding everything else, and it should feel like a railway laid through a
+park rather than a ring drawn around one.
+
+**This means redrawing the park map, and that is fine** — every existing
+attraction, path, wall and plot may be moved to a new location to make a
+good route possible. Treat the current layout as provisional.
+
+Also:
+
+- **The player can no longer walk onto the track.** Use a mix of **visible
+  barriers** (fences, hedges, embankments — things that read as "not for
+  you") and **invisible walls** where a visible one would spoil the view.
+- **The track stays interesting to look at**: statues and items of interest
+  dotted along it, per the first-person train ride note below.
+- **This ties directly into the rollercoaster rework** (item 30g): that ride
+  is also becoming a railed ride running through the real park. The two
+  rail systems should be planned **together, once**, not laid out
+  independently and then reconciled.
+
+### Why this needs the architect first
+
+ARCHITECTURE-DECISIONS.md Decision 1 already rules on train-versus-coaster:
+the train owns the outer band (r ≈ 48–58) at ground level, the coaster the
+middle band (r ≈ 15–45) elevated, crossing exactly twice. **This request
+supersedes the premise of that decision** — a winding, tunnelled route is
+not a band. Decision 1's routing section, its "legible at a glance" argument
+(height, territory, speed) and its PR plan all need revisiting.
+
+The architect should rule on: the new park layout as a whole; both rail
+routes together; how tunnels work given the terrain is a shallow disc and
+the camera is a fixed 38° isometric (a tunnel the camera cannot see into is
+a tunnel the player is lost in); what happens to the anchor-plot system that
+every ride currently registers against; and how much of the existing world
+generation survives. It should also fold in the already-queued items that
+touch placement: paths to the stations, the spooky house moving to the edge,
+and the trackside statues.
+
 ## The train needs paths to its stations (27 July 2026 — queued, not started)
 
 The two stations (Sunny Side and Bluebell Halt) sit out at the park edge
