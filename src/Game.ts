@@ -178,6 +178,14 @@ export class Game {
     // true. `PLAYER_RADIUS` and `JUMP_APEX_HEIGHT` are the player's own numbers
     // rather than a second set: the lattice has to agree with the resolver
     // about where she fits and with the auto-hop about which walls she clears.
+    // Before the lattice is ever baked, and for the same reason it is built
+    // here: the collision world is finished, so this is the one moment the
+    // whole park can be checked at once. It refuses to let a wall exist that
+    // the route planner would hop and the flight would not clear — the exact
+    // shape of bug that stranded a six-year-old against the 1.4 m wall at
+    // [3, 19] → [-4, 20]. See `Collision.checkHoppableColliders`.
+    this.world.collision.checkHoppableColliders(PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+
     this.navGrid = new NavGrid(this.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
 
     // Tap-to-move. Built after the world so it can ask the building where its
