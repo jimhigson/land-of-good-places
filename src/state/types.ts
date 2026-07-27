@@ -96,6 +96,17 @@ export interface InventoryItem {
   stowed: boolean;
 }
 
+/**
+ * A face-painting stall design, or `null` for a clean face.
+ *
+ * Additive field (face painting stall feature, see `world/FacePaintStall.ts`).
+ * The design ids themselves live in `art/style/faces.ts`
+ * (`FacePaintDesign`) — kept as a plain `string | null` here so `state/`
+ * never has to import the art layer, the same reason `PlayerState.hairColour`
+ * is a bare hex number rather than a `Color`.
+ */
+export type FacePaintId = string | null;
+
 export interface PlayerState {
   name: string;
   kind: CharacterKind;
@@ -105,6 +116,8 @@ export interface PlayerState {
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
   maxHealth: number;
+  /** The design currently painted on, or `null` for a clean face. Free, swappable. */
+  facePaint: FacePaintId;
 }
 
 export interface WorldState {

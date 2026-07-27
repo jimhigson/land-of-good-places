@@ -3,6 +3,7 @@ import { DAY_START_TIME, PLAYER_DEFAULT_NAME } from '../core/constants';
 import type {
   CuteCategory,
   CutePlacement,
+  FacePaintId,
   GameMode,
   GameState,
   GameTime,
@@ -87,6 +88,16 @@ class GameStore {
   setPlayerName(name: string): void {
     const trimmed = name.trim();
     this.state.player.name = trimmed.length > 0 ? trimmed : PLAYER_DEFAULT_NAME;
+    this.notify();
+  }
+
+  /**
+   * The face-painting stall (additive feature): free, and swappable any time —
+   * picking a new design just overwrites the old one, and `null` washes it off.
+   */
+  setFacePaint(design: FacePaintId): void {
+    if (this.state.player.facePaint === design) return;
+    this.state.player.facePaint = design;
     this.notify();
   }
 
@@ -322,6 +333,7 @@ function createInitialState(): GameState {
       outfitColour: PALETTE.outfit,
       health: 5,
       maxHealth: 5,
+      facePaint: null,
     },
     world: {
       timeOfDay: DAY_START_TIME,

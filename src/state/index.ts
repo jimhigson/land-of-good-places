@@ -4,6 +4,7 @@ export type {
   CuteCategory,
   CutePlacement,
   CuteThing,
+  FacePaintId,
   GameMode,
   GameState,
   GameTime,
