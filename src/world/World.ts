@@ -7,7 +7,7 @@ import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
-import { Building } from './building';
+import { Building, type InteriorControls } from './building';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -46,7 +46,7 @@ export class World implements GameSystem {
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
 
-  constructor(scene: Scene, sky: Sky) {
+  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
     // Living, pickable flowers — no collision (you walk straight through
@@ -57,7 +57,7 @@ export class World implements GameSystem {
     this.fairyLights = new FairyLights(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots);
+    this.building = new Building(this.collision, this.anchorPlots, interiorControls);
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -89,6 +89,10 @@ export class World implements GameSystem {
       this.fountain.group,
       this.fairyLights.group,
       this.anchorPlots.group,
+      // The building is bigger on the inside: its interior is its own place,
+      // six hundred metres from the park rather than inside the plot the facade
+      // stands on, so it joins the scene on its own rather than through a plot.
+      this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
     );
