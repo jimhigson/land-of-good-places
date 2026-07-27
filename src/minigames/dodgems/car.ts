@@ -48,6 +48,18 @@ export interface CarOptions {
 export interface CarModel {
   readonly root: Group;
   readonly driver: CreatureHandle;
+  /**
+   * The paint colour this car was built in, and who is driving it — both as
+   * handed in.
+   *
+   * Exposed because the HUD's portraits need exactly this to build a matching
+   * little head (`minigames/portraitStrip.ts`): the ring round a portrait is
+   * the car's own colour, which is how a child tells the cars apart on the
+   * rink in the first place. A second table of "who drives what" alongside the
+   * rival roster is precisely the sort of copy that drifts.
+   */
+  readonly bodyColour: number;
+  readonly driverKind: DriverKind;
   /** Total height including the pole and its star — used to hang name pills. */
   readonly height: number;
   /**
@@ -202,6 +214,8 @@ export function createCar(options: CarOptions): CarModel {
   return {
     root,
     driver,
+    bodyColour,
+    driverKind: options.driver,
     height: 3.2,
 
     animate(dt: number, elapsed: number, speed: number, turn: number, squash: number): void {

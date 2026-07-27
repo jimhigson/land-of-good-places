@@ -19,6 +19,8 @@ import { createDodgemsHud, type DodgemsHud } from './hud';
 import { createSparks, type Sparks } from './sparks';
 import { createSteering, type Steering } from './steering';
 import { createWobblyTree, type AppleTarget, type WobblyTree } from './tree';
+import { createPortraitStrip, type PortraitInfo, type PortraitStrip } from '../portraitStrip';
+import { ART } from '../../art/style/artPalette';
 import {
   ARENA_RADIUS,
   BUMP_THRESHOLD,
@@ -131,6 +133,15 @@ const TREE_GAP = 0.9;
 const BUMP_GAP = 0.22;
 /** Seconds between giggle bubbles from the same car, so a pile-up is not a wall of text. */
 const GIGGLE_GAP = 0.55;
+/** Same idea for the portraits: a four-car pile-up should not strobe the edge
+ *  of the screen. Longer than the bump counter's gap, which is only there to
+ *  stop leaning on somebody scoring. */
+const PORTRAIT_GAP = 0.5;
+
+/** How long "GO!" stays up after the countdown ends. */
+const GO_SECONDS = 0.8;
+/** How long the "here is how to drive" line stays under the counters. */
+const HINT_SECONDS = 4;
 
 /**
  * Camera framing.
@@ -214,6 +225,11 @@ interface Car {
   giggleCooldown: number;
   treeCooldown: number;
   bumpCooldown: number;
+  /** Seconds before this driver's portrait may bounce again — see `pop`. */
+  portraitCooldown: number;
+  /** What the portrait is currently showing, so it is only written when it
+   *  changes rather than six times a frame. */
+  portraitHappy: boolean;
   /** Rival brain: where it is pottering off to, and for how long. */
   targetX: number;
   targetZ: number;
@@ -232,6 +248,7 @@ class Dodgems implements MiniGame {
   private sparks: Sparks | null = null;
   private giggles: Giggles | null = null;
   private hud: DodgemsHud | null = null;
+  private portraits: PortraitStrip | null = null;
   private steering: Steering | null = null;
   private readonly cars: Car[] = [];
   private readonly rng = new Rng(0xd0d63e);
@@ -245,6 +262,10 @@ class Dodgems implements MiniGame {
   private bumps = 0;
   private treeBonks = 0;
   private celebrationBurst = 0;
+  /** Seconds of "GO!" left on the countdown's last frame. */
+  private goLeft = 0;
+  /** Seconds left showing the how-to-drive line. */
+  private hintLeft = 0;
   private aspect = 1;
   private viewHeight = MIN_VIEW_HEIGHT;
   /** CSS pixels, kept only so the giggle bubbles can be sized on screen rather
@@ -305,6 +326,14 @@ class Dodgems implements MiniGame {
     this.scene.add(this.youMarker);
 
     this.steering = createSteering();
+
+    // A little head for every driver, docked at the edges of the screen — the
+    // same shared strip the water fight uses, for the same reason: the family
+    // asked for portraits instead of labels over the play area. Built in the
+    // same order as `this.cars` (rivals, then the player), so an index into
+    // one is always an index into the other.
+    this.portraits = createPortraitStrip(context.overlay, this.cars.map(portraitFor));
+
     this.hud = createDodgemsHud(context.overlay);
     this.hud.setBumps(0);
     this.hud.setTreeBonks(0);
@@ -379,6 +408,10 @@ class Dodgems implements MiniGame {
       giggleCooldown: 0,
       treeCooldown: 0,
       bumpCooldown: 0,
+      portraitCooldown: 0,
+      // Starts disagreeing with the driver on purpose, so the first frame
+      // writes the real face and the two can never boot out of step.
+      portraitHappy: false,
       targetX: 0,
       targetZ: 0,
       targetTimer: 0,
@@ -397,8 +430,10 @@ class Dodgems implements MiniGame {
         this.countdown -= dt;
         this.hud?.setCount(countdownText(this.countdown));
         if (this.countdown <= 0) {
-          this.hud?.setCount(null);
-          this.hud?.shout('GO! Bonk the tree!', 2.2);
+          // "GO!" is the last frame of the 3-2-1 rather than a banner of its
+          // own — it is already on screen from `countdownText`, and it is
+          // cleared a beat into the ride by `goLeft` below.
+          this.goLeft = GO_SECONDS;
           this.phase = 'riding';
         }
         // Everybody idles in place until the off — but the tree and the lights
@@ -407,6 +442,14 @@ class Dodgems implements MiniGame {
 
       case 'riding': {
         this.rideTime += dt;
+        if (this.goLeft > 0) {
+          this.goLeft -= dt;
+          if (this.goLeft <= 0) this.hud?.setCount(null);
+        }
+        if (this.hintLeft > 0) {
+          this.hintLeft -= dt;
+          if (this.hintLeft <= 0) this.hud?.setHint(null);
+        }
         this.driveCars(dt, input.hold || steer.wants, steer.x, steer.y);
         this.teach(steer.wants);
         this.hud?.setTime(RIDE_SECONDS - this.rideTime);
@@ -439,7 +482,6 @@ class Dodgems implements MiniGame {
     this.sparks?.update(dt);
     this.giggles?.update(dt, this.worldUnitsPerPixel);
     this.arena?.update(elapsed);
-    this.hud?.update(dt);
     this.updateCamera(dt);
   }
 
@@ -577,6 +619,7 @@ class Dodgems implements MiniGame {
       car.giggleCooldown = Math.max(0, car.giggleCooldown - dt);
       car.treeCooldown = Math.max(0, car.treeCooldown - dt);
       car.bumpCooldown = Math.max(0, car.bumpCooldown - dt);
+      car.portraitCooldown = Math.max(0, car.portraitCooldown - dt);
     }
   }
 
@@ -729,6 +772,8 @@ class Dodgems implements MiniGame {
       this.bumps += 1;
       this.hud?.setBumps(this.bumps);
     }
+    this.popPortrait(a);
+    this.popPortrait(b);
     this.giggle(a.isPlayer ? b : a, 'car');
   }
 
@@ -757,9 +802,25 @@ class Dodgems implements MiniGame {
     if (car.isPlayer) {
       this.treeBonks += 1;
       this.hud?.setTreeBonks(this.treeBonks);
-      this.hud?.shout('TWEET!? 🐦', 1.8);
     }
+    // Whoever hit it wears it: their portrait jumps. That is the whole of what
+    // "TWEET!? 🐦" used to say, minus the bit that sat over the rink.
+    this.popPortrait(car);
     this.giggle(car, 'tree');
+  }
+
+  /**
+   * Bounces this driver's portrait — the edge-of-screen version of the label
+   * that used to appear over the rink.
+   *
+   * Rate-limited per car, because the portraits are the one piece of feedback
+   * that is on screen for everybody at once: six cars in a heap would
+   * otherwise set the whole strip jittering.
+   */
+  private popPortrait(car: Car): void {
+    if (car.portraitCooldown > 0) return;
+    car.portraitCooldown = PORTRAIT_GAP;
+    this.portraits?.pop(this.cars.indexOf(car));
   }
 
   private giggle(car: Car, _reason: 'car' | 'wall' | 'tree'): void {
@@ -779,9 +840,11 @@ class Dodgems implements MiniGame {
         car.squash = Math.min(1, car.squash + 0.25);
       },
       onApple: () => {
+        // Deliberately unannounced — "no need to annotate apple bonks"
+        // (family, 28 July 2026). The driver looks startled and giggles, which
+        // is the joke; a label saying so was the noise.
         car.surprise = SURPRISE_SECONDS;
         this.giggle(car, 'tree');
-        if (car.isPlayer) this.hud?.shout('Apple bonk!', 1.2);
       },
     }));
   }
@@ -809,7 +872,14 @@ class Dodgems implements MiniGame {
       // change to how the ride reads, so it wants the family's eyes on it, and
       // it is one number in `car.ts` to back off if it is too much.
       car.model.animate(dt, elapsed, speed, car.turn, car.squash);
-      car.model.setExpression(car.surprise > 0 ? 'surprised' : 'happy');
+      const happy = car.surprise <= 0;
+      car.model.setExpression(happy ? 'happy' : 'surprised');
+      // The portrait wears the same face as the driver in the car — written
+      // only when it changes, rather than six DOM writes a frame.
+      if (happy !== car.portraitHappy) {
+        car.portraitHappy = happy;
+        this.portraits?.setExpression(this.cars.indexOf(car), happy ? 'happy' : 'surprised');
+      }
     }
 
     const player = this.cars[this.cars.length - 1];
@@ -830,10 +900,10 @@ class Dodgems implements MiniGame {
       const touch = this.context?.touch ?? false;
       // Says what the controls now actually do: a direction is a place to go,
       // not a wheel to turn (the CONTROL RULE — see `driveCars`).
-      this.hud?.shout(
+      this.hud?.setHint(
         touch ? 'Slide your thumb where you want to go!' : 'Press an arrow to go that way!',
-        3,
       );
+      this.hintLeft = HINT_SECONDS;
     }
   }
 
@@ -842,6 +912,7 @@ class Dodgems implements MiniGame {
     this.resultTime = 0;
     this.celebrationBurst = 0;
     this.hud?.setCount(null);
+    this.hud?.setHint(null);
     this.hud?.setTime(0);
     this.throwConfetti();
 
@@ -957,6 +1028,7 @@ class Dodgems implements MiniGame {
     this.sparks?.dispose();
     this.giggles?.dispose();
     this.hud?.dispose();
+    this.portraits?.dispose();
     this.steering?.dispose();
     this.scene.clear();
     this.context = null;
@@ -975,6 +1047,37 @@ function countdownText(remaining: number): string {
   if (remaining > 1.2) return '2';
   if (remaining > 0.2) return '1';
   return 'GO!';
+}
+
+/**
+ * One driver's portrait, from the car they are already sitting in.
+ *
+ * The accent ring is the car's own colour, which is how a child tells the cars
+ * apart on the rink in the first place — the portrait and the thing it stands
+ * for are never a different colour from each other.
+ *
+ * RiPika has no hair, so rather than paint a mouse (which would cost the very
+ * canvases the shared strip exists to save) he gets his own yellow for the
+ * whole face and his cocoa ear-tip colour for the band, which reads as him at
+ * portrait size and costs nothing.
+ */
+function portraitFor(car: Car): PortraitInfo {
+  const driver = car.model.driverKind;
+  if (driver.kind === 'ripika') {
+    return {
+      name: car.name,
+      hair: ART.ripikaTip,
+      skin: ART.ripikaYellow,
+      accent: car.model.bodyColour,
+      isPlayer: car.isPlayer,
+    };
+  }
+  return {
+    name: car.name,
+    hair: driver.hair,
+    accent: car.model.bodyColour,
+    isPlayer: car.isPlayer,
+  };
 }
 
 /** Always kind. There is no losing score at the dodgems. */

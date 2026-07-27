@@ -34,7 +34,6 @@ export interface WaterFightPortraits {
 }
 
 interface WetState {
-  readonly circle: HTMLElement;
   readonly wetElement: HTMLElement;
   /** 0 = dry, 1 = fully soaked. Damped towards `soakTarget` every frame. */
   soakShown: number;
@@ -56,7 +55,7 @@ export function createPortraitRow(
       '<span class="wf-drip"></span><span class="wf-drip"></span><span class="wf-drip"></span>';
     entry.circle.append(wetElement);
 
-    return { circle: entry.circle, wetElement, soakShown: 0, soakTarget: false, smileLeft: 0 };
+    return { wetElement, soakShown: 0, soakTarget: false, smileLeft: 0 };
   });
 
   return {
