@@ -1,42 +1,52 @@
 import {
+  Color,
   CylinderGeometry,
   Group,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   Object3D,
+  Quaternion,
   SphereGeometry,
   TorusGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { TAU, clamp01, damp } from '../../core/mathUtils';
+import { Rng, TAU, clamp01, damp } from '../../core/mathUtils';
 import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { createFacePatch } from '../../art/style/faces';
 import { blob, stub } from '../../art/style/asset';
 import { createRipika } from '../../art/models/ripika';
+import { createSpaceTurtle } from '../../art/models/spaceTurtle';
 
 /**
- * The two friends who come to the window: the alien in their flying saucer, and
- * Space RiPika in a tiny astronaut helmet.
+ * The friends who share the sky with you: the alien in their flying saucer,
+ * Space RiPika in a tiny astronaut helmet, a nebula made of sweeties, and a
+ * little formation of space turtles.
  *
  * They are the reason this ride has any interactivity at all. A ninety-second
  * cut-scene is a lovely thing to watch once; something you can *wave at* is a
- * thing a small hand comes back to. So both of them:
+ * thing a small hand comes back to. So every one of them:
  *
- * - drift across the window on a slow arc, never straight at you;
- * - carry a generous invisible hit sphere, because a finger aimed at a mouse
+ * - lives at its own compass point around the gondola (see
+ *   `SpaceFerrisWheel.ts`'s placement of each), so **turning to look around is
+ *   how a child finds them** rather than watching one procession go by;
+ * - carries a generous invisible hit sphere, because a finger aimed at a mouse
  *   forty metres away is aimed at roughly where the mouse is;
- * - wave back with their whole body when tapped, and keep waving for a moment
- *   afterwards, so the answer is never in doubt.
+ * - waves back with its whole body (or, for the nebula, a shimmer) when
+ *   tapped, and keeps going for a moment afterwards, so the answer is never in
+ *   doubt.
  *
  * Space RiPika is the park's own `createRipika({ space: true })` — the helmet
- * has been waiting in that model file for exactly this ride.
+ * has been waiting in that model file for exactly this ride. The turtles are
+ * `createSpaceTurtle()` from `art/models/spaceTurtle.ts`, an original design.
  */
 
 /** Seconds a friend keeps waving after being waved at. */
 const WAVE_SECONDS = 2.6;
 
-export type FriendId = 'alien' | 'ripika';
+export type FriendId = 'alien' | 'ripika' | 'nebula' | 'turtles';
 
 export interface SpaceFriend {
   readonly id: FriendId;
@@ -376,6 +386,233 @@ export function createSpaceRipika(): SpaceFriend {
     },
 
     dispose(): void {
+      disposeTree(root);
+    },
+  };
+}
+
+// ---------------------------------------------------------- the sweetie nebula
+
+/** How many sweets make up the cloud. Enough to read as a cloud, not a scatter. */
+const NEBULA_COUNT = 64;
+
+/** The candy cloud's own radius, in metres — big and soft, not a tight knot. */
+const NEBULA_RADIUS = 9;
+
+/**
+ * A nebula made of sweeties — a soft, glowing spiral of wrapped sweets,
+ * lollipops and jelly beans, drifting in space exactly where a nebula has no
+ * business being.
+ *
+ * **Cheap, on purpose** (family spec, 27 July 2026): one `InstancedMesh`, no
+ * per-sweet geometry, no texture. Each instance is the same squashed-sphere
+ * "coin" the star field uses, just bigger and in candy colours, scattered
+ * along a golden-angle spiral so the cloud reads as swirling rather than
+ * scattered at random. It brightens like a star (instance-colour twinkle) —
+ * unlit `MeshBasicMaterial`, never additive: ART_DIRECTION §5 tried additive
+ * on an effect once and it blew out to a flat white halo, and a nebula that
+ * blows out to a white halo is just a light bulb.
+ *
+ * It never moves across the window the way the alien and RiPika do — it sits
+ * at its own compass point and slowly turns on the spot, so a child finds it
+ * by turning to look, not by watching it go by.
+ */
+export function createSweetieNebula(): SpaceFriend {
+  const root = new Group();
+  root.name = 'ferris:nebula';
+  root.scale.setScalar(0.001);
+
+  const rng = new Rng(0xcedec9);
+  const geometry = new SphereGeometry(1, 10, 8);
+  const material = new MeshBasicMaterial({ toneMapped: false, transparent: true, depthWrite: false });
+  const sweets = new InstancedMesh(geometry, material, NEBULA_COUNT);
+  sweets.frustumCulled = false;
+  root.add(sweets);
+
+  const goldenAngle = 2.399963;
+  const matrix = new Matrix4();
+  const position = new Vector3();
+  const quaternion = new Quaternion();
+  const scale = new Vector3();
+  const axis = new Vector3();
+  const twinkle: { phase: number; rate: number; tint: Color }[] = [];
+  const candyTints = [
+    PALETTE.markerPink,
+    PALETTE.markerLemon,
+    PALETTE.markerMint,
+    PALETTE.markerSky,
+    PALETTE.markerLilac,
+    PALETTE.blossomWhite,
+    PALETTE.flowerYellow,
+  ];
+
+  for (let i = 0; i < NEBULA_COUNT; i += 1) {
+    const t = i / NEBULA_COUNT;
+    const r = Math.sqrt(t) * NEBULA_RADIUS;
+    const angle = i * goldenAngle;
+    position.set(Math.cos(angle) * r, Math.sin(angle * 0.6) * NEBULA_RADIUS * 0.32, Math.sin(angle) * r);
+    axis.set(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1)).normalize();
+    quaternion.setFromAxisAngle(axis, rng.range(0, TAU));
+    // A mix of flattened "wrapped sweet" discs and rounder jelly beans.
+    const isDisc = rng.chance(0.6);
+    const size = rng.range(0.55, 1.15);
+    scale.set(size * (isDisc ? 1.5 : 1.05), size * (isDisc ? 0.4 : 0.9), size * (isDisc ? 1.5 : 1.05));
+    matrix.compose(position, quaternion, scale);
+    sweets.setMatrixAt(i, matrix);
+    twinkle.push({ phase: rng.range(0, TAU), rate: rng.range(0.5, 1.8), tint: new Color(rng.pick(candyTints)) });
+  }
+  sweets.instanceMatrix.needsUpdate = true;
+
+  const hit = hitSphere(NEBULA_RADIUS * 1.35);
+  root.add(hit);
+
+  let waveTimer = 0;
+  let greetedYet = false;
+  let presence = 0;
+  const sweetColour = new Color();
+
+  return {
+    id: 'nebula',
+    root,
+    hitTarget: hit,
+    get greetable(): boolean {
+      return presence > 0.6;
+    },
+    get greeted(): boolean {
+      return greetedYet;
+    },
+
+    sparkPoint(into: Vector3): Vector3 {
+      return into.set(0, 0, 0).applyMatrix4(root.matrixWorld);
+    },
+
+    wave(): void {
+      waveTimer = WAVE_SECONDS;
+      greetedYet = true;
+    },
+
+    setPresence(next: number): void {
+      presence = clamp01(next);
+      const eased = presence * (1 + Math.sin(presence * Math.PI) * 0.22);
+      root.scale.setScalar(Math.max(0.001, eased));
+      root.visible = presence > 0.002;
+    },
+
+    update(dt: number, elapsed: number): void {
+      if (!root.visible) return;
+
+      if (waveTimer > 0) waveTimer = Math.max(0, waveTimer - dt);
+      const shimmer = waveTimer > 0 ? 1 : 0;
+
+      // Drifting in a spiral: the whole cloud turns slowly on the spot rather
+      // than crossing the window.
+      root.rotation.y = elapsed * 0.05;
+      root.rotation.z = Math.sin(elapsed * 0.07) * 0.12;
+
+      for (let i = 0; i < NEBULA_COUNT; i += 1) {
+        const sweet = twinkle[i];
+        if (!sweet) continue;
+        const pulse = 0.55 + 0.45 * Math.sin(elapsed * sweet.rate + sweet.phase);
+        sweetColour.copy(sweet.tint).multiplyScalar(0.5 + pulse * (0.7 + shimmer * 0.5));
+        sweets.setColorAt(i, sweetColour);
+      }
+      if (sweets.instanceColor) sweets.instanceColor.needsUpdate = true;
+    },
+
+    dispose(): void {
+      disposeTree(root);
+      sweets.dispose();
+    },
+  };
+}
+
+// ------------------------------------------------------------ space turtles
+
+/**
+ * A little formation of space Bulba-squirt — original park turtles, each with
+ * a leafy sprout on its shell — paddling past in loose V formation. Three of
+ * them: a little formation, not a crowd.
+ *
+ * One shared hit sphere covers the whole formation: a child aiming for "the
+ * turtles" should not have to land a tap on the smallest one at the back.
+ */
+export function createSpaceTurtles(): SpaceFriend {
+  const root = new Group();
+  root.name = 'ferris:turtles';
+  root.scale.setScalar(0.001);
+
+  const offsets: [number, number, number][] = [
+    [0, 0, 0],
+    [-0.7, -0.18, 0.55],
+    [0.65, 0.14, 0.62],
+  ];
+
+  const turtles = offsets.map(([x, y, z], index) => {
+    const turtle = createSpaceTurtle();
+    turtle.root.position.set(x, y, z);
+    turtle.root.rotation.y = Math.PI + (x < 0 ? 0.3 : x > 0 ? -0.3 : 0);
+    turtle.root.scale.setScalar(1.9);
+    root.add(turtle.root);
+    return { turtle, baseY: y, phase: index * 0.6 };
+  });
+
+  const hit = hitSphere(2.1);
+  root.add(hit);
+
+  let waveTimer = 0;
+  let greetedYet = false;
+  let presence = 0;
+
+  return {
+    id: 'turtles',
+    root,
+    hitTarget: hit,
+    get greetable(): boolean {
+      return presence > 0.6;
+    },
+    get greeted(): boolean {
+      return greetedYet;
+    },
+
+    sparkPoint(into: Vector3): Vector3 {
+      return into.set(0, 0.15, 0).applyMatrix4(root.matrixWorld);
+    },
+
+    wave(): void {
+      waveTimer = WAVE_SECONDS;
+      greetedYet = true;
+      for (const { turtle } of turtles) turtle.setExpression('happy');
+    },
+
+    setPresence(next: number): void {
+      presence = clamp01(next);
+      const eased = presence * (1 + Math.sin(presence * Math.PI) * 0.22);
+      root.scale.setScalar(Math.max(0.001, eased));
+      root.visible = presence > 0.002;
+    },
+
+    update(dt: number, elapsed: number): void {
+      if (!root.visible) return;
+
+      if (waveTimer > 0) {
+        waveTimer = Math.max(0, waveTimer - dt);
+        if (waveTimer === 0) for (const { turtle } of turtles) turtle.setExpression('neutral');
+      }
+      const excited = waveTimer > 0;
+
+      // A gentle bobbing tumble through space, plus a happier, faster paddle
+      // for a moment after a wave.
+      root.rotation.z = Math.sin(elapsed * 0.4) * 0.08;
+      for (const { turtle, baseY, phase } of turtles) {
+        const paddleRate = excited ? 1.1 : 0.32;
+        turtle.setWalkPhase((elapsed * paddleRate + phase) % 1, excited ? 0.9 : 0.45);
+        turtle.root.position.y = baseY + Math.sin(elapsed * 0.9 + phase * TAU) * 0.05;
+        turtle.head.rotation.y = Math.sin(elapsed * 0.6 + phase) * 0.2;
+      }
+    },
+
+    dispose(): void {
+      for (const { turtle } of turtles) turtle.dispose?.();
       disposeTree(root);
     },
   };

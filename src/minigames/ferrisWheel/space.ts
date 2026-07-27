@@ -79,6 +79,22 @@ export interface SpaceShow {
   dispose(): void;
 }
 
+/**
+ * A point placed by *compass direction from the gondola*, not by eye.
+ *
+ * 0° is dead ahead (the direction the ride starts facing); the angle winds the
+ * same way {@link SpaceFerrisWheel}'s free-look yaw does, so a beat authored at
+ * 150° is a beat a child finds by turning about that far. Everything in the
+ * space show that is not a directly overhead star used to sit within about 60°
+ * of dead ahead — the redistribution below (27 July 2026) is what spreads the
+ * Moon and the planets round the rest of the circle, so turning to look around
+ * is rewarded wherever you turn.
+ */
+export function fromAngle(degrees: number, radius: number, y: number): Vector3 {
+  const theta = (degrees * Math.PI) / 180;
+  return new Vector3(-radius * Math.sin(theta), y, -radius * Math.cos(theta));
+}
+
 export function createSpaceShow(): SpaceShow {
   const root = new Group();
   root.name = 'ferris:space';
@@ -136,7 +152,9 @@ export function createSpaceShow(): SpaceShow {
   // --- the Moon ---------------------------------------------------------------
   const moon = new Group();
   moon.name = 'moon';
-  moon.position.set(-46, 26, -96);
+  // Behind and to the side, at 200° — one more reason to turn all the way
+  // round rather than just glance left and right.
+  moon.position.copy(fromAngle(200, 106.5, 26));
   root.add(moon);
 
   const moonBall = decal(new Mesh(new SphereGeometry(9, 26, 20), toonMaterial(PALETTE.moon)));
@@ -269,10 +287,21 @@ export function createSpaceShow(): SpaceShow {
       }
     }
 
+    // Each planet sweeps a wide arc through a *different* third of the circle
+    // (27 July 2026 redistribution) — bridging the gaps between the ride's
+    // other beats, so there is always a planet drifting somewhere near
+    // wherever a child has just turned to.
+    const fromDeg = [60, 205, 325][index] ?? 0;
+    const toDeg = [140, 275, 400][index] ?? 90;
+    const fromR = [180, 190, 170][index] ?? 180;
+    const toR = [110, 120, 100][index] ?? 110;
+    const fromYAt = [14, 30, 9][index] ?? 15;
+    const toYAt = [30, 10, 27][index] ?? 20;
+
     planets.push({
       root: planet,
-      from: new Vector3([64, -52, 40][index] ?? 0, [22, 9, 34][index] ?? 0, -150 - index * 40),
-      to: new Vector3([-58, 60, -46][index] ?? 0, [8, 26, 14][index] ?? 0, -80 - index * 30),
+      from: fromAngle(fromDeg, fromR, fromYAt),
+      to: fromAngle(toDeg, toR, toYAt),
       spin: [0.16, -0.24, 0.12][index] ?? 0.1,
       offset: [0.1, 0.45, 0.72][index] ?? 0,
       period: [150, 190, 168][index] ?? 160,
