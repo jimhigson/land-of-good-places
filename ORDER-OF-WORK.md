@@ -134,7 +134,11 @@ All of this is **thrown away** if done before 2.1.
 
 All of this is **thrown away** if done before 2.2.
 
-- 5.1 Floors as separate spaces; traversal devices re-conceived
+- 5.1 Floors as separate spaces; traversal devices re-conceived.
+  **Cache the nav lattice per space while doing this** (ARCHITECTURE-REVIEW
+  Review 3/F3): `NavGrid` keeps exactly one lattice, so every floor
+  transition would otherwise re-pay a 6.8–10.1 ms rebuild, both ways, plus
+  ~1.3 MB of typed-array churn when floor sizes differ.
 - 5.2 **Straight stairs only**; walk onto them on keyboard, tap on touch
 - 5.3 **One connection per floor pair**, scattered to reward exploring
 - 5.4 **Tap-and-go trampolines**

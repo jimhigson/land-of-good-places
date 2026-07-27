@@ -539,3 +539,46 @@ formula itself should be one exported function taking a yaw.
 Verified they have no lateral or directional control, so there is nothing for
 a basis to interpret. `Dodgems` deliberately uses its own pitch (0.74 rad)
 and distance — a different camera on purpose, not drift.
+
+---
+
+## Review 4 — the navigation lattice (27 July 2026, 22:40)
+
+Reviewed `src/world/NavGrid.ts`, the one substantial file added this hour.
+
+**Every architectural claim in the PR verifies.** Checked rather than taken on
+trust:
+
+- **No per-frame allocation.** Zero `new` outside construction and rebuild;
+  all working sets are typed-array fields, and the rebuild's reallocation is
+  guarded by `if (this.blocked.length !== total)`, so a same-sized space
+  reuses its arrays.
+- **No assumption of one continuous interior.** It reads
+  `collision.playBoundsX/Z/Radius` rather than any interior origin, so
+  Decision 3's far-apart per-floor origins are just "the bounds moved".
+- **`autoHopClears` is a real consolidation, not a fourth copy.** One
+  definition in `Collision.ts:74`, consumed by `resolve` (3 sites) and by the
+  lattice builder (2 sites), fed by the single `JUMP_APEX_HEIGHT`.
+- **The staleness invariant is enforced, not asserted.** `revisionCounter` is
+  private behind a getter and bumped by the mutators; `ensureLattice` compares
+  against it. This is the correct answer to Review 3's complaint about
+  comments claiming what code does not guarantee — and notably it was written
+  *in response* to that complaint, so the habit is correctable.
+
+**F3 — one lattice is cached, and Decision 3 will thrash it (actionable, not
+yet a bug).** `ensureLattice` keeps exactly one lattice, keyed on centre,
+radius, revision and reference height. Today the park is one space, so it is
+built once and reused — hence the measured 3.3 ms first route and 1.13 ms
+after.
+
+Under Decision 3 each castle floor becomes its own space at its own origin,
+so **every floor transition invalidates the cache and re-pays the full
+stamp** — the PR measured 6.8–10.1 ms for that. Every stairway, every lift
+ride, in both directions. It is hidden behind the 0.42 s iris so it will not
+be seen, but it is a guaranteed hitch on a device with less headroom than
+this one, and floors of differing size also churn roughly 1.3 MB of typed
+arrays each way, against a project with a standing GC-pause complaint.
+
+Fix is small and belongs to whoever implements Decision 3, not to this PR:
+key a small cache by space id and keep one lattice per floor. Five spaces at
+~1.3 MB is affordable; rebuilding on every staircase is not.
