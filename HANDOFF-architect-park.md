@@ -19,9 +19,16 @@ state what survives.
       (0,60), bus stop (0,52)), ferrisWheel/look.ts
 - [x] Worktree .claude/worktrees/architect-park-replan, branch decision/park-replan
       off current origin/main (4876f69)
-- [ ] Write decision into ARCHITECTURE-DECISIONS.md on the branch, commit per
-      section (incremental-on-disk rule)
-- [ ] Push + PR
+- [x] Wrote decision into ARCHITECTURE-DECISIONS.md on the branch (committed
+      in two parts, then rebuilt on moved main)
+- [x] main moved mid-task: castle-floors ruling landed as Decision 3 (#45) +
+      CLAUDE.md added. Renumbered mine to **Decision 4**, spliced above theirs,
+      reconciled WalkPatch note with their WalkSurfaces rewrite (compatible;
+      T2-before-S2 sequencing rule added). Branch reset onto origin/main at
+      50254e4; old base kept at backup/park-replan.
+- [ ] Push + PR (in progress — if pulled, push decision/park-replan from
+      .claude/worktrees/architect-park-replan and open PR titled
+      "Decision 4: the park replan"; doc-only change, no build impact)
 
 ## THE DESIGN (settled; write-up in progress)
 - Rails NEVER leave terrainHeight (+RAIL_HEIGHT). Verticality is BUILT UP, never
