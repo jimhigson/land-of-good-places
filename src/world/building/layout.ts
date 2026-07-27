@@ -28,8 +28,11 @@ import { terrainHeight } from '../terrain';
  * (`Shell.ts`, `Stairs.ts`, …) can never disagree about where a hole is.
  *
  * The one rule that must not be broken: **every hole in a deck has to be fully
- * spanned by a ramp or platform, with solid deck at both ends.** Otherwise a
- * child walking towards the stairs drops through the floor instead.
+ * spanned by a ramp or platform, with solid deck at both ends — or, where it
+ * is walked onto directly rather than crossed (the trampoline well, the
+ * bubble's shaft, the helter-skelter), fully guarded by a rail and a
+ * matching collider (see `ShaftGuards.ts`).** Otherwise a child walking
+ * towards the stairs drops through the floor instead.
  *
  * ## Two spaces
  *
@@ -155,7 +158,15 @@ export interface DeckHole {
  * escalator, the bubble and the trampoline crammed into twenty.
  */
 export const STAIRWELL = rect(-25.5, -20.6, -2.7, 2.7);
-export const ESCALATOR_WELL = rect(-14.2, -9.9, -2.7, 2.7);
+/**
+ * Matches the escalator ramp's own footprint (`escalatorRamp`, below)
+ * exactly, the same way `STAIRWELL` matches `stairFlights` — so the well is
+ * never wider than the ramp that spans it. It used to be 0.6 m wider down
+ * each side (architecture review S5): two 0.6 x 5.4 m open slots through the
+ * slab, outside the balustrade, on every upper deck — nobody fell only
+ * because player radius held them back by 0.22 m, and NPC radius by half that.
+ */
+export const ESCALATOR_WELL = rect(-13.6, -10.5, -2.9, 3.3);
 export const BUBBLE_SHAFT = circle(-1.5, 0, 2.1);
 export const TRAMPOLINE_SHAFT = circle(8, 0.4, 2.5);
 /** East side: the helter-skelter winds down this one. */
@@ -504,6 +515,37 @@ const FACE_EAST = Math.PI / 2;
  * 2. The camera looks in along the +X+Z diagonal, so anything on that line hides
  *    a shop however far away it is. Nothing is parked in front of one.
  */
+/**
+ * North-wall x-positions (architecture review S1).
+ *
+ * `SHOP_SCALE_XZ` widened every counter and forecourt without re-spacing
+ * these, so three counters cut invisible walls through a neighbour's
+ * forecourt. Re-derived from the real, scaled extents:
+ *
+ * - a counter is `1.75 * SHOP_SCALE_XZ` (= 2.8 m) either side of centre, plus
+ *   `0.35 * SHOP_SCALE_XZ` (= 0.56 m) of wall half-thickness beyond that
+ *   (`registerCounter`, `ShopUnits.ts`) — but the half-thickness only bows the
+ *   wall out along its own depth, not its length, so the x-extent that
+ *   matters for spacing along the wall is the plain `±2.8 m`;
+ * - a forecourt is `FORECOURT_HALF_X * SHOP_SCALE_XZ` (= 2.9 * 1.6 = 4.64 m)
+ *   either side of centre (`shopForecourtRegion`, below).
+ *
+ * Four of the five north-wall units have a forecourt (every deck but 0), so
+ * the binding clearance between two centres is `4.64 + 4.64 = 9.28 m` when
+ * both have one, or `4.64 + 2.8 = 7.44 m` when only one does (`balloon`, on
+ * deck 0, is the sole exception) — plus a flat 1 m of solid deck either side
+ * so a counter never sits flush against a neighbour's pit edge. Verified
+ * numerically in `scripts/checkShopSpacing.mjs`: no counter's x-interval
+ * overlaps another shop's forecourt, and the east end (`stickerPet`) clears
+ * `TOILET_ROOM`'s x-range (21.2-28.6, itself inside the same z-band) by
+ * 1.5 m rather than running into it.
+ */
+const HAT_X = -22.44;
+const SURPRISE_EGG_X = -12.16;
+const BALLOON_X = -3.72;
+const CANDY_FLOSS_X = 4.72;
+const STICKER_PET_X = 15;
+
 export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'toy',
@@ -518,7 +560,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'balloon',
     deck: 0,
-    x: -8,
+    x: BALLOON_X,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Balloon Shop',
@@ -528,7 +570,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'candyFloss',
     deck: 1,
-    x: 4,
+    x: CANDY_FLOSS_X,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Candy Floss',
@@ -548,7 +590,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'hat',
     deck: 2,
-    x: -17,
+    x: HAT_X,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Hat Shop',
@@ -558,7 +600,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'stickerPet',
     deck: 2,
-    x: 9,
+    x: STICKER_PET_X,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Stickers & Pets',
@@ -568,7 +610,7 @@ export const SHOP_UNITS: readonly ShopUnitDefinition[] = [
   {
     id: 'surpriseEgg',
     deck: 3,
-    x: -2.5,
+    x: SURPRISE_EGG_X,
     z: NORTH_WALL_Z,
     yaw: FACE_SOUTH,
     title: 'Surprise Eggs',
