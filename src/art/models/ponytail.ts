@@ -25,15 +25,15 @@ import { addOutline, solid } from '../style/materials';
  *
  * ## Where it deliberately differs, and why
  *
- * 1. **It draws rigid segments, not a rebuilt tube.** `BalloonString` builds a
- *    fresh `CatmullRomCurve3` and a fresh `TubeGeometry` every frame and throws
- *    the old one away. That is fine-ish for a 0.012 m thread and it is how the
- *    balloons shipped, but it is a per-frame allocation, and there is a
- *    standing GC-pause complaint against this game (ARCHITECTURE-REVIEW.md).
- *    Hair is also *chunky* in this art direction — a thin extruded tube would
- *    be off-style even if it were free. So the tail is a fixed set of tapered
- *    capsules built once; each frame only writes a `position` and a
- *    `quaternion` on each. **Nothing in `update()` allocates.**
+ * 1. **It is tapered, and chunky.** Hair is *chunky* in this art direction, and
+ *    it is thicker at the tie than at the tip, where a balloon string is one
+ *    even 0.012 m thread end to end. Both are now drawn the same way: a fixed
+ *    set of capsules built once, with each frame writing only a `position` and
+ *    a `quaternion` on each. **Nothing in `update()` allocates.**
+ *
+ *    (`BalloonString` used to rebuild a `CatmullRomCurve3` and a `TubeGeometry`
+ *    every frame, and this file was written to avoid copying that. It has since
+ *    been brought over to this approach instead — see its own header.)
  *
  * 2. **It has safety rails a balloon does not need.** A balloon string is
  *    0.4 m long and both its ends are already smoothed. This is 1.55 m of hair

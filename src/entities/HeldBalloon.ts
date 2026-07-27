@@ -196,7 +196,7 @@ export class HeldBalloons implements GameSystem {
         seed: hashSeed(item.uid),
         placed: false,
       });
-      this.group.add(this.balloons.get(item.uid)!.string.mesh);
+      this.group.add(this.balloons.get(item.uid)!.string.group);
     }
   }
 
@@ -204,7 +204,7 @@ export class HeldBalloons implements GameSystem {
     entry.handle.root.removeFromParent();
     if (entry.handle.dispose) entry.handle.dispose();
     else disposeTree(entry.handle.root);
-    entry.string.mesh.removeFromParent();
+    entry.string.group.removeFromParent();
     entry.string.dispose();
   }
 }
