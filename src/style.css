@@ -2450,11 +2450,17 @@ kbd {
    controls below flow into as many columns as fit — so on anything bigger
    than a laptop everything is visible at once and `overflow-y: auto` on
    `.charcreate-body` only ever engages when the screen genuinely cannot
-   fit it. */
+   fit it.
+
+   Widened again after QA at 2560x1600 still found "Clothes colour" and
+   "Starting hat" cut off the bottom. At that size 1rem is 32.7px, so the old
+   58rem cap was 1895px of a 2560px screen and left `.charcreate-controls`
+   about 1300px — only enough for TWO columns of `minmax(14rem, 1fr)`. 74rem
+   uses the width that was going spare and buys a third and fourth column. */
 .charcreate-card {
   --shop-accent: var(--lgp-sky);
-  width: min(58rem, 96vw);
-  max-height: min(46rem, 92vh);
+  width: min(74rem, 96vw);
+  max-height: min(48rem, 94vh);
 }
 
 .charcreate-body {
@@ -2512,33 +2518,40 @@ kbd {
   word-break: break-word;
 }
 
-/* Columns, not one tall stack (ORDER-OF-WORK 1.8). `auto-fit` means the
-   number of columns is decided by how much room there actually is: one on a
-   phone, two on a laptop, three or more on a big monitor — no breakpoints,
-   and no scrolling until the sections genuinely do not fit. */
+/* Columns, not one tall stack (ORDER-OF-WORK 1.8). The number of columns is
+   decided by how much room there actually is: one on a phone, two or three on
+   a laptop, four on a big monitor — no breakpoints.
+
+   MULTI-COLUMN, not grid. A grid puts sections into ROWS, and a grid row is as
+   tall as its tallest member, so the hat section (eight hats, two abreast)
+   inflated a whole row and left a band of empty space beside it — which is
+   what was still pushing "Clothes colour" and "Starting hat" off the bottom at
+   2560x1600 even after the card grew. Multi-column has no rows: it fills one
+   column to the balanced height, then starts the next, so a tall section costs
+   its own height and nothing more. `columns` takes the column *width* here, so
+   the count still follows the available room rather than a fixed number. */
 .charcreate-controls {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  /* Sections sit at the top of their row rather than stretching, so a short
-     one (a row of swatches) never inflates into the height of a tall one (a
-     grid of hats). */
-  align-content: start;
-  align-items: start;
-  gap: 0.875rem;
+  columns: 13rem;
+  column-gap: 0.875rem;
 }
 
 /* The name is the first thing you fill in and the widest control there is, so
    it spans whatever the column count turns out to be. */
 .charcreate-controls > .charcreate-section:first-child {
-  grid-column: 1 / -1;
+  column-span: all;
 }
 
 .charcreate-section {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
+  /* Multi-column has no row gap, so sections carry their own. */
+  margin-bottom: 0.875rem;
+  /* A section split across a column break would put a label at the foot of one
+     column and its swatches at the head of the next. */
+  break-inside: avoid;
 }
 
 .charcreate-label {
@@ -2650,7 +2663,10 @@ kbd {
 
 .charcreate-row {
   position: relative;
-  min-height: 4.625rem;
+  /* The hat and pet grids are the two tallest things on this screen — thirteen
+     cards between them — so this number is worth about 1.5rem of card height
+     per row it saves. Still a comfortably big tap target for a six-year-old. */
+  min-height: 4.25rem;
   flex-direction: column;
   justify-content: center;
   text-align: center;
