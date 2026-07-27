@@ -61,6 +61,51 @@ export const KID_HEIGHT = 2.12;
  */
 const HEAD_TILT = 0.17;
 
+/** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
+export interface ToneSwatch {
+  readonly colour: number;
+  readonly label: string;
+}
+
+/**
+ * The character creator's skin-tone swatches — and the range the park's NPC
+ * crowd draws from (see `entities/npc/kidCrowd.ts`, which imports this same
+ * list rather than keeping its own).
+ *
+ * Hand-picked, not one base hue scaled darker and lighter: a uniform scale
+ * drifts warm skin towards grey at the low end, which is exactly what an
+ * inclusive range must not do. Every entry keeps its own warm undertone
+ * instead, chosen to sit comfortably in the toon ramp next to `ART.blush`.
+ * `Fair` is `ART.kidSkin`, the game's long-standing default, so a save from
+ * before this list existed still renders identically.
+ */
+export const KID_SKIN_TONES: readonly ToneSwatch[] = [
+  { colour: 0xffe6d1, label: 'Porcelain' },
+  { colour: ART.kidSkin, label: 'Fair' },
+  { colour: 0xf0b787, label: 'Honey' },
+  { colour: 0xd99b6c, label: 'Caramel' },
+  { colour: 0xb97748, label: 'Sienna' },
+  { colour: 0x8f5a37, label: 'Umber' },
+  { colour: 0x6b4226, label: 'Espresso' },
+] as const;
+
+/**
+ * The character creator's eye-colour swatches.
+ *
+ * `Brown`, `Green`, `Blue` and `Violet` (the existing default) are also the
+ * four the NPC crowd bakes as instanced face variants (`kidCrowd.ts`'s
+ * `EYE_VARIANTS`); `Hazel` and `Grey` only ever paint the player's own,
+ * un-instanced face, so they cost nothing beyond this list.
+ */
+export const KID_EYE_COLOURS: readonly ToneSwatch[] = [
+  { colour: ART.kidEyeBrown, label: 'Brown' },
+  { colour: 0xa87a4a, label: 'Hazel' },
+  { colour: ART.kidEyeGreen, label: 'Green' },
+  { colour: ART.kidEyeBlue, label: 'Blue' },
+  { colour: 0x8a93a0, label: 'Grey' },
+  { colour: ART.kidEye, label: 'Violet' },
+] as const;
+
 export interface KidOptions {
   skin?: number;
   hair?: number;

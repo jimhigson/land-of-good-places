@@ -8,21 +8,25 @@ import type { ShopItem } from '../../world/building/shops/catalogue';
 /**
  * One cute thing walking behind you.
  *
- * Three sorts, decided by what the model can actually do rather than by what
+ * Two sorts, decided by what the model can actually do rather than by what
  * shop it came from — which means a new asset joins the parade correctly the
  * day it is written, without anyone remembering to add it to a list:
  *
  * - **walker** — anything implementing `CreatureHandle`: RiPika, Biscuit, the
  *   pets, later the minis. Driven through `setWalkPhase`, speed-matched to the
  *   ground it covers so the legs never skate.
- * - **floater** — balloons. They have no legs; they ride along above the line on
- *   their string, bobbing, exactly as they do in the player's hand.
  * - **hopper** — a cute thing with no walk cycle at all, like the Twinkle Star.
  *   It bounces along instead, which is funnier than sliding.
+ *
+ * There used to be a third, **floater**, for balloons — riding along above the
+ * line on their string. Balloons no longer walk at all: they are *held*, above
+ * the player, on a bending string (see `entities/HeldBalloon.ts` and
+ * `Parade.ts`'s `isOut`, which excludes them outright), so a balloon never
+ * reaches a `ParadeMember` to need a style in the first place.
  */
-export type MemberStyle = 'walker' | 'floater' | 'hopper';
+export type MemberStyle = 'walker' | 'hopper';
 
-/** Anything that can pull a face. Creatures and balloons both can. */
+/** Anything that can pull a face. Creatures can; so could a hopper, in principle. */
 interface Expressive {
   setExpression(name: Expression): void;
 }
@@ -35,9 +39,6 @@ const FOLLOW_SMOOTH = 0.19;
 
 /** Radians per second a follower can turn. Generous — they are small and light. */
 const TURN_SPEED = 7;
-
-/** How high a balloon rides above the ground it is following, in metres. */
-const FLOAT_HEIGHT = 0.78;
 
 /** Peak height of a member's copycat hop, in metres. */
 const HOP_HEIGHT = 0.42;
@@ -107,7 +108,7 @@ export class ParadeMember {
 
     this.creature = hasWalk(this.handle) ? this.handle : null;
     this.expressive = hasExpression(this.handle) ? this.handle : null;
-    this.style = this.creature ? 'walker' : item.kind === 'balloon' ? 'floater' : 'hopper';
+    this.style = this.creature ? 'walker' : 'hopper';
 
     // A short creature takes more steps over the same ground than a tall one.
     // Deriving the stride from the model's own height is what keeps a bunny and
@@ -251,9 +252,7 @@ export class ParadeMember {
       this.hopTimer = -1;
       return 0;
     }
-    // A balloon on a string does not leap; it just rises a little and settles.
-    const scale = this.style === 'floater' ? 0.45 : 1;
-    return Math.sin(t * Math.PI) * HOP_HEIGHT * scale;
+    return Math.sin(t * Math.PI) * HOP_HEIGHT;
   }
 
   /** Poses the model for this frame and returns any extra height it wants. */
@@ -273,13 +272,6 @@ export class ParadeMember {
         }
         // A little look up at the player when idling right behind her.
         creature.head.rotation.x = -0.1 * (1 - this.gait) + Math.sin(elapsed * 2.1) * 0.03;
-        break;
-      }
-      case 'floater': {
-        // Balloons sway on their own (`handle.update`); all that is needed here
-        // is to lift the knot of the string up off the ground and let it bob, so
-        // the balloon rides above the heads of everyone walking.
-        lift = FLOAT_HEIGHT + Math.sin(elapsed * 1.35 + this.slot) * 0.09;
         break;
       }
       case 'hopper': {

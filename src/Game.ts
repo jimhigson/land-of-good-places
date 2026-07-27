@@ -8,7 +8,7 @@ import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
-import { Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
+import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { ActionButton } from './ui/ActionButton';
 import { ParkMap } from './ui/ParkMap';
@@ -57,6 +57,7 @@ export class Game {
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
+  readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
   readonly parkMap: ParkMap;
@@ -115,6 +116,16 @@ export class Game {
     this.parade = new Parade(this.player, this.world.collision, this.camera);
     this.engine.scene.add(this.parade.group);
     this.addSystem(this.parade);
+
+    // Every balloon the player owns and has not stowed, held above them on a
+    // bending string — see `entities/HeldBalloon.ts`'s doc comment for why
+    // this is not simply parented to the hand, and `entities/parade/Parade.ts`
+    // for the other half of the fix (balloons no longer join the walking
+    // line). Built after the parade for no reason but reading order; the two
+    // do not interact.
+    this.heldBalloons = new HeldBalloons(this.player);
+    this.engine.scene.add(this.heldBalloons.group);
+    this.addSystem(this.heldBalloons);
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler

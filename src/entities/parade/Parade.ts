@@ -16,8 +16,10 @@ import { BackpackPeek } from './BackpackPeek';
  *
  * The family's favourite feature, and the point of the whole shopping trip:
  * everything you own that can walk falls in behind you in a single file line,
- * balloons ride along above it, and everything else waits in the backpack and
- * pops its head out now and then.
+ * and everything else waits in the backpack and pops its head out now and
+ * then. Balloons are the one exception: they are *held*, on a bending string
+ * above the player, not walked — see `entities/HeldBalloon.ts` and this
+ * file's own `isOut`, which excludes them outright.
  *
  * **How the line works.** The player leaves a breadcrumb trail (`trail.ts`) and
  * each member follows a point a fixed number of metres *back along that trail*,
@@ -34,10 +36,12 @@ import { BackpackPeek } from './BackpackPeek';
  * A spring settles each member onto its point, so the line has a lazy, springy
  * lag rather than moving like a train on rails.
  *
- * **Who is in it.** Toys, pets and balloons — see `PARADE_KINDS` in the store.
- * Candy floss, ice cream, hats, stickers and eggs cannot walk, so they stay in
- * the bag where {@link BackpackPeek} gives them something to do. The thing in
- * the player's hands is never also in the parade.
+ * **Who is in it.** Toys and pets — see `PARADE_KINDS` in the store, which
+ * also lists `'balloon'` (for the Cute-o-dex's "can this come out?" question)
+ * but is overridden here, since a balloon never walks. Candy floss, ice
+ * cream, hats, stickers and eggs cannot walk either, so they stay in the bag
+ * where {@link BackpackPeek} gives them something to do. The thing in the
+ * player's hands is never also in the parade.
  */
 
 /** How many walk behind you at once. More than this and the park disappears. */
@@ -315,9 +319,19 @@ export class Parade implements GameSystem {
 
 // ------------------------------------------------------------------ helpers
 
-/** Out of the bag, able to walk, and not the thing in the player's hands. */
+/**
+ * Out of the bag, able to walk, and not the thing in the player's hands.
+ *
+ * Balloons are excluded outright, regardless of `carriedUid`: a balloon is
+ * held above the player on a string (`entities/HeldBalloon.ts`), never walked
+ * behind them like a toy or a pet, however many the player owns and however
+ * long ago each one stopped being the thing literally in their hands. They
+ * are still marked `paradeable` in the store (`PARADE_KINDS` includes
+ * `'balloon'`, for the Cute-o-dex's "can this come out with you?" question),
+ * so the exclusion belongs here rather than upstream.
+ */
 function isOut(item: InventoryItem, carriedUid: string | null): boolean {
-  return item.paradeable && !item.stowed && item.uid !== carriedUid;
+  return item.paradeable && item.kind !== 'balloon' && !item.stowed && item.uid !== carriedUid;
 }
 
 /**

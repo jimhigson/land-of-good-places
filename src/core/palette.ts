@@ -85,6 +85,8 @@ export const PALETTE = {
   shoe: 0x7fc4ff,
   eyeWhite: 0xfffdf8,
   eyeDark: 0x3b2d3f,
+  /** Default iris colour — see `ART.kidEye`. A warm violet, not a "realistic" one. */
+  iris: 0x6f4b9a,
   cheek: 0xff9db4,
 
   // sky & light
