@@ -51,6 +51,22 @@ Unless the grown-ups turn on **Mayhem mode**…
   canvas-drawn text) and use it everywhere, so a future addition cannot
   quietly reintroduce small text. Large, friendly and easy to read is the
   house style.
+
+  **The whole UI scales with the screen (27 July 2026 — part of this same
+  rule).** A lot of the dialogs are simply too small. The minimum size is a
+  floor, not the whole answer: **every UI element must be reactive to screen
+  size**, so on a very large screen everything scales *up* in proportion —
+  text, panels, buttons, icons, portraits, padding, the lot. A dialog that
+  sits as a small box in the middle of a big monitor is a bug. Nothing may
+  be a fixed pixel size that ignores the screen it is on.
+
+  *How, so this is done once rather than argued about per panel: derive one
+  root scale from the viewport, and express every size in the UI as a
+  multiple of it, rather than sprinkling media queries. Sizes should grow
+  smoothly with the screen — but **clamped at both ends**, so a phone stays
+  usable and a very large monitor does not end up with a comically enormous
+  dialog. This is the same underlying fix as the character-creation screen
+  scrolling when it has plenty of room, so whoever does one should do both.*
 - **CONTROL RULE — absolute, applies everywhere (27 July 2026):**
   **Never tank controls.** Pressing a direction means "go that way", not
   "rotate towards that way". A six-year-old presses left because they want

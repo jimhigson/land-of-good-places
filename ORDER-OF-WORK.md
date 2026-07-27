@@ -38,8 +38,13 @@ These touch many files but depend on nothing. **Do them early precisely
 because they are global**: everything built afterwards inherits them free;
 everything built before needs revisiting.
 
-- **1.1 Minimum font size** everywhere, including canvas-painted sign text.
-  Define once (CSS custom property + matching canvas constant).
+- **1.1 Minimum font size AND whole-UI scaling** everywhere, including
+  canvas-painted sign text. Define once (CSS custom property + matching
+  canvas constant). The minimum is only the floor: derive **one root scale
+  from the viewport** and express every UI size as a multiple of it, clamped
+  at both ends, so a big monitor scales everything up and a phone stays
+  usable. Dialogs being small boxes on a large screen is the bug being
+  fixed. **Do 1.8 as part of this** — same root cause.
 - **1.2 Rainbow interaction outline** — hover for mouse, E-primed for
   keyboard. Build once as a shared system every interactable registers with.
   *Same reasoning as 1.1: build the mechanism before there are more things
@@ -60,8 +65,10 @@ everything built before needs revisiting.
   760x680 and scrolls instead of using a large window. Let it fill the
   space available; scroll only when it genuinely cannot fit.
 
-*1.5, 1.7 and 1.8 are all character creation — give them to one agent. 1.1 and 1.2 both
-touch every UI surface — sequence them, do not parallelise.*
+*1.5 and 1.7 are character creation — give them to one agent. 1.8 belongs to
+whoever does 1.1, since it is the same root-scale fix, so those two agents
+must agree who owns `style.css` first. 1.1 and 1.2 both touch every UI
+surface — sequence them, do not parallelise.*
 
 **Wave 1b — GC investigation.** Fable profiles, cheap agents fix. Needs the
 browser, so it starts after 0.1 and runs long. Known suspects are already
