@@ -15,6 +15,16 @@ import { hexToCss } from '../../core/palette';
  * `+14` up beside it, because the connection between *I squirted Nell* and *the
  * number went up* is the entire scoring system as far as a child is concerned.
  *
+ * **No more pop-up messages (27 July 2026 feedback).** This used to also throw
+ * a big banner up the middle of the screen — a giggle when you were splashed, a
+ * streak count, a rainbow announcement, even the "SPLASH!" that starts the
+ * round — every one of which sat on top of the garden the family was trying to
+ * watch. That feedback now lives on the portrait row instead (`portraits.ts`):
+ * a splashed child's portrait goes wet, whoever landed the shot gets a brief
+ * smile, the rainbow is announced by the actual rainbow in the sky rather than
+ * a sentence about it, and "SPLASH!" is just the last frame of the 3-2-1
+ * (`setCount`), gone before the fight has properly begun.
+ *
  * One piece of housekeeping lives here too: the framework's "HOLD to go" pad is
  * hidden for the duration, because this game's button is not a go button. It is
  * hidden with a body attribute and one CSS rule — the same trick the framework
@@ -96,21 +106,6 @@ body[data-waterfight='true'] .mg-hold { display: none; }
   text-align: center;
 }
 
-/* A cheerful banner for the rainbow, which is the one thing in the garden that
-   is worth interrupting the score for. */
-.wf-rainbow {
-  align-self: center;
-  padding: 8px 20px;
-  border-radius: 999px;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
-  background: linear-gradient(90deg, #ff8f8f, #ffbe6b, #ffe27a, #8fdf8a, #8cc9ff, #c9a9ff);
-  box-shadow: 0 5px 0 rgba(74, 58, 82, 0.18);
-  text-shadow: 0 2px 3px rgba(74, 58, 82, 0.45);
-  animation: wf-pop-in 320ms cubic-bezier(0.25, 1.5, 0.5, 1);
-}
-
 @keyframes wf-bump {
   0% { transform: scale(1); }
   40% { transform: scale(1.28); }
@@ -121,15 +116,10 @@ body[data-waterfight='true'] .mg-hold { display: none; }
   18% { opacity: 1; }
   100% { transform: translate(-50%, -54px); opacity: 0; }
 }
-@keyframes wf-pop-in {
-  from { transform: scale(0.7); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .wf-score[data-pop='true'] .wf-value,
-  .wf-gain,
-  .wf-rainbow { animation: none; }
+  .wf-gain { animation: none; }
 }
 `;
 
@@ -149,12 +139,8 @@ export interface WaterFightHud {
   setBest(best: number): void;
   /** Seconds left in the round. Turns pink for the last ten. */
   setTime(seconds: number): void;
-  /** Big centred text: the 3-2-1. `null` clears it. */
+  /** Big centred text: the 3-2-1, ending in "SPLASH!". `null` clears it. */
   setCount(text: string | null): void;
-  /** A short cheerful interjection ("Giggle!", "Got Nell!"). */
-  shout(text: string, seconds?: number): void;
-  /** Shows or hides the rainbow banner. Safe to call every frame. */
-  setRainbow(showing: boolean): void;
   /** The line along the bottom telling you what the controls are. */
   setHint(text: string | null): void;
   showResult(title: string, line: string, hint: string): void;
@@ -204,11 +190,8 @@ export function createWaterFightHud(container: HTMLElement): WaterFightHud {
   container.append(root);
 
   let shownPoints = -1;
-  let shoutElement: HTMLElement | null = null;
-  let shoutTimer = 0;
   let countElement: HTMLElement | null = null;
   let hintElement: HTMLElement | null = null;
-  let rainbowElement: HTMLElement | null = null;
   let popTimer = 0;
 
   return {
@@ -259,28 +242,6 @@ export function createWaterFightHud(container: HTMLElement): WaterFightHud {
       centre.append(countElement);
     },
 
-    shout(text: string, seconds = 1.2): void {
-      shoutElement?.remove();
-      shoutElement = document.createElement('div');
-      shoutElement.className = 'mg-shout';
-      shoutElement.textContent = text;
-      centre.append(shoutElement);
-      shoutTimer = seconds;
-    },
-
-    setRainbow(showing: boolean): void {
-      if (showing === (rainbowElement !== null)) return;
-      if (!showing) {
-        rainbowElement?.remove();
-        rainbowElement = null;
-        return;
-      }
-      rainbowElement = document.createElement('div');
-      rainbowElement.className = 'wf-rainbow';
-      rainbowElement.textContent = '🌈 a rainbow!';
-      bottom.append(rainbowElement);
-    },
-
     setHint(text: string | null): void {
       if (text === null) {
         hintElement?.remove();
@@ -318,13 +279,6 @@ export function createWaterFightHud(container: HTMLElement): WaterFightHud {
       if (popTimer > 0) {
         popTimer -= dt;
         if (popTimer <= 0) score.dataset.pop = 'true';
-      }
-      if (shoutTimer > 0) {
-        shoutTimer -= dt;
-        if (shoutTimer <= 0) {
-          shoutElement?.remove();
-          shoutElement = null;
-        }
       }
     },
 

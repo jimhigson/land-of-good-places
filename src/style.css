@@ -2420,3 +2420,159 @@ kbd {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------- mini-game portraits
+   Feedback (27 July 2026): the pop-up messages that used to appear over the
+   water fight garden ("Hee hee!", "SOAKED Nell!", streak counts, a rainbow
+   banner) covered too much of the game. They are gone; this is what replaced
+   them — a little head for everyone in the fight, docked along the top edge.
+   The dodgems are getting the same "portraits instead of pop-ups" treatment
+   next (a separate PR), so the row/circle/name rules below are named and
+   built generically (`.mg-portrait-*`, built by
+   `src/minigames/portraitStrip.ts`) rather than water-fight-specific, and
+   that PR can reuse them as-is. Only the wet-overlay rules further down
+   (`.wf-*`) are water fight's own reaction, layered on top by
+   `src/minigames/waterFight/portraits.ts`.
+
+   Why the top edge: the score/best/time pills already live there and nobody
+   has minded, `WaterFight.resize` fits the camera so the top of the frame
+   sits above the rainbow's peak (`RAINBOW_SCREEN_TOP`) — higher than any
+   child's head can reach — in both the landscape and the portrait framing,
+   and a horizontal row is the shape that actually suits a phone's width in
+   either orientation. A vertical column down a side edge does not: it would
+   eat into the garden's left/right margin in landscape (where children walk
+   close to the fence) and read as an oddly long strip down portrait's narrow
+   width. */
+
+.mg-portrait-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.mg-portrait-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 52px;
+}
+
+.mg-portrait {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--lgp-cream);
+  border: 3px solid var(--mg-portrait-accent, #fff6ea);
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.22);
+}
+
+/* The player's own portrait gets a second, pale ring outside the accent one —
+   the same "you, specifically" cue an in-world name pill gives the player. */
+.mg-portrait-item[data-you='true'] .mg-portrait {
+  box-shadow:
+    0 3px 0 rgba(74, 58, 82, 0.22),
+    0 0 0 2px #fff6eae6;
+}
+
+.mg-portrait-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* A generic little "something happened" bounce — water fight triggers it on
+   a score by toggling `data-smile`; any other mini-game's portrait reaction
+   can trigger the same way. */
+.mg-portrait[data-smile='true'] {
+  animation: mg-portrait-pop 340ms cubic-bezier(0.25, 1.5, 0.5, 1);
+}
+
+.mg-portrait-name {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--lgp-ink);
+  text-shadow: 0 1px 0 #fff6eacc;
+  max-width: 52px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+@keyframes mg-portrait-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+
+@media (max-width: 520px) {
+  .mg-portrait-item { width: 42px; }
+  .mg-portrait { width: 38px; height: 38px; border-width: 2px; }
+  .mg-portrait-name { font-size: 8px; max-width: 42px; }
+}
+
+@media (max-height: 460px) {
+  .mg-portrait-item { width: 38px; }
+  .mg-portrait { width: 34px; height: 34px; border-width: 2px; }
+  .mg-portrait-name { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mg-portrait[data-smile='true'] {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------- water fight: wet portraits
+   The bluish tint pouring down from the top of the head, plus a few drips
+   clinging to the bottom rim — water fight's own reaction, appended to a
+   `.mg-portrait` by `waterFight/portraits.ts`. Opacity is set every frame
+   from the same fast-in/slow-out curve the 3D drippy hair uses, so the
+   portrait and the actual child never disagree about who is currently
+   soaked. */
+.wf-portrait-wet {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 6%,
+    rgba(47, 159, 216, 0.6),
+    rgba(47, 159, 216, 0.32) 55%,
+    rgba(47, 159, 216, 0) 78%
+  );
+}
+
+.wf-drip {
+  position: absolute;
+  bottom: -2px;
+  width: 7px;
+  height: 11px;
+  border-radius: 45% 45% 50% 50% / 55% 55% 45% 45%;
+  background: #6fc7ea;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  animation: wf-drip-bob 1100ms ease-in-out infinite;
+}
+.wf-drip:nth-child(1) { left: 24%; animation-delay: 0ms; }
+.wf-drip:nth-child(2) { left: 44%; height: 14px; animation-delay: 260ms; }
+.wf-drip:nth-child(3) { left: 64%; animation-delay: 520ms; }
+
+@keyframes wf-drip-bob {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(3px) scaleY(1.15); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-drip {
+    animation: none;
+  }
+}

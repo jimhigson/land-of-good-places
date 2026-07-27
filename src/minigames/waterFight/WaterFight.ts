@@ -26,6 +26,7 @@ import { createChild, type ChildModel } from './child';
 import { createControls, type WaterFightControls } from './controls';
 import { createGarden, paintSky, type Garden } from './garden';
 import { createWaterFightHud, type WaterFightHud } from './hud';
+import { createPortraitRow, type PortraitFighterInfo, type WaterFightPortraits } from './portraits';
 import { RAINBOW_SCREEN_TOP, createRainbow, type Rainbow } from './rainbow';
 import { bestSplashPoints, recordSplashPoints } from './score';
 import { createWaterSystem, type WaterSystem } from './water';
@@ -194,6 +195,7 @@ class WaterFight implements MiniGame {
   private context: MiniGameContext | null = null;
   private controls: WaterFightControls | null = null;
   private hud: WaterFightHud | null = null;
+  private portraits: WaterFightPortraits | null = null;
   private garden: Garden | null = null;
   private water: WaterSystem | null = null;
   private rainbow: Rainbow | null = null;
@@ -312,6 +314,23 @@ class WaterFight implements MiniGame {
     this.buildFighters();
 
     this.controls = createControls();
+
+    // A little head for everybody in the fight, at the top edge of the HUD —
+    // see `portraits.ts` for why this replaced the pop-up messages. Built in
+    // the same order as `this.fighters` (rivals, then the player), so an
+    // index into one is always an index into the other.
+    const portraitPlayer = gameStore.get().player;
+    const portraitFighters: PortraitFighterInfo[] = [
+      ...RIVALS.map((rival): PortraitFighterInfo => ({
+        name: rival.name,
+        hair: rival.hair,
+        accent: rival.gun,
+        isPlayer: false,
+      })),
+      { name: portraitPlayer.name, hair: portraitPlayer.hairColour, accent: PALETTE.markerPink, isPlayer: true },
+    ];
+    this.portraits = createPortraitRow(context.overlay, portraitFighters);
+
     this.hud = createWaterFightHud(context.overlay);
     this.hud.setBest(bestSplashPoints());
     this.hud.setPoints(0);
@@ -419,8 +438,11 @@ class WaterFight implements MiniGame {
         this.hud?.setCount(countdownText(this.countdown));
         if (this.countdown <= 0) {
           this.phase = 'fighting';
+          // `countdownText` already showed "SPLASH!" as the last frame of the
+          // count above — nothing more needed here, and nothing left to clear
+          // but the count itself. That is the point: the one thing telling you
+          // the fight has started is gone before the fight has properly begun.
           this.hud?.setCount(null);
-          this.hud?.shout('SPLASH!', 1);
         }
         break;
 
@@ -457,10 +479,16 @@ class WaterFight implements MiniGame {
     this.updateShots(dt);
     this.updateSprinklers(dt);
 
-    for (const fighter of this.fighters) {
+    for (let i = 0; i < this.fighters.length; i += 1) {
+      const fighter = this.fighters[i];
+      if (!fighter) continue;
       fighter.model.setCharge(fighter.charge);
       fighter.model.update(dt, elapsed, this.walkSpeedOf(fighter));
       fighter.model.root.position.set(fighter.x, 0, fighter.z);
+      // The portrait's own wet fade watches the same flag the drippy 3D hair
+      // does, so the little face at the edge of the screen never disagrees
+      // with the child it belongs to.
+      this.portraits?.setSoaked(i, fighter.model.soaked);
     }
 
     this.water?.update(dt, this.camera.quaternion);
@@ -468,15 +496,16 @@ class WaterFight implements MiniGame {
     this.garden?.update(dt, elapsed);
     this.confetti?.update(dt);
     this.updateAimRing(dt);
-    this.hud?.setRainbow(this.rainbow?.showing ?? false);
     this.hud?.update(dt);
+    this.portraits?.update(dt);
 
     // The rainbow's one-off bonus. Claimed once a round, so it is a moment
-    // rather than an income.
+    // rather than an income. The 3D rainbow in the garden (`rainbow.ts`) is
+    // the only announcement it gets — no HUD banner repeating what is already
+    // visible right there in the sky.
     if (!this.rainbowClaimed && this.phase === 'fighting' && this.rainbow?.showing) {
       this.rainbowClaimed = true;
       this.addPoints(POINTS_RAINBOW);
-      this.hud?.shout('🌈 Rainbow bonus!', 1.8);
     }
 
     controls.endFrame();
@@ -768,8 +797,11 @@ class WaterFight implements MiniGame {
   /**
    * A squirt has landed on somebody.
    *
-   * All four of the canon effects fire from here: the giggle, the drippy hair,
-   * the splash back, and — if it was your shot — the splash points.
+   * All the canon effects fire from here: the drippy hair, the splash back,
+   * and — if it was your shot — the splash points. What used to also be a
+   * pop-up message ("Hee hee!", "SOAKED Nell!") is now the portrait row
+   * instead: whoever landed the shot gets a brief smile, and whoever was hit
+   * gets the wet portrait — no text over the garden either way.
    */
   private land(ownerIndex: number, targetIndex: number, power: number): void {
     const target = this.fighters[targetIndex];
@@ -777,6 +809,10 @@ class WaterFight implements MiniGame {
 
     target.model.soak();
     target.soakings += 1;
+    // The one who landed it smiles, splasher or splashee alike — this fires
+    // for every hit in the garden, not only the player's, so the whole row of
+    // portraits stays alive.
+    this.portraits?.score(ownerIndex);
     // Every soaking winds the whole garden up a little, not just the child who
     // got it: this is the "the fight gets bigger" line, as a number.
     target.excitement = clamp01(target.excitement + 0.16);
@@ -785,9 +821,9 @@ class WaterFight implements MiniGame {
     }
 
     if (target.isPlayer) {
-      // Being splashed is a joke, never a setback. You giggle, and your tank is
-      // topped up as a thank-you for standing still long enough to get hit.
-      this.hud?.shout(gigglePhrase(this.rng), 1);
+      // Being splashed is a joke, never a setback. Your tank is topped up as a
+      // thank-you for standing still long enough to get hit — the giggle and
+      // the drippy hair are the wet portrait's job now, not a message's.
       if (this.pointerCharging || this.player.charging) {
         this.player.charge = clamp01(this.player.charge + 0.3);
       }
@@ -807,8 +843,6 @@ class WaterFight implements MiniGame {
     this.streakLeft = STREAK_WINDOW;
     const scored = Math.round(POINTS_BASE + power * POINTS_CHARGE + this.streak * POINTS_STREAK);
     this.addPoints(scored);
-    if (this.streak >= 3) this.hud?.shout(`${this.streak} in a row!`, 0.9);
-    else if (power > 0.85) this.hud?.shout(`SOAKED ${target.name}!`, 0.9);
   }
 
   private addPoints(amount: number): void {
@@ -1067,6 +1101,7 @@ class WaterFight implements MiniGame {
     this.shots.length = 0;
     this.controls?.dispose();
     this.hud?.dispose();
+    this.portraits?.dispose();
     this.garden?.dispose();
     this.water?.dispose();
     this.rainbow?.dispose();
@@ -1114,9 +1149,4 @@ function countdownText(remaining: number): string {
   if (remaining > 1.2) return '2';
   if (remaining > 0.2) return '1';
   return 'SPLASH!';
-}
-
-/** What the HUD says when *you* get it. Never a complaint — always a giggle. */
-function gigglePhrase(rng: Rng): string {
-  return rng.pick(['Hee hee!', 'Giggle!', 'You got me!', 'Soaked!', 'Ha ha ha!']);
 }
