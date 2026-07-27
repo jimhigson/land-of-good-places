@@ -451,3 +451,44 @@ be inferred about:**
 Four audit subagents were in flight when this was written; if their reports
 surface after the pause, fold them into Review 3 rather than trusting this
 section's silence.
+
+---
+
+## Queued investigation — GC pauses (27 July 2026, recorded during the pause)
+
+**Reported by the family from play: the game has fairly frequent GC pauses.**
+That is a felt, user-visible problem — a stutter in a game a six-year-old is
+walking around in — not a theoretical one.
+
+**Assign to a Fable-level agent** for the investigation, because finding
+*which* allocations matter needs judgement: profile a real play-through with
+the browser's performance and memory tools (allocation sampling, allocation
+timeline, GC markers on the timeline), covering the garden, the castle
+interior, the parade, the NPC crowd, and at least one mini-game. Static
+analysis is a legitimate shortcut wherever a per-frame allocation is obvious
+from the code — take it where it is easy and profile where it is not. Then
+**hand the individual fixes to cheaper agents**, one PR-sized chunk each.
+
+Known suspects already found by earlier audits — start here, they are free:
+
+- `Escalators.placeSteps` allocates a `Matrix4`, a `Quaternion` and two
+  `Vector3`s **per escalator per frame** — 16 objects/frame, ~960/second,
+  and it runs even while the player is 890 m away in the garden because
+  `Building.update` never gates the interior machinery on `inside`.
+- `ballPhysics` returns a fresh stats object every frame, consumed by a
+  field nothing reads.
+- `BallPit` allocates a fresh `PlayerContact` literal every frame the player
+  is near the pit.
+- `fitouts.ts` allocates a closure per frame per visible shop (two
+  `forEach`es).
+- The character-creation preview's `disposeTree` never disposes
+  `material.map` — a genuine leak, already flagged P0 in Review 2.
+
+Do not assume that list is complete; it came from auditing one folder plus a
+partial core-loop read. `src/minigames/**`, `src/ui/**`,
+`src/entities/parade/**` and the non-building world files have never been
+audited at all.
+
+**Deferred until 19:00**, and no time is lost by that: runtime profiling
+needs a working browser, and the shared browser profile has been locked all
+session. A Claude Code restart clears it.
