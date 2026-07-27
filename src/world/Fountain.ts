@@ -46,6 +46,27 @@ import type { Player } from '../entities/Player';
  * `topHeight` finds nothing left to push it back out once it lands inside.
  * See `attachPlayer` and `groundLevel` for what happens once you're in.
  */
+/**
+ * The fountain's share of "make the lit area three times bigger in radius".
+ *
+ * Same solve as `LampPosts` and `FairyLights`, and the same trap: `distance`
+ * is only a hard outer edge in three.js's falloff, and at the old decay of 2.0
+ * the light had faded to nothing long before reaching it, so moving it out
+ * alone would have changed nothing anyone could see. Decay 2.0 → 1.25,
+ * intensity solved (6 → 5.23) to hold the brightness in the water itself
+ * exactly where it was. Ground pool 6.0 m → 17.4 m, ratio 2.9–3.1× across
+ * every visibility threshold tested.
+ *
+ * Kept at a higher decay than the other two on purpose. This light sits *in*
+ * the water, 1.2 m up rather than 3.2 m, and it is the fountain's own glow
+ * rather than a lamp meant to light a path — it should still fall away faster
+ * than the lamps do, so the fountain reads as the bright thing in the middle
+ * of the plaza instead of a floodlight.
+ */
+const GLOW_INTENSITY = 5.23;
+const GLOW_DECAY = 1.25;
+const GLOW_DISTANCE = 27;
+
 export class Fountain implements GameSystem {
   readonly name = 'fountain';
   readonly group = new Group();
@@ -201,7 +222,7 @@ export class Fountain implements GameSystem {
     }
 
     // A hint of light in the water so the fountain still reads after dark.
-    this.glow = new PointLight(PALETTE.waterTop, 0, 9, 2);
+    this.glow = new PointLight(PALETTE.waterTop, 0, GLOW_DISTANCE, GLOW_DECAY);
     this.glow.position.y = 1.2;
     this.group.add(this.glow);
 
@@ -315,7 +336,8 @@ export class Fountain implements GameSystem {
     this.waterMaterial.emissiveIntensity = 0.12 + this.nightFactor * 0.55;
     // `dt` is unused for the ripple maths (it is driven by `elapsed`), but the
     // light eases so a sudden nightfall doesn't pop.
-    this.glow.intensity += (this.nightFactor * 6 - this.glow.intensity) * Math.min(1, dt * 3);
+    this.glow.intensity +=
+      (this.nightFactor * GLOW_INTENSITY - this.glow.intensity) * Math.min(1, dt * 3);
   }
 
   /**

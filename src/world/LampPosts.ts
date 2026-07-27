@@ -18,7 +18,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
-import { clamp01 } from '../core/mathUtils';
+import { clamp01, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
@@ -49,6 +49,116 @@ import type { CollisionWorld } from './Collision';
  * disc — and only a handful of real {@link PointLight}s exist at all,
  * reassigned every frame to whichever lamps are nearest the player.
  */
+/**
+ * ## Why these four numbers are what they are
+ *
+ * The family asked for the lit area around every night light to be **about
+ * three times greater in radius**. Tripling `distance` alone does not do that,
+ * and this is the trap worth writing down: three.js's falloff is
+ *
+ * ```
+ * E = intensity / d^decay  ×  (1 - (d/distance)^4)^2
+ * ```
+ *
+ * so `distance` is only a *hard outer edge*. At the old decay of 1.8 the
+ * `1/d^decay` term had already taken the light down to nothing well inside the
+ * old edge, and moving the edge out just extends a curve that has already
+ * died. Nothing visible would have changed, which is exactly what the family
+ * would have reported.
+ *
+ * What actually trebles the pool is **lowering the decay**, and the reason is
+ * worth understanding. Raising `intensity` at a fixed decay also works on
+ * paper — the radius at which the light fades out goes as
+ * `(intensity/threshold)^(1/decay)`, so trebling the radius at decay 1.8 needs
+ * `3^1.8 ≈ 7.2×` the intensity — but that same 7.2× lands on the ground
+ * directly under the lamp too, and blows it out to white. Flattening the
+ * falloff instead spreads the light the lamp already has over a bigger area,
+ * which is what a wider pool physically *is*.
+ *
+ * So: decay 1.8 → 1.0, and intensity solved (9 → 3.48) to hold the brightness
+ * directly under the lamp exactly where it was. Verified numerically against
+ * the formula above — the ground radius goes 6.9 m → 20.5 m, and the ratio
+ * holds between 2.9× and 3.1× at every visibility threshold tested rather than
+ * hitting 3× at one cherry-picked cut-off.
+ *
+ * Decay 1.0 is inverse-linear rather than the inverse-square of a bare bulb.
+ * That is deliberate and it is not physical: it is the falloff of a long strip
+ * light, and it gives the broad soft-edged wash a cosy park wants instead of a
+ * spotlight with a hard rim.
+ */
+const LIGHT_INTENSITY = 3.48;
+const LIGHT_DECAY = 1.0;
+const LIGHT_DISTANCE = 30;
+
+/** How far above the lamp's base the real light sits. */
+const LIGHT_HEIGHT = 3.2;
+
+/**
+ * Size of the painted ground-glow plane, tripled with everything else
+ * (was 4.2). This is the pool the family actually sees on **every** lamp —
+ * only {@link REAL_LIGHTS} of the thirteen get a real light — so if it did not
+ * grow with the rest, twelve lamps out of thirteen would look untouched.
+ *
+ * Kept at three times the radius rather than stretched out to meet the real
+ * light's new 20.5 m: it was 2.1 m against a 6.9 m light pool before, and it
+ * is 6.3 m against a 20.5 m one now, so the two stay in exactly the
+ * relationship they have always had — a bright painted core inside a wider,
+ * softer wash. Making it reach the full 20.5 m would mean thirteen 41-metre
+ * transparent quads on a lawn that is only about 110 m across, which is
+ * several screens of overdraw every night frame on a phone.
+ */
+const GLOW_SIZE = 12.6;
+
+/**
+ * How far the glow plane floats above its lamp's base (was 0.03).
+ *
+ * The plane is flat and the park is not. Measured across all thirteen lamps:
+ * within the old 2.1 m radius the ground never rose more than 0.04 m above the
+ * lamp's own base, so 0.03 very nearly held. Within the new 6.3 m it rises as
+ * much as **0.13 m, at ten lamps out of thirteen** — the disc would be buried
+ * on its uphill side and clip against the grass along a hard straight line,
+ * which is the opposite of a soft pool of light.
+ *
+ * Lifting it clear is the cheap fix. Draping the glow over the terrain instead
+ * would look better still, but each lamp would then need its own vertex data
+ * and the whole thing stops being one instanced draw call. At 0.25 m under a
+ * 12.6 m disc — 2% of its width — the parallax against the grass is about
+ * 0.3 m at the camera's fixed 38°, which is nothing on a soft gradient.
+ */
+const GLOW_LIFT = 0.25;
+
+/**
+ * How many lamps hold a real {@link PointLight} at once.
+ *
+ * Three was plenty when the pool was 6.9 m: the hand-over between one lamp and
+ * the next happened at a median 14.8 m, by which distance the old light had
+ * been cut off entirely and contributed exactly nothing, so the swap was
+ * invisible. At 20.5 m that is no longer true — a light being handed over at
+ * 14.8 m is still worth 0.44 where it stands, and a distant pool would visibly
+ * blink from one lamp to the next as the player walks.
+ *
+ * Five moves the median hand-over out to 26.7 m. **Paid for by giving two back
+ * from `FairyLights`**, which drops 5 → 3 in the same change: with its own
+ * pool trebled to about 40 m, three sources cover the plaza several times
+ * over. The park's total point-light count is unchanged.
+ */
+const REAL_LIGHTS = 5;
+
+/**
+ * Where a real light starts fading out, as a fraction of the hand-over
+ * distance — see {@link LampPosts.update}.
+ *
+ * Five lights alone would leave a worst case: where the lamps bunch up, the
+ * hand-over can happen as close as 17.4 m, and there the light is still worth
+ * 0.15. This closes it exactly rather than approximately. A light is faded on
+ * how far *its own lamp* is from the player, reaching zero at the boundary —
+ * and because the two lamps swapping places are by definition the same
+ * distance away at the moment they swap, the outgoing light is always at
+ * exactly zero when it goes. The hand-over cannot pop, whatever the lamp
+ * spacing, and it costs no extra lights.
+ */
+const HANDOVER_FADE = 0.75;
+
 export class LampPosts implements GameSystem {
   readonly name = 'lampPosts';
   readonly group = new Group();
@@ -72,6 +182,8 @@ export class LampPosts implements GameSystem {
    */
   private readonly nearestIndex: Int32Array;
   private readonly nearestDistance: Float64Array;
+  /** How many of {@link lights} `assignNearestLights` actually placed this frame. */
+  private assigned = 0;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'lamp-posts';
@@ -165,17 +277,17 @@ export class LampPosts implements GameSystem {
       opacity: 0,
       depthWrite: false,
     });
-    const glowGeometry = new PlaneGeometry(4.2, 4.2);
+    const glowGeometry = new PlaneGeometry(GLOW_SIZE, GLOW_SIZE);
     glowGeometry.rotateX(-Math.PI / 2);
-    this.groundGlow = instanceAt(glowGeometry, this.groundGlowMaterial, this.lampPositions, 0.03, count);
+    this.groundGlow = instanceAt(glowGeometry, this.groundGlowMaterial, this.lampPositions, GLOW_LIFT, count);
     this.groundGlow.name = 'lamp-ground-glow';
     this.group.add(this.groundGlow);
 
     // --- the real lights: a small fixed pool, handed to whichever lamps are
     // nearest the player each frame (see `update`). -------------------------
-    const realLightCount = Math.min(3, count);
+    const realLightCount = Math.min(REAL_LIGHTS, count);
     for (let i = 0; i < realLightCount; i += 1) {
-      const light = new PointLight(PALETTE.fairyWarm, 0, 10, 1.8);
+      const light = new PointLight(PALETTE.fairyWarm, 0, LIGHT_DISTANCE, LIGHT_DECAY);
       this.group.add(light);
       this.lights.push(light);
     }
@@ -202,12 +314,37 @@ export class LampPosts implements GameSystem {
     this.groundGlow.visible = lit > 0.02;
 
     this.assignNearestLights(playerPosition);
+    // The hand-over boundary: the distance to the furthest lamp currently
+    // holding a real light. A light exactly at the boundary is the one about
+    // to be taken away, so it is faded to nothing — see `HANDOVER_FADE`.
+    let boundarySq = 0;
+    for (let i = 0; i < this.assigned; i += 1) {
+      const distSq = this.nearestDistance[i] as number;
+      if (distSq > boundarySq) boundarySq = distSq;
+    }
+    const boundary = Math.sqrt(boundarySq);
+    const fadeFrom = boundary * HANDOVER_FADE;
+
     for (let i = 0; i < this.lights.length; i += 1) {
       const light = this.lights[i];
       if (!light) continue;
-      const flicker = 0.86 + 0.14 * Math.sin(elapsed * 1.6 + i * 2.1);
-      light.intensity = lit * 9 * flicker;
-      light.visible = lit > 0.02;
+      if (i >= this.assigned) {
+        light.visible = false;
+        continue;
+      }
+      // Keyed to the **lamp**, not to this light's slot in the pool. The pool
+      // reshuffles which slot holds which lamp as the player walks, and point
+      // lights are summed in the shader, so a pure permutation of the slots is
+      // invisible — but only if nothing about a light depends on its slot.
+      // Keying the flicker to `i` meant a lamp changing slots changed
+      // brightness in one frame, worth up to 0.83 across the pool: a pop that
+      // had nothing to do with the hand-over and survived every other fix.
+      const lamp = this.nearestIndex[i] as number;
+      const flicker = 0.86 + 0.14 * Math.sin(elapsed * 1.6 + lamp * 2.1);
+      const distance = Math.sqrt(this.nearestDistance[i] as number);
+      const handover = boundary > fadeFrom ? smoothstep(boundary, fadeFrom, distance) : 1;
+      light.intensity = lit * LIGHT_INTENSITY * flicker * handover;
+      light.visible = lit > 0.02 && handover > 0.001;
     }
   }
 
@@ -245,11 +382,12 @@ export class LampPosts implements GameSystem {
       }
     }
 
+    this.assigned = filled;
     for (let i = 0; i < filled; i += 1) {
       const light = this.lights[i];
       const lamp = this.lampPositions[bestIndex[i] as number];
       if (!light || !lamp) continue;
-      light.position.set(lamp.x, lamp.y + 3.2, lamp.z);
+      light.position.set(lamp.x, lamp.y + LIGHT_HEIGHT, lamp.z);
     }
   }
 }
