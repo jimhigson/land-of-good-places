@@ -218,6 +218,25 @@ replan (Decision 4), which moves everything and adds a railway the player
 must never route across. It must also handle "no route exists" gracefully —
 walk as close as possible and stop, never freeze or jitter.*
 
+### The top bar takes too much space (27 July 2026 — queued)
+
+The row of pills across the top of the screen takes up too much room. **Hide
+them all behind a single menu button** that expands to show them. The game is
+the thing worth looking at; the controls should get out of its way.
+
+**The clock is to be removed entirely** — the family's words: *"the clock icon
+isn't even useful so remove it entirely."* Not moved into the menu, removed.
+
+*Notes: the pills are the title, the clock, the backpack, the Cute-o-dex and
+the map. The menu button must be big enough for a small finger, must obey the
+minimum text size and the root UI scale, and must pick up the rainbow
+highlight and pointer cursor for free by being an ordinary button. Opening and
+closing it must not leave the game unresponsive — there is prior history of a
+panel doing exactly that (the backpack input-lock bug), so the pause/input
+state has to be re-derived rather than toggled. The day/night cycle stays; only
+its readout goes. If the day counter is judged worth keeping later it can
+return inside the menu, but the default is gone.*
+
 ### Night is still too dark (27 July 2026 — queued)
 
 Lamp posts helped but **night is still too dark**. Three things, together:

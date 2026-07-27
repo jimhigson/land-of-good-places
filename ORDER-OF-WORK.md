@@ -180,6 +180,8 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **Collapse the top bar behind one menu button**, and **remove the clock
+  entirely**. Family-reported; the pills eat too much screen.
 - **Lift call panel** — call button near the lift styled as an elevator
   panel, lift comes fast, auto-board, panel lists floors, go straight there.
   Keep decoupled from lift internals pending the castle floor-split ruling.
