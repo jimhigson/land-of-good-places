@@ -605,6 +605,27 @@ Rough order of construction, each step playable:
     visit and get their faces painted in various cute designs.
 31d. **Player–NPC collision** — the player and NPCs cannot walk through
     each other.
+31h. **Stairs and escalators become a route to discover (27 July 2026 —
+    queued, with 31f).** Three changes, all pulling the same way:
+    - **Tapping stairs simply ascends or descends** — no Climb/Descend menu
+      to choose from, just tap and go the way the stairs lead. (Same
+      tap-and-go spirit as the trampolines in 31g.)
+    - **Never both between the same two floors.** Between any given pair of
+      floors there are stairs *or* an escalator, never both. Each connection
+      is one thing.
+    - **Spread them around the floor, not stacked.** At the moment the
+      stairwell and the escalator well sit in the same place on every deck,
+      so going up is a matter of standing still and repeating. Scatter the
+      connections so the way up from floor two is somewhere else entirely
+      from the way up from floor one — **the point is to make finding the
+      route up an act of exploration**, which is most of what makes a big
+      building fun to be inside.
+    *Note:* this depends on 31f. While the floors are one continuous stacked
+    space, a stairwell has to be a hole punched through a slab in a fixed
+    place; once each floor is its own space, a connection can be anywhere on
+    each side and need not line up at all. Do 31f first, or this fights the
+    deck-hole invariant in `layout.ts`.
+
 31f. **Each castle floor becomes its OWN space (27 July 2026 — queued;
     needs an architect decision first).** The floors should stop existing
     in one continuous 3D space stacked on top of each other. Each floor is
