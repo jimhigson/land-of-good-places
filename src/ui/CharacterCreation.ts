@@ -230,7 +230,10 @@ export class CharacterCreation {
       this.hairColour,
       (colour) => {
         this.hairColour = colour;
-        this.refreshPreview('head');
+        // `hair`, not `head`: a head framing crops the styles that hang past
+        // the shoulders, and a hair *colour* is mostly shown on the part that
+        // hangs — a floor-length ponytail is nearly all of the hair there is.
+        this.refreshPreview('hair');
       },
     );
 
@@ -257,7 +260,7 @@ export class CharacterCreation {
           other.dataset.selected = selected ? 'true' : 'false';
           other.setAttribute('aria-pressed', selected ? 'true' : 'false');
         }
-        this.refreshPreview('head');
+        this.refreshPreview('hair');
       });
       styleButtons.push(button);
       hairStyleRow.append(button);

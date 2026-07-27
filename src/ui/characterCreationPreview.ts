@@ -17,6 +17,7 @@ import { PALETTE } from '../core/palette';
 import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
 import { createKid, type KidHandle } from '../art/models/kid';
+import { TRAILING_HAIR_STYLES } from '../art/models/hair';
 import type { Expression } from '../art/style/faces';
 import type { HairStyle } from '../state';
 import { pixelRatioCap } from '../core/device';
@@ -70,14 +71,25 @@ export interface PreviewChoice {
  * the hat the camera should zoom in on just the head… Same with changing the
  * pet… and the face for eye colour."* So the preview frames whatever the child
  * just touched, holds it for a moment, and drifts back to the whole character.
+ *
+ * `hair` is the one that is not simply "a smaller part of the character": the
+ * styles that hang down the back are longer than the head, and hidden behind
+ * the child in a front view, so that framing both measures the hair itself and
+ * turns the plinth — see {@link CharacterPreview.updateTurntable}.
  */
-export type PreviewFocus = 'all' | 'head' | 'face' | 'body' | 'pet';
+export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'pet';
 
 /**
  * Where the camera sits relative to whatever it is framing: dead in front, and
  * a little above, so a face is seen at a friendly slight downward angle rather
  * than from below. Length is irrelevant — it is normalised and scaled by the
  * fitted distance.
+ *
+ * **Deliberately the same for every framing.** The hanging hair styles need to
+ * be seen from the side, but the fix for that is to turn the *plinth* (see
+ * {@link TAIL_TURN}), not to move the camera off-axis: a hat, a face and a pet
+ * were all tuned against a dead-on view, and swinging the camera round would
+ * have re-tuned all three to fix one.
  */
 const VIEW_DIRECTION = new Vector3(0, 0.16, 1).normalize();
 
@@ -93,6 +105,9 @@ const VIEW_DIRECTION = new Vector3(0, 0.16, 1).normalize();
 const FOCUS_MARGIN: Readonly<Record<PreviewFocus, number>> = {
   all: 1.12,
   head: 1.1,
+  // The hair box is measured with the tail at rest; it swings outside that as
+  // the plinth turns, so this leaves it somewhere to go.
+  hair: 1.18,
   face: 1.24,
   body: 1.14,
   pet: 1.32,
@@ -108,6 +123,67 @@ const FOCUS_HOLD_SECONDS = 2.4;
  * rather than a cut.
  */
 const CAMERA_RATE = 5.5;
+
+// --- the turntable ---------------------------------------------------------
+//
+// The plinth rocks back and forth rather than spinning, so a child never has
+// to wait for the front of the character to come round again. Two settings,
+// because one of them cannot show a floor-length ponytail at all.
+
+/** The resting rock: half-width in radians, and speed in radians per second. */
+const ROCK_AMPLITUDE = 0.55;
+const ROCK_RATE = 0.35;
+
+/**
+ * How far round the plinth turns while a style that hangs down the back is on
+ * show (see `art/models/hair.ts`'s `TRAILING_HAIR_STYLES`).
+ *
+ * Measured, not guessed. The hair hangs about 0.65 m behind the character's
+ * own axis, so at a turn of θ it appears 0.65·sin θ to one side; the widest
+ * thing it has to clear is her hands, about 0.5 m out. That needs sin θ > 0.77,
+ * so θ > 50°, and the rock below either side of this keeps it there. Turning
+ * *this* way (positive, towards the camera's right) also swings the tail away
+ * from the pet, which stands at the character's front-right and was half the
+ * reason the tail could not be seen.
+ */
+const TAIL_TURN = 1.1;
+
+/**
+ * The rock while turned: narrower, and much brisker.
+ *
+ * Narrower because the whole 0.5 rad of the default rock either side of
+ * {@link TAIL_TURN} would swing the tail back behind the body for part of
+ * every cycle. Brisker because the default is *far* too slow to move it: the
+ * anchor's peak acceleration under the resting rock is 0.55 × 0.35² × 0.65 ≈
+ * 0.04 m/s², against a hair gravity of 16, which deflects the tail by about a
+ * twentieth of a degree — invisible. At this rate it is 0.25 × 2.5² × 0.65 ≈
+ * 1.0 m/s², and the drive sits close enough under the tail's own pendulum
+ * frequency (√(16 / 1.3) ≈ 3.5 rad/s) to be amplified by it. She sways; the
+ * tail swishes, which is the entire reason this style exists.
+ */
+const TAIL_ROCK_AMPLITUDE = 0.25;
+const TAIL_ROCK_RATE = 2.5;
+
+/**
+ * How briskly the plinth turns between the two, as an exponential-damping rate.
+ *
+ * This is also the swish: a 1.1 rad turn at this rate starts at about 2.4 rad/s
+ * — a character turning to show you something, not a spin — and the tail is
+ * thrown out behind it and swings back a couple of times as she settles.
+ */
+const TURN_RATE = 2.2;
+
+/**
+ * The framings that turn the plinth for a trailing style: the ones that show
+ * the body at all.
+ *
+ * `head`, `face` and `pet` are deliberately absent. Those are the close-ups
+ * the family asked for — the hat, the eye colour, the pet — and every one of
+ * them was tuned against a character facing the camera. A child choosing an
+ * eye colour gets a face, not a profile; the turn simply unwinds for a moment
+ * and then comes back, which swishes the tail again on the way.
+ */
+const TAIL_FOCUSES: ReadonlySet<PreviewFocus> = new Set<PreviewFocus>(['all', 'hair', 'body']);
 
 // Scratch vectors — `updateCamera` runs every frame and must not allocate.
 const SCRATCH_CENTRE = new Vector3();
@@ -176,6 +252,22 @@ export class CharacterPreview {
   /** False until the first framing, which snaps rather than swooping in. */
   private framed = false;
 
+  // --- the turntable: how far round it has swung to show hair that hangs
+  // down the back, and where it is in its rock. ------------------------------
+  /** True while the built style hangs behind the head. See `TAIL_FOCUSES`. */
+  private trailingHair = false;
+  /** 0 = facing the camera, 1 = turned to {@link TAIL_TURN}. Eased, never cut. */
+  private tailShow = 0;
+  /**
+   * The rock's phase, accumulated rather than read off `elapsed`.
+   *
+   * It has to be: the rock's *rate* changes with {@link tailShow}, and
+   * `sin(elapsed × rate)` would jump the plinth by whole radians the instant
+   * the rate moved — which the hair simulation would read as the child's head
+   * being flung sideways.
+   */
+  private rockPhase = 0;
+
   constructor() {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'charcreate-preview-canvas';
@@ -241,6 +333,7 @@ export class CharacterPreview {
     this.boxes.clear();
     this.focus = focus;
     this.focusUntil = this.elapsed + FOCUS_HOLD_SECONDS;
+    this.trailingHair = TRAILING_HAIR_STYLES.includes(choice.hairStyle);
 
     const group = new Group();
 
@@ -286,6 +379,14 @@ export class CharacterPreview {
 
     this.stage.add(group);
     this.character = group;
+
+    // The kid was built at the origin, unturned; the plinth it has just been
+    // put on is not. The ponytail simulates in world space, so without this it
+    // would spend the next second whipping across from where it thought it was
+    // — on every single tap, since every tap rebuilds the character. It also
+    // has to happen before `boxFor('hair')` measures the tail, so the framing
+    // is taken from a tail at rest rather than one mid-flight.
+    kid.resetHair();
   }
 
   dispose(): void {
@@ -304,9 +405,7 @@ export class CharacterPreview {
     const dt = this.lastTime ? Math.min(0.1, (time - this.lastTime) / 1000) : 0;
     this.lastTime = time;
     this.elapsed += dt;
-    // A lazy turntable — enough life to feel like a toy on a shelf, slow
-    // enough to actually see the choice you just made rather than a blur.
-    if (this.spinsAllowed) this.stage.rotation.y = Math.sin(this.elapsed * 0.35) * 0.55;
+    this.updateTurntable(dt);
     // After the turntable, so the simulated ponytail sees this frame's angle:
     // it is driven from the anchor's WORLD position, which is exactly why the
     // hair swishes as the plinth rocks. Free on every other style.
@@ -316,6 +415,38 @@ export class CharacterPreview {
     this.renderer.render(this.scene, this.camera);
     this.rafHandle = requestAnimationFrame(this.frame);
   };
+
+  /**
+   * The plinth's angle for this frame: a gentle rock, about a centre that
+   * swings round when hair that hangs down the back is being shown.
+   *
+   * This is the whole fix for "the Swishy Pony is invisible". The tail hangs
+   * roughly 0.65 m *behind* a child whose own head is 1.3 m across, so from
+   * dead in front it is hidden by her — by her head at the top, her jumper in
+   * the middle and her shoes at the bottom, with the pet covering what is
+   * left. The camera cannot solve that from the front at any distance. Turning
+   * the plinth can, and it costs the other framings nothing, because they turn
+   * it straight back.
+   *
+   * The turn is also the *motion*: a swinging tail is the entire point of the
+   * style, and the resting rock is nowhere near brisk enough to move one (see
+   * {@link TAIL_ROCK_RATE}).
+   */
+  private updateTurntable(dt: number): void {
+    const wanted = this.trailingHair && TAIL_FOCUSES.has(this.focus) ? 1 : 0;
+    // A player who has asked for reduced motion still gets to see the style —
+    // they just get it turned, rather than turning. Same rule the camera
+    // follows, and the same rule the rock itself has always followed.
+    const blend = this.spinsAllowed ? 1 - Math.exp(-dt * TURN_RATE) : 1;
+    this.tailShow += (wanted - this.tailShow) * blend;
+
+    const amplitude = ROCK_AMPLITUDE + (TAIL_ROCK_AMPLITUDE - ROCK_AMPLITUDE) * this.tailShow;
+    const rate = ROCK_RATE + (TAIL_ROCK_RATE - ROCK_RATE) * this.tailShow;
+    this.rockPhase += dt * rate;
+
+    this.stage.rotation.y =
+      TAIL_TURN * this.tailShow + (this.spinsAllowed ? Math.sin(this.rockPhase) * amplitude : 0);
+  }
 
   /**
    * Measures a subtree's bounds with the turntable held at zero.
@@ -355,6 +486,19 @@ export class CharacterPreview {
         // tall hat is inside this box for free — which is the whole point:
         // the framing cannot crop a hat it measured.
         box = this.measure(kid.head);
+      } else if (focus === 'hair') {
+        // The head, so a hair colour is still framed on a face rather than on
+        // a floating cap — plus every hair mesh actually on show. That second
+        // part matters for exactly one style: the floor-length ponytail's
+        // segments hang off the model **root**, not off the head, so a hair
+        // framing measured from `kid.head` alone would crop 1.3 m of the very
+        // thing being chosen. Hidden parts are skipped because `expandByObject`
+        // does not check visibility, and a spiky style under a hat would
+        // otherwise be framed around spikes nobody can see.
+        box = this.measure(
+          kid.head,
+          ...kid.hairParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
+        );
       } else if (focus === 'face') {
         const patch = kid.root.getObjectByName('facePatch');
         box = patch ? this.measure(patch) : null;
