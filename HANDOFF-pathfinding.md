@@ -1,0 +1,97 @@
+# Handoff — 1.0 Route finding (tap-to-move must go *round* things)
+
+Branch `player-pathfinding`, worktree `.claude/worktrees/player-pathfinding`,
+off `origin/main` at 3c3bef0.
+
+## The decision, and why
+
+**Chosen: a navigation *grid*, generated at run time from the finished
+collision world.** New file `src/world/NavGrid.ts`.
+
+The three candidates, and why the other two lost:
+
+1. **Reuse `entities/npc/poiGraph.ts` as-is — rejected.** Its edges are
+   validated against the real world (which is the good part, and this borrows
+   the trick), but its *nodes* are forty-odd hand-authored seeds along the ring
+   road and the plaza. Decision 4 replans the entire park around a railway and
+   explicitly plans to hand-add spurs and platform nodes to that file — so its
+   node set is days from being rewritten. Worse, it is far too coarse for a
+   finger: a child taps a specific patch of grass, and snapping her destination
+   to the nearest of forty waypoints, or walking her out to the ring road to
+   get four metres round a bench, is a different bug wearing the first one's
+   coat. It also has only three nodes inside the building.
+2. **Densify the poiGraph — rejected.** Densifying it into something fine
+   enough for arbitrary taps means generating its nodes, at which point it is a
+   lattice with extra steps, and it still leaves the NPC seeds as a
+   hand-authored layer to maintain.
+3. **A polygonal navmesh — impossible as things stand.** There is no walkable
+   geometry to build one from. The floor of this world is a *function* —
+   `WalkSurfaces.sample()` — and the meshes are only its portrait (see
+   `world/pickWalkable.ts`, which makes the same point about raycasting).
+   Anything that wants to know where you can stand has to ask, point by point.
+
+So: ask, point by point, on a 0.5 m lattice, from the two authorities that
+already decide where a character may stand — `CollisionWorld` for the solid
+things (every collider stamped in, fattened by the walker's radius) and the
+ground sampler for the height of each free cell (so a route never steps up
+something unwalkable nor off the edge of a deck). Then A* + string-pulling.
+
+**Why this survives the two pending decisions.** It is derived, never authored:
+the railway's exclusion walls, the moved attractions and anything else built
+later appear in it for free. It never assumes one continuous interior — the
+lattice covers exactly the current soft play bounds (`setPlayBounds`, which is
+what already changes on a space change) and is rebuilt when those bounds move,
+when the walker's height moves by half a storey, or when the collision world's
+`revision` changes. Floors at far-apart origins are therefore just "the bounds
+moved".
+
+## What happens when the target is unreachable
+
+Three layers, all of them "walk as close as you can and stop":
+
+- A* keeps the reachable cell that got **closest** to the goal, so an
+  unreachable destination yields a route to the nearest place she can actually
+  stand. `NavGrid.lastRouteReachedGoal` says which happened.
+- `TapNavigator` then pulls the destination (and the tap marker) back to that
+  point when it is more than `SHORTFALL_TOLERANCE` short, and drops the
+  interact zone — she will not reach the thing, so its button must not fire.
+  Within the tolerance the true target is kept, which is what makes a stand
+  point tucked against a stall still work.
+- The old stuck timer survives as the backstop, now measured against the
+  current leg, with **one** replan attempt before it gives up.
+
+If there is no lattice covering where she is standing at all, `findRoute`
+returns 0 and `TapNavigator` falls back to the straight-line seek it has always
+done — never worse than today.
+
+## Auto-hop
+
+A wall she hops without being asked is **not an obstacle** and is not stamped
+into the lattice, so routes go straight over the low garden walls exactly as
+they should. The hop test is not duplicated: `Collision.ts` exports one
+`autoHopClears(topHeight, apexClearance)` used by `resolve`, by
+`wouldAutoHopClear` and by the lattice builder, and `Player` exports the one
+`JUMP_APEX_HEIGHT` all three are fed. Nothing about the fling bug (item 1.4) is
+touched either way.
+
+## No per-frame cost
+
+The lattice is built lazily on the first route asked for in a space; a route is
+planned **once per tap** and then followed. Every buffer is allocated once per
+lattice and reused. Per frame a routed walk costs one extra distance check and
+allocates nothing.
+
+## State
+
+- [x] `src/world/NavGrid.ts` written
+- [ ] `Collision.ts` read-only accessors (`forEachCircle`/`forEachWall`,
+      play-bounds getters, `revision`, exported `autoHopClears`)
+- [ ] `Player.ts` exports `JUMP_APEX_HEIGHT`
+- [ ] `TapNavigator.ts` follows a route
+- [ ] `Game.ts` builds the grid and hands it over
+- [ ] build green, PR raised
+
+Needs visual QA (I do not own the browser): tap across the park behind a tree
+line; tap behind the fountain; tap over a low garden wall (must hop, not
+detour); double-tap to run a routed path; park map travel; tapping an
+unreachable spot (marker should sit where she actually stops).

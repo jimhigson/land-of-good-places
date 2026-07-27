@@ -61,6 +61,21 @@ interface WallCollider {
 const JUMP_CLEARANCE_GRACE = 0.15;
 
 /**
+ * "Does a jump reaching `apexClearance` get over something this tall?"
+ *
+ * The one expression, used by all three places that ask: `resolve` (for a jump
+ * already in flight), {@link CollisionWorld.wouldAutoHopClear} (for one about
+ * to be fired), and `world/NavGrid.ts` (which leaves a wall the walker hops out
+ * of the map entirely, because a route that detoured round it would be worse
+ * than the straight line). They used to be able to drift apart; now they are
+ * the same call, so "a wall the jump clears is exactly a wall the route hops"
+ * is true by construction rather than by comment.
+ */
+export function autoHopClears(topHeight: number, apexClearance: number): boolean {
+  return apexClearance + JUMP_CLEARANCE_GRACE >= topHeight;
+}
+
+/**
  * Overlaps up to this deep are ordinary contact — the everyday case of
  * walking (even sprinting) straight into a wall, tree or fountain rim — and
  * get corrected fully and instantly, exactly as before. That is what keeps
@@ -114,6 +129,23 @@ export class CollisionWorld {
   private boundsZ = 0;
   private boundsRadius = GARDEN_PLAY_RADIUS;
 
+  /**
+   * Bumped whenever the set of solid things changes.
+   *
+   * `world/NavGrid.ts` bakes this world into a lattice and caches it. Today
+   * every collider is registered while the park is being built and none is ever
+   * added afterwards, so the cache would in practice never be wrong — but "in
+   * practice never" is exactly the kind of invariant that quietly stops being
+   * true (the railway of Decision 4 registers a great deal of exclusion wall).
+   * A counter the mutators cannot avoid bumping makes the cache correct by
+   * construction instead of by convention.
+   */
+  private revisionCounter = 0;
+
+  get revision(): number {
+    return this.revisionCounter;
+  }
+
   /** Recentres the soft boundary. Used on every change of space. */
   setPlayBounds(centreX: number, centreZ: number, radius: number): void {
     this.boundsX = centreX;
@@ -121,8 +153,22 @@ export class CollisionWorld {
     this.boundsRadius = radius;
   }
 
+  /** Where the soft boundary is, for anything that has to map the space inside it. */
+  get playBoundsX(): number {
+    return this.boundsX;
+  }
+
+  get playBoundsZ(): number {
+    return this.boundsZ;
+  }
+
+  get playBoundsRadius(): number {
+    return this.boundsRadius;
+  }
+
   addCircle(x: number, z: number, radius: number, topHeight = Infinity, autoHoppable = false): void {
     this.circles.push({ x, z, radius, topHeight, autoHoppable });
+    this.revisionCounter += 1;
   }
 
   addWall(
@@ -135,6 +181,7 @@ export class CollisionWorld {
     autoHoppable = false,
   ): void {
     this.walls.push({ x1, z1, x2, z2, halfThickness, topHeight, autoHoppable });
+    this.revisionCounter += 1;
   }
 
   /** Registers the four sides of an axis-aligned rectangle as walls. */
@@ -160,6 +207,54 @@ export class CollisionWorld {
   clear(): void {
     this.circles.length = 0;
     this.walls.length = 0;
+    this.revisionCounter += 1;
+  }
+
+  /**
+   * Read-only walks over everything solid, for whoever needs to *map* the world
+   * rather than be pushed around by it — `world/NavGrid.ts`, so far.
+   *
+   * Deliberately a visitor rather than an exposed array: the colliders are
+   * mutable objects and handing them out would let a consumer move a tree by
+   * accident. Called once per lattice build, never per frame, so the closure
+   * costs nothing worth counting.
+   */
+  forEachCircle(
+    visit: (
+      x: number,
+      z: number,
+      radius: number,
+      topHeight: number,
+      autoHoppable: boolean,
+    ) => void,
+  ): void {
+    for (const circle of this.circles) {
+      visit(circle.x, circle.z, circle.radius, circle.topHeight, circle.autoHoppable);
+    }
+  }
+
+  forEachWall(
+    visit: (
+      x1: number,
+      z1: number,
+      x2: number,
+      z2: number,
+      halfThickness: number,
+      topHeight: number,
+      autoHoppable: boolean,
+    ) => void,
+  ): void {
+    for (const wall of this.walls) {
+      visit(
+        wall.x1,
+        wall.z1,
+        wall.x2,
+        wall.z2,
+        wall.halfThickness,
+        wall.topHeight,
+        wall.autoHoppable,
+      );
+    }
   }
 
   /**
@@ -252,7 +347,7 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (clearance + JUMP_CLEARANCE_GRACE >= circle.topHeight) {
+        if (autoHopClears(circle.topHeight, clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -282,7 +377,7 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (clearance + JUMP_CLEARANCE_GRACE >= wall.topHeight) {
+        if (autoHopClears(wall.topHeight, clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -338,10 +433,8 @@ export class CollisionWorld {
    * moment before contact rather than after stopping dead against the wall.
    */
   wouldAutoHopClear(position: Vector3, radius: number, apexClearance: number): boolean {
-    const reach = apexClearance + JUMP_CLEARANCE_GRACE;
-
     for (const circle of this.circles) {
-      if (!circle.autoHoppable || reach < circle.topHeight) continue;
+      if (!circle.autoHoppable || !autoHopClears(circle.topHeight, apexClearance)) continue;
       const dx = position.x - circle.x;
       const dz = position.z - circle.z;
       const minimum = circle.radius + radius;
@@ -349,7 +442,7 @@ export class CollisionWorld {
     }
 
     for (const wall of this.walls) {
-      if (!wall.autoHoppable || reach < wall.topHeight) continue;
+      if (!wall.autoHoppable || !autoHopClears(wall.topHeight, apexClearance)) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
