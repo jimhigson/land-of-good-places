@@ -358,6 +358,11 @@ function stowedIds(state: GameState, visible: readonly InventoryItem[]): string[
   for (const item of state.inventory) {
     if (outside.has(item.uid)) continue;
     if (item.uid === state.carriedUid) continue;
+    // A hat on your head and a flower in your hair are not in the bag. Without
+    // this the same hat is drawn twice — once at `hatAnchor`, once peeking out
+    // of the backpack behind it — which is easy to hit now that the drawer can
+    // put any hat on (`ui/InventoryDrawer.ts`).
+    if (item.uid === state.wornHatUid || item.uid === state.wornFlowerUid) continue;
     ids.add(item.id);
   }
   return [...ids];

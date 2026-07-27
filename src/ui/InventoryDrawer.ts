@@ -233,7 +233,11 @@ export class InventoryDrawer {
         (action.label === ''
           ? ''
           : `<span class="row-action" aria-hidden="true">${escapeHtml(action.label)}</span>`) +
-        `<span class="row-carry" aria-hidden="true">${action.glyph}</span>`;
+        // Only when there is something to show: an always-present cell would
+        // reserve its width on every row and squeeze the names for nothing.
+        (action.glyph === ''
+          ? ''
+          : `<span class="row-carry" aria-hidden="true">${action.glyph}</span>`);
       row.addEventListener('click', () => {
         row.blur();
         this.selected = index;

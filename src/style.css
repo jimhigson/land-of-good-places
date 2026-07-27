@@ -1169,6 +1169,42 @@ kbd {
   border-color: var(--lgp-pink-deep);
 }
 
+/* ---- wearing what you own ----
+
+   Every backpack row is one button that toggles: a hat goes on your head, a
+   flower in your hair, anything else into your hands (see
+   `ui/InventoryDrawer.ts`). The pill on the right says which of those a press
+   will do, in words, because "tap it and find out" is not an instruction a
+   six-year-old should have to follow twice.
+
+   The pill is a plain `<span>`, deliberately: making it a second button would
+   turn a row into a little menu, and would give the global HIGHLIGHT rule two
+   overlapping rainbows to draw on one row. The whole row is the tap target. */
+
+.row-action {
+  flex: none;
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+  white-space: nowrap;
+  color: var(--lgp-ink);
+  background: #fff2c9;
+  border-radius: 999px;
+  padding: 0.1875rem 0.625rem 0.25rem;
+}
+
+/* Worn things read as "on" at a glance — the row is filled rather than merely
+   outlined, so a child scanning the list sees what they are wearing without
+   reading a word of it. */
+.shop-row[data-worn='true'] {
+  border-color: var(--lgp-pink-deep);
+  background: linear-gradient(180deg, #fff 0%, #ffe3f2 100%);
+}
+
+.shop-row[data-worn='true'] .row-action {
+  color: #fff;
+  background: var(--lgp-pink-deep);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .shop-card,
   .surprise-egg,
