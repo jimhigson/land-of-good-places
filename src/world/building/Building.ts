@@ -323,6 +323,7 @@ export class Building implements GameSystem {
   attachPlayer(player: Player): void {
     this.player = player;
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
+    this.ballPit.attachPlayer(player);
   }
 
   /** The Climb / Descend menu was answered. */
@@ -336,8 +337,13 @@ export class Building implements GameSystem {
 
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
 
+    // Read once and dispatched to every claimant below, so the lift and the
+    // interior's own interact handling can never both react to the same
+    // press (see `handleInteractPress`'s "first claimant wins" doc comment).
+    const interactPressed = input.justPressed('interact');
+
     this.callLiftIfWaiting();
-    this.lift.update(dt, this.riderInLift(), input.justPressed('interact'));
+    this.lift.update(dt, this.riderInLift(), interactPressed);
     this.bubble.update(dt, elapsed);
     this.escalators.update(dt);
     this.trampoline.update(dt);
@@ -352,7 +358,7 @@ export class Building implements GameSystem {
     if (this.ride) {
       this.advanceRide(dt, player);
     } else if (!this.changingSpace) {
-      this.handleInteractPress(player, input.justPressed('interact'));
+      this.handleInteractPress(player, interactPressed);
       this.handleTrampoline(player);
       this.handleEscalator(player, dt);
       this.checkRideTriggers(player);
@@ -426,14 +432,25 @@ export class Building implements GameSystem {
   private leaveInterior(): void {
     const player = this.player;
     if (!player) return;
-    this.inside = false;
-    this.interiorRoot.visible = false;
-    this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
+    this.exitToGarden();
 
     const x = facadeX(1.5);
     const z = facadeZ(BUILDING_HALF_Z + 2.4);
     // Facing +Z, out into the park — which is also the way the camera looks.
     player.teleportTo(x, this.surfaces.sample(x, z, BUILDING_BASE_Y + 1), z, 0);
+  }
+
+  /**
+   * The shared first half of leaving the interior: shared by `leaveInterior`
+   * (the door) and `startGiantSlide` (the roof, via the slide), the two
+   * independent paths out of the building's own space. Kept as one method so
+   * anything added to "the player has left the interior" can't be added to
+   * one path and silently miss the other, the way this pair once did.
+   */
+  private exitToGarden(): void {
+    this.inside = false;
+    this.interiorRoot.visible = false;
+    this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
   }
 
   // ---------------------------------------------------------------- cutaway
@@ -453,8 +470,16 @@ export class Building implements GameSystem {
     this.shops.setVisibleDeck(floor);
 
     // The grown-up belongs to the roof but lives outside the fader — they have
-    // to stay visible during a ride, when the player is nowhere near a floor.
-    this.grownUp.root.visible = this.ride !== null || floor === null || floor >= TOP_DECK;
+    // to stay visible during most rides, when the player is nowhere near a
+    // floor. The ginormous slide is the exception: that's the one ride he can
+    // be *absent* from, riding only when invited (see `startGiantSlide`), and
+    // by then the player isn't in the interior any more so `floor` is a stale
+    // reading of outdoor coordinates against the interior's deck sampler —
+    // not a real "nowhere near a floor" signal worth falling back on.
+    this.grownUp.root.visible =
+      this.ride !== null && this.ride.giant
+        ? this.grownUpComing
+        : this.ride !== null || floor === null || floor >= TOP_DECK;
   }
 
   // ------------------------------------------------------------------ rides
@@ -492,12 +517,14 @@ export class Building implements GameSystem {
    */
   private startGiantSlide(player: Player): void {
     this.changeSpace(() => {
-      this.inside = false;
-      this.interiorRoot.visible = false;
-      this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
+      this.exitToGarden();
 
-      // The grown-up rides in the garden, so they have to be in the garden.
-      this.gardenRoot.add(this.grownUp.root);
+      // The grown-up rides in the garden, so they have to be in the garden —
+      // but only if they were actually invited. Reparenting unconditionally
+      // here left an uninvited grown-up hanging in the sky beside the tower
+      // for the whole descent, since `updateCutaway` used to show him
+      // whenever any ride ran, invited or not.
+      if (this.grownUpComing) this.gardenRoot.add(this.grownUp.root);
 
       this.ginormousSlide.pointAt(0, this.point);
       player.teleportTo(

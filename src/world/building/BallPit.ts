@@ -6,7 +6,6 @@ import {
   InstancedMesh,
   Matrix4,
   Mesh,
-  Object3D,
   Quaternion,
   SphereGeometry,
   TorusGeometry,
@@ -14,9 +13,11 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { castAndReceive, softMaterial } from './parts';
+import { BALL_PIT_COUNT } from '../../core/constants';
 import { BALL_PIT_DEPTH, BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from './layout';
 import { terrainHeight } from '../terrain';
 import { BallPitSimulation, type PlayerContact, type StepStats } from './ballPhysics';
+import type { Player } from '../../entities/Player';
 
 /** The bowl takes light but does not cast: it sits in its own hole. */
 function receiveOnly(mesh: Mesh): Mesh {
@@ -34,15 +35,6 @@ function receiveOnly(mesh: Mesh): Mesh {
  * see the PR description for the before/after numbers.
  */
 const BALL_RADIUS = 0.28;
-
-/**
- * `core/constants.ts` still has `BALL_PIT_COUNT = 190` — the old spring-based
- * pit's count. This PR owns only `BallPit.ts` and `ballPhysics.ts`, so rather
- * than edit a shared file, the real count for the new AABB/MTV physics is
- * duplicated here. Four-plus times as many balls, comfortably inside the
- * per-frame physics budget on a desktop core (see PR description for numbers).
- */
-const BALL_PIT_COUNT = 900;
 
 /** How close to the wall a ball's centre is allowed, so it never visibly clips it. */
 const CONTAIN_RADIUS = BALL_PIT_RADIUS - BALL_RADIUS - 0.5;
@@ -63,13 +55,24 @@ const SPLASH_UP_STRENGTH = 6.5;
 /**
  * Spawned balls start stacked in loose layers, not resting — dropping 900 of
  * them from scratch takes a few seconds of simulated time to fall and settle
- * into a pile. Running that here, once, synchronously before the first
- * frame renders means the player always finds a already-settled pit (and
- * never pays the settling phase's physics cost during real play, only at
- * construction).
+ * into a pile. That settling has to happen *somewhere*, but not all at once
+ * in the constructor: running 6 seconds of simulation synchronously before
+ * the first frame renders would visibly delay boot. Instead it is spread
+ * across the first real frames of `update()` (see `warmupSecondsRemaining`
+ * below) — a handful of frames' worth of extra physics, invisible against a
+ * game that has plenty else to draw before anyone could possibly reach the
+ * pit, and the player still always finds an already-settled pile.
  */
 const WARMUP_SECONDS = 6;
-const WARMUP_DT = 1 / 60;
+/**
+ * How much simulated time to catch up per real frame while warming up.
+ * Matches the simulation's own per-`step()` cap (`MAX_SUBSTEPS` *
+ * `FIXED_DT`, `ballPhysics.ts`), so each catch-up call is exactly as heavy as
+ * the worst-case real frame the sim is already built to absorb — nothing new
+ * to budget for. At this rate the whole 6 simulated seconds catches up over
+ * about 72 real frames, roughly a second.
+ */
+const WARMUP_BATCH_SECONDS = 5 / 60;
 
 const COLOURS = [
   PALETTE.ballPitA,
@@ -102,14 +105,17 @@ export class BallPit {
   private readonly rotation = new Quaternion();
   private readonly scale = new Vector3(1, 1, 1);
 
-  /** Cached lookup of the player's `Object3D` in the scene graph — see
-   *  {@link findPlayerWorldPosition} for why this file finds it itself rather
-   *  than being handed a reference. */
-  private playerNode: Object3D | null = null;
+  /** Handed in by `Building.attachPlayer`, which already holds the real
+   *  reference — see {@link attachPlayer}. */
+  private player: Player | null = null;
   /** World-space Y of the pit's own anchor, so the player's world Y can be
    *  converted to pit-local. Computed once: the anchor never moves. */
   private readonly groundWorldY: number;
   private lastAwake = -1; // -1 = "never stepped yet", forces the first step to run.
+  /** Simulated seconds still owed to the settling warm-up — see
+   *  `WARMUP_SECONDS` above. Paid off a few frames' worth at a time from
+   *  `update()` rather than all at once in the constructor. */
+  private warmupSecondsRemaining = WARMUP_SECONDS;
 
   /** Timing/activity from the most recent physics step. Not read by gameplay
    *  — poke `window.game.world.building.ballPit.lastStats` from the console
@@ -148,18 +154,24 @@ export class BallPit {
         softMaterial(PALETTE.markerPink, 0.6),
       ),
     );
+    // Sits at the rim of the hole, not inside it — but it never casts either:
+    // like the bowl, its shadow would land on a hole nobody can see into.
+    rim.castShadow = false;
     rim.rotation.x = Math.PI / 2;
     rim.position.y = -BALL_PIT_DEPTH + 1.1;
     this.group.add(rim);
 
-    // The balls: one instanced mesh, real physics underneath.
+    // The balls: one instanced mesh, real physics underneath. They sit inside
+    // the pit's own hole (ARCHITECTURE.md: nothing in a hole casts a shadow
+    // — there is nothing down there for it to land on), so casting is off;
+    // they still receive, so the pile reads as lit rather than flat.
     this.mesh = new InstancedMesh(
       new SphereGeometry(BALL_RADIUS, 12, 9),
       softMaterial(0xffffff, 0.42),
       BALL_PIT_COUNT,
     );
     this.mesh.name = 'balls';
-    this.mesh.castShadow = true;
+    this.mesh.castShadow = false;
     this.mesh.receiveShadow = true;
     this.group.add(this.mesh);
 
@@ -169,7 +181,8 @@ export class BallPit {
       { radius: CONTAIN_RADIUS, restY: REST_Y },
       90210,
     );
-    for (let i = 0; i < WARMUP_SECONDS / WARMUP_DT; i += 1) this.sim.step(WARMUP_DT, null);
+    // No synchronous warm-up here any more — it's paid off gradually from
+    // `update()` instead, see `warmupSecondsRemaining`.
 
     const colour = new Color();
     for (let i = 0; i < BALL_PIT_COUNT; i += 1) {
@@ -181,6 +194,13 @@ export class BallPit {
     // One full write up front so the very first rendered frame already shows
     // the spawn layout, rather than a flash of default (origin) matrices.
     this.writeAllMatrices();
+  }
+
+  /** Hands the pit the player, so wading can push the balls aside. Called
+   *  from `Building.attachPlayer`, which already holds the real reference —
+   *  see the field doc on {@link player}. */
+  attachPlayer(player: Player): void {
+    this.player = player;
   }
 
   /**
@@ -199,6 +219,21 @@ export class BallPit {
   }
 
   update(dt: number, elapsed: number): void {
+    void elapsed; // kept in the signature: Building.ts calls update(dt, elapsed)
+
+    // Settling the freshly-spawned pile is spread across the first real
+    // frames rather than done synchronously in the constructor (see
+    // `WARMUP_SECONDS` above) — a normal frame's worth of extra physics work
+    // each time, invisible against everything else the game has to draw
+    // before anyone could possibly reach the pit.
+    if (this.warmupSecondsRemaining > 0) {
+      const batch = Math.min(this.warmupSecondsRemaining, WARMUP_BATCH_SECONDS);
+      this.sim.step(batch, null);
+      this.warmupSecondsRemaining -= batch;
+      this.writeAllMatrices();
+      return;
+    }
+
     const contact = this.buildPlayerContact();
 
     // Nothing to simulate: the pile is fully asleep and nobody is wading.
@@ -207,36 +242,18 @@ export class BallPit {
     const stats = this.sim.step(dt, contact);
     this.lastAwake = stats.awake;
     this.lastStats = stats;
-    void elapsed; // kept in the signature: Building.ts calls update(dt, elapsed)
 
     this.writeDirtyMatrices();
   }
 
   /**
-   * Finds the player's `Object3D` in the scene graph and converts its world
-   * position to pit-local coordinates, or `null` if the player is nowhere
-   * near the pit (or hasn't been added to the scene yet).
-   *
-   * BallPit doesn't get handed the player directly: this PR owns only
-   * `BallPit.ts` and `ballPhysics.ts`, and wiring a reference through
-   * `Building.ts` would mean editing a file several other agents are working
-   * in. `Player.group` is added straight to the scene root and named
-   * `'player'` (see `entities/Player.ts`), and its `position` is world space
-   * and always current the instant `player.update()` has run — which happens
-   * before `world.update()` every frame (see ARCHITECTURE.md's frame order)
-   * — so this lookup is both self-contained and accurate, just a little
-   * unusual. The lookup itself only runs once; after that it's a cached
-   * reference read.
+   * The player's position, converted to pit-local coordinates, or `null` if
+   * they are nowhere near the pit (or haven't been attached yet).
    */
   private buildPlayerContact(): PlayerContact | null {
-    if (!this.playerNode) {
-      let root: Object3D = this.group;
-      while (root.parent) root = root.parent;
-      this.playerNode = root.getObjectByName('player') ?? null;
-      if (!this.playerNode) return null;
-    }
+    if (!this.player) return null;
 
-    const world = this.playerNode.position;
+    const world = this.player.position;
     const localX = world.x - BALL_PIT_X;
     const localZ = world.z - BALL_PIT_Z;
     const horizontalDistance = Math.hypot(localX, localZ);
