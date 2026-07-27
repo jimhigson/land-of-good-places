@@ -83,6 +83,31 @@ export class CharacterModel {
     this.kid.setExpression(name);
   }
 
+  /**
+   * Secondary motion the model owns rather than the animator: today that is
+   * the simulated ponytail, and nothing else.
+   *
+   * Must be called **after** the frame's pose is set, not before — the tail is
+   * pinned to the world position of an anchor that hangs off `head`, which
+   * hangs off `body`, and both of those are written every frame by `Player`'s
+   * `animate`. Called first it would follow the previous frame's head and lag
+   * by a frame forever.
+   *
+   * `dt` is the game's already-time-scaled delta; the chain clamps it itself.
+   * Free on every style but the swishy ponytail.
+   */
+  update(dt: number): void {
+    this.kid.update(dt);
+  }
+
+  /**
+   * Tells the model whether a hat is being worn, so hair that would spear
+   * straight through one is tucked away. Driven by `WornHat`.
+   */
+  setHatWorn(worn: boolean): void {
+    this.kid.setHatWorn(worn);
+  }
+
   /** The shared house walk cycle, if a caller would rather not pose limbs. */
   setWalkPhase(phase01: number, speed01: number): void {
     this.kid.setWalkPhase(phase01, speed01);

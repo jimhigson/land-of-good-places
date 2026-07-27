@@ -550,6 +550,12 @@ export class Player implements GameSystem {
       model.setExpression(desiredExpression);
     }
 
+    // Secondary motion the model owns: the swishy ponytail, if that is what
+    // the child chose. Last, and deliberately so — it is pinned to the world
+    // position of an anchor on the head, and the head's pose for this frame
+    // was only just written above. See `CharacterModel.update`.
+    model.update(dt);
+
     // The name label counter-rotates so it never tips with the character.
     this.label.sprite.position.y = this.labelTopHeight() + 0.42 + bob + Math.sin(elapsed * 1.3) * 0.03;
     // Kept a constant size on screen rather than in the world — see
