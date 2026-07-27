@@ -178,7 +178,7 @@ const BULB_COLOURS = [
  * light rather than a row of separate blobs — while each bulb is still its own
  * point of light rather than the whole wire fogging up.
  */
-const HALO_SIZE = 1.25;
+const HALO_SIZE = 1.05;
 
 /**
  * How far each halo's colour is pulled towards cream, 0 = the bulb's own
@@ -191,7 +191,7 @@ const HALO_SIZE = 1.25;
  * bulbs still glow green and the pink ones still glow pink, they are just
  * unmistakably *glowing*.
  */
-const HALO_CREAM = 0.55;
+const HALO_CREAM = 0.4;
 
 /** Cream, not white — ART_DIRECTION §5. Nothing in this park highlights to pure white. */
 const HALO_CREAM_COLOUR = PALETTE.signBoard;
