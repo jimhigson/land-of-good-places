@@ -194,6 +194,30 @@ confirmation. Money is infinite in normal play, so buying should feel
 generous. Give immediate, obvious feedback that the thing is now yours, and
 make the button big enough for a small finger.
 
+### Getting where you tapped (27 July 2026 — HIGH PRIORITY, queued)
+
+**Route finding needs to be much better.** A young player expects to **click
+once and go there** — but the character gets **stuck on scenery** on the way.
+The playable character must **work out a route around obstacles** rather than
+walking into them and stopping.
+
+*This is a core-feel item, not a polish item: tap-to-move is the main way a
+six-year-old plays this game, and every time it fails she has to work out why
+and steer manually, which is exactly the fiddliness we keep removing
+elsewhere. It ranks above most of the queued features.*
+
+*Notes: the NPCs already navigate a validated waypoint graph (`poiGraph`,
+whose every edge is walked against the finished collision world at build
+time), while the player's tap-to-move steers more or less straight at the
+target — so the game already contains a working solution the player cannot
+use. Making the player a consumer of real pathfinding is the obvious move.
+Whatever is built must cope with: the auto-jump over small walls (an existing
+feature — a wall the player can hop is not an obstacle); the castle interior,
+which is about to become one space per floor (Decision 3); and the park
+replan (Decision 4), which moves everything and adds a railway the player
+must never route across. It must also handle "no route exists" gracefully —
+walk as close as possible and stop, never freeze or jitter.*
+
 ### Night is still too dark (27 July 2026 — queued)
 
 Lamp posts helped but **night is still too dark**. Three things, together:

@@ -34,6 +34,13 @@ run in the background from minute one and cost nothing.
 
 ## Wave 1 — global mechanisms, and fixes that depend on nothing
 
+- **1.0 ROUTE FINDING (high priority, family-reported).** Tap-to-move gets
+  stuck on scenery; the player must route *around* obstacles. Core feel, not
+  polish — it is how a six-year-old plays. The NPC `poiGraph` already solves
+  this for NPCs; make the player a consumer of real pathfinding. Must respect
+  auto-jump over small walls, survive Decisions 3 and 4, and degrade
+  gracefully when no route exists.
+
 These touch many files but depend on nothing. **Do them early precisely
 because they are global**: everything built afterwards inherits them free;
 everything built before needs revisiting.
