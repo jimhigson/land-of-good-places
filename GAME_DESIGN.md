@@ -305,7 +305,7 @@ The building has cute toilets. When you use one, a **flushing sound** plays,
 then a **tap/faucet sound** as you wash your hands at the basin. (Good
 manners are part of the game!)
 
-**Privacy, and the roof that covers it (27 July 2026 — queued):** you do not
+**Privacy, and the roof that covers it (27 July 2026 — built):** you do not
 use the toilet from the doorway. **The character walks into the room and
 goes in**, and once they are inside **a roof slides over the room so you
 cannot see them**. You hear the **flush**. Then, as they move to the basin to
@@ -327,6 +327,12 @@ game is saved mid-visit — the roof follows the character's state, so if they
 leave the room it lifts, whatever point the sequence had reached. Worth
 letting NPCs use it too; a queue outside a covered toilet is funnier than
 anything we could script.*
+
+*Built: `world/building/Toilets.ts`. The stand spot moved inside the room —
+it used to be a metre outside the front edge, which is why she was using it
+from the doorway — and the interact press is now gated on the room rectangle
+rather than a radius. The camera is orthographic and 90 units out at 38°, so
+it is always far above the lid. NPCs queueing outside is still to do.*
 
 ### The space ferris wheel — the pet's seat (27 July 2026 — queued)
 

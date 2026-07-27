@@ -3,9 +3,11 @@ import {
   CylinderGeometry,
   Group,
   Mesh,
+  type MeshToonMaterial,
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { BUILDING_FADE_SECONDS } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { playFlush, playHandwash } from '../../ui/chime';
 import { castAndReceive, cuteSign, interiorMaterial, softMaterial } from './parts';
@@ -36,12 +38,57 @@ import {
  * Nothing here registers collision. Collision in this game is height-blind, so a
  * cubicle wall on deck one would be an invisible cubicle wall on all five decks;
  * the little room is open-fronted geometry you walk into and out of freely.
+ *
+ * ## The privacy roof
+ *
+ * GAME_DESIGN.md, 27 July 2026: *"the character walks into the room and goes
+ * in, and once they are inside a roof slides over the room so you cannot see
+ * them. You hear the flush. Then, as they move to the basin to wash their
+ * hands, the roof vanishes again"*.
+ *
+ * So: **walk in → roof covers → flush → roof lifts → wash hands → leave.**
+ *
+ * Two rules shape how it is written, and both are about the same thing —
+ * the roof describes where the child *is*, and is never a thing that has been
+ * *done to* her:
+ *
+ * 1. **It is on before she is out of sight, not after.** A lid that arrives a
+ *    beat late reads as a bug rather than as discretion, so the trigger
+ *    rectangle reaches {@link APPROACH} metres past the doorway and the fade
+ *    takes `BUILDING_FADE_SECONDS` — she crosses the threshold and it has
+ *    already closed over her.
+ * 2. **She can never be stuck under it.** `updateRoof` recomputes the target
+ *    from her position every frame; nothing latches except `lifted`, and
+ *    stepping out of the room clears that too. Walk out mid-flush and it
+ *    lifts. Reload a save taken mid-visit — `save.ts` restores a space id and
+ *    a local offset, and this class is rebuilt with `timer === null` — and the
+ *    roof simply asks where she is and answers correctly, with no sequence to
+ *    resume.
  */
 
 /** Seconds: flush, then a beat, then the tap, then everything settles. */
 const FLUSH_AT = 0.05;
 const WASH_AT = 1.5;
 const ROUTINE_LENGTH = 3.4;
+
+/**
+ * How far outside the room the roof already counts you as in it, in metres.
+ *
+ * Rule 1 above: the lid has to lead her, so it starts closing as she reaches
+ * the doorway rather than once she is through it. At a walking pace this is
+ * very nearly `BUILDING_FADE_SECONDS` of travel, so the two land together.
+ */
+const APPROACH = 0.9;
+
+/**
+ * Underside of the lid.
+ *
+ * Above the 2.1m screens so it reads as a roof over them rather than as a
+ * shelf resting on them, and a long way under the deck above at
+ * `BUILDING_FLOOR_HEIGHT` (3.6). The camera is orthographic, 90 units out at
+ * 38°, so it is always far above this and can never end up inside the lid.
+ */
+const ROOF_Y = 2.42;
 
 interface PanParts {
   readonly group: Group;
@@ -55,6 +102,12 @@ interface BasinParts {
   readonly stream: Mesh;
 }
 
+interface RoofParts {
+  readonly group: Group;
+  /** Every material the lid is made of, faded together. */
+  readonly materials: readonly MeshToonMaterial[];
+}
+
 export class Toilets {
   readonly deck = TOILET_DECK;
   /** Interior-local spot a child stands on to use them. */
@@ -63,11 +116,27 @@ export class Toilets {
 
   private readonly pan: PanParts;
   private readonly basin: BasinParts;
+  private readonly roof: RoofParts;
 
   /** Seconds into the routine, or `null` when nobody is using them. */
   private timer: number | null = null;
   private flushed = false;
   private washed = false;
+
+  /** Whether she is in the room — recomputed from her position every frame. */
+  private visiting = false;
+  /**
+   * Whether the wash beat has lifted the roof for this visit.
+   *
+   * The one thing that latches, because "she has finished and is at the basin"
+   * has to outlive the routine timer that said so — otherwise the lid would
+   * drop back over her the moment the tap stopped running. Cleared the instant
+   * she leaves the room, which is what keeps it from ever trapping her.
+   */
+  private lifted = false;
+
+  /** 0 = fully lifted, 1 = fully covering. */
+  private roofAmount = 0;
 
   constructor(floorGroups: readonly Group[]) {
     const room = new Group();
@@ -106,7 +175,9 @@ export class Toilets {
 
     this.pan = buildPan(TOILET_PAN_X, TOILET_PAN_Z);
     this.basin = buildBasin(TOILET_BASIN_X, TOILET_BASIN_Z);
-    room.add(this.pan.group, this.basin.group);
+    this.roof = buildRoof(centreX, centreZ, width, depth);
+    room.add(this.pan.group, this.basin.group, this.roof.group);
+    this.applyRoof();
 
     const sign = cuteSign({
       title: 'Toilets',
@@ -132,7 +203,37 @@ export class Toilets {
     this.washed = false;
   }
 
-  update(dt: number, elapsed: number): void {
+  /**
+   * Is a child at these interior-local coordinates in the room?
+   *
+   * Generous by {@link APPROACH} on every side, because this drives the roof
+   * and the roof has to lead her. The *strict* rectangle — the one that says
+   * whether she has really gone in far enough to use the loo — is
+   * `TOILET_ROOM` itself, tested by `Building.handleInteractPress`.
+   */
+  occupies(localX: number, localZ: number): boolean {
+    return (
+      localX >= TOILET_ROOM.minX - APPROACH &&
+      localX <= TOILET_ROOM.maxX + APPROACH &&
+      localZ >= TOILET_ROOM.minZ - APPROACH &&
+      localZ <= TOILET_ROOM.maxZ + APPROACH
+    );
+  }
+
+  /**
+   * @param occupied Whether a child is in the room right now. The roof is
+   * driven entirely by this and by the routine's own clock — see the class
+   * comment on why it is a question asked every frame rather than a state the
+   * sequence sets.
+   */
+  update(dt: number, elapsed: number, occupied: boolean): void {
+    this.updateFittings(dt, elapsed);
+    this.updateRoof(dt, occupied);
+  }
+
+  // -------------------------------------------------------------- internals
+
+  private updateFittings(dt: number, elapsed: number): void {
     const { lid, swirl } = this.pan;
     const { stream } = this.basin;
 
@@ -170,6 +271,95 @@ export class Toilets {
 
     if (this.timer > ROUTINE_LENGTH) this.timer = null;
   }
+
+  /**
+   * The lid, driven from where she is.
+   *
+   * Runs after `updateFittings`, so the frame the tap starts running is the
+   * same frame the roof begins to lift — the two halves of the joke land
+   * together rather than a beat apart.
+   */
+  private updateRoof(dt: number, occupied: boolean): void {
+    if (occupied) {
+      this.visiting = true;
+      // The wash beat is the cue to lift, and it stays lifted for the rest of
+      // the visit however long she dawdles at the basin afterwards.
+      if (this.timer !== null && this.timer >= WASH_AT) this.lifted = true;
+    } else {
+      // Out of the room: nothing is remembered, so however far the sequence
+      // had got, the next visit starts clean and this one ends uncovered.
+      this.visiting = false;
+      this.lifted = false;
+    }
+
+    const target = this.visiting && !this.lifted ? 1 : 0;
+    if (this.roofAmount !== target) {
+      const step = BUILDING_FADE_SECONDS > 0 ? dt / BUILDING_FADE_SECONDS : 1;
+      const delta = target - this.roofAmount;
+      this.roofAmount += Math.sign(delta) * Math.min(Math.abs(delta), step);
+    }
+    // Applied unconditionally, not only while it is moving. The lid lives in a
+    // floor group, so `FloorFader` has claimed its materials and will write
+    // their opacity whenever deck one fades; re-stating ours every frame costs
+    // two number writes and means the two can never disagree.
+    this.applyRoof();
+  }
+
+  private applyRoof(): void {
+    const amount = this.roofAmount;
+    this.roof.group.visible = amount > 0.002;
+    for (const material of this.roof.materials) material.opacity = amount;
+  }
+}
+
+// ------------------------------------------------------------ privacy roof
+
+/**
+ * A lid over `TOILET_ROOM`, in the tower's own roof colours so it reads as the
+ * little room having grown a roof rather than as a slab dropped on it.
+ *
+ * Built once and faded, never rebuilt. The materials start transparent at zero
+ * opacity on purpose: `FloorFader` claims every material on the deck and
+ * records the opacity it finds, so the base it will fade *to* is invisible —
+ * which means the worst a clash between the two can do is hide the lid, never
+ * strand it opaque over an empty room.
+ *
+ * It does not cast a shadow. A shadow is a lid you can see from outside the
+ * room, and the whole point is that from outside nothing has changed except
+ * that you cannot see in.
+ */
+function buildRoof(centreX: number, centreZ: number, width: number, depth: number): RoofParts {
+  const group = new Group();
+  group.name = 'toilet-roof';
+  group.visible = false;
+
+  const materials: MeshToonMaterial[] = [];
+  const fading = (colour: number): MeshToonMaterial => {
+    const material = interiorMaterial(colour);
+    material.transparent = true;
+    material.opacity = 0;
+    // Off, so the lid never punches a hole in what is drawn behind it while it
+    // is halfway faded. It is the topmost thing in the room, so it has nothing
+    // to sort against anyway.
+    material.depthWrite = false;
+    materials.push(material);
+    return material;
+  };
+
+  // Exactly the room's footprint, with no overhang in any direction. The
+  // screens sit inside these bounds so there is no seam to cover, and the
+  // "Toilets" sign stands 6cm clear of the front edge — an overhang would put
+  // the lid straight through it.
+  const band = new Mesh(new BoxGeometry(width, 0.1, depth), fading(PALETTE.buildingRoofDeep));
+  band.position.set(centreX, ROOF_Y + 0.05, centreZ);
+  group.add(band);
+
+  // An inset panel on top, the same two-tone as the tower's own roof.
+  const panel = new Mesh(new BoxGeometry(width - 0.5, 0.12, depth - 0.5), fading(PALETTE.buildingRoof));
+  panel.position.set(centreX, ROOF_Y + 0.16, centreZ);
+  group.add(panel);
+
+  return { group, materials };
 }
 
 // --------------------------------------------------------------- fittings

@@ -480,8 +480,21 @@ export const GROWN_UP_Z = 14;
  */
 export const TOILET_DECK = 1;
 export const TOILET_ROOM = rect(21.2, 28.6, -21.5, -14.4);
+/**
+ * Where a child stands to use them — **inside the room**.
+ *
+ * GAME_DESIGN.md, 27 July 2026: *"you do not use the toilet from the doorway.
+ * The character walks into the room and goes in"*. This used to be `-13.4`, a
+ * metre *outside* `TOILET_ROOM`'s front edge, which is exactly the thing the
+ * family objected to: she stood in the corridor and the loo flushed at her.
+ *
+ * `x` is the middle of the gap in the front screen (the two front panels leave
+ * 23.4–26.4 clear), so walking here walks her through the doorway rather than
+ * through a wall. `z` is between the doorway and the fittings, clear of both
+ * the pan and the basin, and far enough in that the roof covers her.
+ */
 export const TOILET_STAND_X = 24.9;
-export const TOILET_STAND_Z = -13.4;
+export const TOILET_STAND_Z = -16.8;
 /** Where the pan itself sits, against the room's back wall. */
 export const TOILET_PAN_X = 23.2;
 export const TOILET_PAN_Z = -19.6;

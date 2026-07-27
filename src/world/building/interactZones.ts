@@ -161,12 +161,16 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pressInteract: false,
   });
 
+  // Tapping the loo walks her *in* and then presses — `TOILET_STAND` is now a
+  // spot inside `TOILET_ROOM` rather than one in the corridor outside it, so
+  // the tap route and the walk-up-and-press route both end up in the room,
+  // which is the only place the press is accepted (see `Building`).
   zones.push({
     id: 'toilets',
     label: 'Toilets',
     x: worldX(TOILET_STAND_X),
     y: deckY(TOILET_DECK),
-    z: worldZ(TOILET_STAND_Z - 2.6),
+    z: worldZ(TOILET_STAND_Z),
     pickRadius: 3.2,
     standX: worldX(TOILET_STAND_X),
     standZ: worldZ(TOILET_STAND_Z),
