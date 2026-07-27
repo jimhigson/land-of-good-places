@@ -212,9 +212,60 @@ const SHALLOW_OVERLAP = 0.5;
  */
 export const MAX_DEPENETRATION_SPEED = 3;
 
+/**
+ * How much of a collider's own half-footprint a single movement sub-step is
+ * allowed to cover — see {@link CollisionWorld.resolveMovement}.
+ *
+ * `resolve` is a *point test*: it looks at where a mover has ended up, never
+ * at the line she took to get there. A step longer than the thing she is
+ * walking into simply lands on the far side of it, and then the resolver —
+ * which pushes out of the *nearest* face, because that is the right answer
+ * every other time — helpfully finishes the job and shoves her out the back.
+ * That is the tunnel, and it is at any height, because a collider she is not
+ * overlapping at either end of the step is a collider that never gets asked
+ * about her height at all.
+ *
+ * Half is the margin over the number that would only just do. The step cannot
+ * cross the mid-plane of the thinnest registered collider (its half-thickness
+ * plus the mover's own radius) without a sample landing inside, so half of
+ * that leaves a whole step's worth of slack for the case where a correction
+ * has left her *already* part-way in — the tail of an escort, most of all.
+ *
+ * This is perpendicular-distance reasoning, so it holds at every approach
+ * angle, glancing included: crossing a band of width `w` means covering `w` of
+ * perpendicular distance, which needs a step of at least `w` however it is
+ * pointed. It is exactly the property a swept test against a wall's centre
+ * line does *not* have.
+ */
+const SUBSTEP_FOOTPRINT_FRACTION = 0.5;
+
+/**
+ * A ceiling on sub-steps per movement, purely as a guard against a degenerate
+ * collider (a zero-radius circle registered by accident, say) turning the
+ * substep count into an unbounded loop and hanging the game.
+ *
+ * It is not reached in play and is not meant to be: `MAX_FRAME_DELTA` (1/12 s)
+ * times a full sprint (11.1 m/s) is 0.93 m, and against the park's thinnest
+ * collider that is three sub-steps.
+ */
+const MAX_SUBSTEPS = 16;
+
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
+
+  /**
+   * The half-footprint of the *thinnest* thing registered — the narrowest band
+   * a mover could hope to skip over in one frame, and therefore what sets the
+   * sub-step length in {@link resolveMovement}.
+   *
+   * Tracked as things are added rather than scanned for per frame: it is one
+   * `Math.min` per collider at build time against a scan of hundreds of
+   * colliders per movement, and, more to the point, it cannot go stale. Add a
+   * thinner wall to the park a year from now and the sub-step gets shorter by
+   * itself, with nobody needing to remember that this number existed.
+   */
+  private thinnestHalfWidth = Infinity;
 
   /**
    * The soft boundary you can never walk out of.
@@ -269,6 +320,7 @@ export class CollisionWorld {
 
   addCircle(x: number, z: number, radius: number, topHeight = Infinity, autoHoppable = false): void {
     this.circles.push({ x, z, radius, topHeight, autoHoppable });
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
   }
 
@@ -282,6 +334,7 @@ export class CollisionWorld {
     autoHoppable = false,
   ): void {
     this.walls.push({ x1, z1, x2, z2, halfThickness, topHeight, autoHoppable });
+    this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
     this.revisionCounter += 1;
   }
 
@@ -308,6 +361,7 @@ export class CollisionWorld {
   clear(): void {
     this.circles.length = 0;
     this.walls.length = 0;
+    this.thinnestHalfWidth = Infinity;
     this.revisionCounter += 1;
   }
 
@@ -359,8 +413,122 @@ export class CollisionWorld {
   }
 
   /**
+   * The longest a single movement sub-step may be for a mover of this width,
+   * in metres — see {@link SUBSTEP_FOOTPRINT_FRACTION}. `Infinity` while
+   * nothing solid is registered, which is the honest answer: there is nothing
+   * to tunnel through.
+   */
+  maxSafeStep(moverRadius: number): number {
+    return SUBSTEP_FOOTPRINT_FRACTION * (this.thinnestHalfWidth + moverRadius);
+  }
+
+  /**
+   * **Move, then resolve — in sub-steps short enough that nothing solid can be
+   * stepped clean over.** This is what a mover's per-frame movement should go
+   * through; {@link resolve} on its own is the point test underneath it.
+   *
+   * ### The bug this exists for
+   *
+   * `resolve` asks "where is she *now*?", never "what did she cross getting
+   * here?". At `MAX_FRAME_DELTA` — 1/12 s, the clamp a phone hitting a hitch
+   * actually gets — a full sprint covers 0.93 m in one frame. Step that far
+   * from just outside a garden wall and you land past its middle, at which
+   * point the resolver does the worst possible right thing: it pushes out of
+   * the *nearest* face, which is now the far one, and walks a six-year-old
+   * through a wall she cannot see how she got past. It happens **at any
+   * height**, because a collider she overlaps at neither end of the step is
+   * never asked about her height at all — the whole `clearsTop` /
+   * `MAX_AUTO_HOP_HEIGHT` apparatus is simply skipped. A 2 m wall goes through
+   * exactly as easily as a 0.7 m one.
+   *
+   * ### Why sub-steps and not a swept test
+   *
+   * A swept test would have to be a second collision routine standing beside
+   * `resolve`, and would have to independently reproduce all of it: the height
+   * rule, the two-pass corner handling, the shallow/deep split, the capped
+   * escort, the soft boundary. Two routines that must agree about what "solid"
+   * means are two routines that will one day disagree — and the measured hop
+   * clearances (`scripts/measure-hop-clearance.mts`) were measured against
+   * *this* resolver's exact behaviour, so any second answer would quietly
+   * invalidate them. Sub-stepping calls the one resolver more often and
+   * changes nothing about what it does.
+   *
+   * The other reason is the glancing approach. The obvious swept test — is the
+   * movement segment within `halfThickness + radius` of the wall's centre line
+   * — is not conservative near a wall's ends, and a fence in this park is a
+   * chain of segments, so its ends are everywhere. Sub-stepping asks the real
+   * point test at points along the way and inherits its geometry exactly.
+   *
+   * ### Cost
+   *
+   * One sub-step — i.e. literally the old code path, `resolve` called once —
+   * at any frame rate a player normally sees: 60 fps at a full sprint is a
+   * 0.185 m step against a 0.40 m limit, and even 24 fps stays inside it. The
+   * count only rises on the stuttering frames, where the extra work is two
+   * more collider scans on a frame that was already long, and where the
+   * alternative is walking through a wall.
+   *
+   * `dt` is divided among the sub-steps, which is what keeps a deep overlap's
+   * escort (see {@link MAX_DEPENETRATION_SPEED}) moving at the same metres per
+   * *second* however many sub-steps a frame is cut into — the correction stays
+   * a property of elapsed time, not of frame count, and the fling latch in
+   * `Player.update` sees exactly the escort it saw before.
+   *
+   * The returned flags are the union over the sub-steps, which is the same
+   * question asked of the whole frame: `clearedWall` if she was over something
+   * she had jumped clear of at any point in it, `escorting`/`corrected` if she
+   * was pushed at all. `Player`'s escort latch reads them exactly as it did
+   * when there was only ever one sub-step.
+   */
+  resolveMovement(
+    position: Vector3,
+    deltaX: number,
+    deltaZ: number,
+    radius: number,
+    clearance = 0,
+    dt = Infinity,
+  ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
+    const distance = Math.hypot(deltaX, deltaZ);
+    const limit = this.maxSafeStep(radius);
+
+    // The overwhelmingly common case, and deliberately the *identical* code
+    // path to before: one move, one resolve, no arithmetic changed.
+    if (!(distance > limit)) {
+      position.x += deltaX;
+      position.z += deltaZ;
+      return this.resolve(position, radius, clearance, dt);
+    }
+
+    const steps = Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS);
+    const stepX = deltaX / steps;
+    const stepZ = deltaZ / steps;
+    const stepDt = dt / steps;
+
+    let clearedWall = false;
+    let escorting = false;
+    let corrected = false;
+    for (let step = 0; step < steps; step += 1) {
+      position.x += stepX;
+      position.z += stepZ;
+      const result = this.resolve(position, radius, clearance, stepDt);
+      clearedWall = clearedWall || result.clearedWall;
+      escorting = escorting || result.escorting;
+      corrected = corrected || result.corrected;
+    }
+    return { clearedWall, escorting, corrected };
+  }
+
+  /**
    * Pushes `position` (mutated in place) out of every collider it overlaps and
    * keeps it inside the garden boundary. `radius` is the mover's own width.
+   *
+   * **A point test.** It knows where a mover is, not how she got there, so
+   * anything moving under its own steam should go through
+   * {@link resolveMovement} instead — which is this, in sub-steps short enough
+   * that a long frame cannot carry her over a wall without ever overlapping
+   * it. Calling `resolve` directly is right for a one-shot placement query
+   * (where a body is *put*, not moved) and for the small externally-applied
+   * shoves that never approach a collider's own width.
    *
    * `clearance` is how high the mover's feet currently are above their own
    * local ground — 0 while walking, positive mid-jump. A collider whose
@@ -577,6 +745,36 @@ export class CollisionWorld {
     }
 
     return false;
+  }
+
+  /**
+   * Boot-time check: **the sub-step budget must actually cover the longest
+   * step anything can take.** Call it once, beside
+   * {@link checkHoppableColliders}, after the world has finished registering
+   * scenery.
+   *
+   * {@link resolveMovement} cuts a movement into pieces no longer than
+   * {@link maxSafeStep}, but caps the count at {@link MAX_SUBSTEPS} so a
+   * degenerate collider cannot hang the game. If that cap ever *binds*, the
+   * pieces are silently too long again and the tunnel is back — quietly, and
+   * only on stuttering frames, which is the hardest possible way to notice.
+   * So: say it out loud at boot instead.
+   *
+   * Today the park's thinnest collider is a 0.18 m sign post, giving a 0.40 m
+   * sub-step and three of them for the worst frame there is. It would take a
+   * collider under 3 cm across before the cap came anywhere near binding.
+   */
+  checkSubstepBudget(moverRadius: number, longestStep: number): string[] {
+    const limit = this.maxSafeStep(moverRadius);
+    const needed = Math.ceil(longestStep / limit);
+    if (needed <= MAX_SUBSTEPS) return [];
+    const problem =
+      `the thinnest collider is ${this.thinnestHalfWidth.toFixed(3)} m across, so a mover of ` +
+      `radius ${moverRadius.toFixed(2)} m needs ${needed} sub-steps to cross ` +
+      `${longestStep.toFixed(2)} m safely, but only ${MAX_SUBSTEPS} are taken — she could be ` +
+      `carried straight through something on a stuttering frame`;
+    console.error(`Land of Good Places: ${problem}`);
+    return [problem];
   }
 
   /**

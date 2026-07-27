@@ -4,7 +4,12 @@ import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
 import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
-import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP, PLAYER_RADIUS } from './core/constants';
+import {
+  BUILDING_FLOOR_COUNT,
+  CAMERA_ZOOM_STEP,
+  PLAYER_LONGEST_STEP,
+  PLAYER_RADIUS,
+} from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import { Highlights } from './world/Highlights';
@@ -185,6 +190,11 @@ export class Game {
     // shape of bug that stranded a six-year-old against the 1.4 m wall at
     // [3, 19] → [-4, 20]. See `Collision.checkHoppableColliders`.
     this.world.collision.checkHoppableColliders(PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+    // And, in the same breath and for the same reason: that the sub-steps her
+    // movement is cut into are still short enough for the thinnest thing the
+    // park has grown. See `Collision.checkSubstepBudget` — this is the guard
+    // on the P1 where a stuttering frame walked her clean through a wall.
+    this.world.collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
 
     this.navGrid = new NavGrid(this.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
 
