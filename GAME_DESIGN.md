@@ -144,6 +144,17 @@ a theme park feel like a theme park.
   Bulba-squirt** — a turtle with a plant growing on its back — flying past.
   (Original design, like RiPika: our own creature, not a copy.)
 
+**Queued follow-up (27 July 2026) — after the look-around lands:**
+
+- **Off-screen pointers.** When something is happening outside the current
+  view, show a **labelled arrow at the edge of the screen** pointing the way,
+  so the player knows which way to turn to see more. (e.g. an arrow reading
+  "Alien!" or "Space RiPika" at the screen edge.)
+- **A companion rides with you.** Another NPC child joins the ride and sits
+  **opposite the player** in the gondola, looking around at the attractions
+  in space too — turning their head towards whatever is happening, so the
+  ride feels shared rather than solitary.
+
 ### Dodgems
 
 Crash the cars into each other and into the **fake wooden tree**. When you
