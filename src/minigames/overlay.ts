@@ -47,105 +47,105 @@ body[data-minigame='true'] .touch-controls {
 .mg-content {
   position: absolute;
   inset: 0;
-  padding: calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
-    calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  padding: calc(0.875rem + env(safe-area-inset-top)) calc(0.875rem + env(safe-area-inset-right))
+    calc(0.875rem + env(safe-area-inset-bottom)) calc(0.875rem + env(safe-area-inset-left));
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0.625rem;
 }
 
 .mg-quit {
   position: absolute;
-  top: calc(12px + env(safe-area-inset-top));
-  right: calc(12px + env(safe-area-inset-right));
-  width: 44px;
-  height: 44px;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  right: calc(0.75rem + env(safe-area-inset-right));
+  width: 2.75rem;
+  height: 2.75rem;
   border: none;
   border-radius: 50%;
   background: #fff6ea;
-  box-shadow: 0 4px 0 rgba(74, 58, 82, 0.2);
+  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.2);
   color: #4a3a52;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 700;
   line-height: 1;
   pointer-events: auto;
   cursor: pointer;
   z-index: 3;
 }
-.mg-quit:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(74, 58, 82, 0.2); }
+.mg-quit:active { transform: translateY(0.1875rem); box-shadow: 0 0.0625rem 0 rgba(74, 58, 82, 0.2); }
 
 /* The hold pad is a picture of the control, not the control itself — the whole
    layer is the button, so this must never eat the press. */
 .mg-hold {
   position: absolute;
   left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom));
+  bottom: calc(1.125rem + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   pointer-events: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 20px;
+  gap: 0.625rem;
+  padding: 0.625rem 1.25rem;
   border-radius: 999px;
   background: #fff6eae6;
-  box-shadow: 0 5px 0 rgba(74, 58, 82, 0.18);
-  font-size: 17px;
+  box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.18);
+  font-size: 1.0625rem;
   font-weight: 700;
   transition: transform 90ms ease, background 120ms ease;
   z-index: 2;
 }
 .mg-hold[data-held='true'] {
-  transform: translateX(-50%) translateY(4px) scale(0.98);
+  transform: translateX(-50%) translateY(0.25rem) scale(0.98);
   background: #ffe3f1f2;
 }
 .mg-hold[data-hidden='true'] { opacity: 0; }
 .mg-hold .mg-hold-dot {
-  width: 22px;
-  height: 22px;
+  width: 1.375rem;
+  height: 1.375rem;
   border-radius: 50%;
   background: #ff7fb6;
-  box-shadow: inset 0 -3px 0 rgba(74, 58, 82, 0.18);
+  box-shadow: inset 0 -0.1875rem 0 rgba(74, 58, 82, 0.18);
 }
 .mg-hold[data-held='true'] .mg-hold-dot { background: #7fe3c0; }
 
 /* ------------------------------------------------------------ race HUD bits */
 
-.mg-toprow { display: flex; gap: 8px; align-items: flex-start; }
+.mg-toprow { display: flex; gap: 0.5rem; align-items: flex-start; }
 
 .mg-pill {
-  padding: 7px 15px;
+  padding: 0.4375rem 0.9375rem;
   border-radius: 999px;
   background: #fff6eae6;
-  box-shadow: 0 4px 0 rgba(74, 58, 82, 0.16);
-  font-size: 16px;
+  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.16);
+  font-size: var(--lgp-text-min);
   font-weight: 700;
   white-space: nowrap;
 }
-.mg-pill b { font-size: 19px; }
+.mg-pill b { font-size: 1.1875rem; }
 
 .mg-track {
   position: relative;
-  height: 12px;
-  margin-top: 4px;
+  height: 0.75rem;
+  margin-top: 0.25rem;
   border-radius: 999px;
   background: #fff6eacc;
-  box-shadow: inset 0 2px 0 rgba(74, 58, 82, 0.12);
+  box-shadow: inset 0 0.125rem 0 rgba(74, 58, 82, 0.12);
   flex: 1 1 auto;
-  min-width: 120px;
+  min-width: 7.5rem;
   align-self: center;
 }
 .mg-track .mg-pip {
   position: absolute;
-  top: -4px;
-  width: 20px;
-  height: 20px;
-  margin-left: -10px;
+  top: -0.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-left: -0.625rem;
   border-radius: 50%;
-  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.2);
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.2);
   transition: left 90ms linear;
 }
-.mg-track .mg-pip[data-you='true'] { width: 24px; height: 24px; top: -6px; margin-left: -12px; }
+.mg-track .mg-pip[data-you='true'] { width: 1.5rem; height: 1.5rem; top: -0.375rem; margin-left: -0.75rem; }
 
 .mg-centre {
   position: absolute;
@@ -154,36 +154,36 @@ body[data-minigame='true'] .touch-controls {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 0.75rem;
   pointer-events: none;
   text-align: center;
 }
 
 .mg-card {
-  padding: 18px 30px;
-  border-radius: 26px;
+  padding: 1.125rem 1.875rem;
+  border-radius: 1.625rem;
   background: #fff6eaf2;
-  box-shadow: 0 8px 0 rgba(74, 58, 82, 0.18);
+  box-shadow: 0 0.5rem 0 rgba(74, 58, 82, 0.18);
   animation: mg-pop 260ms cubic-bezier(0.25, 1.4, 0.5, 1) both;
 }
-.mg-card h2 { margin: 0 0 4px; font-size: 30px; }
-.mg-card p { margin: 3px 0; font-size: 17px; opacity: 0.85; }
-.mg-card .mg-sub { font-size: 15px; opacity: 0.7; }
+.mg-card h2 { margin: 0 0 0.25rem; font-size: 1.875rem; }
+.mg-card p { margin: 0.1875rem 0; font-size: 1.0625rem; opacity: 0.85; }
+.mg-card .mg-sub { font-size: var(--lgp-text-min); opacity: 0.7; }
 
 .mg-count {
-  font-size: 96px;
+  font-size: 6rem;
   font-weight: 800;
   color: #fff6ea;
-  text-shadow: 0 6px 0 rgba(74, 58, 82, 0.25);
+  text-shadow: 0 0.375rem 0 rgba(74, 58, 82, 0.25);
   animation: mg-pop 300ms cubic-bezier(0.25, 1.4, 0.5, 1) both;
 }
 
 .mg-shout {
-  padding: 10px 24px;
+  padding: 0.625rem 1.5rem;
   border-radius: 999px;
   background: #ffd166;
-  box-shadow: 0 5px 0 rgba(74, 58, 82, 0.2);
-  font-size: 22px;
+  box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.2);
+  font-size: 1.375rem;
   font-weight: 800;
   animation: mg-pop 240ms cubic-bezier(0.25, 1.4, 0.5, 1) both;
 }

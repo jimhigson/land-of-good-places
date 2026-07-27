@@ -26,12 +26,12 @@ export class DevBadge {
     this.element.setAttribute('aria-hidden', 'true');
     Object.assign(this.element.style, {
       position: 'fixed',
-      right: 'calc(10px + env(safe-area-inset-right))',
-      bottom: 'calc(10px + env(safe-area-inset-bottom))',
+      right: 'calc(0.625rem + env(safe-area-inset-right))',
+      bottom: 'calc(0.625rem + env(safe-area-inset-bottom))',
       fontFamily: "'Baloo 2', 'Nunito', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif",
-      fontSize: 'clamp(28px, 6vw, 56px)',
+      fontSize: '2.2rem',
       fontWeight: '900',
-      letterSpacing: '2px',
+      letterSpacing: '0.125rem',
       color: '#ff2d2d',
       textShadow:
         '0 0 6px rgba(255, 255, 255, 0.9), 0 0 14px rgba(255, 0, 0, 0.55), 0 3px 0 rgba(0, 0, 0, 0.25)',
