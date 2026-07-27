@@ -11,7 +11,8 @@ import {
   type CreatureHandle,
   type CreatureLimbs,
 } from '../style/asset';
-import { buildHair, visibleTop, type HairPart, type HairStyle } from './hair';
+import { visibleTop } from '../style/measure';
+import { buildHair, type HairPart, type HairStyle } from './hair';
 
 /**
  * The player kid — Eleri by default.

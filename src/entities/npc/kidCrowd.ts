@@ -8,7 +8,8 @@ import {
   type Texture,
 } from 'three';
 import { createKid } from '../../art/models/kid';
-import { CROWD_HAIR_STYLES, visibleTop, type HairStyle } from '../../art/models/hair';
+import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
+import { visibleTop } from '../../art/style/measure';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import type { Expression } from '../../art/style/faces';
