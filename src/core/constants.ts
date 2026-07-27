@@ -190,15 +190,24 @@ export const BALL_PIT_COUNT = 190;
 // ----------------------------------------------------------------- camera
 
 /**
- * Pseudo-isometric rig, Theme Park style: an orthographic camera at a fixed
- * downward angle that never rotates freely — only in 90° steps.
+ * Pseudo-isometric rig, Theme Park style: an orthographic camera at one fixed
+ * downward pitch and one fixed compass angle. It never rotates, in 90° steps
+ * or otherwise — see ARCHITECTURE.md, "One camera angle, forever".
  */
 export const CAMERA_IS_ORTHOGRAPHIC = true;
 
 /** Downward pitch of the camera in degrees. Theme Park sat around 35–40°. */
 export const CAMERA_PITCH_DEGREES = 38;
 
-/** Starting compass rotation in degrees (45° gives the classic iso diamond). */
+/**
+ * The camera's one and only compass angle, in degrees (45° gives the classic
+ * iso diamond). Fixed for the life of the app.
+ *
+ * This is also the yaw everything else in the park turns to face: the camera
+ * looks back down this same diagonal, so a sign, a shop counter or a stall
+ * awning authored at roughly this angle reads its painted face square-on
+ * rather than edge-on. See ARCHITECTURE.md, "One camera angle, forever".
+ */
 export const CAMERA_YAW_DEGREES = 45;
 
 /**
@@ -238,9 +247,6 @@ export const CAMERA_DISTANCE = 90;
 
 /** Smoothing half-life in seconds for the camera following the player. */
 export const CAMERA_FOLLOW_HALF_LIFE = 0.16;
-
-/** Seconds for a 90° camera rotation snap. */
-export const CAMERA_ROTATE_DURATION = 0.42;
 
 /** Camera looks slightly ahead of the player, in metres per unit of speed. */
 export const CAMERA_LOOK_AHEAD = 0.16;

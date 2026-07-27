@@ -71,8 +71,17 @@ import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderD
  */
 const STALL_X = -9.8;
 const STALL_Z = -4.8;
-/** A shade west of +Z, mirroring the rail racer's `+0.3` — counter faces the plaza. */
-const STALL_FACING = -0.3;
+/**
+ * A shade east of +Z, same as the rail racer's own `+0.3` — counter faces the
+ * default camera. The *position* mirrors the rail racer's across the X axis,
+ * but the facing must not: the camera angle is one fixed absolute direction
+ * everywhere on the map (GAME_DESIGN.md #16, ARCHITECTURE.md "One camera
+ * angle, forever"), not something relative to which side of the plaza a stall
+ * stands on. An earlier version of this constant mirrored the sign to `-0.3`
+ * along with the position, which quietly turned the counter away from the
+ * camera.
+ */
+const STALL_FACING = 0.3;
 
 const STALL_WIDTH = 3.1;
 const STALL_DEPTH = 2.1;
