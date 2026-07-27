@@ -243,6 +243,26 @@ export const LIFT_CAR_X = INTERIOR_HALF_X + 1.7;
 export const LIFT_CAR_Z = 5;
 export const LIFT_CAR_HALF = 1.3;
 
+/**
+ * The lift lobby: where a child stands to wait, and what a tap aims at.
+ *
+ * `LIFT_STAND_X` is deliberately *inside* the east doorway rather than in the
+ * car. The car is only ever at one deck, and the shaft below it is a
+ * five-storey drop — walking a six-year-old into an open shaft because she
+ * tapped the pretty glass box is not the game we are making. Standing here is
+ * what puts the lift's call panel on screen (`liftRide.ts`), and stepping into
+ * the car is something the lift does *for* her, once it has actually arrived.
+ *
+ * Shared by `interactZones.ts` (the tap target) and `liftRide.ts` (the waiting
+ * area and the spot she is set down on when she gets out), so the two can
+ * never drift apart.
+ */
+export const LIFT_STAND_X = INTERIOR_HALF_X - 1.1;
+export const LIFT_PICK_X = INTERIOR_HALF_X + 0.6;
+export const LIFT_DOOR_Z = 5;
+/** How far back from the doors the call panel still appears. */
+export const LIFT_LOBBY_REACH = 4;
+
 // ------------------------------------------------------------------ ramps
 
 /**

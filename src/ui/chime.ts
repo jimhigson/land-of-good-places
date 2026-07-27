@@ -70,6 +70,15 @@ export function playOpenChime(): void {
   note(698.46, 0.06, 0.16, 0.035); // F5
 }
 
+/**
+ * The lift's doors. Two descending notes, because that is the noise every lift
+ * in the world makes and a six-year-old already knows what it means.
+ */
+export function playLiftDing(): void {
+  note(1046.5, 0, 0.16, 0.05); // C6
+  note(783.99, 0.13, 0.34, 0.045); // G5
+}
+
 // ------------------------------------------------------------------ water
 
 /**

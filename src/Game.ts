@@ -13,7 +13,7 @@ import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
-import { CuteODex, Hud, TapBurst, TouchControls, WhatsNew } from './ui';
+import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './ui';
 import { ActionButton } from './ui/ActionButton';
 import { ParkMap } from './ui/ParkMap';
 import { SignReader } from './ui/SignReader';
@@ -61,6 +61,7 @@ export class Game {
   readonly tapBurst: TapBurst;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
+  readonly liftPanel: LiftPanel;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
@@ -237,6 +238,7 @@ export class Game {
       onClose: () => undefined,
     });
 
+
     // The fairground stalls. Walking up to one and pressing interact hands the
     // frame over to the mini-game host: it freezes the park (exactly as the
     // pause menu does, so nobody moves while you are away), wipes across to a
@@ -305,6 +307,27 @@ export class Game {
       () => this.uiOwnsTheScreen() || this.parkMap.isOpen || this.actionButton.active,
     );
     this.addSystem(this.signReader);
+
+    // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
+    // when a child is standing at the lift doors, calls the car, and then lists
+    // the floors. It is handed the building's `floors()` / `go(n)` seam and
+    // nothing else — see `world/building/liftRide.ts` for why that matters to
+    // ARCHITECTURE-DECISIONS Decision 3.
+    //
+    // The blocked test is `uiOwnsTheScreen()` **minus riding**, because riding
+    // is the one case where this panel is the thing you are using: the whole
+    // journey happens with the character handed over to the lift. Every other
+    // ride leaves the panel's own state at "away", so it hides itself anyway.
+    this.liftPanel = new LiftPanel(
+      uiRoot,
+      this.world.building.liftPanel,
+      () =>
+        (this.uiOwnsTheScreen() && !this.player.riding) ||
+        this.parkMap.isOpen ||
+        this.stairMenu.isOpen ||
+        this.signReader.active,
+    );
+    this.addSystem(this.liftPanel);
 
     // GAME_DESIGN.md's HIGHLIGHT RULE, built once for the whole game: everything
     // interactable is outlined in rainbow when it is about to be used — on hover

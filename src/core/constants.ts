@@ -170,9 +170,22 @@ export const STAIR_RIDE_FADE_SECONDS = 0.18;
 export const TRAMPOLINE_MIN_LAUNCH = 9;
 export const TRAMPOLINE_MAX_LAUNCH = 17;
 
-/** Glass lift: metres per second, and seconds it waits at each floor. */
-export const LIFT_SPEED = 2.4;
-export const LIFT_DWELL = 3.2;
+/**
+ * Glass lift: metres per second.
+ *
+ * Was 2.4 with a 3.2-second dwell at every floor, and the lift trundled up and
+ * down on its own whether anybody wanted it or not — which is how a child at
+ * the ground floor could end up waiting the best part of half a minute for a
+ * car that was sitting on the roof. The family's ruling is "it comes quickly;
+ * never make a child wait" (GAME_DESIGN.md, "Riding the lift"), so it now sits
+ * still until it is called and then comes non-stop at this speed: the whole
+ * four-storey height in about two seconds, which is quick enough not to be a
+ * wait and slow enough that you can still watch the park slide past the glass.
+ */
+export const LIFT_SPEED = 7;
+
+/** Seconds the character takes to step into the car, and to step back out. */
+export const LIFT_BOARD_SECONDS = 0.5;
 
 /** Floating bubble: metres per second, and seconds it waits at each end. */
 export const BUBBLE_SPEED = 1.5;
