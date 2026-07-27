@@ -72,6 +72,9 @@ interface SkyKey {
  */
 const NIGHT_FOG_COLOUR = 0x1a2145;
 
+/** {@link NIGHT_FOG_COLOUR} as a Color, so the per-frame blend allocates nothing. */
+const NIGHT_FOG = new Color(NIGHT_FOG_COLOUR);
+
 const SKY_KEYS: readonly SkyKey[] = [
   {
     t: 0.0, // deep night
@@ -520,6 +523,17 @@ export class DayNight implements GameSystem {
     const fog = this.scene.fog;
     if (fog instanceof Fog) {
       fog.color.copy(this.fogColour);
+      // ...but pulled to the night colour by `nightFactor`, not by the clock.
+      //
+      // Found on screen: at 03:18 the park is still pitch dark — the sun does
+      // not clear the horizon until nearly 06:00 — yet the fog had already
+      // interpolated two thirds of the way from midnight towards the "first
+      // light" keyframe's peach, so the distance was a pale pink haze in the
+      // middle of the night. The keyframe table is a *clock*, and dawn colours
+      // belong to it; how dark the distance is belongs to how dark it actually
+      // is. Blending here keeps both: dusk still fades through its mauve, and
+      // every hour that is genuinely night gets the genuinely dark fog.
+      fog.color.lerp(NIGHT_FOG, this.nightFactorValue);
       // Night pulls the fog right in, so distance falls away into the dark
       // while the ground under the lamps stays bright and legible — see
       // NIGHT_FOG_NEAR. The old 0.7/0.72 scaling put full fog 96 m out, which
