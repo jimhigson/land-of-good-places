@@ -448,10 +448,16 @@ class SpaceFerrisWheel implements MiniGame {
     // (yaw) increasing turns the camera *left* — the same right-handed turn
     // every three.js camera uses (it's why `PointerLockControls` does
     // `euler.y -= movementX`). Negate here so a drag/press to the left swings
-    // the view left, matching the dodgems' steering (drag right -> car turns
-    // right) and the intuitive "turn your head" expectation. Pitch needs no
-    // such flip: `rotation.x` increasing already looks up, so drag-up ->
-    // look-up falls out correctly with the plain sign.
+    // the view left, matching the dodgems (press left -> the car goes left)
+    // and the intuitive "turn your head" expectation. Pitch needs no such
+    // flip: `rotation.x` increasing already looks up, so drag-up -> look-up
+    // falls out correctly with the plain sign.
+    //
+    // This negation is a *camera yaw* thing, and the reason the CONTROL RULE
+    // keeps rotation controls to first person: it is a sign flip that only
+    // exists because a heading and a look direction wind opposite ways on
+    // screen, and it has caught agents out before. Movement never needs it,
+    // because movement is a vector, not an angle — see `core/screenBasis.ts`.
     const targetYawVelocity = -look.x * YAW_RATE;
     const targetPitchVelocity = look.y * PITCH_RATE;
     this.yawVelocity = damp(this.yawVelocity, targetYawVelocity, TURN_DAMPING, dt);

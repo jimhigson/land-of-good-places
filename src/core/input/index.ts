@@ -1,4 +1,4 @@
-export { InputSystem, type InputSnapshot } from './InputSystem';
+export { InputSystem, applyRadialDeadzone, type InputSnapshot } from './InputSystem';
 export { PointerControls, type PointerControlsOptions, type TapPoint } from './PointerControls';
 export {
   GAME_ACTIONS,

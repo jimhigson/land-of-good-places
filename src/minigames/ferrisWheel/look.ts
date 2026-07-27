@@ -5,10 +5,19 @@
  * (`dodgems/steering.ts`) rather than a second one invented for this ride — a
  * child who has already driven the dodgems should not have to learn a new way
  * of holding the screen. The differences are only in what the reading *means*:
- * a dodgem turns towards the stick; here the stick sets a **turn rate**, so
- * the further from where the finger went down, the faster the view spins,
+ * a dodgem's stick is a *direction to travel*; here it sets a **turn rate**,
+ * so the further from where the finger went down, the faster the view spins,
  * and letting go — or bringing the finger back to the middle — lets it drift
  * to a stop rather than snapping back.
+ *
+ * **This is the one kind of control the CONTROL RULE carves out.** Turning by
+ * holding a direction is banned everywhere in the game (GAME_DESIGN.md; the
+ * reasoning and the shared movement basis live in `core/screenBasis.ts`) —
+ * *except* in first person, which is exactly what this ride is. Nothing here
+ * moves the gondola; it only points the child's eyes. The same carve-out
+ * covers the first-person train and the coaster when they arrive, and nothing
+ * else. If you are copying this file for a ride the player looks *at* rather
+ * than *out of*, you want `dodgems/steering.ts` instead.
  *
  * **Why this lives outside the framework's one-button input.** Exactly the
  * dodgems' reasoning: the mini-game contract is one button

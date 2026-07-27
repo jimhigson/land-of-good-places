@@ -53,8 +53,9 @@ export interface CarModel {
   /**
    * Per-frame animation.
    *
-   * `speed` is m/s, `turn` is the signed turn rate in rad/s, `squash` is 0..1
-   * of "just got walloped".
+   * `speed` is m/s, `turn` is how hard the nose is swinging round to face the
+   * way the car is travelling (-1..1, signed; 1 = slewing flat out), `squash`
+   * is 0..1 of "just got walloped".
    */
   animate(dt: number, elapsed: number, speed: number, turn: number, squash: number): void;
   setExpression(expression: Expression): void;

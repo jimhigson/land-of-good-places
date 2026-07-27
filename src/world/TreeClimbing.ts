@@ -63,7 +63,8 @@ export class TreeClimbing implements GameSystem {
   private playerTimer = 0;
   private playerStartX = 0;
   private playerStartZ = 0;
-  private playerLookYaw = 0;
+  /** Which way she faces while peeking — captured at the top of the scramble. */
+  private playerPeekFacing = 0;
   private playerHiddenParts: Object3D[] = [];
 
   // --- NPC state ---------------------------------------------------------
@@ -200,7 +201,7 @@ export class TreeClimbing implements GameSystem {
       if (t >= 1) {
         this.playerPhase = 'peek';
         this.playerTimer = 0;
-        this.playerLookYaw = pose.facing;
+        this.playerPeekFacing = pose.facing;
         this.hidePlayerBody();
         this.player.model.setExpression('happy');
       }
@@ -208,8 +209,17 @@ export class TreeClimbing implements GameSystem {
     }
 
     if (this.playerPhase === 'peek') {
-      // Free look: the movement stick just turns the head, nothing walks.
-      this.playerLookYaw += input.moveX * PLAYER_LOOK_SPEED * dt;
+      // The peek holds the facing it arrived with, and the stick does not
+      // touch it.
+      //
+      // It used to: holding left or right turned the head where she stood.
+      // That is a rotation control, in a third-person view, which the CONTROL
+      // RULE (GAME_DESIGN.md; see `core/screenBasis.ts`) does not allow
+      // anywhere outside first person — and it was barely reachable in any
+      // case, because a deflection of more than a fifth already means "down
+      // and off that way" a few lines below. Pressing a direction up a tree
+      // now means exactly what it means everywhere else: go there. The
+      // scramble down happens first, and then she walks.
       const pose = climbPose(
         tree,
         this.playerStartX,
@@ -217,7 +227,7 @@ export class TreeClimbing implements GameSystem {
         headOffset,
         'peek',
         0,
-        this.playerLookYaw,
+        this.playerPeekFacing,
       );
       this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
       // Reasserted every frame rather than only on the transition: Player's
@@ -346,9 +356,6 @@ export class TreeClimbing implements GameSystem {
 /** How long the up/down scramble takes. Quick and cute, not a climbing sim. */
 const PLAYER_SCRAMBLE_UP_SECONDS = 0.45;
 const PLAYER_SCRAMBLE_DOWN_SECONDS = 0.4;
-
-/** Radians/second the stick turns a peeking player's head. */
-const PLAYER_LOOK_SPEED = 2.4;
 
 /** How close (trunk edge to feet) counts as "near enough to climb". */
 const INTERACT_MARGIN = 2.4;

@@ -12,6 +12,7 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { DEG, Rng, clamp, clamp01, damp } from '../../core/mathUtils';
+import { screenBasis } from '../../core/screenBasis';
 import { gameStore } from '../../state';
 import { createConfetti, type Confetti } from '../railRacer/confetti';
 import {
@@ -1088,9 +1089,12 @@ class WaterFight implements MiniGame {
     this.camera.lookAt(0, 0.9, 0);
     this.camera.updateMatrixWorld();
 
-    // The ground-plane basis the walk keys are interpreted through.
-    this.forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    // The ground-plane basis the walk keys are interpreted through. Shared
+    // with the park and the dodgems rink so "up the screen" means the same
+    // thing everywhere — see `core/screenBasis.ts` and the CONTROL RULE.
+    const basis = screenBasis(this.yaw);
+    this.forward.set(basis.upX, 0, basis.upZ);
+    this.right.set(basis.rightX, 0, basis.rightZ);
   }
 
   // --------------------------------------------------------------- lifecycle
