@@ -196,15 +196,24 @@ export function buildHighlightShell(object: Object3D, thicknessScale = 1): Highl
     // so the shell is built in geometry space and shared too.
     take(object as unknown as Mesh);
   } else {
-    object.traverse((child) => {
-      if (!isMesh(child) || !child.visible) return;
-      // `castShadow` is the asset contract's own marker for "solid part of the
-      // silhouette" (`solid()` vs `decal()`), which is exactly the filter this
-      // wants — and it drops the ink outline meshes, which are back-side copies
-      // that would otherwise double every line.
-      if (!child.castShadow) return;
-      take(child);
-    });
+    const collect = (solidOnly: boolean): void => {
+      object.traverse((child) => {
+        if (!isMesh(child) || !child.visible) return;
+        // `castShadow` is the asset contract's own marker for "solid part of the
+        // silhouette" (`solid()` vs `decal()`), which is exactly the filter this
+        // wants — and it drops the ink outline meshes, which are back-side
+        // copies that would otherwise double every line.
+        if (solidOnly && !child.castShadow) return;
+        take(child);
+      });
+    };
+
+    collect(true);
+    // Nothing solid at all: the target is a flat painted thing rather than a
+    // toy — the shop signs are `castShadow = false` boards, and a sign you can
+    // read is exactly the sort of thing this rule must not silently skip. Take
+    // everything visible instead of giving up.
+    if (positions.length === 0) collect(false);
   }
 
   if (positions.length === 0) return null;
