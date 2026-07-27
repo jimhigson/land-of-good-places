@@ -56,8 +56,11 @@ everything built before needs revisiting.
   systems exist; only the UI route is missing.
 - **1.7 Character-creation preview framing** — the hat is cropped out
   entirely; the camera should follow whatever changed last.
+- **1.8 Character-creation scrolls needlessly** — the card is capped at
+  760x680 and scrolls instead of using a large window. Let it fill the
+  space available; scroll only when it genuinely cannot fit.
 
-*1.5 and 1.7 are the same file — give them to one agent. 1.1 and 1.2 both
+*1.5, 1.7 and 1.8 are all character creation — give them to one agent. 1.1 and 1.2 both
 touch every UI surface — sequence them, do not parallelise.*
 
 **Wave 1b — GC investigation.** Fable profiles, cheap agents fix. Needs the

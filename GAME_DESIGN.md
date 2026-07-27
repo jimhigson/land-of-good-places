@@ -724,6 +724,20 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+    **It scrolls when it does not need to (27 July 2026 — BUG, queued):**
+    the chooser scrolls even when there is plenty of screen to show the
+    whole thing at once. **Use the space that is actually available** — on a
+    roomy screen everything should be visible without scrolling at all, and
+    scrolling should only appear when the screen genuinely cannot fit it.
+    *Note: the card is currently capped at `min(760px, 96vw)` wide and
+    `min(680px, 92vh)` tall with the body set to `overflow-y: auto`, so it
+    refuses to grow into a large window and scrolls instead. Let it use the
+    room: widen the card on wide screens and lay the controls out in
+    columns rather than one tall stack. Ties into the sticky-preview fix
+    (already landed) and the preview framing below — if nothing scrolls,
+    stickiness stops mattering on desktop and only earns its keep on a
+    phone.*
+
     **Preview framing (27 July 2026 — BUG + feature, queued):** the hat you
     are choosing is currently **cropped out of the preview** — you cannot
     see the thing you are picking. The preview camera should **follow
