@@ -1,5 +1,4 @@
 import {
-  Box3,
   BufferGeometry,
   ConeGeometry,
   Group,
@@ -7,6 +6,8 @@ import {
   Object3D,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
+  type BufferAttribute,
   type Material,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -431,20 +432,23 @@ export function buildHair(options: HairOptions): HairRig {
   );
 
   // --- messy ------------------------------------------------------------------
-  // Tufts poking out sideways rather than upwards, deliberately: sideways stays
-  // inside the hat envelope, so messy hair needs no special case, and sideways
-  // is also what actual bed-hair does.
+  // Tufts poking out SIDEWAYS rather than upwards, deliberately, and none of
+  // them centred above 0.38 × HEAD. Two reasons, one of them measured: sideways
+  // keeps the whole style inside the envelope a hat already perches over, so
+  // messy needs no hat special case the way spiky does — and the first version
+  // of this, with tufts up at 0.6 × HEAD leaning hard outwards, measured
+  // *taller than the spikes*, which is not what "messy" means to anybody.
   add(['messy'], crown, () => {
     const messy = solid(
       fuse(hair, [
-        tuftGeometry(0.15 * H, 0.62 * H, 0.34 * H, 0.36 * H, 1.15),
-        tuftGeometry(0.13 * H, -0.5 * H, 0.5 * H, 0.3 * H, 0.9),
-        tuftGeometry(0.17 * H, 0.18 * H, 0.5 * H, -0.5 * H, 1.3),
-        tuftGeometry(0.12 * H, -0.62 * H, 0.24 * H, -0.2 * H, 0.8),
-        tuftGeometry(0.14 * H, 0.56 * H, 0.12 * H, -0.42 * H, 1.05),
-        tuftGeometry(0.11 * H, -0.24 * H, 0.6 * H, 0.4 * H, 1.4),
-        tuftGeometry(0.13 * H, 0.02 * H, 0.34 * H, 0.56 * H, 0.7),
-        tuftGeometry(0.1 * H, -0.44 * H, 0.58 * H, -0.4 * H, 1.2),
+        tuftGeometry(0.14 * H, 0.6 * H, 0.3 * H, 0.34 * H, 1.15),
+        tuftGeometry(0.12 * H, -0.5 * H, 0.36 * H, 0.28 * H, 0.9),
+        tuftGeometry(0.14 * H, 0.16 * H, 0.38 * H, -0.5 * H, 1.3),
+        tuftGeometry(0.11 * H, -0.6 * H, 0.18 * H, -0.2 * H, 0.8),
+        tuftGeometry(0.13 * H, 0.56 * H, 0.06 * H, -0.4 * H, 1.05),
+        tuftGeometry(0.1 * H, -0.22 * H, 0.38 * H, 0.4 * H, 1.4),
+        tuftGeometry(0.12 * H, 0.02 * H, 0.24 * H, 0.56 * H, 0.7),
+        tuftGeometry(0.1 * H, -0.42 * H, 0.34 * H, -0.42 * H, 1.2),
       ]),
     );
     addOutline(messy, OUTLINE_SMALL);
@@ -487,22 +491,30 @@ export function buildHair(options: HairOptions): HairRig {
  * retunes anything. Only *visible* meshes count, and only if every ancestor is
  * visible too: the crowd's prototype carries every style at once, and measuring
  * the hidden ones would report the spikes' height for a child in a bowl cut.
+ *
+ * **Vertices, not bounding boxes.** The obvious implementation — transform each
+ * geometry's `boundingBox` by its world matrix — takes the axis-aligned box of
+ * an axis-aligned box, and every rotation in the chain inflates it. On this
+ * kid, whose hair sits inside a crown tipped back ten degrees, that reported
+ * 2.26 m for a character who is actually 2.11 m: a name label floating a
+ * hand's width above her head. Walking the position attribute is exact, and
+ * this runs at construction, not per frame.
  */
 export function visibleTop(root: Object3D): number {
   root.updateMatrixWorld(true);
-  const box = new Box3();
+  const point = new Vector3();
   let top = 0;
   root.traverse((object) => {
     if (!(object instanceof Mesh) || !object.visible) return;
     for (let node = object.parent; node; node = node.parent) {
       if (!node.visible) return;
     }
-    const geometry = object.geometry;
-    if (!geometry.boundingBox) geometry.computeBoundingBox();
-    const bounds = geometry.boundingBox;
-    if (!bounds) return;
-    box.copy(bounds).applyMatrix4(object.matrixWorld);
-    if (box.max.y > top) top = box.max.y;
+    const position = object.geometry.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      point.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(object.matrixWorld);
+      if (point.y > top) top = point.y;
+    }
   });
   return top;
 }
@@ -549,7 +561,9 @@ function ringGeometry(radius: number, tube: number): BufferGeometry {
 function tuftGeometry(radius: number, x: number, y: number, z: number, lean: number): BufferGeometry {
   return new SphereGeometry(radius, 12, 10)
     .scale(0.85, 0.72, 1.5)
-    .rotateX(lean * (x >= 0 ? -1 : 1) * 0.5)
+    // A modest cant, not a flick: the tuft is 1.5 radii long, so every extra
+    // radian here buys height much faster than it buys character.
+    .rotateX(lean * (x >= 0 ? -1 : 1) * 0.28)
     .rotateY(Math.atan2(x, z))
     .translate(x, y, z);
 }

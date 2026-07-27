@@ -404,6 +404,8 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // real rest pose rather than piled at the model's origin.
   hairRig.ponytail?.reset();
 
+  let measuredHeight = visibleTop(root);
+
   return {
     root,
     body,
@@ -415,12 +417,26 @@ export function createKid(options: KidOptions = {}): KidHandle {
     holdAnchor,
     backpackAnchor,
     hairParts: hairRig.parts,
-    // Measured, not `KID_HEIGHT`: spiky hair is a good 0.2 m taller than a bob,
-    // and a name label placed from a constant would sit inside it.
-    height: visibleTop(root),
+    // Measured, not `KID_HEIGHT`: spiky hair is a good 0.28 m taller than a
+    // bob, and a name label placed from a constant would sit inside it.
+    //
+    // A **getter**, because the answer changes while the character is alive:
+    // putting a hat on hides the spikes, and a height snapshotted at
+    // construction would leave the label of a spiky-haired child in a hat
+    // floating a third of a metre above her, pointing at nothing. Re-measured
+    // only when the style or the hat actually changes — never per frame.
+    get height() {
+      return measuredHeight;
+    },
     setExpression: (name: Expression) => face.setExpression(name),
-    setHairStyle: (style: HairStyle) => hairRig.setStyle(style),
-    setHatWorn: (worn: boolean) => hairRig.setHatWorn(worn),
+    setHairStyle: (style: HairStyle) => {
+      hairRig.setStyle(style);
+      measuredHeight = visibleTop(root);
+    },
+    setHatWorn: (worn: boolean) => {
+      hairRig.setHatWorn(worn);
+      measuredHeight = visibleTop(root);
+    },
     update: (dt: number) => hairRig.ponytail?.update(dt),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
     setSkinColour: (colour: number) => skinMat.color.setHex(colour),

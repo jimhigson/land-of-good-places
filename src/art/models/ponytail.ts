@@ -75,13 +75,13 @@ const RADIUS_TIP = 0.045;
  * vertical the instant the child stops, which kills the swing that is the
  * entire reason this exists.
  */
-const GRAVITY = 3.4;
+const GRAVITY = 16;
 
 /** Per-substep velocity retention. Lower settles faster; too low reads dead. */
-const DRAG = 0.982;
+const DRAG = 0.986;
 
 /** Distance-constraint relaxation passes per substep. More = stiffer tail. */
-const CONSTRAINT_ITERATIONS = 4;
+const CONSTRAINT_ITERATIONS = 5;
 
 /**
  * The largest time step the integrator is ever handed, in seconds.

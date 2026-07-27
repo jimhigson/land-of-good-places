@@ -36,8 +36,18 @@ export class CharacterModel {
   readonly leftLeg: Group;
   readonly rightLeg: Group;
 
-  /** Total height in metres, bare-headed — used to place the name label when nothing is worn. */
-  readonly height: number;
+  /**
+   * Total height in metres, bare-headed — used to place the name label when
+   * nothing is worn.
+   *
+   * Read live off the model rather than snapshotted, because since hair styles
+   * landed it genuinely changes: spiky hair is 0.28 m taller than a bob, and
+   * putting a hat on hides the spikes and brings it back down. See
+   * `art/models/kid.ts`'s `height` getter.
+   */
+  get height(): number {
+    return this.kid.height;
+  }
 
   /** Resting height of the head pivot, in metres. The animator nudges around it. */
   readonly headHeight = KID_HEAD_HEIGHT;
@@ -67,7 +77,6 @@ export class CharacterModel {
     this.rightArm = this.kid.limbs.rightArm;
     this.leftLeg = this.kid.limbs.leftLeg;
     this.rightLeg = this.kid.limbs.rightLeg;
-    this.height = this.kid.height;
     this.hatAnchorHeight = this.kid.hatAnchorHeight;
     this.hatAnchor = this.kid.hatAnchor;
     this.hairAnchor = this.kid.hairAnchor;
