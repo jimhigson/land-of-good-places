@@ -21,7 +21,7 @@ import type { CreatureHandle } from '../../art/style/asset';
 import type { AssetHandle } from '../../art/style/asset';
 import type { Expression } from '../../art/style/faces';
 import { gameStore } from '../../state';
-import { shopItem } from '../../world/building/shops/catalogue';
+import { shopItem, type ShopItem } from '../../world/building/shops/catalogue';
 import { FERRIS_CAR_COLOURS } from './wheelProp';
 
 /**
@@ -40,41 +40,97 @@ import { FERRIS_CAR_COLOURS } from './wheelProp';
  * detail is what tells a child what they are riding.
  *
  * **Your parade rides with you.** Up to three cute things you own and have not
- * stowed are read straight out of the store and sat on the bench facing the
- * window. Nothing is written back — the ride never touches saved state, so
- * leaving it, however you leave it, cannot lose anything.
+ * stowed are read straight out of the store and sat in the little chairs
+ * facing the window. Nothing is written back — the ride never touches saved
+ * state, so leaving it, however you leave it, cannot lose anything.
+ *
+ * **Two heights of seat (27 July 2026).** The family's note: *"the pet should
+ * sit on a chair that is lower than the player's so it is easier to see above
+ * their head, restructure the car to fit."* So the car now has a **raised
+ * window seat at the back for the player** and a **row of low tub chairs at
+ * the front for the pets** — and it grew a little in every direction to hold
+ * them. The numbers are chosen together and checked by
+ * `scripts/checkGondolaSightline.mjs`: the tallest thing that can ride sits
+ * with the top of its head **below the player's eye line**, so the horizon and
+ * everything above it is yours, and the pet is something you look down at
+ * fondly rather than around.
  */
 
-/** How many of your cute things fit on the bench. */
+/** How many of your cute things come along. One chair each. */
 const SEATS = 3;
 
 /**
- * The floor between the bench (facing the window, at `z ≈ -0.55`) and the
- * camera (at `z ≈ 0.78`, near the back glass) is deliberately left bare. A
- * future NPC companion sitting opposite the player (queued in GAME_DESIGN.md,
- * not built here) belongs there, facing back towards the seat — do not fill
- * this gap with more furniture or parade overflow.
+ * The floor between the pet chairs (facing the window, at `z ≈ -0.64`) and the
+ * player's seat (at `z ≈ 0.95`, against the back glass) is deliberately left
+ * bare. A future NPC companion sitting opposite the player (queued in
+ * GAME_DESIGN.md, not built here) belongs there, facing back towards the
+ * seat — do not fill this gap with more furniture or parade overflow. The car
+ * was made deeper when the two seats went in partly to keep this gap; a puff
+ * is 1.26 m across and three chairs' worth of passenger reaches `z ≈ 0`, so
+ * there is about 0.6 m of clear floor and no more.
  */
 
 /** Interior dimensions of the car, in metres. */
-const CAR_WIDTH = 2.9;
-const CAR_DEPTH = 2.4;
-const CAR_HEIGHT = 2.45;
+const CAR_WIDTH = 3.6;
+const CAR_DEPTH = 2.8;
+const CAR_HEIGHT = 2.6;
 
 /** Radius of the wheel this car hangs off, in the ride's own world. */
 const RIDE_RIM_R = 7;
 
 /** Height above the car floor of the rim point it hangs from. */
-const ATTACH_Y = 2.9;
+const ATTACH_Y = 3.05;
 
 /** How far apart the two rims sit — just outside the car's shoulders. */
-const RIM_HALF_GAP = 1.55;
+const RIM_HALF_GAP = 1.9;
 
 /** Spokes on the ride's wheel. Matches the landmark. */
 const SPOKES = 12;
 
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
+
+// ------------------------------------------------------- the two seat heights
+//
+// These numbers are one decision, not four, and they are why the car is the
+// size it is.
+//
+// Every pet is normalised to `PET_RENDER_HEIGHT` (1.46 m — see
+// `art/models/pets.ts`, and note that the normaliser had to be *fixed* to
+// include ears before that was true: a bunny used to render 2.12 m tall). Sat
+// on a 0.16 m cushion its head tops out at 1.62, and RiPika — the tallest
+// thing in the catalogue that reads as a creature — at 1.64. The player's eye
+// is at 1.80, a metre above their own cushion, which is where a child's eye
+// sits when their feet are on the footrest. That leaves **0.16 m of daylight
+// over the tallest head**, and the whole sky is the player's.
+//
+// If you change one of these, run `node scripts/checkGondolaSightline.mjs`,
+// which recomputes the clearance from these exact numbers and fails if any
+// passenger's head reaches the eye line.
+
+/** Top of the pets' cushions, above the car floor. */
+const PET_CHAIR_SEAT_Y = 0.16;
+
+/** Top of the player's cushion. Their seat is the high one on purpose. */
+const PLAYER_SEAT_Y = 0.8;
+
+/** Where the pet chairs stand, across the front of the car. */
+const PET_CHAIR_X = 1.05;
+const PET_CHAIR_Z = -0.64;
+
+/**
+ * Where the player's eye sits, in car space — i.e. where the ride parents its
+ * camera (`SpaceFerrisWheel.init`).
+ *
+ * Exported rather than written out again over there, because it is not a free
+ * choice: it is `PLAYER_SEAT_Y` plus a seated child, and it is the number the
+ * pet chairs are kept below. The two used to drift apart in two files.
+ *
+ * **Position only.** The ride sets the camera's *rotation* itself and the
+ * look-around directions are family-confirmed correct — this must stay a pure
+ * translation, with no rotation of the seat group, or those directions change.
+ */
+export const GONDOLA_EYE = Object.freeze({ x: 0, y: 1.8, z: 0.78 });
 
 interface Passenger {
   readonly handle: AssetHandle;
@@ -148,9 +204,9 @@ export function createGondola(): Gondola {
   floor.position.y = -0.07;
   car.add(floor);
 
-  const rug = decal(new Mesh(new CylinderGeometry(1.0, 1.0, 0.03, 24), toonMaterial(PALETTE.markerMint)));
-  rug.position.y = 0.015;
-  rug.scale.set(1, 1, 0.75);
+  const rug = decal(new Mesh(new CylinderGeometry(1.15, 1.15, 0.03, 24), toonMaterial(PALETTE.markerMint)));
+  rug.position.set(0, 0.015, -0.1);
+  rug.scale.set(1, 1, 0.72);
   car.add(rug);
 
   const roof = solid(
@@ -199,7 +255,11 @@ export function createGondola(): Gondola {
   // --- windows, all the way round ----------------------------------------------
   // A frame around a hole, plus a pane of the faintest glass — on all four
   // sides. There is no direction from the seat that looks out onto a wall.
-  const windowTop = 2.2;
+  // The glass runs higher than it used to. The player's eye went up with the
+  // new seat, and if the top rail had stayed where it was, the amount of sky
+  // you can see by looking up through the front window would have gone down
+  // with it — the one thing this rebuild must not cost.
+  const windowTop = 2.46;
   const windowBottom = 0.42;
   const windowSpan = 0.28; // clearance eaten by each corner post
 
@@ -254,7 +314,7 @@ export function createGondola(): Gondola {
     [-0.55, 0.16],
     [-0.2, 0.07],
   ] as const) {
-    const streak = decal(new Mesh(new BoxGeometry(width, 2.6, 0.02), streakMaterial));
+    const streak = decal(new Mesh(new BoxGeometry(width, 2.3, 0.02), streakMaterial));
     streak.position.set(offset, 1.35, -halfDepth - 0.03);
     streak.rotation.z = 0.42;
     car.add(streak);
@@ -267,7 +327,7 @@ export function createGondola(): Gondola {
   for (let i = 0; i < scallops; i += 1) {
     const scallop = decal(
       new Mesh(
-        new CylinderGeometry(0.13, 0.13, (CAR_WIDTH - 0.5) / scallops, 10, 1, false, 0, Math.PI),
+        new CylinderGeometry(0.11, 0.11, (CAR_WIDTH - 0.5) / scallops, 10, 1, false, 0, Math.PI),
         i % 2 === 0 ? scallopMaterial : toonMaterial(shellColour),
       ),
     );
@@ -292,19 +352,86 @@ export function createGondola(): Gondola {
   skylightRing.scale.set(1, 0.78, 1);
   car.add(skylightRing);
 
-  // --- the bench ----------------------------------------------------------------
-  const benchSeat = solid(
-    new Mesh(new RoundedBoxGeometry(CAR_WIDTH - 0.5, 0.22, 0.72, 3, 0.09), cushion),
+  // --- the player's seat: the high one, at the back --------------------------
+  //
+  // You never see yourself in here, so this exists for two reasons only: the
+  // back of it is in shot whenever a child turns round to look out of the rear
+  // glass, and it is the thing the pets' chairs are lower *than*. The footrest
+  // is the tell — a seat with a bar to swing your feet against is obviously a
+  // high one.
+  const playerSeat = solid(
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH - 0.7, 0.2, 0.68, 3, 0.08), cushion),
   );
-  benchSeat.position.set(0, 0.44, -0.55);
-  car.add(benchSeat);
-  addOutline(benchSeat, 0.016);
+  playerSeat.position.set(0, PLAYER_SEAT_Y - 0.1, 0.95);
+  car.add(playerSeat);
+  addOutline(playerSeat, 0.016);
+
+  const playerBack = solid(
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH - 0.7, 0.62, 0.16, 3, 0.07), cushion),
+  );
+  playerBack.position.set(0, PLAYER_SEAT_Y + 0.31, 1.23);
+  car.add(playerBack);
+  addOutline(playerBack, 0.016);
 
   for (const side of [-1, 1] as const) {
-    const legMesh = solid(new Mesh(new CylinderGeometry(0.07, 0.08, 0.34, 8), woodMaterial));
-    legMesh.position.set(side * (halfWidth - 0.6), 0.17, -0.55);
+    const legMesh = solid(
+      new Mesh(new CylinderGeometry(0.08, 0.09, PLAYER_SEAT_Y - 0.2, 8), woodMaterial),
+    );
+    legMesh.position.set(side * (halfWidth - 0.62), (PLAYER_SEAT_Y - 0.2) / 2, 0.95);
     car.add(legMesh);
   }
+
+  const footrest = solid(
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH - 0.9, 0.07, 0.07, 2, 0.03), cream),
+  );
+  footrest.position.set(0, 0.3, 0.5);
+  car.add(footrest);
+
+  // --- the pets' chairs: three low ones, across the front --------------------
+  //
+  // One each, built to fit a pet rather than the pet scaled to fit it (pets are
+  // size-normalised and `root.scale` is spoken for — see `art/models/pets.ts`).
+  // They are here whether anybody is riding in them or not: three matching
+  // little chairs in a row read as *the pets' seats, empty today*, where one
+  // gap in a bench would just read as a bench.
+  const chairCushion = toonMaterial(PALETTE.markerLemon);
+  const petChair = (x: number): Group => {
+    const chair = new Group();
+    chair.name = 'petChair';
+
+    const pad = solid(new Mesh(new RoundedBoxGeometry(0.72, 0.11, 0.64, 3, 0.05), chairCushion));
+    pad.position.y = PET_CHAIR_SEAT_Y - 0.055;
+    chair.add(pad);
+    addOutline(pad, 0.014);
+
+    // A low back, so it is a chair and not a step — and no higher, because a
+    // tall back would hide the very thing sitting in it.
+    const back = solid(new Mesh(new RoundedBoxGeometry(0.72, 0.34, 0.1, 3, 0.045), woodMaterial));
+    back.position.set(0, PET_CHAIR_SEAT_Y + 0.17, -0.3);
+    chair.add(back);
+    addOutline(back, 0.014);
+
+    for (const fx of [-1, 1] as const) {
+      for (const fz of [-1, 1] as const) {
+        const foot = solid(new Mesh(new CylinderGeometry(0.045, 0.05, 0.11, 8), woodMaterial));
+        foot.position.set(fx * 0.27, 0.055, fz * 0.22);
+        chair.add(foot);
+      }
+    }
+
+    // Built facing +Z with its back at -Z, like every other asset in the park,
+    // then turned to face the window — and turned a few degrees further, in
+    // towards the middle, so a face is catchable from the seat behind. Nothing
+    // in this park is plumb (ART_DIRECTION.md §4); three chairs squared off in
+    // a row look like a waiting room.
+    chair.position.set(x, 0, PET_CHAIR_Z);
+    chair.rotation.y = facing(x);
+    car.add(chair);
+    return chair;
+  };
+
+  /** Left, centre, right. {@link CHAIR_ORDER} decides who gets which. */
+  const petChairs = [petChair(-PET_CHAIR_X), petChair(0), petChair(PET_CHAIR_X)];
 
   // --- lamp --------------------------------------------------------------------
   const lampShade = decal(
@@ -328,23 +455,36 @@ export function createGondola(): Gondola {
     .inventory.filter((item) => item.paradeable && !item.stowed)
     .slice(0, SEATS);
 
-  owned.forEach((item, index) => {
-    const catalogueItem = shopItem(item.id);
-    if (!catalogueItem) return;
-    const handle = catalogueItem.model();
-    // Spread across the bench, and never dead centre in front of the window —
-    // the window is the point of the ride and a teddy is not going to block it.
-    const spread = owned.length === 1 ? 0 : (index / (owned.length - 1) - 0.5) * 1.7;
-    handle.root.position.set(spread, 0.55, -0.55);
-    // Facing the window, turned a little towards the camera so a face is always
-    // catchable when they look round.
-    handle.root.rotation.y = Math.PI + (spread <= 0 ? 0.4 : -0.4);
+  // Tallest to the outside, shortest into the middle of the window. Read off
+  // each handle's own `height` rather than a table here, so a cute thing added
+  // next month sorts itself. Everything that can ride already clears the eye
+  // line (see the seat-height block at the top of this file); this is the extra
+  // courtesy of putting the biggest heads where the view matters least.
+  const boarding = owned
+    .map((item) => shopItem(item.id))
+    .filter((entry): entry is ShopItem => entry !== null)
+    .map((entry) => ({ entry, handle: entry.model() }))
+    .sort((a, b) => b.handle.height - a.handle.height);
+
+  boarding.forEach(({ entry, handle }, index) => {
+    const chairIndex = CHAIR_ORDER[boarding.length]?.[index] ?? 1;
+    const chair = petChairs[chairIndex];
+    if (!chair) return;
+
+    // A balloon is **tied** to its chair rather than sat in it. Its origin is
+    // the bottom of the string — the hand-hold, per the asset contract — so
+    // the string starts at the chair's feet and the animal floats over the
+    // seat, which is both what you actually do with a balloon and what keeps
+    // the one passenger taller than a pet under the player's eye line.
+    const seatY = entry.kind === 'balloon' ? 0 : PET_CHAIR_SEAT_Y;
+    handle.root.position.set(chair.position.x, seatY, chair.position.z);
+    handle.root.rotation.y = chair.rotation.y;
     bench.add(handle.root);
 
     passengers.push({
       handle,
       creature: asCreature(handle),
-      baseY: 0.55,
+      baseY: seatY,
       phase: index * 1.7,
       expression: 'neutral',
     });
@@ -579,6 +719,29 @@ export function createGondola(): Gondola {
       bulbs.dispose();
     },
   };
+}
+
+/**
+ * Which chairs get used, by how many cute things came along.
+ *
+ * Indices are left, centre, right, and the list is in *boarding* order —
+ * which is tallest first (see the sort where passengers are seated). One
+ * passenger takes the middle chair and rides as your co-pilot; two take the
+ * outside pair and leave the middle of the window clear; three fill the row
+ * with the smallest head in the middle.
+ */
+const CHAIR_ORDER: Readonly<Record<number, readonly number[]>> = {
+  1: [1],
+  2: [0, 2],
+  3: [0, 2, 1],
+};
+
+/**
+ * Which way a chair at `x` faces: at the window, and a few degrees in towards
+ * the middle so whoever is sitting in it can be seen from the seat behind.
+ */
+function facing(x: number): number {
+  return Math.PI + x * 0.12;
 }
 
 /**

@@ -11,7 +11,7 @@ import {
 import { PALETTE } from '../../core/palette';
 import { clamp, clamp01, damp, lerp, smoothstep } from '../../core/mathUtils';
 import { createWorldBelow, type WorldBelow } from './below';
-import { createGondola, type Gondola } from './gondola';
+import { GONDOLA_EYE, createGondola, type Gondola } from './gondola';
 import {
   createAlienSaucer,
   createSpaceRipika,
@@ -233,8 +233,14 @@ class SpaceFerrisWheel implements MiniGame {
     // The camera rides in the car, so the sway is the ride. Rotations are set
     // directly rather than through `lookAt`: aiming at a fixed world point every
     // frame would cancel the sway out and turn the ride into a slideshow.
+    //
+    // The eye position comes from `gondola.ts` because it is that file's
+    // decision: it is where a child sitting on the player's seat has their eye,
+    // and the pets' chairs are built to keep their heads below it. It is a
+    // **position only** — nothing here or there rotates the seat, so the
+    // family-confirmed look-around directions below are untouched by it.
     this.camera.rotation.order = 'YXZ';
-    this.camera.position.set(0, 1.44, 0.78);
+    this.camera.position.set(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
     this.gondola.seat.add(this.camera);
 
     this.alien = createAlienSaucer();
