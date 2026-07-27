@@ -164,12 +164,35 @@ firing all three costs one write.
 ## 3. Progress
 
 - [x] Schema decided and written down (this file).
-- [ ] `save.ts`
-- [ ] store hydrate/snapshot
-- [ ] SaveSystem
-- [ ] boot choice UI
-- [ ] fold in the three existing flags
-- [ ] `npm run build` green, PR raised
+- [x] `src/state/save.ts` — schema, tolerant reader, migration gate.
+- [x] `src/state/store.ts` — `revision`, `purchases`, `savedGame()`, `hydrate()`.
+- [x] `src/state/flags.ts` — the four one-time flags, one scheme.
+- [x] `src/SaveSystem.ts` — 5 s timer + pagehide/visibilitychange/beforeunload.
+- [x] `src/world/spaces.ts` — space id ↔ origin, `spaceAt`, `worldToLocal`.
+- [x] `src/ui/ContinueOrRestart.ts` + `.welcome-*` CSS — the boot choice.
+- [x] `src/main.ts` — the choice in front of character creation.
+- [x] Splash-point record moved into the store (`waterFight/score.ts`).
+- [x] `DayNight` seeds its clock from the store, so the time of day persists.
+- [x] `npm run build` green (exit 0).
+- [x] Schema verified out-of-browser — see §5.
+- [ ] PR raised.
+
+## 5. What was verified without the browser
+
+The browser belongs to another agent tonight, so `state/save.ts` was bundled
+with esbuild and exercised under node with a fake `localStorage`. 20 checks,
+all passing: full round trip; no save; unparseable JSON; missing version;
+future version; older version with no migration step; an unknown hair style
+and a malformed colour dropped while the rest of the character survives;
+unknown *new* fields from a future build ignored rather than fatal; a broken
+inventory row dropped while the others are kept; half a `place` dropped
+whole; `purchases` corrected upward from the uids actually present; an
+out-of-range `timeOfDay` dropped while `dayCount` survives; and a
+`localStorage` that throws on both read and write.
+
+Everything downstream of that — the welcome-back screen's looks, the restore
+actually putting her back in the right spot, the 5 s cadence not stuttering —
+needs visual QA. Listed in the PR.
 
 ## 4. Notes for whoever picks this up
 
