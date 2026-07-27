@@ -18,12 +18,38 @@ import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
 import type { Expression } from '../art/style/faces';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
+import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { NameLabel } from '../ui/NameLabel';
-import { gameStore } from '../state';
+import { discoverSecret, gameStore } from '../state';
 import type { WornHat } from './WornHat';
 
 /** Extra speed multiplier while the sprint action is held. */
 const SPRINT_MULTIPLIER = 1.5;
+
+/**
+ * How fast counts as *running*, in metres per second.
+ *
+ * GAME_DESIGN.md: *"only while running, not walking, so running feels
+ * different rather than just faster"* — so this is the line between the two,
+ * and it is a speed rather than `input.isDown('sprint')` on purpose. Holding
+ * sprint while wading through the fountain (which sets `speedMultiplier` to
+ * ~0.6) is not running, and neither is the first moment of a sprint before
+ * `PLAYER_ACCELERATION` has got her anywhere. What kicks up dust is going
+ * fast, which is also the only version of the rule a child can see.
+ *
+ * Sits between a flat-out walk (`PLAYER_MAX_SPEED`, 7.4) and a flat-out
+ * sprint (× `SPRINT_MULTIPLIER`, 11.1), nearer the walk so the dust starts
+ * early in the sprint rather than only at the very top of it.
+ */
+const DUST_SPEED = PLAYER_MAX_SPEED * 1.12;
+
+/** Half a stride: one puff per foot, at the phase each one lands on. */
+const DUST_STRIDE = Math.PI;
+
+/** How far behind her heels a puff is dropped, in metres. */
+const DUST_TRAIL = 0.3;
+/** And how far to the side, so the two feet leave two lines of dust. */
+const DUST_STANCE = 0.14;
 
 /**
  * Tuned so the jump clears the low and mid garden walls but not the tall
@@ -112,6 +138,13 @@ export class Player implements GameSystem {
    */
   readonly hopRings: RainbowRings = createRainbowRings();
 
+  /**
+   * Puffs of dust off her heels while she runs. Parented to the world beside
+   * `hopRings`, and for the same reason: a puff belongs to the patch of ground
+   * it was kicked off, not to the girl who is already several metres past it.
+   */
+  readonly dust: DustPuffs = createDustPuffs();
+
   /** Feet position in world space. */
   readonly position = new Vector3();
   readonly velocity = new Vector3();
@@ -139,6 +172,8 @@ export class Player implements GameSystem {
   /** Start facing the camera, so the first thing you see is her face. */
   private facingAngle = CAMERA_YAW_DEGREES * DEG;
   private walkPhase = 0;
+  /** Last frame's `walkPhase`, so a footfall can be spotted as it is crossed. */
+  private previousWalkPhase = 0;
   /** 0 = standing still, 1 = flat out. Smoothed, drives animation blending. */
   private gait = 0;
   private verticalVelocity = 0;
@@ -320,8 +355,11 @@ export class Player implements GameSystem {
     const { dt, input } = context;
 
     // Before the ride check, so a rainbow started on the ground still finishes
-    // if you hop straight onto something.
+    // if you hop straight onto something. Dust settles on the same terms — the
+    // puffs from her last stride should not freeze in mid-air because she
+    // stepped onto the escalator.
     this.hopRings.update(dt);
+    this.dust.update(dt);
 
     if (this.ridingFlag) {
       // The ride positions us; all we do is hold a suitably delighted pose.
@@ -489,6 +527,8 @@ export class Player implements GameSystem {
     this.walkPhase += planarSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
     if (this.walkPhase > TAU) this.walkPhase -= TAU;
 
+    this.spawnRunningDust(planarSpeed);
+
     this.animate(context, hopHeight);
   }
 
@@ -502,6 +542,8 @@ export class Player implements GameSystem {
     this.label.dispose();
     this.hopRings.root.removeFromParent();
     this.hopRings.dispose();
+    this.dust.root.removeFromParent();
+    this.dust.dispose();
   }
 
   // -------------------------------------------------------------- internals
@@ -527,6 +569,56 @@ export class Player implements GameSystem {
    * second effect — it is already a free-floating, ground-agnostic ring, so
    * bursting it at the current (elevated, mid-air) position just works.
    */
+  /**
+   * One puff of dust per footfall, while she is running.
+   *
+   * Tied to `walkPhase` rather than to a timer, because `walkPhase` is what
+   * the legs are already swinging on — so a puff lands when a foot lands, and
+   * the dust speeds up and slows down with her instead of ticking along at its
+   * own rate beside her. `walkPhase` runs 0…TAU per stride cycle and wraps, so
+   * a change in `floor(phase / π)` is exactly one foot going down: the wrap
+   * from the top of the range back to 0 counts as one, and the crossing of π
+   * counts as the other.
+   *
+   * Not while airborne — dust comes off the ground, and there is none up
+   * there — and not while riding, where her feet are not doing the moving.
+   *
+   * Allocates nothing. The trig is on `facingAngle`, which is already the
+   * direction she is actually pointing, so the puffs come off her heels rather
+   * than out of her velocity vector during a turn.
+   */
+  private spawnRunningDust(planarSpeed: number): void {
+    const previous = this.previousWalkPhase;
+    this.previousWalkPhase = this.walkPhase;
+
+    if (this.airborne || this.ridingFlag || planarSpeed < DUST_SPEED) return;
+    const foot = Math.floor(this.walkPhase / DUST_STRIDE);
+    if (foot === Math.floor(previous / DUST_STRIDE)) return;
+
+    const world = this.group.parent;
+    if (!world) return;
+    if (this.dust.root.parent !== world) world.add(this.dust.root);
+
+    // `facingAngle` is measured so that forward is (sin, cos); behind is the
+    // negative of that, and the sideways axis is the perpendicular.
+    const forwardX = Math.sin(this.facingAngle);
+    const forwardZ = Math.cos(this.facingAngle);
+    // Alternate feet, so two lines of dust trail her rather than one.
+    const side = foot % 2 === 0 ? 1 : -1;
+
+    this.dust.puff(
+      this.position.x - forwardX * DUST_TRAIL + forwardZ * DUST_STANCE * side,
+      this.position.y + 0.08,
+      this.position.z - forwardZ * DUST_TRAIL - forwardX * DUST_STANCE * side,
+      -forwardX,
+      -forwardZ,
+    );
+
+    // She has done the thing. Idempotent and cheap after the first time — see
+    // `discoverSecret` on why this is not a flag kept out here.
+    discoverSecret('secret.dust');
+  }
+
   private spawnClearPoof(): void {
     const world = this.group.parent;
     if (!world) return;
