@@ -2204,13 +2204,22 @@ kbd {
 }
 
 .charcreate-preview {
-  position: relative;
+  /* Sticky, so the character you are customising stays in view while the
+     controls scroll past. `.charcreate-body` is the scroll container and
+     already sets `align-items: flex-start`, which is what lets this stick
+     rather than stretch. The cream background matters: without it the
+     controls scrolling underneath show through. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
   flex: none;
   width: 230px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  padding-bottom: 8px;
+  background: var(--lgp-cream);
 }
 
 .charcreate-preview-canvas {
@@ -2401,6 +2410,13 @@ kbd {
   }
 
   .charcreate-preview {
+    /* Stacked layout: the controls scroll directly beneath the preview, so
+       it spans the full width and centres its own canvas instead. */
+    width: 100%;
+    padding-top: 4px;
+  }
+
+  .charcreate-preview-canvas {
     width: 190px;
   }
 
@@ -2411,6 +2427,10 @@ kbd {
 
 @media (max-height: 640px) {
   .charcreate-preview {
+    width: 150px;
+  }
+
+  .charcreate-preview-canvas {
     width: 150px;
   }
 }
