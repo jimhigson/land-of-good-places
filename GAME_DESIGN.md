@@ -231,6 +231,22 @@ Inside the castle there is a **room full of friendly snakes** — smiley,
 colourful, wiggly. You can adopt a snake as a **pet** and it appears in
 the Cute-o-dex like any cute thing.
 
+## Rides count towards the Cute-o-dex (27 July 2026 — queued, not started)
+
+Riding a ride should **fill in an entry in the Cute-o-dex**, the same way
+buying a cute thing does. Ride the dodgems, the space ferris wheel, the
+water fight, the ginormous slide, the train, the spooky house, the rail
+racer — each one you have ridden gets ticked off; ones you have not are
+adorable `???` silhouettes like everything else.
+
+*Design note:* this changes what the Cute-o-dex IS — no longer only a
+collection of owned objects, but a record of everything you have *done*.
+The completion prize below must therefore count rides too, or it becomes
+unachievable by collecting alone. Whoever implements this needs to check
+how the dex derives its catalogue (it currently reads the shop catalogue,
+with flowers added as a separate section) and give rides their own section
+rather than pretending a ride is an inventory item.
+
 ## Cute-o-dex completion prize
 
 If the player collects **ALL the items in the Cute-o-dex**, the game shows
