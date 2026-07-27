@@ -2,18 +2,22 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  Euler,
   Group,
   InstancedMesh,
   LineBasicMaterial,
   LineSegments,
   Matrix4,
   MeshBasicMaterial,
+  PlaneGeometry,
   Quaternion,
   SphereGeometry,
   Vector3,
 } from 'three';
+import { CAMERA_PITCH_DEGREES } from '../core/constants';
 import { PALETTE } from '../core/palette';
-import { clamp01, lerp, Rng } from '../core/mathUtils';
+import { glowTexture } from '../core/textures';
+import { clamp01, lerp, Rng, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
@@ -164,6 +168,57 @@ const BULB_COLOURS = [
   PALETTE.fairyBlue,
 ];
 
+// ------------------------------------------------------------------- the glow
+
+/**
+ * Width of a bulb's halo, in metres.
+ *
+ * Bulbs sit {@link METRES_PER_BULB} apart along the wire, so at this size
+ * neighbouring halos overlap slightly and a lit string reads as a soft rope of
+ * light rather than a row of separate blobs — while each bulb is still its own
+ * point of light rather than the whole wire fogging up.
+ */
+const HALO_SIZE = 1.25;
+
+/**
+ * How far each halo's colour is pulled towards cream, 0 = the bulb's own
+ * colour, 1 = flat cream.
+ *
+ * Not zero, because a halo has to be *lighter than its surroundings* to read
+ * as brightness at all — a saturated pink disc at full saturation reads as a
+ * pink sticker stuck to the air. Not one either, or the family gets the row of
+ * identical white blobs they were promised they would not: at 0.55 the mint
+ * bulbs still glow green and the pink ones still glow pink, they are just
+ * unmistakably *glowing*.
+ */
+const HALO_CREAM = 0.55;
+
+/** Cream, not white — ART_DIRECTION §5. Nothing in this park highlights to pure white. */
+const HALO_CREAM_COLOUR = PALETTE.signBoard;
+
+/**
+ * How much brighter than its bulb the halo is allowed to get at its centre.
+ *
+ * Above 1 the halo would clip, and the whole point of pigment blending (see
+ * the class doc) is that it cannot.
+ */
+const HALO_STRENGTH = 0.85;
+
+/**
+ * How far into the night the halos have faded fully in. Below this they are
+ * still coming up; at 1 they are at full strength.
+ */
+const HALO_FADE_IN = 0.35;
+
+// Scratch for `aimHalos`, allocated once at module load like everything else
+// in this file. Never allocate in a park that is watching its GC.
+const CAMERA_PITCH = (CAMERA_PITCH_DEGREES * Math.PI) / 180;
+const HALO_EULER = new Euler(0, 0, 0, 'YXZ');
+const HALO_FACING = new Quaternion();
+const HALO_POSITION = new Vector3();
+const HALO_MATRIX = new Matrix4();
+const HALO_SCALE = new Vector3(1, 1, 1);
+
 // ---------------------------------------------------------------- the system
 
 /** One tree the garlands are allowed to be tied to. */
@@ -195,6 +250,22 @@ export class TreeLights implements GameSystem {
   private readonly bulbMaterial: MeshBasicMaterial;
   private readonly wires: LineSegments;
   private readonly wireMaterial: LineBasicMaterial;
+  /** The soft halo around each bulb. See {@link HALO_SIZE}. */
+  private readonly halos: InstancedMesh;
+  private readonly haloMaterial: MeshBasicMaterial;
+  /** Each halo's colour at full brightness, three floats per bulb. */
+  private readonly haloBase: Float32Array;
+  /** Bulb positions, kept so the halos can be re-aimed when the camera turns. */
+  private readonly haloPosition: Float32Array;
+  /**
+   * Camera yaw the halo quads are currently aimed at, or NaN before the first
+   * aim. The bulbs never move and the camera has exactly one pitch forever, so
+   * the only thing that can invalidate 170 billboard matrices is the camera
+   * turning — and in the park it almost never does. Checking costs one
+   * comparison a frame and saves rewriting the whole instance matrix buffer on
+   * every frame of a game that is already watching its GC.
+   */
+  private aimedYaw = Number.NaN;
   /**
    * Every bulb's unlit colour, three floats per bulb, in the same working
    * colour space `InstancedMesh.setColorAt` writes — so `update` can multiply
@@ -299,11 +370,98 @@ export class TreeLights implements GameSystem {
     this.bulbs.instanceMatrix.needsUpdate = true;
     if (this.bulbs.instanceColor) this.bulbs.instanceColor.needsUpdate = true;
     this.group.add(this.bulbs);
+
+    // --- the halo around each bulb ------------------------------------------
+    // The family: "needs more glow around the strings of lights" — the bulbs
+    // read as hard beads next to the lamp posts' proper pools.
+    //
+    // A camera-facing quad each, sized in metres so it scales with the world
+    // rather than staying a fixed number of pixels, carrying the same soft
+    // radial blob the lamp posts' ground glow uses. One InstancedMesh, so the
+    // whole park's glow is one more draw call, and **no lights**: this is
+    // appearance, not illumination.
+    //
+    // Blending is **normal, not additive**, which is the one place this departs
+    // from the brief that came with the request. ART_DIRECTION is explicit —
+    // "pigment, not light; normal blending, never additive" — and it is
+    // explicit because additive was tried on the rainbow hop ring and blew out
+    // to a flat white halo the moment it crossed a pale path. That failure is
+    // exactly the risk here: the request also asks that these hold up now the
+    // light pools are trebled, and an additive halo's brightness depends
+    // entirely on what happens to be behind it, so it would look wrong over
+    // lit ground and wrong again if the park is later darkened back down. A
+    // painted halo looks the same whatever it is in front of. Both were built
+    // and compared on screen before this was settled — see the PR.
+    this.haloMaterial = new MeshBasicMaterial({
+      map: glowTexture(0xffffff),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+      fog: true,
+    });
+    this.halos = new InstancedMesh(
+      new PlaneGeometry(HALO_SIZE, HALO_SIZE),
+      this.haloMaterial,
+      Math.max(1, bulbCount),
+    );
+    this.halos.name = 'tree-light-halos';
+    this.halos.count = bulbCount;
+    this.halos.castShadow = false;
+    this.halos.receiveShadow = false;
+    this.halos.renderOrder = 2;
+
+    this.haloBase = new Float32Array(bulbCount * 3);
+    this.haloPosition = new Float32Array(bulbPoints);
+
+    const cream = new Color(HALO_CREAM_COLOUR);
+    for (let i = 0; i < bulbCount; i += 1) {
+      colour
+        .setRGB(
+          this.bulbBase[i * 3] as number,
+          this.bulbBase[i * 3 + 1] as number,
+          this.bulbBase[i * 3 + 2] as number,
+        )
+        .lerp(cream, HALO_CREAM)
+        .multiplyScalar(HALO_STRENGTH);
+      this.haloBase[i * 3] = colour.r;
+      this.haloBase[i * 3 + 1] = colour.g;
+      this.haloBase[i * 3 + 2] = colour.b;
+      this.halos.setColorAt(i, colour);
+    }
+    if (this.halos.instanceColor) this.halos.instanceColor.needsUpdate = true;
+    this.group.add(this.halos);
   }
 
-  update({ elapsed }: FrameContext): void {
+  /**
+   * Points every halo quad at the camera.
+   *
+   * One quaternion for all of them: the camera looks down at exactly one
+   * angle, forever (ARCHITECTURE.md), so turning the ground-plane
+   * `cameraForward` into a facing is a single `atan2` — the same trick
+   * `Fireflies` uses. Only called when the yaw has actually changed.
+   */
+  private aimHalos(yaw: number): void {
+    this.aimedYaw = yaw;
+    HALO_EULER.set(-CAMERA_PITCH, yaw, 0);
+    HALO_FACING.setFromEuler(HALO_EULER);
+    for (let i = 0; i < this.halos.count; i += 1) {
+      HALO_POSITION.set(
+        this.haloPosition[i * 3] as number,
+        this.haloPosition[i * 3 + 1] as number,
+        this.haloPosition[i * 3 + 2] as number,
+      );
+      HALO_MATRIX.compose(HALO_POSITION, HALO_FACING, HALO_SCALE);
+      this.halos.setMatrixAt(i, HALO_MATRIX);
+    }
+    this.halos.instanceMatrix.needsUpdate = true;
+  }
+
+  update({ elapsed, cameraForward }: FrameContext): void {
     const lit = clamp01(this.nightFactor);
     const instanceColor = this.bulbs.instanceColor;
+    const haloColor = this.halos.instanceColor;
+    const haloArray = haloColor ? (haloColor.array as Float32Array) : null;
+
     if (instanceColor) {
       const array = instanceColor.array as Float32Array;
       // Dull beads by day, bright and twinkling once the sun goes down — the
@@ -316,8 +474,29 @@ export class TreeLights implements GameSystem {
         array[base] = (this.bulbBase[base] as number) * multiplier;
         array[base + 1] = (this.bulbBase[base + 1] as number) * multiplier;
         array[base + 2] = (this.bulbBase[base + 2] as number) * multiplier;
+        // The halo breathes on its bulb's own phase, so the glow and the bead
+        // it belongs to twinkle as one thing rather than beating against
+        // each other.
+        if (haloArray) {
+          haloArray[base] = (this.haloBase[base] as number) * flicker;
+          haloArray[base + 1] = (this.haloBase[base + 1] as number) * flicker;
+          haloArray[base + 2] = (this.haloBase[base + 2] as number) * flicker;
+        }
       }
       instanceColor.needsUpdate = true;
+      if (haloColor) haloColor.needsUpdate = true;
+    }
+
+    // Gone completely in daylight — a glow you can see at noon is a smudge.
+    // Held back until dusk is properly under way rather than fading in with
+    // the bulbs, because a pale disc over a still-bright sky reads as a
+    // lens artefact rather than as a light.
+    this.haloMaterial.opacity = smoothstep(HALO_FADE_IN, 1, lit);
+    this.halos.visible = this.haloMaterial.opacity > 0.004;
+
+    if (this.halos.visible) {
+      const yaw = Math.atan2(-cameraForward.x, -cameraForward.z);
+      if (!(Math.abs(yaw - this.aimedYaw) < 0.002)) this.aimHalos(yaw);
     }
 
     this.wireMaterial.opacity = 0.35 + lit * 0.4;
@@ -328,6 +507,8 @@ export class TreeLights implements GameSystem {
     this.bulbs.geometry.dispose();
     this.wireMaterial.dispose();
     this.wires.geometry.dispose();
+    this.haloMaterial.dispose();
+    this.halos.geometry.dispose();
   }
 }
 
