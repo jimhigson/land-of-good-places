@@ -8,7 +8,7 @@ import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
-import { Parade, Player, TapNavigator, WornFlower } from './entities';
+import { Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
 import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
@@ -52,6 +52,7 @@ export class Game {
   readonly stairMenu: StairMenu;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
+  readonly wornHat: WornHat;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
 
@@ -94,6 +95,12 @@ export class Game {
     // needs nothing from the rest of this constructor beyond the anchor.
     this.wornFlower = new WornFlower(this.player.model.hairAnchor);
     this.addSystem(this.wornFlower);
+
+    // The hat chosen (or granted free) in the character creator — see
+    // `entities/WornHat.ts`. Same store-subscriber shape as `wornFlower`
+    // above, parented to the head instead of the hairline.
+    this.wornHat = new WornHat(this.player.model.hatAnchor);
+    this.addSystem(this.wornHat);
 
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means

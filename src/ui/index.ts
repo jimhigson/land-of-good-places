@@ -1,4 +1,6 @@
 export { Hud } from './Hud';
+export { CharacterCreation, type CharacterCreationHandlers } from './CharacterCreation';
+export { hasCreatedCharacter, markCharacterCreated } from './characterCreationFlag';
 export { DevBadge } from './DevBadge';
 export { ShopPanel, type ShopPanelContent, type ShopPanelItem } from './ShopPanel';
 export { InventoryDrawer } from './InventoryDrawer';

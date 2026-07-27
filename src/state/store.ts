@@ -8,6 +8,7 @@ import type {
   GameMode,
   GameState,
   GameTime,
+  HairStyle,
   InventoryItem,
   InventoryKind,
 } from './types';
@@ -61,6 +62,26 @@ export interface PurchaseSpec {
   readonly shopId: string;
   readonly price: number;
   readonly carryable: boolean;
+}
+
+/**
+ * What the character creator hands the store once, at the very start of a
+ * fresh browser (see `ui/CharacterCreation.ts` and `main.ts`'s `boot()`,
+ * which runs it before `new Game(...)` exists at all).
+ *
+ * `hat` and `pet` are full catalogue entries (`ShopItem` from
+ * `world/building/shops/catalogue.ts` satisfies `PurchaseSpec` with fields to
+ * spare) rather than bare ids, so the store never has to import the catalogue
+ * itself to look them up — the one place that already knows both the
+ * catalogue and the store is the UI layer, which is where this is built.
+ */
+export interface CharacterCreationChoice {
+  readonly name: string;
+  readonly hairColour: number;
+  readonly hairStyle: HairStyle;
+  readonly outfitColour: number;
+  readonly hat: PurchaseSpec;
+  readonly pet: PurchaseSpec;
 }
 
 type Listener = (state: GameState) => void;
@@ -136,6 +157,35 @@ class GameStore {
     this.notify();
   }
 
+  /**
+   * Applies the character creator's choices — name, hair, clothes, the
+   * starting hat and the starting pet — in one go, the moment "Let's go!" is
+   * pressed.
+   *
+   * Runs before the player has ever been spawned (see the doc comment on
+   * {@link CharacterCreationChoice}), so there is no live model to update:
+   * `Player`'s own constructor simply reads `player.hairColour` /
+   * `player.hairStyle` / `player.outfitColour` off this store when it builds
+   * the kid a moment later. The hat and pet are filed exactly like a shop
+   * purchase (`buy()`'s own `InventoryItem` + Cute-o-dex bookkeeping) but
+   * free, and routed straight to their real placement instead of into the
+   * player's hands: the hat goes on the head (`wornHatUid`), the pet joins
+   * the parade immediately.
+   */
+  completeCharacterCreation(choice: CharacterCreationChoice): void {
+    const trimmedName = choice.name.trim();
+    this.state.player.name = trimmedName.length > 0 ? trimmedName : PLAYER_DEFAULT_NAME;
+    this.state.player.hairColour = choice.hairColour;
+    this.state.player.hairStyle = choice.hairStyle;
+    this.state.player.outfitColour = choice.outfitColour;
+
+    const hatItem = this.grantFree(choice.hat, true);
+    this.state.wornHatUid = hatItem.uid;
+    this.grantFree(choice.pet, false);
+
+    this.notify();
+  }
+
   setMode(mode: GameMode): void {
     if (this.state.mode === mode) return;
     this.state.mode = mode;
@@ -208,6 +258,39 @@ class GameStore {
       item.carryable ? 'carried' : item.paradeable ? 'parade' : 'backpack',
     );
     this.notify();
+    return item;
+  }
+
+  /**
+   * Files one catalogue item as owned, for free, without touching the purse
+   * or the player's hands — `buy()`'s sibling for the one other place a thing
+   * can enter the inventory: the character creator's starting hat and pet.
+   *
+   * `worn` picks the placement directly rather than deriving it the way
+   * `buy()` does, because the two callers want opposite answers for an
+   * otherwise-identical `PurchaseSpec` shape: the hat (not paradeable at all)
+   * still needs to read as "in use" rather than "in the backpack", and the pet
+   * (paradeable) needs to start unstowed so it falls in behind the player on
+   * the very first frame instead of waiting in the bag until nudged out.
+   */
+  private grantFree(spec: PurchaseSpec, worn: boolean): InventoryItem {
+    this.purchaseCount += 1;
+    const paradeable = PARADE_KINDS.has(spec.kind);
+    const item: InventoryItem = {
+      uid: `${spec.id}#${this.purchaseCount}`,
+      id: spec.id,
+      kind: spec.kind,
+      displayName: spec.displayName,
+      icon: spec.icon,
+      category: spec.category,
+      shopId: spec.shopId,
+      acquiredAt: this.gameTime(),
+      carryable: spec.carryable,
+      paradeable,
+      stowed: worn ? false : !paradeable,
+    };
+    this.state.inventory.push(item);
+    this.collect(item.id, item.displayName, item.category, worn ? 'worn' : paradeable ? 'parade' : 'backpack');
     return item;
   }
 
@@ -415,6 +498,7 @@ function createInitialState(): GameState {
       name: PLAYER_DEFAULT_NAME,
       kind: 'kid',
       hairColour: PALETTE.hair,
+      hairStyle: 'bunches',
       outfitColour: PALETTE.outfit,
       health: 5,
       maxHealth: 5,
@@ -429,6 +513,7 @@ function createInitialState(): GameState {
     inventory: [],
     carriedUid: null,
     wornFlowerUid: null,
+    wornHatUid: null,
     paused: false,
     debugOverlay: false,
   };
