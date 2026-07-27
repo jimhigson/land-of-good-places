@@ -6,7 +6,7 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
-import { Sky, World } from './world';
+import { Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
@@ -46,6 +46,7 @@ export class Game {
   readonly touchControls: TouchControls | null;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
+  readonly treeClimbing: TreeClimbing;
   readonly signReader: SignReader;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
@@ -77,8 +78,9 @@ export class Game {
     // The building needs a way to move the camera, the clock and the screen
     // wipe when a child walks through its front door into its own space. It is
     // handed one rather than reaching up in here; the closures are only ever
-    // called from a frame, long after everything below is built.
-    this.world = new World(this.engine.scene, this.sky, this.interiorControls());
+    // called from a frame, long after everything below is built. The camera
+    // goes in too: NPC name labels are screen-space, so the crowd needs it.
+    this.world = new World(this.engine.scene, this.sky, this.interiorControls(), this.camera);
 
     // Spawn on the plaza, just south of the fountain, looking at the park.
     this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));
@@ -104,14 +106,24 @@ export class Game {
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
-    // the building installed.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () =>
-      this.world.interactZones(),
-    );
+    // the building installed. `treeClimbing` is constructed further down (it
+    // needs the HUD), but this closure only reads it once play starts, by
+    // which point construction has finished.
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () => [
+      ...this.world.interactZones(),
+      ...this.treeClimbing.interactZones(),
+    ]);
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {
       onTap: (point) => {
+        // Up a tree, a tap anywhere means "come down" — it is not a place to
+        // walk to, and the character cannot walk while riding the climb
+        // anyway (see `Player.riding`).
+        if (this.treeClimbing.playerClimbing) {
+          this.treeClimbing.requestDescend();
+          return;
+        }
         // Tapping a sign is deliberately NOT handled here any more — it used
         // to swoop the camera in to read it, which fired by accident and was
         // jarring (family complaint, 26 Jul 2026; see `ui/SignReader.ts`).
@@ -163,6 +175,19 @@ export class Game {
     this.shopping = new Shopping(uiRoot, this.player, this.world, this.hud);
     this.addSystem(this.shopping);
 
+    // Tree climbing (family design feedback: NPCs — and the player — climb
+    // trees and peek out of the leaves). Registered after `shopping` so its
+    // HUD prompt wins when both would otherwise want the same line — trees
+    // and shops never actually overlap, but the ordering costs nothing and
+    // keeps the two systems from fighting over `hud.setPrompt` if they ever
+    // did. See `world/TreeClimbing.ts`.
+    this.treeClimbing = new TreeClimbing(
+      this.player,
+      this.world.npcs,
+      this.hud,
+      this.world.scenery.climbableTrees,
+    );
+    this.addSystem(this.treeClimbing);
     // "Read" a sign: a HUD button when close and facing one, a full-screen
     // overlay of its own painted face when pressed — see `ui/SignReader.ts`.
     // Signs never move once the world has finished building, so its zone list

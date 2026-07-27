@@ -6,6 +6,7 @@ import type { PoiGraph } from './poiGraph';
 // The park train. Used only by the additive block at the bottom of this file,
 // and only through a singleton that is `null` in a world without one.
 import { trainService } from '../../world/train/service';
+import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
  * A child with somewhere to be.
@@ -56,6 +57,43 @@ const HOP_COOLDOWN = 1.1;
 
 /** Longest a child will push at a waypoint before giving up and re-choosing. */
 const LEG_TIMEOUT = 14;
+
+// --- tree climbing (see world/TreeClimbing.ts) ------------------------------
+//
+// Item 22 of the family's design feedback: NPCs climb trees too. This driver
+// owns only the *decision* and the *timing* — whether to climb, which tree,
+// how long each phase lasts. `TreeClimbing` reads the small public surface
+// below and does the actual posing (it owns the body-hiding and the pose
+// maths, shared with the player's own climb). Kept entirely inside this
+// class so the rest of the file, and everyone calling it, is unaffected.
+
+/** How far from a waypoint a tree is still "right there" to climb. */
+const CLIMB_SEARCH_RADIUS = 6.5;
+
+/** Rolled once per arrival at *any* waypoint, not just interesting ones. */
+const CLIMB_CHANCE = 0.055;
+
+/** Longest to wait before this child is willing to climb again. */
+const CLIMB_COOLDOWN_MIN = 50;
+const CLIMB_COOLDOWN_RANGE = 60;
+
+const CLIMB_UP_SECONDS = 0.5;
+const CLIMB_DOWN_SECONDS = 0.42;
+const CLIMB_PEEK_MIN = 3.4;
+const CLIMB_PEEK_RANGE = 3.6;
+
+/** A phase of the little scripted moment, in order. */
+export type ClimbPhase = 'up' | 'peek' | 'down';
+
+/**
+ * Caps how many children are up trees across the whole park at once, so a
+ * lucky run of coin flips can't put half the crowd in the branches. Shared —
+ * one instance handed to every `WanderDriver` by `NpcSystem`.
+ */
+export interface ClimberBudget {
+  active: number;
+  readonly max: number;
+}
 
 // =============================================================================
 // Face painting stall (additive, self-contained). See ART_DIRECTION.md's face
@@ -149,6 +187,10 @@ export interface WanderOptions {
   readonly startNode: number;
   /** Multiplies every walking speed for this child. Not everyone is brisk. */
   readonly pace?: number;
+  /** Trees big enough to climb. Omit (or leave empty) and nobody ever does. */
+  readonly climbableTrees?: readonly ClimbableTreeSeed[];
+  /** Shared across every child, to keep the whole-park total gentle. */
+  readonly climberBudget?: ClimberBudget;
 }
 
 export class WanderDriver implements CharacterDriver {
@@ -179,6 +221,17 @@ export class WanderDriver implements CharacterDriver {
   private blinkTimer: number;
   private blinkRemaining = 0;
 
+  // --- tree climbing state (see block comment above `WanderOptions`) -------
+  private readonly climbableTrees: readonly ClimbableTreeSeed[];
+  private readonly climberBudget: ClimberBudget | undefined;
+  private climbCooldown: number;
+  private climbPhaseValue: ClimbPhase | null = null;
+  private climbTreeValue: ClimbableTreeSeed | null = null;
+  private climbTimer = 0;
+  private climbPeekFor = 0;
+  private climbStartX = 0;
+  private climbStartZ = 0;
+
   // ---- face painting stall (additive — see the block above the class) ----
   // Not `private`: read from the module-level `paintedNpcFaces()` /
   // `paintedOrVisitingCount()` helpers above, which live outside the class
@@ -202,6 +255,11 @@ export class WanderDriver implements CharacterDriver {
     this.previous = options.startNode;
     this.target = options.startNode;
     this.blinkTimer = this.rng.range(1.5, 5.5);
+    this.climbableTrees = options.climbableTrees ?? [];
+    this.climberBudget = options.climberBudget;
+    // Staggered like the first pause below, so the park doesn't decide to
+    // climb in step either — and nobody is eligible in the first minute.
+    this.climbCooldown = this.rng.range(10, 70);
     // Stagger the first decision so the whole park does not set off in step.
     this.pausing = true;
     this.pauseRemaining = this.rng.range(0, 2.5);
@@ -221,6 +279,33 @@ export class WanderDriver implements CharacterDriver {
     return this.target;
   }
 
+  /** True for the whole climb — up, peeking and down. */
+  get climbing(): boolean {
+    return this.climbPhaseValue !== null;
+  }
+
+  /** Which tree, while {@link climbing}. */
+  get climbTree(): ClimbableTreeSeed | null {
+    return this.climbTreeValue;
+  }
+
+  /** Which part of the climb. `null` when not climbing. */
+  get climbPhase(): ClimbPhase | null {
+    return this.climbPhaseValue;
+  }
+
+  /** 0..1 through the current phase. Meaningless (and unused) during `peek`. */
+  get climbProgress(): number {
+    if (this.climbPhaseValue === 'up') return clamp01(this.climbTimer / CLIMB_UP_SECONDS);
+    if (this.climbPhaseValue === 'down') return clamp01(this.climbTimer / CLIMB_DOWN_SECONDS);
+    return 1;
+  }
+
+  /** Where the child was standing when it started up — the base of the scramble. */
+  get climbGroundSpot(): { readonly x: number; readonly z: number } {
+    return { x: this.climbStartX, z: this.climbStartZ };
+  }
+
   update(context: DriverContext, intent: CharacterIntent): void {
     const { dt } = context;
 
@@ -228,6 +313,18 @@ export class WanderDriver implements CharacterDriver {
     this.hopCooldown -= dt;
     this.blinkTimer -= dt;
     if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
+    // Moved up from the bottom of this method so a child blinks whether they
+    // are wandering or up a tree — climbing returns early, below.
+    if (this.blinkTimer <= 0) {
+      this.blinkTimer = this.rng.range(2.4, 6.2);
+      this.blinkRemaining = 0.12;
+    }
+    this.climbCooldown -= dt;
+
+    if (this.climbPhaseValue !== null) {
+      this.updateClimb(dt, intent);
+      return;
+    }
 
     this.reactToPlayer(context);
 
@@ -259,7 +356,7 @@ export class WanderDriver implements CharacterDriver {
         const distance = Math.hypot(dx, dz);
 
         if (distance <= ARRIVE_RADIUS) {
-          this.arrive();
+          this.arrive(context);
         } else {
           const speed = this.running ? RUN_INTENT : 1;
           const scale = (speed * this.pace) / distance;
@@ -293,11 +390,6 @@ export class WanderDriver implements CharacterDriver {
 
     // Blinking is an expression hint, not an animation: the body only pushes it
     // to the model when it changes, because a blink is a texture swap.
-    if (this.blinkTimer <= 0) {
-      this.blinkTimer = this.rng.range(2.4, 6.2);
-      this.blinkRemaining = 0.12;
-    }
-
     intent.expression =
       this.waveAmount > 0.15 ? 'happy' : this.blinkRemaining > 0 ? 'blink' : 'neutral';
   }
@@ -348,10 +440,14 @@ export class WanderDriver implements CharacterDriver {
     this.lookYaw = this.rng.range(-Math.PI, Math.PI);
   }
 
-  private arrive(): void {
+  private arrive(context: DriverContext): void {
     this.previous = this.current;
     this.current = this.target;
     this.legElapsed = 0;
+
+    // Climbing takes priority over the ordinary pause at this waypoint — it
+    // is its own "stop and look around" moment, just a more memorable one.
+    if (this.tryStartClimb(context)) return;
 
     const node = this.graph.node(this.current);
     if (node?.interesting && this.rng.chance(PAUSE_CHANCE)) {
@@ -587,6 +683,83 @@ export class WanderDriver implements CharacterDriver {
     return false;
   }
 
+  // -------------------------------------------------------------- climbing
+
+  /**
+   * Rolls the dice on climbing whatever climbable tree is nearest, if any is
+   * within reach. True if a climb started — the caller should treat that
+   * exactly like beginning a pause.
+   */
+  private tryStartClimb(context: DriverContext): boolean {
+    if (this.climbableTrees.length === 0) return false;
+    if (this.climbCooldown > 0) return false;
+    if (this.climberBudget && this.climberBudget.active >= this.climberBudget.max) return false;
+    if (!this.rng.chance(CLIMB_CHANCE)) return false;
+
+    const tree = nearestTree(
+      this.climbableTrees,
+      context.position.x,
+      context.position.z,
+      CLIMB_SEARCH_RADIUS,
+    );
+    if (!tree) return false;
+
+    this.climbTreeValue = tree;
+    this.climbStartX = context.position.x;
+    this.climbStartZ = context.position.z;
+    this.climbPhaseValue = 'up';
+    this.climbTimer = 0;
+    if (this.climberBudget) this.climberBudget.active += 1;
+    return true;
+  }
+
+  /** Runs the up/peek/down timer while a climb owns the character. */
+  private updateClimb(dt: number, intent: CharacterIntent): void {
+    // Nothing walks, waves or reacts to the player while up a tree — the pose
+    // itself is TreeClimbing's job, driven by `climbTree`/`climbPhase`/
+    // `climbProgress` below.
+    intent.moveX = 0;
+    intent.moveZ = 0;
+    intent.hop = false;
+    intent.interact = false;
+    intent.lookAt = null;
+    intent.wave = 0;
+    // A tree is a nice place to be: happy rather than the usual neutral
+    // resting face, blinking exactly as normal.
+    intent.expression = this.blinkRemaining > 0 ? 'blink' : 'happy';
+
+    this.climbTimer += dt;
+    switch (this.climbPhaseValue) {
+      case 'up':
+        if (this.climbTimer >= CLIMB_UP_SECONDS) {
+          this.climbPhaseValue = 'peek';
+          this.climbTimer = 0;
+          this.climbPeekFor = this.rng.range(CLIMB_PEEK_MIN, CLIMB_PEEK_MIN + CLIMB_PEEK_RANGE);
+        }
+        return;
+      case 'peek':
+        if (this.climbTimer >= this.climbPeekFor) {
+          this.climbPhaseValue = 'down';
+          this.climbTimer = 0;
+        }
+        return;
+      case 'down':
+        if (this.climbTimer >= CLIMB_DOWN_SECONDS) this.endClimb();
+        return;
+    }
+  }
+
+  private endClimb(): void {
+    this.climbPhaseValue = null;
+    this.climbTreeValue = null;
+    if (this.climberBudget) this.climberBudget.active -= 1;
+    this.climbCooldown = this.rng.range(CLIMB_COOLDOWN_MIN, CLIMB_COOLDOWN_MIN + CLIMB_COOLDOWN_RANGE);
+    // Straight back to ordinary wandering from wherever the climb left it —
+    // `current`/`target` never changed, so this is exactly a fresh pause end.
+    this.chooseNext();
+  }
+
+
   // ---- face painting stall (additive — see the block above the class) ----
 
   /**
@@ -701,4 +874,23 @@ function approach(value: number, target: number, step: number): number {
   if (value < target) return Math.min(target, value + step);
   if (value > target) return Math.max(target, value - step);
   return clamp01(value);
+}
+
+/** Nearest tree to (x, z) within `maxDistance`, or `null`. */
+function nearestTree(
+  trees: readonly ClimbableTreeSeed[],
+  x: number,
+  z: number,
+  maxDistance: number,
+): ClimbableTreeSeed | null {
+  let best: ClimbableTreeSeed | null = null;
+  let bestDistance = maxDistance;
+  for (const tree of trees) {
+    const distance = Math.hypot(tree.x - x, tree.z - z);
+    if (distance < bestDistance) {
+      best = tree;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }

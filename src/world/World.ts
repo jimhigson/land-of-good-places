@@ -18,6 +18,7 @@ import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
+import type { IsoCamera } from '../core/IsoCamera';
 import { NpcSystem } from '../entities/npc';
 // Face painting stall (additive — see FacePaintStall.ts's own file-ownership
 // note). Not a mini-game, so it is wired in here rather than through
@@ -56,7 +57,7 @@ export class World implements GameSystem {
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
 
-  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls) {
+  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
     // Living, pickable flowers — no collision (you walk straight through
@@ -106,7 +107,17 @@ export class World implements GameSystem {
     // route is walked at build time and dropped if a wall or a tree is in the
     // way — and because they walk the building's ground floor, so they need the
     // same ground sampler the player gets.
-    this.npcs = new NpcSystem(this.collision, (x, z, y) => this.building.surfaces.sample(x, z, y));
+    //
+    // `scenery.climbableTrees` is threaded straight through to every wander
+    // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
+    // occasionally climb one — the actual climbing (posing, hiding the body)
+    // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
+    this.npcs = new NpcSystem(
+      this.collision,
+      camera,
+      (x, z, y) => this.building.surfaces.sample(x, z, y),
+      this.scenery.climbableTrees,
+    );
 
     // The face-painting stall (additive): registers its own position with the
     // NPC wander graph's face-paint block as it builds itself, so it must come
