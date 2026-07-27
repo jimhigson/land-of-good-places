@@ -184,6 +184,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // 0.80 m tall where it used to be 0.88, and the top 0.27 m of it disappears up
   // inside the skull, which is exactly what hides the neck.
   const torso = stub(0.325, 0.15, outfitMat);
+  // Named so the character creator's preview can measure the jumper and frame
+  // the body on it when the child changes their clothes colour — see
+  // `ui/characterCreationPreview.ts`. The limb pivots alone stop at the
+  // shoulders, which leaves the collar and most of the jumper out of shot.
+  torso.name = 'torso';
   torso.position.y = 0.6;
   torso.scale.set(1.06, 1, 0.92);
   body.add(torso);

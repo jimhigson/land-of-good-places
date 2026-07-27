@@ -1,13 +1,16 @@
 import {
+  Box3,
   CylinderGeometry,
   DirectionalLight,
   Group,
   HemisphereLight,
   Mesh,
   NeutralToneMapping,
+  Object3D,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import { PALETTE } from '../core/palette';
@@ -59,6 +62,58 @@ export interface PreviewChoice {
   readonly petId: string;
 }
 
+/**
+ * What the camera is currently looking at.
+ *
+ * The family's note: *"the hat you are choosing is cropped out — when changing
+ * the hat the camera should zoom in on just the head… Same with changing the
+ * pet… and the face for eye colour."* So the preview frames whatever the child
+ * just touched, holds it for a moment, and drifts back to the whole character.
+ */
+export type PreviewFocus = 'all' | 'head' | 'face' | 'body' | 'pet';
+
+/**
+ * Where the camera sits relative to whatever it is framing: dead in front, and
+ * a little above, so a face is seen at a friendly slight downward angle rather
+ * than from below. Length is irrelevant — it is normalised and scaled by the
+ * fitted distance.
+ */
+const VIEW_DIRECTION = new Vector3(0, 0.16, 1).normalize();
+
+/**
+ * Breathing room around each framing, as a multiplier on the fitted distance.
+ *
+ * 1.0 would put the subject's bounding box exactly at the edges of the frame.
+ * A face wants noticeably more than a head does — a close-up cropped at the
+ * hairline reads as a mistake, whereas a head framed tight reads as deliberate
+ * — and a pet is small enough that a little of the kid beside it is welcome
+ * context rather than clutter.
+ */
+const FOCUS_MARGIN: Readonly<Record<PreviewFocus, number>> = {
+  all: 1.12,
+  head: 1.1,
+  face: 1.24,
+  body: 1.14,
+  pet: 1.32,
+};
+
+/** Seconds a framing is held after the last change before easing back to `all`. */
+const FOCUS_HOLD_SECONDS = 2.4;
+
+/**
+ * How briskly the camera moves between framings, as an exponential-damping
+ * rate (roughly "e-folds per second"). Fast enough that a child tapping
+ * through hats is not waiting for the camera, slow enough to read as a move
+ * rather than a cut.
+ */
+const CAMERA_RATE = 5.5;
+
+// Scratch vectors — `updateCamera` runs every frame and must not allocate.
+const SCRATCH_CENTRE = new Vector3();
+const SCRATCH_SIZE = new Vector3();
+const SCRATCH_TARGET = new Vector3();
+const SCRATCH_DESIRED = new Vector3();
+
 /** How long the eyes stay shut — same beat as `Player.ts`'s blink. */
 const BLINK_DURATION = 0.11;
 
@@ -79,6 +134,7 @@ export class CharacterPreview {
 
   private character: Group | null = null;
   private kid: KidHandle | null = null;
+  private pet: Object3D | null = null;
   private rafHandle: number | null = null;
   private elapsed = 0;
   private lastTime = 0;
@@ -98,6 +154,26 @@ export class CharacterPreview {
   /** Elapsed-time deadline until which a fresh choice's happy face holds. */
   private reactUntil = 0;
   private currentExpression: Expression = 'neutral';
+
+  // --- camera framing: what the child just changed, and where that is. -------
+  private focus: PreviewFocus = 'all';
+  /** Elapsed-time deadline after which {@link focus} eases back to `all`. */
+  private focusUntil = 0;
+  /**
+   * Bounding boxes per focus, measured with the turntable held at zero so they
+   * are rotation-independent, and re-measured only when the character is
+   * rebuilt. `null` means "measured, and there is nothing there" (no pet), so
+   * a missing subject is not re-measured every frame.
+   *
+   * Boxes rather than camera positions: the distance depends on the canvas's
+   * live aspect ratio, which changes on rotate and reflow, so it is derived
+   * per frame from the box instead of baked in here.
+   */
+  private readonly boxes = new Map<PreviewFocus, Box3 | null>();
+  /** The point the camera is currently looking at — damped towards the target. */
+  private readonly aim = new Vector3();
+  /** False until the first framing, which snaps rather than swooping in. */
+  private framed = false;
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -145,14 +221,25 @@ export class CharacterPreview {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Rebuilds the kid (+ hat, + pet) from scratch for the given choice. */
-  update(choice: PreviewChoice): void {
+  /**
+   * Rebuilds the kid (+ hat, + pet) from scratch for the given choice, and
+   * points the camera at whatever the child just changed.
+   *
+   * `focus` defaults to `all` so a caller that does not care (the very first
+   * build) gets the whole character.
+   */
+  update(choice: PreviewChoice, focus: PreviewFocus = 'all'): void {
     if (this.character) {
       this.stage.remove(this.character);
       disposeTree(this.character);
       this.character = null;
       this.kid = null;
+      this.pet = null;
     }
+    // Everything measured belonged to the character just thrown away.
+    this.boxes.clear();
+    this.focus = focus;
+    this.focusUntil = this.elapsed + FOCUS_HOLD_SECONDS;
 
     const group = new Group();
 
@@ -188,6 +275,7 @@ export class CharacterPreview {
       petAsset.root.position.set(0.92, 0, 0.32);
       petAsset.root.rotation.y = -0.5;
       group.add(petAsset.root);
+      this.pet = petAsset.root;
     }
 
     this.stage.add(group);
@@ -214,9 +302,119 @@ export class CharacterPreview {
     // enough to actually see the choice you just made rather than a blur.
     if (this.spinsAllowed) this.stage.rotation.y = Math.sin(this.elapsed * 0.35) * 0.55;
     this.updateFace(dt);
+    this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
     this.rafHandle = requestAnimationFrame(this.frame);
   };
+
+  /**
+   * Measures a subtree's bounds with the turntable held at zero.
+   *
+   * The stage rocks back and forth continuously, so a box measured while it is
+   * rotated would be both wider than the subject and different every frame.
+   * Zeroing the rotation for the measurement gives a stable box, and
+   * {@link updateCamera} rotates the resulting centre back onto the live
+   * turntable angle instead.
+   */
+  private measure(...parts: readonly Object3D[]): Box3 | null {
+    if (parts.length === 0) return null;
+    const spin = this.stage.rotation.y;
+    this.stage.rotation.y = 0;
+    this.stage.updateMatrixWorld(true);
+    const box = new Box3();
+    for (const part of parts) box.expandByObject(part);
+    this.stage.rotation.y = spin;
+    this.stage.updateMatrixWorld(true);
+    return box.isEmpty() ? null : box;
+  }
+
+  /** The bounds of one focus, measured once per character rebuild. */
+  private boxFor(focus: PreviewFocus): Box3 | null {
+    const cached = this.boxes.get(focus);
+    if (cached !== undefined) return cached;
+
+    const kid = this.kid;
+    let box: Box3 | null = null;
+    if (focus === 'all') {
+      box = this.character ? this.measure(this.character) : null;
+    } else if (focus === 'pet') {
+      box = this.pet ? this.measure(this.pet) : null;
+    } else if (kid) {
+      if (focus === 'head') {
+        // The hat is parented to `hatAnchor`, which lives under `head`, so a
+        // tall hat is inside this box for free — which is the whole point:
+        // the framing cannot crop a hat it measured.
+        box = this.measure(kid.head);
+      } else if (focus === 'face') {
+        const patch = kid.root.getObjectByName('facePatch');
+        box = patch ? this.measure(patch) : null;
+      } else {
+        // Clothes: the jumper and the limbs, deliberately NOT the head. The
+        // hair bunches are wider than the kid's outstretched hands, so any box
+        // containing the head is as wide as the whole character and "clothes
+        // colour" would barely zoom at all.
+        const torso = kid.root.getObjectByName('torso');
+        box = this.measure(
+          ...(torso ? [torso] : []),
+          kid.limbs.leftArm,
+          kid.limbs.rightArm,
+          kid.limbs.leftLeg,
+          kid.limbs.rightLeg,
+        );
+      }
+    }
+
+    this.boxes.set(focus, box);
+    return box;
+  }
+
+  /**
+   * Moves the camera towards whatever is currently in focus, then eases back
+   * to the whole character once the moment has passed.
+   *
+   * Distance is *fitted to the box* rather than hand-tuned per focus, which is
+   * what makes "the whole hat must be visible" true by construction instead of
+   * true until somebody adds a taller hat. The two terms are the standard box
+   * fit: how far back the tallest/widest half-extent has to be to fall inside
+   * the frustum, plus the box's own half-depth, since the near face of the box
+   * is what actually has to clear the frame edge.
+   */
+  private updateCamera(dt: number): void {
+    if (this.focus !== 'all' && this.elapsed >= this.focusUntil) this.focus = 'all';
+
+    const box = this.boxFor(this.focus) ?? this.boxFor('all');
+    if (!box) return;
+
+    const centre = box.getCenter(SCRATCH_CENTRE);
+    const size = box.getSize(SCRATCH_SIZE);
+    const halfVertical = (this.camera.fov * Math.PI) / 360;
+    const halfHorizontal = Math.atan(Math.tan(halfVertical) * this.camera.aspect);
+    const distance =
+      (Math.max(size.y / 2 / Math.tan(halfVertical), size.x / 2 / Math.tan(halfHorizontal)) +
+        size.z / 2) *
+      FOCUS_MARGIN[this.focus];
+
+    // Put the (turntable-independent) centre back onto the live turntable, so
+    // the camera tracks a pet that is currently swinging round to one side.
+    const spin = this.stage.rotation.y;
+    const cos = Math.cos(spin);
+    const sin = Math.sin(spin);
+    const target = SCRATCH_TARGET.set(
+      centre.x * cos + centre.z * sin,
+      centre.y,
+      -centre.x * sin + centre.z * cos,
+    );
+    const desired = SCRATCH_DESIRED.copy(VIEW_DIRECTION).multiplyScalar(distance).add(target);
+
+    // Frame-rate independent exponential damping. The first framing snaps, so
+    // the screen opens on the character rather than flying in at it; so does
+    // every framing when the player has asked for reduced motion.
+    const blend = this.framed && this.spinsAllowed ? 1 - Math.exp(-dt * CAMERA_RATE) : 1;
+    this.framed = true;
+    this.camera.position.lerp(desired, blend);
+    this.aim.lerp(target, blend);
+    this.camera.lookAt(this.aim);
+  }
 
   /**
    * Blinks on an irregular timer, drifts through a happy or surprised look

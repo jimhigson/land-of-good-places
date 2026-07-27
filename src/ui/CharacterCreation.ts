@@ -4,7 +4,7 @@ import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
 import type { CharacterCreationChoice, HairStyle } from '../state';
-import { CharacterPreview } from './characterCreationPreview';
+import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 
 /**
  * The character creator: name, skin tone, hair colour and style, eye colour,
@@ -173,7 +173,9 @@ export class CharacterCreation {
       this.skinColour,
       (colour) => {
         this.skinColour = colour;
-        this.refreshPreview();
+        // Skin shows on the face, the hands and the legs all at once, so this
+        // is the one swatch with no better subject than the whole character.
+        this.refreshPreview('all');
       },
     );
 
@@ -184,7 +186,7 @@ export class CharacterCreation {
       this.hairColour,
       (colour) => {
         this.hairColour = colour;
-        this.refreshPreview();
+        this.refreshPreview('head');
       },
     );
 
@@ -211,7 +213,7 @@ export class CharacterCreation {
           other.dataset.selected = selected ? 'true' : 'false';
           other.setAttribute('aria-pressed', selected ? 'true' : 'false');
         }
-        this.refreshPreview();
+        this.refreshPreview('head');
       });
       styleButtons.push(button);
       hairStyleRow.append(button);
@@ -225,7 +227,7 @@ export class CharacterCreation {
       this.eyeColour,
       (colour) => {
         this.eyeColour = colour;
-        this.refreshPreview();
+        this.refreshPreview('face');
       },
     );
 
@@ -236,14 +238,14 @@ export class CharacterCreation {
       this.outfitColour,
       (colour) => {
         this.outfitColour = colour;
-        this.refreshPreview();
+        this.refreshPreview('body');
       },
     );
 
     // Starting hat ------------------------------------------------------
     const hatSection = this.buildCardSection('Starting hat', HAT_OPTIONS, this.hatId, (item) => {
       this.hatId = item.id;
-      this.refreshPreview();
+      this.refreshPreview('head');
     });
 
     // Starting pet ------------------------------------------------------
@@ -253,7 +255,7 @@ export class CharacterCreation {
       this.petId,
       (item) => {
         this.petId = item.id;
-        this.refreshPreview();
+        this.refreshPreview('pet');
       },
       'toy.ripika',
     );
@@ -398,7 +400,14 @@ export class CharacterCreation {
     return section;
   }
 
-  private refreshPreview(): void {
+  /**
+   * Rebuilds the preview, framed on whatever the child just changed.
+   *
+   * The family's note was that the hat they were choosing was cropped out of
+   * shot, and the same for the pet and for eye colour — so every control says
+   * what it is about and the preview camera goes there, then drifts back.
+   */
+  private refreshPreview(focus: PreviewFocus = 'all'): void {
     this.preview.update({
       skin: this.skinColour,
       hair: this.hairColour,
@@ -407,7 +416,7 @@ export class CharacterCreation {
       eye: this.eyeColour,
       hatId: this.hatId,
       petId: this.petId,
-    });
+    }, focus);
   }
 
   private complete(): void {
