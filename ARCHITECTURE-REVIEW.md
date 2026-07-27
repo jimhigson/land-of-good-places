@@ -101,3 +101,353 @@ three times, rail builders twice).
 ### Action taken
 
 P0 items delegated immediately. P1/P2 recorded here for scheduling.
+
+---
+
+## Review 2 — 27 July 2026 — core loop, collision, player, wanderDriver, docs
+
+**Scope actually covered** (read line-by-line, on a fresh clone of origin/main
+at `a660c64`): `src/Game.ts`, `src/world/World.ts`, `src/world/Collision.ts`,
+`src/entities/Player.ts`, `src/entities/npc/wanderDriver.ts`,
+`src/entities/npc/driver.ts`, targeted reads of `src/world/FacePaintStall.ts`,
+`src/ui/CharacterCreation.ts`, `src/ui/characterCreationPreview.ts`, and all
+six docs. `tsc --noEmit` is clean on main. **Cut short by the 1pm pause — see
+"Not reached" at the end before trusting any silence about other files.**
+
+**Fixed since review 1:** nothing verified yet — review 1's S1/S2/S5/S14 were
+delegated the same hour and had not landed when this was written. Review 3
+should check them off explicitly.
+
+### 1. Correctness risks
+
+**C1 (P1) — the face-paint walk has no timeout and no stuck detection.**
+`wanderDriver.ts:809-827`: the `walking` phase of `driveFacePaintVisit`
+steers straight at the stall with none of the protections the train walk
+has (`WALK_TIMEOUT` at :558, `steerTowards` stuck-sidestep at :646-669).
+There is no equivalent of `LEG_TIMEOUT` either — `legElapsed` is not ticked
+in paint mode. A child wedged behind a bush en route pushes at it **forever**.
+Worse, a stuck child holds one of the four `MAX_CONCURRENT_PAINTED` visit
+slots forever (`paintedOrVisitingCount()` counts `paintVisit !== 'none'`,
+:175-181), so one wedged child quietly throttles the whole feature. This is
+exactly the bug class Decision 2's shared helpers would have prevented: the
+block was copy-adapted from the train block and the safety rails were the
+part that got dropped. In play: an NPC marching on the spot into scenery near
+the stall, indefinitely. Confirm by watching the stall area for ~5 minutes,
+or by temporarily logging `paintVisit` states.
+
+**C2 (P2) — painted-face decals detach during train trips and climbs.**
+The decal position registry (`faceX`/`faceZ`, `wanderDriver.ts:779-780`) is
+only updated inside `driveFacePaintVisit`, which never runs while a climb
+owns the frame (early return at :324-327) or while the train block owns it
+(return at :334). A painted child who boards the train leaves their floating
+paint decal hovering at the platform for the whole ride; same while up a
+tree. Fix is one line: move the `faceX/faceZ` bookkeeping to the top of
+`update()`.
+
+**C3 (P2, cosmetic) — cross-block state leaks between activities.**
+`reactToPlayer` (:329) still runs during train trips, so a copied hop sets
+`hopRequest = true` (:407) — but the consumer (:385-389) is skipped while the
+trip owns the frame, so the hop fires *after* the child leaves the train,
+long after the player hopped. Similarly the `waveAmount` blend (:379) freezes
+mid-wave when a trip starts (arm snaps down because the body clears the
+intent) and snaps briefly back up on rejoin. Two agents' assumptions
+colliding: the social block assumes it always runs; the trip block assumes it
+owns everything.
+
+**C4 (P1) — FacePaintStall breaks the NpcSystem-last build rule**
+(= review 1's S3, independently confirmed with one addition). The stall
+registers four walls (`FacePaintStall.ts:598-601`) but is constructed after
+`NpcSystem` (`World.ts:129` vs :116), so waypoint edges crossing it survived
+validation. The addition: the comment at `World.ts:123-128` **actively
+asserts the order doesn't matter** — it reasons only about the module-level
+target registry and misses the collision consequence entirely. When fixing,
+fix the comment too, or the next agent will "simplify" it back.
+
+**C5 (P2) — `World.dispose()` is incomplete.** `World.ts:237-246` disposes
+fountain, fairyLights, lampPosts, stalls, facePaintStall, train, flowers,
+dodgems — but not garden, scenery, building, anchorPlots, npcs or dayNight.
+Harmless today (the game is never torn down in production) but a trap for
+anything that ever rebuilds a World (tests, a future "new game").
+
+**C6 (P2) — the intent contract documents the opposite of what happens.**
+`driver.ts:76-77`: "Implementations must write **every** field … stale values
+would leak". In fact `NpcCharacter.ts:147` calls `clearIntent()` before every
+`driver.update()`, so drivers only need to write what they own. Both were
+written by different agents; the doc is the wrong one. Correct the doc — a
+future driver author following it will write dead code (and the train block's
+`intent.wave = 0` at :602 already is dead).
+
+**C7 (watch, not a bug) — skin tone / eye colour is doc-only on main.**
+Commit `f258c92` ("Record skin tone, eye colour…") changed **GAME_DESIGN.md
+only**. On main, `CharacterCreation.ts:376` and `Player.ts:173` still
+hardcode `PALETTE.skin`, and `PlayerState` has no skin/eye fields. The
+in-flight skintone branch must touch `Player.ts:171-183`,
+`CharacterCreation.ts`, `state/types.ts` and `characterCreationPreview.ts`
+together — a classic multi-file merge-collision candidate. Whoever merges it:
+verify the chosen tone actually reaches the in-park model, not just the
+preview.
+
+Also noted, nano: `Game.ts:425-426` double-handles the paused case
+(`scaled` already equals `tick.dt` when paused); redundant, not wrong.
+
+### 2. Architectural drift
+
+- **ARCHITECTURE.md's module map is fiction now.** "entities/ — things that
+  move — currently just the Player" (line 32) predates NPCs, the parade, worn
+  items; the world table omits train, stalls, flowers, lamp posts, the face
+  paint stall; ui/ is ~20 files, not "HUD and the name label". Either update
+  it or cut it down to folder-level pointers that can't rot.
+- **The frame-order doc omits three real steps.** ARCHITECTURE.md:38-47 vs
+  `Game.tick()` (:363-448): mini-games update *before* the player on the
+  loop's real dt (:415), `tapNavigator.update` runs between input and player
+  and must (:432-437), and the whole park render is skipped when
+  `hidesPark` (:472). All three are load-bearing and all three are
+  undocumented outside code comments.
+- **The draw-call budget paragraph is stale.** ARCHITECTURE.md:184-187 claims
+  355–430 at default zoom; QA measured 517 under contention. The paragraph
+  now misleads anyone budgeting a new feature. Re-baseline it (full
+  performance census was still in flight when this review was cut off).
+- **The two docs disagree about the scale reference.** ARCHITECTURE.md:264
+  and ASSET_MANIFEST.md both say the kid is **1.86 m** and call it *the*
+  scale reference; ART_DIRECTION.md:132 says the cartoon pass made her
+  **2.12 m**. Pick one number and fix the other two files.
+- **Player.ts:82-84** still says movement is camera-relative "whichever of
+  the four isometric views is active" — the four views died with the camera
+  rotation (GAME_DESIGN #16).
+- **ARCHITECTURE-DECISIONS.md Decision 2 has rotted in a dangerous way**: its
+  "correction" boldly states there is no tree-climbing block. There is now
+  (`wanderDriver.ts:61-96, 686-760`), and an NPC-chat block is landing. Add a
+  dated addendum to the decision rather than leaving a confident false claim
+  in the file that wins conflicts.
+- ARCHITECTURE.md's known follow-up "the children stay in the garden…
+  letting an NPC ride [a ride] means generalising those hooks" is half-stale:
+  NPCs ride the train now, via `TrainService`, which is itself the
+  generalisation the note asked for. Update it to point at the pattern.
+
+### 3. The wanderDriver question — Decision 2 restated, now urgent
+
+The file is 896 lines: a ~470-line wander core plus **three** bolted
+activity blocks (train :476-684, tree-climb :61-96/:224-233/:686-760,
+face-paint :98-181/:235-248/:763-849), with NPC chat about to be the fourth.
+Decision 2 recommended extracting a minimal `Activity` abstraction when it
+believed there were only two blocks. **With fresh eyes: the call was right,
+and the file now contains the evidence.** Every block re-implements the same
+four things — an eligibility gate (cooldown + seeded chance), an off-graph
+walk, a hold-the-frame state machine, and a rejoin-the-graph exit — and they
+have already diverged where they should be identical:
+
+- the train's rejoin (:613-620) resets `current`, `previous` **and**
+  `target`; the paint rejoin (:842-847) resets only `current`/`previous`;
+  the climb's (`endClimb`, :752-760) resets nothing because position didn't
+  change. Three exit dances, two of them subtly different for no reason.
+- the train walk has timeout + stuck-sidestep; the paint walk has neither —
+  that is finding C1, and it is a *consequence* of copy-adaption.
+- the climb block is the odd shape: it claims the frame at the top of
+  `update()` (:324) *and* claims the arrival moment inside `arrive()`
+  (:450), which the other two don't need.
+
+**Restated ruling:** extract `Activity` now, with one refinement over
+Decision 2's shape to accommodate what the climb block proved:
+
+```ts
+interface Activity {
+  /** True = I own this frame; core skips wandering AND the social tail. */
+  update(context: DriverContext, intent: CharacterIntent): boolean;
+  /** Optional: claim the moment of arriving at a waypoint (the climb). */
+  onArrive?(context: DriverContext): boolean;
+}
+```
+
+Activities tried in fixed order (climb, train, chat, paint); first taker
+wins; shared helpers extracted **once**: `steerTowards` + stuck-sidestep,
+`rejoinGraph` (the train's version, with the `target` reset, as canonical),
+and an `offGraphErrand` walk that bakes the timeout in so it cannot be
+forgotten again. Module-level registries (`trainService`,
+`facePaintStallTarget`, `wanderDrivers`) move with their blocks unchanged.
+
+**Migration cost at four blocks:** ~500 lines moved (train ~200, climb ~150,
+paint ~150) into `src/entities/npc/activities/`, zero intended behaviour
+change, verifiable by seeded-determinism trace as Decision 2 said. Cost has
+roughly doubled since the two-block estimate and will grow with every block
+added — the queue system (Decision 2 §3) is next and **must not** be a fifth
+hand-bolted block. **Sequencing matters:** the NPC-chat PR is in flight in
+this same file. Land chat first as a fifth… fourth bolted block (cheaper
+than rebasing it mid-refactor), then extract all four in one move, then fix
+C1/C2/C3 as a follow-up inside the new structure. Two PRs, one owner, no
+parallelism inside `wanderDriver.ts`.
+
+### 4. Performance (partial — full census was still in flight)
+
+From the files actually read:
+
+- `paintedNpcFaces()` (`wanderDriver.ts:153-161`) allocates a fresh array and
+  objects; if `FacePaintStall.update` calls it per frame that is per-frame
+  garbage scaling with painted NPCs. Confirm caller frequency.
+- `World.interactZones()` (:189-197) spreads five arrays into a new one on
+  every call, and `ActionButton` rebuilds the zone list **every frame** by
+  design (`Game.ts:219-231`), with `TapNavigator` doing the same on every
+  tap through a second, duplicated closure (`Game.ts:124-127`). Cheap-ish
+  today; worth one shared, mostly-cached provider when anyone is in there.
+- `CollisionWorld.resolve` is O(all colliders) × 2 passes × every mover ×
+  every frame, no spatial partition (`Collision.ts:246-317`). Fine at current
+  counts, but Decision 2 plans NPC_COUNT 12 → 18 and the collider count is
+  climbing (see the debug HUD). Watch item, not action item.
+- The stale 355–430 draw-call budget vs QA's 517 is in §2; do not re-tune
+  against the doc number.
+
+### 4a. Performance census (audit landed just before the pause)
+
+The dispatched performance audit returned in full. Highlights, severity first:
+
+**Texture budget is blown ~2× at boot, ~4× in play.** Estimate: **~73
+distinct canvas textures at boot, 120–160 after normal play**, against the
+40 budget (ART_DIRECTION.md:282). The driver is `paintExpressions`
+(`faces.ts:359-367`) unconditionally painting **five** canvases per call:
+player kid (5×512²), the crowd prototype kid (5×512², only 3 used —
+`kidCrowd.ts:78`), a **second throwaway blue-eyed prototype kid**
+(`kidCrowd.ts:170`, another 5×512²), pet blobs per-instance
+(`petBlob.ts:95` — the one face not routed through `sharedFacePatch`, which
+`sharedFace.ts` exists to prevent), the locomotive, the stall painter. Plus
+15 sign textures and **13 uncached name-label canvases**. Cheapest wins:
+lazy expression painting (≈14 canvases), `petBlob` → `sharedFacePatch` (−5),
+reuse one prototype for the blue-eye capture (−5).
+
+**Two concrete leaks:**
+- `characterCreationPreview.ts:118-134` rebuilds the kid on every chooser
+  click and `disposeTree` (`materials.ts:192-200`) **never disposes
+  `material.map`** — 5 × 512² canvases leaked per click, ~100 MB in twenty
+  clicks on a phone.
+- `Entrance.ts:197` keys the welcome sign texture by park name
+  (`textures.ts:252`), so every rename permanently adds a 512×288 entry.
+
+**Draw calls: ~250 of the growth past the old 430 budget is accounted for**
+(train +89, face-paint stall +100, stations/track +40, lamps +18), and QA's
+517 is consistent with a stall or two plus the train in shot. **Roughly
+350–400 calls are removable**, mostly by two mechanical passes:
+- `castShadow = false` on decoration: `stallProp.ts` has **~34 decoration
+  casters per stall ×5** (`:116,:164,:170,:241`…), plus `FacePaintStall.ts`
+  pots/dabs/scallops, `Scenery.ts:596/:603` fence posts/caps,
+  `track.ts:139` (two 325 m rail tubes in the shadow pass for a 5 cm rail!),
+  and `FoliageFade.ts:115` — a *transparent* fade-ghost tree casting a solid
+  shadow. Root cause: `solid()` (`materials.ts:172`) defaults casting ON, so
+  every decorative `solid(...)` opts in by accident.
+- Instancing the obvious repeats: stall props (74 → ~25 meshes each), train
+  body merge + wheel instancing (78 → ~20), FairyLights poles/knobs/cables
+  (51 → ~5 calls; `FairyLights.ts:51-103`), wooden-wall posts/caps the way
+  the stone walls already do (`Scenery.ts:591-604` vs the pattern at :698).
+
+**Per-frame allocation confirmed** (my §4 suspicion): `paintedNpcFaces()`
+is called every frame unconditionally from `FacePaintStall.ts:323` — 60
+arrays + up to 240 object literals/sec for a fixed pool of 4 decals. Fill a
+preallocated 4-slot array or iterate the driver set directly. Also
+`LampPosts.ts:212-213` allocates two small arrays per frame. Otherwise the
+frame path is genuinely clean — 88 update methods, zero THREE-object
+allocations — and worth saying so.
+
+**Dead code:** `createCatBus()` (`catBus.ts:70`, ~50 meshes + its own face
+canvas) is never called — only `buildPawPrint` is imported. GAME_DESIGN #30b
+(arrive by cat bus) presumably still wants it; either wire it (instanced,
+per the numbers above) or note it as parked.
+
+Also flagged: the crowd face part carries 6 material variants of which 3
+exist solely for Ethan's blue eyes and draw every frame
+(`kidCrowd.ts:90`), and all 27 crowd meshes are `frustumCulled = false`
+(`InstancedCrowd.ts:128` — deliberate per ARCHITECTURE.md:432, but it is
+why the crowd is a constant 30 calls).
+
+### 5. What the docs should say and don't
+
+Concrete additions for ARCHITECTURE.md (one small PR):
+
+1. **A "merge hazards" section**, verbatim suggestion: *"Most damage in this
+   tree has come from conflict resolution, not from first-draft code. Naive
+   'keep both sides' resolution has produced duplicated logic blocks, a class
+   boundary in the wrong place, and a @keyframes nested inside a rule. When
+   resolving: use a genuine three-way merge against the common ancestor
+   (`git merge-file` / your tool's base pane), never concatenation. After
+   resolving any conflict in a class file, re-read the class for duplicate
+   members and doubled blocks; after CSS conflicts, lint the file. Build
+   passing is not evidence the merge is right — duplicated logic type-checks."*
+2. **The build-order invariant, named**: anything that registers collision
+   must be constructed before `NpcSystem`; the graph validator only sees
+   colliders that exist. (C4/S3 is what happens otherwise.)
+3. **The off-graph errand rule**: any NPC walk that leaves the waypoint graph
+   MUST carry a timeout and stuck detection; name the shared helper once the
+   Activity extraction lands, and forbid new bolted blocks in
+   `wanderDriver.ts` outright.
+4. **The sanctioned decoupling pattern**: module-level singleton registries
+   (`trainService()`, `registerFacePaintStall`) are the house style for
+   "world feature talks to NPC behaviour without threading fields through
+   NpcSystem" — document it *with* its caveat (registry order is flexible;
+   collision order is not).
+5. **Correct the intent contract** in `driver.ts` (C6) and reflect it here:
+   the body clears the intent; drivers fill what they own.
+6. **Fix the frame-order list and the module map** (§2), and reconcile the
+   1.86 m / 2.12 m scale reference across the three docs.
+
+### 6. Prioritised actions (PR-sized, parallel-safe)
+
+Group A — `wanderDriver.ts` and satellites (ONE owner, serial):
+- **A1 (P1)** Land the in-flight NPC-chat block; then extract `Activity` +
+  shared helpers per §3. Owns `src/entities/npc/wanderDriver.ts`,
+  `src/entities/npc/activities/*` (new). No behaviour change.
+- **A2 (P1)** Fix C1 (paint walk timeout/stuck via the shared helper), C2
+  (head-tracking to top of `update()`), C3 (social state vs activities).
+  Same files, immediately after A1.
+
+Group B — `World.ts` only:
+- **B1 (P1)** Move `FacePaintStall` construction above `NpcSystem`; rewrite
+  the misleading comment (C4/S3). One-file PR, safe alongside Group A.
+- **B2 (P2)** Complete `World.dispose()` (C5). Can ride with B1.
+
+Group C — docs only, fully parallel with A and B:
+- **C1d (P1)** ARCHITECTURE.md additions per §5 + Decision 2 dated addendum
+  + budget/scale-reference corrections. Owns the four .md files, no code.
+
+Group D — small code hygiene, parallel with all above (disjoint files):
+- **D1 (P2)** `driver.ts` doc fix + delete dead `intent.wave = 0`
+  (:602). Owns `src/entities/npc/driver.ts` + one line of `wanderDriver.ts`
+  — fold into A2 if contention appears.
+- **D2 (P2)** Shared interact-zone provider for `Game.ts`'s two duplicated
+  closures. Owns `src/Game.ts`. Low value; do last.
+
+Group E — performance (from §4a; each parallel-safe, disjoint files):
+- **E1 (P0)** Fix the character-creation texture leak: `disposeTree` must
+  dispose `material.map` (`src/art/style/materials.ts:192-200`), and the
+  preview should restyle in place rather than rebuild per click
+  (`src/ui/characterCreationPreview.ts:118-134`). Phones OOM on this one.
+- **E2 (P1)** Shadow-caster pass: decoration to `castShadow = false` in
+  `src/minigames/stallProp.ts`, `src/world/FacePaintStall.ts`,
+  `src/world/Scenery.ts` (fence posts/caps), `src/world/train/track.ts:139`,
+  `src/world/FoliageFade.ts:115`; consider flipping `solid()`'s default or
+  adding a `solidNoCast()`. Biggest single draw-call win, ~150+ calls.
+- **E3 (P1)** Texture budget: lazy `paintExpressions`, `petBlob` →
+  `sharedFacePatch`, single prototype in `kidCrowd.ts:170`, cache name-label
+  canvases, un-key the welcome sign from the park name
+  (`src/world/entrance/Entrance.ts:197`). Owns `src/art/style/*`,
+  `src/entities/npc/petBlob.ts`, `src/entities/npc/kidCrowd.ts`,
+  `src/ui/NameLabel.ts`, `src/world/entrance/Entrance.ts`.
+- **E4 (P2)** Instancing: stall props, train wheels, FairyLights poles,
+  wooden-wall posts (match the stone-wall pattern already in `Scenery.ts`).
+- **E5 (P2)** `paintedNpcFaces()` allocation-free (`wanderDriver.ts:153` +
+  `FacePaintStall.ts:323`) — fold into Group A to avoid file contention.
+
+### Not reached — the next review MUST start here
+
+Cut off by the 1pm pause. **No conclusions — not even "probably fine" — should
+be inferred about:**
+
+- `src/minigames/**` (audit was dispatched, results not yet returned)
+- `src/style.css` — the whole 2,442 lines (known prior CSS merge damage
+  makes this a priority; an audit was dispatched, results not yet returned)
+- `src/ui/**`, `src/entities/parade/**`, and the NPC support files
+  (`NpcSystem`, `InstancedCrowd`, `kidCrowd`, `poiGraph`, `petBlob`) beyond
+  the targeted greps noted above (audit dispatched, not returned)
+- `src/world/` non-building files: `train/*`, `TreeClimbing.ts`,
+  `FacePaintStall.ts` (full read), `entrance/*`, `Flowers.ts`, `Sky.ts`,
+  `DayNight.ts`, `Scenery.ts`
+- Runtime verification of anything — this review is static reading only.
+
+Four audit subagents were in flight when this was written; if their reports
+surface after the pause, fold them into Review 3 rather than trusting this
+section's silence.
