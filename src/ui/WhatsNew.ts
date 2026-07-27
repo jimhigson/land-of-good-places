@@ -1,12 +1,13 @@
 import whatsnewData from '../../whatsnew.json';
 import { gameStore } from '../state';
+import { saveFlags } from '../state/flags';
 
 /**
  * The "what's new" welcome panel.
  *
  * `whatsnew.json` (repo root) is a curated, kid-friendly changelog — one entry
  * per feature a player would actually notice. This panel compares the newest
- * entry's id against `lastSeenWhatsNewId` in `localStorage`:
+ * entry's id against the `whatsNewSeenId` kept in the save (`state/flags.ts`):
  *
  * - **First-ever visit** (nothing stored yet): a short welcome, plus only the
  *   **3 newest** entries — a returning six-year-old does not want to read the
@@ -33,8 +34,6 @@ export interface WhatsNewEntry {
 
 /** How many of the newest entries a brand-new player is shown, not the lot. */
 const WELCOME_ENTRY_COUNT = 3;
-
-const STORAGE_KEY = 'lgp:lastSeenWhatsNewId';
 
 /** Newest first, however the file happens to be ordered. */
 const ENTRIES: readonly WhatsNewEntry[] = [...whatsnewData.entries].sort((a, b) => b.id - a.id);
@@ -192,26 +191,13 @@ export class WhatsNew {
   }
 }
 
-/** `null` on a first-ever visit, or if storage is unavailable (private mode). */
+/** `null` on a first-ever visit. Kept in the one save — see `state/flags.ts`. */
 function readLastSeenId(): number | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return null;
-    const value = Number.parseInt(raw, 10);
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    // Safari private mode throws on *access*, not just on write.
-    return null;
-  }
+  return saveFlags.whatsNewSeenId;
 }
 
 function writeLastSeenId(id: number): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, String(id));
-  } catch {
-    // Nothing we can do about a full or disabled store — worst case the
-    // welcome panel shows again next time, which is a fine failure mode.
-  }
+  saveFlags.setWhatsNewSeenId(id);
 }
 
 function escapeHtml(text: string): string {

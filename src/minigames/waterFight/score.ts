@@ -1,32 +1,31 @@
+import { gameStore } from '../../state';
+
 /**
  * The splash-point record.
  *
- * GAME_DESIGN asks for splash points *"and try to beat your best score"*, so the
- * garden has to remember something between visits. It remembers it here, in a
- * module-level number, which means:
+ * GAME_DESIGN asks for splash points *"and try to beat your best score"*, so
+ * the garden has to remember something between visits — and, now that there is
+ * a save file, between *days*. The record lives in `gameStore`
+ * (`bestSplashPoints`, which the state has always declared and nothing ever
+ * wrote), so it is written to disk by the autosave along with everything else
+ * and is there when she comes back tomorrow.
  *
- * - it survives leaving the garden and coming back, because ES modules are
- *   evaluated once per page;
- * - it resets when the page does, which makes it a **session** best — the right
- *   scope for a game a family plays in one sitting, and one that can never feel
- *   unbeatable because of something that happened on Tuesday;
- * - it needs nothing from `state/store.ts`.
+ * It used to be a module-level number here, deliberately session-scoped: "one
+ * sitting" was the right span for a record when nothing survived a refresh,
+ * and the doc comment said lifting it into the store was the obvious next step
+ * once somebody wanted it to persist. Saving is that somebody.
  *
- * That last point is a deliberate boundary, not an oversight. `GameState`
- * already declares `splashPoints` and `bestSplashPoints`, and lifting the record
- * into the store is the obvious next step — but the store has no action to write
- * them yet, and adding one is a change to a file every other feature in the park
- * also edits. The garden is self-contained until somebody wants the park's HUD
- * to show the score too.
+ * `rounds` stays local and stays session-scoped: it counts how many goes she
+ * has had *this visit*, which is what the end-of-round card uses to decide how
+ * chatty to be. That is genuinely about this sitting.
  */
 
-let best = 0;
 let rounds = 0;
 
 export interface SplashRecord {
   /** Points scored in the round just finished. */
   readonly points: number;
-  /** The best of the session, including this round. */
+  /** The best ever, including this round. */
   readonly best: number;
   /** True when this round set a new record. */
   readonly isNewBest: boolean;
@@ -36,15 +35,16 @@ export interface SplashRecord {
 
 /** The score to beat, for showing in the HUD before a round starts. */
 export function bestSplashPoints(): number {
-  return best;
+  return gameStore.get().bestSplashPoints;
 }
 
 /** Files a finished round and says whether it was a record. */
 export function recordSplashPoints(points: number): SplashRecord {
   rounds += 1;
+  const previousBest = gameStore.get().bestSplashPoints;
   // Strictly greater, and never on a zero: "NEW BEST!" for scoring nothing at
   // all on your very first go would be a strange thing to celebrate.
-  const isNewBest = points > best && points > 0;
-  if (isNewBest) best = points;
-  return { points, best, isNewBest, rounds };
+  const isNewBest = points > previousBest && points > 0;
+  gameStore.setSplashPoints(points, isNewBest ? points : previousBest);
+  return { points, best: gameStore.get().bestSplashPoints, isNewBest, rounds };
 }

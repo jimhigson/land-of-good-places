@@ -1,5 +1,6 @@
 import { PALETTE } from '../core/palette';
 import { DAY_START_TIME, PLAYER_DEFAULT_NAME } from '../core/constants';
+import type { SaveFile, SavedGame } from './save';
 import type {
   CuteCategory,
   CutePlacement,
@@ -13,15 +14,14 @@ import type {
   InventoryKind,
 } from './types';
 
-/** Every flower colour there is to find, in a fixed display order. */
-export const FLOWER_COLOURS: readonly FlowerColour[] = [
-  'yellow',
-  'red',
-  'blue',
-  'violet',
-  'pink',
-  'white',
-];
+/**
+ * Every flower colour there is to find, in a fixed display order.
+ *
+ * Defined in `./types` next to the `FlowerColour` union it produces — see the
+ * note at the top of that file — and re-exported here so the rest of the game
+ * keeps importing it from the same place it always has.
+ */
+export { FLOWER_COLOURS } from './types';
 
 /** The true palette colour each flower blooms into. */
 export const FLOWER_HEX: Readonly<Record<FlowerColour, number>> = {
@@ -145,6 +145,8 @@ class GameStore {
   private purchaseCount = 0;
   /** Guards against re-entrant notifications when a listener writes back. */
   private notifyQueued = false;
+  /** Monotonic change counter — see the {@link revision} getter. */
+  private changes = 0;
 
   /** Current state. Treat as read-only; use the actions below to change it. */
   get(): Readonly<GameState> {
@@ -516,6 +518,138 @@ class GameStore {
     this.notify();
   }
 
+  /** The splash-point record, kept here so it survives a save — see `setSplashPoints`. */
+  setSplashPoints(points: number, best: number): void {
+    if (this.state.splashPoints === points && this.state.bestSplashPoints === best) return;
+    this.state.splashPoints = points;
+    this.state.bestSplashPoints = Math.max(best, this.state.bestSplashPoints);
+    this.notify();
+  }
+
+  // --------------------------------------------------------------- saving
+
+  /**
+   * Counts every change anything has made, so the autosave can tell "nothing
+   * happened in the last five seconds" from "she has been shopping".
+   *
+   * Bumped synchronously in {@link notify}, ahead of its microtask coalescing:
+   * a save that fires between the mutation and the notification must still see
+   * the mutation.
+   */
+  get revision(): number {
+    return this.changes;
+  }
+
+  /** The uid counter, for the save file — see `SaveFile.purchases`. */
+  get purchases(): number {
+    return this.purchaseCount;
+  }
+
+  /**
+   * The part of the state worth writing to disk, as a **small literal that
+   * points at the live sub-objects** rather than a copy of them.
+   *
+   * That is deliberate and it is the whole trick that keeps the five-second
+   * autosave cheap: `JSON.stringify` walks `player`, `world`, `collection` and
+   * `inventory` in place, so a save allocates one small object and one string
+   * instead of cloning the object graph every tick. ARCHITECTURE-REVIEW keeps
+   * an allocation-suspect list; this stays off it.
+   *
+   * The returned object must therefore be serialised immediately and never
+   * stashed — it aliases live state.
+   */
+  savedGame(): SavedGame {
+    const s = this.state;
+    return {
+      parkName: s.parkName,
+      mode: s.mode,
+      money: s.money,
+      splashPoints: s.splashPoints,
+      bestSplashPoints: s.bestSplashPoints,
+      player: s.player,
+      world: s.world,
+      collection: s.collection,
+      inventory: s.inventory,
+      carriedUid: s.carriedUid,
+      wornFlowerUid: s.wornFlowerUid,
+      wornHatUid: s.wornHatUid,
+    };
+  }
+
+  /**
+   * Restores a save over a fresh initial state.
+   *
+   * Overlaying rather than replacing is what makes "adding a field is never
+   * fatal" true: `state/save.ts` leaves anything it could not read *absent*,
+   * and an absent field simply keeps the value `createInitialState` gave it.
+   * Nothing here has to know a second set of defaults.
+   *
+   * Must run **before `new Game(...)`**, exactly like character creation:
+   * `Player`'s constructor reads `player.hairStyle` the moment it builds the
+   * kid, and a hair style change swaps meshes rather than a colour, so there
+   * is no path that rebuilds a live character model.
+   */
+  hydrate(file: SaveFile): void {
+    const next = createInitialState();
+    const g = file.game;
+
+    if (g.parkName !== undefined) next.parkName = g.parkName;
+    if (g.mode !== undefined) next.mode = g.mode;
+    if (g.money !== undefined) next.money = g.money;
+    if (g.splashPoints !== undefined) next.splashPoints = g.splashPoints;
+    if (g.bestSplashPoints !== undefined) next.bestSplashPoints = g.bestSplashPoints;
+
+    const p = g.player;
+    if (p) {
+      if (p.name !== undefined) next.player.name = p.name;
+      if (p.kind !== undefined) next.player.kind = p.kind;
+      if (p.skinColour !== undefined) next.player.skinColour = p.skinColour;
+      if (p.hairColour !== undefined) next.player.hairColour = p.hairColour;
+      if (p.hairStyle !== undefined) next.player.hairStyle = p.hairStyle;
+      if (p.outfitColour !== undefined) next.player.outfitColour = p.outfitColour;
+      if (p.eyeColour !== undefined) next.player.eyeColour = p.eyeColour;
+      if (p.maxHealth !== undefined) next.player.maxHealth = Math.max(1, p.maxHealth);
+      if (p.health !== undefined) next.player.health = p.health;
+      if (p.facePaint !== undefined) next.player.facePaint = p.facePaint;
+    }
+
+    const w = g.world;
+    if (w) {
+      if (w.timeOfDay !== undefined) next.world.timeOfDay = w.timeOfDay;
+      if (w.dayCount !== undefined) next.world.dayCount = w.dayCount;
+      if (w.lightsOn !== undefined) next.world.lightsOn = w.lightsOn;
+    }
+
+    if (g.collection) next.collection = g.collection;
+    if (g.inventory) next.inventory = g.inventory;
+    if (g.carriedUid !== undefined) next.carriedUid = g.carriedUid;
+    if (g.wornFlowerUid !== undefined) next.wornFlowerUid = g.wornFlowerUid;
+    if (g.wornHatUid !== undefined) next.wornHatUid = g.wornHatUid;
+
+    // Derived rather than saved, so it can never contradict the mode.
+    next.moneyIsFinite = next.mode === 'mayhem';
+    if (next.mode === 'normal') next.player.health = next.player.maxHealth;
+    else next.player.health = Math.min(Math.max(0, next.player.health), next.player.maxHealth);
+
+    this.state = next;
+    this.purchaseCount = Math.max(0, Math.floor(file.purchases));
+
+    // A uid that names nothing owned is worse than nothing: `WornHat` and
+    // `CarriedItem` would look it up every frame and quietly draw air. Same
+    // slot rules as `setWornHat` / `setWornFlower`, applied once on the way in.
+    const owns = (uid: string | null, kind?: InventoryKind): boolean =>
+      uid !== null && next.inventory.some((item) => item.uid === uid && (!kind || item.kind === kind));
+    if (!owns(next.carriedUid)) next.carriedUid = null;
+    if (!owns(next.wornHatUid, 'hat')) next.wornHatUid = null;
+    if (!owns(next.wornFlowerUid, 'flower')) next.wornFlowerUid = null;
+
+    // The Cute-o-dex's `placement` is derived from what is owned, so a save
+    // written mid-change can never leave the book disagreeing with the bag.
+    for (const id of Object.keys(next.collection)) this.refreshPlacement(id);
+
+    this.notify();
+  }
+
   // ------------------------------------------------------------ internal
 
   /**
@@ -538,6 +672,10 @@ class GameStore {
   }
 
   private notify(): void {
+    // Ahead of the coalescing guard on purpose: the autosave asks "has
+    // anything changed?", and every change must count even when three of them
+    // share one listener callback.
+    this.changes += 1;
     if (this.notifyQueued) return;
     this.notifyQueued = true;
     // Coalesce to a microtask so a burst of actions produces one UI update.

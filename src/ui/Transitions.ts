@@ -25,6 +25,7 @@ export class Transitions {
   private closeTimer = 0;
   private openTimer = 0;
   private flashTimer = 0;
+  private irisRunning = false;
 
   constructor(container: HTMLElement) {
     this.iris = document.createElement('div');
@@ -60,15 +61,28 @@ export class Transitions {
     window.clearTimeout(this.closeTimer);
     window.clearTimeout(this.openTimer);
 
+    this.irisRunning = true;
     this.iris.dataset.closed = 'true';
     this.closeTimer = window.setTimeout(() => {
       midpoint();
       this.iris.dataset.closed = 'false';
-      this.openTimer = window.setTimeout(
-        () => onOpened?.(),
-        IRIS_OPEN_SECONDS * 1000,
-      );
+      this.openTimer = window.setTimeout(() => {
+        this.irisRunning = false;
+        onOpened?.();
+      }, IRIS_OPEN_SECONDS * 1000);
     }, IRIS_CLOSE_SECONDS * 1000);
+  }
+
+  /**
+   * True from the moment the iris starts closing until it has finished opening
+   * again — which is to say, while the player is being moved between spaces.
+   *
+   * The autosave asks (see `SaveSystem`): a position sampled halfway through a
+   * teleport is the one coordinate that could strand a child somewhere she
+   * cannot walk out of.
+   */
+  get wiping(): boolean {
+    return this.irisRunning;
   }
 
   /** The speed-lines vignette, on while the world is running fast. */

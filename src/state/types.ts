@@ -6,14 +6,32 @@
  * feature usually means adding a field here plus an action in `store.ts`.
  */
 
+/**
+ * ## Why the string unions below are written as `as const` arrays
+ *
+ * Every one of them is also a *runtime* question, because a save file read
+ * back off disk is untyped: `state/save.ts` has to ask "is this string still a
+ * hair style?" before handing it to the art layer. Writing the union as a bare
+ * `type` would mean keeping a second, hand-written list of the same words in
+ * the validator — and the day somebody adds a ninth hair style and forgets the
+ * second list, every save with that hair in it quietly loads as `bunches`.
+ *
+ * Deriving the type *from* the list makes that drift impossible: there is one
+ * list, the type follows it, and adding a value is a one-line change that the
+ * validator picks up for free.
+ */
+
 /** Normal = you cannot lose. Mayhem = grown-up mode with health and real money. */
-export type GameMode = 'normal' | 'mayhem';
+export const GAME_MODES = ['normal', 'mayhem'] as const;
+export type GameMode = (typeof GAME_MODES)[number];
 
 /** Which body the player is wearing. Only `kid` exists so far (step 7 adds animals). */
-export type CharacterKind = 'kid' | 'bunny' | 'kitten' | 'mouse';
+export const CHARACTER_KINDS = ['kid', 'bunny', 'kitten', 'mouse'] as const;
+export type CharacterKind = (typeof CHARACTER_KINDS)[number];
 
 /** Where a collected cute thing currently lives. */
-export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried' | 'worn';
+export const CUTE_PLACEMENTS = ['parade', 'backpack', 'bedroom', 'carried', 'worn'] as const;
+export type CutePlacement = (typeof CUTE_PLACEMENTS)[number];
 
 /**
  * Hair style chosen in the character creator.
@@ -32,35 +50,44 @@ export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried' | 'wor
  * result straight into `KidOptions.hairStyle`, so a name that exists in only
  * one of the two files fails to compile.
  */
-export type HairStyle =
-  | 'bunches'
-  | 'bob'
-  | 'short'
-  | 'long'
-  | 'ponytail'
-  | 'longPonytail'
-  | 'bowl'
-  | 'spiky'
-  | 'messy';
+export const HAIR_STYLES = [
+  'bunches',
+  'bob',
+  'short',
+  'long',
+  'ponytail',
+  'longPonytail',
+  'bowl',
+  'spiky',
+  'messy',
+] as const;
+export type HairStyle = (typeof HAIR_STYLES)[number];
 
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
-export type CuteCategory =
-  | 'toy'
-  | 'balloon'
-  | 'candyfloss'
-  | 'icecream'
-  | 'hat'
-  | 'sticker'
-  | 'pet'
-  | 'egg'
-  | 'flower'
-  | 'secret';
+export const CUTE_CATEGORIES = [
+  'toy',
+  'balloon',
+  'candyfloss',
+  'icecream',
+  'hat',
+  'sticker',
+  'pet',
+  'egg',
+  'flower',
+  'secret',
+] as const;
+export type CuteCategory = (typeof CUTE_CATEGORIES)[number];
 
 /**
  * A picked flower's colour variant — free, found in the meadow, never sold.
  * Each is its own little hair accessory (see `entities/WornFlower.ts`).
+ *
+ * The list is also the fixed display order the Cute-o-dex and the HUD use; it
+ * is re-exported from `state/store.ts` (with its colour and icon tables) as
+ * `FLOWER_COLOURS`, which is the name the rest of the game imports.
  */
-export type FlowerColour = 'yellow' | 'red' | 'blue' | 'violet' | 'pink' | 'white';
+export const FLOWER_COLOURS = ['yellow', 'red', 'blue', 'violet', 'pink', 'white'] as const;
+export type FlowerColour = (typeof FLOWER_COLOURS)[number];
 
 export interface CuteThing {
   /** Stable id, e.g. `toy.ripika`. Used as the Cute-o-dex key. */
@@ -81,7 +108,17 @@ export interface CuteThing {
  * shop something came from, while the *kind* decides how the game treats it —
  * a `treat` is eaten, a `hat` is worn, a `pet` walks in the parade.
  */
-export type InventoryKind = 'toy' | 'balloon' | 'treat' | 'hat' | 'sticker' | 'pet' | 'egg' | 'flower';
+export const INVENTORY_KINDS = [
+  'toy',
+  'balloon',
+  'treat',
+  'hat',
+  'sticker',
+  'pet',
+  'egg',
+  'flower',
+] as const;
+export type InventoryKind = (typeof INVENTORY_KINDS)[number];
 
 /** A moment on the park clock. `day` counts from 0, `timeOfDay` is 0..1. */
 export interface GameTime {

@@ -22,7 +22,23 @@ import { Transitions } from './ui/Transitions';
 import { playOpenChime } from './ui/chime';
 import { MiniGameHost } from './minigames';
 import { Shopping } from './Shopping';
+import { SaveSystem } from './SaveSystem';
 import { gameStore } from './state';
+import type { SavedPlace } from './state/save';
+import { localToWorld, SPACE_GARDEN } from './world/spaces';
+
+/** Where a brand-new player starts: the plaza, just south of the fountain. */
+const DEFAULT_SPAWN = new Vector3(0, 0, 7);
+
+export interface GameOptions {
+  /**
+   * Where a continued game left off, from the save file.
+   *
+   * Omitted for a fresh start, and omitted rather than `null` — the tsconfig
+   * has `exactOptionalPropertyTypes`.
+   */
+  readonly startPlace?: SavedPlace;
+}
 
 /**
  * Wires everything together and owns the frame.
@@ -69,6 +85,7 @@ export class Game {
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
   readonly parkMap: ParkMap;
+  readonly saveSystem: SaveSystem;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -87,7 +104,7 @@ export class Game {
   private zoneCacheFrame = -1;
   private zoneCache: readonly InteractZone[] = [];
 
-  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
+  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, options: GameOptions = {}) {
     this.engine = new Engine(canvas);
     this.camera = new IsoCamera();
     this.input = new InputSystem();
@@ -100,12 +117,22 @@ export class Game {
     // goes in too: NPC name labels are screen-space, so the crowd needs it.
     this.world = new World(this.engine.scene, this.sky, this.interiorControls(), this.camera);
 
-    // Spawn on the plaza, just south of the fountain, looking at the park.
-    this.player = new Player(this.world.collision, this.camera, new Vector3(0, 0, 7));
+    // Spawn on the plaza, just south of the fountain, looking at the park —
+    // or wherever a continued game left off (see `resolveSpawn`).
+    const spawn = resolveSpawn(options.startPlace);
+    this.player = new Player(this.world.collision, this.camera, spawn);
     this.engine.scene.add(this.player.group);
     // The building owns "how high is the ground?" from here on, so that its
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
+    // `Player`'s constructor samples the terrain for its own height, which is
+    // right for a fresh spawn and wrong for a restored one — she may have been
+    // standing on a bridge, a deck or the fountain rim. Now that the building's
+    // ground sampler is attached, put her back exactly where she was, facing
+    // the way she was facing.
+    if (spawn !== DEFAULT_SPAWN && options.startPlace) {
+      this.player.teleportTo(spawn.x, spawn.y, spawn.z, options.startPlace.facing);
+    }
 
     // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
     // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
@@ -351,6 +378,17 @@ export class Game {
     });
     this.addSystem(this.highlights);
 
+    // The autosave. Not an `addSystem` registration on purpose — it is a
+    // `setInterval`, so it fires *between* frames rather than inside `tick()`.
+    // Everything it needs is a closure over what it must never write during:
+    // a mini-game entrance or exit wipe, an iris carrying her between spaces,
+    // or a ride driving the character. See `SaveSystem`.
+    this.saveSystem = new SaveSystem({
+      position: () => this.player.position,
+      facing: () => this.player.facing,
+      canSave: () => !this.miniGames.active && !this.transitions.wiping && !this.player.riding,
+    });
+
     this.frameContext = {
       dt: 0,
       elapsed: 0,
@@ -461,6 +499,7 @@ export class Game {
     this.input.attach();
     this.pointer.attach();
     this.tapBurst.attach();
+    this.saveSystem.start();
     this.loop.start();
   }
 
@@ -470,10 +509,15 @@ export class Game {
     this.input.detach();
     this.pointer.detach();
     this.tapBurst.detach();
+    // Writes one last time on the way out, so a dev-console `game.stop()`
+    // never loses the last few seconds either.
+    this.saveSystem.flush();
+    this.saveSystem.stop();
   }
 
   dispose(): void {
     this.stop();
+    this.saveSystem.dispose();
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();
     this.tapNavigator.dispose();
@@ -618,6 +662,36 @@ export class Game {
  * The context object is allocated once and rewritten each frame — systems see
  * it as fully readonly, which stops anyone stashing and mutating it.
  */
+/**
+ * Where a continued game puts her, from the save file's space id plus local
+ * offset (`world/spaces.ts`).
+ *
+ * Two things send her back to the default spawn instead, and both are
+ * deliberate rather than defensive:
+ *
+ * 1. **The space no longer exists.** ARCHITECTURE-DECISIONS Decision 3 turns
+ *    `castle` into five per-floor spaces; a save written before that names a
+ *    place tomorrow's build has never heard of. `localToWorld` says so by
+ *    returning `null`, and everything *else* in the save still loads — her
+ *    character, her hat, her whole Cute-o-dex. Losing the exact spot she was
+ *    standing in is a shrug; losing the park is not.
+ * 2. **She was indoors.** Being inside the building is not just a coordinate:
+ *    `Building` has to have swapped its interior on, moved the play bounds and
+ *    snapped the camera, and none of that has happened at construction time.
+ *    Rather than reproduce the door-transition sequence at boot — untestable
+ *    without the browser, and about to be rewritten wholesale by Decision 3's
+ *    portal system — a continued game starts back out on the plaza, which is
+ *    somewhere a six-year-old always recognises. The indoor position is still
+ *    *written* to the save, so restoring into a space is a small addition the
+ *    day `SpaceManager` exists.
+ */
+function resolveSpawn(place: SavedPlace | undefined): Vector3 {
+  if (!place || place.space !== SPACE_GARDEN) return DEFAULT_SPAWN;
+  const world = localToWorld(place.space, place.x, place.y, place.z);
+  if (!world) return DEFAULT_SPAWN;
+  return new Vector3(world.x, world.y, world.z);
+}
+
 /** What to call each level, for the stairs menu. */
 function floorName(deck: number): string {
   if (deck <= 0) return 'Ground floor';
