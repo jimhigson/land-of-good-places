@@ -1,6 +1,7 @@
 # HANDOFF — 1.1 minimum font size + whole-UI scaling, and 1.8
 
-Branch: `feat/ui-scale`. Owner of `src/style.css` while this is open.
+Branch: `feat/ui-scale`, rebased on `origin/main`. Owner of `src/style.css`
+while this is open. **Work is complete and pushed; only review/QA remains.**
 
 ## The one decision everything inherits
 
@@ -19,42 +20,36 @@ top of `src/style.css`.
 resize) so canvas-painted text uses the same number — one definition, two
 consumers. `minTextPx()` === `uiUnitPx()` by construction.
 
-## Done
+## What landed (3 commits)
 
-- `src/style.css` fully converted px -> rem (script-assisted, then hand-tuned).
-  Only px left: the root clamp, `999px` pill sentinels, `@media` breakpoints,
-  comments. Type-scale tokens `--lgp-text-min/sm/md/lg/xl`; every font-size at
-  or below the floor became `var(--lgp-text-min)`.
-- Breakpoints that merely *shrank* things deleted (shop title/buy, dex grid,
-  parkmap floor label, sign-reader padding, portrait names, `.pill--soft`).
-  Kept: genuine reflows (charcreate stacking, update-toast full width, short
-  screen repositioning, portrait-circle squeeze, `prefers-reduced-motion`).
-- `button/input/select/textarea` pinned to the floor — they do not inherit.
-- 1.8: `.charcreate-card` now `min(58rem, 96vw)` / `min(46rem, 92vh)` and
-  `.charcreate-controls` is `repeat(auto-fit, minmax(14rem, 1fr))` with the
-  name section spanning all columns. Scrolls only when it truly cannot fit.
-  **CSS only — `CharacterCreation.ts` / preview code belong to another agent.**
-- `NameLabel` pill height is now derived (`minTextPx() * 160/62`) instead of a
-  flat 34px, which had the name itself at ~13px. Screen-constant sizing
-  (`worldUnitsPerPixel`) untouched — do not regress that.
-- `SpeechBubble` scaled so its 44px canvas line lands on `minTextPx()` (was
-  ~10px on screen).
-- Signs: subtitle 34 -> 40px, title 52 -> 56px, both with `fillText` max-width
-  so long text condenses instead of overflowing.
+1. **Root scale + style.css.** Whole file px -> rem. Only px left: the root
+   clamp, `999px` pill sentinels, `@media` breakpoints, comments. Type scale
+   `--lgp-text-min/sm/md/lg/xl`. Breakpoints that only *shrank* things are
+   deleted; genuine reflows kept. `button/input/select/textarea` pinned to the
+   floor (they do not inherit). Canvas text: `NameLabel` (was ~13px on
+   screen), `SpeechBubble` (~10px), sign subtitle 34 -> 40px with `fillText`
+   max-width. **1.8**: `.charcreate-card` is `min(58rem, 96vw)` /
+   `min(46rem, 92vh)` and `.charcreate-controls` is
+   `repeat(auto-fit, minmax(14rem, 1fr))` with the name spanning all columns.
+2. **Everything else + the guard.** Park map labels (they were painting at the
+   canvas default 10px — the font string named a CSS var, which a canvas
+   cannot resolve) plus collision-skipping; mini-game HUD CSS-in-TS; DevBadge;
+   `scripts/check-text-sizes.mjs` wired as the first step of `npm run build`.
+3. **Dodgems word art.** Giggles (~6px) and the bird's "TWEET!?" (~15px) now
+   scale from the dodgems camera's `worldUnitsPerPixel`, like name pills.
 
-## Remaining
+## Rules honoured
 
-- `src/ui/ParkMap.ts`: label font `700 11px` -> `minTextPx()`, pin/glyph sizes
-  scaled. Watch for label collisions at the bigger size.
-- CSS-in-TS in `src/minigames/overlay.ts`, `waterFight/hud.ts`,
-  `ferrisWheel/hud.ts`, `dodgems/hud.ts`, and `src/ui/DevBadge.ts`.
-- `scripts/check-text-sizes.mjs` guard + `npm run check:text`.
-- Rebase onto origin/main, `gh pr create`, do NOT merge.
+- CSS only in character creation — `CharacterCreation.ts` and
+  `characterCreationPreview.ts` belong to the concurrent 1.5/1.7 agent.
+- Name labels keep their screen-constant sizing; the zoom-out fix is intact.
+- `npm run build` run and exit code checked after every chunk (never piped).
+- No browser: shared profile is the P0 agent's this hour. Build-verified only;
+  the PR lists what to look at and at which sizes.
 
-## Known follow-ups (call out in the PR, do not fix here)
+## If you take this over
 
-- Dodgems giggle bubbles (`minigames/dodgems/giggles.ts`) and the tree
-  "TWEET!?" are world-scaled sprites, not screen-constant; item 1.3 rewrites
-  that file, so leave them.
-- No browser this session (shared profile owned by the P0 agent) — build
-  verification only.
+Nothing outstanding. If review asks for changes, the levers are: the clamp on
+line 37 of `src/style.css` (floor/cap/coefficients), the type-scale tokens
+just below it, and `.charcreate-controls`'s `minmax(14rem, 1fr)` for how
+eagerly character creation splits into columns.
