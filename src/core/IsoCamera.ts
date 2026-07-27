@@ -12,6 +12,7 @@ import {
   CAMERA_ZOOM_STEP,
 } from './constants';
 import { clamp, damp, DEG } from './mathUtils';
+import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
 
@@ -57,13 +58,9 @@ export class IsoCamera {
   constructor() {
     const yaw = CAMERA_YAW_DEGREES * DEG;
     const pitch = CAMERA_PITCH_DEGREES * DEG;
-    const horizontal = Math.cos(pitch) * CAMERA_DISTANCE;
 
-    this.offset = new Vector3(
-      Math.sin(yaw) * horizontal,
-      Math.sin(pitch) * CAMERA_DISTANCE,
-      Math.cos(yaw) * horizontal,
-    );
+    const offset = cameraOffset(yaw, pitch, CAMERA_DISTANCE);
+    this.offset = new Vector3(offset.x, offset.y, offset.z);
 
     // The camera sits at +offset and looks back at the focus, so "into the
     // screen" is the negated horizontal part of that offset. Solved by the

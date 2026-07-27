@@ -1,6 +1,7 @@
 import { DirectionalLight, Group, HemisphereLight, OrthographicCamera, Scene } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng, clamp, clamp01, damp } from '../../core/mathUtils';
+import { cameraOffset } from '../../core/cameraRig';
 import { gameStore } from '../../state';
 import { createBackdrop, type Backdrop } from './backdrop';
 import { createConfetti, type Confetti } from './confetti';
@@ -529,12 +530,8 @@ class RailRacer implements MiniGame {
 
   private applyCamera(): void {
     const focusZ = LANES[PLAYER_LANE] ?? 0;
-    const horizontal = Math.cos(CAMERA_PITCH) * CAMERA_DISTANCE;
-    this.camera.position.set(
-      this.cameraX + Math.sin(CAMERA_YAW) * horizontal,
-      this.cameraY + Math.sin(CAMERA_PITCH) * CAMERA_DISTANCE,
-      focusZ + Math.cos(CAMERA_YAW) * horizontal,
-    );
+    const eye = cameraOffset(CAMERA_YAW, CAMERA_PITCH, CAMERA_DISTANCE);
+    this.camera.position.set(this.cameraX + eye.x, this.cameraY + eye.y, focusZ + eye.z);
     this.camera.lookAt(this.cameraX, this.cameraY, focusZ);
     this.camera.updateMatrixWorld();
   }

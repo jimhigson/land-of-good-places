@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU, angleDelta, clamp, clamp01, damp, turnTowards } from '../../core/mathUtils';
+import { cameraOffset } from '../../core/cameraRig';
 import { screenBasis, screenToWorldX, screenToWorldZ } from '../../core/screenBasis';
 import { gameStore } from '../../state';
 import { createArena, type Arena } from './arena';
@@ -977,12 +978,8 @@ class Dodgems implements MiniGame {
   }
 
   private applyCamera(): void {
-    const horizontal = Math.cos(CAMERA_PITCH) * CAMERA_DISTANCE;
-    this.camera.position.set(
-      this.focusX + Math.sin(CAMERA_YAW) * horizontal,
-      Math.sin(CAMERA_PITCH) * CAMERA_DISTANCE,
-      this.focusZ + Math.cos(CAMERA_YAW) * horizontal,
-    );
+    const eye = cameraOffset(CAMERA_YAW, CAMERA_PITCH, CAMERA_DISTANCE);
+    this.camera.position.set(this.focusX + eye.x, eye.y, this.focusZ + eye.z);
     this.camera.lookAt(this.focusX, 0.8, this.focusZ);
     this.camera.updateMatrixWorld();
   }

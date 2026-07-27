@@ -11,7 +11,9 @@ import {
   type CanvasTexture,
 } from 'three';
 import { PALETTE } from '../../core/palette';
+import { CAMERA_PITCH_DEGREES } from '../../core/constants';
 import { DEG, Rng, clamp, clamp01, damp } from '../../core/mathUtils';
+import { cameraOffset } from '../../core/cameraRig';
 import { screenBasis } from '../../core/screenBasis';
 import { gameStore } from '../../state';
 import { createConfetti, type Confetti } from '../railRacer/confetti';
@@ -104,8 +106,13 @@ const STREAK_WINDOW = 4;
 /** One-off, the first time a rainbow comes out in a round. */
 const POINTS_RAINBOW = 25;
 
-/** Camera pitch, matching the park's `CAMERA_PITCH_DEGREES`. */
-const CAMERA_PITCH = 38 * DEG;
+/**
+ * Camera pitch. The park's, not a copy of the park's: this used to be `38 * DEG`
+ * with a comment saying it matched `CAMERA_PITCH_DEGREES`, which was true on the
+ * day it was written and would have gone on claiming to be true for ever after
+ * somebody retuned the park camera.
+ */
+const CAMERA_PITCH = CAMERA_PITCH_DEGREES * DEG;
 
 /**
  * Two framing yaws, and the reason this game has two.
@@ -1080,12 +1087,8 @@ class WaterFight implements MiniGame {
   }
 
   private applyCamera(): void {
-    const horizontal = Math.cos(CAMERA_PITCH) * CAMERA_DISTANCE;
-    this.camera.position.set(
-      Math.sin(this.yaw) * horizontal,
-      Math.sin(CAMERA_PITCH) * CAMERA_DISTANCE,
-      Math.cos(this.yaw) * horizontal,
-    );
+    const eye = cameraOffset(this.yaw, CAMERA_PITCH, CAMERA_DISTANCE);
+    this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.lookAt(0, 0.9, 0);
     this.camera.updateMatrixWorld();
 
