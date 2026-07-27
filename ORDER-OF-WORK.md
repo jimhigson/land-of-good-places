@@ -165,6 +165,9 @@ Slot in whenever an agent is free; none of these block anything.
 - **Ferris wheel pet chair** — pet sits lower than the player so it does not
   block the view; restructure the car to fit. Do NOT disturb the ferris
   look-around directions, which are confirmed correct.
+- **Night lighting** — more light after dark; **procedurally generated**
+  light strings between trees (must survive the park replan moving them);
+  fireflies at night. Pool and instance them.
 - **Toilet privacy roof** — walk in, roof covers the room, flush, roof
   lifts, wash hands. Uses the existing `TOILET_ROOM` region and the existing
   flush/tap sounds. Must never trap the player under the lid.

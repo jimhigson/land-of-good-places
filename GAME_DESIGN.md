@@ -194,6 +194,27 @@ confirmation. Money is infinite in normal play, so buying should feel
 generous. Give immediate, obvious feedback that the thing is now yours, and
 make the button big enough for a small finger.
 
+### Night is still too dark (27 July 2026 — queued)
+
+Lamp posts helped but **night is still too dark**. Three things, together:
+
+- **More lights** generally, so the park stays readable and cosy after dark
+  rather than gloomy. This is a game with no losing in it; night should feel
+  magical, not frightening.
+- **Strings of lights between the trees.** These must be **procedurally
+  generated from wherever the trees actually are**, not hand-placed — the
+  park is about to be replanned around a real railway (Decision 4) and the
+  trees will move. A hand-authored set of light strings would be thrown away;
+  a generated one simply re-strings itself.
+- **Fireflies** drifting about at night.
+
+*Notes: the lights should be pooled and instanced — a park full of bulbs is
+exactly the sort of thing that lands on the GC-pause suspect list. Fireflies
+want a small pool of drifting points that fade in as `nightFactor` rises and
+are gone by morning. The string-hanging routine should pick tree pairs by
+proximity with a maximum span so it cannot draw a wire across the whole park,
+and must keep clear of the railway and of anywhere a child walks.*
+
 ### Toilets
 
 The building has cute toilets. When you use one, a **flushing sound** plays,
