@@ -7,6 +7,7 @@ import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
 import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
+import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
@@ -50,6 +51,7 @@ export class World implements GameSystem {
   readonly fairyLights: FairyLights;
   readonly lampPosts: LampPosts;
   readonly treeLights: TreeLights;
+  readonly fireflies: Fireflies;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
@@ -74,6 +76,9 @@ export class World implements GameSystem {
     // AnchorPlots so it only needs the static ANCHORS list, not the built
     // plots themselves, to keep its lamps out of the reserved ride footprints.
     this.lampPosts = new LampPosts(this.collision);
+    // Drifting sparks over the lawn after dark. Depends on nothing but the
+    // terrain and the reserved plots it keeps out of.
+    this.fireflies = new Fireflies();
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots, interiorControls);
@@ -149,6 +154,7 @@ export class World implements GameSystem {
       this.fairyLights.group,
       this.lampPosts.group,
       this.treeLights.group,
+      this.fireflies.group,
       this.anchorPlots.group,
       // The building is bigger on the inside: its interior is its own place,
       // six hundred metres from the park rather than inside the plot the facade
@@ -176,6 +182,9 @@ export class World implements GameSystem {
     this.fairyLights.nightFactor = eveningGlow;
     this.lampPosts.nightFactor = eveningGlow;
     this.treeLights.nightFactor = eveningGlow;
+    // Fireflies follow the real night rather than the park's lighting-up
+    // time — they are not part of the fairy-light rig, they are wildlife.
+    this.fireflies.nightFactor = night;
 
     this.train.nightFactor = night;
 
@@ -183,6 +192,7 @@ export class World implements GameSystem {
     this.fairyLights.update(context);
     this.lampPosts.update(context);
     this.treeLights.update(context);
+    this.fireflies.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
 
@@ -271,6 +281,7 @@ export class World implements GameSystem {
     this.fairyLights.dispose();
     this.lampPosts.dispose();
     this.treeLights.dispose();
+    this.fireflies.dispose();
     this.stalls.dispose();
     this.facePaintStall.dispose();
     this.train.dispose();
