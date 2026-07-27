@@ -497,6 +497,20 @@ Rough order of construction, each step playable:
     shadows come from fixed interior lights only.
 19. **Analogue clock** — replace the time text with a cute analogue clock
     at the top of the screen; tapping it says the time OUT LOUD (speech).
+20a. **Novelty shopfronts, concretely (27 July 2026 — queued, not started).**
+    The **ice cream parlour** should look like a **giant ice cream** and the
+    **balloon shop** like a **giant balloon** — the whole building is the
+    thing it sells. Each has **an opening cut into it for the attendant to
+    stand in**, so a shopkeeper is framed by a doorway in the cone or the
+    balloon rather than standing beside a normal counter. Same treatment for
+    the rest as item 20 describes: giant hat on the hat shop, giant egg for
+    the surprise eggs, and so on.
+    *Note:* the interior work already left a named `getTopperHook()` anchor
+    per shop for exactly this, but a topper sitting on a kiosk is not what
+    is being asked for here — the **building itself** should be the shape,
+    with the counter inside its opening. Whoever takes this should also
+    check the interior has the ceiling height for it (the interior PR flagged
+    that a tall topper would need more headroom).
 20. **Shops are the main feature of their space** — not small side
     attractions. Novelty architecture: each shop is a little building
     shaped like what it sells — the hat shop has a GIANT HAT on top, the
