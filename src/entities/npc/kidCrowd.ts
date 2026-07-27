@@ -8,6 +8,7 @@ import {
   type Texture,
 } from 'three';
 import { createKid } from '../../art/models/kid';
+import { CROWD_HAIR_STYLES, visibleTop, type HairStyle } from '../../art/models/hair';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import type { Expression } from '../../art/style/faces';
@@ -109,8 +110,18 @@ export const EYE_VARIANT_COUNT = EYE_VARIANTS.length + 1;
 /** The variant index reserved for Ethan's family-requested blue eyes. */
 export const BLUE_EYE_VARIANT = EYE_VARIANTS.indexOf(ART.kidEyeBlue) + 1;
 
-/** How many of the biggest parts cast a shadow. Head, hair and body. */
+/** How many of the biggest parts cast a shadow. Head, body and bag. */
 const SHADOW_CASTER_PARTS = 3;
+
+/**
+ * The style the prototype is built wearing.
+ *
+ * Only matters for which parts happen to be `visible` on the prototype after
+ * construction — the crowd reads geometry and hierarchy, not visibility — but
+ * it does decide what {@link KidCrowd.modelHeight} measures, so it is named
+ * rather than left as a bare string in two places.
+ */
+const PROTOTYPE_STYLE: HairStyle = 'bunches';
 
 /** The joints a walk cycle needs, resolved once per child. */
 export interface KidRig {
@@ -142,8 +153,24 @@ export class KidCrowd {
   private readonly prototype: Object3D;
   private readonly roles: readonly ColourRole[];
   private readonly facePartIndex: number;
-  /** Parts that make up the side bunches — hidden to give a short-hair child. */
-  private readonly sideHairParts: readonly number[];
+  /**
+   * Per style, the parts a child wearing it must **not** show.
+   *
+   * This is how the crowd gets nine silhouettes out of one prototype. The
+   * prototype carries every style's hair at once (`CROWD_HAIR_STYLES`), each
+   * mesh tagged by the model with the styles it belongs to, and a member
+   * simply zeroes the matrices of the ones that are not its own — see
+   * `InstancedCrowd`'s `shown`. A second crowd per hairstyle would be twenty-odd
+   * more draw calls apiece, which is more than the rest of the children cost
+   * put together.
+   *
+   * It replaces a positional guess ("hair-coloured, on the head, off to one
+   * side") that only ever had to tell bunches from no-bunches. Nine styles is
+   * well past what a heuristic can do, and the model already knows the answer.
+   */
+  private readonly hiddenParts: ReadonlyMap<HairStyle, readonly number[]>;
+  /** Bare height per style — spikes reach 0.2 m higher than a bob. */
+  private readonly heights: ReadonlyMap<HairStyle, number>;
   private readonly fixedColours: readonly number[];
 
   constructor(capacity: number) {
@@ -153,12 +180,27 @@ export class KidCrowd {
       outfit: SENTINEL_OUTFIT,
       shoe: SENTINEL_SHOE,
       backpackColour: SENTINEL_BAG,
-      hairStyle: 'bunches',
+      hairStyle: PROTOTYPE_STYLE,
+      // Every style a background child can wear, built into the one prototype.
+      // The floor-length simulated ponytail is deliberately not among them —
+      // see `CROWD_HAIR_STYLES` for the full reasoning.
+      hairStyles: CROWD_HAIR_STYLES,
       backpack: true,
     });
 
     this.prototype = handle.root;
     this.modelHeight = handle.height;
+
+    // Ask the model how tall it is wearing each style in turn, rather than
+    // tabulating nine numbers here that would go stale the first time anybody
+    // retuned the hair.
+    const heights = new Map<HairStyle, number>();
+    for (const style of CROWD_HAIR_STYLES) {
+      handle.setHairStyle(style);
+      heights.set(style, visibleTop(handle.root));
+    }
+    handle.setHairStyle(PROTOTYPE_STYLE);
+    this.heights = heights;
 
     // Name the joints so every member can find its own copies by name.
     handle.body.name = NODE_BODY;
@@ -236,7 +278,17 @@ export class KidCrowd {
     // drawn again in the shadow pass, so a whole child casting is twice a
     // child's worth of draw calls for a soft blob on the grass that a head and
     // a body already produce.
-    const casters = new Set(largestParts(this.prototype, SHADOW_CASTER_PARTS));
+    //
+    // Hair is excluded from the contest outright. Since the prototype carries
+    // every style at once, the biggest mesh on it is now whichever style has
+    // the widest merged geometry — the long curtain, whose two face-framing
+    // strands put its bounding sphere near a metre — and letting that win
+    // would push the *body* out of the top three and leave every child in the
+    // park casting a shadow shaped like somebody else's hairstyle.
+    const hairMeshes = new Set(handle.hairParts.map((part) => part.mesh));
+    const casters = new Set(
+      largestParts(this.prototype, SHADOW_CASTER_PARTS, (mesh) => !hairMeshes.has(mesh)),
+    );
 
     this.crowd = new InstancedCrowd(this.prototype, capacity, {
       materialsFor: (source) =>
@@ -249,20 +301,31 @@ export class KidCrowd {
     this.facePartIndex = faceMesh ? sources.indexOf(faceMesh) : -1;
     this.roles = sources.map((source) => classify(source, source === faceMesh));
     this.fixedColours = sources.map((source) => materialColour(source));
-    this.sideHairParts = sources
-      .map((source, index) => ({ source, index }))
-      .filter(({ source, index }) => isSideHair(source, this.roles[index] ?? 'fixed'))
-      .map(({ index }) => index);
+
+    // Invert the model's "this mesh belongs to these styles" into the crowd's
+    // "wearing this style, hide these part indices".
+    const hidden = new Map<HairStyle, number[]>();
+    for (const style of CROWD_HAIR_STYLES) hidden.set(style, []);
+    for (const part of handle.hairParts) {
+      const index = sources.indexOf(part.mesh as Mesh);
+      if (index < 0) continue;
+      for (const style of CROWD_HAIR_STYLES) {
+        if (!part.styles.includes(style)) hidden.get(style)?.push(index);
+      }
+    }
+    this.hiddenParts = hidden;
   }
 
   /**
    * Adds a child. `scale` varies height a little — children are not clones, and
    * at this camera a 6% difference in height reads more strongly than a hat.
+   * `hairStyle` must be one of {@link CROWD_HAIR_STYLES}; anything else would
+   * hide every hair part and leave a bald child.
    * `eyeVariant` selects one of the face-material sets baked in the
    * constructor — `0` for the default violet, `1..EYE_VARIANTS.length` for
    * the extras (see {@link EYE_VARIANT_COUNT}, {@link BLUE_EYE_VARIANT}).
    */
-  spawn(colours: KidColours, shortHair: boolean, scale: number, eyeVariant = 0): KidAvatar {
+  spawn(colours: KidColours, hairStyle: HairStyle, scale: number, eyeVariant = 0): KidAvatar {
     const member = this.crowd.spawn();
     member.root.scale.setScalar(scale);
 
@@ -270,9 +333,7 @@ export class KidCrowd {
       this.crowd.setPartColour(member, part, this.colourFor(part, colours));
     }
 
-    if (shortHair) {
-      for (const part of this.sideHairParts) member.shown[part] = 0;
-    }
+    for (const part of this.hiddenParts.get(hairStyle) ?? []) member.shown[part] = 0;
 
     const rig = resolveRig(member.root);
     const facePart = this.facePartIndex;
@@ -281,7 +342,9 @@ export class KidCrowd {
       rig,
       member,
       headBaseY: rig.head.position.y,
-      height: this.modelHeight * scale,
+      // This child's own style, not the prototype's: a name label sized off
+      // `modelHeight` would sit inside a spiky-haired child's hair.
+      height: (this.heights.get(hairStyle) ?? this.modelHeight) * scale,
       setExpression: (expression: Expression) => {
         if (facePart < 0) return;
         const variant = FACE_ORDER.indexOf(expression);
@@ -357,29 +420,14 @@ function classify(mesh: Mesh, isFace: boolean): ColourRole {
 }
 
 /**
- * Is this part one of the side bunches?
- *
- * Hiding those parts is how the crowd gets a second hair silhouette without a
- * second crowd — a whole extra set of instanced meshes for one hairstyle is
- * twenty-odd draw calls, which is more than the rest of the children cost
- * together. The test is positional rather than by name so that it keeps working
- * if the bunches are moved or resized: hair-coloured, on the head, off to one
- * side. Ears sit in the same place but are skin, so they stay.
- */
-function isSideHair(mesh: Mesh, role: ColourRole): boolean {
-  if (role === 'skin' || role === 'face') return false;
-  if (mesh.parent?.name !== NODE_HEAD) return false;
-  return Math.abs(mesh.position.x) > 0.25;
-}
-
-/**
- * The `count` bulkiest meshes in a model, by bounding radius.
+ * The `count` bulkiest meshes in a model, by bounding radius, among those
+ * `eligible` accepts.
  *
  * Chosen by size rather than by name so that retuning the model — or renaming
  * a part, or swapping the hair for a hat — still picks whatever is now doing
  * the work of being the character's outline.
  */
-function largestParts(prototype: Object3D, count: number): Mesh[] {
+function largestParts(prototype: Object3D, count: number, eligible: (mesh: Mesh) => boolean): Mesh[] {
   const measured: { mesh: Mesh; radius: number }[] = [];
   prototype.traverse((object) => {
     if (!(object instanceof Mesh)) return;
@@ -387,6 +435,7 @@ function largestParts(prototype: Object3D, count: number): Mesh[] {
     // it wraps, so it would win every size contest, and the crowd does not draw
     // them anyway.
     if (object.material instanceof MeshBasicMaterial) return;
+    if (!eligible(object)) return;
     if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere();
     const radius = object.geometry.boundingSphere?.radius ?? 0;
     const scale = Math.max(object.scale.x, object.scale.y, object.scale.z);
