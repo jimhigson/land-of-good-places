@@ -36,11 +36,18 @@ export class CharacterModel {
   readonly leftLeg: Group;
   readonly rightLeg: Group;
 
-  /** Total height in metres — used to place the name label. */
+  /** Total height in metres, bare-headed — used to place the name label when nothing is worn. */
   readonly height: number;
 
   /** Resting height of the head pivot, in metres. The animator nudges around it. */
   readonly headHeight = KID_HEAD_HEIGHT;
+
+  /**
+   * Height of `hatAnchor` above the feet, in metres. Added to a worn hat's own
+   * `height` (`art/models/hats.ts`) to find the true top of the character when
+   * one is worn — see `Player`'s name label placement.
+   */
+  readonly hatAnchorHeight: number;
 
   /** Attachment points for hats, carried toys and backpack peekers. */
   readonly hatAnchor: Group;
@@ -61,6 +68,7 @@ export class CharacterModel {
     this.leftLeg = this.kid.limbs.leftLeg;
     this.rightLeg = this.kid.limbs.rightLeg;
     this.height = this.kid.height;
+    this.hatAnchorHeight = this.kid.hatAnchorHeight;
     this.hatAnchor = this.kid.hatAnchor;
     this.hairAnchor = this.kid.hairAnchor;
     this.holdAnchor = this.kid.holdAnchor;

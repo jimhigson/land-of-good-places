@@ -444,7 +444,15 @@ class SpaceFerrisWheel implements MiniGame {
    * down, so a small hand cannot end up parked staring at the car floor.
    */
   private aimCamera(dt: number, look: LookReading): void {
-    const targetYawVelocity = look.x * YAW_RATE;
+    // `look.x` is screen-space drag-right (see `look.ts`), but `rotation.y`
+    // (yaw) increasing turns the camera *left* — the same right-handed turn
+    // every three.js camera uses (it's why `PointerLockControls` does
+    // `euler.y -= movementX`). Negate here so a drag/press to the left swings
+    // the view left, matching the dodgems' steering (drag right -> car turns
+    // right) and the intuitive "turn your head" expectation. Pitch needs no
+    // such flip: `rotation.x` increasing already looks up, so drag-up ->
+    // look-up falls out correctly with the plain sign.
+    const targetYawVelocity = -look.x * YAW_RATE;
     const targetPitchVelocity = look.y * PITCH_RATE;
     this.yawVelocity = damp(this.yawVelocity, targetYawVelocity, TURN_DAMPING, dt);
     this.pitchVelocity = damp(this.pitchVelocity, targetPitchVelocity, TURN_DAMPING, dt);

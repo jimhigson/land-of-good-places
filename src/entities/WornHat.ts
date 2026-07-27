@@ -33,12 +33,23 @@ export class WornHat implements GameSystem {
 
   private mesh: Group | null = null;
   private currentUid: string | null = null;
+  private currentHeight: number | null = null;
   private pop = 1;
 
   /** `anchor` is the character's `hatAnchor`. */
   constructor(anchor: Group) {
     this.anchor = anchor;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+  }
+
+  /**
+   * The currently-worn hat's own `height` (`art/models/hats.ts`, measured
+   * from `hatAnchor` to the tip) — or `null` bare-headed. The name label adds
+   * this to `CharacterModel.hatAnchorHeight` to clear whatever is worn; see
+   * `Player`.
+   */
+  get hatHeight(): number | null {
+    return this.currentHeight;
   }
 
   update({ dt }: FrameContext): void {
@@ -72,9 +83,11 @@ export class WornHat implements GameSystem {
     asset.root.scale.setScalar(0.001);
     this.anchor.add(asset.root);
     this.mesh = asset.root;
+    this.currentHeight = asset.height;
   }
 
   private clear(): void {
+    this.currentHeight = null;
     if (!this.mesh) return;
     this.anchor.remove(this.mesh);
     disposeTree(this.mesh);
