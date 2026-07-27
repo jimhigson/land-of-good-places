@@ -9,7 +9,6 @@ import {
 } from 'three';
 import {
   DAY_LENGTH_SECONDS,
-  DAY_START_TIME,
   FAIRY_LIGHT_OFF,
   FAIRY_LIGHT_ON,
   FILL_LIGHT_RATIO,
@@ -205,9 +204,18 @@ export class DayNight implements GameSystem {
   readonly fillLight: DirectionalLight;
   readonly ambientLight: HemisphereLight;
 
-  /** Normalised clock. 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset. */
-  private time = DAY_START_TIME;
-  private days = 0;
+  /**
+   * Normalised clock. 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
+   *
+   * Seeded from the store rather than from `DAY_START_TIME` directly, which is
+   * what makes the park clock survive a save: `update()` already pushes the
+   * time *into* the store every frame, so reading the initial value back out
+   * of it closes the loop with no plumbing through `World` or `Game`. A fresh
+   * game is unchanged — `createInitialState()` seeds the store with
+   * `DAY_START_TIME`, so the two agree by construction.
+   */
+  private time = gameStore.get().world.timeOfDay;
+  private days = gameStore.get().world.dayCount;
   private nightFactorValue = 0;
   private lightsOnValue = false;
   private paused = false;
