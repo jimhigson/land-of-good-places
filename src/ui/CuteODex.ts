@@ -1,6 +1,7 @@
 import { FLOWER_COLOURS, FLOWER_ICON, gameStore, type CuteCategory, type FlowerColour, type GameState } from '../state';
 import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/catalogue';
 import { isTouchDevice } from '../core/device';
+import { DexPrize, hasSeenDexPrize, markDexPrizeSeen } from './DexPrize';
 
 /**
  * The Cute-o-dex — the collection book.
@@ -22,6 +23,12 @@ import { isTouchDevice } from '../core/device';
  * A *subscriber*, like the rest of the HUD: it reads `gameStore` and never
  * reaches into a game system. It also mounts its own button into the HUD's top
  * row, so `Hud.ts` needs no change.
+ *
+ * It also owns the moment the book fills up completely: `render` is where the
+ * count is already being worked out, so it is also where "is that 100%?" is
+ * asked, and where the one-time completion prize (`DexPrize.ts`) is set off.
+ * The book's own ⭐ button asks for the same prize again on demand, for a
+ * grown-up who missed it the first time.
  */
 
 /** Section order, and what each one is called in the book. */
@@ -55,14 +62,18 @@ const PARADEABLE = new Set(['toy', 'pet', 'balloon']);
 export class CuteODex {
   private readonly root: HTMLElement;
   private readonly button: HTMLButtonElement;
+  private readonly starButton: HTMLButtonElement;
   private readonly pages: HTMLElement;
   private readonly countEl: HTMLElement;
   private readonly barFill: HTMLElement;
+  private readonly prize: DexPrize;
   private readonly unsubscribe: () => void;
 
   private open = false;
   /** True when we are the reason the park is paused — see `Shopping.setPaused`. */
   private pausedByUs = false;
+  /** Guards the automatic celebration so it only ever fires once per browser. */
+  private prizeAutoShown = hasSeenDexPrize();
 
   constructor(container: HTMLElement) {
     // --- the HUD button ---------------------------------------------------
@@ -105,6 +116,19 @@ export class CuteODex {
     greeting.textContent = 'Every cute thing in the whole park!';
     titles.append(title, greeting);
 
+    // Only shown once the book is full — see `render`. Lets a grown-up who
+    // missed the celebration (or wants to show it off again) bring it back.
+    this.starButton = document.createElement('button');
+    this.starButton.type = 'button';
+    this.starButton.className = 'dex-star';
+    this.starButton.hidden = true;
+    this.starButton.setAttribute('aria-label', 'Show the completion celebration again');
+    this.starButton.textContent = '⭐';
+    this.starButton.addEventListener('click', () => {
+      this.starButton.blur();
+      this.prize.show(this.paradeItems(gameStore.get()), gameStore.get().player.name);
+    });
+
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'shop-close';
@@ -115,7 +139,7 @@ export class CuteODex {
       this.close();
     });
 
-    head.append(glyph, titles, close);
+    head.append(glyph, titles, this.starButton, close);
 
     const progress = document.createElement('div');
     progress.className = 'dex-progress';
@@ -141,12 +165,16 @@ export class CuteODex {
     this.root.append(card);
     container.append(this.root);
 
+    // The full-screen celebration. A separate class (its own confetti,
+    // fireworks and parade), but triggered from here — see the class doc.
+    this.prize = new DexPrize(container);
+
     window.addEventListener('keydown', this.onKeyDown);
     this.unsubscribe = gameStore.subscribe((state) => this.render(state));
   }
 
   get isOpen(): boolean {
-    return this.open;
+    return this.open || this.prize.isOpen;
   }
 
   toggle(): void {
@@ -169,6 +197,14 @@ export class CuteODex {
   }
 
   close(): void {
+    // The celebration sits on top of the book and owns its own pause flag —
+    // if it's showing, a "close" gesture (Escape, the HUD, `Game.tick`'s
+    // "the dex has the screen" branch) means "close that", not the book
+    // underneath it.
+    if (this.prize.isOpen) {
+      this.prize.close();
+      return;
+    }
     if (!this.open) return;
     this.open = false;
     this.root.dataset.open = 'false';
@@ -182,6 +218,7 @@ export class CuteODex {
   dispose(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     this.unsubscribe();
+    this.prize.dispose();
     this.root.remove();
     this.button.remove();
   }
@@ -210,15 +247,26 @@ export class CuteODex {
     ).length;
     const found = CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length + flowerFound;
     const total = CATALOGUE.length + FLOWER_COLOURS.length;
+    const complete = found === total;
     this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
+
+    // The book is full: fire the celebration, exactly once per browser ever
+    // (see `hasSeenDexPrize`), and from then on keep the ⭐ button around so it
+    // can be shown off again on request.
+    this.starButton.hidden = !complete;
+    if (complete && !this.prizeAutoShown) {
+      this.prizeAutoShown = true;
+      markDexPrizeSeen();
+      this.prize.show(this.paradeItems(state), state.player.name);
+    }
 
     if (!this.open) return;
 
     this.countEl.textContent =
       found === 0
         ? 'None found yet — the big building has seven shops!'
-        : `${found} of ${total} found`;
+        : `${found} of ${total} found!`;
     this.barFill.style.width = `${Math.round((found / total) * 100)}%`;
 
     this.pages.innerHTML = '';
@@ -309,6 +357,24 @@ export class CuteODex {
     }
 
     return card;
+  }
+
+  /**
+   * Every found cutie's icon and name, in book order — the parade the prize
+   * celebration marches across the screen. Catalogue items first (shop order),
+   * then any found flowers, so the parade reads in the same order as the pages.
+   */
+  private paradeItems(state: GameState): { icon: string; displayName: string }[] {
+    const catalogueFound = CATALOGUE.filter((item) => state.collection[item.id]?.discovered).map(
+      (item) => ({ icon: item.icon, displayName: item.displayName }),
+    );
+    const flowersFound = FLOWER_COLOURS.filter(
+      (colour) => state.collection[`flower.${colour}`]?.discovered,
+    ).map((colour) => ({
+      icon: FLOWER_ICON[colour],
+      displayName: `${colour.charAt(0).toUpperCase()}${colour.slice(1)} flower`,
+    }));
+    return [...catalogueFound, ...flowersFound];
   }
 
   private renderSection(

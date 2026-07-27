@@ -1432,9 +1432,256 @@ kbd {
   }
 }
 
+/* A tiny star, only shown once the book is full — lets a grown-up ask for the
+   celebration again without hunting for it. */
+.dex-star {
+  appearance: none;
+  cursor: pointer;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-right: -2px;
+  border-radius: 999px;
+  border: 3px solid #fff;
+  background: linear-gradient(180deg, #fff 0%, #ffe9a8 150%);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.dex-star:active {
+  transform: translateY(2px);
+}
+
+.dex-star[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------ Cute-o-dex prize */
+
+.dexprize {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.dexprize[data-open='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  background: radial-gradient(
+    circle at 50% 30%,
+    rgba(255, 255, 255, 0.4) 0%,
+    rgba(74, 58, 82, 0.6) 100%
+  );
+}
+
+.dexprize[data-open='false'] .dexprize-confetti-piece,
+.dexprize[data-open='false'] .dexprize-firework,
+.dexprize[data-open='false'] .dexprize-parade-track {
+  /* Nothing needs to animate off-screen; resumed fresh by `restartAnimation`
+     the next time the celebration is shown. */
+  animation-play-state: paused;
+}
+
+.dexprize-confetti,
+.dexprize-fireworks,
+.dexprize-parade {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dexprize-confetti {
+  z-index: 1;
+}
+
+.dexprize-confetti-piece {
+  position: absolute;
+  top: 0;
+  left: var(--x, 50%);
+  width: 9px;
+  height: 15px;
+  border-radius: 2px;
+  animation: dexprize-fall var(--duration, 3.4s) linear var(--delay, 0s) infinite;
+}
+
+.dexprize-fireworks {
+  z-index: 1;
+}
+
+.dexprize-firework {
+  position: absolute;
+  left: var(--fx, 50%);
+  top: var(--fy, 30%);
+  width: 34vmin;
+  height: 34vmin;
+  margin-left: -17vmin;
+  margin-top: -17vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--fc, #fff) 0%, transparent 62%);
+  mix-blend-mode: screen;
+  animation: dexprize-burst var(--fduration, 1.6s) ease-out var(--fdelay, 0s) infinite;
+}
+
+.dexprize-parade {
+  z-index: 2;
+  top: 14%;
+  bottom: auto;
+  height: 15vmin;
+  display: flex;
+  align-items: center;
+}
+
+.dexprize-parade-track {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 4vmin, 40px);
+  white-space: nowrap;
+  will-change: transform;
+  animation: dexprize-parade-scroll 12s linear infinite;
+}
+
+.dexprize-parade-item {
+  font-size: clamp(28px, 6vmin, 52px);
+  line-height: 1;
+  filter: drop-shadow(0 3px 0 rgba(74, 58, 82, 0.25));
+}
+
+.dexprize-card {
+  --shop-accent: #ffe9a8;
+  position: relative;
+  z-index: 3;
+  width: min(480px, 94vw);
+  max-height: min(560px, 82vh);
+  overflow-y: auto;
+  text-align: center;
+  padding: 28px 22px 24px;
+  background: var(--lgp-cream);
+  border: 6px solid #fff;
+  border-radius: 30px;
+  box-shadow: 0 14px 0 rgba(74, 58, 82, 0.2);
+  animation: prize-pop 420ms cubic-bezier(0.22, 1.5, 0.4, 1) both;
+}
+
+.dexprize-title {
+  margin: 0 0 14px;
+  font-size: clamp(22px, 5.4vmin, 34px);
+  line-height: 1.25;
+  color: var(--lgp-pink-deep);
+  text-shadow: 0 3px 0 #fff, 0 5px 0 rgba(74, 58, 82, 0.1);
+}
+
+.dexprize-note {
+  margin: 0 0 22px;
+  font-size: clamp(14px, 2.6vmin, 17px);
+  font-weight: 700;
+  line-height: 1.5;
+  opacity: 0.82;
+}
+
+.dexprize-sign {
+  display: inline-block;
+  margin-top: 4px;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.dexprize-ok {
+  appearance: none;
+  cursor: pointer;
+  width: 100%;
+  min-height: 68px;
+  font-family: inherit;
+  font-size: clamp(20px, 4vmin, 26px);
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, var(--shop-accent) 220%);
+  border: 4px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 6px 0 rgba(74, 58, 82, 0.22);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.dexprize-ok:active {
+  transform: translateY(4px) scale(0.98);
+  box-shadow: 0 1px 0 rgba(74, 58, 82, 0.22);
+}
+
+@keyframes dexprize-fall {
+  0% {
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate3d(calc(var(--drift, 60) * 1px), 28vh, 0) rotate(110deg);
+  }
+  50% {
+    transform: translate3d(0, 60vh, 0) rotate(200deg);
+  }
+  75% {
+    transform: translate3d(calc(var(--drift, 60) * -1px), 92vh, 0) rotate(300deg);
+  }
+  100% {
+    transform: translate3d(0, 124vh, 0) rotate(400deg);
+  }
+}
+
+@keyframes dexprize-burst {
+  0% {
+    transform: scale(0.15);
+    opacity: 0;
+  }
+  16% {
+    opacity: 0.9;
+  }
+  60% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+
+@keyframes dexprize-parade-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 520px) {
+  .dexprize-parade {
+    top: 10%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .update-toast {
     transition: opacity 120ms ease;
+  }
+
+  .dexprize-confetti,
+  .dexprize-fireworks {
+    display: none;
+  }
+
+  .dexprize-parade-track {
+    animation: none;
+  }
+
+  .dexprize-card {
+    animation: none;
   }
 }
 
