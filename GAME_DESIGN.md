@@ -185,7 +185,7 @@ the lift's internals, because the castle floor-split decision may re-conceive
 every traversal device underneath it. The UX above must survive either
 ruling.*
 
-### It is "collect", not "buy" (27 July 2026 — queued)
+### It is "collect", not "buy" (27 July 2026 — built)
 
 Money is meaningless in normal play, so the word is wrong. **Change "Buy" to
 "Collect" everywhere** — buttons, labels, shop copy, the Cute-o-dex, anywhere
@@ -196,6 +196,18 @@ mode** (not yet implemented, where money is finite) should it say "Buy".
 rather than hard-coding "Collect" everywhere and having to find them all again
 when Mayhem arrives. The coin/price display probably wants the same treatment
 — a price a child can always afford is decoration, not information.*
+
+*Built: `src/state/wording.ts` is the one place. It keys off `moneyIsFinite`
+rather than the mode name, so `setMode('mayhem')` flips every label back at
+once. The price display is routed through the same switch
+(`ShopWords.showPrice`) but deliberately left **on** — the family asked to be
+consulted on whether prices should show at all rather than have it decided for
+them. **Open question for the family:** the shop rows still show a bare number
+(40, 8, 22…) in a yellow lozenge. Money is invisible in the HUD, nothing can
+ever be unaffordable, and the number names no currency — so it teaches a child
+that some cuties are "worth more" than others without that meaning anything.
+The recommendation is to hide it in normal mode and keep it for Mayhem, which
+is a one-line change to `showPrice`.*
 
 ### Buying things (27 July 2026 — BUG/usability, queued)
 

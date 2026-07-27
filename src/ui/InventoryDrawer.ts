@@ -1,7 +1,8 @@
 import { gameStore, wearableSlot, type GameState, type InventoryItem } from '../state';
+import { shopWords } from '../state/wording';
 
 /**
- * The backpack drawer: everything you have bought, newest first.
+ * The backpack drawer: everything you own, newest first.
  *
  * A *subscriber*, like the rest of the HUD — it reads the store and never
  * reaches into a game system.
@@ -279,12 +280,19 @@ export class InventoryDrawer {
   }
 }
 
-/** "day 2 · 14:35" — when a thing was bought, on the park clock. */
+/**
+ * "collected on day 2 at 14:35" — when a thing was got, on the park clock.
+ *
+ * The most-repeated bit of copy in the whole game: it is under *every* row of
+ * the backpack, once per owned thing, forever. So it takes its verb from
+ * `shopWords()` like the shop panel does rather than saying "bought" — which
+ * would be doubly wrong here, since a picked flower was never bought at all.
+ */
 function whenLabel(item: InventoryItem): string {
   const minutes = Math.floor(item.acquiredAt.timeOfDay * 24 * 60);
   const hh = String(Math.floor(minutes / 60) % 24).padStart(2, '0');
   const mm = String(minutes % 60).padStart(2, '0');
-  return `bought on day ${item.acquiredAt.day + 1} at ${hh}:${mm}`;
+  return `${shopWords().pastLower} on day ${item.acquiredAt.day + 1} at ${hh}:${mm}`;
 }
 
 function escapeHtml(text: string): string {

@@ -7,6 +7,7 @@ export {
   type CharacterCreationChoice,
   type PurchaseSpec,
 } from './store';
+export { shopWords, type ShopWords } from './wording';
 export type {
   CharacterKind,
   CuteCategory,
