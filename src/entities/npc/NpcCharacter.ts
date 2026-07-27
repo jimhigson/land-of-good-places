@@ -143,6 +143,13 @@ export class NpcCharacter {
     elapsed: number,
     playerPosition: Readonly<Vector3>,
     playerHopped: boolean,
+    // Chatting (additive): everything else about `DriverContext` was already
+    // enough for the wander driver to decide who to wave at; noticing that
+    // the player has *stopped* and whether they have a hat on needed two more
+    // read-only facts, both computed once per frame in `NpcSystem` and handed
+    // down here rather than duplicated per character.
+    playerStationaryFor: number = 0,
+    playerWearingHat: boolean = false,
   ): void {
     clearIntent(this.intent);
     this.driver.update(
@@ -153,6 +160,8 @@ export class NpcCharacter {
         playerPosition,
         playerHopped,
         grounded: !this.airborne,
+        playerStationaryFor,
+        playerWearingHat,
       },
       this.intent,
     );
