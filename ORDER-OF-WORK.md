@@ -151,6 +151,9 @@ Slot in whenever an agent is free; none of these block anything.
   completion prize must count all categories.
 - **Food is eaten, not carried** — ice cream, candy floss, candy
 - **Flower picking animation** — bend, pick, smell
+- **Toilet privacy roof** — walk in, roof covers the room, flush, roof
+  lifts, wash hands. Uses the existing `TOILET_ROOM` region and the existing
+  flush/tap sounds. Must never trap the player under the lid.
 - **More hair styles** — physics ponytail (springy chain, like the balloon
   strings), long hanging hair, ponytail, bowl cut, spiky, messy. Applies to
   NPCs too. *Graphic-design agent for the modelling.*

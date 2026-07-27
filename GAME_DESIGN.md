@@ -122,6 +122,29 @@ The building has cute toilets. When you use one, a **flushing sound** plays,
 then a **tap/faucet sound** as you wash your hands at the basin. (Good
 manners are part of the game!)
 
+**Privacy, and the roof that covers it (27 July 2026 — queued):** you do not
+use the toilet from the doorway. **The character walks into the room and
+goes in**, and once they are inside **a roof slides over the room so you
+cannot see them**. You hear the **flush**. Then, as they move to the basin to
+**wash their hands, the roof vanishes again** and you can see them once more.
+
+*Note: this is the game's one moment of deliberate privacy, and it is funny
+precisely because the roof is doing the discretion — so the timing carries
+it. Roof on before the character is out of sight, not after. The sequence is
+walk in > roof covers > flush > roof lifts > wash hands > leave, and the
+existing flush and tap sounds slot straight into it.*
+
+*Implementation note: the toilets already have a room region
+(`TOILET_ROOM`/`TOILET_DECK` in `world/building/layout.ts`), so the roof is a
+lid over that rectangle rather than anything new to place. Fade it rather
+than snapping it — the cutaway that hides the floors above already fades, so
+match that. Two things must hold: the camera must not end up inside the lid,
+and **the player must never be stuck under it** if they walk out early or the
+game is saved mid-visit — the roof follows the character's state, so if they
+leave the room it lifts, whatever point the sequence had reached. Worth
+letting NPCs use it too; a queue outside a covered toilet is funnier than
+anything we could script.*
+
 ### The ginormous slide
 
 A **ginormous slide** runs from the very top floor all the way down into the
