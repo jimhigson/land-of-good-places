@@ -386,7 +386,20 @@ export class FacePaintStall implements GameSystem {
     }
   }
 
-  /** Positions the small pool of painted-NPC decals from `wanderDriver.ts`'s registry. */
+  /**
+   * Positions the small pool of painted-NPC decals from `wanderDriver.ts`'s
+   * registry.
+   *
+   * The decals hang off `this.group`, which is not just translated to the
+   * booth but **turned** (`rotation.y = STALL_FACING`), so a painted child's
+   * world position has to come back through that rotation as well as the
+   * offset — `stallToLocal`. Subtracting the group's position alone left every
+   * decal swung a few degrees around the booth: harmless next to the counter,
+   * but metres adrift for a child painted earlier who has since wandered off
+   * across the park, which is where they spend nearly all their time. The yaw
+   * needs the same treatment, or the decal faces `STALL_FACING` away from the
+   * child it belongs to.
+   */
   private updateNpcDecals(): void {
     const faces = paintedNpcFaces();
     for (let i = 0; i < this.npcDecals.length; i += 1) {
@@ -398,8 +411,9 @@ export class FacePaintStall implements GameSystem {
         continue;
       }
       const groundY = terrainHeight(face.x, face.z);
-      slot.mesh.position.set(face.x - this.group.position.x, groundY + NPC_HEAD_OFFSET - this.group.position.y, face.z - this.group.position.z);
-      slot.mesh.rotation.set(0, face.yaw, 0);
+      const [localX, localZ] = stallToLocal(face.x, face.z);
+      slot.mesh.position.set(localX, groundY + NPC_HEAD_OFFSET - this.group.position.y, localZ);
+      slot.mesh.rotation.set(0, face.yaw - STALL_FACING, 0);
       slot.setDesign(face.design);
     }
   }
@@ -674,6 +688,19 @@ export class FacePaintStall implements GameSystem {
 
 function isFacePaintDesign(value: FacePaintId): value is FacePaintDesign {
   return value !== null && (FACE_PAINT_DESIGNS as readonly string[]).includes(value);
+}
+
+/**
+ * A world position in the stall group's own space — the exact inverse of the
+ * `toWorld` helper inside `buildCollision`, which is the one place the booth's
+ * position-and-facing convention is spelled out.
+ */
+function stallToLocal(worldX: number, worldZ: number): [number, number] {
+  const sin = Math.sin(STALL_FACING);
+  const cos = Math.cos(STALL_FACING);
+  const dx = worldX - STALL_X;
+  const dz = worldZ - STALL_Z;
+  return [dx * cos - dz * sin, dx * sin + dz * cos];
 }
 
 function addNpcDecalPoolInto(group: Group, out: FacePaintOverlayHandle[]): void {
