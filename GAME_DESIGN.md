@@ -24,6 +24,15 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Art style APPROVED by Eleri** (26 July 2026): the full sample set —
   RiPika, Biscuit, the player kid, all three balloons, the Mini, and the
   props — was reviewed and she really likes all of it.
+- **CONTROL RULE — absolute, applies everywhere (27 July 2026):**
+  **Never tank controls.** Pressing a direction means "go that way", not
+  "rotate towards that way". A six-year-old presses left because they want
+  to go left, and should go left immediately.
+  **Rotation controls are permitted ONLY in first person** — the ferris
+  wheel look-around, the coaster, the first-person train. Nowhere else, in
+  any ride or mode, now or in future. Any existing control scheme that turns
+  a vehicle by holding a direction must be converted to "press a direction,
+  travel that way".
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
   API, **and touch on phones/tablets: tap a spot and the character walks
   there** (tap-to-move), with tap-on-things to interact. **Double-tap a
@@ -255,6 +264,23 @@ bonk the tree, all at once:
 - A surprised little **bird** pops out of the top going "TWEET!?"
 
 Other dodgems have cute drivers — sometimes RiPika drives one.
+
+**Steering is wrong in two ways (27 July 2026 — BUG, queued).**
+
+1. **Left and right are inverted.** Likely the same root cause as the ferris
+   wheel's inverted look-around, fixed earlier the same day: three.js turns
+   an object *left* as `rotation.y` increases, so feeding screen-space
+   "right" straight into yaw reverses it. Check `dodgems/steering.ts`
+   against that fix rather than flipping a sign blind.
+2. **The car cannot keep turning** — with the keyboard it sticks at a
+   minimum and maximum angle instead of rotating freely, so you cannot
+   simply drive in a circle.
+
+**Both are superseded by the control rule** at the top of this document:
+the dodgems should not be steered by rotation at all. Press a direction and
+the car drives that way. Fixing the inversion and the clamp is worth doing
+only if the rework is delayed — otherwise go straight to direction-pressing,
+which removes both bugs by construction.
 
 **Feedback (27 July 2026) — same fix as the water fight.** The labels in
 the middle of the screen cover up too much of the ride. Replace them with
