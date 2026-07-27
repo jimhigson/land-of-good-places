@@ -68,10 +68,12 @@ import {
   STAIR_STAND_X,
   STAIR_STAND_Z,
   TOILET_DECK,
+  TOILET_ROOM,
   TOP_DECK,
   escalatorRamp,
   facadeX,
   facadeZ,
+  regionContains,
   stairFlights,
   worldX,
   worldZ,
@@ -400,7 +402,7 @@ export class Building implements GameSystem {
     this.bubble.update(dt, elapsed);
     this.escalators.update(dt);
     this.trampoline.update(dt);
-    this.toilets.update(dt, elapsed);
+    this.toilets.update(dt, elapsed, this.toiletOccupied());
     this.ballPit.update(dt, elapsed);
 
     const player = this.player;
@@ -686,7 +688,11 @@ export class Building implements GameSystem {
       return;
     }
 
-    if (deck === TOILET_DECK && near(localX, localZ, this.toilets.standX, this.toilets.standZ, 3)) {
+    // Inside the room, not near it. GAME_DESIGN.md, 27 July 2026: *"you do not
+    // use the toilet from the doorway"* — a radius round the stand spot reached
+    // back out into the corridor, which is precisely what the family objected
+    // to. The rectangle is the room, so the press only lands once she is in.
+    if (deck === TOILET_DECK && regionContains(TOILET_ROOM, localX, localZ)) {
       this.toilets.use();
       return;
     }
@@ -697,6 +703,25 @@ export class Building implements GameSystem {
     ) {
       this.grownUpComing = !this.grownUpComing;
     }
+  }
+
+  /**
+   * Is a child in the toilet room right now?
+   *
+   * Asked fresh every frame and answered only from her current position — no
+   * flag set on the way in and cleared on the way out, because a flag is
+   * something a reload or an unexpected exit can leave stuck, and the one
+   * thing the privacy roof must never do is shut her in. See `Toilets`.
+   *
+   * `deckAt` returns `null` out in the park, so the world-space test and the
+   * interior-local one can never be confused for each other.
+   */
+  private toiletOccupied(): boolean {
+    const player = this.player;
+    if (!player) return false;
+    const { x, y, z } = player.position;
+    if (this.surfaces.deckAt(x, z, y) !== TOILET_DECK) return false;
+    return this.toilets.occupies(x - INTERIOR_ORIGIN_X, z - INTERIOR_ORIGIN_Z);
   }
 
   private placeGrownUp(): void {
