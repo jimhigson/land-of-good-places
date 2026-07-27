@@ -81,17 +81,47 @@ planned **once per tap** and then followed. Every buffer is allocated once per
 lattice and reused. Per frame a routed walk costs one extra distance check and
 allocates nothing.
 
-## State
+## Measured
 
-- [x] `src/world/NavGrid.ts` written
-- [ ] `Collision.ts` read-only accessors (`forEachCircle`/`forEachWall`,
-      play-bounds getters, `revision`, exported `autoHopClears`)
-- [ ] `Player.ts` exports `JUMP_APEX_HEIGHT`
-- [ ] `TapNavigator.ts` follows a route
-- [ ] `Game.ts` builds the grid and hands it over
-- [ ] build green, PR raised
+Headless harness against the real `NavGrid` + `CollisionWorld` (park-sized
+bounds, 1400 circles, 120 walls, a heightfield):
 
-Needs visual QA (I do not own the browser): tap across the park behind a tree
-line; tap behind the fountain; tap over a low garden wall (must hop, not
-detour); double-tap to run a routed path; park map travel; tapping an
-unreachable spot (marker should sit where she actually stops).
+| | |
+|---|---|
+| first route in a space (lattice build **and** A*) | 3.3 ms |
+| any later route, lattice cached | 1.2 ms average, 3.3 ms worst |
+| a completely hopeless goal | 0.1 ms |
+| worst smoothed route, corner to corner | 28 waypoints |
+| per frame while walking | one extra distance check, no allocation |
+
+Behaviours verified headlessly: open ground stays a single straight waypoint
+landing exactly on the tap; a wall with a doorway is routed through the
+doorway; a goal sealed inside a box reports `lastRouteReachedGoal === false`
+and stops 4.3 m short, outside the box; a 0.95 m `autoHoppable` wall is walked
+straight over (one waypoint) while the same wall at 2.3 m is routed round; a
+3 m drop is never crossed except over its bridge.
+
+## State — done
+
+- [x] `src/world/NavGrid.ts`
+- [x] `Collision.ts` read-only accessors, play-bounds getters, `revision`,
+      shared `autoHopClears`
+- [x] `Player.ts` exports `JUMP_APEX_HEIGHT`
+- [x] `TapNavigator.ts` follows a route
+- [x] `Game.ts` builds the grid and hands it over
+- [x] `npm run build` green (exit 0)
+- [x] PR raised
+
+## Still needs visual QA — I do not own the browser
+
+1. Tap across the park behind a tree line: she should walk round, not stop.
+2. Tap over a **low garden wall**: she must hop it, not detour. (The most
+   likely place for this to be wrong.)
+3. Tap the far side of the fountain.
+4. Double-tap a routed destination: still runs the whole way.
+5. Park map: press a location — routed now, same as a tap.
+6. Tap somewhere unreachable: marker should sit where she actually stops, and
+   she should stop cleanly rather than jitter.
+7. Stairs and the front door still ride normally (scripted walks are not
+   routed — if this broke, it is the `scripted` test in `navigateTo`).
+8. Inside the castle: tapping across a deck hole should route round it.

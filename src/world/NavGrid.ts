@@ -137,8 +137,17 @@ const START_SEARCH_RINGS = 8;
  */
 const MAX_EXPANSIONS = 80_000;
 
-/** Waypoints a single route may have after smoothing. Real ones use under ten. */
-export const MAX_ROUTE_WAYPOINTS = 64;
+/**
+ * Waypoints a single route may have after smoothing.
+ *
+ * A route across open park smooths to one; the worst case measured — corner to
+ * corner of a park-sized space stuffed with fourteen hundred obstacles — was
+ * 28. This is deliberately several times that, because the overflow behaviour
+ * (end the route at the destination regardless, rather than stop somewhere
+ * arbitrary) is the one place in here that can put a leg through scenery, and
+ * the cost of never reaching it is a 1 KB array.
+ */
+export const MAX_ROUTE_WAYPOINTS = 128;
 
 const NEW = 0;
 const OPEN = 1;
