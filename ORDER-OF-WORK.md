@@ -178,6 +178,16 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **Indoor navigation does not exist.** The waypoint graph has three "indoors"
+  nodes and the castle architect found they are **dead nodes sitting inside
+  the garden facade** — so NPCs cannot reach the interior at all, and
+  tap-to-walk inside the castle has almost nothing to route on. Surfaced again
+  by the toilet work ("tapping the toilets from across the deck"). Needs
+  proper indoor coverage; note `NavGrid` builds its lattice from the current
+  play bounds, so the interior may mostly want the lattice rather than the
+  graph. Sequence against Decision 3 (S2 was already told to clean up the
+  three dead seeds).
+
 - **If night should be darker, start here.** The park has **14** point lights,
   not the 9 previously recorded: `prop.ferrisWheel` is a `PointLight` at
   intensity **12** — the brightest in the park — plus the locomotive headlight.
