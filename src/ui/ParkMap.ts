@@ -14,6 +14,7 @@ import {
 } from '../core/constants';
 import { PALETTE, hexToCss } from '../core/palette';
 import { isTouchDevice } from '../core/device';
+import { minTextPx, uiUnitPx } from '../core/uiScale';
 import { gameStore } from '../state';
 import { ANCHORS, type AnchorDefinition, type AnchorFootprint } from '../world/anchors';
 import { PLAZA, ROUTES, type RouteDefinition } from '../world/paths';
@@ -104,6 +105,14 @@ export interface ParkMapDeps {
   blocked(): boolean;
 }
 
+/** Where a place name ended up on the canvas, so the next one can avoid it. */
+interface LabelBox {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
 interface FloorFeature {
   readonly x: number;
   readonly z: number;
@@ -169,6 +178,8 @@ export class ParkMap {
   private originPxY = 0;
   private canvasCssWidth = 0;
   private canvasCssHeight = 0;
+  /** Rebuilt every render; see `drawLabel`. */
+  private readonly labelBoxes: LabelBox[] = [];
 
   constructor(container: HTMLElement, private readonly deps: ParkMapDeps) {
     this.button = document.createElement('button');
@@ -441,6 +452,8 @@ export class ParkMap {
   }
 
   private render(): void {
+    // Fresh page, fresh list of where the labels ended up (see `drawLabel`).
+    this.labelBoxes.length = 0;
     this.canvasWrap.dataset.mode = this.indoor ? 'indoor' : 'outdoor';
     this.floorRow.hidden = !this.indoor;
     this.upButton.disabled = this.viewingDeck >= TOP_DECK;
@@ -499,7 +512,7 @@ export class ParkMap {
     ctx.beginPath();
     ctx.arc(fx, fy, fountain.rimRadius * this.scale, 0, Math.PI * 2);
     ctx.fill();
-    this.drawGlyph('⛲', fx, fy, 20);
+    this.drawGlyph('⛲', fx, fy, uiUnitPx());
 
     // --- ride plots, straight from the anchor table -----------------------
     for (const anchor of ANCHORS) this.drawAnchor(anchor);
@@ -534,8 +547,8 @@ export class ParkMap {
       hexToCss(PALETTE.buildingTrim),
     );
     const [bx, by] = this.planeToCanvas(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
-    this.drawGlyph('🏰', bx, by, 24);
-    this.drawLabel('The Big Building', bx, by + 18);
+    this.drawGlyph('🏰', bx, by, 1.2 * uiUnitPx());
+    this.drawLabel('The Big Building', bx, by + 0.9 * uiUnitPx());
 
     // --- the player ----------------------------------------------------------
     if (!this.indoor) {
@@ -701,7 +714,7 @@ export class ParkMap {
 
   private drawPin(px: number, py: number, glyph: string, label: string, colour: string): void {
     const ctx = this.ctx;
-    const r = 13;
+    const r = 0.65 * uiUnitPx();
     ctx.fillStyle = colour;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2.5;
@@ -709,8 +722,8 @@ export class ParkMap {
     ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    this.drawGlyph(glyph, px, py, 15);
-    this.drawLabel(label, px, py + r + 12);
+    this.drawGlyph(glyph, px, py, 0.75 * uiUnitPx());
+    this.drawLabel(label, px, py + r + 0.3 * uiUnitPx());
   }
 
   private drawGlyph(glyph: string, px: number, py: number, size: number): void {
@@ -723,12 +736,47 @@ export class ParkMap {
     ctx.restore();
   }
 
+  /**
+   * A place name under a pin.
+   *
+   * Two things changed here for GAME_DESIGN.md's TEXT RULE. The size is now
+   * `minTextPx()` rather than 11px — and note the old font string named a CSS
+   * custom property, which a canvas cannot resolve, so the whole declaration
+   * was being rejected and these were painting at the 2D context's 10px
+   * default. Second, at a readable size the names are wide enough to collide,
+   * so a name that would land on top of one already drawn is dropped: its pin
+   * and glyph are still there, and an unreadable pile of overlapping words
+   * helps nobody. Draw order is therefore priority order — the big attractions
+   * in `ANCHORS` are drawn before the smaller features.
+   */
   private drawLabel(text: string, px: number, py: number): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.font = '700 11px var(--lgp-font, sans-serif)';
+    const size = minTextPx();
+    ctx.font = `700 ${size}px 'Baloo 2', 'Nunito', 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
+
+    const halfWidth = ctx.measureText(text).width / 2 + 2;
+    const box: LabelBox = {
+      left: px - halfWidth,
+      right: px + halfWidth,
+      top: py,
+      bottom: py + size * 1.2,
+    };
+    const collides = this.labelBoxes.some(
+      (other) =>
+        box.left < other.right &&
+        box.right > other.left &&
+        box.top < other.bottom &&
+        box.bottom > other.top,
+    );
+    if (collides) {
+      ctx.restore();
+      return;
+    }
+    this.labelBoxes.push(box);
+
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.strokeText(text, px, py);

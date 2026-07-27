@@ -19,11 +19,11 @@ const STYLES = `
   position: absolute;
   left: 0;
   top: 0;
-  width: 116px;
-  height: 116px;
-  margin: -58px 0 0 -58px;
+  width: 7.25rem;
+  height: 7.25rem;
+  margin: -3.625rem 0 0 -3.625rem;
   border-radius: 50%;
-  border: 4px solid #fff6eacc;
+  border: 0.25rem solid #fff6eacc;
   background: #ffffff26;
   pointer-events: none;
   opacity: 0;
@@ -35,16 +35,16 @@ const STYLES = `
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 52px;
-  height: 52px;
-  margin: -26px 0 0 -26px;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: -1.625rem 0 0 -1.625rem;
   border-radius: 50%;
   background: #ff8fc0;
-  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.25);
+  box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.25);
 }
-.dg-counts { display: flex; gap: 8px; flex-wrap: wrap; }
+.dg-counts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .dg-tree { background: #d9f7c8e6 !important; }
-.dg-time { min-width: 74px; text-align: center; }
+.dg-time { min-width: 4.625rem; text-align: center; }
 `;
 
 export interface DodgemsHud {
