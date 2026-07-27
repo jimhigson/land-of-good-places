@@ -103,7 +103,17 @@ Money **never runs out** in normal mode. Seven shops:
    - **"Chicken-looter"**, a white and red chicken
 3. **Candy floss stand** — pink, blue, and a rare rainbow one that only
    appears sometimes
-4. **Ice cream parlour** — silly flavours, triple-decker rainbow cones
+4. **Ice cream parlour** — silly flavours, triple-decker rainbow cones.
+   **Food is eaten, not carried (27 July 2026 — queued, not started):**
+   keeping an ice cream in a backpack makes no sense. Buying one should
+   **play an eating sound**, **show the 3D ice cream** held for a few
+   seconds while the character enjoys it, then it is **gone** — the player
+   does not carry it around. It is recorded in the Cute-o-dex as **eaten**,
+   so it still counts towards the collection.
+   *Applies to the other food too — candy floss and the spooky house's
+   candy are the same case. Sits naturally alongside the change making
+   rides count towards the dex: the dex becomes a record of what you have
+   done and tasted, not only what you own.*
 5. **Hat shop** — hats your character actually wears around the park.
    One of them is the **RiPika hat**: a large RiPika head worn on top of
    the wearer's own head.
