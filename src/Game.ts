@@ -10,6 +10,7 @@ import { Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
+import { ParkMap } from './ui/ParkMap';
 import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
@@ -54,6 +55,7 @@ export class Game {
   readonly wornFlower: WornFlower;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
+  readonly parkMap: ParkMap;
 
   private readonly loop: Loop;
   private readonly systems: GameSystem[] = [];
@@ -149,6 +151,18 @@ export class Game {
     // frame renders, and mounted like every other overlay, as a plain DOM
     // child of `uiRoot` rather than anything the world needs to know about.
     this.whatsNew = new WhatsNew(uiRoot);
+    // The park map (GAME_DESIGN.md #24/#30d). Mounts its own HUD pill, same as
+    // the Cute-o-dex above; reads `world`/`player` and reuses the tap navigator
+    // for tap-to-travel rather than a second movement path. `miniGames` is
+    // referenced through a closure rather than passed directly, since it is
+    // not built yet at this point in the constructor — the closure is only
+    // ever called later, once play has started and it exists.
+    this.parkMap = new ParkMap(uiRoot, {
+      world: this.world,
+      player: this.player,
+      walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
+      blocked: () => this.miniGames.frozen || this.player.riding,
+    });
     this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
     this.transitions = new Transitions(uiRoot);
     this.stairMenu = new StairMenu(uiRoot, {
@@ -196,6 +210,7 @@ export class Game {
       this.shopping.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
+      this.parkMap.isOpen ||
       this.miniGames.frozen ||
       this.player.riding,
     );
@@ -296,6 +311,7 @@ export class Game {
     this.player.dispose();
     this.cuteODex.dispose();
     this.whatsNew.dispose();
+    this.parkMap.dispose();
     this.hud.dispose();
     this.sky.dispose();
     this.engine.dispose();
@@ -333,6 +349,12 @@ export class Game {
       // The book has the screen: Escape and B close it, and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
+      }
+    } else if (this.parkMap.isOpen) {
+      // The map has the screen: Escape and B close it, same as every other
+      // full-screen overlay. `M` is handled inside `ParkMap` itself.
+      if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
+        this.parkMap.close();
       }
     } else if (this.stairMenu.isOpen) {
       // The stairs menu has the screen: Escape backs out without choosing.

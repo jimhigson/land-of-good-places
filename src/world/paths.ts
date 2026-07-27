@@ -23,7 +23,7 @@ import { ANCHORS_BY_ID } from './anchors';
  * `entrance`, so moving an anchor automatically moves its path.
  */
 
-interface RouteDefinition {
+export interface RouteDefinition {
   readonly name: string;
   readonly points: readonly (readonly [number, number])[];
   readonly width: number;
@@ -32,7 +32,13 @@ interface RouteDefinition {
 
 const anchor = ANCHORS_BY_ID;
 
-const ROUTES: readonly RouteDefinition[] = [
+/**
+ * Exported so anything that wants to *draw* the path network — the park map
+ * (`ui/ParkMap.ts`) — can rebuild the same centreline from the same control
+ * points rather than hand-tracing a picture that would drift out of date the
+ * moment a route above changes.
+ */
+export const ROUTES: readonly RouteDefinition[] = [
   {
     name: 'main-loop',
     width: 3.6,
@@ -93,7 +99,7 @@ const ROUTES: readonly RouteDefinition[] = [
 ];
 
 /** Fountain plaza — a wide circle of paving where the paths converge. */
-const PLAZA = { x: 0, z: 0, radius: 9.4 };
+export const PLAZA = { x: 0, z: 0, radius: 9.4 };
 
 /** Sampled path centreline, used for scenery placement queries. */
 interface PathSample {
