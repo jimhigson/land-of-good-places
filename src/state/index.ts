@@ -3,6 +3,7 @@ export {
   FLOWER_COLOURS,
   FLOWER_HEX,
   FLOWER_ICON,
+  type CharacterCreationChoice,
   type PurchaseSpec,
 } from './store';
 export type {
@@ -15,6 +16,7 @@ export type {
   GameMode,
   GameState,
   GameTime,
+  HairStyle,
   InventoryItem,
   InventoryKind,
   PlayerState,

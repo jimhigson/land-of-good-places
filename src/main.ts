@@ -2,13 +2,26 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game } from './Game';
 import { UpdateToast } from './ui/UpdateToast';
-import { DevBadge } from './ui';
+import { CharacterCreation, DevBadge, hasCreatedCharacter, markCharacterCreated } from './ui';
+import { gameStore } from './state';
 
 /**
- * Entry point. Finds the canvas, builds the game, hides the splash.
+ * Entry point. Finds the canvas, shows the character creator on a brand-new
+ * browser, then builds the game and hides the splash.
  *
  * The splash is dismissed on the first rendered frame rather than immediately,
  * so nobody ever sees an empty blue rectangle while the park is being built.
+ *
+ * **Character creation runs here, before `Game` exists** — deliberately not
+ * a `Game`-owned overlay like `WhatsNew`. `Player`'s constructor reads
+ * `gameStore.get().player` (name, hair colour and style, outfit colour) the
+ * moment it builds the kid; running the chooser first means that read simply
+ * sees the family's actual choices, rather than needing a "rebuild the live
+ * player model" path that nothing else in the game has (a hair *style*
+ * change swaps meshes, not just a colour). It also guarantees the chooser
+ * finishes before the cat-bus arrival sequence (`world/entrance/`), whenever
+ * that gets wired up — nothing downstream of `new Game(...)` can run before
+ * this does, because `Game` itself doesn't exist yet.
  */
 function boot(): void {
   const canvas = document.getElementById('game-canvas');
@@ -19,6 +32,26 @@ function boot(): void {
     throw new Error('Land of Good Places: expected #game-canvas and #ui-root in the document.');
   }
 
+  if (hasCreatedCharacter()) {
+    launchGame(canvas, uiRoot, splash);
+    return;
+  }
+
+  // The chooser supplies its own full-screen backdrop immediately, so the
+  // generic "building the garden…" splash card would only be a flash behind
+  // it — hide it now rather than waiting for a first game frame that is still
+  // a form submission away.
+  splash?.classList.add('hidden');
+  new CharacterCreation(uiRoot, {
+    onComplete: (choice) => {
+      gameStore.completeCharacterCreation(choice);
+      markCharacterCreated();
+      launchGame(canvas, uiRoot, splash);
+    },
+  });
+}
+
+function launchGame(canvas: HTMLCanvasElement, uiRoot: HTMLElement, splash: HTMLElement | null): void {
   const game = new Game(canvas, uiRoot);
   game.start();
 

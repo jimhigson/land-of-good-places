@@ -2175,3 +2175,248 @@ kbd {
     bottom: calc(156px + env(safe-area-inset-bottom));
   }
 }
+
+/* ---- character creation ------------------------------------------------
+   `.charcreate` carries `.shop-panel` (see CharacterCreation.ts), so the
+   full-screen backdrop and open/close fade come free from the rules above.
+   This is the front door of the game — it runs before `Game` exists, mounted
+   straight into `#ui-root` by `main.ts`'s `boot()` — so unlike every other
+   panel here it never has to coexist with the HUD, only with the boot
+   splash (which it hides itself; see `main.ts`). */
+
+.charcreate-card {
+  --shop-accent: var(--lgp-sky);
+  width: min(760px, 96vw);
+  max-height: min(680px, 92vh);
+}
+
+.charcreate-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  /* Without this the preview column stretches to match the much taller
+     controls column (flex's default `align-items: stretch`), which then
+     feeds a wrong, non-square height into `CharacterPreview.resize()`. */
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.charcreate-preview {
+  position: relative;
+  flex: none;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.charcreate-preview-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 220%);
+  border: 4px solid #fff;
+  box-shadow: 0 5px 0 rgba(74, 58, 82, 0.14);
+  /* This canvas draws with its own WebGL context, entirely separate from
+     the game's — it needs ordinary touch/selection behaviour switched back
+     on (see html/body's blanket `touch-action: none` at the top of this
+     file), since a finger dragging across it is not a park gesture. */
+  touch-action: auto;
+}
+
+.charcreate-name-preview {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  text-align: center;
+  word-break: break-word;
+}
+
+.charcreate-controls {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.charcreate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.charcreate-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.charcreate-name-input {
+  appearance: none;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: #fff;
+  border: 3px solid rgba(74, 58, 82, 0.14);
+  border-radius: 999px;
+  /* A real text field, unlike almost everything else in this UI layer — it
+     needs normal selection/typing behaviour, not the game's blanket
+     no-select/no-touch-scroll defaults. */
+  user-select: text;
+  touch-action: auto;
+}
+
+.charcreate-name-input:focus {
+  outline: none;
+  border-color: var(--shop-accent);
+}
+
+.charcreate-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.charcreate-swatch {
+  appearance: none;
+  cursor: pointer;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  border: 3px solid #fff;
+  background: var(--swatch-colour);
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.14);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.charcreate-swatch[data-selected='true'] {
+  border-color: var(--lgp-ink);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--lgp-ink);
+  transform: translateY(-1px);
+}
+
+.charcreate-swatch:active {
+  transform: translateY(3px);
+}
+
+.charcreate-styles {
+  display: flex;
+  gap: 8px;
+}
+
+.charcreate-style-btn {
+  appearance: none;
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 58px;
+  padding: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: #fff;
+  border: 3px solid rgba(74, 58, 82, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 3px 0 rgba(74, 58, 82, 0.1);
+  transition: transform 90ms ease, box-shadow 90ms ease, border-color 120ms ease;
+}
+
+.charcreate-style-glyph {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.charcreate-style-btn[data-selected='true'] {
+  border-color: var(--shop-accent);
+  box-shadow: 0 4px 0 rgba(74, 58, 82, 0.16);
+  transform: translateY(-1px);
+}
+
+.charcreate-style-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 rgba(74, 58, 82, 0.1);
+}
+
+.charcreate-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.charcreate-row {
+  position: relative;
+  min-height: 74px;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.charcreate-row .row-icon {
+  font-size: 30px;
+  width: auto;
+}
+
+.charcreate-row .row-name {
+  font-size: 13px;
+}
+
+.charcreate-suggested {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: #ffe9a8;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.14);
+  white-space: nowrap;
+}
+
+.charcreate-go {
+  --shop-accent: var(--lgp-mint);
+}
+
+@media (max-width: 700px) {
+  .charcreate-body {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .charcreate-preview {
+    width: 190px;
+  }
+
+  .charcreate-controls {
+    width: 100%;
+  }
+}
+
+@media (max-height: 640px) {
+  .charcreate-preview {
+    width: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .charcreate-card {
+    animation: none;
+  }
+}

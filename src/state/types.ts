@@ -15,6 +15,18 @@ export type CharacterKind = 'kid' | 'bunny' | 'kitten' | 'mouse';
 /** Where a collected cute thing currently lives. */
 export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried' | 'worn';
 
+/**
+ * Hair style chosen in the character creator.
+ *
+ * Kept as a bare string union rather than importing `KidOptions['hairStyle']`
+ * from `art/models/kid.ts` — the same reason `PlayerState.hairColour` is a bare
+ * hex number rather than a `Color`: `state/` never depends on `art/`. The two
+ * unions are kept in sync by hand; TypeScript's structural typing means a
+ * `HairStyle` is already assignable wherever `KidOptions['hairStyle']` is
+ * expected, so nothing has to convert between them.
+ */
+export type HairStyle = 'bunches' | 'bob' | 'short';
+
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export type CuteCategory =
   | 'toy'
@@ -121,6 +133,8 @@ export interface PlayerState {
   kind: CharacterKind;
   /** Chosen in the character creator (step 7). Hex numbers, three.js friendly. */
   hairColour: number;
+  /** Chosen in the character creator — see `HairStyle` for why it's a bare union. */
+  hairStyle: HairStyle;
   outfitColour: number;
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
@@ -164,6 +178,13 @@ export interface GameState {
   carriedUid: string | null;
   /** `uid` of the flower worn in the hair, or null for none — see `WornFlower`. */
   wornFlowerUid: string | null;
+  /**
+   * `uid` of the hat worn on the head, or null for bare-headed — see
+   * `entities/WornHat.ts`. Set once by the character creator today; the hat
+   * shop has no "wear this" button yet, so a hat bought mid-game still only
+   * goes into the player's hands, same as before this field existed.
+   */
+  wornHatUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */
