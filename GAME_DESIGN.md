@@ -24,6 +24,18 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Art style APPROVED by Eleri** (26 July 2026): the full sample set —
   RiPika, Biscuit, the player kid, all three balloons, the Mini, and the
   props — was reviewed and she really likes all of it.
+- **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
+  **minimum font size and apply it throughout the whole game**, with no
+  exceptions. It should be **generously large** — this is a game for a
+  six-year-old, and some text is currently too small even for an adult
+  reading an ordinary web page. Nothing may be smaller than the minimum:
+  not HUD pills, not shop panels, not the Cute-o-dex, not the map, not
+  labels, not the what's-new panel, not captions on portraits, not
+  canvas-painted text on in-world signs. Define it once as a shared value
+  (a CSS custom property for DOM text, and a matching constant for
+  canvas-drawn text) and use it everywhere, so a future addition cannot
+  quietly reintroduce small text. Large, friendly and easy to read is the
+  house style.
 - **CONTROL RULE — absolute, applies everywhere (27 July 2026):**
   **Never tank controls.** Pressing a direction means "go that way", not
   "rotate towards that way". A six-year-old presses left because they want
