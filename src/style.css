@@ -2135,3 +2135,43 @@ kbd {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------- the action button */
+
+/* "Ride" / "Enter" / "Shop" / "Climb" / "Play" — whatever the nearest
+   interactable does, named on a button (`ui/ActionButton.ts`). Anchored to
+   the exact same spot as `.pill--read` on purpose: the two are mutually
+   exclusive by design (an interactable you can act on beats a sign you can
+   read — see `Game.ts`'s `SignReader` wiring), so sharing a slot is both a
+   nod to that precedence and what makes them structurally unable to ever
+   overlap on screen. */
+.pill--action {
+  position: absolute;
+  right: calc(14px + env(safe-area-inset-right));
+  bottom: calc(178px + env(safe-area-inset-bottom));
+  z-index: 5;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 150%);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.pill--action[data-show='false'] {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
+.pill--action:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(74, 58, 82, 0.18);
+}
+
+@media (max-height: 460px) {
+  .pill--action {
+    bottom: calc(156px + env(safe-area-inset-bottom));
+  }
+}

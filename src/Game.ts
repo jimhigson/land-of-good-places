@@ -10,6 +10,7 @@ import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import type { InteriorControls } from './world/building';
 import { Parade, Player, TapNavigator, WornFlower } from './entities';
 import { CuteODex, Hud, TouchControls, WhatsNew } from './ui';
+import { ActionButton } from './ui/ActionButton';
 import { ParkMap } from './ui/ParkMap';
 import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
@@ -50,6 +51,7 @@ export class Game {
   readonly treeClimbing: TreeClimbing;
   readonly foliageFade: FoliageFade;
   readonly signReader: SignReader;
+  readonly actionButton: ActionButton;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly parade: Parade;
@@ -204,6 +206,24 @@ export class Game {
     );
     this.addSystem(this.treeClimbing);
 
+    // "Do the thing" at whatever ride, shop, stall or traversal device the
+    // player is standing next to — see `ui/ActionButton.ts`. Same zone list
+    // `tapNavigator` walks, plus tree-climbing's, rebuilt fresh every frame
+    // because a couple of them move (the lift, the bubble).
+    this.actionButton = new ActionButton(
+      uiRoot,
+      this.player,
+      () => [...this.world.interactZones(), ...this.treeClimbing.interactZones()],
+      this.input,
+      () =>
+        this.shopping.uiOpen ||
+        this.cuteODex.isOpen ||
+        this.whatsNew.isOpen ||
+        this.miniGames.frozen ||
+        this.player.riding,
+    );
+    this.addSystem(this.actionButton);
+
     // Fades out any tree standing between the camera and the player — the
     // fixed camera (design feedback #16) means one can now hide them
     // completely for as long as they stand there. See `world/FoliageFade.ts`.
@@ -214,13 +234,19 @@ export class Game {
     // overlay of its own painted face when pressed — see `ui/SignReader.ts`.
     // Signs never move once the world has finished building, so its zone list
     // is captured once here rather than walked afresh every frame.
+    //
+    // Precedence: an interactable you can act on beats a sign you can read,
+    // since the sign is passive — folded in here as one more reason the sign
+    // pill stays hidden, rather than by teaching `SignReader` anything about
+    // action zones.
     this.signReader = new SignReader(uiRoot, this.player, this.world.signZones(), () =>
       this.shopping.uiOpen ||
       this.cuteODex.isOpen ||
       this.whatsNew.isOpen ||
       this.parkMap.isOpen ||
       this.miniGames.frozen ||
-      this.player.riding,
+      this.player.riding ||
+      this.actionButton.active,
     );
     this.addSystem(this.signReader);
 
