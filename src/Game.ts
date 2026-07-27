@@ -4,13 +4,15 @@ import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
 import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
-import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP } from './core/constants';
+import { BUILDING_FLOOR_COUNT, CAMERA_ZOOM_STEP, PLAYER_RADIUS } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import { Highlights } from './world/Highlights';
 import type { InteractZone } from './world/interact';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
+import { JUMP_APEX_HEIGHT } from './entities/Player';
+import { NavGrid } from './world/NavGrid';
 import { CuteODex, Hud, TapBurst, TouchControls, WhatsNew } from './ui';
 import { ActionButton } from './ui/ActionButton';
 import { ParkMap } from './ui/ParkMap';
@@ -45,6 +47,7 @@ export class Game {
   readonly world: World;
   readonly player: Player;
   readonly hud: Hud;
+  readonly navGrid: NavGrid;
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
   readonly touchControls: TouchControls | null;
@@ -137,12 +140,22 @@ export class Game {
     this.engine.scene.add(this.heldBalloons.group);
     this.addSystem(this.heldBalloons);
 
+    // The map a tapped walk is routed on (ORDER-OF-WORK 1.0). Built here, after
+    // `World`, because it bakes the *finished* collision world — everything
+    // solid is registered by the time World's constructor returns, and nothing
+    // is added afterwards. It does no work at all until the first walk asks for
+    // a route, and `CollisionWorld.revision` covers us if that ever stops being
+    // true. `PLAYER_RADIUS` and `JUMP_APEX_HEIGHT` are the player's own numbers
+    // rather than a second set: the lattice has to agree with the resolver
+    // about where she fits and with the auto-hop about which walls she clears.
+    this.navGrid = new NavGrid(this.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
     // the building installed. `treeClimbing` is constructed further down (it
     // needs the HUD), but this closure only reads it once play starts, by
     // which point construction has finished.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, () =>
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, this.navGrid, () =>
       this.currentZones(),
     );
     this.engine.scene.add(this.tapNavigator.group);
