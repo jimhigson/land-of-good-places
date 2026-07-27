@@ -289,7 +289,7 @@ export class Game {
     // Registered last of the systems, and it has to be: it reads the picks
     // `actionButton` and `signReader` have just made this frame, so an outline
     // can never point somewhere different from the pill naming the action.
-    this.highlights = new Highlights(this.engine.scene, this.camera, {
+    this.highlights = new Highlights(this.engine.scene, this.camera, canvas, {
       zones: () => this.currentZones(),
       primedZone: () => this.actionButton.zone,
       primedSign: () => this.signReader.nearby,

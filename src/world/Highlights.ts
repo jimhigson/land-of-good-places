@@ -120,6 +120,14 @@ export class Highlights implements GameSystem {
   constructor(
     scene: Scene,
     private readonly camera: IsoCamera,
+    /**
+     * The park itself, so that pointing at something usable also turns the
+     * cursor into a pointer — GAME_DESIGN.md's HIGHLIGHT RULE asks for both,
+     * and doing it here means one decision with two effects rather than a
+     * second hover test that could disagree with the outline. The rule lives in
+     * `style.css` (`#game-canvas[data-hover]`); this only says when.
+     */
+    private readonly canvas: HTMLCanvasElement,
     private readonly sources: HighlightSources,
   ) {
     this.group.name = 'highlights';
@@ -166,11 +174,13 @@ export class Highlights implements GameSystem {
 
     if (this.sources.blocked()) {
       for (const slot of this.slots) slot.hide();
+      this.setPointerCursor(false);
       return;
     }
 
     const zones = this.sources.zones();
     const hovered = this.pickHovered(zones, context.playerPosition);
+    this.setPointerCursor(hovered !== null);
     const primed = this.sources.primedZone();
     const sign = this.sources.primedSign();
 
@@ -193,6 +203,13 @@ export class Highlights implements GameSystem {
   }
 
   // -------------------------------------------------------------- internals
+
+  /** Only ever written on a change: the cursor is a style recalc, every frame is not. */
+  private setPointerCursor(on: boolean): void {
+    const want = on ? 'true' : 'false';
+    if (this.canvas.dataset.hover === want) return;
+    this.canvas.dataset.hover = want;
+  }
 
   private showZone(index: number, zone: InteractZone | null): void {
     const slot = this.slots[index];

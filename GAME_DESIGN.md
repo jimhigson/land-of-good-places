@@ -26,19 +26,48 @@ Unless the grown-ups turn on **Mayhem mode**…
   props — was reviewed and she really likes all of it.
 - **HIGHLIGHT RULE — absolute, applies everywhere (27 July 2026):**
   **Everything you can interact with is outlined in a rainbow effect when
-  it is about to be used.**
-  - **Mouse:** anything clickable is outlined **on hover**.
+  it is about to be used, and the cursor becomes a pointer.**
+  - **Mouse:** anything clickable is outlined **on hover**, and the cursor
+    turns into a **pointer** at the same moment.
   - **Keyboard/controller:** anything that pressing **E** would use right
     now is outlined while E is primed — so you can always see what the key
-    is pointing at before you press it.
+    is pointing at before you press it. No cursor changes: there is no
+    cursor involved. The same goes for whatever the UI has **focus** on.
+  - **This covers the interface as well as the park.** Not only the
+    interactables in the 3D world: every button, swatch, tile and tappable
+    row in the UI too — HUD pills, the map, the backpack, shop panels, the
+    Cute-o-dex, character creation, what's-new, mini-game HUDs. Anything a
+    child can click. In the DOM it applies on `:hover` **and**
+    `:focus-visible`, so a child driving the UI from a keyboard or a
+    controller sees the same highlight on whatever is focused.
+  - **When something is actually used — tapped, clicked or activated by key
+    — it flashes the same outline for about half a second afterwards**,
+    radiating outward with a few particles. On a phone there is no hover at
+    all, so this is what tells a child her tap registered; it is the version
+    of this rule that matters most on the device she mostly plays on. It
+    fires on every input method, not just pointers. Hover is quiet and
+    steady ("you can touch this"); the flash expands and fades ("you touched
+    it").
+
   The outline is a **rainbow**, matching the game's existing rainbow motifs
   (the hop ring, the water-fight rainbow). Build it **once** as a shared
   highlight system that every interactable registers with, so anything added
-  later is outlined automatically and nobody has to remember the rule.
+  later is outlined automatically and nobody has to remember the rule — and
+  for the DOM half, one global CSS rule over "things you can press" rather
+  than a class each panel has to remember. The two halves must **look like
+  the same thing**: same six rainbow bands, same sweep speed. A child should
+  learn one thing — rainbow means you can press it.
   *Note: an inverted-hull outline already exists for characters in
   ART_DIRECTION (ink-tinted, never black); this is a different, brighter,
   animated thing for interaction feedback — decide whether to extend that
   machinery or build alongside it, and say which.*
+  **As built (27 July 2026):** it extends that machinery rather than
+  replacing it — same inverted hull, in rainbow, on a shared shell built once
+  per object. `src/world/highlight.ts` is the registration API,
+  `src/world/Highlights.ts` the system, `src/art/effects/rainbowOutline.ts`
+  the drawing, and the DOM half is one global rule at the top of
+  `src/style.css`. The activation flash reuses the hop ring's own pool
+  (`art/effects/rainbowRing.ts`) rather than a second rainbow.
 - **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
   **minimum font size and apply it throughout the whole game**, with no
   exceptions. It should be **generously large** — this is a game for a
