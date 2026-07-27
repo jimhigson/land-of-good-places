@@ -47,8 +47,14 @@ const GRAVITY = 17;
  * an automatic hop clear this?" asks the exact same question the manual jump
  * already answers, rather than a second, independently-tuned number that
  * could quietly drift out of step with it.
+ *
+ * Exported for the same reason, one consumer further out: `world/NavGrid.ts`
+ * leaves a wall this clears out of the walkable map altogether, so that
+ * tap-to-move hops a low garden wall instead of routing the long way round it.
+ * All three questions are answered by `Collision.ts`'s `autoHopClears` from
+ * this one number.
  */
-const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
+export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /**
  * How far ahead — in the direction actually being walked — the auto-hop
