@@ -9,7 +9,9 @@ import { LampPosts } from './LampPosts';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
+import { ParkTrain } from './train';
 import { MiniGameStalls } from '../minigames';
+import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
 import { collectSignZones, type SignZone } from './signs';
@@ -43,6 +45,7 @@ export class World implements GameSystem {
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
+  readonly train: ParkTrain;
   readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
@@ -64,10 +67,27 @@ export class World implements GameSystem {
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots, interiorControls);
+    // The water-fight garden's shop window: takes the "coming soon" sign off the
+    // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
+    // a sprinkler and a rack of very big water guns. The fight itself is a
+    // mini-game in its own world, entered from the stall standing in that plot.
+    dressWaterFightPlot(this.anchorPlots, this.collision);
+
     // Fun-fair stalls: each one is a doorway into a mini-game (see
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
     this.stalls = new MiniGameStalls(this.collision);
+
+    // The park train. Built after everything solid, because it does not have a
+    // route until it has one: it solves its loop against the finished collision
+    // world, so a tree planted across the park edge bends the track rather than
+    // growing through it (see `train/route.ts`). Built before the NPCs, so the
+    // waypoint graph is validated against its station posts too.
+    this.train = new ParkTrain(this.collision);
+    // The platforms and the carriage floors are things you stand on, so they go
+    // to the same sampler the lift and the bubble use.
+    for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
+
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
     // after AnchorPlots (it fills that plot and retires its "coming soon"
@@ -96,6 +116,7 @@ export class World implements GameSystem {
       this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
+      this.train.group,
     );
   }
 
@@ -110,11 +131,21 @@ export class World implements GameSystem {
     this.fairyLights.nightFactor = eveningGlow;
     this.lampPosts.nightFactor = eveningGlow;
 
+    this.train.nightFactor = night;
+
     this.fountain.update(context);
     this.fairyLights.update(context);
     this.lampPosts.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+
+    // The train runs before the children, and it has to: it carries the ones
+    // who are aboard by writing their position, and their own movement code —
+    // which runs inside `npcs.update` — is what commits it to the crowd's
+    // instance buffer. The other way round they would ride a frame behind.
+    this.train.update(context);
+    this.train.carryPassengers(this.npcs.riders);
+
     this.npcs.update(context);
     this.stalls.update(context);
     this.flowers.update(context);
@@ -131,6 +162,7 @@ export class World implements GameSystem {
     return [
       ...this.building.interactZones(),
       ...this.stalls.interactZones(),
+      ...this.train.interactZones(),
       ...this.flowers.interactZones(),
     ];
   }
@@ -153,6 +185,7 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
+    this.train.attachPlayer(player);
   }
 
   dispose(): void {
@@ -160,6 +193,7 @@ export class World implements GameSystem {
     this.fairyLights.dispose();
     this.lampPosts.dispose();
     this.stalls.dispose();
+    this.train.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }

@@ -9,6 +9,7 @@ import { createDodgems } from './dodgems/Dodgems';
 import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createRailRacer } from './railRacer/RailRacer';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
+import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
 
@@ -80,6 +81,33 @@ export const STALLS: readonly StallDefinition[] = [
     // wherever a child is walking from.
     facing: 0.25,
     create: createSpookyHouse,
+  },
+  {
+    id: 'waterFight',
+    title: 'Water Fight!',
+    subtitle: 'very big water guns',
+    glyph: '💦',
+    accent: PALETTE.markerMint,
+    stripe: PALETTE.markerSky,
+    // The one stall that stands *inside* an anchor plot rather than clear of
+    // one. That is not the exception it looks like: the water fight owns the
+    // `waterFight` plot (see `waterFight/plot.ts`, which takes its "coming
+    // soon" sign down and dresses it), so this booth is the doorway into the
+    // ride the plot was reserved for, not a stall squatting on somebody else's
+    // building site.
+    // Well inside the plot, and specifically clear of where the garden path
+    // stops: `world/paths.ts` runs its water-fight spur on to [-25, 20], which
+    // the first placement sat almost exactly on top of. Two metres of open
+    // grass now separate the path's last step from the nearest corner of the
+    // booth.
+    position: [-29.5, 22],
+    // Turned towards the path rather than square down +Z. The counter still
+    // meets the isometric camera at an angle you can read the sign from, and —
+    // the number that actually mattered — the stand point ends up *between* the
+    // path and the booth, so walking up is a straight line that never scrapes
+    // along the side of it.
+    facing: 1.35,
+    create: createWaterFight,
   },
   {
     id: 'spaceFerrisWheel',
