@@ -148,6 +148,10 @@ export class World implements GameSystem {
   }
 
   update(context: FrameContext): void {
+    // Read before `building.update()` runs this frame, so it is a frame behind
+    // — invisible in practice, since every doorway crossing already happens
+    // behind a closed iris (see `Building.changeSpace`).
+    this.dayNight.setIndoors(this.building.playerInRoofedInterior);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read

@@ -27,6 +27,7 @@ import { Escalators } from './Escalators';
 import { FloorFader } from './floorFade';
 import { GlassLift } from './GlassLift';
 import { GrownUp } from './GrownUp';
+import { InteriorLighting } from './InteriorLighting';
 import { BuildingShell } from './Shell';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
@@ -193,6 +194,8 @@ export class Building implements GameSystem {
   private readonly helterSkelter: SlideRide;
   private readonly ginormousSlide: SlideRide;
   private readonly stairRide: StairRide;
+  /** The building's own fixed lights — on indoors, off outside and on the roof. */
+  private readonly interiorLighting = new InteriorLighting();
 
   private player: Player | null = null;
   private ride: ActiveRide | null = null;
@@ -202,6 +205,8 @@ export class Building implements GameSystem {
 
   /** True while the player is in the building's own space. */
   private inside = false;
+  /** The deck the player is currently standing on, or `null` off any deck. */
+  private currentDeck: number | null = null;
   /** True from the moment an iris starts closing until the space has changed. */
   private changingSpace = false;
   private spaceCooldown = 0;
@@ -232,6 +237,10 @@ export class Building implements GameSystem {
     this.toilets = new Toilets(this.shell.floorGroups);
     this.lift = new GlassLift(collision);
     this.interiorRoot.add(this.lift.group);
+    // Off until the player is actually indoors under a ceiling (see `update`);
+    // starts invisible for the same reason `interiorRoot` does.
+    this.interiorRoot.add(this.interiorLighting.group);
+    this.interiorLighting.setActive(false);
 
     const ground = this.shell.floorGroups[0];
     if (ground) ground.add(this.trampoline.group);
@@ -298,6 +307,22 @@ export class Building implements GameSystem {
   /** True while the player is in the building's own space. */
   get playerIsInside(): boolean {
     return this.inside;
+  }
+
+  /**
+   * True while the player is indoors under a ceiling — i.e. anywhere in the
+   * building's own space *except* the roof terrace, which is genuinely
+   * outdoors (GAME_DESIGN.md items 5 and 30c).
+   *
+   * `World` feeds this straight to `DayNight.setIndoors`, which is what turns
+   * the sun's moving shadows off indoors and hands lighting over to
+   * {@link InteriorLighting} instead (item 18). `currentDeck` is a frame
+   * behind `inside` — set by `updateCutaway`, which runs after the doorway
+   * check — but that lag is invisible behind the same iris that already hides
+   * every other seam in a space change.
+   */
+  get playerInRoofedInterior(): boolean {
+    return this.inside && (this.currentDeck === null || this.currentDeck < TOP_DECK);
   }
 
   /**
@@ -440,6 +465,8 @@ export class Building implements GameSystem {
 
   private updateCutaway(player: Player): void {
     if (!this.inside && !this.ride) {
+      this.currentDeck = null;
+      this.interiorLighting.setActive(false);
       this.fader.setVisibleUpTo(null);
       this.shops.setVisibleDeck(null);
       this.grownUp.root.visible = false;
@@ -447,6 +474,8 @@ export class Building implements GameSystem {
     }
 
     const floor = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
+    this.currentDeck = floor;
+    this.interiorLighting.setActive(this.playerInRoofedInterior);
     this.fader.setVisibleUpTo(floor);
     // Shop stock is only drawn on the deck the player is actually standing on;
     // the floors below are visible but their shelves are not worth the budget.
