@@ -10,7 +10,7 @@ import {
 } from 'three';
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { addOutline, decal, disposeTree, solid, toonMaterial } from '../style/materials';
+import { addOutline, decal, disposeTree, markShared, solid, toonMaterial } from '../style/materials';
 import { sharedFacePatch } from '../style/sharedFace';
 import { paintFace, type Expression, type FacePaintOptions } from '../style/faces';
 import { applyWalk, blob, type CreatureHandle } from '../style/asset';
@@ -292,12 +292,14 @@ let puffSingingTexture: ReturnType<typeof paintFace> | null = null;
 
 function puffSingingFace() {
   if (!puffSingingTexture) {
-    puffSingingTexture = paintFace({
-      ...PUFF_FACE_PAINT,
-      eyeStyle: 'archHappy',
-      mouth: 'oh',
-      mouthW: PUFF_FACE_PAINT.mouthW! * 1.25,
-    });
+    puffSingingTexture = markShared(
+      paintFace({
+        ...PUFF_FACE_PAINT,
+        eyeStyle: 'archHappy',
+        mouth: 'oh',
+        mouthW: PUFF_FACE_PAINT.mouthW! * 1.25,
+      }),
+    );
   }
   return puffSingingTexture;
 }

@@ -1,5 +1,5 @@
 import { Mesh, type BufferGeometry, type CanvasTexture } from 'three';
-import { decal, toonMaterial } from './materials';
+import { decal, markShared, toonMaterial } from './materials';
 import {
   facePatchGeometry,
   paintExpressions,
@@ -39,6 +39,11 @@ export function sharedFacePatch(key: string, options: FacePatchOptions): FacePat
       expressions: paintExpressions(paint),
       geometry: facePatchGeometry(radius * 1.012, spreadX, spreadY, tilt),
     };
+    // This cache owns them, so no `disposeTree` may free them — every pet in the
+    // park wears this one face, and the character creator's preview disposes a
+    // pet on every tap. See the ownership note in `materials.ts`.
+    markShared(entry.geometry);
+    for (const texture of Object.values(entry.expressions)) markShared(texture);
     cache.set(key, entry);
   }
 

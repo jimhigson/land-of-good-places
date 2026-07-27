@@ -1,6 +1,7 @@
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'three';
 import { hexToCss, PALETTE } from './palette';
 import { Rng } from './mathUtils';
+import { markShared } from '../art/style/materials';
 
 /**
  * Every texture in the game is drawn here with the 2D canvas API.
@@ -36,7 +37,9 @@ function finish(canvas: HTMLCanvasElement, repeat: number): CanvasTexture {
 function cached<T extends Texture>(key: string, build: () => T): T {
   const existing = cache.get(key);
   if (existing) return existing as T;
-  const texture = build();
+  // This cache owns every texture it hands out, so `disposeTree` must never
+  // free one — see the ownership note in `art/style/materials.ts`.
+  const texture = markShared(build());
   cache.set(key, texture);
   return texture;
 }
