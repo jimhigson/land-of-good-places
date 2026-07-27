@@ -1,19 +1,72 @@
-import { gameStore, type GameState, type InventoryItem } from '../state';
+import { gameStore, wearableSlot, type GameState, type InventoryItem } from '../state';
 
 /**
  * The backpack drawer: everything you have bought, newest first.
  *
  * A *subscriber*, like the rest of the HUD — it reads the store and never
- * reaches into a game system. Tapping a row carries that thing in your hands,
- * which is the only interaction it has, and is enough to make the list feel like
- * it belongs to the player rather than to a menu.
+ * reaches into a game system.
+ *
+ * ### One tap, one rule
+ *
+ * Every row is a single button and tapping it *uses* that thing; tapping it
+ * again puts it back. What "use" means comes from the thing itself, not from
+ * anything the child has to choose:
+ *
+ *  - a **hat** goes on your head, a **flower** goes in your hair
+ *    (`gameStore.setWornHat` / `setWornFlower`, drawn by `entities/WornHat.ts`
+ *    and `entities/WornFlower.ts`);
+ *  - anything else you can hold goes into your **hands**
+ *    (`gameStore.setCarried`).
+ *
+ * There is deliberately no second button, no long-press and no submenu: a
+ * six-year-old should be able to put a crown on by pressing the crown. A hat is
+ * *also* carryable, and wearing wins — see `wearableSlot` in `state/store.ts`
+ * for why that is the right way round.
+ *
+ * The rows are ordinary `<button>`s, so the rainbow outline and the activation
+ * flash of GAME_DESIGN.md's HIGHLIGHT RULE arrive on their own from the global
+ * rule in `style.css`. Nothing in here draws a highlight, and nothing in here
+ * should.
  *
  * The Cute-o-dex, the bedroom shelves and the parade (build step 5) all want
  * this same data; they should read `gameStore.get().inventory` rather than
  * anything in here.
  */
 export interface InventoryHandlers {
-  onCarry(uid: string): void;
+  /** `null` empties the hands — putting a thing down is the same gesture. */
+  onCarry(uid: string | null): void;
+}
+
+/**
+ * What tapping a row will do, worked out once and used for the pill, the
+ * label and the tap itself so the three can never describe different things.
+ */
+interface RowAction {
+  /** `wear` covers both slots; the store call picks which. */
+  readonly kind: 'wear' | 'carry' | 'none';
+  /** True when the thing is currently in use, so the tap undoes it. */
+  readonly active: boolean;
+  /** The words on the pill: "Wear" / "Take off" / "Hold" / "Put down". */
+  readonly label: string;
+  /** The glyph in the trailing cell, or '' for a thing at rest. */
+  readonly glyph: string;
+}
+
+function actionFor(item: InventoryItem, state: GameState): RowAction {
+  const slot = wearableSlot(item.kind);
+  if (slot === 'hat') {
+    const active = item.uid === state.wornHatUid;
+    return { kind: 'wear', active, label: active ? 'Take off' : 'Wear', glyph: active ? '🧑‍🎤' : '' };
+  }
+  if (slot === 'flower') {
+    const active = item.uid === state.wornFlowerUid;
+    return { kind: 'wear', active, label: active ? 'Take out' : 'Wear', glyph: active ? '💐' : '' };
+  }
+  if (item.carryable) {
+    const active = item.uid === state.carriedUid;
+    return { kind: 'carry', active, label: active ? 'Put down' : 'Hold', glyph: active ? '🤲' : '' };
+  }
+  return { kind: 'none', active: false, label: '', glyph: '' };
 }
 
 export class InventoryDrawer {
@@ -62,7 +115,8 @@ export class InventoryDrawer {
 
     const hint = document.createElement('p');
     hint.className = 'shop-hint';
-    hint.innerHTML = '<kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>E</kbd> carry it · <kbd>I</kbd> close';
+    hint.innerHTML =
+      '<kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>E</kbd> wear or hold it · <kbd>I</kbd> close';
 
     this.root.append(head, this.list, hint);
     container.append(this.root);
@@ -106,7 +160,7 @@ export class InventoryDrawer {
       case 'KeyE':
       case 'KeyF':
       case 'Space':
-        this.carrySelected();
+        this.useSelected();
         return true;
       // Esc and I are left to the game's `menu` / `inventory` actions — see the
       // note in `ShopPanel.handleKey`.
@@ -150,23 +204,40 @@ export class InventoryDrawer {
     }
 
     this.rows = this.entries.map((item, index) => {
+      const action = actionFor(item, state);
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'shop-row';
-      row.dataset.available = 'true';
+      // A row with nothing to do is still a row you can select and read, so it
+      // is `aria-disabled` rather than `disabled`. That is also the exact
+      // attribute the global HIGHLIGHT rule and `ui/TapBurst.ts` both skip, so
+      // nothing promises a child a press that would do nothing.
+      row.dataset.available = action.kind === 'none' ? 'false' : 'true';
+      if (action.kind === 'none') row.setAttribute('aria-disabled', 'true');
       row.dataset.selected = index === this.selected ? 'true' : 'false';
       row.dataset.carried = item.uid === state.carriedUid ? 'true' : 'false';
+      row.dataset.worn = action.kind === 'wear' && action.active ? 'true' : 'false';
+      row.setAttribute('aria-pressed', action.active ? 'true' : 'false');
+      row.setAttribute(
+        'aria-label',
+        action.kind === 'none'
+          ? item.displayName
+          : `${item.displayName} — ${action.label.toLowerCase()}`,
+      );
       row.innerHTML =
         `<span class="row-icon">${escapeHtml(item.icon)}</span>` +
         '<span class="row-text">' +
         `<span class="row-name">${escapeHtml(item.displayName)}</span>` +
         `<span class="row-blurb">${escapeHtml(whenLabel(item))}</span>` +
         '</span>' +
-        `<span class="row-carry">${item.uid === state.carriedUid ? '🤲' : ''}</span>`;
+        (action.label === ''
+          ? ''
+          : `<span class="row-action" aria-hidden="true">${escapeHtml(action.label)}</span>`) +
+        `<span class="row-carry" aria-hidden="true">${action.glyph}</span>`;
       row.addEventListener('click', () => {
         row.blur();
         this.selected = index;
-        this.carrySelected();
+        this.useSelected();
       });
       this.list.append(row);
       return row;
@@ -182,10 +253,25 @@ export class InventoryDrawer {
     this.rows[this.selected]?.scrollIntoView({ block: 'nearest' });
   }
 
-  private carrySelected(): void {
+  /**
+   * Does whatever the selected row says it does — the single activation path,
+   * shared by a tap and by the keyboard, so the two can never drift apart.
+   *
+   * Wearing goes straight to the store rather than out through
+   * {@link InventoryHandlers}: `Shopping` has nothing to add to it (unlike
+   * carrying, which it owns because `CarriedItem` hangs off the player model),
+   * and a handler that only ever forwards is a hop with no purpose. Both worn
+   * slots are store subscribers, so this is the whole of the wiring.
+   */
+  private useSelected(): void {
     const item = this.entries[this.selected];
-    if (!item || !item.carryable) return;
-    this.handlers.onCarry(item.uid);
+    if (!item) return;
+    const action = actionFor(item, gameStore.get());
+    const slot = wearableSlot(item.kind);
+
+    if (slot === 'hat') gameStore.setWornHat(action.active ? null : item.uid);
+    else if (slot === 'flower') gameStore.setWornFlower(action.active ? null : item.uid);
+    else if (action.kind === 'carry') this.handlers.onCarry(action.active ? null : item.uid);
   }
 }
 

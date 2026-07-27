@@ -10,12 +10,11 @@ import { shopItem } from '../world/building/shops/catalogue';
  *
  * Mirrors `WornFlower.ts` on purpose: a store subscriber, not something told
  * directly, so "which hat is worn" is a fact about the save rather than a side
- * effect of a button press. Today the only thing that ever sets
- * `wornHatUid` is the character creator (`gameStore.completeCharacterCreation`)
- * — the hat shop has no "wear this" button yet, so a hat bought mid-game still
- * only goes into the player's hands, exactly as it did before this file
- * existed. This class does not need to change when that button arrives; it
- * already draws whatever `wornHatUid` names.
+ * effect of a button press. Two things set `wornHatUid`: the character creator
+ * (`gameStore.completeCharacterCreation`) picks the starting hat, and tapping a
+ * hat in the backpack drawer (`gameStore.setWornHat`) swaps it thereafter.
+ * Neither needed a line of this file — it already draws whatever `wornHatUid`
+ * names, which is the point of the arrangement.
  *
  * Parented to `hatAnchor` — the crown of the head, see `art/models/kid.ts` —
  * at the model's own natural scale: `art/models/hats.ts`'s own doc comment
