@@ -235,6 +235,30 @@ play area.
 
 No more pop-ups over the play area.
 
+## The spooky house — it looks like a stall (27 July 2026 — queued, not started)
+
+From the outside the spooky house currently reads as **just another stall**,
+which undersells it. Two changes:
+
+1. **Make the building a giant GHOST HEAD** — a big friendly-spooky ghost
+   face you walk into, with **a spider sitting on top**. It should be
+   unmistakable from across the park, the way the ferris wheel is, not a
+   striped booth you could confuse with the rail racer or the dodgems
+   kiosk.
+2. **Move it further towards the EDGE of the park.** It currently stands on
+   the lawn a short walk north-east of the fountain plaza, in the middle of
+   everything. Out at the edge suits it better — a spooky house should feel
+   slightly set apart.
+
+*Engineering note:* it is registered through the mini-game stall framework
+(`src/minigames/stalls.ts`), which builds a standard striped booth prop for
+every entry — that is exactly why it looks like a stall. It needs its own
+prop, the way the ferris wheel got one, rather than a re-skin of the booth.
+When re-placing it, check clearance against the anchor plots, the wall runs
+and the seeded tree/bush scatter (an earlier stall placement *looked* clear
+on paper and had a bush planted on top of it once the scatter ran), and
+against the train's track loop, which now occupies the park edge.
+
 ## The spooky house
 
 A **spooky house** attraction (fun-spooky, not scary-scary): inside, a big
