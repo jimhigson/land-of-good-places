@@ -329,6 +329,15 @@ Every cute thing you buy or find:
 - **Photo mode** — a camera button that snaps you and your toys in a cute frame
 - **Rainbow hop** — a rainbow effect radiates out from the player whenever
   they jump
+- **Picking a flower is a little animation** (27 July 2026 — queued, not
+  started): the character **bends down** to pick it, then **lifts it up and
+  smells it**, with a happy expression, before it goes into the collection.
+  Not an instant pop — a small moment worth watching. *Note: the character
+  already has an expression system (happy/blink/surprised via face-texture
+  swaps) and a limb animator that carries lean, roll and head-lag, so this
+  is a pose sequence rather than new machinery. Picking currently fires a
+  sparkle and shrinks the flower to the player; the animation should own
+  that timing instead, and tap-to-move should not fight it mid-bend.*
 - **Flowers grow and can be picked** — flowers on the ground grow
   constantly, slowly but noticeably, up to a limit of objects; new ones
   sprout as others are picked. Tap/walk up to pick a flower, and picked
