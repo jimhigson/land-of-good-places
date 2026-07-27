@@ -13,6 +13,7 @@ import {
   createStickerSheet,
   createSurpriseEgg,
 } from '../../../art/models/shopItems';
+import { createSpookyCandy } from '../../../minigames/spookyHouse/candyModel';
 import type { CuteCategory, InventoryKind } from '../../../state';
 
 /**
@@ -39,7 +40,15 @@ export type ShopId =
 export interface ShopItem {
   /** Stable catalogue id, and the Cute-o-dex key. */
   readonly id: string;
-  readonly shopId: ShopId;
+  /**
+   * Which shop unit sells it — or `'spookyHouse'` for the one entry that
+   * isn't sold anywhere, only found (see the `candy.spookyHouse` entry in
+   * `SHOP_ITEMS` below). Kept as
+   * a union with `ShopId` rather than folded into it, so the exhaustive
+   * `Record<ShopId, …>` tables in `fitouts.ts`/`Shops.ts` never have to know
+   * about a shop that doesn't physically exist.
+   */
+  readonly shopId: ShopId | 'spookyHouse';
   readonly displayName: string;
   /** One cheerful line under the name in the purchase panel. */
   readonly blurb: string;
@@ -441,6 +450,31 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     carryable: true,
     model: () => createSurpriseEgg(PALETTE.stonePinkLight, PALETTE.markerLilac),
     heldScale: 0.7,
+    rare: false,
+  },
+
+  // --------------------------------------------------------- the spooky house
+  // Not sold anywhere — poured out by the mouth in the spooky house mini-game
+  // (`minigames/spookyHouse/candyShower.ts`). `shopId: 'spookyHouse'` never
+  // matches a real `ShopId`, so `itemsForShop` never puts it on a shelf; living
+  // in `SHOP_ITEMS` is only so the Cute-o-dex (`ui/CuteODex.ts`, built from
+  // `[...SHOP_ITEMS, ...EGG_PRIZES]`) picks it up without a second list to keep
+  // in step. One entry, not one per shower colour — the colours are a visual
+  // flourish (see the comment on `CANDY_COLOURS` in `candyShower.ts`), not
+  // different things to collect. Filed under the existing "Candy floss"
+  // Cute-o-dex page since it is a `treat` exactly like its neighbours there.
+  {
+    id: 'candy.spookyHouse',
+    shopId: 'spookyHouse',
+    displayName: 'Spooky Sweet',
+    blurb: 'A wrapped sweet from the giggling mouth in the spooky house.',
+    icon: '🍬',
+    price: 0,
+    kind: 'treat',
+    category: 'candyfloss',
+    carryable: true,
+    model: () => createSpookyCandy(),
+    heldScale: 0.9,
     rare: false,
   },
 ];
