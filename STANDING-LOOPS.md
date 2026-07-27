@@ -9,11 +9,28 @@ session in this repo, so whoever is overseeing can re-arm them immediately.
 
 ## Re-arm these on a new session
 
+All five jobs below (three loops plus the daily pause/resume pair) die with
+the session and must be recreated. Recurring jobs also auto-expire after
+seven days, so they need re-arming at least weekly regardless.
+
 | Cadence | Cron | Task |
 | --- | --- | --- |
 | Every 20 minutes | `*/20 * * * *` | kill redundant browser panes and vite instances |
 | Hourly at :07 | `7 * * * *` | check in with tasks done and still to do since last update, continue working if not yet complete |
 | Hourly at :23 | `23 * * * *` | Fable Architect sub-agent does review of repo code to date, produces a report, the Overseer delegates actioning of this report, and writes it into design docs |
+
+## Daily quiet hours
+
+Development pauses over the expensive part of the day and resumes when
+tokens are cheaper. These two are **also session-only** and must be re-armed
+alongside the loops above.
+
+| Cadence | Cron | Task |
+| --- | --- | --- |
+| Daily 12:48 | `48 12 * * *` | **Pause.** Harvest every in-flight agent's work (build, commit, push, PR), merge what is green, stop all agents, kill servers and browser pages, and delete the three loops above so nothing fires during the pause. Fires 12 minutes early on purpose — winding down properly takes time, and the aim is that work has actually stopped by 1pm. |
+| Daily 19:00 | `0 19 * * *` | **Resume.** Re-arm the three loops from this file, reload ARCHITECTURE-REVIEW.md and GAME_DESIGN.md, check what state the repo was left in, and restart work on the highest-priority outstanding items. |
+
+The pause job must not delete the pause/resume jobs themselves.
 
 Minutes are deliberately off :00 and :30, and offset from each other, so the
 three jobs never fire together.
