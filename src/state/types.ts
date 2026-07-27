@@ -24,8 +24,24 @@ export type CutePlacement = 'parade' | 'backpack' | 'bedroom' | 'carried' | 'wor
  * unions are kept in sync by hand; TypeScript's structural typing means a
  * `HairStyle` is already assignable wherever `KidOptions['hairStyle']` is
  * expected, so nothing has to convert between them.
+ *
+ * The canonical list lives in `art/models/hair.ts` (which also knows what each
+ * one is made of, and which of them a background child may wear). Keep these
+ * two in step: they are checked against each other every build, because
+ * `ui/CharacterCreation.ts` types its picker from *this* union and feeds the
+ * result straight into `KidOptions.hairStyle`, so a name that exists in only
+ * one of the two files fails to compile.
  */
-export type HairStyle = 'bunches' | 'bob' | 'short';
+export type HairStyle =
+  | 'bunches'
+  | 'bob'
+  | 'short'
+  | 'long'
+  | 'ponytail'
+  | 'longPonytail'
+  | 'bowl'
+  | 'spiky'
+  | 'messy';
 
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export type CuteCategory =
