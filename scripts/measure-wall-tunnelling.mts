@@ -312,6 +312,45 @@ function sweep(cases: readonly Case[], substepping: boolean): Summary {
   return summary;
 }
 
+/**
+ * **Does sub-stepping change how she moves at an ordinary frame rate?**
+ *
+ * Walks the same case twice, frame for frame, with and without, and returns
+ * the largest distance the two ever end up apart. The claim being checked is
+ * not "close enough" but *identical*: below the sub-step limit
+ * `resolveMovement` takes the single-step branch, which is the old code, so
+ * the answer must be exactly 0 — no drift, no last-bit difference. The walk
+ * she has today is a thing the family tuned, and a fix for a stutter has no
+ * business touching it.
+ */
+function divergence(testCase: Case, dt: number, sprint: boolean, phase: number): number {
+  const worlds = [false, true].map((substepping) => {
+    const collision = new CollisionWorld();
+    collision.setPlayBounds(0, 0, 100000);
+    testCase.build(collision);
+    const player = new SimPlayer(collision, {
+      substepping,
+      hopProbe: (probe) => collision.wouldAutoHopClear(probe, PLAYER_RADIUS, JUMP_APEX_HEIGHT),
+    });
+    player.position.set(testCase.startX, 0, testCase.startZ);
+    return player;
+  });
+  const [plain, stepped] = worlds as [SimPlayer, SimPlayer];
+
+  let worst = 0;
+  let time = 0;
+  let first = true;
+  while (time < RUN_SECONDS) {
+    const frame = first ? dt * (1 - phase) : dt;
+    first = false;
+    time += frame;
+    plain.step(frame, testCase.dirX, testCase.dirZ, sprint);
+    stepped.step(frame, testCase.dirX, testCase.dirZ, sprint);
+    worst = Math.max(worst, plain.position.distanceTo(stepped.position));
+  }
+  return worst;
+}
+
 function buildCases(wallsOf: (halfThickness: number) => Wall): Case[] {
   const cases: Case[] = [];
   for (const halfThickness of HALF_THICKNESSES) {
@@ -380,5 +419,37 @@ for (const suite of suites) {
         `    took                  ${((Date.now() - started) / 1000).toFixed(1)} s`,
     );
     for (const example of summary.examples) console.log(`      e.g. ${example}`);
+  }
+}
+
+// --- and the thing that must NOT have changed --------------------------------
+//
+// Ordinary walking. Sub-stepping is only ever allowed to alter the frames that
+// were unsafe; every frame rate a child actually plays at must produce the
+// same walk, to the last bit.
+console.log(
+  '\n=== Ordinary movement is untouched\n' +
+    '    Same walk, frame for frame, with and without sub-stepping. Anything\n' +
+    '    but an exact 0 below the sub-step limit is a change to how she moves.',
+);
+console.log('\n   fps  gait    sub-steps  worst divergence');
+const identityCases = [
+  ...buildCases((halfThickness) => ({ halfThickness, topHeight: 0.7, autoHoppable: true })),
+  ...buildCases((halfThickness) => ({ halfThickness, topHeight: 2.0, autoHoppable: false })),
+];
+for (const dt of DELTAS) {
+  for (const sprint of [false, true]) {
+    const step = PLAYER_MAX_SPEED * (sprint ? PLAYER_SPRINT_MULTIPLIER : 1) * dt;
+    let worst = 0;
+    for (const testCase of identityCases) {
+      for (const phase of [0, 0.17, 0.41, 0.63, 0.88]) {
+        worst = Math.max(worst, divergence(testCase, dt, sprint, phase));
+      }
+    }
+    console.log(
+      `   ${String(Math.round(1 / dt)).padStart(3)}  ${sprint ? 'sprint' : 'walk  '}  ` +
+        `${String(Math.ceil(step / limit)).padStart(9)}  ${worst.toFixed(6)} m` +
+        (worst === 0 ? '   (identical)' : ''),
+    );
   }
 }
