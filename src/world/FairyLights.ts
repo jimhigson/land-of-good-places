@@ -32,6 +32,34 @@ import type { CollisionWorld } from './Collision';
  * The whole rig fades in and out with {@link nightFactor}, which the DayNight
  * system sets each frame.
  */
+
+/**
+ * The plaza ring's share of "make the lit area three times bigger in radius".
+ *
+ * Same reasoning as the lamp posts, and the same trap — tripling `distance`
+ * alone would have changed nothing visible, because three.js's `1/d^decay`
+ * term had already taken the light to nothing well inside the old cut-off.
+ * Decay 1.6 → 1.0, intensity solved (11 → 5.69) to hold the brightness
+ * directly under a string exactly where it was. Ground pool 13.8 m → 39.8 m,
+ * and the ratio holds between 2.9× and 3.0× across every visibility threshold
+ * tested.
+ */
+const LIGHT_INTENSITY = 5.69;
+const LIGHT_DECAY = 1.0;
+const LIGHT_DISTANCE = 63;
+
+/**
+ * How many of the ten strings carry a real light — down from five.
+ *
+ * This is what pays for `LampPosts` going 3 → 5, so the park's total
+ * point-light count does not move. It is the right side of the trade: these
+ * five sit on a ring only 13.5 m across and each now washes about 40 m, so
+ * they were lighting the same plaza five times over, while the lamp posts are
+ * strung out along a ring road well over a hundred metres round and genuinely
+ * needed the reach.
+ */
+const REAL_LIGHTS = 3;
+
 export class FairyLights implements GameSystem {
   readonly name = 'fairyLights';
   readonly group = new Group();
@@ -109,6 +137,12 @@ export class FairyLights implements GameSystem {
     const bulbsPerString = 9;
     const bulbPositions: Vector3[] = [];
 
+    // Which strings get one, spread as evenly as three divides into ten.
+    const LIT_STRINGS = new Set<number>();
+    for (let k = 0; k < REAL_LIGHTS; k += 1) {
+      LIT_STRINGS.add(Math.round((k * poleCount) / REAL_LIGHTS) % poleCount);
+    }
+
     for (let i = 0; i < poleCount; i += 1) {
       const from = poles[i] as Vector3;
       const to = poles[(i + 1) % poleCount] as Vector3;
@@ -131,12 +165,13 @@ export class FairyLights implements GameSystem {
       this.group.add(line);
       this.strings.push(line);
 
-      // Real lights only on every other string. Each one costs every lit
-      // fragment in the scene, and five warm pools around the plaza already
-      // reads as "the fairy lights are on".
-      if (i % 2 === 0) {
+      // Real lights on three of the ten strings — see REAL_LIGHTS. Each one
+      // costs every lit fragment in the scene, so the ring carries as few as
+      // will do the job, and with the pool trebled three of them cover the
+      // plaza several times over.
+      if (LIT_STRINGS.has(i)) {
         const middle = points[Math.floor(points.length / 2)] as Vector3;
-        const light = new PointLight(rng.pick(bulbColours), 0, 21, 1.6);
+        const light = new PointLight(rng.pick(bulbColours), 0, LIGHT_DISTANCE, LIGHT_DECAY);
         light.position.copy(middle);
         this.group.add(light);
         this.lights.push(light);
@@ -194,7 +229,7 @@ export class FairyLights implements GameSystem {
       const light = this.lights[i];
       if (!light) continue;
       const flicker = 0.85 + 0.15 * Math.sin(elapsed * 1.7 + i * 2.3);
-      light.intensity = lit * 11 * flicker;
+      light.intensity = lit * LIGHT_INTENSITY * flicker;
       light.visible = lit > 0.02;
     }
 
