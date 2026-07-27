@@ -586,6 +586,14 @@ the middle of the screen cover up too much of the ride. Replace them with
 HUD, and **do not annotate apple bonks with text** — the wobble, the
 falling apples, the leaves and the startled bird already show it in-game.
 
+*Built: the dodgems use the shared `minigames/portraitStrip.ts`, the same
+component the water fight uses. `shout()` is gone from `dodgems/hud.ts`
+entirely: "Apple bonk!" is deleted outright, "TWEET!? 🐦" is the bonker's
+portrait jumping, and "GO!" is the last frame of the 3-2-1 rather than a
+banner over it. The one line that is not a reaction — how to drive — is a
+quiet pill under the counters. What is left in the middle is the countdown
+and the finish card.*
+
 ### Water fight garden
 
 A place in the garden for water fights with the other children, using **very
@@ -612,6 +620,17 @@ portrait** — never bunched in one corner, and never over the middle of the
 play area.
 
 No more pop-ups over the play area.
+
+*Built: `minigames/portraitStrip.ts` (shared with the dodgems) plus the
+`.mg-portrait-*` rules in `style.css`. Heads 3rem → 4.25rem, names 1rem →
+1.1875rem, and the list split down the middle into two banks — a column down
+each side in landscape (name beside the head, inboard), a row top and bottom
+in portrait (name underneath). The swap is one
+`@media (orientation: portrait)` block and no JavaScript, so turning the
+phone rearranges them live. The strip also stopped painting five canvases per
+character per game — the expressions are painted once and shared, and the
+skin and hair are a CSS gradient — which took it from sixty canvases to five
+and is what paid for the bigger heads.*
 
 ## The spooky house — it looks like a stall (27 July 2026 — queued, not started)
 

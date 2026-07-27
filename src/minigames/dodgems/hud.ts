@@ -3,13 +3,29 @@
  * a picture of the thumb-stick so a child can see what their finger is doing.
  *
  * Plain DOM on the framework's overlay layer, and it re-uses the framework's
- * own pill / card / shout classes rather than restyling them, so the two stalls
- * look like they belong to the same fair. The only new CSS is the stick, which
- * is injected from here under its own id — a mini-game must be addable without
- * editing a line the park or the framework owns.
+ * own pill / card classes rather than restyling them, so the two stalls look
+ * like they belong to the same fair. The only new CSS is the stick and the
+ * hint, which are injected from here under their own id — a mini-game must be
+ * addable without editing a line the park or the framework owns.
  *
  * Everything is `pointer-events: none`. The whole screen underneath is the go
  * button and the steering stick; nothing here may steal a press from it.
+ *
+ * **Nothing shouts over the rink any more (28 July 2026 feedback).** The
+ * family, on the dodgems: *"same fix as water fights — labels in the middle
+ * cover up too much; use portraits"*, and *"no need to annotate apple
+ * bonks"*. So `shout()` is gone from this HUD entirely rather than being
+ * quietened: a bonk, a bump and a wallop now show on the driver's own portrait
+ * at the edge of the screen (`minigames/portraitStrip.ts`), an apple says
+ * nothing at all, and "GO!" is just the last frame of the 3-2-1 instead of a
+ * banner of its own. What is left in the middle of the screen is the countdown
+ * and the finish card, both of which are the whole screen's business for a
+ * moment and then gone.
+ *
+ * The one line that is not a reaction — telling a child who has not moved yet
+ * how to drive — became {@link DodgemsHud.setHint}, tucked under the counters
+ * at the top. It is information, not celebration, and it never sits over the
+ * cars.
  */
 
 const STYLE_ID = 'lgp-dodgems-styles';
@@ -45,22 +61,38 @@ const STYLES = `
 .dg-counts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .dg-tree { background: #d9f7c8e6 !important; }
 .dg-time { min-width: 4.625rem; text-align: center; }
+
+/* Under the counters, not over the rink. Sized to sit inside the portrait
+   strip's top clearance so it never lands on a driver's face. */
+.dg-hint {
+  align-self: flex-start;
+  max-width: 22rem;
+  padding: 0.4375rem 1rem;
+  border-radius: 999px;
+  background: #fff6eacc;
+  font-size: var(--lgp-text-min);
+  font-weight: 700;
+  opacity: 0.9;
+  animation: mg-pop 240ms cubic-bezier(0.25, 1.4, 0.5, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dg-hint { animation: none; }
+}
 `;
 
 export interface DodgemsHud {
   setTime(secondsLeft: number): void;
   setBumps(bumps: number): void;
   setTreeBonks(bonks: number): void;
-  /** Big centred number for the 3-2-1. `null` clears it. */
+  /** Big centred number for the 3-2-1, ending in "GO!". `null` clears it. */
   setCount(text: string | null): void;
-  /** A short cheerful interjection. */
-  shout(text: string, seconds?: number): void;
+  /** One quiet line under the counters saying how to drive. `null` clears it. */
+  setHint(text: string | null): void;
   /** Draws the thumb-stick where the finger is, or hides it with `null`. */
   setStick(
     stick: { readonly originX: number; readonly originY: number; readonly x: number; readonly y: number } | null,
   ): void;
   showResult(title: string, line: string, hint: string): void;
-  update(dt: number): void;
   dispose(): void;
 }
 
@@ -105,8 +137,7 @@ export function createDodgemsHud(container: HTMLElement): DodgemsHud {
   root.append(topRow, centre, stick);
   container.append(root);
 
-  let shoutElement: HTMLElement | null = null;
-  let shoutTimer = 0;
+  let hintElement: HTMLElement | null = null;
   let countElement: HTMLElement | null = null;
   let lastTime = -1;
 
@@ -140,19 +171,20 @@ export function createDodgemsHud(container: HTMLElement): DodgemsHud {
       centre.append(countElement);
     },
 
-    shout(text: string, seconds = 1.4): void {
-      // A new shout replaces the old one rather than queueing: during a good
-      // pile-up three of these arrive in the same second.
-      if (shoutElement?.textContent === text && shoutTimer > 0.3) {
-        shoutTimer = seconds;
+    setHint(text: string | null): void {
+      if (text === null) {
+        hintElement?.remove();
+        hintElement = null;
         return;
       }
-      shoutElement?.remove();
-      shoutElement = document.createElement('div');
-      shoutElement.className = 'mg-shout';
-      shoutElement.textContent = text;
-      centre.append(shoutElement);
-      shoutTimer = seconds;
+      if (!hintElement) {
+        hintElement = document.createElement('div');
+        hintElement.className = 'dg-hint';
+        // After the counters, so it lands under them in the overlay's column
+        // rather than anywhere near the cars.
+        topRow.after(hintElement);
+      }
+      hintElement.textContent = text;
     },
 
     setStick(reading): void {
@@ -181,16 +213,6 @@ export function createDodgemsHud(container: HTMLElement): DodgemsHud {
       small.textContent = hint;
       card.append(heading, paragraph, small);
       centre.append(card);
-    },
-
-    update(dt: number): void {
-      if (shoutTimer > 0) {
-        shoutTimer -= dt;
-        if (shoutTimer <= 0) {
-          shoutElement?.remove();
-          shoutElement = null;
-        }
-      }
     },
 
     dispose(): void {

@@ -34,7 +34,6 @@ export interface WaterFightPortraits {
 }
 
 interface WetState {
-  readonly circle: HTMLElement;
   readonly wetElement: HTMLElement;
   /** 0 = dry, 1 = fully soaked. Damped towards `soakTarget` every frame. */
   soakShown: number;
@@ -56,7 +55,7 @@ export function createPortraitRow(
       '<span class="wf-drip"></span><span class="wf-drip"></span><span class="wf-drip"></span>';
     entry.circle.append(wetElement);
 
-    return { circle: entry.circle, wetElement, soakShown: 0, soakTarget: false, smileLeft: 0 };
+    return { wetElement, soakShown: 0, soakTarget: false, smileLeft: 0 };
   });
 
   return {
@@ -65,13 +64,9 @@ export function createPortraitRow(
       if (!entry) return;
       if (entry.smileLeft <= 0) strip.setExpression(index, 'happy');
       entry.smileLeft = 0.8;
-      // Retriggers the little bounce even if this fighter is already smiling
-      // from a moment ago — a quick double-hit should read as two moments,
-      // not one that got stretched.
-      entry.circle.dataset.smile = 'false';
-      requestAnimationFrame(() => {
-        entry.circle.dataset.smile = 'true';
-      });
+      // The bounce, including its retrigger-while-already-bouncing handling,
+      // belongs to the shared strip — the dodgems want exactly the same one.
+      strip.pop(index);
     },
 
     setSoaked(index: number, soaked: boolean): void {

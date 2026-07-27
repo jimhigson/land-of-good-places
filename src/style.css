@@ -3235,50 +3235,79 @@ kbd {
    Feedback (27 July 2026): the pop-up messages that used to appear over the
    water fight garden ("Hee hee!", "SOAKED Nell!", streak counts, a rainbow
    banner) covered too much of the game. They are gone; this is what replaced
-   them — a little head for everyone in the fight, docked along the top edge.
-   The dodgems are getting the same "portraits instead of pop-ups" treatment
-   next (a separate PR), so the row/circle/name rules below are named and
-   built generically (`.mg-portrait-*`, built by
-   `src/minigames/portraitStrip.ts`) rather than water-fight-specific, and
-   that PR can reuse them as-is. Only the wet-overlay rules further down
+   them — a little head for everyone playing, docked at the edges of the
+   screen. The dodgems now use the very same rules (labels over the cars,
+   same complaint, same fix), which is why everything here is named
+   `.mg-portrait-*` and built by `src/minigames/portraitStrip.ts` rather than
+   being water-fight-specific. Only the wet-overlay rules further down
    (`.wf-*`) are water fight's own reaction, layered on top by
    `src/minigames/waterFight/portraits.ts`.
 
-   Why the top edge: the score/best/time pills already live there and nobody
-   has minded, `WaterFight.resize` fits the camera so the top of the frame
-   sits above the rainbow's peak (`RAINBOW_SCREEN_TOP`) — higher than any
-   child's head can reach — in both the landscape and the portrait framing,
-   and a horizontal row is the shape that actually suits a phone's width in
-   either orientation. A vertical column down a side edge does not: it would
-   eat into the garden's left/right margin in landscape (where children walk
-   close to the fence) and read as an oddly long strip down portrait's narrow
-   width. */
+   Where they sit (28 July 2026 feedback): "the heads and names on the water
+   fight icons need to be bigger, put the icons down the left and right sides
+   too (half on each side) when in landscape and top/bottom when in portrait".
+   So the list is split down the middle into two banks, and only their
+   placement changes with the shape of the screen — a column down each side in
+   landscape, a row along the top and bottom in portrait. That is one
+   `@media (orientation: portrait)` block below and no JavaScript at all,
+   which is what makes it answer a phone being turned over *live*.
 
-.mg-portrait-row {
+   This replaces an earlier note here arguing for a single row along the top,
+   on the grounds that a side column would eat into the garden's left and
+   right margins. The family has now asked for the sides specifically, so that
+   is what they get; the banks are centred vertically, so they take a band out
+   of each edge rather than the whole height of it.
+
+   In landscape the name sits *beside* its head, inboard, which halves how
+   much height an item needs — three portraits at this size do not otherwise
+   fit down the side of a landscape phone. In portrait it sits underneath. */
+
+.mg-portrait-strip {
+  position: absolute;
+  inset: 0;
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0.3125rem;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
   pointer-events: none;
+  z-index: 1;
 }
+
+.mg-portrait-bank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.mg-portrait-strip > .mg-portrait-bank + .mg-portrait-bank { align-items: flex-end; }
 
 .mg-portrait-item {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 0.125rem;
-  width: 3.25rem;
+  gap: 0.4375rem;
 }
+/* The far bank mirrors, so its names stay inboard rather than running off the
+   edge of the screen. */
+.mg-portrait-bank + .mg-portrait-bank .mg-portrait-item { flex-direction: row-reverse; }
 
 .mg-portrait {
   position: relative;
-  width: 3rem;
-  height: 3rem;
+  flex: none;
+  width: 4.25rem;
+  height: 4.25rem;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--lgp-cream);
-  border: 0.1875rem solid var(--mg-portrait-accent, #fff6ea);
+  /* Skin and hair fringe: two stops of one gradient, set per portrait by
+     `portraitStrip.ts`. They used to be two fills on a canvas of their own,
+     which cost a canvas per character per expression. */
+  background: linear-gradient(
+    to bottom,
+    var(--mg-portrait-hair, #6b4a8f) 0 var(--mg-portrait-fringe, 32%),
+    var(--mg-portrait-skin, #ffd9bf) var(--mg-portrait-fringe, 32%) 100%
+  );
+  border: 0.25rem solid var(--mg-portrait-accent, #fff6ea);
   box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.22);
 }
 
@@ -3287,30 +3316,33 @@ kbd {
 .mg-portrait-item[data-you='true'] .mg-portrait {
   box-shadow:
     0 0.1875rem 0 rgba(74, 58, 82, 0.22),
-    0 0 0 0.125rem #fff6eae6;
+    0 0 0 0.1875rem #fff6eae6;
 }
 
 .mg-portrait-face {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
 }
 
-/* A generic little "something happened" bounce — water fight triggers it on
-   a score by toggling `data-smile`; any other mini-game's portrait reaction
-   can trigger the same way. */
-.mg-portrait[data-smile='true'] {
+/* A generic little "something just happened to me" bounce. Every mini-game
+   triggers it through `PortraitStrip.pop()` rather than setting the attribute
+   itself. */
+.mg-portrait[data-pop='true'] {
   animation: mg-portrait-pop 340ms cubic-bezier(0.25, 1.5, 0.5, 1);
 }
 
 .mg-portrait-name {
-  font-size: var(--lgp-text-min);
-  font-weight: 700;
+  font-size: 1.1875rem;
+  font-weight: 800;
   line-height: 1.1;
   color: var(--lgp-ink);
-  text-shadow: 0 0.0625rem 0 #fff6eacc;
-  max-width: 3.25rem;
+  text-shadow:
+    0 0.0625rem 0 #fff6ea,
+    0 0 0.25rem #fff6eacc;
+  max-width: 5.5rem;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3323,20 +3355,46 @@ kbd {
   100% { transform: scale(1); }
 }
 
-@media (max-width: 520px) {
-  .mg-portrait-item { width: 2.625rem; }
-  .mg-portrait { width: 2.375rem; height: 2.375rem; border-width: 0.125rem; }
-  .mg-portrait-name { max-width: 2.625rem; }
+/* Portrait: a bank along the top and a bank along the bottom, names under the
+   heads. The padding keeps them off the score pills at the top and off the
+   hold pad and the hint pill at the bottom — both of which are centred, which
+   is exactly where a full-width row would otherwise land. */
+@media (orientation: portrait) {
+  .mg-portrait-strip {
+    flex-direction: column;
+    align-items: center;
+    padding: 5.75rem 0 5rem;
+  }
+
+  .mg-portrait-bank,
+  .mg-portrait-strip > .mg-portrait-bank + .mg-portrait-bank {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+  }
+
+  .mg-portrait-item,
+  .mg-portrait-bank + .mg-portrait-bank .mg-portrait-item {
+    flex-direction: column;
+    gap: 0.1875rem;
+  }
+
+  .mg-portrait-name { max-width: 5rem; }
 }
 
-@media (max-height: 460px) {
-  .mg-portrait-item { width: 2.375rem; }
-  .mg-portrait { width: 2.125rem; height: 2.125rem; border-width: 0.125rem; }
-  .mg-portrait-name { display: none; }
+/* Small screens: still bigger than the row these replaced (3rem heads, 1rem
+   names), because "bigger" was the ask. The names stay — they used to be
+   hidden outright below 460px tall, which is the one screen where a child is
+   most likely to need telling who is who. */
+@media (max-width: 520px), (max-height: 460px) {
+  .mg-portrait { width: 3.375rem; height: 3.375rem; border-width: 0.1875rem; }
+  .mg-portrait-name { font-size: var(--lgp-text-min); max-width: 4.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mg-portrait[data-smile='true'] {
+  .mg-portrait[data-pop='true'] {
     animation: none;
   }
 }
