@@ -403,6 +403,17 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+    **Also (27 July 2026):** choose **skin tone** and **eye colour**. The
+    preview character should be alive — **blinking and cycling through
+    expressions** while you customise them, not a frozen doll.
+    *Engine note: the face system already provides eye styles (open,
+    closedHappy, archHappy, worried, wide, sly), mouth styles (smile,
+    bigSmile, grin, oh, cat, wobble, none) and composed expressions
+    (neutral, blink, happy, surprised, sad); `KidOptions` already accepts
+    `skin` and `eyeColour`. This is a matter of exposing and using what
+    exists, not building a new face system.*
+    **NPCs get the same treatment**: varied skin tones and eye colours
+    across the crowd, and the same blinking/expression range.
 28. **NPCs have names** — every NPC child has a name shown above their
     head exactly like the player's. There is ALWAYS a boy with blonde
     hair and blue eyes called **Ethan** somewhere in the park.
