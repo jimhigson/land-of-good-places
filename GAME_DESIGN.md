@@ -773,6 +773,19 @@ Rough order of construction, each step playable:
     traversal device, and whether this is one refactor or a staged one,
     before any of it is built.
 
+31i. **From inside, the castle's outer wall still looks like a shopping
+    mall (27 July 2026 — queued, not started).** The exterior was rebuilt as
+    a palace, but **only the facade** — the interior shell was deliberately
+    left untouched, so standing inside you are still surrounded by the old
+    mall-style wall. It must use the **new castle appearance**: the same
+    stonework, arches, battlements and rose windows, seen from within.
+    **Sliced to the current floor plus the floors below it** — you should
+    see the castle wall as it exists at your height and beneath you, not the
+    whole tower stacked above your head. Goes hand in hand with 31e (the
+    interior rooms) and 31f (floors as separate spaces): once a floor is its
+    own space, its perimeter wall can be built as exactly the slice of
+    castle that belongs at that height.
+
 31e. **The castle INTERIOR must be fairy-tale themed too.** Checked
     27 July 2026: it is not. Inside is a shopping centre — flat deck
     floors with alternating cream/blossom storeys, a floor roundel,
