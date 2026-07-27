@@ -2,14 +2,18 @@ import type { Scene } from 'three';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
+import { Flowers } from './Flowers';
 import { Fountain } from './Fountain';
 import { FairyLights } from './FairyLights';
+import { LampPosts } from './LampPosts';
 import { AnchorPlots } from './AnchorPlots';
 import { DayNight } from './DayNight';
-import { Building } from './building';
+import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { MiniGameStalls } from '../minigames';
+import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
+import { collectSignZones, type SignZone } from './signs';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -33,23 +37,35 @@ export class World implements GameSystem {
   readonly collision = new CollisionWorld();
   readonly garden: Garden;
   readonly scenery: Scenery;
+  readonly flowers: Flowers;
   readonly fountain: Fountain;
   readonly fairyLights: FairyLights;
+  readonly lampPosts: LampPosts;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
+  readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
 
-  constructor(scene: Scene, sky: Sky) {
+  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
+    // Living, pickable flowers — no collision (you walk straight through
+    // them, same as the old decorative scatter), so it needs nothing from
+    // the world to be built.
+    this.flowers = new Flowers();
     this.fountain = new Fountain(this.collision);
     this.fairyLights = new FairyLights(this.collision);
+    // Lamp posts along the paths — the family's "night is too dark" feedback.
+    // Built after FairyLights (which rings the fountain plaza) and before
+    // AnchorPlots so it only needs the static ANCHORS list, not the built
+    // plots themselves, to keep its lamps out of the reserved ride footprints.
+    this.lampPosts = new LampPosts(this.collision);
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots);
+    this.building = new Building(this.collision, this.anchorPlots, interiorControls);
     // Fun-fair stalls: each one is a doorway into a mini-game (see
     // `minigames/stalls.ts`). They stand on open lawn rather than in an anchor
     // plot, so they are built last and simply keep out of everyone's way.
@@ -65,6 +81,11 @@ export class World implements GameSystem {
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
 
+    // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
+    // and the fake wooden tree, visible from right across the garden. Built
+    // after AnchorPlots (it fills that plot and retires its "coming soon"
+    // dressing); the ride you climb into is the mini-game behind the kiosk.
+    this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
     // The other children in the park. Built last, because the waypoint graph
@@ -77,9 +98,15 @@ export class World implements GameSystem {
     scene.add(
       this.garden.group,
       this.scenery.group,
+      this.flowers.group,
       this.fountain.group,
       this.fairyLights.group,
+      this.lampPosts.group,
       this.anchorPlots.group,
+      // The building is bigger on the inside: its interior is its own place,
+      // six hundred metres from the park rather than inside the plot the facade
+      // stands on, so it joins the scene on its own rather than through a plot.
+      this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
       this.train.group,
@@ -92,13 +119,16 @@ export class World implements GameSystem {
     // Fan the time-of-day out to everything that changes with it. Systems read
     // a plain number rather than subscribing, which keeps the ordering obvious.
     const night = this.dayNight.nightFactor;
+    const eveningGlow = this.dayNight.lightsOn ? night : night * 0.25;
     this.fountain.nightFactor = night;
-    this.fairyLights.nightFactor = this.dayNight.lightsOn ? night : night * 0.25;
+    this.fairyLights.nightFactor = eveningGlow;
+    this.lampPosts.nightFactor = eveningGlow;
 
     this.train.nightFactor = night;
 
     this.fountain.update(context);
     this.fairyLights.update(context);
+    this.lampPosts.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
 
@@ -111,6 +141,8 @@ export class World implements GameSystem {
 
     this.npcs.update(context);
     this.stalls.update(context);
+    this.flowers.update(context);
+    this.dodgems.update(context);
   }
 
   /**
@@ -124,7 +156,20 @@ export class World implements GameSystem {
       ...this.building.interactZones(),
       ...this.stalls.interactZones(),
       ...this.train.interactZones(),
+      ...this.flowers.interactZones(),
     ];
+  }
+
+  /**
+   * Every tap-to-read sign in the park (see `world/signs.ts`).
+   *
+   * A traversal of `anchorPlots.group` rather than a per-builder registry: the
+   * building is built *into* the anchor plots (see the constructor), so this
+   * one call already reaches every anchor sign and every shop sign without
+   * needing to know that chain of ownership.
+   */
+  signZones(): SignZone[] {
+    return collectSignZones(this.anchorPlots.group);
   }
 
   /**
@@ -139,7 +184,10 @@ export class World implements GameSystem {
   dispose(): void {
     this.fountain.dispose();
     this.fairyLights.dispose();
+    this.lampPosts.dispose();
     this.stalls.dispose();
     this.train.dispose();
+    this.flowers.dispose();
+    this.dodgems.dispose();
   }
 }

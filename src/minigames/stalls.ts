@@ -4,6 +4,9 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
+import { ANCHORS_BY_ID } from '../world/anchors';
+import { createDodgems } from './dodgems/Dodgems';
+import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createRailRacer } from './railRacer/RailRacer';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
@@ -49,6 +52,43 @@ export const STALLS: readonly StallDefinition[] = [
     // booth and the plaza, so walking up is a straight line from the fountain.
     facing: 0.3,
     create: createRailRacer,
+  },
+  {
+    id: 'spaceFerrisWheel',
+    title: 'Space Ferris Wheel',
+    subtitle: 'all the way up to space!',
+    glyph: '🎡',
+    accent: PALETTE.markerLilac,
+    stripe: PALETTE.markerSky,
+    // The one stall that is not a stall: this is the ferris wheel's ticket
+    // kiosk, and it stands *exactly* where the plot's "coming soon" sign stood
+    // — same spot, same yaw — because that sign has now come true. Putting it
+    // on the anchor's own entrance also means the path spur already leads here,
+    // and the placeholder's collision post ends up inside the booth's own walls
+    // instead of being left behind as an invisible obstacle on the lawn.
+    position: ANCHORS_BY_ID.ferrisWheel.entrance,
+    facing: ANCHORS_BY_ID.ferrisWheel.signYaw,
+    create: createSpaceFerrisWheel,
+  },
+  {
+    id: 'dodgems',
+    title: 'Dodgems!',
+    subtitle: 'bonk the wobbly tree!',
+    glyph: '🚗',
+    accent: PALETTE.markerPink,
+    stripe: PALETTE.markerLemon,
+    // The ticket kiosk for the ride standing in the `dodgems` anchor plot: just
+    // outside the bumper wall, a couple of metres from the doorway in it, and
+    // right where the path spur from the garden arrives. Checked against the
+    // ride's own geometry (`dodgems/plot.ts`): the booth and the point a child
+    // stands at are both clear of the barrier, and the walk from the end of the
+    // path to the counter is a straight line across open grass.
+    position: [24, 12],
+    // Same rule the rail racer follows: the counter faces the default camera,
+    // and the stand point in front of it ends up between the kiosk and the
+    // ride's doorway rather than inside the rink.
+    facing: 0.3,
+    create: createDodgems,
   },
 ];
 

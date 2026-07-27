@@ -49,6 +49,8 @@ export class IsoCamera {
   private zoomTarget = 1;
 
   private aspect = 1;
+  /** CSS pixels — kept for {@link worldUnitsPerPixel}, screen-constant UI sizing. */
+  private viewportHeight = 1;
 
   constructor() {
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
@@ -72,6 +74,28 @@ export class IsoCamera {
     return this.zoomValue;
   }
 
+  /**
+   * The ground point the camera is orbiting — usually right on top of the
+   * player. **Not** the camera's own position: this is an orthographic rig,
+   * so the camera sits a fixed `CAMERA_DISTANCE` back at every zoom level,
+   * and a straight-line distance to *that* would be roughly constant no
+   * matter what is actually on screen. Anything checking "is this far from
+   * what the camera is looking at" — a name label deciding whether to hide,
+   * say — wants distance to this point instead.
+   */
+  get focusPoint(): Readonly<Vector3> {
+    return this.focus;
+  }
+
+  /**
+   * World units spanned by one CSS pixel of the canvas, at the current zoom.
+   * Multiply a desired on-screen size (in CSS px) by this to get the world
+   * scale that reads as that size regardless of zoom — see `ui/NameLabel.ts`.
+   */
+  get worldUnitsPerPixel(): number {
+    return (this.camera.top - this.camera.bottom) / this.viewportHeight;
+  }
+
   /** Snaps the camera straight to a position, skipping the follow smoothing. */
   snapTo(position: Vector3): void {
     this.focus.copy(position);
@@ -81,6 +105,7 @@ export class IsoCamera {
 
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
+    this.viewportHeight = Math.max(1, height);
     this.applyFrustum();
   }
 
