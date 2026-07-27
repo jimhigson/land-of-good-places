@@ -178,6 +178,25 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **The pets are still not 1.46 m** (found by the asset-contract check, which
+  was written to validate the fix that missed this). `sizeToStandard` now
+  closes over a `Box3`, which **over-measures** — a Box3 is the axis-aligned
+  box of already axis-aligned boxes, so every rotation inflates it. The pets
+  are therefore scaled slightly too far *down*: kitten -34 mm, mouse -55 mm,
+  puff -68 mm, and the puff sinks 28 mm through the floor. Only the bunny is
+  inside tolerance. Fix: close it over the new `visibleBounds` vertex walk
+  (`src/art/style/measure.ts`) instead of a Box3, and tighten the ratchet
+  entries afterwards.
+
+- **Three assets declare a height that does not describe them** — reported by
+  the contract check, deliberately not fixed, because moving art is a
+  level-design decision: `spaceTurtle` +42% (the sprout on its shell is
+  excluded from the sum, exactly like the bunny's ears), `prop.tree.tall.*`
+  -14% (`tallness` multiplies the whole declared height but only the trunk and
+  the canopy pivot are scaled), `hat.puff` +37% and hovering 30 mm above the
+  crown. Plus origins off the floor: `keeper` +99 mm, `candy.spookyHouse`
+  +77 mm.
+
 - **Assert that every asset's declared height matches its measured bounds**
   (Review 6/F5). `sizeToStandard` scaled pets from a hand-written `0.52` that
   was the top of the skull, not the creature — so the bunny rendered at 2.12 m
