@@ -39,20 +39,20 @@ const STYLES = `
    control, not ours. Hidden by attribute so it returns intact on the way out. */
 body[data-waterfight='true'] .mg-hold { display: none; }
 
-.wf-row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+.wf-row { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
 
 .wf-score {
   position: relative;
-  padding: 6px 18px 8px;
-  border-radius: 22px;
+  padding: 0.375rem 1.125rem 0.5rem;
+  border-radius: 1.375rem;
   background: #fff6eaf2;
-  box-shadow: 0 5px 0 rgba(74, 58, 82, 0.18);
+  box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.18);
   text-align: center;
-  min-width: 128px;
+  min-width: 8rem;
 }
 .wf-score .wf-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--lgp-text-min);
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -60,7 +60,7 @@ body[data-waterfight='true'] .mg-hold { display: none; }
 }
 .wf-score .wf-value {
   display: block;
-  font-size: 42px;
+  font-size: 2.625rem;
   font-weight: 800;
   line-height: 1.02;
   color: #2f9fd8;
@@ -68,27 +68,27 @@ body[data-waterfight='true'] .mg-hold { display: none; }
 .wf-score[data-pop='true'] .wf-value { animation: wf-bump 320ms cubic-bezier(0.25, 1.5, 0.5, 1); }
 
 .wf-pill {
-  padding: 7px 15px;
+  padding: 0.4375rem 0.9375rem;
   border-radius: 999px;
   background: #fff6eae6;
-  box-shadow: 0 4px 0 rgba(74, 58, 82, 0.16);
-  font-size: 15px;
+  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.16);
+  font-size: var(--lgp-text-min);
   font-weight: 700;
   white-space: nowrap;
 }
-.wf-pill b { font-size: 19px; }
+.wf-pill b { font-size: 1.1875rem; }
 .wf-pill[data-hurry='true'] { background: #ffd9ecf2; }
 
 /* The little "+14" that leaps out of the score every time you land one. */
 .wf-gain {
   position: absolute;
   left: 50%;
-  top: 2px;
+  top: 0.125rem;
   transform: translateX(-50%);
-  font-size: 26px;
+  font-size: 1.625rem;
   font-weight: 800;
   color: #2fb98f;
-  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.9);
+  text-shadow: 0 0.125rem 0 rgba(255, 255, 255, 0.9);
   pointer-events: none;
   animation: wf-gain 780ms ease-out forwards;
 }
@@ -96,11 +96,11 @@ body[data-waterfight='true'] .mg-hold { display: none; }
 .wf-hint {
   align-self: center;
   margin-top: auto;
-  margin-bottom: 6px;
-  padding: 8px 18px;
+  margin-bottom: 0.375rem;
+  padding: 0.5rem 1.125rem;
   border-radius: 999px;
   background: #fff6eacc;
-  font-size: 14px;
+  font-size: var(--lgp-text-min);
   font-weight: 700;
   opacity: 0.85;
   text-align: center;
@@ -114,7 +114,7 @@ body[data-waterfight='true'] .mg-hold { display: none; }
 @keyframes wf-gain {
   0% { transform: translate(-50%, 0); opacity: 0; }
   18% { opacity: 1; }
-  100% { transform: translate(-50%, -54px); opacity: 0; }
+  100% { transform: translate(-50%, -3.375rem); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -184,7 +184,7 @@ export function createWaterFightHud(container: HTMLElement): WaterFightHud {
   const bottom = document.createElement('div');
   bottom.className = 'mg-centre';
   bottom.style.justifyContent = 'flex-end';
-  bottom.style.gap = '8px';
+  bottom.style.gap = '0.5rem';
 
   root.append(row, centre, bottom);
   container.append(root);
@@ -267,7 +267,7 @@ export function createWaterFightHud(container: HTMLElement): WaterFightHud {
       paragraph.innerHTML = line;
       paragraph.style.color = hexToCss(0x2f9fd8);
       paragraph.style.fontWeight = '800';
-      paragraph.style.fontSize = '24px';
+      paragraph.style.fontSize = '1.35rem';
       const small = document.createElement('p');
       small.className = 'mg-sub';
       small.textContent = hint;

@@ -1,6 +1,7 @@
 import { CanvasTexture, Group, SRGBColorSpace, Sprite, SpriteMaterial } from 'three';
 import { PALETTE, hexToCss } from '../../core/palette';
 import { Rng, clamp01 } from '../../core/mathUtils';
+import { minTextPx } from '../../core/uiScale';
 
 /**
  * "hee hee!" — the little giggle bubbles that pop over a car when it is bumped.
@@ -18,11 +19,25 @@ const WORDS = ['hee hee!', 'wheee!', 'oops!', 'bonk!', 'ha ha!', 'wheeee!'] as c
 const POOL = 6;
 const LIFE = 1.15;
 
+/** Canvas the word is painted on, and the size it is painted at. The bubble is
+ *  scaled in the world so that word lands on the TEXT RULE's minimum — see
+ *  {@link Giggles.update}. */
+const CANVAS_WIDTH = 256;
+const CANVAS_HEIGHT = 144;
+const FONT_PX = 54;
+
 export interface Giggles {
   readonly root: Group;
   /** Pops a random giggle over a point. */
   pop(x: number, y: number, z: number): void;
-  update(dt: number): void;
+  /**
+   * `worldUnitsPerPixel` is the dodgems camera's own version of
+   * `IsoCamera.worldUnitsPerPixel` — how much world one CSS pixel spans at the
+   * current framing. Passing it in is what keeps the giggle a constant size on
+   * *screen*: at a fixed world scale the words came out around 6-11 CSS pixels
+   * tall, easily the smallest text in the game.
+   */
+  update(dt: number, worldUnitsPerPixel: number): void;
   dispose(): void;
 }
 
@@ -81,7 +96,10 @@ export function createGiggles(): Giggles {
       bubble.sprite.position.set(bubble.x, bubble.y, bubble.z);
     },
 
-    update(dt: number): void {
+    update(dt: number, worldUnitsPerPixel: number): void {
+      // The height that puts the painted word exactly on the minimum text size.
+      const height = worldUnitsPerPixel * CANVAS_HEIGHT * (minTextPx() / FONT_PX);
+      const width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
       for (const bubble of bubbles) {
         if (bubble.life <= 0) continue;
         bubble.life -= dt;
@@ -93,7 +111,7 @@ export function createGiggles(): Giggles {
         bubble.sprite.position.y = bubble.y + t * 1.2;
         // Pops big, settles, then fades — held at full size for most of its life.
         const pop = t < 0.18 ? 0.5 + (t / 0.18) * 0.62 : 1.12 - (t - 0.18) * 0.12;
-        bubble.sprite.scale.set(1.7 * pop, 0.95 * pop, 1);
+        bubble.sprite.scale.set(width * pop, height * pop, 1);
         bubble.material.opacity = clamp01((1 - t) * 2.6);
       }
     },
@@ -115,8 +133,8 @@ const ACCENTS = [
 ];
 
 function giggleTexture(word: string, index: number): CanvasTexture {
-  const width = 256;
-  const height = 144;
+  const width = CANVAS_WIDTH;
+  const height = CANVAS_HEIGHT;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -142,7 +160,7 @@ function giggleTexture(word: string, index: number): CanvasTexture {
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 54px "Trebuchet MS", "Segoe UI", sans-serif';
+  ctx.font = `bold ${FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
   ctx.fillStyle = hexToCss(accent);
   ctx.lineWidth = 5;
   ctx.strokeText(word, width / 2, height * 0.4);

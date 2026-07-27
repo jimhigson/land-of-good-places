@@ -1,13 +1,27 @@
 import { Sprite, SpriteMaterial, type CanvasTexture } from 'three';
-import { nameLabelTexture } from '../core/textures';
+import {
+  NAME_LABEL_CANVAS_HEIGHT,
+  NAME_LABEL_FONT_PX,
+  nameLabelTexture,
+} from '../core/textures';
+import { minTextPx } from '../core/uiScale';
 import { PALETTE } from '../core/palette';
 
 /**
- * How tall the label reads on screen, in CSS pixels — generous enough for a
- * six-year-old to read at arm's length on a phone. Deliberately a *screen*
- * size, not a world size: see {@link NameLabel.updateScreenSize}.
+ * How tall the whole pill has to read on screen, in CSS pixels, for the name
+ * inside it to be exactly the minimum text size (GAME_DESIGN.md's TEXT RULE).
+ *
+ * Derived, not chosen: the name is painted at {@link NAME_LABEL_FONT_PX} on a
+ * {@link NAME_LABEL_CANVAS_HEIGHT}-tall canvas, so the pill must be that many
+ * times taller than the text it contains. It was a flat 34px before, which
+ * made the name itself about 13px on screen — under half the minimum.
+ *
+ * Grows with the root UI scale, like everything else: on a big monitor the
+ * name pills grow with the panels.
  */
-const LABEL_PIXEL_HEIGHT = 34;
+function labelPixelHeight(): number {
+  return minTextPx() * (NAME_LABEL_CANVAS_HEIGHT / NAME_LABEL_FONT_PX);
+}
 
 /** Beyond this many metres from the camera, a label hides rather than floats
  *  as a huge screen-constant pill over a tiny distant character. */
@@ -33,13 +47,15 @@ export class NameLabel {
   private texture: CanvasTexture;
   private readonly material: SpriteMaterial;
   private accent: number;
-  /** Multiplies {@link LABEL_PIXEL_HEIGHT} — lets a crowd of labels read a
-   *  touch smaller/quieter than the one the player is wearing. */
+  /** Multiplies {@link labelPixelHeight} — lets a crowd of labels read a
+   *  touch *larger* than the player's if a caller ever wants that. Values
+   *  below 1 are ignored: the TEXT RULE has no exceptions, so a label may
+   *  never be scaled below the minimum readable size. */
   private readonly sizeScale: number;
 
   constructor(name: string, accent: number = PALETTE.markerPink, sizeScale: number = 1) {
     this.accent = accent;
-    this.sizeScale = sizeScale;
+    this.sizeScale = Math.max(1, sizeScale);
     this.texture = nameLabelTexture(name, accent);
     this.material = new SpriteMaterial({
       map: this.texture,
@@ -72,7 +88,7 @@ export class NameLabel {
     this.sprite.visible = distanceToCamera <= LABEL_MAX_DISTANCE;
     if (!this.sprite.visible) return;
 
-    const height = worldUnitsPerPixel * LABEL_PIXEL_HEIGHT * this.sizeScale;
+    const height = worldUnitsPerPixel * labelPixelHeight() * this.sizeScale;
     this.sprite.scale.set(height * LABEL_ASPECT, height, 1);
   }
 

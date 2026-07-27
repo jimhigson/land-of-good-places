@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run check:text && tsc --noEmit && vite build",
+    "check:text": "node scripts/check-text-sizes.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

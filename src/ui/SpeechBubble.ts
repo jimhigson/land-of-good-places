@@ -1,5 +1,6 @@
 import { CanvasTexture, Sprite, SpriteMaterial, SRGBColorSpace } from 'three';
 import { hexToCss, PALETTE } from '../core/palette';
+import { minTextPx } from '../core/uiScale';
 
 /**
  * The little speech bubble a chatting child gets over their head (see
@@ -14,14 +15,15 @@ import { hexToCss, PALETTE } from '../core/palette';
  * it reads as the same game rather than a second UI idiom.
  */
 
-/** Screen height, in CSS pixels, that the tallest (two-line) bubble reads at. */
-const BUBBLE_PIXEL_HEIGHT = 30;
-
 /** Beyond this many metres from the camera a bubble is not worth drawing. */
 const BUBBLE_MAX_DISTANCE = 40;
 
 const CANVAS_WIDTH = 512;
-const FONT = 'bold 44px "Trebuchet MS", "Segoe UI", sans-serif';
+/** Font size the line is painted at inside the canvas. The bubble is then
+ *  scaled on screen so this lands on the TEXT RULE's minimum — see
+ *  {@link SpeechBubble.updateScreenSize}. */
+const FONT_PX = 44;
+const FONT = `bold ${FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
 const PADDING_X = 40;
 const LINE_HEIGHT = 54;
 const TAIL_HEIGHT = 28;
@@ -32,6 +34,10 @@ export class SpeechBubble {
   private texture: CanvasTexture | null = null;
   private readonly material: SpriteMaterial;
   private aspect = 512 / 220;
+  /** Canvas height of the current bubble: a one-line bubble is shorter than a
+   *  two-line one, and the on-screen size is derived from it so the *text*
+   *  ends up the same size either way. */
+  private canvasHeight = 220;
   private currentText: string | null = null;
 
   constructor(private readonly accent: number = PALETTE.markerSky) {
@@ -61,14 +67,21 @@ export class SpeechBubble {
     this.texture = drawBubble(text, this.accent);
     this.material.map = this.texture;
     this.material.needsUpdate = true;
-    this.aspect = this.texture.image.width / this.texture.image.height;
+    this.canvasHeight = this.texture.image.height;
+    this.aspect = this.texture.image.width / this.canvasHeight;
     previous?.dispose();
     // `updateScreenSize` sets real visibility/size next frame; this just
     // keeps it from flashing at whatever scale it last had.
     this.sprite.visible = true;
   }
 
-  /** Same screen-constant-size trick as `NameLabel.updateScreenSize`. */
+  /**
+   * Same screen-constant-size trick as `NameLabel.updateScreenSize`, and the
+   * same TEXT RULE arithmetic: the bubble is drawn on screen at whatever
+   * height makes its {@link FONT_PX} line land exactly on `minTextPx()`. It
+   * used to be a flat 30px tall for the *whole* canvas, which left the words
+   * themselves around 10px — the smallest text in the game.
+   */
   updateScreenSize(worldUnitsPerPixel: number, distanceToCamera: number): void {
     if (!this.currentText) return;
     if (distanceToCamera > BUBBLE_MAX_DISTANCE) {
@@ -76,7 +89,7 @@ export class SpeechBubble {
       return;
     }
     this.sprite.visible = true;
-    const height = worldUnitsPerPixel * BUBBLE_PIXEL_HEIGHT;
+    const height = worldUnitsPerPixel * this.canvasHeight * (minTextPx() / FONT_PX);
     this.sprite.scale.set(height * this.aspect, height, 1);
   }
 
