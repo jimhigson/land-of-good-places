@@ -78,16 +78,36 @@ const NODE_RIGHT_LEG = 'npc.rightLeg';
 const FACE_ORDER: readonly Expression[] = ['neutral', 'happy', 'blink'];
 
 /**
- * Where the blue-eyed variants sit in the face material list, after the
- * normal ones — see the `blueEyes` parameter on {@link KidCrowd.spawn}.
+ * Extra eye colours the crowd bakes as their own face-material set, on top of
+ * the default (violet, `ART.kidEye`) the prototype already paints — one of
+ * these used to be reserved just for Ethan (a family request: always blue),
+ * generalised here so the whole crowd can vary, not just him.
  *
- * One fixed child (Ethan — a family request) always has blue eyes, but the
- * crowd shares one face material per expression across every member, so his
- * blue eyes need their own material variant rather than a per-child colour.
- * Cheaper than a second crowd: one extra texture per expression, no extra
- * draw calls (still the same `InstancedMesh` per variant).
+ * These are a *subset* of `art/models/kid.ts`'s `KID_EYE_COLOURS` — the
+ * character creator offers `Hazel` and `Grey` too, but those only ever paint
+ * the player's own, un-instanced face. Baking them here would cost a full
+ * extra `FACE_ORDER.length` textures apiece for variety an instanced crowd of
+ * near-identical children does not need. Three keeps the crowd's own face
+ * budget at `(3 + 1) × FACE_ORDER.length` = 12 canvases (up from 6 before
+ * this feature) — see the doc comment on {@link EYE_VARIANT_COUNT}.
  */
-const BLUE_EYE_OFFSET = FACE_ORDER.length;
+const EYE_VARIANTS: readonly number[] = [ART.kidEyeBlue, ART.kidEyeBrown, ART.kidEyeGreen];
+
+/**
+ * How many face materials one eye variant occupies in the shared list — one
+ * per {@link FACE_ORDER} entry.
+ */
+const EYE_VARIANT_OFFSET = FACE_ORDER.length;
+
+/**
+ * How many distinct eye-colour variants a child can be spawned with: the
+ * default plus every entry in {@link EYE_VARIANTS}. Valid `eyeVariant`
+ * arguments to {@link KidCrowd.spawn} are `0..EYE_VARIANT_COUNT - 1`.
+ */
+export const EYE_VARIANT_COUNT = EYE_VARIANTS.length + 1;
+
+/** The variant index reserved for Ethan's family-requested blue eyes. */
+export const BLUE_EYE_VARIANT = EYE_VARIANTS.indexOf(ART.kidEyeBlue) + 1;
 
 /** How many of the biggest parts cast a shadow. Head, hair and body. */
 const SHADOW_CASTER_PARTS = 3;
@@ -162,12 +182,14 @@ export class KidCrowd {
       handle.setExpression('neutral');
     }
 
-    // A second, throwaway kid — never added to any scene graph — exists only
-    // to paint a blue-eyed version of the same expression set. Discarded once
-    // its textures are captured below; see `BLUE_EYE_OFFSET`.
-    const blueEyedFaceMaps = new Map<Expression, Texture | null>();
-    if (faceMesh) {
-      const blueHandle = createKid({
+    // One throwaway kid per extra eye colour — never added to any scene
+    // graph — exists only to paint that colour's version of the same
+    // expression set. Discarded once its textures are captured below; see
+    // `EYE_VARIANTS`/`EYE_VARIANT_OFFSET`.
+    const variantFaceMaps: Map<Expression, Texture | null>[] = EYE_VARIANTS.map((eyeColour) => {
+      const maps = new Map<Expression, Texture | null>();
+      if (!faceMesh) return maps;
+      const variantHandle = createKid({
         skin: SENTINEL_SKIN,
         hair: SENTINEL_HAIR,
         outfit: SENTINEL_OUTFIT,
@@ -175,17 +197,18 @@ export class KidCrowd {
         backpackColour: SENTINEL_BAG,
         hairStyle: 'bunches',
         backpack: true,
-        eyeColour: ART.kidEyeBlue,
+        eyeColour,
       });
-      const blueFaceMesh = findFaceMesh(blueHandle.root);
-      if (blueFaceMesh) {
-        const blueMaterial = blueFaceMesh.material as MeshToonMaterial;
+      const variantFaceMesh = findFaceMesh(variantHandle.root);
+      if (variantFaceMesh) {
+        const variantMaterial = variantFaceMesh.material as MeshToonMaterial;
         for (const expression of FACE_ORDER) {
-          blueHandle.setExpression(expression);
-          blueEyedFaceMaps.set(expression, blueMaterial.map);
+          variantHandle.setExpression(expression);
+          maps.set(expression, variantMaterial.map);
         }
       }
-    }
+      return maps;
+    });
 
     // One material for the entire crowd. Colour comes from `instanceColor`, so
     // white here means "whatever this child was painted".
@@ -199,11 +222,13 @@ export class KidCrowd {
         clone.map = faceMaps.get(expression) ?? base.map;
         faceMaterials.push(clone);
       }
-      // Blue-eyed variants appended after the normal ones, at `BLUE_EYE_OFFSET`.
-      for (const expression of FACE_ORDER) {
-        const clone = base.clone();
-        clone.map = blueEyedFaceMaps.get(expression) ?? base.map;
-        faceMaterials.push(clone);
+      // Each extra eye variant appended in turn, at `variantIndex * EYE_VARIANT_OFFSET`.
+      for (const maps of variantFaceMaps) {
+        for (const expression of FACE_ORDER) {
+          const clone = base.clone();
+          clone.map = maps.get(expression) ?? base.map;
+          faceMaterials.push(clone);
+        }
       }
     }
 
@@ -233,10 +258,11 @@ export class KidCrowd {
   /**
    * Adds a child. `scale` varies height a little — children are not clones, and
    * at this camera a 6% difference in height reads more strongly than a hat.
-   * `blueEyes` selects the second face-material set baked in the constructor
-   * (see `BLUE_EYE_OFFSET`) — reserved for Ethan.
+   * `eyeVariant` selects one of the face-material sets baked in the
+   * constructor — `0` for the default violet, `1..EYE_VARIANTS.length` for
+   * the extras (see {@link EYE_VARIANT_COUNT}, {@link BLUE_EYE_VARIANT}).
    */
-  spawn(colours: KidColours, shortHair: boolean, scale: number, blueEyes = false): KidAvatar {
+  spawn(colours: KidColours, shortHair: boolean, scale: number, eyeVariant = 0): KidAvatar {
     const member = this.crowd.spawn();
     member.root.scale.setScalar(scale);
 
@@ -260,7 +286,7 @@ export class KidCrowd {
         if (facePart < 0) return;
         const variant = FACE_ORDER.indexOf(expression);
         const base = variant < 0 ? 0 : variant;
-        member.variant[facePart] = blueEyes ? base + BLUE_EYE_OFFSET : base;
+        member.variant[facePart] = base + eyeVariant * EYE_VARIANT_OFFSET;
       },
     };
   }

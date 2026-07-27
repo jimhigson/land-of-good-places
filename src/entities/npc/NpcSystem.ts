@@ -1,6 +1,7 @@
-import { Color, Group, Object3D, Vector3 } from 'three';
+import { Group, Object3D, Vector3 } from 'three';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
+import { KID_SKIN_TONES } from '../../art/models/kid';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -10,7 +11,7 @@ import type { GroundSampler, Player } from '../Player';
 import { NameLabel } from '../../ui/NameLabel';
 import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
-import { KidCrowd, type KidColours } from './kidCrowd';
+import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
@@ -162,12 +163,13 @@ const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
 /**
  * Colour choices, all of them already named in `PALETTE` or `ART`.
  *
- * Skin tones are the palette's one skin colour scaled — the same trick the kid
- * model uses for its own shading, which keeps every child on the one warm hue
- * the park is lit for instead of introducing five new colours nobody art
- * directed.
+ * Skin tones are drawn from `KID_SKIN_TONES` — the same hand-picked, inclusive
+ * range the character creator offers the player (see `art/models/kid.ts`),
+ * rather than one base hue scaled darker: a uniform scale drifts warm skin
+ * towards grey at the low end, and never actually reaches a deep tone. Every
+ * child in the park should look plausibly reachable from the creator's own
+ * swatch row.
  */
-const SKIN_SCALES = [1, 0.95, 0.88, 0.78, 0.66, 0.56] as const;
 
 const HAIR_COLOURS = [
   PALETTE.hair,
@@ -299,8 +301,13 @@ export class NpcSystem implements GameSystem {
       const shortHairRoll = rng.chance(0.35);
       const shortHair = isEthan ? true : shortHairRoll;
 
-      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), isEthan);
-      // Forces the face variant to match `isEthan` immediately — otherwise a
+      // Ethan's blue eyes are pinned to their own variant; everyone else
+      // rolls across the crowd's whole eye-colour range (see `kidCrowd.ts`'s
+      // `EYE_VARIANT_COUNT`), same spirit as the skin/hair/outfit rolls above.
+      const eyeVariant = isEthan ? BLUE_EYE_VARIANT : rng.int(0, EYE_VARIANT_COUNT - 1);
+
+      const avatar = this.kids.spawn(colours, shortHair, rng.range(0.86, 1.04), eyeVariant);
+      // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default
       // 'neutral' would never call `setExpression` and Ethan would show the
       // crowd's normal (non-blue) eyes until the first blink.
@@ -678,8 +685,6 @@ export class NpcSystem implements GameSystem {
 
 // ------------------------------------------------------------------ helpers
 
-const scratchColour = new Color();
-
 /**
  * Draws `count` names from {@link KID_NAMES} without replacement (and without
  * `ETHAN_NAME`, which is reserved for the fixed slot) — so nobody in one park
@@ -697,9 +702,8 @@ function pickNames(rng: Rng, count: number): string[] {
 }
 
 function pickColours(rng: Rng): KidColours {
-  const skinScale = rng.pick(SKIN_SCALES);
   return {
-    skin: scratchColour.setHex(PALETTE.skin).multiplyScalar(skinScale).getHex(),
+    skin: rng.pick(KID_SKIN_TONES).colour,
     hair: rng.pick(HAIR_COLOURS),
     outfit: rng.pick(OUTFIT_COLOURS),
     shoe: rng.pick(SHOE_COLOURS),

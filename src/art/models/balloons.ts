@@ -18,20 +18,54 @@ import { blob, type AssetHandle } from '../style/asset';
  *
  * They are animal-shaped helium balloons, so the rules bend a little: no legs,
  * no walk cycle, a teardrop body, and a tie-knot at the bottom. The origin is at
- * the **bottom of the string** — the point the player's hand holds — so
+ * the **bottom of the string** — the knot the player's hand holds — so
  * attaching one is `kid.holdAnchor.add(balloon.root)` with no offset maths.
  *
  * They bob and sway on their own via `update()`, because a balloon that hangs
  * dead still looks like a lamp.
+ *
+ * **The string is optional.** A balloon on the shop shelf wears the rigid
+ * cylinder `makeString` draws below, same as always. A balloon in the
+ * player's hand does not: `entities/HeldBalloon.ts` builds one with
+ * `includeString: false` and draws its own dynamic string instead, one that
+ * actually bends as the child walks, stops and turns — a fixed mesh cannot do
+ * that, which is exactly why the held case opts out here rather than trying
+ * to bend the shop model in place.
  */
 export type BalloonKind = 'dalmatian' | 'corgi' | 'chicken';
+
+const BALLOON_KINDS: readonly BalloonKind[] = ['dalmatian', 'corgi', 'chicken'];
+
+/**
+ * Recovers the balloon kind from its catalogue id (`balloon.dalmatian` →
+ * `dalmatian`), or `null` if `id` names something else entirely. Lets
+ * `HeldBalloon.ts` go from an inventory entry straight to a fresh model
+ * without a round trip through the shop catalogue, which only ever hands out
+ * a zero-argument `model()` factory — no way to ask it for the string-free
+ * variant a held balloon needs.
+ */
+export function balloonKindFromItemId(id: string): BalloonKind | null {
+  if (!id.startsWith('balloon.')) return null;
+  const kind = id.slice('balloon.'.length);
+  return (BALLOON_KINDS as readonly string[]).includes(kind) ? (kind as BalloonKind) : null;
+}
+
+export interface BalloonOptions {
+  /** False to skip the rigid shelf string — see the class doc comment above. */
+  includeString?: boolean;
+}
 
 export interface BalloonHandle extends AssetHandle {
   readonly balloon: Group;
   setExpression(name: Expression): void;
 }
 
-const STRING_LENGTH = 0.95;
+/**
+ * Rest length of the string, in metres — the shelf's own rigid one, and the
+ * distance `HeldBalloon.ts`'s dynamic one aims to keep between the hand and
+ * the knot.
+ */
+export const STRING_LENGTH = 0.95;
 
 const TMP_POS = new Vector3();
 const TMP_NORMAL = new Vector3();
@@ -67,14 +101,18 @@ function makeString(parent: Group): void {
 }
 
 /** Shared shell: string, knot, teardrop body and the floaty bob. */
-function balloonBase(name: string, colour: number): {
+function balloonBase(
+  name: string,
+  colour: number,
+  includeString: boolean,
+): {
   root: Group;
   balloon: Group;
   bodyMesh: Mesh;
 } {
   const root = new Group();
   root.name = `balloon.${name}`;
-  makeString(root);
+  if (includeString) makeString(root);
 
   const balloon = new Group();
   balloon.position.y = STRING_LENGTH;
@@ -103,8 +141,8 @@ function bobber(balloon: Group, seed: number): (dt: number, elapsed: number) => 
 }
 
 /** The fire-fighting dalmatian pup. */
-export function createDalmatianBalloon(): BalloonHandle {
-  const { root, balloon } = balloonBase('dalmatian', ART.dalmatianWhite);
+export function createDalmatianBalloon(options: BalloonOptions = {}): BalloonHandle {
+  const { root, balloon } = balloonBase('dalmatian', ART.dalmatianWhite, options.includeString ?? true);
   const white = toonMaterial(ART.dalmatianWhite);
   const spot = toonMaterial(ART.dalmatianSpot);
   const earMat = toonMaterial(ART.dalmatianEar);
@@ -198,8 +236,8 @@ export function createDalmatianBalloon(): BalloonHandle {
 }
 
 /** The small flying corgi with pink flying glasses. */
-export function createCorgiBalloon(): BalloonHandle {
-  const { root, balloon } = balloonBase('corgi', ART.corgiTan);
+export function createCorgiBalloon(options: BalloonOptions = {}): BalloonHandle {
+  const { root, balloon } = balloonBase('corgi', ART.corgiTan, options.includeString ?? true);
   const tan = toonMaterial(ART.corgiTan);
   const cream = toonMaterial(ART.corgiCream);
   const goggle = toonMaterial(ART.gogglePink);
@@ -294,8 +332,8 @@ export function createCorgiBalloon(): BalloonHandle {
 }
 
 /** Chicken-looter: white and red, and up to no good. */
-export function createChickenBalloon(): BalloonHandle {
-  const { root, balloon } = balloonBase('chicken', ART.chickenWhite);
+export function createChickenBalloon(options: BalloonOptions = {}): BalloonHandle {
+  const { root, balloon } = balloonBase('chicken', ART.chickenWhite, options.includeString ?? true);
   const shade = toonMaterial(ART.chickenShade);
   const red = toonMaterial(ART.chickenComb);
   const beakMat = toonMaterial(ART.chickenBeak);
@@ -387,8 +425,8 @@ export function createChickenBalloon(): BalloonHandle {
   };
 }
 
-export function createBalloon(kind: BalloonKind): BalloonHandle {
-  if (kind === 'dalmatian') return createDalmatianBalloon();
-  if (kind === 'corgi') return createCorgiBalloon();
-  return createChickenBalloon();
+export function createBalloon(kind: BalloonKind, options: BalloonOptions = {}): BalloonHandle {
+  if (kind === 'dalmatian') return createDalmatianBalloon(options);
+  if (kind === 'corgi') return createCorgiBalloon(options);
+  return createChickenBalloon(options);
 }
