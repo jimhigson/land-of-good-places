@@ -1,4 +1,4 @@
-export { Building } from './Building';
+export { Building, type InteriorControls } from './Building';
 export { WalkSurfaces, type MovingPlatform } from './surfaces';
 export { SlideRide } from './SlideRide';
 export { ShopUnits } from './ShopUnits';

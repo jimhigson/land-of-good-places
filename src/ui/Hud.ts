@@ -201,13 +201,13 @@ export class Hud {
     this.clockPill.innerHTML =
       `<span class="emoji">${icon}</span><span>${this.clockText}${this.dayText}</span>`;
 
-    // In normal mode the purse never runs out — say so, rather than showing a
-    // number that never changes.
-    const money =
-      state.mode === 'normal'
-        ? '<span class="emoji">💰</span><span>Lots!</span>'
-        : `<span class="emoji">💰</span><span>${state.money}</span>`;
-    this.moneyPill.innerHTML = money;
+    // Money only means anything once it can run out (mayhem mode) — in normal
+    // mode there is no number worth showing, so the pill is hidden entirely
+    // rather than saying "Lots!".
+    this.moneyPill.style.display = state.moneyIsFinite ? '' : 'none';
+    if (state.moneyIsFinite) {
+      this.moneyPill.innerHTML = `<span class="emoji">💰</span><span>${state.money}</span>`;
+    }
 
     const count = state.inventory.length;
     this.backpackButton.innerHTML =

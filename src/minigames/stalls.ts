@@ -4,7 +4,12 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
+import { ANCHORS_BY_ID } from '../world/anchors';
+import { createDodgems } from './dodgems/Dodgems';
+import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createRailRacer } from './railRacer/RailRacer';
+import { createSpookyHouse } from './spookyHouse/SpookyHouse';
+import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
 import type { StallDefinition } from './types';
 
@@ -49,6 +54,97 @@ export const STALLS: readonly StallDefinition[] = [
     // booth and the plaza, so walking up is a straight line from the fountain.
     facing: 0.3,
     create: createRailRacer,
+  },
+  {
+    id: 'spookyHouse',
+    title: 'The Spooky House',
+    subtitle: 'ooOOoo... just for giggles!',
+    glyph: '👻',
+    accent: PALETTE.markerLilac,
+    stripe: PALETTE.markerMint,
+    // A short walk north-east of the fountain plaza, clear of every anchor
+    // plot, the Rail Racer stall and every hand-authored wall run in
+    // `Scenery.ts` by several metres. The scenery scatter is seeded (see
+    // `Scenery.ts`), not something a builder can predict by eye from the
+    // coordinate tables alone — an earlier choice out on the open lawn at
+    // [40, 0] *looked* clear on paper but turned out to have a bush planted
+    // right on top of it once the seeded scatter actually ran, so this spot
+    // was checked the same way, against the real instanced tree/bush
+    // positions read out of the running game, and also checked that the
+    // straight line tap-to-move walks from the spawn point clears the
+    // fountain by a wide margin rather than grazing its collision circle.
+    position: [13, 9],
+    // Every anchor sign and every other stall in this park uses a yaw near
+    // +0.2–0.3 regardless of where it stands, because the isometric camera
+    // never rotates (GAME_DESIGN.md #16) — "face the camera" is the same
+    // absolute direction everywhere on the map, not a direction relative to
+    // wherever a child is walking from.
+    facing: 0.25,
+    create: createSpookyHouse,
+  },
+  {
+    id: 'waterFight',
+    title: 'Water Fight!',
+    subtitle: 'very big water guns',
+    glyph: '💦',
+    accent: PALETTE.markerMint,
+    stripe: PALETTE.markerSky,
+    // The one stall that stands *inside* an anchor plot rather than clear of
+    // one. That is not the exception it looks like: the water fight owns the
+    // `waterFight` plot (see `waterFight/plot.ts`, which takes its "coming
+    // soon" sign down and dresses it), so this booth is the doorway into the
+    // ride the plot was reserved for, not a stall squatting on somebody else's
+    // building site.
+    // Well inside the plot, and specifically clear of where the garden path
+    // stops: `world/paths.ts` runs its water-fight spur on to [-25, 20], which
+    // the first placement sat almost exactly on top of. Two metres of open
+    // grass now separate the path's last step from the nearest corner of the
+    // booth.
+    position: [-29.5, 22],
+    // Turned towards the path rather than square down +Z. The counter still
+    // meets the isometric camera at an angle you can read the sign from, and —
+    // the number that actually mattered — the stand point ends up *between* the
+    // path and the booth, so walking up is a straight line that never scrapes
+    // along the side of it.
+    facing: 1.35,
+    create: createWaterFight,
+  },
+  {
+    id: 'spaceFerrisWheel',
+    title: 'Space Ferris Wheel',
+    subtitle: 'all the way up to space!',
+    glyph: '🎡',
+    accent: PALETTE.markerLilac,
+    stripe: PALETTE.markerSky,
+    // The one stall that is not a stall: this is the ferris wheel's ticket
+    // kiosk, and it stands *exactly* where the plot's "coming soon" sign stood
+    // — same spot, same yaw — because that sign has now come true. Putting it
+    // on the anchor's own entrance also means the path spur already leads here,
+    // and the placeholder's collision post ends up inside the booth's own walls
+    // instead of being left behind as an invisible obstacle on the lawn.
+    position: ANCHORS_BY_ID.ferrisWheel.entrance,
+    facing: ANCHORS_BY_ID.ferrisWheel.signYaw,
+    create: createSpaceFerrisWheel,
+  },
+  {
+    id: 'dodgems',
+    title: 'Dodgems!',
+    subtitle: 'bonk the wobbly tree!',
+    glyph: '🚗',
+    accent: PALETTE.markerPink,
+    stripe: PALETTE.markerLemon,
+    // The ticket kiosk for the ride standing in the `dodgems` anchor plot: just
+    // outside the bumper wall, a couple of metres from the doorway in it, and
+    // right where the path spur from the garden arrives. Checked against the
+    // ride's own geometry (`dodgems/plot.ts`): the booth and the point a child
+    // stands at are both clear of the barrier, and the walk from the end of the
+    // path to the counter is a straight line across open grass.
+    position: [24, 12],
+    // Same rule the rail racer follows: the counter faces the default camera,
+    // and the stand point in front of it ends up between the kiosk and the
+    // ride's doorway rather than inside the rink.
+    facing: 0.3,
+    create: createDodgems,
   },
 ];
 

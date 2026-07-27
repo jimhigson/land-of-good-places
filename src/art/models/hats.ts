@@ -1,4 +1,5 @@
 import {
+  Box3,
   ConeGeometry,
   CylinderGeometry,
   Group,
@@ -15,6 +16,7 @@ import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { blob, type AssetHandle } from '../style/asset';
+import { buildRipikaHead } from './ripika';
 
 /**
  * The hat shop's stock — and, from build step 5 onwards, what the player wears.
@@ -36,9 +38,17 @@ import { blob, type AssetHandle } from '../style/asset';
  * or a display plinth needs; the negative part of a brim is never more than a
  * few centimetres.
  */
-export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower';
+export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat';
 
-export const HAT_KINDS: readonly HatKind[] = ['party', 'crown', 'bobble', 'sun', 'cap', 'flower'];
+export const HAT_KINDS: readonly HatKind[] = [
+  'party',
+  'crown',
+  'bobble',
+  'sun',
+  'cap',
+  'flower',
+  'ripikaHat',
+];
 
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
 const SIT = -0.1;
@@ -220,6 +230,43 @@ function createFlowerCrown(): AssetHandle {
   return { root, height: SIT + 0.16 };
 }
 
+/**
+ * How much bigger than a *real* RiPika's own head this hat's head is built at
+ * (RiPika itself uses 1.32 — see `ripika.ts`). The family asked for "a large
+ * head of RiPika on the wearer's head", so this deliberately dwarfs every
+ * other hat in the shop.
+ *
+ * It can go this big safely because of *where* a hat sinks, not how big it
+ * is: every hat here sinks onto the skull by the same `SIT`, and the wearer's
+ * eyes sit a long way further down the skull than that — a hat only grows
+ * upward from `SIT`, so no amount of extra scale brings it anywhere near the
+ * face. What has to stay in check is width more than height, which is why
+ * this is 2.1×, not larger still: wide enough to read as "RiPika's actual
+ * head", not so wide it reads as a blob eating the wearer's silhouette.
+ */
+const RIPIKA_HAT_SCALE = 2.1;
+
+function createRipikaHat(): AssetHandle {
+  const root = new Group();
+  root.name = 'hat.ripikaHat';
+
+  const ripikaHead = buildRipikaHead(RIPIKA_HAT_SCALE);
+  // buildRipikaHead's group is centred on RiPika's own skull centre. Its
+  // lowest point is the underside of the skull, at `-skullR * 0.97` (the
+  // blob's own y-squash) — sink that point to `SIT`, exactly like every other
+  // hat's brim/band, so it grips the wearer's crown rather than floating.
+  ripikaHead.group.position.y = SIT + ripikaHead.skullR * 0.97;
+  root.add(ripikaHead.group);
+
+  // Measured to the actual top (ear tips lean outward under rotation, so the
+  // exact offset isn't a clean formula) rather than hand-guessed, the same
+  // way every asset's `height` must reach the real highest point.
+  root.updateMatrixWorld(true);
+  const height = new Box3().setFromObject(root).max.y;
+
+  return { root, height };
+}
+
 const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   party: createPartyHat,
   crown: createCrown,
@@ -227,6 +274,7 @@ const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   sun: createSunHat,
   cap: createCap,
   flower: createFlowerCrown,
+  ripikaHat: createRipikaHat,
 };
 
 /** A fresh hat. Parent it to `hatAnchor` (head) or to a shop stand. */

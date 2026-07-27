@@ -54,12 +54,31 @@ interface InstanceItem {
   readonly shade: number;
 }
 
+/**
+ * A lollipop tree with a generous enough canopy to climb (see
+ * `world/TreeClimbing.ts`). Read-only geometry facts only — Scenery has no
+ * opinion about climbing itself, it just tells the truth about where its own
+ * trees are.
+ */
+export interface ClimbableTreeSeed {
+  readonly x: number;
+  readonly z: number;
+  /** World-space height of the top of the canopy — where a head pops out. */
+  readonly canopyTopY: number;
+  /** Trunk collider radius, so a caller can stand a character just outside it. */
+  readonly trunkRadius: number;
+}
+
 export class Scenery {
   readonly group = new Group();
+  /** The subset of trees big enough to climb. See {@link ClimbableTreeSeed}. */
+  readonly climbableTrees: readonly ClimbableTreeSeed[];
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'scenery';
-    this.group.add(buildFoliage(collision));
+    const foliage = buildFoliage(collision);
+    this.group.add(foliage.group);
+    this.climbableTrees = foliage.climbableTrees;
     this.group.add(buildTreeline());
     this.group.add(buildWoodenWalls(collision));
     this.group.add(buildStoneWalls(collision));
@@ -68,7 +87,13 @@ export class Scenery {
 
 // ------------------------------------------------------------------ foliage
 
-function buildFoliage(collision: CollisionWorld): Group {
+/** Canopy radius (of the 1.75–2.5 range rolled below) worth climbing. */
+const CLIMBABLE_MIN_RADIUS = 2.05;
+
+function buildFoliage(collision: CollisionWorld): {
+  group: Group;
+  climbableTrees: ClimbableTreeSeed[];
+} {
   const group = new Group();
   group.name = 'foliage';
 
@@ -78,17 +103,9 @@ function buildFoliage(collision: CollisionWorld): Group {
   const roundCanopies: InstanceItem[] = [];
   const coneCanopies: InstanceItem[] = [];
   const bushes: InstanceItem[] = [];
-  const flowers: InstanceItem[] = [];
+  const climbableTrees: ClimbableTreeSeed[] = [];
 
   const canopyGreens = [PALETTE.leafMid, PALETTE.leafLight, PALETTE.leafDeep, PALETTE.leafBlue];
-  const flowerColours = [
-    PALETTE.flowerYellow,
-    PALETTE.flowerRed,
-    PALETTE.flowerBlue,
-    PALETTE.flowerViolet,
-    PALETTE.blossomPink,
-    PALETTE.blossomWhite,
-  ];
 
   // --- trees ---------------------------------------------------------------
   let attempts = 0;
@@ -150,13 +167,27 @@ function buildFoliage(collision: CollisionWorld): Group {
       // one tucked beside it so the silhouette isn't a perfect circle.
       const radius = rng.range(1.75, 2.5);
       const colour = kind === 'blossom' ? PALETTE.blossomPink : rng.pick(canopyGreens);
+      const canopyVScale = rng.range(0.82, 1.0);
+      const canopyCentreY = canopyBase + radius * 0.42;
       roundCanopies.push({
-        position: new Vector3(x, canopyBase + radius * 0.42, z),
-        scale: new Vector3(radius, radius * rng.range(0.82, 1.0), radius),
+        position: new Vector3(x, canopyCentreY, z),
+        scale: new Vector3(radius, radius * canopyVScale, radius),
         rotationY,
         colour,
         shade: rng.range(0.95, 1.06),
       });
+      // Climbable: a plain lollipop with plenty of canopy to hide a body in.
+      // Blossom trees are excluded — a face poking out of cherry-blossom
+      // fluff reads oddly, and the stacked/pine kinds have no one big canopy
+      // to disappear into.
+      if (kind === 'lollipop' && radius >= CLIMBABLE_MIN_RADIUS) {
+        climbableTrees.push({
+          x,
+          z,
+          canopyTopY: canopyCentreY + radius * canopyVScale,
+          trunkRadius: 0.55 * lean,
+        });
+      }
       if (rng.chance(0.55)) {
         const small = radius * rng.range(0.5, 0.72);
         const offset = rng.range(0, TAU);
@@ -213,44 +244,9 @@ function buildFoliage(collision: CollisionWorld): Group {
     bushCount += 1;
   }
 
-  // --- flowers -------------------------------------------------------------
-  // Purely decorative, no collision: you can trot straight through them.
-  // Each is a squashed bloom sitting on a short stem — from the isometric
-  // camera you mostly see them from above, so a flattened dome reads as a
-  // flower head far better than a ball floating in the grass would.
-  const stems: InstanceItem[] = [];
-  let flowerCount = 0;
-  attempts = 0;
-  while (flowerCount < 430 && attempts < 7600) {
-    attempts += 1;
-    const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 55;
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    if (isOnPath(x, z, 0.5)) continue;
-    if (insideAnyAnchor(x, z, 0.5)) continue;
-
-    const ground = terrainHeight(x, z);
-    const width = rng.range(0.16, 0.26);
-    const stemHeight = rng.range(0.16, 0.3);
-    const rotationY = rng.range(0, TAU);
-
-    stems.push({
-      position: new Vector3(x, ground + stemHeight / 2, z),
-      scale: new Vector3(1, stemHeight, 1),
-      rotationY,
-      colour: PALETTE.leafDeep,
-      shade: rng.range(0.9, 1.1),
-    });
-    flowers.push({
-      position: new Vector3(x, ground + stemHeight, z),
-      scale: new Vector3(width, width * 0.5, width),
-      rotationY,
-      colour: rng.pick(flowerColours),
-      shade: 1,
-    });
-    flowerCount += 1;
-  }
+  // Flowers used to be scattered here too, as static decoration. They are now
+  // a living, pickable population — see `world/Flowers.ts` — built and owned
+  // separately so this file stays about the things that never move.
 
   const trunkGeometry = new CylinderGeometry(0.19, 0.3, 1, 8);
   const canopyGeometry = new IcosahedronGeometry(1, 2);
@@ -258,19 +254,15 @@ function buildFoliage(collision: CollisionWorld): Group {
   // Subdivision 2 rather than 1: still faceted enough to look hand-made, but
   // rounded rather than spiky — a bush, not a lump of quartz.
   const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
-  const flowerGeometry = new SphereGeometry(1, 7, 5);
-  const stemGeometry = new CylinderGeometry(0.02, 0.028, 1, 4);
 
   group.add(
     makeInstanced('tree-trunks', trunkGeometry, foliageMaterial(0.95), trunks, true),
     makeInstanced('tree-canopies', canopyGeometry, foliageMaterial(0.85), roundCanopies, true),
     makeInstanced('tree-cones', coneGeometry, foliageMaterial(0.85), coneCanopies, true),
     makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true),
-    makeInstanced('flower-stems', stemGeometry, foliageMaterial(0.9), stems, false),
-    makeInstanced('flowers', flowerGeometry, foliageMaterial(0.7), flowers, false),
   );
 
-  return group;
+  return { group, climbableTrees };
 }
 
 /**

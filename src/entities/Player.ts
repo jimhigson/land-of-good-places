@@ -150,11 +150,26 @@ export class Player implements GameSystem {
 
   /** Puts the character somewhere immediately, clearing momentum. */
   teleport(x: number, z: number): void {
-    this.position.set(x, terrainHeight(x, z), z);
+    this.teleportTo(x, this.groundAt(x, z, Infinity), z);
+  }
+
+  /**
+   * The same, but you say how high as well.
+   *
+   * Needed by anything that moves the character between the park and the
+   * building's own space, where "the ground" is not a function of the terrain
+   * and asking for it at the destination before you are there gives the wrong
+   * answer.
+   */
+  teleportTo(x: number, y: number, z: number, facing?: number): void {
+    this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
+    this.airborne = false;
+    if (facing !== undefined) this.facing = facing;
     this.group.position.copy(this.position);
+    this.group.rotation.y = this.facing;
   }
 
   /** True while a ride is driving the character instead of the player. */
@@ -261,11 +276,28 @@ export class Player implements GameSystem {
     // `hopClearance` (this jumper's height above local ground, as of last
     // frame) lets a wall the player has jumped above stop pushing back — see
     // Collision.ts. Grounded, it's 0, so every wall blocks exactly as before.
-    const clearedWall = this.collision.resolve(this.position, PLAYER_RADIUS, this.hopClearance);
+    // Passing `dt` is what lets a *deep* overlap (spawned or stepped inside
+    // something) resolve as a gentle, capped escort rather than a one-frame
+    // shove — see `Collision.ts`'s `MAX_DEPENETRATION_SPEED` (design feedback
+    // #17, "the fling"). Ordinary shallow contact against a wall is
+    // unaffected and stays exactly as crisp as before.
+    const { clearedWall, escorting } = this.collision.resolve(
+      this.position,
+      PLAYER_RADIUS,
+      this.hopClearance,
+      dt,
+    );
 
     // Trust the resolved position over the intended one, so walking into a wall
-    // actually kills the momentum instead of grinding against it.
-    if (dt > 0) {
+    // actually kills the momentum instead of grinding against it — but *not*
+    // while being escorted out of a deep overlap: that distance is an
+    // external nudge, not something achieved under her own power, and reading
+    // it back as velocity is exactly what caused the fling (design feedback
+    // #17) — the escort got banked as speed, which then carried her further
+    // into the same overlap next frame, which escorted her again, banking
+    // more speed still. Leaving velocity alone here lets it simply decelerate
+    // normally, as if nothing solid were there at all.
+    if (dt > 0 && !escorting) {
       this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
       this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
     }

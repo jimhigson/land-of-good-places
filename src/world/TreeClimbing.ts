@@ -1,0 +1,428 @@
+import type { Object3D } from 'three';
+import { clamp01, lerp, smoothstep } from '../core/mathUtils';
+import { isTouchDevice } from '../core/device';
+import type { FrameContext, GameSystem } from '../core/types';
+import type { Player } from '../entities/Player';
+import type { NpcCharacter } from '../entities/npc/NpcCharacter';
+import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
+import type { KidAvatar } from '../entities/npc/kidCrowd';
+import type { NpcSystem } from '../entities/npc';
+import type { Hud } from '../ui/Hud';
+import type { InteractZone } from './interact';
+import type { ClimbableTreeSeed } from './Scenery';
+import { terrainHeight } from './terrain';
+
+/**
+ * Tree climbing (family design feedback: NPCs — and the player — climb trees,
+ * peek out of the leaves, and climb back down).
+ *
+ * Both the player and every NPC go through the same three-phase scripted
+ * moment — `up` (a quick scramble), `peek` (held, looking around), `down` (the
+ * scramble in reverse) — computed by the pure {@link climbPose} function at
+ * the bottom of this file. What differs is who drives it:
+ *
+ * - The **player**'s phase timer lives here, directly, and is driven by the
+ *   `interact` action (or a tap) to start and `interact`/`jump`/moving/a tap
+ *   to end. Positioning reuses `Player.beginRide/setRidePose/endRide` — the
+ *   exact mechanism already used to hand the character to a slide — so
+ *   normal movement, collision and tap-to-move all switch off for free while
+ *   `player.riding` is true, and switch back on the moment `endRide` fires.
+ * - Every **NPC**'s phase timer lives in its own `WanderDriver` (see the
+ *   climbing block in `entities/npc/wanderDriver.ts`), which decides *when*
+ *   and *which tree*; this class only reads that state and turns it into a
+ *   pose, via the small `beginClimb/setClimbPose/endClimb` trio added to
+ *   `NpcCharacter` for exactly this.
+ *
+ * **Body hidden, head out**: rather than trust the isometric camera to see a
+ * body occluded by a canopy blob from every one of its four snap angles, the
+ * body is simply hidden for the duration and the head positioned at the
+ * canopy top. For the player that is a `Group.visible` toggle on everything
+ * under `model.body` except `model.head` (three.js visibility only cascades
+ * down through ancestors, so the head stays visible while its siblings don't
+ * — no change needed to `CharacterModel`/`kid.ts`). For an NPC, drawn through
+ * `InstancedCrowd`, a proxy's `.visible` is not what `commit()` reads —
+ * only `CrowdMember.shown[partIndex]` is — so the equivalent is finding every
+ * part whose prototype mesh is *not* a descendant of the head joint and
+ * zeroing those indices for the duration (cached per avatar, since the rig
+ * shape is identical for the whole crowd).
+ *
+ * **The tree's collider is untouched.** Nothing here adds or removes a
+ * collision shape; the trunk stays exactly as solid as it always was for
+ * everyone not currently climbing it, because climbing works by taking a
+ * character *out* of the normal move/collide/gravity loop for a few seconds,
+ * not by changing the world.
+ */
+export class TreeClimbing implements GameSystem {
+  readonly name = 'treeClimbing';
+
+  private readonly trees: readonly ClimbableTreeSeed[];
+
+  // --- player state ----------------------------------------------------------
+  private playerPhase: ClimbPhase | null = null;
+  private playerTree: ClimbableTreeSeed | null = null;
+  private playerTimer = 0;
+  private playerStartX = 0;
+  private playerStartZ = 0;
+  private playerLookYaw = 0;
+  private playerHiddenParts: Object3D[] = [];
+
+  // --- NPC state ---------------------------------------------------------
+  /** Every part hidden while an avatar climbs — computed once, reused forever. */
+  private readonly npcHideParts = new WeakMap<KidAvatar, readonly number[]>();
+  /** What each part's `shown` flag was before climbing, so it restores exactly. */
+  private readonly npcShownBackup = new Map<NpcCharacter, Uint8Array>();
+
+  constructor(
+    private readonly player: Player,
+    private readonly npcs: NpcSystem,
+    private readonly hud: Hud,
+    trees: readonly ClimbableTreeSeed[],
+  ) {
+    this.trees = trees;
+  }
+
+  /** Trees big enough to climb, for `NpcSystem` to hand to every wander driver. */
+  get climbableTrees(): readonly ClimbableTreeSeed[] {
+    return this.trees;
+  }
+
+  /** True while the player is up a tree, in any phase — for `Game`'s tap routing. */
+  get playerClimbing(): boolean {
+    return this.playerPhase !== null;
+  }
+
+  /**
+   * Every tap target this system owns: one zone per climbable tree (see
+   * `world/interact.ts`). The *pick* point (what a tap has to land near) is
+   * the trunk's true centre, generous enough to catch a tap anywhere on the
+   * canopy overhead — but the *stand* point is offset just outside the
+   * trunk's own collision circle. Standing dead-centre is not something a
+   * character can ever do (the trunk collider pushes them out to its edge),
+   * and `TapNavigator`'s arrival radius (0.55 m) is smaller than some of
+   * these trunks — aim it at the centre and every tapped tree "gets stuck"
+   * short of arriving, so `pressInteract` never fires and the tap silently
+   * does nothing.
+   */
+  interactZones(): InteractZone[] {
+    return this.trees.map((tree, index) => {
+      const y = terrainHeight(tree.x, tree.z);
+      // Offset radially outward from the park centre rather than a fixed
+      // compass direction: trees near the plaza sit close to the decorative
+      // fences ringing the fountain, and a fixed "south" offset can land the
+      // stand point behind one of them. Outward, toward the open lawn beyond
+      // the tree, is clear far more often.
+      const outward = Math.hypot(tree.x, tree.z) || 1; // guard the one tree at the origin
+      const standDistance = tree.trunkRadius + 0.9;
+      const standX = tree.x + (tree.x / outward) * standDistance;
+      const standZ = tree.z + (tree.z / outward) * standDistance;
+      return {
+        id: `tree-${index}`,
+        label: 'Climbable tree',
+        x: tree.x,
+        y,
+        z: tree.z,
+        pickRadius: tree.trunkRadius + 2.6,
+        standX,
+        standZ,
+        pressInteract: true,
+      };
+    });
+  }
+
+  /** A tap landed anywhere while the player is up a tree: that means "come down". */
+  requestDescend(): void {
+    if (this.playerPhase !== 'peek') return;
+    this.beginPlayerDescend();
+  }
+
+  update(context: FrameContext): void {
+    this.updateNpcClimbs(context);
+
+    if (this.playerPhase !== null) {
+      this.updatePlayerClimb(context);
+      return;
+    }
+
+    const tree = this.nearestClimbableTree(context.playerPosition.x, context.playerPosition.z);
+    if (!tree) return; // Leave the HUD prompt alone — something else may own it.
+
+    this.hud.setPrompt(climbPrompt());
+    if (context.input.justPressed('interact') && !this.player.riding) {
+      this.beginPlayerClimb(tree);
+    }
+  }
+
+  // ============================================================== player
+
+  private nearestClimbableTree(x: number, z: number): ClimbableTreeSeed | null {
+    let best: ClimbableTreeSeed | null = null;
+    let bestMargin = INTERACT_MARGIN;
+    for (const tree of this.trees) {
+      const margin = Math.hypot(tree.x - x, tree.z - z) - tree.trunkRadius;
+      if (margin < bestMargin) {
+        best = tree;
+        bestMargin = margin;
+      }
+    }
+    return best;
+  }
+
+  private beginPlayerClimb(tree: ClimbableTreeSeed): void {
+    this.playerTree = tree;
+    this.playerStartX = this.player.position.x;
+    this.playerStartZ = this.player.position.z;
+    this.playerPhase = 'up';
+    this.playerTimer = 0;
+    this.player.beginRide();
+  }
+
+  private beginPlayerDescend(): void {
+    this.playerPhase = 'down';
+    this.playerTimer = 0;
+    this.showPlayerBody();
+  }
+
+  private updatePlayerClimb(context: FrameContext): void {
+    const tree = this.playerTree;
+    if (!tree) {
+      this.playerPhase = null;
+      return;
+    }
+    const { dt, input } = context;
+    this.playerTimer += dt;
+    const headOffset = this.player.model.headHeight;
+
+    if (this.playerPhase === 'up') {
+      const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_UP_SECONDS);
+      const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'up', t, 0);
+      this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
+      this.hud.setPrompt(null);
+      if (t >= 1) {
+        this.playerPhase = 'peek';
+        this.playerTimer = 0;
+        this.playerLookYaw = pose.facing;
+        this.hidePlayerBody();
+        this.player.model.setExpression('happy');
+      }
+      return;
+    }
+
+    if (this.playerPhase === 'peek') {
+      // Free look: the movement stick just turns the head, nothing walks.
+      this.playerLookYaw += input.moveX * PLAYER_LOOK_SPEED * dt;
+      const pose = climbPose(
+        tree,
+        this.playerStartX,
+        this.playerStartZ,
+        headOffset,
+        'peek',
+        0,
+        this.playerLookYaw,
+      );
+      this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
+      // Reasserted every frame rather than only on the transition: Player's
+      // own blink cycle (`Player.animate`) calls `setExpression('neutral')`
+      // whenever a blink ends, which would otherwise quietly erase the happy
+      // face a few seconds into the peek. One texture-swap call a frame for
+      // a single character is not worth engineering around.
+      this.player.model.setExpression('happy');
+      this.hud.setPrompt(descendPrompt());
+
+      const wantsDown =
+        input.justPressed('interact') || input.justPressed('jump') || input.moveAmount > 0.22;
+      if (wantsDown) this.beginPlayerDescend();
+      return;
+    }
+
+    // 'down'
+    const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_DOWN_SECONDS);
+    const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'down', t, 0);
+    this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
+    this.hud.setPrompt(null);
+    if (t >= 1) {
+      this.player.endRide(0, 0, 0);
+      this.playerPhase = null;
+      this.playerTree = null;
+    }
+  }
+
+  /** Hides every part of the model except the head — see the class doc. */
+  private hidePlayerBody(): void {
+    const model = this.player.model;
+    this.playerHiddenParts = [];
+    for (const child of model.body.children) {
+      if (child === model.head) continue;
+      if (!child.visible) continue;
+      child.visible = false;
+      this.playerHiddenParts.push(child);
+    }
+  }
+
+  private showPlayerBody(): void {
+    for (const child of this.playerHiddenParts) child.visible = true;
+    this.playerHiddenParts = [];
+  }
+
+  // ================================================================= NPCs
+
+  private updateNpcClimbs(context: FrameContext): void {
+    for (const character of this.npcs.all) {
+      const driver = character.driver;
+      if (!(driver instanceof WanderDriver)) continue;
+
+      const shouldClimb = driver.climbing;
+      const isClimbing = character.climbing;
+
+      if (shouldClimb && !isClimbing) {
+        character.beginClimb();
+        this.hideNpcBody(character);
+      } else if (!shouldClimb && isClimbing) {
+        character.endClimb();
+        this.showNpcBody(character);
+        continue;
+      }
+
+      if (!shouldClimb) continue;
+
+      const tree = driver.climbTree;
+      if (!tree) continue;
+      const spot = driver.climbGroundSpot;
+      // A little automatic sway stands in for the player's stick-driven free
+      // look — enough that a peeking child reads as "looking around" rather
+      // than a statue. The seed keeps several simultaneous climbers from all
+      // swaying in lockstep.
+      const seed = tree.x * 12.9 + tree.z * 7.3;
+      const peekFacing =
+        Math.atan2(spot.x - tree.x, spot.z - tree.z) +
+        Math.PI +
+        Math.sin(context.elapsed * 0.7 + seed) * 0.55;
+
+      const pose = climbPose(
+        tree,
+        spot.x,
+        spot.z,
+        character.avatar.headBaseY,
+        driver.climbPhase ?? 'peek',
+        driver.climbProgress,
+        peekFacing,
+      );
+      character.setClimbPose(pose.x, pose.y, pose.z, pose.facing);
+    }
+  }
+
+  private hideNpcBody(character: NpcCharacter): void {
+    const { avatar } = character;
+    const parts = this.hidePartsFor(avatar);
+    const shown = avatar.member.shown;
+    this.npcShownBackup.set(character, Uint8Array.from(shown));
+    for (const index of parts) shown[index] = 0;
+  }
+
+  private showNpcBody(character: NpcCharacter): void {
+    const backup = this.npcShownBackup.get(character);
+    if (!backup) return;
+    character.avatar.member.shown.set(backup);
+    this.npcShownBackup.delete(character);
+  }
+
+  /** Every part index that is not the head or one of its own parts. Cached. */
+  private hidePartsFor(avatar: KidAvatar): readonly number[] {
+    const cached = this.npcHideParts.get(avatar);
+    if (cached) return cached;
+
+    const head = avatar.rig.head;
+    const indices: number[] = [];
+    avatar.member.proxies.forEach((proxy, index) => {
+      if (proxy !== head && !isDescendantOf(proxy, head)) indices.push(index);
+    });
+
+    this.npcHideParts.set(avatar, indices);
+    return indices;
+  }
+}
+
+// -------------------------------------------------------------------- pose
+
+/** How long the up/down scramble takes. Quick and cute, not a climbing sim. */
+const PLAYER_SCRAMBLE_UP_SECONDS = 0.45;
+const PLAYER_SCRAMBLE_DOWN_SECONDS = 0.4;
+
+/** Radians/second the stick turns a peeking player's head. */
+const PLAYER_LOOK_SPEED = 2.4;
+
+/** How close (trunk edge to feet) counts as "near enough to climb". */
+const INTERACT_MARGIN = 2.4;
+
+interface ClimbPose {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly facing: number;
+}
+
+/**
+ * The one piece of maths both the player and every NPC climb through.
+ *
+ * `startX/startZ` is wherever the climber was standing when the climb began —
+ * the scramble visibly closes the gap between that and the tree, rather than
+ * assuming anyone arrived exactly on the trunk. The climbing spot itself is
+ * not the trunk's centre but a point just outside it, in the direction the
+ * climber approached from (`edgeX/edgeZ` below) — `BackpackPeek` uses the
+ * same trick for the same reason: dead centre reads as floating, leaning out
+ * to one side reads as *climbing*, and it conveniently also means "climb back
+ * down" never has to divide by a distance of zero.
+ *
+ * `peekFacing` is only used for the `peek` phase (the caller works out
+ * whatever "look around" means for a player or an NPC); `up`/`down` always
+ * face the trunk, because a body sliding up or down a tree looking anywhere
+ * else would look broken.
+ */
+function climbPose(
+  tree: ClimbableTreeSeed,
+  startX: number,
+  startZ: number,
+  headOffsetY: number,
+  phase: ClimbPhase,
+  progress: number,
+  peekFacing: number,
+): ClimbPose {
+  const approachAngle = Math.atan2(startX - tree.x, startZ - tree.z);
+  const edgeDistance = tree.trunkRadius + 0.35;
+  const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
+  const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
+  const topY = tree.canopyTopY - headOffsetY;
+
+  if (phase === 'peek') return { x: edgeX, y: topY, z: edgeZ, facing: peekFacing };
+
+  const t = clamp01(progress);
+  const eased = smoothstep(0, 1, t);
+  // A little wiggle on the way up and down — fades out as the scramble
+  // completes so it never disturbs the held peek.
+  const wiggle = Math.sin(t * Math.PI * 6) * 0.14 * (1 - t);
+  const climbingUp = phase === 'up';
+  const groundY = terrainHeight(startX, startZ);
+
+  return {
+    x: lerp(climbingUp ? startX : edgeX, climbingUp ? edgeX : startX, eased) + wiggle,
+    z: lerp(climbingUp ? startZ : edgeZ, climbingUp ? edgeZ : startZ, eased) + wiggle * 0.6,
+    y: lerp(climbingUp ? groundY : topY, climbingUp ? topY : groundY, eased),
+    facing: approachAngle + Math.PI,
+  };
+}
+
+function isDescendantOf(node: Object3D, ancestor: Object3D): boolean {
+  let current: Object3D | null = node.parent;
+  while (current) {
+    if (current === ancestor) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function climbPrompt(): string {
+  return isTouchDevice() ? 'Tap the tree — Climb' : 'Press E — Climb';
+}
+
+function descendPrompt(): string {
+  return isTouchDevice() ? 'Tap anywhere — Climb down' : 'Press E or hop — Climb down';
+}

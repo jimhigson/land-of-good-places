@@ -12,7 +12,16 @@ import { KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
-import { WanderDriver } from './wanderDriver';
+import { WanderDriver, type ClimberBudget } from './wanderDriver';
+import type { ClimbableTreeSeed } from '../../world/Scenery';
+
+/**
+ * Caps how many children climb trees across the whole park at once (see
+ * `world/TreeClimbing.ts` and the climbing block in `wanderDriver.ts`). One
+ * shared budget, handed to every driver, keeps a lucky run of coin flips from
+ * putting half the crowd up in the branches at the same time.
+ */
+const MAX_CONCURRENT_CLIMBERS = 3;
 
 /**
  * The children who were already in the park when you arrived.
@@ -209,6 +218,10 @@ export class NpcSystem implements GameSystem {
     collision: CollisionWorld,
     private readonly camera: IsoCamera,
     groundSampler: GroundSampler | null = null,
+    // Trees big enough to climb — threaded down into every child's wander
+    // driver so it can decide, on its own, whether one is worth stopping at.
+    // Empty by default so nothing here breaks if a caller has none to offer.
+    climbableTrees: readonly ClimbableTreeSeed[] = [],
   ) {
     this.group.name = 'npcs';
 
@@ -224,6 +237,7 @@ export class NpcSystem implements GameSystem {
     this.group.add(this.kids.crowd.group);
 
     const spawnNodes = this.graph.spawnNodes();
+    const climberBudget: ClimberBudget = { active: 0, max: MAX_CONCURRENT_CLIMBERS };
 
     for (let i = 0; i < NPC_COUNT; i += 1) {
       const node = spawnNodes[Math.floor((i / NPC_COUNT) * spawnNodes.length)];
@@ -254,6 +268,8 @@ export class NpcSystem implements GameSystem {
         rng: new Rng(NPC_SEED + i * 977),
         startNode: node.index,
         pace: rng.range(0.85, 1.12),
+        climbableTrees,
+        climberBudget,
       });
 
       const character = new NpcCharacter(
@@ -318,9 +334,30 @@ export class NpcSystem implements GameSystem {
     for (const character of this.characters) character.groundSampler = sampler;
   }
 
+  /**
+   * The children themselves.
+   *
+   * Exposed for rides that carry a character rather than steer one: a driver
+   * produces intent and has no business owning a position, so something that
+   * physically moves a child — the park train's carriages — needs the bodies.
+   * Read-only: nothing outside may add or remove one.
+   */
+  get riders(): readonly NpcCharacter[] {
+    return this.characters;
+  }
+
   /** How many draw calls the crowd costs. Reported in the debug overlay. */
   get drawCallCost(): number {
     return this.kids.crowd.partCount + this.pets.partCount;
+  }
+
+  /**
+   * Every child in the crowd, for a system that wants to read or briefly take
+   * over one of them — currently just `world/TreeClimbing.ts`, which reads
+   * each one's driver to spot a climb in progress and pose it accordingly.
+   */
+  get all(): readonly NpcCharacter[] {
+    return this.characters;
   }
 
   update(context: FrameContext): void {

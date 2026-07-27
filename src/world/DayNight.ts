@@ -63,10 +63,14 @@ const SKY_KEYS: readonly SkyKey[] = [
     horizon: 0x4a5590,
     horizonStrength: 0.3,
     sun: PALETTE.moon,
-    sunIntensity: 0.3,
+    // Nudged up from 0.24 (and ambientIntensity from 0.46) alongside the lamp
+    // posts: with only the fairy-light ring for warmth, the rest of the park
+    // read as flat black at midnight even once the paths were lit. A cosy
+    // evening, not noon — see the lamp posts PR for the before/after.
+    sunIntensity: 0.34,
     ambientSky: 0x4a5691,
     ambientGround: 0x252b48,
-    ambientIntensity: 0.46,
+    ambientIntensity: 0.52,
     fog: 0x2b3560,
   },
   {
