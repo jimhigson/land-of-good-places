@@ -64,6 +64,14 @@ export class LampPosts implements GameSystem {
   private readonly groundGlowMaterial: MeshBasicMaterial;
   private readonly lights: PointLight[] = [];
   private readonly scratchColour = new Color();
+  /**
+   * Working set for {@link assignNearestLights}, sized once to the number of
+   * real lights. These used to be two array literals built fresh every frame —
+   * named on ARCHITECTURE-REVIEW's list of allocation suspects behind the
+   * family's GC-pause complaint. Same search, no garbage.
+   */
+  private readonly nearestIndex: Int32Array;
+  private readonly nearestDistance: Float64Array;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'lamp-posts';
@@ -171,6 +179,8 @@ export class LampPosts implements GameSystem {
       this.group.add(light);
       this.lights.push(light);
     }
+    this.nearestIndex = new Int32Array(realLightCount);
+    this.nearestDistance = new Float64Array(realLightCount);
   }
 
   update({ elapsed, playerPosition }: FrameContext): void {
@@ -209,8 +219,9 @@ export class LampPosts implements GameSystem {
   private assignNearestLights(playerPosition: Vector3): void {
     const count = this.lights.length;
     if (count === 0) return;
-    const bestIndex: number[] = [];
-    const bestDist: number[] = [];
+    const bestIndex = this.nearestIndex;
+    const bestDist = this.nearestDistance;
+    let filled = 0;
 
     for (let i = 0; i < this.lampPositions.length; i += 1) {
       const lamp = this.lampPositions[i] as Vector3;
@@ -218,26 +229,26 @@ export class LampPosts implements GameSystem {
       const dz = lamp.z - playerPosition.z;
       const distSq = dx * dx + dz * dz;
 
-      if (bestIndex.length < count) {
-        bestIndex.push(i);
-        bestDist.push(distSq);
+      if (filled < count) {
+        bestIndex[filled] = i;
+        bestDist[filled] = distSq;
+        filled += 1;
       } else {
         let worst = 0;
         for (let k = 1; k < count; k += 1) {
-          if ((bestDist[k] ?? 0) > (bestDist[worst] ?? 0)) worst = k;
+          if ((bestDist[k] as number) > (bestDist[worst] as number)) worst = k;
         }
-        if (distSq < (bestDist[worst] ?? Infinity)) {
+        if (distSq < (bestDist[worst] as number)) {
           bestIndex[worst] = i;
           bestDist[worst] = distSq;
         }
       }
     }
 
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < filled; i += 1) {
       const light = this.lights[i];
-      const index = bestIndex[i];
-      if (!light || index === undefined) continue;
-      const lamp = this.lampPositions[index] as Vector3;
+      const lamp = this.lampPositions[bestIndex[i] as number];
+      if (!light || !lamp) continue;
       light.position.set(lamp.x, lamp.y + 3.2, lamp.z);
     }
   }

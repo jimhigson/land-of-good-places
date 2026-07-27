@@ -63,15 +63,20 @@ const SKY_KEYS: readonly SkyKey[] = [
     horizon: 0x4a5590,
     horizonStrength: 0.3,
     sun: PALETTE.moon,
-    // Nudged up from 0.24 (and ambientIntensity from 0.46) alongside the lamp
-    // posts: with only the fairy-light ring for warmth, the rest of the park
-    // read as flat black at midnight even once the paths were lit. A cosy
-    // evening, not noon — see the lamp posts PR for the before/after.
+    // The key light is the *sun* only now — below the horizon it fades out
+    // and {@link DayNight.moonLight} takes over (see MOON_INTENSITY). This
+    // value is what the fill light and the sky tint still read at night, so
+    // it stays non-zero.
     sunIntensity: 0.34,
-    ambientSky: 0x4a5691,
-    ambientGround: 0x252b48,
-    ambientIntensity: 0.52,
-    fog: 0x2b3560,
+    // Lifted alongside the moonlight (from 0x4a5691 / 0x252b48 / 0.52). The
+    // hemisphere is what decides how dark the *darkest* thing in the park
+    // can get, and midnight was bottoming out barely off black — against the
+    // "no black in this game" rule in ART_DIRECTION. Warmer and paler now, so
+    // the shadow side of a toy at midnight is still obviously its own colour.
+    ambientSky: 0x5d6cad,
+    ambientGround: 0x3a3f66,
+    ambientIntensity: 0.62,
+    fog: 0x354272,
   },
   {
     t: 0.21, // first light
@@ -153,10 +158,49 @@ const SKY_KEYS: readonly SkyKey[] = [
   },
 ];
 
+/**
+ * How hard the moon shines straight down on the park at its highest.
+ *
+ * Deliberately about a third of the noon sun. The brief from the family is
+ * "a child can see where she is going and the park stays cosy", not "night
+ * stops being night" — and the moon is a *pale* light, so most of what makes
+ * it read as moonlight is {@link PALETTE.moon}, not the number.
+ */
+const MOON_INTENSITY = 0.62;
+
+/**
+ * The moon's own light is cool, so the cool opposite fill has less to do at
+ * night than it does under a warm sun — but a little more of it is what keeps
+ * the side of a toy facing away from the moon from going flat. Multiplies
+ * {@link FILL_LIGHT_RATIO} for the moon's share only.
+ */
+const MOON_FILL_BOOST = 1.7;
+
 export class DayNight implements GameSystem {
   readonly name = 'dayNight';
 
+  /**
+   * The sun. Casts the park's shadows, and **only ever shines by day** — it
+   * used to be flipped round to the far side of the sky and dimmed to serve
+   * as the moon as well, which meant a light of intensity ≈ 1.1 teleporting
+   * 180° across the park the instant the sun touched the horizon, swinging
+   * every shadow with it. It now simply fades out at the horizon and
+   * {@link moonLight} fades in.
+   */
   readonly keyLight: DirectionalLight;
+  /**
+   * The moon: pale, cool and dim, rising and setting on the moon's own arc —
+   * which is the sun's arc reflected through the origin, exactly the arc the
+   * moon is *drawn* on in {@link Sky} (`uMoonPosition`). One directional light
+   * lights the whole park evenly, so night reads everywhere at once instead of
+   * only in the pools under the lamp posts.
+   *
+   * It casts **no shadow**. A second shadow map would double the shadow pass
+   * for the whole game to buy faint shadows nobody looks for at midnight; and
+   * with no moon shadow there is no way for one to leak into the building's
+   * interior, which is a bug this park has had before (see {@link setIndoors}).
+   */
+  readonly moonLight: DirectionalLight;
   /** The cool opposite fill. Casts nothing; colours the shadow side. */
   readonly fillLight: DirectionalLight;
   readonly ambientLight: HemisphereLight;
@@ -174,7 +218,10 @@ export class DayNight implements GameSystem {
    */
   private indoors = false;
 
+  /** World-space direction *towards* the sun. Always the true sun, day or night. */
   private readonly sunDirection = new Vector3(0, 1, 0);
+  /** World-space direction *towards* the moon — the sun's, reflected. */
+  private readonly moonDirection = new Vector3(0, -1, 0);
   private readonly fogColour = new Color();
 
   constructor(
@@ -204,6 +251,15 @@ export class DayNight implements GameSystem {
     this.keyLight.shadow.blurSamples = 10;
     scene.add(this.keyLight, this.keyLight.target);
 
+    // The moon. Positioned exactly the way the sun's key light is — a point
+    // far out along the direction the light comes *from*, aimed at a target —
+    // except that with no shadow camera to keep centred on the action there is
+    // nothing to gain from following the player, so its target simply sits at
+    // the origin and only the direction ever changes.
+    this.moonLight = new DirectionalLight(PALETTE.moon, 0);
+    this.moonLight.castShadow = false;
+    scene.add(this.moonLight, this.moonLight.target);
+
     // The cool opposite fill (ART_DIRECTION.md §6). It shines from the far side
     // of the sun and slightly above, never casts a shadow, and exists purely so
     // the toon ramp's shadow band keeps a colour temperature instead of sinking
@@ -232,9 +288,18 @@ export class DayNight implements GameSystem {
     return this.time;
   }
 
-  /** World-space direction *towards* the sun. */
+  /**
+   * World-space direction *towards* the sun — the real sun, even at night when
+   * it is below the horizon and lighting nothing. (It used to be flipped to
+   * point at the moon after dark; {@link moonDirectionVector} is that now.)
+   */
   get sunDirectionVector(): Readonly<Vector3> {
     return this.sunDirection;
+  }
+
+  /** World-space direction *towards* the moon. The sun's, reflected. */
+  get moonDirectionVector(): Readonly<Vector3> {
+    return this.moonDirection;
   }
 
   /** Jump the clock, e.g. from a debug key or a cutscene. */
@@ -285,6 +350,7 @@ export class DayNight implements GameSystem {
     // either the lit scene or the shadow pass, and needs no further per-frame
     // work (see `InteriorLighting`, which is what lights the room instead).
     this.keyLight.visible = !this.indoors;
+    this.moonLight.visible = !this.indoors;
     this.fillLight.visible = !this.indoors;
     this.ambientLight.visible = !this.indoors;
 
@@ -365,23 +431,46 @@ export class DayNight implements GameSystem {
       smoothstep(1.45, 0.85, Math.abs(moonRelative)) * smoothstep(0.02, 0.2, -this.sunDirection.y);
 
     // --- lights ----------------------------------------------------------
-    // Below the horizon the key light becomes moonlight: it flips to shine from
-    // the opposite side, dims right down and turns cool blue.
-    const isDay = this.sunDirection.y > 0;
-    if (!isDay) this.sunDirection.negate();
+    // The sun and the moon cross-fade through the horizon, in **mirrored**
+    // windows — `moonUp` is `1 - sunUp` by construction. That matters: the
+    // first version of this used two narrow offset windows, and measuring the
+    // whole day's light curve showed that for the few seconds either side of
+    // sunrise and sunset *neither* light was contributing, so the park went
+    // briefly flat and ambient-only. Mirrored windows mean the two always sum
+    // to one light's worth. For those few seconds both are lit at part
+    // strength, from opposite sides — which is exactly what dusk looks like
+    // with the moon already up.
+    const sunUp = smoothstep(-0.12, 0.12, this.sunDirection.y);
+    const moonUp = 1 - sunUp;
+    const sunStrength = look.sunIntensity * sunUp;
+    const moonStrength = MOON_INTENSITY * moonUp;
 
     this.keyLight.color.setHex(look.sun);
-    this.keyLight.intensity = look.sunIntensity;
+    this.keyLight.intensity = sunStrength;
 
-    // The fill sits opposite the sun on the compass but still above the park:
-    // straight opposite would light the ground from underneath and every toy
-    // would glow along its bottom edge.
+    // The shadow pass is the single most expensive thing this light does, and
+    // at night it renders a map for a light of intensity zero. Freezing the
+    // map (rather than clearing `castShadow`, which changes three.js's light
+    // counts and recompiles every material in the park) skips the pass
+    // outright. Never frozen before the first map exists, or the shader would
+    // sample a texture that was never created.
+    this.keyLight.shadow.autoUpdate = sunStrength > 0.02 || this.keyLight.shadow.map === null;
+
+    this.moonDirection.copy(this.sunDirection).negate();
+    this.moonLight.position.copy(this.moonDirection).multiplyScalar(120);
+    this.moonLight.intensity = moonStrength;
+
+    // The fill sits opposite whichever of the two is actually lighting the
+    // park, but still above it: straight opposite would light the ground from
+    // underneath and every toy would glow along its bottom edge.
+    const keyDirection = sunStrength >= moonStrength ? this.sunDirection : this.moonDirection;
     this.fillLight.position
-      .set(-this.sunDirection.x, 0.55, -this.sunDirection.z)
+      .set(-keyDirection.x, 0.55, -keyDirection.z)
       .normalize()
       .multiplyScalar(60);
     this.fillLight.color.setHex(look.ambientSky);
-    this.fillLight.intensity = look.sunIntensity * FILL_LIGHT_RATIO;
+    this.fillLight.intensity =
+      (sunStrength + moonStrength * MOON_FILL_BOOST) * FILL_LIGHT_RATIO;
 
     this.ambientLight.color.setHex(look.ambientSky);
     this.ambientLight.groundColor.setHex(look.ambientGround);
