@@ -645,6 +645,18 @@ kbd {
 
 .backpack {
   place-items: end start;
+  /* `.backpack` has three separate top-level children (head, list, hint)
+     stacked as implicit grid rows, unlike `.shop-card`'s single wrapping
+     card. Grid's default `align-content: normal` behaves like `stretch`
+     here, splitting the whole overlay height evenly between those three
+     auto rows; with `align-items: end` each child then sits at the
+     *bottom* of its own oversized row, leaving a see-through gap above it.
+     With few or no rows in the list, that gap is enormous — it reads as a
+     hole punched through the middle of the drawer. `align-content: end`
+     packs the rows tightly against each other (and against the bottom of
+     the corner, matching the drawer's anchor) instead of stretching them,
+     so there's never a phantom gap regardless of how many things you own. */
+  align-content: end;
   padding: 12px calc(12px + env(safe-area-inset-left)) calc(80px + env(safe-area-inset-bottom));
 }
 
@@ -686,6 +698,10 @@ kbd {
 
 .backpack-list {
   width: min(360px, 92vw);
+  /* No min-height here: with items, the list should hug its rows (and cap
+     out at max-height below, scrolling). The empty state gets its own
+     generous min-height on `.backpack-empty` instead, so a 1-item drawer
+     doesn't get padded out into a mostly-blank box. */
   max-height: min(320px, 42vh);
   background: var(--lgp-cream);
   border: 5px solid #fff;
@@ -694,11 +710,48 @@ kbd {
   box-shadow: 0 10px 0 rgba(74, 58, 82, 0.14);
 }
 
+/* The friendly empty state: a big soft illustration so the drawer always
+   reads as a whole, deliberate card — never a stub with a hole in it. */
 .backpack-empty {
-  margin: 8px;
-  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 216px;
+  margin: 0;
+  padding: 20px 18px;
+  text-align: center;
+}
+
+.backpack-empty-emoji {
+  font-size: 68px;
+  line-height: 1;
+  animation: backpack-empty-breathe 2.6s ease-in-out infinite;
+}
+
+.backpack-empty-title {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--lgp-pink-deep);
+}
+
+.backpack-empty-hint {
+  margin: 0;
+  font-size: 13px;
   font-weight: 700;
-  opacity: 0.7;
+  opacity: 0.62;
+}
+
+@keyframes backpack-empty-breathe {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(4deg);
+  }
 }
 
 .backpack .shop-hint {
@@ -724,7 +777,8 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .shop-card,
   .surprise-egg,
-  .surprise-prize {
+  .surprise-prize,
+  .backpack-empty-emoji {
     animation: none;
   }
 }
