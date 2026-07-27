@@ -2001,6 +2001,10 @@ kbd {
   flex: 1;
   overflow-y: auto;
   display: flex;
+  /* Without this the preview column stretches to match the much taller
+     controls column (flex's default `align-items: stretch`), which then
+     feeds a wrong, non-square height into `CharacterPreview.resize()`. */
+  align-items: flex-start;
   gap: 14px;
   padding: 12px;
   -webkit-overflow-scrolling: touch;

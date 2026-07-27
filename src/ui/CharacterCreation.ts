@@ -260,13 +260,17 @@ export class CharacterCreation {
     this.root.append(form);
     container.append(this.root);
 
-    // A resize on the preview's own box (phone rotation, layout reflow at the
-    // 700px breakpoint) keeps the aspect ratio honest — a fixed CSS size
-    // alone would letterbox or crop as the box changes shape.
+    // A resize on the canvas's OWN box (phone rotation, layout reflow at the
+    // 700px breakpoint) keeps the render buffer's aspect ratio matching its
+    // CSS box exactly. Observing `previewWrap` instead would read the wrong
+    // number: that flex column also holds the name preview text below the
+    // canvas, and being a flex child itself, its height stretches to match
+    // its (much taller) sibling — see the `align-items: flex-start` note on
+    // `.charcreate-body` in style.css for the other half of this fix.
     this.resizeObserver = new ResizeObserver(() => {
-      this.preview.resize(this.previewWrap.clientWidth, this.previewWrap.clientHeight * 0.82);
+      this.preview.resize(this.preview.canvas.clientWidth, this.preview.canvas.clientHeight);
     });
-    this.resizeObserver.observe(this.previewWrap);
+    this.resizeObserver.observe(this.preview.canvas);
 
     this.refreshPreview();
 
