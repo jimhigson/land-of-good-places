@@ -134,12 +134,28 @@ const header = [
 console.log(header);
 console.log('-'.repeat(header.length));
 
+/**
+ * How wide a hat may be, as a fraction of the bare head, and how far past her
+ * own height a hat may take the wearer.
+ *
+ * Both bounds are set from the two failures this script was written for, not
+ * from taste: the un-scaled hats measured **0.33–0.67** across (a party hat at
+ * 0.38 is the "much too small" the family reported), and the old RiPika head
+ * took the wearer to **1.72×** her height. The park's real range is now
+ * 0.49–1.01 wide and up to 1.38× tall, so every bound below has room for a new
+ * hat with its own character and none for either mistake coming back.
+ */
+const MIN_SPAN = 0.45;
+const MAX_SPAN = 1.15;
+const MAX_TIP = 1.45;
+
 interface Row {
   readonly kind: HatKind;
   readonly grip: number;
   readonly span: number;
 }
 const rows: Row[] = [];
+const failures: string[] = [];
 
 for (const kind of HAT_KINDS) {
   const hat = createHat(kind);
@@ -162,6 +178,17 @@ for (const kind of HAT_KINDS) {
   // a multiple of her bare height — a hat that adds three quarters of a child
   // is not a hat, whatever its width says.
   const tip = kid.hatAnchorHeight + worn.top;
+  if (span < MIN_SPAN || span > MAX_SPAN) {
+    failures.push(
+      `${kind} is ${span.toFixed(2)}× the head wide; hats run ${MIN_SPAN}–${MAX_SPAN}×.`,
+    );
+  }
+  if (tip / kidHeight > MAX_TIP) {
+    failures.push(
+      `${kind} takes the wearer to ${(tip / kidHeight).toFixed(2)}× her own height ` +
+        `(limit ${MAX_TIP}×) — that is a second head, not a hat.`,
+    );
+  }
   console.log(
     [
       kind.padEnd(12),
@@ -176,9 +203,25 @@ for (const kind of HAT_KINDS) {
   );
 }
 
+// `grip` is reported but not gated: a rim narrower than the skull at its own
+// height is *buried* in the head, which is how a band grips rather than hovers
+// (see `SIT` in `hats.ts`), so under 1 is right and the only question is how
+// far under. `span` is the number that says "too small" out loud.
 console.log(
-  '\nwidth/head = the hat at its band; grip = band ÷ skull there (want ≳ 1);\n' +
-    'span = widest part ÷ bare head width; rise/tip in metres.',
+  '\nwidth/head = the hat at its lowest ring against the skull there;\n' +
+    'grip = that ratio (a rim buries, so ≲ 1); span = widest ÷ bare head.',
 );
 const loose = rows.reduce((a, b) => (b.grip < a.grip ? b : a));
-console.log(`worst grip: ${loose.kind} at ${loose.grip.toFixed(2)}×.`);
+const narrow = rows.reduce((a, b) => (b.span < a.span ? b : a));
+console.log(
+  `deepest-buried rim: ${loose.kind} at ${loose.grip.toFixed(2)}×; ` +
+    `narrowest hat: ${narrow.kind} at ${narrow.span.toFixed(2)}× the head.`,
+);
+
+if (failures.length > 0) {
+  console.error(`\nhat fit: ${failures.length} hat(s) do not fit the head:`);
+  for (const failure of failures) console.error(`  - ${failure}`);
+  process.exitCode = 1;
+} else {
+  console.log(`hat fit: all ${rows.length} hats fit the head they sit on.`);
+}
