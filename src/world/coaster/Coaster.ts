@@ -1,11 +1,13 @@
 import {
   BoxGeometry,
+  CatmullRomCurve3,
   CylinderGeometry,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
   Quaternion,
+  TubeGeometry,
   Vector3,
 } from 'three';
 import { CoasterRoute, checkCoasterClearances, STATION_HEIGHT } from './route';
@@ -319,14 +321,48 @@ export class Coaster implements GameSystem {
     const step = 1.4;
     const segments = Math.ceil(this.route.length / step);
     const railGauge = 0.55;
-    const left = new InstancedMesh(new BoxGeometry(0.14, 0.14, step + 0.25), railMaterial, segments);
-    const right = new InstancedMesh(new BoxGeometry(0.14, 0.14, step + 0.25), railMaterial, segments);
+    // The rails are **swept**, not chopped (family note, 28 July): a rail built
+    // from one straight box per 1.4 m read as a row of disjointed sticks
+    // wherever the loop bends, which on a coaster is most of it. Two closed
+    // curves — the solved centre line offset left and right — tubed along their
+    // whole length instead, so a bend is a bend.
+    //
+    // A circular cross-section is why this can be a plain `TubeGeometry`: the
+    // Frenet frame `TubeGeometry` builds may twist along a curve with torsion,
+    // and on a tube of circular section that twist is invisible. Two draw calls
+    // per coaster, and the ties and pylons stay instanced.
+    const railGeometries = [1, -1].map((sideSign) => {
+      const points: Vector3[] = [];
+      const centre = new Vector3();
+      const along = new Vector3();
+      for (let i = 0; i < segments; i += 1) {
+        const d = i * step;
+        this.route.pointAt(d, centre);
+        this.route.tangentAt(d, along);
+        // Sideways in the ground plane: the track has no banking, so "left of
+        // the rail" is the horizontal normal, not a rolled one.
+        const sideX = along.z;
+        const sideZ = -along.x;
+        const norm = Math.hypot(sideX, sideZ) || 1;
+        points.push(
+          new Vector3(
+            centre.x + (sideX / norm) * sideSign * railGauge,
+            centre.y,
+            centre.z + (sideZ / norm) * sideSign * railGauge,
+          ),
+        );
+      }
+      const railCurve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
+      // Two tubular segments a metre: enough that the tightest bend the solver
+      // can produce still reads as a curve rather than a polygon.
+      return new TubeGeometry(railCurve, Math.ceil(this.route.length * 2), 0.075, 6, true);
+    });
+    for (const geometry of railGeometries) this.group.add(new Mesh(geometry, railMaterial));
+
     const ties = new InstancedMesh(new BoxGeometry(1.5, 0.08, 0.3), tieMaterial, segments);
     const matrix = new Matrix4();
     const rotation = new Quaternion();
-    const up = new Vector3(0, 1, 0);
     const forward = new Vector3();
-    const side = new Vector3();
     const position = new Vector3();
     const one = new Vector3(1, 1, 1);
     const mid = new Vector3();
@@ -338,15 +374,7 @@ export class Coaster implements GameSystem {
       this.route.pointAt(d, mid);
       this.route.pointAt(d + step, next);
       forward.subVectors(next, mid).normalize();
-      side.crossVectors(up, forward).normalize();
       rotation.setFromUnitVectors(new Vector3(0, 0, 1), forward);
-      for (const [mesh, sideSign] of [
-        [left, 1],
-        [right, -1],
-      ] as const) {
-        matrix.compose(position.copy(mid).addScaledVector(side, sideSign * railGauge), rotation, one);
-        mesh.setMatrixAt(i, matrix);
-      }
       matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
       ties.setMatrixAt(i, matrix);
 
@@ -376,8 +404,6 @@ export class Coaster implements GameSystem {
         }
       }
     }
-    left.instanceMatrix.needsUpdate = true;
-    right.instanceMatrix.needsUpdate = true;
     ties.instanceMatrix.needsUpdate = true;
 
     const pylons = new InstancedMesh(
@@ -395,7 +421,7 @@ export class Coaster implements GameSystem {
       pylons.setMatrixAt(index, matrix);
     });
     pylons.instanceMatrix.needsUpdate = true;
-    this.group.add(left, right, ties, pylons);
+    this.group.add(ties, pylons);
 
     // The station platform: a low deck beside the boarding dip.
     const stationPoint = this.route.pointAt(this.route.stationDistance, new Vector3());
