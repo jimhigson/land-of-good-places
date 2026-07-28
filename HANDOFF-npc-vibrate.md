@@ -6,7 +6,7 @@
 
 Prime suspect 1 — **double ownership** — confirmed, with a runaway on top.
 
-`scripts/measure-npc-jitter.mts` builds the real park headlessly and drives
+`scripts/check-npc-jitter.mts` builds the real park headlessly and drives
 `World.update` at a fixed 60 Hz, sampling every child's x/z three times a frame
 (start, after `ParkTrain.carryPassengers`, after `NpcSystem.update`).
 
@@ -51,12 +51,49 @@ to keep out of PR #101's way.
 
 ## Invariant
 
-`scripts/measure-npc-jitter.mts` is kept and wired into `npm run build` as
-`check:jitter`: no child may move more than 0.35 m in one 60 Hz frame across
-9000 frames of the real park.
+`scripts/check-npc-jitter.mts`, wired into `npm run build` as `check:jitter`.
+Two bounds on a child's *own* movement (measured after `carryPassengers`, so
+boarding is not mistaken for a fault), over 9000 frames of the real park:
+
+- own step <= 1.0 m in a frame (walking is 4.25 cm);
+- speed <= 8 m/s (flat out is `NPC_WALK_SPEED * RUN_INTENT` = 4.46 m/s).
+
+On this branch: worst own step 0.165 m, worst speed 4.959 m/s.
+On 55b9b4f: 105.796 m and 3173.866 m/s, 12231 violations, first at frame 3985.
 
 ## State
 
 - Branch `npc-vibrate`, worktree `.claude/worktrees/npc-vibrate`.
-- `scripts/trace-one-child.mts` and `scripts/_probe.mts` are throwaway; delete
-  before pushing.
+- Throwaway traces deleted. `npm run build` green, exit 0.
+
+## Not done: the castle-floor clipping report
+
+Investigated, **not reproduced, and not fixed** — handed on rather than guessed
+at. Measured on this branch:
+
+- `PoiGraph` has **46 nodes, all `space: 'garden'`** — zero castle nodes.
+  `spawnNodes()` filters to `SPACE_GARDEN` and `nearest()` is confined to the
+  asker's own space, so on today's `main` no child can ever be in the castle.
+  ORDER-OF-WORK.md line 276 says the same: *"NPCs cannot get inside. That is a
+  portal."* (The `World.ts` comment claiming they "walk the building's ground
+  floor" is stale — it predates the deletion of the three dead indoor seeds.)
+- No poi node anywhere in the park stands under a floor plate it cannot reach:
+  for all 46, `sample(x, z, terrain)` == `sample(x, z, terrain + 3)`.
+- 6000 frames of the real park: no child ever has a walk surface more than
+  `BUILDING_STEP_UP` above the one they are standing on.
+
+**The mechanism is nevertheless real and worth the next agent's first hour.**
+`WalkSurfaces.sample(x, z, y)` only offers a surface within `BUILDING_STEP_UP`
+(0.62 m) of your feet, and the interior plaza is `INTERIOR_GROUND_Y` = 1.200 m
+below deck 0 (measured: deck 0 = 0.441, plaza = -0.759). So **any** character
+who arrives on the castle ground floor below the deck can never step up onto
+it and lives there for ever, sunk 1.2 m — which for a ~1.3 m child is exactly
+"head poking out of the floor". `NpcCharacter`'s constructor seeds y from raw
+`terrainHeight(x, z)`, ignoring the ground sampler, which is precisely how a
+child placed indoors would arrive below the deck.
+
+So: whatever route the family saw a child take into the castle is not on this
+branch, but if one is ever added, that constructor is the bug waiting for it.
+Reproduce by placing an `NpcCharacter` at an interior coordinate and running
+`World.update`; fix by sampling the installed `GroundSampler` on spawn (and/or
+letting a character below a floor plate step up onto it).
