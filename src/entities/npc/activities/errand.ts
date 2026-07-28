@@ -35,7 +35,11 @@ export class Errand {
   private dzValue = 0;
   private distanceValue = 0;
 
-  constructor(private readonly limits: ErrandLimits) {}
+  private readonly limits: ErrandLimits;
+
+  constructor(limits: ErrandLimits) {
+    this.limits = limits;
+  }
 
   /** Call when the walk starts, before the first {@link step}. */
   begin(context: DriverContext): void {
@@ -159,7 +163,11 @@ export const NO_LIMIT = Number.POSITIVE_INFINITY;
 export class Backstop {
   private elapsed = 0;
 
-  constructor(private readonly seconds: number) {}
+  private readonly seconds: number;
+
+  constructor(seconds: number) {
+    this.seconds = seconds;
+  }
 
   restart(): void {
     this.elapsed = 0;

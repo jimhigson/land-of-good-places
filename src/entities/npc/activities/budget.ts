@@ -14,6 +14,9 @@ import type { ActivityBudget } from './activity';
 export class BudgetSlot {
   private held = false;
 
+  private readonly budget: ActivityBudget | undefined;
+  private readonly whenAbsent: 'allow' | 'refuse';
+
   /**
    * @param budget The shared cap, or `undefined` when nobody handed one over.
    * @param whenAbsent What an absent cap means. The two blocks that predate
@@ -21,10 +24,10 @@ export class BudgetSlot {
    *   the chat treated it as *closed*. Both are defensible and both are
    *   preserved, so the disagreement is at least written down now.
    */
-  constructor(
-    private readonly budget: ActivityBudget | undefined,
-    private readonly whenAbsent: 'allow' | 'refuse',
-  ) {}
+  constructor(budget: ActivityBudget | undefined, whenAbsent: 'allow' | 'refuse') {
+    this.budget = budget;
+    this.whenAbsent = whenAbsent;
+  }
 
   /** True when there is no room and a child may not start. */
   get full(): boolean {
