@@ -683,8 +683,14 @@ export function paintFacePaintOverlay(design: FacePaintDesign, size = 512): Canv
       const right = paintCheekPoint(s, 1);
       // Bigger and bolder than the everyday blush (`DEFAULTS.blushR` 0.075) so
       // it reads as a deliberate paint job, not just rosy cheeks.
-      drawBlush(ctx, s, left.x, left.y, ART.ripikaCheek, 'disc', s * 0.115);
-      drawBlush(ctx, s, right.x, right.y, ART.ripikaCheek, 'disc', s * 0.115);
+      //
+      // `drawBlush`'s radius is a **fraction of `s`** — it multiplies by `s`
+      // itself (`rad = r * s`), exactly as the two call sites above pass
+      // `o.blushR`. Passing `s * 0.115` here squared it: at s = 512 that is a
+      // 30,000 px disc, which painted the whole face a flat red. One number,
+      // two units.
+      drawBlush(ctx, s, left.x, left.y, ART.ripikaCheek, 'disc', 0.115);
+      drawBlush(ctx, s, right.x, right.y, ART.ripikaCheek, 'disc', 0.115);
       break;
     }
   }
