@@ -8,6 +8,7 @@ import type { PoiGraph } from './poiGraph';
 // only the wander core and the small amount of glue that runs them.
 import type { Activity, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
 import { TreeClimb, type ClimbPhase, type ClimberBudget } from './activities/treeClimb';
+import { TrainTrip } from './activities/trainTrip';
 // Chatting (see the additive block near the bottom of this file). Content —
 // what a child says and when — lives in its own module so this file stays
 // about timing and state, not word lists.
@@ -29,9 +30,6 @@ import {
   pickGoodbyeLine,
   type ChatBudget,
 } from './chatActivity';
-// The park train. Used only by the additive block at the bottom of this file,
-// and only through a singleton that is `null` in a world without one.
-import { trainService } from '../../world/train/service';
 import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
@@ -203,6 +201,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
    */
   private readonly activities: readonly Activity[];
   private readonly climb: TreeClimb;
+  private readonly train: TrainTrip;
 
   private current: number;
   private target: number;
@@ -264,6 +263,9 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // initialised, because several of them draw from this child's seeded
     // stream and the order of those draws is behaviour, not detail.
     this.climb = new TreeClimb(this.rng, options.climbableTrees ?? [], options.climberBudget);
+    // The trip draws nothing from the stream until the first time it wonders
+    // about the train, so it can be built anywhere in here.
+    this.train = new TrainTrip();
     // Stagger the first decision so the whole park does not set off in step.
     this.pausing = true;
     this.pauseRemaining = this.rng.range(0, 2.5);
@@ -282,7 +284,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // The order the frame is offered in. Unchanged from the chain of `if`s
     // this replaced: the climb pre-empts everything (see `ActivityHold`), then
     // chat, then the train, then the paint stall.
-    this.activities = [this.climb];
+    this.activities = [this.climb, this.train];
   }
 
   /** Where this child is heading, for debugging and for the pet to follow. */
@@ -358,14 +360,11 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       if (hold === null && this.updateChatActivity(context, intent, dt)) hold = 'steering';
 
       if (hold === null) {
-        // Catching the park train, if there is one and this child fancies it.
-        // When it is handling the frame, it has filled the intent in itself.
-        if (this.updateTrainTrip(context, intent)) hold = 'intent';
         // Face painting stall (additive): a child mid-visit — or one who has
         // just decided to start one — has movement handled entirely by
         // `driveFacePaintVisit` for this frame, in place of the ordinary node
         // logic below.
-        else if (this.driveFacePaintVisit(context, intent, dt)) hold = 'steering';
+        if (this.driveFacePaintVisit(context, intent, dt)) hold = 'steering';
         else this.updateWander(context, intent, dt);
       }
     }
@@ -590,214 +589,10 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.legElapsed = 0;
   }
 
-  // ===========================================================================
-  // ADDITIVE BLOCK — riding the park train (`world/train`).
-  //
-  // Self-contained on purpose: every field it uses is declared here, it hooks
-  // into `update` in exactly one place, and it talks to the train through the
-  // `trainService()` singleton rather than through anything the crowd owns.
-  // Delete this block and its one call and the driver is exactly what it was.
-  //
-  // The shape of a trip: walk out to a station, wait on the platform, take a
-  // seat when the train pulls in, ride a stop or two, get off, walk back into
-  // the park. Only the riding part is unusual — while a child is aboard the
-  // train writes their x and z (see `ParkTrain.carryPassengers`) and this
-  // driver simply asks for nothing, which is exactly what a passenger does.
-  // ===========================================================================
-
-  /** What this child is doing about the train. */
-  private trainMode: 'none' | 'walking' | 'waiting' | 'riding' = 'none';
-
-  /** Seat number while aboard. Read by `ParkTrain` — see `TrainPassenger`. */
-  private seat: number | null = null;
-
-  /** Which stop is being walked to, waited at, or was boarded at. */
-  private trainStop = 0;
-
-  /** Seconds until this child next considers a trip. */
-  private trainCooldown = 0;
-
-  /** Guards the walk out and the wait, so nobody queues for ever. */
-  private trainElapsed = 0;
-
-  private stopsRidden = 0;
-  private stopsWanted = 1;
-  private lastSeenStop: number | null = null;
-
-  /** Stuck detection for the off-graph walk to the platform. */
-  private lastProgressX = 0;
-  private lastProgressZ = 0;
-  private progressTimer = 0;
-  private sidestep = 0;
-
-  /** The seat this child is in, if any. `ParkTrain` reads this every frame. */
+  /** The seat this child is in, if any. `ParkTrain` reads this every frame —
+   *  see the structural `TrainPassenger` type in `world/train/service.ts`. */
   get trainSeat(): number | null {
-    return this.seat;
-  }
-
-  /**
-   * Returns true when the train has this child's attention, in which case the
-   * intent has been filled in and the wander behaviour must not run.
-   */
-  private updateTrainTrip(context: DriverContext, intent: CharacterIntent): boolean {
-    const { dt } = context;
-    const service = trainService();
-
-    if (!service) {
-      // No train in this world (or it has gone away mid-ride).
-      this.seat = null;
-      this.trainMode = 'none';
-      return false;
-    }
-
-    switch (this.trainMode) {
-      case 'none': {
-        this.trainCooldown -= dt;
-        if (this.trainCooldown > 0) return false;
-        this.trainCooldown = this.rng.range(TRAIN_INTERVAL_MIN, TRAIN_INTERVAL_MAX);
-        if (!this.rng.chance(TRAIN_CHANCE)) return false;
-
-        const stop = service.nearestStop(context.position.x, context.position.z);
-        if (!stop) return false;
-
-        this.trainStop = stop.index;
-        this.trainMode = 'walking';
-        this.trainElapsed = 0;
-        this.beginProgressCheck(context);
-        return false;
-      }
-
-      case 'walking': {
-        const stop = service.stops[this.trainStop];
-        if (!stop) return this.abandonTrip();
-
-        this.trainElapsed += dt;
-        if (this.trainElapsed > WALK_TIMEOUT) return this.abandonTrip();
-
-        const dx = stop.x - context.position.x;
-        const dz = stop.z - context.position.z;
-        const distance = Math.hypot(dx, dz);
-        if (distance <= PLATFORM_ARRIVE) {
-          this.trainMode = 'waiting';
-          this.trainElapsed = 0;
-          return true;
-        }
-
-        this.steerTowards(context, intent, dx, dz, distance, dt);
-        intent.expression = this.blinkRemaining > 0 ? 'blink' : 'neutral';
-        return true;
-      }
-
-      case 'waiting': {
-        this.trainElapsed += dt;
-        if (this.trainElapsed > WAIT_TIMEOUT) return this.abandonTrip();
-
-        // Look out along the track, the way anybody waits for a train.
-        intent.lookAt = Math.atan2(-context.position.x, -context.position.z) + Math.PI;
-        intent.expression = this.blinkRemaining > 0 ? 'blink' : 'happy';
-
-        const seat = service.claimSeat(this.trainStop);
-        if (seat !== null) {
-          this.seat = seat;
-          this.trainMode = 'riding';
-          this.stopsRidden = 0;
-          this.stopsWanted = this.rng.int(1, 2);
-          this.lastSeenStop = this.trainStop;
-        }
-        return true;
-      }
-
-      case 'riding': {
-        const seat = this.seat;
-        if (seat === null || !service.seatValid(seat)) {
-          this.seat = null;
-          return this.abandonTrip();
-        }
-
-        // Ask for nothing: the train is doing the moving.
-        intent.expression = this.blinkRemaining > 0 ? 'blink' : 'happy';
-        intent.wave = 0;
-
-        const stopped = service.stoppedAt();
-        if (stopped !== null && stopped !== this.lastSeenStop) {
-          this.lastSeenStop = stopped;
-          this.stopsRidden += 1;
-
-          if (this.stopsRidden >= this.stopsWanted) {
-            service.leaveSeat(seat);
-            this.seat = null;
-            // Straight back into the park: rejoin the waypoint graph at
-            // whatever is nearest, which from a platform is the ring road.
-            const node = this.graph.nearest(context.position.x, context.position.z);
-            if (node) {
-              this.current = node.index;
-              this.previous = node.index;
-              this.target = node.index;
-              this.chooseNext();
-            }
-            this.trainMode = 'none';
-            this.trainCooldown = this.rng.range(TRAIN_INTERVAL_MIN, TRAIN_INTERVAL_MAX);
-            this.pausing = false;
-            this.legElapsed = 0;
-            return false;
-          }
-        }
-        return true;
-      }
-
-      default:
-        return false;
-    }
-  }
-
-  /**
-   * Steers straight at a point, with a sidestep when that stops working.
-   *
-   * The stations are off the waypoint graph — they are out at the park edge,
-   * where there is no paving to author waypoints along — so this is the one
-   * place a child steers rather than walks a validated edge. Trees are sparse
-   * out there and collision resolution slides them round most things, but a
-   * child who has not moved for a few seconds is wedged, and a couple of metres
-   * of sideways gets them past it.
-   */
-  private steerTowards(
-    context: DriverContext,
-    intent: CharacterIntent,
-    dx: number,
-    dz: number,
-    distance: number,
-    dt: number,
-  ): void {
-    this.progressTimer += dt;
-    if (this.progressTimer > STUCK_WINDOW) {
-      const moved = Math.hypot(
-        context.position.x - this.lastProgressX,
-        context.position.z - this.lastProgressZ,
-      );
-      this.sidestep = moved < STUCK_DISTANCE ? (this.rng.chance(0.5) ? 1 : -1) : 0;
-      this.beginProgressCheck(context);
-    }
-
-    const scale = this.pace / distance;
-    // Perpendicular in the ground plane, which for a heading (dx, dz) is
-    // (dz, -dx) — no need to normalise, the scale is shared.
-    intent.moveX = (dx + dz * this.sidestep * 0.9) * scale;
-    intent.moveZ = (dz - dx * this.sidestep * 0.9) * scale;
-  }
-
-  private beginProgressCheck(context: DriverContext): void {
-    this.lastProgressX = context.position.x;
-    this.lastProgressZ = context.position.z;
-    this.progressTimer = 0;
-  }
-
-  /** Gives up on the train and goes back to wandering. Always returns false. */
-  private abandonTrip(): boolean {
-    this.trainMode = 'none';
-    this.seat = null;
-    this.sidestep = 0;
-    this.trainCooldown = this.rng.range(TRAIN_INTERVAL_MIN, TRAIN_INTERVAL_MAX);
-    return false;
+    return this.train.trainSeat;
   }
 
 
@@ -928,7 +723,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       // Never poaches a child already committed to the train or the paint
       // stall — and a climbing child never reaches this line at all, since
       // `update` returns out of `updateClimb` before getting here.
-      if (this.trainMode !== 'none' || this.paintVisit !== 'none') return false;
+      if (this.train.busy || this.paintVisit !== 'none') return false;
       if (this.chatRollTimer > 0) return false;
       this.chatRollTimer = this.rng.range(CHAT_ROLL_MIN, CHAT_ROLL_MAX);
 
@@ -1050,26 +845,6 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.chooseNext();
   }
 }
-
-// --- tuning for the additive block above -------------------------------------
-
-/** Seconds between one child wondering about the train and the next time. */
-const TRAIN_INTERVAL_MIN = 22;
-const TRAIN_INTERVAL_MAX = 70;
-
-/** …and the chance they actually go, when they do wonder. */
-const TRAIN_CHANCE = 0.55;
-
-/** Close enough to the middle of the platform to count as waiting on it. */
-const PLATFORM_ARRIVE = 1.6;
-
-/** Longest a child spends walking to a station, or standing on one. */
-const WALK_TIMEOUT = 60;
-const WAIT_TIMEOUT = 45;
-
-/** Moving less than this in this long means something is in the way. */
-const STUCK_WINDOW = 2.5;
-const STUCK_DISTANCE = 0.8;
 
 /** Moves `value` towards `target` by at most `step`. */
 function approach(value: number, target: number, step: number): number {

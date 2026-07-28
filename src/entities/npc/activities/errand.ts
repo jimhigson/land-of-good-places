@@ -40,8 +40,20 @@ export class Errand {
   /** Call when the walk starts, before the first {@link step}. */
   begin(context: DriverContext): void {
     this.elapsed = 0;
-    this.sidestep = 0;
     this.markProgress(context);
+  }
+
+  /**
+   * Forgets which way round the scenery was working.
+   *
+   * Deliberately *not* part of {@link begin}: the sidestep is a running
+   * estimate of how this child is getting past whatever is in front of them,
+   * and it survives from one errand to the next until the stuck check
+   * re-evaluates it a couple of seconds in. That is what the train block did
+   * before this class existed, and this is a refactor.
+   */
+  clearSidestep(): void {
+    this.sidestep = 0;
   }
 
   /** Vector to the target as of the last {@link step}. */
