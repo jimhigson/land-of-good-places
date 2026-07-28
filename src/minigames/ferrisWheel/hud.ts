@@ -1,26 +1,22 @@
 /**
- * The ride's screen furniture: where you are, what to look at, and the way home.
+ * The ride's screen furniture: where you are and what to look at.
  *
  * Plain DOM on the framework's overlay layer, like every other HUD in the game.
- * Two things here are specific to a ride rather than a game:
+ * One thing here is specific to a ride rather than a game:
  *
  * **The framework's hold pad is hidden.** Every other mini-game is a one-button
- * game and the pad says "HOLD to go!"; on the ferris wheel holding means *leave*,
- * and a prompt telling a child to hold would send them home before the aliens
- * arrive. It is hidden with one CSS rule from this file rather than by adding an
- * option to the framework — the overlay is shared with games still to be written
- * and none of them should have to know this ride exists.
+ * game and the pad says "HOLD to go!"; this is a ride with nothing to press for,
+ * so the prompt would be pointing at nothing. It is hidden with one CSS rule
+ * from this file rather than by adding an option to the framework — the overlay
+ * is shared with games still to be written and none of them should have to know
+ * this ride exists.
  *
- * **Going home has a filling ring.** A skip that happens the instant a thumb
- * rests on the glass is a skip that happens by accident. The ring fills over
- * {@link HOLD_SECONDS} and empties the moment the finger lifts, so leaving is
- * always something you chose.
+ * **The way out is the framework's ✕, and only that.** A hold-anywhere gesture
+ * used to leave as well; the family had it removed (28 July 2026) because the ✕
+ * already does it and a child can actually see a button.
  */
 
 const STYLE_ID = 'lgp-ferris-styles';
-
-/** How long "hold to go home" has to be held. */
-export const HOLD_SECONDS = 1.4;
 
 const STYLES = `
 /* The framework's hold prompt means "go faster" everywhere else in the park.
@@ -76,36 +72,6 @@ const STYLES = `
 .fw-card p { margin: 0.1875rem 0; font-size: 1.0625rem; opacity: 0.85; }
 .fw-card .fw-sub { font-size: var(--lgp-text-min); opacity: 0.7; }
 
-/* The way home. Sits low and stays quiet until a finger is actually down. */
-.fw-home {
-  position: absolute;
-  left: 50%;
-  bottom: calc(1.125rem + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.6875rem;
-  padding: 0.5625rem 1.125rem;
-  border-radius: 999px;
-  background: #fff6ead9;
-  box-shadow: 0 0.3125rem 0 rgba(74, 58, 82, 0.16);
-  font-size: var(--lgp-text-min);
-  font-weight: 700;
-  pointer-events: none;
-  opacity: 0.55;
-  transition: opacity 160ms ease, transform 120ms ease;
-}
-.fw-home[data-holding='true'] { opacity: 1; transform: translateX(-50%) translateY(0.1875rem); }
-.fw-home[data-hidden='true'] { opacity: 0; }
-
-.fw-ring {
-  width: 1.375rem;
-  height: 1.375rem;
-  border-radius: 50%;
-  background: conic-gradient(#ff7fb6 var(--fw-fill, 0turn), #ffe3f1 0);
-  box-shadow: inset 0 0 0 0.1875rem #fff6ea;
-}
-
 @keyframes fw-pop {
   from { transform: scale(0.72); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
@@ -152,8 +118,6 @@ export interface RideHud {
   setCaption(text: string): void;
   /** A short cheerful interjection. Clears itself. */
   shout(text: string, seconds?: number): void;
-  /** 0..1 of the way to going home. Below zero hides the pill entirely. */
-  setHomeHold(progress: number, holding: boolean): void;
   /** The end-of-ride card. */
   showCard(title: string, line: string, hint: string): void;
   /** Draws the look-around stick where the finger is, or hides it with `null`. */
@@ -164,7 +128,7 @@ export interface RideHud {
   dispose(): void;
 }
 
-export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
+export function createRideHud(container: HTMLElement): RideHud {
   ensureStyles();
 
   const root = document.createElement('div');
@@ -181,16 +145,6 @@ export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
   const centre = document.createElement('div');
   centre.className = 'fw-centre';
 
-  const home = document.createElement('div');
-  home.className = 'fw-home';
-  const ring = document.createElement('span');
-  ring.className = 'fw-ring';
-  const homeText = document.createElement('span');
-  // "Hold anywhere" would now also describe dragging to look around — say
-  // "hold still" instead, so the two gestures read as different things.
-  homeText.textContent = touch ? 'Hold still to go home' : 'Hold Space to go home';
-  home.append(ring, homeText);
-
   const stick = document.createElement('div');
   stick.className = 'fw-stick';
   stick.dataset.on = 'false';
@@ -198,7 +152,7 @@ export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
   knob.className = 'fw-stick-knob';
   stick.append(knob);
 
-  root.append(title, centre, home, stick);
+  root.append(title, centre, stick);
   container.append(root);
 
   let shoutElement: HTMLElement | null = null;
@@ -217,12 +171,6 @@ export function createRideHud(container: HTMLElement, touch: boolean): RideHud {
       shoutElement.textContent = text;
       centre.append(shoutElement);
       shoutTimer = seconds;
-    },
-
-    setHomeHold(progress: number, holding: boolean): void {
-      home.dataset.holding = holding ? 'true' : 'false';
-      home.dataset.hidden = progress < 0 ? 'true' : 'false';
-      ring.style.setProperty('--fw-fill', `${Math.max(0, Math.min(1, progress))}turn`);
     },
 
     showCard(cardTitle: string, line: string, hint: string): void {

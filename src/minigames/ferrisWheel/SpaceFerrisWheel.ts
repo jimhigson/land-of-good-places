@@ -22,7 +22,7 @@ import {
 } from './friends';
 import { createSpaceShow, fromAngle, type SpaceShow } from './space';
 import { createSparks, type Sparks } from './sparks';
-import { HOLD_SECONDS, createRideHud, type RideHud } from './hud';
+import { createRideHud, type RideHud } from './hud';
 import { createLookControl, type LookReading } from './look';
 import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
 
@@ -45,10 +45,12 @@ import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
  * - **Something to do with your hands.** Tap the alien or Space RiPika and they
  *   wave back with confetti sparks. That is the entire interaction, it can never
  *   go wrong, and it is the difference between a cut-scene and a ride.
- * - **A way out that cannot happen by accident.** Hold for {@link HOLD_SECONDS}
- *   and the wheel hurries you home, with a filling ring the whole time. The
- *   framework's ✕ is still there for a grown-up in a hurry. Neither writes
- *   anything anywhere, so leaving early costs nothing at all.
+ * - **One obvious way out: the framework's ✕.** There was a hold-anywhere
+ *   gesture here too, and the family asked for it to go (28 July 2026) — the ✕
+ *   does the same thing and a six-year-old can see it. Holding still is the
+ *   least discoverable gesture there is, and two ways to do one thing is worse
+ *   than one you can point at. Leaving writes nothing anywhere, so going early
+ *   costs nothing at all.
  *
  * The camera is bolted inside the gondola (`gondola.ts`) and the world outside
  * is moved past it (`below.ts`, `space.ts`) — nothing here actually travels a
@@ -77,9 +79,6 @@ const CARD_LOCKOUT = 0.9;
 
 /** Seconds after which the card dismisses itself. */
 const CARD_TIMEOUT = 8;
-
-/** How much faster the wheel turns once you have asked to go home. */
-const HURRY_RATE = 4;
 
 // ------------------------------------------------------------------ the show
 
@@ -190,20 +189,13 @@ class SpaceFerrisWheel implements MiniGame {
   /** Ride clock in seconds. Not the frame's elapsed: going home speeds it up. */
   private clock = 0;
   private rate = 1;
-  private height = 0;
-  private holdTime = 0;
   private cardTime = -1;
   private waves = 0;
-  private goingHome = false;
 
   private yaw = 0;
   private pitch = -0.06;
   private yawVelocity = 0;
   private pitchVelocity = 0;
-  /** True whenever the current touch has moved past the look-stick's deadzone
-   *  — while it has, held time does not count towards going home (see
-   *  `look.ts` and {@link updateHold}). */
-  private lookDragging = false;
 
   private readonly cues: Cue[] = [];
 
@@ -256,7 +248,7 @@ class SpaceFerrisWheel implements MiniGame {
     this.sparks = createSparks();
     this.scene.add(this.sparks.root);
 
-    this.hud = createRideHud(context.overlay, context.touch);
+    this.hud = createRideHud(context.overlay);
     this.hud.setCaption('all aboard!');
     this.hud.shout(
       this.gondola.passengerCount > 0 ? 'Everybody in! Up we go!' : 'All aboard! Up we go!',
@@ -295,16 +287,12 @@ class SpaceFerrisWheel implements MiniGame {
 
     this.clock += dt * this.rate;
 
-    // Read the look control once a frame: `updateHold` needs to know whether
-    // the finger is dragging (looking around) rather than resting (going
-    // home), and `aimCamera` needs the same reading to turn the view.
+    // Read the look control once a frame: `aimCamera` turns the view by it and
+    // the HUD draws the stick under the thumb.
     const look = this.look.read();
-    this.lookDragging = look.dragging;
-    this.updateHold(dt, input.hold);
     this.hud?.setStick(look.touch);
 
     const height = rideHeight(this.clock);
-    this.height = height;
 
     this.below?.setHeight(height);
     this.space?.setDepth(clamp01((height - 0.5) / 0.35));
@@ -324,7 +312,7 @@ class SpaceFerrisWheel implements MiniGame {
     this.aimCamera(dt, look);
 
     this.fireCues();
-    this.hud?.setCaption(captionFor(this.clock, this.goingHome));
+    this.hud?.setCaption(captionFor(this.clock));
     this.hud?.update(dt);
 
     if (this.clock >= RIDE_END && this.cardTime < 0) this.showCard();
@@ -335,53 +323,6 @@ class SpaceFerrisWheel implements MiniGame {
         this.finish();
       }
     }
-  }
-
-  /**
-   * Hold to go home.
-   *
-   * Deliberately not instant, and deliberately not a button in the corner: on a
-   * phone the whole screen is the control a small hand can find, and the ring
-   * filling up is the only thing that makes holding it safe.
-   *
-   * **Dragging does not count.** The framework's hold gesture is "press
-   * anywhere", and looking around is also "press anywhere" — so held time
-   * only accumulates while the current touch has *not* moved past the
-   * look-stick's deadzone (`look.ts`). Resting a thumb still leaves early;
-   * sliding it around the sky does not.
-   */
-  private updateHold(dt: number, held: boolean): void {
-    if (this.cardTime >= 0) {
-      this.hud?.setHomeHold(-1, false);
-      return;
-    }
-    if (this.goingHome) {
-      this.hud?.setHomeHold(-1, false);
-      return;
-    }
-
-    const countsTowardsHome = held && !this.lookDragging;
-    this.holdTime = countsTowardsHome ? this.holdTime + dt : Math.max(0, this.holdTime - dt * 2.4);
-    this.hud?.setHomeHold(this.holdTime / HOLD_SECONDS, countsTowardsHome);
-
-    if (this.holdTime >= HOLD_SECONDS) this.goHome();
-  }
-
-  /**
-   * The wheel hurries you back down, rather than cutting to black.
-   *
-   * The clock jumps to *the point on the way down that is the same height you
-   * are at now* and then runs at {@link HURRY_RATE}, so a child who asks to go
-   * home halfway up does not watch the park snap away and come back. Nothing is
-   * saved and nothing is written, so this and riding to the end leave the park
-   * in precisely the same state.
-   */
-  private goHome(): void {
-    if (this.goingHome) return;
-    this.goingHome = true;
-    this.rate = HURRY_RATE;
-    this.clock = Math.max(this.clock, descentTimeFor(this.height));
-    this.hud?.shout('Home we go!', 2);
   }
 
   private updateFriends(dt: number): void {
@@ -504,9 +445,6 @@ class SpaceFerrisWheel implements MiniGame {
       if (cue.fired || this.clock < cue.at) continue;
       cue.fired = true;
       if (cue.unless?.()) continue;
-      // A cue that comes up while the ride is hurrying home has been overtaken
-      // by events — nobody wants to be told about the clouds on the way down.
-      if (this.goingHome) continue;
       this.hud?.shout(cue.say);
     }
   }
@@ -569,7 +507,6 @@ class SpaceFerrisWheel implements MiniGame {
   private showCard(): void {
     this.cardTime = 0;
     this.rate = 0;
-    this.hud?.setHomeHold(-1, false);
     this.hud?.showCard(
       'What a ride!',
       wavesLine(this.waves),
@@ -649,20 +586,6 @@ function rideTurn(clock: number): number {
   return 2;
 }
 
-/**
- * The moment on the way down that is at a given height.
- *
- * The descent is a smoothstep, and a cubic smoothstep has a closed-form
- * inverse: `t = ½ − sin(asin(1 − 2y) / 3)`. Cheaper and exact where a bisection
- * would have been approximate, and it means "take me home" always joins the
- * descent at the height the child is actually looking at.
- */
-function descentTimeFor(height: number): number {
-  const fallen = clamp01(1 - height);
-  const t = 0.5 - Math.sin(Math.asin(clamp(1 - 2 * fallen, -1, 1)) / 3);
-  return SPACE_END + t * (DESCEND_END - SPACE_END);
-}
-
 /** 0 before, 1 during, 0 after — with a soft edge at each end. */
 function window01(clock: number, from: number, to: number): number {
   if (clock < from) return 0;
@@ -670,8 +593,7 @@ function window01(clock: number, from: number, to: number): number {
   return clamp01((clock - from) / 3);
 }
 
-function captionFor(clock: number, goingHome: boolean): string {
-  if (goingHome && clock < DESCEND_END) return 'home we go…';
+function captionFor(clock: number): string {
   if (clock < BOARD_END) return 'all aboard!';
   if (clock < 20) return 'up we go!';
   if (clock < CLIMB_END) return 'through the clouds…';
