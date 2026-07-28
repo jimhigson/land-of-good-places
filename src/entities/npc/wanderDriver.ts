@@ -253,7 +253,29 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // `'intent'` and `'child'` hold the whole intent, so the social tail below
     // does not run for them — they write their own expression. See
     // `ActivityHold`.
-    if (hold === 'intent' || hold === 'child') return;
+    if (hold === 'intent' || hold === 'child') {
+      // Nothing is going to consume what the social half of this method was
+      // saving up, so drop it rather than let it queue (ARCHITECTURE-REVIEW C3).
+      //
+      // `reactToPlayer` still runs before a `'intent'` activity claims the
+      // frame — it has to, because it draws from the seeded stream and skipping
+      // it would shift every later decision this child makes. What it asks for
+      // is what leaked. A hop copied from the player on the platform sat in
+      // `hopRequest` for the whole ride and fired when the child stepped off the
+      // train, a minute after the hop it was copying. And `waveAmount` froze
+      // part-way through its blend while the arm itself snapped down (the body
+      // clears the intent every frame), so the arm jumped back up to where the
+      // blend had stopped when the trip let go.
+      //
+      // Two blocks' assumptions colliding: the social tail assumed it always
+      // ran, the trip assumed it owned everything. The trip does own everything
+      // — so the answer is that a child who gets on a train has finished
+      // waving.
+      this.hopRequest = false;
+      this.waveRemaining = 0;
+      this.waveAmount = 0;
+      return;
+    }
 
     // --- the bits that make them look like children -------------------------
     this.waveAmount = approach(this.waveAmount, this.waveRemaining > 0 ? 1 : 0, dt * 4.5);
