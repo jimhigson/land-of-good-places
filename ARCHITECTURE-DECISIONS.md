@@ -1422,3 +1422,70 @@ blink already bookends it.
 
 Q3 (fate of the stall), Q4 (name) and Q5 (waving at riders) remain open and
 are not blocking — build to the memo's defaults until answered.
+
+---
+
+## Decision 5 — The park is generated, not authored (28 July 2026)
+
+**Date:** 28 July 2026, 02:40 · **Status:** decided by the family, in
+implementation tonight · **Supersedes:** Decision 4 §2's "the attractions do
+not move". The railway rulings of Decision 4 (build up never dig; the solver
+keeps solving; crossings computed at boot; exclusion generated; one
+`RideCamera` by extraction) all stand — this decision moves the layer *under*
+them from authored to generated.
+
+### The family's ruling
+
+1. **As much of the park as possible is procedurally generated, so the layout
+   is not fixed in code.** Invariants — such as "paths lead to every
+   attraction" — are stated explicitly and *satisfied by construction, then
+   verified by machine*.
+2. **One canonical park**: a single `PARK_SEED` committed in code. Everyone
+   gets the same park; a replan is a deliberate seed bump we choose, not a
+   per-save roll. Saves carry a `layoutVersion`; on mismatch a park-space
+   position degrades to the plaza spawn by the save system's existing
+   unknown-place path. (Interior positions are space-relative and survive.)
+3. **Everything moves except the entrance.** The castle and the fountain are
+   placed by the solver like everything else. The entrance stays pinned as
+   the one fixed thing a returning child can rely on.
+
+### The layers, each consuming the previous, all from `PARK_SEED`
+
+- **L1 anchors** — a seeded constraint solver places castle, fountain, rides,
+  shops, stalls, spooky house: minimum separations, band preferences,
+  keep-outs, entrance esplanade kept clear.
+- **L2 railway** — Decision 4's solver unchanged; its per-bearing inward-dip
+  profile is *derived from the generated anchor gaps* rather than authored.
+- **L3 paths** — generated to connect entrance → every attraction → both
+  stations; a bridge is emitted where a path must cross the solved rail, a
+  tunnel hill where the rail passes under a path (Decision 4's constructs,
+  placed by data).
+- **L4 dressing** — scatter, lamps, garlands already derive from their
+  surroundings and inherit the new layout free.
+- **L5 validation** — `check:park`, in `npm run build`.
+
+### The invariants (machine-checked, not claimed)
+
+1. Every attraction's stand point routes from the entrance on the real nav
+   lattice.
+2. No generated route crosses the railway except over a bridge deck.
+3. `poiGraph` is a single connected component containing every POI.
+4. Rail exclusion is continuous; no walkable cell lies on track.
+5. The existing hop-ceiling and sub-step boot asserts still pass.
+6. Every anchor's own keep-outs are respected (no bench in a stairwell —
+   the dressing rules generalised).
+
+*The checker is built first and proved against the current hand-authored
+park; every generator step then lands under its protection. Four of
+tonight's bugs were claims nobody re-derived — a generated park without a
+machine-checked contract would be that disease at park scale.*
+
+### Execution shape (chosen for the observed failure mode)
+
+Subagents die every few minutes tonight; the main session does not. So the
+**main agent owns the serial core** (L1 solver, L2 profile derivation, the
+consumer rewiring) in its own worktree with a commit at every coherent step,
+and subagents take only bankable, independently-restartable pieces (the
+checker, dressing adapters). The first-person train and shared `RideCamera`
+(Decision 4 C-steps) are *not* in tonight's scope — they build on the
+replanned park and want a fresh session.

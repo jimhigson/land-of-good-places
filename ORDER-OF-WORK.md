@@ -124,7 +124,16 @@ conflicts badly.
 
 ---
 
-## Wave 4 — implement the park replan
+## Wave 4 — implement the park replan (IN PROGRESS 28 July, per Decision 5)
+
+**Tonight's scope, set by the family at 02:40: this refactor, plus finishing
+the three in-flight branches, then stop.** Decision 5 supersedes the fixed
+layout: one canonical PARK_SEED, everything moves but the entrance, layers
+L1-L5, invariants machine-checked by `check:park` which is built FIRST.
+Main agent owns the serial core; subagents take bankable pieces only.
+RideCamera / first-person train are explicitly NOT tonight.
+
+## Wave 4 (original plan, now subsumed) — implement the park replan
 
 All of this is **thrown away** if done before 2.1.
 
