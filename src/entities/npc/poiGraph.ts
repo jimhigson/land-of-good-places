@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
+import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
 /**
  * Where the children go, and how they get there.
@@ -21,6 +22,50 @@ import type { CollisionWorld } from '../../world/Collision';
  * The nodes marked `interesting` are the destinations worth stopping at — the
  * fountain, the ball pit lip, the building door, the plots where the rides are
  * coming. The rest are junctions to pass through.
+ *
+ * ## What this is *not* for: the player's tap-to-walk
+ *
+ * This graph answers "which interesting place should a child head for next?".
+ * It is deliberately not the map a finger is routed on — that is
+ * `world/NavGrid.ts`, a half-metre lattice derived from the finished collision
+ * world, and its own file comment gives the three reasons. Keep the two apart:
+ * a waypoint is a *destination*, a lattice cell is a *patch of floor*.
+ *
+ * ## Somewhere a child could stand
+ *
+ * Three things had to be true of a waypoint, and only two of them were checked.
+ *
+ * 1. **A character of NPC width fits there.** {@link findClearSpot}, since the
+ *    beginning: the scenery is scattered from a seed and nobody hand-checks
+ *    forty coordinates against twelve hundred trees.
+ * 2. **The straight line to a neighbour is walkable.** The edge pass below,
+ *    also since the beginning.
+ * 3. **A child can get there from where children are** — and nothing checked
+ *    this at all. It is not implied by the other two: the big building's facade
+ *    out in the garden is a hollow box of four wall segments with *nothing
+ *    registered inside it*, so the resolver happily reports the middle of a
+ *    solid tower as clear, and two waypoints in there happily see each other
+ *    across the empty interior. That is exactly what two of the three old
+ *    `indoors` seeds were — an island of two nodes inside the facade, joined to
+ *    each other and to nothing else, saved from being spawn points only by an
+ *    authored flag that lied about which space they were in.
+ *
+ * So the third test is now made, structurally and without knowing what a facade
+ * is: keep the **largest connected component in each space**, and mark
+ * everything else {@link PoiNode.reachable} `false`. A pocket of waypoints
+ * nobody can walk to is a child standing in a bush however many of them there
+ * are, and counting one node's neighbours can never see a pocket of two.
+ *
+ * ## Spaces
+ *
+ * The park is not one coordinate system: the building's interior is a floor
+ * plate six hundred metres away, and Decision 3 gives every castle floor its
+ * own origin beyond that. A node's space is therefore **derived** from where it
+ * is ({@link spaceAt}), never authored — the one bug this file has actually had
+ * was an authored `indoors: true` on three nodes that were in the garden. Edges
+ * never join two spaces: {@link lineIsClear} would walk six hundred metres of
+ * empty world between them and pronounce it fine. Crossing between spaces is a
+ * *portal*, not a walk, and belongs to the building.
  *
  * Known follow-up: the ring-road coordinates below mirror the `main-loop` route
  * in `paths.ts`, which does not export its control points. Exporting them and
@@ -44,11 +89,17 @@ interface NodeSeed {
   readonly z: number;
   /** Somewhere worth stopping and looking at, rather than a junction. */
   readonly interesting?: boolean;
-  /** Inside the building. Used to keep most of the crowd outdoors. */
-  readonly indoors?: boolean;
 }
 
-const SEEDS: readonly NodeSeed[] = [
+/**
+ * The waypoints, as authored.
+ *
+ * Exported for `scripts/check-waypoints.mts`, which is the build's guard
+ * against the one mistake this table has actually made: a coordinate inside a
+ * solid building. See that file — it fails a build rather than a child's
+ * afternoon.
+ */
+export const SEEDS: readonly NodeSeed[] = [
   // --- the ring road, with midpoints so a straight chord stays on the paving
   { x: 0, z: -21 },
   { x: 7.5, z: -21 },
@@ -88,13 +139,28 @@ const SEEDS: readonly NodeSeed[] = [
   { x: anchor.ballPit.entrance[0], z: anchor.ballPit.entrance[1], interesting: true },
   { x: -8, z: -8.5, interesting: true },
 
-  // --- the big building: up the spur, through the front door, into the hall
+  // --- the big building: up the spur to the front door, and no further.
+  //
+  // There used to be three more here, flagged `indoors`, meant to be the lobby
+  // and the hall. They were nothing of the sort. The interior is six hundred
+  // metres away (`core/constants.ts`'s `INTERIOR_ORIGIN_X`); these three were at
+  // x ≈ −30, which is *inside the facade* — the solid scenery tower out here in
+  // the garden. Two of them (−29, −27) and (−34, −26) sat behind the lobby's
+  // back wall in a part of the model that has no floor and no way in, joined to
+  // each other and to nothing else. The third stood in the 1.8 m lobby, which
+  // exists only so a child who keeps walking during the iris does not end up
+  // inside a solid tower (`Building.registerFacadeCollision`) — an airlock, not
+  // a place to loiter.
+  //
+  // Nothing replaces them. A waypoint is somewhere a child would *choose* to
+  // go, and until Decision 3's S2 gives each castle floor its own space there
+  // are no such places indoors — and no way for a child to reach them if there
+  // were, because crossing the threshold is a six-hundred-metre teleport rather
+  // than a walk. When S2 lands, indoor waypoints go in at the floor's own
+  // origin and `spaceAt` will label them correctly without anyone saying so.
   { x: -19, z: -15 },
   { x: -23, z: -18 },
   { x: anchor.building.entrance[0], z: anchor.building.entrance[1], interesting: true },
-  { x: -29, z: -23, indoors: true },
-  { x: -29, z: -27, interesting: true, indoors: true },
-  { x: -34, z: -26, interesting: true, indoors: true },
 
   // --- the plots where the rides are coming
   { x: 24, z: -11 },
@@ -113,8 +179,35 @@ export interface PoiNode {
   readonly x: number;
   readonly z: number;
   readonly interesting: boolean;
-  readonly indoors: boolean;
+  /**
+   * Which place this is in — **derived from the coordinates**, never authored.
+   *
+   * The one bug this table has had was three nodes that claimed to be indoors
+   * and were in the garden, inside the facade. A field nobody can write cannot
+   * say that.
+   */
+  readonly space: SpaceId;
+  /**
+   * Can a child actually walk here from where children are?
+   *
+   * False for a waypoint stranded off the main body of its own space — see the
+   * file comment. Such a node keeps its index (so every other node's
+   * `neighbours` stays valid) but is never spawned on, never returned by
+   * {@link PoiGraph.nearest}, and named at boot.
+   */
+  readonly reachable: boolean;
   /** Indices of every node reachable in a straight, unobstructed line. */
+  readonly neighbours: number[];
+}
+
+/** Mutable while the graph is being assembled; frozen into `PoiNode` after. */
+interface BuildingNode {
+  readonly index: number;
+  readonly x: number;
+  readonly z: number;
+  readonly interesting: boolean;
+  readonly space: SpaceId;
+  reachable: boolean;
   readonly neighbours: number[];
 }
 
@@ -123,7 +216,7 @@ export class PoiGraph {
 
   constructor(collision: CollisionWorld) {
     const probe = new Vector3();
-    const nodes: PoiNode[] = [];
+    const nodes: BuildingNode[] = [];
 
     for (const seed of SEEDS) {
       const clear = findClearSpot(collision, seed.x, seed.z, probe);
@@ -133,7 +226,9 @@ export class PoiGraph {
         x: clear.x,
         z: clear.z,
         interesting: seed.interesting ?? false,
-        indoors: seed.indoors ?? false,
+        space: spaceAt(clear.x, clear.z),
+        // Decided below, once there are edges to decide it from.
+        reachable: false,
         neighbours: [],
       });
     }
@@ -143,6 +238,10 @@ export class PoiGraph {
         const from = nodes[a];
         const to = nodes[b];
         if (!from || !to) continue;
+        // Two spaces are hundreds of metres apart with nothing in between, so
+        // the clearance walk below would stroll from one to the other and
+        // report a lovely wide path. Getting between places is a portal.
+        if (from.space !== to.space) continue;
         const dx = to.x - from.x;
         const dz = to.z - from.z;
         if (dx * dx + dz * dz > MAX_EDGE * MAX_EDGE) continue;
@@ -152,27 +251,36 @@ export class PoiGraph {
       }
     }
 
-    // A node nobody can reach is a child standing in a bush. Drop them, but
-    // keep the indices stable by leaving the entries in place and never
-    // choosing one as a spawn point (see `spawnNodes`).
+    markReachable(nodes);
     this.nodes = nodes;
+    reportStrandedNodes(nodes);
   }
 
-  /** Nodes a child can actually be dropped onto: connected, and outdoors. */
+  /** Nodes a child can actually be dropped onto: reachable, and out in the park. */
   spawnNodes(): PoiNode[] {
-    return this.nodes.filter((node) => node.neighbours.length > 0 && !node.indoors);
+    return this.nodes.filter((node) => node.reachable && node.space === SPACE_GARDEN);
   }
 
   node(index: number): PoiNode | undefined {
     return this.nodes[index];
   }
 
-  /** Closest connected node to a point — used to place a child at spawn. */
+  /**
+   * Closest walkable node to a point — used to place a child at spawn, and to
+   * put one back on the graph when an activity lets go of them.
+   *
+   * Confined to the asker's own space, and to nodes a child could walk to. Both
+   * matter for the same reason: this is how a child *rejoins* the graph, so
+   * handing back a waypoint they cannot reach strands them there until the leg
+   * timeout, and handing back one in another place would walk them at a wall
+   * six hundred metres away for as long as they were allowed to try.
+   */
   nearest(x: number, z: number): PoiNode | null {
+    const space = spaceAt(x, z);
     let best: PoiNode | null = null;
     let bestDistance = Infinity;
     for (const node of this.nodes) {
-      if (node.neighbours.length === 0) continue;
+      if (!node.reachable || node.space !== space) continue;
       const dx = node.x - x;
       const dz = node.z - z;
       const distance = dx * dx + dz * dz;
@@ -186,6 +294,89 @@ export class PoiGraph {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/**
+ * Marks the largest connected group of waypoints in each space, and only that.
+ *
+ * This is the "somewhere a child could stand" test the file comment describes,
+ * and it is done structurally on purpose: it needs to know nothing about
+ * facades, walls or buildings, so it catches the next pocket as readily as the
+ * one that prompted it. Flood-filled with an explicit stack — forty-odd nodes,
+ * once, at boot, but a recursive walk over a graph read from a table is a stack
+ * overflow waiting for somebody to add enough waypoints.
+ *
+ * "Largest" rather than "connected to a named root" because there is no root to
+ * name: the park's shape is authored and its main body is simply whichever
+ * group most of the waypoints ended up in. A space whose waypoints genuinely
+ * split in two halves would keep the bigger half and report the other, which is
+ * the right way round — the reported half is either a mistake or a place that
+ * needs a path built to it, and both want saying out loud.
+ */
+function markReachable(nodes: readonly BuildingNode[]): void {
+  const componentOf = new Int32Array(nodes.length).fill(-1);
+  /** Size of each component, and which space it belongs to. */
+  const sizes: number[] = [];
+  const spaces: SpaceId[] = [];
+  const stack: number[] = [];
+
+  for (const start of nodes) {
+    if (componentOf[start.index] !== -1) continue;
+    const component = sizes.length;
+    sizes.push(0);
+    spaces.push(start.space);
+
+    componentOf[start.index] = component;
+    stack.push(start.index);
+    while (stack.length > 0) {
+      const index = stack.pop();
+      if (index === undefined) break;
+      sizes[component] = (sizes[component] ?? 0) + 1;
+      const node = nodes[index];
+      if (!node) continue;
+      for (const neighbour of node.neighbours) {
+        if (componentOf[neighbour] !== -1) continue;
+        componentOf[neighbour] = component;
+        stack.push(neighbour);
+      }
+    }
+  }
+
+  /** The winning component in each space: the one with the most waypoints. */
+  const mainOf = new Map<SpaceId, number>();
+  for (let component = 0; component < sizes.length; component += 1) {
+    const space = spaces[component];
+    if (space === undefined) continue;
+    const best = mainOf.get(space);
+    if (best === undefined || (sizes[component] ?? 0) > (sizes[best] ?? 0)) {
+      mainOf.set(space, component);
+    }
+  }
+
+  for (const node of nodes) {
+    node.reachable = componentOf[node.index] === mainOf.get(node.space);
+  }
+}
+
+/**
+ * Says out loud that a waypoint has been dropped, and where it was.
+ *
+ * Dropping it silently is what let three of them sit inside a solid tower for
+ * weeks: the crowd looked fine, because a node nobody can reach is a node
+ * nobody visits. A line in the console names the coordinate to go and look at.
+ * A warning rather than a throw — a child's afternoon must not end because a
+ * waypoint drifted into a bush, and the graph is already safe without it.
+ * `scripts/check-waypoints.mts` is the half of this that fails a build.
+ */
+function reportStrandedNodes(nodes: readonly BuildingNode[]): void {
+  const stranded = nodes.filter((node) => !node.reachable);
+  if (stranded.length === 0) return;
+  console.warn(
+    `poiGraph: ${stranded.length} waypoint(s) nobody can walk to, and dropped — ` +
+      stranded.map((node) => `(${node.x.toFixed(1)}, ${node.z.toFixed(1)})`).join(' ') +
+      '. A waypoint stranded off the main path network is usually one that has ' +
+      'drifted inside something solid.',
+  );
+}
 
 /** Rings searched around a blocked waypoint before giving up on it. */
 const NUDGES: readonly (readonly [number, number])[] = [
