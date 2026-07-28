@@ -2906,15 +2906,34 @@ kbd {
   left: 0;
   top: 0;
   z-index: 5;
+  /* A COLUMN, not a row: the selected thing's sign card (`.sign-card`, see
+     `ui/SignCard.ts`) is a sibling of the chip row inside this same block, so
+     the browser lays the two out together and one transform moves both. That
+     is what makes "the card never overlaps the chips and clamps with them"
+     true by construction rather than by two sets of arithmetic agreeing. */
   display: flex;
-  gap: 0.375rem;
-  /* Two chips over a small thing would otherwise reach past its edges. */
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3125rem;
   pointer-events: none;
   /* Positioned by a transform written every frame, so the transition is on
      opacity alone — a chip that eased into place would lag behind its item. */
   transition: opacity 140ms ease;
   will-change: transform;
+}
+
+/* No room above the item for the card, so it goes underneath the chips rather
+   than off the top of the world. `ui/ActionChips.ts` drops the whole block by
+   the card's height at the same moment, so the chip row does not move. */
+.action-chips[data-card='below'] {
+  flex-direction: column-reverse;
+}
+
+.action-chip-row {
+  display: flex;
+  gap: 0.375rem;
+  /* Two chips over a small thing would otherwise reach past its edges. */
+  align-items: flex-end;
 }
 
 .action-chips[data-show='false'] {
@@ -2970,6 +2989,64 @@ kbd {
   .action-chip {
     animation: none;
   }
+}
+
+/* ------------------------------------------------------------ the sign card */
+
+/* What the thing is called, over the thing — the family's ruling of 28 July
+   2026: *"3D signs are hard to read. Remove them from the world entirely;
+   instead, when an item is selected, its sign appears in 2D screen-space above
+   the action chips."* So there are no painted wooden boards in the park any
+   more, and this is where their words went.
+
+   It lives inside `.action-chips` (see above) and is positioned by that block,
+   never by itself. `--sign-accent` is the colour the board used to be painted
+   with, written by `ui/SignCard.ts` from the zone's own accent, so the mint
+   sign is still the mint one. */
+.sign-card {
+  --sign-accent: var(--lgp-pink);
+  /* Narrow on purpose. The BREVITY RULE keeps a title to ~24 characters and a
+     note to ~50, so this is wide enough for both and still clearly a label on
+     something rather than a panel in front of it. */
+  max-width: min(19rem, 74vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.0625rem;
+  padding: 0.375rem 0.875rem 0.4375rem;
+  text-align: center;
+  color: var(--lgp-ink);
+  /* The chips' own treatment, in the sign's colour: white, washed with the
+     accent from below, ringed in it. One house style, two elements. */
+  background: linear-gradient(180deg, var(--lgp-cream) 0%, var(--sign-accent) 260%);
+  border: 0.1875rem solid var(--sign-accent);
+  border-radius: 1.125rem;
+  box-shadow: var(--lgp-shadow);
+}
+
+.sign-card[hidden] {
+  display: none;
+}
+
+.sign-card-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--lgp-text-md);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.sign-card-note {
+  margin: 0;
+  font-size: var(--lgp-text-min);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.sign-card-note[hidden] {
+  display: none;
 }
 
 /* ---- character creation ------------------------------------------------
