@@ -34,8 +34,16 @@ to say why the hash moved. Recorded below at each step.
 | --- | --- | --- |
 | baseline (55b9b4f) | `26a241cc` | — |
 | Part 1 (glass, art only) | `26a241cc` | unchanged, as expected — no camera maths touched |
-| Part 2 (pitch limits) | `d1a4bbf0` | **intentional**: `PITCH_MIN` −0.33 → −1.396, `PITCH_MAX` 0.64 → 1.222 |
-| Part 3 (sensor look) | `d1a4bbf0` | unchanged — sensor mode is a separate path, no sensor in Node |
+| Part 2 (pitch limits) | `0d724f0d` | **intentional**: `PITCH_MIN` −0.33 → −1.396, `PITCH_MAX` 0.64 → 1.222 |
+| Part 3 (sensor look) | `0d724f0d` | unchanged — sensor mode is a separate path, no sensor in Node |
+
+Part 2 also tripped the gate's **coverage** floor, which is the gate doing its
+job: the script keeps its own copy of the two clamps precisely so that widening
+them shows up as `pitch-top=0 pitch-bottom=0` and a failed build, rather than as
+a hash that quietly moves. Re-copied the two constants into
+`scripts/trace-ride-camera.mts` as its own comment instructs. The sweep's key
+holds did **not** need lengthening — pitch is persistent state, so three seconds
+of `ArrowUp` still parks it against the new clamp and it stays there.
 
 Part 2's move is the whole point of Part 2 and is the only deliberate
 behaviour change in this PR. Part 3 is built so the trace stays meaningful:
