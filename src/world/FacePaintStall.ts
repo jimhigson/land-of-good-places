@@ -34,7 +34,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import { gameStore, type FacePaintId } from '../state';
 import { playOpenChime, playSurpriseChime } from '../ui/chime';
-import { FacePaintPanel } from '../ui/FacePaintPanel';
+import { FacePaintPanel, type FacePaintLook } from '../ui/FacePaintPanel';
 import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderDriver';
 
 /**
@@ -312,7 +312,7 @@ export class FacePaintStall implements GameSystem {
 
   private openPanel(): void {
     const current = gameStore.get().player.facePaint;
-    this.panel?.openWith(isFacePaintDesign(current) ? current : null);
+    this.panel?.openWith(isFacePaintDesign(current) ? current : null, playerLook());
     playOpenChime();
   }
 
@@ -683,6 +683,34 @@ export class FacePaintStall implements GameSystem {
 
 function isFacePaintDesign(value: FacePaintId): value is FacePaintDesign {
   return value !== null && (FACE_PAINT_DESIGNS as readonly string[]).includes(value);
+}
+
+/**
+ * How the player looks right now, for the picker's preview to wear.
+ *
+ * Read fresh on every open rather than captured once: she may have bought a
+ * hat since her last visit, and the preview is only worth having if the face
+ * in it is recognisably hers.
+ *
+ * The hat is resolved through `wornHatUid` exactly as `entities/WornHat.ts`
+ * does — a uid names a *purchase*, and the catalogue id it carries is what
+ * names a model. No pet: the camera rests on the face here, where a pet stood
+ * at her feet is never in shot, so building one every time a design is hovered
+ * would be work nobody sees (`shopItem('')` is null, which the preview reads
+ * as "no pet").
+ */
+function playerLook(): FacePaintLook {
+  const state = gameStore.get();
+  const worn = state.inventory.find((item) => item.uid === state.wornHatUid);
+  return {
+    skin: state.player.skinColour,
+    hair: state.player.hairColour,
+    hairStyle: state.player.hairStyle,
+    outfit: state.player.outfitColour,
+    eye: state.player.eyeColour,
+    hatId: worn?.id ?? '',
+    petId: '',
+  };
 }
 
 /**
