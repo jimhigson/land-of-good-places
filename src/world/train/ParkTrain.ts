@@ -63,8 +63,16 @@ import { setTrainService, type TrainPassenger, type TrainService, type TrainStop
  *
  * The children are carried the other way round, because a driver has no
  * business owning a position: `ParkTrain` writes a rider's x and z before
- * `NpcSystem` runs, and the carriage-as-moving-platform supplies the y. Their
- * own movement code then runs as usual and finds it has nothing to do.
+ * `NpcSystem` runs, and the carriage-as-moving-platform supplies the y.
+ *
+ * Their own movement code then stands down for the frame — `setCarriedPose`,
+ * the crowd's counterpart to `Player.setRidePose`. It used to *run* instead,
+ * on the theory that a passenger asks for nothing and so would go nowhere.
+ * That theory was wrong twice over: a seat sits on the track, inside the rail
+ * fence, so collision resolution pushed every rider off the train; and the
+ * resolved-position velocity rewrite then read both that push and this class's
+ * own write as speed the child had asked for, which ran away. See
+ * `NpcCharacter.setCarriedPose` for the numbers.
  */
 
 /** Metres per second on the open stretches. About a brisk walking pace. */
@@ -377,9 +385,12 @@ export class ParkTrain implements GameSystem, TrainService {
       // are posed by their own walk cycle, and a standing child holding on
       // reads better than a walking one sitting down.
       this.seatPosition(seat, 0, character.position.y);
-      character.position.x = this.seatWorld.x;
-      character.position.z = this.seatWorld.z;
-      character.syncTransform();
+      // Hands the child to the ride for this frame — see
+      // `NpcCharacter.setCarriedPose`. Writing x/z here and letting their own
+      // `move()` run anyway is what made riders vibrate: the seat is on the
+      // track, so `collision.resolve` shoved them off the train every frame,
+      // and the resolved-position velocity rewrite banked the shove as speed.
+      character.setCarriedPose(this.seatWorld.x, this.seatWorld.z);
     }
   }
 
