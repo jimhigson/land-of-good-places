@@ -983,6 +983,15 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
+    **Two phone bugs (28 July 2026, from a photo of the real device):**
+    (a) **The name is shown twice** — as a caption under the preview *and* in
+    the name input right below it. **Keep the input, drop the caption.**
+    (b) **The scrolling controls pass behind and around the preview square.**
+    The preview is sticky, so as the controls scroll they slide underneath it
+    and reappear around its edges, which looks broken. The scrolling pane
+    should sit **adjacent to** the preview, not beneath it — the preview needs
+    its own column or band that the controls never travel through.
+
     **Scrolling is fine; overlap is not (27 July 2026 — the settled rule).**
     The family, seeing controls overlap each other: *"It's ok to scroll, just
     don't scroll while there's screen space available."* So: **use the space
