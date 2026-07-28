@@ -129,23 +129,28 @@ const PARADE_KINDS: ReadonlySet<InventoryKind> = new Set<InventoryKind>(['toy', 
  * Which bit of the player a thing goes on, or `null` for something that is not
  * worn at all.
  *
- * There are exactly three slots, because there are exactly three `worn*Uid`
- * fields and three systems that draw them: `entities/WornHat.ts` on the head,
- * `entities/WornFlower.ts` in the hair and `entities/WornJetpack.ts` on the
- * back. Deriving the slot from {@link InventoryKind} here — rather than in the
- * drawer that happens to be the first caller — is what stops "can I wear this?"
- * from being answered differently by the backpack, the Cute-o-dex and whatever
- * asks next.
+ * There are exactly four slots, because there are exactly four `worn*Uid`
+ * fields and four systems that draw them: `entities/WornHat.ts` on the head,
+ * `entities/WornFlower.ts` in the hair, `entities/WornJetpack.ts` on the back
+ * and `entities/WornKeychain.ts` on the backpack. Deriving the slot from
+ * {@link InventoryKind} here — rather than in the drawer that happens to be the
+ * first caller — is what stops "can I wear this?" from being answered
+ * differently by the backpack, the Cute-o-dex and whatever asks next.
  *
  * A hat is also `carryable`, so both a wear and a carry are defensible answers
  * to tapping one. The backpack picks wearing: a child who bought a crown wants
  * it on their head, and a hat still lands in the hands on purchase
- * ({@link GameStore.buy}) so nothing became unreachable.
+ * ({@link GameStore.buy}) so nothing became unreachable. A keychain is neither
+ * carryable nor paradeable (see `HANDOFF-keychain-shop.md`), so wearing is the
+ * only thing tapping one in the backpack can mean.
  */
-export function wearableSlot(kind: InventoryKind): 'hat' | 'flower' | 'jetpack' | null {
+export function wearableSlot(
+  kind: InventoryKind,
+): 'hat' | 'flower' | 'jetpack' | 'keychain' | null {
   if (kind === 'hat') return 'hat';
   if (kind === 'flower') return 'flower';
   if (kind === 'jetpack') return 'jetpack';
+  if (kind === 'keychain') return 'keychain';
   return null;
 }
 
@@ -604,6 +609,29 @@ class GameStore {
     this.notify();
   }
 
+  /**
+   * Puts an owned keychain on the player's backpack, or takes it off with
+   * `null`. {@link setWornJetpack}'s twin, minus the carry hand-off: a keychain
+   * is never carryable (`HANDOFF-keychain-shop.md`), so there is no hand for it
+   * to leave.
+   */
+  setWornKeychain(uid: string | null): void {
+    if (
+      uid !== null &&
+      !this.state.inventory.some((item) => item.uid === uid && item.kind === 'keychain')
+    ) {
+      return;
+    }
+    if (this.state.wornKeychainUid === uid) return;
+    const previous = this.state.inventory.find((item) => item.uid === this.state.wornKeychainUid);
+    this.state.wornKeychainUid = uid;
+    const next = this.state.inventory.find((item) => item.uid === uid);
+
+    if (previous) this.refreshPlacement(previous.id);
+    if (next) this.refreshPlacement(next.id);
+    this.notify();
+  }
+
   /** Puts one owned thing in the player's hands, or empties them with `null`. */
   setCarried(uid: string | null): void {
     if (uid !== null && !this.state.inventory.some((item) => item.uid === uid)) return;
@@ -775,6 +803,7 @@ class GameStore {
       wornFlowerUid: s.wornFlowerUid,
       wornHatUid: s.wornHatUid,
       wornJetpackUid: s.wornJetpackUid,
+      wornKeychainUid: s.wornKeychainUid,
     };
   }
 
@@ -840,6 +869,7 @@ class GameStore {
     if (g.wornFlowerUid !== undefined) next.wornFlowerUid = g.wornFlowerUid;
     if (g.wornHatUid !== undefined) next.wornHatUid = g.wornHatUid;
     if (g.wornJetpackUid !== undefined) next.wornJetpackUid = g.wornJetpackUid;
+    if (g.wornKeychainUid !== undefined) next.wornKeychainUid = g.wornKeychainUid;
 
     // Derived rather than saved, so it can never contradict the mode.
     next.moneyIsFinite = next.mode === 'mayhem';

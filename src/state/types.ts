@@ -126,6 +126,7 @@ export const CUTE_CATEGORIES = [
   'egg',
   'flower',
   'secret',
+  'keychain',
 ] as const;
 export type CuteCategory = (typeof CUTE_CATEGORIES)[number];
 
@@ -176,6 +177,13 @@ export const INVENTORY_KINDS = [
    * a head and a back are two slots that must both be usable at once.
    */
   'jetpack',
+  /**
+   * Hangs off the backpack. Its own kind rather than a `hat` on a different
+   * anchor, for the same reason `jetpack` is: {@link wearableSlot} decides
+   * which `worn*Uid` a thing lands in, and a head, a back and a bag are three
+   * slots that must all be usable at once.
+   */
+  'keychain',
 ] as const;
 export type InventoryKind = (typeof INVENTORY_KINDS)[number];
 
@@ -337,6 +345,13 @@ export interface GameState {
    * pack on, no button (`ui/ScreenControls.ts`, `entities/Player.ts`).
    */
   wornJetpackUid: string | null;
+  /**
+   * `uid` of the keychain worn on the backpack, or null for none — see
+   * `entities/WornKeychain.ts`. Set by the keychain stall's picker
+   * (`gameStore.setWornKeychain`), and thereafter by tapping a keychain in
+   * the backpack drawer, exactly like `wornHatUid`.
+   */
+  wornKeychainUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */
