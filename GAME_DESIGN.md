@@ -390,19 +390,19 @@ from the doorway — and the interact press is now gated on the room rectangle
 rather than a radius. The camera is orthographic and 90 units out at 38°, so
 it is always far above the lid. NPCs queueing outside is still to do.*
 
-### The coaster is a RACE (28 July 2026 — in progress)
+### TWO coasters (28 July 2026 — the family's ruling, in progress)
 
-The rail racer kept its track and lost its race in the move into the park;
-both belong. Decision 4's **two-track** coaster is the answer:
-
-- a **second track** beside the first, same solved loop, a cart-width apart;
-- a **rival park child** in the other cart — waves at the start, cheers at
-  the end, cheers YOU if she wins;
-- **hold on to go fast** — the old racer's one button, kept: hold to speed
-  up within the gentle physics, release to coast;
-- countdown at the station, **first home gets confetti**, losing costs
-  nothing and going again is instant. **Winning the rail race is a
-  Cute-o-dex deed.**
+1. **The Sky Cruiser** — the existing solver-grown coaster stays a
+   **passive, serene ride, first person**. It gets its own entry stall.
+2. **The Rail Race** — a **second, separate solver-grown coaster** carrying
+   the old racer's soul: **hold to accelerate, release to DUCK under
+   barriers** strung over the track. Played **third person, camera just
+   behind the player's head, so you can see her ducking.** A rival park
+   child races the parallel track; not holding while passing under a
+   barrier is enough to clear it (the old rule); a bonk is a cosy wobble
+   and lost speed, never harm. First home gets confetti; losing costs
+   nothing; going again is instant; **winning is a Cute-o-dex deed.** The
+   old Rail Racer stall is its entry — the name finally tells the truth.
 
 ### The space ferris wheel — leaving it (28 July 2026 — queued)
 
