@@ -71,7 +71,7 @@ design is applied and persisted, do not change.
 - [x] CSS
 - [x] whatsnew (id 15, "Try On Face Paint")
 - [x] `npm run build` green (exit 0, not piped)
-- [ ] PR raised
+- [x] PR raised — #104
 
 ## If you are taking over
 
