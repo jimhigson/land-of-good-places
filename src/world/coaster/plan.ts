@@ -1,0 +1,111 @@
+import { Vector3 } from 'three';
+import { CoasterRoute, type CoasterRouteOptions } from './route';
+import { placedEntry } from '../parkLayout';
+import { clearOfPlots } from '../train/plan';
+
+/**
+ * The coaster plan — the two rollercoasters as *data*, solved at module load
+ * from the park layout alone, mirroring `train/plan.ts` exactly (see that
+ * file's header for why this inversion matters).
+ *
+ * `CoasterRoute` already depended on nothing but the layout, so this is a
+ * move rather than a redesign: `Coaster` used to call `new CoasterRoute(...)`
+ * itself, in its own constructor, which meant nothing upstream of the ride —
+ * least of all the path graph — could know where a coaster's station (and so
+ * its exit) actually was. Now both loops are solved here, before any scene
+ * object exists, and `paths.ts` gives each one's exit a node in the same walk
+ * network a station gets.
+ *
+ * The race avoids the cruiser (`CoasterRouteOptions.avoid`), so the cruiser
+ * must be solved first — same order `World.ts` used to build them in.
+ */
+
+export interface PlannedCoaster {
+  readonly name: string;
+  readonly route: CoasterRoute;
+  readonly stationStallId: string;
+  /** Where a rider is put down after the ride (GAME_DESIGN.md's EXIT rule). */
+  readonly exitX: number;
+  readonly exitZ: number;
+}
+
+interface CoasterSeed {
+  readonly name: string;
+  readonly routeSalt: number;
+  readonly stationStallId: string;
+  readonly bandMin?: number;
+  readonly bandMax?: number;
+  readonly nominal?: number;
+}
+
+const CRUISER_SEED: CoasterSeed = {
+  name: 'skyCruiser',
+  routeSalt: 0xc0a57e,
+  stationStallId: 'stall.skyCruiser',
+};
+
+const RACE_SEED: CoasterSeed = {
+  name: 'railRace',
+  routeSalt: 0x9ace12,
+  stationStallId: 'stall.railRacer',
+  nominal: 24,
+  bandMax: 38,
+};
+
+/**
+ * The exit point: beside the station, on the far side from the booth, clear
+ * of every plot blocker — the `clearOfPlots`/slide pattern `train/plan.ts`
+ * uses for a station's platform, adapted from a distance-along-the-loop
+ * search to a 2D one, because an exit is a point beside the track rather than
+ * a point on it.
+ *
+ * Starts a few metres past the station's platform deck (it is 6 m long) so
+ * the exit never lands *on* the platform, then slides further along the same
+ * line — straight out from the booth, through the station — until the ground
+ * there is genuinely clear.
+ */
+function planExit(route: CoasterRoute, stationStallId: string): { exitX: number; exitZ: number } {
+  const stall = placedEntry(stationStallId);
+  const station = route.pointAt(route.stationDistance, new Vector3());
+  const dx = station.x - stall.x;
+  const dz = station.z - stall.z;
+  const length = Math.hypot(dx, dz) || 1;
+  const nx = dx / length;
+  const nz = dz / length;
+  for (let distance = 5; distance <= 24; distance += 1) {
+    const x = station.x + nx * distance;
+    const z = station.z + nz * distance;
+    if (clearOfPlots(x, z, 1.4)) return { exitX: x, exitZ: z };
+  }
+  // Never found clear ground out to 24 m — hand back the nearest try rather
+  // than nothing; `dismount.ts`'s runtime safety net is the last resort for
+  // exactly this case, and the procgen invariant is the loud way to hear
+  // about it before a child does.
+  return { exitX: station.x + nx * 5, exitZ: station.z + nz * 5 };
+}
+
+function planCoaster(seed: CoasterSeed, avoid: CoasterRoute | null): PlannedCoaster {
+  const options: CoasterRouteOptions = {
+    salt: seed.routeSalt,
+    stationStallId: seed.stationStallId,
+    avoid,
+    ...(seed.bandMin !== undefined ? { bandMin: seed.bandMin } : {}),
+    ...(seed.bandMax !== undefined ? { bandMax: seed.bandMax } : {}),
+    ...(seed.nominal !== undefined ? { nominal: seed.nominal } : {}),
+  };
+  const route = new CoasterRoute(options);
+  const { exitX, exitZ } = planExit(route, seed.stationStallId);
+  return { name: seed.name, route, stationStallId: seed.stationStallId, exitX, exitZ };
+}
+
+/** The two plans. Import this; never re-solve — same rule as `TRAIN_PLAN`. */
+export const COASTER_PLANS: {
+  readonly cruiser: PlannedCoaster;
+  readonly race: PlannedCoaster;
+} = (() => {
+  // Solved cruiser first: the race's solve steers clear of it (loop-over-loop
+  // avoidance in `CoasterRoute`), so the cruiser must already exist.
+  const cruiser = planCoaster(CRUISER_SEED, null);
+  const race = planCoaster(RACE_SEED, cruiser.route);
+  return { cruiser, race };
+})();

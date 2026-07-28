@@ -13,6 +13,7 @@ import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { Coaster } from './coaster/Coaster';
+import { COASTER_PLANS } from './coaster/plan';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -117,26 +118,21 @@ export class World implements GameSystem {
 
     // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
     // serene first-person ride, and the Rail Race, third person with
-    // barriers to duck. Grown after the train (rail-over-rail assert), the
-    // race grown after the cruiser (loop-over-loop avoidance and assert).
+    // barriers to duck. Both routes are solved already — `coaster/plan.ts`
+    // grows the cruiser first and the race avoiding it (loop-over-loop),
+    // at module load — so this just *builds* them, same as the train's
+    // stations. Still built after the train, for the rail-over-rail assert.
     this.coaster = new Coaster(this.collision, this.train, {
-      name: 'skyCruiser',
-      routeSalt: 0xc0a57e,
-      stationStallId: 'stall.skyCruiser',
+      plan: COASTER_PLANS.cruiser,
       camera: 'firstPerson',
     });
     this.raceCoaster = new Coaster(this.collision, this.train, {
-      name: 'railRace',
-      routeSalt: 0x9ace12,
-      stationStallId: 'stall.railRacer',
+      plan: COASTER_PLANS.race,
       camera: 'chase',
       // The thing that makes it a race rather than a second scenic ride:
       // barriers, a rival, a countdown and a finish. Without it `buildRace`
       // never runs and the Rail Race is a Sky Cruiser seen from behind.
       race: true,
-      avoid: this.coaster,
-      nominal: 24,
-      bandMax: 38,
     });
 
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights

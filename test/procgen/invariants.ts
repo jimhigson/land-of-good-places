@@ -194,6 +194,26 @@ const lampsTouchNothing: Invariant = (facts) => {
   expect(fouls, fouls.join('\n')).toHaveLength(0);
 };
 
+/**
+ * Every ride's exit (GAME_DESIGN.md's EXIT rule, 28 July 2026) is clear
+ * ground a rider of the player's own radius can actually stand on, and the
+ * real nav lattice can actually route a child there from the entrance —
+ * proving `paths.ts`'s exit nodes are not just present in the graph but
+ * genuinely usable, the same "measure the built park" standard every other
+ * invariant here holds to.
+ */
+const rideExitsAreUsable: Invariant = (facts) => {
+  const problems: string[] = [];
+  for (const exit of facts.exits) {
+    const at = `${exit.id} at (${exit.x.toFixed(1)}, ${exit.z.toFixed(1)})`;
+    if (!facts.isStandable(exit.x, exit.z)) problems.push(`${at} is not clear ground`);
+    if (!facts.reachableFromEntrance(exit.x, exit.z)) {
+      problems.push(`${at} is not reachable from the entrance`);
+    }
+  }
+  expect(problems, problems.join('\n')).toHaveLength(0);
+};
+
 /** Every path is lit along its whole length. */
 const everyPathIsLit: Invariant = (facts) => {
   const dark: string[] = [];
@@ -224,6 +244,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
+  ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
 ];
 
 /**
@@ -248,6 +269,7 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       expect(facts.trees.length, 'the park planted no trees').toBeGreaterThan(0);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
+      expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
     });
 
     for (const [name, check] of INVARIANTS) {

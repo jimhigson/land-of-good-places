@@ -29,6 +29,8 @@ import {
 } from './trainModel';
 import { playChuff, playStationBell, playTrainWhistle, setTrainAudioCarry } from './trainSounds';
 import { setTrainService, type TrainPassenger, type TrainService, type TrainStop } from './service';
+import { resolveDismount } from '../dismount';
+import { PLAYER_RADIUS } from '../../core/constants';
 
 /**
  * The park train.
@@ -168,6 +170,8 @@ export class ParkTrain implements GameSystem, TrainService {
   private readonly carOffsets: number[] = [];
 
   private readonly stopOffset: number;
+  /** Kept for {@link alight}'s dismount safety net — see `world/dismount.ts`. */
+  private readonly collision: CollisionWorld;
   private player: Player | null = null;
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
@@ -175,6 +179,7 @@ export class ParkTrain implements GameSystem, TrainService {
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'park-train';
+    this.collision = collision;
 
     this.route = TRAIN_PLAN.route;
     this.track = buildTrack(this.route);
@@ -610,12 +615,13 @@ export class ParkTrain implements GameSystem, TrainService {
 
     const station = this.stoppedStop === null ? null : this.stations[this.stoppedStop];
     if (station) {
-      player.setRidePose(
-        station.standX,
-        station.surfaceY,
-        station.standZ,
-        Math.atan2(-station.standX, -station.standZ),
-      );
+      // The platform stand is already a genuine exit — `train/plan.ts` solves
+      // it clear of every plot before the platform is ever built. The
+      // dismount safety net (`world/dismount.ts`) still runs on top of it:
+      // the universal rule is "every dismount goes through here", not
+      // "every dismount that is currently known to need it".
+      const { x, z } = resolveDismount(this.collision, station.standX, station.standZ, PLAYER_RADIUS);
+      player.setRidePose(x, station.surfaceY, z, Math.atan2(-station.standX, -station.standZ));
     }
     player.endRide();
     this.onRideChange?.(false);

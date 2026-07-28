@@ -65,6 +65,13 @@ export interface RouteFact {
   readonly points: readonly (readonly [number, number])[];
 }
 
+/** A ride's dismount point (GAME_DESIGN.md's EXIT rule) — a node in `PATH_GRAPH`. */
+export interface ExitFact {
+  readonly id: string;
+  readonly x: number;
+  readonly z: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -74,6 +81,7 @@ export interface ParkFacts {
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
   readonly routes: readonly RouteFact[];
+  readonly exits: readonly ExitFact[];
   /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
@@ -85,6 +93,12 @@ export interface ParkFacts {
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
+  /**
+   * Can the real nav lattice actually route a child here from where she
+   * starts? The same question `scripts/check-park.mts` asks of every
+   * attraction, asked here of every ride's exit.
+   */
+  readonly reachableFromEntrance: (x: number, z: number) => boolean;
   readonly buildMs: number;
 }
 
@@ -120,13 +134,19 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     );
   }
 
-  const { world, buildMs } = buildHeadlessPark();
+  const { world, buildMs, sample } = buildHeadlessPark();
 
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
-  const { ROUTES } = await import('../../src/world/paths.ts');
+  const { ROUTES, PATH_GRAPH } = await import('../../src/world/paths.ts');
   const { STALL_STANDS } = await import('../../src/minigames/stallPlacement.ts');
   const { CatmullRomCurve3 } = await import('three');
+  const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
+  const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
+  const { JUMP_APEX_HEIGHT } = await import('../../src/entities/Player.ts');
+  const { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } = await import(
+    '../../src/world/entrance/layout.ts'
+  );
 
   const walls: WallFact[] = world.scenery.wallRuns.map((run) => ({
     from: run.from,
@@ -204,6 +224,36 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
   };
 
+  // Every ride's exit, straight off `PATH_GRAPH` — the same nodes `paths.ts`
+  // gives a station or a stall's doormat, read back off the built graph
+  // rather than off `coaster/plan.ts`/`ferrisWheel/exit.ts` directly, so this
+  // measures what the graph actually contains rather than restating the plan
+  // that was meant to produce it.
+  const exits: ExitFact[] = PATH_GRAPH.nodes
+    .filter((node) => node.kind === 'exit')
+    .map((node) => ({ id: node.id, x: node.x, z: node.z }));
+
+  // The real nav lattice, built exactly as `scripts/check-park.mts` builds
+  // one and as `Game` itself does — the walker's own radius and jump apex —
+  // so "reachable" here means what it means in play.
+  const navGrid = new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+  const routeBuffer = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
+  const reachableFromEntrance = (x: number, z: number): boolean => {
+    const count = navGrid.findRoute(
+      ENTRANCE_PLAYER_X,
+      ENTRANCE_PLAYER_Z,
+      x,
+      z,
+      sample,
+      0,
+      routeBuffer,
+    );
+    if (count === 0) return false;
+    const endX = routeBuffer[(count - 1) * 2] ?? Infinity;
+    const endZ = routeBuffer[(count - 1) * 2 + 1] ?? Infinity;
+    return Math.hypot(endX - x, endZ - z) < 1.5;
+  };
+
   return {
     seed,
     world,
@@ -212,6 +262,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
+    exits,
+    reachableFromEntrance,
     routes,
     nearPairs,
     distanceToRail,

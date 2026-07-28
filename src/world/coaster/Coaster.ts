@@ -11,6 +11,7 @@ import {
   Vector3,
 } from 'three';
 import { CoasterRoute, checkCoasterClearances, STATION_HEIGHT } from './route';
+import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
@@ -19,10 +20,11 @@ import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../paths';
 import { PARK_LAYOUT } from '../parkLayout';
 import type { CollisionWorld } from '../Collision';
+import { resolveDismount } from '../dismount';
+import { PLAYER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { ParkTrain } from '../train';
-import { placedEntry } from '../parkLayout';
 import { buildBarriers } from './barriers';
 import { createConfetti, type Confetti } from '../../minigames/railRacer/confetti';
 import { createKid, type KidHandle } from '../../art/models/kid';
@@ -100,9 +102,12 @@ export type RaceMoment =
   | { readonly kind: 'end' };
 
 export interface CoasterOptions {
-  readonly name: string;
-  readonly routeSalt: number;
-  readonly stationStallId: string;
+  /**
+   * The solved plan (`coaster/plan.ts`) — route, station stall and exit
+   * point, all decided before any scene object exists. `Coaster` builds what
+   * was planned; it no longer solves its own route.
+   */
+  readonly plan: PlannedCoaster;
   /**
    * 'firstPerson': the eye in her head, model hidden (the Sky Cruiser).
    * 'chase': the camera just behind and above her head, model visible —
@@ -111,10 +116,6 @@ export interface CoasterOptions {
   readonly camera: 'firstPerson' | 'chase';
   /** The Rail Race: hold to accelerate, release to duck under barriers. */
   readonly race?: boolean;
-  readonly avoid?: Coaster | null;
-  readonly bandMin?: number;
-  readonly bandMax?: number;
-  readonly nominal?: number;
 }
 
 export class Coaster implements GameSystem {
@@ -144,6 +145,8 @@ export class Coaster implements GameSystem {
   private readonly cartMount: Group;
   /** The seat, turned to face the camera's convention. See the constructor. */
   private readonly eyeMount: Group;
+  /** Kept for {@link arrive}'s dismount safety net — see `world/dismount.ts`. */
+  private readonly collision: CollisionWorld;
   private player: Player | null = null;
   private riding = false;
   private distance: number;
@@ -192,17 +195,13 @@ export class Coaster implements GameSystem {
 
   constructor(collision: CollisionWorld, train: ParkTrain, options: CoasterOptions) {
     this.options = options;
-    this.name = options.name;
+    this.collision = collision;
+    this.name = options.plan.name;
     this.playerStaysVisible = options.camera === 'chase';
-    this.group.name = options.name;
-    this.route = new CoasterRoute({
-      salt: options.routeSalt,
-      stationStallId: options.stationStallId,
-      avoid: options.avoid?.route ?? null,
-      ...(options.bandMin !== undefined ? { bandMin: options.bandMin } : {}),
-      ...(options.bandMax !== undefined ? { bandMax: options.bandMax } : {}),
-      ...(options.nominal !== undefined ? { nominal: options.nominal } : {}),
-    });
+    this.group.name = options.plan.name;
+    // Solved already, at module load (`coaster/plan.ts`) — built here, not
+    // re-solved. Mirrors `ParkTrain` taking `TRAIN_PLAN.route` as given.
+    this.route = options.plan.route;
     this.distance = this.route.stationDistance;
 
     // Boot assert, in the claim-versus-fact tradition: report loudly and
@@ -212,7 +211,7 @@ export class Coaster implements GameSystem {
       const p = train.route.pointAt(d, new Vector3());
       return { y: p.y, distance: Math.hypot(p.x - x, p.z - z) };
     });
-    for (const complaint of complaints) console.warn(`${options.name}: ${complaint}`);
+    for (const complaint of complaints) console.warn(`${options.plan.name}: ${complaint}`);
 
     this.buildTrack(collision);
     if (options.race) this.buildRace();
@@ -612,10 +611,18 @@ export class Coaster implements GameSystem {
     this.speed = 0;
     if (this.riding && this.player) {
       this.riding = false;
-      const stall = placedEntry(this.options.stationStallId);
-      const offX = stall.x + (stall.entranceX - stall.x) * 0.4;
-      const offZ = stall.z + (stall.entranceZ - stall.z) * 0.4;
-      this.player.setRidePose(offX, terrainHeight(offX, offZ), offZ, 0);
+      // The planned exit (`coaster/plan.ts`) — beside the station, clear of
+      // every plot blocker — with the runtime safety net on top (see
+      // `world/dismount.ts`): this used to put a rider 40% of the way from
+      // the booth's own centre towards its doormat, which is still inside
+      // the booth's four walls and trapped her there for good.
+      const { x, z } = resolveDismount(
+        this.collision,
+        this.options.plan.exitX,
+        this.options.plan.exitZ,
+        PLAYER_RADIUS,
+      );
+      this.player.setRidePose(x, terrainHeight(x, z), z, 0);
       this.player.endRide();
       this.onRideChange?.(false);
     }
