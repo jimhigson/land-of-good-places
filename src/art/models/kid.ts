@@ -428,6 +428,12 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly backpackParts: readonly BackpackPart[];
   /**
+   * Where a worn keychain hangs — low on the bag's side, clear of
+   * {@link backpackAnchor} (the bag's *mouth*, used by a peeking creature's
+   * head) so the two never overlap. See `entities/WornKeychain.ts`.
+   */
+  readonly keychainAnchor: Group;
+  /**
    * Every hair mesh built, each tagged with the styles that show it.
    *
    * Exposed as typed objects rather than found by name, so the NPC crowd can
@@ -748,6 +754,24 @@ export function createKid(options: KidOptions = {}): KidHandle {
   jetpackAnchor.position.set(0, 0.56, -0.32);
   body.add(jetpackAnchor);
 
+  // Where a worn keychain hangs. A separate anchor from `backpackAnchor`, which
+  // is the bag's *mouth* — a charm hung there would sit on top of a peeking
+  // creature's head (`BackpackPeek`). Declared outside the `if` like the others,
+  // so a kid built with `backpack: false` still hands back a real (if
+  // unparented) `Group` rather than `undefined`.
+  //
+  // NOTE: this offset was measured (28 July) against the single bag the model
+  // had then — 0.36 x 0.32 x 0.20 at (0, 0.56, -0.32). Backpacks became five
+  // authored shapes since (`art/models/backpacks.ts`), so it is only known good
+  // for a shape of about those dimensions. Hanging the charm off the bag's own
+  // rig, per shape, is the right long-term home for this number.
+  const keychainAnchor = new Group();
+  keychainAnchor.name = 'keychainAnchor';
+  if (backpackRig) {
+    keychainAnchor.position.set(0.17, 0.5, -0.3);
+    body.add(keychainAnchor);
+  }
+
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
   // 1.36 rather than up by half the extra radius, because the head is meant to
@@ -891,6 +915,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     jetpackAnchor,
     glassesAnchor,
     backpackParts: backpackRig?.parts ?? [],
+    keychainAnchor,
     hairParts: hairRig.parts,
     get hairHidesHat() {
       return hairRig.hidesHat;

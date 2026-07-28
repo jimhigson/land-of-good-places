@@ -88,6 +88,8 @@ export class CharacterModel {
    * so there is nothing to swap mid-game.
    */
   readonly glassesAnchor: Group;
+  /** Where a worn keychain hangs — see `art/models/kid.ts`'s `keychainAnchor`. */
+  readonly keychainAnchor: Group;
 
   private readonly kid: KidHandle;
 
@@ -107,6 +109,7 @@ export class CharacterModel {
     this.backpackAnchor = this.kid.backpackAnchor;
     this.jetpackAnchor = this.kid.jetpackAnchor;
     this.glassesAnchor = this.kid.glassesAnchor;
+    this.keychainAnchor = this.kid.keychainAnchor;
   }
 
   /**
