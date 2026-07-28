@@ -187,6 +187,24 @@ Unless the grown-ups turn on **Mayhem mode**…
   the water-fight garden) reads its ground axes from it, so a direction
   means the same thing in every scene and in the castle interior, which
   sits six hundred metres away in world space but under the same camera.
+- **EXIT RULE — absolute, applies everywhere (28 July 2026):** **Every ride
+  has a designated exit, and it is a node in the walking-paths graph.**
+  Riding is not allowed to end anywhere else: a coaster's exit stands
+  beside its station, clear of the booth and everything else in the park; a
+  train station's platform stand is its own exit; the ferris wheel's exit
+  sits a couple of metres to the side of its entrance. Riders and NPCs
+  always dismount there, never at wherever the booth happens to be — the
+  family found a child could ride any coaster and be put down inside its
+  booth's own walls, with no way out at all.
+
+  *Where this lives in the code (28 July 2026):* the exit points are solved
+  as data, before any scene object exists — `src/world/coaster/plan.ts`,
+  `src/minigames/ferrisWheel/exit.ts` — the same "plan" pattern
+  `src/world/train/plan.ts` set. `src/world/paths.ts` gives each one a node.
+  `src/world/dismount.ts` is the universal safety net underneath all of it:
+  every dismount checks the exit point is genuinely clear right now and
+  slides to the nearest clear spot if it is not, so no ride can strand a
+  rider inside geometry, whatever else about the park changes later.
 - **Controls:** Keyboard (WASD/arrows), game controller via the Gamepad
   API, **and touch on phones/tablets: tap a spot and the character walks
   there** (tap-to-move), with tap-on-things to interact. **Double-tap a

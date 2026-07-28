@@ -12,6 +12,8 @@ import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
+import { COASTER_PLANS } from './coaster/plan';
+import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 
 /**
  * The winding path network.
@@ -205,7 +207,7 @@ function nearestRingPoint(
  */
 export interface PathNode {
   readonly id: string;
-  readonly kind: 'gate' | 'plaza' | 'anchor' | 'stall' | 'station';
+  readonly kind: 'gate' | 'plaza' | 'anchor' | 'stall' | 'station' | 'exit';
   readonly x: number;
   readonly z: number;
 }
@@ -359,6 +361,27 @@ function buildGraph(): PathGraph {
       },
     });
   }
+
+  // Ride exits (GAME_DESIGN.md's EXIT rule, 28 July 2026): every ride's
+  // dismount point is a node in this same graph, exactly like a station or a
+  // stall's doormat — so `check:park` can prove a rider can actually be
+  // walked there and back, and so nothing about "where does this ride let
+  // you off" is ever a coordinate known only to the ride itself. The `spur`
+  // helper's `towardX/towardZ` equal to `(ex, ez)` is the same "no past-the-
+  // doormat extension" case a station's own node would use if it needed one:
+  // an exit is a destination in itself, not a doorway into a plot.
+  for (const plan of [COASTER_PLANS.cruiser, COASTER_PLANS.race]) {
+    spur(`exit-${plan.name}`, 'exit', plan.exitX, plan.exitZ, plan.exitX, plan.exitZ, 2.2);
+  }
+  spur(
+    'exit-ferrisWheel',
+    'exit',
+    FERRIS_WHEEL_EXIT.x,
+    FERRIS_WHEEL_EXIT.z,
+    FERRIS_WHEEL_EXIT.x,
+    FERRIS_WHEEL_EXIT.z,
+    2.2,
+  );
 
   return { nodes, edges, ring };
 }

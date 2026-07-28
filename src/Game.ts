@@ -27,11 +27,15 @@ import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
 import { playOpenChime } from './ui/chime';
 import { MiniGameHost } from './minigames';
+import type { MiniGameResult } from './minigames/types';
+import { FERRIS_WHEEL_EXIT } from './minigames/ferrisWheel/exit';
+import { resolveDismount } from './world/dismount';
 import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
 import { gameStore } from './state';
 import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
+import { terrainHeight } from './world/terrain';
 
 /** Where a brand-new player starts: the plaza, just south of the fountain. */
 const DEFAULT_SPAWN = new Vector3(0, 0, 7);
@@ -297,6 +301,22 @@ export class Game {
       uiRoot,
       stalls: this.world.stalls.stalls,
       touch: isTouchDevice(),
+      // Only the ferris wheel needs this: GAME_DESIGN.md's EXIT rule gives
+      // every ride a dismount point, and the ferris wheel is a curtain
+      // mini-game rather than a `beginRide`/`endRide` ride, so nothing else
+      // moves the player when its curtain closes again. Every other stall
+      // is a self-contained game a child steps straight back out of, at the
+      // exact doormat she stepped in from.
+      onResult: (result: MiniGameResult) => {
+        if (result.id !== 'spaceFerrisWheel') return;
+        const { x, z } = resolveDismount(
+          this.world.collision,
+          FERRIS_WHEEL_EXIT.x,
+          FERRIS_WHEEL_EXIT.z,
+          PLAYER_RADIUS,
+        );
+        this.player.teleportTo(x, terrainHeight(x, z), z);
+      },
     });
 
     // Shops: the join between the shop geometry, the purchase panel and the

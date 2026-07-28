@@ -61,8 +61,12 @@ const STATION_SEEDS = [
 /** Clear of every plot's bounding circle by `radius` — the pure counterpart
  * of the old `collision.isClearCircle`. Trees no longer count: they are
  * seeded *after* this plan now, and keep off the railway rather than the
- * railway bending round them. */
-function clearOfPlots(x: number, z: number, radius: number): boolean {
+ * railway bending round them.
+ *
+ * Exported so any other pure plan solved at module load — `coaster/plan.ts`,
+ * the ferris wheel's exit point — can ask the same question of the same
+ * layout, rather than each re-deriving it. */
+export function clearOfPlots(x: number, z: number, radius: number): boolean {
   for (const entry of PARK_LAYOUT.entries.values()) {
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
   }
