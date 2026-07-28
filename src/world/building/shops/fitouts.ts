@@ -18,7 +18,7 @@ import { toonMaterial } from '../../../art/style/materials';
 import { createRipika } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon, type BalloonHandle } from '../../../art/models/balloons';
-import { createHat, HAT_KINDS } from '../../../art/models/hats';
+import { createHat, HAT_DISPLAY_SCALE, HAT_KINDS } from '../../../art/models/hats';
 import { createPet, PET_KINDS, type PetHandle } from '../../../art/models/pets';
 import {
   createCandyFloss,
@@ -326,7 +326,13 @@ function hatShop(): Fitout {
   const hats = HAT_KINDS.map((kind, index) => {
     const slot = positions[index];
     const hat = createHat(kind);
-    if (slot) place(hat.root, slot.x, slot.y + slot.height + 0.06, slot.z, 0.85, index * 0.5);
+    // Shown well under life size — the stands are 0.85 m apart and a real sun
+    // hat is 1.4 m across, so at life size each brim would saw through its
+    // neighbours. `HAT_DISPLAY_SCALE` keeps the stands looking exactly as they
+    // did while the worn hats grew to fit the head; see `art/models/hats.ts`.
+    if (slot) {
+      place(hat.root, slot.x, slot.y + slot.height + 0.06, slot.z, HAT_DISPLAY_SCALE, index * 0.5);
+    }
     detail.add(hat.root);
     return hat;
   });

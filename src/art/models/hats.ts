@@ -1,5 +1,4 @@
 import {
-  Box3,
   ConeGeometry,
   CylinderGeometry,
   Group,
@@ -13,11 +12,12 @@ import {
 } from 'three';
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { visibleBounds } from '../style/measure';
+import { visibleBounds, visibleTop } from '../style/measure';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { blob, type AssetHandle } from '../style/asset';
-import { buildRipikaHead } from './ripika';
+import { KID_HEAD_SCALE } from './kid';
+import { buildRipikaHead, RIPIKA_HEAD_SCALE } from './ripika';
 import { createPuffCreature } from './pets';
 
 /**
@@ -33,12 +33,28 @@ import { createPuffCreature } from './pets';
  * ```
  *
  * and standing one on a shop display is the same group parented to a stand.
- * Brims therefore hang *below* y = 0: the anchor is the top of a 0.44 m skull,
- * and a brim drawn at y = 0 would float above the hair.
+ * Brims therefore hang *below* y = 0: the anchor is the top of the skull, and a
+ * brim drawn at y = 0 would float above the hair.
  *
  * `height` is measured from the origin to the tip, which is what a name label
  * or a display plinth needs; the negative part of a brim is never more than a
  * few centimetres.
+ *
+ * ## Every number in this file is in *head units*, not metres
+ *
+ * A hat is only ever the right size relative to the head under it, so the
+ * geometry below is authored against a skull of radius 0.44 — the kid's, as
+ * `art/models/kid.ts` first wrote it — and {@link FIT} converts that into
+ * metres at the end. Change the kid's head and every hat follows.
+ *
+ * This is not a stylistic preference; it is the bug. `kid.ts`'s cartoon pass
+ * took `KID_HEAD_SCALE` from 1 to 1.5 and everything mounted on the head grew
+ * with it — hair, ears, face patch, the hat anchor. The hats, sitting in this
+ * file with the raw 0.44-skull numbers still in them, did not. Measured
+ * (`scripts/measure-hat-fit.mts`) each hat's band came out 0.64–0.72× as wide
+ * as the skull it was gripping: the head bulged straight out through every
+ * band, which is what "the hats are all much too small" looks like from a
+ * sofa. One `FIT` group per hat fixes the lot and keeps them fixed.
  */
 export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat' | 'puff';
 
@@ -53,8 +69,61 @@ export const HAT_KINDS: readonly HatKind[] = [
   'puff',
 ];
 
+/**
+ * Head units → metres. See the header: this is the kid's own head knob, so a
+ * hat is always the size the head it sits on wants it to be.
+ *
+ * It scales {@link SIT} along with the geometry, which is the point — how deep
+ * a band sinks is a fraction of a skull, not a fixed number of centimetres.
+ */
+const FIT = KID_HEAD_SCALE;
+
+/**
+ * How big a hat is shown on a shop stand, as a fraction of life size.
+ *
+ * Exported so `world/building/shops/fitouts.ts` does not have to know about
+ * {@link FIT}: the stands are 0.85 m apart, and a life-size sun hat is 1.4 m
+ * across, so displaying them at life size would have each brim slicing through
+ * its neighbours. Written as a fraction of `FIT` so the stands keep the size
+ * they have always shown whatever the head does next.
+ */
+export const HAT_DISPLAY_SCALE = 0.85 / FIT;
+
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
 const SIT = -0.1;
+
+/**
+ * A hat's two groups: the `root` the contract talks about, left at scale 1 for
+ * the caller's pop-in, and the `fit` group inside it that every piece of
+ * geometry goes into, holding the one conversion from head units to metres.
+ *
+ * Two groups rather than writing `FIT` onto `root`, because the contract
+ * reserves `root.scale` for the caller — `entities/WornHat.ts` pops a new hat
+ * in by writing it, and `check:assets` fails any asset that has spent it.
+ */
+function hatGroups(name: string): { root: Group; fit: Group } {
+  const root = new Group();
+  root.name = name;
+  const fit = new Group();
+  fit.name = `${name}:fit`;
+  fit.scale.setScalar(FIT);
+  root.add(fit);
+  return { root, fit };
+}
+
+/**
+ * Finishes a hat: its `height` measured off the geometry just built, never
+ * hand-written.
+ *
+ * Four of these used to carry a hand-written height and four had an entry in
+ * `check:assets`'s KNOWN_DRIFT to match (crown −20 mm, sun −24 mm, flower
+ * −38 mm, the RiPika hat −28 mm). Multiplying a hand-written number by `FIT`
+ * would only have multiplied its error, so all four are measured now and all
+ * four entries are gone.
+ */
+function finish(root: Group): AssetHandle {
+  return { root, height: visibleTop(root) };
+}
 
 function ring(radius: number, tube: number, colour: number): Mesh {
   const mesh = solid(new Mesh(new TorusGeometry(radius, tube, 8, 20), toonMaterial(colour)));
@@ -63,28 +132,26 @@ function ring(radius: number, tube: number, colour: number): Mesh {
 }
 
 function createPartyHat(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.party';
+  const { root, fit } = hatGroups('hat.party');
 
   const cone = solid(new Mesh(new ConeGeometry(0.26, 0.42, 18), toonMaterial(PALETTE.markerPink)));
   cone.position.y = SIT + 0.21;
-  root.add(cone);
+  fit.add(cone);
   addOutline(cone, 0.011);
 
   const stripe = ring(0.19, 0.028, PALETTE.markerLemon);
   stripe.position.y = SIT + 0.13;
-  root.add(stripe);
+  fit.add(stripe);
 
   const pom = blob(0.075, toonMaterial(ART.cream), [1, 0.9, 1], 14);
   pom.position.y = SIT + 0.44;
-  root.add(pom);
+  fit.add(pom);
 
-  return { root, height: SIT + 0.52 };
+  return finish(root);
 }
 
 function createCrown(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.crown';
+  const { root, fit } = hatGroups('hat.crown');
 
   // Five points, made by squashing a five-sided cone — a crown is a pentagon
   // with the top pulled up, and one cone is cheaper than five spikes.
@@ -92,23 +159,22 @@ function createCrown(): AssetHandle {
     new Mesh(new CylinderGeometry(0.26, 0.27, 0.16, 20), toonMaterial(ART.helmetGold)),
   );
   band.position.y = SIT + 0.08;
-  root.add(band);
+  fit.add(band);
   addOutline(band, 0.011);
 
   const points = solid(new Mesh(new ConeGeometry(0.27, 0.2, 5), toonMaterial(ART.helmetGold)));
   points.position.y = SIT + 0.24;
-  root.add(points);
+  fit.add(points);
 
   const jewel = decal(new Mesh(starGeometry(0.13, 0.03), toonMaterial(PALETTE.markerPink)));
   jewel.position.set(0, SIT + 0.09, 0.26);
-  root.add(jewel);
+  fit.add(jewel);
 
-  return { root, height: SIT + 0.36 };
+  return finish(root);
 }
 
 function createBobbleHat(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.bobble';
+  const { root, fit } = hatGroups('hat.bobble');
 
   const dome = solid(
     new Mesh(
@@ -118,23 +184,22 @@ function createBobbleHat(): AssetHandle {
   );
   dome.position.y = SIT + 0.02;
   dome.scale.set(1, 1.1, 1);
-  root.add(dome);
+  fit.add(dome);
   addOutline(dome, 0.012);
 
   const brim = ring(0.265, 0.055, PALETTE.blossomWhite);
   brim.position.y = SIT + 0.01;
-  root.add(brim);
+  fit.add(brim);
 
   const pom = blob(0.1, toonMaterial(PALETTE.blossomWhite), [1, 0.92, 1], 16);
   pom.position.y = SIT + 0.33;
-  root.add(pom);
+  fit.add(pom);
 
-  return { root, height: SIT + 0.43 };
+  return finish(root);
 }
 
 function createSunHat(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.sun';
+  const { root, fit } = hatGroups('hat.sun');
 
   const brim = solid(
     new Mesh(new CylinderGeometry(0.46, 0.46, 0.05, 24), toonMaterial(PALETTE.flowerYellow)),
@@ -143,7 +208,7 @@ function createSunHat(): AssetHandle {
   // Nothing is plumb: a sun hat worn at a slight angle reads as jaunty rather
   // than as a dinner plate.
   brim.rotation.z = 0.08;
-  root.add(brim);
+  fit.add(brim);
   addOutline(brim, 0.01);
 
   const dome = solid(
@@ -154,18 +219,17 @@ function createSunHat(): AssetHandle {
   );
   dome.position.y = SIT + 0.04;
   dome.scale.set(1, 0.9, 1);
-  root.add(dome);
+  fit.add(dome);
 
   const ribbon = ring(0.235, 0.032, PALETTE.blossomPink);
   ribbon.position.y = SIT + 0.07;
-  root.add(ribbon);
+  fit.add(ribbon);
 
-  return { root, height: SIT + 0.28 };
+  return finish(root);
 }
 
 function createCap(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.cap';
+  const { root, fit } = hatGroups('hat.cap');
 
   const dome = solid(
     new Mesh(
@@ -175,7 +239,7 @@ function createCap(): AssetHandle {
   );
   dome.position.y = SIT + 0.01;
   dome.scale.set(1, 0.92, 1);
-  root.add(dome);
+  fit.add(dome);
   addOutline(dome, 0.012);
 
   // The peak: a flattened disc pushed out over the eyes.
@@ -186,22 +250,21 @@ function createCap(): AssetHandle {
   peak.rotation.y = Math.PI;
   peak.rotation.x = -0.12;
   peak.scale.set(1, 1, 1.15);
-  root.add(peak);
+  fit.add(peak);
 
   const button = blob(0.045, toonMaterial(PALETTE.leafMid), [1, 0.8, 1], 12);
   button.position.y = SIT + 0.26;
-  root.add(button);
+  fit.add(button);
 
-  return { root, height: SIT + 0.31 };
+  return finish(root);
 }
 
 function createFlowerCrown(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.flower';
+  const { root, fit } = hatGroups('hat.flower');
 
   const band = ring(0.27, 0.05, PALETTE.leafMid);
   band.position.y = SIT + 0.02;
-  root.add(band);
+  fit.add(band);
   addOutline(band, 0.01);
 
   // Six blooms round the band as one instanced mesh — the same geometry six
@@ -224,50 +287,54 @@ function createFlowerCrown(): AssetHandle {
     blooms.setMatrixAt(i, matrix);
   }
   blooms.instanceMatrix.needsUpdate = true;
-  root.add(blooms);
+  fit.add(blooms);
 
   const heart = blob(0.045, toonMaterial(PALETTE.flowerYellow), [1, 0.7, 1], 10);
   heart.position.set(0, SIT + 0.09, 0.27);
-  root.add(heart);
+  fit.add(heart);
 
-  return { root, height: SIT + 0.16 };
+  return finish(root);
 }
 
 /**
- * How much bigger than a *real* RiPika's own head this hat's head is built at
- * (RiPika itself uses 1.32 — see `ripika.ts`). The family asked for "a large
- * head of RiPika on the wearer's head", so this deliberately dwarfs every
- * other hat in the shop.
+ * The RiPika hat: RiPika's own head, at RiPika's own size, worn on top of
+ * yours. GAME_DESIGN.md §"Hat shop" — "a large RiPika head worn on top of the
+ * wearer's own head" — so it stays on the crown like every other hat here, and
+ * never comes down over the face.
  *
- * It can go this big safely because of *where* a hat sinks, not how big it
- * is: every hat here sinks onto the skull by the same `SIT`, and the wearer's
- * eyes sit a long way further down the skull than that — a hat only grows
- * upward from `SIT`, so no amount of extra scale brings it anywhere near the
- * face. What has to stay in check is width more than height, which is why
- * this is 2.1×, not larger still: wide enough to read as "RiPika's actual
- * head", not so wide it reads as a blob eating the wearer's silhouette.
+ * **It used to be built at 2.1× instead**, chosen so the ball came out as wide
+ * as the wearer's whole head. That is not a hat, it is a second head: a ball
+ * 1.43 m across whose ear tips stood 1.67 m above the crown, taking a 2.12 m
+ * child to 3.65 m — 1.72× her own height — which is the "the RiPika head is
+ * too large" half of the family's report. A ball worn on top of a head rises
+ * by its own diameter no matter where you sink it, so the only honest fix is a
+ * smaller ball.
+ *
+ * `RIPIKA_HEAD_SCALE` is the size it should have been all along, and it is a
+ * derived number rather than a tuned one: this *is* a RiPika head, so it is
+ * exactly as big as the one on RiPika walking past you in the park. The
+ * wearer's own head still reads clearly underneath, and the hat is still by
+ * some way the biggest in the shop.
+ *
+ * The division by {@link FIT} is only the unit conversion — `buildRipikaHead`
+ * works in metres and the `fit` group is in head units.
  */
-const RIPIKA_HAT_SCALE = 2.1;
-
 function createRipikaHat(): AssetHandle {
-  const root = new Group();
-  root.name = 'hat.ripikaHat';
+  const { root, fit } = hatGroups('hat.ripikaHat');
 
-  const ripikaHead = buildRipikaHead(RIPIKA_HAT_SCALE);
+  const ripikaHead = buildRipikaHead(RIPIKA_HEAD_SCALE / FIT);
   // buildRipikaHead's group is centred on RiPika's own skull centre. Its
   // lowest point is the underside of the skull, at `-skullR * 0.97` (the
   // blob's own y-squash) — sink that point to `SIT`, exactly like every other
   // hat's brim/band, so it grips the wearer's crown rather than floating.
   ripikaHead.group.position.y = SIT + ripikaHead.skullR * 0.97;
-  root.add(ripikaHead.group);
+  fit.add(ripikaHead.group);
 
-  // Measured to the actual top (ear tips lean outward under rotation, so the
-  // exact offset isn't a clean formula) rather than hand-guessed, the same
-  // way every asset's `height` must reach the real highest point.
-  root.updateMatrixWorld(true);
-  const height = new Box3().setFromObject(root).max.y;
-
-  return { root, height };
+  // Measured to the actual top — the ear tips lean outward under two
+  // rotations, so there is no clean formula — and by walking the vertices
+  // rather than by `Box3`, which takes the axis-aligned box of an
+  // already-rotated ear and reported the tips 28 mm higher than they are.
+  return finish(root);
 }
 
 /**
@@ -284,15 +351,14 @@ function createRipikaHat(): AssetHandle {
  * measured off the built ball, not guessed at from its radius.
  */
 function createPuffHat(): AssetHandle {
+  const { root, fit } = hatGroups('hat.puff');
   const puff = createPuffCreature({ variant: 'hat' });
-  puff.root.name = 'hat.puff';
 
-  // The ball's real extent, walked off its vertices — outline hull, curl and
-  // all. Both numbers below used to be guessed from `PUFF_BALL_RADIUS * 0.92`,
-  // a stand-in for the ball's own y-squash that missed the 12 mm outline the
-  // ball wears, so the hat declared 0.358 m and built 0.492 m and sat 30 mm off
-  // the crown instead of settling into the hair.
-  const { bottom, top } = visibleBounds(puff.root);
+  // How deep the ball's own paws are, walked off its vertices — outline hull
+  // and all. It used to be guessed from `PUFF_BALL_RADIUS * 0.92`, a stand-in
+  // for the ball's y-squash that missed the 12 mm outline the ball wears, and
+  // the hat sat 30 mm off the crown instead of settling into the hair.
+  const { bottom } = visibleBounds(puff.root);
 
   // Every other hat in this file leaves `root` at the origin and draws itself
   // relative to `SIT`, because `root` *is* the crown anchor — `WornHat` parents
@@ -306,7 +372,11 @@ function createPuffHat(): AssetHandle {
   const mount = new Group();
   mount.name = 'hat.puff:mount';
   mount.add(puff.body);
-  puff.root.add(mount);
+  // Into `fit`, not `puff.root`: the puff is authored in metres for the pet
+  // pen, and everything worn on a head belongs in head units. It grows with
+  // the head exactly as the sewn hats do — a ball that looked right on the
+  // old skull is a marble on this one (0.33× the head, measured).
+  fit.add(mount);
   // Settle it the same shallow depth into the hair that the bobble hat's rim
   // and the cap's dome do (SIT + ~0.02), rather than the full SIT a brim uses.
   mount.position.y = SIT + 0.02 - bottom;
@@ -318,10 +388,7 @@ function createPuffHat(): AssetHandle {
   // build the object conditionally instead of assigning the (statically)
   // possibly-undefined value straight through.
   return {
-    root: puff.root,
-    // Measured to the real tip and carried across the same shift, so `height`
-    // runs from this hat's origin — the crown — to the top of the curl.
-    height: top + mount.position.y,
+    ...finish(root),
     ...(puff.update && { update: puff.update }),
     ...(puff.dispose && { dispose: puff.dispose }),
   };
