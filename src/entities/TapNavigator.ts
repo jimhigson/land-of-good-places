@@ -108,7 +108,7 @@ const REPLAN_ATTEMPTS = 1;
  * somewhere else, and saying so (moving the marker, dropping the interaction)
  * beats walking her at a wall.
  */
-const SHORTFALL_TOLERANCE = 1.6;
+export const SHORTFALL_TOLERANCE = 1.6;
 
 /** A destination further than this is almost certainly a mis-tap on the sky. */
 const MAX_TARGET_DISTANCE = 90;
