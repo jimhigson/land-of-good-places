@@ -3,16 +3,16 @@ import type { Rng } from '../../core/mathUtils';
 /**
  * Content and tuning for the "a child comes over for a chat" feature (see
  * GAME_DESIGN.md, "Chatting (27 July 2026)"). The state machine itself lives
- * inline in `wanderDriver.ts`, in a block shaped exactly like the train-trip
- * and face-paint-visit blocks either side of it — this file is just the
- * "what to say and when" half, kept separate so that half can grow (more
- * lines, more things noticed) without the state machine file getting any
- * longer.
+ * in `activities/chatToPlayer.ts` — this file is just the "what to say and
+ * when" half, kept separate so that half can grow (more lines, more things
+ * noticed) without the state machine file getting any longer.
  */
 
 /** How many children may be mid-chat (approaching, talking, or waving
  *  goodbye) across the whole park at once. Shared — one instance handed to
- *  every `WanderDriver` by `NpcSystem`, exactly like `ClimberBudget`. */
+ *  every `WanderDriver` by `NpcSystem`, exactly like `ClimberBudget`. Both are
+ *  an `ActivityBudget` (`activities/activity.ts`); claim and release it through
+ *  a `BudgetSlot` rather than by hand. */
 export interface ChatBudget {
   active: number;
   readonly max: number;
