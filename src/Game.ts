@@ -388,6 +388,7 @@ export class Game {
       uiRoot,
       this.selection,
       () => this.cameraOverride ?? this.camera.camera,
+      () => this.player.riding,
     );
     this.addSystem(this.actionChips);
 
