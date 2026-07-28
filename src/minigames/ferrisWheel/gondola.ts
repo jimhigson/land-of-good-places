@@ -2,6 +2,7 @@ import {
   BoxGeometry,
   Color,
   CylinderGeometry,
+  DoubleSide,
   Group,
   InstancedMesh,
   Matrix4,
@@ -9,6 +10,7 @@ import {
   MeshBasicMaterial,
   PointLight,
   Quaternion,
+  RingGeometry,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -175,7 +177,6 @@ export function createGondola(): Gondola {
   car.add(seat);
 
   const shellColour = FERRIS_CAR_COLOURS[0] ?? PALETTE.markerPink;
-  const shellDeep = toonMaterial(PALETTE.outfitDark);
   // The frame — posts, rails, window bars — is all one light cream, so it
   // reads as one thin structure rather than four different walls.
   const cream = toonMaterial(PALETTE.buildingWall);
@@ -184,11 +185,17 @@ export function createGondola(): Gondola {
   // Not quite clear: a faint tint is what tells the eye there is glass there at
   // all, and a window you cannot see is just a hole.
   const glass = toonMaterial(PALETTE.glassTint, { transparent: true, opacity: 0.13 });
+  // The floor and roof are glass too, and they are the two panes a child looks
+  // *through* rather than out of — so they carry a little more tint than the
+  // windows do. A floor you cannot see is a floor a six-year-old will not
+  // believe is there, and the first thing she does on a glass floor is check it
+  // is holding her up.
+  const floorGlass = toonMaterial(PALETTE.glassTint, { transparent: true, opacity: 0.22 });
 
   const halfWidth = CAR_WIDTH / 2;
   const halfDepth = CAR_DEPTH / 2;
 
-  // --- floor and roof: slim, everything between them is glass -----------------
+  // --- floor and roof: glass, like everything between them --------------------
   //
   // **The gondola rebuild (27 July 2026).** The first car had opaque walls on
   // three sides and a porthole apiece for the other two — "a box with a
@@ -198,23 +205,50 @@ export function createGondola(): Gondola {
   // way round on all four sides: front, back and both flanks alike. The child
   // is meant to feel like they are riding in a glass bubble, not a room with
   // a window in it.
+  //
+  // **The floor and the roof are glass too (28 July 2026).** The family asked
+  // for it, and it is what finishes the bubble: the car had glass on four
+  // sides and a wooden floor and a painted lid, which is a lantern, not a
+  // bubble. Now a child can look **straight down at the park** through her own
+  // feet and **straight up at the sky** through the roof — and the pitch limits
+  // in `SpaceFerrisWheel.ts` were opened up in the same breath so she can
+  // actually reach both. The two changes are one change; if you narrow the
+  // pitch again, this glass stops being worth its transparency.
+  //
+  // Still `solid()`: the floor catches the lamp and the passengers' shadows,
+  // and a glass floor that receives nothing looks like a hole rather than a
+  // pane.
   const floor = solid(
-    new Mesh(new RoundedBoxGeometry(CAR_WIDTH, 0.14, CAR_DEPTH, 3, 0.06), woodMaterial),
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH, 0.14, CAR_DEPTH, 3, 0.06), floorGlass),
   );
   floor.position.y = -0.07;
   car.add(floor);
 
-  const rug = decal(new Mesh(new CylinderGeometry(1.15, 1.15, 0.03, 24), toonMaterial(PALETTE.markerMint)));
-  rug.position.set(0, 0.015, -0.1);
-  rug.scale.set(1, 1, 0.72);
+  // The rug used to be a mint disc across the middle of the floor, which is
+  // precisely the patch of floor the family now wants to see through. It stays
+  // as a **ring** round the edge instead: the same colour note in the same
+  // place, and it reads as the frame of a very big porthole, which is what the
+  // floor now is.
+  const rug = decal(
+    new Mesh(new RingGeometry(1.5, 1.72, 32), toonMaterial(PALETTE.markerMint, { side: DoubleSide })),
+  );
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.set(0, 0.02, -0.1);
+  // Squashed down the car's short axis, and no further: at 0.74 the ring's
+  // outer edge lands at z ±1.27 about its own centre, which keeps it inside the
+  // front and back glass at ±1.4. It is rotated flat, so this scales what was
+  // the geometry's Y before the rotation — the car's Z.
+  rug.scale.set(1, 0.74, 1);
   car.add(rug);
 
+  // No outline on the roof any more: `addOutline` builds a back-facing hull in
+  // a flat ink colour, and on a pane you are looking through that is an opaque
+  // ceiling with extra steps.
   const roof = solid(
-    new Mesh(new RoundedBoxGeometry(CAR_WIDTH + 0.16, 0.13, CAR_DEPTH + 0.16, 3, 0.06), shellDeep),
+    new Mesh(new RoundedBoxGeometry(CAR_WIDTH + 0.16, 0.13, CAR_DEPTH + 0.16, 3, 0.06), floorGlass),
   );
   roof.position.y = CAR_HEIGHT;
   car.add(roof);
-  addOutline(roof, 0.016);
 
   // --- the frame: four corner posts and a handrail, and nothing else ----------
   const postRadius = 0.05;
@@ -340,12 +374,16 @@ export function createGondola(): Gondola {
     car.add(scallop);
   }
 
-  // --- the skylight ------------------------------------------------------------
-  // The one window that shows you what you are riding.
-  const skylight = decal(new Mesh(new BoxGeometry(1.7, 0.05, 1.3), glass));
-  skylight.position.set(0, CAR_HEIGHT + 0.01, -0.15);
-  car.add(skylight);
-
+  // --- the skylight ring --------------------------------------------------------
+  //
+  // The skylight used to be a pane of glass let into an opaque roof, and it was
+  // the one window that showed you what you were riding. **The whole roof is
+  // that window now**, so the pane itself has gone — laying one sheet of glass
+  // over another only doubled the tint in the exact spot the wheel goes past.
+  //
+  // The cream ring stays. It is what a child's eye actually reads as "look up
+  // here", it frames the hub and the spokes sweeping past, and without it a
+  // fully glazed roof is just an absence.
   const skylightRing = solid(new Mesh(new TorusGeometry(0.95, 0.08, 8, 24), cream));
   skylightRing.rotation.x = Math.PI / 2;
   skylightRing.position.set(0, CAR_HEIGHT + 0.04, -0.15);
