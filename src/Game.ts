@@ -13,13 +13,15 @@ import {
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import { Highlights } from './world/Highlights';
-import type { InteractZone } from './world/interact';
+import { Selection } from './world/Selection';
+import { setInteractPress, type InteractZone } from './world/interact';
+import { signInteractZone } from './world/signs';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './ui';
-import { ActionButton } from './ui/ActionButton';
+import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
@@ -77,7 +79,8 @@ export class Game {
   readonly treeClimbing: TreeClimbing;
   readonly foliageFade: FoliageFade;
   readonly signReader: SignReader;
-  readonly actionButton: ActionButton;
+  readonly selection: Selection;
+  readonly actionChips: ActionChips;
   readonly highlights: Highlights;
   readonly tapBurst: TapBurst;
   readonly transitions: Transitions;
@@ -108,6 +111,8 @@ export class Game {
   /** Per-frame memo for {@link currentZones}. -1 so the first call always builds. */
   private zoneCacheFrame = -1;
   private zoneCache: readonly InteractZone[] = [];
+  /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
+  private signZones: readonly InteractZone[] = [];
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, options: GameOptions = {}) {
     this.engine = new Engine(canvas);
@@ -203,9 +208,7 @@ export class Game {
     // the building installed. `treeClimbing` is constructed further down (it
     // needs the HUD), but this closure only reads it once play starts, by
     // which point construction has finished.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, this.navGrid, () =>
-      this.currentZones(),
-    );
+    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, this.navGrid);
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {
@@ -223,23 +226,24 @@ export class Game {
         // A tap near a sign now just walks there like any other patch of
         // ground; reading one is a proximity+facing gate and a button.
         if (this.parade.handleTap(point)) return;
+        // GAME_DESIGN.md's SELECTION RULE, step 1: a tap that lands on a thing
+        // *selects* it and goes no further. Selection is free — it costs no
+        // walk — and that is exactly what makes a distant thing take two taps
+        // and stops a child doing anything by accident. A tap that hits nothing
+        // falls through to the walk, unchanged since the day it was written.
+        if (this.selection.handleTap(point.ndcX, point.ndcY)) return;
         this.tapNavigator.handleTap(point);
-        // The HIGHLIGHT RULE's activation flash. Fired here, on the tap itself,
-        // rather than on arrival: a phone has no hover at all, so this burst is
-        // the only thing that tells a child her tap landed on the thing she
-        // aimed at. Tapping open ground is already answered by the tap marker.
-        this.highlights.flashZone(this.tapNavigator.destinationZone);
       },
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
-      // The mouse half of the HIGHLIGHT RULE. Mouse-only, and the highlight
-      // system does the picking on the next frame rather than here, so a mouse
-      // waggled about cannot cost more than one ray a frame. `highlights` is
-      // built further down; the closure only runs once play has started.
+      // The mouse half of the HIGHLIGHT RULE. Mouse-only, and `Selection` does
+      // the picking on the next frame rather than here, so a mouse waggled
+      // about cannot cost more than one ray a frame. `selection` is built
+      // further down; the closure only runs once play has started.
       onHover: (point) => {
-        if (point) this.highlights.setCursor(point.ndcX, point.ndcY);
-        else this.highlights.clearCursor();
+        if (point) this.selection.setCursor(point.ndcX, point.ndcY);
+        else this.selection.clearCursor();
       },
     });
 
@@ -317,41 +321,23 @@ export class Game {
     );
     this.addSystem(this.treeClimbing);
 
-    // "Do the thing" at whatever ride, shop, stall or traversal device the
-    // player is standing next to — see `ui/ActionButton.ts`. Same zone list
-    // `tapNavigator` walks, plus tree-climbing's, rebuilt fresh every frame
-    // because a couple of them move (the lift, the bubble).
-    this.actionButton = new ActionButton(
-      uiRoot,
-      this.player,
-      () => this.currentZones(),
-      this.input,
-      () => this.uiOwnsTheScreen(),
-    );
-    this.addSystem(this.actionButton);
-
     // Fades out any tree standing between the camera and the player — the
     // fixed camera (design feedback #16) means one can now hide them
     // completely for as long as they stand there. See `world/FoliageFade.ts`.
     this.foliageFade = new FoliageFade(this.world.scenery, this.camera);
     this.engine.scene.add(this.foliageFade.group);
     this.addSystem(this.foliageFade);
-    // "Read" a sign: a HUD button when close and facing one, a full-screen
-    // overlay of its own painted face when pressed — see `ui/SignReader.ts`.
-    // Signs never move once the world has finished building, so its zone list
-    // is captured once here rather than walked afresh every frame.
-    //
-    // Precedence: an interactable you can act on beats a sign you can read,
-    // since the sign is passive — folded in here as one more reason the sign
-    // pill stays hidden, rather than by teaching `SignReader` anything about
-    // action zones.
-    this.signReader = new SignReader(
-      uiRoot,
-      this.player,
-      this.world.signZones(),
-      () => this.uiOwnsTheScreen() || this.parkMap.isOpen || this.actionButton.active,
-    );
+    // Reading a sign: the full-screen overlay of its own painted face. The
+    // *offer* is a "Read" chip like any other action now (see below).
+    this.signReader = new SignReader(uiRoot);
     this.addSystem(this.signReader);
+    // Signs join the one selection system as ordinary zones — see
+    // `world/signs.ts`'s `signInteractZone`, including why they are built here
+    // rather than inside `World.interactZones()`. Captured once: nothing here
+    // moves after the world has finished building.
+    this.signZones = this.world
+      .signZones()
+      .map((sign) => signInteractZone(sign, () => this.signReader.open(sign)));
 
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
     // when a child is standing at the lift doors, calls the car, and then lists
@@ -374,20 +360,43 @@ export class Game {
     );
     this.addSystem(this.liftPanel);
 
-    // GAME_DESIGN.md's HIGHLIGHT RULE, built once for the whole game: everything
-    // interactable is outlined in rainbow when it is about to be used — on hover
-    // for a mouse, and on whatever E would use while E is primed. See
-    // `world/Highlights.ts`; registering a tap target is all it takes to be
-    // covered by it.
+    // GAME_DESIGN.md's SELECTION RULE, built once for the whole game: one thing
+    // in the park is selected at a time — by standing at it, hovering it or
+    // tapping it — and that is what the rainbow outlines and what the chips
+    // offer actions for. See `world/Selection.ts`; registering a tap target with
+    // actions is all it takes to be covered by it.
     //
-    // Registered last of the systems, and it has to be: it reads the picks
-    // `actionButton` and `signReader` have just made this frame, so an outline
-    // can never point somewhere different from the pill naming the action.
-    this.highlights = new Highlights(this.engine.scene, this.camera, canvas, {
+    // Riding is deliberately NOT blocked, unlike every other panel-ish test in
+    // here: a child in the train's first-person seat is looking straight at the
+    // platform, and "Get off" has to be pressable from there. Which zones may
+    // be selected while a ride owns her is the zone's own business — see
+    // `InteractZone.selectableWhileRiding`.
+    this.selection = new Selection(this.player, this.camera, canvas, {
       zones: () => this.currentZones(),
-      primedZone: () => this.actionButton.zone,
-      primedSign: () => this.signReader.nearby,
-      blocked: () => this.screenIsBusy(),
+      blocked: () => this.selectionBlocked(),
+      walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
+      walking: () => this.tapNavigator.isNavigating,
+      flash: (zone) => this.highlights.flashZone(zone),
+    });
+    this.addSystem(this.selection);
+    // The E key, virtually — how a chip reaches whichever system owns the thing
+    // it names. See `world/interact.ts`'s `pressAction`.
+    setInteractPress(() => this.input.pressVirtual('interact'));
+
+    // The chips themselves, floating over the selected item.
+    this.actionChips = new ActionChips(
+      uiRoot,
+      this.selection,
+      () => this.cameraOverride ?? this.camera.camera,
+    );
+    this.addSystem(this.actionChips);
+
+    // Registered last of the systems, and it has to be: it draws the pick
+    // `selection` has just made this frame, so the outline can never point
+    // somewhere different from the chips naming the action.
+    this.highlights = new Highlights(this.engine.scene, {
+      selected: () => this.selection.selected,
+      blocked: () => this.selectionBlocked(),
     });
     this.addSystem(this.highlights);
 
@@ -457,7 +466,11 @@ export class Game {
   private currentZones(): readonly InteractZone[] {
     if (this.zoneCacheFrame !== this.frameContext.frame) {
       this.zoneCacheFrame = this.frameContext.frame;
-      this.zoneCache = [...this.world.interactZones(), ...this.treeClimbing.interactZones()];
+      this.zoneCache = [
+        ...this.world.interactZones(),
+        ...this.treeClimbing.interactZones(),
+        ...this.signZones,
+      ];
     }
     return this.zoneCache;
   }
@@ -496,6 +509,28 @@ export class Game {
   private screenIsBusy(): boolean {
     return (
       this.uiOwnsTheScreen() ||
+      this.parkMap.isOpen ||
+      this.stairMenu.isOpen ||
+      this.signReader.active ||
+      gameStore.get().paused
+    );
+  }
+
+  /**
+   * {@link screenIsBusy}, minus riding.
+   *
+   * The one predicate the SELECTION RULE runs on. Riding is the exception it has
+   * to make: on the train the park is still on screen, the platform is right
+   * there, and the "Get off" chip is the only way off. Nothing else becomes
+   * selectable by it — a zone has to say `selectableWhileRiding` for that.
+   */
+  private selectionBlocked(): boolean {
+    return (
+      this.shopping.uiOpen ||
+      this.world.facePaintStall.uiOpen ||
+      this.cuteODex.isOpen ||
+      this.whatsNew.isOpen ||
+      this.miniGames.frozen ||
       this.parkMap.isOpen ||
       this.stairMenu.isOpen ||
       this.signReader.active ||
@@ -572,6 +607,7 @@ export class Game {
 
   dispose(): void {
     this.stop();
+    setInteractPress(null);
     this.saveSystem.dispose();
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();

@@ -5,7 +5,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import type { CollisionWorld } from '../Collision';
-import type { InteractZone } from '../interact';
+import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import { TrainRoute } from './route';
 import { buildTrack, type Track } from './track';
@@ -33,9 +33,16 @@ import { setTrainService, type TrainPassenger, type TrainService, type TrainStop
  * The park train.
  *
  * A little engine and three open carriages going round and round the edge of
- * the park all day, calling at two stations. You get on by standing on a
- * platform when it is in; you get off by asking to move while it is stopped.
- * Children get on too.
+ * the park all day, calling at two stations. Children get on by themselves.
+ *
+ * **You** get on and off by pressing a chip, and only by pressing a chip
+ * (GAME_DESIGN.md's SELECTION RULE, 28 July 2026). Standing on a platform used
+ * to board you outright and any attempt to walk used to put you off again,
+ * which is exactly the "doing things by mistake" the family had had enough of:
+ * a child crossing a platform found herself on a train, and a child looking
+ * round from her seat found herself back on the platform. Now the station
+ * offers **"Get on"** while the train is standing there, and **"Get off"**
+ * while she is aboard and it is stopped, and nothing at all in between.
  *
  * ### Riding is a seat-lock, not a moving floor
  *
@@ -83,6 +90,9 @@ const CHUFF_INTERVAL = 1.5;
 
 /** Beyond this the train cannot be heard at all. */
 const AUDIBLE_RANGE = 42;
+
+/** Shared empty list: "nothing you can do with this train from here, just now". */
+const NO_ACTIONS: readonly ZoneAction[] = [];
 
 interface Seat {
   /** Which car, and which of its seats. */
@@ -137,6 +147,11 @@ export class ParkTrain implements GameSystem, TrainService {
 
   private playerRiding = false;
   private playerBoardedAt = 0;
+  /** This frame's game clock, kept so {@link requestBoard} can stamp a boarding from outside the frame. */
+  private boardedAtElapsed = 0;
+  /** Allocated once each: an action list is immutable and is rebuilt every frame otherwise. */
+  private getOnAction: readonly ZoneAction[] | null = null;
+  private getOffAction: readonly ZoneAction[] | null = null;
   /** Set on alighting; cleared when the train pulls out, so you get a moment. */
   private boardingLocked = false;
 
@@ -315,14 +330,76 @@ export class ParkTrain implements GameSystem, TrainService {
     return platforms;
   }
 
+  /**
+   * One zone per platform, each offering whatever the train can do for you
+   * *right now* — which is the whole reason {@link InteractZone.actions} is a
+   * function. Standing at Bluebell Halt with the train at Sunny Side offers
+   * nothing; the moment it pulls in, "Get on" appears over it.
+   */
   interactZones(): InteractZone[] {
-    return this.stations.map((station) => station.interactZone());
+    return this.stations.map((station, index) => ({
+      ...station.interactZone(),
+      actions: () => this.stationActions(index),
+    }));
+  }
+
+  /** "Get on" / "Get off" / nothing, for the platform at `index`. */
+  private stationActions(index: number): readonly ZoneAction[] {
+    // Only ever the platform she is actually standing at: the train cannot be
+    // in two places, and neither can she.
+    if (this.stoppedStop !== index) return NO_ACTIONS;
+
+    if (this.playerRiding) {
+      return this.getOffAction ?? (this.getOffAction = [
+        { id: PRIMARY_ACTION, label: 'Get off', glyph: '👋', run: () => this.requestAlight() },
+      ]);
+    }
+
+    const seat = this.seats[PLAYER_SEAT];
+    if (this.boardingLocked || !seat || seat.taken !== null) return NO_ACTIONS;
+    return this.getOnAction ?? (this.getOnAction = [
+      { id: PRIMARY_ACTION, label: 'Get on', glyph: '🚂', run: () => this.requestBoard() },
+    ]);
+  }
+
+  /**
+   * "Get on, please."
+   *
+   * The chip's own commit walks her onto the platform first when she pressed it
+   * from across the park, so by the time this runs she is standing on it — but
+   * the train may have pulled out while she walked, which is why every gate is
+   * re-checked here rather than trusted from when the chip was drawn.
+   */
+  requestBoard(): void {
+    const player = this.player;
+    const seat = this.seats[PLAYER_SEAT];
+    if (!player || !seat) return;
+    if (this.stoppedStop === null || this.boardingLocked || seat.taken !== null) return;
+    if (player.riding) return; // already on a slide, or in the lift
+
+    const station = this.stations[this.stoppedStop];
+    if (!station || !station.covers(player.position.x, player.position.z)) return;
+
+    seat.taken = 'player';
+    this.playerRiding = true;
+    this.playerBoardedAt = this.boardedAtElapsed;
+    player.beginRide();
+    playStationBell();
+    this.onRideChange?.(true);
+  }
+
+  /** "Get off, please." Ignored while the train is moving — there is nowhere to step. */
+  requestAlight(): void {
+    const player = this.player;
+    if (!player || !this.playerRiding || this.stoppedStop === null) return;
+    this.alight(player);
   }
 
   // --------------------------------------------------------------- the frame
 
   update(context: FrameContext): void {
     const { dt } = context;
+    this.boardedAtElapsed = context.elapsed;
     if (dt <= 0) return;
 
     this.drive(dt);
@@ -542,36 +619,24 @@ export class ParkTrain implements GameSystem, TrainService {
       return;
     }
 
-    if (this.stoppedStop === null || this.boardingLocked || seat.taken !== null) return;
-
-    const station = this.stations[this.stoppedStop];
-    if (!station || !station.covers(player.position.x, player.position.z)) return;
-    if (player.riding) return; // already on a slide, or in the lift
-
-    seat.taken = 'player';
-    this.playerRiding = true;
-    this.playerBoardedAt = context.elapsed;
-    player.beginRide();
-    playStationBell();
-    this.onRideChange?.(true);
+    // Nothing else to do. Boarding is {@link requestBoard} and nothing but —
+    // there is deliberately no "she is standing on the platform, put her on the
+    // train" branch here any more.
   }
 
   /**
-   * "Let me off."
+   * "Let me off." The interact key or a hop — accelerators for the "Get off"
+   * chip, for a player whose hands are already on the keyboard.
    *
-   * The interact key, a hop, or *any attempt to walk*. That last one matters:
-   * `Game` hides the touch buttons while a ride has hold of you, so on a phone
-   * a tap on the ground — which the tap navigator turns into movement input —
-   * has to be a way out, or a child is stuck on the train until they find the
-   * keyboard they do not have.
+   * **Walking is no longer a way off**, and that is the point of the SELECTION
+   * RULE: a child who turned to look at the park found herself standing on the
+   * platform watching the train leave. The chip is the way out, it is on screen
+   * over the platform the whole time the train is stopped, and it is pressable
+   * with a finger — which is what the movement clause was really there for.
    */
-  private wantsOff(context: FrameContext, lookDragging: boolean): boolean {
+  private wantsOff(context: FrameContext, _lookDragging: boolean): boolean {
     const { input } = context;
-    if (input.justPressed('interact') || input.justPressed('jump')) return true;
-    // A walk is still a way out (a child on a phone has no other), but not
-    // while the same finger is mid look-drag.
-    if (lookDragging) return false;
-    return Math.abs(input.moveX) + Math.abs(input.moveY) > 0.35;
+    return input.justPressed('interact') || input.justPressed('jump');
   }
 
   private alight(player: Player): void {

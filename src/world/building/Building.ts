@@ -347,6 +347,9 @@ export class Building implements GameSystem {
         facadeZ(BUILDING_HALF_Z + 1.4),
         BUILDING_BASE_Y + 1,
       ),
+      // The lift's "Call" chip and the panel's big round button are the same
+      // summon — see `liftRide.ts`'s `LiftPanelSource`.
+      callLift: () => this.liftRide.call(),
     });
   }
 

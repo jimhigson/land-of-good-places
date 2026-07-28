@@ -1,4 +1,3 @@
-import { isTouchDevice } from './core/device';
 import type { FrameContext, GameSystem } from './core/types';
 import { CarriedItem } from './entities/CarriedItem';
 import { EatenTreat } from './entities/EatenTreat';
@@ -60,7 +59,6 @@ export class Shopping implements GameSystem {
 
   private readonly player: Player;
   private readonly world: World;
-  private readonly hud: Hud;
   private readonly panel: ShopPanel;
   private readonly drawer: InventoryDrawer;
   private readonly carried: CarriedItem;
@@ -71,7 +69,6 @@ export class Shopping implements GameSystem {
   constructor(uiRoot: HTMLElement, player: Player, world: World, hud: Hud) {
     this.player = player;
     this.world = world;
-    this.hud = hud;
 
     this.panel = new ShopPanel(uiRoot, {
       onBuy: (itemId) => this.buy(itemId),
@@ -112,7 +109,6 @@ export class Shopping implements GameSystem {
       // Esc / B on a pad closes whatever is open; nothing else gets through.
       if (input.justPressed('menu') || input.justPressed('cancel')) this.closeUi();
       else if (input.justPressed('inventory')) this.toggleDrawer();
-      this.hud.setPrompt(null);
       return;
     }
 
@@ -121,12 +117,16 @@ export class Shopping implements GameSystem {
       return;
     }
 
+    // No "Press E to shop" prompt of its own any more: GAME_DESIGN.md's
+    // SELECTION RULE puts a "Shop!" chip over the counter instead, from the one
+    // system that offers every action in the park (`world/Selection.ts`). The
+    // press itself is still handled here, exactly as it always was — the chip
+    // fires the same virtual E.
     const stand = this.world.building.shops.shopAt(
       this.player.position.x,
       this.player.position.y,
       this.player.position.z,
     );
-    this.hud.setPrompt(stand ? promptFor(stand) : null);
 
     if (stand && input.justPressed('interact') && !this.player.riding) this.openShop(stand);
   }
@@ -268,6 +268,4 @@ function specFor(item: ShopItem): PurchaseSpec {
   };
 }
 
-function promptFor(stand: ShopStand): string {
-  return isTouchDevice() ? `Tap the counter — ${stand.title}` : `Press E — ${stand.title}`;
-}
+

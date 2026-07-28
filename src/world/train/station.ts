@@ -148,7 +148,11 @@ export class Station {
     return Math.abs(along) <= this.halfLength && Math.abs(across) <= this.halfWidth;
   }
 
-  interactZone(): InteractZone {
+  /**
+   * The platform as a tap target. `ParkTrain` adds the actions — "Get on",
+   * "Get off" — because only the train knows whether it is standing here.
+   */
+  interactZone(): Omit<InteractZone, 'actions'> {
     return {
       id: `train-station-${this.index}`,
       label: this.name,
@@ -158,9 +162,13 @@ export class Station {
       pickRadius: 4.2,
       standX: this.standX,
       standZ: this.standZ,
-      // Nothing to press: standing on the platform when the train is in is what
-      // gets you a seat, exactly as standing on the slide pad starts the slide.
-      pressInteract: false,
+      // Wider than the default three metres, and measured from the middle of a
+      // 7.2 m platform: a child at either end of it, or sitting in the far
+      // carriage, is still "at this station" as far as the chip is concerned.
+      standRadius: 5.5,
+      // So that "Get off" is on screen while the ride owns her — see
+      // `InteractZone.selectableWhileRiding`.
+      selectableWhileRiding: true,
     };
   }
 

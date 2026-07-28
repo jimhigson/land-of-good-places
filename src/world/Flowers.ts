@@ -15,7 +15,7 @@ import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/fl
 import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
-import type { InteractZone } from './interact';
+import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -214,23 +214,31 @@ export class Flowers implements GameSystem {
     const zones: InteractZone[] = [];
     for (let i = 0; i < this.count; i += 1) {
       if (this.stage[i] === STAGE_PICKED) continue;
-      zones.push({
-        id: `flower:${i}`,
-        label: 'flower',
-        x: this.posX[i] ?? 0,
-        y: this.groundY[i] ?? 0,
-        z: this.posZ[i] ?? 0,
-        pickRadius: 0.9,
-        standX: this.posX[i] ?? 0,
-        standZ: this.posZ[i] ?? 0,
-        pressInteract: true,
-        // The HIGHLIGHT RULE's interesting case: there is no flower object to
-        // point at, only row `i` of an instance buffer. The highlight system
-        // shares one shell across every instance of the head mesh and reads the
-        // instance's own matrix each frame, so the rainbow grows with the
-        // flower and vanishes with it when it is picked.
-        highlight: highlightInstance(this.heads, i),
-      });
+      zones.push(
+        pressZone(
+          {
+            id: `flower:${i}`,
+            label: 'flower',
+            x: this.posX[i] ?? 0,
+            y: this.groundY[i] ?? 0,
+            z: this.posZ[i] ?? 0,
+            pickRadius: 0.9,
+            standX: this.posX[i] ?? 0,
+            standZ: this.posZ[i] ?? 0,
+            // Tighter than the default three metres, and it has to be: picking
+            // is gated on {@link PICK_RADIUS} below, so a "Pick!" chip offered
+            // from further off would be a button that does nothing.
+            standRadius: PICK_RADIUS,
+            // The HIGHLIGHT RULE's interesting case: there is no flower object
+            // to point at, only row `i` of an instance buffer. The highlight
+            // system shares one shell across every instance of the head mesh and
+            // reads the instance's own matrix each frame, so the rainbow grows
+            // with the flower and vanishes with it when it is picked.
+            highlight: highlightInstance(this.heads, i),
+          },
+          '🌼',
+        ),
+      );
     }
     return zones;
   }
