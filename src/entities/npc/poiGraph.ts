@@ -1,6 +1,14 @@
-import { Vector3 } from 'three';
-import { ANCHORS_BY_ID } from '../../world/anchors';
+import { CatmullRomCurve3, Vector3 } from 'three';
+import {
+  BUILDING_CENTRE_X,
+  BUILDING_CENTRE_Z,
+  BUILDING_HALF_X,
+  BUILDING_HALF_Z,
+} from '../../core/constants';
+import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
+import { PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
+import { STALL_STANDS } from '../../minigames/stallPlacement';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
 /**
@@ -11,13 +19,14 @@ import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
  * tree trunks produces exactly what you would expect: half of them stuck on a
  * trunk, vibrating, forever.
  *
- * Instead they walk a small graph of waypoints. The nodes are authored to
- * follow the real path network in `world/paths.ts` — the ring road, the plaza,
- * and a spur to each anchor — so a child crossing the park walks the paving a
- * child would actually walk. Edges are **not** authored: every candidate pair
- * is walked at build time and kept only if a character of NPC width fits along
- * the whole straight line. Plant a new tree across a shortcut and the shortcut
- * removes itself.
+ * Instead they walk a small graph of waypoints. The nodes **follow the real
+ * path network in `world/paths.ts`** — the ring road, the plaza, and a spur to
+ * each anchor — so a child crossing the park walks the paving a child would
+ * actually walk. Nothing here is a typed-in coordinate: the seeds are *derived*
+ * from the same exports the park is built from (see {@link SEEDS}). Edges are
+ * not authored either: every candidate pair is walked at build time and kept
+ * only if a character of NPC width fits along the whole straight line. Plant a
+ * new tree across a shortcut and the shortcut removes itself.
  *
  * The nodes marked `interesting` are the destinations worth stopping at — the
  * fountain, the ball pit lip, the building door, the plots where the rides are
@@ -67,13 +76,25 @@ import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
  * empty world between them and pronounce it fine. Crossing between spaces is a
  * *portal*, not a walk, and belongs to the building.
  *
- * Known follow-up: the ring-road coordinates below mirror the `main-loop` route
- * in `paths.ts`, which does not export its control points. Exporting them and
- * deriving these would be the tidy fix; the validation pass means a drift shows
- * up as dropped edges rather than as children walking through a hedge.
+ * ## Nothing here is typed in
+ *
+ * This table used to be forty hand-written coordinates that *traced* the path
+ * network: ring-road nodes copied off the `main-loop` route, spur nodes copied
+ * off each anchor's entrance. That is a copy, and a copy goes stale silently.
+ *
+ * ARCHITECTURE-DECISIONS **Decision 5** makes the park procedurally generated —
+ * `ANCHORS` keeps its interface but its positions come from a solver, `ROUTES`
+ * keeps its shape but its control points are grown, and the plaza moves to
+ * wherever the fountain is placed. Every one of those forty coordinates would
+ * have become a node in a hedge: not a crash, just children slowly walking
+ * nowhere, which is exactly the bug class that cost a night in July.
+ *
+ * So the seeds are **built from the layout's own exports**, at module load,
+ * before any of it is generated: {@link PLAZA} for the plaza ring,
+ * {@link ROUTES} for the paving, {@link ANCHORS} for the entrances, and
+ * `minigames/stallPlacement.ts` for the stall stands. Nothing changes here when
+ * the generator lands, because there is nothing here to change.
  */
-
-const anchor = ANCHORS_BY_ID;
 
 /** Longest straight line between two waypoints. Keeps chords near the paving. */
 const MAX_EDGE = 13;
@@ -88,91 +109,158 @@ interface NodeSeed {
   readonly x: number;
   readonly z: number;
   /** Somewhere worth stopping and looking at, rather than a junction. */
-  readonly interesting?: boolean;
+  readonly interesting: boolean;
 }
 
+/** Metres between waypoints sampled along a path. Comfortably under {@link MAX_EDGE}. */
+const ROUTE_SPACING = 7;
+
+/** How many waypoints ring the fountain. Six is what the plaza has always had. */
+const PLAZA_RING_NODES = 6;
+
+/** How far inside the plaza kerb its ring of waypoints sits. */
+const PLAZA_EDGE_INSET = 0.8;
+
 /**
- * The waypoints, as authored.
+ * Two seeds closer than this are the same place, and the first one wins.
+ *
+ * A spur's last sample and the entrance it arrives at land within a metre of
+ * each other; so do a kiosk's stand point and the anchor entrance it stands on
+ * (the ferris wheel's ticket booth *is* the anchor's entrance). Keeping both
+ * would put two nodes in one patch of paving, which is a child choosing between
+ * two identical destinations.
+ */
+const MERGE_DISTANCE = 1.2;
+
+/**
+ * The waypoints — **derived from the park's own layout exports**, never typed.
+ *
+ * Four sources, in the order they are added, which is also the order of
+ * precedence when two land on the same spot (see {@link MERGE_DISTANCE}):
+ *
+ * 1. **The plaza kerb.** A ring just inside {@link PLAZA}'s edge. The fountain
+ *    is in the middle, so a ring is the only shape that works, and this is the
+ *    busiest place in the park — every one of them is `interesting`.
+ * 2. **Every anchor entrance**, from {@link ANCHORS}. This is where a path spur
+ *    arrives and where the sign stands: the place a child goes.
+ * 3. **Every stall stand**, from `minigames/stallPlacement.ts` — the patch of
+ *    grass in front of a counter, derived there from the booth's position and
+ *    facing rather than measured off a map.
+ * 4. **The paving itself.** Every route in {@link ROUTES} is sampled along its
+ *    curve every {@link ROUTE_SPACING} metres, which gives the junctions
+ *    between all of the above. Samples, not control points: a Catmull-Rom curve
+ *    bows away from its controls on a bend, and control points on the ring road
+ *    can be fifteen metres apart — further than an edge is allowed to be. The
+ *    curve is rebuilt with the same parameters `paths.ts` builds it with, which
+ *    is what `ui/ParkMap.ts` does to draw the same centreline.
+ *
+ * One thing is dropped, and it is the one thing nothing downstream can catch:
+ * a sample inside the **facade**. The building's spur runs its last control
+ * point into the solid scenery tower the front door is cut into, and that tower
+ * is registered as four wall segments with *nothing inside*, so the collision
+ * resolver reports its middle as clear and two waypoints in there happily see
+ * each other across it. That is the mistake `scripts/check-waypoints.mts` fails
+ * a build over, and {@link insideFacade} below tests the same rectangle from
+ * the same four constants the checker uses — so what is seeded and what the
+ * checker accepts cannot drift apart.
+ *
+ * Nothing else is filtered. An anchor's plot is *not* excluded: the ring road
+ * runs straight through the ball pit's footprint, the dodgems' and the water
+ * fight's entrances sit inside their own plots by design, and everything those
+ * plots will eventually have built on them is real collision that the edge pass
+ * can see for itself.
+ *
+ * Everything past this point is validated anyway — a seed inside a bush is
+ * nudged or dropped by {@link findClearSpot}, an edge through a hedge never
+ * forms, and a pocket nobody can walk to is marked unreachable and named at
+ * boot. Deriving the seeds does not replace any of that; it stops the *inputs*
+ * from silently describing last week's park.
  *
  * Exported for `scripts/check-waypoints.mts`, which is the build's guard
  * against the one mistake this table has actually made: a coordinate inside a
  * solid building. See that file — it fails a build rather than a child's
  * afternoon.
  */
-export const SEEDS: readonly NodeSeed[] = [
-  // --- the ring road, with midpoints so a straight chord stays on the paving
-  { x: 0, z: -21 },
-  { x: 7.5, z: -21 },
-  { x: 15, z: -20 },
-  { x: 24, z: -12 },
-  { x: 25, z: -5 },
-  { x: 25, z: 2 },
-  { x: 22, z: 8.8 },
-  { x: 18, z: 15 },
-  { x: 11, z: 19.2 },
-  { x: 4, z: 22 },
-  { x: -4, z: 22.5 },
-  { x: -12, z: 22 },
-  { x: -23, z: 13 },
-  { x: -24.5, z: 5 },
-  { x: -24, z: -3 },
-  { x: -17, z: -16 },
-  { x: -9, z: -19 },
+export const SEEDS: readonly NodeSeed[] = buildSeeds();
 
-  // --- the fountain plaza: the busiest place in the park
-  { x: 0, z: -15 },
-  { x: 0, z: -9, interesting: true },
-  { x: 7, z: -5, interesting: true },
-  { x: 8, z: 3, interesting: true },
-  { x: 0, z: 8, interesting: true },
-  { x: -8, z: 3, interesting: true },
-  { x: -7, z: -5, interesting: true },
+function buildSeeds(): NodeSeed[] {
+  const seeds: NodeSeed[] = [];
 
-  // --- grass shortcuts off the plaza. Dropped automatically if a tree is in
-  //     the way, which is why they can be optimistic.
-  { x: 13, z: 8 },
-  { x: -13, z: 9 },
+  const add = (x: number, z: number, interesting: boolean): void => {
+    for (const seed of seeds) {
+      const dx = seed.x - x;
+      const dz = seed.z - z;
+      if (dx * dx + dz * dz < MERGE_DISTANCE * MERGE_DISTANCE) return;
+    }
+    seeds.push({ x, z, interesting });
+  };
 
-  // --- the ball pit lip
-  { x: -2, z: -16 },
-  { x: -4, z: -12 },
-  { x: anchor.ballPit.entrance[0], z: anchor.ballPit.entrance[1], interesting: true },
-  { x: -8, z: -8.5, interesting: true },
+  // 1. The plaza kerb, starting at the fountain approach (-Z) and going round.
+  const plazaRadius = PLAZA.radius - PLAZA_EDGE_INSET;
+  for (let i = 0; i < PLAZA_RING_NODES; i += 1) {
+    const angle = -Math.PI / 2 + (i / PLAZA_RING_NODES) * Math.PI * 2;
+    add(PLAZA.x + Math.cos(angle) * plazaRadius, PLAZA.z + Math.sin(angle) * plazaRadius, true);
+  }
 
-  // --- the big building: up the spur to the front door, and no further.
-  //
-  // There used to be three more here, flagged `indoors`, meant to be the lobby
-  // and the hall. They were nothing of the sort. The interior is six hundred
-  // metres away (`core/constants.ts`'s `INTERIOR_ORIGIN_X`); these three were at
-  // x ≈ −30, which is *inside the facade* — the solid scenery tower out here in
-  // the garden. Two of them (−29, −27) and (−34, −26) sat behind the lobby's
-  // back wall in a part of the model that has no floor and no way in, joined to
-  // each other and to nothing else. The third stood in the 1.8 m lobby, which
-  // exists only so a child who keeps walking during the iris does not end up
-  // inside a solid tower (`Building.registerFacadeCollision`) — an airlock, not
-  // a place to loiter.
-  //
-  // Nothing replaces them. A waypoint is somewhere a child would *choose* to
-  // go, and until Decision 3's S2 gives each castle floor its own space there
-  // are no such places indoors — and no way for a child to reach them if there
-  // were, because crossing the threshold is a six-hundred-metre teleport rather
-  // than a walk. When S2 lands, indoor waypoints go in at the floor's own
-  // origin and `spaceAt` will label them correctly without anyone saying so.
-  { x: -19, z: -15 },
-  { x: -23, z: -18 },
-  { x: anchor.building.entrance[0], z: anchor.building.entrance[1], interesting: true },
+  // 2. Where each attraction is entered.
+  for (const anchor of ANCHORS) add(anchor.entrance[0], anchor.entrance[1], true);
 
-  // --- the plots where the rides are coming
-  { x: 24, z: -11 },
-  { x: anchor.ferrisWheel.entrance[0], z: anchor.ferrisWheel.entrance[1], interesting: true },
-  { x: 29, z: -19, interesting: true },
-  { x: 19, z: 13 },
-  { x: anchor.dodgems.entrance[0], z: anchor.dodgems.entrance[1], interesting: true },
-  { x: 26, z: 17, interesting: true },
-  { x: -19, z: 17 },
-  { x: anchor.waterFight.entrance[0], z: anchor.waterFight.entrance[1], interesting: true },
-  { x: -25, z: 20, interesting: true },
-];
+  // 3. Where a child stands to be served at each stall.
+  for (const stand of STALL_STANDS) add(stand.x, stand.z, true);
+
+  // 4. The paving between them.
+  for (const route of ROUTES) {
+    for (const point of sampleRoute(route)) {
+      if (insideFacade(point.x, point.z)) continue;
+      add(point.x, point.z, false);
+    }
+  }
+
+  return seeds;
+}
+
+/**
+ * Points every {@link ROUTE_SPACING} metres along a route's centreline.
+ *
+ * The curve is rebuilt exactly as `paths.ts` builds the ribbon it draws —
+ * centripetal-ish Catmull-Rom, tension 0.4, closed for the ring road — so these
+ * points are on the paving rather than near it. A closed route stops one sample
+ * short of the end, which is where it started.
+ */
+function sampleRoute(route: RouteDefinition): { x: number; z: number }[] {
+  const vectors = route.points.map(([x, z]) => new Vector3(x, 0, z));
+  const curve = new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+  const steps = Math.max(1, Math.round(curve.getLength() / ROUTE_SPACING));
+  const last = route.closed ? steps - 1 : steps;
+  const point = new Vector3();
+  const points: { x: number; z: number }[] = [];
+  for (let i = 0; i <= last; i += 1) {
+    curve.getPoint(i / steps, point);
+    points.push({ x: point.x, z: point.z });
+  }
+  return points;
+}
+
+/**
+ * Is this inside the big building's solid facade?
+ *
+ * The one place in the park where "a character fits here" is a lie: the facade
+ * is four wall segments with nothing registered between them, so the resolver
+ * finds the middle of a solid tower perfectly clear. The building's path spur
+ * ends *inside* it — the last control point is the doorway approach seen from
+ * the model's side — so sampling that route without this test seeds a waypoint
+ * in a wall, which is precisely what `scripts/check-waypoints.mts` fails a
+ * build for. Same four constants, same rectangle, so the two agree by
+ * construction rather than by somebody keeping them in step.
+ */
+function insideFacade(x: number, z: number): boolean {
+  return (
+    x >= BUILDING_CENTRE_X - BUILDING_HALF_X &&
+    x <= BUILDING_CENTRE_X + BUILDING_HALF_X &&
+    z >= BUILDING_CENTRE_Z - BUILDING_HALF_Z &&
+    z <= BUILDING_CENTRE_Z + BUILDING_HALF_Z
+  );
+}
 
 export interface PoiNode {
   readonly index: number;
