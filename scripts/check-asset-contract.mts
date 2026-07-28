@@ -130,18 +130,16 @@ const KNOWN_DRIFT: Readonly<Record<string, Recorded>> = {
     why: 'Both the tip and the mounting depth are computed from `PUFF_BALL_RADIUS * 0.92`, a hand-guessed stand-in for the ball\'s real extent. The hat therefore hovers 30 mm above the crown instead of settling into the hair.',
   },
 
-  // ---- Pets. `sizeToStandard` closes over a `Box3`, which is the axis-aligned
-  // ---- box of already axis-aligned boxes: every rotation in the chain inflates
-  // ---- it, so the sizer scales each pet down a little too far. The bunny is
-  // ---- nearly right, the puff is 68 mm short of the 1.46 m standard.
-  'pet.kitten': { height: -0.034, why: 'Box3 over-measure in `sizeToStandard` — see above.' },
-  'pet.mouse': { height: -0.055, why: 'Box3 over-measure in `sizeToStandard` — see above.' },
-  'egg.prize.mouse': { height: -0.055, why: 'Box3 over-measure in `sizeToStandard` — see above.' },
-  'pet.puff': {
-    height: -0.068,
-    bottom: -0.028,
-    why: 'Box3 over-measure in `sizeToStandard`, plus the puff sinks 28 mm through the floor.',
-  },
+  // ---- The pets had four entries here — kitten -34 mm, mouse -55 mm, puff
+  // ---- -68 mm and sunk 28 mm through the floor — because `sizeToStandard`
+  // ---- closed over a `Box3`, the axis-aligned box of already axis-aligned
+  // ---- boxes, which every rotation in the chain inflates. It now closes over
+  // ---- `visibleBounds` and over the full extent rather than the top alone,
+  // ---- so all four measure 1.460 with their feet on the floor. **The entries
+  // ---- are gone, not relaxed**: the ratchet only guards an asset while its
+  // ---- allowance is no wider than the truth, and each of those three errors
+  // ---- was well outside HEIGHT_TOLERANCE, so this check would have caught
+  // ---- last night's fix had the table been tightened with it.
 
   // ---- Origins that are deliberate, and would be better stated in the model.
   'prop.tree.*': {
