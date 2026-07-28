@@ -228,13 +228,23 @@ function buildRoutes(): readonly RouteDefinition[] {
 export const ROUTES: readonly RouteDefinition[] = buildRoutes();
 
 /** Sampled path centreline, used for scenery placement queries. */
-interface PathSample {
+export interface PathSample {
   readonly x: number;
   readonly z: number;
   readonly halfWidth: number;
 }
 
 const samples: PathSample[] = [];
+
+/**
+ * The drawn network's centreline samples — the ground truth the crossings
+ * computation walks (Decision 4: crossings are computed from the solved
+ * curves at boot, so they can never drift off either the track or the path).
+ * Populated by {@link buildPaths}, which Garden runs before the train exists.
+ */
+export function pathCentreline(): readonly PathSample[] {
+  return samples;
+}
 
 /**
  * Distance from (x, z) to the nearest path *edge*.

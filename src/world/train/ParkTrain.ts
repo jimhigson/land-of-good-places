@@ -10,6 +10,8 @@ import type { MovingPlatform } from '../building/surfaces';
 import { TrainRoute } from './route';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
+import { computeCrossings, type LevelCrossing } from './crossings';
+import { buildRailFence } from './fence';
 import { SmokePuffs } from './puffs';
 import {
   createCarriage,
@@ -95,6 +97,8 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly route: TrainRoute;
   readonly stations: Station[] = [];
   readonly stops: TrainStop[] = [];
+  /** The level crossings — exported so `check:park` knows where feet may cross. */
+  readonly crossings: readonly LevelCrossing[] = [];
 
   /** 0 by day, 1 at night. Set by `World`, like the fountain's. */
   nightFactor = 0;
@@ -138,6 +142,13 @@ export class ParkTrain implements GameSystem, TrainService {
     this.route = new TrainRoute(collision);
     this.track = buildTrack(this.route);
     this.group.add(this.track.group);
+
+    // Level crossings first (they come out of the solved curve and the drawn
+    // paths), then the fence, which leaves a gap at every one of them and at
+    // both stations. Order matters: the stations below choose their spot with
+    // `clearStationDistance`, so the fence is built after them — see the end
+    // of this constructor.
+    this.crossings = computeCrossings(this.route);
 
     // --- the train itself ----------------------------------------------------
     this.locomotive = createLocomotive();
@@ -226,6 +237,16 @@ export class ParkTrain implements GameSystem, TrainService {
       this.group.add(station.group);
       this.stops.push({ index, name: seed.name, x: station.standX, z: station.standZ });
     });
+
+    // --- the fence (Decision 4 §6: keeping feet off the track) -------------
+    // Built last of all the trackside furniture, because its gaps are defined
+    // by everything above: a gap at every level crossing, and a gap along
+    // every platform so children can board.
+    this.group.add(
+      buildRailFence(this.route, collision, this.crossings, this.stations.map((station) => ({
+        distance: station.distance,
+      }))),
+    );
 
     // Start standing at the first station, so the first thing a child sees is a
     // train waiting for them rather than one disappearing round a corner.

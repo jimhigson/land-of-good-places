@@ -117,13 +117,13 @@ const PULL = 0.006;
  * rather than a fence around it — and every dip still respects the
  * per-bearing lower bound, so it can never touch a plot.
  */
-const DIP_RADIUS = 33;
+const DIP_RADIUS = 38;
 
 /** A bearing only dips if the way in is clear this far past the dip floor. */
-const DIP_HEADROOM = 3.5;
+const DIP_HEADROOM = 2.5;
 
 /** Bearings of guard either side of an obstacle before a dip is allowed. */
-const DIP_GUARD = 8;
+const DIP_GUARD = 5;
 
 /**
  * Beyond this radius the collision probe is skipped.
@@ -348,8 +348,12 @@ function solveProfile(collision: CollisionWorld): Float64Array {
       // Averaging the two neighbours alone (weight 0.5) leaves the alternating
       // high-low mode untouched — it is an eigenvector with eigenvalue -1 and
       // flips sign forever instead of decaying. Keep the weight below a half.
-      let radius =
-        here + SMOOTHING * (before + after - 2 * here) + PULL * ((target[i] ?? NOMINAL_RADIUS) - here);
+      // Dips pull much harder than the wall does: a dip is a narrow angular
+      // window, and at the wall's gentle pull the smoothing term wins and
+      // the loop never leaves the wall at all (measured: zero dips).
+      const want = target[i] ?? NOMINAL_RADIUS;
+      const pull = want < NOMINAL_RADIUS - 1 ? PULL * 5 : PULL;
+      let radius = here + SMOOTHING * (before + after - 2 * here) + pull * (want - here);
 
       const angle = (i / BEARINGS) * Math.PI * 2;
       const dirX = Math.cos(angle);
