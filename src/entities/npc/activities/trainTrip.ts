@@ -97,6 +97,18 @@ export class TrainTrip implements Activity {
         this.cooldown -= dt;
         if (this.cooldown > 0) return false;
         this.cooldown = host.rng.range(TRAIN_INTERVAL_MIN, TRAIN_INTERVAL_MAX);
+        // Never poach a child already committed to something else. Activities
+        // are offered the frame in the order `[climb, chat, train, paint]`, so
+        // being *last* is what protects the first three: a busy one takes the
+        // frame and the loop stops before reaching the rest. The paint stall is
+        // behind the train, and so had nothing protecting it — a child on their
+        // way to have their face painted got marched off to a station instead,
+        // holding a paint slot for the whole trip and resuming the walk a minute
+        // later from wherever the train dropped them. Asked here rather than
+        // enforced in the runner because skipping an activity's `update`
+        // entirely also stops its idle bookkeeping, and the climb deliberately
+        // ticks its cooldown through everything else a child does.
+        if (host.othersBusy(this)) return false;
         if (!host.rng.chance(TRAIN_CHANCE)) return false;
 
         const stop = service.nearestStop(context.position.x, context.position.z);

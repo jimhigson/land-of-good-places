@@ -231,6 +231,13 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       this.blinkRemaining = 0.12;
     }
 
+    // Where a painted child's face is, for the stall to hang their decal near.
+    // Above the activities rather than inside the visit, because a climb or a
+    // train trip takes the frame before the visit is ever offered it, and a
+    // child does not stop having a face while they are up a tree
+    // (ARCHITECTURE-REVIEW C2).
+    this.paint.trackHead(context);
+
     // An activity that holds the whole child gets the frame before the child
     // even notices the player: nobody waves from up a tree.
     let hold = this.offerFrame(true, context, intent);
@@ -246,14 +253,52 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // `'intent'` and `'child'` hold the whole intent, so the social tail below
     // does not run for them — they write their own expression. See
     // `ActivityHold`.
-    if (hold === 'intent' || hold === 'child') return;
+    if (hold === 'intent' || hold === 'child') {
+      // Nothing is going to consume what the social half of this method was
+      // saving up, so drop it rather than let it queue (ARCHITECTURE-REVIEW C3).
+      //
+      // `reactToPlayer` still runs before a `'intent'` activity claims the
+      // frame — it has to, because it draws from the seeded stream and skipping
+      // it would shift every later decision this child makes. What it asks for
+      // is what leaked. A hop copied from the player on the platform sat in
+      // `hopRequest` for the whole ride and fired when the child stepped off the
+      // train, a minute after the hop it was copying. And `waveAmount` froze
+      // part-way through its blend while the arm itself snapped down (the body
+      // clears the intent every frame), so the arm jumped back up to where the
+      // blend had stopped when the trip let go.
+      //
+      // Two blocks' assumptions colliding: the social tail assumed it always
+      // ran, the trip assumed it owned everything. The trip does own everything
+      // — so the answer is that a child who gets on a train has finished
+      // waving.
+      this.hopRequest = false;
+      this.waveRemaining = 0;
+      this.waveAmount = 0;
+      return;
+    }
 
     // --- the bits that make them look like children -------------------------
     this.waveAmount = approach(this.waveAmount, this.waveRemaining > 0 ? 1 : 0, dt * 4.5);
     if (this.waveRemaining > 0) this.waveRemaining -= dt;
 
     intent.wave = this.waveAmount;
-    if (this.pausing && this.lookYaw !== null) intent.lookAt = this.lookYaw;
+
+    // Where a child looks while paused belongs to the wander core, so it is
+    // only applied on the frames the core is actually steering them.
+    //
+    // A `'steering'` activity leaves this tail running — that is the point of
+    // the hold, so a chatting child still blends their wave — but where they
+    // walk and where they look are one decision, not two, and the activity
+    // making it is the one that knows. Without the `hold` test, a chat that
+    // began while the child happened to be mid-pause had them talking to the
+    // player while gazing off at whatever the pause had last picked out, and a
+    // child walking to the paint stall looked somewhere other than the stall.
+    //
+    // The pause itself is left alone: neither chat nor paint clears `pausing`
+    // when it takes over (they rejoin `'legacy'`), so the child resumes the
+    // pause afterwards exactly as before. Unifying that with the train's
+    // `'full'` rejoin is a separate behaviour change — see `Rejoin`.
+    if (hold === null && this.pausing && this.lookYaw !== null) intent.lookAt = this.lookYaw;
 
     if (this.hopRequest && context.grounded) {
       intent.hop = true;

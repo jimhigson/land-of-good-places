@@ -2,7 +2,7 @@ import type { Rng } from '../../../core/mathUtils';
 import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../../art/style/faces';
 import type { CharacterIntent, DriverContext } from '../driver';
 import type { Activity, ActivityHold, ActivityHost } from './activity';
-import { Errand, NO_LIMIT, NO_TIMEOUT } from './errand';
+import { Errand, NO_LIMIT } from './errand';
 
 /**
  * Getting your face painted at the stall (see ART_DIRECTION.md's face patch
@@ -20,15 +20,18 @@ import { Errand, NO_LIMIT, NO_TIMEOUT } from './errand';
  * through `NpcSystem`. That is the house style for this kind of feature
  * (`trainService()` is the same idea) and it moved here unchanged.
  *
- * **This is the block that dropped the safety rails.** It was copy-adapted
- * from the train trip and lost both of the train's guards — the walk timeout
- * and the stuck-sidestep — with the result that a child wedged behind a bush
- * on the way to the stall pushes at it for ever, *and* holds one of the four
- * concurrent visit slots for ever with it, so four unlucky children quietly
- * switch face painting off for the rest of the session (ARCHITECTURE-REVIEW
- * review 2, C1 — P1, still open). The rails are now `Errand`'s to keep, and
- * this activity's `ErrandLimits` say out loud that it has none. Turning them
- * on is a two-line behaviour change and belongs in its own PR.
+ * **This is the block that dropped the safety rails**, and this is the change
+ * that puts them back (ARCHITECTURE-REVIEW review 2, C1 — P1). It was
+ * copy-adapted from the train trip and lost both of the train's guards — the
+ * walk timeout and the stuck-sidestep — with the result that a child wedged
+ * behind a bush on the way to the stall pushed at it for ever, *and* held one
+ * of the four concurrent visit slots for ever with it, so four unlucky
+ * children quietly switched face painting off for the rest of the session,
+ * with nothing on screen to say why.
+ *
+ * The walk below now carries the train's own two guards, and the give-up path
+ * hands the slot back — see {@link spokenFor}, which is the slot: a child who
+ * gave up is neither painted nor visiting, so the next child may go.
  */
 export class FacePaintVisit implements Activity {
   readonly name = 'facePaintVisit';
@@ -47,19 +50,20 @@ export class FacePaintVisit implements Activity {
   private faceYaw = 0;
 
   /**
-   * The walk to the stall.
+   * The walk to the stall — off the validated waypoint graph, through whatever
+   * the garden has grown in the way, so both of `Errand`'s rails are on.
    *
-   * `NO_TIMEOUT` and `unstick: false` are **wrong** and are preserved verbatim
-   * — see the class comment. `Errand` is written so this has to be stated
-   * rather than merely forgotten: the fix is `timeout: WALK_TIMEOUT` and
-   * `unstick: true`, and the `'givenUp'` branch below is already waiting for
-   * it.
+   * `WALK_TIMEOUT` is the train's sixty seconds, deliberately: this is a walk
+   * of the same kind and the same length across the same park, and two
+   * different numbers for the same question would only be another thing to
+   * drift apart. `abandonRadius` stays `NO_LIMIT` because, unlike the player a
+   * chat is chasing, a stall does not walk off.
    */
   private readonly walk = new Errand({
     arriveRadius: ARRIVE_RADIUS,
-    timeout: NO_TIMEOUT,
+    timeout: WALK_TIMEOUT,
     abandonRadius: NO_LIMIT,
-    unstick: false,
+    unstick: true,
   });
 
   constructor(rng: Rng, startX: number, startZ: number) {
@@ -95,21 +99,36 @@ export class FacePaintVisit implements Activity {
   }
 
   /**
+   * Where this child's head is, for the stall to hang their paint decal near.
+   *
+   * Called by the wander core **before** any activity is offered the frame, and
+   * so on every frame of the child's life. That is the whole of
+   * ARCHITECTURE-REVIEW C2: this used to live at the top of {@link update},
+   * which sounds like the same thing and is not, because `update` is only
+   * reached if no activity ahead of this one took the frame. A painted child
+   * who climbed a tree or boarded the train stopped being tracked the instant
+   * the climb or the trip claimed them — and left their paint decal hanging in
+   * the air at the foot of the tree, or on the platform, for the whole ride.
+   *
+   * Not part of {@link Activity}: it is not an activity's business to run when
+   * an activity is not running, and one named call from the core is clearer
+   * than a hook on the interface with exactly one implementer.
+   */
+  trackHead(context: DriverContext): void {
+    this.faceX = context.position.x;
+    this.faceZ = context.position.z;
+  }
+
+  /**
    * One frame of "on the way to, or being painted at, the face-painting
    * stall".
    *
    * Every early `return false` leaves every field it touched back where the
    * wander core expects it, so a child who never gets picked for a visit costs
-   * this method nothing beyond the position bookkeeping at the top, which the
-   * stall's decal renderer needs regardless.
+   * this method nothing at all.
    */
   update(host: ActivityHost, context: DriverContext, intent: CharacterIntent): boolean {
     const { dt } = context;
-    // Cheap approximate head tracking, kept up to date every frame whether or
-    // not this child ever visits — `FacePaintStall` reads it straight off the
-    // registry in `paintedNpcFaces()`.
-    this.faceX = context.position.x;
-    this.faceZ = context.position.z;
 
     if (this.visit === 'none') {
       if (this.design !== null) return false; // one coat is plenty
@@ -143,10 +162,14 @@ export class FacePaintVisit implements Activity {
       const step = this.walk.step(host, context, intent, stall.standX, stall.standZ);
 
       if (step === 'givenUp') {
-        // Unreachable while the limits above say `NO_TIMEOUT`. This is the
-        // branch that turns on when C1 is fixed: give the slot back and go
-        // back to wandering from wherever the child got wedged.
+        // A minute of pushing at whatever is in the way, sidesteps included,
+        // and the stall is still not reached. Give up the way the train does:
+        // drop the visit — which is what gives the slot back, since
+        // `spokenFor` is false again the moment `visit` is `'none'` and no
+        // design was ever earned — forget which way round the scenery was
+        // working, and rejoin the graph from wherever the child got wedged.
         this.visit = 'none';
+        this.walk.clearSidestep();
         this.cooldown = host.rng.range(15, 40);
         host.rejoinGraph(context, 'legacy');
         return false;
@@ -219,17 +242,43 @@ export interface PaintedNpcFace {
  * (see `kidCrowd.ts` / `InstancedCrowd.ts`) — reaching into either is exactly
  * what this activity is written not to do. The decal's own head-height offset
  * is applied by the caller.
+ *
+ * **The returned array is reused, and is only valid until the next call.**
+ * Copy anything you need to keep. `FacePaintStall.updateNpcDecals` calls this
+ * unconditionally every frame, so building a fresh array and four fresh object
+ * literals here was 60 arrays and up to 240 objects a second, for ever, for a
+ * fixed pool of four decals — the one confirmed per-frame allocation on the
+ * whole update path (ARCHITECTURE-REVIEW §4a, which asked for exactly this).
+ *
+ * The pool only ever grows, because a painted child never becomes unpainted and
+ * no visit ever leaves {@link facePaintVisits} — so in a running park this
+ * allocates at most four times ever, on the frames the first four children come
+ * away painted.
  */
-export function paintedNpcFaces(): PaintedNpcFace[] {
-  const faces: PaintedNpcFace[] = [];
+export function paintedNpcFaces(): readonly PaintedNpcFace[] {
+  let count = 0;
   for (const visit of facePaintVisits) {
     const design = visit.paintDesign;
-    if (design) {
-      faces.push({ x: visit.headX, z: visit.headZ, yaw: visit.headYaw, design });
+    if (!design) continue;
+
+    let face = facePool[count];
+    if (!face) {
+      face = { x: 0, z: 0, yaw: 0, design };
+      facePool.push(face);
     }
+    face.x = visit.headX;
+    face.z = visit.headZ;
+    face.yaw = visit.headYaw;
+    face.design = design;
+    count += 1;
   }
-  return faces;
+  facePool.length = count;
+  return facePool;
 }
+
+/** The reused backing for {@link paintedNpcFaces}. Mutable in here, handed out
+ *  as `readonly PaintedNpcFace[]`. */
+const facePool: { x: number; z: number; yaw: number; design: FacePaintDesign }[] = [];
 
 function paintedOrVisitingCount(): number {
   let count = 0;
@@ -253,3 +302,7 @@ const PAINT_VISIT_CHANCE = 0.4;
 
 /** How close counts as having arrived — the wander core's own arrive radius. */
 const ARRIVE_RADIUS = 0.9;
+
+/** Longest a child spends walking to the stall. The train's number, on purpose
+ *  — see the `walk` field. */
+const WALK_TIMEOUT = 60;
