@@ -20,8 +20,9 @@ import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
+import { PARK_SEED } from './parkManifest';
 import { terrainHeight } from './terrain';
-import { isOnPath } from './paths';
+import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
 import type { CollisionWorld } from './Collision';
 
@@ -525,7 +526,8 @@ function facetted<T extends BufferGeometry>(geometry: T): T {
 function isPlantable(x: number, z: number, clearance: number): boolean {
   if (Math.hypot(x, z) > 55) return false;
   if (isOnPath(x, z, clearance)) return false;
-  if (Math.hypot(x, z) < 11) return false; // keep the fountain plaza open
+  // Keep the fountain plaza open — wherever the layout put it (Decision 5).
+  if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
   if (insideAnyAnchor(x, z, clearance)) return false;
   return true;
 }
@@ -541,6 +543,91 @@ function insideAnyAnchor(x: number, z: number, margin: number): boolean {
 
 // -------------------------------------------------------------------- walls
 
+/** Both endpoints and the middle sit on open plantable lawn. */
+function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
+  const steps = 4;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    if (!isPlantable(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, 2.4)) return false;
+  }
+  return true;
+}
+
+/**
+ * The hiding maze: L-shaped pieces scattered on the lawn. Two segments can
+ * never close a region, and pieces keep {@link MAZE_PIECE_GAP} apart, so the
+ * maze stays open however the seed falls — `check:park`'s routing invariant
+ * then proves it, rather than trusting this comment.
+ */
+const MAZE_PIECE_GAP = 7;
+
+function generateWallMaze(): WallRun[] {
+  const rng = new Rng(0x77a115 ^ PARK_SEED);
+  const heights = [0.95, 1.0, 1.5, 1.8, 2.1, 2.6];
+  const runs: WallRun[] = [];
+  const cornerPoints: [number, number][] = [];
+  let attempts = 0;
+  while (runs.length < 10 && attempts < 4000) {
+    attempts += 1;
+    const angle = rng.range(0, Math.PI * 2);
+    const radius = Math.sqrt(rng.range(13 * 13, 42 * 42));
+    const cx = Math.cos(angle) * radius;
+    const cz = Math.sin(angle) * radius;
+    if (cornerPoints.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < MAZE_PIECE_GAP + 12)) {
+      continue;
+    }
+    const yaw = rng.pick([0, Math.PI / 2] as const) + rng.range(-0.12, 0.12);
+    const armA = rng.range(5.5, 8.5);
+    const armB = rng.range(4.5, 7.5);
+    const a2: [number, number] = [cx + Math.cos(yaw) * armA, cz + Math.sin(yaw) * armA];
+    const b2: [number, number] = [
+      cx + Math.cos(yaw + Math.PI / 2) * armB,
+      cz + Math.sin(yaw + Math.PI / 2) * armB,
+    ];
+    if (!runIsClear(cx, cz, a2[0], a2[1]) || !runIsClear(cx, cz, b2[0], b2[1])) continue;
+    runs.push({ from: [cx, cz], to: a2, height: rng.pick(heights) });
+    runs.push({ from: [cx, cz], to: b2, height: rng.pick(heights) });
+    cornerPoints.push([cx, cz]);
+  }
+  return runs;
+}
+
+/** Plaza garden beds on four tangents, plus benches out on the lawn. */
+function generateStoneRuns(): WallRun[] {
+  const rng = new Rng(0x57013e ^ PARK_SEED);
+  const runs: WallRun[] = [];
+  // Beds: short tangent walls just off the plaza kerb, at seeded bearings.
+  const bedDistance = PLAZA.radius + 3.2;
+  for (let i = 0; i < 4; i += 1) {
+    const bearing = (i / 4) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    const cx = PLAZA.x + Math.cos(bearing) * bedDistance;
+    const cz = PLAZA.z + Math.sin(bearing) * bedDistance;
+    const tangent = bearing + Math.PI / 2;
+    const half = rng.range(3, 4.5);
+    const from: [number, number] = [cx - Math.cos(tangent) * half, cz - Math.sin(tangent) * half];
+    const to: [number, number] = [cx + Math.cos(tangent) * half, cz + Math.sin(tangent) * half];
+    if (!runIsClear(from[0], from[1], to[0], to[1])) continue;
+    runs.push({ from, to, height: rng.pick([0.7, 0.85] as const) });
+  }
+  // Benches: low stonework on open lawn, honestly hoppable heights only.
+  let attempts = 0;
+  while (runs.length < 8 && attempts < 2000) {
+    attempts += 1;
+    const angle = rng.range(0, Math.PI * 2);
+    const radius = Math.sqrt(rng.range(18 * 18, 40 * 40));
+    const cx = Math.cos(angle) * radius;
+    const cz = Math.sin(angle) * radius;
+    const yaw = rng.range(0, Math.PI);
+    const half = rng.range(3.5, 4.5);
+    const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
+    const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
+    if (!runIsClear(from[0], from[1], to[0], to[1])) continue;
+    runs.push({ from, to, height: rng.pick([0.95, 1.0, 1.2] as const) });
+  }
+  return runs;
+}
+
+
 /**
  * Wooden walls at various heights — the design doc asks for things "to run
  * around and hide behind", so these are laid out as a loose, open maze rather
@@ -550,18 +637,13 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
   const group = new Group();
   group.name = 'wooden-walls';
 
-  const runs: readonly WallRun[] = [
-    { from: [8, -8], to: [17, -8], height: 1.5 },
-    { from: [17, -8], to: [17, -2], height: 2.3 },
-    { from: [11, -3], to: [11, 3], height: 0.95 },
-    { from: [11, 3], to: [18, 4], height: 1.8 },
-    { from: [-16, 2], to: [-16, 9], height: 2.6 },
-    { from: [-16, 9], to: [-8, 10], height: 1.25 },
-    { from: [-10, 2], to: [-4, 1], height: 1.75 },
-    { from: [3, 13], to: [3, 19], height: 2.1 },
-    { from: [3, 19], to: [-4, 20], height: 1.4 },
-    { from: [-21, -8], to: [-15, -9], height: 1.15 },
-  ];
+  // Generated, not authored (Decision 5): five L-shaped pieces of hiding
+  // maze, seeded off PARK_SEED, each validated against the generated paths
+  // and plots. Heights come from a palette that deliberately skips the
+  // 1.0-1.5 m band: `checkHoppableColliders` proved the jump clears 1.0 m
+  // and strands on anything up to ~1.43 m, so a wall is either honestly
+  // hoppable or honestly solid, never in the trap between.
+  const runs: readonly WallRun[] = generateWallMaze();
 
   const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
   const postMaterial = toonMaterial(PALETTE.woodDark);
@@ -621,16 +703,11 @@ function buildStoneWalls(collision: CollisionWorld): Group {
   const group = new Group();
   group.name = 'stone-walls';
 
-  const runs: readonly WallRun[] = [
-    { from: [-13, -4], to: [-13, 4], height: 0.85 },
-    { from: [13, -5], to: [13, 2], height: 0.85 },
-    { from: [-7, 12], to: [7, 12], height: 0.7 },
-    { from: [-6, -12], to: [6, -12], height: 0.7 },
-    { from: [22, -6], to: [22, 4], height: 1.2 },
-    { from: [-24, 4], to: [-24, 12], height: 1.2 },
-    { from: [6, 26], to: [14, 24], height: 0.95 },
-    { from: [-14, -22], to: [-6, -23], height: 0.95 },
-  ];
+  // Four tangent-aligned beds around the plaza plus four lawn benches,
+  // generated from the layout (Decision 5). Stone stays at or below 1.2 m --
+  // and the 1.2 m runs sit far from paths, but the height palette obeys the
+  // same hoppable-or-solid rule as the wooden maze.
+  const runs: readonly WallRun[] = generateStoneRuns();
 
   const wallMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });
   const copingMaterial = toonMaterial(PALETTE.stonePinkLight);
