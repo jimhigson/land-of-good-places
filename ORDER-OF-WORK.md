@@ -234,15 +234,29 @@ ARCHITECTURE-DECISIONS.md Decision 2.
   `[22,-6]->[22,4]` 1.20 m, stone `[-24,4]->[-24,12]` 1.20 m. Lower them if
   they were meant to be hoppable; leave them if they are meant to be barriers.
 
-- **Indoor navigation does not exist.** The waypoint graph has three "indoors"
-  nodes and the castle architect found they are **dead nodes sitting inside
-  the garden facade** — so NPCs cannot reach the interior at all, and
-  tap-to-walk inside the castle has almost nothing to route on. Surfaced again
-  by the toilet work ("tapping the toilets from across the deck"). Needs
-  proper indoor coverage; note `NavGrid` builds its lattice from the current
-  play bounds, so the interior may mostly want the lattice rather than the
-  graph. Sequence against Decision 3 (S2 was already told to clean up the
-  three dead seeds).
+- **Indoor navigation — investigated 28 July, and it is smaller than it
+  looked.** Half of this entry was wrong; the measurements are in the
+  `feat/indoor-nav` PR and are worth not re-deriving:
+  - **Tap-to-walk already routes indoors.** `Building.enterInterior` moves the
+    play bounds to (600, 600, 46) and `NavGrid` keys on exactly those, so the
+    lattice has covered the interior since it landed. Measured: **99%** of
+    standable deck 1 routes to the toilets, **97%** of deck 0 to the front
+    door, rebuild **1.3 ms**. The residual is sealed *by design* — the alcove
+    behind each north-wall shop counter, and the deliberately solid
+    `HELTER_SHAFT` guard. Nothing to fix; the toilet report was a symptom of
+    the graph's dead nodes being mistaken for the player's map.
+  - **The three dead seeds are gone**, along with the `indoors` flag that lied
+    about them, and the graph now drops any waypoint stranded off the main
+    path network and says so. `npm run check:waypoints` fails the build on a
+    new one. **S2 no longer has this to clean up.**
+  - **What is genuinely left: NPCs cannot get inside.** That is a *portal*
+    problem, not a navigation one — crossing the threshold is a 600 m
+    teleport. It wants S1 (which turns the door into a portal) and then a
+    handful of waypoints per floor space after S2. Decision 3 §4 scopes it out
+    on purpose; it is no longer blocked on the `Activity` work, only on S1.
+  - **The interior's navigation is the lattice, decided.** The graph carries
+    only deliberate NPC destinations, and indoor waypoints are authored per
+    floor space *after* S2 — never against today's stacked plate.
 
 - **If night should be darker, start here.** The park has **14** point lights,
   not the 9 previously recorded: `prop.ferrisWheel` is a `PointLight` at

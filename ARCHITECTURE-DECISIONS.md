@@ -734,6 +734,18 @@ the future: an interior NPC on a split floor needs a flat single-storey
 waypoint graph, not multi-deck sampling. Letting NPCs use portals is out of
 scope and gated behind the `Activity` work (Wave 3).
 
+> **Done ahead of S2 (28 July, `feat/indoor-nav`).** The three seeds are
+> deleted and **S2 has nothing to clean up here**. Two were an isolated pair
+> inside the facade's solid block; the third stood in the 1.8 m lobby. The
+> `indoors` flag is replaced by a `space` derived from `world/spaces.ts`'s
+> `spaceAt`, edges may not join two spaces, and the graph drops any waypoint
+> stranded off the main path network. When S2 adds indoor waypoints they go in
+> at each floor's own origin and are labelled correctly without anyone saying
+> so. Two corrections to the paragraph above: NPC-indoors is no longer gated on
+> the `Activity` work (that landed) but on **S1**, since crossing the threshold
+> needs a portal; and the interior's *player* navigation was never missing —
+> `NavGrid` follows the play bounds and has routed the interior all along.
+
 ### 5. Per-floor plans — where the castle finally gets to be a castle
 
 `layout.ts` stops being one 800-line table for one stacked building. It keeps

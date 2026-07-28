@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:assets && npm run check:crowd && vite build",
+    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:assets && npm run check:crowd && npm run check:waypoints && vite build",
     "check:text": "node scripts/check-text-sizes.mjs",
     "check:assets": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-asset-contract.mts",
     "check:crowd": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts",
+    "check:waypoints": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-waypoints.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
     "check:gondola-sightline": "node scripts/checkGondolaSightline.mjs",
     "check:hop-clearance": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hop-clearance.mts",
