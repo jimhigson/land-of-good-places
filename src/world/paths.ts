@@ -98,7 +98,10 @@ function solveRing(): (readonly [number, number])[] {
     }
   }
   const points: (readonly [number, number])[] = [];
-  for (let i = 0; i < bearings; i += 2) {
+  // Every bearing becomes a control point: the ribbon's spline interpolates
+  // between them, and with 11-degree gaps it bulged into plot circles the
+  // profile itself had correctly avoided.
+  for (let i = 0; i < bearings; i += 1) {
     const angle = (i / bearings) * TAU_PATH;
     points.push([
       PLAZA.x + Math.cos(angle) * (profile[i] as number),

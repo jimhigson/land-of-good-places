@@ -94,74 +94,52 @@ interface Recorded {
  * step, and it gets no allowance.
  */
 const RATCHET: Readonly<Record<string, Recorded>> = {
-  'route.unreachable': {
-    worst: 1,
-    why:
-      "The space ferris wheel's kiosk was built straight across its own " +
-      "anchor's path spur: the four stall walls at (23.7, −16.1)–(28.3, −17.9) " +
-      'enclose the arrival point (26, −17) where the anchor sign stands, and ' +
-      'the nearest spot a child of player width fits is 2.5 m away. The other ' +
-      'four anchors stop 1.27 m short — the sign post itself, which is inside ' +
-      "`TapNavigator`'s own shortfall tolerance and is what arriving at a sign " +
-      'looks like. Closed by L1/L3: the solver reserves the spur and the sign ' +
-      'stands beside the path rather than in it.',
-  },
-  'poi.nospot': {
-    worst: 1,
-    why:
-      'One authored waypoint has nowhere within 2.2 m that a character of NPC ' +
-      'width fits, so `poiGraph` discards it before the graph is built — the ' +
-      'same walled-in ferris wheel spur. Closed when the waypoints come off ' +
-      'generated paths instead of a hand-typed table.',
-  },
-  'poi.stranded': {
-    worst: 7,
-    why:
-      'Seven authored waypoints sit off the main network — the ferris wheel, ' +
-      'dodgems and water-fight approach nodes among them — so the children ' +
-      'never walk to three of the five plots. They are dropped safely at boot ' +
-      '(poiGraph reports them), but a park where a third of the interesting ' +
-      'places are unreachable is exactly what Decision 5 L3 generates away: ' +
-      'paths are emitted to connect the entrance to every attraction, and the ' +
-      'waypoints come off those paths rather than off a hand-typed table.',
-  },
+  // Re-baselined 28 July at the Decision 5 switchover: the layout is now
+  // generated, and these residuals moved with it. Each entry says why its
+  // number is what it is; a *class* fix deletes the entry rather than
+  // loosening it. Historical note worth keeping: the generated park routes
+  // strictly better than the hand-authored one did — route.unreachable,
+  // poi.nospot and poi.stranded all went to zero and their entries were
+  // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 230.9,
+    worst: 155,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
-      'both sides — 231 of the 355 m loop. Decision 4 §6 ("keeping feet off ' +
-      'the rails without fencing the park in") is designed and unbuilt: the ' +
-      'train registers two station posts and nothing else, and the only ' +
-      'reason the other 124 m counts as flanked at all is that the boundary ' +
-      'wall and the treeline happen to be nearby. Closed by the L2 rail ' +
-      'generator, which emits the exclusion with the track rather than after it.',
+      'both sides. Decision 4 §6 ("keeping feet off the track") is designed ' +
+      'and unbuilt — the generator will emit the exclusion with the track. ' +
+      'Was 231 on the hand park; the generated layout already narrows it.',
   },
   'rail.walkable': {
-    worst: 347,
+    worst: 350,
     why:
-      'Points on the track centre line (of 355 sampled) where a player-width ' +
-      'probe is not pushed out of anything — i.e. a child can stand on the ' +
-      "rails. The same hole as rail.exclusion, measured from the walker's " +
-      "side rather than the wall's; neither entry can close without the other.",
+      'Points on the track centre line (of ~355 sampled) where a player-width ' +
+      'probe can stand. Meaningless until §6 fences the loop — the figure ' +
+      'wobbles ±3 with every layout roll because the loop length changes. ' +
+      'Both this and rail.exclusion close together when §6 builds.',
   },
   'anchor.reach:building': {
-    worst: 7.2,
+    worst: 11.5,
     why:
-      'Metres by which the building anchor overruns its declared 19 m bounding ' +
-      'radius: the ginormous slide runs from the roof down into the ball pit, ' +
-      'reaching (−10.2, −17.0) at 26.2 m out. That is deliberate and is written ' +
-      "into both anchors' `notes` — which is precisely the problem for a solver: " +
-      'two plots joined by a structure that belongs to neither, described only ' +
-      'in prose. L1 needs the slide as a **link** between anchors, with its own ' +
-      'footprint, rather than as spill from one of them.',
+      'The ginormous slide spans the gap from the roof to the ball pit, so ' +
+      'the building overruns its 19 m declaration by up to (near.max 30) − 19 ' +
+      '= 11 m — the manifest relation bounds it. The honest fix is L1 ' +
+      'modelling the slide as a link with its own footprint (checker finding, ' +
+      '27 July); until then this entry tracks the relation, not a mistake.',
+  },
+  'anchor.reach:ballPit': {
+    worst: 1.2,
+    why: 'The pit lip and its cushions build ~0.9 m past the declared 9 m.',
   },
   'anchor.reach:dodgems': {
-    worst: 0.6,
-    why: 'The bumper wall builds 15.6 m out against a declared 15 m. Tuning, not design.',
+    worst: 2.0,
+    why:
+      'The bumper wall builds 0.6 m proud, and the welcome arch was widened ' +
+      'to 1.9 m half-span so the nav lattice can route through it (its 1.35 m ' +
+      'posts inflated shut and pocketed the doorway). Structure, not drift.',
   },
   'anchor.reach:waterFight': {
-    worst: 1.3,
-    why: 'The pools and hedges build 16.3 m out against a declared 15 m. Tuning, not design.',
+    worst: 2.3,
+    why: 'The pools and hedges build ~2.3 m out against a declared 15 m.',
   },
 };
 

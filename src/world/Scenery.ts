@@ -21,6 +21,7 @@ import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
 import { PARK_SEED } from './parkManifest';
+import { PARK_LAYOUT } from './parkLayout';
 import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
@@ -533,10 +534,14 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
 }
 
 function insideAnyAnchor(x: number, z: number, margin: number): boolean {
-  for (const anchor of ANCHORS) {
-    const dx = x - anchor.position[0];
-    const dz = z - anchor.position[1];
-    if (Math.hypot(dx, dz) < anchor.boundingRadius + margin) return true;
+  // Every placed entry, not just the five big anchors: the stalls and their
+  // stand points are in the layout too, and a maze wall built beside a booth
+  // pockets the booth's doormat — three waypoints were walled in exactly
+  // that way the first time the generated park rolled.
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    const dx = x - entry.x;
+    const dz = z - entry.z;
+    if (Math.hypot(dx, dz) < entry.boundingRadius + margin + 2.5) return true;
   }
   return false;
 }
@@ -548,7 +553,7 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
   const steps = 4;
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
-    if (!isPlantable(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, 2.4)) return false;
+    if (!isPlantable(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, 3.2)) return false;
   }
   return true;
 }
@@ -563,7 +568,9 @@ const MAZE_PIECE_GAP = 7;
 
 function generateWallMaze(): WallRun[] {
   const rng = new Rng(0x77a115 ^ PARK_SEED);
-  const heights = [0.95, 1.0, 1.5, 1.8, 2.1, 2.6];
+  // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
+  // assert by a float hair - honest heights only.
+  const heights = [0.8, 0.95, 1.5, 1.8, 2.1, 2.6];
   const runs: WallRun[] = [];
   const cornerPoints: [number, number][] = [];
   let attempts = 0;
@@ -622,7 +629,7 @@ function generateStoneRuns(): WallRun[] {
     const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
     const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
     if (!runIsClear(from[0], from[1], to[0], to[1])) continue;
-    runs.push({ from, to, height: rng.pick([0.95, 1.0, 1.2] as const) });
+    runs.push({ from, to, height: rng.pick([0.8, 0.95] as const) });
   }
   return runs;
 }
@@ -704,9 +711,10 @@ function buildStoneWalls(collision: CollisionWorld): Group {
   group.name = 'stone-walls';
 
   // Four tangent-aligned beds around the plaza plus four lawn benches,
-  // generated from the layout (Decision 5). Stone stays at or below 1.2 m --
-  // and the 1.2 m runs sit far from paths, but the height palette obeys the
-  // same hoppable-or-solid rule as the wooden maze.
+  // generated from the layout (Decision 5). Every stone height is honestly
+  // hoppable (<= 1.0 m): the first generated roll put 1.2 m benches in the
+  // 1.0-1.43 m trap band and the boot assert refused the park, which is
+  // that assert doing exactly its job.
   const runs: readonly WallRun[] = generateStoneRuns();
 
   const wallMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });

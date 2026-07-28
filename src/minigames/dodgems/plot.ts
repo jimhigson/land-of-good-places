@@ -221,8 +221,11 @@ export function buildDodgemsPlot(
   signGroup.rotation.y = anchor.signYaw;
   root.add(signGroup);
 
+  // 1.9 m out, not 1.35: the nav lattice fattens each post by the walker
+  // radius, and at 1.35 the gap between the arch's posts inflated shut —
+  // 0.76 m of walkable slot that pocketed the whole doorway behind it.
   const signPostGeometry = new CylinderGeometry(0.14, 0.16, 2.6, 8);
-  for (const offset of [-1.35, 1.35]) {
+  for (const offset of [-1.9, 1.9]) {
     const post = solid(new Mesh(signPostGeometry, toonMaterial(PALETTE.wood)));
     post.position.set(offset, 1.3, 0);
     signGroup.add(post);
@@ -234,7 +237,7 @@ export function buildDodgemsPlot(
   }
 
   const board = solid(
-    new Mesh(new BoxGeometry(3.3, 1.9, 0.16), toonMaterial(PALETTE.woodLight)),
+    new Mesh(new BoxGeometry(4.4, 1.9, 0.16), toonMaterial(PALETTE.woodLight)),
   );
   board.position.y = 2.6;
   signGroup.add(board);
@@ -242,7 +245,7 @@ export function buildDodgemsPlot(
 
   const face = decal(
     new Mesh(
-      new PlaneGeometry(3.1, 1.74),
+      new PlaneGeometry(4.2, 1.74),
       new MeshBasicMaterial({
         map: signTexture({
           title: anchor.signTitle,

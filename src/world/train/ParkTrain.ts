@@ -202,7 +202,14 @@ export class ParkTrain implements GameSystem, TrainService {
     ] as const;
 
     stationSeeds.forEach((seed, index) => {
-      const distance = this.route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
+      // The bearing gives the *neighbourhood*; the exact spot slides along
+      // the loop until the platform's ground is genuinely clear. The park is
+      // generated now (Decision 5), so "due east happens to be open lawn" is
+      // no longer something anyone guarantees — trees are seeded before the
+      // train, and a platform standing in one is exactly what check:park
+      // caught the first time the layout rolled.
+      const target = this.route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
+      const distance = this.clearStationDistance(target, collision);
       const station = new Station(
         {
           index,
@@ -233,6 +240,41 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 
   /** Platforms and carriage floors, for `WalkSurfaces.addPlatform`. */
+  /**
+   * Slides along the loop from `target` (0, +1, -1, +2 ... metres) until the
+   * platform area is clear of everything registered so far, checked as three
+   * discs across the platform's length. Gives up at +-24 m and returns the
+   * target — the boot assert and check:park will then say so loudly rather
+   * than a child finding a platform inside a tree.
+   */
+  private clearStationDistance(target: number, collision: CollisionWorld): number {
+    const centre = new Vector3();
+    const tangent = new Vector3();
+    for (let step = 0; step <= 48; step += 1) {
+      const offset = (step % 2 === 0 ? 1 : -1) * Math.ceil(step / 2);
+      const distance = target + offset;
+      this.route.pointAt(distance, centre);
+      this.route.tangentAt(distance, tangent);
+      const rightX = tangent.z;
+      const rightZ = -tangent.x;
+      const parkIsRight = rightX * -centre.x + rightZ * -centre.z >= 0;
+      const side = parkIsRight ? 1 : -1;
+      const standX = centre.x + rightX * side * 2.15;
+      const standZ = centre.z + rightZ * side * 2.15;
+      let clear = true;
+      for (const along of [-2.6, 0, 2.6]) {
+        const px = standX + tangent.x * along;
+        const pz = standZ + tangent.z * along;
+        if (!collision.isClearCircle(px, pz, 1.7)) {
+          clear = false;
+          break;
+        }
+      }
+      if (clear) return distance;
+    }
+    return target;
+  }
+
   platforms(): MovingPlatform[] {
     const platforms: MovingPlatform[] = this.stations.map((station) => station.asPlatform());
     for (const carriage of this.carriages) platforms.push(carriageFloor(carriage));

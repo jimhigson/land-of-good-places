@@ -35,7 +35,11 @@ export interface StallPlacement {
 }
 
 /** How far in front of the centre a child stands to be served. */
-export const STALL_STAND_DISTANCE = 2.5;
+// 3.1, not 2.5: the doormat must stay walkable after the nav lattice
+// inflates the booth's walls by the walker radius. At 2.5 the stand point
+// sat two centimetres inside the inflated wall - reachable on the old park
+// by luck, pocketed on the generated one by the same luck running out.
+export const STALL_STAND_DISTANCE = 3.1;
 
 /**
  * Keyed by stall id so `stalls.ts` can spread one in by name and the two

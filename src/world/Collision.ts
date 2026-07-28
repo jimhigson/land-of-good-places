@@ -255,6 +255,28 @@ export class CollisionWorld {
   private readonly walls: WallCollider[] = [];
 
   /**
+   * True if a disc at (x, z) touches nothing registered so far. A *planning*
+   * query — the layout generator and the station placer ask it before
+   * building somewhere — so it reads whatever has been registered at the
+   * time it is called, exactly like the boot asserts do.
+   */
+  isClearCircle(x: number, z: number, radius: number): boolean {
+    for (const circle of this.circles) {
+      if (Math.hypot(x - circle.x, z - circle.z) < radius + circle.radius) return false;
+    }
+    for (const wall of this.walls) {
+      const abx = wall.x2 - wall.x1;
+      const abz = wall.z2 - wall.z1;
+      const lengthSq = abx * abx + abz * abz || 1;
+      const t = Math.max(0, Math.min(1, ((x - wall.x1) * abx + (z - wall.z1) * abz) / lengthSq));
+      const cx = wall.x1 + abx * t;
+      const cz = wall.z1 + abz * t;
+      if (Math.hypot(x - cx, z - cz) < radius + wall.halfThickness) return false;
+    }
+    return true;
+  }
+
+  /**
    * The half-footprint of the *thinnest* thing registered — the narrowest band
    * a mover could hope to skip over in one frame, and therefore what sets the
    * sub-step length in {@link resolveMovement}.

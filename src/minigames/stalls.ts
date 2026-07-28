@@ -1,18 +1,17 @@
 import { Group } from 'three';
 import { PALETTE } from '../core/palette';
-import { placedEntry } from '../world/parkLayout';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import type { InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
-import { ANCHORS_BY_ID } from '../world/anchors';
 import { createDodgems } from './dodgems/Dodgems';
 import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createRailRacer } from './railRacer/RailRacer';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
+import { STALL_PLACEMENTS } from './stallPlacement';
 import type { StallDefinition } from './types';
 
 /**
@@ -50,11 +49,11 @@ export const STALLS: readonly StallDefinition[] = [
     // seconds' walk from where the game starts you, clear of every anchor plot,
     // clear of the hand-authored wall runs, and — checked in the running game —
     // with no scattered tree or bush within four metres.
-    position: [placedEntry('stall.railRacer').x, placedEntry('stall.railRacer').z],
+    ...STALL_PLACEMENTS.railRacer,
     // A shade east of +Z: the counter, the awning stripes and the sign all face
     // the default camera, and the stand point in front of it sits between the
     // booth and the plaza, so walking up is a straight line from the fountain.
-    facing: 0.3,
+
     create: createRailRacer,
   },
   {
@@ -75,13 +74,13 @@ export const STALLS: readonly StallDefinition[] = [
     // positions read out of the running game, and also checked that the
     // straight line tap-to-move walks from the spawn point clears the
     // fountain by a wide margin rather than grazing its collision circle.
-    position: [placedEntry('stall.spookyHouse').x, placedEntry('stall.spookyHouse').z],
+    ...STALL_PLACEMENTS.spookyHouse,
     // Every anchor sign and every other stall in this park uses a yaw near
     // +0.2–0.3 regardless of where it stands, because the isometric camera
     // never rotates (GAME_DESIGN.md #16) — "face the camera" is the same
     // absolute direction everywhere on the map, not a direction relative to
     // wherever a child is walking from.
-    facing: 0.25,
+
     create: createSpookyHouse,
   },
   {
@@ -102,13 +101,13 @@ export const STALLS: readonly StallDefinition[] = [
     // the first placement sat almost exactly on top of. Two metres of open
     // grass now separate the path's last step from the nearest corner of the
     // booth.
-    position: [placedEntry('stall.waterFight').x, placedEntry('stall.waterFight').z],
+    ...STALL_PLACEMENTS.waterFight,
     // Turned towards the path rather than square down +Z. The counter still
     // meets the isometric camera at an angle you can read the sign from, and —
     // the number that actually mattered — the stand point ends up *between* the
     // path and the booth, so walking up is a straight line that never scrapes
     // along the side of it.
-    facing: 1.35,
+
     create: createWaterFight,
   },
   {
@@ -124,8 +123,7 @@ export const STALLS: readonly StallDefinition[] = [
     // on the anchor's own entrance also means the path spur already leads here,
     // and the placeholder's collision post ends up inside the booth's own walls
     // instead of being left behind as an invisible obstacle on the lawn.
-    position: ANCHORS_BY_ID.ferrisWheel.entrance,
-    facing: ANCHORS_BY_ID.ferrisWheel.signYaw,
+    ...STALL_PLACEMENTS.spaceFerrisWheel,
     create: createSpaceFerrisWheel,
   },
   {
@@ -141,11 +139,11 @@ export const STALLS: readonly StallDefinition[] = [
     // ride's own geometry (`dodgems/plot.ts`): the booth and the point a child
     // stands at are both clear of the barrier, and the walk from the end of the
     // path to the counter is a straight line across open grass.
-    position: [placedEntry('stall.dodgems').x, placedEntry('stall.dodgems').z],
+    ...STALL_PLACEMENTS.dodgems,
     // Same rule the rail racer follows: the counter faces the default camera,
     // and the stand point in front of it ends up between the kiosk and the
     // ride's doorway rather than inside the rink.
-    facing: 0.3,
+
     create: createDodgems,
   },
 ];
