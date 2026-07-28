@@ -363,6 +363,15 @@ from the doorway — and the interact press is now gated on the room rectangle
 rather than a radius. The camera is orthographic and 90 units out at 38°, so
 it is always far above the lid. NPCs queueing outside is still to do.*
 
+### The space ferris wheel — leaving it (28 July 2026 — queued)
+
+**Drop "hold still to go home".** The **X button already does the same thing
+and is more intuitive.** One obvious way out, not two — and a hold-to-act
+gesture is the least discoverable kind for a six-year-old.
+
+*Check whether the same hold-still-to-leave gesture exists on other rides; if
+it does, the X button should be the single way out of all of them.*
+
 ### The space ferris wheel — the pet's seat (27 July 2026 — queued)
 
 In the ferris wheel car, **the pet sits on its own chair, lower than the
