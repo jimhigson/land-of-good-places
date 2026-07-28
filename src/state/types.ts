@@ -84,6 +84,7 @@ export const CUTE_CATEGORIES = [
   'egg',
   'flower',
   'secret',
+  'keychain',
 ] as const;
 export type CuteCategory = (typeof CUTE_CATEGORIES)[number];
 
@@ -126,6 +127,7 @@ export const INVENTORY_KINDS = [
   'pet',
   'egg',
   'flower',
+  'keychain',
 ] as const;
 export type InventoryKind = (typeof INVENTORY_KINDS)[number];
 
@@ -255,6 +257,13 @@ export interface GameState {
    * player.
    */
   wornHatUid: string | null;
+  /**
+   * `uid` of the keychain worn on the backpack, or null for none — see
+   * `entities/WornKeychain.ts`. Set by the keychain stall's picker
+   * (`gameStore.setWornKeychain`), and thereafter by tapping a keychain in
+   * the backpack drawer, exactly like `wornHatUid`.
+   */
+  wornKeychainUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */
