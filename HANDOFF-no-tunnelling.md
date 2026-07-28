@@ -78,8 +78,33 @@ swept case whose step exceeded the sub-step limit), which move down slightly
 thicknesses is still 1.045 m**, so `MAX_AUTO_HOP_HEIGHT = 1.0` still holds, and
 every point still sits above `measuredHopCeiling()`.
 
+Trajectory identity: exactly **0 divergence** with and without sub-stepping at
+every frame rate where one sub-step suffices (30 fps up sprinting, 20 fps up
+walking). Divergence appears only inside the band the old code could tunnel in.
+
+## Verified in the browser, on the real park
+
+424 colliders; thinnest half-width 0.20 m; sub-step limit **0.41 m**; three
+sub-steps for the worst frame there is.
+
+5235 sprint runs at every unhoppable wall in the park, 1/12 s frames, both
+sides, square-on to 0.9-glancing, five timing phases, starting from positions
+that overlap nothing:
+
+- **with the fix: 0 crossings.**
+- with the pre-fix integration monkey-patched back in: **2463 crossings** (47%).
+
+405 runs at the hoppable garden walls: 0 crossed on foot, 248 hopped over.
+
+Cost, measured in the page against those 424 colliders: `resolve` 1.14 µs;
+`resolveMovement` on an ordinary 60 fps sprint step 1.02 µs (same — one
+sub-step, same branch); on the worst 1/12 s frame, three sub-steps, 3.13 µs.
+So a stuttering frame costs ~2 µs more out of 83,333 µs.
+
+Boot console clean: both `checkHoppableColliders` and `checkSubstepBudget`
+silent. `NavGrid` untouched (it never calls `resolve`); route over the hoppable
+wall at z = 12 still planned straight across, cross-park route 1.4 ms.
+
 ## Still to do
 
-- Browser QA (own the Chrome profile): walk/sprint feel at 60 fps, hop a garden
-  wall, check console for the two boot checks staying quiet.
-- Raise the PR.
+- Raise the PR. Nothing else outstanding.
