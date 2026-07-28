@@ -817,6 +817,11 @@ kbd {
   align-items: center;
   gap: 0.625rem;
   width: 100%;
+  /* Same reason as `.whatsnew-row` below — `.shop-list` and `.backpack-list`
+     are column flex containers, so without this a full list squashes its rows
+     to `min-height` and their names and blurbs spill out of the rounded boxes.
+     A two-line blurb on a narrow phone is all it takes. */
+  flex: none;
   min-height: 3.625rem;
   padding: 0.5rem 0.75rem;
   text-align: left;
@@ -2236,6 +2241,18 @@ kbd {
   align-items: center;
   gap: 0.625rem;
   width: 100%;
+  /* `flex: none`, and this is a bug fix, not tidying (28 July 2026, from a
+     photo of a real phone). `.whatsnew-list` is a COLUMN flex container, so
+     these rows inherited flex's default `flex-shrink: 1`. Once the list
+     overran — which it always did at 390x844 with the old 90-to-124-character
+     lines wrapping to four and five lines each — every row was squashed down
+     to the `min-height` below and its text spilled straight out of the rounded
+     box onto the row above it. Nothing clipped it: a flex item shrinks its
+     BOX, not its content. Hence the family's "the text is overflowing its
+     boxes and the titles sit on top of the box above". Rows are now their own
+     height and the list scrolls instead, which is the settled rule
+     (GAME_DESIGN.md: scrolling is fine, overlap never is). */
+  flex: none;
   min-height: 3.625rem;
   padding: 0.5rem 0.75rem;
   background: #fff;
