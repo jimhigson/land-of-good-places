@@ -2,7 +2,7 @@ import type { Rng } from '../../../core/mathUtils';
 import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../../art/style/faces';
 import type { CharacterIntent, DriverContext } from '../driver';
 import type { Activity, ActivityHold, ActivityHost } from './activity';
-import { Errand, NO_LIMIT, NO_TIMEOUT } from './errand';
+import { Errand, NO_LIMIT } from './errand';
 
 /**
  * Getting your face painted at the stall (see ART_DIRECTION.md's face patch
@@ -20,15 +20,18 @@ import { Errand, NO_LIMIT, NO_TIMEOUT } from './errand';
  * through `NpcSystem`. That is the house style for this kind of feature
  * (`trainService()` is the same idea) and it moved here unchanged.
  *
- * **This is the block that dropped the safety rails.** It was copy-adapted
- * from the train trip and lost both of the train's guards — the walk timeout
- * and the stuck-sidestep — with the result that a child wedged behind a bush
- * on the way to the stall pushes at it for ever, *and* holds one of the four
- * concurrent visit slots for ever with it, so four unlucky children quietly
- * switch face painting off for the rest of the session (ARCHITECTURE-REVIEW
- * review 2, C1 — P1, still open). The rails are now `Errand`'s to keep, and
- * this activity's `ErrandLimits` say out loud that it has none. Turning them
- * on is a two-line behaviour change and belongs in its own PR.
+ * **This is the block that dropped the safety rails**, and this is the change
+ * that puts them back (ARCHITECTURE-REVIEW review 2, C1 — P1). It was
+ * copy-adapted from the train trip and lost both of the train's guards — the
+ * walk timeout and the stuck-sidestep — with the result that a child wedged
+ * behind a bush on the way to the stall pushed at it for ever, *and* held one
+ * of the four concurrent visit slots for ever with it, so four unlucky
+ * children quietly switched face painting off for the rest of the session,
+ * with nothing on screen to say why.
+ *
+ * The walk below now carries the train's own two guards, and the give-up path
+ * hands the slot back — see {@link spokenFor}, which is the slot: a child who
+ * gave up is neither painted nor visiting, so the next child may go.
  */
 export class FacePaintVisit implements Activity {
   readonly name = 'facePaintVisit';
@@ -47,19 +50,20 @@ export class FacePaintVisit implements Activity {
   private faceYaw = 0;
 
   /**
-   * The walk to the stall.
+   * The walk to the stall — off the validated waypoint graph, through whatever
+   * the garden has grown in the way, so both of `Errand`'s rails are on.
    *
-   * `NO_TIMEOUT` and `unstick: false` are **wrong** and are preserved verbatim
-   * — see the class comment. `Errand` is written so this has to be stated
-   * rather than merely forgotten: the fix is `timeout: WALK_TIMEOUT` and
-   * `unstick: true`, and the `'givenUp'` branch below is already waiting for
-   * it.
+   * `WALK_TIMEOUT` is the train's sixty seconds, deliberately: this is a walk
+   * of the same kind and the same length across the same park, and two
+   * different numbers for the same question would only be another thing to
+   * drift apart. `abandonRadius` stays `NO_LIMIT` because, unlike the player a
+   * chat is chasing, a stall does not walk off.
    */
   private readonly walk = new Errand({
     arriveRadius: ARRIVE_RADIUS,
-    timeout: NO_TIMEOUT,
+    timeout: WALK_TIMEOUT,
     abandonRadius: NO_LIMIT,
-    unstick: false,
+    unstick: true,
   });
 
   constructor(rng: Rng, startX: number, startZ: number) {
@@ -143,10 +147,14 @@ export class FacePaintVisit implements Activity {
       const step = this.walk.step(host, context, intent, stall.standX, stall.standZ);
 
       if (step === 'givenUp') {
-        // Unreachable while the limits above say `NO_TIMEOUT`. This is the
-        // branch that turns on when C1 is fixed: give the slot back and go
-        // back to wandering from wherever the child got wedged.
+        // A minute of pushing at whatever is in the way, sidesteps included,
+        // and the stall is still not reached. Give up the way the train does:
+        // drop the visit — which is what gives the slot back, since
+        // `spokenFor` is false again the moment `visit` is `'none'` and no
+        // design was ever earned — forget which way round the scenery was
+        // working, and rejoin the graph from wherever the child got wedged.
         this.visit = 'none';
+        this.walk.clearSidestep();
         this.cooldown = host.rng.range(15, 40);
         host.rejoinGraph(context, 'legacy');
         return false;
@@ -253,3 +261,7 @@ const PAINT_VISIT_CHANCE = 0.4;
 
 /** How close counts as having arrived — the wander core's own arrive radius. */
 const ARRIVE_RADIUS = 0.9;
+
+/** Longest a child spends walking to the stall. The train's number, on purpose
+ *  — see the `walk` field. */
+const WALK_TIMEOUT = 60;
