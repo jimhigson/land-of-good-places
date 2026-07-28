@@ -29,11 +29,26 @@
  * no collision, because collision is not what a driver decides. Wedging, and
  * therefore the stuck-sidestep and the timeouts, are exercised by the pinned
  * child (see `WEDGED_CHILD`) rather than by geometry.
+ *
+ * ## The second scenario
+ *
+ * The trace above answers "did anything change?". It cannot answer "does the
+ * face-paint stall survive a child who gets stuck on the way to it?", because
+ * a whole-park hash is exactly the wrong shape for a question with a yes/no
+ * answer. {@link runWedge} is that question, asserted rather than hashed:
+ * ARCHITECTURE-REVIEW C1 was a bug whose entire symptom was a feature quietly
+ * doing *nothing*, and nothing hashes beautifully.
  */
 
+import { spawnSync } from 'node:child_process';
 import { Vector3 } from 'three';
 import { Rng } from '../src/core/mathUtils.ts';
-import { RUN_INTENT, createIntent, clearIntent } from '../src/entities/npc/driver.ts';
+import {
+  RUN_INTENT,
+  createIntent,
+  clearIntent,
+  type CharacterIntent,
+} from '../src/entities/npc/driver.ts';
 import type { PoiGraph, PoiNode } from '../src/entities/npc/poiGraph.ts';
 import {
   WanderDriver,
@@ -299,18 +314,172 @@ function run(coverage: Coverage): string {
 const EXPRESSIONS = ['neutral', 'happy', 'blink', 'sad', 'surprised'];
 const PHASES = ['up', 'peek', 'down'];
 
-const coverage: Coverage = { climbs: 0, trips: 0, chats: 0, paints: 0, waves: 0, hops: 0 };
-const trace = run(coverage);
+// --- scenario 2: a child wedged on the way to the face-paint stall -----------
 
-console.log(`frames=${FRAMES} children=${CHILDREN}`);
-console.log(
-  `covered climbs=${coverage.climbs} trips=${coverage.trips} chats=${coverage.chats} ` +
-    `paints=${coverage.paints} waves=${coverage.waves} hops=${coverage.hops}`,
-);
-console.log(`trace=${trace}`);
+/**
+ * **Does face painting still work when somebody gets stuck on the way?**
+ *
+ * A park with nothing in it but children and the face-paint stall — no train,
+ * no trees, no chat budget — so the only thing that can happen is a visit to
+ * the stall, and one child pinned to the spot the moment they set off for it.
+ *
+ * The property under test is the whole of ARCHITECTURE-REVIEW C1, stated the
+ * way a player would notice it: **four children can still be painted**, which
+ * is `MAX_CONCURRENT_PAINTED`, even though one of them is wedged and will never
+ * arrive. A wedged child who keeps their slot leaves only three, for the rest
+ * of the session, silently.
+ *
+ * Measured, at the time of writing:
+ *
+ * | | painted | fourth painted at |
+ * | --- | --- | --- |
+ * | before the C1 fix | **3** | never |
+ * | after | **4** | t≈91 s |
+ *
+ * `fourthPaintedAt` is checked as well as the count, and that is not
+ * decoration: it is what stops the check passing *vacuously*. Unpinned, this
+ * park paints its fourth child by t≈38 s. Only a slot handed back by a walk
+ * that timed out can push it past the sixty-second mark. If a future change
+ * means the pinned child never sets off for the stall at all, this run stops
+ * proving anything — and the timing assertion is what says so out loud instead
+ * of going quietly green.
+ */
+function runWedge(): { painted: number; fourthPaintedAt: number } {
+  const graph = buildGraph();
+  registerFacePaintStall(9, -9, 8.2, -8.6);
+  const layout = new Rng(20260728);
 
-const missing = Object.entries(coverage).filter(([, count]) => count === 0);
-if (missing.length > 0) {
-  console.error(`NOT EXERCISED: ${missing.map(([name]) => name).join(', ')}`);
-  process.exitCode = 1;
+  const children: { driver: WanderDriver; position: Vector3; intent: CharacterIntent }[] = [];
+  for (let i = 0; i < CHILDREN; i += 1) {
+    const startNode = layout.int(0, 24);
+    const node = graph.node(startNode)!;
+    children.push({
+      // No trees, no budgets and no train service installed: nothing else in
+      // this park can take the frame, so a walk that never ends is the only
+      // thing that can hold a slot.
+      driver: new WanderDriver({
+        graph,
+        rng: new Rng(4242 + i * 977),
+        startNode,
+        pace: layout.range(0.86, 1.12),
+      }),
+      position: new Vector3(node.x, 0, node.z),
+      intent: createIntent(),
+    });
+  }
+
+  // The player stands well out of the way — `reactToPlayer` is not what this
+  // scenario is about.
+  const player = new Vector3(60, 0, 60);
+  let painted = 0;
+  let fourthPaintedAt = Infinity;
+
+  for (let frame = 0; frame < WEDGE_FRAMES; frame += 1) {
+    const elapsed = frame * DT;
+
+    const now = paintedNpcFaces().length;
+    if (now > painted) {
+      painted = now;
+      if (painted === 4) fourthPaintedAt = elapsed;
+    }
+
+    for (let i = 0; i < children.length; i += 1) {
+      const child = children[i]!;
+      clearIntent(child.intent);
+      child.driver.update(
+        {
+          dt: DT,
+          elapsed,
+          position: child.position,
+          playerPosition: player,
+          playerHopped: false,
+          grounded: true,
+          playerStationaryFor: 0,
+          playerWearingHat: false,
+        },
+        child.intent,
+      );
+
+      if (i === WEDGED_VISITOR) continue;
+      const speed = Math.min(Math.hypot(child.intent.moveX, child.intent.moveZ), RUN_INTENT);
+      if (speed > 1e-6) {
+        const scale = (WALK_SPEED * DT * speed) / Math.hypot(child.intent.moveX, child.intent.moveZ);
+        child.position.x += child.intent.moveX * scale;
+        child.position.z += child.intent.moveZ * scale;
+      }
+    }
+  }
+
+  return { painted, fourthPaintedAt };
+}
+
+/** Five minutes: long enough for a sixty-second walk to time out and for the
+ *  child who inherits the freed slot to walk over and be painted. */
+const WEDGE_FRAMES = 18_000;
+
+/** The child who sets off for the stall first, and is pinned so they never get
+ *  there. Deliberately not `WEDGED_CHILD` — that one is busy being wedged on
+ *  the way to a station, in a park this scenario does not build. */
+const WEDGED_VISITOR = 8;
+
+/** Every slot the stall has (`MAX_CONCURRENT_PAINTED`). The number that has to
+ *  still be reachable with one child wedged. */
+const PAINT_SLOTS = 4;
+
+/** A fourth painted child sooner than this means nobody was ever wedged, so the
+ *  run proves nothing — see {@link runWedge}. */
+const WEDGE_MUST_OUTLAST = 60;
+
+// --- what to run -------------------------------------------------------------
+//
+// The two scenarios cannot share a process. `facePaintVisits` in
+// `activities/facePaintVisit.ts` is a module-level registry that children join
+// at construction and never leave, and the whole-park paint cap counts it — so
+// a second park in the same process starts with the first park's four painted
+// children already holding every slot. That is real (a rebuilt `World` would
+// hit it too; ARCHITECTURE-REVIEW C5), but adding a test-only reset to
+// production code to work around it would be worse than paying for a process.
+
+if (process.env.CROWD_SCENARIO === 'wedge') {
+  const { painted, fourthPaintedAt } = runWedge();
+  const at = fourthPaintedAt === Infinity ? 'never' : `t=${fourthPaintedAt.toFixed(1)}s`;
+  console.log(`wedged-visitor painted=${painted}/${PAINT_SLOTS} fourth-painted ${at}`);
+
+  if (painted < PAINT_SLOTS) {
+    console.error(
+      `PAINT SLOT LEAKED: only ${painted} of ${PAINT_SLOTS} children could be painted with one ` +
+        `wedged on the way to the stall. A walk that never gives up holds its slot for ever ` +
+        `(ARCHITECTURE-REVIEW C1).`,
+    );
+    process.exitCode = 1;
+  } else if (fourthPaintedAt < WEDGE_MUST_OUTLAST) {
+    console.error(
+      `NOT EXERCISED: the fourth child was painted at ${at}, sooner than the walk timeout — so ` +
+        `nobody was actually wedged and this run proves nothing. Re-pick WEDGED_VISITOR.`,
+    );
+    process.exitCode = 1;
+  }
+} else {
+  const coverage: Coverage = { climbs: 0, trips: 0, chats: 0, paints: 0, waves: 0, hops: 0 };
+  const trace = run(coverage);
+
+  console.log(`frames=${FRAMES} children=${CHILDREN}`);
+  console.log(
+    `covered climbs=${coverage.climbs} trips=${coverage.trips} chats=${coverage.chats} ` +
+      `paints=${coverage.paints} waves=${coverage.waves} hops=${coverage.hops}`,
+  );
+  console.log(`trace=${trace}`);
+
+  const missing = Object.entries(coverage).filter(([, count]) => count === 0);
+  if (missing.length > 0) {
+    console.error(`NOT EXERCISED: ${missing.map(([name]) => name).join(', ')}`);
+    process.exitCode = 1;
+  }
+
+  // …and now the same file again, in its own process, for scenario 2.
+  const wedge = spawnSync(process.execPath, [...process.execArgv, process.argv[1]!], {
+    env: { ...process.env, CROWD_SCENARIO: 'wedge' },
+    stdio: 'inherit',
+  });
+  if (wedge.status !== 0) process.exitCode = 1;
 }
