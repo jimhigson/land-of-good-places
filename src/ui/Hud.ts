@@ -122,7 +122,28 @@ export class Hud {
       this.backpackHandler?.();
     });
 
-    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton);
+    // The controls help. It used to be a small "?" disc floating over the
+    // bottom-left of the park, which the family had pressed by accident once
+    // too often (GAME_DESIGN.md's SELECTION RULE entry, 28 July 2026: *"move
+    // the '?' help into under the menu button too since it is easy to press by
+    // mistake"*). So it is an ordinary menu pill now, in the one place a child
+    // already goes looking for the things that are not the park.
+    this.hintToggle = document.createElement('button');
+    this.hintToggle.type = 'button';
+    this.hintToggle.className = 'pill pill--help';
+    this.hintToggle.setAttribute('aria-label', 'Show controls help');
+    this.hintToggle.setAttribute('aria-expanded', 'false');
+    this.hintToggle.innerHTML = '<span class="emoji">❓</span><span>Help</span>';
+    this.hintToggle.addEventListener('click', (event) => {
+      // Stopped so the menu's own "you chose something, I'll get out of the
+      // way" listener does not fire before this one — the menu is put away
+      // explicitly below, which keeps the order honest.
+      event.stopPropagation();
+      this.setMenuOpen(false);
+      this.setHintOpen(!this.hintOpen);
+    });
+
+    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton, this.hintToggle);
     this.menu.append(this.menuButton, this.menuItems);
     top.append(this.menu);
     this.applyMenu();
@@ -133,39 +154,19 @@ export class Hud {
     const hints = document.createElement('div');
     hints.className = 'hint-stack';
 
-    // A small "?" pill that reveals the controls hint on demand — the hint
-    // bar used to sit on screen permanently, which is a lot of real estate for
-    // something you only need to read once. Same idea for both variants below.
-    this.hintToggle = document.createElement('button');
-    this.hintToggle.type = 'button';
-    this.hintToggle.className = 'hint-toggle is-new';
-    this.hintToggle.setAttribute('aria-label', 'Show controls help');
-    this.hintToggle.setAttribute('aria-expanded', 'false');
-    this.hintToggle.textContent = '?';
-    this.hintToggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.setHintOpen(!this.hintOpen);
-    });
-    // The pulse is a one-time "look at me" for a first-time player; once they
-    // have noticed it (played, or opened it), it should not nag them again.
-    this.hintToggle.addEventListener(
-      'animationend',
-      () => this.hintToggle.classList.remove('is-new'),
-      { once: true },
-    );
-
     // Two versions of the same hint. A phone player has no keys to press, and
     // being told about WASD is how a six-year-old decides the game is broken.
     this.keyHint = pill('pill pill--soft hint-panel');
     this.keyHint.dataset.open = 'false';
     this.keyHint.innerHTML = isTouchDevice()
       ? '<span class="emoji">👆</span>' +
-        '<span><b>Tap</b> where to walk · tap a thing to use it · ' +
+        '<span><b>Tap</b> where to walk · tap a thing, then tap what it says · ' +
         '<b>hop</b> button · <b>pinch</b> to zoom</span>'
       : '<span class="emoji">🕹️</span>' +
         '<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to walk · ' +
         '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · ' +
-        '<kbd>+</kbd>/<kbd>−</kbd> zoom · or just <b>click</b> where to go</span>';
+        '<kbd>+</kbd>/<kbd>−</kbd> zoom · <kbd>E</kbd> to use what is outlined · ' +
+        'or just <b>click</b> where to go</span>';
 
     this.padPill = pill('pill pill--pad');
     this.padPill.dataset.connected = 'false';
@@ -176,7 +177,7 @@ export class Hud {
     this.promptPill = pill('pill pill--prompt');
     this.promptPill.dataset.show = 'false';
 
-    hints.append(this.hintToggle, this.promptPill, this.padPill);
+    hints.append(this.promptPill, this.padPill);
 
     this.debugPill = pill('pill pill--soft');
     this.debugPill.style.display = 'none';
@@ -268,7 +269,6 @@ export class Hud {
     this.keyHint.dataset.open = open ? 'true' : 'false';
     this.hintToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     this.hintToggle.setAttribute('aria-label', open ? 'Hide controls help' : 'Show controls help');
-    this.hintToggle.classList.remove('is-new');
   }
 
   private readonly onOutsidePointerDown = (event: PointerEvent): void => {
