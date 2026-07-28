@@ -1,6 +1,12 @@
 import { PerspectiveCamera, type Object3D } from 'three';
 import { clamp, damp } from './mathUtils';
 import { createLookControl, type LookControl, type LookReading } from './rideLook';
+import {
+  createOrientationLook,
+  isOrientationLookSupported,
+  requestOrientationPermission,
+  type OrientationLook,
+} from './deviceOrientationLook';
 
 /**
  * **First-person look-around on a moving mount.** One implementation, three
@@ -68,6 +74,36 @@ import { createLookControl, type LookControl, type LookReading } from './rideLoo
  * because two rides need it for something other than turning: the ferris draws
  * the on-screen stick under the thumb, and the train has to tell a look-drag
  * apart from "let me off" — `dragging` exists for exactly that.
+ *
+ * ---------------------------------------------------------------------------
+ * Two ways to look around, chosen per frame
+ * ---------------------------------------------------------------------------
+ * On a phone or a tablet the drag is replaced by the **device's own
+ * orientation** — tilt and turn the phone and the view goes with it, like a
+ * window into the park (`core/deviceOrientationLook.ts`). Every first-person
+ * ride gets it by sitting behind this class; none of them has to know.
+ *
+ * The two are **separate code paths on purpose**, and which one runs is decided
+ * fresh every frame by whether the sensor is actually delivering:
+ *
+ * - A drag is a **turn rate**, integrated and damped. The sensor is an
+ *   **absolute angle**, so in sensor mode the yaw and pitch are *assigned*
+ *   rather than accumulated, and the damping and idle sway sit out — the small
+ *   movements of a real hand are a better idle sway than a sine wave, and the
+ *   two would fight.
+ * - `check:ride-camera` traces the drag path, and that trace is the evidence
+ *   the family-approved look-around is undisturbed. Keeping the sensor out of
+ *   that arithmetic is what keeps a passing trace worth having. In Node there
+ *   is no `DeviceOrientationEvent`, so the sensor control is never even built.
+ *
+ * Anything that stops the sensor — an iOS permission refused, no gyroscope, the
+ * page backgrounded — makes its reading `null`, and `null` means the thumb is
+ * driving. That is a per-frame fallback rather than a boot-time decision, so a
+ * sensor that drops out mid-ride hands control back rather than freezing.
+ *
+ * Rides should call {@link RideCamera.board} from the tap that starts the ride:
+ * it takes "forward" from wherever the child is facing, and it is the gesture
+ * iOS insists on before it will hand over the sensors at all.
  *
  * ---------------------------------------------------------------------------
  * Banking, and why there is no `roll`
@@ -154,12 +190,39 @@ export interface RideCameraOptions {
   readonly startPitch?: number;
   /** Where the view starts turned, in radians. */
   readonly startYaw?: number;
+  /**
+   * Let the device's orientation drive the view where there is a sensor for it.
+   * On by default — every first-person ride wants it. A ride that must stay on
+   * the thumb says `false`, and then behaves exactly as it did before the
+   * sensor existed.
+   */
+  readonly sensorLook?: boolean;
 }
 
 export class RideCamera {
   readonly camera: PerspectiveCamera;
 
   private readonly look: LookControl = createLookControl();
+
+  /**
+   * The phone-tilt path, or `null` where there is no such API at all — desktop
+   * browsers that have never heard of it, and Node, where the parity trace
+   * runs. Built eagerly because listening costs nothing until events arrive,
+   * and because whether the sensor *works* is a question only the events can
+   * answer.
+   */
+  private readonly orientation: OrientationLook | null;
+
+  /**
+   * Reused so that sensor mode does not allocate a reading every frame. Cast to
+   * the readonly `LookReading` on the way out: callers may look, not touch.
+   */
+  private readonly sensorReading = {
+    x: 0,
+    y: 0,
+    dragging: false,
+    touch: null as LookReading['touch'],
+  };
 
   private readonly yawRate: number;
   private readonly pitchRate: number;
@@ -194,6 +257,31 @@ export class RideCamera {
 
     this.yaw = options.startYaw ?? 0;
     this.pitch = options.startPitch ?? 0;
+
+    this.orientation =
+      (options.sensorLook ?? true) && isOrientationLookSupported() ? createOrientationLook() : null;
+  }
+
+  /**
+   * **Call this from the tap that starts the ride**, not from the frame after
+   * it. Two things happen here and both need a real user gesture behind them:
+   *
+   * - iOS will not release the motion sensors without a permission prompt, and
+   *   will only show that prompt from inside a gesture. The boarding tap is
+   *   one; `init()` a few frames later is not. Refused or unsupported is fine
+   *   and silent — the child drags instead.
+   * - "Straight ahead" is taken from wherever the phone is pointing *now*, so
+   *   forward means whichever way she was facing when she got on rather than
+   *   whichever way is north.
+   *
+   * Safe to call on desktop, where it does nothing at all.
+   */
+  board(): void {
+    if (!this.orientation) return;
+    this.orientation.recentre();
+    // Deliberately not awaited: boarding must not wait on a dialog, and the
+    // answer is picked up by the next frame's reading either way.
+    void requestOrientationPermission();
   }
 
   /**
@@ -247,6 +335,12 @@ export class RideCamera {
   update(dt: number, clock: number, pitchBias = 0): LookReading {
     const look = this.look.read();
 
+    // The phone, if it is talking to us. `null` — no sensor, no permission, not
+    // warmed up, gone quiet — falls straight through to the thumb below, which
+    // is byte-for-byte the code the parity trace covers.
+    const sensor = this.orientation?.read(dt) ?? null;
+    if (sensor !== null) return this.applySensor(sensor.yaw, sensor.pitch, look, pitchBias);
+
     const targetYawVelocity = -look.x * this.yawRate;
     const targetPitchVelocity = look.y * this.pitchRate;
     this.yawVelocity = damp(this.yawVelocity, targetYawVelocity, this.turnDamping, dt);
@@ -265,6 +359,54 @@ export class RideCamera {
     return look;
   }
 
+  /**
+   * One frame of looking around **by phone**. The sensor hands over where the
+   * view should be pointing, so this assigns rather than accumulates.
+   *
+   * Three things the drag path does are deliberately absent:
+   *
+   * - **No damping.** `deviceOrientationLook` has already smoothed the sensor,
+   *   and a second lag on top of that is felt as the window sticking to your
+   *   hands.
+   * - **No idle sway.** The tiny movements of a real arm holding a real phone
+   *   are the idle sway, and they are a better one. Adding a sine wave would
+   *   put a drift on the view that answers to nothing the child is doing.
+   * - **No velocity.** Both are zeroed, so that if the sensor drops out
+   *   mid-ride the thumb takes over from a standstill at the angle the view is
+   *   already at, rather than inheriting a spin from before the handover.
+   *
+   * The clamps are the same clamps: a ride's limits are its limits however the
+   * child is driving.
+   */
+  private applySensor(
+    yaw: number,
+    pitch: number,
+    look: LookReading,
+    pitchBias: number,
+  ): LookReading {
+    this.yaw = this.yawLimit === null ? yaw : clamp(yaw, -this.yawLimit, this.yawLimit);
+    this.pitch = clamp(pitch, this.pitchMin, this.pitchMax);
+    this.yawVelocity = 0;
+    this.pitchVelocity = 0;
+
+    this.camera.rotation.set(
+      clamp(this.pitch + pitchBias, this.pitchMin, this.pitchMax),
+      this.yaw,
+      0,
+    );
+
+    // What the ride is told. `x`/`y` are zero because the thumb is not steering
+    // anything, and `touch` is null so the ferris draws no thumb stick — a
+    // stick that does not move the view is a lie in the corner of the screen.
+    //
+    // `dragging` is passed through untouched, and that is not an oversight: the
+    // train uses it to tell a look-drag from "let me off", and a child whose
+    // finger is sliding across the screen still means "not that" whether or not
+    // the slide is what turns her head.
+    this.sensorReading.dragging = look.dragging;
+    return this.sensorReading;
+  }
+
   resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.fov =
@@ -277,6 +419,7 @@ export class RideCamera {
 
   dispose(): void {
     this.look.dispose();
+    this.orientation?.dispose();
     this.camera.removeFromParent();
   }
 }

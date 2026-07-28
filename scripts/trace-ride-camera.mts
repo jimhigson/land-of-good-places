@@ -236,9 +236,22 @@ interface Coverage {
 
 /** Straight from `SpaceFerrisWheel`. Duplicated on purpose: if somebody widens
  *  the clamp there, this run stops reporting that it reached it, and the
- *  coverage floor says so out loud instead of the hash quietly moving. */
-const PITCH_MIN = -0.33;
-const PITCH_MAX = 0.64;
+ *  coverage floor says so out loud instead of the hash quietly moving.
+ *
+ *  It did exactly that on 28 July 2026, which is the only reason these two
+ *  numbers have ever changed: the car's floor and roof became glass, so the
+ *  clamps opened from −0.33/0.64 to −1.396/1.222 (80° down, 70° up), this run
+ *  reported `pitch-top=0 pitch-bottom=0`, and the build stopped. Working
+ *  exactly as intended — re-copied here, and the sweep re-checked.
+ *
+ *  The sweep's key holds did **not** need lengthening, which is worth writing
+ *  down because it looks as though they should have: there is now 2.6 rad
+ *  between the clamps where there was 0.97. They still reach because pitch is
+ *  *persistent* — three seconds of `ArrowUp` at 1.1 rad/s covers the distance,
+ *  and once parked the view stays parked until something drives it back. If a
+ *  future change shortens those holds, check the two counters, not the clock. */
+const PITCH_MIN = -1.396;
+const PITCH_MAX = 1.222;
 
 /** Straight from `look.ts`'s `STICK_DEADZONE`, for the same reason. */
 const STICK_DEADZONE = 10;

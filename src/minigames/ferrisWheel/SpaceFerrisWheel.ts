@@ -130,12 +130,28 @@ const FOV = 62;
 // because this ride's numbers are the ones the shared defaults were set from,
 // and two copies of an approved number is one copy too many.
 
-/** How far down you can tip the view. Gentle — a six-year-old should never be
- *  able to end up staring at the car floor. */
-const PITCH_MIN = -0.33;
-/** How far up you can tip it — generous, since the wheel's own rim and the
- *  Moon both like to sit high. */
-const PITCH_MAX = 0.64;
+// **Both clamps opened right up (28 July 2026), and it is a deliberate change
+// to family-approved behaviour** — `check:ride-camera`'s trace moves because of
+// it, from `26a241cc` to `d1a4bbf0`, and that is the only reason it moves.
+//
+// The old numbers were tight on purpose: staring at a wooden car floor is not a
+// view, so there was no reason to let a small thumb end up parked there. The
+// car's floor and roof are **glass** now (`gondola.ts`), which turns the two
+// directions that used to be dead ends into the best two views on the ride —
+// the whole park directly below your feet, and the wheel and the stars directly
+// overhead. Clamping to 19° down would have meant fitting a glass floor a child
+// cannot look through, which is worse than not fitting one.
+//
+// These two constants and that glass are **one decision**. If you ever put the
+// floor back, put these back with it.
+
+/** How far down you can tip the view: 80°, near enough straight down through
+ *  the glass floor. Short of vertical on purpose — at exactly 90° there is no
+ *  horizon left anywhere in frame and a child loses track of which way is out. */
+const PITCH_MIN = -1.396;
+/** How far up: 70°, up through the glass roof at the hub, the spokes and the
+ *  Moon. Also short of vertical, for the same reason. */
+const PITCH_MAX = 1.222;
 /** Where the view sits before anybody touches it: a shade below level, so the
  *  park is in the window rather than the sky. */
 const START_PITCH = -0.06;
@@ -238,6 +254,16 @@ class SpaceFerrisWheel implements MiniGame {
     // **position only** — nothing here or there rotates the seat, so the
     // family-confirmed look-around directions are untouched by it.
     this.view.mountOn(this.gondola.seat, GONDOLA_EYE);
+
+    // Sitting down. On a phone this takes "straight ahead" from wherever the
+    // child is actually holding it, so the window into space starts pointing
+    // out of the front of the car rather than at magnetic north.
+    //
+    // The iOS permission prompt is *not* raised here — `init` runs behind a
+    // closed curtain, several frames after the press that opened the stall, and
+    // iOS only grants sensors from inside a gesture. `MiniGameHost.begin` asks
+    // while that press is still live (`StallDefinition.firstPerson`).
+    this.view.board();
 
     this.alien = createAlienSaucer();
     this.ripika = createSpaceRipika();
@@ -386,8 +412,10 @@ class SpaceFerrisWheel implements MiniGame {
    * deflection, the faster the view spins, and the damping is what turns a
    * sudden flick into a smooth spin-up rather than a snap. Yaw is free —
    * there is glass on every side of the rebuilt gondola, so there is always
-   * something to turn towards. Pitch is clamped gently, mostly on the way
-   * down, so a small hand cannot end up parked staring at the car floor.
+   * something to turn towards. Pitch is clamped wide (80° down, 70° up) and
+   * for one reason only: to stop short of vertical, where there is no horizon
+   * left in frame and a child loses track of which way is out. There is glass
+   * underfoot and overhead now, so both directions are views.
    *
    * All of that now lives in `core/RideCamera.ts`, shared with the first-person
    * train and the coaster, and the signs in it are this ride's — the ones the

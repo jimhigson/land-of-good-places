@@ -129,4 +129,19 @@ export interface StallDefinition {
    * by MiniGameHost.boardRide before a game would be built.
    */
   readonly create?: MiniGameFactory;
+  /**
+   * True if what is behind this door is a **first-person ride** — something
+   * driven by `core/RideCamera`.
+   *
+   * The framework needs to know one thing and one thing only: iOS will not hand
+   * over the motion sensors except from inside a user gesture, and the *only*
+   * gesture in the whole sequence is the interact press that opens the stall.
+   * By the time `init()` runs the curtain has already closed, which is a frame
+   * or two later and a lifetime too late.
+   *
+   * So the flag is here rather than the prompt being fired for every stall: a
+   * six-year-old opening the dodgems should not be asked about motion sensors
+   * for a game that has no use for them.
+   */
+  readonly firstPerson?: boolean;
 }

@@ -139,6 +139,10 @@ export const STALLS: readonly StallDefinition[] = [
     // instead of being left behind as an invisible obstacle on the lawn.
     ...STALL_PLACEMENTS.spaceFerrisWheel,
     create: createSpaceFerrisWheel,
+    // The only stall behind which you sit in a seat and turn your head, so the
+    // only one that needs iOS asked about the motion sensors while the opening
+    // press is still a gesture. See `StallDefinition.firstPerson`.
+    firstPerson: true,
   },
   {
     id: 'dodgems',
