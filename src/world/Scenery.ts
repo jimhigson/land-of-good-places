@@ -22,7 +22,11 @@ import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
 import { PARK_SEED } from './parkManifest';
 import { PARK_LAYOUT } from './parkLayout';
-import { TRAIN_PLAN } from './train/plan';
+import {
+  TRAIN_PLAN,
+  distanceToRailCorridor,
+  RAIL_CORRIDOR_CLEARANCE,
+} from './train/plan';
 import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
@@ -41,12 +45,46 @@ import type { CollisionWorld } from './Collision';
 
 type TreeKind = 'lollipop' | 'stack' | 'pine' | 'blossom';
 
+/** Which palette a run is built from — and how thick it therefore is. */
+type WallKind = 'wood' | 'stone';
+
 /** One straight length of wall, in world metres. */
 interface WallRun {
   readonly from: readonly [number, number];
   readonly to: readonly [number, number];
   readonly height: number;
+  readonly kind: WallKind;
+  /**
+   * Runs belonging to one deliberately-joined structure — the two arms of an
+   * L-shaped maze piece, which meet at a shared corner on purpose. Distinct
+   * pieces must keep {@link WALL_RUN_GAP} apart; arms of the same piece are
+   * exempt, because "these two touch" is the whole point of an L.
+   */
+  readonly piece: number;
 }
+
+/**
+ * Half the thickness of a run, for clearance maths.
+ *
+ * Taken from what is actually built, not from the collider: the stone runs'
+ * coping stone is the widest part of them at 0.72 m (`buildStoneWalls`), wider
+ * than both the 0.55 m wall below it and the 0.34 m half-width the collider
+ * gets. Measuring the collider would let two copings touch while the colliders
+ * still read as clear.
+ */
+const WALL_HALF_WIDTH: Record<WallKind, number> = { wood: 0.24, stone: 0.36 };
+
+/**
+ * Gap kept between the faces of any two wall runs.
+ *
+ * Wide enough to walk down: `PLAYER_RADIUS` is 0.62, so a 2 m lane leaves a
+ * child three-quarters of a metre of daylight either shoulder. The narrower
+ * alternative is worse than it sounds — a 40 cm slot between two walls is not
+ * a passage, it is a place to get stuck, and `NavGrid` (which fattens every
+ * collider by the walker's radius before it decides a cell is walkable) would
+ * classify it as solid anyway, leaving a visible gap the map says is a wall.
+ */
+const WALL_RUN_GAP = 2;
 
 interface InstanceItem {
   readonly position: Vector3;
@@ -175,6 +213,33 @@ export class Scenery {
 /** Canopy radius (of the 1.75–2.5 range rolled below) worth climbing. */
 const CLIMBABLE_MIN_RADIUS = 2.05;
 
+/**
+ * How far each kind of tree can possibly reach sideways from its trunk.
+ *
+ * These are the **ceilings of the rolls below**, not tuned spacing numbers, and
+ * they have to be read off the rolls whenever those change:
+ *
+ * - `pine` — cone widths roll `rng.range(1.7, 2.3)`, narrowing with height, all
+ *   centred on the trunk. Ceiling 2.3.
+ * - `stack` — canopy radii roll `rng.range(1.6, 2.05)`, narrowing per layer,
+ *   centred. Ceiling 2.05.
+ * - `lollipop` / `blossom` — a main ball of up to 2.5, plus the optional small
+ *   ball tucked beside it at `radius * 0.7` carrying its own `radius * 0.72`.
+ *   Ceiling `2.5 * (0.7 + 0.72)` = 3.55, and it is the side ball that makes
+ *   these the widest thing on the lawn.
+ *
+ * Reserved before a tree is rolled in detail, so a candidate is refused for
+ * the space it *could* take rather than the space it happens to take. That
+ * over-reserves a little; two canopies growing through each other is the thing
+ * being prevented, and 53 pairs of them were doing exactly that.
+ */
+const TREE_REACH: Record<TreeKind, number> = {
+  pine: 2.3,
+  stack: 2.05,
+  lollipop: 3.55,
+  blossom: 3.55,
+};
+
 function buildFoliage(collision: CollisionWorld): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
@@ -207,7 +272,15 @@ function buildFoliage(collision: CollisionWorld): {
   // ground it used to, so the old scatter left the near view looking bare. These
   // are all InstancedMesh, so the extra plants cost vertices and nothing else.
   const targetTrees = 72;
-  while (treeCount < targetTrees && attempts < 5200) {
+  // Where the trees already are, and how far each reaches — the scatter used
+  // to keep no such record, and so planted 72 trees that knew about the paths
+  // and the plots and nothing whatever about each other. Fifty-three pairs of
+  // canopies grew through one another on the canonical seed, the worst by
+  // 4.32 m, which at a 2.5 m canopy is one tree standing inside another.
+  const planted: { x: number; z: number; reach: number }[] = [];
+  // Attempts raised with the new refusal: the old budget was sized for a test
+  // that almost never said no.
+  while (treeCount < targetTrees && attempts < 26000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
@@ -216,6 +289,9 @@ function buildFoliage(collision: CollisionWorld): {
     if (!isPlantable(x, z, 2.6)) continue;
 
     const kind = pickTreeKind(rng);
+    const reach = TREE_REACH[kind];
+    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) continue;
+    planted.push({ x, z, reach });
     const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
     const rotationY = rng.range(0, TAU);
@@ -569,14 +645,76 @@ function insideAnyAnchor(x: number, z: number, margin: number): boolean {
 
 // -------------------------------------------------------------------- walls
 
-/** Both endpoints and the middle sit on open plantable lawn. */
+/**
+ * The whole run sits on open plantable lawn, and off the railway.
+ *
+ * Sampled every half metre rather than at five fixed fractions: a run is up to
+ * 8.5 m long, and quarter-points 2 m apart step straight over a path corner or
+ * a dip in the rail corridor. The rail test is the one this file did not used
+ * to make at all — `Scenery` runs long before the train does (see `World`) and
+ * so had no idea where the rails were going. It does now, because
+ * {@link distanceToRailCorridor} is decided by the layout rather than by the
+ * built park; on the canonical seed the nearest pink wall stood **0.14 m** from
+ * the centre line, which is a wall through the train.
+ */
 function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
-  const steps = 4;
+  const steps = Math.max(4, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / 0.5));
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
-    if (!isPlantable(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, 3.2)) return false;
+    const x = x1 + (x2 - x1) * t;
+    const z = z1 + (z2 - z1) * t;
+    if (!isPlantable(x, z, 3.2)) return false;
+    if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
   }
   return true;
+}
+
+/** Do these two runs come within {@link WALL_RUN_GAP} of one another? */
+function runsClash(a: WallRun, b: WallRun): boolean {
+  if (a.piece === b.piece) return false;
+  const needed = WALL_HALF_WIDTH[a.kind] + WALL_HALF_WIDTH[b.kind] + WALL_RUN_GAP;
+  return segmentDistance(a.from, a.to, b.from, b.to) < needed;
+}
+
+/** True if `candidate` may be built alongside everything in `placed`. */
+function fitsAmong(candidate: WallRun, placed: readonly WallRun[]): boolean {
+  return !placed.some((run) => runsClash(candidate, run));
+}
+
+/**
+ * The park's whole wall layout, wooden and stone together, solved once.
+ *
+ * Together is the point. The two builders used to generate independently and
+ * neither could see the other's runs, so a hiding wall and a garden bed could
+ * be laid across each other — measured on the canonical seed at **-0.5 m**,
+ * i.e. properly interpenetrating, and on six other pairs besides. The maze's
+ * own {@link MAZE_PIECE_GAP} only ever separated maze *corners* from each
+ * other, and the stone benches had no separation rule at all.
+ *
+ * Memoised because both builders need the same answer and the generation is
+ * pure: same {@link PARK_SEED}, same park.
+ */
+let cachedWallPlan: { readonly wood: readonly WallRun[]; readonly stone: readonly WallRun[] } | null =
+  null;
+
+function wallPlan(): { readonly wood: readonly WallRun[]; readonly stone: readonly WallRun[] } {
+  if (cachedWallPlan) return cachedWallPlan;
+  // One growing list of everything accepted so far, shared by both generators.
+  const placed: WallRun[] = [];
+  // The maze goes down first, and the order is worth keeping. It is the more
+  // constrained of the two — an L-piece needs two clear arms *and* 19 m of
+  // separation from every other corner — and it is the thing the design doc
+  // asks for by name, somewhere "to run around and hide behind". The stone
+  // runs are short enough to slot into whatever it leaves.
+  //
+  // This is a genuinely tight lawn: every plot excludes its bounding radius
+  // plus 5.7 m, so the two structures really do compete. Measured on the
+  // canonical seed — maze first gives 4 wooden and 6 stone segments; stone
+  // first gives 8 stone and no hiding maze at all.
+  const wood = generateWallMaze(placed);
+  const stone = generateStoneRuns(placed);
+  cachedWallPlan = { wood, stone };
+  return cachedWallPlan;
 }
 
 /**
@@ -587,7 +725,7 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
  */
 const MAZE_PIECE_GAP = 7;
 
-function generateWallMaze(): WallRun[] {
+function generateWallMaze(placed: WallRun[]): WallRun[] {
   const rng = new Rng(0x77a115 ^ PARK_SEED);
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
@@ -595,6 +733,7 @@ function generateWallMaze(): WallRun[] {
   const runs: WallRun[] = [];
   const cornerPoints: [number, number][] = [];
   let attempts = 0;
+  let piece = 0;
   while (runs.length < 10 && attempts < 4000) {
     attempts += 1;
     const angle = rng.range(0, Math.PI * 2);
@@ -613,17 +752,44 @@ function generateWallMaze(): WallRun[] {
       cz + Math.sin(yaw + Math.PI / 2) * armB,
     ];
     if (!runIsClear(cx, cz, a2[0], a2[1]) || !runIsClear(cx, cz, b2[0], b2[1])) continue;
-    runs.push({ from: [cx, cz], to: a2, height: rng.pick(heights) });
-    runs.push({ from: [cx, cz], to: b2, height: rng.pick(heights) });
+
+    // The L goes down whole or not at all: half a hiding piece is a stub.
+    piece += 1;
+    const armOne: WallRun = {
+      from: [cx, cz],
+      to: a2,
+      height: rng.pick(heights),
+      kind: 'wood',
+      piece,
+    };
+    const armTwo: WallRun = {
+      from: [cx, cz],
+      to: b2,
+      height: rng.pick(heights),
+      kind: 'wood',
+      piece,
+    };
+    if (!fitsAmong(armOne, placed) || !fitsAmong(armTwo, placed)) continue;
+
+    runs.push(armOne, armTwo);
+    placed.push(armOne, armTwo);
     cornerPoints.push([cx, cz]);
   }
   return runs;
 }
 
 /** Plaza garden beds on four tangents, plus benches out on the lawn. */
-function generateStoneRuns(): WallRun[] {
+function generateStoneRuns(placed: WallRun[]): WallRun[] {
   const rng = new Rng(0x57013e ^ PARK_SEED);
   const runs: WallRun[] = [];
+  let piece = 1000;
+  const consider = (run: WallRun): void => {
+    if (!runIsClear(run.from[0], run.from[1], run.to[0], run.to[1])) return;
+    if (!fitsAmong(run, placed)) return;
+    runs.push(run);
+    placed.push(run);
+  };
+
   // Beds: short tangent walls just off the plaza kerb, at seeded bearings.
   const bedDistance = PLAZA.radius + 3.2;
   for (let i = 0; i < 4; i += 1) {
@@ -634,23 +800,30 @@ function generateStoneRuns(): WallRun[] {
     const half = rng.range(3, 4.5);
     const from: [number, number] = [cx - Math.cos(tangent) * half, cz - Math.sin(tangent) * half];
     const to: [number, number] = [cx + Math.cos(tangent) * half, cz + Math.sin(tangent) * half];
-    if (!runIsClear(from[0], from[1], to[0], to[1])) continue;
-    runs.push({ from, to, height: rng.pick([0.7, 0.85] as const) });
+    piece += 1;
+    consider({ from, to, height: rng.pick([0.7, 0.85] as const), kind: 'stone', piece });
   }
   // Benches: low stonework on open lawn, honestly hoppable heights only.
+  // The attempt budget is generous because most candidates are now refused —
+  // a bench crossing another bench used to be accepted without a murmur.
   let attempts = 0;
-  while (runs.length < 8 && attempts < 2000) {
+  while (runs.length < 8 && attempts < 6000) {
     attempts += 1;
     const angle = rng.range(0, Math.PI * 2);
-    const radius = Math.sqrt(rng.range(18 * 18, 40 * 40));
+    const radius = Math.sqrt(rng.range(16 * 16, 44 * 44));
     const cx = Math.cos(angle) * radius;
     const cz = Math.sin(angle) * radius;
     const yaw = rng.range(0, Math.PI);
-    const half = rng.range(3.5, 4.5);
+    // Shorter than the 7-9 m these used to roll. A run that long is a garden
+    // wall, and the lawn has very few 9 m stretches that clear every path,
+    // plot and now the railway along their whole length — the old length only
+    // ever fitted because `runIsClear` sampled five points and stepped over
+    // what lay between them. 4.4-6.4 m still reads as stonework to sit on.
+    const half = rng.range(2.2, 3.2);
     const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
     const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
-    if (!runIsClear(from[0], from[1], to[0], to[1])) continue;
-    runs.push({ from, to, height: rng.pick([0.8, 0.95] as const) });
+    piece += 1;
+    consider({ from, to, height: rng.pick([0.8, 0.95] as const), kind: 'stone', piece });
   }
   return runs;
 }
@@ -671,7 +844,7 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
   // 1.0-1.5 m band: `checkHoppableColliders` proved the jump clears 1.0 m
   // and strands on anything up to ~1.43 m, so a wall is either honestly
   // hoppable or honestly solid, never in the trap between.
-  const runs: readonly WallRun[] = generateWallMaze();
+  const runs: readonly WallRun[] = wallPlan().wood;
 
   const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
   const postMaterial = toonMaterial(PALETTE.woodDark);
@@ -736,7 +909,7 @@ function buildStoneWalls(collision: CollisionWorld): Group {
   // hoppable (<= 1.0 m): the first generated roll put 1.2 m benches in the
   // 1.0-1.43 m trap band and the boot assert refused the park, which is
   // that assert doing exactly its job.
-  const runs: readonly WallRun[] = generateStoneRuns();
+  const runs: readonly WallRun[] = wallPlan().stone;
 
   const wallMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });
   const copingMaterial = toonMaterial(PALETTE.stonePinkLight);
@@ -862,6 +1035,11 @@ function clearOfAnchors(runs: readonly WallRun[], margin = 0.6): WallRun[] {
         from: [x1 + dx * start, z1 + dz * start],
         to: [x1 + dx * end, z1 + dz * end],
         height: run.height,
+        kind: run.kind,
+        // Sub-spans of one run keep its piece id. They are collinear parts of
+        // the same wall, so exempting them from each other's clearance is
+        // right — and they could not clash if they tried.
+        piece: run.piece,
       });
     }
   }
@@ -870,6 +1048,60 @@ function clearOfAnchors(runs: readonly WallRun[], margin = 0.6): WallRun[] {
 
 /** Shorter than this and a trimmed run is dropped rather than built. */
 const MIN_WALL_LENGTH = 1.8;
+
+/**
+ * Closest approach between two line segments, in metres. Zero if they cross.
+ *
+ * Exact rather than sampled: two walls laid across each other in an X touch at
+ * exactly one point, and a sampler stepping along both of them can step over
+ * it and report a comfortable gap where there is a crossing.
+ */
+function segmentDistance(
+  a1: readonly [number, number],
+  a2: readonly [number, number],
+  b1: readonly [number, number],
+  b2: readonly [number, number],
+): number {
+  if (segmentsCross(a1, a2, b1, b2)) return 0;
+  return Math.min(
+    pointToSegment(a1, b1, b2),
+    pointToSegment(a2, b1, b2),
+    pointToSegment(b1, a1, a2),
+    pointToSegment(b2, a1, a2),
+  );
+}
+
+function segmentsCross(
+  a1: readonly [number, number],
+  a2: readonly [number, number],
+  b1: readonly [number, number],
+  b2: readonly [number, number],
+): boolean {
+  const side = (
+    p: readonly [number, number],
+    q: readonly [number, number],
+    r: readonly [number, number],
+  ): number => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  const d1 = side(b1, b2, a1);
+  const d2 = side(b1, b2, a2);
+  const d3 = side(a1, a2, b1);
+  const d4 = side(a1, a2, b2);
+  return d1 !== d2 && d3 !== d4;
+}
+
+function pointToSegment(
+  p: readonly [number, number],
+  s1: readonly [number, number],
+  s2: readonly [number, number],
+): number {
+  const dx = s2[0] - s1[0];
+  const dz = s2[1] - s1[1];
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared < 1e-12) return Math.hypot(p[0] - s1[0], p[1] - s1[1]);
+  let t = ((p[0] - s1[0]) * dx + (p[1] - s1[1]) * dz) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(p[0] - (s1[0] + dx * t), p[1] - (s1[1] + dz * t));
+}
 
 // ----------------------------------------------------------------- helpers
 

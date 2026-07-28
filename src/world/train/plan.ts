@@ -133,6 +133,69 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
   });
 }
 
+/**
+ * Distance from (x, z) to the solved rail centre line, by segment projection
+ * over a fine sampling of the curve.
+ *
+ * This is what lets `Scenery` keep its garden walls off the tracks: walls are
+ * scattered long before the train is *built*, but the route is *planned* at
+ * module load, so the question has an exact answer by then. (An earlier
+ * version approximated this with a separate "corridor pre-solve" because the
+ * route used to bend around trees at build time; the pure plan made the
+ * approximation — and its caveats — unnecessary.)
+ */
+export function distanceToRailCorridor(x: number, z: number): number {
+  ensureCorridorSamples();
+  let best = Infinity;
+  const xs = corridorX as Float64Array;
+  const zs = corridorZ as Float64Array;
+  for (let i = 0; i < xs.length; i += 1) {
+    const j = (i + 1) % xs.length;
+    const ax = xs[i] ?? 0;
+    const az = zs[i] ?? 0;
+    const bx = xs[j] ?? 0;
+    const bz = zs[j] ?? 0;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSquared = dx * dx + dz * dz;
+    const t =
+      lengthSquared < 1e-12
+        ? 0
+        : Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSquared));
+    const gap = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+    if (gap < best) best = gap;
+  }
+  return best;
+}
+
+/**
+ * How far a scattered structure must keep off {@link distanceToRailCorridor}.
+ *
+ * Measured, not chosen: the fence stands 2 m off the rails (`train/fence.ts`)
+ * and a station platform's canopy reaches 3.7 m from the centre line
+ * (`train/station.ts`: `PLATFORM_OFFSET` 2.15 + half of `PLATFORM_WIDTH` 2.6,
+ * + 0.25 of roof overhang). Anything at 4.2 m clears the widest of those with
+ * room for its own thickness.
+ */
+export const RAIL_CORRIDOR_CLEARANCE = 4.2;
+
+let corridorX: Float64Array | null = null;
+let corridorZ: Float64Array | null = null;
+
+function ensureCorridorSamples(): void {
+  if (corridorX) return;
+  const route = TRAIN_PLAN.route;
+  const count = Math.max(64, Math.ceil(route.length / 2));
+  corridorX = new Float64Array(count);
+  corridorZ = new Float64Array(count);
+  const point = new Vector3();
+  for (let i = 0; i < count; i += 1) {
+    route.pointAt((i / count) * route.length, point);
+    corridorX[i] = point.x;
+    corridorZ[i] = point.z;
+  }
+}
+
 /** The one plan. Import this; never re-solve — same rule as `PARK_LAYOUT`. */
 export const TRAIN_PLAN: {
   readonly route: TrainRoute;
