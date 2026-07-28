@@ -20,6 +20,8 @@ src/
     Engine.ts        renderer + scene + resize handling
     Loop.ts          requestAnimationFrame loop, fixed-ish delta, FPS counter
     IsoCamera.ts     orthographic isometric rig at one fixed angle: follow, zoom
+    RideCamera.ts    the one first-person look-around, for rides you sit inside
+    rideLook.ts      what RideCamera reads: drag-to-turn + keys, one deadzone
     constants.ts     every tuning number in the game
     palette.ts       every colour in the game
     mathUtils.ts     lerp/damp/smoothstep/angles + the seeded Rng

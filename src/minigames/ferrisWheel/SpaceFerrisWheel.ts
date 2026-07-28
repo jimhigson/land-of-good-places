@@ -1,15 +1,7 @@
-import {
-  Color,
-  DirectionalLight,
-  HemisphereLight,
-  PerspectiveCamera,
-  Raycaster,
-  Scene,
-  Vector2,
-  Vector3,
-} from 'three';
+import { Color, DirectionalLight, HemisphereLight, Raycaster, Scene, Vector2, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { clamp, clamp01, damp, lerp, smoothstep } from '../../core/mathUtils';
+import { clamp01, lerp, smoothstep } from '../../core/mathUtils';
+import { RideCamera } from '../../core/RideCamera';
 import { createWorldBelow, type WorldBelow } from './below';
 import { GONDOLA_EYE, createGondola, type Gondola } from './gondola';
 import {
@@ -23,7 +15,6 @@ import {
 import { createSpaceShow, fromAngle, type SpaceShow } from './space';
 import { createSparks, type Sparks } from './sparks';
 import { createRideHud, type RideHud } from './hud';
-import { createLookControl, type LookReading } from './look';
 import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
 
 /**
@@ -130,23 +121,27 @@ const NEBULA_HEIGHT = 9;
 const FOV = 62;
 
 // ------------------------------------------------------------- look-around
+//
+// The look-around itself is `core/RideCamera.ts` — the shared one the train and
+// the coaster also ride behind, extracted from this file (ARCHITECTURE-DECISIONS
+// Decision 4 §8) and gated by `npm run check:ride-camera`. What is left here is
+// what Decision 4 says a ride owns: **its mount and its limits**. The feel — the
+// turn rates, the damping, the idle sway — is deliberately *not* restated,
+// because this ride's numbers are the ones the shared defaults were set from,
+// and two copies of an approved number is one copy too many.
 
-/** Radians per second of yaw at full stick/key deflection. Free to spin all
- *  the way round — there is glass on every side now, so nothing stops it. */
-const YAW_RATE = 1.7;
-/** Radians per second of pitch. Slower than yaw: up and down is the axis a
- *  small thumb overshoots on. */
-const PITCH_RATE = 1.1;
 /** How far down you can tip the view. Gentle — a six-year-old should never be
  *  able to end up staring at the car floor. */
 const PITCH_MIN = -0.33;
 /** How far up you can tip it — generous, since the wheel's own rim and the
  *  Moon both like to sit high. */
 const PITCH_MAX = 0.64;
-/** Half-life of the turn-rate damping, in seconds. The stick sets where the
- *  view *wants* to be turning; this is what keeps a sudden flick from being a
- *  snap. */
-const TURN_DAMPING = 0.16;
+/** Where the view sits before anybody touches it: a shade below level, so the
+ *  park is in the window rather than the sky. */
+const START_PITCH = -0.06;
+/** Radians of extra tilt at the very start of the ride — see {@link
+ *  SpaceFerrisWheel.aimCamera}. */
+const ESTABLISHING_PITCH = 0.34;
 
 interface Cue {
   readonly at: number;
@@ -160,7 +155,22 @@ class SpaceFerrisWheel implements MiniGame {
   readonly id = 'spaceFerrisWheel';
   readonly title = 'Space Ferris Wheel';
   readonly scene = new Scene();
-  readonly camera = new PerspectiveCamera(FOV, 1, 0.05, 3200);
+  /**
+   * The shared first-person look-around, this ride's first consumer.
+   *
+   * Only the two clamps and the starting tilt are stated: yaw is free (there is
+   * glass on every side of the rebuilt gondola, so there is always something to
+   * turn towards), and the rates, damping and idle sway are the shared defaults,
+   * which *are* this ride's approved numbers.
+   */
+  private readonly view = new RideCamera({
+    fov: FOV,
+    pitchMin: PITCH_MIN,
+    pitchMax: PITCH_MAX,
+    startPitch: START_PITCH,
+  });
+
+  readonly camera = this.view.camera;
 
   private context: MiniGameContext | null = null;
   /** The one the framework is drawing into: taps are measured against it. */
@@ -174,7 +184,6 @@ class SpaceFerrisWheel implements MiniGame {
   private ripika: SpaceFriend | null = null;
   private nebula: SpaceFriend | null = null;
   private turtles: SpaceFriend | null = null;
-  private readonly look = createLookControl();
 
   private readonly sky = new Color();
   private readonly dayAmbient = new Color(PALETTE.ambientDay);
@@ -191,11 +200,6 @@ class SpaceFerrisWheel implements MiniGame {
   private rate = 1;
   private cardTime = -1;
   private waves = 0;
-
-  private yaw = 0;
-  private pitch = -0.06;
-  private yawVelocity = 0;
-  private pitchVelocity = 0;
 
   private readonly cues: Cue[] = [];
 
@@ -222,18 +226,18 @@ class SpaceFerrisWheel implements MiniGame {
     this.gondola = createGondola();
     this.scene.add(this.gondola.root);
 
-    // The camera rides in the car, so the sway is the ride. Rotations are set
-    // directly rather than through `lookAt`: aiming at a fixed world point every
-    // frame would cancel the sway out and turn the ride into a slideshow.
+    // The camera rides in the car, so the sway is the ride: mounting it on the
+    // seat is what makes that true, and is all this ride has to say about where
+    // the eye goes. `RideCamera` sets rotations directly rather than through
+    // `lookAt` — aiming at a fixed world point every frame would cancel the sway
+    // out and turn the ride into a slideshow.
     //
     // The eye position comes from `gondola.ts` because it is that file's
     // decision: it is where a child sitting on the player's seat has their eye,
     // and the pets' chairs are built to keep their heads below it. It is a
     // **position only** — nothing here or there rotates the seat, so the
-    // family-confirmed look-around directions below are untouched by it.
-    this.camera.rotation.order = 'YXZ';
-    this.camera.position.set(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
-    this.gondola.seat.add(this.camera);
+    // family-confirmed look-around directions are untouched by it.
+    this.view.mountOn(this.gondola.seat, GONDOLA_EYE);
 
     this.alien = createAlienSaucer();
     this.ripika = createSpaceRipika();
@@ -287,11 +291,6 @@ class SpaceFerrisWheel implements MiniGame {
 
     this.clock += dt * this.rate;
 
-    // Read the look control once a frame: `aimCamera` turns the view by it and
-    // the HUD draws the stick under the thumb.
-    const look = this.look.read();
-    this.hud?.setStick(look.touch);
-
     const height = rideHeight(this.clock);
 
     this.below?.setHeight(height);
@@ -309,7 +308,7 @@ class SpaceFerrisWheel implements MiniGame {
     this.space?.update(dt, this.clock);
     this.updateFriends(dt);
     this.sparks?.update(dt);
-    this.aimCamera(dt, look);
+    this.aimCamera(dt);
 
     this.fireCues();
     this.hud?.setCaption(captionFor(this.clock));
@@ -384,49 +383,32 @@ class SpaceFerrisWheel implements MiniGame {
    * them a look control — turning to find things is meant to be theirs to do.
    *
    * The stick/keys set a **turn rate**, not a target angle: the further the
-   * deflection, the faster the view spins, and `TURN_DAMPING` is what turns a
+   * deflection, the faster the view spins, and the damping is what turns a
    * sudden flick into a smooth spin-up rather than a snap. Yaw is free —
    * there is glass on every side of the rebuilt gondola, so there is always
    * something to turn towards. Pitch is clamped gently, mostly on the way
    * down, so a small hand cannot end up parked staring at the car floor.
+   *
+   * All of that now lives in `core/RideCamera.ts`, shared with the first-person
+   * train and the coaster, and the signs in it are this ride's — the ones the
+   * family confirmed. What is left here is the two things only the ferris wheel
+   * knows: **its clock**, which the idle sway breathes on and which stops when
+   * the end card comes up, and **the establishing tilt** below.
    */
-  private aimCamera(dt: number, look: LookReading): void {
-    // `look.x` is screen-space drag-right (see `look.ts`), but `rotation.y`
-    // (yaw) increasing turns the camera *left* — the same right-handed turn
-    // every three.js camera uses (it's why `PointerLockControls` does
-    // `euler.y -= movementX`). Negate here so a drag/press to the left swings
-    // the view left, matching the dodgems (press left -> the car goes left)
-    // and the intuitive "turn your head" expectation. Pitch needs no such
-    // flip: `rotation.x` increasing already looks up, so drag-up -> look-up
-    // falls out correctly with the plain sign.
-    //
-    // This negation is a *camera yaw* thing, and the reason the CONTROL RULE
-    // keeps rotation controls to first person: it is a sign flip that only
-    // exists because a heading and a look direction wind opposite ways on
-    // screen, and it has caught agents out before. Movement never needs it,
-    // because movement is a vector, not an angle — see `core/screenBasis.ts`.
-    const targetYawVelocity = -look.x * YAW_RATE;
-    const targetPitchVelocity = look.y * PITCH_RATE;
-    this.yawVelocity = damp(this.yawVelocity, targetYawVelocity, TURN_DAMPING, dt);
-    this.pitchVelocity = damp(this.pitchVelocity, targetPitchVelocity, TURN_DAMPING, dt);
-
-    this.yaw += this.yawVelocity * dt;
-    this.pitch = clamp(this.pitch + this.pitchVelocity * dt, PITCH_MIN, PITCH_MAX);
-
-    // A small idle sway for a hand that is not on the controls — gone the
-    // instant a child actually asks to look somewhere, so it never fights them.
-    const idle = !look.dragging && look.x === 0 && look.y === 0;
-    const idleYaw = idle ? Math.sin(this.clock * 0.11) * 0.05 : 0;
-
+  private aimCamera(dt: number): void {
     // The opening beat: while the car is still at the bottom there is nothing
     // out of the window but grass, so the ride starts by looking *up* — at the
     // spokes, the hub and the cars swinging above you. It is the establishing
     // shot, layered on top of whatever the child is doing and gone within a
     // few seconds either way.
-    const establishing = this.clock < BOARD_END ? 0.34 * (1 - smoothstep(0, 1, this.clock / BOARD_END)) : 0;
-    const pitch = clamp(this.pitch + establishing, PITCH_MIN, PITCH_MAX);
+    const establishing =
+      this.clock < BOARD_END
+        ? ESTABLISHING_PITCH * (1 - smoothstep(0, 1, this.clock / BOARD_END))
+        : 0;
 
-    this.camera.rotation.set(pitch, this.yaw + idleYaw, 0);
+    // The reading comes back because the HUD draws the stick under the thumb.
+    const look = this.view.update(dt, this.clock, establishing);
+    this.hud?.setStick(look.touch);
   }
 
   private applySky(height: number): void {
@@ -527,17 +509,15 @@ class SpaceFerrisWheel implements MiniGame {
   // -------------------------------------------------------------- lifecycle
 
   resize(width: number, height: number): void {
-    this.camera.aspect = width / Math.max(1, height);
-    // On a portrait phone the vertical field of view has to open up, or the
-    // window ends up showing a letterbox of space with the frame either side.
-    this.camera.fov = this.camera.aspect < 1 ? FOV / Math.max(0.62, this.camera.aspect) : FOV;
-    this.camera.fov = Math.min(this.camera.fov, 96);
-    this.camera.updateProjectionMatrix();
+    // Including the portrait-phone widening: a first-person window that
+    // letterboxes on a turned phone is every first-person ride's problem, so it
+    // moved into `RideCamera` with the rest of it.
+    this.view.resize(width, height);
   }
 
   dispose(): void {
     window.removeEventListener('pointerdown', this.onPointerDown, true);
-    this.look.dispose();
+    this.view.dispose();
     this.gondola?.dispose();
     this.below?.dispose();
     this.space?.dispose();
