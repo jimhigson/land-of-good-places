@@ -47,6 +47,15 @@ export const PLAYER_DEFAULT_NAME = 'Eleri';
 /** Top walking speed, metres/second. */
 export const PLAYER_MAX_SPEED = 7.4;
 
+/**
+ * Extra speed multiplier while the sprint action is held.
+ *
+ * Out here beside the speed it multiplies rather than inside `Player`, because
+ * "how far can she possibly move in one frame?" is a question the collision
+ * world has to answer too — see {@link PLAYER_LONGEST_STEP}.
+ */
+export const PLAYER_SPRINT_MULTIPLIER = 1.5;
+
 /** Acceleration towards the desired velocity, metres/second². */
 export const PLAYER_ACCELERATION = 46;
 
@@ -367,3 +376,15 @@ export const GAMEPAD_BUTTON_THRESHOLD = 0.5;
 
 /** Frame delta is clamped to this many seconds to survive tab-switching. */
 export const MAX_FRAME_DELTA = 1 / 12;
+
+/**
+ * The furthest the player can move in a single integration step, in metres: a
+ * flat-out sprint through the longest frame the loop will ever hand out.
+ *
+ * 0.93 m — **wider than any garden wall's whole footprint**, which is why
+ * `CollisionWorld.resolveMovement` exists and why `Player` moves in sub-steps
+ * rather than one leap. `CollisionWorld.checkSubstepBudget` is handed this
+ * number at boot and complains if the park has grown something too thin for
+ * it to be walked into safely.
+ */
+export const PLAYER_LONGEST_STEP = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER * MAX_FRAME_DELTA;

@@ -7,6 +7,7 @@ import {
   PLAYER_DECELERATION,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
+  PLAYER_SPRINT_MULTIPLIER,
   PLAYER_TURN_SPEED,
 } from '../core/constants';
 import { PALETTE } from '../core/palette';
@@ -23,9 +24,6 @@ import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore } from '../state';
 import type { WornHat } from './WornHat';
 
-/** Extra speed multiplier while the sprint action is held. */
-const SPRINT_MULTIPLIER = 1.5;
-
 /**
  * How fast counts as *running*, in metres per second.
  *
@@ -38,8 +36,8 @@ const SPRINT_MULTIPLIER = 1.5;
  * fast, which is also the only version of the rule a child can see.
  *
  * Sits between a flat-out walk (`PLAYER_MAX_SPEED`, 7.4) and a flat-out
- * sprint (× `SPRINT_MULTIPLIER`, 11.1), nearer the walk so the dust starts
- * early in the sprint rather than only at the very top of it.
+ * sprint (× `PLAYER_SPRINT_MULTIPLIER`, 11.1), nearer the walk so the dust
+ * starts early in the sprint rather than only at the very top of it.
  */
 const DUST_SPEED = PLAYER_MAX_SPEED * 1.12;
 
@@ -316,9 +314,11 @@ export class Player implements GameSystem {
    * moving walkway that comes later. Collision still applies.
    */
   nudge(dx: number, dz: number): void {
-    this.position.x += dx;
-    this.position.z += dz;
-    this.collision.resolve(this.position, PLAYER_RADIUS, this.hopClearance);
+    // Sub-stepped for the same reason her own movement is (see `update`),
+    // though an escalator's per-frame shove is far too small to reach even one
+    // extra sub-step: a moving walkway that ever carried her a wall's width in
+    // a frame should not be able to carry her through one.
+    this.collision.resolveMovement(this.position, dx, dz, PLAYER_RADIUS, this.hopClearance);
     this.group.position.copy(this.position);
   }
 
@@ -383,7 +383,9 @@ export class Player implements GameSystem {
 
     const inputLength = this.moveDirection.length();
     const speedLimit =
-      PLAYER_MAX_SPEED * (input.isDown('sprint') ? SPRINT_MULTIPLIER : 1) * this.speedMultiplier;
+      PLAYER_MAX_SPEED *
+      (input.isDown('sprint') ? PLAYER_SPRINT_MULTIPLIER : 1) *
+      this.speedMultiplier;
 
     if (inputLength > 1e-4) {
       this.desiredVelocity.copy(this.moveDirection).multiplyScalar(speedLimit);
@@ -397,8 +399,15 @@ export class Player implements GameSystem {
 
     // --- horizontal movement + collision ------------------------------------
     this.previousPosition.copy(this.position);
-    this.position.x += this.velocity.x * dt;
-    this.position.z += this.velocity.z * dt;
+    // `resolveMovement`, not `resolve`: it walks the step in sub-steps short
+    // enough that nothing solid can be crossed without ever being overlapped.
+    // At `MAX_FRAME_DELTA` a sprint covers 0.93 m in one frame — wider than a
+    // garden wall's whole footprint — and the plain point test would let her
+    // land beyond the middle and then be pushed out the *far* side, through
+    // the wall, at any height. See `Collision.ts`'s `resolveMovement`. At any
+    // ordinary frame rate the step is short enough that this is the old single
+    // `resolve` call, unchanged, so the walk feels exactly as it did.
+    //
     // `hopClearance` (this jumper's height above local ground, as of last
     // frame) lets a wall the player has jumped above stop pushing back — see
     // Collision.ts. Grounded, it's 0, so every wall blocks exactly as before.
@@ -406,9 +415,13 @@ export class Player implements GameSystem {
     // something) resolve as a gentle, capped escort rather than a one-frame
     // shove — see `Collision.ts`'s `MAX_DEPENETRATION_SPEED` (design feedback
     // #17, "the fling"). Ordinary shallow contact against a wall is
-    // unaffected and stays exactly as crisp as before.
-    const { clearedWall, escorting, corrected } = this.collision.resolve(
+    // unaffected and stays exactly as crisp as before. `dt` is shared out
+    // among the sub-steps, so the escort still moves at the same metres per
+    // second and the latch below still sees the same escort it always did.
+    const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
+      this.velocity.x * dt,
+      this.velocity.z * dt,
       PLAYER_RADIUS,
       this.hopClearance,
       dt,

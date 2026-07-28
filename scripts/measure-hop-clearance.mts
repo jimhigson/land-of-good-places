@@ -14,12 +14,11 @@
  *      scripts/measure-hop-clearance.mts
  * ```
  *
- * It drives the **real** `CollisionWorld` — not a model of one — with a
- * faithful copy of `Player.update`'s movement integration, in the same order:
- * accelerate → step → `resolve` → escort latch → velocity read-back → auto-hop
- * lookahead → vertical integration → `hopClearance`. The copy is the one thing
- * here that can rot; if `Player.update` is restructured, re-check `attempt()`
- * against it.
+ * It drives the **real** `CollisionWorld` — not a model of one — through
+ * `scripts/playerSim.mts`, the single shared copy of `Player.update`'s
+ * movement integration. (That copy used to live here; it moved out when
+ * `measure-wall-tunnelling.mts` needed the same walking girl, because two
+ * copies of an integration are two copies to keep faithful.)
  *
  * Three outcomes are distinguished, and the distinction is the whole point:
  * **clean** (flew the footprint untouched), **popped** (fell back inside the
@@ -28,43 +27,13 @@
  * **stuck** (never released at all: pinned against the face, landing and
  * auto-hopping forever). `MAX_AUTO_HOP_HEIGHT` is set from the *clean* column.
  */
-import { Vector3 } from 'three';
 import {
   CollisionWorld,
   MAX_AUTO_HOP_HEIGHT,
   MEASURED_HOP_APEX,
 } from '../src/world/Collision.ts';
-import {
-  PLAYER_ACCELERATION,
-  PLAYER_DECELERATION,
-  PLAYER_MAX_SPEED,
-  PLAYER_RADIUS,
-} from '../src/core/constants.ts';
-
-// Player's own numbers. Not imported: `Player.ts` pulls in three.js meshes and
-// the DOM, neither of which exists here, and only `JUMP_APEX_HEIGHT` is
-// exported anyway. `checkHoppableColliders` is what stops these drifting
-// unnoticed — it compares the live apex against the one recorded in
-// `Collision.ts` as having been measured.
-const JUMP_SPEED = 6.6;
-const GRAVITY = 17;
-const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
-const AUTO_HOP_LOOKAHEAD = 0.5;
-const SPRINT_MULTIPLIER = 1.5;
-
-function approach(current: Vector3, target: Vector3, maxDelta: number): void {
-  const dx = target.x - current.x;
-  const dz = target.z - current.z;
-  const distance = Math.hypot(dx, dz);
-  if (distance <= maxDelta || distance < 1e-6) {
-    current.x = target.x;
-    current.z = target.z;
-    return;
-  }
-  const scale = maxDelta / distance;
-  current.x += dx * scale;
-  current.z += dz * scale;
-}
+import { PLAYER_RADIUS } from '../src/core/constants.ts';
+import { GRAVITY, JUMP_APEX_HEIGHT, JUMP_SPEED, SimPlayer } from './playerSim.mts';
 
 interface Options {
   topHeight: number;
@@ -83,24 +52,20 @@ function attempt(o: Options): Outcome {
   collision.setPlayBounds(0, 0, 100000);
   collision.addWall(-5000, 0, 5000, 0, o.halfThickness, o.topHeight, true);
 
-  const position = new Vector3(0, 0, -6);
-  const velocity = new Vector3();
-  const desired = new Vector3();
-  const moveDirection = new Vector3();
-  const hopProbe = new Vector3();
-  const previousPosition = new Vector3();
+  const face = o.halfThickness + PLAYER_RADIUS;
+
+  // `CollisionWorld.wouldAutoHopClear` deliberately is *not* used here. It
+  // consults `autoHopClears`, i.e. the very ceiling this script exists to
+  // measure, so asking it would only confirm the policy back to us. The probe
+  // below is the same lookahead geometry with the policy removed: fire at the
+  // wall whatever its height, and find out where the flight fails.
+  const player = new SimPlayer(collision, { hopProbe: (probe) => Math.abs(probe.z) < face });
+  player.position.set(0, 0, -6);
 
   const angle = (o.approachAngle * Math.PI) / 180;
   const dirX = Math.sin(angle);
   const dirZ = Math.cos(angle);
 
-  let verticalVelocity = 0;
-  let airborne = false;
-  let hopClearance = 0;
-  let escorting = false;
-
-  const face = o.halfThickness + PLAYER_RADIUS;
-  const speedLimit = PLAYER_MAX_SPEED * (o.sprint ? SPRINT_MULTIPLIER : 1);
   /** Set if the wall ever pushed her while she was inside its footprint. */
   let shoved = false;
 
@@ -111,59 +76,13 @@ function attempt(o: Options): Outcome {
     first = false;
     time += dt;
 
-    moveDirection.set(dirX, 0, dirZ);
-    const inputLength = moveDirection.length();
-    desired.copy(moveDirection).multiplyScalar(speedLimit);
-    const rate = inputLength > 1e-4 ? PLAYER_ACCELERATION : PLAYER_DECELERATION;
-    approach(velocity, desired, rate * dt);
+    player.step(dt, dirX, dirZ, o.sprint);
 
-    previousPosition.copy(position);
-    position.x += velocity.x * dt;
-    position.z += velocity.z * dt;
-    const r = collision.resolve(position, PLAYER_RADIUS, hopClearance, dt);
-    escorting = r.corrected && (r.escorting || escorting);
     // Inside the footprint (not merely resting against the near face) and
     // still being pushed: the wall went solid under her mid-flight.
-    if (r.corrected && position.z > -face + 1e-6) shoved = true;
+    if (player.corrected && player.position.z > -face + 1e-6) shoved = true;
 
-    if (dt > 0 && !escorting) {
-      const previousSpeed = Math.hypot(velocity.x, velocity.z);
-      const derivedX = (position.x - previousPosition.x) / dt;
-      const derivedZ = (position.z - previousPosition.z) / dt;
-      if (Math.hypot(derivedX, derivedZ) <= previousSpeed) {
-        velocity.x = derivedX;
-        velocity.z = derivedZ;
-      }
-    }
-
-    // `CollisionWorld.wouldAutoHopClear` deliberately is *not* used here. It
-    // consults `autoHopClears`, i.e. the very ceiling this script exists to
-    // measure, so asking it would only confirm the policy back to us. The
-    // probe below is the same lookahead geometry with the policy removed: fire
-    // at the wall whatever its height, and find out where the flight fails.
-    let autoHopWanted = false;
-    if (!airborne && inputLength > 1e-4) {
-      const inverse = 1 / inputLength;
-      hopProbe.copy(position).addScaledVector(moveDirection, AUTO_HOP_LOOKAHEAD * inverse);
-      autoHopWanted = Math.abs(hopProbe.z) < o.halfThickness + PLAYER_RADIUS;
-    }
-    if (autoHopWanted && !airborne) {
-      verticalVelocity = JUMP_SPEED;
-      airborne = true;
-    }
-
-    if (airborne) {
-      verticalVelocity -= GRAVITY * dt;
-      position.y += verticalVelocity * dt;
-      if (position.y <= 0) {
-        position.y = 0;
-        verticalVelocity = 0;
-        airborne = false;
-      }
-    }
-    hopClearance = position.y;
-
-    if (position.z > face + 0.05) return shoved ? 'popped' : 'clean';
+    if (player.position.z > face + 0.05) return shoved ? 'popped' : 'clean';
   }
   return 'stuck';
 }
