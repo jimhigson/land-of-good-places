@@ -166,6 +166,12 @@ export class Station {
       // 7.2 m platform: a child at either end of it, or sitting in the far
       // carriage, is still "at this station" as far as the chip is concerned.
       standRadius: 5.5,
+      // Above everything else in the park, and only ever *while* the train is
+      // standing here — a station with no train offers no actions at all, so it
+      // is not selectable and the rank never comes up. The eight seconds it is
+      // in are eight seconds when "Get on" beats the flower growing beside the
+      // platform, which is exactly what QA found it losing to.
+      selectRank: 1,
       // So that "Get off" is on screen while the ride owns her — see
       // `InteractZone.selectableWhileRiding`.
       selectableWhileRiding: true,

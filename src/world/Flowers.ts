@@ -229,6 +229,14 @@ export class Flowers implements GameSystem {
             // is gated on {@link PICK_RADIUS} below, so a "Pick!" chip offered
             // from further off would be a button that does nothing.
             standRadius: PICK_RADIUS,
+            // Below everything you can properly *do* something with — the same
+            // rank signs sit at, and for the same reason. Flowers are scattered
+            // over the whole park by the hundred, and one growing beside a
+            // station platform or a shop counter must not be what a child is
+            // offered when she walks up to the train or the till. Tapping a
+            // flower still selects it outright; this is only about which of two
+            // things she is standing between wins by itself.
+            selectRank: -1,
             // The HIGHLIGHT RULE's interesting case: there is no flower object
             // to point at, only row `i` of an instance buffer. The highlight
             // system shares one shell across every instance of the head mesh and

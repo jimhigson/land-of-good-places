@@ -2,6 +2,12 @@
   "_comment": "CONTRIBUTING (for future agents / the Overseer): this file feeds the 'What's new' welcome panel (src/ui/WhatsNew.ts). When you merge a feature a player would actually notice, append ONE entry to the front of `entries` (highest id, newest first). Bump `id` by 1 from the current highest. Schema per entry: { id: number, emoji: string, title: string, line: string }. WRITE IT SHORT — GAME_DESIGN.md's BREVITY RULE is absolute and `npm run check:brevity` fails the build if you break it: `title` at most 24 characters, `line` ONE sentence of at most 50. Say what the child can now do, never how it works: 'One press collects anything in a shop!' (38), not 'Every thing in a shop now has its own big Collect button, press it once and it is yours!' (88). Eleri is 6, so plain words, one idea, an exclamation mark if you like, an emoji that matches the thing. Ids and order are history for a returning player and must not change; the wording of an old entry may be tightened, never lengthened.",
   "entries": [
     {
+      "id": 14,
+      "emoji": "👆",
+      "title": "Tap, Then Choose",
+      "line": "Tap a thing, then tap what you want to do!"
+    },
+    {
       "id": 13,
       "emoji": "🧹",
       "title": "A Tidier Screen",
