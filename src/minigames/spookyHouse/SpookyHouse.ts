@@ -248,7 +248,14 @@ class SpookyHouse implements MiniGame {
       price: item.price,
       carryable: item.carryable,
     });
-    if (!bought) return;
+    // A sweet is a `treat`, so the store eats it rather than filing it in the
+    // backpack (`isEdible`, `state/store.ts`) — which is what the family asked
+    // for and what a child does with a sweet. There is no munch to show here:
+    // the spooky house is its own scene with its own camera and the player's
+    // model is not in it, and a shower of sweets would be a machine-gun of
+    // chomps in any case. `playCandySound` is already the feedback, and the
+    // Cute-o-dex records the sweet exactly as it records an ice cream.
+    if (bought.outcome === 'refused') return;
     this.candyCount += 1;
     this.hud?.setCandyCount(this.candyCount);
   };

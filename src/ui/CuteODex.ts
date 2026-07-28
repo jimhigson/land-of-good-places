@@ -492,6 +492,28 @@ export class CuteODex {
       return unknown;
     }
 
+    const count = entry?.count ?? 1;
+
+    // Something eaten is a thing she *did*, not a thing she has, so its card is
+    // shaped like a secret's: a plain `<div>` with nothing to press, because a
+    // finished ice cream cannot be brought out for the parade or put away. Read
+    // off the placement rather than off `item.kind`, so a save from before food
+    // stopped being kept still tells the truth about the candy floss that is
+    // genuinely still in its backpack.
+    if (entry?.placement === 'eaten') {
+      const eaten = document.createElement('div');
+      eaten.className = 'dex-card';
+      eaten.dataset.owned = 'true';
+      const eatenState = count > 1 ? `Eaten ${count} of them! Yum!` : 'Eaten! Yum!';
+      eaten.setAttribute('aria-label', `${item.displayName} — ${eatenState}`);
+      eaten.innerHTML =
+        `<span class="dex-icon">${escapeHtml(item.icon)}</span>` +
+        `<span class="dex-name">${escapeHtml(item.displayName)}</span>` +
+        `<span class="dex-state">${escapeHtml(eatenState)}</span>` +
+        (count > 1 ? `<span class="dex-badge">×${count}</span>` : '');
+      return eaten;
+    }
+
     const paradeable = PARADEABLE.has(item.kind);
     const out = paradeable && gameStore.isOut(item.id);
     const carried = state.inventory.some(
@@ -505,7 +527,6 @@ export class CuteODex {
     card.dataset.out = out ? 'true' : 'false';
     card.disabled = !paradeable;
 
-    const count = entry?.count ?? 1;
     const where = carried ? 'In my hands' : out ? 'Walking with me' : 'In my backpack';
 
     card.innerHTML =

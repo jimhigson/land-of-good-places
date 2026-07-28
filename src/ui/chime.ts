@@ -79,6 +79,73 @@ export function playLiftDing(): void {
   note(783.99, 0.13, 0.34, 0.045); // G5
 }
 
+// ------------------------------------------------------------------ eating
+
+/**
+ * How long the whole munch lasts, in seconds, and how many bites it takes.
+ *
+ * Exported because `entities/EatenTreat.ts` chews the model down on exactly
+ * this clock: the sound schedules its bites ahead of time in the audio graph
+ * and the model shrinks on the frame clock, and the two only stay in step if
+ * they are counting the same bites over the same seconds. Two hand-tuned
+ * numbers in two files drifted apart the moment either was adjusted.
+ */
+export const EAT_SECONDS = 2.2;
+export const EAT_BITES = 3;
+
+/** The moment bite `n` (0-based) is taken, in seconds from the start. */
+export function biteAt(n: number): number {
+  return (n * EAT_SECONDS) / EAT_BITES;
+}
+
+/**
+ * One bite: a soft crunch, made the same way the water sounds are — a band of
+ * noise with a fast attack and a very short tail. Low and round rather than
+ * bright and snappy, because this is ice cream and candy floss, not crisps.
+ */
+function crunch(at: number, gain: number): void {
+  const ctx = ensureContext();
+  if (!ctx) return;
+  const start = ctx.currentTime + at;
+
+  const source = ctx.createBufferSource();
+  source.buffer = ensureNoise(ctx);
+  source.loop = true;
+
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.4;
+  band.frequency.setValueAtTime(1100, start);
+  band.frequency.exponentialRampToValueAtTime(300, start + 0.11);
+
+  const envelope = ctx.createGain();
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(gain, start + 0.012);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, start + 0.13);
+
+  source.connect(band);
+  band.connect(envelope);
+  envelope.connect(ctx.destination);
+  source.start(start, Math.random() * 1.5);
+  source.stop(start + 0.2);
+}
+
+/**
+ * Eating something: three happy little bites, then a satisfied "mmm!".
+ *
+ * The whole sound is scheduled in one go — the browser's audio clock is far
+ * steadier than a frame, and a chomp that arrives a stuttering frame late
+ * stops sounding like a chomp. `EatenTreat` takes the matching visual bite out
+ * of the model at each {@link biteAt}.
+ */
+export function playEatingSound(): void {
+  for (let n = 0; n < EAT_BITES; n += 1) crunch(biteAt(n), 0.06 - n * 0.008);
+  // The "mmm!" — two notes rising, right after the last bite.
+  const after = biteAt(EAT_BITES - 1) + 0.34;
+  note(587.33, after, 0.16, 0.045); // D5
+  note(880, after + 0.11, 0.3, 0.04); // A5
+}
+
 // ------------------------------------------------------------------ water
 
 /**
