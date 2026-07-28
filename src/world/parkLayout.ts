@@ -63,20 +63,30 @@ export interface ParkLayout {
 /** Walkable clearance kept between any two plots' bounding circles. */
 const CORRIDOR_GAP = 5;
 
-/** Candidate draws per entry before the solver declares the seed unsolvable. */
-const MAX_TRIES = 5000;
+/** Candidate draws per entry before this whole-park attempt is abandoned. */
+const MAX_TRIES = 400;
+
+/**
+ * Whole-park restarts. Greedy placement can paint itself into a corner — an
+ * unlucky big-plot arrangement leaves no sliver for a later relation — and
+ * the cheap, deterministic cure is to re-roll the whole arrangement: the rng
+ * stream continues, so restarts are as seeded as everything else.
+ */
+const PARK_RESTARTS = 80;
 
 /** The gate sits on the boundary wall; the corridor runs from it to centre. */
 const GATE_ANGLE = Math.PI / 2; // matches entrance/layout.ts ENTRANCE_ANGLE
 const GATE_RADIUS = 60; //         matches ENTRANCE_WALL_RADIUS
 
 function inGateCorridor(x: number, z: number, clearance: number): boolean {
-  // The corridor is the axis-aligned strip from the gate to the park middle
-  // (the gate is at bearing GATE_ANGLE, i.e. +Z). Anything whose bounding
-  // circle reaches into it is rejected.
+  // The corridor is the short axis-aligned strip inside the gate (which sits
+  // at bearing GATE_ANGLE, i.e. +Z on the boundary wall). Only the strip
+  // itself must stay clear — from its mouth the approach *path* winds to
+  // wherever the plaza was placed, around whatever stands in between, and
+  // `check:park`'s routing invariant proves that walk exists.
   const gateX = Math.cos(GATE_ANGLE) * GATE_RADIUS;
   const corridorHalf = GATE_CORRIDOR_HALF_WIDTH + clearance;
-  return Math.abs(x - gateX) < corridorHalf && z > -2;
+  return Math.abs(x - gateX) < corridorHalf && z > 25;
 }
 
 function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ: number): number {
@@ -93,6 +103,17 @@ function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ: numbe
 
 function solve(): ParkLayout {
   const rng = new Rng(PARK_SEED);
+  for (let restart = 0; restart < PARK_RESTARTS; restart += 1) {
+    const built = buildOnce(rng);
+    if (built) return built;
+  }
+  throw new Error(
+    `park layout: unsolvable in ${PARK_RESTARTS} restarts (seed ${PARK_SEED}) — ` +
+      `loosen bands, shrink the manifest, or bump the seed`,
+  );
+}
+
+function buildOnce(rng: Rng): ParkLayout | null {
   const placed: PlacedEntry[] = [];
   const byId = new Map<string, PlacedEntry>();
 
@@ -101,7 +122,7 @@ function solve(): ParkLayout {
   // Ties (and everything after them) keep manifest order, which is what
   // pins the draw sequence to the seed.
   const order: ManifestEntry[] = [...PARK_MANIFEST].sort(
-    (a, b) => b.boundingRadius - a.boundingRadius,
+    (a, b) => (a.solveOrder ?? 50) - (b.solveOrder ?? 50) || b.boundingRadius - a.boundingRadius,
   );
 
   for (const entry of order) {
@@ -142,11 +163,15 @@ function solve(): ParkLayout {
         centreDistance >= entry.band.min - 1e-6 &&
         centreDistance <= entry.band.max + 1e-6 &&
         !inGateCorridor(x, z, entry.boundingRadius) &&
-        placed.every(
-          (other) =>
-            Math.hypot(x - other.x, z - other.z) >=
-            entry.boundingRadius + other.boundingRadius + CORRIDOR_GAP,
-        );
+        placed.every((other) => {
+          // The near-target pair is deliberately close; its manifest min is
+          // the rule. Everyone else keeps a walkable corridor.
+          const isNearTarget = entry.near && other.id === entry.near.id;
+          const floor = isNearTarget
+            ? (entry.near as { min: number }).min
+            : entry.boundingRadius + other.boundingRadius + CORRIDOR_GAP;
+          return Math.hypot(x - other.x, z - other.z) >= floor;
+        });
       if (entry.pin && !ok) {
         throw new Error(
           `park layout: pinned entry '${entry.id}' at [${x}, ${z}] violates a constraint — ` +
@@ -155,12 +180,7 @@ function solve(): ParkLayout {
       }
     }
 
-    if (!ok) {
-      throw new Error(
-        `park layout: no valid position for '${entry.id}' after ${MAX_TRIES} draws ` +
-          `(seed ${PARK_SEED}) — loosen its band, shrink the manifest, or bump the seed`,
-      );
-    }
+    if (!ok) return null; // this arrangement dead-ended; the caller restarts
 
     // Entrance: on the plot edge, facing the park middle (the plaza is
     // placed first among big plots in practice, but the middle is the
@@ -192,6 +212,7 @@ function solve(): ParkLayout {
   if (!fountain || fountain.footprint.kind !== 'circle') {
     throw new Error(`park layout: the manifest must contain a circular 'fountain'`);
   }
+
 
   return {
     seed: PARK_SEED,

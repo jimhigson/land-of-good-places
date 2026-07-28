@@ -41,18 +41,30 @@ export interface ManifestEntry {
   /**
    * Keep this entry's centre within [min, max] metres of another entry —
    * e.g. the ball pit must stay where the ginormous slide can reach it.
+   * A near-pair is *exempt from the corridor gap* between the two of them:
+   * relations exist precisely to put things deliberately close (the slide
+   * flies over the ground between building and pit), so the manifest's own
+   * min is the whole rule for that one pair.
    */
   readonly near?: { readonly id: string; readonly min: number; readonly max: number };
+  /**
+   * Placement priority: lower places earlier. Default is by size (largest
+   * first, which packs reliably). The fountain overrides this to place
+   * FIRST: it is the park's middle, and everything else arranges around it —
+   * placed fifth, the big plots carve its central band down to nothing.
+   */
+  readonly solveOrder?: number;
 }
 
 /**
  * Hard bound on how far out a plot may reach: |centre| + boundingRadius must
  * stay inside this. The train loop rests beyond 55 (`train/route.ts`) and
- * `Scenery.isPlantable` refuses past 55, so capping plots at 45 leaves the
- * outer band tree-free and rail-safe *by construction* — the loop the solver
- * grows out there never has to dodge an attraction.
+ * `Scenery.isPlantable` refuses past 55, so plots stopping at 52 keep the
+ * treeline clear while still letting a big plot shoulder into the rail band —
+ * the route solver's raycasts then bend the loop around it into a *squeeze*,
+ * which Decision 4 records as a feature (the castle squeeze), not a clash.
  */
-export const PLOT_EXTENT_LIMIT = 45;
+export const PLOT_EXTENT_LIMIT = 52;
 
 /** Half-width of the corridor kept clear from the gate to the plaza. */
 export const GATE_CORRIDOR_HALF_WIDTH = 7;
@@ -70,6 +82,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: 9.4 },
     boundingRadius: 10.5,
     band: { min: 0, max: 12 },
+    solveOrder: 0,
   },
   {
     id: 'building',
@@ -102,7 +115,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
     band: { min: 10, max: 34 },
-    near: { id: 'building', min: 18, max: 30 },
+    near: { id: 'building', min: 24, max: 30 },
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   {
@@ -122,14 +135,14 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
-    near: { id: 'waterFight', min: 8, max: 20 },
+    near: { id: 'waterFight', min: 17, max: 22 },
   },
   {
     id: 'stall.dodgems',
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
-    near: { id: 'dodgems', min: 8, max: 20 },
+    near: { id: 'dodgems', min: 17, max: 22 },
   },
   {
     id: 'stall.facePaint',
