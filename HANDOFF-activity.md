@@ -128,6 +128,23 @@ unstick: false,
 
 ---
 
+## How "behaviour must not change" was checked
+
+`npm run check:crowd` (`scripts/trace-npc-driver.mts`) drives twelve children
+for 25 minutes of park time past a scripted player, a two-stop train and a
+face-paint stall, one child pinned to the spot so the walk timeouts and the
+stuck-sidestep are exercised rather than dead. It hashes every intent field
+plus target node, seat, climb phase and speech bubble, every frame.
+
+```
+origin/main   covered climbs=29 trips=81 chats=75 paints=4 waves=62906 hops=310   trace=ba8f7deb
+this branch   covered climbs=29 trips=81 chats=75 paints=4 waves=62906 hops=310   trace=ba8f7deb
+```
+
+The script only touches the driver's long-standing public surface, so the first
+line was produced by running the same file, unedited, in a detached worktree at
+`origin/main`. Re-run it that way if you doubt any later change.
+
 ## Progress
 
 - [x] read everything; design settled

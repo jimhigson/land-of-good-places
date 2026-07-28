@@ -856,12 +856,60 @@ integration branch in `.claude/worktrees/agent-aff75b8bf22683c43`, which is
 where the train, the stall games and the stair ride actually coexist; `main`
 does not have the train yet.
 
-**One correction to the brief before anything else:** the two additive blocks
+> **Addendum, 28 July 2026 — §2 has been implemented, and the paragraph
+> immediately below is wrong.** Read this addendum before §2 or §6's PR-A.
+>
+> **What was stale.** The "one correction" below states flatly that there is no
+> tree-climbing block. There is, and there was by the time the decision was
+> read the second time (ARCHITECTURE-REVIEW review 2 §2 flagged exactly this: a
+> confident false claim in a decision file wins arguments it should lose). By
+> the time the extraction ran there were **four** blocks, not two: train trip,
+> tree climb, face paint, and chat. The migration estimate below (~300 lines,
+> two files) was for two blocks; it landed at ~640 lines moved into six.
+>
+> **What §2's proposed shape got right:** `update(context, intent) → boolean`,
+> "true means I owned this frame", array order and nothing more, the wander
+> core untouched, the module-level registries moving unchanged, and the
+> insistence that the interface be descriptive rather than aspirational. All
+> kept.
+>
+> **What four blocks forced on top of it**, none of which two blocks could have
+> shown:
+>
+> - **`hold: 'steering' | 'intent' | 'child'`.** The blocks did not take the
+>   same amount of the child, and the differences are visible in play. Chat
+>   wants the core's social tail to keep blending its wave; the train writes
+>   its own expression and wants the tail skipped; the climb pre-empts even
+>   *noticing the player*, which also means it must not draw from the child's
+>   seeded stream. One boolean return could not express that.
+> - **`onArrive`** — review 2's refinement, and correct: the climb is decided
+>   because you have just walked up to a tree.
+> - **`busy`**, so "never poach a child already committed" is asked through the
+>   host instead of by reaching into another block's private mode field.
+> - **`Errand` with no optional fields** (`arriveRadius`, `timeout`,
+>   `abandonRadius`, `unstick`), which is the load-bearing one. §2 called for
+>   "an `offGraphErrand` walk that bakes the timeout in so it cannot be
+>   forgotten again"; making all four *required* is what actually enforces it.
+> - **`Rejoin`'s three named variants.** §2 nominated the train's version as
+>   canonical. It is, but the other two are preserved verbatim as `'legacy'`
+>   and `'inPlace'`, because unifying them is a behaviour change and PR-A was
+>   not allowed one.
+>
+> **What PR-C should know:** a ride queue is a `'steering'` activity with an
+> `Errand` to the gate and a `Backstop` on the ticket (§5's ~45 s guarantee is
+> already a class). It should *not* need to touch `wanderDriver.ts` at all —
+> only `NpcSystem`'s construction of it.
+>
+> Verification landed with it: `npm run check:crowd` hashes a seeded 25-minute
+> trace of the whole crowd, and the hash is byte-identical before and after.
+
+**One correction to the brief before anything else:** ~~the two additive blocks
 in `wanderDriver.ts` are the **park-train trip** and the **face-paint visit**.
 There is no tree-climbing block anywhere in the codebase (checked both
-checkouts). The argument below survives the correction — two blocks exist,
-queueing would be the third — but the memo should not cite code that isn't
-there.
+checkouts).~~ *(Struck 28 July 2026 — false; see the addendum above. There were
+four blocks by the time this was acted on.)* The argument below survives the
+correction — the blocks exist, queueing would be the next one — but the memo
+should not cite code that isn't there.
 
 ### 1. Can a stall mini-game have a queue? Yes — because the frozen park is never on screen
 
@@ -1043,7 +1091,7 @@ this feature that could ever trap a child.
 
 | PR | What | Owns (files) | Depends on |
 | --- | --- | --- | --- |
-| **PR-A** | `wanderDriver` → activities: extract `Activity`, move the train-trip and face-paint blocks unchanged, extract `steerTowards`/`rejoinGraph`. No behaviour change. | `src/entities/npc/wanderDriver.ts`, `src/entities/npc/activities/*` (new) | — |
+| **PR-A** | ~~`wanderDriver` → activities~~ **LANDED 28 July 2026** as ORDER-OF-WORK Wave 3: all **four** blocks (train trip, tree climb, face paint, chat), plus `Errand`/`Backstop`/`BudgetSlot`. See the addendum at the top of this decision for the shape as built. | `src/entities/npc/wanderDriver.ts`, `src/entities/npc/activities/*` (new) | — |
 | **PR-B** | The queue itself: `RideQueue`, slot math, tickets, dispatch, registry, fence-building helper; dev-console harness queue for testing without a ride. | `src/world/rides/queue.ts`, `src/world/rides/queueRegistry.ts` (new) | — (parallel with A) |
 | **PR-C** | NPCs queue: `activities/queueForRide.ts` (roll → walk to gate → hold slot → board on dispatch → pretend-ride or seat → rejoin); `NPC_COUNT` 12 → 18. | `src/entities/npc/activities/queueForRide.ts`, one constant in `NpcSystem.ts` | A, B |
 | **PR-D** | Train adopts queues: one per station, front-of-line feeds `claimSeat`, trip activity's `waiting` state consumes it; walk-on boarding kept when the line is empty. | `src/world/train/ParkTrain.ts`, `src/world/train/station.ts` | B, C |
