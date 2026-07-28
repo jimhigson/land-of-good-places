@@ -13,6 +13,10 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE } from '../core/palette';
 import { signTexture } from '../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
+// The stand distance lives with the coordinates rather than with the geometry:
+// the NPC waypoint seeds need it and must not import anything that builds a
+// mesh. See `stallPlacement.ts`.
+import { STALL_STAND_DISTANCE } from './stallPlacement';
 import type { StallDefinition } from './types';
 
 /**
@@ -33,8 +37,6 @@ import type { StallDefinition } from './types';
 export const STALL_WIDTH = 4.2;
 /** Front-to-back depth, from the back wall to the front of the counter. */
 export const STALL_DEPTH = 2.6;
-/** How far in front of the centre a child stands to be served. */
-export const STALL_STAND_DISTANCE = 2.5;
 
 export interface StallProp {
   readonly root: Group;
