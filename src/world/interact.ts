@@ -203,8 +203,11 @@ const DEFAULT_VERBS: readonly (readonly [prefix: string, verb: string])[] = [
   ['shop-', 'Shop'],
   ['stall:dodgems', 'Ride'],
   ['stall:spaceFerrisWheel', 'Ride'],
-  // The rail racer grew up into a real coaster you ride in first person
-  // (`world/coaster/`), so its chip says so.
+  // Both coasters are booths you *board* rather than mini-games you play, so
+  // their chips say "Ride!" — see `world/coaster/`. `MiniGameHost.boardRide`
+  // takes these two stall ids and hands them to the world ride; the chip is
+  // the ordinary virtual E press that gets it there.
+  ['stall:skyCruiser', 'Ride'],
   ['stall:railRacer', 'Ride'],
   ['stall:spookyHouse', 'Enter'],
   ['stall:', 'Play'], // waterFight, facePaint and any future stall
