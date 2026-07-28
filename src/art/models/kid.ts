@@ -2,7 +2,12 @@ import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createFacePatch, type Expression } from '../style/faces';
+import {
+  createFacePaintOverlay,
+  createFacePatch,
+  type Expression,
+  type FacePaintOverlayHandle,
+} from '../style/faces';
 import {
   applyWalk,
   blob,
@@ -81,6 +86,19 @@ export const KID_HEIGHT = 2.12;
  * reads as a chin-up, pleased-with-itself pose, which is no bad thing.
  */
 const HEAD_TILT = 0.17;
+
+/**
+ * The skull's radius, and how the face patch worn on it is squashed to sit
+ * flat against that curve.
+ *
+ * Module constants rather than locals inside {@link createKid} because
+ * {@link attachFacePaint} builds a second decal layer onto the same skull and
+ * has to agree with the first one exactly. They used to be *copied* into
+ * `world/FacePaintStall.ts`, which said so in a comment and asked to be kept
+ * in step by hand; there is now one of each.
+ */
+const SKULL_RADIUS = 0.44 * HEAD;
+const FACE_SQUASH: readonly [number, number, number] = [1, 0.95, 0.98];
 
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
@@ -355,7 +373,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   crown.rotation.x = -HEAD_TILT;
   head.add(crown);
 
-  const skullR = 0.44 * HEAD;
+  const skullR = SKULL_RADIUS;
   const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 38);
   crown.add(skull);
   addOutline(skull, 0.02);
@@ -413,7 +431,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     blushStyle: 'soft',
     blushR: 0.1,
   });
-  face.mesh.scale.set(1, 0.95, 0.98);
+  face.mesh.scale.set(...FACE_SQUASH);
   crown.add(face.mesh);
 
   // Measured rather than hand-derived from `KID_HEAD_HEIGHT` + the anchor's
@@ -477,4 +495,45 @@ export function createKid(options: KidOptions = {}): KidHandle {
     },
     setShoeColour: (colour: number) => shoeMat.color.setHex(colour),
   };
+}
+
+/**
+ * Puts a face-paint decal layer on an already-built kid and hands back the
+ * handle that swaps the design (or hides it again, for "wash it off").
+ *
+ * Opt-in rather than part of {@link createKid}, because most kids in the park
+ * never wear paint and the NPC crowd instances every mesh it finds on its
+ * prototype — an always-present overlay would cost the whole crowd a draw
+ * layer nobody asked for.
+ *
+ * **One implementation, two callers**, which is the point of it living here:
+ * `world/FacePaintStall.ts` paints the real player with this, and the face
+ * stall's picker previews the choice with the very same call
+ * (GAME_DESIGN.md's PREVIEW RULE — the preview must be the same code as the
+ * thing it previews, or the two drift). The stall used to carry its own copies
+ * of {@link SKULL_RADIUS}, {@link FACE_SQUASH} and `HEAD_TILT` with a note
+ * asking for them to be updated by hand if the head was ever retuned; that
+ * note is now unnecessary.
+ *
+ * The tilt group reproduces `crown`'s own rotation, so the overlay sits in
+ * exactly the space `createFacePatch`'s mesh does — the expression it is drawn
+ * over — rather than in the untilted head's.
+ *
+ * Takes the head rather than a whole {@link KidHandle} because that is all it
+ * needs, and because the two callers hold the same kid in different wrappers:
+ * the preview has the `KidHandle` itself, while the stall has a
+ * `entities/CharacterModel`, which keeps its handle private and re-exposes
+ * `head`. Anything passed here must be a head built by {@link createKid} —
+ * the radius and tilt above are this model's, not a general creature's.
+ */
+export function attachFacePaint(model: { readonly head: Group }, size = 512): FacePaintOverlayHandle {
+  const tilt = new Group();
+  tilt.name = 'facePaintTilt';
+  tilt.rotation.x = -HEAD_TILT;
+  model.head.add(tilt);
+
+  const overlay = createFacePaintOverlay(SKULL_RADIUS, { size });
+  overlay.mesh.scale.set(...FACE_SQUASH);
+  tilt.add(overlay.mesh);
+  return overlay;
 }

@@ -16,9 +16,9 @@ import {
 import { PALETTE } from '../core/palette';
 import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
-import { createKid, type KidHandle } from '../art/models/kid';
+import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
-import type { Expression } from '../art/style/faces';
+import type { Expression, FacePaintDesign } from '../art/style/faces';
 import type { HairStyle } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
@@ -62,7 +62,36 @@ export interface PreviewChoice {
   readonly eye: number;
   readonly hatId: string;
   readonly petId: string;
+  /**
+   * The face-paint design worn, `null` for a clean face — or **omitted** by a
+   * screen that does not paint faces (the character creator), which is why it
+   * is optional rather than nullable-and-required under
+   * `exactOptionalPropertyTypes`.
+   */
+  readonly facePaint?: FacePaintDesign | null;
 }
+
+/**
+ * How much of the character a screen is about — the resting framing its camera
+ * returns to once a moment's close-up has passed.
+ *
+ * GAME_DESIGN.md's PREVIEW RULE: *"each such screen should be framed for what
+ * it changes: face painting zooms right in on the face; a hat frames the head;
+ * a pet frames the pet."* The character creator changes everything, so it
+ * rests on the whole character (`full`); the face-painting stall changes one
+ * thing, on the face, so it rests there (`face`) and never pulls back.
+ *
+ * Deliberately a small, closed vocabulary of *what a screen is for*, rather
+ * than exposing {@link PreviewFocus} itself: a resting framing of `pet` or
+ * `hair` is not a thing any screen wants today, and every value here has to
+ * hold up as somewhere the camera can simply live.
+ */
+export type PreviewFraming = 'full' | 'face';
+
+const RESTING_FOCUS: Readonly<Record<PreviewFraming, PreviewFocus>> = {
+  full: 'all',
+  face: 'face',
+};
 
 /**
  * What the camera is currently looking at.
@@ -233,8 +262,14 @@ export class CharacterPreview {
   private currentExpression: Expression = 'neutral';
 
   // --- camera framing: what the child just changed, and where that is. -------
-  private focus: PreviewFocus = 'all';
-  /** Elapsed-time deadline after which {@link focus} eases back to `all`. */
+  /**
+   * Where the camera lives when nothing has just changed — `all` for the
+   * character creator, `face` for the face-painting stall. See
+   * {@link PreviewFraming}.
+   */
+  private readonly resting: PreviewFocus;
+  private focus: PreviewFocus;
+  /** Elapsed-time deadline after which {@link focus} eases back to {@link resting}. */
   private focusUntil = 0;
   /**
    * Bounding boxes per focus, measured with the turntable held at zero so they
@@ -268,7 +303,15 @@ export class CharacterPreview {
    */
   private rockPhase = 0;
 
-  constructor() {
+  /**
+   * @param options.framing what the screen using this preview is for. Defaults
+   * to `full` — the whole character — so the character creator, and any future
+   * caller that has not thought about it, gets the original behaviour.
+   */
+  constructor(options: { framing?: PreviewFraming } = {}) {
+    this.resting = RESTING_FOCUS[options.framing ?? 'full'];
+    this.focus = this.resting;
+
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'charcreate-preview-canvas';
 
@@ -318,10 +361,12 @@ export class CharacterPreview {
    * Rebuilds the kid (+ hat, + pet) from scratch for the given choice, and
    * points the camera at whatever the child just changed.
    *
-   * `focus` defaults to `all` so a caller that does not care (the very first
-   * build) gets the whole character.
+   * `focus` defaults to the screen's resting framing (see
+   * {@link PreviewFraming}) so a caller that does not care — the very first
+   * build, or a face-paint screen where every change is on the face anyway —
+   * gets what that screen is about, with no camera move at all.
    */
-  update(choice: PreviewChoice, focus: PreviewFocus = 'all'): void {
+  update(choice: PreviewChoice, focus: PreviewFocus = this.resting): void {
     if (this.character) {
       this.stage.remove(this.character);
       disposeTree(this.character);
@@ -355,6 +400,13 @@ export class CharacterPreview {
     this.kid = kid;
     group.add(kid.root);
 
+    // The face paint, if this screen has any — built by the very same call the
+    // face-painting stall makes on the real player (`attachFacePaint`), so the
+    // design previewed here is the design she walks away wearing, drawn by one
+    // piece of code rather than two that agree today.
+    const paint = choice.facePaint ?? null;
+    if (paint) attachFacePaint(kid).setDesign(paint);
+
     // Same attachment every worn hat uses in the real game — see
     // `art/models/hats.ts`'s doc comment: no offset maths needed.
     const hatAsset = shopItem(choice.hatId)?.model();
@@ -387,6 +439,35 @@ export class CharacterPreview {
     // has to happen before `boxFor('hair')` measures the tail, so the framing
     // is taken from a tail at rest rather than one mid-flight.
     kid.resetHair();
+  }
+
+  /**
+   * Starts or stops the render loop.
+   *
+   * The character creator never needs this: it is disposed for good the moment
+   * the game starts. A preview that lives inside the park does — the
+   * face-painting stall's picker is built once and opened many times, and a
+   * second WebGL context quietly rendering a kid on a plinth behind the park
+   * for the whole session is a real cost for something nobody is looking at.
+   *
+   * Pausing rather than disposing and rebuilding, because a child opening and
+   * closing the stall a dozen times would otherwise create a dozen WebGL
+   * contexts, and browsers cap how many may be alive at once.
+   */
+  setRunning(running: boolean): void {
+    if (this.disposed) return;
+    if (running) {
+      if (this.rafHandle !== null) return;
+      // Drop the stale timestamp: `frame` would otherwise measure `dt` from
+      // whenever the loop was last paused, and hand a clamped-but-still-large
+      // step to the ponytail simulation on the first frame back.
+      this.lastTime = 0;
+      this.rafHandle = requestAnimationFrame(this.frame);
+      return;
+    }
+    if (this.rafHandle === null) return;
+    cancelAnimationFrame(this.rafHandle);
+    this.rafHandle = null;
   }
 
   dispose(): void {
@@ -534,7 +615,7 @@ export class CharacterPreview {
    * is what actually has to clear the frame edge.
    */
   private updateCamera(dt: number): void {
-    if (this.focus !== 'all' && this.elapsed >= this.focusUntil) this.focus = 'all';
+    if (this.focus !== this.resting && this.elapsed >= this.focusUntil) this.focus = this.resting;
 
     const box = this.boxFor(this.focus) ?? this.boxFor('all');
     if (!box) return;

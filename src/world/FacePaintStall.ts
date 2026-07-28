@@ -24,6 +24,7 @@ import {
   type FacePaintDesign,
   type FacePaintOverlayHandle,
 } from '../art/style/faces';
+import { attachFacePaint } from '../art/models/kid';
 import { collectSignZones, markAsSign, type SignZone } from './signs';
 import { pressZone, type InteractZone } from './interact';
 import { highlightObject } from './highlight';
@@ -91,21 +92,6 @@ const STALL_DEPTH = 2.1;
 const STAND_DISTANCE = 2.3;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.2;
-
-// ------------------------------------------------------------- player paint
-
-/**
- * Mirrors constants from `art/models/kid.ts` (`HEAD = 1.5`, `HEAD_TILT =
- * 0.17`, `skullR = 0.44 × HEAD`). Duplicated rather than imported: this PR's
- * file ownership excludes `kid.ts` (see the note at the top of this file),
- * and the kid model doesn't currently export them. If the head is ever
- * retuned, this needs a matching update — the same trade-off `poiGraph.ts`
- * already documents for its own duplicated ring-road coordinates.
- */
-const PLAYER_HEAD_TILT = 0.17;
-const PLAYER_SKULL_RADIUS = 0.44 * 1.5;
-/** Matches `face.mesh.scale` in `kid.ts`. */
-const PLAYER_FACE_SQUASH: readonly [number, number, number] = [1, 0.95, 0.98];
 
 // ---------------------------------------------------------------- npc paint
 
@@ -220,18 +206,19 @@ export class FacePaintStall implements GameSystem {
     return (this.panel?.isOpen ?? false) || this.paintingStartedAt !== null;
   }
 
-  /** Gives the stall the player, and puts the overlay mesh on their actual head. */
+  /**
+   * Gives the stall the player, and puts the overlay mesh on their actual head.
+   *
+   * The overlay is built by `art/models/kid.ts`'s `attachFacePaint` — the same
+   * call the picker's preview makes on its own little model, so what the child
+   * is shown and what she ends up wearing cannot drift apart (GAME_DESIGN.md's
+   * PREVIEW RULE). This used to be six lines here, working from copies of the
+   * kid's skull radius and head tilt.
+   */
   attachPlayer(player: Player): void {
     this.player = player;
 
-    const tilt = new Group();
-    tilt.name = 'facePaintTilt';
-    tilt.rotation.x = -PLAYER_HEAD_TILT;
-    player.model.head.add(tilt);
-
-    const overlay = createFacePaintOverlay(PLAYER_SKULL_RADIUS, { size: 512 });
-    overlay.mesh.scale.set(...PLAYER_FACE_SQUASH);
-    tilt.add(overlay.mesh);
+    const overlay = attachFacePaint(player.model);
     this.playerOverlay = overlay;
 
     const saved = gameStore.get().player.facePaint;
