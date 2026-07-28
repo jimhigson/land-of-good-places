@@ -67,10 +67,10 @@ design is applied and persisted, do not change.
 - [x] Study, findings above
 - [x] `kid.ts` `attachFacePaint` + `FacePaintStall` uses it
 - [x] `CharacterPreview` framing option, face paint, setRunning
-- [ ] `FacePaintPanel` rebuilt on the shared component
-- [ ] CSS
-- [ ] whatsnew
-- [ ] `npm run build` green (exit 0)
+- [x] `FacePaintPanel` rebuilt on the shared component
+- [x] CSS
+- [x] whatsnew (id 15, "Try On Face Paint")
+- [x] `npm run build` green (exit 0, not piped)
 - [ ] PR raised
 
 ## If you are taking over
