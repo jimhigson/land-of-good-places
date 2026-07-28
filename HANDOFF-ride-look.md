@@ -119,13 +119,71 @@ no pitch limits and keep the shared defaults, so they are untouched.
 
 ### Part 3 — device-orientation look (`core/deviceOrientationLook.ts`, new)
 
-New sibling module that `RideCamera` uses as a **second input mode**, chosen at
-runtime. Desktop and the trace never arm it.
+New sibling module that `RideCamera` uses as a **second input mode**, chosen
+per frame. Desktop and the trace never arm it: the control returns `null` until
+a real `deviceorientation` event has arrived, and `null` falls through to the
+existing drag arithmetic untouched.
 
-The risky part is the pure function `orientationToYawPitch(alpha, beta, gamma,
-screenAngle)` — exported, no DOM, no state — and it is unit-tested headlessly
-by `scripts/check-orientation-math.mts` (`npm run check:orientation`, wired
-into `npm run build`). 24 cases; see the script.
+Wiring — all three rides, at the boarding **gesture**, which matters because
+iOS only grants the sensors from inside one:
+
+- ferris: `MiniGameHost.begin()` raises the permission prompt while the stall
+  press is still live (new `StallDefinition.firstPerson` flag, set only on the
+  ferris — a child opening the dodgems should not be asked about gyroscopes).
+  `SpaceFerrisWheel.init()` then calls `view.board()` for the recentre. The
+  prompt **cannot** go in `init()`: that runs behind a closed curtain, several
+  frames after the press, and iOS refuses it.
+- train: `ParkTrain.requestBoard()` → `rideView.board()`
+- coaster: `Coaster.requestBoard()` → `rideView.board()`
+
+#### The bug worth knowing about — do not reintroduce it
+
+The first version did what `three`'s own `DeviceOrientationControls` does:
+build the device quaternion, pull an `YXZ` Euler back out, keep `y` and `x`.
+**That is wrong for this camera.** `YXZ` mixes roll into the other two axes:
+roll the phone 90° about the axis you are looking along and the extracted yaw
+moves by 90°, even though the phone still points at exactly the same thing.
+
+`DeviceOrientationControls` gets away with it because it drives a full 3-DOF
+camera and applies `Rz(-screenAngle)` to cancel the roll — but that only cancels
+rolls the OS has noticed and re-laid the page out for. Rotation lock on, or a
+phone held at 40°, and it does not cancel at all.
+
+The fix: rotate the camera's forward axis by the device orientation and read the
+**aim** off the resulting vector. Where the back of the phone points is a
+physical fact that does not care about roll or page layout. Roll never enters
+the arithmetic — which suits `RideCamera`, which has no roll term by design.
+
+`screenAngle` is still a parameter and still earns it: pointed dead at the floor
+or ceiling every heading is the same heading, and the only thing left that says
+which way the child means is where the top of the phone points, which *is* a
+function of the screen.
+
+#### The test
+
+`scripts/check-orientation-math.mts`, `npm run check:orientation`, wired into
+`npm run build` after `check:ride-camera`. **38 assertions, six groups:**
+
+1. **Eight hand-checkable poses** — held up (pitch 0), flat in the lap
+   (pitch −90), overhead screen-down (pitch +90), tipped ±30, turned ±30/90.
+2. **4,928 orientations against an independent reference** implemented from the
+   W3C spec's own `Rz(α)·Rx(β)·Ry(γ)` with plain 3×3 matrices — deliberately not
+   the same three.js idiom, or it would only prove the function agrees with
+   itself. Worst disagreement **4.8e-13°**.
+3. **7,020 rolled orientations** — the property that caught the bug above.
+   `screenAngle` enters the maths as exactly the roll in question, so the
+   assertion is simply "vary it, and the aim must not move". Worst movement
+   **1.4e-13°**.
+4. **Degenerate poles** — dead up and dead down at every screen angle stay
+   finite and vertical.
+5. **Ranges** over 300k+ samples: pitch within ±90°, yaw within ±180°, nothing
+   non-finite anywhere.
+6. **Continuity** — a 0.25° nudge moves the aim at most 0.56°. Measured as the
+   angle between **aim vectors**, not as a distance in yaw/pitch: yaw is a
+   longitude and goes arbitrarily sensitive near the poles, which is a property
+   of spherical coordinates rather than a discontinuity. The ride is kept out of
+   that region by the pitch clamps, which stop short of vertical for this exact
+   reason.
 
 ## Where things are
 

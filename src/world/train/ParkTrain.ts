@@ -330,6 +330,11 @@ export class ParkTrain implements GameSystem, TrainService {
     this.playerBoardedAt = this.boardedAtElapsed;
     player.beginRide();
     playStationBell();
+    // Still inside the "Get on" press, which is the point: this is where the
+    // phone-tilt look takes "straight ahead" from where she is actually facing,
+    // and where iOS is asked for the sensors — a prompt it will only show from
+    // inside a gesture. Does nothing on desktop.
+    this.rideView?.board();
     this.onRideChange?.(true);
   }
 

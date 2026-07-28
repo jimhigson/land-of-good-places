@@ -314,6 +314,10 @@ export class Coaster implements GameSystem {
 
     this.phase = 'chain';
     this.speed = CHAIN_SPEED;
+    // Inside the interact press, where the phone-tilt look needs to be armed:
+    // it takes "forward" from here, and iOS only grants the sensors from a
+    // gesture. No-op on desktop, and harmless if it is refused.
+    this.rideView?.board();
     return true;
   }
 

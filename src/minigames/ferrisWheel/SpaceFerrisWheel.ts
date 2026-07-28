@@ -255,6 +255,16 @@ class SpaceFerrisWheel implements MiniGame {
     // family-confirmed look-around directions are untouched by it.
     this.view.mountOn(this.gondola.seat, GONDOLA_EYE);
 
+    // Sitting down. On a phone this takes "straight ahead" from wherever the
+    // child is actually holding it, so the window into space starts pointing
+    // out of the front of the car rather than at magnetic north.
+    //
+    // The iOS permission prompt is *not* raised here — `init` runs behind a
+    // closed curtain, several frames after the press that opened the stall, and
+    // iOS only grants sensors from inside a gesture. `MiniGameHost.begin` asks
+    // while that press is still live (`StallDefinition.firstPerson`).
+    this.view.board();
+
     this.alien = createAlienSaucer();
     this.ripika = createSpaceRipika();
     this.nebula = createSweetieNebula();
