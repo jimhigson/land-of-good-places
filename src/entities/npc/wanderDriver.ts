@@ -3,6 +3,11 @@ import { clamp01 } from '../../core/mathUtils';
 import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../art/style/faces';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
+// The things a child does instead of wandering. See `activities/activity.ts`
+// for what an `Activity` is and why it has the shape it has; this file keeps
+// only the wander core and the small amount of glue that runs them.
+import type { Activity, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
+import { TreeClimb, type ClimbPhase, type ClimberBudget } from './activities/treeClimb';
 // Chatting (see the additive block near the bottom of this file). Content —
 // what a child says and when — lives in its own module so this file stays
 // about timing and state, not word lists.
@@ -79,42 +84,9 @@ const HOP_COOLDOWN = 1.1;
 /** Longest a child will push at a waypoint before giving up and re-choosing. */
 const LEG_TIMEOUT = 14;
 
-// --- tree climbing (see world/TreeClimbing.ts) ------------------------------
-//
-// Item 22 of the family's design feedback: NPCs climb trees too. This driver
-// owns only the *decision* and the *timing* — whether to climb, which tree,
-// how long each phase lasts. `TreeClimbing` reads the small public surface
-// below and does the actual posing (it owns the body-hiding and the pose
-// maths, shared with the player's own climb). Kept entirely inside this
-// class so the rest of the file, and everyone calling it, is unaffected.
-
-/** How far from a waypoint a tree is still "right there" to climb. */
-const CLIMB_SEARCH_RADIUS = 6.5;
-
-/** Rolled once per arrival at *any* waypoint, not just interesting ones. */
-const CLIMB_CHANCE = 0.055;
-
-/** Longest to wait before this child is willing to climb again. */
-const CLIMB_COOLDOWN_MIN = 50;
-const CLIMB_COOLDOWN_RANGE = 60;
-
-const CLIMB_UP_SECONDS = 0.5;
-const CLIMB_DOWN_SECONDS = 0.42;
-const CLIMB_PEEK_MIN = 3.4;
-const CLIMB_PEEK_RANGE = 3.6;
-
-/** A phase of the little scripted moment, in order. */
-export type ClimbPhase = 'up' | 'peek' | 'down';
-
-/**
- * Caps how many children are up trees across the whole park at once, so a
- * lucky run of coin flips can't put half the crowd in the branches. Shared —
- * one instance handed to every `WanderDriver` by `NpcSystem`.
- */
-export interface ClimberBudget {
-  active: number;
-  readonly max: number;
-}
+// Re-exported so the climb's consumers (`world/TreeClimbing.ts`,
+// `NpcSystem.ts`) do not have to care that it moved into `activities/`.
+export type { ClimbPhase, ClimberBudget };
 
 // =============================================================================
 // Face painting stall (additive, self-contained). See ART_DIRECTION.md's face
@@ -216,12 +188,21 @@ export interface WanderOptions {
   readonly chatBudget?: ChatBudget;
 }
 
-export class WanderDriver implements CharacterDriver {
+export class WanderDriver implements CharacterDriver, ActivityHost {
   readonly name = 'wander';
 
   private readonly graph: PoiGraph;
-  private readonly rng: Rng;
-  private readonly pace: number;
+  readonly rng: Rng;
+  readonly pace: number;
+
+  /**
+   * Everything this child does instead of wandering, in the order they are
+   * offered the frame. Built once, at construction — nothing here allocates
+   * per frame, because there are eighteen children and they are drawn with an
+   * `InstancedMesh`.
+   */
+  private readonly activities: readonly Activity[];
+  private readonly climb: TreeClimb;
 
   private current: number;
   private target: number;
@@ -243,17 +224,6 @@ export class WanderDriver implements CharacterDriver {
 
   private blinkTimer: number;
   private blinkRemaining = 0;
-
-  // --- tree climbing state (see block comment above `WanderOptions`) -------
-  private readonly climbableTrees: readonly ClimbableTreeSeed[];
-  private readonly climberBudget: ClimberBudget | undefined;
-  private climbCooldown: number;
-  private climbPhaseValue: ClimbPhase | null = null;
-  private climbTreeValue: ClimbableTreeSeed | null = null;
-  private climbTimer = 0;
-  private climbPeekFor = 0;
-  private climbStartX = 0;
-  private climbStartZ = 0;
 
   // ---- face painting stall (additive — see the block above the class) ----
   // Not `private`: read from the module-level `paintedNpcFaces()` /
@@ -289,12 +259,11 @@ export class WanderDriver implements CharacterDriver {
     this.previous = options.startNode;
     this.target = options.startNode;
     this.blinkTimer = this.rng.range(1.5, 5.5);
-    this.climbableTrees = options.climbableTrees ?? [];
-    this.climberBudget = options.climberBudget;
     this.chatBudget = options.chatBudget;
-    // Staggered like the first pause below, so the park doesn't decide to
-    // climb in step either — and nobody is eligible in the first minute.
-    this.climbCooldown = this.rng.range(10, 70);
+    // Activities are constructed exactly where their state used to be
+    // initialised, because several of them draw from this child's seeded
+    // stream and the order of those draws is behaviour, not detail.
+    this.climb = new TreeClimb(this.rng, options.climbableTrees ?? [], options.climberBudget);
     // Stagger the first decision so the whole park does not set off in step.
     this.pausing = true;
     this.pauseRemaining = this.rng.range(0, 2.5);
@@ -309,6 +278,11 @@ export class WanderDriver implements CharacterDriver {
     // Stagger the first chat roll too, so nobody is eligible in the opening seconds.
     this.chatCooldown = this.rng.range(3, 20);
     wanderDrivers.add(this);
+
+    // The order the frame is offered in. Unchanged from the chain of `if`s
+    // this replaced: the climb pre-empts everything (see `ActivityHold`), then
+    // chat, then the train, then the paint stall.
+    this.activities = [this.climb];
   }
 
   /** Where this child is heading, for debugging and for the pet to follow. */
@@ -316,31 +290,32 @@ export class WanderDriver implements CharacterDriver {
     return this.target;
   }
 
+  // The climb's public surface, read by `world/TreeClimbing.ts`. Delegated
+  // rather than moved so that file is untouched by this refactor.
+
   /** True for the whole climb — up, peeking and down. */
   get climbing(): boolean {
-    return this.climbPhaseValue !== null;
+    return this.climb.busy;
   }
 
   /** Which tree, while {@link climbing}. */
   get climbTree(): ClimbableTreeSeed | null {
-    return this.climbTreeValue;
+    return this.climb.climbTree;
   }
 
   /** Which part of the climb. `null` when not climbing. */
   get climbPhase(): ClimbPhase | null {
-    return this.climbPhaseValue;
+    return this.climb.climbPhase;
   }
 
   /** 0..1 through the current phase. Meaningless (and unused) during `peek`. */
   get climbProgress(): number {
-    if (this.climbPhaseValue === 'up') return clamp01(this.climbTimer / CLIMB_UP_SECONDS);
-    if (this.climbPhaseValue === 'down') return clamp01(this.climbTimer / CLIMB_DOWN_SECONDS);
-    return 1;
+    return this.climb.climbProgress;
   }
 
   /** Where the child was standing when it started up — the base of the scramble. */
   get climbGroundSpot(): { readonly x: number; readonly z: number } {
-    return { x: this.climbStartX, z: this.climbStartZ };
+    return this.climb.climbGroundSpot;
   }
 
   /**
@@ -367,69 +342,38 @@ export class WanderDriver implements CharacterDriver {
       this.blinkTimer = this.rng.range(2.4, 6.2);
       this.blinkRemaining = 0.12;
     }
-    this.climbCooldown -= dt;
 
-    if (this.climbPhaseValue !== null) {
-      this.updateClimb(dt, intent);
-      return;
-    }
+    // An activity that holds the whole child gets the frame before the child
+    // even notices the player: nobody waves from up a tree.
+    let hold = this.offerFrame(true, context, intent);
 
-    this.reactToPlayer(context);
+    if (hold === null) {
+      this.reactToPlayer(context);
 
-    // Chatting (additive): claims the frame — in place of the train trip and
-    // the face-paint visit below — while a chat is starting, happening, or
-    // being said goodbye to. See the block near the bottom of this file for
-    // the state machine; every other method on this class is unchanged.
-    const chatting = this.updateChatActivity(context, intent, dt);
+      hold = this.offerFrame(false, context, intent);
 
-    if (!chatting) {
-      // Catching the park train, if there is one and this child fancies it. The
-      // whole behaviour is in the additive block at the bottom of this file; when
-      // it is handling the frame, it has filled the intent in itself.
-      if (this.updateTrainTrip(context, intent)) return;
+      // Chatting (additive): claims the frame — in place of the train trip and
+      // the face-paint visit below — while a chat is starting, happening, or
+      // being said goodbye to.
+      if (hold === null && this.updateChatActivity(context, intent, dt)) hold = 'steering';
 
-      // --- where am I trying to be? -------------------------------------------
-      // Face painting stall (additive): a child mid-visit — or one who has just
-      // decided to start one — has movement handled entirely by
-      // `driveFacePaintVisit` for this frame, in place of the ordinary node
-      // logic below. See the block above the class for the state this reads
-      // and writes; every other method on this class is unchanged.
-      if (!this.driveFacePaintVisit(context, intent, dt)) {
-        const node = this.graph.node(this.target);
-
-        if (this.pausing) {
-          this.pauseRemaining -= dt;
-          this.updateLook(context, dt);
-          if (this.pauseRemaining <= 0) {
-            this.pausing = false;
-            this.chooseNext();
-          }
-        } else if (node) {
-          this.legElapsed += dt;
-          const dx = node.x - context.position.x;
-          const dz = node.z - context.position.z;
-          const distance = Math.hypot(dx, dz);
-
-          if (distance <= ARRIVE_RADIUS) {
-            this.arrive(context);
-          } else {
-            const speed = this.running ? RUN_INTENT : 1;
-            const scale = (speed * this.pace) / distance;
-            intent.moveX = dx * scale;
-            intent.moveZ = dz * scale;
-          }
-
-          // A child who has been walking at the same waypoint for a quarter of a
-          // minute is stuck on something the edge test did not catch.
-          // Re-choosing is a cheaper and far less visible fix than a rescue
-          // teleport.
-          if (this.legElapsed > LEG_TIMEOUT) {
-            this.current = this.target;
-            this.chooseNext();
-          }
-        }
+      if (hold === null) {
+        // Catching the park train, if there is one and this child fancies it.
+        // When it is handling the frame, it has filled the intent in itself.
+        if (this.updateTrainTrip(context, intent)) hold = 'intent';
+        // Face painting stall (additive): a child mid-visit — or one who has
+        // just decided to start one — has movement handled entirely by
+        // `driveFacePaintVisit` for this frame, in place of the ordinary node
+        // logic below.
+        else if (this.driveFacePaintVisit(context, intent, dt)) hold = 'steering';
+        else this.updateWander(context, intent, dt);
       }
     }
+
+    // `'intent'` and `'child'` hold the whole intent, so the social tail below
+    // does not run for them — they write their own expression. See
+    // `ActivityHold`.
+    if (hold === 'intent' || hold === 'child') return;
 
     // --- the bits that make them look like children -------------------------
     this.waveAmount = approach(this.waveAmount, this.waveRemaining > 0 ? 1 : 0, dt * 4.5);
@@ -450,7 +394,120 @@ export class WanderDriver implements CharacterDriver {
       this.waveAmount > 0.15 ? 'happy' : this.blinkRemaining > 0 ? 'blink' : 'neutral';
   }
 
+  // ------------------------------------------------------------- running them
+
+  /**
+   * Offers the frame to each activity in turn; the first to take it wins and
+   * nothing after it runs.
+   *
+   * Two passes, because activities do not all take the same amount of the
+   * child: `preemptive` selects the ones that hold the whole child
+   * (`hold: 'child'`), which are offered the frame before `reactToPlayer` —
+   * so a child up a tree does not roll for a wave, and does not consume a
+   * draw from their seeded stream doing it.
+   *
+   * Indexed loop, no closures, no iterators: this runs for every child every
+   * frame.
+   */
+  private offerFrame(
+    preemptive: boolean,
+    context: DriverContext,
+    intent: CharacterIntent,
+  ): ActivityHold | null {
+    for (let i = 0; i < this.activities.length; i += 1) {
+      const activity = this.activities[i];
+      if (!activity) continue;
+      if ((activity.hold === 'child') !== preemptive) continue;
+      if (activity.update(this, context, intent)) return activity.hold;
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------- ActivityHost
+
+  /** True on the frames this child's eyes are shut. */
+  get blinking(): boolean {
+    return this.blinkRemaining > 0;
+  }
+
+  /** True if any activity other than `asking` is mid-something. */
+  othersBusy(asking: Activity): boolean {
+    for (let i = 0; i < this.activities.length; i += 1) {
+      const activity = this.activities[i];
+      if (!activity || activity === asking) continue;
+      if (activity.busy) return true;
+    }
+    return false;
+  }
+
+  /** Asks for a wave of at least `seconds`, eased in by the social tail. */
+  requestWave(seconds: number): void {
+    this.waveRemaining = Math.max(this.waveRemaining, seconds);
+  }
+
+  /**
+   * Puts the child back into ordinary wandering when an activity lets go.
+   * The three variants are pre-existing and differ in ways nobody recorded —
+   * see {@link Rejoin} and HANDOFF-activity.md.
+   */
+  rejoinGraph(context: DriverContext, how: Rejoin): void {
+    if (how !== 'inPlace') {
+      // Rejoin at whatever waypoint is nearest, which from a station platform
+      // is the ring road, and from the paint stall is the path outside it.
+      const nearest = this.graph.nearest(context.position.x, context.position.z);
+      if (nearest) {
+        this.current = nearest.index;
+        this.previous = nearest.index;
+        if (how === 'full') this.target = nearest.index;
+      }
+    }
+    this.chooseNext();
+    if (how === 'full') {
+      this.pausing = false;
+      this.legElapsed = 0;
+    }
+  }
+
   // ---------------------------------------------------------------- internals
+
+  /** Walk to the next waypoint, or stand at this one and look around. */
+  private updateWander(context: DriverContext, intent: CharacterIntent, dt: number): void {
+    const node = this.graph.node(this.target);
+
+    if (this.pausing) {
+      this.pauseRemaining -= dt;
+      this.updateLook(context, dt);
+      if (this.pauseRemaining <= 0) {
+        this.pausing = false;
+        this.chooseNext();
+      }
+      return;
+    }
+
+    if (!node) return;
+
+    this.legElapsed += dt;
+    const dx = node.x - context.position.x;
+    const dz = node.z - context.position.z;
+    const distance = Math.hypot(dx, dz);
+
+    if (distance <= ARRIVE_RADIUS) {
+      this.arrive(context);
+    } else {
+      const speed = this.running ? RUN_INTENT : 1;
+      const scale = (speed * this.pace) / distance;
+      intent.moveX = dx * scale;
+      intent.moveZ = dz * scale;
+    }
+
+    // A child who has been walking at the same waypoint for a quarter of a
+    // minute is stuck on something the edge test did not catch. Re-choosing is
+    // a cheaper and far less visible fix than a rescue teleport.
+    if (this.legElapsed > LEG_TIMEOUT) {
+      this.current = this.target;
+      this.chooseNext();
+    }
+  }
 
   /** Waves at the player, and copies their hops. */
   private reactToPlayer(context: DriverContext): void {
@@ -501,9 +558,13 @@ export class WanderDriver implements CharacterDriver {
     this.current = this.target;
     this.legElapsed = 0;
 
-    // Climbing takes priority over the ordinary pause at this waypoint — it
-    // is its own "stop and look around" moment, just a more memorable one.
-    if (this.tryStartClimb(context)) return;
+    // An activity may claim the arrival itself — climbing a tree takes
+    // priority over the ordinary pause at this waypoint, being its own "stop
+    // and look around" moment, just a more memorable one.
+    for (let i = 0; i < this.activities.length; i += 1) {
+      const activity = this.activities[i];
+      if (activity?.onArrive?.(this, context)) return;
+    }
 
     const node = this.graph.node(this.current);
     if (node?.interesting && this.rng.chance(PAUSE_CHANCE)) {
@@ -737,82 +798,6 @@ export class WanderDriver implements CharacterDriver {
     this.sidestep = 0;
     this.trainCooldown = this.rng.range(TRAIN_INTERVAL_MIN, TRAIN_INTERVAL_MAX);
     return false;
-  }
-
-  // -------------------------------------------------------------- climbing
-
-  /**
-   * Rolls the dice on climbing whatever climbable tree is nearest, if any is
-   * within reach. True if a climb started — the caller should treat that
-   * exactly like beginning a pause.
-   */
-  private tryStartClimb(context: DriverContext): boolean {
-    if (this.climbableTrees.length === 0) return false;
-    if (this.climbCooldown > 0) return false;
-    if (this.climberBudget && this.climberBudget.active >= this.climberBudget.max) return false;
-    if (!this.rng.chance(CLIMB_CHANCE)) return false;
-
-    const tree = nearestTree(
-      this.climbableTrees,
-      context.position.x,
-      context.position.z,
-      CLIMB_SEARCH_RADIUS,
-    );
-    if (!tree) return false;
-
-    this.climbTreeValue = tree;
-    this.climbStartX = context.position.x;
-    this.climbStartZ = context.position.z;
-    this.climbPhaseValue = 'up';
-    this.climbTimer = 0;
-    if (this.climberBudget) this.climberBudget.active += 1;
-    return true;
-  }
-
-  /** Runs the up/peek/down timer while a climb owns the character. */
-  private updateClimb(dt: number, intent: CharacterIntent): void {
-    // Nothing walks, waves or reacts to the player while up a tree — the pose
-    // itself is TreeClimbing's job, driven by `climbTree`/`climbPhase`/
-    // `climbProgress` below.
-    intent.moveX = 0;
-    intent.moveZ = 0;
-    intent.hop = false;
-    intent.interact = false;
-    intent.lookAt = null;
-    intent.wave = 0;
-    // A tree is a nice place to be: happy rather than the usual neutral
-    // resting face, blinking exactly as normal.
-    intent.expression = this.blinkRemaining > 0 ? 'blink' : 'happy';
-
-    this.climbTimer += dt;
-    switch (this.climbPhaseValue) {
-      case 'up':
-        if (this.climbTimer >= CLIMB_UP_SECONDS) {
-          this.climbPhaseValue = 'peek';
-          this.climbTimer = 0;
-          this.climbPeekFor = this.rng.range(CLIMB_PEEK_MIN, CLIMB_PEEK_MIN + CLIMB_PEEK_RANGE);
-        }
-        return;
-      case 'peek':
-        if (this.climbTimer >= this.climbPeekFor) {
-          this.climbPhaseValue = 'down';
-          this.climbTimer = 0;
-        }
-        return;
-      case 'down':
-        if (this.climbTimer >= CLIMB_DOWN_SECONDS) this.endClimb();
-        return;
-    }
-  }
-
-  private endClimb(): void {
-    this.climbPhaseValue = null;
-    this.climbTreeValue = null;
-    if (this.climberBudget) this.climberBudget.active -= 1;
-    this.climbCooldown = this.rng.range(CLIMB_COOLDOWN_MIN, CLIMB_COOLDOWN_MIN + CLIMB_COOLDOWN_RANGE);
-    // Straight back to ordinary wandering from wherever the climb left it —
-    // `current`/`target` never changed, so this is exactly a fresh pause end.
-    this.chooseNext();
   }
 
 
@@ -1091,23 +1076,4 @@ function approach(value: number, target: number, step: number): number {
   if (value < target) return Math.min(target, value + step);
   if (value > target) return Math.max(target, value - step);
   return clamp01(value);
-}
-
-/** Nearest tree to (x, z) within `maxDistance`, or `null`. */
-function nearestTree(
-  trees: readonly ClimbableTreeSeed[],
-  x: number,
-  z: number,
-  maxDistance: number,
-): ClimbableTreeSeed | null {
-  let best: ClimbableTreeSeed | null = null;
-  let bestDistance = maxDistance;
-  for (const tree of trees) {
-    const distance = Math.hypot(tree.x - x, tree.z - z);
-    if (distance < bestDistance) {
-      best = tree;
-      bestDistance = distance;
-    }
-  }
-  return best;
 }
