@@ -1454,8 +1454,16 @@ them from authored to generated.
 - **L1 anchors** — a seeded constraint solver places castle, fountain, rides,
   shops, stalls, spooky house: minimum separations, band preferences,
   keep-outs, entrance esplanade kept clear.
-- **L2 railway** — Decision 4's solver unchanged; its per-bearing inward-dip
-  profile is *derived from the generated anchor gaps* rather than authored.
+- **L2 rails, both systems** — the family, 02:45: *"The train and rail race
+  need to be procedurally placed tracks grown organically in the code. Paths
+  need to react to them with bridges over as appropriate."* So the train
+  loop AND the coaster/rail-racer track are both **grown** by the solver
+  against the generated anchors — the train at grade hugging and diving as
+  Decision 4 rules, the coaster elevated in its band — with neither route
+  authored. Paths (L3) are generated *after* the rails and react to them:
+  a bridge where a path crosses rail, a tunnel hill where rail passes under
+  a path. Rails first, paths second — the family's wording makes the
+  dependency direction explicit.
 - **L3 paths** — generated to connect entrance → every attraction → both
   stations; a bridge is emitted where a path must cross the solved rail, a
   tunnel hill where the rail passes under a path (Decision 4's constructs,
