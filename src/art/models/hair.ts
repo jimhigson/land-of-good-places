@@ -212,6 +212,21 @@ export function buildHair(options: HairOptions): HairRig {
   fall.position.set(0, 0, -FALL_BACK * H);
   crown.add(fall);
 
+  /**
+   * The **draped**-hair frame: the same untilted, plain-metres space as
+   * `fall`, but left on the head's own axis instead of parked behind it.
+   *
+   * `fall` is offset back by `FALL_BACK × HEAD` because a curtain or a tail
+   * hangs *off* the back of the head and has to clear the backpack. Anything
+   * that wraps *around* the head needs the opposite: authored in `fall`, a
+   * shell meant to sit on the skull would be a shell centred half a metre
+   * behind it. Same rotation, so down is still down.
+   */
+  const drape = new Group();
+  drape.name = 'hair.drape';
+  drape.rotation.x = headTilt;
+  crown.add(drape);
+
   // --- shared: the cap, the fringe and the back tuft --------------------------
 
   // Stops well ABOVE the eye line. Every extra degree of theta here eats
@@ -302,20 +317,96 @@ export function buildHair(options: HairOptions): HairRig {
   );
 
   // --- long, hanging down -----------------------------------------------------
-  // Inside `fall`, so in metres: a curtain down the back, kept behind the
-  // backpack (whose back face is at z = -0.42 on the body), and two shorter
-  // strands framing the face. The strands stop well above the hands — an arm
-  // swinging through a curtain of hair is the thing that makes long hair on a
-  // walk cycle look broken.
-  add(['long'], fall, () => {
-    const longHair = solid(
-      fuse(hair, [
-        new SphereGeometry(0.34, 20, 16).scale(1.02, 1.55, 0.36).translate(0, -0.16, -0.1),
-        new SphereGeometry(0.24, 16, 12).scale(1.15, 0.55, 0.5).translate(0, -0.6, -0.1),
-        new SphereGeometry(0.16, 14, 12).scale(0.62, 1.9, 0.62).translate(-0.6, 0.02, 0.6),
-        new SphereGeometry(0.16, 14, 12).scale(0.6, 1.76, 0.62).translate(0.6, 0.04, 0.6),
-      ]),
-    );
+  /**
+   * Long hair, as one connected fall.
+   *
+   * **What was wrong.** It used to be four fused blobs: a flat slab down the
+   * back spanning x ±0.35, and two vertical strands parked out at x = ±0.60,
+   * z = +0.60 beside the face. Nothing joined them — there was clear air from
+   * |x| = 0.35 out to |x| = 0.50 — so the strands read as a pair of sideburns
+   * hung either side of a separate back panel. The family called it a mullet,
+   * which is exactly what disconnected side pieces over a back mass look like.
+   *
+   * **What it is now.** Three overlapping arcs of locks, in `drape` (the head's
+   * own axis, in metres), each one a ring of blobs whose neighbours overlap by
+   * construction — `sweep` sets every lock's half-width from the spacing, so a
+   * gap cannot be introduced by retuning the counts:
+   *
+   *  1. the **shroud**, hugging the cap from under its rim right round to the
+   *     cheekbones, longest at the back and shortest at the face — this is the
+   *     piece that was missing, and it is what turns two strands and a panel
+   *     into one head of hair;
+   *  2. the **fall**, gathering behind the shoulders and pushed back clear of
+   *     the backpack;
+   *  3. the **hem**, narrower and further back again, tapering out below the
+   *     shoulders.
+   *
+   * Every lock below the shroud stays behind z = -0.20 and above the hands'
+   * swing, because an arm passing through a curtain of hair is the thing that
+   * makes long hair on a walk cycle look broken — the same rule the old
+   * strands were obeying by simply stopping short.
+   */
+  add(['long'], drape, () => {
+    const locks: BufferGeometry[] = [];
+
+    /**
+     * One arc of locks around the head, from `-arc/2` to `+arc/2` about the
+     * back of the skull.
+     *
+     * `spread` is the half-width every lock is given: half the gap between
+     * neighbours plus a quarter again, so consecutive locks always overlap and
+     * the arc merges into a continuous shell. That is the invariant the old
+     * long hair broke, so it is arithmetic here rather than a tuned number.
+     */
+    const sweep = (
+      count: number,
+      arc: number,
+      shape: (angle: number) => { radius: number; top: number; bottom: number; thickness: number; back: number },
+    ): void => {
+      const step = arc / (count - 1);
+      for (let i = 0; i < count; i += 1) {
+        const angle = (i / (count - 1) - 0.5) * arc;
+        const part = shape(angle);
+        const spread = part.radius * step * 0.625;
+        locks.push(lockGeometry({ angle, width: spread, ...part }));
+      }
+    };
+
+    // 1. The shroud. Its top is above the cap's rim (y = 0.14) and its inner
+    //    face is inside the cap's surface, so it tucks under rather than
+    //    butting against it. Length falls away towards the face: down the back
+    //    to below the skull, beside the face only to the cheekbone, which is
+    //    where the old strands stopped and is still well clear of the arms.
+    sweep(11, Math.PI * 1.33, (angle) => ({
+      radius: 0.7,
+      top: 0.22,
+      bottom: -(0.5 + 0.26 * Math.cos(angle)),
+      thickness: 0.13,
+      back: 0,
+    }));
+
+    // 2. The fall, gathered behind the shoulders. Pushed back so its front
+    //    face sits behind the backpack's own back face (z = -0.42 on the body)
+    //    at the centre, and behind the hands' back-swing at the edges.
+    sweep(7, Math.PI * 0.78, (angle) => ({
+      radius: 0.52,
+      top: -0.5,
+      bottom: -(0.66 + 0.24 * Math.cos(angle)),
+      thickness: 0.12,
+      back: 0.14,
+    }));
+
+    // 3. The hem: narrow, further back, and stopping at body y = 0.42 — a good
+    //    0.3 m below the shoulders, and above the skirt hem.
+    sweep(5, Math.PI * 0.56, (angle) => ({
+      radius: 0.3,
+      top: -0.82,
+      bottom: -(0.9 + 0.04 * Math.cos(angle)),
+      thickness: 0.095,
+      back: 0.3,
+    }));
+
+    const longHair = solid(fuse(hair, locks));
     addOutline(longHair, OUTLINE);
     return longHair;
   });
@@ -518,6 +609,35 @@ function fuse(material: Material, geometries: readonly BufferGeometry[]): Mesh {
   }
   if (geometries.length > 1) for (const geometry of geometries) geometry.dispose();
   return new Mesh(merged, material);
+}
+
+/**
+ * One lock of hair: a blob stretched down the head and swung round onto an arc.
+ *
+ * `angle` is measured from the **back** of the skull, so 0 hangs straight down
+ * the nape and ±π/2 sits over the ear. The blob is built about the origin,
+ * elongated on Y, thinned on Z (the radial direction) and widened on X (the
+ * tangential one), then pushed out to `radius` and rotated into place —
+ * `rotateY` maps +Z onto the outward direction, which is the same trick and the
+ * same reason as {@link tuftGeometry}. `back` is applied afterwards, in plain
+ * world Z, so a falling lock can be pushed clear of the backpack without
+ * dragging the whole arc out with it.
+ */
+function lockGeometry(lock: {
+  readonly angle: number;
+  readonly radius: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly thickness: number;
+  readonly back: number;
+}): BufferGeometry {
+  const { angle, radius, top, bottom, width, thickness, back } = lock;
+  return new SphereGeometry(1, 10, 8)
+    .scale(width, (top - bottom) / 2, thickness)
+    .translate(0, (top + bottom) / 2, radius)
+    .rotateY(Math.PI - angle)
+    .translate(0, 0, -back);
 }
 
 /** A hair tie or bobble: a torus lying flat, ready to be positioned. */
