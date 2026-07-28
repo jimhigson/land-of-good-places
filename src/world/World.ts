@@ -131,6 +131,10 @@ export class World implements GameSystem {
       routeSalt: 0x9ace12,
       stationStallId: 'stall.railRacer',
       camera: 'chase',
+      // The thing that makes it a race rather than a second scenic ride:
+      // barriers, a rival, a countdown and a finish. Without it `buildRace`
+      // never runs and the Rail Race is a Sky Cruiser seen from behind.
+      race: true,
       avoid: this.coaster,
       nominal: 24,
       bandMax: 38,

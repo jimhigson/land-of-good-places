@@ -3662,3 +3662,158 @@ kbd {
     text-align: left;
   }
 }
+
+/* ============================================================== THE RAIL RACE
+   The countdown, the lap and the result card for the coaster race out in the
+   park (see `src/ui/RaceHud.ts` and `src/world/coaster/Coaster.ts`).
+
+   Sits at z-index 18: above the park's own HUD row, below every panel (20+),
+   so a panel opening over it still behaves. The whole layer is
+   pointer-events: none EXCEPT `.racehud-pad`, which is the phone's hold
+   button and must never have a pill, a digit or a card stealing a press from
+   it — the park hides the touch hop button while a ride has hold of you, and
+   holding is the entire game here. */
+.racehud {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+  display: block;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
+  font-family: var(--lgp-font);
+  color: var(--lgp-ink);
+}
+
+.racehud[data-shown='true'] {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 200ms ease;
+}
+
+/* The whole screen is the go button. Transparent, and the only thing on this
+   layer that takes a pointer at all. */
+.racehud-pad {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.racehud[data-shown='true'] .racehud-pad {
+  pointer-events: auto;
+}
+
+/* Lap counter: a cream pill at the top, out of the way of the track ahead. */
+.racehud-lap {
+  position: absolute;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.9rem;
+  border-radius: 999rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  font-size: var(--lgp-text-lg);
+  font-weight: 800;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.racehud-lap[data-shown='true'] {
+  opacity: 1;
+}
+
+/* The 3-2-1-GO. Deliberately enormous — this is the one moment the whole
+   screen is saying one thing, and a six-year-old should be able to read it
+   from across the room. Sized as a multiple of the root scale like every
+   other one-off display size in this file, so it grows with the screen. */
+.racehud-count {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 5rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0 0.5rem rgba(74, 58, 82, 0.45),
+    0 0.25rem 0 var(--lgp-pink-deep);
+  opacity: 0;
+}
+
+.racehud-count[data-shown='true'] {
+  animation: lgp-race-count 900ms ease-out forwards;
+}
+
+@keyframes lgp-race-count {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.45);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* The result card. Never a scoreboard — one line that is kind either way. */
+.racehud-banner {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 1rem 1.6rem;
+  border-radius: 1.25rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  text-align: center;
+  max-width: min(24rem, 88vw);
+}
+
+.racehud-banner[data-shown='true'] {
+  display: flex;
+  animation: lgp-race-banner 420ms ease-out forwards;
+}
+
+.racehud-banner strong {
+  font-size: 2.2rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.racehud-banner span {
+  font-size: var(--lgp-text-lg);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+@keyframes lgp-race-banner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
