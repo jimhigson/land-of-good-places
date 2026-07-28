@@ -49,8 +49,13 @@ export const STALLS: readonly StallDefinition[] = [
   },
   {
     id: 'railRacer',
-    title: 'Rail Racer!',
-    subtitle: 'hold on, let go, whoosh!',
+    // The id stays `railRacer` — it is a save key and the prefix
+    // `world/interact.ts` reads the "Ride!" verb off — but the booth now
+    // advertises the ride it actually boards. "hold on, let go, whoosh!"
+    // described the controls of the retired 2D game and never said that there
+    // is somebody to beat, which is the whole point of it.
+    title: 'The Rail Race!',
+    subtitle: 'race the other cart, duck the bars!',
     glyph: '🎢',
     accent: PALETTE.markerPink,
     stripe: PALETTE.buildingWall,
