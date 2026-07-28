@@ -141,6 +141,30 @@ export function buildRailFence(
       length: Math.hypot(b.x - a.x, b.z - a.z),
     });
   };
+  /**
+   * A box end cap crosses the track, and the train drives through it four
+   * times a lap — so the *collision* wall keeps its full span (the seal is a
+   * rule, and rules are airtight), but the *visible* rail is two short stubs
+   * flanking the rails with the middle left open. What a child sees is the
+   * fence turning in to meet the crossing; what the train sees is nothing.
+   */
+  const cap = (a: Post, b: Post) => {
+    collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+    const span = Math.hypot(b.x - a.x, b.z - a.z);
+    const stub = Math.max(0, span / 2 - 1.1) / span; // fraction of the way in
+    for (const [from, to] of [
+      [a, { x: a.x + (b.x - a.x) * stub, z: a.z + (b.z - a.z) * stub, y: a.y }],
+      [b, { x: b.x + (a.x - b.x) * stub, z: b.z + (a.z - b.z) * stub, y: b.y }],
+    ] as const) {
+      rails.push({
+        x: (from.x + to.x) / 2,
+        z: (from.z + to.z) / 2,
+        y: (from.y + to.y) / 2 + 0.62,
+        yaw: Math.atan2(to.x - from.x, to.z - from.z),
+        length: Math.hypot(to.x - from.x, to.z - from.z),
+      });
+    }
+  };
 
   for (const box of closed) {
     let previousLeft: Post | null = null;
@@ -155,12 +179,12 @@ export function buildRailFence(
         link(previousLeft, left);
         link(previousRight, right);
       } else {
-        link(left, right); // the cap at this end of the box
+        cap(left, right); // the cap at this end of the box
       }
       previousLeft = left;
       previousRight = right;
     }
-    if (previousLeft && previousRight) link(previousLeft, previousRight); // far cap
+    if (previousLeft && previousRight) cap(previousLeft, previousRight); // far cap
   }
 
   const postMaterial = toonMaterial(PALETTE.stonePink);
