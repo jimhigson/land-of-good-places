@@ -674,3 +674,55 @@ own set. Now painted once, cached, shared as data URLs, with skin and hair as
 a CSS gradient — five canvases total. Worth recording because the budget in
 ART_DIRECTION.md is a guideline nothing enforces, and this was found only
 because someone went looking while doing unrelated work.
+
+---
+
+## Review 7 — the verification scripts (28 July, 01:40)
+
+The night produced an unusual amount of *checking* code, and it is worth
+reviewing that as an area in its own right, because it is now load-bearing:
+three of tonight's bugs were found by measurement rather than by reading, and
+two fixes were only trusted because a script proved them.
+
+**Clean, and working.** `npm run build` runs `check:text` then `tsc` then
+`check:assets`. Both pass on main: no text below the minimum, 81 assets
+measured, 32 carrying recorded drift with the worst at +0.077 m. The
+`KNOWN_DRIFT` ratchet is doing its job — the pet entries were *removed* rather
+than relaxed when they stopped drifting, which is the behaviour that keeps a
+table like this honest.
+
+**Genuine reuse, not copy-adaptation.** `ts-extension-resolver`,
+`headless-canvas.mjs` and `playerSim.mts` are each shared by more than one
+script. `playerSim.mts` in particular is one faithful copy of `Player.update`'s
+integration used by both the hop-clearance and wall-tunnelling harnesses, and
+the refactor to share it was verified byte-identical against the pre-refactor
+output. That is the right instinct: two independent copies of the integration
+would have drifted and quietly invalidated each other's numbers.
+
+**F7 — four of the seven checks are orphaned, and orphaned checks rot
+(actionable).** Only `check-text-sizes` and `check-asset-contract` are
+referenced from `package.json`. These are not:
+
+- `checkShopSpacing.mjs`
+- `checkGondolaSightline.mjs`
+- `measure-hop-clearance.mts`
+- `measure-wall-tunnelling.mts`
+
+The last two matter most. `MAX_AUTO_HOP_HEIGHT = 1.0` is justified by
+measurements from `measure-hop-clearance.mts`, and the sub-step cap by
+`measure-wall-tunnelling.mts` — and **both of those numbers depend on values
+that change**: jump apex, sprint speed, acceleration, collider thicknesses,
+`MAX_FRAME_DELTA`. There are boot asserts (`checkHoppableColliders`,
+`checkSubstepBudget`) covering the specific invariants, which is good — but
+nothing re-derives the underlying measurements, so the day someone retunes the
+jump, the asserts still pass against a ceiling that is no longer true.
+
+Fix is cheap: give each a `check:` script entry, and decide deliberately which
+belong in `build` (fast, deterministic) versus a slower `check:all` a human or
+a nightly job runs. A 350k-run sweep does not belong in every build; a
+sightline check does.
+
+*Related, and the reason this is worth doing now rather than later: the
+codebase has been bitten four times tonight by a claim nobody re-derived.
+An unrun script is exactly that — a measurement frozen at the moment someone
+last happened to run it.*

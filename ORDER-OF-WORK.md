@@ -178,6 +178,16 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ## Anytime — genuinely independent
 
+- **Wire up the four orphaned check scripts** (Review 7/F7).
+  `checkShopSpacing`, `checkGondolaSightline`, `measure-hop-clearance` and
+  `measure-wall-tunnelling` are referenced from nothing in `package.json`, so
+  nothing re-runs them. The hop ceiling (1.0 m) and the sub-step cap are both
+  *justified by* those measurements and both depend on values that change —
+  jump apex, sprint speed, collider thickness, `MAX_FRAME_DELTA`. The boot
+  asserts guard the invariants but nothing re-derives the numbers behind them.
+  Give each a `check:` entry and split fast/deterministic ones into `build`
+  from slow sweeps into a `check:all`.
+
 - **The pets are still not 1.46 m** (found by the asset-contract check, which
   was written to validate the fix that missed this). `sizeToStandard` now
   closes over a `Box3`, which **over-measures** — a Box3 is the axis-aligned
