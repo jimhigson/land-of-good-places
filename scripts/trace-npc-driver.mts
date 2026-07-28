@@ -254,7 +254,22 @@ function run(coverage: Coverage): string {
 
     // Face painting has no per-child getter by design — the visit keeps that
     // to itself — so it is counted through the decal registry the stall reads.
-    coverage.paints = Math.max(coverage.paints, paintedNpcFaces().length);
+    //
+    // The registry is hashed as well as counted. It is a real per-frame output
+    // of the driver — `FacePaintStall` positions its decals straight off it —
+    // and it is the one output that is *not* an intent field, so nothing else
+    // in this trace covers it. That mattered: ARCHITECTURE-REVIEW C2 was the
+    // head position silently ceasing to be updated on every frame an activity
+    // held, and it moved not one bit of this hash until these three lines
+    // existed.
+    const faces = paintedNpcFaces();
+    coverage.paints = Math.max(coverage.paints, faces.length);
+    for (let i = 0; i < faces.length; i += 1) {
+      const face = faces[i]!;
+      mix(face.x);
+      mix(face.z);
+      mix(face.yaw);
+    }
 
     for (let i = 0; i < children.length; i += 1) {
       const child = children[i]!;
