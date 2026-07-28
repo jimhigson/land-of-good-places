@@ -97,6 +97,18 @@ Unless the grown-ups turn on **Mayhem mode**…
   them rather than growing the panel. **Enforce this with a check** so it
   cannot creep back: a rule nothing measures is a rule that rots, and this
   codebase has been bitten four times by exactly that.
+
+  *The check exists: `npm run check:brevity`
+  (`scripts/check-copy-brevity.mts`), run inside `npm run build`. It measures
+  `whatsnew.json`, the shop catalogue's `displayName` and `blurb`, and the
+  anchor signs' `signTitle` and `signSubtitle` — 102 pieces of copy, walked
+  from the modules the game itself imports, so a new shop item is covered the
+  day it is added. Seven two-sentence shop blurbs where the second sentence is
+  the joke ("One scoop. It wobbles when you walk.") are written down in its
+  `KNOWN_LONG` table as a ratchet: recorded, not accepted, may not grow, and
+  shortening one means deleting its entry. Sign text written inline at a
+  builder call site is the one blind spot; if a future one grows, move it into
+  a table the script already walks.*
 - **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
   **minimum font size and apply it throughout the whole game**, with no
   exceptions. It should be **generously large** — this is a game for a
@@ -944,6 +956,19 @@ Rough order of construction, each step playable:
 14. **"What's new" welcome** — on opening the game, a cute welcome panel
     lists what's new in the park since your last visit (kid-friendly
     lines, from a curated whatsnew file shipped with each release).
+    **Too much text (28 July 2026, from a photo of the real phone — FIXED):**
+    *"This screen needs less text by about half, and clear guidelines to not
+    write this much"*, and *"that also doesn't need to repeat the ages yet
+    again"*. Every line was rewritten to the BREVITY RULE (1296 characters of
+    line text down to 496), the first-visit subtitle lost the credit line and
+    now just reads "A few things to try:" — the credit is already on the
+    splash, in `index.html` and in the PWA manifest — and `check:brevity`
+    stops it growing back. Two overlaps in the same photo went with it: the
+    rows were being squashed by flex so their text spilled out of the rounded
+    boxes onto the row above (`.whatsnew-row` now has `flex: none`, so the
+    list scrolls instead), and the floating "hop" button sat on top of "OK,
+    let's go!" — the touch controls now hide whenever anything owns the
+    screen, not only while riding.
 15. **Upgrade notice** — if a new version deploys while you're playing, a
     gentle in-game notice appears ("A new version of the park is ready!")
     with a tap-to-refresh.
@@ -1021,14 +1046,24 @@ Rough order of construction, each step playable:
 27. **Character creation screen** — at the start: choose name (default
     Eleri), hair colour and style, clothes, starting hat, and starting
     pet (RiPika featured as the suggested starter).
-    **Two phone bugs (28 July 2026, from a photo of the real device):**
+    **Two phone bugs (28 July 2026, from a photo of the real device — both
+    FIXED):**
     (a) **The name is shown twice** — as a caption under the preview *and* in
     the name input right below it. **Keep the input, drop the caption.**
+    *Done: `.charcreate-name-preview` is gone.*
     (b) **The scrolling controls pass behind and around the preview square.**
     The preview is sticky, so as the controls scroll they slide underneath it
     and reappear around its edges, which looks broken. The scrolling pane
     should sit **adjacent to** the preview, not beneath it — the preview needs
     its own column or band that the controls never travel through.
+    *Done, and worth recording why it looked so bad: the cream background did
+    hide the controls' own pixels, but iOS paints a text field's caret and
+    selection handles above all page content, so the name input's handles poked
+    out either side of the picture. On a phone the card body is now two
+    regions — the preview is a static band across the top and the controls are
+    the scroll container below it — so nothing scrolls through the preview's
+    space at all. The wide-screen sticky side column is unchanged, because
+    there the controls are already a sibling column beside it.*
 
     **Scrolling is fine; overlap is not (27 July 2026 — the settled rule).**
     The family, seeing controls overlap each other: *"It's ok to scroll, just

@@ -2964,11 +2964,16 @@ kbd {
 }
 
 .charcreate-preview {
-  /* Sticky, so the character you are customising stays in view while the
-     controls scroll past. `.charcreate-body` is the scroll container and
-     already sets `align-items: flex-start`, which is what lets this stick
-     rather than stretch. The cream background matters: without it the
-     controls scrolling underneath show through. */
+  /* Wide screens: a column of its own beside the controls, made sticky so the
+     character you are customising stays in view while they scroll past.
+     `.charcreate-body` is the scroll container and already sets
+     `align-items: flex-start`, which is what lets this stick rather than
+     stretch. Nothing ever passes through it here — the controls are a
+     *sibling column*, so they scroll beside it, not under it.
+
+     The narrow-screen story is different and lives in the `max-width: 700px`
+     block at the bottom of this section: there the two stack, so "beside" has
+     to become "above", and stickiness is replaced by a band. */
   position: sticky;
   top: 0;
   z-index: 1;
@@ -2997,13 +3002,11 @@ kbd {
   touch-action: auto;
 }
 
-.charcreate-name-preview {
-  font-size: var(--lgp-text-lg);
-  font-weight: 800;
-  color: var(--lgp-ink);
-  text-align: center;
-  word-break: break-word;
-}
+/* (`.charcreate-name-preview` used to sit here — the caption under the picture
+   that repeated the name. It was removed on 28 July 2026: on a phone it landed
+   one line above a name input already showing the same word, so the family saw
+   their name twice over. The input stayed; the caption went. See
+   `ui/CharacterCreation.ts`.) */
 
 /* Columns, not one tall stack (ORDER-OF-WORK 1.8). The number of columns is
    decided by how much room there actually is: one on a phone, two or three on
@@ -3210,16 +3213,57 @@ kbd {
   --shop-accent: var(--lgp-mint);
 }
 
+/* ---- the phone layout: two regions, not one scroller ---------------------
+
+   THE BUG (28 July 2026, from a photo of a real iPhone in portrait). Stacked,
+   `.charcreate-body` was both the scroll container AND the sticky preview's
+   containing block, so the controls scrolled *through the space the preview
+   occupies* and came out around its edges. The name input was half-swallowed
+   by the picture with its iOS selection handles poking out either side — the
+   cream background hides the input's own pixels, but the platform paints a
+   text field's caret and selection handles above all page content, so they
+   leak through whatever you put in their way. It read as broken, and it is:
+   the family's words were "the scrolling pane should be adjacent to it, but
+   behind it", i.e. the preview wants a band of its own that scrolling content
+   never crosses.
+
+   THE FIX. Split the card's body into two regions rather than one scroller
+   with something floating in it: the preview is a fixed band across the top
+   of the body, and `.charcreate-controls` becomes the scroll region below it.
+   Nothing scrolls past the preview because nothing scrolls *in* the preview's
+   region at all.
+
+   This does not un-stick the preview in the sense that mattered — the reason
+   it was made sticky was so the character stays in view while you scroll, and
+   a band pinned above a scrolling pane keeps that guarantee more firmly than
+   stickiness did. `position: static` here is what makes it a band rather than
+   a floating tile; the wide-screen sticky column above is untouched.
+
+   And it still only scrolls when it has to: `.charcreate-body` is a flex
+   child, so it is only as tall as the card lets it be, and the controls are
+   `flex: 1` inside it — if they fit, there is no scrollbar (GAME_DESIGN.md:
+   "It's ok to scroll, just don't scroll while there's screen space
+   available"). */
 @media (max-width: 700px) {
   .charcreate-body {
     flex-direction: column;
     align-items: center;
+    /* The body is no longer the scroller — `.charcreate-controls` is. Without
+       this the two would nest and the outer one would scroll the preview off
+       the top, which is the thing being fixed. */
+    overflow: hidden;
+    /* A flex child will not shrink below its content's min-content height by
+       default, which would make the card taller than its own max-height and
+       hand the scrolling back to the page. */
+    min-height: 0;
   }
 
   .charcreate-preview {
-    /* Stacked layout: the controls scroll directly beneath the preview, so
-       it spans the full width and centres its own canvas instead. */
+    /* Its own band across the top. Not sticky: nothing scrolls underneath it
+       any more, so there is nothing to stick to — see the note above. */
+    position: static;
     width: 100%;
+    flex: none;
     padding-top: 0.25rem;
   }
 
@@ -3229,6 +3273,28 @@ kbd {
 
   .charcreate-controls {
     width: 100%;
+    /* NOT a multi-column container down here, and this is load-bearing rather
+       than cosmetic. `columns: 13rem` above makes this a multicol box; give a
+       multicol box a definite height and overflow and it does not scroll down,
+       it fragments into *overflow columns sideways* — the controls would march
+       off the right-hand edge. At this width it was only ever resolving to one
+       column anyway (a 13rem column inside about 16rem of room), so setting
+       both `column-width` and `column-count` back to `auto` — which is what
+       `columns: auto` does — takes the multicol formatting context away
+       entirely and leaves a plain block stack. */
+    columns: auto;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Inline padding because this is now the scroll box, and `.charcreate-row`
+       hangs its "Suggested!" badge 0.375rem outside its own right edge — with
+       nothing to hang into, `overflow-y: auto` (which forces `overflow-x` to
+       `auto` too) would find 0.375rem of horizontal scroll to offer. The top
+       padding is the seam under the preview band, so it reads as a band and it
+       is obvious the pane below is the thing that moves. */
+    padding: 0.5rem 0.5rem 0;
+    border-top: 0.125rem solid rgba(74, 58, 82, 0.08);
   }
 }
 

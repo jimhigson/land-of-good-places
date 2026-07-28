@@ -180,11 +180,12 @@ export class CharacterCreation {
     this.previewWrap.className = 'charcreate-preview';
     this.preview = new CharacterPreview();
     this.previewWrap.append(this.preview.canvas);
-
-    const namePreview = document.createElement('div');
-    namePreview.className = 'charcreate-name-preview';
-    namePreview.textContent = PLAYER_DEFAULT_NAME;
-    this.previewWrap.append(namePreview);
+    // Nothing else goes in here. There used to be a `.charcreate-name-preview`
+    // caption echoing the name under the picture, which on a phone put the word
+    // "Eleri" directly above a name input already reading "Eleri" — the family
+    // saw the name twice, one line apart, and only one of them did anything
+    // (28 July 2026, GAME_DESIGN.md item 27a). The input is the one that does
+    // something, so the caption went.
 
     const controls = document.createElement('div');
     controls.className = 'charcreate-controls';
@@ -205,9 +206,6 @@ export class CharacterCreation {
     this.nameInput.spellcheck = false;
     this.nameInput.value = PLAYER_DEFAULT_NAME;
     this.nameInput.setAttribute('aria-label', 'Your name');
-    this.nameInput.addEventListener('input', () => {
-      namePreview.textContent = this.nameInput.value.trim() || PLAYER_DEFAULT_NAME;
-    });
     nameSection.append(nameLabel, this.nameInput);
 
     // Skin tone ---------------------------------------------------------------
@@ -339,9 +337,9 @@ export class CharacterCreation {
     // A resize on the canvas's OWN box (phone rotation, layout reflow at the
     // 700px breakpoint) keeps the render buffer's aspect ratio matching its
     // CSS box exactly. Observing `previewWrap` instead would read the wrong
-    // number: that flex column also holds the name preview text below the
-    // canvas, and being a flex child itself, its height stretches to match
-    // its (much taller) sibling — see the `align-items: flex-start` note on
+    // number: it is a flex child that centres the canvas inside a wider band
+    // on a phone and stretches to its sibling's height on a desktop, so its
+    // box is not the canvas's box — see the `align-items: flex-start` note on
     // `.charcreate-body` in style.css for the other half of this fix.
     this.resizeObserver = new ResizeObserver(() => {
       this.preview.resize(this.preview.canvas.clientWidth, this.preview.canvas.clientHeight);
