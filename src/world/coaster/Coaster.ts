@@ -231,6 +231,10 @@ export class Coaster implements GameSystem {
     this.cart = new Group();
     const body = toonBox(1.5, 0.7, 2.2, PALETTE.markerPink);
     body.position.y = 0.35;
+    // The cart's own body casts — one more draw call, and it is the shadow the
+    // eye actually follows round the loop. The nose does not: it is inside the
+    // body's silhouette from every angle the fixed camera can see.
+    body.castShadow = true;
     this.cart.add(body);
     const nose = toonBox(1.1, 0.4, 0.5, PALETTE.markerLemon);
     nose.position.set(0, 0.35, 1.3);
@@ -573,6 +577,7 @@ export class Coaster implements GameSystem {
     this.rivalCart = new Group();
     const body = toonBox(1.5, 0.7, 2.2, PALETTE.markerSky);
     body.position.y = 0.35;
+    body.castShadow = true;
     this.rivalCart.add(body);
     const nose = toonBox(1.1, 0.4, 0.5, PALETTE.markerMint);
     nose.position.set(0, 0.35, 1.3);
@@ -666,7 +671,17 @@ export class Coaster implements GameSystem {
       // can produce still reads as a curve rather than a polygon.
       return new TubeGeometry(railCurve, Math.ceil(this.route.length * 2), 0.075, 6, true);
     });
-    for (const geometry of railGeometries) this.group.add(new Mesh(geometry, railMaterial));
+    // The rails cast (ARCHITECTURE.md, *rendering notes*: shadow casting is
+    // opt-out and every caster is drawn twice). A coaster is a thing in the
+    // sky, and without a shadow on the lawn under it there is nothing telling
+    // a child how high up it is — which is the whole feeling of the ride. Two
+    // tubes is two extra draw calls for the entire loop, which is exactly the
+    // "shapes doing the silhouette's work" the note asks for.
+    for (const geometry of railGeometries) {
+      const rail = new Mesh(geometry, railMaterial);
+      rail.castShadow = true;
+      this.group.add(rail);
+    }
 
     const ties = new InstancedMesh(new BoxGeometry(1.5, 0.08, 0.3), tieMaterial, segments);
     const matrix = new Matrix4();
@@ -730,6 +745,16 @@ export class Coaster implements GameSystem {
       pylons.setMatrixAt(index, matrix);
     });
     pylons.instanceMatrix.needsUpdate = true;
+    // The pylons cast too: they are what plants the track on the ground, and
+    // an `InstancedMesh` is one draw call however many posts there are, so the
+    // whole colonnade costs one more.
+    //
+    // The **ties do not**, and that is a judgement rather than a saving: they
+    // are 8 cm slats every 1.4 m, and a shadow of them is a fine stripey comb
+    // that `VSMShadowMap`'s soft edges turn to mush at this scale. Nobody looks
+    // for the shadow of a sleeper — see the station canopy's note in
+    // `train/station.ts` and ARCHITECTURE.md's *rendering notes*.
+    pylons.castShadow = true;
     this.group.add(ties, pylons);
 
     // The station platform: a low deck beside the boarding dip.
