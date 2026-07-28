@@ -154,7 +154,7 @@ line was produced by running the same file, unedited, in a detached worktree at
 - [x] chat moved
 - [x] face paint moved
 - [x] core tidied, docs updated, `npm run build` green
-- [x] PR raised
+- [x] PR raised: #84
 
 Public surface that must not move (other files import it):
 `WanderDriver`, `WanderOptions`, `ClimbPhase`, `ClimberBudget`,
