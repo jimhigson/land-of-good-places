@@ -201,11 +201,22 @@ export class MiniGameHost {
   // -------------------------------------------------------------- internals
 
   /** Standing next to a stall and pressing interact opens it. */
+  /**
+   * The rail racer's booth boards the real coaster now (Decision 4 C5) —
+   * Game wires this to `world.coaster.requestBoard`. The 2D scene is
+   * retired; the stall, its sign and its glyph stay as the way in.
+   */
+  boardCoaster: (() => boolean) | null = null;
+
   private checkStalls(context: FrameContext): void {
     if (!context.input.justPressed('interact')) return;
     const { x, z } = context.playerPosition;
     for (const stall of this.stalls) {
       if (Math.hypot(x - stall.standX, z - stall.standZ) <= REACH) {
+        if (stall.definition.id === 'railRacer' && this.boardCoaster) {
+          this.boardCoaster();
+          return;
+        }
         this.begin(stall);
         return;
       }

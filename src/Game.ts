@@ -414,6 +414,7 @@ export class Game {
     this.engine.onResize((width, height) => {
       this.camera.resize(width, height);
       this.world.train.rideView?.resize(width, height);
+      this.world.coaster.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -422,12 +423,17 @@ export class Game {
     // seat's RideCamera, alighting wipes back. The override is the third
     // render state Decision 1 specified — render() swaps cameras, nothing
     // else changes. Her own model hides while the eye is in her head.
-    this.world.train.onRideChange = (riding) => {
+    const firstPerson = (camera: import('three').PerspectiveCamera | null) => {
       this.transitions.irisWipe(() => {
-        this.cameraOverride = riding ? (this.world.train.rideView?.camera ?? null) : null;
-        this.player.group.visible = !riding;
+        this.cameraOverride = camera;
+        this.player.group.visible = camera === null;
       });
     };
+    this.world.train.onRideChange = (riding) =>
+      firstPerson(riding ? (this.world.train.rideView?.camera ?? null) : null);
+    this.world.coaster.onRideChange = (riding) =>
+      firstPerson(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
+    this.miniGames.boardCoaster = () => this.world.coaster.requestBoard();
 
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));
