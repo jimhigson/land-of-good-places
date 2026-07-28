@@ -1,6 +1,5 @@
 import type { Rng } from '../../core/mathUtils';
 import { clamp01 } from '../../core/mathUtils';
-import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../art/style/faces';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
 // The things a child does instead of wandering. See `activities/activity.ts`
@@ -9,27 +8,11 @@ import type { PoiGraph } from './poiGraph';
 import type { Activity, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
 import { TreeClimb, type ClimbPhase, type ClimberBudget } from './activities/treeClimb';
 import { TrainTrip } from './activities/trainTrip';
-// Chatting (see the additive block near the bottom of this file). Content —
-// what a child says and when — lives in its own module so this file stays
-// about timing and state, not word lists.
-import {
-  CHAT_APPROACH_TIMEOUT,
-  CHAT_COOLDOWN_MIN,
-  CHAT_COOLDOWN_RANGE,
-  CHAT_GIVEUP_RADIUS,
-  CHAT_GOODBYE_DURATION,
-  CHAT_RADIUS,
-  CHAT_ROLL_MAX,
-  CHAT_ROLL_MIN,
-  CHAT_START_CHANCE,
-  CHAT_STOP_DISTANCE,
-  CHAT_TALK_MAX,
-  CHAT_TALK_MIN,
-  CHAT_TRIGGER_STATIONARY,
-  pickChatLine,
-  pickGoodbyeLine,
-  type ChatBudget,
-} from './chatActivity';
+import { ChatToPlayer } from './activities/chatToPlayer';
+import { FacePaintVisit } from './activities/facePaintVisit';
+// Chatting: the budget is handed to every driver by `NpcSystem`; the state
+// machine itself lives in `activities/chatToPlayer.ts`.
+import type { ChatBudget } from './chatActivity';
 import type { ClimbableTreeSeed } from '../../world/Scenery';
 
 /**
@@ -86,90 +69,14 @@ const LEG_TIMEOUT = 14;
 // `NpcSystem.ts`) do not have to care that it moved into `activities/`.
 export type { ClimbPhase, ClimberBudget };
 
-// =============================================================================
-// Face painting stall (additive, self-contained). See ART_DIRECTION.md's face
-// patch section and `world/FacePaintStall.ts` for the feature this feeds.
-//
-// A `WanderDriver` never learns where the stall is by being told about it
-// directly — `NpcSystem`/`kidCrowd.ts`/`NpcCharacter.ts` stay untouched by this
-// PR. Instead the stall registers its own position here once, at construction
-// (`registerFacePaintStall`), and every driver — spawned before or after that
-// call — reads the same module-level target. Painted state is likewise read
-// back out through a module-level registry (`paintedNpcFaces`) rather than a
-// new field threaded through `NpcSystem`, which is what lets this whole feature
-// live in one file plus the stall's own.
-//
-// Two other PRs also add blocks to this file; this one touches nothing above
-// `LEG_TIMEOUT` and nothing in the existing methods below except the two
-// marked call-outs inside `update()`.
-// =============================================================================
-
-/** Where a child stands to be painted, and how close counts as "there". */
-export interface FacePaintStallTarget {
-  readonly x: number;
-  readonly z: number;
-  readonly standX: number;
-  readonly standZ: number;
-}
-
-/** Set once by `FacePaintStall` after it places itself in the garden. */
-let facePaintStallTarget: FacePaintStallTarget | null = null;
-
-/** Called by `world/FacePaintStall.ts` once, when the stall is built. */
-export function registerFacePaintStall(x: number, z: number, standX: number, standZ: number): void {
-  facePaintStallTarget = { x, z, standX, standZ };
-}
-
-/** Every driver alive, so a painted face can be found without a new registry in `NpcSystem`. */
-const wanderDrivers = new Set<WanderDriver>();
-
-export interface PaintedNpcFace {
-  readonly x: number;
-  readonly z: number;
-  readonly yaw: number;
-  readonly design: FacePaintDesign;
-}
-
-/**
- * Every currently-painted child's approximate head position, for
- * `FacePaintStall` to plant a small floating paint decal near.
- *
- * "Approximate" is the operative word: a driver only ever knows its own
- * character's *feet* position (`DriverContext.position`) and an inferred
- * facing, never the real head transform inside the instanced crowd's skeleton
- * (see `kidCrowd.ts` / `InstancedCrowd.ts`) — reaching into either is exactly
- * what this block is written not to do. The decal's own head-height offset is
- * applied by the caller.
- */
-export function paintedNpcFaces(): PaintedNpcFace[] {
-  const faces: PaintedNpcFace[] = [];
-  for (const driver of wanderDrivers) {
-    if (driver.paintDesign) {
-      faces.push({ x: driver.faceX, z: driver.faceZ, yaw: driver.faceYaw, design: driver.paintDesign });
-    }
-  }
-  return faces;
-}
-
-/**
- * How many children may be mid-visit or freshly painted at once.
- *
- * Matches `FacePaintStall`'s own decal pool size (see the comment there) — a
- * child who is painted but has no decal slot free would just be an invisible
- * design, which is worse than not offering them a turn yet.
- */
-const MAX_CONCURRENT_PAINTED = 4;
-
-/** Chance a child who has reached the front of the queue actually goes in. */
-const PAINT_VISIT_CHANCE = 0.4;
-
-function paintedOrVisitingCount(): number {
-  let count = 0;
-  for (const driver of wanderDrivers) {
-    if (driver.paintDesign || driver.paintVisit !== 'none') count += 1;
-  }
-  return count;
-}
+// Re-exported so `world/FacePaintStall.ts` does not have to care that the
+// visit moved into `activities/`.
+export {
+  registerFacePaintStall,
+  paintedNpcFaces,
+  type FacePaintStallTarget,
+  type PaintedNpcFace,
+} from './activities/facePaintVisit';
 
 export interface WanderOptions {
   readonly graph: PoiGraph;
@@ -202,6 +109,8 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   private readonly activities: readonly Activity[];
   private readonly climb: TreeClimb;
   private readonly train: TrainTrip;
+  private readonly chat: ChatToPlayer;
+  private readonly paint: FacePaintVisit;
 
   private current: number;
   private target: number;
@@ -224,32 +133,6 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   private blinkTimer: number;
   private blinkRemaining = 0;
 
-  // ---- face painting stall (additive — see the block above the class) ----
-  // Not `private`: read from the module-level `paintedNpcFaces()` /
-  // `paintedOrVisitingCount()` helpers above, which live outside the class
-  // body. Nothing outside this file touches them.
-  /** `none` = ordinary wandering; anything else overrides movement for a frame. */
-  paintVisit: 'none' | 'walking' | 'pausing' = 'none';
-  /** The design worn home, or `null` before a first (successful) visit. */
-  paintDesign: FacePaintDesign | null = null;
-  private paintCooldown: number;
-  private paintPauseRemaining = 0;
-  /** Approximate head-tracking, updated every frame regardless of state. */
-  faceX = 0;
-  faceZ = 0;
-  faceYaw = 0;
-
-  // ---- chatting (additive — see the block above the `WanderDriver` class,
-  // and the state machine near the bottom of it) ----
-  private readonly chatBudget: ChatBudget | undefined;
-  private chatState: 'none' | 'approaching' | 'talking' | 'leaving' = 'none';
-  private chatCooldown: number;
-  private chatRollTimer = 0;
-  private chatElapsed = 0;
-  private chatTalkRemaining = 0;
-  private chatLeaveRemaining = 0;
-  private chatLine: string | null = null;
-
   constructor(options: WanderOptions) {
     this.graph = options.graph;
     this.rng = options.rng;
@@ -258,7 +141,6 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.previous = options.startNode;
     this.target = options.startNode;
     this.blinkTimer = this.rng.range(1.5, 5.5);
-    this.chatBudget = options.chatBudget;
     // Activities are constructed exactly where their state used to be
     // initialised, because several of them draw from this child's seeded
     // stream and the order of those draws is behaviour, not detail.
@@ -273,18 +155,15 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
     // Stagger the first face-paint roll too, and start tracking the head at
     // whatever waypoint this child spawned on.
-    this.paintCooldown = this.rng.range(12, 40);
     const startNode = this.graph.node(options.startNode);
-    this.faceX = startNode?.x ?? 0;
-    this.faceZ = startNode?.z ?? 0;
+    this.paint = new FacePaintVisit(this.rng, startNode?.x ?? 0, startNode?.z ?? 0);
     // Stagger the first chat roll too, so nobody is eligible in the opening seconds.
-    this.chatCooldown = this.rng.range(3, 20);
-    wanderDrivers.add(this);
+    this.chat = new ChatToPlayer(this.rng, options.chatBudget);
 
     // The order the frame is offered in. Unchanged from the chain of `if`s
     // this replaced: the climb pre-empts everything (see `ActivityHold`), then
     // chat, then the train, then the paint stall.
-    this.activities = [this.climb, this.train];
+    this.activities = [this.climb, this.chat, this.train, this.paint];
   }
 
   /** Where this child is heading, for debugging and for the pet to follow. */
@@ -328,7 +207,13 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
    * the player.
    */
   get chatBubbleText(): string | null {
-    return this.chatState === 'talking' || this.chatState === 'leaving' ? this.chatLine : null;
+    return this.chat.bubbleText;
+  }
+
+  /** The seat this child is in, if any. `ParkTrain` reads this every frame —
+   *  see the structural `TrainPassenger` type in `world/train/service.ts`. */
+  get trainSeat(): number | null {
+    return this.train.trainSeat;
   }
 
   update(context: DriverContext, intent: CharacterIntent): void {
@@ -338,8 +223,9 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.hopCooldown -= dt;
     this.blinkTimer -= dt;
     if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
-    // Moved up from the bottom of this method so a child blinks whether they
-    // are wandering or up a tree — climbing returns early, below.
+    // Kept above the activities so a child blinks whether they are wandering,
+    // riding or up a tree: an activity holding the whole intent never reaches
+    // the expression line at the bottom of this method.
     if (this.blinkTimer <= 0) {
       this.blinkTimer = this.rng.range(2.4, 6.2);
       this.blinkRemaining = 0.12;
@@ -354,19 +240,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
       hold = this.offerFrame(false, context, intent);
 
-      // Chatting (additive): claims the frame — in place of the train trip and
-      // the face-paint visit below — while a chat is starting, happening, or
-      // being said goodbye to.
-      if (hold === null && this.updateChatActivity(context, intent, dt)) hold = 'steering';
-
-      if (hold === null) {
-        // Face painting stall (additive): a child mid-visit — or one who has
-        // just decided to start one — has movement handled entirely by
-        // `driveFacePaintVisit` for this frame, in place of the ordinary node
-        // logic below.
-        if (this.driveFacePaintVisit(context, intent, dt)) hold = 'steering';
-        else this.updateWander(context, intent, dt);
-      }
+      if (hold === null) this.updateWander(context, intent, dt);
     }
 
     // `'intent'` and `'child'` hold the whole intent, so the social tail below
@@ -589,261 +463,6 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.legElapsed = 0;
   }
 
-  /** The seat this child is in, if any. `ParkTrain` reads this every frame —
-   *  see the structural `TrainPassenger` type in `world/train/service.ts`. */
-  get trainSeat(): number | null {
-    return this.train.trainSeat;
-  }
-
-
-  // ---- face painting stall (additive — see the block above the class) ----
-
-  /**
-   * One frame of "on the way to, or being painted at, the face-painting
-   * stall". Returns `true` the moment it has taken movement over for this
-   * frame — the caller skips the ordinary wander logic entirely when it does.
-   *
-   * Every early `return false` leaves every field it touched back where the
-   * ordinary wander logic expects it, so a child who never gets picked for a
-   * visit costs this method nothing beyond the position bookkeeping at the
-   * top, which the stall's decal renderer needs regardless.
-   */
-  private driveFacePaintVisit(context: DriverContext, intent: CharacterIntent, dt: number): boolean {
-    // Cheap approximate head tracking, kept up to date every frame whether or
-    // not this child ever visits — `FacePaintStall` reads it straight off the
-    // registry in `paintedNpcFaces()`.
-    this.faceX = context.position.x;
-    this.faceZ = context.position.z;
-
-    if (this.paintVisit === 'none') {
-      if (this.paintDesign !== null) return false; // one coat is plenty
-      this.paintCooldown -= dt;
-      if (this.paintCooldown > 0) return false;
-
-      if (!facePaintStallTarget || paintedOrVisitingCount() >= MAX_CONCURRENT_PAINTED) {
-        // No stall yet, or every decal slot is spoken for — try again soon
-        // rather than queuing, since there is nowhere to queue.
-        this.paintCooldown = this.rng.range(6, 16);
-        return false;
-      }
-      if (!this.rng.chance(PAINT_VISIT_CHANCE)) {
-        this.paintCooldown = this.rng.range(15, 40);
-        return false;
-      }
-      this.paintVisit = 'walking';
-    }
-
-    const stall = facePaintStallTarget;
-    if (!stall) {
-      // The stall vanished from under a child already on the way — cannot
-      // happen in practice (it is built once and never disposed while the
-      // park is up), but bail cleanly rather than walking towards nothing.
-      this.paintVisit = 'none';
-      return false;
-    }
-
-    if (this.paintVisit === 'walking') {
-      const dx = stall.standX - context.position.x;
-      const dz = stall.standZ - context.position.z;
-      const distance = Math.hypot(dx, dz);
-
-      if (distance <= ARRIVE_RADIUS) {
-        this.paintVisit = 'pausing';
-        this.paintPauseRemaining = this.rng.range(1.6, 2.4);
-        this.faceYaw = Math.atan2(stall.x - context.position.x, stall.z - context.position.z);
-        intent.lookAt = this.faceYaw;
-        return true;
-      }
-
-      const scale = this.pace / distance;
-      intent.moveX = dx * scale;
-      intent.moveZ = dz * scale;
-      this.faceYaw = Math.atan2(dx, dz);
-      return true;
-    }
-
-    // `pausing`: stand and face the painter. `FacePaintStall` drives the
-    // actual painter-leans-in-and-sparkles cutscene visuals on its own clock;
-    // this only has to keep the child politely still for roughly as long.
-    this.paintPauseRemaining -= dt;
-    intent.lookAt = this.faceYaw;
-    if (this.paintPauseRemaining > 0) return true;
-
-    this.paintDesign = this.rng.pick(NPC_PAINT_DESIGNS);
-    this.paintVisit = 'none';
-
-    // Back into the ordinary graph from wherever the stall turned out to be —
-    // the nearest waypoint becomes "current" so `chooseNext` has somewhere
-    // sane to carry on from, exactly as the `LEG_TIMEOUT` rescue re-route does.
-    const nearest = this.graph.nearest(context.position.x, context.position.z);
-    if (nearest) {
-      this.current = nearest.index;
-      this.previous = nearest.index;
-    }
-    this.chooseNext();
-    return false;
-  }
-
-  // ===========================================================================
-  // ADDITIVE BLOCK — chatting with the player (`entities/npc/chatActivity.ts`).
-  //
-  // The fourth additive block in this file (train, tree climbing, face paint,
-  // and now this) — see ARCHITECTURE-DECISIONS.md, Decision 2: the architect's
-  // standing recommendation is that a proper `Activity` abstraction is now
-  // warranted to absorb these mechanically. Not done here, on purpose — this
-  // block is kept exactly the same shape as its three neighbours (self-
-  // contained state, one call from `update`, a single tuning/content module
-  // alongside it) specifically so that future refactor can lift it wholesale.
-  //
-  // The shape of a chat: notice the player has stood still for a couple of
-  // seconds, walk over, stop short of them, say something, wave and smile for
-  // a few seconds, then say goodbye and go back to ordinary wandering — early,
-  // if the player wanders off first. `NpcSystem` reads `chatBubbleText` (see
-  // the getter above) to float a `SpeechBubble` over whichever child is
-  // talking; this file never touches rendering.
-  // ===========================================================================
-
-  /**
-   * One frame of "on the way to, mid, or waving goodbye from, a chat with the
-   * player". Returns `true` the moment it has taken the frame over — the
-   * caller (`update`) skips the train trip and the face-paint visit entirely
-   * while this is happening, exactly as those two already skip each other.
-   *
-   * Every early `return false` leaves state exactly where the caller expects
-   * it, so a child who is never eligible (busy, out of range, capped by the
-   * shared budget, unlucky on the roll) costs this method nothing beyond the
-   * cooldown bookkeeping at the top.
-   */
-  private updateChatActivity(context: DriverContext, intent: CharacterIntent, dt: number): boolean {
-    this.chatCooldown -= dt;
-
-    if (this.chatState === 'none') {
-      this.chatRollTimer -= dt;
-      if (this.chatCooldown > 0) return false;
-      // Never poaches a child already committed to the train or the paint
-      // stall — and a climbing child never reaches this line at all, since
-      // `update` returns out of `updateClimb` before getting here.
-      if (this.train.busy || this.paintVisit !== 'none') return false;
-      if (this.chatRollTimer > 0) return false;
-      this.chatRollTimer = this.rng.range(CHAT_ROLL_MIN, CHAT_ROLL_MAX);
-
-      if (context.playerStationaryFor < CHAT_TRIGGER_STATIONARY) return false;
-
-      const dx = context.playerPosition.x - context.position.x;
-      const dz = context.playerPosition.z - context.position.z;
-      if (dx * dx + dz * dz > CHAT_RADIUS * CHAT_RADIUS) return false;
-
-      if (!this.chatBudget || this.chatBudget.active >= this.chatBudget.max) {
-        // Capped for the whole park right now — try again soon rather than
-        // queuing, exactly like a full face-paint stall.
-        this.chatCooldown = this.rng.range(2, 5);
-        return false;
-      }
-      if (!this.rng.chance(CHAT_START_CHANCE)) return false;
-
-      this.chatBudget.active += 1;
-      this.chatState = 'approaching';
-      this.chatElapsed = 0;
-    }
-
-    if (this.chatState === 'approaching') {
-      this.chatElapsed += dt;
-      const dx = context.playerPosition.x - context.position.x;
-      const dz = context.playerPosition.z - context.position.z;
-      const distance = Math.hypot(dx, dz);
-
-      // The player wandered off, or this is taking too long (stuck on
-      // something) — give up quietly rather than chasing forever.
-      if (distance > CHAT_GIVEUP_RADIUS || this.chatElapsed > CHAT_APPROACH_TIMEOUT) {
-        this.endChat(context);
-        return false;
-      }
-
-      if (distance <= CHAT_STOP_DISTANCE) {
-        // Arrived: turn to face them, pick a line, and start talking. Stopping
-        // at `CHAT_STOP_DISTANCE` — well outside `PLAYER_SEPARATION` in
-        // `NpcSystem.ts` — is what keeps this a friendly stop rather than a
-        // shoving match once player↔NPC collision gets involved.
-        this.chatState = 'talking';
-        this.chatTalkRemaining = this.rng.range(CHAT_TALK_MIN, CHAT_TALK_MAX);
-        this.chatLine = pickChatLine(this.rng, context.playerWearingHat);
-        intent.moveX = 0;
-        intent.moveZ = 0;
-        intent.lookAt = Math.atan2(dx, dz);
-        // Piggy-backs the ordinary wave/happy blend in `update`'s tail — see
-        // that field's own doc comment.
-        this.waveRemaining = Math.max(this.waveRemaining, 0.5);
-        return true;
-      }
-
-      const scale = this.pace / distance;
-      intent.moveX = dx * scale;
-      intent.moveZ = dz * scale;
-      intent.lookAt = Math.atan2(dx, dz);
-      return true;
-    }
-
-    if (this.chatState === 'talking') {
-      const dx = context.playerPosition.x - context.position.x;
-      const dz = context.playerPosition.z - context.position.z;
-      const distance = Math.hypot(dx, dz);
-
-      intent.moveX = 0;
-      intent.moveZ = 0;
-      intent.lookAt = Math.atan2(dx, dz);
-      this.waveRemaining = Math.max(this.waveRemaining, 0.3);
-
-      this.chatTalkRemaining -= dt;
-      // `playerStationaryFor` drops to zero the instant the player takes a
-      // step — the cue to wrap up "as soon as the player moves away" rather
-      // than waiting out the timer.
-      const playerLeft = distance > CHAT_GIVEUP_RADIUS || context.playerStationaryFor <= 0;
-
-      if (playerLeft || this.chatTalkRemaining <= 0) {
-        this.chatState = 'leaving';
-        this.chatLeaveRemaining = CHAT_GOODBYE_DURATION;
-        this.chatLine = pickGoodbyeLine(this.rng);
-      }
-      return true;
-    }
-
-    // 'leaving': a brief goodbye wave, still facing the player, before handing
-    // back to ordinary wandering.
-    const dx = context.playerPosition.x - context.position.x;
-    const dz = context.playerPosition.z - context.position.z;
-    intent.moveX = 0;
-    intent.moveZ = 0;
-    intent.lookAt = Math.atan2(dx, dz);
-    this.waveRemaining = Math.max(this.waveRemaining, 0.3);
-
-    this.chatLeaveRemaining -= dt;
-    if (this.chatLeaveRemaining <= 0) {
-      this.endChat(context);
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * Ends a chat, whatever state it got to — abandoned mid-approach or a
-   * completed goodbye. Always frees the shared budget slot exactly once (it
-   * is claimed exactly once, on starting) and sends the child back into
-   * ordinary wandering from wherever they ended up — the same re-anchor-to-
-   * the-graph move `driveFacePaintVisit` makes on its own way out.
-   */
-  private endChat(context: DriverContext): void {
-    if (this.chatBudget) this.chatBudget.active = Math.max(0, this.chatBudget.active - 1);
-    this.chatState = 'none';
-    this.chatLine = null;
-    this.chatCooldown = this.rng.range(CHAT_COOLDOWN_MIN, CHAT_COOLDOWN_MIN + CHAT_COOLDOWN_RANGE);
-
-    const nearest = this.graph.nearest(context.position.x, context.position.z);
-    if (nearest) {
-      this.current = nearest.index;
-      this.previous = nearest.index;
-    }
-    this.chooseNext();
-  }
 }
 
 /** Moves `value` towards `target` by at most `step`. */

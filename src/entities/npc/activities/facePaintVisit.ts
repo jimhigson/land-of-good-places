@@ -1,0 +1,255 @@
+import type { Rng } from '../../../core/mathUtils';
+import { NPC_PAINT_DESIGNS, type FacePaintDesign } from '../../../art/style/faces';
+import type { CharacterIntent, DriverContext } from '../driver';
+import type { Activity, ActivityHold, ActivityHost } from './activity';
+import { Errand, NO_LIMIT, NO_TIMEOUT } from './errand';
+
+/**
+ * Getting your face painted at the stall (see ART_DIRECTION.md's face patch
+ * section and `world/FacePaintStall.ts`).
+ *
+ * The shape of a visit: notice you have not been painted yet, walk over to the
+ * spot in front of the stall, stand politely still while the painter works,
+ * then wander off wearing it for the rest of the session.
+ *
+ * A visit never learns where the stall is by being told: the stall registers
+ * its own position here once, at construction ({@link registerFacePaintStall}),
+ * and every child — spawned before or after that call — reads the same
+ * module-level target. Painted state is likewise read back out through a
+ * module-level registry ({@link paintedNpcFaces}) rather than a field threaded
+ * through `NpcSystem`. That is the house style for this kind of feature
+ * (`trainService()` is the same idea) and it moved here unchanged.
+ *
+ * **This is the block that dropped the safety rails.** It was copy-adapted
+ * from the train trip and lost both of the train's guards — the walk timeout
+ * and the stuck-sidestep — with the result that a child wedged behind a bush
+ * on the way to the stall pushes at it for ever, *and* holds one of the four
+ * concurrent visit slots for ever with it, so four unlucky children quietly
+ * switch face painting off for the rest of the session (ARCHITECTURE-REVIEW
+ * review 2, C1 — P1, still open). The rails are now `Errand`'s to keep, and
+ * this activity's `ErrandLimits` say out loud that it has none. Turning them
+ * on is a two-line behaviour change and belongs in its own PR.
+ */
+export class FacePaintVisit implements Activity {
+  readonly name = 'facePaintVisit';
+  readonly hold: ActivityHold = 'steering';
+
+  /** `none` = ordinary wandering; anything else overrides movement for a frame. */
+  private visit: 'none' | 'walking' | 'pausing' = 'none';
+  /** The design worn home, or `null` before a first (successful) visit. */
+  private design: FacePaintDesign | null = null;
+  private cooldown: number;
+  private pauseRemaining = 0;
+
+  /** Approximate head-tracking, updated every frame regardless of state. */
+  private faceX = 0;
+  private faceZ = 0;
+  private faceYaw = 0;
+
+  /**
+   * The walk to the stall.
+   *
+   * `NO_TIMEOUT` and `unstick: false` are **wrong** and are preserved verbatim
+   * — see the class comment. `Errand` is written so this has to be stated
+   * rather than merely forgotten: the fix is `timeout: WALK_TIMEOUT` and
+   * `unstick: true`, and the `'givenUp'` branch below is already waiting for
+   * it.
+   */
+  private readonly walk = new Errand({
+    arriveRadius: ARRIVE_RADIUS,
+    timeout: NO_TIMEOUT,
+    abandonRadius: NO_LIMIT,
+    unstick: false,
+  });
+
+  constructor(rng: Rng, startX: number, startZ: number) {
+    // Stagger the first roll so the whole park does not queue at once.
+    this.cooldown = rng.range(12, 40);
+    // Start tracking the head at whatever waypoint this child spawned on.
+    this.faceX = startX;
+    this.faceZ = startZ;
+    facePaintVisits.add(this);
+  }
+
+  /** True from deciding to go until walking away painted. */
+  get busy(): boolean {
+    return this.visit !== 'none';
+  }
+
+  /** Counts towards the whole-park cap: mid-visit, or already wearing one. */
+  get spokenFor(): boolean {
+    return this.design !== null || this.visit !== 'none';
+  }
+
+  get paintDesign(): FacePaintDesign | null {
+    return this.design;
+  }
+  get headX(): number {
+    return this.faceX;
+  }
+  get headZ(): number {
+    return this.faceZ;
+  }
+  get headYaw(): number {
+    return this.faceYaw;
+  }
+
+  /**
+   * One frame of "on the way to, or being painted at, the face-painting
+   * stall".
+   *
+   * Every early `return false` leaves every field it touched back where the
+   * wander core expects it, so a child who never gets picked for a visit costs
+   * this method nothing beyond the position bookkeeping at the top, which the
+   * stall's decal renderer needs regardless.
+   */
+  update(host: ActivityHost, context: DriverContext, intent: CharacterIntent): boolean {
+    const { dt } = context;
+    // Cheap approximate head tracking, kept up to date every frame whether or
+    // not this child ever visits — `FacePaintStall` reads it straight off the
+    // registry in `paintedNpcFaces()`.
+    this.faceX = context.position.x;
+    this.faceZ = context.position.z;
+
+    if (this.visit === 'none') {
+      if (this.design !== null) return false; // one coat is plenty
+      this.cooldown -= dt;
+      if (this.cooldown > 0) return false;
+
+      if (!facePaintStallTarget || paintedOrVisitingCount() >= MAX_CONCURRENT_PAINTED) {
+        // No stall yet, or every decal slot is spoken for — try again soon
+        // rather than queuing, since there is nowhere to queue.
+        this.cooldown = host.rng.range(6, 16);
+        return false;
+      }
+      if (!host.rng.chance(PAINT_VISIT_CHANCE)) {
+        this.cooldown = host.rng.range(15, 40);
+        return false;
+      }
+      this.visit = 'walking';
+      this.walk.begin(context);
+    }
+
+    const stall = facePaintStallTarget;
+    if (!stall) {
+      // The stall vanished from under a child already on the way — cannot
+      // happen in practice (it is built once and never disposed while the
+      // park is up), but bail cleanly rather than walking towards nothing.
+      this.visit = 'none';
+      return false;
+    }
+
+    if (this.visit === 'walking') {
+      const step = this.walk.step(host, context, intent, stall.standX, stall.standZ);
+
+      if (step === 'givenUp') {
+        // Unreachable while the limits above say `NO_TIMEOUT`. This is the
+        // branch that turns on when C1 is fixed: give the slot back and go
+        // back to wandering from wherever the child got wedged.
+        this.visit = 'none';
+        this.cooldown = host.rng.range(15, 40);
+        host.rejoinGraph(context, 'legacy');
+        return false;
+      }
+
+      if (step === 'arrived') {
+        this.visit = 'pausing';
+        this.pauseRemaining = host.rng.range(1.6, 2.4);
+        this.faceYaw = Math.atan2(stall.x - context.position.x, stall.z - context.position.z);
+        intent.lookAt = this.faceYaw;
+        return true;
+      }
+
+      this.faceYaw = Math.atan2(this.walk.dx, this.walk.dz);
+      return true;
+    }
+
+    // `pausing`: stand and face the painter. `FacePaintStall` drives the
+    // actual painter-leans-in-and-sparkles cutscene visuals on its own clock;
+    // this only has to keep the child politely still for roughly as long.
+    this.pauseRemaining -= dt;
+    intent.lookAt = this.faceYaw;
+    if (this.pauseRemaining > 0) return true;
+
+    this.design = host.rng.pick(NPC_PAINT_DESIGNS);
+    this.visit = 'none';
+
+    // Back into the ordinary graph from wherever the stall turned out to be —
+    // the nearest waypoint becomes "current" so the next leg has somewhere
+    // sane to carry on from, exactly as the `LEG_TIMEOUT` rescue re-route does.
+    host.rejoinGraph(context, 'legacy');
+    return false;
+  }
+}
+
+/** Where a child stands to be painted, and how close counts as "there". */
+export interface FacePaintStallTarget {
+  readonly x: number;
+  readonly z: number;
+  readonly standX: number;
+  readonly standZ: number;
+}
+
+/** Set once by `FacePaintStall` after it places itself in the garden. */
+let facePaintStallTarget: FacePaintStallTarget | null = null;
+
+/** Called by `world/FacePaintStall.ts` once, when the stall is built. */
+export function registerFacePaintStall(x: number, z: number, standX: number, standZ: number): void {
+  facePaintStallTarget = { x, z, standX, standZ };
+}
+
+/** Every child's visit, so a painted face can be found without a new registry
+ *  in `NpcSystem`. */
+const facePaintVisits = new Set<FacePaintVisit>();
+
+export interface PaintedNpcFace {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly design: FacePaintDesign;
+}
+
+/**
+ * Every currently-painted child's approximate head position, for
+ * `FacePaintStall` to plant a small floating paint decal near.
+ *
+ * "Approximate" is the operative word: a driver only ever knows its own
+ * character's *feet* position (`DriverContext.position`) and an inferred
+ * facing, never the real head transform inside the instanced crowd's skeleton
+ * (see `kidCrowd.ts` / `InstancedCrowd.ts`) — reaching into either is exactly
+ * what this activity is written not to do. The decal's own head-height offset
+ * is applied by the caller.
+ */
+export function paintedNpcFaces(): PaintedNpcFace[] {
+  const faces: PaintedNpcFace[] = [];
+  for (const visit of facePaintVisits) {
+    const design = visit.paintDesign;
+    if (design) {
+      faces.push({ x: visit.headX, z: visit.headZ, yaw: visit.headYaw, design });
+    }
+  }
+  return faces;
+}
+
+function paintedOrVisitingCount(): number {
+  let count = 0;
+  for (const visit of facePaintVisits) {
+    if (visit.spokenFor) count += 1;
+  }
+  return count;
+}
+
+/**
+ * How many children may be mid-visit or freshly painted at once.
+ *
+ * Matches `FacePaintStall`'s own decal pool size (see the comment there) — a
+ * child who is painted but has no decal slot free would just be an invisible
+ * design, which is worse than not offering them a turn yet.
+ */
+const MAX_CONCURRENT_PAINTED = 4;
+
+/** Chance a child who has reached the front of the queue actually goes in. */
+const PAINT_VISIT_CHANCE = 0.4;
+
+/** How close counts as having arrived — the wander core's own arrive radius. */
+const ARRIVE_RADIUS = 0.9;
