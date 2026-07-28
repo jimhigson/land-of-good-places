@@ -8,19 +8,14 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  PlaneGeometry,
   Quaternion,
-  SphereGeometry,
   TorusGeometry,
   Vector3,
 } from 'three';
-import { PALETTE } from '../core/palette';
 import { TAU } from '../core/mathUtils';
-import { signTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
-import { markAsSign } from './signs';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -29,7 +24,15 @@ import type { CollisionWorld } from './Collision';
  *
  * Each anchor gets an empty `Group` (named `anchor:<id>`) that later steps fill
  * with the real ride or building, plus a placeholder: a marked-out area of
- * ground, bunting posts and a cute "coming soon" sign.
+ * ground, a dashed outline of pegs and a hoop at the centre.
+ *
+ * There *was* a "coming soon" board on two posts at each plot's entrance. It
+ * went with every other sign in the park on 28 July 2026 (the family found them
+ * hard to read), and with it went the collision circle that stood on the exact
+ * spot each plot's path spur arrives at — invisible for as long as the
+ * placeholder had been hidden, and the thing `scripts/check-park.mts` has been
+ * routing around ever since. What each plot is *for* is said by the ride's own
+ * interact zone now, on the sign card.
  *
  * To build a feature here:
  * ```ts
@@ -46,7 +49,6 @@ export class AnchorPlots implements GameSystem {
 
   private readonly contentGroups = new Map<AnchorId, Group>();
   private readonly placeholders = new Map<AnchorId, Group>();
-  private readonly signs: Mesh[] = [];
   /** The one plot that has been built on. Null until the wheel goes up. */
   private ferrisWheel: FerrisWheelProp | null = null;
 
@@ -66,18 +68,15 @@ export class AnchorPlots implements GameSystem {
       this.contentGroups.set(anchor.id, content);
 
       // The temporary decoration, kept separate so it can be hidden in one call.
-      const placeholder = buildPlaceholder(anchor, collision);
+      const placeholder = buildPlaceholder(anchor);
       content.add(placeholder);
       this.placeholders.set(anchor.id, placeholder);
 
-      const sign = placeholder.getObjectByName('sign-face');
-      if (sign instanceof Mesh) this.signs.push(sign);
-
       // The Space Ferris Wheel is built. The wheel goes up on its plot, the
-      // "coming soon" dressing comes down, and the sign that stood at the
-      // entrance is replaced by the ride's own ticket kiosk — which the
-      // mini-game framework builds from the row in `minigames/stalls.ts`, at
-      // this same entrance point. See `minigames/ferrisWheel/`.
+      // "coming soon" dressing comes down, and the plot's entrance is taken
+      // over by the ride's own ticket kiosk — which the mini-game framework
+      // builds from the row in `minigames/stalls.ts`, at this same entrance
+      // point. See `minigames/ferrisWheel/`.
       if (anchor.id === 'ferrisWheel') {
         this.ferrisWheel = createFerrisWheelProp(anchor, collision);
         content.add(this.ferrisWheel.root);
@@ -101,19 +100,11 @@ export class AnchorPlots implements GameSystem {
 
   update({ dt, elapsed }: FrameContext): void {
     this.ferrisWheel?.update(dt, elapsed);
-
-    // Signs sway very slightly, as if on a breezy afternoon.
-    for (let i = 0; i < this.signs.length; i += 1) {
-      const sign = this.signs[i];
-      if (!sign) continue;
-      sign.rotation.z = Math.sin(elapsed * 1.1 + i * 1.7) * 0.035;
-      sign.position.y = sign.userData.baseY + Math.sin(elapsed * 1.6 + i) * 0.035;
-    }
   }
 }
 
 /** Builds the whole "coming soon" dressing for one plot, in plot-local space. */
-function buildPlaceholder(anchor: AnchorDefinition, collision: CollisionWorld): Group {
+function buildPlaceholder(anchor: AnchorDefinition): Group {
   const placeholder = new Group();
   placeholder.name = 'placeholder';
 
@@ -169,82 +160,8 @@ function buildPlaceholder(anchor: AnchorDefinition, collision: CollisionWorld): 
   pegs.instanceMatrix.needsUpdate = true;
   placeholder.add(pegs);
 
-  // --- the sign -------------------------------------------------------------
-  // The sign stands BESIDE the doormat, not on it: `entrance` is where a
-  // child (and the path spur, and the routing invariant's stand point)
-  // arrives, and a solid sign post exactly there walls the arrival in —
-  // check:park caught the ferris wheel unreachable for precisely this.
-  const [doorX, doorZ] = anchor.entrance;
-  const towardMiddleLength = Math.hypot(doorX, doorZ) || 1;
-  const sideX = (-doorZ / towardMiddleLength) * 2.2;
-  const sideZ = (doorX / towardMiddleLength) * 2.2;
-  const ex = doorX + sideX;
-  const ez = doorZ + sideZ;
-  const signX = ex - cx;
-  const signZ = ez - cz;
-  const signGround = terrainHeight(ex, ez) - ground;
-
-  const signGroup = new Group();
-  signGroup.name = 'sign';
-  signGroup.position.set(signX, signGround, signZ);
-  signGroup.rotation.y = anchor.signYaw;
-  placeholder.add(signGroup);
-
-  const postMaterial = new MeshStandardMaterial({
-    color: PALETTE.wood,
-    roughness: 0.9,
-    metalness: 0,
-  });
-  const postGeometry = new CylinderGeometry(0.12, 0.14, 2.2, 8);
-  for (const offset of [-1.05, 1.05]) {
-    const post = new Mesh(postGeometry, postMaterial);
-    post.position.set(offset, 1.1, 0);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    signGroup.add(post);
-  }
-
-  const boardBack = new Mesh(
-    new BoxGeometry(2.6, 1.5, 0.12),
-    new MeshStandardMaterial({ color: PALETTE.woodLight, roughness: 0.85 }),
-  );
-  boardBack.position.y = 2.05;
-  boardBack.castShadow = true;
-  boardBack.receiveShadow = true;
-  boardBack.userData.baseY = 2.05;
-  boardBack.name = 'sign-face';
-  // Tappable, for the "inspect" camera — see `world/signs.ts`.
-  markAsSign(boardBack, 2.6, 1.5);
-  signGroup.add(boardBack);
-
-  const face = new Mesh(
-    new PlaneGeometry(2.44, 1.37),
-    new MeshBasicMaterial({
-      map: signTexture({
-        title: anchor.signTitle,
-        subtitle: anchor.signSubtitle,
-        glyph: anchor.glyph,
-        accent: anchor.accent,
-      }),
-      // Front only: from behind you should see the plain wooden board, not
-      // mirrored writing.
-      toneMapped: false,
-    }),
-  );
-  face.position.z = 0.07;
-  boardBack.add(face);
-
-  // A bobble on top, because everything in this park has a bobble on top.
-  const bobble = new Mesh(
-    new SphereGeometry(0.2, 12, 9),
-    new MeshStandardMaterial({ color: anchor.accent, roughness: 0.5 }),
-  );
-  bobble.position.set(0, 0.92, 0);
-  bobble.castShadow = true;
-  boardBack.add(bobble);
-
   // A ring of bunting-ish hoops at the plot centre so it reads as "reserved"
-  // even before you get close enough to read the sign.
+  // from right across the park.
   const hoop = new Mesh(
     new TorusGeometry(1.6, 0.09, 8, 30),
     new MeshStandardMaterial({
@@ -259,10 +176,9 @@ function buildPlaceholder(anchor: AnchorDefinition, collision: CollisionWorld): 
   hoop.castShadow = true;
   placeholder.add(hoop);
 
-  // Sign posts are solid; the plot itself is walkable so kids can run about in
-  // the space before the ride exists.
-  collision.addCircle(ex, ez, 0.5);
-
+  // Nothing here is solid. The plot is walkable so kids can run about in the
+  // space before the ride exists, and the one collider that used to stand on it
+  // held up the sign post that no longer exists.
   return placeholder;
 }
 

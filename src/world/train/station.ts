@@ -4,24 +4,21 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
-  PlaneGeometry,
   SphereGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { CAMERA_YAW_DEGREES } from '../../core/constants';
-import { signTexture, woodTexture } from '../../core/textures';
+import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
-import { DEG } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
-import type { InteractZone } from '../interact';
+import type { InteractZone, ZoneSign } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import type { TrainRoute } from './route';
 
 /**
- * A little station: a platform, a stripy canopy, a sign and a bench.
+ * A little station: a platform, a stripy canopy, lamps and a bench.
  *
  * Two of them, at opposite ends of the loop. They sit on the *inside* of the
  * track — the side the park is on — so a child walks up to one from the park
@@ -70,6 +67,19 @@ export class Station {
   readonly name: string;
   readonly index: number;
 
+  /**
+   * The station's name board, as words rather than as a painted plank.
+   *
+   * There *was* a board on a post at the end of every platform. The family
+   * found in-world signs hard to read (28 July 2026) and had them all taken
+   * out; the same four fields now ride on the platform's interact zone, so
+   * "Bluebell Halt — mind the gap, and the bunnies" appears on the sign card
+   * the moment a child selects the platform. Which is also strictly better than
+   * the board was: it is legible from the far end of the platform, and it is
+   * still there when she is sitting in the carriage looking back at it.
+   */
+  private readonly sign: ZoneSign;
+
   /** Distance along the route the train stops at. */
   readonly distance: number;
 
@@ -87,13 +97,17 @@ export class Station {
   private readonly halfWidth = PLATFORM_WIDTH / 2;
   private readonly cosYaw: number;
   private readonly sinYaw: number;
-  /** The station group's own world yaw — the track tangent's own compass angle. */
-  private readonly groupYaw: number;
 
   constructor(options: StationOptions, route: TrainRoute, collision: CollisionWorld) {
     this.index = options.index;
     this.name = options.name;
     this.distance = options.distance;
+    this.sign = {
+      title: options.name,
+      note: options.subtitle,
+      glyph: options.glyph,
+      accent: options.accent,
+    };
 
     const centre = route.pointAt(options.distance, new Vector3());
     const tangent = route.tangentAt(options.distance, new Vector3());
@@ -121,7 +135,6 @@ export class Station {
     const yaw = Math.atan2(tangent.x, tangent.z);
     this.cosYaw = Math.cos(yaw);
     this.sinYaw = Math.sin(yaw);
-    this.groupYaw = yaw;
 
     this.group.name = `train-station-${options.index}`;
     this.group.position.set(this.standX, ground, this.standZ);
@@ -162,6 +175,7 @@ export class Station {
       pickRadius: 4.2,
       standX: this.standX,
       standZ: this.standZ,
+      sign: this.sign,
       // Wider than the default three metres, and measured from the middle of a
       // 7.2 m platform: a child at either end of it, or sitting in the far
       // carriage, is still "at this station" as far as the chip is concerned.
@@ -283,45 +297,12 @@ export class Station {
       this.group.add(leg);
     }
 
-    // --- the sign ------------------------------------------------------------
-    const signGroup = new Group();
-    signGroup.name = 'station-sign';
-    signGroup.position.set(-trackSide * (PLATFORM_WIDTH / 2 + 0.05), PLATFORM_HEIGHT, 2.9);
-    // Turned to face the camera's one fixed angle (ARCHITECTURE.md, "One
-    // camera angle, forever"), not merely "away from the track": the loop
-    // runs all the way round the park, so a station on the near side of it
-    // has "away from the track" pointing squarely away from the camera
-    // instead. Since the group itself is already turned to `groupYaw` (the
-    // track's own tangent), the sign's *local* yaw has to cancel that out and
-    // then add the camera angle back on top.
-    signGroup.rotation.y = CAMERA_YAW_DEGREES * DEG - this.groupYaw;
-    this.group.add(signGroup);
-
-    const signPost = new Mesh(new CylinderGeometry(0.09, 0.11, 2.1, 8), postMaterial);
-    signPost.position.y = 1.05;
-    signPost.castShadow = false;
-    signGroup.add(signPost);
-
-    const board = new Mesh(new BoxGeometry(2.5, 1.0, 0.12), boardMaterial);
-    board.position.y = 2.15;
-    board.castShadow = false;
-    board.receiveShadow = true;
-    signGroup.add(board);
-
-    const face = new Mesh(
-      new PlaneGeometry(2.36, 0.9),
-      new MeshBasicMaterial({
-        map: signTexture({
-          title: options.name,
-          subtitle: options.subtitle,
-          glyph: options.glyph,
-          accent: options.accent,
-        }),
-        toneMapped: false,
-      }),
-    );
-    face.position.z = 0.07;
-    board.add(face);
+    // The name board on its post is gone (family ruling, 28 July 2026: in-world
+    // signs are hard to read). It used to have to be turned to cancel the
+    // group's own yaw and face the camera's one fixed angle, which is a fair
+    // sign in itself that a board seen from a fixed 45° was never going to be
+    // easy reading. The name travels on the platform's interact zone now — see
+    // {@link Station.sign} — and the platform keeps its canopy, bench and lamps.
 
     // --- lamps ---------------------------------------------------------------
     for (const along of [-2.6, -0.2] as const) {

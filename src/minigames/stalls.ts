@@ -229,6 +229,12 @@ export class MiniGameStalls implements GameSystem {
    * press, so pressing the chip reaches `MiniGameHost`'s own proximity-and-press
    * watch exactly as walking up and pressing the key always did. The keyboard
    * and touch paths still meet before anything game-specific happens.
+   *
+   * The `sign` is the booth's own board, which the booth no longer carries: the
+   * family's 28 July 2026 ruling took the painted signs out of the park, so the
+   * same four fields that used to be baked into a canvas texture now travel to
+   * `ui/SignCard.ts` instead. Read straight off {@link StallDefinition} — the
+   * words are written once, in {@link STALLS} above.
    */
   interactZones(): InteractZone[] {
     return this.stalls.map((stall) =>
@@ -242,6 +248,12 @@ export class MiniGameStalls implements GameSystem {
           pickRadius: 3.2,
           standX: stall.standX,
           standZ: stall.standZ,
+          sign: {
+            title: stall.definition.title,
+            note: stall.definition.subtitle,
+            glyph: stall.definition.glyph,
+            accent: stall.definition.accent,
+          },
           // The whole booth lights up in rainbow when it is selected — see
           // GAME_DESIGN.md's HIGHLIGHT RULE and `world/highlight.ts`. `props` is
           // filled in step with `stalls` in the constructor above, one prop per

@@ -10,7 +10,7 @@ import {
 import { BUILDING_FADE_SECONDS } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { playFlush, playHandwash } from '../../ui/chime';
-import { castAndReceive, cuteSign, interiorMaterial, softMaterial } from './parts';
+import { castAndReceive, interiorMaterial, softMaterial } from './parts';
 import {
   TOILET_BASIN_X,
   TOILET_BASIN_Z,
@@ -179,15 +179,9 @@ export class Toilets {
     room.add(this.pan.group, this.basin.group, this.roof.group);
     this.applyRoof();
 
-    const sign = cuteSign({
-      title: 'Toilets',
-      subtitle: 'wash your hands!',
-      glyph: '🚻',
-      accent: PALETTE.markerMint,
-      width: 2.6,
-    });
-    sign.position.set(centreX, 2.5, maxZ + 0.06);
-    room.add(sign);
+    // The "Toilets / wash your hands!" board over the door is gone with every
+    // other sign in the park (28 July 2026). Its words live on the `toilets`
+    // interact zone now — see `building/interactZones.ts`.
   }
 
   /** True while the flush-and-wash routine is playing. */

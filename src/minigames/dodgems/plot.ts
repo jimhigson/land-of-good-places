@@ -6,7 +6,6 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
-  PlaneGeometry,
   RingGeometry,
   SphereGeometry,
   TorusGeometry,
@@ -15,7 +14,6 @@ import {
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
-import { signTexture } from '../../core/textures';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import { terrainHeight } from '../../world/terrain';
@@ -207,11 +205,14 @@ export function buildDodgemsPlot(
   railRing.position.y = deck + 1.0;
   root.add(railRing);
 
-  // --- the sign -------------------------------------------------------------
-  // This is the "coming soon" board's replacement, and it deliberately keeps the
-  // anchor's own title, glyph and `signYaw`: the yaw exists because a sign a
-  // child cannot read without rotating the camera is no use, and that is just as
-  // true now the ride is real.
+  // --- the entrance arch ------------------------------------------------------
+  // This began life as the "coming soon" board's replacement and is now an arch
+  // rather than a sign: two posts, a plain wooden lintel, a string of fairground
+  // bulbs along the top and a cone on the peak. The painted face that used to
+  // name the ride is gone with every other sign in the park (family ruling, 28
+  // July 2026); the lintel stays because it is what the bulbs and the topper sit
+  // on and what makes the two posts read as a gateway. `signYaw` stays too — an
+  // arch you walk *through* still wants to be square to the one camera angle.
   const signGroup = new Group();
   signGroup.position.set(
     entranceX - centreX,
@@ -243,24 +244,7 @@ export function buildDodgemsPlot(
   signGroup.add(board);
   addOutline(board, 0.02);
 
-  const face = decal(
-    new Mesh(
-      new PlaneGeometry(4.2, 1.74),
-      new MeshBasicMaterial({
-        map: signTexture({
-          title: anchor.signTitle,
-          subtitle: anchor.signSubtitle,
-          glyph: anchor.glyph,
-          accent: anchor.accent,
-        }),
-        toneMapped: false,
-      }),
-    ),
-  );
-  face.position.z = 0.09;
-  board.add(face);
-
-  // Bulbs round the sign, like a real fairground board.
+  // Bulbs along the lintel, like a real fairground arch.
   for (let i = 0; i < 10; i += 1) {
     const t = i / 9;
     const bulb = decal(new Mesh(bulbGeometry, bulbMaterials[i % 4] ?? padA));

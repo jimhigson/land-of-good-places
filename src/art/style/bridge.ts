@@ -15,7 +15,6 @@ export {
   pathTexture,
   pinkStoneTexture,
   woodTexture,
-  signTexture,
   nameLabelTexture,
   glowTexture,
 } from '../../core/textures';

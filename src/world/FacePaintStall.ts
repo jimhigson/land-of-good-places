@@ -4,7 +4,6 @@ import {
   Mesh,
   MeshBasicMaterial,
   OctahedronGeometry,
-  PlaneGeometry,
   RingGeometry,
   SphereGeometry,
   TorusGeometry,
@@ -13,7 +12,6 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE } from '../core/palette';
 import { placedEntry } from './parkLayout';
 import { Rng } from '../core/mathUtils';
-import { signTexture } from '../core/textures';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 import { blob, stub } from '../art/style/asset';
@@ -25,8 +23,7 @@ import {
   type FacePaintOverlayHandle,
 } from '../art/style/faces';
 import { attachFacePaint } from '../art/models/kid';
-import { collectSignZones, markAsSign, type SignZone } from './signs';
-import { pressZone, type InteractZone } from './interact';
+import { pressZone, type InteractZone, type ZoneSign } from './interact';
 import { highlightObject } from './highlight';
 import { terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
@@ -59,6 +56,22 @@ import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderD
  * face, and the additive block in `wanderDriver.ts` for how a background
  * child gets one too.
  */
+
+/**
+ * What the booth's board said, now what its sign card says.
+ *
+ * A module-level table rather than four arguments at the builder call site,
+ * which is what `scripts/check-copy-brevity.mts` asked for in so many words:
+ * *"sign text written inline at a builder call site is the one blind spot; if a
+ * future one grows, move it into a table the script already walks"*. The board
+ * itself is gone (family ruling, 28 July 2026).
+ */
+export const FACE_PAINT_SIGN: ZoneSign = {
+  title: 'Face Painting!',
+  note: 'free — and it washes off',
+  glyph: '🎨',
+  accent: PALETTE.markerPink,
+};
 
 // ---------------------------------------------------------------- placement
 
@@ -237,6 +250,7 @@ export class FacePaintStall implements GameSystem {
           pickRadius: REACH,
           standX: this.standX,
           standZ: this.standZ,
+          sign: FACE_PAINT_SIGN,
           // GAME_DESIGN.md's HIGHLIGHT RULE: the booth itself outlines in
           // rainbow when it is selected (see `world/highlight.ts`).
           highlight: highlightObject(this.group),
@@ -245,10 +259,6 @@ export class FacePaintStall implements GameSystem {
         'Paint!',
       ),
     ];
-  }
-
-  signZones(): SignZone[] {
-    return collectSignZones(this.group);
   }
 
   update(context: FrameContext): void {
@@ -530,30 +540,11 @@ export class FacePaintStall implements GameSystem {
       awning.add(scallop);
     }
 
-    // --- sign --------------------------------------------------------------
-    const sign = new Group();
-    sign.position.set(0, 2.9, -0.65);
-    this.group.add(sign);
-    const board = solid(new Mesh(new RoundedBoxGeometry(2.2, 1.25, 0.12, 3, 0.07), boardMaterial));
-    sign.add(board);
-    addOutline(board, 0.016);
-    const face = decal(
-      new Mesh(
-        new PlaneGeometry(2.05, 1.15),
-        new MeshBasicMaterial({
-          map: signTexture({
-            title: 'Face Painting!',
-            subtitle: 'free — and it washes off',
-            glyph: '🎨',
-            accent: PALETTE.markerPink,
-          }),
-          toneMapped: false,
-        }),
-      ),
-    );
-    face.position.z = 0.07;
-    board.add(face);
-    markAsSign(board, 2.2, 1.25);
+    // The painted name board that used to hang over the counter is gone — the
+    // family found in-world signs hard to read (28 July 2026), so the booth's
+    // name lives in {@link FACE_PAINT_SIGN} and arrives on the sign card when a
+    // child selects the stall. The awning and the bunting are what make this
+    // read as a fairground booth; a blank board would only have read as a bug.
 
     // --- mirror on the back wall ---------------------------------------------
     const mirrorFrame = solid(new Mesh(new TorusGeometry(0.36, 0.06, 10, 26), toonMaterial(ART.miniLilac)));

@@ -111,7 +111,9 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'on 28 July when the railway became a pure pre-scene plan (train/plan) ' +
       'and the loop re-solved: every metre was audited against the solved ' +
       'curve — the level crossing at 90 m plus the two platform gaps — see ' +
-      'the race-coaster PR.',
+      'the race-coaster PR. Signs coming out of the 3D world (same day) also ' +
+      'removed invisible sign-post obstacles that had been standing near some ' +
+      'anchors; re-verify this number reflects both changes together.',
   },
   'rail.walkable': {
     worst: 30,
@@ -120,17 +122,20 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'from the entrance: the level-crossing decks and the platform rail ' +
       'edges — the deliberate places. Was 347-of-355 before the §6 fence.',
   },
+  // `anchor.reach:ballPit` (was 1.0) was DELETED on 28 July when the park's
+  // signs came out, and `anchor.reach:building` fell from 2.0 to nothing at
+  // all: what had been building past both declarations was the "coming soon"
+  // sign post standing at each plot's entrance, invisible ever since the real
+  // ride moved in but still registered in the collision world. Same cause,
+  // smaller effect, on the three numbers below.
   'anchor.reach:building': {
-    worst: 0.1,
+    worst: 0,
     why:
-      'Once 2.0 (the ginormous slide spanning to the ball pit); the 28 July ' +
-      'rail replan left it overrunning its 19 m declaration by only ' +
-      'centimetres, but any overrun at all still emits a finding, so the ' +
-      'entry stays at the smallest step above zero.',
-  },
-  'anchor.reach:ballPit': {
-    worst: 1.0,
-    why: 'The pit lip and its cushions build ~0.9 m past the declared 9 m.',
+      'The castle now builds to exactly its 19 m declaration — the overrun ' +
+      'was the plot sign post, and it is gone. Kept at zero rather than ' +
+      'deleted because the finding still fires (19.0 of 19), so an entry is ' +
+      'what holds it at zero; the moment anything builds proud of the wall ' +
+      'again this fails rather than quietly re-opening the old 2 m allowance.',
   },
   'anchor.reach:dodgems': {
     worst: 1.7,

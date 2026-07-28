@@ -6,14 +6,10 @@ import {
   MeshToonMaterial,
   Path,
   Shape,
-  Vector2,
   type Material,
-  type UVGenerator,
 } from 'three';
-import { signTexture } from '../../core/textures';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
-import { markAsSign } from '../signs';
 import type { Region } from './layout';
 
 /**
@@ -143,96 +139,6 @@ export function segmentsMinusGaps(
     spans = next;
   }
   return spans;
-}
-
-// ------------------------------------------------------------------- signs
-
-export interface CuteSignOptions {
-  readonly title: string;
-  readonly subtitle?: string;
-  readonly glyph?: string;
-  readonly accent?: number;
-  readonly width?: number;
-}
-
-/** A flat "opening soon" board: a chunky backing plate and a painted face. */
-export function cuteSign(options: CuteSignOptions): Mesh {
-  const width = options.width ?? 1.9;
-  const height = width * (288 / 512);
-  const accent = options.accent ?? PALETTE.markerPink;
-
-  const faceOptions: Parameters<typeof signTexture>[0] = { title: options.title, accent };
-  if (options.subtitle !== undefined) faceOptions.subtitle = options.subtitle;
-  if (options.glyph !== undefined) faceOptions.glyph = options.glyph;
-
-  // One mesh, not a board plus a separate painted face: the extruded plate
-  // carries the sign texture on its front cap, and the 9 cm of edge nobody ever
-  // looks at is a fair price for halving the sign count.
-  const geometry = new ExtrudeGeometry(roundedPlate(width, height, height * 0.18), {
-    depth: 0.09,
-    bevelEnabled: false,
-    curveSegments: 6,
-    UVGenerator: signUVs(width, height),
-  });
-
-  // Toon-shaded like the rest of the fabric — `MeshBasicMaterial` is reserved
-  // for outlines and catchlights, never for something solid. The painted face
-  // is *also* fed in as an emissive map, which is what keeps a sign legible
-  // after dark without making it a flat sticker in daylight.
-  const face = signTexture(faceOptions);
-  const material = toonMaterial(0xffffff, { map: face });
-  material.emissive.setHex(0xffffff);
-  material.emissiveMap = face;
-  material.emissiveIntensity = 0.38;
-
-  const board = new Mesh(geometry, material);
-  board.castShadow = false;
-  board.receiveShadow = false;
-  // Tappable: the "inspect" camera (SignInspector) reads this back off the
-  // assembled scene graph rather than needing its own registry wired through
-  // every builder that calls `cuteSign`.
-  markAsSign(board, width, height);
-  return board;
-}
-
-/**
- * Maps the sign texture across the plate rather than by world units, so the
- * whole board is exactly one copy of the painted face whatever size it is.
- */
-function signUVs(width: number, height: number): UVGenerator {
-  const map = (x: number, y: number): Vector2 =>
-    new Vector2(x / width + 0.5, y / height + 0.5);
-  return {
-    generateTopUV: (_geometry, vertices, a, b, c) => [
-      map(vertices[a * 3] ?? 0, vertices[a * 3 + 1] ?? 0),
-      map(vertices[b * 3] ?? 0, vertices[b * 3 + 1] ?? 0),
-      map(vertices[c * 3] ?? 0, vertices[c * 3 + 1] ?? 0),
-    ],
-    generateSideWallUV: () => [
-      new Vector2(0.02, 0.5),
-      new Vector2(0.02, 0.5),
-      new Vector2(0.02, 0.5),
-      new Vector2(0.02, 0.5),
-    ],
-  };
-}
-
-function roundedPlate(width: number, height: number, radius: number): Shape {
-  const shape = new Shape();
-  const hx = width / 2;
-  const hy = height / 2;
-  const r = Math.min(radius, hx, hy);
-  shape.moveTo(-hx + r, -hy);
-  shape.lineTo(hx - r, -hy);
-  shape.quadraticCurveTo(hx, -hy, hx, -hy + r);
-  shape.lineTo(hx, hy - r);
-  shape.quadraticCurveTo(hx, hy, hx - r, hy);
-  shape.lineTo(-hx + r, hy);
-  shape.quadraticCurveTo(-hx, hy, -hx, hy - r);
-  shape.lineTo(-hx, -hy + r);
-  shape.quadraticCurveTo(-hx, -hy, -hx + r, -hy);
-  shape.closePath();
-  return shape;
 }
 
 export function disposeTree(root: { traverse(cb: (o: unknown) => void): void }): void {

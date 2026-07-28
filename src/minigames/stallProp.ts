@@ -5,13 +5,11 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
-  PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
-import { signTexture } from '../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 // The stand distance lives with the coordinates rather than with the geometry:
 // the NPC waypoint seeds need it and must not import anything that builds a
@@ -56,7 +54,6 @@ export function createStallProp(definition: StallDefinition): StallProp {
 
   const creamMaterial = toonMaterial(PALETTE.buildingWall);
   const woodMaterial = toonMaterial(PALETTE.wood);
-  const woodDarkMaterial = toonMaterial(PALETTE.woodDark);
   const accentMaterial = toonMaterial(accent);
   const stripeMaterial = toonMaterial(stripe);
   const boardMaterial = toonMaterial(PALETTE.woodLight);
@@ -176,43 +173,14 @@ export function createStallProp(definition: StallDefinition): StallProp {
     awning.add(scallop);
   }
 
-  // --- sign -----------------------------------------------------------------
-  const sign = new Group();
-  sign.position.set(0, 3.42, -0.75);
-  root.add(sign);
-
-  const board = solid(new Mesh(new RoundedBoxGeometry(2.9, 1.62, 0.16, 4, 0.09), boardMaterial));
-  board.castShadow = true;
-  sign.add(board);
-  addOutline(board, 0.02);
-
-  const face = decal(
-    new Mesh(
-      new PlaneGeometry(2.7, 1.5),
-      new MeshBasicMaterial({
-        map: signTexture({
-          title: definition.title,
-          subtitle: definition.subtitle,
-          glyph: definition.glyph,
-          accent,
-        }),
-        toneMapped: false,
-      }),
-    ),
-  );
-  face.position.z = 0.09;
-  board.add(face);
-
-  const bobble = solid(new Mesh(new SphereGeometry(0.19, 12, 9), accentMaterial));
-  bobble.position.set(0, 0.95, 0);
-  sign.add(bobble);
-
-  for (const side of [-1, 1] as const) {
-    const strut = solid(new Mesh(new CylinderGeometry(0.06, 0.06, 0.95, 8), woodDarkMaterial));
-    strut.position.set(side * 1.1, 2.9, -0.9);
-    strut.rotation.x = 0.24;
-    root.add(strut);
-  }
+  // NO SIGN BOARD. Every stall used to be crowned with a painted board on two
+  // struts saying what game it was; the family had all of them taken out of the
+  // park on 28 July 2026 because they are hard to read at the camera's one
+  // fixed angle. The struts went with the board rather than being left holding
+  // nothing. What the stall is called arrives on its sign card the moment a
+  // child selects the booth — see `minigames/stalls.ts`'s `interactZones`, which
+  // reads the same four fields off the same {@link StallDefinition} the board
+  // used to be painted from.
 
   // --- bunting between the posts -------------------------------------------
   const bunting = new Group();
@@ -257,9 +225,9 @@ export function createStallProp(definition: StallDefinition): StallProp {
     root,
     height: 4.4,
     update(elapsed: number): void {
-      // The sign sways as if on a breezy afternoon, and the flags flutter out
-      // of step with each other — nothing in this park is ever quite still.
-      sign.rotation.z = Math.sin(elapsed * 1.1) * 0.035;
+      // The flags flutter out of step with each other — nothing in this park is
+      // ever quite still. (The board that used to sway beside them is gone; see
+      // the note where it was built.)
       for (const flag of flagMeshes) {
         const phase = flag.userData.phase as number;
         flag.rotation.z = Math.sin(elapsed * 2.3 + phase) * 0.22;
