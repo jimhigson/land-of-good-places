@@ -102,7 +102,7 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 20,
+    worst: 14,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
       'both sides. The §6 fence closed this from 231 (hand park) to 20: the ' +
@@ -110,14 +110,14 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'by design and compartmented so they cannot be strolled along.',
   },
   'rail.walkable': {
-    worst: 54,
+    worst: 34,
     why:
       'Points on the track centre line where a child can stand AND walk to ' +
       'from the entrance. 54 = the level-crossing decks and the platform rail ' +
       'edges — the deliberate places. Was 347-of-355 before the §6 fence.',
   },
   'anchor.reach:building': {
-    worst: 9.5,
+    worst: 2.0,
     why:
       'The ginormous slide spans the gap from the roof to the ball pit, so ' +
       'the building overruns its 19 m declaration by up to (near.max 30) − 19 ' +
@@ -159,6 +159,17 @@ const findings: Finding[] = [];
 /** Lines printed under `--verbose`, or whenever something fails. */
 const table: string[] = [];
 const verbose = process.argv.includes('--verbose');
+
+/**
+ * `LGP_RATCHET=off` (the seed sweep sets it): the RATCHET table's recorded
+ * deviations are tuned to the canonical park — the slide's reach literally
+ * depends on how far this seed put the pit from the castle — so when
+ * hunting seeds, only the hard invariants decide pass/fail and the drift
+ * numbers are reported for the eye. The canonical build never sets this.
+ */
+const ratchetEnforced =
+  (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.['LGP_RATCHET'] !==
+  'off';
 
 function report(finding: Finding): void {
   findings.push(finding);
@@ -319,12 +330,8 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
  */
 const BRIDGE_RISE = 2;
 
-/**
- * How far a route's rail intersection may sit from a declared level
- * crossing's centre and still count as using it. The fence gap is 4.5 m
- * each way along the loop; a path is 3.2 m wide; their sum bounds it.
- */
-const LEVEL_CROSSING_REACH = 5.5;
+// A route may meet the rail within a crossing's own (self-measured) fence
+// gap plus a stride — the crossings module publishes `halfGap` per crossing.
 
 /** Do segments a→b and c→d cross? Proper crossing only; touching does not count. */
 function segmentsCross(
@@ -440,7 +447,8 @@ for (const target of targets) {
       const deck = park.sample(hit.x, hit.z, 0);
       const overBridge = deck - hit.rail >= BRIDGE_RISE;
       const atLevelCrossing = park.world.train.crossings.some(
-        (crossing) => Math.hypot(crossing.x - hit.x, crossing.z - hit.z) < LEVEL_CROSSING_REACH,
+        (crossing) =>
+          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) < crossing.halfGap + 2.5,
       );
       if (!overBridge && !atLevelCrossing) {
         crossings += 1;
@@ -842,16 +850,27 @@ for (const finding of findings) {
   measured.set(finding.key, (measured.get(finding.key) ?? 0) + finding.measured);
 }
 
+// Hard invariants always fail; the drift table is canonical-park-specific,
+// so a seed sweep (LGP_RATCHET=off) reports drift without failing on it.
+const HARD_KEYS = new Set([
+  'route.unreachable',
+  'route.crossesRail',
+  'poi.nospot',
+  'poi.stranded',
+  'poi.split',
+  'boot.asserts',
+]);
 const regressions: string[] = [];
 for (const [key, amount] of measured) {
   const recorded = RATCHET[key];
-  if (!recorded) {
-    regressions.push(`${key}: ${amount} (no allowance — this is new)`);
-  } else if (amount > recorded.worst) {
-    regressions.push(
-      `${key}: ${amount}, recorded at ${recorded.worst} — it has got worse`,
-    );
-  }
+  const line = !recorded
+    ? `${key}: ${amount} (no allowance — this is new)`
+    : amount > recorded.worst
+      ? `${key}: ${amount}, recorded at ${recorded.worst} — it has got worse`
+      : null;
+  if (!line) continue;
+  if (ratchetEnforced || HARD_KEYS.has(key)) regressions.push(line);
+  else console.log(`drift (not enforced this run): ${line}`);
 }
 
 const loose: string[] = [];

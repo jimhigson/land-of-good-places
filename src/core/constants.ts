@@ -84,8 +84,15 @@ export const PLAYER_BOB_HEIGHT = 0.16;
  * inside GARDEN_PLAY_RADIUS — otherwise the soft park boundary would push the
  * player out of the far end of their own shopping centre.
  */
-export const BUILDING_CENTRE_X = -28.5;
-export const BUILDING_CENTRE_Z = -30.5;
+/**
+ * DERIVED since Decision 5 — do not import these two from here.
+ * `world/building/layout.ts` computes the real centre from the placed
+ * 'building' anchor (nudged {@link BUILDING_CENTRE_NUDGE} towards the park
+ * middle so every interior corner stays inside GARDEN_PLAY_RADIUS) and
+ * re-exports under the same names. These remain only so the derivation has
+ * the nudge magnitude the authored park used.
+ */
+export const BUILDING_CENTRE_NUDGE = 3.54;
 
 /** Exterior half-extents in metres — a 24 x 18 m footprint. */
 export const BUILDING_HALF_X = 12;

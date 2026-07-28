@@ -27,8 +27,7 @@ import { terrainHeight } from '../terrain';
 
 const FENCE_OFFSET = 2.0;
 const STEP = 2.4;
-/** Fence gap half-length around a crossing, along the loop. */
-const CROSSING_GAP = 4.5;
+// A crossing's fence gap is its own `halfGap` — self-measured for obliquity.
 /** Fence gap half-length around a station, along the loop. */
 const STATION_GAP = 6.5;
 
@@ -45,14 +44,69 @@ export function buildRailFence(
   const group = new Group();
   group.name = 'rail-fence';
 
-  const wrapGap = (a: number, b: number): number => {
-    const raw = Math.abs(a - b) % route.length;
-    return Math.min(raw, route.length - raw);
+  // --- 1. the open intervals: crossings and platforms, merged --------------
+  // Everything else is a CLOSED stretch, and each closed stretch is fenced as
+  // a sealed box: both sides, plus an end cap at each end. Airtight by
+  // construction — overlapping gaps, oblique paths and station spacing can
+  // change where the boxes are, never whether they seal. (The first version
+  // fenced the loop with gaps and added compartment walls separately;
+  // overlapping gaps let a child slalom around a compartment wall whose side
+  // fence was absent — measured as 229 of 392 track points strollable.)
+  interface Interval {
+    from: number;
+    to: number;
+  }
+  const length = route.length;
+  const open: Interval[] = [];
+  for (const crossing of crossings) {
+    open.push({ from: crossing.railDistance - crossing.halfGap, to: crossing.railDistance + crossing.halfGap });
+  }
+  for (const station of stations) {
+    open.push({ from: station.distance - STATION_GAP, to: station.distance + STATION_GAP });
+  }
+  // Unwrap the circle at a seam that lies in CLOSED track, so no open
+  // interval straddles it. (Seaming at the middle of the first gap fenced
+  // half of that very gap — the wrap-adjusted span ran past the loop's end
+  // and the complement swallowed the other half.)
+  const contains = (interval: Interval, d: number): boolean => {
+    const span = ((interval.to - interval.from) % length + length) % length;
+    const into = ((d - interval.from) % length + length) % length;
+    return into <= span;
   };
-  const inGap = (distance: number): boolean =>
-    crossings.some((crossing) => wrapGap(distance, crossing.railDistance) < CROSSING_GAP) ||
-    stations.some((station) => wrapGap(distance, station.distance) < STATION_GAP);
+  let seam = open.length ? ((open[0] as Interval).to % length + length) % length + 0.01 : 0;
+  for (let guard = 0; guard < open.length + 1; guard += 1) {
+    const inside = open.find((interval) => contains(interval, seam));
+    if (!inside) break;
+    seam = ((inside.to % length + length) % length) + 0.01;
+  }
+  const unwrap = (d: number): number => {
+    let value = (d - seam) % length;
+    if (value < 0) value += length;
+    return value;
+  };
+  const spans = open
+    .map((interval) => {
+      const from = unwrap(interval.from);
+      let to = unwrap(interval.to);
+      if (to < from) to += length; // cannot straddle the seam; guard anyway
+      return { from, to };
+    })
+    .sort((a, b) => a.from - b.from);
+  const merged: Interval[] = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span.from <= last.to + 0.5) last.to = Math.max(last.to, span.to);
+    else merged.push({ ...span });
+  }
+  const closed: Interval[] = [];
+  let cursor = 0;
+  for (const span of merged) {
+    if (span.from > cursor + 1) closed.push({ from: cursor, to: span.from });
+    cursor = Math.max(cursor, span.to);
+  }
+  if (cursor < length - 1) closed.push({ from: cursor, to: length });
 
+  // --- 2. build each sealed box -------------------------------------------
   const point = new Vector3();
   const tangent = new Vector3();
   interface Post {
@@ -70,74 +124,43 @@ export function buildRailFence(
   const posts: Post[] = [];
   const rails: Rail[] = [];
 
-  for (const side of [-1, 1] as const) {
-    let previous: Post | null = null;
-    for (let distance = 0; distance < route.length; distance += STEP) {
-      if (inGap(distance)) {
-        previous = null;
-        continue;
-      }
-      route.pointAt(distance, point);
-      route.tangentAt(distance, tangent);
-      const x = point.x + tangent.z * side * FENCE_OFFSET;
-      const z = point.z - tangent.x * side * FENCE_OFFSET;
-      const y = terrainHeight(x, z);
-      const post: Post = { x, z, y };
-      posts.push(post);
-      if (previous) {
-        collision.addWall(previous.x, previous.z, x, z, 0.18);
-        rails.push({
-          x: (previous.x + x) / 2,
-          z: (previous.z + z) / 2,
-          y: (previous.y + y) / 2 + 0.62,
-          yaw: Math.atan2(x - previous.x, z - previous.z),
-          length: Math.hypot(x - previous.x, z - previous.z),
-        });
-      }
-      previous = post;
-    }
-  }
+  const sideAt = (distance: number, side: number): Post => {
+    route.pointAt(distance + seam, point);
+    route.tangentAt(distance + seam, tangent);
+    const x = point.x + tangent.z * side * FENCE_OFFSET;
+    const z = point.z - tangent.x * side * FENCE_OFFSET;
+    return { x, z, y: terrainHeight(x, z) };
+  };
+  const link = (a: Post, b: Post) => {
+    collision.addWall(a.x, a.z, b.x, b.z, 0.18);
+    rails.push({
+      x: (a.x + b.x) / 2,
+      z: (a.z + b.z) / 2,
+      y: (a.y + b.y) / 2 + 0.62,
+      yaw: Math.atan2(b.x - a.x, b.z - a.z),
+      length: Math.hypot(b.x - a.x, b.z - a.z),
+    });
+  };
 
-  // --- compartment walls at every crossing gap ----------------------------
-  // Without these, a child who enters the fence gap at a legal crossing can
-  // turn and stroll down the line between the fences (measured: 267 of 414
-  // track points reachable). Each crossing gets two walls ACROSS the
-  // corridor, one at each end of its fence gap, spanning fence line to
-  // fence line — the path crosses in the middle of the gap and never meets
-  // them; walking along the rails does, immediately.
-  const compartmentEnds: number[] = [];
-  for (const crossing of crossings) {
-    for (const gapEnd of [-1, 1] as const) {
-      compartmentEnds.push(crossing.railDistance + gapEnd * CROSSING_GAP);
+  for (const box of closed) {
+    let previousLeft: Post | null = null;
+    let previousRight: Post | null = null;
+    const steps = Math.max(2, Math.ceil((box.to - box.from) / STEP));
+    for (let i = 0; i <= steps; i += 1) {
+      const distance = box.from + ((box.to - box.from) * i) / steps;
+      const left = sideAt(distance, 1);
+      const right = sideAt(distance, -1);
+      posts.push(left, right);
+      if (previousLeft && previousRight) {
+        link(previousLeft, left);
+        link(previousRight, right);
+      } else {
+        link(left, right); // the cap at this end of the box
+      }
+      previousLeft = left;
+      previousRight = right;
     }
-  }
-  // The station gaps are strolled into just as easily as the crossings'.
-  for (const station of stations) {
-    for (const gapEnd of [-1, 1] as const) {
-      compartmentEnds.push(station.distance + gapEnd * STATION_GAP);
-    }
-  }
-  for (const atDistance of compartmentEnds) {
-    {
-      route.pointAt(atDistance, point);
-      route.tangentAt(atDistance, tangent);
-      const nx = tangent.z;
-      const nz = -tangent.x;
-      const fromX = point.x + nx * (FENCE_OFFSET + 0.2);
-      const fromZ = point.z + nz * (FENCE_OFFSET + 0.2);
-      const toX = point.x - nx * (FENCE_OFFSET + 0.2);
-      const toZ = point.z - nz * (FENCE_OFFSET + 0.2);
-      collision.addWall(fromX, fromZ, toX, toZ, 0.18);
-      rails.push({
-        x: (fromX + toX) / 2,
-        z: (fromZ + toZ) / 2,
-        y: (terrainHeight(fromX, fromZ) + terrainHeight(toX, toZ)) / 2 + 0.62,
-        yaw: Math.atan2(toX - fromX, toZ - fromZ),
-        length: Math.hypot(toX - fromX, toZ - fromZ),
-      });
-      posts.push({ x: fromX, z: fromZ, y: terrainHeight(fromX, fromZ) });
-      posts.push({ x: toX, z: toZ, y: terrainHeight(toX, toZ) });
-    }
+    if (previousLeft && previousRight) link(previousLeft, previousRight); // far cap
   }
 
   const postMaterial = toonMaterial(PALETTE.stonePink);

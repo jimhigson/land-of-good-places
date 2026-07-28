@@ -27,6 +27,13 @@ export interface LevelCrossing {
   /** Unit direction of the path as it crosses. */
   readonly pathDirX: number;
   readonly pathDirZ: number;
+  /**
+   * Half-length of the fence gap this crossing needs, along the loop. Self-
+   * measured from the touch cluster's own spread: an oblique path occupies
+   * more corridor than a perpendicular one, and a fixed gap strands the
+   * path's own waypoint samples between the compartment walls.
+   */
+  readonly halfGap: number;
 }
 
 /** How close a path sample must come to the rail to count as touching it. */
@@ -52,7 +59,10 @@ export function computeCrossings(route: TrainRoute): LevelCrossing[] {
   // The gate walk: from the gate to well inside, sampled every metre.
   const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
   const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-  for (let step = 0; step <= 14; step += 1) {
+  // Sample the walk deep enough to meet the track however far in this
+  // seed's loop dips — 14 m missed the crossing entirely on seeds whose
+  // gate-side dip sat low, sealing the gate outside the fence.
+  for (let step = 0; step <= 32; step += 1) {
     consider(ENTRANCE_GATE_X + inX * step, ENTRANCE_GATE_Z + inZ * step);
   }
 
@@ -62,15 +72,17 @@ export function computeCrossings(route: TrainRoute): LevelCrossing[] {
   const flush = () => {
     if (!cluster.length) return;
     const mid = cluster[Math.floor(cluster.length / 2)] as (typeof touches)[number];
+    const first = cluster[0] as (typeof touches)[number];
+    const last = cluster[cluster.length - 1] as (typeof touches)[number];
+    const spread = last.railDistance - first.railDistance;
     const tangent = route.tangentAt(mid.railDistance, new Vector3());
     crossings.push({
       x: mid.x,
       z: mid.z,
       railDistance: mid.railDistance,
-      // The path crosses roughly perpendicular to the rail; that is all the
-      // deck and the fence gap need to know.
       pathDirX: tangent.z,
       pathDirZ: -tangent.x,
+      halfGap: Math.min(14, Math.max(4.5, spread / 2 + 3.5)),
     });
     cluster = [];
   };

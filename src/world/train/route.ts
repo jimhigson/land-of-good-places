@@ -1,11 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-  GARDEN_HALF_SIZE,
-} from '../../core/constants';
+import { BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
 import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
@@ -85,6 +80,15 @@ const BEARINGS = 360;
  * away from the *centre line*.
  */
 export const TRACK_CLEARANCE = 1.3;
+
+/**
+ * Clearance to *plots* is much larger than to walls and trees: the fence
+ * stands 2 m off the rails, and a walkable lane must survive between fence
+ * and plot or anything whose doormat faces that lane is sealed into a
+ * sliver (seed 2 stranded a stall stand exactly that way). 2.0 fence +
+ * 1.9 lane + 0.3 breathing room.
+ */
+export const TRACK_PLOT_CLEARANCE = 4.2;
 
 /**
  * Where the profile settles when nothing is pushing it outwards.
@@ -307,7 +311,7 @@ function solveProfile(collision: CollisionWorld): Float64Array {
     for (const rect of rects) exit = Math.max(exit, rectExitRadius(dirX, dirZ, rect));
     for (const circle of circles) exit = Math.max(exit, circleExitRadius(dirX, dirZ, circle));
 
-    lower[i] = exit > 0 ? exit + TRACK_CLEARANCE : NOMINAL_RADIUS * 0.5;
+    lower[i] = exit > 0 ? exit + TRACK_PLOT_CLEARANCE : NOMINAL_RADIUS * 0.5;
     upper[i] = WALL_INNER_RADIUS - TRACK_CLEARANCE;
   }
 
@@ -415,10 +419,13 @@ function repair(
       }
     }
 
-    if (worst >= TRACK_CLEARANCE) break;
+    // Plots demand the big clearance (fence + walkable lane); the wall only
+    // the track's own.
+    const needed = fromWall ? TRACK_CLEARANCE : TRACK_PLOT_CLEARANCE;
+    if (worst >= needed) break;
     // Too close to the wall means come in; too close to anything else means the
     // only way past is further out, because the plots reach the park centre.
-    value += fromWall ? -(TRACK_CLEARANCE - worst) : TRACK_CLEARANCE - worst;
+    value += fromWall ? -(needed - worst) : needed - worst;
   }
   return value;
 }

@@ -1,17 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_FLOOR_COUNT,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-  GARDEN_HALF_SIZE,
-  INTERIOR_HALF_X,
-  INTERIOR_HALF_Z,
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
-  PLAYER_RADIUS,
-} from '../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, PLAYER_RADIUS } from '../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../world/building/layout';
 import { PALETTE, hexToCss } from '../core/palette';
 import { isTouchDevice } from '../core/device';
 import { minTextPx, uiUnitPx } from '../core/uiScale';
