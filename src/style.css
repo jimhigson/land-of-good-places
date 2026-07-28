@@ -1091,20 +1091,71 @@ kbd {
    full-screen backdrop, open/close transition and `.shop-card` frame all come
    free from the rules above. Only what's genuinely different about this panel
    — a design grid instead of a priced list, a lighter second button, and the
-   painting-moment brush/sparkles — needs its own rules here. */
+   painting-moment brush/sparkles — needs its own rules here.
+
+   GAME_DESIGN.md's PREVIEW RULE (28 July 2026) made this the character-creation
+   screen with one choice on it, so its body is now built from
+   `.charcreate-body` / `.charcreate-preview` / `.charcreate-controls` further
+   down this file, and everything those solved — the sticky preview column on a
+   wide screen, and the phone-portrait split into a fixed preview band above a
+   scrolling controls pane — is inherited rather than re-solved here. The three
+   rules below are the whole difference. */
 
 .facepaint-card {
   --shop-accent: var(--lgp-mint);
+  /* Wider than a `.shop-card`'s 27.5rem, which was sized for a single list:
+     this card now carries the preview column *and* the designs beside it, and
+     at the old width the two would each get about half of 440px. Still well
+     under the creator's 74rem, because there is one picker here rather than
+     eight. Both caps are multiples of the root scale, so the card grows with
+     the UI scale (GAME_DESIGN.md's TEXT/UI-SCALE rule) instead of pinning
+     itself to a pixel size. */
+  width: min(46rem, 96vw);
+  max-height: min(40rem, 92vh);
 }
 
+/* `.charcreate-controls` is a multi-column box (`columns: 13rem`) so the
+   creator's eight sections flow into as many columns as fit. The design grid
+   is a grid and must not be fragmented into columns on top of that — this
+   takes the multicol formatting context away and leaves a plain block, exactly
+   as the phone rules already do for the creator itself. */
+.facepaint-controls {
+  columns: auto;
+}
+
+/* Not a scroller any more. `.charcreate-controls` above is the scroll region
+   now, and nesting a second one inside it is the bug the phone-portrait fix
+   was written to kill — content scrolling inside content, with the preview
+   band the only thing pinned. */
 .facepaint-grid {
-  flex: 1;
-  overflow-y: auto;
   padding: 0.625rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
-  -webkit-overflow-scrolling: touch;
+}
+
+/* The creator has no close button (finishing it is the only way out), so there
+   is nothing to inherit and no `.shop-head` left to hold one. It floats over
+   the top-right corner of the card instead — clear of the preview, which is
+   centred in its band, and sized like every other round tap target in the
+   game. */
+.facepaint-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  appearance: none;
+  cursor: pointer;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  border: 0.1875rem solid #fff;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--lgp-ink);
+  font-family: inherit;
+  font-size: var(--lgp-text-md);
+  font-weight: 800;
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.14);
 }
 
 .facepaint-row {
