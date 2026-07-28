@@ -1,11 +1,9 @@
 import {
-  BufferGeometry,
+  CatmullRomCurve3,
   Color,
   CylinderGeometry,
   Group,
   InstancedMesh,
-  Line,
-  LineBasicMaterial,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -13,6 +11,7 @@ import {
   PointLight,
   Quaternion,
   SphereGeometry,
+  TubeGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../core/palette';
@@ -60,6 +59,22 @@ const LIGHT_DISTANCE = 63;
  */
 const REAL_LIGHTS = 3;
 
+/**
+ * Radius of the cable, in metres — a cord about 5 cm thick, matching the
+ * tree-to-tree garlands exactly (`TreeLights.WIRE_RADIUS`, where the reasoning
+ * is written out in full).
+ *
+ * Short version: these were `Line`s, and the family reported the string
+ * between the lights as very faint. WebGL ignores `LineBasicMaterial.linewidth`
+ * on essentially every platform, so a line is always one device pixel however
+ * it is configured. The only way to give the cable presence is to make it
+ * geometry, so it is a tube.
+ */
+const CABLE_RADIUS = 0.025;
+
+/** Faces around the cable. See `TreeLights.WIRE_SIDES`. */
+const CABLE_SIDES = 5;
+
 export class FairyLights implements GameSystem {
   readonly name = 'fairyLights';
   readonly group = new Group();
@@ -72,7 +87,7 @@ export class FairyLights implements GameSystem {
   private readonly bulbColours: Color[] = [];
   private readonly bulbBase: Color[] = [];
   private readonly lights: PointLight[] = [];
-  private readonly strings: Line[] = [];
+  private readonly strings: Mesh[] = [];
   private readonly bulbMatrix = new Matrix4();
   private readonly scratchColour = new Color();
 
@@ -127,7 +142,7 @@ export class FairyLights implements GameSystem {
       PALETTE.fairyMint,
       PALETTE.fairyBlue,
     ];
-    const cableMaterial = new LineBasicMaterial({
+    const cableMaterial = new MeshBasicMaterial({
       color: 0x6b5a4a,
       transparent: true,
       opacity: 0.75,
@@ -160,10 +175,21 @@ export class FairyLights implements GameSystem {
         }
       }
 
-      const geometry = new BufferGeometry().setFromPoints(points);
-      const line = new Line(geometry, cableMaterial);
-      this.group.add(line);
-      this.strings.push(line);
+      // The sag points already lie on the parabola, so the Catmull-Rom through
+      // them stays on it — the curve exists only because `TubeGeometry` wants
+      // one. One tube segment per sag point is plenty for a 9 m span.
+      const geometry = new TubeGeometry(
+        new CatmullRomCurve3(points),
+        points.length,
+        CABLE_RADIUS,
+        CABLE_SIDES,
+        false,
+      );
+      const cable = new Mesh(geometry, cableMaterial);
+      cable.castShadow = false;
+      cable.receiveShadow = false;
+      this.group.add(cable);
+      this.strings.push(cable);
 
       // Real lights on three of the ten strings — see REAL_LIGHTS. Each one
       // costs every lit fragment in the scene, so the ring carries as few as
@@ -234,8 +260,8 @@ export class FairyLights implements GameSystem {
     }
 
     const cableOpacity = 0.35 + lit * 0.4;
-    for (const line of this.strings) {
-      (line.material as LineBasicMaterial).opacity = cableOpacity;
+    for (const cable of this.strings) {
+      (cable.material as MeshBasicMaterial).opacity = cableOpacity;
     }
   }
 

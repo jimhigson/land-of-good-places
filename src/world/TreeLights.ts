@@ -1,19 +1,20 @@
 import {
-  BufferAttribute,
   BufferGeometry,
+  CatmullRomCurve3,
   Color,
   Euler,
   Group,
   InstancedMesh,
-  LineBasicMaterial,
-  LineSegments,
   Matrix4,
+  Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
   Quaternion,
   SphereGeometry,
+  TubeGeometry,
   Vector3,
 } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CAMERA_PITCH_DEGREES } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
@@ -94,7 +95,7 @@ import type { FrameContext, GameSystem } from '../core/types';
  * `FairyLights` and `LampPosts` already use, so the three rigs read as one
  * family after dark.
  *
- * Every wire in the park is **one** `LineSegments` and every bulb is **one**
+ * Every wire in the park is **one** merged `Mesh` and every bulb is **one**
  * `InstancedMesh`: two draw calls for the lot. Nothing is allocated after
  * construction — `update` writes floats straight into the instance colour
  * buffer that already exists.
@@ -155,6 +156,29 @@ const CATENARY_K = 1.9;
 
 /** Where up the canopy the wire is tied on, as a fraction of the canopy radius. */
 const TIE_HEIGHT = 0.62;
+
+/**
+ * Radius of the wire itself, in metres — so a cord about 5 cm thick.
+ *
+ * It used to be a `LineSegments`, and the family's report was that the string
+ * between the lights is "very faint". It was: WebGL ignores
+ * `LineBasicMaterial.linewidth` on essentially every platform, so a line is
+ * always exactly **one device pixel** — which on a retina screen is half a CSS
+ * pixel, a grey hair holding up a row of glowing bulbs. There is no thickness
+ * setting to turn up; the wire has to become geometry, so it is a tube.
+ *
+ * 0.025 m of radius comes out at roughly two and a half times that hairline at
+ * the default zoom, which is what was asked for, and unlike a line it now
+ * thickens when a child zooms in, exactly as the poles and the bulbs do.
+ */
+const WIRE_RADIUS = 0.025;
+
+/**
+ * Faces around the wire. Five, for the same reason the balloon string uses
+ * five: at this thickness a pentagon reads as round, and a hexagon would just
+ * be more vertices to say the same thing.
+ */
+const WIRE_SIDES = 5;
 
 /** Roughly one bulb every this many metres. */
 const METRES_PER_BULB = 1.15;
@@ -248,8 +272,8 @@ export class TreeLights implements GameSystem {
 
   private readonly bulbs: InstancedMesh;
   private readonly bulbMaterial: MeshBasicMaterial;
-  private readonly wires: LineSegments;
-  private readonly wireMaterial: LineBasicMaterial;
+  private readonly wires: Mesh;
+  private readonly wireMaterial: MeshBasicMaterial;
   /** The soft halo around each bulb. See {@link HALO_SIZE}. */
   private readonly halos: InstancedMesh;
   private readonly haloMaterial: MeshBasicMaterial;
@@ -288,7 +312,7 @@ export class TreeLights implements GameSystem {
     this.stringCount = strings.length;
 
     // --- walk every chosen span once, filling both buffers -------------------
-    const wirePoints: number[] = [];
+    const wireTubes: BufferGeometry[] = [];
     const bulbPoints: number[] = [];
 
     for (const { a, b, span, sag } of strings) {
@@ -296,35 +320,42 @@ export class TreeLights implements GameSystem {
       const to = posts[b] as Post;
       const segments = Math.max(6, Math.min(22, Math.round(span / METRES_PER_BULB)));
 
-      let prevX = from.x;
-      let prevY = from.y;
-      let prevZ = from.z;
+      const path: Vector3[] = [new Vector3(from.x, from.y, from.z)];
       for (let s = 1; s <= segments; s += 1) {
         const t = s / segments;
         const x = lerp(from.x, to.x, t);
         const z = lerp(from.z, to.z, t);
         const y = lerp(from.y, to.y, t) - sag * catenaryShape(t);
-        wirePoints.push(prevX, prevY, prevZ, x, y, z);
-        prevX = x;
-        prevY = y;
-        prevZ = z;
+        path.push(new Vector3(x, y, z));
         // A bulb hangs off every interior joint. Never off the two ends, where
         // it would sit inside the canopy it is tied to.
         if (s < segments) bulbPoints.push(x, y - BULB_DROP, z);
       }
+
+      // A Catmull-Rom through points that already lie on the catenary stays on
+      // it — the curve is only here because that is what `TubeGeometry` takes.
+      wireTubes.push(
+        new TubeGeometry(new CatmullRomCurve3(path), segments, WIRE_RADIUS, WIRE_SIDES, false),
+      );
     }
 
-    // --- the wires: one LineSegments for the whole park ----------------------
-    this.wireMaterial = new LineBasicMaterial({
+    // --- the wires: one merged Mesh for the whole park ------------------------
+    // Still a single draw call, as the `LineSegments` this replaced was — the
+    // per-span tubes are merged rather than added to the group one by one.
+    this.wireMaterial = new MeshBasicMaterial({
       color: PALETTE.barkDark,
       transparent: true,
       opacity: 0.7,
       fog: true,
     });
-    const wireGeometry = new BufferGeometry();
-    wireGeometry.setAttribute('position', new BufferAttribute(new Float32Array(wirePoints), 3));
-    this.wires = new LineSegments(wireGeometry, this.wireMaterial);
+    const merged = wireTubes.length > 0 ? mergeGeometries(wireTubes, false) : null;
+    for (const tube of wireTubes) tube.dispose();
+    this.wires = new Mesh(merged ?? new BufferGeometry(), this.wireMaterial);
     this.wires.name = 'tree-light-wires';
+    // A 5 cm cord's shadow is a smudge, and the park's one shadow map has more
+    // useful things to spend itself on.
+    this.wires.castShadow = false;
+    this.wires.receiveShadow = false;
     this.group.add(this.wires);
 
     // --- the bulbs: one InstancedMesh for the whole park ---------------------
