@@ -242,17 +242,43 @@ export interface PaintedNpcFace {
  * (see `kidCrowd.ts` / `InstancedCrowd.ts`) — reaching into either is exactly
  * what this activity is written not to do. The decal's own head-height offset
  * is applied by the caller.
+ *
+ * **The returned array is reused, and is only valid until the next call.**
+ * Copy anything you need to keep. `FacePaintStall.updateNpcDecals` calls this
+ * unconditionally every frame, so building a fresh array and four fresh object
+ * literals here was 60 arrays and up to 240 objects a second, for ever, for a
+ * fixed pool of four decals — the one confirmed per-frame allocation on the
+ * whole update path (ARCHITECTURE-REVIEW §4a, which asked for exactly this).
+ *
+ * The pool only ever grows, because a painted child never becomes unpainted and
+ * no visit ever leaves {@link facePaintVisits} — so in a running park this
+ * allocates at most four times ever, on the frames the first four children come
+ * away painted.
  */
-export function paintedNpcFaces(): PaintedNpcFace[] {
-  const faces: PaintedNpcFace[] = [];
+export function paintedNpcFaces(): readonly PaintedNpcFace[] {
+  let count = 0;
   for (const visit of facePaintVisits) {
     const design = visit.paintDesign;
-    if (design) {
-      faces.push({ x: visit.headX, z: visit.headZ, yaw: visit.headYaw, design });
+    if (!design) continue;
+
+    let face = facePool[count];
+    if (!face) {
+      face = { x: 0, z: 0, yaw: 0, design };
+      facePool.push(face);
     }
+    face.x = visit.headX;
+    face.z = visit.headZ;
+    face.yaw = visit.headYaw;
+    face.design = design;
+    count += 1;
   }
-  return faces;
+  facePool.length = count;
+  return facePool;
 }
+
+/** The reused backing for {@link paintedNpcFaces}. Mutable in here, handed out
+ *  as `readonly PaintedNpcFace[]`. */
+const facePool: { x: number; z: number; yaw: number; design: FacePaintDesign }[] = [];
 
 function paintedOrVisitingCount(): number {
   let count = 0;

@@ -41,8 +41,9 @@ export class TreeClimb implements Activity {
   private tree: ClimbableTreeSeed | null = null;
   private timer = 0;
   private peekFor = 0;
-  private startX = 0;
-  private startZ = 0;
+  /** Where the child stood when the climb began. Handed out by
+   *  {@link climbGroundSpot}; rewritten, never replaced. */
+  private readonly groundSpot = { x: 0, z: 0 };
 
   constructor(rng: Rng, trees: readonly ClimbableTreeSeed[], budget: ActivityBudget | undefined) {
     this.trees = trees;
@@ -76,9 +77,17 @@ export class TreeClimb implements Activity {
     return 1;
   }
 
-  /** Where the child was standing when it started up — the base of the scramble. */
+  /**
+   * Where the child was standing when it started up — the base of the scramble.
+   *
+   * Returns the same object every time, rewritten when a climb begins.
+   * `TreeClimbing.updateNpcClimbs` reads this once per climbing child per
+   * frame, so a fresh literal here was up to three objects a frame for as long
+   * as anybody was up a tree, which is the sort of thing the standing GC-pause
+   * complaint is made of. Read it and use it; do not keep it.
+   */
   get climbGroundSpot(): { readonly x: number; readonly z: number } {
-    return { x: this.startX, z: this.startZ };
+    return this.groundSpot;
   }
 
   /**
@@ -96,8 +105,8 @@ export class TreeClimb implements Activity {
     if (!tree) return false;
 
     this.tree = tree;
-    this.startX = context.position.x;
-    this.startZ = context.position.z;
+    this.groundSpot.x = context.position.x;
+    this.groundSpot.z = context.position.z;
     this.phase = 'up';
     this.timer = 0;
     this.slot.claim();
