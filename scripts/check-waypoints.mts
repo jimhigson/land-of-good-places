@@ -43,12 +43,8 @@
  * child standing in a doorway in the dark.
  */
 
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-} from '../src/core/constants.ts';
+import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../src/core/constants.ts';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layout.ts';
 import { SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 
