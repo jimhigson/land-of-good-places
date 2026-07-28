@@ -759,6 +759,16 @@ export class Game {
     if (!paused) this.player.update(this.frameContext);
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
+    // Straight after the camera moves and before the sky is drawn: the stars,
+    // the moon and the sun all slide with the park so the night sky reads as a
+    // place a long way off rather than as wallpaper stuck to the screen. Fed
+    // from the isometric rig even while a ride's first-person camera has the
+    // world, exactly as the sun's own screen bearing already is.
+    this.sky.setParallax(
+      this.camera.skyAnchor.x,
+      this.camera.skyAnchor.y,
+      this.camera.viewHalfHeight,
+    );
     this.world.update(this.frameContext);
 
     for (const system of this.systems) system.update(this.frameContext);
