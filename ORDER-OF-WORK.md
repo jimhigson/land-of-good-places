@@ -185,6 +185,21 @@ ARCHITECTURE-DECISIONS.md Decision 2.
 
 ---
 
+## Next session, first (28 July, 04:30 — the overnight run's handover)
+
+- **Implement the PREVIEW RULE** (GAME_DESIGN.md absolute rules): every
+  appearance chooser becomes the character-creation component with fewer
+  choices — face painting zoomed on the face, hats framing the head. An agent
+  was assigned twice tonight and died both times with nothing banked; the
+  design intent is in the rule itself. The ferris-exit half of its brief
+  (X as the single way out) already merged as #88.
+- **Wire LAYOUT_VERSION into the save** so a park-space position from an
+  older layout falls back to the plaza spawn (interior positions already
+  survive; the constant exists in parkManifest.ts).
+- The deferred Decision 5 items recorded in PR #95: the slide as a manifest
+  link with its own footprint, and Decision 4 §6 rail fencing (closes the
+  rail.exclusion and rail.walkable ratchets together).
+
 ## Anytime — genuinely independent
 
 - **Wire up the four orphaned check scripts** (Review 7/F7).
