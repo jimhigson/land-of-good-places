@@ -425,6 +425,7 @@ export class Game {
       this.camera.resize(width, height);
       this.world.train.rideView?.resize(width, height);
       this.world.coaster.rideView?.resize(width, height);
+      this.world.raceCoaster.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -433,17 +434,29 @@ export class Game {
     // seat's RideCamera, alighting wipes back. The override is the third
     // render state Decision 1 specified — render() swaps cameras, nothing
     // else changes. Her own model hides while the eye is in her head.
-    const firstPerson = (camera: import('three').PerspectiveCamera | null) => {
+    const rideCamera = (
+      camera: import('three').PerspectiveCamera | null,
+      playerStaysVisible = false,
+    ) => {
       this.transitions.irisWipe(() => {
         this.cameraOverride = camera;
-        this.player.group.visible = camera === null;
+        this.player.group.visible = camera === null || playerStaysVisible;
       });
     };
     this.world.train.onRideChange = (riding) =>
-      firstPerson(riding ? (this.world.train.rideView?.camera ?? null) : null);
+      rideCamera(riding ? (this.world.train.rideView?.camera ?? null) : null);
     this.world.coaster.onRideChange = (riding) =>
-      firstPerson(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
-    this.miniGames.boardCoaster = () => this.world.coaster.requestBoard();
+      rideCamera(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
+    this.world.raceCoaster.onRideChange = (riding) =>
+      rideCamera(
+        riding ? (this.world.raceCoaster.rideView?.camera ?? null) : null,
+        this.world.raceCoaster.playerStaysVisible,
+      );
+    this.miniGames.boardRide = (stallId) => {
+      if (stallId === 'railRacer') return this.world.raceCoaster.requestBoard();
+      if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
+      return false;
+    };
 
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));

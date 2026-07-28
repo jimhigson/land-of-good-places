@@ -39,6 +39,15 @@ import type { StallDefinition } from './types';
 
 export const STALLS: readonly StallDefinition[] = [
   {
+    id: 'skyCruiser',
+    title: 'Sky Cruiser',
+    subtitle: 'float over the whole park!',
+    glyph: '\u{1F6A0}',
+    accent: PALETTE.markerSky,
+    stripe: PALETTE.buildingWall,
+    ...STALL_PLACEMENTS.skyCruiser,
+  },
+  {
     id: 'railRacer',
     title: 'Rail Racer!',
     subtitle: 'hold on, let go, whoosh!',

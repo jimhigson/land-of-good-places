@@ -123,5 +123,10 @@ export interface StallDefinition {
   /** Yaw in radians the counter faces. 0 looks down +Z. */
   readonly facing: number;
   /** Builds a fresh instance of the game. Called on every visit. */
-  readonly create: MiniGameFactory;
+  /**
+   * Builds the mini-game behind this stall. Absent for booths that board a
+   * world ride instead (the Sky Cruiser, the Rail Race) — those are taken
+   * by MiniGameHost.boardRide before a game would be built.
+   */
+  readonly create?: MiniGameFactory;
 }

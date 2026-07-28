@@ -59,6 +59,7 @@ export class World implements GameSystem {
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
+  readonly raceCoaster: Coaster;
   readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
@@ -115,9 +116,25 @@ export class World implements GameSystem {
     // It registers no collision itself; the wires hang overhead.
     this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
-    // The rollercoaster: grown after the train, because its boot assert
-    // checks rail-over-rail air against the solved train curve.
-    this.coaster = new Coaster(this.collision, this.train);
+    // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
+    // serene first-person ride, and the Rail Race, third person with
+    // barriers to duck. Grown after the train (rail-over-rail assert), the
+    // race grown after the cruiser (loop-over-loop avoidance and assert).
+    this.coaster = new Coaster(this.collision, this.train, {
+      name: 'skyCruiser',
+      routeSalt: 0xc0a57e,
+      stationStallId: 'stall.skyCruiser',
+      camera: 'firstPerson',
+    });
+    this.raceCoaster = new Coaster(this.collision, this.train, {
+      name: 'railRace',
+      routeSalt: 0x9ace12,
+      stationStallId: 'stall.railRacer',
+      camera: 'chase',
+      avoid: this.coaster,
+      nominal: 24,
+      bandMax: 38,
+    });
 
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
@@ -172,6 +189,7 @@ export class World implements GameSystem {
       this.facePaintStall.group,
       this.train.group,
       this.coaster.group,
+      this.raceCoaster.group,
     );
   }
 
@@ -210,6 +228,7 @@ export class World implements GameSystem {
     // instance buffer. The other way round they would ride a frame behind.
     this.train.update(context);
     this.coaster.update(context);
+    this.raceCoaster.update(context);
     this.train.carryPassengers(this.npcs.riders);
 
     this.npcs.update(context);
@@ -272,6 +291,7 @@ export class World implements GameSystem {
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
+    this.raceCoaster.attachPlayer(player);
     // Lets the crowd push gently apart from the player instead of walking
     // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
     this.npcs.attachPlayer(player);
@@ -298,6 +318,7 @@ export class World implements GameSystem {
     this.facePaintStall.dispose();
     this.train.dispose();
     this.coaster.dispose();
+    this.raceCoaster.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }

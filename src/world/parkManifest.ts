@@ -92,6 +92,13 @@ export const GATE_CORRIDOR_HALF_WIDTH = 7;
 /**
  * The attractions. Copy (sign titles, notes, accents) stays in `anchors.ts`,
  * keyed by id — this file owns only *where things may go*.
+ *
+ * **Why nearly everything is pinned:** these are the solved positions of the
+ * park the family approved on 28 July. Pinning them keeps that park exactly
+ * while new entries (the Sky Cruiser's stall was the first) are placed by
+ * the solver around them — without pins, any addition re-rolled the whole
+ * arrangement, which broke "adding an attraction is adding a line". To
+ * re-roll the park deliberately: delete the pins and bump PARK_SEED.
  */
 export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // The fountain plaza: the park's social middle. Movable (family ruling:
@@ -99,6 +106,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // stays legible to a six-year-old.
   {
     id: 'fountain',
+    pin: [4.96489106075262, 7.750971156106802],
     footprint: { kind: 'circle', radius: 9.4 },
     boundingRadius: 10.5,
     band: { min: 0, max: 12 },
@@ -106,24 +114,28 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'building',
+    pin: [-17.379101772707354, -24.68456869332909],
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
     boundingRadius: 19,
     band: { min: 26, max: 42 },
   },
   {
     id: 'waterFight',
+    pin: [32.9413989483355, -14.5429227619724],
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
     boundingRadius: 15,
     band: { min: 24, max: 40 },
   },
   {
     id: 'dodgems',
+    pin: [-23.62827940709836, 26.640671757006064],
     footprint: { kind: 'rect', halfX: 12, halfZ: 10 },
     boundingRadius: 15,
     band: { min: 24, max: 40 },
   },
   {
     id: 'ferrisWheel',
+    pin: [22.200529615211444, 30.762495788486575],
     footprint: { kind: 'circle', radius: 11 },
     boundingRadius: 13,
     band: { min: 24, max: 40 },
@@ -132,6 +144,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // pit must stay within a slide's reach of the building whatever the seed.
   {
     id: 'ballPit',
+    pin: [6.935078330951129, -27.93267837318263],
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
     band: { min: 10, max: 34 },
@@ -140,18 +153,21 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   {
     id: 'stall.railRacer',
+    pin: [26.896471713281517, 9.50805624751888],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
   },
   {
     id: 'stall.spookyHouse',
+    pin: [-14.009419630595104, 2.531869221037949],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
   },
   {
     id: 'stall.waterFight',
+    pin: [16.198422689521646, -11.141212665997175],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
@@ -159,13 +175,29 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'stall.dodgems',
+    pin: [-6.494351647680116, 24.895734667592652],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 30 },
     near: { id: 'dodgems', min: 17, max: 22 },
   },
   {
+    id: 'stall.skyCruiser',
+    footprint: { kind: 'circle', radius: 2.6 },
+    boundingRadius: 3.4,
+    // The pinned park is packed solid: a probe of the whole 13–36 annulus
+    // found zero cells that keep CORRIDOR_GAP from every plot, and the outer
+    // ring sits in the rail band (placing there deformed the train loop and
+    // regressed rail.exclusion). The one real pocket is west of the castle —
+    // inside the castle's rail shadow, so the train route never notices it.
+    // The near relation reaches it the same way the other booths snuggle
+    // their rides.
+    band: { min: 13, max: 36 },
+    near: { id: 'building', min: 21, max: 26 },
+  },
+  {
     id: 'stall.facePaint',
+    pin: [-26.12933205483198, 2.951281913621141],
     footprint: { kind: 'circle', radius: 2.8 },
     boundingRadius: 3.6,
     band: { min: 13, max: 30 },

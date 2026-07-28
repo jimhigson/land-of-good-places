@@ -218,7 +218,53 @@ function buildRoutes(): readonly RouteDefinition[] {
       points: [...routeAround(start, [ex, ez]), past],
     });
   }
+  // Booths the solver placed away from the network get a spur too — the sky
+  // cruiser's sits in the castle's west pocket, a 30 m walk from the nearest
+  // path when this loop didn't exist. Booths already beside the ring (all the
+  // others, today) are skipped rather than double-paved.
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (!entry.id.startsWith('stall.')) continue;
+    const ex = entry.entranceX;
+    const ez = entry.entranceZ;
+    if (distanceToRouteNetwork(routes, ex, ez) < 4) continue;
+    const start = nearestRingPoint(ring, ex, ez);
+    const towards = [entry.x - ex, entry.z - ez];
+    const l = Math.hypot(towards[0] as number, towards[1] as number) || 1;
+    const past: readonly [number, number] = [
+      ex + ((towards[0] as number) / l) * 2,
+      ez + ((towards[1] as number) / l) * 2,
+    ];
+    routes.push({
+      name: `spur-${entry.id}`,
+      width: 2.6,
+      closed: false,
+      points: [...routeAround(start, [ex, ez]), past],
+    });
+  }
   return routes;
+}
+
+/** Min distance from (x, z) to any segment of the routes built so far. */
+function distanceToRouteNetwork(
+  routes: readonly RouteDefinition[],
+  x: number,
+  z: number,
+): number {
+  let best = Infinity;
+  for (const route of routes) {
+    const points = route.points;
+    const count = route.closed ? points.length : points.length - 1;
+    for (let i = 0; i < count; i += 1) {
+      const [ax, az] = points[i] as readonly [number, number];
+      const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const lengthSq = dx * dx + dz * dz;
+      const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+      best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+    }
+  }
+  return best;
 }
 
 /**
