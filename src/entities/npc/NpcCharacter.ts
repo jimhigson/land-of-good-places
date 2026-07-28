@@ -76,6 +76,16 @@ export class NpcCharacter {
   // flag is set; `TreeClimbing` drives the pose directly every frame instead.
   private climbingFlag = false;
 
+  // --- being carried (see world/train/ParkTrain.ts) ------------------------
+  // The same idea as `climbingFlag`, for the other thing that moves a child
+  // rather than steering one. Re-asserted every frame by whoever is doing the
+  // carrying — `ParkTrain.carryPassengers`, which `World.update` calls just
+  // before `NpcSystem.update` — and cleared by `update` itself, so a frame
+  // nobody claims a child is a frame they are back on their own feet. That is
+  // why there is no `endCarry()`: getting off a ride is not an event the ride
+  // has to remember to send.
+  private carriedFlag = false;
+
   constructor(
     avatar: KidAvatar,
     driver: CharacterDriver,
@@ -129,6 +139,45 @@ export class NpcCharacter {
     this.climbingFlag = false;
   }
 
+  /** True while a ride is carrying this character instead of `move()` walking it. */
+  get carried(): boolean {
+    return this.carriedFlag;
+  }
+
+  /**
+   * "You are aboard, and it is here." Called once a frame, before
+   * {@link update}, by something that carries a character rather than steering
+   * one — currently just `ParkTrain.carryPassengers`.
+   *
+   * It takes over x and z outright, and `move()` is skipped for that frame.
+   * Both halves of that matter, and the second one is a bug fix (28 July):
+   *
+   * - A child standing on a carriage is standing **on the track**, which is
+   *   ringed by the rail-exclusion fence's colliders. `move()`'s
+   *   `collision.resolve` therefore shoved every rider ~7 cm off the train,
+   *   every frame.
+   * - `move()` then rewrites `velocity` from how far the character actually
+   *   ended up moving — the line that makes walking into a wall kill your
+   *   momentum. For a rider, "how far they moved" is the ride's own write plus
+   *   that shove, neither of which is speed the child asked for. It fed back:
+   *   1.9 m/s on the first frame out of Bluebell Halt, 29 m/s twenty frames
+   *   later, ~2200 m/s after half a minute, with the child ping-ponging 73 m
+   *   between the seat and the fence every frame. That was the vibration.
+   *
+   * y is left alone deliberately: the carriage floor registers with
+   * `WalkSurfaces` as a moving platform, so {@link rideAlong} settles onto it
+   * the same way a walking child settles onto the ground.
+   */
+  setCarriedPose(x: number, z: number): void {
+    this.carriedFlag = true;
+    this.position.x = x;
+    this.position.z = z;
+    // Nothing a ride does to a passenger is speed they earned, so they step off
+    // standing still rather than shooting away from wherever it put them down.
+    this.velocity.set(0, 0, 0);
+    this.avatar.rig.root.position.copy(this.position);
+  }
+
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
   setWalkPhase(phase: number): void {
     this.walkPhase = phase;
@@ -170,8 +219,17 @@ export class NpcCharacter {
     // running `move()` too would immediately drag the character back down to
     // the ground via gravity and the ground sampler. `animate()` still runs
     // so blink/expression transitions (driven by `intent`, set above) and the
-    // idle breathing motion keep working while perched.
-    if (!this.climbingFlag) this.move(dt);
+    // idle breathing motion keep working while perched. A carried child is the
+    // same bargain with a different owner — see `setCarriedPose`.
+    if (this.climbingFlag) {
+      // TreeClimbing owns everything, including y.
+    } else if (this.carriedFlag) {
+      this.rideAlong(dt);
+    } else {
+      this.move(dt);
+    }
+    // The carry is re-asserted every frame; one that is not is over.
+    this.carriedFlag = false;
     this.animate(elapsed);
   }
 
@@ -209,6 +267,43 @@ export class NpcCharacter {
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * One frame aboard something that is carrying you.
+   *
+   * `setCarriedPose` has already written x and z, so all that is left is what a
+   * passenger genuinely does: settle onto whatever is under their feet — the
+   * carriage floor, which registers with `WalkSurfaces` as a moving platform,
+   * exactly like the lift car — turn their head if the driver asked, and let
+   * the walk cycle wind down to a stand.
+   *
+   * Deliberately a separate path rather than `move()` with a flag threaded
+   * through it: the whole point is that **none** of `move()`'s horizontal half
+   * may run for a rider, and a branch that says so is harder to reintroduce a
+   * bug into than four scattered `if`s.
+   */
+  private rideAlong(dt: number): void {
+    // A ride cannot drop you, and it cannot launch you either: no gravity, no
+    // hop (a giggle-hop banked just before boarding would otherwise fire from
+    // the seat), no falling off the edge of the carriage floor.
+    this.verticalVelocity = 0;
+    this.airborne = false;
+
+    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+    this.position.y = damp(this.position.y, groundY, 0.04, dt);
+
+    if (this.intent.lookAt !== null) {
+      this.facing = turnTowards(this.facing, this.intent.lookAt, 4.5 * dt);
+    }
+
+    const root = this.avatar.rig.root;
+    root.position.copy(this.position);
+    root.rotation.y = this.facing;
+
+    // Standing, holding on. `animate` reads `gait`, so easing it down is what
+    // stops the legs from walking on the spot for a second after boarding.
+    this.gait = damp(this.gait, 0, 0.07, dt);
+  }
 
   private move(dt: number): void {
     const intentLength = Math.hypot(this.intent.moveX, this.intent.moveZ);
