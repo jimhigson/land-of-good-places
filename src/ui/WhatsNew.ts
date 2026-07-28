@@ -144,11 +144,13 @@ export class WhatsNew {
     if (firstVisit) {
       this.show(
         'Welcome to Land of Good Places!',
-        // The standard credit line (see README.md / index.html / vite.config.ts's
-        // manifest description) — kept in sync by hand rather than imported, since
-        // it is one string and pulling in a whole shared-constants module for it
-        // would be a bigger dependency than the thing it replaces.
-        'By Eleri age 6, and Jim age 44 — here’s a few things to try:',
+        // Was the full credit line ("By Eleri age 6, and Jim age 44 — here's a
+        // few things to try:"). The family, 28 July 2026: "that also doesn't
+        // need to repeat the ages yet again". The credit is already on the boot
+        // splash, in index.html and in the PWA manifest description; repeating
+        // it every time this panel opens is noise on the one screen they asked
+        // to have *less* text on. See GAME_DESIGN.md's BREVITY RULE.
+        'A few things to try:',
         ENTRIES.slice(0, WELCOME_ENTRY_COUNT),
       );
       return;

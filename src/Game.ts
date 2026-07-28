@@ -387,12 +387,7 @@ export class Game {
       zones: () => this.currentZones(),
       primedZone: () => this.actionButton.zone,
       primedSign: () => this.signReader.nearby,
-      blocked: () =>
-        this.uiOwnsTheScreen() ||
-        this.parkMap.isOpen ||
-        this.stairMenu.isOpen ||
-        this.signReader.active ||
-        gameStore.get().paused,
+      blocked: () => this.screenIsBusy(),
     });
     this.addSystem(this.highlights);
 
@@ -463,6 +458,29 @@ export class Game {
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
       this.player.riding
+    );
+  }
+
+  /**
+   * True while ANYTHING is up over the park — a panel, the map, a stair menu,
+   * a sign being read, or a plain pause.
+   *
+   * {@link uiOwnsTheScreen} plus the overlays that are not panels. This is the
+   * predicate the highlight system has always used to switch the rainbow
+   * outlines off; the touch controls now share it, because they did not, and
+   * the family's photo showed the floating "hop" button sitting on top of the
+   * what's-new panel's "OK, let's go!" button. `updateHud()` only hid the
+   * cluster while riding, so every other overlay got a thumb-sized pink circle
+   * dropped on its bottom-right corner — a button you cannot press, over a
+   * button you need. Overlap is always a bug (GAME_DESIGN.md).
+   */
+  private screenIsBusy(): boolean {
+    return (
+      this.uiOwnsTheScreen() ||
+      this.parkMap.isOpen ||
+      this.stairMenu.isOpen ||
+      this.signReader.active ||
+      gameStore.get().paused
     );
   }
 
@@ -646,9 +664,10 @@ export class Game {
   private updateHud(tick: LoopTick): void {
     this.hud.setFps(tick.fps);
     this.hud.setGamepadConnected(this.input.gamepadConnected);
-    // Nothing to hop or turn while a slide has hold of you, and the buttons sit
-    // right where the view of the ride is.
-    this.touchControls?.setVisible(!this.player.riding);
+    // Nothing to hop while a slide has hold of you or while a panel is up, and
+    // the buttons sit right where the view of the ride — or the panel's own OK
+    // button — is. See {@link screenIsBusy}.
+    this.touchControls?.setVisible(!this.screenIsBusy());
     this.hud.updateDebug([
       // The park clock lives here now rather than in a pill of its own: the
       // family had the clock removed from the HUD entirely (GAME_DESIGN.md,
