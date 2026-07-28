@@ -55,6 +55,13 @@ import type { CollisionWorld } from '../../world/Collision';
  */
 
 /** Where the camera stands, so this is where the wheel faces. */
+/**
+ * Fallback only: the real yaw is derived per-park so the boarding deck's
+ * local -X side faces the anchor's entrance wherever the layout solver put
+ * it (Decision 5). The authored constant aimed the deck at where the
+ * entrance *used* to be, which pocketed the doormat the first time the park
+ * regenerated.
+ */
 const WHEEL_YAW = Math.PI / 4;
 
 /**
@@ -112,14 +119,22 @@ export function createFerrisWheelProp(
 ): FerrisWheelProp {
   const root = new Group();
   root.name = 'prop.ferrisWheel';
-  root.rotation.y = WHEEL_YAW;
 
   const [centreX, centreZ] = anchor.position;
+  // Aim the boarding deck (local -X) at the entrance: local -X maps to world
+  // (-cos yaw, +sin yaw), so yaw = atan2(dz, -dx) for entrance direction d.
+  const entranceDx = anchor.entrance[0] - centreX;
+  const entranceDz = anchor.entrance[1] - centreZ;
+  const wheelYaw =
+    Math.hypot(entranceDx, entranceDz) > 1e-6
+      ? Math.atan2(entranceDz, -entranceDx)
+      : WHEEL_YAW;
+  root.rotation.y = wheelYaw;
   const ground = terrainHeight(centreX, centreZ);
   /** Plot-local (x, z) to world (x, z), through the wheel's own yaw. */
   const toWorld = (lx: number, lz: number): [number, number] => [
-    centreX + lx * Math.cos(WHEEL_YAW) + lz * Math.sin(WHEEL_YAW),
-    centreZ - lx * Math.sin(WHEEL_YAW) + lz * Math.cos(WHEEL_YAW),
+    centreX + lx * Math.cos(wheelYaw) + lz * Math.sin(wheelYaw),
+    centreZ - lx * Math.sin(wheelYaw) + lz * Math.cos(wheelYaw),
   ];
 
   const frame = toonMaterial(PALETTE.stonePink);

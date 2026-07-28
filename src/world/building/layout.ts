@@ -1,4 +1,5 @@
 import { PALETTE } from '../../core/palette';
+import { placedEntry } from '../parkLayout';
 import {
   BUILDING_CENTRE_X,
   BUILDING_CENTRE_Z,
@@ -824,8 +825,8 @@ export function shopForecourtRamps(): readonly RampDefinition[] {
 // --------------------------------------------------------------- ball pit
 
 /** Centre of the ball pit, in world coordinates (the `ballPit` anchor). */
-export const BALL_PIT_X = -9;
-export const BALL_PIT_Z = -15;
+export const BALL_PIT_X = placedEntry('ballPit').x;
+export const BALL_PIT_Z = placedEntry('ballPit').z;
 export const BALL_PIT_RADIUS = 6;
 /** How far the pit floor sits below the surrounding grass. */
 export const BALL_PIT_DEPTH = 0.5;

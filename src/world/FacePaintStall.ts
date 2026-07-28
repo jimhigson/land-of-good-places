@@ -11,6 +11,7 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
+import { placedEntry } from './parkLayout';
 import { Rng } from '../core/mathUtils';
 import { signTexture } from '../core/textures';
 import { ART } from '../art/style/artPalette';
@@ -70,8 +71,8 @@ import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderD
  * `Scenery.ts` (nearest, the `[-10, 2]`–`[-4, 1]` wood run, is ~6.8 m away).
  * Confirmed clear by eye in the running game (see PROGRESS-FACEPAINT.md).
  */
-const STALL_X = -9.8;
-const STALL_Z = -4.8;
+const STALL_X = placedEntry('stall.facePaint').x;
+const STALL_Z = placedEntry('stall.facePaint').z;
 /**
  * A shade east of +Z, same as the rail racer's own `+0.3` — counter faces the
  * default camera. The *position* mirrors the rail racer's across the X axis,

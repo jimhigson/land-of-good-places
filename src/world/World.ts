@@ -17,6 +17,7 @@ import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
 import type { InteractZone } from './interact';
 import { collectSignZones, type SignZone } from './signs';
+import { PLAZA } from './paths';
 import type { Sky } from './Sky';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -69,7 +70,7 @@ export class World implements GameSystem {
     // them, same as the old decorative scatter), so it needs nothing from
     // the world to be built.
     this.flowers = new Flowers();
-    this.fountain = new Fountain(this.collision);
+    this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
     this.fairyLights = new FairyLights(this.collision);
     // Lamp posts along the paths — the family's "night is too dark" feedback.
     // Built after FairyLights (which rings the fountain plaza) and before

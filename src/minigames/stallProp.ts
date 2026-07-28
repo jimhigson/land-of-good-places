@@ -16,6 +16,7 @@ import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 // The stand distance lives with the coordinates rather than with the geometry:
 // the NPC waypoint seeds need it and must not import anything that builds a
 // mesh. See `stallPlacement.ts`.
+export { STALL_STAND_DISTANCE } from './stallPlacement';
 import { STALL_STAND_DISTANCE } from './stallPlacement';
 import type { StallDefinition } from './types';
 

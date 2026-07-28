@@ -170,7 +170,16 @@ function buildPlaceholder(anchor: AnchorDefinition, collision: CollisionWorld): 
   placeholder.add(pegs);
 
   // --- the sign -------------------------------------------------------------
-  const [ex, ez] = anchor.entrance;
+  // The sign stands BESIDE the doormat, not on it: `entrance` is where a
+  // child (and the path spur, and the routing invariant's stand point)
+  // arrives, and a solid sign post exactly there walls the arrival in —
+  // check:park caught the ferris wheel unreachable for precisely this.
+  const [doorX, doorZ] = anchor.entrance;
+  const towardMiddleLength = Math.hypot(doorX, doorZ) || 1;
+  const sideX = (-doorZ / towardMiddleLength) * 2.2;
+  const sideZ = (doorX / towardMiddleLength) * 2.2;
+  const ex = doorX + sideX;
+  const ez = doorZ + sideZ;
   const signX = ex - cx;
   const signZ = ez - cz;
   const signGround = terrainHeight(ex, ez) - ground;
