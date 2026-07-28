@@ -155,22 +155,16 @@ export class CharacterCreation {
     form.className = 'charcreate-card shop-card';
     form.noValidate = true;
 
-    // --- header --------------------------------------------------------
-    const head = document.createElement('div');
-    head.className = 'shop-head';
-    const glyph = document.createElement('span');
-    glyph.className = 'shop-glyph';
-    glyph.textContent = '🧒';
-    const titles = document.createElement('div');
-    titles.className = 'shop-titles';
-    const title = document.createElement('h2');
-    title.className = 'shop-title';
-    title.textContent = 'Make your character!';
-    const greeting = document.createElement('p');
-    greeting.className = 'shop-greeting';
-    greeting.textContent = 'Pick how you look, then let’s go to the park!';
-    titles.append(title, greeting);
-    head.append(glyph, titles);
+    // No header. There used to be a `.shop-head` band here — a 🧒 glyph, the
+    // title "Make your character!" and the line "Pick how you look, then let's
+    // go to the park!". The family's words (28 July 2026): "The character
+    // create screen is obvious enough what its purpose is - drop the main
+    // heading and subheading." On a phone that band cost about 150px off the
+    // top of a screen the controls were already scrolling on, which the layout
+    // fix that landed the same day had to work around. The screen is a picture
+    // of a child, a name box and a row of colours; it does not need to be
+    // announced. The dialog keeps its `aria-label` above, so a screen reader
+    // still hears what it is.
 
     // --- body: preview + controls --------------------------------------
     const body = document.createElement('div');
@@ -326,7 +320,7 @@ export class CharacterCreation {
     goButton.innerHTML = '<span class="emoji">🚌</span><span>Let’s go!</span>';
     footer.append(goButton);
 
-    form.append(head, body, footer);
+    form.append(body, footer);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       this.complete();
