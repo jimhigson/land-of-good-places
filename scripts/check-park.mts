@@ -102,35 +102,38 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 14,
+    worst: 21,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
-      'both sides. The §6 fence closed this from 231 (hand park) to 20: the ' +
-      'residue is the crossing and station gaps themselves, which are open ' +
-      'by design and compartmented so they cannot be strolled along.',
+      'both sides. The §6 fence closed this from 231 (hand park) to ~20: the ' +
+      'residue is the crossing and station gaps themselves, open by design ' +
+      'and compartmented so they cannot be strolled along. Re-recorded at 21 ' +
+      'on 28 July when the railway became a pure pre-scene plan (train/plan) ' +
+      'and the loop re-solved: every metre was audited against the solved ' +
+      'curve — the level crossing at 90 m plus the two platform gaps — see ' +
+      'the race-coaster PR.',
   },
   'rail.walkable': {
-    worst: 34,
+    worst: 30,
     why:
       'Points on the track centre line where a child can stand AND walk to ' +
-      'from the entrance. 54 = the level-crossing decks and the platform rail ' +
+      'from the entrance: the level-crossing decks and the platform rail ' +
       'edges — the deliberate places. Was 347-of-355 before the §6 fence.',
   },
   'anchor.reach:building': {
-    worst: 2.0,
+    worst: 0.1,
     why:
-      'The ginormous slide spans the gap from the roof to the ball pit, so ' +
-      'the building overruns its 19 m declaration by up to (near.max 30) − 19 ' +
-      '= 11 m — the manifest relation bounds it. The honest fix is L1 ' +
-      'modelling the slide as a link with its own footprint (checker finding, ' +
-      '27 July); until then this entry tracks the relation, not a mistake.',
+      'Once 2.0 (the ginormous slide spanning to the ball pit); the 28 July ' +
+      'rail replan left it overrunning its 19 m declaration by only ' +
+      'centimetres, but any overrun at all still emits a finding, so the ' +
+      'entry stays at the smallest step above zero.',
   },
   'anchor.reach:ballPit': {
     worst: 1.0,
     why: 'The pit lip and its cushions build ~0.9 m past the declared 9 m.',
   },
   'anchor.reach:dodgems': {
-    worst: 1.8,
+    worst: 1.7,
     why:
       'The bumper wall builds 0.6 m proud, and the welcome arch was widened ' +
       'to 1.9 m half-span so the nav lattice can route through it (its 1.35 m ' +

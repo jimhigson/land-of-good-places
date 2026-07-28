@@ -11,6 +11,7 @@ import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
+import { TRAIN_PLAN } from './train/plan';
 
 /**
  * The winding path network.
@@ -136,6 +137,13 @@ function routeAround(
       const dx = abx / length;
       const dz = abz / length;
       for (const blocker of BLOCKERS) {
+        // A segment ending inside the circle is arriving at a destination —
+        // every spur's last metres run into a plot mouth. Detouring that
+        // blocker would splice the same escape point forever (measured:
+        // seven copies of one point). Only the *far* endpoint can be inside
+        // a blocker: starts are junction points, kept outside every circle
+        // by `nearestNetworkPoint`.
+        if (Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius) continue;
         const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
         const cx = a[0] + dx * t;
         const cz = a[1] + dz * t;
@@ -152,7 +160,16 @@ function routeAround(
     }
     if (!changed) break;
   }
-  return points;
+  // Collapse any near-identical neighbours: a zero-length Catmull-Rom
+  // segment is a NaN tangent waiting for the ribbon extruder.
+  const clean: [number, number][] = [];
+  for (const point of points) {
+    const last = clean[clean.length - 1];
+    if (last && Math.hypot(point[0] - last[0], point[1] - last[1]) < 0.4) continue;
+    clean.push(point);
+  }
+  if (clean.length < 2) clean.push([to[0], to[1]]);
+  return clean;
 }
 
 function nearestRingPoint(
@@ -172,76 +189,216 @@ function nearestRingPoint(
   return best;
 }
 
-function buildRoutes(): readonly RouteDefinition[] {
-  const ring = solveRing();
-  const routes: RouteDefinition[] = [
-    { name: 'main-loop', width: 3.6, closed: true, points: ring },
+/**
+ * The network as a *graph* first: named nodes (every place a child might be
+ * going) and solved edges between them. The drawn ribbons, the crossings, the
+ * NPC destinations and `check:park`'s reachability all derive from this one
+ * structure, so "is everywhere connected?" is a property of the data rather
+ * than an accident of which ribbons happen to touch.
+ *
+ * Nodes: the park gate, the fountain plaza, every anchor's entrance, every
+ * stall's doormat, and — now that `train/plan.ts` solves the railway before
+ * any path is drawn — both train station platforms. Edges: the ring road
+ * backbone, plus a spur from the network to every node, each routed round
+ * the placed plots. A node already standing on the network keeps its edge
+ * unpaved (`paved: false`): connected in the graph, no double ribbon drawn.
+ */
+export interface PathNode {
+  readonly id: string;
+  readonly kind: 'gate' | 'plaza' | 'anchor' | 'stall' | 'station';
+  readonly x: number;
+  readonly z: number;
+}
+
+export interface PathEdge {
+  /** Node ids; `'ring'` means the backbone itself. */
+  readonly from: string;
+  readonly to: string;
+  readonly route: RouteDefinition;
+  /** False when the node stands on the network already — no ribbon drawn. */
+  readonly paved: boolean;
+}
+
+export interface PathGraph {
+  readonly nodes: readonly PathNode[];
+  readonly edges: readonly PathEdge[];
+  /** The closed backbone the spurs hang off. */
+  readonly ring: RouteDefinition;
+}
+
+function buildGraph(): PathGraph {
+  const ringPoints = solveRing();
+  const ring: RouteDefinition = { name: 'main-loop', width: 3.6, closed: true, points: ringPoints };
+
+  const nodes: PathNode[] = [
+    { id: 'gate', kind: 'gate', x: 0, z: 54 },
+    { id: 'plaza', kind: 'plaza', x: PLAZA.x, z: PLAZA.z },
+  ];
+  const edges: PathEdge[] = [
+    // The backbone, as an edge from itself to itself: everything hangs off it.
+    { from: 'ring', to: 'ring', paved: true, route: ring },
     // The approach: from just inside the park gate, down the protected
     // corridor, then around whatever stands between it and the plaza.
     {
-      name: 'gate-approach',
-      width: 3.2,
-      closed: false,
-      points: [
-        [0, 54] as const,
-        [0, 30] as const,
-        ...routeAround([0, 27], nearestRingPoint(ring, 0, 27)).slice(1),
-      ],
+      from: 'gate',
+      to: 'ring',
+      paved: true,
+      route: {
+        name: 'gate-approach',
+        width: 3.2,
+        closed: false,
+        points: [
+          [0, 54] as const,
+          [0, 30] as const,
+          ...routeAround([0, 27], nearestRingPoint(ringPoints, 0, 27)).slice(1),
+        ],
+      },
     },
     // From the ring to the plaza edge nearest the gate side, so the two
     // networks always touch.
     {
-      name: 'fountain-approach',
-      width: 3.0,
-      closed: false,
-      points: routeAround(
-        nearestRingPoint(ring, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
-        [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
-      ),
+      from: 'ring',
+      to: 'plaza',
+      paved: true,
+      route: {
+        name: 'fountain-approach',
+        width: 3.0,
+        closed: false,
+        points: routeAround(
+          nearestRingPoint(ringPoints, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
+          [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
+        ),
+      },
     },
   ];
+
+  // Only paved edges are real paving: a later spur may branch off them, and
+  // "already on the network" is measured against them. An unpaved edge is a
+  // connectivity fact, not a ribbon — branching off one paved from a booth's
+  // doormat once, and the junction waypoint seeded inside the booth.
+  const network = (): readonly RouteDefinition[] =>
+    edges.filter((edge) => edge.paved).map((edge) => edge.route);
+
+  /** A spur edge from the network to (ex, ez), routed round the plots. When
+   * the destination already stands on the network the edge is kept but not
+   * paved — connectivity is a graph fact either way. `past` carries the
+   * ribbon a couple of metres beyond the doormat into the plot mouth. */
+  const spur = (
+    id: string,
+    kind: PathNode['kind'],
+    ex: number,
+    ez: number,
+    towardX: number,
+    towardZ: number,
+    width: number,
+  ): void => {
+    nodes.push({ id, kind, x: ex, z: ez });
+    const already = distanceToRouteNetwork(network(), ex, ez) < 4;
+    // Branch from wherever the *network* comes nearest — an earlier spur is
+    // as good a trunk as the ring. Starting from the nearest ring vertex sent
+    // the west station's spur on a 45 m wander from (-8.7, 5) around three
+    // booths; from the sky cruiser's spur it is a 21 m walk.
+    const start = nearestNetworkPoint(network(), ringPoints, ex, ez);
+    const l = Math.hypot(towardX - ex, towardZ - ez);
+    const past: readonly (readonly [number, number])[] =
+      l > 1e-6
+        ? [[ex + ((towardX - ex) / l) * 2, ez + ((towardZ - ez) / l) * 2]]
+        : []; // no "past the doormat" when the node is its own destination
+    edges.push({
+      from: 'ring',
+      to: id,
+      paved: !already,
+      route: {
+        name: `spur-${id}`,
+        width,
+        closed: false,
+        points: [...routeAround(start, [ex, ez]), ...past],
+      },
+    });
+  };
+
   for (const anchor of ANCHORS) {
     const [ex, ez] = anchor.entrance;
-    const start = nearestRingPoint(ring, ex, ez);
-    // Carry the spur a couple of metres past the doormat into the plot mouth,
-    // as the authored spurs always did.
-    const towards = [anchor.position[0] - ex, anchor.position[1] - ez];
-    const l = Math.hypot(towards[0] as number, towards[1] as number) || 1;
-    const past: readonly [number, number] = [
-      ex + ((towards[0] as number) / l) * 2,
-      ez + ((towards[1] as number) / l) * 2,
-    ];
-    routes.push({
-      name: `spur-${anchor.id}`,
-      width: anchor.id === 'building' ? 2.8 : 2.6,
-      closed: false,
-      points: [...routeAround(start, [ex, ez]), past],
-    });
+    spur(
+      anchor.id,
+      'anchor',
+      ex,
+      ez,
+      anchor.position[0],
+      anchor.position[1],
+      anchor.id === 'building' ? 2.8 : 2.6,
+    );
   }
-  // Booths the solver placed away from the network get a spur too — the sky
-  // cruiser's sits in the castle's west pocket, a 30 m walk from the nearest
-  // path when this loop didn't exist. Booths already beside the ring (all the
-  // others, today) are skipped rather than double-paved.
+  // Every stall booth is a node too — the sky cruiser's sits in the castle's
+  // west pocket, a 30 m walk from the nearest path before its spur existed.
   for (const entry of PARK_LAYOUT.entries.values()) {
     if (!entry.id.startsWith('stall.')) continue;
-    const ex = entry.entranceX;
-    const ez = entry.entranceZ;
-    if (distanceToRouteNetwork(routes, ex, ez) < 4) continue;
-    const start = nearestRingPoint(ring, ex, ez);
-    const towards = [entry.x - ex, entry.z - ez];
-    const l = Math.hypot(towards[0] as number, towards[1] as number) || 1;
-    const past: readonly [number, number] = [
-      ex + ((towards[0] as number) / l) * 2,
-      ez + ((towards[1] as number) / l) * 2,
-    ];
-    routes.push({
-      name: `spur-${entry.id}`,
-      width: 2.6,
-      closed: false,
-      points: [...routeAround(start, [ex, ez]), past],
+    spur(entry.id, 'stall', entry.entranceX, entry.entranceZ, entry.x, entry.z, 2.6);
+  }
+  // And the train stations — plannable at all only because `train/plan.ts`
+  // solves the railway before any path is drawn. The stand is the node, but
+  // the spur routes to the *approach* (the platform's empty half) and only
+  // then turns down the platform: arriving radially put the canopy posts
+  // square across the waypoint graph's line to the stand.
+  for (const station of TRAIN_PLAN.stations) {
+    const id = `station-${station.index}`;
+    nodes.push({ id, kind: 'station', x: station.standX, z: station.standZ });
+    const start = nearestNetworkPoint(network(), ringPoints, station.approachX, station.approachZ);
+    edges.push({
+      from: 'ring',
+      to: id,
+      paved: true,
+      route: {
+        name: `spur-${id}`,
+        width: 2.6,
+        closed: false,
+        points: [
+          ...routeAround(start, [station.approachX, station.approachZ]),
+          [station.standX, station.standZ],
+        ],
+      },
     });
   }
-  return routes;
+
+  return { nodes, edges, ring };
+}
+
+/** The closest point on any segment of the routes built so far — where a new
+ * spur branches off. Falls back to the nearest ring vertex if the network is
+ * somehow empty. */
+function nearestNetworkPoint(
+  routes: readonly RouteDefinition[],
+  ringPoints: readonly (readonly [number, number])[],
+  x: number,
+  z: number,
+): readonly [number, number] {
+  let best: readonly [number, number] | null = null;
+  let bestDistance = Infinity;
+  for (const route of routes) {
+    const points = route.points;
+    const count = route.closed ? points.length : points.length - 1;
+    for (let i = 0; i < count; i += 1) {
+      const [ax, az] = points[i] as readonly [number, number];
+      const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const lengthSq = dx * dx + dz * dz;
+      const t =
+        lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+      const px = ax + dx * t;
+      const pz = az + dz * t;
+      // Never branch from inside a plot's blocker circle: every spur's last
+      // couple of metres run into a plot mouth, and a junction there routes
+      // the new spur straight through the booth it belongs to.
+      if (BLOCKERS.some((b) => Math.hypot(px - b.x, pz - b.z) < b.radius)) continue;
+      const distance = Math.hypot(x - px, z - pz);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = [px, pz];
+      }
+    }
+  }
+  return best ?? nearestRingPoint(ringPoints, x, z);
 }
 
 /** Min distance from (x, z) to any segment of the routes built so far. */
@@ -267,11 +424,17 @@ function distanceToRouteNetwork(
   return best;
 }
 
+/** The solved graph — nodes, edges, backbone. One per build, like the park. */
+export const PATH_GRAPH: PathGraph = buildGraph();
+
 /**
- * Exported so anything that wants to *draw* the network — the park map — can
- * rebuild the same centreline from the same generated control points.
+ * The ribbons actually drawn — the graph's paved edges. Exported so anything
+ * that wants to *draw* the network — the park map — can rebuild the same
+ * centreline from the same generated control points.
  */
-export const ROUTES: readonly RouteDefinition[] = buildRoutes();
+export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
+  .filter((edge) => edge.paved)
+  .map((edge) => edge.route);
 
 /** Sampled path centreline, used for scenery placement queries. */
 export interface PathSample {

@@ -28,6 +28,15 @@ export interface PlannedStation {
   /** Where a child waits: on the park side of the platform. */
   readonly standX: number;
   readonly standZ: number;
+  /**
+   * Where a path should arrive: a few metres along the platform on its
+   * *empty* half. The canopy posts and the bench all stand at negative
+   * platform-along by construction (`station.ts`), so a spur walking in at
+   * positive along, then turning down the platform to the stand, never has
+   * furniture across its line.
+   */
+  readonly approachX: number;
+  readonly approachZ: number;
 }
 
 const STATION_SEEDS = [
@@ -108,6 +117,7 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
     const target = route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
     const distance = clearStationDistance(route, target);
     const { standX, standZ } = stationStand(route, distance);
+    const tangent = route.tangentAt(distance, new Vector3());
     return {
       index,
       name: seed.name,
@@ -117,6 +127,8 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
       distance,
       standX,
       standZ,
+      approachX: standX + tangent.x * 3.5,
+      approachZ: standZ + tangent.z * 3.5,
     };
   });
 }

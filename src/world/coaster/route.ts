@@ -212,35 +212,42 @@ export class CoasterRoute {
     const probe = new Vector3();
     for (let pass = 0; pass < 10; pass += 1) {
       // Worst deficit per control point, so a run of low samples under one
-      // control raises it once by what it needs, not once per sample.
+      // control raises it once by what it needs, not once per sample. The
+      // same sweep records how close to the station each control's track
+      // actually runs — measured on the curve, because the carve's
+      // bearing-domain estimate stretches on a wandering spur and froze
+      // controls whose real track was well outside the assert's window.
       const lifts = new Map<number, number>();
+      const ownsStationTrack = new Map<number, number>();
       for (let d = 0; d < length; d += 2) {
         curve.getPointAt(d / length, probe);
         const toStation = Math.min(
           Math.abs(d - station),
           length - Math.abs(d - station),
         );
+        const bearing = ((Math.atan2(probe.z, probe.x) + TAU) % TAU) / TAU * BEARINGS;
+        const control = (Math.round(bearing / 4) * 4) % BEARINGS;
+        ownsStationTrack.set(
+          control,
+          Math.min(ownsStationTrack.get(control) ?? Infinity, toStation),
+        );
         if (toStation < STATION_FLAT + STATION_RAMP) continue;
         const above = probe.y - terrainHeight(probe.x, probe.z);
         if (above >= CRUISE_FLOOR) continue;
-        const bearing = ((Math.atan2(probe.z, probe.x) + TAU) % TAU) / TAU * BEARINGS;
-        const control = (Math.round(bearing / 4) * 4) % BEARINGS;
         const lift = CRUISE_FLOOR - above + 0.4;
         lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
       }
-      // Never lift a control that the station carve owns — a half-lift
-      // bleeding onto the boarding flat would tilt the platform.
-      const carved = (index: number): boolean => {
-        const offset = Math.abs(
-          ((index - stallIndex + BEARINGS / 2 + BEARINGS) % BEARINGS) - BEARINGS / 2,
-        );
-        return (offset / BEARINGS) * TAU * stationRadius < STATION_FLAT + STATION_RAMP * 0.6;
-      };
+      // Never lift a control that owns boarding-flat or early-ramp track —
+      // a half-lift bleeding onto the platform would tilt it. Mid-ramp and
+      // beyond is fair game: steepening the ramp's tail is exactly how a
+      // sag just past the window gets fixed.
+      const liftable = (index: number): boolean =>
+        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65;
       for (const [control, lift] of lifts) {
-        if (!carved(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
+        if (liftable(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
         for (const side of [-4, 4]) {
           const neighbour = (control + side + BEARINGS) % BEARINGS;
-          if (!carved(neighbour))
+          if (liftable(neighbour))
             heights[neighbour] = (heights[neighbour] ?? CRUISE_FLOOR) + lift * 0.5;
         }
       }

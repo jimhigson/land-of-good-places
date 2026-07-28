@@ -175,7 +175,10 @@ export class ParkTrain implements GameSystem, TrainService {
     // Level crossings first (they come out of the solved curve and the drawn
     // paths), then the fence, which leaves a gap at every one of them and at
     // both stations (whose spots were fixed in `train/plan.ts`).
-    this.crossings = computeCrossings(this.route);
+    this.crossings = computeCrossings(
+      this.route,
+      TRAIN_PLAN.stations.map((station) => station.distance),
+    );
 
     // --- the train itself ----------------------------------------------------
     this.locomotive = createLocomotive();
