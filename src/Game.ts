@@ -23,6 +23,7 @@ import { NavGrid } from './world/NavGrid';
 import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
+import { RaceHud } from './ui/RaceHud';
 import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
@@ -83,6 +84,8 @@ export class Game {
   readonly actionChips: ActionChips;
   readonly highlights: Highlights;
   readonly tapBurst: TapBurst;
+  /** The Rail Race's countdown, lap and result card — and its hold pad. */
+  readonly raceHud: RaceHud;
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
@@ -255,6 +258,10 @@ export class Game {
     // listener and a pool of four overlays — see `ui/TapBurst.ts`; no panel
     // has to know it exists.
     this.tapBurst = new TapBurst(uiRoot);
+    // The Rail Race's framing. Mounted here with the rest of the HUD; it is
+    // invisible and inert until the race raises its first moment (see the
+    // wiring at the end of this constructor).
+    this.raceHud = new RaceHud(uiRoot);
     // ...including the world's own HUD. The face-painting stall owns a picker
     // panel and a proximity hint, and `World` was built ~80 lines ago, so it
     // could not have mounted them itself without the line above deleting them.
@@ -425,6 +432,7 @@ export class Game {
       this.camera.resize(width, height);
       this.world.train.rideView?.resize(width, height);
       this.world.coaster.rideView?.resize(width, height);
+      this.world.raceCoaster.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -433,17 +441,58 @@ export class Game {
     // seat's RideCamera, alighting wipes back. The override is the third
     // render state Decision 1 specified — render() swaps cameras, nothing
     // else changes. Her own model hides while the eye is in her head.
-    const firstPerson = (camera: import('three').PerspectiveCamera | null) => {
+    const rideCamera = (
+      camera: import('three').PerspectiveCamera | null,
+      playerStaysVisible = false,
+    ) => {
       this.transitions.irisWipe(() => {
         this.cameraOverride = camera;
-        this.player.group.visible = camera === null;
+        this.player.group.visible = camera === null || playerStaysVisible;
       });
     };
     this.world.train.onRideChange = (riding) =>
-      firstPerson(riding ? (this.world.train.rideView?.camera ?? null) : null);
+      rideCamera(riding ? (this.world.train.rideView?.camera ?? null) : null);
     this.world.coaster.onRideChange = (riding) =>
-      firstPerson(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
-    this.miniGames.boardCoaster = () => this.world.coaster.requestBoard();
+      rideCamera(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
+    this.world.raceCoaster.onRideChange = (riding) =>
+      rideCamera(
+        riding ? (this.world.raceCoaster.rideView?.camera ?? null) : null,
+        this.world.raceCoaster.playerStaysVisible,
+      );
+    this.miniGames.boardRide = (stallId) => {
+      if (stallId === 'railRacer') return this.world.raceCoaster.requestBoard();
+      if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
+      return false;
+    };
+
+    // The Rail Race's framing — the 3-2-1, the lap, and the card at the end.
+    // `Coaster` raises moments and knows nothing about the DOM; this is the
+    // only place the two meet, in the same idiom as `onRideChange` above.
+    //
+    // The HUD is also the *hold button on a phone*: `screenIsBusy()` hides the
+    // touch controls while a ride has hold of you, so without this the race
+    // would have no control at all on the device it is most likely played on.
+    this.world.raceCoaster.raceHold = () => this.raceHud.holding;
+    this.world.raceCoaster.onRaceMoment = (moment) => {
+      switch (moment.kind) {
+        case 'start':
+          this.raceHud.setShown(true);
+          break;
+        case 'count':
+          this.raceHud.setCount(moment.text);
+          break;
+        case 'lap':
+          this.raceHud.setLap(`Lap ${moment.lap} of ${moment.of}`);
+          break;
+        case 'result':
+          this.raceHud.setLap(null);
+          this.raceHud.setBanner(moment.won ? 'won' : 'lost');
+          break;
+        case 'end':
+          this.raceHud.setShown(false);
+          break;
+      }
+    };
 
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));
@@ -614,6 +663,7 @@ export class Game {
     this.miniGames.dispose();
     this.tapNavigator.dispose();
     this.tapBurst.dispose();
+    this.raceHud.dispose();
     this.touchControls?.dispose();
     this.stairMenu.dispose();
     this.transitions.dispose();

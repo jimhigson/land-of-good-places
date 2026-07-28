@@ -63,8 +63,11 @@ export interface ParkLayout {
 /** Walkable clearance kept between any two plots' bounding circles. */
 const CORRIDOR_GAP = 5;
 
-/** Candidate draws per entry before this whole-park attempt is abandoned. */
-const MAX_TRIES = 400;
+/** Candidate draws per entry before this whole-park attempt is abandoned.
+ * 3000, not 400: with per-entry streams a restart is one greedy arrangement,
+ * and the difference between "unsolvable in 240 restarts" and "solved at
+ * 101" was giving a squeezed entry enough draws to find its sliver. */
+const MAX_TRIES = 3000;
 
 /**
  * Whole-park restarts. Greedy placement can paint itself into a corner — an
@@ -72,7 +75,7 @@ const MAX_TRIES = 400;
  * the cheap, deterministic cure is to re-roll the whole arrangement: the rng
  * stream continues, so restarts are as seeded as everything else.
  */
-const PARK_RESTARTS = 80;
+const PARK_RESTARTS = 240;
 
 /** The gate sits on the boundary wall; the corridor runs from it to centre. */
 const GATE_ANGLE = Math.PI / 2; // matches entrance/layout.ts ENTRANCE_ANGLE

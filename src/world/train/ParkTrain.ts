@@ -8,6 +8,7 @@ import type { CollisionWorld } from '../Collision';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
 import { TrainRoute } from './route';
+import { TRAIN_PLAN } from './plan';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
@@ -167,16 +168,17 @@ export class ParkTrain implements GameSystem, TrainService {
   constructor(collision: CollisionWorld) {
     this.group.name = 'park-train';
 
-    this.route = new TrainRoute(collision);
+    this.route = TRAIN_PLAN.route;
     this.track = buildTrack(this.route);
     this.group.add(this.track.group);
 
     // Level crossings first (they come out of the solved curve and the drawn
     // paths), then the fence, which leaves a gap at every one of them and at
-    // both stations. Order matters: the stations below choose their spot with
-    // `clearStationDistance`, so the fence is built after them — see the end
-    // of this constructor.
-    this.crossings = computeCrossings(this.route);
+    // both stations (whose spots were fixed in `train/plan.ts`).
+    this.crossings = computeCrossings(
+      this.route,
+      TRAIN_PLAN.stations.map((station) => station.distance),
+    );
 
     // --- the train itself ----------------------------------------------------
     this.locomotive = createLocomotive();
@@ -218,53 +220,31 @@ export class ParkTrain implements GameSystem, TrainService {
     }
 
     // --- the stations --------------------------------------------------------
-    // At the two bearings where the solved route comes closest to the park: due
-    // east and due west, which are opposite ends of the loop and both on a
-    // near-circular stretch, so a straight platform sits flush to the rails.
-    const stationSeeds = [
-      {
-        name: 'Sunny Side',
-        subtitle: 'all aboard for the whole park!',
-        glyph: '🚂',
-        accent: PALETTE.markerLemon,
-        bearingX: 1,
-        bearingZ: 0,
-      },
-      {
-        name: 'Bluebell Halt',
-        subtitle: 'mind the gap, and the bunnies',
-        glyph: '🚉',
-        accent: PALETTE.markerSky,
-        bearingX: -1,
-        bearingZ: 0,
-      },
-    ] as const;
-
-    stationSeeds.forEach((seed, index) => {
-      // The bearing gives the *neighbourhood*; the exact spot slides along
-      // the loop until the platform's ground is genuinely clear. The park is
-      // generated now (Decision 5), so "due east happens to be open lawn" is
-      // no longer something anyone guarantees — trees are seeded before the
-      // train, and a platform standing in one is exactly what check:park
-      // caught the first time the layout rolled.
-      const target = this.route.distanceNear(seed.bearingX * 60, seed.bearingZ * 60);
-      const distance = this.clearStationDistance(target, collision);
+    // Planned in `train/plan.ts` — position, name, everything — before any
+    // scene object existed, so the path graph could take them as nodes. Here
+    // they are only *built*.
+    for (const planned of TRAIN_PLAN.stations) {
       const station = new Station(
         {
-          index,
-          name: seed.name,
-          subtitle: seed.subtitle,
-          glyph: seed.glyph,
-          accent: seed.accent,
-          distance,
+          index: planned.index,
+          name: planned.name,
+          subtitle: planned.subtitle,
+          glyph: planned.glyph,
+          accent: planned.accent,
+          distance: planned.distance,
         },
         this.route,
         collision,
       );
       this.stations.push(station);
       this.group.add(station.group);
-      this.stops.push({ index, name: seed.name, x: station.standX, z: station.standZ });
-    });
+      this.stops.push({
+        index: planned.index,
+        name: planned.name,
+        x: station.standX,
+        z: station.standZ,
+      });
+    }
 
     // --- the fence (Decision 4 §6: keeping feet off the track) -------------
     // Built last of all the trackside furniture, because its gaps are defined
@@ -289,41 +269,6 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 
   /** Platforms and carriage floors, for `WalkSurfaces.addPlatform`. */
-  /**
-   * Slides along the loop from `target` (0, +1, -1, +2 ... metres) until the
-   * platform area is clear of everything registered so far, checked as three
-   * discs across the platform's length. Gives up at +-24 m and returns the
-   * target — the boot assert and check:park will then say so loudly rather
-   * than a child finding a platform inside a tree.
-   */
-  private clearStationDistance(target: number, collision: CollisionWorld): number {
-    const centre = new Vector3();
-    const tangent = new Vector3();
-    for (let step = 0; step <= 48; step += 1) {
-      const offset = (step % 2 === 0 ? 1 : -1) * Math.ceil(step / 2);
-      const distance = target + offset;
-      this.route.pointAt(distance, centre);
-      this.route.tangentAt(distance, tangent);
-      const rightX = tangent.z;
-      const rightZ = -tangent.x;
-      const parkIsRight = rightX * -centre.x + rightZ * -centre.z >= 0;
-      const side = parkIsRight ? 1 : -1;
-      const standX = centre.x + rightX * side * 2.15;
-      const standZ = centre.z + rightZ * side * 2.15;
-      let clear = true;
-      for (const along of [-2.6, 0, 2.6]) {
-        const px = standX + tangent.x * along;
-        const pz = standZ + tangent.z * along;
-        if (!collision.isClearCircle(px, pz, 1.7)) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) return distance;
-    }
-    return target;
-  }
-
   platforms(): MovingPlatform[] {
     const platforms: MovingPlatform[] = this.stations.map((station) => station.asPlatform());
     for (const carriage of this.carriages) platforms.push(carriageFloor(carriage));

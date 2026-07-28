@@ -5,6 +5,7 @@ import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 import { PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
 import { STALL_STANDS } from '../../minigames/stallPlacement';
+import { TRAIN_PLAN } from '../../world/train/plan';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
 /**
@@ -204,6 +205,15 @@ function buildSeeds(): NodeSeed[] {
   // 3. Where a child stands to be served at each stall.
   for (const stand of STALL_STANDS) add(stand.x, stand.z, true);
 
+  // 3½. The train stations: the stand (a place worth waiting at) and its
+  // approach point. The approach matters structurally — the spur turns 90°
+  // there onto the platform's empty half, and without a node at the corner
+  // the graph tries to cut across the canopy posts and strands the stand.
+  for (const station of TRAIN_PLAN.stations) {
+    add(station.approachX, station.approachZ, false);
+    add(station.standX, station.standZ, true);
+  }
+
   // 4. The paving between them.
   for (const route of ROUTES) {
     for (const point of sampleRoute(route)) {
@@ -231,7 +241,12 @@ function sampleRoute(route: RouteDefinition): { x: number; z: number }[] {
   const point = new Vector3();
   const points: { x: number; z: number }[] = [];
   for (let i = 0; i <= last; i += 1) {
-    curve.getPoint(i / steps, point);
+    // getPointAt, not getPoint: parameter-uniform sampling gives each control
+    // segment the same number of samples however long it is, and one long
+    // segment on an otherwise-knotty spur went 27 m with no waypoint in it —
+    // twice MAX_EDGE, so its far end was stranded. Arc-length sampling makes
+    // "every ROUTE_SPACING metres" actually true.
+    curve.getPointAt(i / steps, point);
     points.push({ x: point.x, z: point.z });
   }
   return points;

@@ -42,12 +42,25 @@ const TOUCH_DISTANCE = 3.2;
 /** Two touches this far apart along the loop belong to different crossings. */
 const CLUSTER_GAP = 8;
 
-export function computeCrossings(route: TrainRoute): LevelCrossing[] {
+/** Touches this close (along the loop) to a platform are the *station's* —
+ * its fence gap and platform already own that stretch, and a timber deck
+ * under a platform is not a crossing. The station spurs the path graph now
+ * grows would otherwise register one at every platform. */
+const STATION_EXCLUSION = 9.5;
+
+export function computeCrossings(
+  route: TrainRoute,
+  stationDistances: readonly number[] = [],
+): LevelCrossing[] {
   const point = new Vector3();
   const touches: { railDistance: number; x: number; z: number }[] = [];
 
   const consider = (x: number, z: number) => {
     const railDistance = route.distanceNear(x, z);
+    for (const station of stationDistances) {
+      const along = Math.abs(route.wrap(railDistance - station + route.length / 2) - route.length / 2);
+      if (along < STATION_EXCLUSION) return;
+    }
     route.pointAt(railDistance, point);
     if (Math.hypot(point.x - x, point.z - z) <= TOUCH_DISTANCE) {
       touches.push({ railDistance, x: point.x, z: point.z });

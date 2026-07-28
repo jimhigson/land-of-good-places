@@ -202,21 +202,18 @@ export class MiniGameHost {
 
   /** Standing next to a stall and pressing interact opens it. */
   /**
-   * The rail racer's booth boards the real coaster now (Decision 4 C5) —
-   * Game wires this to `world.coaster.requestBoard`. The 2D scene is
-   * retired; the stall, its sign and its glyph stay as the way in.
+   * Booths that board world rides instead of opening a mini-game — Game
+   * wires stall ids to the rides' `requestBoard`s. The 2D rail racer scene
+   * is retired; its stall (and the Sky Cruiser's) stay as the ways in.
    */
-  boardCoaster: (() => boolean) | null = null;
+  boardRide: ((stallId: string) => boolean) | null = null;
 
   private checkStalls(context: FrameContext): void {
     if (!context.input.justPressed('interact')) return;
     const { x, z } = context.playerPosition;
     for (const stall of this.stalls) {
       if (Math.hypot(x - stall.standX, z - stall.standZ) <= REACH) {
-        if (stall.definition.id === 'railRacer' && this.boardCoaster) {
-          this.boardCoaster();
-          return;
-        }
+        if (this.boardRide?.(stall.definition.id)) return;
         this.begin(stall);
         return;
       }
@@ -239,7 +236,16 @@ export class MiniGameHost {
       return;
     }
 
-    const game = stall.definition.create();
+    const factory = stall.definition.create;
+    if (!factory) {
+      // A ride-boarding stall with no mini-game behind it: boardRide should
+      // have taken it in checkStalls; ending up here means the wiring is
+      // missing, and saying so beats a silent black curtain.
+      console.warn(`stall '${stall.definition.id}' has no mini-game and no ride wiring`);
+      this.finishLeaving();
+      return;
+    }
+    const game = factory();
     game.init({
       renderer: this.engine.renderer,
       touch: this.touch,

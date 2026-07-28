@@ -77,6 +77,7 @@ function ferrisKiosk(): StallPlacement {
 
 export const STALL_PLACEMENTS = {
   railRacer: placedStall('stall.railRacer'),
+  skyCruiser: placedStall('stall.skyCruiser'),
   spookyHouse: placedStall('stall.spookyHouse'),
   waterFight: placedStall('stall.waterFight'),
   spaceFerrisWheel: ferrisKiosk(),

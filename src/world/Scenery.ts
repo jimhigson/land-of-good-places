@@ -22,6 +22,7 @@ import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
 import { PARK_SEED } from './parkManifest';
 import { PARK_LAYOUT } from './parkLayout';
+import { TRAIN_PLAN } from './train/plan';
 import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
@@ -523,15 +524,35 @@ function facetted<T extends BufferGeometry>(geometry: T): T {
   return geometry;
 }
 
-/** Somewhere we are allowed to plant: not on paving, not in a reserved plot. */
+/** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
+ * not on the railway. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
   if (Math.hypot(x, z) > 55) return false;
   if (isOnPath(x, z, clearance)) return false;
   // Keep the fountain plaza open — wherever the layout put it (Decision 5).
   if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
   if (insideAnyAnchor(x, z, clearance)) return false;
+  if (onRailway(x, z, clearance)) return false;
   return true;
 }
+
+/**
+ * The rail corridor and the platforms. The dependency used to point the
+ * other way — the route was solved against the finished collision world and
+ * bent around trees — but the route is a pure pre-scene plan now
+ * (`train/plan.ts`), so the trees are the ones that give way.
+ */
+function onRailway(x: number, z: number, clearance: number): boolean {
+  const route = TRAIN_PLAN.route;
+  const near = route.pointAt(route.distanceNear(x, z), railProbe);
+  // Fence at 2.0 m either side, plus the plant's own clearance.
+  if (Math.hypot(near.x - x, near.z - z) < 2.6 + clearance) return true;
+  for (const station of TRAIN_PLAN.stations) {
+    if (Math.hypot(station.standX - x, station.standZ - z) < 5.2 + clearance) return true;
+  }
+  return false;
+}
+const railProbe = new Vector3();
 
 function insideAnyAnchor(x: number, z: number, margin: number): boolean {
   // Every placed entry, not just the five big anchors: the stalls and their
