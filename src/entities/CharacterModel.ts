@@ -65,6 +65,8 @@ export class CharacterModel {
   readonly hairAnchor: Group;
   readonly holdAnchor: Group;
   readonly backpackAnchor: Group;
+  /** Where a worn keychain hangs — see `art/models/kid.ts`'s `keychainAnchor`. */
+  readonly keychainAnchor: Group;
 
   private readonly kid: KidHandle;
 
@@ -82,6 +84,7 @@ export class CharacterModel {
     this.hairAnchor = this.kid.hairAnchor;
     this.holdAnchor = this.kid.holdAnchor;
     this.backpackAnchor = this.kid.backpackAnchor;
+    this.keychainAnchor = this.kid.keychainAnchor;
   }
 
   /**

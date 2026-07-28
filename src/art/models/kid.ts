@@ -163,6 +163,12 @@ export interface KidHandle extends CreatureHandle {
   /** Where a peeking creature's head pops out of the bag. */
   readonly backpackAnchor: Group;
   /**
+   * Where a worn keychain hangs — low on the bag's side, clear of
+   * {@link backpackAnchor} (the bag's *mouth*, used by a peeking creature's
+   * head) so the two never overlap. See `entities/WornKeychain.ts`.
+   */
+  readonly keychainAnchor: Group;
+  /**
    * Every hair mesh built, each tagged with the styles that show it.
    *
    * Exposed as typed objects rather than found by name, so the NPC crowd can
@@ -306,6 +312,14 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
   // --- backpack -------------------------------------------------------------------
   const backpackAnchor = new Group();
+  // Additive (keychain-shop feature): a second anchor low on the bag's side,
+  // not shared with `backpackAnchor` above — that one is the bag's *mouth*,
+  // where a peeking creature's head pops out (`BackpackPeek`), and a keychain
+  // hanging from the same point would sit on top of that head. Declared
+  // outside the `if` like `backpackAnchor` itself, so a kid built with
+  // `backpack: false` (the mini-game racers, the disembarking crowd) still
+  // returns a real (if unparented) `Group` rather than `undefined`.
+  const keychainAnchor = new Group();
   if (backpack) {
     // Dropped and pushed back so it still clears the underside of the skull —
     // the head now overhangs to z = -0.65, and a bag tucked under it vanishes.
@@ -327,6 +341,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
     backpackAnchor.position.set(0, 0.74, -0.3);
     body.add(backpackAnchor);
+
+    // Low on the bag's side, clear of the mouth above — see the doc comment
+    // on `KidHandle.keychainAnchor`.
+    keychainAnchor.position.set(0.17, 0.5, -0.3);
+    body.add(keychainAnchor);
   }
 
   // --- head --------------------------------------------------------------------
@@ -431,6 +450,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairAnchor,
     holdAnchor,
     backpackAnchor,
+    keychainAnchor,
     hairParts: hairRig.parts,
     // Measured, not `KID_HEIGHT`: spiky hair is a good 0.28 m taller than a
     // bob, and a name label placed from a constant would sit inside it.
