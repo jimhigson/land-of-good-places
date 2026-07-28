@@ -38,6 +38,24 @@ non-compiling branch to `main` that way once.
 TypeScript is strict with `exactOptionalPropertyTypes: true`: optional
 properties must be **omitted**, never assigned `undefined`.
 
+## Expanding the procedural generation
+
+`test/procgen/invariants.ts` proves the generated park is placed sanely — no
+wall crossing another wall or the railway, no tree through a tree, no lamp in
+anything, every path lit, every doormat usable — across the canonical seed and
+four sweep seeds. **If you add to or change procgen, add or extend an invariant
+in that file in the same PR.** It is one small function plus one line in the
+list, and it then runs on every seed for free.
+
+Two rules when you do: measure the park that was built, never the rules that
+built it; and take thresholds from the game (`PLAYER_RADIUS`,
+`TRACK_CLEARANCE`) rather than from the generator's own target. Never weaken an
+assertion to make a seed pass — swap the seed and write down why.
+
+`npm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
+is not optional. It complements `check:park`, which owns whether the park
+*works*; this owns whether its furniture is *placed sanely*.
+
 ## The browser
 
 The chrome-devtools MCP uses a **single shared Chrome profile** — only one

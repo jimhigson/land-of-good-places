@@ -1,0 +1,53 @@
+name: Procgen invariants
+
+# Proves the generated park is placed sanely — no wall crossing another wall or
+# the railway, no tree growing through a tree, no lamp standing in anything,
+# every path lit and every doormat usable — across the canonical seed and four
+# of the seeds `npm run sweep:seeds` passes.
+#
+# This is a required check on main. Any change to the procedural generation is
+# expected to extend `test/procgen/invariants.ts` in the same PR — see
+# CLAUDE.md, "Expanding the procedural generation".
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: procgen-invariants-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  invariants:
+    name: Procgen invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        # Registry hiccups are common enough to be worth retrying — same
+        # reasoning as deploy.yml.
+        run: npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000
+
+      # Runs first and on its own, so a failure reads as "an invariant broke"
+      # rather than being buried in the build log. Six parks, a few seconds.
+      - name: Procgen invariant suite
+        run: npm run test:procgen
+
+      # The full gate, which includes `check:park`'s six invariants and the
+      # ratchet on the canonical seed. Kept in the same job because it shares
+      # the npm install and still finishes well inside the timeout.
+      - name: Build
+        run: npm run build

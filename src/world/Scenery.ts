@@ -167,8 +167,29 @@ interface HideableInstance {
 /** Degenerate matrix that renders an instance as nothing — cheaper than touching instance count. */
 const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
 
+/**
+ * A wall run as actually built — the run plus the half-width it occupies.
+ *
+ * Published for the same reason {@link FoliageOccluder} is: a check that wants
+ * to prove no two walls cross should measure the walls that exist, not
+ * re-derive them from the rules that made them. Re-deriving would only ever
+ * prove the rules agree with themselves.
+ */
+export interface PlacedWallRun {
+  readonly from: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly height: number;
+  readonly kind: WallKind;
+  /** Runs sharing this are one structure and may touch. See {@link WallRun}. */
+  readonly piece: number;
+  /** Half the widest part of it, in metres. See {@link WALL_HALF_WIDTH}. */
+  readonly halfWidth: number;
+}
+
 export class Scenery {
   readonly group = new Group();
+  /** Every wall run standing in the park. See {@link PlacedWallRun}. */
+  readonly wallRuns: readonly PlacedWallRun[];
   /** The subset of trees big enough to climb. See {@link ClimbableTreeSeed}. */
   readonly climbableTrees: readonly ClimbableTreeSeed[];
   /** Every tree big enough to hide the player. See {@link FoliageOccluder}. */
@@ -183,8 +204,12 @@ export class Scenery {
     this.foliageOccluders = foliage.occluders;
     this.hideableInstances = foliage.hideableInstances;
     this.group.add(buildTreeline());
-    this.group.add(buildWoodenWalls(collision));
-    this.group.add(buildStoneWalls(collision));
+    // Collected as they are built, after `clearOfAnchors` has trimmed them,
+    // so what is published is what is standing.
+    const built: PlacedWallRun[] = [];
+    this.group.add(buildWoodenWalls(collision, built));
+    this.group.add(buildStoneWalls(collision, built));
+    this.wallRuns = built;
   }
 
   /**
@@ -834,7 +859,7 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
  * around and hide behind", so these are laid out as a loose, open maze rather
  * than a fence line.
  */
-function buildWoodenWalls(collision: CollisionWorld): Group {
+function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Group {
   const group = new Group();
   group.name = 'wooden-walls';
 
@@ -893,6 +918,7 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
     // button press, the moment walking (or tap-to-move) runs into one it
     // could jump anyway (design feedback #30e).
     collision.addWall(x1, z1, x2, z2, 0.22, run.height, true);
+    built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 
   return group;
@@ -900,7 +926,7 @@ function buildWoodenWalls(collision: CollisionWorld): Group {
 
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
-function buildStoneWalls(collision: CollisionWorld): Group {
+function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Group {
   const group = new Group();
   group.name = 'stone-walls';
 
@@ -971,6 +997,7 @@ function buildStoneWalls(collision: CollisionWorld): Group {
     // Real wall height, not the `Infinity` default — see the wooden walls
     // above, including why `autoHoppable` is `true` here too.
     collision.addWall(x1, z1, x2, z2, 0.34, run.height, true);
+    built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 
   group.add(
