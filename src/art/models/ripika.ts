@@ -28,8 +28,19 @@ import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/
  * on the screen.
  */
 
-/** Head scale-up over the original authoring. The one knob for RiPika's skull. */
-const HEAD = 1.32;
+/**
+ * Head scale-up over the original authoring. The one knob for RiPika's skull.
+ *
+ * Exported because the RiPika hat (`art/models/hats.ts`) is *this* head, worn:
+ * building it at its own scale is what makes it recognisably RiPika's head
+ * rather than a yellow ball, and it means a retune here cannot leave the hat
+ * behind. It used to be blown up to 2.1 independently, which put a 1.4 m ball
+ * on a child and made her 1.72× her own height.
+ */
+export const RIPIKA_HEAD_SCALE = 1.32;
+
+/** Local shorthand for {@link RIPIKA_HEAD_SCALE}. */
+const HEAD = RIPIKA_HEAD_SCALE;
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;

@@ -165,13 +165,13 @@ const KNOWN_DRIFT: Readonly<Record<string, Recorded>> = {
   'balloon.corgi': { height: 0.077, why: 'The flying goggles clear the declared tip by 77 mm.' },
   'ice.*': { height: -0.018, why: 'The scoop stack is 18 mm shorter than the formula claims.' },
   mini: { height: -0.023, bottom: -0.020, why: 'Builds 0.70 against a declared 0.72.' },
-  'hat.crown': { height: -0.020, why: 'Hand-written; the points are 20 mm lower than claimed.' },
-  'hat.sun': { height: -0.024, why: 'Hand-written; the dome is 24 mm lower than claimed.' },
-  'hat.flower': {
-    height: -0.038,
-    why: 'Declares 0.06 m; the flower ring is 0.02 m tall. Small in absolute terms, but the claim is three times the truth.',
-  },
-  'hat.ripikaHat': { height: -0.028, why: 'Hand-written; the ears are 28 mm lower than claimed.' },
+  // ---- Every `hat.*` entry has gone — crown −20 mm, sun −24 mm, flower
+  // ---- −38 mm and the RiPika hat −28 mm. All four were hand-written numbers
+  // ---- (the RiPika hat's was a `Box3` around a rotated ear, which is the
+  // ---- same mistake in a different shape), and the hat-fit fix would have
+  // ---- multiplied every one of them by 1.5. `art/models/hats.ts` measures
+  // ---- all eight with `visibleTop` now, so there is no allowance left for
+  // ---- any of them to creep back into.
   'prop.pinkWall.*': { height: -0.025, why: 'Coping is 25 mm below the declared 1.62.' },
   'prop.woodWall.*': { height: -0.021, why: 'Top plank is 21 mm below the declared height.' },
   // The three `prop.tree` canopy entries (+70 to +109 mm) went with the `tall`

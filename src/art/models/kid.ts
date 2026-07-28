@@ -39,8 +39,19 @@ import { buildHair, type HairPart, type HairStyle } from './hair';
  * Every number inside the `head` group is written as `x * HEAD`, so this is the
  * one knob. Face patches, hair, ears and the hat anchor all ride along, which is
  * the whole reason the face is painted onto a patch sized from `skullR`.
+ *
+ * **Exported, because hats have to ride it too.** `art/models/hats.ts` is
+ * authored against the *original* 0.44 m skull, and it lives in another file
+ * with no reference to this number — so when the cartoon pass took this from 1
+ * to 1.5, hair and ears and the hat anchor grew and every hat in the shop did
+ * not. They spent two days at two thirds of the head they sat on, which is the
+ * "the hats are all much too small" the family reported. `hats.ts` now scales
+ * itself by this, so the next head retune carries the hats with it.
  */
-const HEAD = 1.5;
+export const KID_HEAD_SCALE = 1.5;
+
+/** Local shorthand for {@link KID_HEAD_SCALE}: every head number is `x * HEAD`. */
+const HEAD = KID_HEAD_SCALE;
 
 /**
  * Height of the head pivot above the feet, in metres.
