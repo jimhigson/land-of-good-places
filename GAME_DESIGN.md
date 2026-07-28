@@ -617,8 +617,10 @@ Other dodgems have cute drivers — sometimes RiPika drives one.
    (three.js turns an object *left* as `rotation.y` increases, so feeding
    screen-space "right" straight into yaw reverses it); the dodgems still
    has the unfixed version of that same mistake. `dodgems/steering.ts` is
-   the file the ferris wheel's `look.ts` was originally modelled on, which
-   is exactly how the error propagated. Apply the same correction there, and
+   the file the ferris wheel's look control was originally modelled on,
+   which is exactly how the error propagated. That control is now
+   `core/rideLook.ts`, read by `core/RideCamera.ts` — the corrected signs
+   are there, in one place, gated by `npm run check:ride-camera`. Apply the same correction there, and
    check nothing else copied `steering.ts` before it was fixed.
 2. **The car cannot keep turning** — with the keyboard it sticks at a
    minimum and maximum angle instead of rotating freely, so you cannot

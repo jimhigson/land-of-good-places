@@ -1,5 +1,14 @@
 /**
- * Look-around control for the ride: drag anywhere to turn, or use the keyboard.
+ * Look-around control for a **first-person ride**: drag anywhere to turn, or use
+ * the keyboard.
+ *
+ * This is the ferris wheel's control, moved here **verbatim** — same deadzone,
+ * same range, same signs — because ARCHITECTURE-DECISIONS Decision 4 §8 says
+ * extract, never rewrite: its directions are family-confirmed and the train and
+ * the coaster get *this* one rather than a second opinion. What reads it is
+ * {@link RideCamera} in `core/RideCamera.ts`, which is what a ride should
+ * actually reach for; this file is only the reading. `check:ride-camera` hashes
+ * the result of the two together.
  *
  * Built as a straight copy of the dodgems' on-screen joystick idiom
  * (`dodgems/steering.ts`) rather than a second one invented for this ride — a
@@ -15,9 +24,9 @@
  * reasoning and the shared movement basis live in `core/screenBasis.ts`) —
  * *except* in first person, which is exactly what this ride is. Nothing here
  * moves the gondola; it only points the child's eyes. The same carve-out
- * covers the first-person train and the coaster when they arrive, and nothing
- * else. If you are copying this file for a ride the player looks *at* rather
- * than *out of*, you want `dodgems/steering.ts` instead.
+ * covers the first-person train and the coaster, and nothing else. If you are
+ * copying this file for a ride the player looks *at* rather than *out of*, you
+ * want `dodgems/steering.ts` instead.
  *
  * **Why this lives outside the framework's one-button input.** Exactly the
  * dodgems' reasoning: the mini-game contract is one button
