@@ -253,7 +253,23 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     if (this.waveRemaining > 0) this.waveRemaining -= dt;
 
     intent.wave = this.waveAmount;
-    if (this.pausing && this.lookYaw !== null) intent.lookAt = this.lookYaw;
+
+    // Where a child looks while paused belongs to the wander core, so it is
+    // only applied on the frames the core is actually steering them.
+    //
+    // A `'steering'` activity leaves this tail running — that is the point of
+    // the hold, so a chatting child still blends their wave — but where they
+    // walk and where they look are one decision, not two, and the activity
+    // making it is the one that knows. Without the `hold` test, a chat that
+    // began while the child happened to be mid-pause had them talking to the
+    // player while gazing off at whatever the pause had last picked out, and a
+    // child walking to the paint stall looked somewhere other than the stall.
+    //
+    // The pause itself is left alone: neither chat nor paint clears `pausing`
+    // when it takes over (they rejoin `'legacy'`), so the child resumes the
+    // pause afterwards exactly as before. Unifying that with the train's
+    // `'full'` rejoin is a separate behaviour change — see `Rejoin`.
+    if (hold === null && this.pausing && this.lookYaw !== null) intent.lookAt = this.lookYaw;
 
     if (this.hopRequest && context.grounded) {
       intent.hop = true;
