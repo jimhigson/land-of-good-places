@@ -106,15 +106,25 @@ export type MiniGameFactory = () => MiniGame;
  * plots in `world/anchors.ts` (the wall pass trims anything crossing them, and
  * the scenery scatter refuses to plant inside them).
  */
+/**
+ * A stall in the garden.
+ *
+ * `title`, `subtitle`, `glyph` and `accent` used to be painted onto a wooden
+ * board over the booth. Since the family's ruling of 28 July 2026 there are no
+ * painted boards in the park at all — those four fields become the stall's
+ * `InteractZone.sign` instead, and `ui/SignCard.ts` shows them in screen space
+ * when a child selects the booth. They are still the stall's *name*, so they
+ * obey GAME_DESIGN.md's BREVITY RULE and `npm run check:brevity` measures them.
+ */
 export interface StallDefinition {
   readonly id: string;
-  /** Big line on the sign. */
+  /** The stall's name. A title: at most ~24 characters. */
   readonly title: string;
-  /** Little line under it. */
+  /** One short line under it. A line: one sentence, at most ~50 characters. */
   readonly subtitle: string;
-  /** One emoji on the sign board. */
+  /** One emoji, shown before the title. */
   readonly glyph: string;
-  /** Awning stripe + trim colour. From PALETTE. */
+  /** Awning stripe + trim colour, and the sign card's border. From PALETTE. */
   readonly accent: number;
   /** The other stripe. From PALETTE. */
   readonly stripe: number;

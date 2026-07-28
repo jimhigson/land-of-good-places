@@ -1,18 +1,14 @@
 import {
-  BoxGeometry,
   CircleGeometry,
   CylinderGeometry,
   Group,
   Mesh,
-  MeshBasicMaterial,
-  PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
-import { signTexture } from '../../core/textures';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
 import { terrainHeight } from '../../world/terrain';
@@ -158,52 +154,20 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   sprinklerHead.position.set(sprinklerX, sprinklerY + 0.85, sprinklerZ);
   root.add(sprinklerHead);
 
-  // --- the sign, swapped -------------------------------------------------------------
-  // The placeholder's "coming soon" board stood exactly here, and its posts are
-  // still in the collision world (`AnchorPlots` registers them, and this file
-  // does not own that). So the replacement goes in the same spot: the plot keeps
-  // a solid sign where a child expects to see one, and the park never grows an
-  // invisible obstacle.
-  const signY = localGround(doorX, doorZ);
-  const sign = new Group();
-  sign.position.set(doorX, signY, doorZ);
-  sign.rotation.y = anchor.signYaw;
-  root.add(sign);
-
-  for (const offset of [-1.05, 1.05]) {
-    const signPost = solid(new Mesh(new CylinderGeometry(0.12, 0.14, 2.2, 8), materials.post));
-    signPost.position.set(offset, 1.1, 0);
-    sign.add(signPost);
-  }
-
-  const board = solid(new Mesh(new BoxGeometry(2.6, 1.5, 0.12), materials.board));
-  board.position.y = 2.05;
-  sign.add(board);
-
-  const face = decal(
-    new Mesh(
-      new PlaneGeometry(2.44, 1.37),
-      new MeshBasicMaterial({
-        map: signTexture({
-          title: 'Water Fight!',
-          subtitle: 'come and get soaked',
-          glyph: '💦',
-          accent: PALETTE.markerMint,
-        }),
-        toneMapped: false,
-      }),
-    ),
-  );
-  face.position.z = 0.07;
-  board.add(face);
-
-  const bobble = solid(new Mesh(new SphereGeometry(0.2, 12, 9), materials.pipe));
-  bobble.position.set(0, 0.92, 0);
-  board.add(bobble);
+  // NO SIGN. There was a "Water Fight! / come and get soaked" board on two
+  // posts standing exactly where the path spur arrives, and it was here for two
+  // reasons: to name the ride, and — the note that used to live here — because
+  // the placeholder's own sign posts were still registered in the collision
+  // world, so a plot with no visible board would have grown an invisible
+  // obstacle. Both reasons are now gone. The family had every sign in the park
+  // taken out on 28 July 2026, and `AnchorPlots` no longer registers that
+  // collider either (it went with the board it held up), so the spot the spur
+  // arrives at is simply open grass. The ride names itself on its stall's sign
+  // card, and the rack of enormous water guns two metres away says the rest.
 
   // --- the rack of very big water guns ----------------------------------------------
-  // Right beside the sign, so a child arriving up the path meets three enormous
-  // water guns before they meet anything else.
+  // Right where the path spur arrives, so a child walking up meets three
+  // enormous water guns before they meet anything else.
   const rackX = doorX - 2.6;
   const rackZ = doorZ - 1.4;
   const rackY = localGround(rackX, rackZ);

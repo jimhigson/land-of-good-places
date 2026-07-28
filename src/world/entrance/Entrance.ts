@@ -3,19 +3,14 @@ import {
   CylinderGeometry,
   Group,
   Mesh,
-  MeshBasicMaterial,
-  MeshStandardMaterial,
-  PlaneGeometry,
   SphereGeometry,
   TorusGeometry,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { pinkStoneTexture, signTexture, woodTexture } from '../../core/textures';
+import { pinkStoneTexture, woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { terrainHeight } from '../terrain';
-import { markAsSign } from '../signs';
-import { gameStore } from '../../state';
-import type { FrameContext, GameSystem } from '../../core/types';
+import type { GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { buildPawPrint } from './catBus';
 import {
@@ -27,20 +22,23 @@ import {
 } from './layout';
 
 /**
- * The park entrance: a gated arch in the boundary wall with the park's own
- * name over it, and a little bus stop with a shelter just inside — always
- * present, whether or not the cat bus is mid-arrival. See `Garden.ts`'s
- * `buildBoundaryWall` for the matching gap left in the wall itself, and
- * `paths.ts`'s `spur-entrance` route for the path that leads up to it.
+ * The park entrance: a gated arch in the boundary wall, and a little bus stop
+ * with a shelter just inside — always present, whether or not the cat bus is
+ * mid-arrival. See `Garden.ts`'s `buildBoundaryWall` for the matching gap left
+ * in the wall itself, and `paths.ts`'s `spur-entrance` route for the path that
+ * leads up to it.
+ *
+ * **The park's name is no longer painted on a board under the arch.** The
+ * family had every sign in the park taken out on 28 July 2026 — a canvas face
+ * on a rectangle seen from the camera's one fixed angle is hard to read, which
+ * is exactly why it needed a full-screen reader to go with it. The name is not
+ * lost: `ui/Hud.ts`'s park pill has said it, in ordinary DOM text at the
+ * ordinary minimum size, since long before this. The arch keeps its posts, its
+ * caps, its paw prints and its crossbar, which is what makes it a gate.
  */
 export class Entrance implements GameSystem {
   readonly name = 'entrance';
   readonly group = new Group();
-
-  private readonly signBoard: Mesh;
-  private readonly signFace: Mesh;
-  private lastParkName = '';
-  private readonly unsubscribe: () => void;
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'entrance';
@@ -96,28 +94,6 @@ export class Entrance implements GameSystem {
     crossbar.castShadow = true;
     this.group.add(crossbar);
 
-    // --- the hanging name sign --------------------------------------------
-    this.signBoard = new Mesh(
-      new BoxGeometry(2.9, 1.5, 0.12),
-      new MeshStandardMaterial({ color: PALETTE.signBoard, roughness: 0.85 }),
-    );
-    this.signBoard.name = 'entrance-sign';
-    this.signBoard.position.set(ENTRANCE_GATE_X, archGround + postHeight - 0.55, ENTRANCE_GATE_Z);
-    this.signBoard.rotation.y = Math.PI; // faces inward, towards the park and the default camera
-    this.signBoard.castShadow = true;
-    this.signBoard.userData.baseY = this.signBoard.position.y;
-    markAsSign(this.signBoard, 2.9, 1.5);
-    this.group.add(this.signBoard);
-
-    this.signFace = new Mesh(
-      new PlaneGeometry(2.7, 1.32),
-      new MeshBasicMaterial({ toneMapped: false }),
-    );
-    this.signFace.position.z = 0.07;
-    this.signBoard.add(this.signFace);
-    this.refreshSign(gameStore.get().parkName);
-    this.unsubscribe = gameStore.subscribe((state) => this.refreshSign(state.parkName));
-
     // --- the bus stop shelter ----------------------------------------------
     // Set back on the eastern verge of the entrance road, so the cat bus's
     // curb-side door opens directly onto it.
@@ -152,25 +128,10 @@ export class Entrance implements GameSystem {
     bench.receiveShadow = true;
     this.group.add(bench);
 
-    const stopSignPost = new Mesh(new CylinderGeometry(0.07, 0.08, 1.9, 8), woodMaterial);
-    stopSignPost.position.set(shelterX - 0.9, shelterGround + 0.95, shelterZ + 1.3);
-    stopSignPost.castShadow = true;
-    this.group.add(stopSignPost);
-    collision.addCircle(stopSignPost.position.x, stopSignPost.position.z, 0.18);
-
-    const stopSignBoard = new Mesh(
-      new BoxGeometry(0.6, 0.6, 0.06),
-      new MeshBasicMaterial({
-        map: signTexture({
-          title: 'Bus Stop',
-          glyph: '🚌',
-          accent: PALETTE.markerLemon,
-        }),
-        toneMapped: false,
-      }),
-    );
-    stopSignBoard.position.set(0, 0.75, 0.04);
-    stopSignPost.add(stopSignBoard);
+    // The little "Bus Stop 🚌" lollipop went with every other sign, and its
+    // post went with it rather than being left standing on the verge holding
+    // nothing. The shelter, the bench and the cat's paw prints are what say
+    // "the bus comes here", and the bus itself says the rest.
 
     const pawB = buildPawPrint(toonMaterial(PALETTE.stonePinkDark));
     pawB.position.set(shelterX, shelterGround + 0.02, shelterZ - 1.1);
@@ -179,27 +140,14 @@ export class Entrance implements GameSystem {
     this.group.add(pawB);
   }
 
-  /** Signs sway gently, same as every other sign in the park (`AnchorPlots.ts`). */
-  update({ elapsed }: FrameContext): void {
-    this.signBoard.rotation.z = Math.sin(elapsed * 1.05) * 0.03;
-    this.signBoard.position.y = (this.signBoard.userData.baseY as number) + Math.sin(elapsed * 1.5) * 0.03;
-  }
-
-  dispose(): void {
-    this.unsubscribe();
-  }
-
-  private refreshSign(parkName: string): void {
-    if (parkName === this.lastParkName) return;
-    this.lastParkName = parkName;
-    const material = this.signFace.material as MeshBasicMaterial;
-    material.map?.dispose();
-    material.map = signTexture({
-      title: parkName,
-      subtitle: 'welcome!',
-      glyph: '🐾',
-      accent: PALETTE.markerPink,
-    });
-    material.needsUpdate = true;
-  }
+  /**
+   * Nothing moves here any more.
+   *
+   * The arch used to sway its name board on a breeze. There is no board, and
+   * the stonework is stonework — but `Entrance` stays a {@link GameSystem}
+   * rather than being unregistered from the loop, because it is the park's
+   * front gate and the next thing anyone adds to it (a gate that swings, a
+   * lantern that comes on at dusk) will want a frame again.
+   */
+  update(): void {}
 }

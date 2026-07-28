@@ -1,5 +1,5 @@
 import { BoxGeometry, Group, Mesh, type Material } from 'three';
-import { cuteSign, interiorMaterial } from './parts';
+import { interiorMaterial } from './parts';
 import {
   SHOP_RECESS_DEPTH,
   SHOP_SCALE_XZ,
@@ -18,8 +18,8 @@ import type { CollisionWorld } from '../Collision';
 /**
  * The seven empty shop units.
  *
- * Build step 4 fits these out. Each one is an alcove with a counter, a stripy
- * awning and an "opening soon" board, plus an empty `Group` named
+ * Build step 4 fits these out. Each one is an alcove with a counter and a
+ * stripy awning, plus an empty `Group` named
  * `shop:<id>` sitting at the unit's front-centre on the deck, facing into the
  * room. Whoever builds the shops adds their fittings to that group and hides
  * the placeholder:
@@ -140,7 +140,7 @@ function buildUnit(unit: ShopUnitDefinition): Group {
   group.add(counter);
 
   // Shallow, and set high: a deep awning looks lovely from the ground and hides
-  // the sign completely from a camera that is looking down at 38°.
+  // the whole alcove from a camera that is looking down at 38°.
   const awning = shopMesh(
     new BoxGeometry(4.8, 0.26, 0.95),
     interiorMaterial(unit.accent, 0.6),
@@ -149,19 +149,9 @@ function buildUnit(unit: ShopUnitDefinition): Group {
   awning.rotation.x = -0.16;
   group.add(awning);
 
-  const sign = cuteSign({
-    title: unit.title,
-    subtitle: 'opening soon!',
-    glyph: unit.glyph,
-    accent: unit.accent,
-    width: 2.7,
-  });
-  sign.position.set(0, 1.9, 0.04);
-  // Tipped back a little so it points at the isometric camera rather than the
-  // opposite wall.
-  sign.rotation.x = -0.24;
-  group.add(sign);
-
+  // No "opening soon!" board: the park has no painted signs any more (family
+  // ruling, 28 July 2026). Every one of these units has a real shop in it by
+  // the time a child sees it, and the shop names itself on its sign card.
   return group;
 }
 

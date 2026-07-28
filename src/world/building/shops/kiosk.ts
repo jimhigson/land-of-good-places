@@ -10,7 +10,7 @@ import {
   type Material,
 } from 'three';
 import { PALETTE } from '../../../core/palette';
-import { cuteSign, interiorMaterial } from '../parts';
+import { interiorMaterial } from '../parts';
 import type { ShopUnitDefinition } from '../layout';
 
 /**
@@ -74,7 +74,7 @@ export interface KioskShell {
 }
 
 /** Builds one kiosk shell into a fresh group, ready to add to the unit anchor. */
-export function buildKiosk(unit: ShopUnitDefinition, subtitle: string): KioskShell {
+export function buildKiosk(unit: ShopUnitDefinition): KioskShell {
   const group = new Group();
   group.name = `kiosk:${unit.id}`;
 
@@ -160,25 +160,10 @@ export function buildKiosk(unit: ShopUnitDefinition, subtitle: string): KioskShe
   valance.instanceMatrix.needsUpdate = true;
   group.add(valance);
 
-  // --- name board ---------------------------------------------------------
-  const sign = cuteSign({
-    title: unit.title,
-    subtitle,
-    glyph: unit.glyph,
-    accent: unit.accent,
-    // Narrow. The board hangs in the middle of the shop front and the camera
-    // looks in at 45°, so every centimetre of width is a centimetre of shelf it
-    // covers up diagonally.
-    width: 1.6,
-  });
-  // Hung off the front of the awning: high enough that its bottom edge clears
-  // the stock on screen (see the note on SHELF_Y), low enough that its top edge
-  // clears the ceiling slab 3.3 m up.
-  sign.position.set(0, 2.8, 0.98);
-  // Tipped back a little so it points at the isometric camera rather than at
-  // the opposite wall.
-  sign.rotation.x = -0.24;
-  group.add(sign);
+  // The hanging name board is gone (family ruling, 28 July 2026: signs in the
+  // world are hard to read). The shop's name and its line of patter travel on
+  // its `shop-<id>` interact zone instead — see `building/interactZones.ts` —
+  // which also gives the stock back the shelf-width the board used to cover.
 
   return { group, shelfY: SHELF_Y };
 }

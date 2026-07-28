@@ -43,13 +43,33 @@ screen-space above the action chips.*
 - `check:brevity` walks `ANCHORS.signTitle/signSubtitle`. Those fields die with
   the boards, so the script must be repointed at the copy that is now live.
 
-## Status
+## Status — DONE, PR raised
 
 - [x] Study main, design settled
-- [ ] Zone sign payload + card
-- [ ] Removals
-- [ ] Checkers
-- [ ] Build green, PR raised
+- [x] Zone sign payload + card
+- [x] Removals (every `signTexture`/`cuteSign`/`markAsSign` site)
+- [x] Checkers: `check:park` ratchet tightened, `check:brevity` left alone —
+      see below
+- [x] `npm run build` exit 0
+
+**`check:brevity` needed no change after all.** `ui/ParkMap.ts:653` draws each
+map pin from `anchor.signTitle`, so the anchor copy in `anchors.ts` is still
+live and the check still measures something real. Nothing was silenced.
+
+**`check:park` ratchet tightened, and it loosened because the park got
+better**: removing the invisible sign-post colliders took `anchor.reach:ballPit`
+to zero (entry deleted), `anchor.reach:building` from 2.0 m to 0,
+`anchor.reach:dodgems` 1.8 → 1.7, `rail.exclusion` 14 → 12, `rail.walkable`
+34 → 31.
+
+## Follow-ups left for another PR
+
+- The **E-routing bug** reported mid-task was NOT touched — out of scope here
+  and not started.
+- `whatsnew.json` has no entry for this change.
+- The castle, ball pit, helter-skelter and ginormous slide have no sign card,
+  because they have no actions and so are not selectable. Accepted, not
+  overlooked — see the finding above.
 
 **Browser:** not owned by this task. Build-verify only; visual QA listed in the PR.
 **Conflict watch:** PR #101 (race coaster) may touch `Game.ts`.

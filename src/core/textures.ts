@@ -244,100 +244,19 @@ export function woodTexture(repeatX = 3, repeatY = 1): CanvasTexture {
    being copied around:
 
    - the fractions below say how big the text is relative to its canvas;
-   - the caller (`ui/NameLabel.ts`, `ui/SpeechBubble.ts`, `.sign-reader-face`
-     in style.css) sizes the canvas on screen so that fraction lands at or
-     above `uiScale.ts`'s `minTextPx()`.
+   - the caller (`ui/NameLabel.ts`, `ui/SpeechBubble.ts`) sizes the canvas on
+     screen so that fraction lands at or above `uiScale.ts`'s `minTextPx()`.
+
+   The park's sign boards used to be the third of these. There are no sign
+   boards any more (family ruling, 28 July 2026) and `signTexture` went with
+   them: what a thing is called is DOM text now, so it is simply covered by the
+   TEXT RULE's ordinary `--lgp-text-min` like every other word in the game.
 --------------------------------------------------------------------------- */
 
 /** Canvas height of the name pill (see {@link nameLabelTexture}). */
 export const NAME_LABEL_CANVAS_HEIGHT = 160;
 /** Font size the name is painted at inside that canvas. */
 export const NAME_LABEL_FONT_PX = 62;
-/** Canvas width of a sign board (see {@link signTexture}). */
-export const SIGN_CANVAS_WIDTH = 512;
-/** The smallest text on a sign board: its subtitle. */
-export const SIGN_SUBTITLE_FONT_PX = 40;
-
-export interface SignOptions {
-  /** Main line, e.g. "Ferris wheel". */
-  title: string;
-  /** Small line underneath, e.g. "coming soon!". */
-  subtitle?: string;
-  /** Big emoji-ish glyph drawn above the text. Plain text — no image assets. */
-  glyph?: string;
-  /** Board colour behind the text. */
-  background?: number;
-  /** Accent used for the border and the title. */
-  accent?: number;
-}
-
-/**
- * A cute wooden-sign face: rounded board, chunky border, hand-lettered feel.
- * Used for the "coming soon" plots and any future signage.
- */
-export function signTexture(options: SignOptions): CanvasTexture {
-  const key = `sign:${options.title}|${options.subtitle ?? ''}|${options.glyph ?? ''}|${options.background ?? 0}|${options.accent ?? 0}`;
-  return cached(key, () => {
-    const width = SIGN_CANVAS_WIDTH;
-    const height = 288;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('2D canvas context unavailable');
-
-    const background = options.background ?? PALETTE.signBoard;
-    const accent = options.accent ?? PALETTE.markerPink;
-
-    ctx.fillStyle = hexToCss(background);
-    roundedRect(ctx, 0, 0, width, height, 34);
-    ctx.fill();
-
-    ctx.strokeStyle = hexToCss(accent);
-    ctx.lineWidth = 14;
-    roundedRect(ctx, 9, 9, width - 18, height - 18, 28);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#ffffffcc';
-    ctx.lineWidth = 4;
-    roundedRect(ctx, 22, 22, width - 44, height - 44, 20);
-    ctx.stroke();
-
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    let textCentre = height / 2 + 6;
-    if (options.glyph) {
-      ctx.font = '64px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
-      ctx.fillText(options.glyph, width / 2, 86);
-      textCentre = height / 2 + 34;
-    }
-
-    // `fillText`'s max-width argument condenses a long title rather than
-    // letting it run off the board — the alternative (shrinking the font) is
-    // exactly what the TEXT RULE forbids.
-    ctx.font = 'bold 56px "Trebuchet MS", "Segoe UI", sans-serif';
-    ctx.fillStyle = hexToCss(accent);
-    ctx.fillText(options.title, width / 2, textCentre, width - 80);
-
-    if (options.subtitle) {
-      // Bumped from 34px: at the size the sign reader shows a board (see
-      // `.sign-reader-face` in style.css) this is the line that decides
-      // whether the smallest text on a sign clears the minimum.
-      ctx.font = `bold ${SIGN_SUBTITLE_FONT_PX}px "Trebuchet MS", "Segoe UI", sans-serif`;
-      ctx.fillStyle = hexToCss(PALETTE.ink);
-      ctx.globalAlpha = 0.75;
-      ctx.fillText(options.subtitle, width / 2, textCentre + 52, width - 80);
-      ctx.globalAlpha = 1;
-    }
-
-    const texture = new CanvasTexture(canvas);
-    texture.colorSpace = SRGBColorSpace;
-    texture.anisotropy = 4;
-    return texture;
-  });
-}
-
 /**
  * The floating name pill above a character's head.
  *

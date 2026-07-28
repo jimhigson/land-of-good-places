@@ -30,7 +30,7 @@ import { WalkSurfaces } from './surfaces';
 import { buildingInteractZones } from './interactZones';
 import { dressDeck } from './dressing';
 import type { InteractZone } from '../interact';
-import { cuteSign, softMaterial } from './parts';
+import { softMaterial } from './parts';
 import {
   BALL_PIT_X,
   BALL_PIT_Z,
@@ -836,62 +836,37 @@ function buildGinormousSlide(): SlideRide {
   });
 }
 
-/** Little painted pads and signs so a child can see where a thing begins. */
+/**
+ * Little painted pads so a child can see where a thing begins.
+ *
+ * Each of these used to have a small board beside it naming the ride. The
+ * boards went with every other sign in the park on 28 July 2026 (the family:
+ * they are hard to read), and the pads — a disc of the ride's own colour,
+ * readable from right across the deck at the camera's fixed angle — turned out
+ * to be doing most of the work anyway. The stairs and the grown-up say their
+ * names on the sign card now (`building/interactZones.ts`); the helter-skelter
+ * and the ginormous slide are things you use by *arriving*, so they offer no
+ * actions, are not selectable, and have only their pad. Which is the same
+ * answer the SELECTION RULE already gave them.
+ */
 function addRideEntrances(floorGroups: readonly Group[]): void {
   const helterFloor = floorGroups[HELTER_DECK];
   if (helterFloor) {
-    helterFloor.add(
-      entrancePad(HELTER_ENTRY_X, HELTER_ENTRY_Z, PALETTE.markerLilac),
-      entranceSign(
-        HELTER_ENTRY_X - 0.4,
-        HELTER_ENTRY_Z + 1.6,
-        'Helter-skelter',
-        '🌀',
-        PALETTE.markerLilac,
-      ),
-    );
+    helterFloor.add(entrancePad(HELTER_ENTRY_X, HELTER_ENTRY_Z, PALETTE.markerLilac));
   }
 
-  // The stairs get a pad and a board on every deck. This is the one thing in the
-  // building you press a button at rather than walk up, so it has to be the most
-  // obvious thing on the floor.
+  // The stairs get a pad on every deck. This is the one thing in the building
+  // you press a button at rather than walk up, so it has to be the most obvious
+  // thing on the floor.
   for (let deck = 0; deck < floorGroups.length; deck += 1) {
     const floor = floorGroups[deck];
     if (!floor) continue;
-    floor.add(
-      entrancePad(STAIR_STAND_X, STAIR_STAND_Z, PALETTE.markerMint),
-      entranceSign(
-        STAIR_STAND_X,
-        STAIR_STAND_Z + 1.7,
-        'Stairs',
-        '🪜',
-        PALETTE.markerMint,
-        'tap for a ride up or down!',
-      ),
-    );
+    floor.add(entrancePad(STAIR_STAND_X, STAIR_STAND_Z, PALETTE.markerMint));
   }
 
   const topFloor = floorGroups[TOP_DECK];
   if (topFloor) {
-    topFloor.add(
-      entrancePad(GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, PALETTE.slideChute),
-      entranceSign(
-        GIANT_SLIDE_ENTRY_X,
-        GIANT_SLIDE_ENTRY_Z - 2.4,
-        'Ginormous Slide',
-        '🎢',
-        PALETTE.slideChute,
-        'off the roof to the ball pit!',
-      ),
-      entranceSign(
-        GROWN_UP_X,
-        GROWN_UP_Z - 1.6,
-        'Press E',
-        '🤗',
-        PALETTE.grownUpScarf,
-        'a grown-up comes too!',
-      ),
-    );
+    topFloor.add(entrancePad(GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, PALETTE.slideChute));
   }
 }
 
@@ -900,21 +875,6 @@ function entrancePad(x: number, z: number, colour: number): Mesh {
   pad.receiveShadow = true;
   pad.position.set(x, 0.04, z);
   return pad;
-}
-
-function entranceSign(
-  x: number,
-  z: number,
-  title: string,
-  glyph: string,
-  accent: number,
-  subtitle = 'step on!',
-): Mesh {
-  const sign = cuteSign({ title, subtitle, glyph, accent, width: 2.1 });
-  sign.position.set(x, 1.8, z);
-  // Left facing +Z: that is where the default isometric camera looks from, and
-  // the plot signs in the garden follow the same rule for the same reason.
-  return sign;
 }
 
 // --------------------------------------------------------------- collision

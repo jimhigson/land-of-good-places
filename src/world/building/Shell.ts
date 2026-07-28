@@ -33,7 +33,6 @@ import {
 import { PALETTE } from '../../core/palette';
 import {
   castAndReceive,
-  cuteSign,
   extrudePlan,
   glassMaterial,
   interiorMaterial,
@@ -516,16 +515,6 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   roof.add(bobble);
 
   roof.add(buildRoofPlanters(plan));
-
-  const sign = cuteSign({
-    title: 'The Roof!',
-    subtitle: 'mind the sky',
-    glyph: '☁️',
-    accent: PALETTE.markerSky,
-    width: 4.2,
-  });
-  sign.position.set(0, 2.4, -oz + 0.9);
-  roof.add(sign);
 }
 
 /** A ring of pastel planters so the terrace is not a blank field from above. */
@@ -649,7 +638,6 @@ function buildCastle(plan: ShellPlan, group: Group): void {
   group.add(buildCornerTowers(plan));
   group.add(buildEntranceArch(plan));
   group.add(buildRoseWindow(plan));
-  group.add(buildEntranceSign(plan));
 }
 
 /** One ring of four walls in plan, with the given gaps left in the south face. */
@@ -1011,27 +999,13 @@ function buildRoseWindow(plan: ShellPlan): Group {
   return group;
 }
 
-/**
- * The one sign the castle needs: what it is, right by the door.
- *
- * Everything else that used to hang off the old canopy (the little awning, its
- * two posts) is gone — the stone arch is the grand thing over the doorway now,
- * and a free-standing tent roof would only compete with it.
+/*
+ * The castle used to name itself on a board beside its door, the roof terrace
+ * on another, and the way out on a third. All three went with every other sign
+ * in the park on 28 July 2026 (the family: they are hard to read). The stone
+ * arch is the grand thing over the doorway, and it says "castle" without a
+ * word on it.
  */
-function buildEntranceSign(plan: ShellPlan): Mesh {
-  const oz = outerZ(plan);
-  const sign = cuteSign({
-    title: 'The Castle',
-    subtitle: 'come in and look around!',
-    glyph: '🏰',
-    accent: PALETTE.markerSky,
-    width: 4.6,
-  });
-  // Left of the door, facing +Z like every sign in the game (the static
-  // camera, item 16, never needs to see the back of one).
-  sign.position.set(plan.doorMinX - 2.3, 3.2, oz + 1.6);
-  return sign;
-}
 
 // ---------------------------------------------------------------- entrance
 
@@ -1133,16 +1107,4 @@ function buildInteriorPorch(plan: ShellPlan, parent: Group): void {
   posts.instanceMatrix.needsUpdate = true;
   porch.add(posts);
 
-  const sign = cuteSign({
-    title: 'Way Out',
-    subtitle: 'back to the garden',
-    glyph: '🌳',
-    accent: PALETTE.markerMint,
-    width: 4.4,
-  });
-  // Facing +Z like every other sign in the game: the boards are painted on one
-  // face, so turning one round to "face into the room" shows its back and reads
-  // as mirror writing.
-  sign.position.set(0, 4.3, 1.9);
-  porch.add(sign);
 }

@@ -15,7 +15,6 @@ import { FoliageFade, Sky, TreeClimbing, World } from './world';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { setInteractPress, type InteractZone } from './world/interact';
-import { signInteractZone } from './world/signs';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
@@ -24,7 +23,6 @@ import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './u
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
-import { SignReader } from './ui/SignReader';
 import { StairMenu, type StairDirection } from './ui/StairMenu';
 import { Transitions } from './ui/Transitions';
 import { playOpenChime } from './ui/chime';
@@ -79,7 +77,6 @@ export class Game {
   readonly shopping: Shopping;
   readonly treeClimbing: TreeClimbing;
   readonly foliageFade: FoliageFade;
-  readonly signReader: SignReader;
   readonly selection: Selection;
   readonly actionChips: ActionChips;
   readonly highlights: Highlights;
@@ -115,7 +112,6 @@ export class Game {
   private zoneCacheFrame = -1;
   private zoneCache: readonly InteractZone[] = [];
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
-  private signZones: readonly InteractZone[] = [];
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, options: GameOptions = {}) {
     this.engine = new Engine(canvas);
@@ -223,11 +219,6 @@ export class Game {
           this.treeClimbing.requestDescend();
           return;
         }
-        // Tapping a sign is deliberately NOT handled here any more — it used
-        // to swoop the camera in to read it, which fired by accident and was
-        // jarring (family complaint, 26 Jul 2026; see `ui/SignReader.ts`).
-        // A tap near a sign now just walks there like any other patch of
-        // ground; reading one is a proximity+facing gate and a button.
         if (this.parade.handleTap(point)) return;
         // GAME_DESIGN.md's SELECTION RULE, step 1: a tap that lands on a thing
         // *selects* it and goes no further. Selection is free — it costs no
@@ -334,18 +325,6 @@ export class Game {
     this.foliageFade = new FoliageFade(this.world.scenery, this.camera);
     this.engine.scene.add(this.foliageFade.group);
     this.addSystem(this.foliageFade);
-    // Reading a sign: the full-screen overlay of its own painted face. The
-    // *offer* is a "Read" chip like any other action now (see below).
-    this.signReader = new SignReader(uiRoot);
-    this.addSystem(this.signReader);
-    // Signs join the one selection system as ordinary zones — see
-    // `world/signs.ts`'s `signInteractZone`, including why they are built here
-    // rather than inside `World.interactZones()`. Captured once: nothing here
-    // moves after the world has finished building.
-    this.signZones = this.world
-      .signZones()
-      .map((sign) => signInteractZone(sign, () => this.signReader.open(sign)));
-
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
     // when a child is standing at the lift doors, calls the car, and then lists
     // the floors. It is handed the building's `floors()` / `go(n)` seam and
@@ -362,8 +341,7 @@ export class Game {
       () =>
         (this.uiOwnsTheScreen() && !this.player.riding) ||
         this.parkMap.isOpen ||
-        this.stairMenu.isOpen ||
-        this.signReader.active,
+        this.stairMenu.isOpen,
     );
     this.addSystem(this.liftPanel);
 
@@ -519,7 +497,6 @@ export class Game {
       this.zoneCache = [
         ...this.world.interactZones(),
         ...this.treeClimbing.interactZones(),
-        ...this.signZones,
       ];
     }
     return this.zoneCache;
@@ -561,7 +538,6 @@ export class Game {
       this.uiOwnsTheScreen() ||
       this.parkMap.isOpen ||
       this.stairMenu.isOpen ||
-      this.signReader.active ||
       gameStore.get().paused
     );
   }
@@ -583,7 +559,6 @@ export class Game {
       this.miniGames.frozen ||
       this.parkMap.isOpen ||
       this.stairMenu.isOpen ||
-      this.signReader.active ||
       gameStore.get().paused
     );
   }
@@ -692,11 +667,9 @@ export class Game {
     // action vocabulary already read here.
     //
     // Below it: while a shop, the backpack or the stairs menu is open, Escape
-    // belongs to it — see `Shopping.uiOpen`. Same for a sign that is open
-    // full-screen: Escape is one of the ordinary "back out" actions
-    // `SignReader` already closes on. And when the Cute-o-dex has the screen,
-    // Escape belongs to the book. Otherwise Escape would close the panel
-    // *and* pause the park behind it.
+    // belongs to it — see `Shopping.uiOpen`. And when the Cute-o-dex has the
+    // screen, Escape belongs to the book. Otherwise Escape would close the
+    // panel *and* pause the park behind it.
     if (this.whatsNew.isOpen) {
       if (
         this.input.justPressed('menu') ||
@@ -724,8 +697,7 @@ export class Game {
     } else if (
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
-      !this.world.facePaintStall.uiOpen &&
-      !this.signReader.active
+      !this.world.facePaintStall.uiOpen
     ) {
       gameStore.setPaused(!gameStore.get().paused);
     }
