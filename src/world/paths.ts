@@ -9,7 +9,8 @@ import {
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
-import { ANCHORS_BY_ID } from './anchors';
+import { ANCHORS } from './anchors';
+import { PARK_LAYOUT } from './parkLayout';
 
 /**
  * The winding path network.
@@ -18,9 +19,11 @@ import { ANCHORS_BY_ID } from './anchors';
  * terrain, rather than a texture painted on the ground: that way they follow the
  * hills exactly and the cream edging reads as a real kerb from the iso camera.
  *
- * Routes are authored as plain [x, z] control points below. The main loop is the
- * park's ring road; every other route is a spur that ends at an anchor's
- * `entrance`, so moving an anchor automatically moves its path.
+ * Routes are **generated from the solved layout** (Decision 5): a ring road
+ * grown around wherever the plaza landed, squeezed between the plots the
+ * solver placed; a spur to every anchor's entrance; and the approach from the
+ * park gate. Nothing below is authored — move the manifest and the network
+ * re-grows, with `check:park` proving every attraction is still reachable.
  */
 
 export interface RouteDefinition {
@@ -30,76 +33,196 @@ export interface RouteDefinition {
   readonly closed: boolean;
 }
 
-const anchor = ANCHORS_BY_ID;
+/** Fountain plaza — wherever the layout put it. Paths converge here. */
+export const PLAZA = {
+  x: PARK_LAYOUT.fountain.x,
+  z: PARK_LAYOUT.fountain.z,
+  radius: PARK_LAYOUT.fountain.radius,
+};
+
+// ------------------------------------------------------------ generation
+
+/** Everything the ring road and the spurs must steer around. */
+interface Blocker {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number; // bounding circle, already inflated for kerbs
+}
+
+const BLOCKERS: readonly Blocker[] = [...PARK_LAYOUT.entries.values()]
+  .filter((e) => e.id !== 'fountain')
+  .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 }));
+
+/** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
+function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker): number {
+  const ex = b.x - px;
+  const ez = b.z - pz;
+  const proj = ex * dx + ez * dz;
+  if (proj <= 0) return Infinity;
+  const perp2 = ex * ex + ez * ez - proj * proj;
+  const r2 = b.radius * b.radius;
+  if (perp2 >= r2) return Infinity;
+  return proj - Math.sqrt(r2 - perp2);
+}
 
 /**
- * Exported so anything that wants to *draw* the path network — the park map
- * (`ui/ParkMap.ts`) — can rebuild the same centreline from the same control
- * points rather than hand-tracing a picture that would drift out of date the
- * moment a route above changes.
+ * The ring road: a radius-per-bearing profile around the plaza, held off
+ * every plot and relaxed smooth — the same shape of solve as the train
+ * loop's (`train/route.ts`), two sizes smaller.
  */
-export const ROUTES: readonly RouteDefinition[] = [
-  {
-    name: 'main-loop',
-    width: 3.6,
-    closed: true,
-    points: [
-      [0, -21],
-      [15, -20],
-      [24, -12],
-      [25, 2],
-      [18, 15],
-      [4, 22],
-      [-12, 22],
-      [-23, 13],
-      [-24, -3],
-      [-17, -16],
-    ],
-  },
-  {
-    name: 'fountain-approach',
-    width: 3.0,
-    closed: false,
-    points: [
-      [0, -21],
-      [0, -15],
-      [0, -9],
-    ],
-  },
-  {
-    name: 'spur-building',
-    width: 2.8,
-    closed: false,
-    points: [[-19, -15], [-23, -18], anchor.building.entrance, [-29, -23]],
-  },
-  {
-    name: 'spur-ballpit',
-    width: 2.4,
-    closed: false,
-    points: [[-2, -16], [-4, -12], anchor.ballPit.entrance, [-8, -8.5]],
-  },
-  {
-    name: 'spur-ferris',
-    width: 2.8,
-    closed: false,
-    points: [[24, -11], anchor.ferrisWheel.entrance, [29, -19]],
-  },
-  {
-    name: 'spur-dodgems',
-    width: 2.8,
-    closed: false,
-    points: [[19, 13], anchor.dodgems.entrance, [26, 17]],
-  },
-  {
-    name: 'spur-water',
-    width: 2.8,
-    closed: false,
-    points: [[-19, 17], anchor.waterFight.entrance, [-25, 20]],
-  },
-];
+function solveRing(): (readonly [number, number])[] {
+  const bearings = 32;
+  const low = PLAZA.radius + 4.5;
+  const highCap = 30;
+  const profile: number[] = [];
+  for (let i = 0; i < bearings; i += 1) {
+    const angle = (i / bearings) * TAU_PATH;
+    const dx = Math.cos(angle);
+    const dz = Math.sin(angle);
+    let high = highCap;
+    for (const b of BLOCKERS) high = Math.min(high, rayToBlocker(PLAZA.x, PLAZA.z, dx, dz, b));
+    profile.push(Math.max(low, Math.min(high - 1.2, low + 0.62 * (high - low))));
+  }
+  // Laplacian relax, re-clamped each pass so smoothing never re-enters a plot.
+  for (let pass = 0; pass < 60; pass += 1) {
+    for (let i = 0; i < bearings; i += 1) {
+      const prev = profile[(i + bearings - 1) % bearings] as number;
+      const next = profile[(i + 1) % bearings] as number;
+      const angle = (i / bearings) * TAU_PATH;
+      const dx = Math.cos(angle);
+      const dz = Math.sin(angle);
+      let high = highCap;
+      for (const b of BLOCKERS) high = Math.min(high, rayToBlocker(PLAZA.x, PLAZA.z, dx, dz, b));
+      const target = (prev + next) / 2;
+      profile[i] = Math.max(low, Math.min(high - 1.2, ((profile[i] as number) + target) / 2));
+    }
+  }
+  const points: (readonly [number, number])[] = [];
+  for (let i = 0; i < bearings; i += 2) {
+    const angle = (i / bearings) * TAU_PATH;
+    points.push([
+      PLAZA.x + Math.cos(angle) * (profile[i] as number),
+      PLAZA.z + Math.sin(angle) * (profile[i] as number),
+    ]);
+  }
+  return points;
+}
 
-/** Fountain plaza — a wide circle of paving where the paths converge. */
-export const PLAZA = { x: 0, z: 0, radius: 9.4 };
+const TAU_PATH = Math.PI * 2;
+
+/**
+ * Straight line from `from` to `to`, detouring around any blocker it clips:
+ * the offending circle contributes a tangent-side waypoint, repeatedly,
+ * until the polyline is clear. Greedy but bounded, and the ribbon curve
+ * smooths the corners it leaves.
+ */
+function routeAround(
+  from: readonly [number, number],
+  to: readonly [number, number],
+): (readonly [number, number])[] {
+  const points: [number, number][] = [[from[0], from[1]], [to[0], to[1]]];
+  for (let pass = 0; pass < 8; pass += 1) {
+    let changed = false;
+    for (let i = 0; i < points.length - 1 && !changed; i += 1) {
+      const a = points[i] as [number, number];
+      const b = points[i + 1] as [number, number];
+      const abx = b[0] - a[0];
+      const abz = b[1] - a[1];
+      const length = Math.hypot(abx, abz);
+      if (length < 1e-6) continue;
+      const dx = abx / length;
+      const dz = abz / length;
+      for (const blocker of BLOCKERS) {
+        const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
+        const cx = a[0] + dx * t;
+        const cz = a[1] + dz * t;
+        const distance = Math.hypot(blocker.x - cx, blocker.z - cz);
+        if (distance >= blocker.radius) continue;
+        // Step out of the circle, on the side the segment already favours.
+        const sideX = distance > 1e-6 ? (cx - blocker.x) / distance : -dz;
+        const sideZ = distance > 1e-6 ? (cz - blocker.z) / distance : dx;
+        const out = blocker.radius + 1.6;
+        points.splice(i + 1, 0, [blocker.x + sideX * out, blocker.z + sideZ * out]);
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+  }
+  return points;
+}
+
+function nearestRingPoint(
+  ring: readonly (readonly [number, number])[],
+  x: number,
+  z: number,
+): readonly [number, number] {
+  let best = ring[0] as readonly [number, number];
+  let bestDistance = Infinity;
+  for (const point of ring) {
+    const distance = Math.hypot(point[0] - x, point[1] - z);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = point;
+    }
+  }
+  return best;
+}
+
+function buildRoutes(): readonly RouteDefinition[] {
+  const ring = solveRing();
+  const routes: RouteDefinition[] = [
+    { name: 'main-loop', width: 3.6, closed: true, points: ring },
+    // The approach: from just inside the park gate, down the protected
+    // corridor, then around whatever stands between it and the plaza.
+    {
+      name: 'gate-approach',
+      width: 3.2,
+      closed: false,
+      points: [
+        [0, 54] as const,
+        [0, 30] as const,
+        ...routeAround([0, 27], nearestRingPoint(ring, 0, 27)).slice(1),
+      ],
+    },
+    // From the ring to the plaza edge nearest the gate side, so the two
+    // networks always touch.
+    {
+      name: 'fountain-approach',
+      width: 3.0,
+      closed: false,
+      points: routeAround(
+        nearestRingPoint(ring, PLAZA.x, PLAZA.z + PLAZA.radius + 4),
+        [PLAZA.x, PLAZA.z + PLAZA.radius - 1],
+      ),
+    },
+  ];
+  for (const anchor of ANCHORS) {
+    const [ex, ez] = anchor.entrance;
+    const start = nearestRingPoint(ring, ex, ez);
+    // Carry the spur a couple of metres past the doormat into the plot mouth,
+    // as the authored spurs always did.
+    const towards = [anchor.position[0] - ex, anchor.position[1] - ez];
+    const l = Math.hypot(towards[0] as number, towards[1] as number) || 1;
+    const past: readonly [number, number] = [
+      ex + ((towards[0] as number) / l) * 2,
+      ez + ((towards[1] as number) / l) * 2,
+    ];
+    routes.push({
+      name: `spur-${anchor.id}`,
+      width: anchor.id === 'building' ? 2.8 : 2.6,
+      closed: false,
+      points: [...routeAround(start, [ex, ez]), past],
+    });
+  }
+  return routes;
+}
+
+/**
+ * Exported so anything that wants to *draw* the network — the park map — can
+ * rebuild the same centreline from the same generated control points.
+ */
+export const ROUTES: readonly RouteDefinition[] = buildRoutes();
 
 /** Sampled path centreline, used for scenery placement queries. */
 interface PathSample {

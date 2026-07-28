@@ -1,4 +1,5 @@
 import { PALETTE } from '../core/palette';
+import { placedEntry } from './parkLayout';
 
 /**
  * Reserved plots for the features that arrive in later build steps.
@@ -44,88 +45,84 @@ export interface AnchorDefinition {
   readonly notes: string;
 }
 
+/**
+ * Sign copy and styling per anchor — the *words* stay authored here; the
+ * *positions* come from the layout solver (Decision 5: the park is generated,
+ * not authored). `placed()` joins the two.
+ */
+interface AnchorCopy {
+  readonly signYawNudge?: number;
+  readonly signTitle: string;
+  readonly signSubtitle: string;
+  readonly glyph: string;
+  readonly accent: number;
+  readonly notes: string;
+}
+
+function placed(id: AnchorId, copy: AnchorCopy): AnchorDefinition {
+  const p = placedEntry(id);
+  return {
+    id,
+    position: [p.x, p.z],
+    footprint: p.footprint,
+    boundingRadius: p.boundingRadius,
+    entrance: [p.entranceX, p.entranceZ],
+    signYaw: p.signYaw + (copy.signYawNudge ?? 0),
+    signTitle: copy.signTitle,
+    signSubtitle: copy.signSubtitle,
+    glyph: copy.glyph,
+    accent: copy.accent,
+    notes: copy.notes,
+  };
+}
+
 export const ANCHORS: readonly AnchorDefinition[] = [
-  {
-    id: 'building',
-    position: [-31, -33],
-    footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    boundingRadius: 19,
-    entrance: [-27, -20],
-    signYaw: Math.PI * 0.29,
-    signTitle: 'The Big Building',
-    signSubtitle: 'lots of floors coming soon!',
-    glyph: '🏬',
+  placed('building', {
+    signTitle: 'The Castle',
+    signSubtitle: 'come in and look around!',
+    glyph: '\u{1F3F0}',
     accent: PALETTE.markerSky,
     notes:
-      'Multi-floor building: glass lift, escalators, stairs, trampoline, bubble ' +
-      'and the top of the ginormous slide. The slide should exit towards the ' +
-      'ballPit anchor to the north-east. Ground level here is roughly y=0; call ' +
-      'terrainHeight() for the exact value under each footing.',
-  },
-  {
-    id: 'ballPit',
-    position: [-9, -15],
-    footprint: { kind: 'circle', radius: 7.5 },
-    boundingRadius: 9,
-    entrance: [-6, -8],
-    signYaw: Math.PI * 0.21,
+      'Multi-floor castle: glass lift, escalators, stairs, trampoline, bubble ' +
+      'and the top of the ginormous slide. The slide exits towards the ballPit ' +
+      'anchor, which the layout solver keeps within reach (see parkManifest).',
+  }),
+  placed('ballPit', {
     signTitle: 'Ball Pit',
     signSubtitle: 'the ginormous slide lands here!',
-    glyph: '🎉',
+    glyph: '\u{1F389}',
     accent: PALETTE.markerLemon,
     notes:
       'Landing pit of squishy balls at the bottom of the ginormous slide. The ' +
-      'slide arrives from the building anchor to the south-west, so keep the ' +
-      'north-east lip open. A grown-up can ride down with the player.',
-  },
-  {
-    id: 'ferrisWheel',
-    position: [31, -27],
-    footprint: { kind: 'circle', radius: 11 },
-    boundingRadius: 13,
-    entrance: [26, -17],
-    signYaw: Math.PI * 0.3,
+      'manifest holds it within slide reach of the building whatever the seed.',
+  }),
+  placed('ferrisWheel', {
     signTitle: 'Space Ferris Wheel',
     signSubtitle: 'all the way up to space!',
-    glyph: '🎡',
+    glyph: '\u{1F3A1}',
     accent: PALETTE.markerLilac,
     notes:
       'The wheel climbs into space: park shrinks, Earth appears, stars, moon, ' +
-      'planets, a waving alien and Space RiPika. It lights up at night — ' +
-      'subscribe to the DayNight system for `lightsOn`.',
-  },
-  {
-    id: 'dodgems',
-    position: [33, 21],
-    footprint: { kind: 'rect', halfX: 12, halfZ: 10 },
-    boundingRadius: 15,
-    entrance: [23, 15],
-    signYaw: Math.PI * 0.2,
+      'planets, a waving alien and Space RiPika. It lights up at night.',
+  }),
+  placed('dodgems', {
     signTitle: 'Dodgems',
     signSubtitle: 'bonk the wobbly tree!',
-    glyph: '🚗',
+    glyph: '\u{1F697}',
     accent: PALETTE.markerPink,
     notes:
       'Arena floor plus the fake wooden tree in the middle. Bonking the tree ' +
-      'wobbles it, drops apples, rains leaves and pops a surprised bird out of ' +
-      'the top going "TWEET!?".',
-  },
-  {
-    id: 'waterFight',
-    position: [-31, 25],
-    footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    boundingRadius: 15,
-    entrance: [-22, 18],
-    signYaw: Math.PI * 0.27,
+      'wobbles it, drops apples, rains leaves and pops a surprised bird out.',
+  }),
+  placed('waterFight', {
     signTitle: 'Water Fight',
     signSubtitle: 'very big water guns!',
-    glyph: '💦',
+    glyph: '\u{1F4A6}',
     accent: PALETTE.markerMint,
     notes:
       'Splash points, giggling kids who splash back, drippy soaked hair and a ' +
-      'little rainbow when lots of water is in the air. Score lives in ' +
-      'gameStore (splashPoints / bestSplashPoints).',
-  },
+      'little rainbow when lots of water is in the air.',
+  }),
 ];
 
 export const ANCHORS_BY_ID: Readonly<Record<AnchorId, AnchorDefinition>> = Object.fromEntries(
