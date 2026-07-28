@@ -1,5 +1,4 @@
 import {
-  Box3,
   Group,
   InstancedMesh,
   Matrix4,
@@ -11,6 +10,7 @@ import {
 } from 'three';
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
+import { visibleBounds } from '../style/measure';
 import { addOutline, decal, disposeTree, markShared, solid, toonMaterial } from '../style/materials';
 import { sharedFacePatch } from '../style/sharedFace';
 import { paintFace, type Expression, type FacePaintOptions } from '../style/faces';
@@ -119,29 +119,49 @@ function petSizer(root: Group, body: Group): Group {
 
 /**
  * Scales the sizer so the finished creature stands exactly
- * {@link PET_RENDER_HEIGHT} tall — **measured, never hand-written**.
+ * {@link PET_RENDER_HEIGHT} tall, with its lowest point on the floor —
+ * **measured, never hand-written**.
  *
- * This used to take a natural height as a literal argument, and every recipe
- * pet passed the same `0.52`. That number was the top of the *skull*, so the
- * ears — the whole point of a bunny — were left out of the sum and then
- * multiplied by the sizer along with everything else. The result was the exact
- * opposite of what this function is for: a bunny rendered **2.12 m** tall (as
- * tall as the player), a mouse 1.80, a kitten 1.71, and only the earless puff
- * anywhere near 1.46. It also put every pet's name label, which the parade
- * hangs at `height + 0.42`, somewhere inside its head.
+ * Twice now this has been half-fixed, so both mistakes are worth keeping:
  *
- * Measuring the built body closes that off for good: add a taller ear, a hat,
- * a horn, and the pet is still 1.46 m tall without anybody remembering to
- * re-measure by hand. It costs one `Box3` per pet, at construction only.
+ * 1. It used to take a natural height as a literal argument, and every recipe
+ *    pet passed the same `0.52`. That number was the top of the *skull*, so the
+ *    ears — the whole point of a bunny — were left out of the sum and then
+ *    multiplied by the sizer along with everything else. A bunny rendered
+ *    **2.12 m** tall (as tall as the player), a mouse 1.80, a kitten 1.71, and
+ *    only the earless puff was anywhere near 1.46. It also put every pet's name
+ *    label, which the parade hangs above `height`, somewhere inside its head.
+ * 2. The fix for that measured a `Box3` — and a `Box3` of a built model is the
+ *    axis-aligned box of already axis-aligned boxes, so every rotation in the
+ *    chain inflates it. Measuring off an inflated box scales the pet *down* too
+ *    far: the kitten came out 34 mm short, the mouse 55, the puff 68.
  *
- * The box is taken from the origin (the paws — the asset contract puts every
- * origin at the base) up to the highest point, outline hulls and all.
+ * So it measures {@link visibleBounds}, which walks vertices rather than boxes
+ * and expands an `InstancedMesh` through its `instanceMatrix` — and a pet's
+ * ears *are* one instanced mesh of two mirrored copies, which is precisely how
+ * mistake (1) stayed hidden. Add a taller ear, a hat or a horn and the pet is
+ * still 1.46 m tall with nobody remembering to re-measure.
+ *
+ * Both halves of the asset contract are settled here, because both are one
+ * transform. The scale comes from the full visible extent — `top - bottom`, not
+ * `top` — and the sizer is then lifted by whatever the bottom was, so the pet's
+ * lowest visible point lands on y = 0. The puff needs that: its foot blobs dip
+ * 10 mm below the body origin, which the sizer's ~3× magnified into 28 mm of
+ * pet sunk through the floor.
+ *
+ * It writes `sizer`, never `root` (reserved for the caller's squash-and-stretch)
+ * and never `body` (rewritten every frame by {@link applyWalk}), which is the
+ * whole reason the sizer group exists. Construction only; never per frame.
  */
 function sizeToStandard(sizer: Group, body: Group): void {
-  sizer.scale.setScalar(1);
-  sizer.updateMatrixWorld(true);
-  const natural = new Box3().setFromObject(body).max.y;
-  if (natural > 1e-4) sizer.scale.setScalar(PET_RENDER_HEIGHT / natural);
+  // Measured in `body`'s own space, so whatever the sizer currently holds — and
+  // whatever a walk frame has left on `body` — divides straight back out.
+  const { bottom, top } = visibleBounds(body);
+  const extent = top - bottom;
+  if (extent <= 1e-4) return;
+  const scale = PET_RENDER_HEIGHT / extent;
+  sizer.scale.setScalar(scale);
+  sizer.position.y = -bottom * scale;
 }
 
 export function createPet(kind: PetKind): PetHandle {
