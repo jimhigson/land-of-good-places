@@ -1449,6 +1449,18 @@ them from authored to generated.
    placed by the solver like everything else. The entrance stays pinned as
    the one fixed thing a returning child can rely on.
 
+### The input is a manifest, not just a seed (family, 02:55)
+
+*"In future we should be able to change the locations of things and add new
+attractions at will and this regenerates the rails etc to another working
+configuration."* So the generator's input is a **declarative park manifest**:
+a list of attractions, each optionally **pinned** to a position, plus
+`PARK_SEED` for everything left free. Adding an attraction is adding a line;
+moving one is pinning it somewhere else; the solver re-grows rails, paths and
+dressing around the change and `check:park` proves the result is a working
+park. The manifest is the API the family will eventually edit — design every
+layer so nothing but the manifest and the seed feed it.
+
 ### The layers, each consuming the previous, all from `PARK_SEED`
 
 - **L1 anchors** — a seeded constraint solver places castle, fountain, rides,
