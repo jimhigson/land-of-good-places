@@ -68,6 +68,20 @@ Unless the grown-ups turn on **Mayhem mode**…
   the drawing, and the DOM half is one global rule at the top of
   `src/style.css`. The activation flash reuses the hop ring's own pool
   (`art/effects/rainbowRing.ts`) rather than a second rainbow.
+- **PREVIEW RULE — absolute, applies everywhere (28 July 2026):** **every
+  screen that changes how the character looks is the character-creation
+  screen, with fewer choices.** Face painting, hats, and anything else that
+  alters her appearance must be **the same component and the same code** —
+  the same preview, the same framing behaviour, the same layout — showing
+  only the one choice that screen is for. Do not write a second picker with
+  its own look.
+  Each such screen should be **framed for what it changes**: face painting
+  zooms right in on the face; a hat frames the head; a pet frames the pet.
+  The camera-follows-what-changed behaviour already exists in character
+  creation — it is the thing to reuse, not to reimplement.
+  *Why it is a rule: a child learns one screen and then knows them all, and
+  we stop maintaining four pickers that drift apart. This codebase has
+  already been bitten repeatedly by copy-adapted twins.*
 - **BREVITY RULE — absolute, applies everywhere (28 July 2026):** **write
   about half as much as feels natural.** This is a game for a six-year-old
   who is still learning to read; a wall of text is a wall, however friendly
