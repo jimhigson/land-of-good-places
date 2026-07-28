@@ -18,6 +18,7 @@ import { ANCHORS } from './anchors';
 import type { InteractZone } from './interact';
 import { highlightInstance } from './highlight';
 import type { FrameContext, GameSystem } from '../core/types';
+import type { Player } from '../entities/Player';
 import { FLOWER_COLOURS, FLOWER_HEX, gameStore } from '../state';
 
 /**
@@ -103,6 +104,14 @@ export class Flowers implements GameSystem {
   private readonly stems: InstancedMesh;
   private readonly heads: InstancedMesh;
   private readonly pickEffect: FlowerPickEffect;
+
+  /**
+   * Who does the bending and the smelling — see {@link attachPlayer}. Null
+   * until `World.attachPlayer` hands her over, and treated as optional
+   * throughout: the meadow works perfectly well without a character in it, and
+   * a missing flourish must never be able to stop a flower being picked.
+   */
+  private player: Player | null = null;
 
   // Scratch objects, reused every frame — nothing here allocates in the loop.
   private readonly scratchMatrix = new Matrix4();
@@ -226,6 +235,17 @@ export class Flowers implements GameSystem {
     return zones;
   }
 
+  /**
+   * Lets the meadow ask the character to bend, pick and smell.
+   *
+   * `World.attachPlayer`'s pattern, and here for the same reason it is used
+   * for the fountain and the crowd: `World` is built before `Player` exists
+   * (see `Game`'s constructor), so this cannot be a constructor argument.
+   */
+  attachPlayer(player: Player): void {
+    this.player = player;
+  }
+
   dispose(): void {
     this.stems.geometry.dispose();
     this.heads.geometry.dispose();
@@ -252,7 +272,15 @@ export class Flowers implements GameSystem {
     const y = this.groundY[index] ?? 0;
     const hex = FLOWER_HEX[colour];
 
+    // The flower is hers *first*, and worn a moment later — the flourish that
+    // follows is decoration and nothing waits on it. That is what makes
+    // walking off mid-bend cost nothing: there is no half-picked flower to
+    // finish picking, only a pose that stops being applied.
     gameStore.collectFlower(colour);
+
+    // Bend, pick, smell (family design feedback). Never blocks: she can walk
+    // out of it on the next frame — see `Player.pickFlower`.
+    this.player?.pickFlower();
 
     // The flight target is read live every frame of the flourish, so it keeps
     // heading for the player even if they walk off immediately after picking.
