@@ -1,5 +1,6 @@
 import { CanvasTexture, Euler, type Material, type Object3D, Quaternion, Vector3 } from 'three';
 import { angleDelta, DEG } from '../core/mathUtils';
+import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from './interact';
 
 /**
  * The "Read a sign" registry.
@@ -12,11 +13,11 @@ import { angleDelta, DEG } from '../core/mathUtils';
  * mesh; {@link collectSignZones} then reads the *assembled* scene graph back,
  * which cannot disagree with what is actually on screen.
  *
- * Reading is proximity-based (see `ui/SignReader.ts`): stand close to a sign
- * and face it, and a "Read" button appears. There is no tap-to-inspect path —
- * that used to swoop the camera in, which fired by accident and read as a
- * jarring zoom (family complaint, 26 Jul 2026); a full-screen overlay with no
- * camera move replaced it.
+ * Reading follows GAME_DESIGN.md's SELECTION RULE like everything else: a sign
+ * is selected by standing at it, hovering it or tapping it, and its one action —
+ * a "Read" chip over the board — opens `ui/SignReader.ts`'s full-screen overlay.
+ * See {@link signInteractZone} for the adapter, and for why signs are not folded
+ * into `World.interactZones()`.
  */
 export interface SignZone {
   readonly id: string;
@@ -173,4 +174,48 @@ function canvasOf(object: Object3D): HTMLCanvasElement | null {
   const single = Array.isArray(material) ? material[0] : material;
   const map = (single as { map?: unknown } | undefined)?.map;
   return map instanceof CanvasTexture ? (map.image as HTMLCanvasElement) : null;
+}
+
+/** How far in front of a board a child stands to read it, in metres. */
+const SIGN_STAND_DISTANCE = 1.6;
+
+/**
+ * A sign as an {@link InteractZone}, so the SELECTION RULE can treat it like
+ * everything else in the park: one thing selected, one outline, one chip.
+ *
+ * **Built by `Game`, deliberately not folded into `World.interactZones()`.**
+ * `scripts/check-park.mts` walks that list as "every attraction's stand point"
+ * and asserts each one routes from the entrance on the real nav lattice; signs
+ * are scattered furniture, several of them up against a hedge or on a plot
+ * boundary, and quietly enrolling forty of them in that invariant would have
+ * been a ratchet full of noise rather than a checker anybody trusts.
+ *
+ * `selectRank: -1` is the old precedence, kept: an interactable you can *act*
+ * on beats a sign you can read, since the sign is passive, and a shop's own
+ * sign hangs directly over its counter.
+ *
+ * The stand point is a step in front of the painted face rather than inside the
+ * post, so that walking to a distant sign she tapped puts her where she can
+ * actually see it.
+ */
+export function signInteractZone(sign: SignZone, read: () => void): InteractZone {
+  const actions: readonly ZoneAction[] = [
+    { id: PRIMARY_ACTION, label: 'Read', glyph: '📖', run: read },
+  ];
+  return {
+    id: sign.id,
+    label: 'Sign',
+    x: sign.x,
+    y: sign.y,
+    z: sign.z,
+    // The board itself is what a tap has to land on, so the pick radius follows
+    // the painted face rather than a fixed guess.
+    pickRadius: Math.max(0.9, sign.width * 0.6),
+    standX: sign.x + Math.sin(sign.yaw) * SIGN_STAND_DISTANCE,
+    standZ: sign.z + Math.cos(sign.yaw) * SIGN_STAND_DISTANCE,
+    standRadius: SIGN_READ_DISTANCE,
+    selectRank: -1,
+    highlight: { object: sign.object },
+    actions: () => actions,
+  };
 }

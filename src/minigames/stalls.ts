@@ -2,7 +2,7 @@ import { Group } from 'three';
 import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
-import type { InteractZone } from '../world/interact';
+import { pressZone, type InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
 import { createDodgems } from './dodgems/Dodgems';
@@ -207,28 +207,32 @@ export class MiniGameStalls implements GameSystem {
   /**
    * Tap targets, one per stall (see `world/interact.ts`).
    *
-   * `pressInteract` is true, so tapping the booth walks the character to the
-   * counter and then fires exactly the same action the E key raises — the
-   * keyboard and touch paths meet before anything game-specific happens.
+   * One action each — "Ride!", "Play!", "Enter!" — and it is the virtual E
+   * press, so pressing the chip reaches `MiniGameHost`'s own proximity-and-press
+   * watch exactly as walking up and pressing the key always did. The keyboard
+   * and touch paths still meet before anything game-specific happens.
    */
   interactZones(): InteractZone[] {
-    return this.stalls.map((stall) => ({
-      id: `stall:${stall.definition.id}`,
-      label: stall.definition.title,
-      x: stall.x,
-      y: terrainHeight(stall.x, stall.z),
-      z: stall.z,
-      pickRadius: 3.2,
-      standX: stall.standX,
-      standZ: stall.standZ,
-      pressInteract: true,
-      // The whole booth lights up in rainbow when you can use it (GAME_DESIGN's
-      // HIGHLIGHT RULE). `props` is filled in step with `stalls` in the
-      // constructor above, one prop per instance, in order.
-      // The whole booth lights up in rainbow when you can use it — see
-      // GAME_DESIGN.md's HIGHLIGHT RULE and `world/highlight.ts`.
-      highlight: highlightObject(stall.booth),
-    }));
+    return this.stalls.map((stall) =>
+      pressZone(
+        {
+          id: `stall:${stall.definition.id}`,
+          label: stall.definition.title,
+          x: stall.x,
+          y: terrainHeight(stall.x, stall.z),
+          z: stall.z,
+          pickRadius: 3.2,
+          standX: stall.standX,
+          standZ: stall.standZ,
+          // The whole booth lights up in rainbow when it is selected — see
+          // GAME_DESIGN.md's HIGHLIGHT RULE and `world/highlight.ts`. `props` is
+          // filled in step with `stalls` in the constructor above, one prop per
+          // instance, in order.
+          highlight: highlightObject(stall.booth),
+        },
+        stall.definition.glyph,
+      ),
+    );
   }
 
   update({ elapsed }: FrameContext): void {

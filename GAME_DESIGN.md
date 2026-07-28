@@ -83,6 +83,24 @@ Unless the grown-ups turn on **Mayhem mode**…
   alighting by accidentally walking.
   Also: **move the "?" help button under the Menu button** — where it floats
   now it is too easy to press by mistake.
+  **As built (28 July 2026):** `src/world/Selection.ts` is the coordinator —
+  proximity, mouse hover and taps all feed one `selected` zone, and everything
+  downstream reads it rather than re-deriving it. `InteractZone.actions` is a
+  *function*, evaluated every frame, which is what lets "Get on" become "Get
+  off"; a zone with no actions is not selectable, so **outlined = selected =
+  actions showing** is one fact rather than three. `src/ui/ActionChips.ts`
+  draws the chips as real `<button>`s projected over the item (so the rainbow
+  outline, the pointer cursor and the tap flash come free), through whichever
+  camera the frame is drawn with — which is why they still work from the
+  train's first-person seat. `Highlights` became a renderer with one slot.
+  The old one-word action pill, the "Read" pill and the press-E prompts in
+  `Shopping` and `TreeClimbing` are all deleted: one system, not five. The
+  train's auto-boarding and alighting-by-walking are gone.
+  *Two consequences worth knowing:* things you use by **arriving** rather than
+  by pressing — the trampoline, the bubble, the slides, the front door — have
+  no actions and so are no longer outlined at all; and a tap that lands on a
+  thing no longer walks you to it, so tapping a stall selects it and tapping
+  its chip is what sets off the walk.
 - **PREVIEW RULE — absolute, applies everywhere (28 July 2026):** **every
   screen that changes how the character looks is the character-creation
   screen, with fewer choices.** Face painting, hats, and anything else that

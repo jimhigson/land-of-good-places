@@ -1,20 +1,13 @@
 import {
-  Box3,
   BufferGeometry,
   Group,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  Raycaster,
-  Sphere,
-  Vector2,
-  Vector3,
-  type Ray,
   type RingGeometry,
   type Scene,
 } from 'three';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { IsoCamera } from '../core/IsoCamera';
 import {
   createRainbowRings,
   createRainbowSparks,
@@ -31,38 +24,30 @@ import {
 } from '../art/effects/rainbowOutline';
 import { decal } from '../art/style/materials';
 import type { InteractZone } from './interact';
-import type { SignZone } from './signs';
 import { highlightKey, type HighlightTarget } from './highlight';
 
 /**
- * The HIGHLIGHT RULE, as one system.
+ * The HIGHLIGHT RULE, as one system — and, since 28 July 2026, the SELECTION
+ * RULE's other half.
  *
  * GAME_DESIGN.md, absolute, applies everywhere: *everything you can interact
- * with is outlined in a rainbow when it is about to be used*. On a mouse, that
- * means **on hover**. On a keyboard or a pad, it means **whatever pressing E
- * would use right now**, for as long as E is primed. The point is that a
- * six-year-old can always see what is usable without hunting for it.
+ * with is outlined in a rainbow when it is about to be used*. The SELECTION RULE
+ * then made "about to be used" mean exactly one thing: **the rainbow outline IS
+ * the selection**. Whatever `world/Selection.ts` has picked — by proximity, by
+ * hover or by tap — is what is outlined, and `ui/ActionChips.ts` floats that
+ * same thing's actions over it. One pick, two pictures of it, which is what
+ * makes it impossible for the outline and the chips to disagree.
  *
- * Built once, here, so that everything built afterwards inherits it. Three
- * things feed it and it owns none of them:
- *
- *  - **the zone list** — the same `interactZones()` the tap navigator and the
- *    action button already walk, so registering a tap target *is* registering a
- *    highlight;
- *  - **the primed zone** — `ActionButton.zone`, which is by definition the one
- *    thing E would act on, hysteresis and all. Reading it rather than
- *    re-deriving it is what guarantees the outline and the pill can never
- *    disagree about what you are standing next to;
- *  - **the primed sign** — `SignReader.nearby`, the same idea for the passive
- *    "Read" pill.
+ * This system therefore owns no picking of its own at all any more (it used to
+ * own the hover ray; that moved to `Selection`, which needs it for taps too).
+ * It draws, and it fires the activation flash on request.
  *
  * ### Cost
  *
- * Three slots, allocated at construction: hover, primed zone, primed sign.
- * **At most three extra draw calls in the whole frame**, no matter how many
- * interactables the park grows — highlighting is a property of the one thing
- * you are pointing at, not of every registered thing. Shell geometry is built
- * on first use and cached per object, so nothing is merged in a loop.
+ * One slot, allocated at construction — because one thing is selected. **At most
+ * one extra draw call in the whole frame**, no matter how many interactables the
+ * park grows. Shell geometry is built on first use and cached per object, so
+ * nothing is merged in a loop.
  *
  * ### Day and night
  *
@@ -72,8 +57,8 @@ import { highlightKey, type HighlightTarget } from './highlight';
  * plum separators baked into the strip; see `art/effects/rainbowOutline.ts`.
  */
 
-/** Slots, in order: what the mouse is over, what E would use, what Read would read. */
-const SLOT_COUNT = 3;
+/** One selection, one outline. */
+const SLOT_COUNT = 1;
 
 /** Clearance above the ground for the fallback ring, so it never z-fights the grass. */
 const RING_CLEARANCE = 0.07;
@@ -83,9 +68,6 @@ const MIN_RING_RADIUS = 0.7;
 
 /** Ring width as a fraction of its radius — a rim, not a dinner plate. */
 const RING_INNER = 0.84;
-
-/** Nothing further than this from the player is worth pointing at. Matches TapNavigator. */
-const MAX_HOVER_DISTANCE = 90;
 
 /** Gentle breathing, shared by every highlight on screen: cycles per second, and depth. */
 const PULSE_HZ = 0.5;
@@ -102,13 +84,9 @@ const PULSE_DEPTH = 0.12;
 const FROZEN_DT = 1 / 60;
 
 export interface HighlightSources {
-  /** Every interactable in the park this frame — the same list the action button walks. */
-  zones(): readonly InteractZone[];
-  /** What pressing E would act on right now, or null. */
-  primedZone(): InteractZone | null;
-  /** What pressing Read would read right now, or null. */
-  primedSign(): SignZone | null;
-  /** True while something else owns the screen — a shop, the book, a mini-game, a ride. */
+  /** The one selected thing, from `world/Selection.ts`, or null. */
+  selected(): InteractZone | null;
+  /** True while something else owns the screen — a shop, the book, the map, a sign. */
   blocked(): boolean;
 }
 
@@ -123,15 +101,8 @@ export class Highlights implements GameSystem {
 
   /** One shell per target object, built lazily and kept — see the cost note above. */
   private readonly shells = new Map<string, HighlightShell | null>();
-  /** World-space bounds per target object, for hover picking. Targets that move use their zone instead. */
-  private readonly bounds = new Map<string, Box3>();
 
-  private readonly raycaster = new Raycaster();
-  private readonly ndc = new Vector2();
   private readonly scratchMatrix = new Matrix4();
-  private readonly scratchSphere = new Sphere();
-  private readonly scratchPoint = new Vector3();
-  private hasCursor = false;
 
   /**
    * The activation flash: the hop rainbow's own pool, fired at whatever was
@@ -143,27 +114,8 @@ export class Highlights implements GameSystem {
   private readonly rings: RainbowRings;
   private readonly sparks: RainbowSparks;
 
-  /**
-   * What was primed on the last frame the park was being played.
-   *
-   * The press that uses something is the same press that opens the panel over
-   * it, and by the time this system runs that frame the action button has
-   * already gone dark. Flashing what was primed a moment ago is what lets a
-   * shop, a ride or a mini-game confirm the tap that started it.
-   */
-  private lastPrimed: InteractZone | null = null;
-
   constructor(
     scene: Scene,
-    private readonly camera: IsoCamera,
-    /**
-     * The park itself, so that pointing at something usable also turns the
-     * cursor into a pointer — GAME_DESIGN.md's HIGHLIGHT RULE asks for both,
-     * and doing it here means one decision with two effects rather than a
-     * second hover test that could disagree with the outline. The rule lives in
-     * `style.css` (`#game-canvas[data-hover]`); this only says when.
-     */
-    private readonly canvas: HTMLCanvasElement,
     private readonly sources: HighlightSources,
   ) {
     this.group.name = 'highlights';
@@ -189,28 +141,14 @@ export class Highlights implements GameSystem {
   }
 
   /**
-   * Where the mouse is, in normalised device coordinates, or nothing if it has
-   * left the canvas. Touch never calls this: a finger has no hover, and on a
-   * touch device the action pill is the "primed" signal instead.
-   */
-  setCursor(ndcX: number, ndcY: number): void {
-    this.ndc.set(ndcX, ndcY);
-    this.hasCursor = true;
-  }
-
-  clearCursor(): void {
-    this.hasCursor = false;
-  }
-
-  /**
    * "You touched it": half a second of radiating rainbow and a scatter of
    * stars, at whatever was just used.
    *
-   * Public because a tap is confirmed the moment it lands, not when the walk it
-   * started finishes — `Game` calls this from the tap handler. Every other way
-   * of using something (E, the pad, the action pill, arriving somewhere you
-   * tapped) comes through the `interact` action and is picked up in
-   * {@link update}, so there is one flash however you played.
+   * Public, and called from exactly one place: `world/Selection.ts`, which is
+   * the one thing that knows when something was selected, pressed or arrived at.
+   * A tap is confirmed the moment it lands rather than when the walk it started
+   * finishes, because on a phone that burst is the only "yes, that one" a child
+   * gets.
    */
   flashZone(zone: InteractZone | null): void {
     if (!zone) return;
@@ -237,36 +175,7 @@ export class Highlights implements GameSystem {
     this.material.opacity = pulse;
     this.ringMaterial.opacity = pulse * 0.9;
 
-    // Every input method meets here: the E key, a pad button, the action pill
-    // and a tap that has just walked somewhere all raise `interact`.
-    const activated = context.input.justPressed('interact');
-
-    if (this.sources.blocked()) {
-      // The press that used the thing is the press that opened the panel over
-      // it, so this frame is where a shop, a ride or a stall gets confirmed.
-      if (activated) {
-        this.flashZone(this.lastPrimed);
-        this.lastPrimed = null;
-      }
-      for (const slot of this.slots) slot.hide();
-      this.setPointerCursor(false);
-      return;
-    }
-
-    const zones = this.sources.zones();
-    const hovered = this.pickHovered(zones, context.playerPosition);
-    this.setPointerCursor(hovered !== null);
-    const primed = this.sources.primedZone();
-    const sign = this.sources.primedSign();
-
-    if (activated) this.flashZone(primed ?? this.lastPrimed);
-    this.lastPrimed = primed;
-
-    this.showZone(0, hovered);
-    // Never draw the same thing twice: standing next to the very thing you are
-    // pointing at is the common case, not the exception.
-    this.showZone(1, primed && primed.id !== hovered?.id ? primed : null);
-    this.showSign(2, sign);
+    this.showZone(0, this.sources.blocked() ? null : this.sources.selected());
   }
 
   dispose(): void {
@@ -275,7 +184,6 @@ export class Highlights implements GameSystem {
     for (const slot of this.slots) slot.dispose();
     for (const shell of this.shells.values()) shell?.geometry.dispose();
     this.shells.clear();
-    this.bounds.clear();
     this.ringGeometry.dispose();
     this.ringMaterial.dispose();
     this.material.dispose();
@@ -283,13 +191,6 @@ export class Highlights implements GameSystem {
   }
 
   // -------------------------------------------------------------- internals
-
-  /** Only ever written on a change: the cursor is a style recalc, every frame is not. */
-  private setPointerCursor(on: boolean): void {
-    const want = on ? 'true' : 'false';
-    if (this.canvas.dataset.hover === want) return;
-    this.canvas.dataset.hover = want;
-  }
 
   private showZone(index: number, zone: InteractZone | null): void {
     const slot = this.slots[index];
@@ -314,19 +215,6 @@ export class Highlights implements GameSystem {
       zone.z,
       Math.max(MIN_RING_RADIUS, zone.pickRadius),
     );
-  }
-
-  private showSign(index: number, sign: SignZone | null): void {
-    const slot = this.slots[index];
-    if (!slot) return;
-    if (!sign) {
-      slot.hide();
-      return;
-    }
-    const target: HighlightTarget = { object: sign.object };
-    const shell = this.shellFor(target);
-    if (shell) slot.showShell(sign.id, shell, this.worldMatrixOf(target));
-    else slot.hide();
   }
 
   /** The target's world matrix, with its instance's own matrix folded in if it has one. */
@@ -359,73 +247,6 @@ export class Highlights implements GameSystem {
     return shell;
   }
 
-  /**
-   * The interactable under the mouse, or null.
-   *
-   * Tested against the target's world bounds where one was registered — so a tall
-   * shop front can be pointed at anywhere up its awning — and against the zone's
-   * own `pickRadius` sphere otherwise, which is exactly what a tap already uses.
-   * Nearest hit along the ray wins, the same rule `pickInteractZone` uses for a
-   * finger.
-   */
-  private pickHovered(
-    zones: readonly InteractZone[],
-    playerPosition: Readonly<Vector3>,
-  ): InteractZone | null {
-    if (!this.hasCursor) return null;
-    this.raycaster.setFromCamera(this.ndc, this.camera.camera);
-    const ray = this.raycaster.ray;
-
-    let best: InteractZone | null = null;
-    let bestDistance = Infinity;
-
-    for (const zone of zones) {
-      const dx = zone.x - playerPosition.x;
-      const dz = zone.z - playerPosition.z;
-      // Cheap, and it is also what keeps the building's interior — six hundred
-      // metres away in its own space — out of the park's hover tests.
-      if (dx * dx + dz * dz > MAX_HOVER_DISTANCE * MAX_HOVER_DISTANCE) continue;
-
-      const hit = this.intersect(ray, zone);
-      if (hit === null || hit >= bestDistance) continue;
-      best = zone;
-      bestDistance = hit;
-    }
-
-    return best;
-  }
-
-  /** Distance along the ray to this zone, or null for a miss. */
-  private intersect(ray: Ray, zone: InteractZone): number | null {
-    const box = zone.highlight ? this.boundsFor(zone.highlight) : null;
-    if (box) {
-      const hit = ray.intersectBox(box, this.scratchPoint);
-      return hit ? ray.origin.distanceTo(hit) : null;
-    }
-    this.scratchSphere.center.set(zone.x, zone.y + zone.pickRadius * 0.5, zone.z);
-    this.scratchSphere.radius = zone.pickRadius;
-    const hit = ray.intersectSphere(this.scratchSphere, this.scratchPoint);
-    return hit ? ray.origin.distanceTo(hit) : null;
-  }
-
-  /**
-   * World bounds of a registered target, cached.
-   *
-   * Only for targets that stand still — which is every one that names a whole
-   * object. An instance moves, grows and is picked (the flowers), so those fall
-   * back to their zone's sphere, which is rebuilt from live data every frame
-   * anyway.
-   */
-  private boundsFor(target: HighlightTarget): Box3 | null {
-    if (target.instanceId !== undefined) return null;
-    const key = highlightKey(target);
-    const existing = this.bounds.get(key);
-    if (existing) return existing;
-    const box = new Box3().setFromObject(target.object);
-    if (box.isEmpty()) return null;
-    this.bounds.set(key, box);
-    return box;
-  }
 }
 
 /**

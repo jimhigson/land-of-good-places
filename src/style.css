@@ -407,11 +407,22 @@ body {
   box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
 }
 
-/* The same finite "look, I'm here" the controls toggle gets, for the same
-   reason: on a first run this button is the only clue the rest of it exists. */
+/* One finite "look, I'm here" on a first run: this button is now the only clue
+   that the park name, the purse, the backpack, the book, the map and the
+   controls help all exist. Finite, so it never nags. */
 .pill--menu.is-new {
-  animation: hint-toggle-pulse 700ms ease-in-out 2;
+  animation: menu-pill-pulse 700ms ease-in-out 2;
   animation-delay: 700ms;
+}
+
+@keyframes menu-pill-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.16);
+  }
 }
 
 .hud-menu-items {
@@ -510,52 +521,28 @@ body {
   transform: translateY(0.375rem);
 }
 
-/* The "?" that reveals the controls hint. Small and circular on purpose — the
-   hint text used to sit on screen all the time, which is a lot of real estate
-   for something a child reads once and never again. */
-.hint-toggle {
+/* The controls help lives under the Menu button now — one more pill in the
+   dropdown, styled like the rest of them. It used to be a small circular "?"
+   floating over the bottom-left of the park, and it was pressed by mistake
+   often enough that the family asked for it to be tucked away with everything
+   else (GAME_DESIGN.md, SELECTION RULE, 28 July 2026). */
+.pill--help {
   pointer-events: auto;
   cursor: pointer;
   appearance: none;
   font-family: inherit;
-  width: 2.375rem;
-  height: 2.375rem;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--lgp-text-md);
-  font-weight: 800;
   color: var(--lgp-ink);
   background: linear-gradient(180deg, #fff 0%, var(--lgp-cream) 150%);
-  border: 0.1875rem solid #fff;
-  box-shadow: var(--lgp-shadow);
   transition: transform 90ms ease, box-shadow 90ms ease;
 }
 
-.hint-toggle:active {
+.pill--help:active {
   transform: translateY(0.1875rem);
   box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
 }
 
-/* One gentle "look, I'm here" on first load — finite, so it never nags. */
-.hint-toggle.is-new {
-  animation: hint-toggle-pulse 700ms ease-in-out 2;
-  animation-delay: 700ms;
-}
-
-@keyframes hint-toggle-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.16);
-  }
-}
-
-/* The hint panel itself: an overlay anchored just above the toggle, so
-   opening it never reflows the other pills. */
+/* The hint panel itself: an overlay anchored to the bottom-left corner, so
+   opening it never reflows the pills stacked there. */
 .hint-panel {
   position: absolute;
   left: calc(1rem + env(safe-area-inset-left));
@@ -2613,42 +2600,9 @@ kbd {
 
 /* --------------------------------------------------------- reading a sign */
 
-/* The "Read" button: styled like every other HUD pill (`.pill--prompt`,
-   `.pill--backpack`), fading in/out rather than snapping — but see
-   `.sign-reader` below for why the full-screen overlay it opens does NOT get
-   the same treatment. Anchored bottom-right, just above where the touch hop
-   button sits (`.touch-controls`), so a thumb already resting near the action
-   buttons reaches it without moving — see `ui/SignReader.ts`. */
-.pill--read {
-  position: absolute;
-  right: calc(0.875rem + env(safe-area-inset-right));
-  bottom: calc(11.125rem + env(safe-area-inset-bottom));
-  z-index: 5;
-  pointer-events: auto;
-  cursor: pointer;
-  appearance: none;
-  font-family: inherit;
-  color: var(--lgp-ink);
-  background: linear-gradient(180deg, #fff 0%, var(--lgp-mint) 150%);
-  transition: opacity 180ms ease, transform 180ms ease;
-}
-
-.pill--read[data-show='false'] {
-  opacity: 0;
-  transform: translateY(0.375rem);
-  pointer-events: none;
-}
-
-.pill--read:active {
-  transform: translateY(0.1875rem);
-  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
-}
-
-@media (max-height: 460px) {
-  .pill--read {
-    bottom: calc(9.75rem + env(safe-area-inset-bottom));
-  }
-}
+/* The "Read" pill that used to sit in the bottom-right corner is gone: a sign
+   is an ordinary selectable thing now, and its "Read" chip floats over the
+   board itself (see `.action-chips` above and `world/signs.ts`). */
 
 /* The full-screen sign, and deliberately the one overlay in the whole game
    with NO transition, NO fade and NO entrance animation anywhere in this
@@ -2883,43 +2837,87 @@ kbd {
   }
 }
 
-/* ------------------------------------------------------- the action button */
+/* ------------------------------------------------------------- action chips */
 
-/* "Ride" / "Enter" / "Shop" / "Climb" / "Play" — whatever the nearest
-   interactable does, named on a button (`ui/ActionButton.ts`). Anchored to
-   the exact same spot as `.pill--read` on purpose: the two are mutually
-   exclusive by design (an interactable you can act on beats a sign you can
-   read — see `Game.ts`'s `SignReader` wiring), so sharing a slot is both a
-   nod to that precedence and what makes them structurally unable to ever
-   overlap on screen. */
-.pill--action {
+/* GAME_DESIGN.md's SELECTION RULE: *"once selected, the possible actions show
+   over the item itself"*. So there is no anchored corner pill any more — the
+   old `.pill--action` ("Ride E") and `.pill--read` are both gone, and their
+   one job is done by these, floating over whatever is selected.
+
+   `ui/ActionChips.ts` positions the row by projecting the item's world point
+   to the screen every frame and writing one `transform`; everything about how
+   it *looks* is here. The chips are real `<button>`s, so the rainbow
+   hover/focus outline, the pointer cursor and the activation flash all arrive
+   from the global rules at the top of this file and from `ui/TapBurst.ts` —
+   nothing is restated here. */
+.action-chips {
   position: absolute;
-  right: calc(0.875rem + env(safe-area-inset-right));
-  bottom: calc(11.125rem + env(safe-area-inset-bottom));
+  left: 0;
+  top: 0;
   z-index: 5;
+  display: flex;
+  gap: 0.375rem;
+  /* Two chips over a small thing would otherwise reach past its edges. */
+  align-items: flex-end;
+  pointer-events: none;
+  /* Positioned by a transform written every frame, so the transition is on
+     opacity alone — a chip that eased into place would lag behind its item. */
+  transition: opacity 140ms ease;
+  will-change: transform;
+}
+
+.action-chips[data-show='false'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.action-chip {
   pointer-events: auto;
   cursor: pointer;
   appearance: none;
   font-family: inherit;
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+  letter-spacing: 0.0125rem;
   color: var(--lgp-ink);
   background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 150%);
-  transition: opacity 180ms ease, transform 180ms ease;
+  border: 0.1875rem solid #fff;
+  border-radius: 999px;
+  padding: 0.375rem 0.875rem 0.4375rem;
+  box-shadow: var(--lgp-shadow);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+  /* A chip appearing is a small, cheerful event — it is the game answering a
+     tap — so it pops rather than fading in. */
+  animation: action-chip-pop 200ms ease-out;
 }
 
-.pill--action[data-show='false'] {
-  opacity: 0;
-  transform: translateY(0.375rem);
-  pointer-events: none;
+.action-chip .emoji {
+  font-size: var(--lgp-text-md);
+  line-height: 1;
 }
 
-.pill--action:active {
-  transform: translateY(0.1875rem);
+.action-chip:active {
+  transform: translateY(0.125rem);
   box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
 }
 
-@media (max-height: 460px) {
-  .pill--action {
-    bottom: calc(9.75rem + env(safe-area-inset-bottom));
+@keyframes action-chip-pop {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-chip {
+    animation: none;
   }
 }
 

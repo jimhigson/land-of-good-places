@@ -8,7 +8,7 @@ import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
 import type { KidAvatar } from '../entities/npc/kidCrowd';
 import type { NpcSystem } from '../entities/npc';
 import type { Hud } from '../ui/Hud';
-import type { InteractZone } from './interact';
+import { pressZone, type InteractZone } from './interact';
 import type { ClimbableTreeSeed } from './Scenery';
 import { terrainHeight } from './terrain';
 
@@ -100,9 +100,8 @@ export class TreeClimbing implements GameSystem {
    * trunk's own collision circle. Standing dead-centre is not something a
    * character can ever do (the trunk collider pushes them out to its edge),
    * and `TapNavigator`'s arrival radius (0.55 m) is smaller than some of
-   * these trunks — aim it at the centre and every tapped tree "gets stuck"
-   * short of arriving, so `pressInteract` never fires and the tap silently
-   * does nothing.
+   * these trunks — aim it at the centre and a walk to a tapped tree "gets
+   * stuck" short of arriving, so the chip that sent her there fires nothing.
    */
   interactZones(): InteractZone[] {
     return this.trees.map((tree, index) => {
@@ -116,17 +115,23 @@ export class TreeClimbing implements GameSystem {
       const standDistance = tree.trunkRadius + 0.9;
       const standX = tree.x + (tree.x / outward) * standDistance;
       const standZ = tree.z + (tree.z / outward) * standDistance;
-      return {
-        id: `tree-${index}`,
-        label: 'Climbable tree',
-        x: tree.x,
-        y,
-        z: tree.z,
-        pickRadius: tree.trunkRadius + 2.6,
-        standX,
-        standZ,
-        pressInteract: true,
-      };
+      return pressZone(
+        {
+          id: `tree-${index}`,
+          label: 'Climbable tree',
+          x: tree.x,
+          y,
+          z: tree.z,
+          pickRadius: tree.trunkRadius + 2.6,
+          standX,
+          standZ,
+          // The same margin `nearestClimbableTree` climbs within, measured from
+          // the trunk's surface rather than its centre — so the "Climb!" chip
+          // and the E key it names agree about how close is close enough.
+          standRadius: tree.trunkRadius + INTERACT_MARGIN,
+        },
+        '🌳',
+      );
     });
   }
 
@@ -144,10 +149,13 @@ export class TreeClimbing implements GameSystem {
       return;
     }
 
+    // No prompt of its own any more: the SELECTION RULE's "Climb!" chip over the
+    // tree is what says a tree can be climbed, and it is the same one system
+    // that offers everything else in the park (`world/Selection.ts`). This still
+    // owns the press itself, exactly as it always did.
     const tree = this.nearestClimbableTree(context.playerPosition.x, context.playerPosition.z);
-    if (!tree) return; // Leave the HUD prompt alone — something else may own it.
+    if (!tree) return;
 
-    this.hud.setPrompt(climbPrompt());
     if (context.input.justPressed('interact') && !this.player.riding) {
       this.beginPlayerClimb(tree);
     }
@@ -424,10 +432,6 @@ function isDescendantOf(node: Object3D, ancestor: Object3D): boolean {
     current = current.parent;
   }
   return false;
-}
-
-function climbPrompt(): string {
-  return isTouchDevice() ? 'Tap the tree — Climb' : 'Press E — Climb';
 }
 
 function descendPrompt(): string {

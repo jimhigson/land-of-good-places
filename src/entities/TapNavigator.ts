@@ -4,7 +4,6 @@ import type { InputSystem } from '../core/input';
 import type { TapPoint } from '../core/input/PointerControls';
 import type { IsoCamera } from '../core/IsoCamera';
 import { pickWalkablePoint } from '../world/pickWalkable';
-import { pickInteractZone, type InteractZone } from '../world/interact';
 import { MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGrid';
 import { TapMarker } from '../art/models/tapMarker';
 import type { GroundSampler, Player } from './Player';
@@ -154,7 +153,6 @@ export class TapNavigator implements GameSystem {
   private replansLeft = 0;
 
   private active = false;
-  private zone: InteractZone | null = null;
   private scripted: ScriptedWalk | null = null;
   private bestDistance = Infinity;
   private sinceProgress = 0;
@@ -166,7 +164,6 @@ export class TapNavigator implements GameSystem {
     private readonly camera: IsoCamera,
     private readonly input: InputSystem,
     private readonly navGrid: NavGrid,
-    private readonly zoneSource: () => readonly InteractZone[],
   ) {}
 
   /** The tap marker's geometry. Add it to the scene once, at construction. */
@@ -208,12 +205,11 @@ export class TapNavigator implements GameSystem {
     if (!found) return false;
     if (this.hit.distanceTo(this.player.position) > MAX_TARGET_DISTANCE) return false;
 
-    // Did the tap land on a *thing*? If so, walk to where you stand to use it
-    // rather than to the pixel that was touched.
-    const zone = pickInteractZone(this.zoneSource(), this.hit.x, this.hit.y, this.hit.z);
-    this.zone = zone;
-    if (zone) this.target.set(zone.standX, this.hit.y, zone.standZ);
-    else this.target.copy(this.hit);
+    // A tap that landed on a *thing* never reaches here: GAME_DESIGN.md's
+    // SELECTION RULE gives `world/Selection.ts` first refusal, and a tap on
+    // something selects it without walking anywhere (`Game`'s tap handler). So
+    // by the time this runs, the tap is a place, and a place is walked to.
+    this.target.copy(this.hit);
 
     this.active = true;
     this.running = point.doubleTap;
@@ -222,7 +218,7 @@ export class TapNavigator implements GameSystem {
     // moves the target — and therefore the marker — to where she can get to.
     this.planRoute(sampler);
     this.beginLeg();
-    this.marker.show(this.target.x, this.target.y, this.target.z, this.zone !== null, this.running);
+    this.marker.show(this.target.x, this.target.y, this.target.z, false, this.running);
     return true;
   }
 
@@ -240,7 +236,6 @@ export class TapNavigator implements GameSystem {
   navigateTo(x: number, y: number, z: number, scripted?: ScriptedWalk): void {
     if (this.player.riding) return;
     this.abandonScripted();
-    this.zone = null;
     this.scripted = scripted ?? null;
     this.target.set(x, y, z);
     this.active = true;
@@ -260,27 +255,10 @@ export class TapNavigator implements GameSystem {
     return this.active;
   }
 
-  /**
-   * The interactable the current walk is headed for, or null for plain ground.
-   *
-   * Read straight after {@link handleTap} to find out what a finger actually
-   * landed on — which is what the HIGHLIGHT RULE's activation flash needs, since
-   * on a phone a tap must be confirmed the moment it lands rather than when the
-   * walk it started finishes.
-   *
-   * Null, too, when the thing tapped turns out to be unreachable: flashing a
-   * stall she is about to stop ten metres short of promises something the walk
-   * cannot deliver.
-   */
-  get destinationZone(): InteractZone | null {
-    return this.zone;
-  }
-
   /** Drops the current destination. Called when the player takes over. */
   cancel(): void {
     this.active = false;
     this.running = false;
-    this.zone = null;
     this.routeLength = 0;
     this.routeIndex = 0;
     this.abandonScripted();
@@ -411,7 +389,6 @@ export class TapNavigator implements GameSystem {
     if (Math.hypot(endX - this.target.x, endZ - this.target.z) <= SHORTFALL_TOLERANCE) return;
 
     this.target.set(endX, sampler(endX, endZ, this.player.position.y), endZ);
-    this.zone = null;
   }
 
   /**
@@ -466,12 +443,14 @@ export class TapNavigator implements GameSystem {
   }
 
   /**
-   * Arrived. If the destination was a thing that wants a button press — the
-   * lift, the grown-up on the top deck — fire it now, through exactly the same
-   * action the E key raises.
+   * Arrived.
+   *
+   * Nothing is fired on arrival any more. Walking somewhere used to press the
+   * button on whatever you had tapped, which is half of what the SELECTION RULE
+   * came to stop; a walk that ends in an action is now one a chip explicitly
+   * asked for, and `world/Selection.ts` runs it (see its `commit`).
    */
   private arrive(): void {
-    if (this.zone?.pressInteract) this.input.pressVirtual('interact');
     this.input.setNavigationMove(0, 0);
 
     // Take the handler off first: `onArrive` is how the stair ride queues its
@@ -479,7 +458,6 @@ export class TapNavigator implements GameSystem {
     const scripted = this.scripted;
     this.scripted = null;
     this.active = false;
-    this.zone = null;
     this.routeLength = 0;
     this.routeIndex = 0;
     scripted?.onArrive();

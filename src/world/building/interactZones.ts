@@ -1,4 +1,4 @@
-import type { InteractZone } from '../interact';
+import { PRIMARY_ACTION, pressAction, pressZone, type InteractZone, type ZoneAction } from '../interact';
 import {
   BUBBLE_RADIUS,
   BUBBLE_X,
@@ -52,10 +52,19 @@ export interface BuildingZoneState {
   readonly trampolineSurfaceY: number;
   /** Ground height at the facade's front door, out in the garden. */
   readonly doorstepY: number;
+  /** "Come here, please." The lift's own summon — see `liftRide.ts`. */
+  callLift(): void;
 }
 
 export function buildingInteractZones(state: BuildingZoneState): InteractZone[] {
   const zones: InteractZone[] = [];
+
+  // Allocated once per call rather than once per deck: five decks share one
+  // stairwell chip and one lift chip, and an action list is immutable.
+  const callAction: readonly ZoneAction[] = [
+    { id: PRIMARY_ACTION, label: 'Call', glyph: '🛗', run: () => state.callLift() },
+  ];
+  const stairsAction: readonly ZoneAction[] = pressAction('Climb!', '🪜');
 
   // The way in, out in the garden. A tap on the tower walks a child to the top
   // of the front steps, and stepping over the threshold does the rest.
@@ -68,20 +77,17 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pickRadius: 3.4,
     standX: facadeX(1.5),
     standZ: facadeZ(BUILDING_HALF_Z - 0.7),
-    pressInteract: false,
   });
 
   // The lift doors and the stairs, once per deck: whichever one you can see is
   // the one you are standing next to, and the height tolerance in
   // `pickInteractZone` keeps the other four out of the way.
   for (let deck = 0; deck < BUILDING_FLOOR_COUNT; deck += 1) {
-    // Tapping the lift walks you to the doors and stops there. Arriving is the
-    // whole interaction now: standing in the lobby is what puts the lift's own
-    // control panel on screen (`world/building/liftRide.ts`,
-    // `ui/LiftPanel.ts`), and that panel is a far better affordance for a
-    // six-year-old than a one-word "Ride" pill. Hence `pressInteract: false`
-    // — there is no press for arriving to fire, and the action pill stays out
-    // of the way of the panel.
+    // The lift's one action is its call button, which is the same `call()` the
+    // brushed-metal panel's own big round button fires (`ui/LiftPanel.ts`). So
+    // tapping the lift from across the lobby walks her over and summons the car
+    // in one gesture, and the panel — a far better affordance than any chip
+    // once she is standing there — takes over from the doors onwards.
     zones.push({
       id: `lift-${deck}`,
       label: 'Glass lift',
@@ -91,7 +97,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       pickRadius: 2.8,
       standX: worldX(LIFT_STAND_X),
       standZ: worldZ(LIFT_DOOR_Z),
-      pressInteract: false,
+      actions: () => callAction,
     });
 
     // Tapping the stairs walks you to the foot of the flight and then fires
@@ -108,7 +114,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       pickRadius: 4.2,
       standX: worldX(STAIR_STAND_X),
       standZ: worldZ(STAIR_STAND_Z),
-      pressInteract: true,
+      actions: () => stairsAction,
     });
   }
 
@@ -121,8 +127,8 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pickRadius: TRAMPOLINE_RADIUS + 0.5,
     standX: worldX(TRAMPOLINE_X),
     standZ: worldZ(TRAMPOLINE_Z),
-    // Landing on it is the interaction.
-    pressInteract: false,
+    // Landing on it is the interaction, so it offers no chip — and, by the
+    // SELECTION RULE, is never outlined either.
   });
 
   zones.push({
@@ -134,7 +140,6 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pickRadius: BUBBLE_RADIUS + 0.4,
     standX: worldX(BUBBLE_X),
     standZ: worldZ(BUBBLE_Z),
-    pressInteract: false,
   });
 
   zones.push({
@@ -146,7 +151,6 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pickRadius: 1.9,
     standX: worldX(HELTER_ENTRY_X),
     standZ: worldZ(HELTER_ENTRY_Z),
-    pressInteract: false,
   });
 
   zones.push({
@@ -158,24 +162,27 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
     pickRadius: 2.4,
     standX: worldX(GIANT_SLIDE_ENTRY_X),
     standZ: worldZ(GIANT_SLIDE_ENTRY_Z),
-    pressInteract: false,
   });
 
   // Tapping the loo walks her *in* and then presses — `TOILET_STAND` is now a
   // spot inside `TOILET_ROOM` rather than one in the corridor outside it, so
   // the tap route and the walk-up-and-press route both end up in the room,
   // which is the only place the press is accepted (see `Building`).
-  zones.push({
-    id: 'toilets',
-    label: 'Toilets',
-    x: worldX(TOILET_STAND_X),
-    y: deckY(TOILET_DECK),
-    z: worldZ(TOILET_STAND_Z),
-    pickRadius: 3.2,
-    standX: worldX(TOILET_STAND_X),
-    standZ: worldZ(TOILET_STAND_Z),
-    pressInteract: true,
-  });
+  zones.push(
+    pressZone(
+      {
+        id: 'toilets',
+        label: 'Toilets',
+        x: worldX(TOILET_STAND_X),
+        y: deckY(TOILET_DECK),
+        z: worldZ(TOILET_STAND_Z),
+        pickRadius: 3.2,
+        standX: worldX(TOILET_STAND_X),
+        standZ: worldZ(TOILET_STAND_Z),
+      },
+      '🚽',
+    ),
+  );
 
   // The seven shops. Tapping a counter walks you to the serving spot and then
   // fires `interact` on arrival, which is the same thing the E key does when a
@@ -183,33 +190,41 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   for (const unit of SHOP_UNITS) {
     const [counterX, counterZ] = shopLocalToBuilding(unit, 0, 1.15);
     const [standX, standZ] = shopLocalToBuilding(unit, 0, SHOP_STAND_Z);
-    zones.push({
-      id: `shop-${unit.id}`,
-      label: unit.title,
-      x: worldX(counterX),
-      y: deckY(unit.deck),
-      z: worldZ(counterZ),
-      // Wide enough to take a tap anywhere on the kiosk — counter, shelves or
-      // the awning above it — without reaching the next shop along.
-      pickRadius: 2.3,
-      standX: worldX(standX),
-      standZ: worldZ(standZ),
-      pressInteract: true,
-    });
+    zones.push(
+      pressZone(
+        {
+          id: `shop-${unit.id}`,
+          label: unit.title,
+          x: worldX(counterX),
+          y: deckY(unit.deck),
+          z: worldZ(counterZ),
+          // Wide enough to take a tap anywhere on the kiosk — counter, shelves
+          // or the awning above it — without reaching the next shop along.
+          pickRadius: 2.3,
+          standX: worldX(standX),
+          standZ: worldZ(standZ),
+        },
+        '🛍️',
+      ),
+    );
   }
 
-  zones.push({
-    id: 'grownUp',
-    label: 'Ask a grown-up along',
-    x: worldX(GROWN_UP_X),
-    y: deckY(TOP_DECK),
-    z: worldZ(GROWN_UP_Z),
-    pickRadius: 1.7,
-    // Stand in front of them rather than inside them.
-    standX: worldX(GROWN_UP_X),
-    standZ: worldZ(GROWN_UP_Z + 1.4),
-    pressInteract: true,
-  });
+  zones.push(
+    pressZone(
+      {
+        id: 'grownUp',
+        label: 'Ask a grown-up along',
+        x: worldX(GROWN_UP_X),
+        y: deckY(TOP_DECK),
+        z: worldZ(GROWN_UP_Z),
+        pickRadius: 1.7,
+        // Stand in front of them rather than inside them.
+        standX: worldX(GROWN_UP_X),
+        standZ: worldZ(GROWN_UP_Z + 1.4),
+      },
+      '🧑',
+    ),
+  );
 
   return zones;
 }
