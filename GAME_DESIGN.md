@@ -390,6 +390,20 @@ from the doorway — and the interact press is now gated on the room rectangle
 rather than a radius. The camera is orthographic and 90 units out at 38°, so
 it is always far above the lid. NPCs queueing outside is still to do.*
 
+### The coaster is a RACE (28 July 2026 — in progress)
+
+The rail racer kept its track and lost its race in the move into the park;
+both belong. Decision 4's **two-track** coaster is the answer:
+
+- a **second track** beside the first, same solved loop, a cart-width apart;
+- a **rival park child** in the other cart — waves at the start, cheers at
+  the end, cheers YOU if she wins;
+- **hold on to go fast** — the old racer's one button, kept: hold to speed
+  up within the gentle physics, release to coast;
+- countdown at the station, **first home gets confetti**, losing costs
+  nothing and going again is instant. **Winning the rail race is a
+  Cute-o-dex deed.**
+
 ### The space ferris wheel — leaving it (28 July 2026 — queued)
 
 **Drop "hold still to go home".** The **X button already does the same thing
