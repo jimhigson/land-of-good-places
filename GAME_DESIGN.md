@@ -68,6 +68,21 @@ Unless the grown-ups turn on **Mayhem mode**…
   the drawing, and the DOM half is one global rule at the top of
   `src/style.css`. The activation flash reuses the hop ring's own pool
   (`art/effects/rainbowRing.ts`) rather than a second rainbow.
+- **BREVITY RULE — absolute, applies everywhere (28 July 2026):** **write
+  about half as much as feels natural.** This is a game for a six-year-old
+  who is still learning to read; a wall of text is a wall, however friendly
+  the words. Concretely, and these are limits rather than targets:
+  - a what's-new line, a shop blurb, a sign or a tip: **one sentence, at most
+    ~50 characters.** "One press collects anything in a shop!" not "Every
+    thing in a shop now has its own big Collect button — press it once and it
+    is yours!"
+  - a title: **at most ~24 characters.**
+  - never two sentences where one will do, and never explain the mechanism
+    when the child can simply see it happen.
+  If a panel needs scrolling to read its words, the words are too long — cut
+  them rather than growing the panel. **Enforce this with a check** so it
+  cannot creep back: a rule nothing measures is a rule that rots, and this
+  codebase has been bitten four times by exactly that.
 - **TEXT RULE — absolute, applies everywhere (27 July 2026):** set a
   **minimum font size and apply it throughout the whole game**, with no
   exceptions. It should be **generously large** — this is a game for a
