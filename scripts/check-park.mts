@@ -59,7 +59,7 @@
  */
 import './headless-canvas.mjs';
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import { buildHeadlessPark } from './park-harness.mts';
+import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
 import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
@@ -201,8 +201,11 @@ const collision = world.collision;
 // the map every route below is planned on. Running it after the lattice was
 // built would plan on a park the game never has.
 
-const hoppable = collision.checkHoppableColliders(PLAYER_RADIUS, JUMP_APEX_HEIGHT);
-const substep = collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
+// Both shout at the console themselves, which is exactly right at boot and
+// merely duplicate here: they hand back the same complaints as strings, and
+// those become findings below.
+const hoppable = quietly(() => collision.checkHoppableColliders(PLAYER_RADIUS, JUMP_APEX_HEIGHT));
+const substep = quietly(() => collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP));
 for (const problem of [...hoppable, ...substep]) {
   report({ invariant: 5, key: 'boot.asserts', measured: 1, detail: problem });
 }
@@ -383,6 +386,8 @@ function crossesTrack(
 }
 
 const targets = destinations();
+let routed = 0;
+let crossingsTotal = 0;
 
 for (const target of targets) {
   const points = navGrid.findRoute(
@@ -406,6 +411,7 @@ for (const target of targets) {
   const shortfall = Math.hypot(endX - target.x, endZ - target.z);
   const arrived = points > 0 && (navGrid.lastRouteReachedGoal || shortfall <= SHORTFALL_TOLERANCE);
 
+  if (arrived) routed += 1;
   if (!arrived) {
     const why =
       points === 0
@@ -451,6 +457,7 @@ for (const target of targets) {
     fromX = toX;
     fromZ = toZ;
   }
+  crossingsTotal += crossings;
 
   if (verbose) {
     table.push(
@@ -474,7 +481,10 @@ for (const target of targets) {
 // Its own file comment says why it matters: "a pocket of waypoints nobody can
 // walk to is a child standing in a bush however many of them there are".
 
-const graph = new PoiGraph(collision);
+// Built here rather than borrowed from `NpcSystem`, which keeps its copy
+// private. Forty-odd nodes, so the edge validation costs a few milliseconds —
+// and it is the same constructor the game runs, which is the point.
+const graph = quietly(() => new PoiGraph(collision));
 
 const dropped = SEEDS.length - graph.nodes.length;
 if (dropped > 0) {
@@ -847,16 +857,32 @@ for (const key of Object.keys(RATCHET)) {
   }
 }
 
+/**
+ * The one deviation worth a line of its own: whichever open allowance is the
+ * largest fraction of what the invariant would ideally be.
+ *
+ * A fraction rather than a raw figure, because the units are not comparable —
+ * 231 m of unfenced railway and one walled-in ferris wheel cannot be sorted
+ * against each other by size. Both are compared against their own recorded
+ * worst, so the line names the thing that is furthest from being fixed.
+ */
+let worst = { key: '', share: -1, count: 0, amount: 0 };
+for (const [key, amount] of measured) {
+  const share = amount / (RATCHET[key]?.worst || amount || 1);
+  const count = findings.filter((finding) => finding.key === key).length;
+  const better =
+    share > worst.share ||
+    (share === worst.share && (count > worst.count || (count === worst.count && amount > worst.amount)));
+  if (better) worst = { key, share, count, amount };
+}
+const worstDetail = findings.find((finding) => finding.key === worst.key)?.detail ?? '';
+
 if (verbose || regressions.length > 0) {
   for (const line of table) console.log(line);
-  if (findings.length > 0) console.log('');
-}
-
-if (findings.length > 0) {
-  for (const finding of findings) {
-    console.log(`  [${finding.invariant}] ${finding.detail}`);
-  }
   console.log('');
+  for (const finding of findings) console.log(`  [${finding.invariant}] ${finding.detail}`);
+  if (findings.length > 0) console.log('');
+  for (const line of park.said) console.log(`  world said: ${line}`);
 }
 
 for (const line of loose) {
@@ -873,9 +899,18 @@ if (regressions.length > 0) {
   process.exit(1);
 }
 
-const recordedCount = measured.size;
-console.log(
-  `check:park: ${targets.length} attractions route from the entrance; ` +
-    `${collision.colliderCount} colliders, ${world.train.route.length.toFixed(0)} m of track; ` +
-    `${recordedCount} invariant(s) carrying recorded drift. ${elapsed.toFixed(0)} ms.`,
-);
+const summary =
+  `check:park: ${routed}/${targets.length} attractions route from the entrance, ` +
+  `${crossingsTotal} rail crossing(s), ` +
+  `${graph.nodes.length - stranded.length}/${SEEDS.length} waypoints connected`;
+
+if (measured.size === 0) {
+  console.log(`${summary}. All six invariants hold. ${elapsed.toFixed(0)} ms.`);
+} else {
+  console.log(
+    `${summary}; ${measured.size} recorded deviation(s), worst ${worst.key} ` +
+      `(${worst.amount}) — ${worstDetail}. ` +
+      `RATCHET in scripts/check-park.mts; --verbose for all of them. ` +
+      `${elapsed.toFixed(0)} ms.`,
+  );
+}

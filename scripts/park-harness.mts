@@ -56,9 +56,49 @@ function inertInteriorControls(): InteriorControls {
   };
 }
 
+/**
+ * Noise that only exists because there is no browser here.
+ *
+ * `three` serialises a material's textures when it clones one (`KidCrowd` does,
+ * once per outfit), and our stubbed canvas has no image for it to serialise, so
+ * it warns — dozens of times, about nothing. Everything else a builder says
+ * during construction is kept and handed back to the caller.
+ */
+const HEADLESS_NOISE = /Unable to serialize Texture/;
+
+/**
+ * Runs `body` with `console.warn` and `console.error` collected rather than
+ * printed.
+ *
+ * Building the park says things — `poiGraph` names every waypoint it dropped,
+ * `Collision` names every hoppable wall it demoted — and a checker that lets
+ * them scroll past has buried its own findings in the world's. They are
+ * returned instead, so a caller can re-derive them properly and print the
+ * version a person can act on.
+ */
+function collectingWarnings<T>(body: () => T): { value: T; said: string[] } {
+  const said: string[] = [];
+  const warn = console.warn;
+  const error = console.error;
+  const capture = (...parts: unknown[]): void => {
+    const line = parts.map((part) => String(part)).join(' ');
+    if (!HEADLESS_NOISE.test(line)) said.push(line);
+  };
+  console.warn = capture;
+  console.error = capture;
+  try {
+    return { value: body(), said };
+  } finally {
+    console.warn = warn;
+    console.error = error;
+  }
+}
+
 export interface HeadlessPark {
   readonly scene: Scene;
   readonly world: World;
+  /** Everything the builders said while the park was going up. */
+  readonly said: readonly string[];
   /**
    * The ground under a point, as the player's own sampler answers it — the
    * building's `WalkSurfaces`, which is what `Game` installs. Decks, platforms
@@ -71,19 +111,32 @@ export interface HeadlessPark {
   readonly buildMs: number;
 }
 
-/** Builds the park. Costs a second or so; call it once. */
+/** Builds the park. A couple of hundred milliseconds; call it once. */
 export function buildHeadlessPark(): HeadlessPark {
   const started = performance.now();
   const scene = new Scene();
-  const sky = new Sky();
-  const camera = new IsoCamera();
-  const world = new World(scene, sky, inertInteriorControls(), camera);
+  const { value: world, said } = collectingWarnings(() => {
+    const sky = new Sky();
+    const camera = new IsoCamera();
+    return new World(scene, sky, inertInteriorControls(), camera);
+  });
   const buildMs = performance.now() - started;
 
   return {
     scene,
     world,
+    said,
     sample: (x, z, y) => world.building.surfaces.sample(x, z, y),
     buildMs,
   };
+}
+
+/**
+ * Runs `body` with the world's own console chatter collected, for a caller that
+ * builds something else off the finished park — a second `PoiGraph`, say, whose
+ * "waypoints nobody can walk to" warning the caller is about to report properly
+ * and in full.
+ */
+export function quietly<T>(body: () => T): T {
+  return collectingWarnings(body).value;
 }
