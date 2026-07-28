@@ -26,6 +26,21 @@ Proved it bites, on the unmodified ride:
 
 ## Findings
 
+- **`npm run build` is broken on `origin/main` b4143f0 (#96), before this branch.**
+  `scripts/check-waypoints.mts:47` imports `BUILDING_CENTRE_X` from
+  `src/core/constants.ts`, which no longer exports it — the winding-railway PR
+  moved it. Nothing on this branch touches either file. Every *other* build step
+  passes here: `check:text`, `check:shop-spacing`, `check:gondola-sightline`,
+  `check:hop-clearance`, `tsc --noEmit`, `check:brevity`, `check:assets`,
+  `check:crowd`, `check:ride-camera`, `check:park`, `vite build`. Somebody owns
+  that fix; it is not this PR.
+- **Live QA outstanding.** `window.game` is not reachable in the running dev
+  build (the `import.meta.env.DEV` hook in `main.ts:125` did not appear on
+  `window`), so the ride could not be opened from the console and the browser
+  check was abandoned rather than circled. The park itself boots and renders
+  fine. The parity trace is the stronger evidence anyway — it is the real ride,
+  bit-exact — but somebody should still sit in the gondola once.
+
 - **`Game.cameraOverride` does not exist on `origin/main`.** The brief says it
   does (~10 lines in `Game.ts`). Grep for `cameraOverride` across `src/` returns
   nothing. Decision 4 §8.2 lists it as its own piece of work; it is *not* in this
