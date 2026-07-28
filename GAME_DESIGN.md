@@ -68,6 +68,21 @@ Unless the grown-ups turn on **Mayhem mode**…
   the drawing, and the DOM half is one global rule at the top of
   `src/style.css`. The activation flash reuses the hop ring's own pool
   (`art/effects/rainbowRing.ts`) rather than a second rainbow.
+- **SELECTION RULE — absolute, applies everywhere (28 July 2026):** actions
+  happen in two steps so nothing happens by mistake.
+  1. **Tapping a world item — or standing close to it — SELECTS it**, shown
+     by the rainbow outline (the HIGHLIGHT rule's outline is the selection).
+  2. **Once selected, its possible actions appear over the item itself** —
+     "Get on", "Read", "Ride", "Pick" — as tappable chips.
+  3. **Press the key or tap the action chip to do it.** So a distant thing
+     takes two taps (select, then act) and a nearby thing takes one, because
+     proximity already selected it.
+  The train is the motivating case: **"Get on" appears when standing at a
+  platform with the train stopped; "Get off" when riding and it is stopped.**
+  No more boarding by accidentally standing in the wrong place, no more
+  alighting by accidentally walking.
+  Also: **move the "?" help button under the Menu button** — where it floats
+  now it is too easy to press by mistake.
 - **PREVIEW RULE — absolute, applies everywhere (28 July 2026):** **every
   screen that changes how the character looks is the character-creation
   screen, with fewer choices.** Face painting, hats, and anything else that
