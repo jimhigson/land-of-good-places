@@ -43,6 +43,8 @@ export class CarriedItem {
   private currentUid: string | null = null;
   private scale = 1;
   private pop = 1;
+  /** See {@link setVisible} — kept here so a swap mid-munch stays hidden too. */
+  private visible = true;
 
   /** `anchor` is the character's `holdAnchor` — the right hand. */
   constructor(anchor: Group) {
@@ -53,6 +55,22 @@ export class CarriedItem {
   /** The catalogue id in the player's hands, or null. */
   get itemId(): string | null {
     return this.handle?.root.name ?? null;
+  }
+
+  /**
+   * Hides whatever is in the hand without letting go of it.
+   *
+   * There is one hand and it can only hold one thing at a time, but *two*
+   * systems parent models to `holdAnchor`: this one, and
+   * `entities/EatenTreat.ts` while a treat is being eaten. Without this a
+   * child holding her teddy who then eats an ice cream would hold both, in the
+   * same fist, overlapping. Deliberately a visibility flag rather than
+   * `setCarried(null)`: what she is carrying has not changed, and she should
+   * still be holding it when the ice cream is finished.
+   */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    if (this.handle) this.handle.root.visible = visible;
   }
 
   update(dt: number, elapsed: number): void {
@@ -97,6 +115,7 @@ export class CarriedItem {
     // Turned to face the way the character does, and tipped forward a touch so
     // it reads as being carried rather than balanced on a palm.
     handle.root.rotation.set(0.12, 0, 0);
+    handle.root.visible = this.visible;
     this.anchor.add(handle.root);
     this.handle = handle;
   }

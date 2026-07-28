@@ -88,6 +88,9 @@ export interface CharacterCreationChoice {
 
 type Listener = (state: GameState) => void;
 
+/** The one refusal, shared — it carries no data, so it never needs allocating. */
+const REFUSED: Acquisition = { outcome: 'refused' };
+
 /**
  * The kinds of thing that walk or float behind you.
  *
@@ -120,6 +123,46 @@ export function wearableSlot(kind: InventoryKind): 'hat' | 'flower' | null {
   if (kind === 'flower') return 'flower';
   return null;
 }
+
+/**
+ * Whether a thing is eaten on the spot rather than kept.
+ *
+ * GAME_DESIGN.md, the family's words: *"keeping ice cream in a backpack
+ * doesn't really make sense — in this case make an eating sound effect and
+ * show a 3d model of the ice cream for a few seconds, add it as eaten to the
+ * cute-o-dex and the player doesn't carry it around."*
+ *
+ * `wearableSlot`'s twin, and here for the same reason: "what sort of thing is
+ * this, and where does it go?" is one question with one answer, asked of the
+ * {@link InventoryKind} and nowhere else. Before this existed the shop, the
+ * spooky house and the backpack would each have had to know that an ice cream
+ * is different, and the day a fourth caller forgot, a candy floss would have
+ * followed a child around the park forever.
+ *
+ * Every `treat` is edible — the candy flosses, the ice creams, and the sweet
+ * that falls out of the spooky house's mouth. Nothing else is.
+ */
+export function isEdible(kind: InventoryKind): boolean {
+  return kind === 'treat';
+}
+
+/**
+ * What became of a thing taken from a shop.
+ *
+ * {@link GameStore.buy} used to answer with `InventoryItem | null`, which had
+ * exactly two answers for three outcomes: since food stopped being kept, "you
+ * own it now" and "you ate it" are both real successes and only one of them
+ * produces an inventory entry. Callers that used to write `if (!bought)
+ * return;` would have quietly treated a happily-eaten ice cream as a failed
+ * purchase.
+ */
+export type Acquisition =
+  /** The purse said no. Only possible in mayhem mode; nothing happened. */
+  | { readonly outcome: 'refused' }
+  /** Kept. It is in the inventory now, in the hands / parade / backpack. */
+  | { readonly outcome: 'kept'; readonly item: InventoryItem }
+  /** Eaten on the spot: recorded in the book, never owned. `id` is the catalogue id. */
+  | { readonly outcome: 'eaten'; readonly id: string };
 
 /**
  * A tiny observable store — the single source of truth for money, the
@@ -245,19 +288,37 @@ class GameStore {
   }
 
   /**
-   * Buys one thing.
+   * Buys one thing, and puts it wherever that kind of thing goes.
    *
-   * Returns the new inventory entry, or `null` if the purse said no (which in
-   * normal mode it never does). One entry per purchase rather than a stack
-   * count, because the parade needs to put *two* toys behind you if you bought
-   * two — the Cute-o-dex keeps the counts, and is updated here as well so the
-   * two can never disagree.
+   * **This is the routing.** Not the shop panel, not the spooky house: one
+   * place asks {@link isEdible} and {@link PARADE_KINDS} what sort of thing
+   * this is, and everything downstream follows. See {@link Acquisition} for
+   * why the answer is a small union rather than `InventoryItem | null`.
+   *
+   * Food never reaches the inventory at all — it is eaten where it is bought,
+   * so there is no entry to stow, nothing to peek out of the backpack and
+   * nothing to follow her in the parade. All that is left of it is the
+   * Cute-o-dex line saying she had one, which is filed the same way a secret
+   * is (see `state/secrets.ts`): a deed rather than a possession.
+   *
+   * Everything else is one entry per purchase rather than a stack count,
+   * because the parade needs to put *two* toys behind you if you bought two —
+   * the Cute-o-dex keeps the counts, and is updated here as well so the two
+   * can never disagree.
    *
    * The newest carryable thing goes straight into the player's hands, which is
    * how a six-year-old finds out the purchase worked.
    */
-  buy(spec: PurchaseSpec): InventoryItem | null {
-    if (!this.spend(spec.price)) return null;
+  buy(spec: PurchaseSpec): Acquisition {
+    if (!this.spend(spec.price)) return REFUSED;
+
+    if (isEdible(spec.kind)) {
+      // No inventory entry, no uid, no `purchaseCount` — nothing owns it. The
+      // book still counts it, so eating three ice creams reads as `×3`.
+      this.collect(spec.id, spec.displayName, spec.category, 'eaten');
+      this.notify();
+      return { outcome: 'eaten', id: spec.id };
+    }
 
     this.purchaseCount += 1;
     const item: InventoryItem = {
@@ -286,7 +347,7 @@ class GameStore {
       item.carryable ? 'carried' : item.paradeable ? 'parade' : 'backpack',
     );
     this.notify();
-    return item;
+    return { outcome: 'kept', item };
   }
 
   /**
@@ -634,6 +695,21 @@ class GameStore {
     this.state = next;
     this.purchaseCount = Math.max(0, Math.floor(file.purchases));
 
+    // Food used to be kept. A save written before that changed still has ice
+    // creams and candy flosses sitting in the backpack, and leaving them there
+    // would mean the rule only applied to children who started today — the one
+    // player who matters most has a save going back weeks. They are eaten now:
+    // the book keeps every one of them, the bag lets them go. Runs before the
+    // `owns` checks below, so a treat that was in her hands is let go of too.
+    if (next.inventory.some((item) => isEdible(item.kind))) {
+      for (const item of next.inventory) {
+        if (!isEdible(item.kind)) continue;
+        const entry = next.collection[item.id];
+        if (entry) entry.placement = 'eaten';
+      }
+      next.inventory = next.inventory.filter((item) => !isEdible(item.kind));
+    }
+
     // A uid that names nothing owned is worse than nothing: `WornHat` and
     // `CarriedItem` would look it up every frame and quietly draw air. Same
     // slot rules as `setWornHat` / `setWornFlower`, applied once on the way in.
@@ -663,6 +739,10 @@ class GameStore {
     const entry = this.state.collection[id];
     if (!entry) return;
     const copies = this.state.inventory.filter((item) => item.id === id);
+    // An eaten thing owns no copies to derive anything from, and "she has none
+    // of these" is not the same fact as "she never had one" — deriving here
+    // would file every ice cream she has ever finished under `backpack`.
+    if (copies.length === 0 && entry.placement === 'eaten') return;
     const isWorn = (item: InventoryItem): boolean =>
       item.uid === this.state.wornHatUid || item.uid === this.state.wornFlowerUid;
     if (copies.some((item) => item.uid === this.state.carriedUid)) entry.placement = 'carried';

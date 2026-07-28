@@ -29,8 +29,17 @@ export type GameMode = (typeof GAME_MODES)[number];
 export const CHARACTER_KINDS = ['kid', 'bunny', 'kitten', 'mouse'] as const;
 export type CharacterKind = (typeof CHARACTER_KINDS)[number];
 
-/** Where a collected cute thing currently lives. */
-export const CUTE_PLACEMENTS = ['parade', 'backpack', 'bedroom', 'carried', 'worn'] as const;
+/**
+ * Where a collected cute thing currently lives.
+ *
+ * `eaten` is the odd one out: it is not a place at all, it is the absence of
+ * one. The family's rule — *"keeping ice cream in a backpack doesn't really
+ * make sense"* — means an edible thing is enjoyed and then gone, so the book
+ * remembers that it happened and the bag stays empty. See `isEdible` in
+ * `state/store.ts` for who decides, and `GameStore.refreshPlacement` for why a
+ * placement with nothing left to derive it from is left alone.
+ */
+export const CUTE_PLACEMENTS = ['parade', 'backpack', 'bedroom', 'carried', 'worn', 'eaten'] as const;
 export type CutePlacement = (typeof CUTE_PLACEMENTS)[number];
 
 /**

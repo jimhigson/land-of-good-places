@@ -1,6 +1,7 @@
 import { isTouchDevice } from './core/device';
 import type { FrameContext, GameSystem } from './core/types';
 import { CarriedItem } from './entities/CarriedItem';
+import { EatenTreat } from './entities/EatenTreat';
 import type { Player } from './entities/Player';
 import type { World } from './world';
 import type { ShopStand } from './world/building/shops/Shops';
@@ -15,7 +16,7 @@ import { gameStore, type PurchaseSpec } from './state';
 import type { Hud } from './ui/Hud';
 import { InventoryDrawer } from './ui/InventoryDrawer';
 import { ShopPanel, type ShopPanelItem } from './ui/ShopPanel';
-import { playOpenChime, playPurchaseChime, playSurpriseChime } from './ui/chime';
+import { playEatingSound, playOpenChime, playPurchaseChime, playSurpriseChime } from './ui/chime';
 
 /**
  * Buying things.
@@ -63,6 +64,7 @@ export class Shopping implements GameSystem {
   private readonly panel: ShopPanel;
   private readonly drawer: InventoryDrawer;
   private readonly carried: CarriedItem;
+  private readonly eating: EatenTreat;
 
   private wasPausedByUs = false;
 
@@ -81,6 +83,9 @@ export class Shopping implements GameSystem {
       onCarry: (uid) => gameStore.setCarried(uid),
     });
     this.carried = new CarriedItem(player.model.holdAnchor);
+    // The same hand: a treat is eaten out of it, and whatever she was already
+    // holding steps aside for a couple of seconds — see `CarriedItem.setVisible`.
+    this.eating = new EatenTreat(player.model.holdAnchor);
 
     hud.setBackpackHandler(() => this.toggleDrawer());
     window.addEventListener('keydown', this.onKeyDown);
@@ -95,6 +100,12 @@ export class Shopping implements GameSystem {
     const { dt, elapsed, input } = context;
 
     this.carried.update(dt, elapsed);
+    this.eating.update(dt, elapsed);
+    // Re-derived every frame rather than toggled at the start and end of a
+    // munch, the same way `syncPaused` below re-derives the pause: there is
+    // then no path — a swapped item, a finished treat, a disposed system —
+    // that can leave her holding an invisible teddy.
+    this.carried.setVisible(!this.eating.active);
     this.syncPaused();
 
     if (this.uiOpen) {
@@ -125,6 +136,7 @@ export class Shopping implements GameSystem {
     this.panel.dispose();
     this.drawer.dispose();
     this.carried.dispose();
+    this.eating.dispose();
   }
 
   // -------------------------------------------------------------- internals
@@ -177,7 +189,13 @@ export class Shopping implements GameSystem {
   }
 
   /**
-   * Buys one thing, and hatches it if it was an egg.
+   * Buys one thing, hatches it if it was an egg, and eats it if it was food.
+   *
+   * *Where* the thing goes is not decided here — `gameStore.buy` routes it and
+   * says what happened (see `Acquisition` in `state/store.ts`). This only
+   * chooses the noise and, for a treat, starts the munch: an ice cream is
+   * enjoyed on the spot rather than kept, so it gets its own sound instead of
+   * the purchase chime, and the model is in her hand for a couple of seconds.
    *
    * The egg is bought first and *then* opened, so both the egg and what was
    * inside it are in the backpack — a six-year-old who buys three eggs should be
@@ -188,7 +206,17 @@ export class Shopping implements GameSystem {
     if (!item) return;
 
     const bought = gameStore.buy(specFor(item));
-    if (!bought) return;
+    if (bought.outcome === 'refused') return;
+    if (bought.outcome === 'eaten') {
+      // The panel comes down first. It covers most of the screen, and a park
+      // that is paused behind it runs on `dt = 0` (see `Game.tick`) — so
+      // leaving it up would hide the one thing the family asked to be shown
+      // and freeze the munch under it while the sound played on regardless.
+      this.closeUi();
+      this.eating.start(bought.id);
+      playEatingSound();
+      return;
+    }
     playPurchaseChime();
 
     if (item.id !== 'egg.surprise') return;
