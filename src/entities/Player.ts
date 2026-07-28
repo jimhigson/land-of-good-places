@@ -11,7 +11,7 @@ import {
   PLAYER_TURN_SPEED,
 } from '../core/constants';
 import { PALETTE } from '../core/palette';
-import { clamp01, damp, DEG, lerp, TAU, turnTowards } from '../core/mathUtils';
+import { clamp01, damp, DEG, lerp, smoothstep, TAU, turnTowards } from '../core/mathUtils';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
@@ -93,6 +93,36 @@ const FALL_THRESHOLD = 0.5;
 
 /** How long the eyes stay shut. Any longer and she looks sleepy, not blinking. */
 const BLINK_DURATION = 0.11;
+
+/**
+ * The beats of the flower-picking flourish, in seconds from the pick — see
+ * {@link Player.pickFlower}.
+ *
+ * The family asked for *bend, pick, smell*, and the whole thing is over in a
+ * little over a second on purpose. A six-year-old picks a great many flowers;
+ * at three seconds the third one would already be a thing she was waiting
+ * through. She is never stopped from walking during it in any case — the pose
+ * simply gives way (see {@link Player.applyFlowerPick}) — so this is how long
+ * the flourish lasts when she chooses to stand and watch it.
+ */
+const PICK_BEND_IN = 0.24;
+const PICK_PLUCK = 0.28;
+const PICK_PLUCK_END = 0.42;
+const PICK_RISE_END = 0.66;
+const PICK_SNIFF_IN = 0.7;
+const PICK_SECONDS = 1.1;
+
+/**
+ * Above this fraction of top speed the flourish is gone entirely.
+ *
+ * Not a hard cancel at the first twitch of the stick: a tap-to-walk pick
+ * arrives with the character still decelerating (`gait` is damped), so a
+ * zero-tolerance rule would throw the flourish away on the very frame it
+ * started, every single time a flower was tapped rather than walked up to.
+ * Below this the pose fades in as she settles; above it, she is walking away
+ * and it fades out over a couple of frames.
+ */
+const PICK_WALK_AWAY = 0.38;
 
 /**
  * Answers "how high is the ground at this point?" for a character standing at
@@ -200,6 +230,14 @@ export class Player implements GameSystem {
   private blinkRemaining = 0;
   private currentExpression: Expression = 'neutral';
   private ridingFlag = false;
+  /**
+   * Seconds into the flower-picking flourish, or `-1` when there is none.
+   *
+   * See {@link pickFlower} and {@link applyFlowerPick}.
+   */
+  private pickTime = -1;
+  /** True while the flourish is at the sniff — makes her smile. */
+  private smelling = false;
 
   /**
    * Multiplies the speed limit below — 1 normally. The fountain sets this to
@@ -281,6 +319,32 @@ export class Player implements GameSystem {
   /** True while a ride is driving the character instead of the player. */
   get riding(): boolean {
     return this.ridingFlag;
+  }
+
+  /**
+   * Bend, pick, smell — the little flourish when a flower comes out of the
+   * meadow. Called by `world/Flowers.ts` the moment one is picked.
+   *
+   * **It never takes the controls.** The family asked for the moment to read;
+   * a six-year-old will pick a hundred flowers and an animation she has to sit
+   * through is an obstacle, not a treat. So this changes nothing but the pose:
+   * the flower is already hers, already in her hair (`gameStore.collectFlower`
+   * wears it immediately), and she can walk off mid-bend without losing it.
+   *
+   * Interrupting is therefore free and there is nothing to unwind.
+   * {@link applyFlowerPick} is layered on top of a pose that `animate` rebuilds
+   * from scratch every frame, so dropping the flourish — because she walked,
+   * jumped, got on a ride, or simply finished — restores the ordinary walk
+   * cycle on the very next frame with no state left behind. That is also why
+   * the timer is a bare number rather than a state machine: there is no state
+   * that can be wrong.
+   *
+   * Starting a second pick mid-flourish restarts it, which is exactly what
+   * picking two flowers in a row should look like.
+   */
+  pickFlower(): void {
+    if (this.ridingFlag || this.airborne) return;
+    this.pickTime = 0;
   }
 
   /**
@@ -657,6 +721,104 @@ export class Player implements GameSystem {
     return Math.max(this.model.height, this.model.hatAnchorHeight + hatHeight);
   }
 
+  /**
+   * The flower flourish, laid over this frame's finished pose.
+   *
+   * Four beats, all read off one clock: she bends and reaches down, tugs the
+   * stem free, straightens up bringing her hand to her face, and has a couple
+   * of little sniffs of it before letting her arm fall. Angles are *added* to
+   * what `animate` has already written, so she can walk, run, bob and blink
+   * through the whole thing.
+   *
+   * **Nothing here can get stuck**, which is the whole reason it is shaped
+   * this way. Every pose value it touches is overwritten from scratch at the
+   * top of the next `animate`, so the flourish exists only for as long as it
+   * keeps re-applying itself: walking away (or a ride, or a jump, or simply
+   * running out of clock) stops it re-applying and the ordinary pose is back
+   * on the next frame with nothing to tidy up.
+   *
+   * `weight` is what makes walking away read as her giving up on the sniff
+   * rather than as a snap: it fades with `gait`, so a step or two out of the
+   * flowerbed dissolves the pose. Below {@link PICK_WALK_AWAY} it also fades
+   * back *in*, which is what makes a tapped flower work — she arrives still
+   * slowing down, and the flourish eases on as she comes to rest.
+   *
+   * Angles follow the rig's own convention (see the asset contract: forward is
+   * +Z), where a **negative** `rotation.x` pitches a body or a limb forwards.
+   */
+  private applyFlowerPick(dt: number, gait: number): void {
+    if (this.pickTime < 0) {
+      this.smelling = false;
+      return;
+    }
+    // A ride or a jump takes the character away from us outright; there is no
+    // sensible way to bend down off the ground or out of a dodgem.
+    if (this.ridingFlag || this.airborne) {
+      this.pickTime = -1;
+      this.smelling = false;
+      return;
+    }
+
+    const t = this.pickTime;
+    this.pickTime += dt;
+    if (this.pickTime >= PICK_SECONDS) this.pickTime = -1;
+
+    // Eased on at the start and off at the end so neither edge snaps, and
+    // faded out by walking.
+    const envelope = Math.min(
+      smoothstep(0, 0.07, t),
+      smoothstep(PICK_SECONDS, PICK_SECONDS - 0.18, t),
+    );
+    const weight = envelope * clamp01(1 - gait / PICK_WALK_AWAY);
+    if (weight <= 0.001) {
+      this.smelling = false;
+      return;
+    }
+
+    // How far into the bend she is: down, held through the pluck, then up.
+    const bend = Math.min(smoothstep(0, PICK_BEND_IN, t), 1 - smoothstep(PICK_PLUCK_END, PICK_RISE_END, t));
+    // The reaching hand, which lets go of the ground as the stem comes free.
+    const reach = Math.min(smoothstep(0, PICK_BEND_IN * 0.9, t), 1 - smoothstep(PICK_PLUCK, PICK_RISE_END * 0.8, t));
+    // And the flower at her nose, from halfway up until the very end.
+    const sniff = Math.min(
+      smoothstep(PICK_PLUCK_END, PICK_SNIFF_IN, t),
+      1 - smoothstep(PICK_SECONDS - 0.2, PICK_SECONDS, t),
+    );
+    // The pluck itself: one quick up-flick of the hand, in and out.
+    const tug = t < PICK_PLUCK || t > PICK_PLUCK_END
+      ? 0
+      : Math.sin(((t - PICK_PLUCK) / (PICK_PLUCK_END - PICK_PLUCK)) * Math.PI);
+
+    const model = this.model;
+
+    // Bending at the waist, with the feet planted — the legs hang off `body`
+    // in the rig, so lowering it would take her shoes into the grass.
+    model.body.rotation.x -= bend * 0.78 * weight;
+    // Head down to look at the flower on the way in, tipped towards her hand
+    // on the way back.
+    model.head.rotation.x -= (bend * 0.34 - sniff * 0.2) * weight;
+
+    // The picking hand is the one a carried toy is held in (`holdAnchor` hangs
+    // off `rightArm`), so the flower goes where her hands already do things.
+    // Down for the stem, then folded up to her face for the sniff.
+    model.rightArm.rotation.x -= (reach * 0.6 + sniff * 2.25 - tug * 0.5) * weight;
+    model.rightArm.rotation.z += sniff * 0.42 * weight;
+    // The other arm swings back a little as she goes down, for balance.
+    model.leftArm.rotation.x += bend * 0.4 * weight;
+    // A small bounce out of the knees as the stem gives way.
+    model.leftLeg.rotation.x -= tug * 0.12 * weight;
+    model.rightLeg.rotation.x -= tug * 0.12 * weight;
+
+    // Two quick sniffs — small and fast, so they read as a nose rather than a
+    // nod. Driven off the flourish's own clock, not `elapsed`, so every pick
+    // sniffs at the same place in the movement.
+    model.head.rotation.x -= Math.sin(t * 38) * 0.045 * sniff * weight;
+
+    // She only smiles once the flower is actually under her nose — a grin
+    // through the bend would be smiling at the ground.
+    this.smelling = sniff * weight > 0.4;
+  }
+
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;
     const gait = this.gait;
@@ -695,6 +857,10 @@ export class Player implements GameSystem {
     model.leftLeg.rotation.x = -legSwing;
     model.rightLeg.rotation.x = legSwing;
 
+    // Bend, pick, smell. Layered on top of everything above, and on top of a
+    // pose that has just been written from scratch — see `applyFlowerPick`.
+    this.applyFlowerPick(dt, gait);
+
     // Blinking: a long pause, then a quick close-and-open.
     //
     // The face is painted onto a canvas now rather than built out of spheres,
@@ -709,7 +875,11 @@ export class Player implements GameSystem {
     if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
 
     const blinking = this.blinkRemaining > 0;
-    const desiredExpression: Expression = blinking ? 'blink' : this.waterHappy ? 'happy' : 'neutral';
+    const desiredExpression: Expression = blinking
+      ? 'blink'
+      : this.waterHappy || this.smelling
+        ? 'happy'
+        : 'neutral';
     if (desiredExpression !== this.currentExpression) {
       this.currentExpression = desiredExpression;
       model.setExpression(desiredExpression);

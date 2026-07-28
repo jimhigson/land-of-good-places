@@ -265,6 +265,8 @@ export class World implements GameSystem {
     // Lets the crowd push gently apart from the player instead of walking
     // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
     this.npcs.attachPlayer(player);
+    // So the meadow can ask her to bend, pick and smell — see `Flowers.pick`.
+    this.flowers.attachPlayer(player);
 
     const groundBeforeFountain = player.groundSampler;
     player.groundSampler = (x, z, y) =>
