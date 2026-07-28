@@ -852,14 +852,15 @@ for (const finding of findings) {
 
 // Hard invariants always fail; the drift table is canonical-park-specific,
 // so a seed sweep (LGP_RATCHET=off) reports drift without failing on it.
-const HARD_KEYS = new Set([
-  'route.unreachable',
-  'route.crossesRail',
-  'poi.nospot',
-  'poi.stranded',
-  'poi.split',
-  'boot.asserts',
-]);
+// In sweep mode (LGP_RATCHET=off) the NPC-coverage keys are soft too: a
+// stranded waypoint is pruned at boot and the children skip it — a candidate
+// seed with two pruned waypoints is a playable park the family may still
+// prefer. The canonical park is held to all of them.
+const HARD_KEYS = new Set(
+  ratchetEnforced
+    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts']
+    : ['route.unreachable', 'route.crossesRail', 'boot.asserts'],
+);
 const regressions: string[] = [];
 for (const [key, amount] of measured) {
   const recorded = RATCHET[key];
