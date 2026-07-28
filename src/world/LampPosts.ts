@@ -23,7 +23,7 @@ import { terrainHeight } from './terrain';
 import { distanceToPath, ROUTES } from './paths';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
-import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/route';
+import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
