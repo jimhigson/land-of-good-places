@@ -1,18 +1,6 @@
 import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_FLOOR_HEIGHT,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-  GARDEN_PLAY_RADIUS,
-  INTERIOR_HALF_X,
-  INTERIOR_HALF_Z,
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
-  INTERIOR_PLAY_RADIUS,
-  SLIDE_SPEED,
-} from '../../core/constants';
+import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';

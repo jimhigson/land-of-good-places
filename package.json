@@ -19,7 +19,8 @@
     "check:wall-tunnelling": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:all": "npm run build && npm run check:wall-tunnelling",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sweep:seeds": "node --experimental-transform-types --import ./scripts/ts-extension-resolver-register.mjs scripts/sweep-park-seeds.mts"
   },
   "dependencies": {
     "three": "^0.185.1"

@@ -20,7 +20,27 @@ import type { AnchorFootprint } from './anchors';
  * carry {@link LAYOUT_VERSION}, so positions from an older park degrade to
  * the plaza spawn rather than to a spot inside a relocated ride.
  */
-export const PARK_SEED = 20260728;
+export const PARK_SEED = seedOverride() ?? 20260728;
+
+/**
+ * Node-only escape hatch for seed hunting: `LGP_SEED=n npm run check:park`
+ * (and the sweep script) try other parks without touching the canonical
+ * constant. Absent in the browser bundle — Vite ships no `process` — so a
+ * player can never wander into a different park by accident.
+ */
+function seedOverride(): number | null {
+  try {
+    // `process` is a Node global the browser bundle does not have; reach for
+    // it via globalThis so the browser build needs no Node type definitions.
+    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
+    const raw = nodeProcess?.env?.['LGP_SEED'];
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Bump alongside PARK_SEED (or any generator change that moves things). */
 export const LAYOUT_VERSION = 2;

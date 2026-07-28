@@ -1,12 +1,5 @@
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_FLOOR_COUNT,
-  BUILDING_FLOOR_HEIGHT,
-  BUILDING_STEP_UP,
-  INTERIOR_ORIGIN_X,
-  INTERIOR_ORIGIN_Z,
-} from '../../core/constants';
+import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_STEP_UP, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { clamp01 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import {

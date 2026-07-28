@@ -1,12 +1,8 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-  GARDEN_HALF_SIZE,
-} from '../../core/constants';
+import { BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
+import { PARK_LAYOUT } from '../parkLayout';
 import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
 import { terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
@@ -86,6 +82,15 @@ const BEARINGS = 360;
 export const TRACK_CLEARANCE = 1.3;
 
 /**
+ * Clearance to *plots* is much larger than to walls and trees: the fence
+ * stands 2 m off the rails, and a walkable lane must survive between fence
+ * and plot or anything whose doormat faces that lane is sealed into a
+ * sliver (seed 2 stranded a stall stand exactly that way). 2.0 fence +
+ * 1.9 lane + 0.3 breathing room.
+ */
+export const TRACK_PLOT_CLEARANCE = 4.2;
+
+/**
  * Where the profile settles when nothing is pushing it outwards.
  *
  * Deliberately past 55, and that is the single most useful number in this file:
@@ -103,10 +108,26 @@ const NOMINAL_RADIUS = 56.2;
 /** Inner face of the pink boundary wall (see `Garden.buildBoundaryWall`). */
 const WALL_INNER_RADIUS = GARDEN_HALF_SIZE - 2 - 0.45;
 
-/** Relaxation: passes, smoothing weight, and the pull towards the nominal. */
+/** Relaxation: passes, smoothing weight, and the pull towards the target. */
 const RELAX_PASSES = 700;
 const SMOOTHING = 0.35;
-const PULL = 0.003;
+const PULL = 0.006;
+
+/**
+ * How far in the loop dives when a gap between plots lets it (Decision 4:
+ * "hugging the wall behind the four big plots and diving inward through the
+ * gaps"). The dip floor sits inside the stall band on purpose — the track
+ * weaving between the stalls is what makes the railway part of the park
+ * rather than a fence around it — and every dip still respects the
+ * per-bearing lower bound, so it can never touch a plot.
+ */
+const DIP_RADIUS = 38;
+
+/** A bearing only dips if the way in is clear this far past the dip floor. */
+const DIP_HEADROOM = 2.5;
+
+/** Bearings of guard either side of an obstacle before a dip is allowed. */
+const DIP_GUARD = 5;
 
 /**
  * Beyond this radius the collision probe is skipped.
@@ -271,6 +292,14 @@ function solveProfile(collision: CollisionWorld): Float64Array {
     }
   }
 
+  // Now the loop dives inside the park (Decision 4), everything the layout
+  // placed is an obstacle — the stalls and the fountain plaza were never in
+  // this list because the old wall-hugging loop could not reach them.
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (entry.id in anchors || entry.id === 'building') continue;
+    circles.push({ centreX: entry.x, centreZ: entry.z, radius: entry.boundingRadius + 1.5 });
+  }
+
   const lower = new Float64Array(BEARINGS);
   const upper = new Float64Array(BEARINGS);
   for (let i = 0; i < BEARINGS; i += 1) {
@@ -282,13 +311,35 @@ function solveProfile(collision: CollisionWorld): Float64Array {
     for (const rect of rects) exit = Math.max(exit, rectExitRadius(dirX, dirZ, rect));
     for (const circle of circles) exit = Math.max(exit, circleExitRadius(dirX, dirZ, circle));
 
-    lower[i] = exit > 0 ? exit + TRACK_CLEARANCE : NOMINAL_RADIUS * 0.5;
+    lower[i] = exit > 0 ? exit + TRACK_PLOT_CLEARANCE : NOMINAL_RADIUS * 0.5;
     upper[i] = WALL_INNER_RADIUS - TRACK_CLEARANCE;
+  }
+
+  // The per-bearing target: the wall behind plots, the dip floor in gaps.
+  // A bearing counts as a gap only when it and its neighbours are all clear
+  // well past the dip floor, so the run-in to every dip starts on open grass
+  // rather than scraping a plot corner.
+  const target = new Float64Array(BEARINGS);
+  for (let i = 0; i < BEARINGS; i += 1) {
+    let clearForDip = true;
+    for (let w = -DIP_GUARD; w <= DIP_GUARD && clearForDip; w += 1) {
+      const j = (i + w + BEARINGS) % BEARINGS;
+      if ((lower[j] ?? 0) + DIP_HEADROOM > DIP_RADIUS) clearForDip = false;
+    }
+    target[i] = clearForDip ? DIP_RADIUS : NOMINAL_RADIUS;
+  }
+  // Soften the square edges of the target so the pull draws smooth S-bends.
+  for (let pass = 0; pass < 40; pass += 1) {
+    for (let i = 0; i < BEARINGS; i += 1) {
+      const before = target[(i - 1 + BEARINGS) % BEARINGS] ?? 0;
+      const after = target[(i + 1) % BEARINGS] ?? 0;
+      target[i] = (target[i] ?? 0) * 0.5 + (before + after) * 0.25;
+    }
   }
 
   let radii = new Float64Array(BEARINGS);
   for (let i = 0; i < BEARINGS; i += 1) {
-    radii[i] = clamp(NOMINAL_RADIUS, lower[i] ?? 0, upper[i] ?? NOMINAL_RADIUS);
+    radii[i] = clamp(target[i] ?? NOMINAL_RADIUS, lower[i] ?? 0, upper[i] ?? NOMINAL_RADIUS);
   }
 
   for (let pass = 0; pass < RELAX_PASSES; pass += 1) {
@@ -301,7 +352,12 @@ function solveProfile(collision: CollisionWorld): Float64Array {
       // Averaging the two neighbours alone (weight 0.5) leaves the alternating
       // high-low mode untouched — it is an eigenvector with eigenvalue -1 and
       // flips sign forever instead of decaying. Keep the weight below a half.
-      let radius = here + SMOOTHING * (before + after - 2 * here) + PULL * (NOMINAL_RADIUS - here);
+      // Dips pull much harder than the wall does: a dip is a narrow angular
+      // window, and at the wall's gentle pull the smoothing term wins and
+      // the loop never leaves the wall at all (measured: zero dips).
+      const want = target[i] ?? NOMINAL_RADIUS;
+      const pull = want < NOMINAL_RADIUS - 1 ? PULL * 5 : PULL;
+      let radius = here + SMOOTHING * (before + after - 2 * here) + pull * (want - here);
 
       const angle = (i / BEARINGS) * Math.PI * 2;
       const dirX = Math.cos(angle);
@@ -363,10 +419,13 @@ function repair(
       }
     }
 
-    if (worst >= TRACK_CLEARANCE) break;
+    // Plots demand the big clearance (fence + walkable lane); the wall only
+    // the track's own.
+    const needed = fromWall ? TRACK_CLEARANCE : TRACK_PLOT_CLEARANCE;
+    if (worst >= needed) break;
     // Too close to the wall means come in; too close to anything else means the
     // only way past is further out, because the plots reach the park centre.
-    value += fromWall ? -(TRACK_CLEARANCE - worst) : TRACK_CLEARANCE - worst;
+    value += fromWall ? -(needed - worst) : needed - worst;
   }
   return value;
 }

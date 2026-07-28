@@ -1,8 +1,22 @@
 import { PALETTE } from '../../core/palette';
 import { placedEntry } from '../parkLayout';
+import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
+
+/**
+ * The facade's centre: the placed 'building' plot, nudged towards the park
+ * middle so the interior's corners stay inside the soft play boundary — the
+ * same nudge the authored park used, now applied from wherever the solver
+ * put the castle. The seed sweep caught the facade still standing at the
+ * old authored coordinates while its plot, its rail avoidance and its
+ * keep-outs had all moved: 85 m of 'building' at seed 7.
+ */
+const FACADE_ANCHOR = placedEntry('building');
+const FACADE_LENGTH = Math.hypot(FACADE_ANCHOR.x, FACADE_ANCHOR.z) || 1;
+export const BUILDING_CENTRE_X =
+  FACADE_ANCHOR.x - (FACADE_ANCHOR.x / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
+export const BUILDING_CENTRE_Z =
+  FACADE_ANCHOR.z - (FACADE_ANCHOR.z / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
 import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
   BUILDING_HALF_X,

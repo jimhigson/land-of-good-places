@@ -1,10 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import {
-  BUILDING_CENTRE_X,
-  BUILDING_CENTRE_Z,
-  BUILDING_HALF_X,
-  BUILDING_HALF_Z,
-} from '../../core/constants';
+import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../world/building/layout';
 import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 import { PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
