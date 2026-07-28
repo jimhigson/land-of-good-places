@@ -231,6 +231,13 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
       this.blinkRemaining = 0.12;
     }
 
+    // Where a painted child's face is, for the stall to hang their decal near.
+    // Above the activities rather than inside the visit, because a climb or a
+    // train trip takes the frame before the visit is ever offered it, and a
+    // child does not stop having a face while they are up a tree
+    // (ARCHITECTURE-REVIEW C2).
+    this.paint.trackHead(context);
+
     // An activity that holds the whole child gets the frame before the child
     // even notices the player: nobody waves from up a tree.
     let hold = this.offerFrame(true, context, intent);

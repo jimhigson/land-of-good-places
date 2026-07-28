@@ -99,21 +99,36 @@ export class FacePaintVisit implements Activity {
   }
 
   /**
+   * Where this child's head is, for the stall to hang their paint decal near.
+   *
+   * Called by the wander core **before** any activity is offered the frame, and
+   * so on every frame of the child's life. That is the whole of
+   * ARCHITECTURE-REVIEW C2: this used to live at the top of {@link update},
+   * which sounds like the same thing and is not, because `update` is only
+   * reached if no activity ahead of this one took the frame. A painted child
+   * who climbed a tree or boarded the train stopped being tracked the instant
+   * the climb or the trip claimed them — and left their paint decal hanging in
+   * the air at the foot of the tree, or on the platform, for the whole ride.
+   *
+   * Not part of {@link Activity}: it is not an activity's business to run when
+   * an activity is not running, and one named call from the core is clearer
+   * than a hook on the interface with exactly one implementer.
+   */
+  trackHead(context: DriverContext): void {
+    this.faceX = context.position.x;
+    this.faceZ = context.position.z;
+  }
+
+  /**
    * One frame of "on the way to, or being painted at, the face-painting
    * stall".
    *
    * Every early `return false` leaves every field it touched back where the
    * wander core expects it, so a child who never gets picked for a visit costs
-   * this method nothing beyond the position bookkeeping at the top, which the
-   * stall's decal renderer needs regardless.
+   * this method nothing at all.
    */
   update(host: ActivityHost, context: DriverContext, intent: CharacterIntent): boolean {
     const { dt } = context;
-    // Cheap approximate head tracking, kept up to date every frame whether or
-    // not this child ever visits — `FacePaintStall` reads it straight off the
-    // registry in `paintedNpcFaces()`.
-    this.faceX = context.position.x;
-    this.faceZ = context.position.z;
 
     if (this.visit === 'none') {
       if (this.design !== null) return false; // one coat is plenty
