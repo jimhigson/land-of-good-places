@@ -1,5 +1,6 @@
 import { CylinderGeometry, Group, Mesh, SphereGeometry } from 'three';
 import { PALETTE } from '../style/bridge';
+import { visibleTop } from '../style/measure';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { createFacePatch, type Expression } from '../style/faces';
 import { applyWalk, blob, makeLimbs, type CreatureHandle } from '../style/asset';
@@ -166,13 +167,22 @@ export function createSpaceTurtle(): SpaceTurtleHandle {
   tail.scale.set(1, 0.8, 1.1);
   body.add(tail);
 
+  // Measured with the sprout on, which is the whole point. The hand-written
+  // number this replaces was 0.52 — the top of the *shell* (0.34 + 0.225 x 0.72
+  // + its outline), with the stem, leaves and bud budding 22 cm above it and
+  // left out of the sum. That is the bunny's ears again: a height written at the
+  // bottom of a factory, a hundred lines from the geometry that decides it, and
+  // wrong by 42% the moment somebody adds a part above the one it was measured
+  // from. Add a taller bud and this stays right on its own.
+  const height = visibleTop(root);
+
   return {
     root,
     body,
     head,
     limbs,
     sprout,
-    height: 0.52,
+    height,
     setExpression: (name: Expression) => face.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => {
       // A gentle paddle rather than a stride: less swing, more bob, because

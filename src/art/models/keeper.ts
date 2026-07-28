@@ -1,6 +1,7 @@
 import { CylinderGeometry, Group, InstancedMesh, Matrix4, Mesh, Quaternion, Vector3 } from 'three';
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
+import { visibleBounds } from '../style/measure';
 import { addOutline, solid, toonMaterial } from '../style/materials';
 import { sharedFacePatch } from '../style/sharedFace';
 import type { Expression } from '../style/faces';
@@ -39,8 +40,17 @@ export function createKeeper(options: KeeperOptions): KeeperHandle {
 
   const root = new Group();
   root.name = 'shopkeeper';
+  // A keeper is a legless bust: nothing is modelled below the bottom of the
+  // apron, which the torso puts 99 mm up. That is not origin-at-the-feet, and
+  // the moment one stands anywhere but behind a counter it hovers. `stand`
+  // carries the correction, measured at the end of this function — it cannot go
+  // on `body`, whose `position.y` is the shopkeeper's bob, nor on `root`, which
+  // the contract leaves to the caller.
+  const stand = new Group();
+  stand.name = 'shopkeeper:stand';
+  root.add(stand);
   const body = new Group();
-  root.add(body);
+  stand.add(body);
 
   const skinMat = toonMaterial(skin);
 
@@ -111,13 +121,19 @@ export function createKeeper(options: KeeperOptions): KeeperHandle {
   });
   head.add(face.mesh);
 
+  // Both halves of the contract, from the same measurement: drop the bust onto
+  // the floor, and report the height it actually built rather than the
+  // hand-written 1.42 it had been claiming against a real 1.456.
+  const { bottom, top } = visibleBounds(body);
+  stand.position.y = -bottom;
+
   return {
     root,
     body,
     head,
     hands,
     limbs: null,
-    height: 1.42,
+    height: top - bottom,
     setExpression: (name: Expression) => face.setExpression(name),
     // Shopkeepers never walk, but the contract says every creature can, and a
     // gentle bob on the spot is exactly what `applyWalk` produces at low speed.

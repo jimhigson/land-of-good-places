@@ -13,11 +13,12 @@ import {
 } from 'three';
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
+import { visibleBounds } from '../style/measure';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { blob, type AssetHandle } from '../style/asset';
 import { buildRipikaHead } from './ripika';
-import { createPuffCreature, PUFF_BALL_RADIUS, PUFF_CENTRE_Y } from './pets';
+import { createPuffCreature } from './pets';
 
 /**
  * The hat shop's stock — and, from build step 5 onwards, what the player wears.
@@ -279,23 +280,36 @@ function createRipikaHat(): AssetHandle {
  * ground at y = 0 the way every creature does, but a hat's origin is the
  * point that sits on `hatAnchor` (the crown), with the model sinking a
  * little *below* that the way every other hat's base does (see `SIT`). So
- * the whole puff is shifted down by exactly the depth of its own paws.
+ * the whole puff is shifted down by exactly the depth of its own paws —
+ * measured off the built ball, not guessed at from its radius.
  */
 function createPuffHat(): AssetHandle {
   const puff = createPuffCreature({ variant: 'hat' });
   puff.root.name = 'hat.puff';
 
-  // Where the ball's underside sits in the puff's own (ground-at-0) space.
-  const ballBottomLocal = PUFF_CENTRE_Y - PUFF_BALL_RADIUS * 0.92;
+  // The ball's real extent, walked off its vertices — outline hull, curl and
+  // all. Both numbers below used to be guessed from `PUFF_BALL_RADIUS * 0.92`,
+  // a stand-in for the ball's own y-squash that missed the 12 mm outline the
+  // ball wears, so the hat declared 0.358 m and built 0.492 m and sat 30 mm off
+  // the crown instead of settling into the hair.
+  const { bottom, top } = visibleBounds(puff.root);
+
+  // Every other hat in this file leaves `root` at the origin and draws itself
+  // relative to `SIT`, because `root` *is* the crown anchor — `WornHat` parents
+  // it straight onto `hatAnchor` and pops it by writing `root.scale`, which
+  // scales about that origin. This one was shifting `root.position.y` instead,
+  // which put the hat's declared height and its geometry in two different
+  // spaces (and popped it from a point inside the wearer's skull). The shift
+  // goes on a group of its own between root and body: `body` cannot hold it,
+  // because the puff's jiggle rewrites `body.position` and `body.scale` every
+  // frame.
+  const mount = new Group();
+  mount.name = 'hat.puff:mount';
+  mount.add(puff.body);
+  puff.root.add(mount);
   // Settle it the same shallow depth into the hair that the bobble hat's rim
   // and the cap's dome do (SIT + ~0.02), rather than the full SIT a brim uses.
-  puff.root.position.y = SIT + 0.02 - ballBottomLocal;
-
-  // Ball top, plus a little for the curl, in the puff's own space — then
-  // carried across the same shift so `height` still measures from this hat's
-  // true origin to the tip, ears (or curls) included, per ART_DIRECTION.md §7.
-  const ballTopLocal = PUFF_CENTRE_Y + PUFF_BALL_RADIUS * 0.92;
-  const top = ballTopLocal + PUFF_BALL_RADIUS * 0.35 + puff.root.position.y;
+  mount.position.y = SIT + 0.02 - bottom;
 
   // `puff.update`/`puff.dispose` are typed as possibly-`undefined` because
   // `AssetHandle` declares them optional — but with `exactOptionalPropertyTypes`
@@ -305,7 +319,9 @@ function createPuffHat(): AssetHandle {
   // possibly-undefined value straight through.
   return {
     root: puff.root,
-    height: top,
+    // Measured to the real tip and carried across the same shift, so `height`
+    // runs from this hat's origin — the crown — to the top of the curl.
+    height: top + mount.position.y,
     ...(puff.update && { update: puff.update }),
     ...(puff.dispose && { dispose: puff.dispose }),
   };
