@@ -41,8 +41,20 @@ import type { WornHat } from './WornHat';
  */
 const DUST_SPEED = PLAYER_MAX_SPEED * 1.12;
 
-/** Half a stride: one puff per foot, at the phase each one lands on. */
-const DUST_STRIDE = Math.PI;
+/**
+ * How much of the stride cycle one puff of dust covers.
+ *
+ * A quarter of it — so **two puffs per foot**, one as it lands and one part
+ * way through it carrying her weight. It was half a cycle (one puff per foot)
+ * and the family wanted about twice as much dust; doing it by shortening this
+ * rather than by making the puffs bigger or longer-lived keeps every puff the
+ * size and life it already had, which is what was asked for.
+ *
+ * Which side a puff comes off is still decided per *foot* rather than per
+ * puff — see {@link Player.spawnRunningDust} — or the two trails would zip
+ * back and forth across each other instead of being two lines.
+ */
+const DUST_STRIDE = Math.PI / 2;
 
 /** How far behind her heels a puff is dropped, in metres. */
 const DUST_TRAIL = 0.3;
@@ -649,12 +661,15 @@ export class Player implements GameSystem {
    * One puff of dust per footfall, while she is running.
    *
    * Tied to `walkPhase` rather than to a timer, because `walkPhase` is what
-   * the legs are already swinging on — so a puff lands when a foot lands, and
-   * the dust speeds up and slows down with her instead of ticking along at its
-   * own rate beside her. `walkPhase` runs 0…TAU per stride cycle and wraps, so
-   * a change in `floor(phase / π)` is exactly one foot going down: the wrap
-   * from the top of the range back to 0 counts as one, and the crossing of π
-   * counts as the other.
+   * the legs are already swinging on — so the dust lands in time with her
+   * feet, and speeds up and slows down with her instead of ticking along at
+   * its own rate beside her. `walkPhase` runs 0…TAU per stride cycle and
+   * wraps, so a change in `floor(phase / DUST_STRIDE)` is one step of that
+   * cycle; the wrap from the top of the range back to 0 counts as one of them.
+   *
+   * At {@link DUST_STRIDE} = π/2 that is four steps a cycle, two per foot.
+   * Halving `step` recovers which foot it is, so a foot's pair of puffs both
+   * come off the same heel.
    *
    * Not while airborne — dust comes off the ground, and there is none up
    * there — and not while riding, where her feet are not doing the moving.
@@ -668,8 +683,8 @@ export class Player implements GameSystem {
     this.previousWalkPhase = this.walkPhase;
 
     if (this.airborne || this.ridingFlag || planarSpeed < DUST_SPEED) return;
-    const foot = Math.floor(this.walkPhase / DUST_STRIDE);
-    if (foot === Math.floor(previous / DUST_STRIDE)) return;
+    const step = Math.floor(this.walkPhase / DUST_STRIDE);
+    if (step === Math.floor(previous / DUST_STRIDE)) return;
 
     const world = this.group.parent;
     if (!world) return;
@@ -679,8 +694,9 @@ export class Player implements GameSystem {
     // negative of that, and the sideways axis is the perpendicular.
     const forwardX = Math.sin(this.facingAngle);
     const forwardZ = Math.cos(this.facingAngle);
-    // Alternate feet, so two lines of dust trail her rather than one.
-    const side = foot % 2 === 0 ? 1 : -1;
+    // Alternate feet, so two lines of dust trail her rather than one — per
+    // foot, not per puff, which is why `step` is halved first.
+    const side = Math.floor(step / 2) % 2 === 0 ? 1 : -1;
 
     this.dust.puff(
       this.position.x - forwardX * DUST_TRAIL + forwardZ * DUST_STANCE * side,

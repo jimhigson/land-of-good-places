@@ -1,4 +1,4 @@
-import { OrthographicCamera, Vector3 } from 'three';
+import { OrthographicCamera, Vector2, Vector3 } from 'three';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -50,6 +50,15 @@ export class IsoCamera {
 
   private zoomValue = 1;
   private zoomTarget = 1;
+
+  /**
+   * Where the **world origin** sits on screen, in world units along the
+   * screen's own two axes. See {@link skyAnchor}.
+   */
+  private readonly anchor = new Vector2();
+  /** Scratch for the two screen-space axes read out of the camera's matrix. */
+  private readonly screenRight = new Vector3();
+  private readonly screenUp = new Vector3();
 
   private aspect = 1;
   /** CSS pixels — kept for {@link worldUnitsPerPixel}, screen-constant UI sizing. */
@@ -103,6 +112,33 @@ export class IsoCamera {
    */
   get focusPoint(): Readonly<Vector3> {
     return this.focus;
+  }
+
+  /**
+   * Half the height of the orthographic box, in world metres. Multiply a
+   * screen-space offset measured in half-heights by this to get world metres,
+   * or divide the other way — which is what the sky does with
+   * {@link skyAnchor}.
+   */
+  get viewHalfHeight(): number {
+    return this.camera.top;
+  }
+
+  /**
+   * Where the world origin currently sits on screen, in **world metres along
+   * the screen's own right and up axes**.
+   *
+   * In other words: how far the whole park has slid across the frame. It is
+   * `(0,0)` when the camera is looking at the origin and grows as the player
+   * walks away from it, and it is the only handle the sky has on where the
+   * player is standing — see `world/Sky.setParallax`.
+   *
+   * Read straight off the camera's world matrix rather than by projecting a
+   * point, because the orthographic projection would divide the answer back
+   * out by the frustum size and the sky wants the metres, not the fraction.
+   */
+  get skyAnchor(): Readonly<Vector2> {
+    return this.anchor;
   }
 
   /**
@@ -163,6 +199,16 @@ export class IsoCamera {
     this.camera.position.copy(this.focus).add(this.offset);
     this.camera.lookAt(this.focus);
     this.camera.updateMatrixWorld();
+
+    // The world origin in view space is `-cameraPosition` resolved against the
+    // camera's own right and up axes (columns 0 and 1 of its world matrix).
+    // Two dot products, no matrix inverse, nothing allocated.
+    this.screenRight.setFromMatrixColumn(this.camera.matrixWorld, 0);
+    this.screenUp.setFromMatrixColumn(this.camera.matrixWorld, 1);
+    this.anchor.set(
+      -this.camera.position.dot(this.screenRight),
+      -this.camera.position.dot(this.screenUp),
+    );
   }
 
   /**
