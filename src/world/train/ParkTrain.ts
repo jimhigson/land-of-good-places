@@ -10,6 +10,7 @@ import type { MovingPlatform } from '../building/surfaces';
 import { TrainRoute } from './route';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
+import { RideCamera } from '../../core/RideCamera';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
 import { SmokePuffs } from './puffs';
@@ -99,6 +100,18 @@ export class ParkTrain implements GameSystem, TrainService {
   readonly stops: TrainStop[] = [];
   /** The level crossings — exported so `check:park` knows where feet may cross. */
   readonly crossings: readonly LevelCrossing[] = [];
+
+  /**
+   * The first-person view from the player's seat (Decision 4 C2), built on
+   * C1's shared {@link RideCamera} — the ferris wheel's family-approved
+   * look-around, adopted rather than rewritten. Created lazily in
+   * {@link attachPlayer} because it attaches pointer listeners, and the
+   * headless park (check:park) has no DOM and no player.
+   */
+  rideView: RideCamera | null = null;
+  /** Game wires this: entered/left first person, wrap it in the iris. */
+  onRideChange: ((riding: boolean) => void) | null = null;
+  private seatMount: Group | null = null;
 
   /** 0 by day, 1 at night. Set by `World`, like the fountain's. */
   nightFactor = 0;
@@ -479,6 +492,20 @@ export class ParkTrain implements GameSystem, TrainService {
   /** Given the player once, by `World.attachPlayer`. */
   attachPlayer(player: Player): void {
     this.player = player;
+
+    // The eye rides the player's seat: a mount parented into the carriage at
+    // the seat's local spot, so three.js composes the motion and the view
+    // needs no per-frame transform (the property C1's parity proof rests on).
+    const seat = this.seats[PLAYER_SEAT];
+    const car = seat ? this.carriages[seat.car] : undefined;
+    const local = car?.seats[seat?.index ?? 0];
+    if (car && local) {
+      this.seatMount = new Group();
+      this.seatMount.position.set(local.x, SEAT_Y - CAR_FLOOR_Y + CAR_FLOOR_Y, local.z);
+      car.root.add(this.seatMount);
+      this.rideView = new RideCamera({ startPitch: -0.05 });
+      this.rideView.mountOn(this.seatMount, { x: 0, y: 0.62, z: 0 });
+    }
   }
 
   private updateRider(context: FrameContext): void {
@@ -499,8 +526,19 @@ export class ParkTrain implements GameSystem, TrainService {
         car ? car.root.rotation.y : 0,
       );
 
+      // First person: the shared look-around runs while she rides, and a
+      // look-drag must never read as "let me off" — that is what the
+      // reading's `dragging` is for (see wantsOff).
+      const look = this.rideView?.update(context.dt, context.elapsed) ?? null;
+
       const settled = context.elapsed - this.playerBoardedAt > BOARDING_GRACE;
-      if (settled && this.stoppedStop !== null && this.wantsOff(context)) this.alight(player);
+      if (
+        settled &&
+        this.stoppedStop !== null &&
+        this.wantsOff(context, look?.dragging ?? false)
+      ) {
+        this.alight(player);
+      }
       return;
     }
 
@@ -515,6 +553,7 @@ export class ParkTrain implements GameSystem, TrainService {
     this.playerBoardedAt = context.elapsed;
     player.beginRide();
     playStationBell();
+    this.onRideChange?.(true);
   }
 
   /**
@@ -526,9 +565,12 @@ export class ParkTrain implements GameSystem, TrainService {
    * has to be a way out, or a child is stuck on the train until they find the
    * keyboard they do not have.
    */
-  private wantsOff(context: FrameContext): boolean {
+  private wantsOff(context: FrameContext, lookDragging: boolean): boolean {
     const { input } = context;
     if (input.justPressed('interact') || input.justPressed('jump')) return true;
+    // A walk is still a way out (a child on a phone has no other), but not
+    // while the same finger is mid look-drag.
+    if (lookDragging) return false;
     return Math.abs(input.moveX) + Math.abs(input.moveY) > 0.35;
   }
 
@@ -550,6 +592,7 @@ export class ParkTrain implements GameSystem, TrainService {
       );
     }
     player.endRide();
+    this.onRideChange?.(false);
   }
 
   // ------------------------------------------------------------- the trimmings

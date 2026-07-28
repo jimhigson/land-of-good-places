@@ -413,8 +413,21 @@ export class Game {
 
     this.engine.onResize((width, height) => {
       this.camera.resize(width, height);
+      this.world.train.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
+    this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
+
+    // First person on the train (Decision 4 C2): boarding wipes into the
+    // seat's RideCamera, alighting wipes back. The override is the third
+    // render state Decision 1 specified — render() swaps cameras, nothing
+    // else changes. Her own model hides while the eye is in her head.
+    this.world.train.onRideChange = (riding) => {
+      this.transitions.irisWipe(() => {
+        this.cameraOverride = riding ? (this.world.train.rideView?.camera ?? null) : null;
+        this.player.group.visible = !riding;
+      });
+    };
 
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));
@@ -681,6 +694,12 @@ export class Game {
     ]);
   }
 
+  /**
+   * When set, the world renders through this camera instead of the isometric
+   * one — the first-person rides. The sky pass keeps the park's sky.
+   */
+  private cameraOverride: import('three').PerspectiveCamera | null = null;
+
   private render(): void {
     const renderer = this.engine.renderer;
     // The sky is a full-screen backdrop drawn first with depth testing off; the
@@ -691,7 +710,7 @@ export class Game {
     if (!this.miniGames.hidesPark) {
       this.sky.render(renderer);
       renderer.clearDepth();
-      renderer.render(this.engine.scene, this.camera.camera);
+      renderer.render(this.engine.scene, this.cameraOverride ?? this.camera.camera);
     }
     this.miniGames.render(renderer);
   }
