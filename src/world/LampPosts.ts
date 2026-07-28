@@ -20,8 +20,11 @@ import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
-import { isOnPath } from './paths';
+import { distanceToPath, ROUTES } from './paths';
 import { ANCHORS } from './anchors';
+import { PARK_LAYOUT } from './parkLayout';
+import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
+import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -32,15 +35,17 @@ import type { CollisionWorld } from './Collision';
  * lights (see {@link FairyLights}) only ring the fountain plaza — everywhere
  * else along the paths stays gloomy after dusk. Lamp posts fill that gap.
  *
- * Placement mirrors {@link "./paths"}'s technique rather than reaching into
- * it: `paths.ts`'s route control points and sampled centreline are
- * module-private, so this file re-authors the same short main-loop and
- * fountain-approach point lists (they are the single source of truth in
- * `paths.ts`; if that file's `ROUTES` ever move, these need a matching nudge)
- * and walks its own `CatmullRomCurve3` to find perpendicular offsets, exactly
- * the way `addRibbon` does. Every candidate is then checked against the
- * already-exported {@link isOnPath} (stay off the paving) and {@link ANCHORS}
- * (stay out of the reserved ride plots) before it is kept.
+ * Placement walks the **real** path network — `paths.ts`'s exported
+ * {@link ROUTES} — at a regular {@link LAMP_SPACING}, alternating verges, each
+ * lamp standing just past the kerb and each one subject to {@link lampFits}.
+ *
+ * It used to re-author two of `paths.ts`'s route control-point lists by hand,
+ * with a comment asking whoever moved a route to remember to come back and
+ * nudge them. Decision 5 then made the routes *generated*, and those tables
+ * quietly stopped describing any park that exists on any seed: the lamps were
+ * being laid out along a ring road that had moved. That is why the lit
+ * stretches read as sparse and arbitrary. Walking `ROUTES` cannot drift,
+ * because it is the same object the paving is built from.
  *
  * Performance: 18 lamps would mean 18 real lights, which is exactly what
  * {@link FairyLights} avoids and so does this. Every lamp gets a cheap fake —
@@ -167,6 +172,18 @@ export class LampPosts implements GameSystem {
   nightFactor = 0;
 
   private readonly lampPositions: Vector3[] = [];
+  /**
+   * Where every lamp actually stands.
+   *
+   * Exposed so a check can measure the lighting plan off the built object
+   * rather than off the placement rules that produced it — the same reason
+   * `Scenery` publishes its `foliageOccluders`. `test/procgen` asserts the
+   * park has no dark stretch using this.
+   */
+  get positions(): readonly Vector3[] {
+    return this.lampPositions;
+  }
+
   private readonly bulbs: InstancedMesh;
   private readonly bulbColours: Color[] = [];
   private readonly bulbBase: Color;
@@ -188,11 +205,11 @@ export class LampPosts implements GameSystem {
   constructor(collision: CollisionWorld) {
     this.group.name = 'lamp-posts';
 
-    const positions = placeLampPosts();
+    const positions = placeLampPosts(collision);
     for (const [x, z] of positions) {
       const ground = terrainHeight(x, z);
       this.lampPositions.push(new Vector3(x, ground, z));
-      collision.addCircle(x, z, 0.22);
+      collision.addCircle(x, z, LAMP_RADIUS);
     }
     const count = this.lampPositions.length;
 
@@ -395,62 +412,180 @@ export class LampPosts implements GameSystem {
 // ---------------------------------------------------------------- placement
 
 /**
- * Mirrors `paths.ts`'s `main-loop` route control points — see the class doc
- * comment. Keep in sync by hand if that route ever moves.
+ * Metres between lamps along a path.
+ *
+ * The family asked for a lamp "every few metres along every path". Ten is what
+ * that turns into once the pool size is accounted for: {@link LIGHT_DISTANCE}
+ * puts usable light about 20 m out from a lamp, so at 10 m apart the pools
+ * overlap two-deep along a path and a child is never walking into the dark
+ * between two of them. Tighter than this and the park reads as a runway.
  */
-const MAIN_LOOP_POINTS: readonly (readonly [number, number])[] = [
-  [0, -21],
-  [15, -20],
-  [24, -12],
-  [25, 2],
-  [18, 15],
-  [4, 22],
-  [-12, 22],
-  [-23, 13],
-  [-24, -3],
-  [-17, -16],
-];
-const MAIN_LOOP_HALF_WIDTH = 1.8;
-
-/** Mirrors `paths.ts`'s `fountain-approach` route control points. */
-const FOUNTAIN_APPROACH_POINTS: readonly (readonly [number, number])[] = [
-  [0, -21],
-  [0, -15],
-  [0, -9],
-];
-const FOUNTAIN_APPROACH_HALF_WIDTH = 1.5;
-
-/** Extra clearance beyond a route's half-width so lamps stand clear of the kerb. */
-const EDGE_GAP = 1.7;
-
-/** Kept clear of every reserved ride plot by this much on top of its own radius. */
-const ANCHOR_MARGIN = 1.2;
+const LAMP_SPACING = 10;
 
 /**
- * Sampled more densely than the final lamp count needs: a good third of these
- * fall within a reserved ride plot's clearance and are dropped by
- * {@link offsetFromCurve}, since the anchors sit right off this ring road by
- * design. Oversampling here is what keeps the survivors in the ~12-18 target
- * range instead of the sparse handful a 1-for-1 sample count would leave.
+ * Extra clearance beyond a route's half-width, so a lamp stands *just past the
+ * kerb* rather than on it.
+ *
+ * Not a look-nice number. `NavGrid` fattens every collider by the walker's
+ * radius before deciding a cell is walkable (0.62 m) and a lamp's collider is
+ * 0.22 m, so a lamp reaches 0.84 m into the lattice. At 1.1 m past the kerb it
+ * cannot eat into the paving at all — which is the whole dodgems-arch lesson
+ * (`minigames/dodgems/plot.ts`): two posts at 1.35 m inflated shut and
+ * pocketed the doorway behind them. A lamp must never pinch a path.
  */
-function placeLampPosts(): (readonly [number, number])[] {
-  const positions: (readonly [number, number])[] = [];
+const EDGE_GAP = 1.1;
 
-  const mainLoop = makeCurve(MAIN_LOOP_POINTS, true);
-  const mainLoopSamples = 24;
-  for (let i = 0; i < mainLoopSamples; i += 1) {
-    const t = i / mainLoopSamples;
-    const point = offsetFromCurve(mainLoop, t, MAIN_LOOP_HALF_WIDTH + EDGE_GAP);
-    if (point) positions.push(point);
-  }
+/** Kept clear of every plot the layout placed, on top of its own radius. */
+const ANCHOR_MARGIN = 1.2;
 
-  const fountainApproach = makeCurve(FOUNTAIN_APPROACH_POINTS, false);
-  for (const t of [0.35, 0.75]) {
-    const point = offsetFromCurve(fountainApproach, t, FOUNTAIN_APPROACH_HALF_WIDTH + EDGE_GAP);
-    if (point) positions.push(point);
+/** Nothing paved within this of a lamp — see {@link EDGE_GAP} for the 0.84. */
+const LAMP_PATH_GAP = 0.95;
+
+/**
+ * Doormats and stand points are sacred.
+ *
+ * A waypoint at a stall counter or an anchor's entrance has to stay reachable,
+ * and a lamp standing in front of one pockets it exactly the way the dodgems
+ * arch did. Generous on purpose: there is always another lamp 10 m along, and
+ * skipping one costs nothing.
+ */
+const DOORMAT_CLEARANCE = 2.6;
+
+/** Clear of anything already solid — walls, trunks, bushes, the fountain. */
+const SOLID_CLEARANCE = 0.8;
+
+/** No two lamps closer than this. */
+const LAMP_GAP = 4;
+
+/** The lamp's own collider radius, as registered below. */
+const LAMP_RADIUS = 0.22;
+
+/**
+ * Every lamp in the park, walked off the **real** path network.
+ *
+ * This used to re-author `paths.ts`'s control points as two hand-copied
+ * tables, with a comment asking whoever moved a route to remember to come and
+ * nudge them. Decision 5 made the routes generated, so those tables described a
+ * park that no longer existed on any seed — the lamps were laid along a ring
+ * road that had moved, which is why the lit stretches looked arbitrary and
+ * sparse. {@link ROUTES} is the network as drawn, so walking it cannot drift.
+ *
+ * Every route is walked at {@link LAMP_SPACING}, alternating sides so the light
+ * comes from both hands as you go, and each candidate must clear everything
+ * around it (see {@link lampFits}). **A lamp that does not fit is skipped, never
+ * shoved** — a forced lamp is a lamp inside a bench.
+ *
+ * Deterministic: no rng at all, just the solved routes, so one seed is one
+ * lighting plan.
+ */
+function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[] {
+  const positions: [number, number][] = [];
+  // Alternates across the whole park rather than per route, so the two ends of
+  // a spur meeting the ring road do not both land on the same side.
+  let side = 0;
+
+  for (const route of ROUTES) {
+    const curve = makeCurve(route.points, route.closed);
+    const length = curve.getLength();
+    if (length < LAMP_SPACING * 0.5) continue;
+
+    const count = Math.max(1, Math.round(length / LAMP_SPACING));
+    const offset = route.width / 2 + EDGE_GAP;
+    for (let i = 0; i < count; i += 1) {
+      // A closed loop divides evenly; an open spur is sampled off both of its
+      // ends, because a lamp exactly on a spur's mouth stands in the junction.
+      const t = route.closed ? i / count : (i + 0.5) / count;
+      side += 1;
+      const preferred: 1 | -1 = side % 2 === 0 ? 1 : -1;
+      // Try the preferred verge, then the other one, then a quarter-span
+      // either way along the path. None of that is *forcing* a lamp — every
+      // one of these is an equally good place for a lamp post, and the rule
+      // that matters (`lampFits`) is unchanged for all of them. What it avoids
+      // is a lamp being skipped because the one spot it was first offered
+      // happened to be a plot corner. Measured on the canonical seed: the
+      // preferred verge alone left a 23 m unlit stretch of ring road.
+      const nudge = (route.closed ? 1 / count : 1 / count) * 0.25;
+      let stood = false;
+      for (const along of [0, nudge, -nudge]) {
+        for (const trySide of [preferred, -preferred as 1 | -1]) {
+          const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
+          const candidate = offsetFromCurve(curve, at, offset, trySide);
+          if (!candidate) continue;
+          if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
+          positions.push(candidate);
+          stood = true;
+          break;
+        }
+        if (stood) break;
+      }
+    }
   }
 
   return positions;
+}
+
+/** Everything a lamp has to stand clear of. Skip it rather than force it. */
+function lampFits(
+  x: number,
+  z: number,
+  placed: readonly (readonly [number, number])[],
+  collision: CollisionWorld,
+): boolean {
+  // Off the paving of *every* path, not just the one being walked: routes
+  // cross, and the offset that clears one can land on another.
+  if (distanceToPath(x, z) < LAMP_PATH_GAP) return false;
+
+  // Out of every plot the solver placed — the stalls too, not just the five
+  // big anchors. `anchor.trespass` in check:park has no allowance at all.
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + ANCHOR_MARGIN) return false;
+  }
+
+  // Off the railway. This one number also buys the level-crossing decks and
+  // the station platforms, neither of which exists yet when lamps are built
+  // (see `World`) — the corridor is wider than both.
+  if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+
+  // Never in front of a door.
+  for (const anchor of ANCHORS) {
+    const [ex, ez] = anchor.entrance;
+    if (Math.hypot(x - ex, z - ez) < DOORMAT_CLEARANCE) return false;
+  }
+  for (const stand of STALL_STANDS) {
+    if (Math.hypot(x - stand.x, z - stand.z) < DOORMAT_CLEARANCE) return false;
+  }
+
+  // And clear of everything already built. Asking the collision world is the
+  // honest version of this: it knows where `Scenery` actually put its walls
+  // and trunks, which no table here could.
+  let clear = true;
+  const needed = LAMP_RADIUS + SOLID_CLEARANCE;
+  collision.forEachCircle((cx, cz, radius) => {
+    if (Math.hypot(x - cx, z - cz) < radius + needed) clear = false;
+  });
+  collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+    if (pointToSegment(x, z, x1, z1, x2, z2) < halfThickness + needed) clear = false;
+  });
+  if (!clear) return false;
+
+  return !placed.some(([px, pz]) => Math.hypot(x - px, z - pz) < LAMP_GAP);
+}
+
+function pointToSegment(
+  x: number,
+  z: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): number {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared < 1e-12) return Math.hypot(x - x1, z - z1);
+  let t = ((x - x1) * dx + (z - z1) * dz) / lengthSquared;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t));
 }
 
 function makeCurve(points: readonly (readonly [number, number])[], closed: boolean): CatmullRomCurve3 {
@@ -462,34 +597,29 @@ function makeCurve(points: readonly (readonly [number, number])[], closed: boole
   );
 }
 
-const CENTRE = new Vector3(1, 0, 0.2);
-
 /**
- * Samples the curve at `t`, offsets perpendicular to the tangent by `offset`
- * (choosing the side that points away from the plaza, same convention the
- * fairy-light ring and the paths themselves are built around), then rejects
- * the point if it still lands on paving or inside a reserved ride plot.
+ * Samples the curve at `t` and steps `offset` metres off it, perpendicular to
+ * the tangent, on the requested side.
+ *
+ * `side` rather than "whichever points away from the plaza": the family asked
+ * for lamps down both sides of a path, and always choosing the outward side
+ * lights one verge and leaves the other dark. Whether the candidate is
+ * *allowed* is {@link lampFits}'s business, not this function's.
  */
-function offsetFromCurve(curve: CatmullRomCurve3, t: number, offset: number): (readonly [number, number]) | null {
+function offsetFromCurve(
+  curve: CatmullRomCurve3,
+  t: number,
+  offset: number,
+  side: 1 | -1,
+): [number, number] | null {
   const point = curve.getPoint(t);
   const tangent = curve.getTangent(t);
   const nx = -tangent.z;
   const nz = tangent.x;
-  const length = Math.hypot(nx, nz) || 1;
+  const length = Math.hypot(nx, nz);
+  if (!Number.isFinite(length) || length < 1e-9) return null;
 
-  const candidateA = { x: point.x + (nx / length) * offset, z: point.z + (nz / length) * offset };
-  const candidateB = { x: point.x - (nx / length) * offset, z: point.z - (nz / length) * offset };
-  const distA = Math.hypot(candidateA.x - CENTRE.x, candidateA.z - CENTRE.z);
-  const distB = Math.hypot(candidateB.x - CENTRE.x, candidateB.z - CENTRE.z);
-  const candidate = distA >= distB ? candidateA : candidateB;
-
-  if (isOnPath(candidate.x, candidate.z, 0.2)) return null;
-  for (const anchor of ANCHORS) {
-    const [ax, az] = anchor.position;
-    if (Math.hypot(candidate.x - ax, candidate.z - az) < anchor.boundingRadius + ANCHOR_MARGIN) return null;
-  }
-
-  return [candidate.x, candidate.z];
+  return [point.x + (nx / length) * offset * side, point.z + (nz / length) * offset * side];
 }
 
 // ------------------------------------------------------------------ helpers
