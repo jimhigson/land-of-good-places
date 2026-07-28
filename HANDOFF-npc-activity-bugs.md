@@ -44,15 +44,30 @@ re-phasing and proves nothing on its own.
 7. **C3** — `hopRequest`/`waveRemaining`/`waveAmount` cleared on the
    `'intent'`/`'child'` early return.
 
+8. **C3** — `hopRequest`/`waveRemaining`/`waveAmount` cleared on the
+   `'intent'`/`'child'` early return. Trace `fd3860f2` -> `7d9c4fec`.
+9. **Per-frame allocations** — `paintedNpcFaces()` fills a reused pool,
+   `TreeClimb.climbGroundSpot` hands back a rewritten object. Hash unchanged
+   (`7d9c4fec`), `node --trace-gc` 125 scavenges -> 110.
+
+Final: `npm run build` exit 0, trace `7d9c4fec`, wedge `painted=4/4`.
+
+## Verified in the browser (I owned it)
+
+Dev server on :5199, **a stale service worker was present and had to be cleared**
+— see CLAUDE.md. 12 children, ~2.5 minutes, no console errors or warnings.
+
+- Four decals at four *distinct* world positions — a mis-aliased pool would have
+  put all four in the same place, which is the failure mode the reused array
+  invites.
+- All four moved (6.9 m – 73.2 m over 20 s), so they follow their children.
+- **C2 invariant, live:** `max |head − character position|` over all 12 children
+  = 0.042 m (about one frame of walking), and exactly **0 for the child who was
+  riding the train at the time**. That is the bug, gone, measured.
+
 ## Left to do
 
-- Per-frame allocations in the same two files, both named in
-  ARCHITECTURE-REVIEW §4/§4a: `paintedNpcFaces()` (fresh array + up to 4 objects,
-  called **every frame** from `FacePaintStall.ts:323` — confirmed) and
-  `TreeClimb.climbGroundSpot` (an object per climbing child per frame, read by
-  `TreeClimbing.ts:299`). Both behaviour-neutral, so the hash must not move.
-- `npm run build` end to end, exit code checked, **not piped through tail**.
-- PR via `gh pr create`. Do not merge.
+- Nothing. PR raised; do not merge.
 
 ## Found, deliberately not fixed
 
