@@ -1,5 +1,6 @@
 import { ConeGeometry, Group, Mesh, SphereGeometry } from 'three';
 import { PALETTE } from '../../core/palette';
+import { visibleBounds } from '../../art/style/measure';
 import { addOutline, solid, toonMaterial } from '../../art/style/materials';
 import type { AssetHandle } from '../../art/style/asset';
 
@@ -26,6 +27,12 @@ const WRAP_COLOURS = [
 export function createSpookyCandy(seed = 0): AssetHandle {
   const root = new Group();
   root.name = 'prop.spookyCandy';
+  // The sweet is drawn around `bodyHeight`, with nothing below it, so it used
+  // to hang 77 mm clear of whatever it was put on — a shelf, the backpack peek,
+  // a held-item anchor. `sweet` carries the drop onto the origin, measured
+  // below, so the shape stays authored the way it reads here.
+  const sweet = new Group();
+  root.add(sweet);
 
   const wrapColour = WRAP_COLOURS[seed % WRAP_COLOURS.length] ?? PALETTE.markerLilac;
   const wrapMaterial = toonMaterial(wrapColour);
@@ -37,7 +44,7 @@ export function createSpookyCandy(seed = 0): AssetHandle {
   body.scale.set(1, 0.62, 0.62);
   body.position.y = bodyHeight;
   body.rotation.z = Math.PI / 2;
-  root.add(body);
+  sweet.add(body);
   addOutline(body, 0.008);
 
   for (const side of [-1, 1] as const) {
@@ -45,11 +52,19 @@ export function createSpookyCandy(seed = 0): AssetHandle {
     twist.position.set(side * 0.095, bodyHeight, 0);
     twist.rotation.z = side * (Math.PI / 2 - 0.5);
     twist.scale.set(1, 1, 0.55);
-    root.add(twist);
+    sweet.add(twist);
   }
+
+  // Origin at the base and the real tip, both from one measurement. The old
+  // `bodyHeight + 0.05` was a guess at the lozenge's half-thickness: the body
+  // is a sphere squashed on two axes and then turned on its side, so the radius
+  // that ends up vertical is the unsquashed 0.075, plus its outline hull — not
+  // the 0.05 somebody estimated. It declared 0.21 m and built 0.243 m.
+  const { bottom, top } = visibleBounds(sweet);
+  sweet.position.y = -bottom;
 
   return {
     root,
-    height: bodyHeight + 0.05,
+    height: top - bottom,
   };
 }

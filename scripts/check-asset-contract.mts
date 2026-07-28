@@ -47,6 +47,14 @@
  * no allowance at all. Nothing here is *accepted* — it is *recorded*. The
  * summary line names the worst offender on every run so it stays visible.
  *
+ * The ratchet only ratchets if it is **tightened as things are fixed**. An
+ * asset that stops drifting must lose its entry, or the allowance stays open
+ * and the check silently stops guarding it. Everything above 100 mm has now
+ * gone that way — the turtle's missing sprout, the `tall` tree's canopy, the
+ * puff hat's guessed ball, the shopkeeper's floating bust and the sweet's — so
+ * what is left below is centimetre-scale tuning, waiting on the family rather
+ * than on an engineer.
+ *
  * **Assets are enumerated, not discovered.** The shop catalogue is walked
  * whole, so anything that goes on sale is covered the day it is added; the
  * rest are listed in {@link collect}. An asset that is in neither gets no
@@ -113,21 +121,14 @@ interface Recorded {
  * `pets.ts` already do. A key ending in `.*` matches by prefix.
  */
 const KNOWN_DRIFT: Readonly<Record<string, Recorded>> = {
-  // ---- Gross. These are not tuning; somebody's number does not describe the
-  // ---- model at all, and each one is the same disease as the bunny's ears.
+  // ---- The three gross ones — spaceTurtle +42%, prop.tree.tall -14%, hat.puff
+  // ---- +37% — are gone. Each was a hand-kept second copy of the geometry, and
+  // ---- each is now derived from the built model with `visibleTop` /
+  // ---- `visibleBounds` instead, so no allowance is left behind for them to
+  // ---- creep back into. The turtle keeps one line, for its origin only:
   spaceTurtle: {
-    height: 0.218,
     bottom: 0.034,
-    why: "0.52 m declared, 0.74 m built — the leafy sprout on its shell is not in the sum, exactly the way the bunny's ears were not. It floats in the space show, so `bottom` is meaningless for it, but the height feeds its name label.",
-  },
-  'prop.tree.tall.*': {
-    height: -0.594,
-    why: 'The `tall` variant multiplies the *whole* declared height by 1.45, but only the trunk and the canopy pivot are actually scaled — the canopy ball keeps its natural size. Declared 4.23 m, built 3.64 m.',
-  },
-  'hat.puff': {
-    height: 0.134,
-    bottom: 0.030,
-    why: 'Both the tip and the mounting depth are computed from `PUFF_BALL_RADIUS * 0.92`, a hand-guessed stand-in for the ball\'s real extent. The hat therefore hovers 30 mm above the crown instead of settling into the hair.',
+    why: 'It floats in the ferris wheel space show and has no ground to stand on, so its flippers hang 34 mm above an origin nothing ever rests on. Its *height* is measured now, sprout and all.',
   },
 
   // ---- The pets had four entries here — kitten -34 mm, mouse -55 mm, puff
@@ -146,16 +147,11 @@ const KNOWN_DRIFT: Readonly<Record<string, Recorded>> = {
     bottom: -0.135,
     why: 'The root flare is a whole squashed ball centred on the origin, so half of it is under the grass on purpose — a trunk with no flare reads as a pole stuck in a lawn.',
   },
-  keeper: {
-    height: 0.036,
-    bottom: 0.099,
-    why: 'A shopkeeper is a legless bust that starts 99 mm above the ground. Invisible behind a 1.02 m counter, which is the only place one has ever stood — but it is not origin-at-the-feet, and anything that stands one elsewhere will find it hovering.',
-  },
-  'candy.spookyHouse': {
-    height: 0.033,
-    bottom: 0.077,
-    why: 'The sweet is modelled around y = 0.16 with nothing below it, so it hangs 77 mm clear of whatever it is put on.',
-  },
+  // `keeper` (+36 mm, 99 mm off the floor) and `candy.spookyHouse` (+33 mm,
+  // 77 mm off it) used to be recorded here. Both bust and sweet now sit on
+  // their own origin and measure their own height, so both entries are gone.
+  // `Shops.ts` lifts its keepers back up by the 99 mm they used to float, so
+  // nothing behind a counter moved — see `KEEPER_LIFT`.
 
   // ---- Centimetre drift. A tuning conversation, not a licence to move
   // ---- anything: each of these places a name label a couple of centimetres
@@ -178,9 +174,10 @@ const KNOWN_DRIFT: Readonly<Record<string, Recorded>> = {
   'hat.ripikaHat': { height: -0.028, why: 'Hand-written; the ears are 28 mm lower than claimed.' },
   'prop.pinkWall.*': { height: -0.025, why: 'Coping is 25 mm below the declared 1.62.' },
   'prop.woodWall.*': { height: -0.021, why: 'Top plank is 21 mm below the declared height.' },
-  'prop.tree.plain.*': { height: 0.109, why: 'Canopy formula under-reads by up to 109 mm.' },
-  'prop.tree.blossom.*': { height: 0.109, why: 'Canopy formula under-reads by up to 109 mm.' },
-  'prop.tree.fruit.*': { height: 0.109, why: 'Canopy formula under-reads by up to 109 mm.' },
+  // The three `prop.tree` canopy entries (+70 to +109 mm) went with the `tall`
+  // one: there was only ever one canopy formula and it is now one measurement,
+  // so every variant lands on the nose. No tree is placed in the park yet, so
+  // nothing on screen moved.
 };
 
 /**

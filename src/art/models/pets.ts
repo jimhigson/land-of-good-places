@@ -10,7 +10,7 @@ import {
 } from 'three';
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { visibleBounds } from '../style/measure';
+import { visibleBounds, visibleTop } from '../style/measure';
 import { addOutline, decal, disposeTree, markShared, solid, toonMaterial } from '../style/materials';
 import { sharedFacePatch } from '../style/sharedFace';
 import { paintFace, type Expression, type FacePaintOptions } from '../style/faces';
@@ -301,25 +301,19 @@ export interface PuffOptions {
   readonly variant: 'pet' | 'hat';
   /** A second puff (or a third) staggers its jiggle/song phase from the rest. */
   readonly seed?: number;
-  /**
-   * Extra Y shift applied to `root` after construction, folded into the
-   * returned `height` too. A pet's origin is the ground, so this is left at
-   * 0; a hat's origin is the crown anchor it sits on, so `hats.ts` passes how
-   * far below that anchor this same body needs to sink — computed there,
-   * since only `hats.ts` knows its own `SIT` constant.
-   */
-  readonly mountShift?: number;
 }
 
 const PUFF_FUR = PALETTE.blossomPink;
 const PUFF_BELLY = PALETTE.stonePinkLight;
 const PUFF_CURL = ART.heartPink;
 
-/** Exported so `hats.ts` can work out where to sink the same body onto a head
- *  without duplicating the shape here — see `createPuffCreature`'s doc comment. */
-export const PUFF_BALL_RADIUS = 0.2;
-/** Where the ball's centre sits above the ground/anchor. */
-export const PUFF_CENTRE_Y = 0.225;
+/** The ball this whole creature is. Private: `hats.ts` used to import it and
+ *  guess the ball's extent as `PUFF_BALL_RADIUS * 0.92` to work out where to
+ *  sink the puff onto a head, which is how the hat ended up 30 mm off the
+ *  crown. It measures the built body instead now, and needs neither of these. */
+const PUFF_BALL_RADIUS = 0.2;
+/** Where the ball's centre sits above the ground. */
+const PUFF_CENTRE_Y = 0.225;
 
 /** Only `sharedFacePatch` (which builds the curved shell) wants these — plain
  *  `paintFace` calls (the extra singing texture) don't take a shape at all. */
@@ -427,12 +421,14 @@ export function createPuffCreature(options: PuffOptions): CreatureHandle {
   // not part of how tall the creature is.
   if (sizer) sizeToStandard(sizer, body);
 
-  // A pet's origin is the ground, so this is 0; a hat's is the crown anchor,
-  // so `hats.ts` passes how far this body needs to sink below it.
-  const mountShift = options.mountShift ?? 0;
-  root.position.y = mountShift;
-  const topLocal = PUFF_CENTRE_Y + PUFF_BALL_RADIUS * 0.92 + PUFF_BALL_RADIUS * 0.35;
-  const height = variant === 'pet' ? PET_RENDER_HEIGHT : topLocal + mountShift;
+  // Whatever the variant, this puff's origin is its own ground: the sizer has
+  // put the pet's paws on y = 0, and the hat form is left standing on its own
+  // paws for `hats.ts` to settle onto a crown (it owns `SIT`, and only it knows
+  // how deep a hat sits). So the height reported here is measured from that
+  // ground — `visibleTop`, not the old `PUFF_BALL_RADIUS * 0.92 + * 0.35`,
+  // which was a guess at the ball's extent that forgot the 12 mm outline hull
+  // and mis-stated the curl by 25 mm.
+  const height = variant === 'pet' ? PET_RENDER_HEIGHT : visibleTop(body);
 
   // ------------------------------------------------------------- singing
 

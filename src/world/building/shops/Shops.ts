@@ -45,6 +45,22 @@ export const SHOP_STAND_Z = 2.4 * SHOP_SCALE_XZ;
 /** How close to that spot counts as "at the counter". Scaled the same way. */
 export const SHOP_REACH = 2.2 * SHOP_SCALE_XZ;
 
+/**
+ * How far a shopkeeper is stood up off the shop floor, in metres.
+ *
+ * The keeper model used to *float* by this much: a legless bust with nothing
+ * modelled below 99 mm, declaring origin-at-the-feet and not delivering it.
+ * `createKeeper` now sits the bust properly on its own origin, so this is what
+ * puts every keeper back exactly where the family has always seen it — a hair
+ * taller behind a 1.02 m counter, which is the whole reason the model's own
+ * comment says "tall enough to be seen".
+ *
+ * Deliberately kept, not quietly dropped: whether a keeper should come down
+ * these 10 cm is a look decision for the family, and it is now one line to try.
+ * (The old float measured 99 mm; this rounds it, which no eye will find.)
+ */
+const KEEPER_LIFT = 0.1;
+
 export interface ShopStand {
   readonly id: ShopId;
   readonly title: string;
@@ -188,7 +204,7 @@ export class Shops {
 
       // Behind the counter and off to one side, so the stock stays in view.
       const keeper = createKeeper({ colour: skin.apron, hair: skin.hair, skin: skin.skin });
-      keeper.root.position.set(-1.3, 0, 0.5);
+      keeper.root.position.set(-1.3, KEEPER_LIFT, 0.5);
       detail.add(keeper.root);
 
       leaveTheShadowPass(detail);

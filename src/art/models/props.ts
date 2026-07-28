@@ -9,6 +9,7 @@ import {
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE, pinkStoneTexture, woodTexture, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
+import { visibleTop } from '../style/measure';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import { blob, type AssetHandle } from '../style/asset';
 
@@ -96,6 +97,13 @@ export function createLollipopTree(options: TreeOptions = {}): AssetHandle {
   const leafMat = toonMaterial(rng.chance(0.4) ? ART.lollipopLeafAlt : PALETTE.leafMid);
   const leafLightMat = leafMat;
 
+  // A `tall` tree is a tree on a longer trunk, not a bigger tree: the trunk
+  // stretches and the canopy is carried further up, but the canopy ball, the
+  // shoulder puffs and the blossom keep the size they were drawn at. That is
+  // deliberate — scaling the ball too would just be a 45% larger tree, and it
+  // would break the shoulder puffs and dot scatter, which are all sized off `r`
+  // with no `tallness` anywhere near them. See the `height` note below: it was
+  // the *declaration* that got this wrong, not the geometry.
   const tallness = variant === 'tall' ? 1.45 : 1;
   const trunk = solid(new Mesh(treeTrunkGeometry(), barkMat));
   trunk.scale.set(1, tallness, 1);
@@ -157,7 +165,21 @@ export function createLollipopTree(options: TreeOptions = {}): AssetHandle {
     }
   }
 
-  return { root, height: (1.42 + r * 1.6) * tallness };
+  // Measured, not restated. The old `(1.42 + r * 1.6) * tallness` was a
+  // second, hand-kept copy of the geometry above, and it was wrong twice over:
+  //
+  //  - it multiplied the *whole* height by `tallness`, canopy ball included,
+  //    when only the trunk and the canopy pivot are scaled — so a `tall` tree
+  //    declared 4.07–4.23 m and built 3.51–3.64 m, 14% short. The geometry is
+  //    right and the declaration was wrong: `tall` means a longer trunk;
+  //  - and even at `tallness` 1 it under-read by 70–109 mm, because `r * 1.6`
+  //    forgets that the ball sits at `r * 0.72` with a `r * 0.94` radius and an
+  //    outline hull on top, and forgets the blossom dots entirely.
+  //
+  // `visibleTop` walks the vertices of what was actually built, so a variant
+  // added later cannot get this wrong again. It runs once per tree, at
+  // construction — never in the render loop, per this file's header.
+  return { root, height: visibleTop(root) };
 }
 
 // ------------------------------------------------------------------- the walls
