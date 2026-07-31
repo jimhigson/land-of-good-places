@@ -205,8 +205,40 @@ Numeric first, screenshots second, and neither alone.
 
 ## 7. Status
 
+**Jim's answers to §5, 31 July 2026 — settled, do not re-litigate:**
+
+1. **A then B.** Stage A first.
+2. **Stage B tolerance** — deferred until Stage B actually starts.
+3. **Budget: ~150 KB per character** for the exported asset. Approved.
+4. **Hair, hats and shoes stay procedural.** Backpacks too, by the same
+   reasoning. Do not touch them.
+5. **Browser time granted.**
+
 - [x] Face-paint regression measured, fixed, and pinned by a check
 - [x] Headless glb round trip proven (export, parse, node counts, named nodes)
 - [x] Animation contract enumerated
-- [ ] **Everything else — waiting on the five decisions in §5**
-- [ ] No Blender work started
+- [x] **Every body/head part named** — `KID_BODY_PARTS` in `kid.ts` (`96a20f5`)
+- [x] **`npm run export:kid`** writes `src/art/assets/kid.glb` + a generated
+      `kid.glb.ts`. 134.8 KB / 45.3 KB gzipped, inside budget (`34fad43`)
+- [x] **`art/style/glb.ts`** — synchronous reader for the subset we author
+- [ ] Wire `createKid` to build from the asset
+- [ ] `check:character-parity` — authored vs procedural, and our reader vs
+      three.js's `GLTFLoader`
+- [ ] Blender: import the glb, save the `.blend`, re-export, prove the round
+      trip changed nothing
+- [ ] Before/after screenshots in the browser
+
+### Decisions taken while building, that a reviewer should look at
+
+- **Mirrored parts share one geometry** in the asset (5 pairs). This is what
+  brought 187.7 KB down to 134.8 KB. Discovered by comparing buffers, not
+  declared.
+- **The asset owns shape and each mesh's own local transform; the rig stays in
+  code.** `body`/`head`/`crown`, the limb pivots and the four anchors are still
+  built by `createKid` from `KID_HEAD_HEIGHT`, `SKULL_RADIUS` and
+  `KID_HEAD_SCALE` — which hats, hair and three check scripts import. Baking
+  those into the asset would create a *second* description of them, which is
+  the thing being removed.
+- **The bytes are imported, not fetched.** Costs ~15 KB gzipped; buys one code
+  path across Node, Vitest and the browser, and no service-worker staleness.
+  Reconsider at the second authored character; only `kidAsset.ts` changes.
