@@ -5,6 +5,7 @@ import { createRipika } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
+import { createJetpack } from '../../../art/models/jetpack';
 import { createPet, PUFF_DISPLAY_NAME } from '../../../art/models/pets';
 import {
   createCandyFloss,
@@ -118,6 +119,31 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     carryable: true,
     model: () => createStarToy(PALETTE.flowerYellow),
     heldScale: 0.62,
+    rare: false,
+  },
+
+  // The toy shop's one gadget, and Eleri's own ask: *"add a shop that sells a
+  // jet pack, and when you use it your pet gets one too."* Not `carryable` —
+  // it goes straight onto her back on purchase (`GameStore.buy`) rather than
+  // into her hands, because a child who has just bought a jet pack wants to
+  // fly, and a rocket carried like a shopping bag is nobody's idea of one.
+  {
+    id: 'gear.jetpack',
+    shopId: 'toy',
+    displayName: 'Jet Pack',
+    blurb: 'Press fly and off you go!',
+    icon: '🚀',
+    price: 60,
+    kind: 'jetpack',
+    // Filed under Toys in the Cute-o-dex, which is where it is sold and what it
+    // is: a toy rocket. A section of its own would be a page with one thing on.
+    category: 'toy',
+    carryable: false,
+    model: () => createJetpack(),
+    // Never in a hand, so this is only ever read by code that does not run for
+    // it. Kept at the neutral 1 rather than 0, so a future carried-gear feature
+    // starts from life size rather than from a thing that has vanished.
+    heldScale: 1,
     rare: false,
   },
 

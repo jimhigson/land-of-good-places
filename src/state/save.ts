@@ -133,6 +133,7 @@ export interface SavedGame {
   readonly carriedUid?: string | null;
   readonly wornFlowerUid?: string | null;
   readonly wornHatUid?: string | null;
+  readonly wornJetpackUid?: string | null;
 }
 
 /** The character: her name, and everything the creator let her choose. */
@@ -327,6 +328,7 @@ function readGame(value: unknown): SavedGame {
   put(game, 'carriedUid', readUid(value['carriedUid']));
   put(game, 'wornFlowerUid', readUid(value['wornFlowerUid']));
   put(game, 'wornHatUid', readUid(value['wornHatUid']));
+  put(game, 'wornJetpackUid', readUid(value['wornJetpackUid']));
   return game;
 }
 

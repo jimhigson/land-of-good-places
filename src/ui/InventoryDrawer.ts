@@ -63,6 +63,10 @@ function actionFor(item: InventoryItem, state: GameState): RowAction {
     const active = item.uid === state.wornFlowerUid;
     return { kind: 'wear', active, label: active ? 'Take out' : 'Wear', glyph: active ? '💐' : '' };
   }
+  if (slot === 'jetpack') {
+    const active = item.uid === state.wornJetpackUid;
+    return { kind: 'wear', active, label: active ? 'Take off' : 'Wear', glyph: active ? '🚀' : '' };
+  }
   if (item.carryable) {
     const active = item.uid === state.carriedUid;
     return { kind: 'carry', active, label: active ? 'Put down' : 'Hold', glyph: active ? '🤲' : '' };
@@ -276,6 +280,7 @@ export class InventoryDrawer {
 
     if (slot === 'hat') gameStore.setWornHat(action.active ? null : item.uid);
     else if (slot === 'flower') gameStore.setWornFlower(action.active ? null : item.uid);
+    else if (slot === 'jetpack') gameStore.setWornJetpack(action.active ? null : item.uid);
     else if (action.kind === 'carry') this.handlers.onCarry(action.active ? null : item.uid);
   }
 }

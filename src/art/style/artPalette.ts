@@ -98,6 +98,23 @@ export const ART = {
   /** Ethan's hair — a family request (see NpcSystem.ts). */
   kidHairBlonde: 0xf0d48a,
 
+  // --- the jet pack ---------------------------------------------------------
+  /**
+   * A coral rocket with a sky-blue harness, because the two things it must read
+   * as from across the park are *rocket* and *toy*. Deliberately not a metal
+   * grey: nothing in this park is metal (ART_DIRECTION §2), and a chrome
+   * cylinder on a child's back would be the one prop that looks visited from
+   * another game.
+   */
+  jetpackTank: 0xff9a7a,
+  jetpackTankDark: 0xe8795c,
+  jetpackTrim: 0x8cd8ff,
+  /** The nozzle cones. A soft blue-grey — the darkest thing on the model. */
+  jetpackNozzle: 0x9fc4de,
+  /** Painted flames, in two bands. Pigment, never light — see §"Effects". */
+  jetpackFlame: 0xffb45c,
+  jetpackFlameCore: 0xffe9a8,
+
   // --- props ----------------------------------------------------------------
   lollipopStick: PALETTE.bark,
   lollipopLeaf: PALETTE.leafMid,

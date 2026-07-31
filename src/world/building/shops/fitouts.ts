@@ -19,6 +19,7 @@ import { createRipika } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon, type BalloonHandle } from '../../../art/models/balloons';
 import { createHat, HAT_DISPLAY_SCALE, HAT_KINDS } from '../../../art/models/hats';
+import { createJetpack } from '../../../art/models/jetpack';
 import { createPet, PET_KINDS, type PetHandle } from '../../../art/models/pets';
 import {
   createCandyFloss,
@@ -121,14 +122,27 @@ function toyShop(): Fitout {
   const star = createStarToy(PALETTE.flowerYellow);
   detail.add(place(star.root, 1.25, COUNTER_TOP_Y, 1.1, 0.7, 0.2));
 
+  // The jet pack, on the counter front and turned three-quarters on, so a child
+  // walking up sees the tanks and the nozzles rather than a flat back plate.
+  // Its origin is the point that straps to a back (`art/models/jetpack.ts`), so
+  // it is lifted by its own `height` to stand the nozzles on the counter rather
+  // than sinking half of it through the wood.
+  const jetpack = createJetpack();
+  detail.add(place(jetpack.root, -1.25, COUNTER_TOP_Y + jetpack.height, 1.1, 1, 0.7));
+  // Firing gently on the stand: it is the one thing in the shop that *does*
+  // something, and a rocket with no flame is a rucksack.
+  jetpack.setThrust(0.55);
+
   return {
     detail,
     // Toys on a shelf breathe very slightly, which is the difference between a
     // toy shop and a display of ornaments.
-    update: (_dt, elapsed) => {
+    update: (dt, elapsed) => {
       ripika.body.rotation.z = Math.sin(elapsed * 1.1) * 0.05;
       biscuit.body.rotation.z = Math.sin(elapsed * 0.9 + 1) * 0.05;
       star.root.rotation.y = 0.2 + Math.sin(elapsed * 0.7) * 0.25;
+      jetpack.root.rotation.y = 0.7 + Math.sin(elapsed * 0.5) * 0.3;
+      jetpack.update?.(dt, elapsed);
     },
     setRainbowVisible: null,
   };

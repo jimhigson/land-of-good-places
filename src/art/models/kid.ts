@@ -227,6 +227,14 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly backpackAnchor: Group;
   /**
+   * Where a jet pack straps on — the middle of her back.
+   *
+   * A separate anchor from {@link backpackAnchor}, which is the *mouth* of the
+   * bag (higher, and wherever the worn shape happens to open). See
+   * `art/models/jetpack.ts`.
+   */
+  readonly jetpackAnchor: Group;
+  /**
    * Every backpack mesh built, each tagged with the kinds that show it.
    *
    * The twin of {@link hairParts}, and exposed for the same caller: the NPC
@@ -261,6 +269,12 @@ export interface KidHandle extends CreatureHandle {
    * tucked away. Called by `entities/WornHat.ts` and by the creator's preview.
    */
   setHatWorn(worn: boolean): void;
+  /**
+   * Tells the model a jet pack is on, so her bag gets out of its way — you
+   * cannot strap two things to one back. See `BackpackRig.setHidden`.
+   * Called by `entities/WornJetpack.ts`.
+   */
+  setJetpackWorn(worn: boolean): void;
   /**
    * Advances the simulated ponytail, if this kid is wearing one. `dt` is the
    * game's already-time-scaled delta. Safe (and free) to call on any kid.
@@ -401,6 +415,15 @@ export function createKid(options: KidOptions = {}): KidHandle {
     : null;
   const backpackAnchor = backpackRig?.anchor ?? new Group();
 
+  // Where a jet pack straps on — the middle of the bag's own patch of back, so
+  // the rocket takes the place the rucksack was in rather than hovering behind
+  // it. `art/models/jetpack.ts` is authored around this exact point, which is
+  // what lets it mount with no offset maths at all.
+  const jetpackAnchor = new Group();
+  jetpackAnchor.name = 'jetpackAnchor';
+  jetpackAnchor.position.set(0, 0.56, -0.32);
+  body.add(jetpackAnchor);
+
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
   // 1.36 rather than up by half the extra radius, because the head is meant to
@@ -498,6 +521,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairAnchor,
     holdAnchor,
     backpackAnchor,
+    jetpackAnchor,
     backpackParts: backpackRig?.parts ?? [],
     hairParts: hairRig.parts,
     // Measured, not `KID_HEIGHT`: spiky hair is a good 0.24 m taller than a
@@ -521,6 +545,10 @@ export function createKid(options: KidOptions = {}): KidHandle {
     // character taller. A `visibleTop` walk per switch would be a whole model's
     // worth of vertices for a number that cannot have changed.
     setBackpackKind: (kind: BackpackKind) => backpackRig?.setKind(kind),
+    // No re-measure either, and for the same reason: a bag hidden under a jet
+    // pack is a metre below the top of her hair, so neither it nor the rocket
+    // that replaced it can be what makes the character taller.
+    setJetpackWorn: (worn: boolean) => backpackRig?.setHidden(worn),
     setHatWorn: (worn: boolean) => {
       hairRig.setHatWorn(worn);
       measuredHeight = visibleTop(root);

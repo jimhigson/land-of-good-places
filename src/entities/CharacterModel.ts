@@ -65,6 +65,8 @@ export class CharacterModel {
   readonly hairAnchor: Group;
   readonly holdAnchor: Group;
   readonly backpackAnchor: Group;
+  /** Where a jet pack straps on — the middle of her back. See `WornJetpack`. */
+  readonly jetpackAnchor: Group;
 
   private readonly kid: KidHandle;
 
@@ -82,6 +84,7 @@ export class CharacterModel {
     this.hairAnchor = this.kid.hairAnchor;
     this.holdAnchor = this.kid.holdAnchor;
     this.backpackAnchor = this.kid.backpackAnchor;
+    this.jetpackAnchor = this.kid.jetpackAnchor;
   }
 
   /**
@@ -115,6 +118,14 @@ export class CharacterModel {
    */
   setHatWorn(worn: boolean): void {
     this.kid.setHatWorn(worn);
+  }
+
+  /**
+   * Tells the model a jet pack is on, so her chosen bag steps aside for it —
+   * one back, one thing strapped to it. Driven by `WornJetpack`.
+   */
+  setJetpackWorn(worn: boolean): void {
+    this.kid.setJetpackWorn(worn);
   }
 
   /** The shared house walk cycle, if a caller would rather not pose limbs. */

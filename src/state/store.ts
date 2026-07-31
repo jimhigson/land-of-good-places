@@ -109,21 +109,23 @@ const PARADE_KINDS: ReadonlySet<InventoryKind> = new Set<InventoryKind>(['toy', 
  * Which bit of the player a thing goes on, or `null` for something that is not
  * worn at all.
  *
- * There are exactly two slots, because there are exactly two `worn*Uid` fields
- * and two systems that draw them: `entities/WornHat.ts` on the head and
- * `entities/WornFlower.ts` in the hair. Deriving the slot from
- * {@link InventoryKind} here — rather than in the drawer that happens to be the
- * first caller — is what stops "can I wear this?" from being answered
- * differently by the backpack, the Cute-o-dex and whatever asks next.
+ * There are exactly three slots, because there are exactly three `worn*Uid`
+ * fields and three systems that draw them: `entities/WornHat.ts` on the head,
+ * `entities/WornFlower.ts` in the hair and `entities/WornJetpack.ts` on the
+ * back. Deriving the slot from {@link InventoryKind} here — rather than in the
+ * drawer that happens to be the first caller — is what stops "can I wear this?"
+ * from being answered differently by the backpack, the Cute-o-dex and whatever
+ * asks next.
  *
  * A hat is also `carryable`, so both a wear and a carry are defensible answers
  * to tapping one. The backpack picks wearing: a child who bought a crown wants
  * it on their head, and a hat still lands in the hands on purchase
  * ({@link GameStore.buy}) so nothing became unreachable.
  */
-export function wearableSlot(kind: InventoryKind): 'hat' | 'flower' | null {
+export function wearableSlot(kind: InventoryKind): 'hat' | 'flower' | 'jetpack' | null {
   if (kind === 'hat') return 'hat';
   if (kind === 'flower') return 'flower';
+  if (kind === 'jetpack') return 'jetpack';
   return null;
 }
 
@@ -343,13 +345,26 @@ class GameStore {
     };
     this.state.inventory.push(item);
     if (item.carryable) this.state.carriedUid = item.uid;
+    // A jet pack goes straight on. Every other wearable lands in the hands and
+    // is put on from the backpack drawer, which is right for a hat — there are
+    // eight of them and choosing is half the fun. There is one jet pack, it is
+    // the most exciting thing in the shop, and a six-year-old who has just
+    // bought it wants to fly, not to open a menu. Same reasoning as the
+    // character creator's starting hat going straight onto the head.
+    if (wearableSlot(item.kind) === 'jetpack') this.state.wornJetpackUid = item.uid;
     // Placement is what the parade reads; the newest carryable thing goes into
     // the hands, a toy or a pet falls in behind you, and the rest wait in the bag.
     this.collect(
       item.id,
       item.displayName,
       item.category,
-      item.carryable ? 'carried' : item.paradeable ? 'parade' : 'backpack',
+      item.uid === this.state.wornJetpackUid
+        ? 'worn'
+        : item.carryable
+          ? 'carried'
+          : item.paradeable
+            ? 'parade'
+            : 'backpack',
     );
     this.notify();
     return { outcome: 'kept', item };
@@ -460,6 +475,30 @@ class GameStore {
     if (this.state.wornHatUid === uid) return;
     const previous = this.state.inventory.find((item) => item.uid === this.state.wornHatUid);
     this.state.wornHatUid = uid;
+
+    const next = this.state.inventory.find((item) => item.uid === uid);
+    if (uid !== null && this.state.carriedUid === uid) this.state.carriedUid = null;
+
+    if (previous) this.refreshPlacement(previous.id);
+    if (next) this.refreshPlacement(next.id);
+    this.notify();
+  }
+
+  /**
+   * Straps an owned jet pack to the player's back, or takes it off with `null`.
+   *
+   * {@link setWornHat}'s twin, shaped identically on purpose: one field, one
+   * store subscriber drawing it (`entities/WornJetpack.ts`), nothing told
+   * twice. Taking it off mid-flight is safe — `entities/Player.ts` watches the
+   * same field and lands her rather than leaving her hanging in the sky.
+   */
+  setWornJetpack(uid: string | null): void {
+    if (uid !== null && !this.state.inventory.some((item) => item.uid === uid && item.kind === 'jetpack')) {
+      return;
+    }
+    if (this.state.wornJetpackUid === uid) return;
+    const previous = this.state.inventory.find((item) => item.uid === this.state.wornJetpackUid);
+    this.state.wornJetpackUid = uid;
 
     const next = this.state.inventory.find((item) => item.uid === uid);
     if (uid !== null && this.state.carriedUid === uid) this.state.carriedUid = null;
@@ -639,6 +678,7 @@ class GameStore {
       carriedUid: s.carriedUid,
       wornFlowerUid: s.wornFlowerUid,
       wornHatUid: s.wornHatUid,
+      wornJetpackUid: s.wornJetpackUid,
     };
   }
 
@@ -693,6 +733,7 @@ class GameStore {
     if (g.carriedUid !== undefined) next.carriedUid = g.carriedUid;
     if (g.wornFlowerUid !== undefined) next.wornFlowerUid = g.wornFlowerUid;
     if (g.wornHatUid !== undefined) next.wornHatUid = g.wornHatUid;
+    if (g.wornJetpackUid !== undefined) next.wornJetpackUid = g.wornJetpackUid;
 
     // Derived rather than saved, so it can never contradict the mode.
     next.moneyIsFinite = next.mode === 'mayhem';
@@ -725,6 +766,7 @@ class GameStore {
     if (!owns(next.carriedUid)) next.carriedUid = null;
     if (!owns(next.wornHatUid, 'hat')) next.wornHatUid = null;
     if (!owns(next.wornFlowerUid, 'flower')) next.wornFlowerUid = null;
+    if (!owns(next.wornJetpackUid, 'jetpack')) next.wornJetpackUid = null;
 
     // The Cute-o-dex's `placement` is derived from what is owned, so a save
     // written mid-change can never leave the book disagreeing with the bag.
@@ -751,7 +793,9 @@ class GameStore {
     // would file every ice cream she has ever finished under `backpack`.
     if (copies.length === 0 && entry.placement === 'eaten') return;
     const isWorn = (item: InventoryItem): boolean =>
-      item.uid === this.state.wornHatUid || item.uid === this.state.wornFlowerUid;
+      item.uid === this.state.wornHatUid ||
+      item.uid === this.state.wornFlowerUid ||
+      item.uid === this.state.wornJetpackUid;
     if (copies.some((item) => item.uid === this.state.carriedUid)) entry.placement = 'carried';
     else if (copies.some(isWorn)) entry.placement = 'worn';
     else if (copies.some((item) => item.paradeable && !item.stowed)) entry.placement = 'parade';
@@ -805,6 +849,7 @@ function createInitialState(): GameState {
     carriedUid: null,
     wornFlowerUid: null,
     wornHatUid: null,
+    wornJetpackUid: null,
     paused: false,
     debugOverlay: false,
   };

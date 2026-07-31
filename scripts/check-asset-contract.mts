@@ -225,8 +225,13 @@ function collect(): Subject[] {
 
   // Everything the shops sell, straight from the table the shelves are built
   // from — its own comment promises "origin at the base, facing +Z".
+  // `hat.` and `gear.` are the two families whose origin is the point they
+  // mount at rather than the ground — the crown of the head and the middle of
+  // the back. Both say so in their own file headers; everything else in the
+  // catalogue promises "origin at the base, facing +Z".
   for (const item of [...SHOP_ITEMS, ...EGG_PRIZES]) {
-    add(item.id, item.model(), item.id.startsWith('hat.') ? 'anchor' : 'base');
+    const anchored = item.id.startsWith('hat.') || item.id.startsWith('gear.');
+    add(item.id, item.model(), anchored ? 'anchor' : 'base');
   }
 
   // Variants the catalogue might only sample one of.

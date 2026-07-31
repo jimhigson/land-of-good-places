@@ -107,6 +107,23 @@ export interface BackpackRig {
   readonly anchor: Group;
   /** Shows one kind and hides the rest, and moves {@link anchor} to its mouth. */
   setKind(kind: BackpackKind): void;
+  /**
+   * Hides the bag altogether — straps and all — and puts it back.
+   *
+   * There is exactly one thing that asks: a **jet pack**
+   * (`entities/WornJetpack.ts`). You cannot strap two things to one back, and a
+   * rocket floating 25 cm proud of a bubble rucksack reads as detached rather
+   * than worn. Same shape of courtesy as `hair.ts`'s `setHatWorn`, which tucks
+   * away a fall of hair that a hat would otherwise spear straight through.
+   *
+   * {@link anchor} deliberately does **not** move: `entities/parade/BackpackPeek.ts`
+   * holds the group it was handed for the lifetime of the character, and a
+   * peeking bunny looking over the top of a jet pack is exactly right anyway.
+   *
+   * Nothing is destroyed, so taking the jet pack off brings the child's own
+   * chosen bag straight back — the creator's choice is never lost.
+   */
+  setHidden(hidden: boolean): void;
 }
 
 /**
@@ -254,14 +271,28 @@ export function buildBackpacks(options: BackpackOptions): BackpackRig {
   anchor.name = 'backpackAnchor';
   body.add(anchor);
 
-  const setKind = (next: BackpackKind): void => {
-    for (const part of parts) part.mesh.visible = part.kinds.includes(next);
-    const [y, z] = MOUTHS[next];
+  // The kind currently chosen, so `setHidden(false)` can put back exactly the
+  // bag that was there rather than the one this rig was built with.
+  let worn: BackpackKind = kind;
+  let hidden = false;
+
+  const apply = (): void => {
+    for (const part of parts) part.mesh.visible = !hidden && part.kinds.includes(worn);
+    const [y, z] = MOUTHS[worn];
     anchor.position.set(0, y, z);
   };
-  setKind(kind);
 
-  return { parts, anchor, setKind };
+  const setKind = (next: BackpackKind): void => {
+    worn = next;
+    apply();
+  };
+  const setHidden = (next: boolean): void => {
+    hidden = next;
+    apply();
+  };
+  apply();
+
+  return { parts, anchor, setKind, setHidden };
 }
 
 /**

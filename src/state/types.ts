@@ -143,6 +143,14 @@ export const INVENTORY_KINDS = [
   'pet',
   'egg',
   'flower',
+  /**
+   * Worn on the back, and the only kind that changes how the player *moves* —
+   * see `entities/WornJetpack.ts` and the flight in `entities/Player.ts`. Its
+   * own kind rather than a `hat` on a different anchor, because
+   * {@link wearableSlot} is what decides which `worn*Uid` a thing goes in, and
+   * a head and a back are two slots that must both be usable at once.
+   */
+  'jetpack',
 ] as const;
 export type InventoryKind = (typeof INVENTORY_KINDS)[number];
 
@@ -276,6 +284,17 @@ export interface GameState {
    * player.
    */
   wornHatUid: string | null;
+  /**
+   * `uid` of the jet pack strapped to the player's back, or null for none —
+   * see `entities/WornJetpack.ts`.
+   *
+   * `wornHatUid`'s twin down to the shape of it, and its own field for the same
+   * reason there are two of those: a head and a back are separate slots, and
+   * one field per slot is what stops "am I wearing this?" from needing a search
+   * through the inventory. It is also the gate on the HUD's fly button — no jet
+   * pack on, no button (`ui/TouchControls.ts`, `entities/Player.ts`).
+   */
+  wornJetpackUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */
   paused: boolean;
   /** Developer overlay visibility. */
