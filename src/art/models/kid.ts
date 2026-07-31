@@ -124,6 +124,48 @@ export const KID_FACE = {
   eyeH: 0.158,
 } as const;
 
+/**
+ * Height of {@link KidHandle.hatAnchor} inside the `crown` group, in metres.
+ *
+ * Exported because a hat is authored about that anchor while the eyes are
+ * described about the skull's centre, so anything comparing the two — the
+ * eye-clearance gate in `check:hat-fit` — needs the one offset between them
+ * rather than its own copy of `0.42 * HEAD`.
+ */
+export const KID_HAT_ANCHOR_Y = 0.42 * HEAD;
+
+/**
+ * **Where the top of an eye is**, at azimuth `azimuth` radians round the face
+ * (0 is dead ahead, +x is the wearer's left as the camera sees it), measured in
+ * the **`crown` group's frame** — the frame a worn hat lives in. `null` outside
+ * the eyes' own arc.
+ *
+ * This exists so that nothing has to reconstruct it. `check:hair` had the only
+ * copy, and it is written in the *hair shells'* frame — `hair.ts` hangs them
+ * off a `drape` group carrying `rotation.x = headTilt` — so it rotates the
+ * result by `HEAD_TILT` on the way out and, being about hair rather than about
+ * the painted surface, leaves {@link FACE_SQUASH} out. Both are right there and
+ * wrong anywhere else: reusing that formula for hats puts the eyes 106 mm too
+ * high. One surface must have one description (ART-AGENT-NOTES §5); this is it,
+ * and it is checked against the built patch's own vertices by `check:hat-fit`.
+ *
+ * An eye is an **ellipse**, so this is a function of azimuth rather than one
+ * number: at its outer corner an eye has no height at all, and comparing a
+ * brim's lowest point anywhere in the eye's azimuth range against the eye's
+ * tallest point condemns every hat that correctly frames a face.
+ */
+export function kidEyeTopAt(azimuth: number): number | null {
+  const band =
+    Math.PI / 2 - KID_FACE.spreadY / 2 + KID_FACE.tilt + KID_FACE.eyeY * KID_FACE.spreadY;
+  const centre = (KID_FACE.eyeGap / 2) * KID_FACE.spreadX;
+  const halfW = (KID_FACE.eyeW / 2) * KID_FACE.spreadX;
+  const halfH = (KID_FACE.eyeH / 2) * KID_FACE.spreadY;
+  const offset = Math.abs(Math.abs(azimuth) - centre) / halfW;
+  if (offset >= 1) return null;
+  const theta = band - halfH * Math.sqrt(1 - offset * offset);
+  return SKULL_RADIUS * Math.cos(theta) * FACE_SQUASH[1];
+}
+
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
   readonly colour: number;

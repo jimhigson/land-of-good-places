@@ -18,7 +18,7 @@ import { toonMaterial } from '../../../art/style/materials';
 import { createRipika } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon, type BalloonHandle } from '../../../art/models/balloons';
-import { createHat, HAT_DISPLAY_SCALE, HAT_KINDS } from '../../../art/models/hats';
+import { createHat, hatDisplayScale, HAT_KINDS, HAT_STAND_SPACING } from '../../../art/models/hats';
 import { createPet, PET_KINDS, type PetHandle } from '../../../art/models/pets';
 import {
   createCandyFloss,
@@ -293,7 +293,9 @@ function hatShop(): Fitout {
   const positions = HAT_KINDS.map((_, index) => {
     const onCounter = index < 3;
     return {
-      x: onCounter ? -0.1 + index * 0.85 : -1.1 + (index - 3) * 0.85,
+      x: onCounter
+        ? -0.1 + index * HAT_STAND_SPACING
+        : -1.1 + (index - 3) * HAT_STAND_SPACING,
       y: onCounter ? COUNTER_TOP_Y : SHELF_TOP,
       z: onCounter ? 1.05 : SHELF_Z,
       height: onCounter ? 0.3 : 0.16,
@@ -326,12 +328,14 @@ function hatShop(): Fitout {
   const hats = HAT_KINDS.map((kind, index) => {
     const slot = positions[index];
     const hat = createHat(kind);
-    // Shown well under life size — the stands are 0.85 m apart and a real sun
-    // hat is 1.4 m across, so at life size each brim would saw through its
-    // neighbours. `HAT_DISPLAY_SCALE` keeps the stands looking exactly as they
-    // did while the worn hats grew to fit the head; see `art/models/hats.ts`.
+    // Shown well under life size — the stands are `HAT_STAND_SPACING` apart and
+    // a real sun hat is 2.1 m across, so at life size each brim would saw
+    // through its neighbours. `hatDisplayScale` divides out how big the family
+    // want hats *worn*, so the shop keeps the size it has always shown however
+    // that changes; see `art/models/hats.ts`.
     if (slot) {
-      place(hat.root, slot.x, slot.y + slot.height + 0.06, slot.z, HAT_DISPLAY_SCALE, index * 0.5);
+      const scale = hatDisplayScale(kind);
+      place(hat.root, slot.x, slot.y + slot.height + 0.06, slot.z, scale, index * 0.5);
     }
     detail.add(hat.root);
     return hat;
