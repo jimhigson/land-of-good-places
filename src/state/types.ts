@@ -69,6 +69,7 @@ export const HAIR_STYLES = [
   'bowl',
   'spiky',
   'messy',
+  'mohican',
 ] as const;
 export type HairStyle = (typeof HAIR_STYLES)[number];
 

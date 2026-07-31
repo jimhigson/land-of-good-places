@@ -87,6 +87,7 @@ const HAIR_STYLE_OPTIONS: Readonly<Record<HairStyle, { label: string; glyph: str
   bowl: { label: 'Bowl Cut', glyph: '🥣' },
   spiky: { label: 'Spiky', glyph: '⚡' },
   messy: { label: 'Messy', glyph: '🌪️' },
+  mohican: { label: 'Rooster', glyph: '🐓' },
 };
 
 /**
@@ -104,6 +105,7 @@ const HAIR_STYLE_ORDER: readonly HairStyle[] = [
   'bowl',
   'spiky',
   'messy',
+  'mohican',
 ];
 
 /**
