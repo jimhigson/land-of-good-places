@@ -398,6 +398,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     crown,
     root,
     head: HEAD,
+    skull: SKULL_RADIUS,
     headTilt: HEAD_TILT,
     hairMaterial: hairMat,
     hairDarkMaterial: hairDarkMat,
