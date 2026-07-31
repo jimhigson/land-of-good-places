@@ -87,6 +87,17 @@ This is the highest-leverage decision in the whole art direction:
 
 ### Drawing rules
 
+**The governing rule for anything painted:** a texture should look like
+something that *could have been* built as geometry, just wasn't — for
+curvature, cost, or animation reasons. Flat colour fills, bold well-defined
+ink outlines, shapes with a clear silhouette. Not shading, not gradients
+across a whole shape, not photographic or painterly rendering — a painted
+texture must read in the same visual language as the toon-shaded primitives
+sitting right next to it, or the model looks like two different games glued
+together. The soft touches below (blush airbrush, iris gradient) are
+deliberate, bounded exceptions — a few percent of a small shape — not a
+licence for painted detail generally.
+
 - **Ink**: fill with `PALETTE.ink`. Never `#000`.
 - **Eyes**: one solid ink oval, **taller than wide** (height ≈ 1.3 × width). No
   white sclera — cartoon toys read cuter with a full dark eye.
@@ -375,6 +386,15 @@ only, outlines ink-tinted per §4's rules — never black, never photoreal. And
 it is wrapped in the exact same `AssetHandle` factory function as everything
 above: origin at the base, `height` to the true top, seeded randomness if
 any is needed. The only thing that changed is where the vertices came from.
+
+**A painted face on an authored surface follows §3's governing rule too:**
+bake it into the surface's own UV mapping rather than a second mesh that has
+to independently agree with the first's geometry (31 July 2026, after the
+RiPika/Trilla hood faces went invisible when a hand-rolled second mesh was
+wound the wrong way round — see CLAUDE.md). And it still has to look like
+flat appliqué that could have been geometry, not a texture doing shading's
+job — §3's rule on that is not relaxed just because the base mesh is
+authored.
 
 ---
 
