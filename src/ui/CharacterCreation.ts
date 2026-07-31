@@ -253,17 +253,17 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
  * Hair styles a hat cannot sit on top of — so far, none: the Mohican that
  * would be the first entry (Jim's words, 31 July 2026: "a Mohican and a hat
  * are mutually exclusive… selecting this should count against the hat,
- * disabling the hat tab") is being modelled by the 3D-artist agent and is not
- * yet a member of `HairStyle` (`art/models/hair.ts`) — adding the literal
- * `'mohican'` here today would not compile. **Once it lands, this is the one
- * line that switches the whole mechanism on**: `new Set<HairStyle>(['mohican'])`.
+ * disabling the hat tab") is `'mohican'` — landed 31 July 2026 (PR #138,
+ * `feat/mohican-hair`, labelled "Rooster" in the picker: {@link
+ * HAIR_STYLE_OPTIONS}), and the whole mechanism below was built and wired
+ * against this set while it was still empty, exactly the way the shoe picker
+ * was designed against `ShoeKind` before that union existed — turning it on
+ * was the one-line edit this comment used to promise.
  *
  * Everything downstream of this set — hiding the Hat tab, remembering and
  * restoring the hat she had on, taking a hat off if she is already wearing
- * one when she picks an exclusive style — is built and wired against it now,
- * exactly the way the shoe picker was designed against `ShoeKind` before that
- * union existed, so there is nothing left to do here the day the style lands
- * beyond this one edit. See {@link applyHairStyle}.
+ * one when she picks an exclusive style — needed no further changes the day
+ * the style actually landed. See {@link applyHairStyle}.
  *
  * Deliberately a set of styles, not a single hard-coded `'mohican'` check
  * scattered across this file: the rule is "some styles conflict with a hat",
@@ -284,7 +284,7 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
  * (`entities/npc/NpcSystem.ts` has no hat-rolling of any kind), so there is no
  * crowd-side mirror of this needed either.
  */
-const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>();
+const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>(['mohican']);
 
 export class CharacterCreation {
   private readonly root: HTMLElement;
@@ -466,6 +466,18 @@ export class CharacterCreation {
       this.refreshPreview('feet');
     });
 
+    // Only `'plain'` actually shows this swatch's colour. Flagged in QA (31
+    // July 2026): picking Sparkly leaves "Sky" pressed here while the shoe
+    // renders its own fixed pink glitter. That is `art/models/shoes.ts`'s own
+    // design, not a bug this file introduced — its `FOOT_COLOUR` table gives
+    // `'ripika'`, `'sandal'` and `'sparkle'` each a fixed palette the same way
+    // the RiPika/Trilla backpacks keep their own colours (`backpacks.ts`'s
+    // `collar()`): a themed pair is that theme's own colours, not a canvas
+    // for whichever swatch happens to be selected. Left as-is rather than
+    // hiding the swatch for those three kinds — unlike the backpack, none of
+    // them has a collar/strap equivalent left over for the chosen colour to
+    // paint instead, so hiding it would leave those three tabs with nothing
+    // for the swatch row to do at all, which reads as more broken, not less.
     const shoeColourSection = this.buildSwatchSection(
       'Shoe colour',
       SHOE_SWATCHES,
