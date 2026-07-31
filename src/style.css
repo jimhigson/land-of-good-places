@@ -3219,6 +3219,16 @@ kbd {
   opacity: 0;
 }
 
+/* `hidden` vs this class's own `display: flex` is a same-specificity tie an
+   author rule always wins by cascade origin, `[hidden]` here is what breaks
+   the tie back in `hidden`'s favour. Without it the collapsed panel kept its
+   full flex layout height (just invisible), which was inflating every swatch
+   section by a wheel's worth of blank space — caught in QA: it pushed every
+   section after the first custom-colour tile off the bottom of the screen. */
+.colourwheel-panel[hidden] {
+  display: none;
+}
+
 .colourwheel-top {
   display: flex;
   align-items: center;
