@@ -129,6 +129,48 @@ licence for painted detail generally.
 `material.map`. **That is the entire expression system** — nothing else in the
 game animates a face.
 
+### A face on a worn object goes in that object's own UV map
+
+Everything above is about a face on a **head**, where a transparent patch worn
+over the skull is right: the skull is the thing the face belongs to, and the
+patch is what lets the eyes be bigger than the geometry allows.
+
+A face painted on something the child *wears* — the critter hoods, and anything
+like them — is a different problem, and the decal patch is the wrong answer to
+it. **Bake the face into the wearing surface's own UV map instead**
+(`paintFaceOnFill`, and `hoodShellGeometry`'s face window as the reference
+implementation): paint the object's base colour as the texture's background
+fill, then the face on top of it. One surface, one texture.
+
+This is not a preference. Both critter hoods' faces were **invisible in the game
+for a fortnight** and no check noticed. The patch mesh was wound the opposite
+way round from the shell under it, so its normals pointed at the wearer's skull
+and `MeshToonMaterial`'s `FrontSide` culled it outright — and the obvious fix,
+floating it further out, could never have worked. A second surface has to be
+kept in step with the first by hand, and every property of it is a way to get
+that wrong: winding, stand-off distance, and whatever relief the base mesh adds
+after you sampled it. There is nothing to keep in step if there is only one
+surface.
+
+Three things it costs, all cheap:
+
+- the surface needs real UVs, and a UV that runs with azimuth **cannot close** —
+  split the seam column the way `SphereGeometry` does, or one quad interpolates
+  across the whole texture and smears the face round the back;
+- weld the split seam's normals, or the toon ramp and the outline both draw a
+  line down it;
+- leave a border of plain base colour round the face (`FACE_FILL_INSET`), wide
+  enough to survive mip-mapping. Everything outside the face window clamps to
+  it, which is what makes the rest of the object come out the right flat colour
+  from the same one texture.
+
+Make it **opt-in** per object: something with no face keeps its flat-colour
+material and its exact geometry, and pays nothing.
+
+`npm run check:hood-face` holds this in place. It casts a ray in from outside at
+each painted feature and checks what the camera would actually hit — which an
+inside-out surface fails, and which measuring where the vertices *are* does not.
+
 ---
 
 ## 4. Proportions — where "cute" actually comes from
