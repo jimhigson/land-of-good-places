@@ -824,17 +824,32 @@ const MOHICAN_SPAN: readonly [number, number] = [0.40, 0.46];
 /** Blades along the crest. Enough that neighbours overlap into one ridge. */
 const MOHICAN_BLADES = 13;
 /** The tallest blade, in head units. Comparable to a spike, deliberately. */
-const MOHICAN_LONG = 0.30;
-/** How tall the end blades are as a fraction of the tallest. Never zero — a
- *  crest that stops dead reads as a cut, not as hair. */
-const MOHICAN_LOW = 0.3;
-/** Skews the profile's peak forward of the crown, where a real crest's is. */
-const MOHICAN_SKEW = 0.78;
+const MOHICAN_LONG = 0.34;
+/**
+   * How tall the end blades are as a fraction of the tallest.
+   *
+   * High, and that is the whole difference between a crest and a fin. The sides
+   * are the `crop` shell — a full cap of hair — so a blade only reads at all
+   * once it clears that cap. At 0.3 the ends sank into the hair and the style
+   * came out as a single shark fin over the crown; at 0.6 the crest stays proud
+   * from nape to brow, which is what makes it a Mohican.
+   */
+const MOHICAN_LOW = 0.72;
+/**
+   * Skews the profile's peak forward of the crown, where a real crest's is.
+   *
+   * **Above 1, not below.** `t` runs 0 at the nape to 1 at the brow, and the
+   * peak of `sin(π · tᵏ)` sits at `t = 0.5^(1/k)` — so a value under 1 drags the
+   * peak *backwards*. The first pass used 0.78 and put the tallest blade at
+   * t = 0.41, behind the crown, which is exactly where it looked wrong. 1.3
+   * puts it at t = 0.59.
+   */
+const MOHICAN_SKEW = 1.15;
 /** Sharpens the peak. 1 is a plain raised cosine; higher is more of a quiff. */
 const MOHICAN_PEAK = 1.25;
 /** Half-width across the head. Thin enough to read as a strip, fat enough that
  *  ART_DIRECTION's "no thin parts" still holds. */
-const MOHICAN_THICK = 0.075;
+const MOHICAN_THICK = 0.092;
 /** Half-depth along the crest — bigger than the width, so blades overlap. */
 const MOHICAN_DEPTH = 0.115;
 /** How much of each blade is buried in the scalp, as a fraction of its length. */
