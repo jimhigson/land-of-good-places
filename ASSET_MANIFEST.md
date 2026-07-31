@@ -92,7 +92,7 @@ interface CreatureHandle extends AssetHandle {
 | 19 | Candy floss / ice cream / egg / hat / sticker items | M | ~24 small held props. All ≤ 0.3 m, all with the same `heldOffset`. |
 | 20 | Pet followers (bunny, kitten, mouse) | M | Also the "cute animal" player options — one rig, three skins. |
 | 21 | Hats (8+) | S | Mount to `head` via a `hatAnchor` empty at the crown. |
-| 22 | Backpack + peeking heads | M | Backpack exists on the kid; peek slot is an anchor at the top. |
+| 22 | Backpack + peeking heads | M | Five shapes in `art/models/backpacks.ts` (`satchel`, `bubble`, `heart`, `ripikaHead`, `trillaHead`), chosen in the creator and rolled per NPC. Tagged per kind like hair, not built as separate assets — a bag is part of the body, never bought. The peek slot is `backpackAnchor`, which moves to the mouth of the shape worn. |
 | 23 | Cute-o-dex + bedroom shelves | M | UI-adjacent; needs consistent 3D icon renders. |
 
 ## P2 — space show, Mayhem dressing, polish
