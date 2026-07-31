@@ -255,7 +255,7 @@ export interface KidHandle extends CreatureHandle {
   readonly hairParts: readonly HairPart[];
   /**
    * Whether the **worn hairstyle**, not any hat, decides a hat cannot show —
-   * Spiky, today (`art/models/hair.ts`'s `HairPart.hideUnderHat`; its own
+   * Mohican, today (`art/models/hair.ts`'s `HairPart.hideUnderHat`; its own
    * `HairRig.hidesHat` is what this mirrors). Read by whoever is about to
    * attach or show a hat mesh — `entities/WornHat.ts` in the running park,
    * `ui/characterCreationPreview.ts` in the creator — **before** doing so:

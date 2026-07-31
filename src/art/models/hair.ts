@@ -140,9 +140,11 @@ export interface HairPart {
   readonly mesh: Object3D;
   readonly styles: readonly HairStyle[];
   /**
-   * True for parts that stick up past the bare hair cap and would spear
-   * straight through a worn hat — in practice, the spikes. Everything else
-   * sits inside the envelope hats already sit over.
+   * True for a style that cannot share the head with a hat at all — in
+   * practice, Mohican, whose crest occupies the same space a hat wants.
+   * Spiky also sticks up past the bare hair cap and spears straight through
+   * a worn hat, but Jim's ruling below allows that overlap; every other
+   * style sits inside the envelope hats already sit over regardless.
    *
    * **Never hides this part.** Jim's refinement (31 July 2026), after the
    * first version of this rule tucked the hair away and Spiky turned out to
@@ -190,8 +192,9 @@ export interface HairRig {
   /** Shows one style and hides the rest. */
   setStyle(style: HairStyle): void;
   /**
-   * Whether the **current** style has any part that would spear through a
-   * worn hat (`HairPart.hideUnderHat`) — Spiky, today. Live off {@link
+   * Whether the **current** style has any part that can't share the head
+   * with a hat (`HairPart.hideUnderHat`) — Mohican, today; spiky and a hat
+   * are allowed to overlap (31 July 2026), clipping included. Live off {@link
    * setStyle}, not snapshotted: the character creator rebuilds the whole kid
    * per tap, but this stays correct even for a hypothetical caller that
    * switched styles on a live rig instead.
@@ -437,9 +440,12 @@ export function buildHair(options: HairOptions): HairRig {
   // surface (`hairShellSampler`) rather than from a hand-picked radius, so a
   // spike cannot come loose from the head it grows out of.
   //
-  // Kept as one merged mesh, and hidden whole when a hat goes on: everything
-  // else in this file sits inside the envelope hats already perch over, but a
-  // spike goes straight through the party hat.
+  // Kept as one merged mesh. Used to hide itself whenever a hat was worn — a
+  // spike genuinely does go straight through the party hat's geometry — but
+  // Jim's call (31 July 2026): spiky and a hat are both allowed to show
+  // together, clipping included. Only Mohican keeps the "can't share the
+  // head with a hat" flag now; every other style, spiky included, no longer
+  // asks the hat to hide.
   add(
     ['spiky'],
     drape,
@@ -496,7 +502,6 @@ export function buildHair(options: HairOptions): HairRig {
       addOutline(spiky, OUTLINE_SMALL);
       return spiky;
     },
-    true,
   );
 
   // --- mohican ----------------------------------------------------------------
@@ -553,16 +558,19 @@ export function buildHair(options: HairOptions): HairRig {
     // `HAT_EXCLUSIVE_HAIR_STYLES`). `true` here is the backstop for anywhere
     // that rule does not reach: if a hat is ever worn over this crest anyway
     // (bought from a shop after the fact, say), it is the *hat* that declines
-    // to render, exactly like the spikes — see `hideUnderHat`'s doc comment,
-    // and `entities/WornHat.ts`, which is what actually checks it.
+    // to render — see `hideUnderHat`'s doc comment, and `entities/WornHat.ts`,
+    // which is what actually checks it. Spiky used to share this flag; it no
+    // longer does (31 July 2026) — Mohican is the one style left that asks
+    // for it.
     true,
   );
 
   // --- messy ------------------------------------------------------------------
   // Tufts poking out SIDEWAYS rather than upwards, deliberately: it keeps the
-  // whole style inside the envelope a hat already perches over, so messy needs
-  // no hat special case the way spiky does, and an early version with tufts
-  // leaning hard upwards measured *taller than the spikes*, which is not what
+  // whole style inside the envelope a hat already perches over, so messy has
+  // never needed a hat special case (spiky no longer does either, 31 July
+  // 2026 — only Mohican still does), and an early version with tufts leaning
+  // hard upwards measured *taller than the spikes*, which is not what
   // "messy" means to anybody.
   //
   // **Every tuft is centred on the shell's surface.** On `main` they were at

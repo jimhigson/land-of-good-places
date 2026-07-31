@@ -456,7 +456,7 @@ export class CharacterPreview {
     // Same attachment every worn hat uses in the real game — see
     // `art/models/hats.ts`'s doc comment: no offset maths needed. Gated on
     // `!kid.hairHidesHat`: the freshly-built kid already knows whether the
-    // chosen hair style (Spiky, today) cannot coexist with a worn hat, and
+    // chosen hair style (Mohican, today) cannot coexist with a worn hat, and
     // if so the *hat* is the one that does not get attached — hair is never
     // the thing that hides any more, see `art/models/hair.ts`'s
     // `HairPart.hideUnderHat`. `choice.hatId` itself is untouched either

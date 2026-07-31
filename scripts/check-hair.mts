@@ -330,7 +330,17 @@ function worldPoints(root: Object3D): Vector3[] {
 {
   const kid = createKid({ hairStyle: 'spiky' });
   kid.root.updateMatrixWorld(true);
-  const spikeParts = kid.hairParts.filter((part) => part.hideUnderHat);
+  // Identified by style, not `hideUnderHat` — that flag now means "can't
+  // share the head with a hat", which spiky no longer claims (31 July 2026:
+  // spiky and a hat are allowed to show together). Only Mohican still sets
+  // it, so filtering on it here would find the wrong style entirely.
+  //
+  // `styles.length === 1` excludes the shared `crop` shell — it lists
+  // `spiky` alongside four other styles it also builds for, so a plain
+  // `styles.includes('spiky')` matches the shell as well as the spikes.
+  const spikeParts = kid.hairParts.filter(
+    (part) => part.styles.length === 1 && part.styles[0] === 'spiky',
+  );
   check(spikeParts.length === 1, `spiky: ${spikeParts.length} spike mesh(es), expected exactly 1`);
 
   const shell = find(kid.root, 'hair.shell.crop')[0] as Mesh | undefined;
