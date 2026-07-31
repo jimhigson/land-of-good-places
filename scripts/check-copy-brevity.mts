@@ -109,10 +109,6 @@ const KNOWN_LONG: Readonly<Record<string, Recorded>> = {
     sentences: 2,
     why: '"Three whole scoops. The famous one." — 35 characters.',
   },
-  'blurb:hat.ripikaHat': {
-    sentences: 2,
-    why: '"Wear the whole of RiPika on your head. Very silly." — 50 characters, exactly on the limit. "Very silly" is the sell.',
-  },
   'blurb:pet.bunny': {
     sentences: 2,
     why: '"Hops. Will follow you about." — 28 characters, two sentences of three words.',

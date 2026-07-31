@@ -522,6 +522,13 @@ Money **never runs out** in normal mode. Seven shops:
 5. **Hat shop** — hats your character actually wears around the park.
    One of them is the **RiPika hat**: a large RiPika head worn on top of
    the wearer's own head.
+   *Amended 31 July 2026, at the family's request: built literally — the
+   creature's own head model, shrunk — it read as uncanny, "a tiny live
+   animal on your head", rather than cute. Both animal hats are now
+   **critter caps**: a hat shaped like the animal (ears, a face on the
+   front, a peak) rather than a copy of the animal. The original ask is
+   left standing above because it is what was asked for and it is what the
+   hat still has to say from across the park.*
 6. **Sticker & pet shop** — cute stickers and a little pet that follows you.
    Among the pets: a **jiggly ball-shaped puff creature in pastel pink that
    likes to sing** (bursts into little songs with musical notes floating

@@ -31,11 +31,12 @@ import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/
 /**
  * Head scale-up over the original authoring. The one knob for RiPika's skull.
  *
- * Exported because the RiPika hat (`art/models/hats.ts`) is *this* head, worn:
- * building it at its own scale is what makes it recognisably RiPika's head
- * rather than a yellow ball, and it means a retune here cannot leave the hat
- * behind. It used to be blown up to 2.1 independently, which put a 1.4 m ball
- * on a child and made her 1.72× her own height.
+ * Still exported, but nothing outside this file reads it any more. The RiPika
+ * hat used to: it *was* this head, built at this scale and perched on the
+ * wearer's crown. That is the reading the family rejected on 31 July — a hat
+ * shaped like an animal and a shrunken live animal are different objects — so
+ * the hat is now its own design in `hoodShell.ts` and takes nothing from here
+ * but the palette and the character of the ears.
  */
 export const RIPIKA_HEAD_SCALE = 1.32;
 
