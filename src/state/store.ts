@@ -2,6 +2,7 @@ import { PALETTE } from '../core/palette';
 import { DAY_START_TIME, PLAYER_DEFAULT_NAME } from '../core/constants';
 import type { SaveFile, SavedGame } from './save';
 import type {
+  BackpackKind,
   CuteCategory,
   CutePlacement,
   FacePaintId,
@@ -82,6 +83,8 @@ export interface CharacterCreationChoice {
   readonly hairStyle: HairStyle;
   readonly outfitColour: number;
   readonly eyeColour: number;
+  readonly backpackKind: BackpackKind;
+  readonly backpackColour: number;
   readonly hat: PurchaseSpec;
   readonly pet: PurchaseSpec;
 }
@@ -249,6 +252,8 @@ class GameStore {
     this.state.player.hairStyle = choice.hairStyle;
     this.state.player.outfitColour = choice.outfitColour;
     this.state.player.eyeColour = choice.eyeColour;
+    this.state.player.backpackKind = choice.backpackKind;
+    this.state.player.backpackColour = choice.backpackColour;
 
     const hatItem = this.grantFree(choice.hat, true);
     this.state.wornHatUid = hatItem.uid;
@@ -669,6 +674,8 @@ class GameStore {
       if (p.hairStyle !== undefined) next.player.hairStyle = p.hairStyle;
       if (p.outfitColour !== undefined) next.player.outfitColour = p.outfitColour;
       if (p.eyeColour !== undefined) next.player.eyeColour = p.eyeColour;
+      if (p.backpackKind !== undefined) next.player.backpackKind = p.backpackKind;
+      if (p.backpackColour !== undefined) next.player.backpackColour = p.backpackColour;
       if (p.maxHealth !== undefined) next.player.maxHealth = Math.max(1, p.maxHealth);
       if (p.health !== undefined) next.player.health = p.health;
       if (p.facePaint !== undefined) next.player.facePaint = p.facePaint;
@@ -782,6 +789,8 @@ function createInitialState(): GameState {
       hairStyle: 'bunches',
       outfitColour: PALETTE.outfit,
       eyeColour: PALETTE.iris,
+      backpackKind: 'satchel',
+      backpackColour: PALETTE.backpack,
       health: 5,
       maxHealth: 5,
       facePaint: null,

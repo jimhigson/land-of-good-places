@@ -79,7 +79,7 @@ export const ART = {
   kidOutfit: PALETTE.outfit,
   kidOutfitDark: PALETTE.outfitDark,
   kidShoe: PALETTE.shoe,
-  kidBackpack: 0x7fe3c0,
+  kidBackpack: PALETTE.backpack,
   kidBackpackDark: 0x5fc9a6,
   kidBobble: 0xffd166,
   /** Default iris colour, named so a retune has somewhere to live. */

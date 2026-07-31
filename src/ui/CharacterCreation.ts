@@ -3,7 +3,7 @@ import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
-import type { CharacterCreationChoice, HairStyle } from '../state';
+import type { BackpackKind, CharacterCreationChoice, HairStyle } from '../state';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 import { ColourWheelPicker } from './ColourWheelPicker';
 
@@ -35,6 +35,13 @@ interface Swatch {
   readonly label: string;
 }
 
+/** One button in a glyph-and-label picker grid — a hair style, a bag shape. */
+interface Choice<T extends string> {
+  readonly value: T;
+  readonly label: string;
+  readonly glyph: string;
+}
+
 const HAIR_SWATCHES: readonly Swatch[] = [
   { colour: PALETTE.hair, label: 'Brown' },
   { colour: ART.kidHairBlonde, label: 'Blonde' },
@@ -51,6 +58,15 @@ const OUTFIT_SWATCHES: readonly Swatch[] = [
   { colour: PALETTE.markerLemon, label: 'Lemon' },
   { colour: PALETTE.flowerViolet, label: 'Violet' },
   { colour: PALETTE.flowerRed, label: 'Coral' },
+];
+
+const BACKPACK_SWATCHES: readonly Swatch[] = [
+  { colour: PALETTE.backpack, label: 'Mint' },
+  { colour: PALETTE.markerSky, label: 'Sky' },
+  { colour: PALETTE.markerLemon, label: 'Lemon' },
+  { colour: PALETTE.markerPink, label: 'Pink' },
+  { colour: PALETTE.flowerViolet, label: 'Violet' },
+  { colour: ART.corgiTan, label: 'Toffee' },
 ];
 
 /**
@@ -96,12 +112,40 @@ const HAIR_STYLE_ORDER: readonly HairStyle[] = [
  * compiler guards; this makes the *order* list a preference rather than a
  * second place a style can be lost.
  */
-const HAIR_STYLES: readonly { value: HairStyle; label: string; glyph: string }[] = [
+const HAIR_STYLES: readonly Choice<HairStyle>[] = [
   ...HAIR_STYLE_ORDER,
   ...(Object.keys(HAIR_STYLE_OPTIONS) as HairStyle[]).filter(
     (style) => !HAIR_STYLE_ORDER.includes(style),
   ),
 ].map((value) => ({ value, ...HAIR_STYLE_OPTIONS[value] }));
+
+/**
+ * What a child sees on each backpack button.
+ *
+ * A `Record` over the whole union for the same reason the hair styles are one:
+ * a shape added to `art/models/backpacks.ts` and forgotten here would exist in
+ * the game and be unchoosable, which is exactly the bug that survives a review.
+ *
+ * The two creature bags are named after the creatures rather than described
+ * ("RiPika", not "RiPika head bag") — a six-year-old picking RiPika is picking
+ * RiPika, and the picture on the button says the rest.
+ */
+const BACKPACK_OPTIONS: Readonly<Record<BackpackKind, { label: string; glyph: string }>> = {
+  satchel: { label: 'Backpack', glyph: '🎒' },
+  bubble: { label: 'Bubble', glyph: '🫧' },
+  heart: { label: 'Heart', glyph: '💗' },
+  ripikaHead: { label: 'RiPika', glyph: '⚡' },
+  trillaHead: { label: 'Trilla', glyph: '🎵' },
+};
+
+const BACKPACK_ORDER: readonly BackpackKind[] = ['satchel', 'bubble', 'heart', 'ripikaHead', 'trillaHead'];
+
+const BACKPACKS: readonly Choice<BackpackKind>[] = [
+  ...BACKPACK_ORDER,
+  ...(Object.keys(BACKPACK_OPTIONS) as BackpackKind[]).filter(
+    (kind) => !BACKPACK_ORDER.includes(kind),
+  ),
+].map((value) => ({ value, ...BACKPACK_OPTIONS[value] }));
 
 /** Every hat the hat shop sells — one source of truth, no duplicated data. */
 const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');
@@ -132,6 +176,8 @@ export class CharacterCreation {
   private hairStyle: HairStyle = 'bunches';
   private outfitColour: number = PALETTE.outfit;
   private eyeColour: number = ART.kidEye;
+  private backpackKind: BackpackKind = 'satchel';
+  private backpackColour: number = PALETTE.backpack;
   private hatId = DEFAULT_HAT_ID;
   private petId = DEFAULT_PET_ID;
 
@@ -231,34 +277,15 @@ export class CharacterCreation {
     );
 
     // Hair style ---------------------------------------------------------
-    const hairStyleSection = document.createElement('div');
-    hairStyleSection.className = 'charcreate-section';
-    const hairStyleLabel = document.createElement('p');
-    hairStyleLabel.className = 'charcreate-label';
-    hairStyleLabel.textContent = 'Hair style';
-    const hairStyleRow = document.createElement('div');
-    hairStyleRow.className = 'charcreate-styles';
-    const styleButtons: HTMLButtonElement[] = [];
-    for (const style of HAIR_STYLES) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'charcreate-style-btn';
-      button.dataset.selected = style.value === this.hairStyle ? 'true' : 'false';
-      button.setAttribute('aria-pressed', style.value === this.hairStyle ? 'true' : 'false');
-      button.innerHTML = `<span class="charcreate-style-glyph">${style.glyph}</span><span>${style.label}</span>`;
-      button.addEventListener('click', () => {
-        this.hairStyle = style.value;
-        for (const other of styleButtons) {
-          const selected = other === button;
-          other.dataset.selected = selected ? 'true' : 'false';
-          other.setAttribute('aria-pressed', selected ? 'true' : 'false');
-        }
+    const hairStyleSection = this.buildChoiceSection(
+      'Hair style',
+      HAIR_STYLES,
+      this.hairStyle,
+      (style) => {
+        this.hairStyle = style;
         this.refreshPreview('hair');
-      });
-      styleButtons.push(button);
-      hairStyleRow.append(button);
-    }
-    hairStyleSection.append(hairStyleLabel, hairStyleRow);
+      },
+    );
 
     // Eye colour ---------------------------------------------------------------
     const eyeColourSection = this.buildSwatchSection(
@@ -279,6 +306,29 @@ export class CharacterCreation {
       (colour) => {
         this.outfitColour = colour;
         this.refreshPreview('body');
+      },
+    );
+
+    // Backpack ---------------------------------------------------------------
+    // Both halves frame the bag, which means the preview turns her round to
+    // show you her back — see `characterCreationPreview.ts`'s `BACK_TURN`.
+    const backpackSection = this.buildChoiceSection(
+      'Backpack',
+      BACKPACKS,
+      this.backpackKind,
+      (kind) => {
+        this.backpackKind = kind;
+        this.refreshPreview('backpack');
+      },
+    );
+
+    const backpackColourSection = this.buildSwatchSection(
+      'Backpack colour',
+      BACKPACK_SWATCHES,
+      this.backpackColour,
+      (colour) => {
+        this.backpackColour = colour;
+        this.refreshPreview('backpack');
       },
     );
 
@@ -307,6 +357,8 @@ export class CharacterCreation {
       hairStyleSection,
       eyeColourSection,
       outfitSection,
+      backpackSection,
+      backpackColourSection,
       hatSection,
       petSection,
     );
@@ -439,6 +491,52 @@ export class CharacterCreation {
     return section;
   }
 
+  /**
+   * A grid of glyph-and-label buttons — one picked at a time.
+   *
+   * The hair-style row's own markup, lifted into a helper the day the backpack
+   * shapes needed the identical thing: same `charcreate-styles` grid, same
+   * `charcreate-style-btn`, same `aria-pressed` bookkeeping. Two copies of a
+   * picker is how a codebase ends up with pickers that drift apart, which
+   * GAME_DESIGN.md's PREVIEW RULE exists to prevent.
+   */
+  private buildChoiceSection<T extends string>(
+    label: string,
+    choices: readonly Choice<T>[],
+    initial: T,
+    onPick: (value: T) => void,
+  ): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'charcreate-section';
+    const labelEl = document.createElement('p');
+    labelEl.className = 'charcreate-label';
+    labelEl.textContent = label;
+    const row = document.createElement('div');
+    row.className = 'charcreate-styles';
+    const buttons: HTMLButtonElement[] = [];
+    for (const choice of choices) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'charcreate-style-btn';
+      button.dataset.selected = choice.value === initial ? 'true' : 'false';
+      button.setAttribute('aria-pressed', choice.value === initial ? 'true' : 'false');
+      button.innerHTML =
+        `<span class="charcreate-style-glyph">${choice.glyph}</span><span>${escapeHtml(choice.label)}</span>`;
+      button.addEventListener('click', () => {
+        onPick(choice.value);
+        for (const other of buttons) {
+          const selected = other === button;
+          other.dataset.selected = selected ? 'true' : 'false';
+          other.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        }
+      });
+      buttons.push(button);
+      row.append(button);
+    }
+    section.append(labelEl, row);
+    return section;
+  }
+
   private buildCardSection(
     label: string,
     items: readonly ShopItem[],
@@ -494,6 +592,8 @@ export class CharacterCreation {
       hairStyle: this.hairStyle,
       outfit: this.outfitColour,
       eye: this.eyeColour,
+      backpack: this.backpackKind,
+      backpackColour: this.backpackColour,
       hatId: this.hatId,
       petId: this.petId,
     }, focus);
@@ -516,6 +616,8 @@ export class CharacterCreation {
         hairStyle: this.hairStyle,
         outfitColour: this.outfitColour,
         eyeColour: this.eyeColour,
+        backpackKind: this.backpackKind,
+        backpackColour: this.backpackColour,
         hat,
         pet,
       };

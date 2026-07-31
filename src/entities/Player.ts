@@ -283,12 +283,17 @@ export class Player implements GameSystem {
         outfit: playerState.outfitColour,
         shoe: PALETTE.shoe,
       },
-      // Hair style, skin tone and eye colour are chosen in the character
-      // creator (`ui/CharacterCreation.ts`) and have already been written to
-      // the store by the time this constructor runs — see `main.ts`'s
+      // Hair style, skin tone, eye colour and the backpack are chosen in the
+      // character creator (`ui/CharacterCreation.ts`) and have already been
+      // written to the store by the time this constructor runs — see `main.ts`'s
       // `boot()`, which applies them before `Game` (and therefore `Player`)
       // is ever built.
-      { hairStyle: playerState.hairStyle, eyeColour: playerState.eyeColour },
+      {
+        hairStyle: playerState.hairStyle,
+        eyeColour: playerState.eyeColour,
+        backpackKind: playerState.backpackKind,
+        backpackColour: playerState.backpackColour,
+      },
     );
     this.group.add(this.model.root);
 

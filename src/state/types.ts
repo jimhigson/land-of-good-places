@@ -72,6 +72,23 @@ export const HAIR_STYLES = [
 ] as const;
 export type HairStyle = (typeof HAIR_STYLES)[number];
 
+/**
+ * Backpack shape chosen in the character creator.
+ *
+ * Written out here for exactly the reasons {@link HairStyle} above is: `state/`
+ * never imports `art/`, a save file read back off disk is untyped and needs a
+ * runtime list to validate against, and the two unions are structurally
+ * assignable so nothing has to convert between them.
+ *
+ * The canonical list lives in `art/models/backpacks.ts`, which also knows what
+ * each shape is made of and which of them a background child may wear. Keep
+ * these two in step: `ui/CharacterCreation.ts` types its picker from *this*
+ * union and feeds the result straight into `KidOptions.backpackKind`, so a name
+ * that exists in only one of the two files fails to compile.
+ */
+export const BACKPACK_KINDS = ['satchel', 'bubble', 'heart', 'ripikaHead', 'trillaHead'] as const;
+export type BackpackKind = (typeof BACKPACK_KINDS)[number];
+
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export const CUTE_CATEGORIES = [
   'toy',
@@ -205,6 +222,10 @@ export interface PlayerState {
   outfitColour: number;
   /** Iris colour, chosen in the character creator. Defaults to the game's violet. */
   eyeColour: number;
+  /** Which bag she wears — see `BackpackKind`. Chosen in the character creator. */
+  backpackKind: BackpackKind;
+  /** What colour that bag is painted. A bare hex, like every other colour here. */
+  backpackColour: number;
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
   maxHealth: number;
