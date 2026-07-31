@@ -287,8 +287,15 @@ export class CharacterPreview {
    * Where the camera lives when nothing has just changed — `all` for the
    * character creator, `face` for the face-painting stall. See
    * {@link PreviewFraming}.
+   *
+   * Mutable, not `readonly`: the character creator's tab strip
+   * ({@link setResting}) moves this whenever the child switches tabs, so
+   * "the whole character" is only ever one tab's resting place among several,
+   * not a fact fixed for the screen's whole lifetime the way it still is for
+   * the face-painting stall (which never calls {@link setResting} and simply
+   * keeps the value {@link PreviewFraming} gave it at construction).
    */
-  private readonly resting: PreviewFocus;
+  private resting: PreviewFocus;
   private focus: PreviewFocus;
   /** Elapsed-time deadline after which {@link focus} eases back to {@link resting}. */
   private focusUntil = 0;
@@ -464,6 +471,25 @@ export class CharacterPreview {
     // has to happen before `boxFor('hair')` measures the tail, so the framing
     // is taken from a tail at rest rather than one mid-flight.
     kid.resetHair();
+  }
+
+  /**
+   * Moves where the camera rests once nothing is transiently in focus —
+   * what the character creator's tab strip calls on every switch, generalising
+   * the PREVIEW RULE's "framed for what it changes" from *the last thing
+   * tapped* to *the whole tab currently open* (GAME_DESIGN.md).
+   *
+   * Deliberately also retargets {@link focus} itself rather than only
+   * {@link resting}: nothing about the character changed, so there is nothing
+   * for the usual `update()`-driven "hold {@link FOCUS_HOLD_SECONDS}, then
+   * ease back" beat to hold *away from* — a tab switch is the new resting
+   * place, immediately, not a temporary detour that will ease back to
+   * wherever the old tab left it. `updateCamera`'s own damping still carries
+   * the actual camera move there smoothly; only the destination jumps.
+   */
+  setResting(focus: PreviewFocus): void {
+    this.resting = focus;
+    this.focus = focus;
   }
 
   /**

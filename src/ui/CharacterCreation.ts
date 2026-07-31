@@ -25,6 +25,17 @@ import { ColourWheelPicker } from './ColourWheelPicker';
  * `<input>`, so Tab/Enter/Space "just work" without any bespoke key handling
  * — there is no game `InputSystem` running yet to fight over the keyboard
  * with, unlike `ShopPanel`/`FacePaintPanel`.
+ *
+ * **Tabbed**, one customisation category per tab (see {@link TAB_META}) — the
+ * name field is the one exception, fixed above the strip. Every tab is one
+ * (or two, for hair and the backpack) of the sections this screen already
+ * had; tabbing them did not change what a section builds or how a pick is
+ * applied, only which of them are attached to the DOM at once and which one
+ * the live preview's camera currently rests on (`characterCreationPreview.
+ * ts`'s `CharacterPreview.setResting`) — see that method's doc comment for
+ * how this generalises the PREVIEW RULE's existing "camera follows what
+ * changed" behaviour from *the last control tapped* to *the tab currently
+ * open*.
  */
 export interface CharacterCreationHandlers {
   onComplete(choice: CharacterCreationChoice): void;
@@ -163,6 +174,46 @@ const PET_OPTIONS: readonly ShopItem[] = [
 
 const DEFAULT_HAT_ID = HAT_OPTIONS.find((item) => item.id === 'hat.party')?.id ?? HAT_OPTIONS[0]?.id ?? '';
 const DEFAULT_PET_ID = PET_OPTIONS[0]?.id ?? '';
+
+/** One tab in the strip below — a customisation category, its own place on the child. */
+type TabId = 'skin' | 'hair' | 'eyes' | 'outfit' | 'hat' | 'backpack' | 'pet';
+
+/**
+ * The tab strip: order, what a child sees on the button, and — the actual
+ * point of tabbing this screen at all — which {@link PreviewFocus} the camera
+ * settles on while that tab is open.
+ *
+ * Requested directly (31 July 2026), after the screen had grown to nine
+ * stacked sections plus name, hat and pet: "one tab per thing you can
+ * change… so each customisation category gets its own tab instead of
+ * everything stacked on one long screen." Name stays outside the strip (see
+ * the constructor) — typing is not a "look" choice the way the rest of this
+ * table is, and it is the one thing every child does exactly once, so it gets
+ * to stay the first thing on the screen rather than hide behind a tap.
+ *
+ * The focus column is GAME_DESIGN.md's PREVIEW RULE generalised one level up:
+ * that rule already had the camera zoom to what a single control just
+ * changed (`refreshPreview`'s own `focus` argument, unchanged below); this
+ * table says the same thing about what a whole *tab* is for, so opening
+ * "Hat" alone — before touching a single hat card — already frames the head,
+ * and the "hold two seconds then ease back" beat a lone swatch tap gets
+ * (`characterCreationPreview.ts`'s `FOCUS_HOLD_SECONDS`) has nowhere to ease
+ * *back to* any more, because every control inside a tab already asks for
+ * that tab's own focus. `hair` and `backpack` both carry two controls
+ * (colour + style, kind + colour) that already agreed on one focus each
+ * before tabs existed — which is exactly why grouping them by tab rather than
+ * by control needed no new camera tuning at all, only `CharacterPreview.
+ * setResting` to move the destination on a switch instead of only a pick.
+ */
+const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly glyph: string; readonly focus: PreviewFocus }[] = [
+  { id: 'skin', label: 'Skin', glyph: '🖐️', focus: 'all' },
+  { id: 'hair', label: 'Hair', glyph: '💇', focus: 'hair' },
+  { id: 'eyes', label: 'Eyes', glyph: '👀', focus: 'face' },
+  { id: 'outfit', label: 'Outfit', glyph: '👕', focus: 'body' },
+  { id: 'hat', label: 'Hat', glyph: '🎩', focus: 'head' },
+  { id: 'backpack', label: 'Backpack', glyph: '🎒', focus: 'backpack' },
+  { id: 'pet', label: 'Pet', glyph: '🐾', focus: 'pet' },
+];
 
 export class CharacterCreation {
   private readonly root: HTMLElement;
@@ -352,18 +403,93 @@ export class CharacterCreation {
       'toy.ripika',
     );
 
-    controls.append(
-      nameSection,
-      skinToneSection,
-      hairColourSection,
-      hairStyleSection,
-      eyeColourSection,
-      outfitSection,
-      backpackSection,
-      backpackColourSection,
-      hatSection,
-      petSection,
-    );
+    // --- the tab strip ----------------------------------------------------
+    // Panels grouped exactly as {@link TAB_META} names them — each one the
+    // section(s) that already agreed on a single camera focus before tabs
+    // existed (see that constant's doc comment).
+    const panels: Readonly<Record<TabId, HTMLElement>> = {
+      skin: this.buildTabPanel('skin', [skinToneSection]),
+      hair: this.buildTabPanel('hair', [hairColourSection, hairStyleSection]),
+      eyes: this.buildTabPanel('eyes', [eyeColourSection]),
+      outfit: this.buildTabPanel('outfit', [outfitSection]),
+      hat: this.buildTabPanel('hat', [hatSection]),
+      backpack: this.buildTabPanel('backpack', [backpackSection, backpackColourSection]),
+      pet: this.buildTabPanel('pet', [petSection]),
+    };
+
+    // Reuses `.charcreate-styles`/`.charcreate-style-btn` verbatim — the same
+    // glyph-and-label grid `buildChoiceSection` already draws for a hair style
+    // or a backpack shape. A tab **is** a choice grid, one level up: "which
+    // category" rather than "which value within one", so it earns the same
+    // look rather than a bespoke one, and for free it also carries the fix
+    // documented on `.charcreate-styles` in style.css — the row wraps onto a
+    // second line instead of ever needing a horizontal scroll to find a tab.
+    const tabStrip = document.createElement('div');
+    tabStrip.className = 'charcreate-styles';
+    tabStrip.setAttribute('role', 'tablist');
+    tabStrip.setAttribute('aria-label', 'What to change');
+
+    // Tab + button paired up as they are built, and switched by reference —
+    // not by index into two parallel arrays, which `tsconfig`'s
+    // `noUncheckedIndexedAccess` (rightly) will not let stand unchecked, and
+    // which is more ceremony than this needs anyway.
+    interface TabHandle {
+      readonly meta: (typeof TAB_META)[number];
+      readonly button: HTMLButtonElement;
+    }
+    const tabHandles: TabHandle[] = [];
+
+    const selectTab = (target: TabHandle): void => {
+      for (const handle of tabHandles) {
+        const active = handle === target;
+        panels[handle.meta.id].hidden = !active;
+        handle.button.dataset.selected = active ? 'true' : 'false';
+        handle.button.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+      // The whole point: the camera's resting place moves with the tab, not
+      // just with the last thing tapped inside it. See `setResting`'s own
+      // doc comment for why this — not another `refreshPreview` call — is
+      // the right primitive here: nothing about the character changed.
+      this.preview.setResting(target.meta.focus);
+    };
+
+    let isFirstTab = true;
+    for (const tab of TAB_META) {
+      const active = isFirstTab;
+      isFirstTab = false;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'charcreate-style-btn';
+      button.id = `charcreate-tab-${tab.id}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', panels[tab.id].id);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.dataset.selected = active ? 'true' : 'false';
+      button.innerHTML =
+        `<span class="charcreate-style-glyph">${tab.glyph}</span><span>${escapeHtml(tab.label)}</span>`;
+      const handle: TabHandle = { meta: tab, button };
+      button.addEventListener('click', () => selectTab(handle));
+      tabHandles.push(handle);
+      tabStrip.append(button);
+    }
+
+    // The strip itself is not a `.charcreate-section` (it carries no
+    // `.charcreate-label`, a tab button already names itself), but it still
+    // wants that class's bottom margin ahead of whichever panel is showing —
+    // easiest borrowed the same way `.charcreate-tabpanel` borrows nothing at
+    // all below.
+    const tabStripSection = document.createElement('div');
+    tabStripSection.className = 'charcreate-section';
+    tabStripSection.append(tabStrip);
+
+    // Every panel starts `hidden` (see `buildTabPanel`); the first tab is the
+    // one exception, un-hidden directly rather than through `selectTab` so
+    // construction does not also fire an unnecessary `preview.setResting`
+    // call before the preview it would move even exists.
+    panels.skin.hidden = false;
+
+    controls.append(nameSection, tabStripSection, ...TAB_META.map((tab) => panels[tab.id]));
     body.append(this.previewWrap, controls);
 
     // --- footer ----------------------------------------------------------
@@ -414,6 +540,29 @@ export class CharacterCreation {
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Wraps one or more sections into a tab's panel — the "Hair" tab is colour
+   * then style, everything else here is one section alone.
+   *
+   * `id`/`aria-labelledby` are derived from `id` rather than threaded through
+   * as a parameter, so this (built first, while the tab strip's buttons do
+   * not exist yet) and the button `aria-controls` points at it (built after,
+   * from the same {@link TAB_META} table) agree on the string without either
+   * one needing to hand it to the other. Starts `hidden` — the constructor
+   * unhides exactly the first tab once every panel in {@link TAB_META} exists,
+   * see `selectTab`'s initial call below.
+   */
+  private buildTabPanel(id: TabId, sections: readonly HTMLElement[]): HTMLElement {
+    const panel = document.createElement('div');
+    panel.className = 'charcreate-tabpanel';
+    panel.id = `charcreate-tabpanel-${id}`;
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', `charcreate-tab-${id}`);
+    panel.hidden = true;
+    panel.append(...sections);
+    return panel;
+  }
 
   /**
    * A row of curated one-tap swatches, **plus** a "Custom colour" tile that

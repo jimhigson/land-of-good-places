@@ -1132,13 +1132,13 @@ kbd {
   max-height: min(40rem, 92vh);
 }
 
-/* `.charcreate-controls` is a multi-column box (`columns: 13rem`) so the
-   creator's eight sections flow into as many columns as fit. The design grid
-   is a grid and must not be fragmented into columns on top of that — this
-   takes the multicol formatting context away and leaves a plain block, exactly
-   as the phone rules already do for the creator itself. */
+/* `.charcreate-controls`'s `max-width: 26rem` exists for the *tabbed*
+   character creator, where only one small tab panel is ever showing at once
+   (`ui/CharacterCreation.ts`'s `TAB_META`). This screen has no tabs — every
+   design shows at once, in the grid below — and wants the width
+   `.facepaint-card` above was actually sized for. */
 .facepaint-controls {
-  columns: auto;
+  max-width: none;
 }
 
 /* Not a scroller any more. `.charcreate-controls` above is the scroll region
@@ -3089,40 +3089,51 @@ kbd {
    their name twice over. The input stayed; the caption went. See
    `ui/CharacterCreation.ts`.) */
 
-/* Columns, not one tall stack (ORDER-OF-WORK 1.8). The number of columns is
-   decided by how much room there actually is: one on a phone, two or three on
-   a laptop, four on a big monitor — no breakpoints.
-
-   MULTI-COLUMN, not grid. A grid puts sections into ROWS, and a grid row is as
-   tall as its tallest member, so the hat section (eight hats, two abreast)
-   inflated a whole row and left a band of empty space beside it — which is
-   what was still pushing "Clothes colour" and "Starting hat" off the bottom at
-   2560x1600 even after the card grew. Multi-column has no rows: it fills one
-   column to the balanced height, then starts the next, so a tall section costs
-   its own height and nothing more. `columns` takes the column *width* here, so
-   the count still follows the available room rather than a fixed number. */
+/* Used to be `columns: 13rem` (ORDER-OF-WORK 1.8) — a multi-column spread
+   built to fit nine stacked sections across one to four columns depending on
+   screen width, because a grid's row-per-section wasted a band of empty space
+   beside the tall hat/pet card grids at 2560x1600. Tabs (31 July 2026,
+   `ui/CharacterCreation.ts`'s `TAB_META`) removed the problem the multi-column
+   trick was solving — only one tab's panel is ever attached, and the tallest
+   one is two sections (Hair: colour + style; Backpack: shape + colour) — so
+   this is a plain flex column now. `max-width` keeps a lone swatch row or a
+   two-up card grid from stretching edge to edge the way four columns of
+   content once filled the same space on purpose. */
 .charcreate-controls {
   flex: 1;
   min-width: 0;
-  columns: 13rem;
-  column-gap: 0.875rem;
-}
-
-/* The name is the first thing you fill in and the widest control there is, so
-   it spans whatever the column count turns out to be. */
-.charcreate-controls > .charcreate-section:first-child {
-  column-span: all;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .charcreate-section {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  /* Multi-column has no row gap, so sections carry their own. */
+  /* A flex column has no row gap set, so sections carry their own. */
   margin-bottom: 0.875rem;
-  /* A section split across a column break would put a label at the foot of one
-     column and its swatches at the head of the next. */
-  break-inside: avoid;
+}
+
+/* One tab's contents — one `.charcreate-section` (most tabs) or two (Hair,
+   Backpack). Each section still carries its own `margin-bottom`, so this
+   needs nothing beyond stacking them; the only reason it exists as a rule at
+   all is `[hidden]` below.
+
+   Same same-specificity tie every other `[hidden]` toggle in this file breaks
+   the same way (`.colourwheel-panel[hidden]` above is the original case): an
+   author rule's `display: flex` and the UA's `[hidden]` rule are equal
+   specificity, so cascade order alone would decide it, and this class comes
+   later. Without the explicit override a hidden panel would keep its full
+   flex height while invisible, stacking every other tab's panel underneath it
+   in the same space. */
+.charcreate-tabpanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.charcreate-tabpanel[hidden] {
+  display: none;
 }
 
 .charcreate-label {
@@ -3544,16 +3555,11 @@ kbd {
 
   .charcreate-controls {
     width: 100%;
-    /* NOT a multi-column container down here, and this is load-bearing rather
-       than cosmetic. `columns: 13rem` above makes this a multicol box; give a
-       multicol box a definite height and overflow and it does not scroll down,
-       it fragments into *overflow columns sideways* — the controls would march
-       off the right-hand edge. At this width it was only ever resolving to one
-       column anyway (a 13rem column inside about 16rem of room), so setting
-       both `column-width` and `column-count` back to `auto` — which is what
-       `columns: auto` does — takes the multicol formatting context away
-       entirely and leaves a plain block stack. */
-    columns: auto;
+    /* The desktop `max-width: 26rem` cap (single tab panel, keeps a lone
+       swatch row from stretching edge to edge) would otherwise also bite on a
+       tablet-width phone inside this same breakpoint — this band wants the
+       full width every other rule here already gives it. */
+    max-width: none;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
