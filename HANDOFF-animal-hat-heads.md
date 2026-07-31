@@ -1,6 +1,14 @@
-# Handoff — animal hat heads (RiPika / Trilla critter hoods)
+# Handoff — animal hat heads, then the plain cap, then shoes
 
 **Branch** `animal-hat-heads`. **Worktree** `.claude/worktrees/animal-hat-heads`.
+
+This branch has had three jobs in order. **§1–§8 are the two critter hoods,
+finished and approved by the family — do not redesign them.** §9 is the plain
+Cheery Cap, done. §10 is the shoes, in progress.
+
+---
+
+# 1–8. The critter hoods (done, approved)
 
 ## The job
 
@@ -128,3 +136,88 @@ and the curl. The runtime build and the Blender prototype are the same shape.
 4. **The cap has panel seams (`seamR`), the bonnet barely any.** They are
    invisible at gameplay distance by design; if we want the sewn read to
    carry further, that is one number.
+   → **Answered in §9.** `cos` relief makes broad *lobes*, not seams. The new
+   `seamSharp` turns them into narrow creases. It defaults to 1, so both
+   hoods are byte-identical; raise it on a hood if the family wants the sewn
+   read there too.
+
+---
+
+# 9. The Cheery Cap — the plain one (done, needs family eyes)
+
+`HatKind: 'cap'`, `createCap()`. The last hat still built the old way. Same
+diagnosis as the hoods, no animal theme: it is now cut from the same
+`hoodShell.ts` surface and has the same anatomy, with **nothing** added — no
+face, no ears. Specs are `CHEERY_HOOD` / `CHEERY_PEAK` in `hoodShell.ts`.
+
+## What the old one actually was (worth knowing, it explains the bug report)
+
+A squashed sphere with `CylinderGeometry(0.24, 0.24, 0.04, 18, 1, false, 0, PI)`
+stuck on the front. That is a **half**-disc, and with `rotation.y = PI` the flat
+straight edge ended up facing forward and the semicircle sideways — so the
+"peak" was a flat green tongue sticking out of one side of the head. **That is
+the "one-sided peak" the family saw.** It was never a peak that had gone wrong;
+it was a half-disc that was never rotated into place. There is no band, and the
+dome just floats on the skull.
+
+Reconstructed faithfully from the committed code and rendered as the before
+shot: `scratchpad/renders/old_cap_{front,side,iso38}.png`. (The uncommitted
+throwaway patch made in a scratch worktree is deliberately **not** in it.)
+
+## The three findings, all from angles other than the front
+
+1. **Peak and band were both `leafMid` and merged into one green bowl** at the
+   game's own 38° camera — a mint dome sitting in a green cup. The RiPika cap
+   escapes this only because its band is *cream* against a *yellow* peak. The
+   band is now the crown's own mint (a self-fabric sweatband, which a plain cap
+   has anyway) and the green peak is the sole accent. **If you change one
+   colour on this hat, check it at iso38 before anything else.**
+2. **The RiPika peak's 60°-either-side wrap is hidden by its face patch.** On a
+   bare crown that wrap reads as a bowl. Arc pulled in to 50° and the root
+   buried deeper (`inset` 0.90 → 0.84) so the flanks stay inside the crown and
+   only the actual bill emerges. `length` went 0.150 → 0.165 to buy back the
+   reach the deeper inset costs.
+3. **A plain cap wants a shallower crown and straighter sides.** `semiY` 0.245
+   (the RiPika cap's 0.335 is paid for by the ears standing on it; with nothing
+   up there that dome reads as a bonnet) and `semiLow` 0.92, which stops the
+   crown overhanging its own band — the first pass looked like a mushroom.
+
+## Two numbers not to re-derive
+
+- **`semiLow` is pinned by the grip, not by taste.** The hem must land on the
+  skull's own width at that height: skull radius at −0.205 is
+  `sqrt(0.88h − h²)` = 0.372, and `0.385·sqrt(1 − (0.205/0.92)²)` = 0.375.
+  Change `semiLow` or `shellR` and you must redo that or the band hovers.
+- **The asymmetry is a *yaw*, not a tilt** (`CAP_JAUNT = 0.11`). A tilt lifts
+  one side of a hem cut to hug the skull and opens a ~3 cm gap; a yaw moves the
+  band along its own contact ring, costs nothing, and is free in
+  `check:hat-fit` (which measures `hypot(x, z)` about that same axis).
+
+## Cross-check that the port is faithful
+
+`check:hat-fit` measures the built hat's `rise` at **0.435 m**; the Blender
+prototype measures **0.435 m**. Same shape. `grip` went 0.81 → **1.00** (the
+band lands on the skull instead of hovering), `span` 0.94 → **1.09** against the
+1.15 limit, `tip` 1.16× the kid's height against the 1.45 limit.
+
+Renders: `scratchpad/renders/cheery04_{front,side,iso38,back,kid}.png`.
+
+## Status
+
+- [x] Modelled in Blender against the same `KidRef_*` kid, then hand-ported
+- [x] `seamSharp` added to `HoodShellSpec`, defaulting to 1 so both approved
+      hoods are untouched
+- [x] `npm run build` **exit 0** (checked directly, not piped);
+      `check:hat-fit` all 8 pass; `check:assets` records no drift for the cap
+- [ ] **No in-game QA** — the browser was not mine to drive (CLAUDE.md), and PR
+      #131 was open from another agent. Needs `/art-samples.html`, the hat shop
+      stand, and one wear/remove cycle in the character creator.
+- [ ] Family has not seen it yet.
+
+## Deliberately not done
+
+The shop blurb stays "Minty, with a little green peak." — still accurate, and
+`check:copy-brevity`'s rule is to say what the child gets, not how it is built,
+so "six mint panels" would be worse copy, not better. No `GAME_DESIGN.md`
+amendment either: unlike the RiPika hat, nothing the family explicitly asked
+for has been departed from here.
