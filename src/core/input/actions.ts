@@ -9,6 +9,7 @@ export type GameAction =
   | 'interact' // talk to things, ride rides, toss a coin in the fountain
   | 'jump' // hop (and later: corgi-balloon float)
   | 'fly' // jet pack: tap to take off, hold to climb, let go to come down
+  | 'flyDown' // and hold this to come down briskly rather than drifting
   | 'cancel' // back out of a menu
   | 'menu' // open the pause / park menu
   | 'inventory' // open the backpack drawer
@@ -22,6 +23,7 @@ export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
   'jump',
   'fly',
+  'flyDown',
   'cancel',
   'menu',
   'inventory',
@@ -44,6 +46,11 @@ export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   // already bound.
   KeyG: 'fly',
   KeyR: 'fly',
+  // And down is **the key to the right of whichever one you fly with** — H sits
+  // beside G, T beside R. No letter spells "descend", but a pair of adjacent
+  // keys is something a hand remembers even when a word would not have been.
+  KeyH: 'flyDown',
+  KeyT: 'flyDown',
   Enter: 'interact',
   KeyE: 'interact',
   KeyF: 'interact',
@@ -77,13 +84,15 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * 0 A / 1 B / 2 X / 3 Y / 4 LB / 5 RB / 6 LT / 7 RT / 8 Back / 9 Start
  * 10 L3 / 11 R3 / 12 D-up / 13 D-down / 14 D-left / 15 D-right
  *
- * LB (4) is unbound: it used to rotate the camera, which no longer exists
- * (GAME_DESIGN.md #16 — see ARCHITECTURE.md, "One camera angle, forever").
- * RB (5) is the jet pack — a shoulder button is where a hand already rests,
- * and holding it to climb wants a finger that is not doing anything else.
+ * LB/RB (4/5) are the jet pack: **RB up, LB down**. They used to rotate the
+ * camera, which no longer exists (GAME_DESIGN.md #16 — see ARCHITECTURE.md,
+ * "One camera angle, forever"), and a pair of shoulder buttons is where two
+ * hands already rest — holding one to climb wants a finger that is not doing
+ * anything else.
  */
 export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   0: 'jump',
+  4: 'flyDown',
   5: 'fly',
   2: 'interact',
   1: 'cancel',

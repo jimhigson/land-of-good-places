@@ -39,7 +39,7 @@ export class RaceHud {
 
     this.pad = document.createElement('div');
     this.pad.className = 'racehud-pad';
-    // pointerdown/up rather than click, exactly as `ui/TouchControls.ts`: a
+    // pointerdown/up rather than click, exactly as `ui/ScreenControls.ts`: a
     // game control must answer on the way down, and this one has to answer on
     // the way *up* too, which `click` cannot express at all.
     this.pad.addEventListener('pointerdown', (event) => {

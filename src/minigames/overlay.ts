@@ -22,7 +22,7 @@ const STYLES = `
    framework must be addable without the park's UI knowing it exists. */
 body[data-minigame='true'] .hud-row,
 body[data-minigame='true'] .hud-bar,
-body[data-minigame='true'] .touch-controls {
+body[data-minigame='true'] .screen-controls {
   opacity: 0;
   /* visibility as well as opacity: several of the park's pills set
      pointer-events: auto on themselves, which beats the none below and leaves

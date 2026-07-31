@@ -292,7 +292,7 @@ export interface GameState {
    * reason there are two of those: a head and a back are separate slots, and
    * one field per slot is what stops "am I wearing this?" from needing a search
    * through the inventory. It is also the gate on the HUD's fly button — no jet
-   * pack on, no button (`ui/TouchControls.ts`, `entities/Player.ts`).
+   * pack on, no button (`ui/ScreenControls.ts`, `entities/Player.ts`).
    */
   wornJetpackUid: string | null;
   /** Set while a menu, shop or cutscene owns the input. */

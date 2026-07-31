@@ -155,6 +155,21 @@ const FLY_RISE_SPEED = 4.4;
  */
 const FLY_SINK_SPEED = 3;
 
+/**
+ * And how fast she sinks with the **down** button held.
+ *
+ * Twice the drift, so pressing it is obviously doing something, and still well
+ * under a free fall (`GRAVITY` reaches this in a fifth of a second) so it reads
+ * as flying down rather than as the pack cutting out.
+ *
+ * The button exists because "let go and you come down" is, as a *control*,
+ * invisible — the way to descend was to stop doing something, which is the
+ * least discoverable instruction there is. See `ui/ScreenControls.ts`. Letting
+ * go of everything still floats her down at {@link FLY_SINK_SPEED} exactly as
+ * it always did; this is an addition, not a replacement.
+ */
+const FLY_DIVE_SPEED = 6;
+
 /** How briskly the climb and the sink get up to speed. Snappy, not instant. */
 const FLY_VERTICAL_ACCELERATION = 24;
 
@@ -167,15 +182,24 @@ const FLY_VERTICAL_ACCELERATION = 24;
 export const PARK_FLY_CEILING = 12;
 
 /**
- * And how high indoors, where it is a hover rather than a flight.
+ * And how high indoors — which is also how "you cannot fly in here" is said.
  *
  * A castle floor is `BUILDING_FLOOR_HEIGHT` (3.6 m) below the one above it and
- * there is **no ceiling collider up there** — nothing would stop her going
+ * there is **no ceiling collider up there**: nothing would stop her going
  * through the slab, and a child inside the deck above has nothing to land on
  * that she chose. She is `KID_HEIGHT` (2.12 m) tall and `position` is her feet,
- * so this leaves her the better part of a third of a metre of headroom under
- * the slab: enough to lift over the benches and the planters, never enough to
- * leave the room she is in.
+ * so this leaves the better part of a third of a metre of headroom.
+ *
+ * It does two jobs, and that is deliberate rather than a coincidence worth
+ * separating into two fields:
+ *
+ * 1. It is the **sentinel** {@link Player.canFlyHere} compares against, so the
+ *    castle refuses a take-off outright and the fly buttons are not on screen
+ *    inside it. The jet pack is an outdoors thing, everywhere, consistently —
+ *    rather than a full flight in the park and a puzzling one-metre hover
+ *    indoors that no button offers you.
+ * 2. It stays the **backstop** for a flight already in the air if the space
+ *    under her ever changes, which is what it was written for.
  *
  * `world/building/Building.ts` is what writes it — see `Player.flyCeiling`.
  */
@@ -510,6 +534,27 @@ export class Player implements GameSystem {
   }
 
   /**
+   * True where she may actually take off: a jet pack is on her back **and**
+   * there is room here to use it.
+   *
+   * One question, asked in one place, because two things need the answer and
+   * they must never disagree: the take-off in {@link update}, and whether
+   * `ui/ScreenControls.ts` puts the up and down buttons on screen at all. A
+   * button that is there while the take-off is refused is exactly the promise
+   * this game does not make.
+   *
+   * "Room here" is read off {@link flyCeiling} rather than from a second
+   * indoors flag, so there is still only one thing `Building` has to write and
+   * only one thing that can be wrong. Indoors that ceiling is exactly
+   * {@link INDOOR_FLY_CEILING}, so the comparison is a genuine `>` rather than
+   * a float equality, and anywhere with a real ceiling over her — the park, the
+   * roof terrace — comes out true.
+   */
+  get canFlyHere(): boolean {
+    return (this.wornJetpack?.isWorn ?? false) && this.flyCeiling > INDOOR_FLY_CEILING;
+  }
+
+  /**
    * True while the jet pack is holding her up.
    *
    * Read by `entities/parade/Parade.ts`, which takes the whole line into the
@@ -731,11 +776,12 @@ export class Player implements GameSystem {
     }
 
     // --- take off (the jet pack) ---------------------------------------------
-    // A tap on the fly button, and only with a pack actually on her back — the
-    // HUD hides the button otherwise, and this is the same question asked of
-    // the same object, so the two can never disagree.
-    const packWorn = this.wornJetpack?.isWorn ?? false;
-    if (packWorn && !this.flying && input.justPressed('fly')) {
+    // A tap on the fly button — and only where she may actually fly. The HUD
+    // hides the buttons on exactly the same question ({@link canFlyHere}), so a
+    // button that is there and a take-off that is allowed are one fact rather
+    // than two that can drift apart.
+    const canFly = this.canFlyHere;
+    if (canFly && !this.flying && input.justPressed('fly')) {
       this.flying = true;
       this.airborne = true;
       // Straight to climbing speed: a take-off that has to build up reads as
@@ -755,11 +801,19 @@ export class Player implements GameSystem {
     if (this.flying) {
       // Hold to climb, let go to come down. `jump` counts too, so the space bar
       // a child is already holding does the obvious thing rather than nothing.
-      const thrusting = packWorn && (input.isDown('fly') || input.isDown('jump'));
+      const thrusting = canFly && (input.isDown('fly') || input.isDown('jump'));
+      // And hold *down* to come down briskly rather than drifting. Up wins when
+      // both are held: it is the button that makes something happen, and a
+      // six-year-old with a thumb on each should go up rather than stall.
+      const diving = !thrusting && input.isDown('flyDown');
       const height = this.position.y - groundY;
       // Ease off into the ceiling instead of stopping dead against it.
       const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
-      const target = thrusting ? FLY_RISE_SPEED * headroom : -FLY_SINK_SPEED;
+      const target = thrusting
+        ? FLY_RISE_SPEED * headroom
+        : diving
+          ? -FLY_DIVE_SPEED
+          : -FLY_SINK_SPEED;
       this.verticalVelocity = approachScalar(
         this.verticalVelocity,
         target,

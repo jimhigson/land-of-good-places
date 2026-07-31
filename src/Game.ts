@@ -19,7 +19,7 @@ import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
-import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './ui';
+import { CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -76,7 +76,7 @@ export class Game {
   readonly navGrid: NavGrid;
   readonly tapNavigator: TapNavigator;
   readonly pointer: PointerControls;
-  readonly touchControls: TouchControls | null;
+  readonly screenControls: ScreenControls;
   readonly miniGames: MiniGameHost;
   readonly shopping: Shopping;
   readonly treeClimbing: TreeClimbing;
@@ -296,7 +296,7 @@ export class Game {
       walkTo: (x, y, z) => this.tapNavigator.navigateTo(x, y, z),
       blocked: () => this.miniGames.frozen || this.player.riding,
     });
-    this.touchControls = isTouchDevice() ? new TouchControls(uiRoot, this.input) : null;
+    this.screenControls = new ScreenControls(uiRoot, this.input);
     this.transitions = new Transitions(uiRoot);
     this.stairMenu = new StairMenu(uiRoot, {
       onChoose: (direction) => this.takeStairs(direction),
@@ -673,7 +673,7 @@ export class Game {
     this.tapNavigator.dispose();
     this.tapBurst.dispose();
     this.raceHud.dispose();
-    this.touchControls?.dispose();
+    this.screenControls.dispose();
     this.stairMenu.dispose();
     this.transitions.dispose();
     this.world.dispose();
@@ -789,11 +789,12 @@ export class Game {
     // Nothing to hop while a slide has hold of you or while a panel is up, and
     // the buttons sit right where the view of the ride — or the panel's own OK
     // button — is. See {@link screenIsBusy}.
-    this.touchControls?.setVisible(!this.screenIsBusy());
-    // And the fly button exists only while there is actually a jet pack on her
-    // back. Asked of the system that draws it rather than of the store, so a
-    // button on screen and a rocket on screen are the same fact.
-    this.touchControls?.setFlyAvailable(this.wornJetpack.isWorn);
+    this.screenControls.setVisible(!this.screenIsBusy());
+    // And the up/down buttons exist only where she may actually take off, which
+    // is one question `Player` answers for both them and the take-off itself —
+    // a pack on her back and room here to use it. `isFlying` is the second
+    // fact: "down" has nothing to do until she is off the ground.
+    this.screenControls.setFlyControls(this.player.canFlyHere, this.player.isFlying);
     this.hud.updateDebug([
       // The park clock lives here now rather than in a pill of its own: the
       // family had the clock removed from the HUD entirely (GAME_DESIGN.md,

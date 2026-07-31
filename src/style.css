@@ -575,18 +575,22 @@ kbd {
   padding: 0.0625rem 0.375rem 0.125rem;
 }
 
-/* --------------------------------------------------------- touch controls */
+/* -------------------------------------------------------- screen controls */
 
-/* Bottom-right and thumb-sized. Only built on a touch screen — see
-   `ui/TouchControls.ts`; walking is a tap on the park itself. */
-.touch-controls {
+/* Bottom-right and thumb-sized. Mounted on every device now — see
+   `ui/ScreenControls.ts` — but hop is still touch-only, because a keyboard has
+   the space bar and walking is a tap on the park itself either way. The fly
+   pair is on both: it used to exist only as two letters nobody had been told
+   about. */
+.screen-controls {
   position: absolute;
   right: calc(0.875rem + env(safe-area-inset-right));
   bottom: calc(0.875rem + env(safe-area-inset-bottom));
   display: flex;
-  /* A row, so fly sits *beside* hop — Eleri asked for the fly button "next to
-     the jump button". Stacked, the upper one would sit where the bottom-left
-     pills already reach on a short phone. */
+  /* A row, so the fly pair sits *beside* hop — Eleri asked for the fly button
+     "next to the jump button". The pair itself stacks inside its own column
+     below, which is what keeps the cluster two buttons wide rather than three
+     on a phone. */
   flex-direction: row;
   align-items: flex-end;
   gap: 0.625rem;
@@ -594,13 +598,13 @@ kbd {
   transition: opacity 220ms ease, transform 220ms ease;
 }
 
-.touch-controls[data-hidden='true'] {
+.screen-controls[data-hidden='true'] {
   opacity: 0;
   transform: translateY(0.75rem);
   pointer-events: none;
 }
 
-.touch-btn {
+.screen-btn {
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
@@ -621,44 +625,68 @@ kbd {
 }
 
 /* `display: flex` above is an author rule and so beats the browser's own
-   `[hidden] { display: none }`. Without this the fly button would be on screen
+   `[hidden] { display: none }`. Without this the fly buttons would be on screen
    for a child who has never bought a jet pack — which is precisely the promise
-   `setFlyAvailable` exists to avoid making. */
-.touch-btn[hidden] {
+   `setFlyControls` exists to avoid making. The stack needs its own copy for the
+   same reason. */
+.screen-btn[hidden],
+.screen-fly[hidden] {
   display: none;
+}
+
+/* Nothing to come down from until she is off the ground. Kept legible rather
+   than nearly invisible: it is still telling a child that the button exists
+   and what it is for, it just cannot be pressed yet. */
+.screen-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.16);
 }
 
 /* Presses squash the button onto its own shadow — the same squash-and-stretch
    language the character animation uses. */
-.touch-btn[data-pressed='true'] {
+.screen-btn[data-pressed='true'] {
   transform: translateY(0.25rem) scale(0.96);
   box-shadow: 0 0.0625rem 0 rgba(74, 58, 82, 0.22);
 }
 
-.touch-btn--hop {
+.screen-btn--hop {
   width: 5.5rem;
   height: 5.5rem;
   background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 150%);
 }
 
-/* The same size and shape as hop, in the sky blue the jet pack's own harness
-   is painted (ART.jetpackTrim), so the button and the thing on her back read
-   as the same object. Hidden until one is actually worn — see
-   `ui/TouchControls.setFlyAvailable`. */
-.touch-btn--fly {
+/* Up above down, because the button that is higher on the screen taking you
+   higher is a thing a six-year-old reads without being told. One column, so
+   the whole cluster stays two buttons wide on a phone rather than three. */
+.screen-fly {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+/* Both in the sky blue the jet pack's own harness is painted
+   (ART.jetpackTrim), so the buttons and the thing on her back read as the same
+   object. Hidden until one is worn and she is somewhere she can use it — see
+   `ui/ScreenControls.setFlyControls`. */
+.screen-btn--fly-up,
+.screen-btn--fly-down {
   width: 5.5rem;
   height: 5.5rem;
   background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
 }
 
-.touch-btn--hop .touch-glyph,
-.touch-btn--fly .touch-glyph {
+.screen-btn--hop .screen-glyph,
+.screen-btn--fly-up .screen-glyph,
+.screen-btn--fly-down .screen-glyph {
   font-size: 1.875rem;
   line-height: 1;
   margin-top: -0.125rem;
 }
 
-.touch-label {
+.screen-label {
   font-size: var(--lgp-text-min);
   font-weight: 800;
   letter-spacing: 0.025rem;
@@ -668,8 +696,9 @@ kbd {
 /* On a short landscape phone the hint pill and the buttons fight for the
    bottom of the screen; give the buttons the corner and shrink the hint. */
 @media (max-height: 460px) {
-  .touch-btn--hop,
-  .touch-btn--fly {
+  .screen-btn--hop,
+  .screen-btn--fly-up,
+  .screen-btn--fly-down {
     width: 4.625rem;
     height: 4.625rem;
   }
@@ -683,11 +712,12 @@ kbd {
     padding-right: 6rem;
   }
 
-  /* And twice that once the fly button is out, because the cluster is then two
-     buttons wide. Keyed off the button actually being visible rather than off
-     a second class somebody has to remember to set: owning a jet pack is the
-     only thing that shows it, and this rule follows on its own. */
-  #ui-root:has(.touch-btn--fly:not([hidden])) .hud-row.bottom {
+  /* And twice that once the fly pair is out, because the cluster is then two
+     buttons wide. Keyed off the pair actually being visible rather than off a
+     second class somebody has to remember to set: wearing a jet pack somewhere
+     you can fly is the only thing that shows it, and this rule follows on its
+     own. */
+  #ui-root:has(.screen-fly:not([hidden])) .hud-row.bottom {
     padding-right: 12.25rem;
   }
 }

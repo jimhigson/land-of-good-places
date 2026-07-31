@@ -7,7 +7,7 @@ export { InventoryDrawer } from './InventoryDrawer';
 export { CuteODex } from './CuteODex';
 export { playLiftDing, playOpenChime, playPurchaseChime, playSurpriseChime } from './chime';
 export { NameLabel } from './NameLabel';
-export { TouchControls } from './TouchControls';
+export { ScreenControls } from './ScreenControls';
 export { WhatsNew, type WhatsNewEntry } from './WhatsNew';
 export { UpdateGate } from './UpdateGate';
 export { TapBurst } from './TapBurst';

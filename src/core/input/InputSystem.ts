@@ -155,7 +155,7 @@ export class InputSystem {
    * hopping forever. Climbing on a jet pack is a *state*: it must last exactly
    * as long as the thumb is down, so it is latched here and cleared on release.
    *
-   * The caller owns both ends. `ui/TouchControls.ts` clears it on `pointerup`,
+   * The caller owns both ends. `ui/ScreenControls.ts` clears it on `pointerup`,
    * `pointercancel` *and* `pointerleave`, which is the same triple that already
    * clears the pressed styling — so a thumb sliding off the button stops the
    * climb exactly as it stops the glow.
