@@ -553,10 +553,18 @@ and control where you fly instead of walking."*
 - It is **sold in the toy shop**, and buying one puts it **straight on her
   back** — there is one jet pack, it is the most exciting thing in the shop,
   and she should not have to open a menu to use it.
-- A **fly button sits next to the hop button**, and only exists once she owns
-  one.
-- **One button, one rule:** tap to take off, **hold to go up**, let go and she
-  comes gently down, touch the ground and she is walking again.
+- **Up and down buttons sit next to the hop button**, and only appear once she
+  owns a jet pack and is somewhere she can fly.
+- **Tap up to take off, hold up to go up, hold down to come down**, let go of
+  both and she floats gently down, touch the ground and she is walking again.
+- *Added 31 July 2026 after Jim played it on a desktop and found there was no
+  way to see or use flight at all beyond knowing to press a key blind. The
+  buttons are on every device now, not only on a phone — and "down" is a real
+  button rather than the absence of pressing up, which is the least
+  discoverable instruction there is.*
+- **The jet pack is an outdoors thing.** It does nothing inside the castle,
+  where a floor is 3.6 m below the one above and there is no ceiling to stop
+  her going through it.
 - **Her whole parade takes off with her**, each one wearing its own jet pack.
 
 *This is squarely a CONTROL RULE feature and it obeys it: steering in the air

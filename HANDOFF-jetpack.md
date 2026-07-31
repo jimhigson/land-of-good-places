@@ -36,11 +36,19 @@ creature peeking out still peeks from the same place — over the jetpack now.
 
 ### 3. Flight controls — the CONTROL RULE, lifted into 3D
 
-One button, one rule a six-year-old needs no explanation for:
+Two buttons, one rule a six-year-old needs no explanation for:
 
-- **Tap Fly** → she lifts off.
-- **While flying, hold Fly** → she rises. **Let go** → she sinks, gently.
+- **Tap up** → she lifts off.
+- **Hold up** → she rises. **Let go** → she sinks, gently.
+- **Hold down** → she comes down about twice as briskly (6 m/s against 3).
 - **Touch the ground** → she lands and is walking again.
+
+*It was one button at first (hold = up, release = down), matching the touch
+cluster exactly. Jim played it on a desktop and could not find flight at all,
+which is the same bug one level down: descending was an **absence** — the way
+down was to stop doing something. So there is a real down button, and letting go
+of everything still floats her down exactly as it did. Up wins when both are
+held.*
 
 Horizontal steering while flying is *identical to walking*: the same
 `camera.right`/`camera.forward` ground basis from `core/screenBasis.ts`, so left
@@ -72,7 +80,8 @@ The model faces its direction of travel, which is decoration only.
 | The slot | `state/types.ts` (`kind: 'jetpack'`, `wornJetpackUid`), `state/store.ts` (`wearableSlot`, `setWornJetpack`, `buy`), `state/save.ts` |
 | On sale | `world/building/shops/catalogue.ts` — `gear.jetpack`, toy shop, 60 |
 | On the counter | `world/building/shops/fitouts.ts` — `toyShop()` |
-| The button | `core/input/actions.ts` (`fly`; keys **G**/**R**, gamepad RB), `ui/TouchControls.ts`, `style.css` `.touch-btn--fly` |
+| The buttons | `core/input/actions.ts` (`fly`: **G**/**R**, gamepad RB · `flyDown`: **H**/**T**, gamepad LB), `ui/ScreenControls.ts`, `style.css` `.screen-fly` |
+| May she fly here? | `entities/Player.ts` — `get canFlyHere` (worn **and** `flyCeiling > INDOOR_FLY_CEILING`). The buttons and the take-off ask this same one question. |
 | Held presses | `core/input/InputSystem.ts` — `holdVirtual` / `clearVirtualHolds` (new) |
 | The flight | `entities/Player.ts` — the `THE JET PACK` block, `flying`, `flyCeiling`, `applyFlightPose` |
 | The ceiling indoors | `world/building/Building.ts` — one line in `update` |
@@ -80,8 +89,9 @@ The model faces its direction of travel, which is decoration only.
 
 ## Numbers, if they need retuning
 
-Rise 4.4 m/s · sink 3.0 m/s · vertical acceleration 24 m/s² · park ceiling 12 m
-(soft over the last 2.5 m) · indoor ceiling 1.2 m. All in `entities/Player.ts`.
+Rise 4.4 m/s · drift down 3.0 m/s · held down 6.0 m/s · vertical acceleration
+24 m/s² · park ceiling 12 m (soft over the last 2.5 m) · indoor ceiling 1.2 m.
+All in `entities/Player.ts`.
 
 ## State of play
 
@@ -97,6 +107,27 @@ Rise 4.4 m/s · sink 3.0 m/s · vertical acceleration 24 m/s² · park ceiling 1
       installed in the shared checkout's `node_modules`, so `npm run
       test:procgen` fails with "command not found" there. Installed locally in
       this worktree with `npm i vitest --no-save` to run it.
-- [x] PR opened
+- [x] PR opened (#133)
+- [x] Follow-up from Jim's desktop test: on-screen **up/down** buttons on every
+      device, shown only with a pack worn and only outdoors. `TouchControls`
+      became `ScreenControls` because it is no longer touch-only.
 - [ ] Visual QA — the shared browser was **not** owned by this task, so none of
       this has been seen running. The list is in the PR body.
+
+## Where the follow-up landed (desktop fly buttons)
+
+`ScreenControls` mounts on every device. Hop is still built only when
+`isTouchDevice()`; the fly pair is built always and shown by
+`setFlyControls(available, canDescend)`, called every frame from
+`Game.updateHud` with `player.canFlyHere` and `player.isFlying`.
+
+Two decisions a reviewer might want to argue with, both written up in the
+commit message:
+
+1. **Two buttons, not one.** One button would have matched the touch semantic
+   exactly, but it makes descending an absence. `flyDown` is a real action with
+   its own speed (`FLY_DIVE_SPEED`), its own keys and its own gamepad button.
+2. **No more indoor hover.** `canFlyHere` refuses a take-off indoors, because
+   the "buttons only outdoors" requirement would otherwise leave the castle
+   allowing a 1.2 m hover that no button offered. `INDOOR_FLY_CEILING` keeps its
+   second job as the backstop for a flight already in the air.
