@@ -221,3 +221,106 @@ The shop blurb stays "Minty, with a little green peak." — still accurate, and
 so "six mint panels" would be worse copy, not better. No `GAME_DESIGN.md`
 amendment either: unlike the RiPika hat, nothing the family explicitly asked
 for has been departed from here.
+
+---
+
+# 10. Shoes — `src/art/models/shoes.ts` (asset side done)
+
+Four kinds: `'plain' | 'ripika' | 'sandal' | 'sparkle'`. Committed in `ec4f1ef`.
+**Asset side only** — the character-creation picker and its state are a parallel
+Sonnet task, and everything that agent needs is in this section.
+
+## Read this before wiring anything
+
+**There were no shoes at all.** Not a stub, not an anchor. Each foot was two
+unnamed `blob()`s written inline in `createKid`'s leg loop (`kid.ts` ~340–356),
+painted `ART.kidShoe`. The only footwear concept in the repo was the *colour*:
+`setShoeColour` on `KidHandle`, `CharacterColours.shoe`, and the crowd's
+`ColourRole 'shoe'`. So the anchor design below is new, not discovered.
+
+**`BackpackKind` is not on this branch.** The brief said to mirror it; it lives
+only on the unmerged `origin/backpack-picker` (PR #131). It is also *not* a
+`createX(kind)` + `BUILDERS` factory — it is `buildBackpacks(options):
+BackpackRig`, a body-part rig in `hair.ts`'s style, and its own header explains
+why. I followed that, not `hats.ts`. **If PR #131 lands first, re-read
+`backpacks.ts` and align naming** — I have matched its shape from memory of the
+diff, not from a merged file.
+
+## The two structural decisions
+
+1. **A rig, not an asset-on-an-anchor.** A hat is bought, worn and removed, so
+   it is a separate asset that `WornHat.ts` swaps at runtime. A shoe is chosen
+   once and never taken off — the relationship *hair* has with the head. So:
+   `ShoePart {mesh, kinds}`, one `setKind` flipping `visible`, materials passed
+   in, metres in the leg pivot's space.
+2. **No single anchor is possible.** `applyWalk` rotates `limbs.leftLeg` and
+   `limbs.rightLeg` every frame. A shoe must swing with its leg, so every part
+   is built **twice, one per pivot**, and `buildShoes` takes
+   `legs: [left, right]`. Anything hung off one point on the body slides off the
+   foot the moment she walks.
+
+## The API
+
+```ts
+buildShoes({ legs, footMaterial, kind, kinds? }): ShoeRig   // { parts, setKind }
+createShoe(kind, colour?): AssetHandle                      // swatch / shop stand
+SHOE_KINDS, CROWD_SHOE_KINDS, type ShoeKind, type ShoePart
+```
+
+- `footMaterial` is **the kid's own `shoeMat`**, not a colour: the rig repaints
+  it in `setKind`, so `setShoeColour` keeps working and the creator's live
+  recolour is unaffected.
+- `kinds` builds more than the one worn. Pass all four only where the child is
+  about to tap through them — the creator rebuilds the whole kid per tap.
+- `CROWD_SHOE_KINDS` is `['plain', 'sandal']`. `kidCrowd.ts` bakes one instanced
+  draw call **per mesh on the prototype**, so every kind the crowd can show
+  costs the whole park a draw call. Same reasoning as `CROWD_BACKPACK_KINDS`.
+
+## Three numbers not to re-derive
+
+- Foot ellipsoid semi-axes **(0.175, 0.1365, 0.224) m**, at **(0, −0.22, 0.045)**
+  in its leg pivot — read off `blob(0.175, shoeMat, [1, 0.78, 1.28])` in
+  `kid.ts`. Every shape in `shoes.ts` is cut to those, so **if `kid.ts`'s foot
+  changes, `FOOT`/`FOOT_AT` must change with it.**
+- `FOOT_AT` is an offset **inside the pivot**, not inside the shoe. `createShoe`
+  has to emulate a pivot for that reason; not doing so put every part 22 cm
+  below the foot.
+- The left shoe is a **true x-mirror** (`mirrorX`, lifted from `hoodShell.ts`'s
+  `mirrorEar`). `scale.x = -1` lights from the wrong side; a π turn about Y
+  mirrors *forward* too and puts the toe cap on the heel.
+
+## Design notes from the renders
+
+- **RiPika**: a flat cocoa **paw print**, not a sculpted ear tab. The tab was
+  built first and reads as a stray flap — the same failure as a sculpted muzzle
+  turning a hat back into a head. Appliqué, the RiPika Cap's own rule.
+- **Sandal**: a sandal must *show the foot*, so `'sandal'` repaints the foot
+  blob `PALETTE.skin`. That is why the rig owns the material, not just meshes.
+  Its strap is a swept **rounded** ribbon — a rectangular sweep gives a flat
+  outer face and open ends and reads as tape stuck on.
+- **Sparkle**: stars are **stratified**, not freely random; ten independent ones
+  clump and a clump reads as a rash. Instanced `starGeometry`, seeded `Rng`,
+  `MeshBasicMaterial` pigment — the `flowerSparkle` / dodgems convention.
+  `createCrown`'s "Sparkly Crown" has **no** sparkle technique to reuse: its
+  sparkle is one static star-shaped jewel and the name is copy.
+- Toe cap rims turn **inward** before closing. A fan to the axis crosses the
+  foot's own surface and leaves notches all round the rim.
+
+Renders: `scratchpad/renders/shoe4_{ripika,sparkle}_{iso,out,kid}.png` and
+`shoe6_sandal_{iso,back,kid}.png`.
+
+## Status / what is left
+
+- [x] `ShoeKind`, `SHOE_KINDS`, `CROWD_SHOE_KINDS`, geometry, `buildShoes`,
+      `createShoe`; `npm run build` **exit 0**; all four sit on the ground
+      (base −0.011 against the 0.02 tolerance), `root.scale` untouched
+- [ ] **Not wired into `kid.ts`.** `createKid` still builds its own two foot
+      blobs inline. Wiring is: build the blobs as now, then
+      `buildShoes({ legs: [limbs.leftLeg, limbs.rightLeg], footMaterial: shoeMat, kind })`,
+      expose `shoeParts` + `setShoeKind` on `KidHandle` beside `hairParts` /
+      `setHairStyle`, and add `KidOptions.shoe?: ShoeKind`.
+- [ ] **Not in `check:assets`.** It enumerates rather than discovers. Add
+      `for (const kind of SHOE_KINDS) { const kid = createKid(); kid.setShoeKind(kind); add(\`kid.shoe.${kind}\`, kid); }`
+      beside the hair loop. A new asset gets **no** `KNOWN_DRIFT` allowance.
+- [ ] No in-game QA (browser not mine — see §9).
+- [ ] Family has not seen them.
