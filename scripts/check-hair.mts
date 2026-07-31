@@ -239,7 +239,7 @@ function find(root: Object3D, name: string): Object3D[] {
  * failure written up in ART-AGENT-NOTES.md §6.
  */
 function hands(root: Object3D): Object3D[] {
-  return KID_BODY_PARTS.filter((part) => part.startsWith('hand.')).flatMap((part) =>
+  return KID_BODY_PARTS.filter((part) => part.startsWith('hand-')).flatMap((part) =>
     find(root, part),
   );
 }

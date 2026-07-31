@@ -53,7 +53,7 @@ import { createKid, KID_BODY_PARTS, type KidBodyPart } from '../src/art/models/k
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(here, '../src/art/assets/kid.glb');
-const OUT_TS = resolve(here, '../src/art/assets/kid.glb.ts');
+const OUT_TS = resolve(here, '../src/art/assets/kidGlb.ts');
 
 /**
  * `GLTFExporter`'s binary path reads its own `Blob` back through a `FileReader`,
@@ -172,7 +172,10 @@ function tally(geometry: BufferGeometry): { verts: number; tris: number; attrs: 
   };
 }
 
-const kid = createKid({});
+// `geometry: 'procedural'` explicitly: `createKid` now defaults to the authored
+// asset, and an exporter that read the asset back out would only ever be able
+// to copy the file it was meant to be producing.
+const kid = createKid({ geometry: 'procedural' });
 const { scene, shared } = exportScene(kid.root);
 
 let verts = 0;

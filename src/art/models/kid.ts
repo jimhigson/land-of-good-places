@@ -1,4 +1,4 @@
-import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
+import { Color, Group, Mesh, TorusGeometry, Vector3, type Material } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import {
@@ -21,6 +21,7 @@ import {
 import { visibleTop } from '../style/measure';
 import { buildHair, type HairPart, type HairStyle } from './hair';
 import { buildBackpacks, type BackpackKind, type BackpackPart } from './backpacks';
+import { kidAssetMesh } from './kidAsset';
 
 /**
  * The player kid — Eleri by default.
@@ -190,17 +191,17 @@ export const KID_BODY_PARTS = [
   'torso',
   'collar',
   'hem',
-  'arm.upper.l',
-  'arm.upper.r',
-  'hand.l',
-  'hand.r',
-  'leg.upper.l',
-  'leg.upper.r',
-  'foot.l',
-  'foot.r',
+  'arm-upper-l',
+  'arm-upper-r',
+  'hand-l',
+  'hand-r',
+  'leg-upper-l',
+  'leg-upper-r',
+  'foot-l',
+  'foot-r',
   'skull',
-  'ear.l',
-  'ear.r',
+  'ear-l',
+  'ear-r',
 ] as const;
 
 export type KidBodyPart = (typeof KID_BODY_PARTS)[number];
@@ -257,6 +258,23 @@ export interface KidOptions {
    * can carry the head's colour, keep the patch when something else has to.
    */
   facePatch?: boolean;
+  /**
+   * Where the body and head's shape comes from.
+   *
+   * - `'authored'` (the default) — `art/assets/kid.glb`, via
+   *   `models/kidAsset.ts`. Geometry and UVs authored together in one file.
+   * - `'procedural'` — the primitives the asset was generated from, still here
+   *   and still built by the same code.
+   *
+   * **The procedural path is kept for one reason and it is not nostalgia.** A
+   * parity claim has to be checked against the *previous* rendering, not
+   * against the constants of the change being made; comparing new code with
+   * new code is a tautology, and this project has filed a false "verified" that
+   * way twice (ART-AGENT-NOTES.md §6). `check:character-parity` builds one of
+   * each in a single process and measures the difference. Nothing in the game
+   * passes this — it is for the harness.
+   */
+  geometry?: 'authored' | 'procedural';
 }
 
 export interface KidHandle extends CreatureHandle {
@@ -367,6 +385,8 @@ export function createKid(options: KidOptions = {}): KidHandle {
     eyeColour = ART.kidEye,
   } = options;
 
+  const authored = options.geometry !== 'procedural';
+
   const root = new Group();
   root.name = 'kid';
   const body = new Group();
@@ -388,60 +408,101 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
   const limbs = makeLimbs();
 
+  /**
+   * One body or head part — from the authored asset, or built from primitives.
+   *
+   * The asset (`art/assets/kid.glb`, read by `models/kidAsset.ts`) owns each
+   * part's **shape, UVs and where that shape sits in its own parent**. The rig
+   * around them — `body`, `head`, `crown`, the limb pivots and the four anchors
+   * — stays here, driven by `KID_HEAD_HEIGHT`, `SKULL_RADIUS` and
+   * `KID_HEAD_SCALE`, because hats, hair and three check scripts import those
+   * and a copy in the asset would be a second description of them.
+   *
+   * `make` is the *procedural* shape, and it is the code the asset was
+   * generated from — kept alive, and reachable with `geometry: 'procedural'`,
+   * because a parity claim has to compare against the previous rendering rather
+   * than against the new code. That mistake has been made twice on this
+   * project; see ART-AGENT-NOTES.md §6. `check:character-parity` builds both in
+   * one process and compares them vertex for vertex.
+   */
+  const part = (
+    name: KidBodyPart,
+    material: Material,
+    shadow: <T extends Mesh>(mesh: T) => T,
+    make: () => Mesh,
+  ): Mesh => {
+    const mesh = authored ? kidAssetMesh(name, material) : make();
+    mesh.name = name;
+    // Applied here rather than left to `blob`/`stub`, so the authored path and
+    // the procedural one cannot disagree about whether a part casts a shadow.
+    return shadow(mesh);
+  };
+
   // --- torso -------------------------------------------------------------------
   // Short and wide. Under a head this big the torso is a dumpling, not a trunk:
   // 0.80 m tall where it used to be 0.88, and the top 0.27 m of it disappears up
   // inside the skull, which is exactly what hides the neck.
-  const torso = stub(0.325, 0.15, outfitMat);
+  //
   // Named so the character creator's preview can measure the jumper and frame
   // the body on it when the child changes their clothes colour — see
   // `ui/characterCreationPreview.ts`. The limb pivots alone stop at the
   // shoulders, which leaves the collar and most of the jumper out of shot.
-  torso.name = 'torso';
-  torso.position.y = 0.6;
-  torso.scale.set(1.06, 1, 0.92);
+  const torso = part('torso', outfitMat, solid, () => {
+    const mesh = stub(0.325, 0.15, outfitMat);
+    mesh.position.y = 0.6;
+    mesh.scale.set(1.06, 1, 0.92);
+    return mesh;
+  });
   body.add(torso);
   addOutline(torso, 0.02);
 
   // Neckline. Sits just *below* the bottom of the skull — any higher and the
   // head swallows it whole and the jumper appears to have no opening.
-  const collar = solid(new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat));
-  collar.name = 'collar';
-  collar.rotation.x = Math.PI / 2;
-  collar.position.y = 0.71;
+  const collar = part('collar', outfitDarkMat, solid, () => {
+    const mesh = new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = 0.71;
+    return mesh;
+  });
   body.add(collar);
 
   // Skirt hem — a flared ring that stops the torso reading as a plain pill.
-  const hem = solid(new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat));
-  hem.name = 'hem';
-  hem.rotation.x = Math.PI / 2;
-  hem.position.y = 0.4;
-  hem.scale.set(1.06, 1.06, 0.7);
+  const hem = part('hem', outfitDarkMat, solid, () => {
+    const mesh = new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = 0.4;
+    mesh.scale.set(1.06, 1.06, 0.7);
+    return mesh;
+  });
   body.add(hem);
 
   // --- arms ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftArm : limbs.rightArm;
-    pivot.name = `arm.pivot.${sideTag(side)}`;
+    pivot.name = `arm-pivot-${sideTag(side)}`;
     // Shoulders set wide and low so the arms swing clear of the skull, and wider
     // than the skirt hem (0.32) so the hands are not swallowed by it — with a
     // torso this short, an arm tucked inside the silhouette simply disappears.
     pivot.position.set(side * 0.38, 0.72, 0);
     body.add(pivot);
 
-    const upper = stub(0.105, 0.16, outfitMat);
-    upper.name = `arm.upper.${sideTag(side)}`;
-    upper.position.y = -0.14;
+    const upper = part(`arm-upper-${sideTag(side)}`, outfitMat, solid, () => {
+      const mesh = stub(0.105, 0.16, outfitMat);
+      mesh.position.y = -0.14;
+      return mesh;
+    });
     pivot.add(upper);
 
-    const hand = blob(0.135, skinMat, [1, 1, 1], 18);
-    // Named for the same reason as the backpack: the arc these swing through
-    // is the other thing long hair must not be caught in. Side-suffixed since
-    // the asset export needs every node uniquely named — `check:hair` sweeps
-    // both, so it looks them up by the `KID_BODY_PARTS` table rather than by a
-    // bare `'hand'` that used to match two meshes at once.
-    hand.name = `hand.${sideTag(side)}`;
-    hand.position.y = -0.32;
+    // The hands are named for the same reason as the backpack: the arc these
+    // swing through is the other thing long hair must not be caught in.
+    // Side-suffixed since the asset needs every node uniquely named —
+    // `check:hair` sweeps both, so it looks them up through `KID_BODY_PARTS`
+    // rather than by a bare `'hand'` that used to match two meshes at once.
+    const hand = part(`hand-${sideTag(side)}`, skinMat, solid, () => {
+      const mesh = blob(0.135, skinMat, [1, 1, 1], 18);
+      mesh.position.y = -0.32;
+      return mesh;
+    });
     pivot.add(hand);
     addOutline(hand, 0.012);
   }
@@ -454,20 +515,24 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // --- legs ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftLeg : limbs.rightLeg;
-    pivot.name = `leg.pivot.${sideTag(side)}`;
+    pivot.name = `leg-pivot-${sideTag(side)}`;
     pivot.position.set(side * 0.155, 0.36, 0);
     body.add(pivot);
 
-    const leg = stub(0.12, 0.1, skinMat);
-    leg.name = `leg.upper.${sideTag(side)}`;
-    leg.position.y = -0.1;
+    const leg = part(`leg-upper-${sideTag(side)}`, skinMat, solid, () => {
+      const mesh = stub(0.12, 0.1, skinMat);
+      mesh.position.y = -0.1;
+      return mesh;
+    });
     pivot.add(leg);
 
     // Big round shoes. Oversized feet read as "toy" from the iso camera — and
     // they carry even more weight now, because they are most of the body.
-    const foot = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
-    foot.name = `foot.${sideTag(side)}`;
-    foot.position.set(0, -0.22, 0.045);
+    const foot = part(`foot-${sideTag(side)}`, shoeMat, solid, () => {
+      const mesh = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
+      mesh.position.set(0, -0.22, 0.045);
+      return mesh;
+    });
     pivot.add(foot);
     addOutline(foot, 0.014);
   }
@@ -506,8 +571,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   head.add(crown);
 
   const skullR = SKULL_RADIUS;
-  const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 38);
-  skull.name = 'skull';
+  const skull = part('skull', skinMat, solid, () => blob(skullR, skinMat, [1, 0.95, 0.98], 38));
   crown.add(skull);
   addOutline(skull, 0.02);
 
@@ -543,9 +607,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
   });
 
   for (const side of [-1, 1] as const) {
-    const ear = decal(blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12));
-    ear.name = `ear.${sideTag(side)}`;
-    ear.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
+    const ear = part(`ear-${sideTag(side)}`, skinMat, decal, () => {
+      const mesh = blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12);
+      mesh.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
+      return mesh;
+    });
     crown.add(ear);
   }
 
@@ -578,7 +644,13 @@ export function createKid(options: KidOptions = {}): KidHandle {
     crown.add(patchFace.mesh);
   } else {
     bakedFace = createBakedFace({ fill: skin, ...facePaint });
-    bakedFace.applyTo(skull);
+    // An authored skull already **is** the face window: the unwrap was made
+    // beside the geometry rather than recomputed from it afterwards, which is
+    // the whole point of Stage A. `remapSphereFaceUv` is therefore not called
+    // at all on that path — one fewer description of the same surface, and the
+    // one geometry can then be shared by every child in the park because
+    // nothing writes to it.
+    bakedFace.applyTo(skull, { uvsAuthored: authored });
   }
 
   // Measured rather than hand-derived from `KID_HEAD_HEIGHT` + the anchor's

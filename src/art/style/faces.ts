@@ -663,8 +663,13 @@ export interface BakedFace {
   /**
    * Points a head sphere at this face: its material, and its UVs remapped so
    * the face window fills the texture.
+   *
+   * Pass `uvsAuthored` for a head whose UVs **already are** the face window —
+   * an authored asset, where the unwrap was made alongside the geometry rather
+   * than computed from it afterwards. Nothing is then rewritten, which is what
+   * lets an authored head geometry be shared by every child in the park.
    */
-  applyTo(mesh: Mesh): void;
+  applyTo(mesh: Mesh, options?: { uvsAuthored?: boolean }): void;
 }
 
 export function createBakedFace(options: BakedFaceOptions): BakedFace {
@@ -724,15 +729,17 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
       design = next;
       repaint();
     },
-    applyTo(mesh: Mesh) {
-      if (isShared(mesh.geometry)) {
-        throw new Error(
-          'createBakedFace: refusing to remap a shared geometry. A cached head ' +
-            'geometry is worn by more than one character and its UVs are not this ' +
-            "face's to rewrite — see sharedFace.ts.",
-        );
+    applyTo(mesh: Mesh, applyOptions: { uvsAuthored?: boolean } = {}) {
+      if (!applyOptions.uvsAuthored) {
+        if (isShared(mesh.geometry)) {
+          throw new Error(
+            'createBakedFace: refusing to remap a shared geometry. A cached head ' +
+              'geometry is worn by more than one character and its UVs are not this ' +
+              "face's to rewrite — see sharedFace.ts.",
+          );
+        }
+        remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
       }
-      remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
       mesh.material = material;
       // Flagged, *and* named if it had no name of its own.
       //
