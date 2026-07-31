@@ -438,9 +438,59 @@ neither hood has a decal patch left on it.
 - every face window sits strictly inside the crown (`yHi < semiY`), which is
   what lets the pole fan clamp to the texture's top border.
 
-**No in-game QA — the browser was not this agent's to drive** (CLAUDE.md).
-Still needs eyes on: `/art-samples.html`, both hat shop stands, and one
-wear/remove cycle in the character creator, plus a check that the bonnet still
-sings and swaps to its singing face. Note the bib is now visible for the first
-time; open question 3 in §1–8 (bib and brim merging into one pale area at
-iso38) becomes live and may want a deeper pink.
+## Status
+
+- [x] `hoodShellGeometry(spec, face?)`, `hoodFaceUv`, `HoodFaceWindow`, the
+      split seam and the normal weld
+- [x] `paintFaceOnFill` + `FACE_FILL_INSET` in `faces.ts`; `css` exported
+- [x] `hats.ts` rewired: both hoods are one textured shell; the bonnet's song,
+      note burst, singing-face swap and jiggle all still there (the swap is now
+      a swap of the whole hood skin, same two canvases)
+- [x] `hoodPatchGeometry` and `hoodBibGeometry` deleted
+- [x] `scripts/check-hood-face.mts`, wired into `npm run build`
+- [x] ART_DIRECTION.md §3 records the pattern
+- [x] **`npm run build` exit 0**, checked directly, not piped. `check:hat-fit`
+      unchanged: `rise` 0.695 / 0.683 and span 1.08 / 1.09, exactly the numbers
+      §1–8 recorded. `check:assets` reports no new drift.
+
+## What has actually been verified, and how
+
+Everything below was run in Node against the real built hats. **None of it is a
+screenshot and none of it is code reading.**
+
+- **The Cheery Cap is untouched.** Its shell was built by this branch and by
+  `origin/main`'s generator side by side: same 2306 vertices, `max |Δposition|`
+  **0**, `max |Δnormal|` **0**.
+- **The hoods' geometry only gained the seam.** All shared vertices identical
+  (`max |Δposition|` 0); +32 vertices on the cap and +44 on the bonnet, exactly
+  `rings × 2`; the seam's two copies coincide to 1e-16; the only normals that
+  changed at all are that one column's, which is the weld.
+- **The face is on the surface the camera sees.** A ray in from outside at each
+  painted feature hits the shell first, and the UV interpolated at the hit is
+  within **0.0003** of where the feature was painted. Against `origin/main` the
+  same ray never hits the face patch at any distance.
+- **The texture is painted as claimed.** Recorded the real canvas calls: the
+  RiPika skin is a `#ffd63f` `fillRect` over the whole 512² canvas with the face
+  composited at (41, 41, 430, 430) — the 0.08 inset exactly; Trilla's is
+  `#ffa9d4` over 256² with the bib path (97 points, spanning canvas y 145–253,
+  where the bib's height range maps to) drawn under a face at (20.5, 20.5, 215,
+  215).
+- Texture count is unchanged: three composited canvases where there were three
+  face canvases. The face canvases are transient and discarded.
+
+## Not verified — needs the browser
+
+**No in-game QA. The browser was not this agent's to drive** (CLAUDE.md: do not
+use it unless told you own it, and this agent was not). Everything above is
+Node-side. Still needs eyes on:
+
+- `/art-samples.html` and both hat shop stands, at gameplay distance and at the
+  game's own iso38 camera;
+- one wear/remove cycle in the character creator (pop-in scale, and that the
+  bonnet still sings and swaps to its singing face);
+- **the back of both hoods specifically** — the split seam is the one new thing
+  that could show as a line, and the weld is what should stop it;
+- **the bib, which is visible for the first time.** Open question 3 in §1–8
+  (bib and brim merging into one pale area at iso38) was written off Blender
+  renders where backface culling was off; it becomes a live question now and may
+  want a deeper pink on one of them.
