@@ -732,9 +732,17 @@ export const RIPIKA_PEAK: HoodPeakSpec = {
   inset: 0.9,
 };
 
+/**
+ * Trilla's brim.
+ *
+ * `y` is 0.028 higher than the hem it springs from *and* than the first version
+ * of it, for a reason worth writing down: at −0.128 the whole peak sat inside
+ * the hem roll's tube (the roll spans ±0.036 about −0.127) and simply could not
+ * be seen. A brim has to clear its own band.
+ */
 export const TRILLA_PEAK: HoodPeakSpec = {
-  y: -0.128,
-  length: 0.115,
+  y: -0.1,
+  length: 0.14,
   arc: 0.8,
   drop: 0.038,
   thick: 0.034,
