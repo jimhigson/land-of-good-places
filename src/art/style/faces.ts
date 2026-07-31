@@ -658,20 +658,7 @@ export interface BakedFace {
 export function createBakedFace(options: BakedFaceOptions): BakedFace {
   const { fill, spreadX = 1.7, spreadY = 1.7, tilt = 0.1, ...paint } = options;
   const size = paint.size ?? DEFAULTS.size;
-  /**
-   * Face paint is placed from **this character's** eye layout.
-   *
-   * The separate overlay decal could not do that — it was built at its own
-   * radius and tilt and positioned from `DEFAULTS`, so on the player kid (whose
-   * eyes are at `eyeY` 0.43 under a `tilt` of 0.03, not 0.46 under 0.1) every
-   * design landed **72 mm below her actual cheeks**, measured. Sharing one
-   * canvas makes that impossible: the paint and the face are drawn in the same
-   * coordinates now.
-   *
-   * That is a deliberate, visible change and the only one in this file. To go
-   * back to reproducing the old placement, pass `DEFAULT_FACE_LAYOUT` here.
-   */
-  const layout = faceLayoutOf(paint);
+  const host = { spreadX, spreadY, tilt };
   const paints = expressionPaints(paint);
 
   let colour = fill;
@@ -697,7 +684,7 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
     for (const name of EXPRESSIONS) {
       const target = canvases[name];
       drawFaceOnFill(target.ctx, size, colour, paints[name], {
-        ...(design ? { over: (ctx, s) => drawFacePaint(ctx, s, design as FacePaintDesign, layout) } : {}),
+        ...(design ? { over: (ctx, s) => drawFacePaint(ctx, s, design as FacePaintDesign, host) } : {}),
       });
       expressions[name].needsUpdate = true;
     }
@@ -863,13 +850,38 @@ export const DEFAULT_FACE_LAYOUT: FaceLayout = {
   eyeH: DEFAULTS.eyeH,
 };
 
-function faceLayoutOf(paint: FacePaintOptions): FaceLayout {
-  return {
-    eyeY: paint.eyeY ?? DEFAULTS.eyeY,
-    eyeGap: paint.eyeGap ?? DEFAULTS.eyeGap,
-    eyeW: paint.eyeW ?? DEFAULTS.eyeW,
-    eyeH: paint.eyeH ?? DEFAULTS.eyeH,
-  };
+/**
+ * The face window every face-paint design was drawn against.
+ *
+ * The designs' coordinates are not abstract — `drawCatWhiskers` puts its nose at
+ * `eyeY + eyeH * 0.55` of *this* layout, on *this* window. That was the old
+ * standalone overlay's geometry (`createFacePaintOverlay`'s defaults), and it is
+ * the space the artwork means.
+ *
+ * **So a design is never re-parameterised onto a different face; it is
+ * transformed onto one.** Reading the same canvas fractions against a different
+ * window silently moves every design by the difference between the two tilts —
+ * which is exactly how the cat whiskers ended up drawn across the kid's eyes.
+ */
+const FACE_PAINT_AUTHORED = { spreadX: 1.7, spreadY: 1.7, tilt: 0.1 } as const;
+
+/**
+ * Puts the canvas into the space the paint designs were authored in.
+ *
+ * Both windows map canvas fractions to the same angles on a head, affinely, so
+ * going from one to the other is a scale and a translate. Apply this and the
+ * authored drawing code lands on precisely the part of the head it always did,
+ * whatever window is hosting it.
+ */
+function toAuthoredPaintSpace(ctx: CanvasRenderingContext2D, size: number, host: Required<FaceWindow>): void {
+  const a = FACE_PAINT_AUTHORED;
+  const theta0 = (w: { spreadY: number; tilt: number }): number => Math.PI / 2 - w.spreadY / 2 + w.tilt;
+  const scaleX = a.spreadX / host.spreadX;
+  const scaleY = a.spreadY / host.spreadY;
+  const offsetX = (host.spreadX - a.spreadX) / (2 * host.spreadX);
+  const offsetY = (theta0(a) - theta0(host)) / host.spreadY;
+  ctx.translate(offsetX * size, offsetY * size);
+  ctx.scale(scaleX, scaleY);
 }
 
 /** Centre of the cheek blush spot, mirroring the maths in `paintFace`. */
@@ -1024,9 +1036,15 @@ export function drawFacePaint(
   ctx: CanvasRenderingContext2D,
   s: number,
   design: FacePaintDesign,
-  layout: FaceLayout = DEFAULT_FACE_LAYOUT,
+  host: Required<FaceWindow> = FACE_PAINT_AUTHORED,
 ): void {
   const cx = s / 2;
+  // Every design below is written in the authored space, against the authored
+  // layout. Nothing here knows or cares which character is wearing it.
+  const layout = DEFAULT_FACE_LAYOUT;
+
+  ctx.save();
+  toAuthoredPaintSpace(ctx, s, host);
 
   switch (design) {
     case 'butterfly': {
@@ -1073,6 +1091,8 @@ export function drawFacePaint(
       break;
     }
   }
+
+  ctx.restore();
 }
 
 /** Paints one face-paint design onto a transparent canvas, for an overlay decal. */

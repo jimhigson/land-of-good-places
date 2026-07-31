@@ -35,7 +35,12 @@ import { createKid, KID_FACE } from '../src/art/models/kid.ts';
 import { buildRipikaHead } from '../src/art/models/ripika.ts';
 import { createMini } from '../src/art/models/mini.ts';
 import { createBiscuit } from '../src/art/models/biscuit.ts';
-import { FACE_FILL_INSET, type FacePaintOptions } from '../src/art/style/faces.ts';
+import {
+  drawFacePaint,
+  FACE_FILL_INSET,
+  FACE_PAINT_DESIGNS,
+  type FacePaintOptions,
+} from '../src/art/style/faces.ts';
 
 /** How far the UV under a ray hit may sit from where the feature was painted. */
 const UV_TOLERANCE = 0.02;
@@ -218,9 +223,82 @@ function skullOf(root: Object3D, label: string): Mesh {
   return found;
 }
 
+/**
+ * **Does every face-paint design still land where it landed before the bake?**
+ *
+ * This exists because it went wrong. Baking the paint into the face's canvas
+ * moved every design up by the difference between the two windows' tilts, and
+ * the cat whiskers ended up drawn across the kid's eyes. It was reported as
+ * verified, because the check made at the time compared the new cheek position
+ * against a landmark computed from the *same new* numbers — which is a
+ * tautology, not a test.
+ *
+ * So this compares against **the space the designs were authored in**, which is
+ * the thing that must not change, and it checks every design rather than one
+ * family of them.
+ */
+function checkFacePaintPlacement(): void {
+  const SIZE = 512;
+  const AUTHORED = { spreadX: 1.7, spreadY: 1.7, tilt: 0.1 };
+  const host = { spreadX: KID_FACE.spreadX, spreadY: KID_FACE.spreadY, tilt: KID_FACE.tilt };
+  const skullR = 0.44 * 1.5;
+
+  const angles = (cu: number, cv: number, w: typeof AUTHORED): [number, number] => [
+    -w.spreadX / 2 + cu * w.spreadX,
+    Math.PI / 2 - w.spreadY / 2 + w.tilt + cv * w.spreadY,
+  ];
+
+  /** The coordinates a design really draws at, with the canvas transform folded in. */
+  const capture = (design: (typeof FACE_PAINT_DESIGNS)[number], w: typeof AUTHORED): [number, number][] => {
+    const canvas = document.createElement('canvas') as HTMLCanvasElement & { ops?: unknown[] };
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    drawFacePaint(ctx, SIZE, design, w);
+    const ops = (canvas.ops ?? []) as { op: string; a: number[] }[];
+    const points: [number, number][] = [];
+    let tx = 0;
+    let ty = 0;
+    let sx = 1;
+    let sy = 1;
+    for (const o of ops) {
+      if (o.op === 'translate') [tx, ty] = [o.a[0] as number, o.a[1] as number];
+      else if (o.op === 'scale') [sx, sy] = [o.a[0] as number, o.a[1] as number];
+      else if (['ellipse', 'arc', 'moveTo', 'lineTo'].includes(o.op)) {
+        points.push([tx + (o.a[0] as number) * sx, ty + (o.a[1] as number) * sy]);
+      }
+    }
+    return points;
+  };
+
+  let worst = 0;
+  for (const design of FACE_PAINT_DESIGNS) {
+    const before = capture(design, AUTHORED);
+    const after = capture(design, host);
+    if (before.length !== after.length) {
+      failures.push(`face paint '${design}': draws a different number of points in a hosted canvas`);
+      continue;
+    }
+    for (let i = 0; i < before.length; i += 1) {
+      const [az0, po0] = angles((before[i] as [number, number])[0] / SIZE, (before[i] as [number, number])[1] / SIZE, AUTHORED);
+      const [az1, po1] = angles((after[i] as [number, number])[0] / SIZE, (after[i] as [number, number])[1] / SIZE, host);
+      worst = Math.max(worst, Math.hypot(az0 - az1, po0 - po1) * skullR * 1000);
+    }
+  }
+  check(
+    worst < 0.5,
+    `face paint has moved ${worst.toFixed(2)} mm from where it was authored to sit on the head. ` +
+      `A design is transformed onto a face window, never re-read against a different one — see ` +
+      `FACE_PAINT_AUTHORED in faces.ts.`,
+  );
+  notes.push(`  face paint: all ${FACE_PAINT_DESIGNS.length} designs land within ${worst.toFixed(4)} mm of where they were authored`);
+}
+
 console.log('Baked faces — is each face on the surface the camera sees?\n');
 
 checkSphereConvention();
+checkFacePaintPlacement();
 
 const kid = createKid({});
 checkHead({
