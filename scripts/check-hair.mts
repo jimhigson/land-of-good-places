@@ -62,7 +62,13 @@ import {
   Vector3,
 } from 'three';
 import { TAU } from '../src/core/mathUtils.ts';
-import { createKid, KID_FACE, KID_HEAD_SCALE, SKULL_RADIUS } from '../src/art/models/kid.ts';
+import {
+  createKid,
+  KID_BODY_PARTS,
+  KID_FACE,
+  KID_HEAD_SCALE,
+  SKULL_RADIUS,
+} from '../src/art/models/kid.ts';
 import {
   HAIR_SHELLS,
   hairShellGeometry,
@@ -222,6 +228,22 @@ function find(root: Object3D, name: string): Object3D[] {
   return found;
 }
 
+/**
+ * Both hands — looked up from {@link KID_BODY_PARTS} rather than by a bare
+ * `'hand'`.
+ *
+ * They used to share the one name, which a single `find` happened to return two
+ * of. Every body part is now uniquely named so the exported asset has a node per
+ * part, and a check that named one side would quietly have stopped sweeping the
+ * other — which is precisely the "check one member of a family and generalise"
+ * failure written up in ART-AGENT-NOTES.md §6.
+ */
+function hands(root: Object3D): Object3D[] {
+  return KID_BODY_PARTS.filter((part) => part.startsWith('hand.')).flatMap((part) =>
+    find(root, part),
+  );
+}
+
 for (const style of HAIR_STYLES) {
   if (style === 'ponytail' || style === 'longPonytail') continue;
   // Every shape built at once, so one kid per style answers for all five —
@@ -274,7 +296,7 @@ for (const style of HAIR_STYLES) {
   // amplitude is `applyWalk`'s own default swing, at full speed.
   const WALK_SWING = 0.85;
   let closestHand = Infinity;
-  for (const hand of find(kid.root, 'hand')) {
+  for (const hand of hands(kid.root)) {
     const pivot = hand.parent;
     if (!pivot) continue;
     const rest = hand.position.clone();
@@ -288,7 +310,7 @@ for (const style of HAIR_STYLES) {
     pivot.updateMatrixWorld(true);
   }
   // The hand's own radius, measured off the built mesh rather than copied.
-  const handMesh = find(kid.root, 'hand')[0] as Mesh | undefined;
+  const handMesh = hands(kid.root)[0] as Mesh | undefined;
   const handBox = handMesh
     ? new Box3().setFromBufferAttribute(handMesh.geometry.getAttribute('position') as never)
     : null;

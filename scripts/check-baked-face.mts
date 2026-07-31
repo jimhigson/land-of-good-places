@@ -39,6 +39,7 @@ import {
   drawFacePaint,
   FACE_FILL_INSET,
   FACE_PAINT_DESIGNS,
+  isBakedFaceMesh,
   type FacePaintOptions,
 } from '../src/art/style/faces.ts';
 
@@ -211,13 +212,13 @@ function checkHead(head: Head): void {
   }
 }
 
-/** The mesh a baked face was applied to — named by `applyTo`, not guessed. */
+/** The mesh a baked face was applied to — flagged by `applyTo`, not guessed. */
 function skullOf(root: Object3D, label: string): Mesh {
-  const found = meshesOf(root).find((mesh) => mesh.name === 'bakedFace');
+  const found = meshesOf(root).find((mesh) => isBakedFaceMesh(mesh));
   if (!found) {
     throw new Error(
-      `${label}: no mesh named 'bakedFace'. Either the face is not baked, or the head ` +
-        `mesh already had a name and \`applyTo\` left it alone.`,
+      `${label}: no mesh carries the baked-face flag, so no face was baked into any ` +
+        `surface on this character.`,
     );
   }
   return found;

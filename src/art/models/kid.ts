@@ -168,6 +168,48 @@ export const KID_EYE_COLOURS: readonly ToneSwatch[] = [
   { colour: ART.kidEye, label: 'Violet' },
 ] as const;
 
+/**
+ * The name of every mesh the kid's **body and head** are built from.
+ *
+ * One table, used three ways, which is the whole point of it existing:
+ *
+ * 1. `createKid` names each mesh from it as it builds;
+ * 2. `scripts/export-kid-glb.mts` walks it to decide what goes in the asset,
+ *    and a glTF node has to be *named* or it comes back from a round trip as
+ *    `mesh_1`, `mesh_2` (ART-AGENT-NOTES.md §8);
+ * 3. the parity harness pairs authored part against procedural part by it.
+ *
+ * Hair, backpacks, hats and shoes are **not** here: they are separate rigs
+ * (`hair.ts`, `backpacks.ts`, `hats.ts`, `shoes.ts`) that mount on anchors and
+ * are chosen per child, and they keep their current procedural build.
+ *
+ * The `.l` / `.r` suffix is the character's own left and right — the sign used
+ * for `side` in the loops below, so `.l` is `side === -1`, i.e. −X.
+ */
+export const KID_BODY_PARTS = [
+  'torso',
+  'collar',
+  'hem',
+  'arm.upper.l',
+  'arm.upper.r',
+  'hand.l',
+  'hand.r',
+  'leg.upper.l',
+  'leg.upper.r',
+  'foot.l',
+  'foot.r',
+  'skull',
+  'ear.l',
+  'ear.r',
+] as const;
+
+export type KidBodyPart = (typeof KID_BODY_PARTS)[number];
+
+/** `'l'` for the character's left (−X), `'r'` for her right. */
+function sideTag(side: -1 | 1): 'l' | 'r' {
+  return side < 0 ? 'l' : 'r';
+}
+
 export interface KidOptions {
   skin?: number;
   hair?: number;
@@ -328,6 +370,10 @@ export function createKid(options: KidOptions = {}): KidHandle {
   const root = new Group();
   root.name = 'kid';
   const body = new Group();
+  // Named for the same reason the meshes below are: the exported asset is a
+  // node hierarchy, and `applyWalk` finds nothing by name but a glTF round trip
+  // renames anything anonymous. See {@link KID_BODY_PARTS}.
+  body.name = 'body';
   root.add(body);
 
   const skinMat = toonMaterial(skin);
@@ -360,12 +406,14 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // Neckline. Sits just *below* the bottom of the skull — any higher and the
   // head swallows it whole and the jumper appears to have no opening.
   const collar = solid(new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat));
+  collar.name = 'collar';
   collar.rotation.x = Math.PI / 2;
   collar.position.y = 0.71;
   body.add(collar);
 
   // Skirt hem — a flared ring that stops the torso reading as a plain pill.
   const hem = solid(new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat));
+  hem.name = 'hem';
   hem.rotation.x = Math.PI / 2;
   hem.position.y = 0.4;
   hem.scale.set(1.06, 1.06, 0.7);
@@ -374,6 +422,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // --- arms ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftArm : limbs.rightArm;
+    pivot.name = `arm.pivot.${sideTag(side)}`;
     // Shoulders set wide and low so the arms swing clear of the skull, and wider
     // than the skirt hem (0.32) so the hands are not swallowed by it — with a
     // torso this short, an arm tucked inside the silhouette simply disappears.
@@ -381,35 +430,43 @@ export function createKid(options: KidOptions = {}): KidHandle {
     body.add(pivot);
 
     const upper = stub(0.105, 0.16, outfitMat);
+    upper.name = `arm.upper.${sideTag(side)}`;
     upper.position.y = -0.14;
     pivot.add(upper);
 
     const hand = blob(0.135, skinMat, [1, 1, 1], 18);
     // Named for the same reason as the backpack: the arc these swing through
-    // is the other thing long hair must not be caught in.
-    hand.name = 'hand';
+    // is the other thing long hair must not be caught in. Side-suffixed since
+    // the asset export needs every node uniquely named — `check:hair` sweeps
+    // both, so it looks them up by the `KID_BODY_PARTS` table rather than by a
+    // bare `'hand'` that used to match two meshes at once.
+    hand.name = `hand.${sideTag(side)}`;
     hand.position.y = -0.32;
     pivot.add(hand);
     addOutline(hand, 0.012);
   }
 
   const holdAnchor = new Group();
+  holdAnchor.name = 'holdAnchor';
   holdAnchor.position.set(0, -0.42, 0.1);
   limbs.rightArm.add(holdAnchor);
 
   // --- legs ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftLeg : limbs.rightLeg;
+    pivot.name = `leg.pivot.${sideTag(side)}`;
     pivot.position.set(side * 0.155, 0.36, 0);
     body.add(pivot);
 
     const leg = stub(0.12, 0.1, skinMat);
+    leg.name = `leg.upper.${sideTag(side)}`;
     leg.position.y = -0.1;
     pivot.add(leg);
 
     // Big round shoes. Oversized feet read as "toy" from the iso camera — and
     // they carry even more weight now, because they are most of the body.
     const foot = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
+    foot.name = `foot.${sideTag(side)}`;
     foot.position.set(0, -0.22, 0.045);
     pivot.add(foot);
     addOutline(foot, 0.014);
@@ -436,6 +493,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // 1.36 rather than up by half the extra radius, because the head is meant to
   // sit ON the shoulders like a snowman's — a big head on a visible neck wobbles.
   const head = new Group();
+  head.name = 'head';
   head.position.y = KID_HEAD_HEIGHT;
   body.add(head);
 
@@ -443,15 +501,18 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // the face still points at the ISO CAMERA rather than at the grass. From 38°
   // above, an untilted head this large shows the player nothing but hair.
   const crown = new Group();
+  crown.name = 'crown';
   crown.rotation.x = -HEAD_TILT;
   head.add(crown);
 
   const skullR = SKULL_RADIUS;
   const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 38);
+  skull.name = 'skull';
   crown.add(skull);
   addOutline(skull, 0.02);
 
   const hatAnchor = new Group();
+  hatAnchor.name = 'hatAnchor';
   hatAnchor.position.set(0, 0.42 * HEAD, 0);
   crown.add(hatAnchor);
 
@@ -459,6 +520,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // a flower worn here reads as "in her hair" alongside a hat rather than
   // fighting it for the same spot.
   const hairAnchor = new Group();
+  hairAnchor.name = 'hairAnchor';
   hairAnchor.position.set(0.32 * HEAD, 0.22 * HEAD, 0.14 * HEAD);
   crown.add(hairAnchor);
 
@@ -482,6 +544,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
   for (const side of [-1, 1] as const) {
     const ear = decal(blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12));
+    ear.name = `ear.${sideTag(side)}`;
     ear.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
     crown.add(ear);
   }

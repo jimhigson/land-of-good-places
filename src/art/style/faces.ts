@@ -634,6 +634,18 @@ export function remapSphereFaceUv(geometry: BufferGeometry, window: FaceWindow =
  * The rule in one line: **bake when the texture can carry the head's colour;
  * keep the patch when something else has to.**
  */
+/**
+ * `userData` key set on whatever mesh a baked face was applied to.
+ *
+ * See {@link isBakedFaceMesh}.
+ */
+const BAKED_FACE_FLAG = 'bakedFace';
+
+/** Was this mesh's texture and UV map written by {@link createBakedFace}? */
+export function isBakedFaceMesh(mesh: Mesh): boolean {
+  return (mesh.userData as Record<string, unknown>)[BAKED_FACE_FLAG] === true;
+}
+
 export interface BakedFaceOptions extends FacePaintOptions, FaceWindow {
   /** The head's own colour. It becomes the texture's background fill. */
   fill: number;
@@ -722,9 +734,16 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
       }
       remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
       mesh.material = material;
-      // Named for the same reason `createFacePatch` names its mesh `facePatch`:
+      // Flagged, *and* named if it had no name of its own.
+      //
       // `check:baked-face` and QA need to find the surface a face went into
-      // without guessing which blob is the head.
+      // without guessing which blob is the head. The name alone was not enough:
+      // a head that already has a name keeps it (the kid's skull is `skull`, so
+      // that the exported asset has a node to call it — see `KID_BODY_PARTS`),
+      // and the check would then look for a `bakedFace` that does not exist.
+      // The flag is the fact; the name is a convenience for reading a scene
+      // graph dump.
+      (mesh.userData as Record<string, unknown>)[BAKED_FACE_FLAG] = true;
       if (!mesh.name) mesh.name = 'bakedFace';
     },
   };
