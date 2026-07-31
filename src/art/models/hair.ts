@@ -402,41 +402,48 @@ export function buildHair(options: HairOptions): HairRig {
   });
 
   // --- spiky ------------------------------------------------------------------
-  // Nine fat cones fanned off the crop shell. Fat, because ART_DIRECTION's "no
-  // thin parts" still applies to a spike: a needle reads as a rendering
+  // Nine fat cones standing up off the crop shell. Fat, because ART_DIRECTION's
+  // "no thin parts" still applies to a spike: a needle reads as a rendering
   // artefact where a wedge reads as hair. A cone *is* the right primitive for a
-  // spike, so these stayed cones — but every base is now taken from the shell's
-  // own surface (`hairShellSampler`) rather than from a hand-picked radius, so
-  // a spike cannot come loose from the head it grows out of.
+  // spike, so these stayed cones — and every base is taken from the shell's own
+  // surface (`hairShellSampler`) rather than from a hand-picked radius, so a
+  // spike cannot come loose from the head it grows out of.
   //
   // Kept as one merged mesh, and hidden whole when a hat goes on: everything
   // else in this file sits inside the envelope hats already perch over, but a
-  // spike would go straight through the party hat.
+  // spike goes straight through the party hat.
   add(
     ['spiky'],
     drape,
     () => {
       const surface = hairShellSampler(HAIR_SHELLS.crop, skull).surface;
+      const radius = SPIKE_RADIUS * H;
       const spikes: BufferGeometry[] = [];
       for (let i = 0; i < 9; i += 1) {
         const azimuth = (i / 9) * Math.PI * 2 + 0.24;
-        // Alternating lengths, so it reads as hacked-about rather than machined.
-        const length = (i % 3 === 0 ? 0.3 : i % 3 === 1 ? 0.25 : 0.27) * H;
-        // Leaning well out rather than straight up: it keeps the child inside
-        // about 2.3 m total instead of 2.5, which matters when the crowd she is
-        // standing in is 2.12 and the park's doorways were built for that.
-        const tilt = 0.66;
+        // Three lengths and three leans, dealt round, so the crown reads as
+        // hacked about rather than machined.
+        const [span, tilt] = SPIKES[i % SPIKES.length] as readonly [number, number];
+        const length = span * H;
         const [x, y, z] = surface(azimuth, SPIKE_ROOT);
         spikes.push(
-          new ConeGeometry(0.105 * H, length, 8)
+          new ConeGeometry(radius, length, 8)
             // Cone geometry is centred on its own height, so this drops the
-            // base a little BELOW the surface and puts the tip at +length: a
-            // spike is aimed about its buried base, never about its middle.
-            .translate(0, length / 2 - 0.06, 0)
-            .rotateZ(tilt)
-            // `rotateZ` tips +Y towards -X, so an azimuth measured the shell's
-            // way (from the back of the skull, x = r·sin φ) lands the spike
-            // where it belongs after this half turn.
+            // base BELOW the surface and puts the tip at +length: a spike is
+            // aimed about its buried base, never about its middle.
+            .translate(0, length / 2 - SPIKE_BURY * radius, 0)
+            // `rotateX` tips +Y towards +Z, so a negative angle tips it towards
+            // -Z — which is the outward radial at azimuth 0, the shell
+            // measuring its azimuth from the back of the skull. The half turn
+            // then carries that outward lean round to this spike's own side.
+            //
+            // The pair used to be `rotateZ(tilt)` and the same `rotateY`, which
+            // tips +Y towards -X and lands the lean **tangentially**: every
+            // spike leaned sideways around the head like a pinwheel instead of
+            // out of it (dot product with its own outward radial: 0.000 for all
+            // nine, measured). That is what laid the cones down flat along the
+            // dome and made the style read as scales rather than as hair.
+            .rotateX(-tilt)
             .rotateY(-azimuth)
             .translate(x, y, z),
         );
@@ -526,9 +533,69 @@ function fuse(material: Material, geometries: readonly BufferGeometry[]): Mesh {
 /**
  * Where the spikes are rooted on the crop shell, in metres up the drape frame.
  * High enough to fan off the crown, low enough that the shell is still wide
- * there and every base is properly buried.
+ * there and the ring of nine reads as a crown of points rather than a topknot.
  */
 const SPIKE_ROOT = 0.44;
+
+/**
+ * The three spikes, as `[length in HEAD units, lean from vertical in radians]`,
+ * dealt round the nine in turn.
+ *
+ * **The lean is the number this style lives or dies by.** It was a flat 0.66
+ * (38°) for all nine — and since it was also being applied sideways (see the
+ * build above), the cones lay down along the dome and the family read the whole
+ * style as a bumpy texture rather than as hair. The brief is Bart Simpson:
+ * points that radiate *up* and only slightly out, making a jagged crown in
+ * silhouette. 14–23° does that; the old 38° cannot, at any length.
+ *
+ * Three different pairs rather than one repeated, because nine identical cones
+ * on a ring read as a machined tiara — ART_DIRECTION §4's "nothing is plumb",
+ * and the "hacked about" idea the first version had in its lengths and could
+ * not show. The longest spike is also the most upright, so the variation adds
+ * up rather than cancelling out.
+ *
+ * Against a 0.105 radius these run 1.6–2.1 spike-widths long: still a wedge,
+ * not a needle (§1's "no thin parts" applies to a spike as much as to a limb),
+ * but a wedge that comes to a point well clear of the skull — which is the
+ * whole of what was wrong.
+ *
+ * **Sized to a height, deliberately.** Nine of these take the child to 2.37 m,
+ * which is where `spiky` stood before the shells landed — `kid.ts` still
+ * records it as "0.28 m taller than a bob", and it is 0.28 m taller than a bob
+ * again. Standing them fully upright reaches 2.5 m, and she has to walk around
+ * a park whose crowd is 2.12 m; a shorter dramatic spike beats a tall one that
+ * clips a doorway, so the ceiling is restored rather than raised.
+ */
+const SPIKES: readonly (readonly [number, number])[] = [
+  [0.42, 0.24],
+  [0.32, 0.4],
+  [0.37, 0.31],
+];
+
+/** Spike base radius, in `HEAD` units. Fat on purpose — see above. */
+const SPIKE_RADIUS = 0.105;
+
+/**
+ * How deep a spike's base sits below the point it grows out of, in **base
+ * radii** — so it tracks {@link SPIKE_RADIUS} and a head retune.
+ *
+ * A cone lying along the dome hugs it; a cone standing up out of a scalp that
+ * slopes away meets it at an angle, and part of its base disc is left showing.
+ * The first version buried 0.06 m — 0.38 base radii — which was enough for
+ * cones leaning 38° and is not enough for these.
+ *
+ * **Deeper is not simply better, which is the trap here.** Measured against the
+ * real shell as the fraction of each base rim left outside it: 0.38 radii
+ * leaves 183 rim samples of 288 out, 1.0 leaves 147 — and then it turns round
+ * again, because past about 1.4 radii the front spike is driven so far in that
+ * its base passes clean through the other side of the shell and *every* one of
+ * its rim samples ends up outside (32 of 32 at 1.65). There is an optimum in
+ * the middle rather than a direction to push in, and this is it.
+ *
+ * `check:hair` holds the property this is really for — that all nine spikes
+ * stay rooted in the head — rather than trusting the number.
+ */
+const SPIKE_BURY = 1.0;
 
 /**
  * The messy tufts: radius, azimuth from the back of the skull, height in HEAD
