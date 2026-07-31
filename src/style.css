@@ -3449,6 +3449,18 @@ kbd {
   box-shadow: 0 0 0 rgba(74, 58, 82, 0.1);
 }
 
+/* Same same-specificity `[hidden]` tie as `.charcreate-tabpanel[hidden]`
+   above (and `.colourwheel-panel[hidden]` before that) — `.charcreate-
+   style-btn`'s own `display: flex` would otherwise win by cascade order and
+   leave a hidden button occupying its grid cell. Nothing today ever hides
+   one of these except the Hat tab's button while a hair style that cannot
+   wear a hat is selected (`ui/CharacterCreation.ts`'s `applyHairStyle`) —
+   every hair-style or backpack-shape button built with this same class is
+   simply never toggled `hidden` at all, so this rule is inert for them. */
+.charcreate-style-btn[hidden] {
+  display: none;
+}
+
 .charcreate-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

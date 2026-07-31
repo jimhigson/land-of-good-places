@@ -85,7 +85,14 @@ export interface CharacterCreationChoice {
   readonly eyeColour: number;
   readonly backpackKind: BackpackKind;
   readonly backpackColour: number;
-  readonly hat: PurchaseSpec;
+  /**
+   * `null` means "no hat" — the creator's Hat tab hides itself while an
+   * exclusive hair style is selected (a Mohican, once `art/models/hair.ts`
+   * lands one; see `ui/CharacterCreation.ts`'s `HAT_EXCLUSIVE_HAIR_STYLES`),
+   * and `null` is the real, intentional answer that reaches here rather than
+   * a hat being defaulted onto someone who was never offered a choice.
+   */
+  readonly hat: PurchaseSpec | null;
   readonly pet: PurchaseSpec;
 }
 
@@ -243,6 +250,19 @@ class GameStore {
    * free, and routed straight to their real placement instead of into the
    * player's hands: the hat goes on the head (`wornHatUid`), the pet joins
    * the parade immediately.
+   *
+   * `choice.hat` may be `null` — an exclusive hair style (the Hat/Mohican
+   * rule, `ui/CharacterCreation.ts`) was selected, so nothing is granted, and
+   * whatever was worn is taken off through {@link setWornHat} rather than a
+   * bare field write, so the Cute-o-dex's `placement` bookkeeping for it
+   * (`refreshPlacement`) stays correct too. Taking it off unconditionally,
+   * not "only if it was worn", matters for one specific path: `ui/Hud.ts`'s
+   * "Look" pill reopens this screen over an *existing* save (`main.ts`'s
+   * `reopenCharacterCreation`), which hydrates `wornHatUid` from that save
+   * before this method ever runs — so a hat worn before she reopened the
+   * creator needs exactly the same "take it off" call a brand-new character
+   * (who never had one on) gets, which turns out to be free: `setWornHat`
+   * already no-ops when nothing is worn.
    */
   completeCharacterCreation(choice: CharacterCreationChoice): void {
     const trimmedName = choice.name.trim();
@@ -255,8 +275,12 @@ class GameStore {
     this.state.player.backpackKind = choice.backpackKind;
     this.state.player.backpackColour = choice.backpackColour;
 
-    const hatItem = this.grantFree(choice.hat, true);
-    this.state.wornHatUid = hatItem.uid;
+    if (choice.hat) {
+      const hatItem = this.grantFree(choice.hat, true);
+      this.state.wornHatUid = hatItem.uid;
+    } else {
+      this.setWornHat(null);
+    }
     this.grantFree(choice.pet, false);
 
     this.notify();
