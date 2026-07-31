@@ -37,7 +37,28 @@ Both are in `hair.ts`'s `add(['spiky'], drape, …)` block.
 
    `.rotateX(-tilt).rotateY(-azimuth)` gives dot **1.000** for all nine.
 
-## The fix
+## Second round — "all over the head, not a circle around the edge"
+
+The family said this of the first pass, and they were right: all nine spikes
+were rooted at one height, so however upright they stood they made a **tiara**
+and left the top of the head bare. The 38° camera looks *down* at her, so the
+bare bit is most of what you see.
+
+- **16 spikes on a golden-angle spiral**, band 0.40 → 0.63 up the dome. Golden
+  angle because any rational turn re-forms into rings. `SPIKE_CROWD` 1.5 bunches
+  them low, where the dome has the circumference to hold them.
+- **Lean is now derived per spike** — `SPIKE_STAND` 0.45 × the shell's own local
+  slope. ~23° at the hairline (scalp falls away at 51°), near-upright at the
+  crown. No hand-authored angles, so moving a spike up the dome cannot leave its
+  angle behind.
+- **Length tapers 0.42 → 0.33 HEAD** up the band. That is the height budget: a
+  crown spike starts 0.3 m higher so it must be shorter to finish level.
+- First attempt tapered to 0.28 with the band to 0.66 — the crown spikes read as
+  **bumps**, i.e. the original complaint moved to the top of her head. Eased.
+
+Still 2.342 m, 255 mm proud. One merged mesh, ~256 triangles.
+
+## The fix (first pass — still the basis)
 
 - lean **outward**: `.rotateX(-tilt).rotateY(-azimuth)` (dot 1.000, was 0.000)
 - stand them up: a flat 0.66 rad (38°) → **0.24 / 0.40 / 0.31 rad (14–23°)**
@@ -78,7 +99,7 @@ crowd. Shipped at **2.329 m**, points 241 mm proud of the crown.
 - [x] whatsnew entry 19; stale "0.28 m taller than a bob" comments in `kid.ts`
       and `CharacterModel.ts` corrected to 0.24
 - [x] Blender contact sheets: `/tmp/blender-hair/spiky.png` (before),
-      `/tmp/blender-hair/spiky-after.png` (after)
+      `spiky-after.png` (ring, superseded), `spiky-allover-C.png` (**shipped**)
 - [x] PR raised, **not merged**
 - [ ] browser QA — **not owned, not used**
 
