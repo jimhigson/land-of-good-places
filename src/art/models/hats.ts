@@ -23,6 +23,8 @@ import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects
 import { blob, type AssetHandle } from '../style/asset';
 import { KID_HEAD_SCALE } from './kid';
 import {
+  CHEERY_HOOD,
+  CHEERY_PEAK,
   hoodBibGeometry,
   hoodHemRollGeometry,
   hoodPatchGeometry,
@@ -248,32 +250,67 @@ function createSunHat(): AssetHandle {
   return finish(root);
 }
 
+/**
+ * How far round the wearer's head the cap is knocked, in radians.
+ *
+ * ART_DIRECTION.md §4: nothing is plumb, and every head needs one asymmetric
+ * feature or it reads as a placeholder. The two critter hoods get theirs from
+ * things hung on them — the RiPika cap's droopier left ear, Trilla's off-centre
+ * curl — and a plain cap has nothing to hang. So it is simply **worn slightly
+ * crooked**, the way a cap on a six-year-old always is.
+ *
+ * A *yaw* specifically, and not the tilt the sun hat uses. Tilting lifts one
+ * side of the band off a skull the hem is cut to hug, opening a three-centimetre
+ * gap; rotating about the vertical moves the band along its own contact ring and
+ * costs nothing. It is also free in `check:hat-fit`, which measures span as
+ * `hypot(x, z)` about that same axis.
+ */
+const CAP_JAUNT = 0.11;
+
+/**
+ * The Cheery Cap.
+ *
+ * The plain one, and the last hat that was still a squashed sphere with a
+ * half-cylinder stuck on the front for a peak. It is now cut from the same
+ * `hoodShell.ts` surface as the two critter hoods and has the anatomy they do —
+ * a six-panel crown with creased seams, a band rolled along the hem, a peak on
+ * its own plane below the crown, and a button on top — with nothing added.
+ *
+ * The one thing worth knowing is the **colour split**, because it is what makes
+ * the shape legible rather than decoration. Peak and band started out both in
+ * `leafMid`, the cap's existing green, and at the game's 38° camera they merged
+ * into a single green bowl with a mint dome sitting in it. The RiPika cap does
+ * not have this problem because its band is cream against a yellow peak. So the
+ * band here is the crown's own mint — a self-fabric sweatband, which is what a
+ * plain cap has anyway — leaving the green peak as the only accent and the
+ * only thing breaking the silhouette forward. The band still reads from behind:
+ * it is a rolled tube, so it carries its own shading.
+ */
 function createCap(): AssetHandle {
   const { root, fit } = hatGroups('hat.cap');
+  fit.rotation.y = CAP_JAUNT;
 
-  const dome = solid(
-    new Mesh(
-      new SphereGeometry(0.27, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.54),
-      toonMaterial(PALETTE.markerMint),
-    ),
-  );
-  dome.position.y = SIT + 0.01;
-  dome.scale.set(1, 0.92, 1);
-  fit.add(dome);
-  addOutline(dome, 0.012);
+  const shell = hoodPart(hoodShellGeometry(CHEERY_HOOD), PALETTE.markerMint);
+  fit.add(shell);
+  addOutline(shell, 0.013);
 
-  // The peak: a flattened disc pushed out over the eyes.
-  const peak = solid(
-    new Mesh(new CylinderGeometry(0.24, 0.24, 0.04, 18, 1, false, 0, Math.PI), toonMaterial(PALETTE.leafMid)),
-  );
-  peak.position.set(0, SIT + 0.02, 0.16);
-  peak.rotation.y = Math.PI;
-  peak.rotation.x = -0.12;
-  peak.scale.set(1, 1, 1.15);
+  const peak = hoodPart(hoodPeakGeometry(CHEERY_HOOD, CHEERY_PEAK), PALETTE.leafMid);
   fit.add(peak);
+  addOutline(peak, 0.011);
 
-  const button = blob(0.045, toonMaterial(PALETTE.leafMid), [1, 0.8, 1], 12);
-  button.position.y = SIT + 0.26;
+  // Both sides, for the same reason the RiPika cap's is: a child looking up at
+  // a friend sees the underside of the bill and nothing else of it.
+  const lining = decal(
+    new Mesh(hoodPeakLiningGeometry(CHEERY_HOOD, CHEERY_PEAK), toonMaterial(PALETTE.markerMint)),
+  );
+  (lining.material as MeshToonMaterial).side = DoubleSide;
+  fit.add(lining);
+
+  const band = hoodPart(hoodHemRollGeometry(CHEERY_HOOD, 0.03), PALETTE.markerMint);
+  fit.add(band);
+
+  const button = blob(0.044, toonMaterial(PALETTE.leafMid), [1, 0.72, 1], 14);
+  button.position.y = CHEERY_HOOD.semiY + 0.013;
   fit.add(button);
 
   return finish(root);

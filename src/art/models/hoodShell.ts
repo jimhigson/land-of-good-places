@@ -97,6 +97,21 @@ export interface HoodShellSpec {
   readonly panels: number;
   /** Panel-seam relief, as a fraction of the radius. */
   readonly seamR: number;
+  /**
+   * How *sharp* the seams are, and so whether they read as seams at all.
+   *
+   * At `1` (the default, and what both critter hoods use) the relief is a plain
+   * `cos`: the crown swells into broad lobes with the seams as the shallow
+   * troughs between them. That is invisible on a hood carrying a face and ears,
+   * which is exactly why it was never noticed — and it is not what a seam looks
+   * like. A sewn seam is a **narrow crease**, not a wide valley.
+   *
+   * Above `1` the relief becomes `-((1 + cos)/2)ᵏ`: the panels sit at the
+   * nominal radius and a tight groove is pulled in at each seam, `k` setting
+   * how tight. The plain cap needs this because the panelling is the only
+   * structure it has; a hood with a painted face on the front does not.
+   */
+  readonly seamSharp: number;
   readonly segments: number;
   readonly rings: number;
 }
@@ -112,6 +127,7 @@ export const HOOD_SHELL_DEFAULTS = {
   flareSpan: 0.3,
   panels: 6,
   seamR: 0.018,
+  seamSharp: 1,
   segments: 48,
   rings: 18,
 } as const satisfies Omit<HoodShellSpec, 'hem'>;
@@ -192,7 +208,7 @@ export function hoodShellSampler(spec: HoodShellSpec) {
 
 /** One hood's shell. Origin is the hat anchor; head units throughout. */
 export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
-  const { depth, thick, panels, seamR, segments, rings } = spec;
+  const { depth, thick, panels, seamR, seamSharp, segments, rings } = spec;
   const { radiusAt } = hoodShellSampler(spec);
   const handover = Math.max(CAP_Y * spec.semiY, ...spec.hem);
 
@@ -210,7 +226,12 @@ export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
   for (let i = 0; i < segments; i += 1) {
     const phi = (i / segments) * TAU;
     const bottom = hemAt(spec.hem, phi);
-    const seam = Math.cos(panels * phi);
+    // 1 at a seam, 0 in the middle of a panel. See `seamSharp`: raising that to
+    // a power turns the broad lobe into a narrow crease without moving the
+    // panels themselves, and leaves `seamSharp: 1` byte-identical to the `cos`
+    // both critter hoods were approved with.
+    const lobe = (1 + Math.cos(panels * phi)) / 2;
+    const seam = seamSharp <= 1 ? Math.cos(panels * phi) : -(lobe ** seamSharp);
     for (let j = 1; j <= rings; j += 1) {
       const s = j / rings;
       const y =
@@ -720,6 +741,74 @@ export const TRILLA_HOOD: HoodShellSpec = {
     -0.222, -0.23, -0.248, -0.276, -0.318, -0.352, -0.362, -0.33, -0.262, -0.2, -0.166, -0.146,
     -0.14,
   ],
+};
+
+/**
+ * The Cheery Cap — the plain one, and the reason this file is not just about
+ * critters.
+ *
+ * It was the last hat still made the old way: a squashed sphere with a
+ * half-cylinder disc glued on the front as a "peak". Same diagnosis as the two
+ * hoods (no crown structure, no seams, no band, the peak fused into the dome),
+ * with none of the animal theme to distract from it — so it gets the same
+ * anatomy, and nothing else. No face, no ears. **This is the baseline every
+ * cap-shaped hat in the park is measured against**, so it is deliberately
+ * generic, and every departure from the RiPika cap below is a considered one:
+ *
+ * - **A shallower crown** (`semiY` 0.245 against the RiPika cap's 0.335). That
+ *   cap's tall dome is paid for by the ears standing on it; with nothing up
+ *   there a dome that tall reads as a bonnet. A cap is wider than it is tall.
+ * - **Straighter sides** (`semiLow` 0.92 against 0.66), so the crown does not
+ *   overhang its own band. The bulge is what made the first pass look like a
+ *   mushroom, and at `0.92` the band still lands within 3 mm of the skull's own
+ *   width at that height, so it grips exactly as before.
+ * - **Creased seams** rather than lobes (`seamSharp`), because the six panels
+ *   are the only structure this hat has.
+ *
+ * The hem is nearly level — a cap's sweatband is — rising only 0.037 towards
+ * the brow, which is what keeps the peak clear of the wearer's eyes.
+ */
+export const CHEERY_HOOD: HoodShellSpec = {
+  ...HOOD_SHELL_DEFAULTS,
+  shellR: 0.385,
+  semiY: 0.245,
+  semiLow: 0.92,
+  depth: 1.06,
+  panels: 6,
+  seamR: 0.045,
+  seamSharp: 6,
+  segments: 64,
+  rings: 18,
+  hem: [
+    -0.205, -0.205, -0.204, -0.202, -0.2, -0.197, -0.193, -0.188, -0.182, -0.177, -0.172, -0.169,
+    -0.168,
+  ],
+};
+
+/**
+ * The Cheery Cap's peak.
+ *
+ * `arc` and `inset` are the two that were tuned by eye and are worth keeping.
+ * The RiPika cap's peak wraps 60° either side of the front with its root only
+ * just inside the crown, and that is fine *there* because the painted face
+ * covers the wrap. On a bare crown the same peak reads as a bowl the cap is
+ * sitting in — from the game's own 38° camera it swept right round the front
+ * and stopped looking like a peak at all. Pulling the arc in to 50° and burying
+ * the root deeper (`inset` 0.84) hides the flanks inside the crown, so only the
+ * part that is actually a bill comes out.
+ *
+ * `length` is up to 0.165 to buy back the forward reach the deeper inset costs;
+ * peak-to-crown still lands on the reference's 0.39 ratio, and `check:hat-fit`
+ * measures the whole hat at 1.09× the bare head against its 1.15 limit.
+ */
+export const CHEERY_PEAK: HoodPeakSpec = {
+  y: -0.086,
+  length: 0.165,
+  arc: 0.88,
+  drop: 0.05,
+  thick: 0.036,
+  spread: 0.1,
+  inset: 0.84,
 };
 
 export const RIPIKA_PEAK: HoodPeakSpec = {
