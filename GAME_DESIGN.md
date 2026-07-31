@@ -16,10 +16,15 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Look:** Inspired by *Theme Park* — pseudo-isometric camera, but really
   rendered in 3D. Very cute, Pokémon-inspired style: bright colours, big
   eyes, chunky shapes, soft shadows.
-- **Art approach (decided):** true 3D models built procedurally from chunky
-  primitives with canvas-painted faces — not sprites — because the camera
-  moves (space wheel, slides) and lighting is dynamic. Billboard sprites are
-  used only for particles (confetti, splashes, hearts). The Artist agent's
+- **Art approach (decided):** true 3D models with canvas-painted faces — not
+  sprites — because the camera moves (space wheel, slides) and lighting is
+  dynamic. Billboard sprites are used only for particles (confetti, splashes,
+  hearts). Models are usually chunky procedural primitives, and that stays
+  the default, but an authored/imported asset is fine where it genuinely
+  looks better (31 July 2026 ruling) — the constraint is real 3D geometry in
+  the house style, not the method that produced it. The **world layout**
+  staying procedurally generated is a separate rule (Decision 5,
+  ARCHITECTURE-DECISIONS.md) and is unaffected by this. The Artist agent's
   ART_DIRECTION.md is the style bible all builders must follow.
 - **Art style APPROVED by Eleri** (26 July 2026): the full sample set —
   RiPika, Biscuit, the player kid, all three balloons, the Mini, and the
