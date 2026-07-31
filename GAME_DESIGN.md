@@ -19,10 +19,11 @@ Unless the grown-ups turn on **Mayhem mode**…
 - **Art approach (decided):** true 3D models with canvas-painted faces — not
   sprites — because the camera moves (space wheel, slides) and lighting is
   dynamic. Billboard sprites are used only for particles (confetti, splashes,
-  hearts). Models are usually chunky procedural primitives, and that stays
-  the default, but an authored/imported asset is fine where it genuinely
-  looks better (31 July 2026 ruling) — the constraint is real 3D geometry in
-  the house style, not the method that produced it. The **world layout**
+  hearts). Chunky procedural primitives are the **preferred** way to build a
+  model, not just the default — but organic forms that genuinely fight
+  primitive composition (hair is the paradigm case) are modeled in Blender
+  instead (31 July 2026 ruling), still held to the house look. Full rule in
+  ART_DIRECTION.md §7. The **world layout**
   staying procedurally generated is a separate rule (Decision 5,
   ARCHITECTURE-DECISIONS.md) and is unaffected by this. The Artist agent's
   ART_DIRECTION.md is the style bible all builders must follow.

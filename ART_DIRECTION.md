@@ -312,6 +312,28 @@ instancing-friendly: geometry and materials are module-level singletons
 `InstancedMesh` with per-instance colour, or call the factory for a one-off.
 Never call a factory inside a render loop.
 
+### Primitives vs. authored geometry (e.g. Blender)
+
+Chunky primitive composition — spheres, cylinders, capsules squashed and
+combined — is the **preferred** way to build a model, not merely the default:
+it is cheap to iterate, trivially hits §1–§4, and needs nothing outside this
+repo. Stay with it whenever it can reach the target shape.
+
+It is not an absolute rule, though, and treating it as one is its own
+failure mode. **Organic, continuous forms genuinely fight primitive
+composition** — hair is the paradigm case: real hair reads as strands, waves
+and mass, which a stack of capsules approximates badly, however long you
+fight it. For that category, model in Blender instead (31 July 2026 ruling).
+
+An authored asset gets **no exemption from anything else in this contract**.
+It must still look like it came off this pipeline, not visited from another
+game: chunky and rounded per §1, the four-band toon ramp or the §2 material
+table (no realistic shading, no surface micro-detail), the house palette
+only, outlines ink-tinted per §4's rules — never black, never photoreal. And
+it is wrapped in the exact same `AssetHandle` factory function as everything
+above: origin at the base, `height` to the true top, seeded randomness if
+any is needed. The only thing that changed is where the vertices came from.
+
 ---
 
 ## 8. Quick checklist before you commit an asset
