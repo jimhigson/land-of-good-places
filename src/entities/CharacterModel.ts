@@ -49,10 +49,11 @@ export class CharacterModel {
   }
 
   /**
-   * Whether the worn hairstyle refuses to share the head with a hat — Spiky,
-   * today. `WornHat` checks this **before** attaching a hat mesh at all: the
-   * hat is what disappears, never the hair. See `art/models/kid.ts`'s
-   * `hairHidesHat` for the full reasoning.
+   * Whether the worn hairstyle refuses to share the head with a hat —
+   * Mohican, today (Spiky and a hat are allowed to overlap, clipping
+   * included — Jim's ruling, 31 July 2026). `WornHat` checks this **before**
+   * attaching a hat mesh at all: the hat is what disappears, never the hair.
+   * See `art/models/kid.ts`'s `hairHidesHat` for the full reasoning.
    */
   get hairHidesHat(): boolean {
     return this.kid.hairHidesHat;

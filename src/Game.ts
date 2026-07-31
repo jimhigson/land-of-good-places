@@ -156,7 +156,7 @@ export class Game {
     // The hat chosen (or granted free) in the character creator — see
     // `entities/WornHat.ts`. Same store-subscriber shape as `wornFlower`
     // above, parented to the head instead of the hairline. `hairHidesHat`
-    // is what lets `WornHat` decline to draw a hat that a style like Spiky
+    // is what lets `WornHat` decline to draw a hat that Mohican's crest
     // cannot share the head with, without touching `wornHatUid` itself.
     this.wornHat = new WornHat(
       this.player.model.hatAnchor,

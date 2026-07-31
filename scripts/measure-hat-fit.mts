@@ -110,12 +110,14 @@ function widthAt(root: Object3D, frame: Object3D, y: number, band = 0.04): numbe
 // The bare head: skull, ears and face patch, with every hair part hidden.
 //
 // Hair is hidden by hand here, in full, rather than through `setHatWorn`:
-// that call no longer touches hair visibility at all (31 July 2026 — a style
-// like Spiky is now always fully drawn, and it is a *worn hat* that declines
-// to render instead, see `art/models/hair.ts`'s `HairPart.hideUnderHat`),
-// and even before that change it only ever tucked the spikes. Bunches were
-// always left alone by it, and they hang out to 1.82 m across — comparing a
-// hat's brim against a pair of bunches would say the sun hat is too narrow
+// that call no longer touches hair visibility at all (31 July 2026 — hair is
+// now always fully drawn regardless of whether a hat is worn; only Mohican's
+// crest is handled specially, by a *worn hat* declining to render instead,
+// see `art/models/hair.ts`'s `HairPart.hideUnderHat`), and even before that
+// change it only ever tucked the spikes, which no longer applies to Spiky at
+// all — spiky and a hat are now allowed to overlap, clipping included.
+// Bunches were always left alone by it, and they hang out to 1.82 m across —
+// comparing a hat's brim against a pair of bunches would say the sun hat is too narrow
 // when it is the skull, at the crown, that a hat has to look right against.
 // `setHatWorn(true)` is still called, purely so `kid.height` below re-measures.
 const kid = createKid();

@@ -71,31 +71,40 @@ exit 0 (checked directly, never piped) after every one. **No PR opened yet**
    file in commit `f9573e9`. `check:hair`/`check:hat-fit` both pass with
    numbers identical to before the change (their scripts already hid hair by
    hand, never relied on the removed tucking side effect).
+9. **Coordinator verified step 8 live, then Jim refined the rule further**:
+   spiky and a hat should both show together after all — clipping included —
+   not have the hat disable itself. **Only Mohican keeps the hides-hat
+   behaviour now.** The coordinator made this change directly (small: one
+   flag), committed straight to this branch as `80cccc4` ("Allow spiky hair
+   and a hat to show together, clipping included") — verified live by them,
+   spikes visibly poking through the party hat's brim. I pulled it (same
+   worktree, same branch, nothing to merge) and swept the rest of the codebase
+   for my own now-stale "Spiky" references the coordinator's commit had not
+   touched — found and fixed four (`entities/WornHat.ts`'s class doc comment,
+   `entities/CharacterModel.ts`'s `hairHidesHat` doc comment, `Game.ts`'s
+   `WornHat` construction comment, `scripts/measure-hat-fit.mts`) plus this
+   file's own "Needs eyes" list below, which had been telling the next tester
+   to expect the *old*, now-wrong behaviour. `hair.ts`'s `HairPart.
+   hideUnderHat` is `true` for Mohican only now; spiky's `add()` call carries
+   no trailing boolean at all (defaults to `false`).
 
 **Rebase note:** step 6's rebase onto `feat/mohican-hair` rewrote every
 commit's hash from steps 1–5. Use `git log --oneline` for current hashes
 rather than anything cited from memory of an earlier checkpoint.
 
-**Visually verified: steps 1–4 (by the coordinator), partially; steps 6/7/8
-not yet at all.** Everything marked "needs eyes" below is real and
-outstanding — this branch now carries three sessions' worth of unverified
-hat/hair interaction changes stacked on top of each other.
+**Visually verified: steps 1–4 and 9/spiky (by the coordinator); step 6/7
+(Mohican) not yet at all.** Everything marked "needs eyes" below is real and
+outstanding.
 
 ### Needs eyes (manual QA)
 
-- **Spiky + a hat, both directions — brand new, zero visual confirmation.**
-  In the creator: pick a hat in the Hat tab, switch to Spiky in the Hair tab,
-  confirm the spikes are **fully visible** (not tucked) and the hat is what
-  disappears. In real gameplay (harder to reach without the creator itself
-  being tested first): a character with Spiky hair who owns/wears a hat
-  should show full spikes, no hat mesh, while the backpack drawer still
-  marks that hat as worn.
-- **Mohican — fixed once, unverified since, and now sits on top of the Spiky
-  fix.** Pick a distinct hat in the Hat tab, switch to Rooster (Mohican) in
-  the Hair tab, confirm the hat visibly
-  comes off **and the crest shows** (both symptoms of the one bug fixed in
-  step 7 above); switch to a different hair style, confirm the hat visibly
-  returns and the Hat tab shows it selected (not reset to the default).
+- **Mohican — fixed once (step 7), unverified since, and now the *only*
+  style with hides-hat behaviour (step 9 narrowed it from two styles to
+  one).** Pick a distinct hat in the Hat tab, switch to Rooster (Mohican) in
+  the Hair tab, confirm the hat visibly comes off **and the crest shows**
+  (both symptoms of the bug fixed in step 7); switch to a different hair
+  style, confirm the hat visibly returns and the Hat tab shows it selected
+  (not reset to the default).
   Then the edge case: open the creator with Mohican already selected
   (nothing to switch away from) and confirm the Hat tab is simply absent
   from the start, no flash of it appearing first.

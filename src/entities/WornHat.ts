@@ -22,8 +22,8 @@ import { shopItem } from '../world/building/shops/catalogue';
  *
  * **Checks `hairHidesHat` before ever drawing anything** (31 July 2026, Jim's
  * words: "just allow any hair other than rooster with a hat, and disable the
- * hat, not the hair in this case"). A style like Spiky spears straight
- * through a worn hat, and it is the hat that gives way now, not the hair —
+ * hat, not the hair in this case"). Mohican's crest occupies the same space a
+ * hat wants, and it is the hat that gives way for that one style —
  * `wornHatUid`, the inventory and the Cute-o-dex all still say the hat is
  * worn; this file simply declines to draw a mesh for it, the same as if the
  * catalogue lookup below had failed.
