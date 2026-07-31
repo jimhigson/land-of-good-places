@@ -5,6 +5,7 @@ import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
 import type { CharacterCreationChoice, HairStyle } from '../state';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
+import { ColourWheelPicker } from './ColourWheelPicker';
 
 /**
  * The character creator: name, skin tone, hair colour and style, eye colour,
@@ -360,6 +361,14 @@ export class CharacterCreation {
 
   // -------------------------------------------------------------- internals
 
+  /**
+   * A row of curated one-tap swatches, **plus** a "Custom colour" tile that
+   * opens {@link ColourWheelPicker} — see that class's doc comment for why
+   * this is additive rather than a replacement. Both paths call the same
+   * `onPick`, so the rest of this screen (the preview, the saved choice)
+   * cannot tell a custom pick from a curated one — a bare hex number either
+   * way, exactly like every colour field already stores.
+   */
   private buildSwatchSection(
     label: string,
     swatches: readonly Swatch[],
@@ -374,6 +383,22 @@ export class CharacterCreation {
     const row = document.createElement('div');
     row.className = 'charcreate-swatches';
     const buttons: HTMLButtonElement[] = [];
+    // The colour actually applied right now — starts at `initial`, and is
+    // kept in step by both a curated click and a wheel drag, so reopening the
+    // wheel (or checking whether it should show its own selection ring)
+    // always reflects what the character is really wearing.
+    let current = initial;
+
+    const selectCurated = (button: HTMLButtonElement) => {
+      for (const other of buttons) {
+        const selected = other === button;
+        other.dataset.selected = selected ? 'true' : 'false';
+        other.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      }
+      picker.setSelected(false);
+      picker.close();
+    };
+
     for (const swatch of swatches) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -384,17 +409,33 @@ export class CharacterCreation {
       button.setAttribute('aria-label', swatch.label);
       button.title = swatch.label;
       button.addEventListener('click', () => {
+        current = swatch.colour;
         onPick(swatch.colour);
-        for (const other of buttons) {
-          const selected = other === button;
-          other.dataset.selected = selected ? 'true' : 'false';
-          other.setAttribute('aria-pressed', selected ? 'true' : 'false');
-        }
+        selectCurated(button);
       });
       buttons.push(button);
       row.append(button);
     }
-    section.append(labelEl, row);
+
+    const picker = new ColourWheelPicker({
+      onChange: (colour) => {
+        current = colour;
+        onPick(colour);
+        for (const other of buttons) {
+          other.dataset.selected = 'false';
+          other.setAttribute('aria-pressed', 'false');
+        }
+        picker.setSelected(true);
+      },
+    });
+    // Starts selected when the field's starting colour is not one of the
+    // curated presets at all — e.g. a save file carrying an earlier custom
+    // pick reopening the creator.
+    picker.setSelected(!swatches.some((swatch) => swatch.colour === initial));
+    row.append(picker.trigger);
+    picker.trigger.addEventListener('click', () => picker.toggle(current));
+
+    section.append(labelEl, row, picker.panel);
     return section;
   }
 

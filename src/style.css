@@ -3166,6 +3166,186 @@ kbd {
   transform: translateY(0.1875rem);
 }
 
+/* ---- the "Custom colour" tile + its wheel panel (`ui/ColourWheelPicker.ts`)
+   Additive, next to the curated swatches — see that file's doc comment for
+   why. The tile is a `.charcreate-swatch` (same size, same selection ring)
+   so it sits in the row as just one more colour to consider, except its own
+   "colour" is a standing rainbow rather than `--swatch-colour`, and its cascade
+   position — after `.charcreate-swatch` above — is what lets that win. */
+.colourwheel-trigger {
+  background: conic-gradient(
+    from 90deg,
+    hsl(0 100% 62%),
+    hsl(60 100% 62%),
+    hsl(120 100% 62%),
+    hsl(180 100% 62%),
+    hsl(240 100% 62%),
+    hsl(300 100% 62%),
+    hsl(360 100% 62%)
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.colourwheel-trigger-glyph {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0.0625rem 0.125rem rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* Fades out on close; `ColourWheelPicker.close()` sets `hidden` after this
+   duration elapses so a closed panel cannot be tabbed into. There is no
+   matching pop-in — it is a small inline disclosure below the swatch row,
+   not a new screen, so it simply appears; only the goodbye needs softening. */
+.colourwheel-panel {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.625rem;
+  background: #fff;
+  border: 0.125rem solid rgba(74, 58, 82, 0.1);
+  border-radius: 1.125rem;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.colourwheel-panel[data-open='false'] {
+  opacity: 0;
+}
+
+.colourwheel-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* The wheel: hue by angle, richness (saturation) by distance from the middle.
+   Two flat CSS gradients, not a canvas — see `ColourWheelPicker`'s doc
+   comment for why this is colorimetrically exact rather than a rough
+   picture of one. */
+.colourwheel-wheel {
+  position: relative;
+  flex: none;
+  width: 8.5rem;
+  height: 8.5rem;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: none;
+  background-image:
+    radial-gradient(circle, #fff 0%, rgba(255, 255, 255, 0) 100%),
+    conic-gradient(
+      from 90deg,
+      hsl(0 100% 50%),
+      hsl(30 100% 50%),
+      hsl(60 100% 50%),
+      hsl(90 100% 50%),
+      hsl(120 100% 50%),
+      hsl(150 100% 50%),
+      hsl(180 100% 50%),
+      hsl(210 100% 50%),
+      hsl(240 100% 50%),
+      hsl(270 100% 50%),
+      hsl(300 100% 50%),
+      hsl(330 100% 50%),
+      hsl(360 100% 50%)
+    );
+  border: 0.1875rem solid #fff;
+  box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.14);
+}
+
+.colourwheel-wheel:focus-visible {
+  outline: none; /* the shared rainbow focus ring (see near the top of this file) covers it */
+}
+
+.colourwheel-cursor {
+  position: absolute;
+  width: 1.125rem;
+  height: 1.125rem;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  border: 0.1875rem solid #fff;
+  box-shadow:
+    0 0 0 0.09375rem var(--lgp-ink),
+    0 0.0625rem 0.125rem rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* The exact colour under the cursor right now — the only "readout" this
+   picker ever gives, and it is a swatch, never a number. */
+.colourwheel-preview {
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--colourwheel-preview, #fff);
+  border: 0.1875rem solid #fff;
+  box-shadow: 0 0 0 0.1875rem var(--lgp-ink);
+}
+
+/* The brightness bar: black at one end, this hue/richness at full value at
+   the other — an exact ramp, not a decoration. See the class doc comment. */
+.colourwheel-value {
+  position: relative;
+  width: 100%;
+  max-width: 14rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(to right, #000, var(--colourwheel-rich, #fff));
+  border: 0.1875rem solid #fff;
+  box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.14);
+}
+
+.colourwheel-value-thumb {
+  position: absolute;
+  top: 50%;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 0.1875rem solid var(--lgp-ink);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.colourwheel-hint {
+  margin: 0;
+  font-size: var(--lgp-text-min);
+  font-weight: 700;
+  opacity: 0.65;
+  text-align: center;
+}
+
+.colourwheel-done {
+  appearance: none;
+  cursor: pointer;
+  padding: 0.5rem 1.75rem;
+  font-family: inherit;
+  font-size: var(--lgp-text-min);
+  font-weight: 800;
+  color: var(--lgp-ink);
+  background: var(--lgp-mint);
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 0.1875rem 0 rgba(74, 58, 82, 0.14);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.colourwheel-done:active {
+  transform: translateY(0.1875rem);
+  box-shadow: 0 0 0 rgba(74, 58, 82, 0.14);
+}
+
 /* A GRID, not a flex row. This was `display: flex` with `flex: 1` buttons,
    which is fine for three styles and breaks badly at nine: a flex item will
    not shrink below its own `min-content` width, and each of these contains an
