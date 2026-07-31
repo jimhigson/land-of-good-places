@@ -1,24 +1,44 @@
 import {
+  BufferGeometry,
   ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
+  type MeshToonMaterial,
   Quaternion,
   SphereGeometry,
   TorusGeometry,
   Vector3,
 } from 'three';
-import { PALETTE } from '../style/bridge';
+import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { visibleBounds, visibleTop } from '../style/measure';
-import { addOutline, decal, solid, toonMaterial } from '../style/materials';
+import { visibleTop } from '../style/measure';
+import { addOutline, decal, markShared, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
+import { paintFace, type FacePaintOptions } from '../style/faces';
+import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
 import { blob, type AssetHandle } from '../style/asset';
 import { KID_HEAD_SCALE } from './kid';
-import { buildRipikaHead, RIPIKA_HEAD_SCALE } from './ripika';
-import { createPuffCreature } from './pets';
+import {
+  hoodBibGeometry,
+  hoodHemRollGeometry,
+  hoodPatchGeometry,
+  hoodPeakGeometry,
+  hoodPeakLiningGeometry,
+  hoodShellGeometry,
+  mirrorEar,
+  plushEarGeometry,
+  RIPIKA_HOOD,
+  RIPIKA_PEAK,
+  TRILLA_HOOD,
+  TRILLA_PEAK,
+  type HoodPatchSpec,
+  type HoodShellSpec,
+  type PlushEarSpec,
+} from './hoodShell';
 
 /**
  * The hat shop's stock — and, from build step 5 onwards, what the player wears.
@@ -296,103 +316,318 @@ function createFlowerCrown(): AssetHandle {
   return finish(root);
 }
 
+// =============================================================================
+// The two critter hoods.
+//
+// Both used to be the creature itself, shrunk: `createRipikaHat` called
+// `buildRipikaHead()` and `createPuffHat` called `createPuffCreature()`, and
+// each perched the result on the crown. The family read it as uncanny rather
+// than cute, and rightly — a hat shaped like an animal and a shrunken live
+// animal are different objects. What a child wears is a **character cap**: a
+// crown with panel seams, a peak, a band, sewn-on ears, and the animal's face
+// appliquéd onto the front. `hoodShell.ts` owns the surface those are cut from
+// and carries the design notes; this file assembles and paints them.
+//
+// Neither hood ever comes down over the wearer's face — GAME_DESIGN.md's rule
+// for the RiPika hat, and both peaks clear the wearer's eyes by 0.15 head units
+// (0.23 m). See the peak-height table in HANDOFF/hoodShell.
+// =============================================================================
+
+/** A hood part: solid, toon-shaded, one colour. */
+function hoodPart(geometry: BufferGeometry, colour: number): Mesh {
+  return solid(new Mesh(geometry, toonMaterial(colour)));
+}
+
 /**
- * The RiPika hat: RiPika's own head, at RiPika's own size, worn on top of
- * yours. GAME_DESIGN.md §"Hat shop" — "a large RiPika head worn on top of the
- * wearer's own head" — so it stays on the crown like every other hat here, and
- * never comes down over the face.
+ * A face painted onto a window of the hood's own surface.
  *
- * **It used to be built at 2.1× instead**, chosen so the ball came out as wide
- * as the wearer's whole head. That is not a hat, it is a second head: a ball
- * 1.43 m across whose ear tips stood 1.67 m above the crown, taking a 2.12 m
- * child to 3.65 m — 1.72× her own height — which is the "the RiPika head is
- * too large" half of the family's report. A ball worn on top of a head rises
- * by its own diameter no matter where you sink it, so the only honest fix is a
- * smaller ball.
+ * The texture is cached per key and `markShared`, so the shop stand's copy and
+ * the worn copy paint one canvas between them and `disposeTree` leaves it
+ * alone. A hat is worn and taken off constantly in the character creator, and
+ * a fresh 512² canvas per try-on is exactly the leak `ownTextures` was added
+ * to stop.
+ */
+const hoodFaces = new Map<string, ReturnType<typeof paintFace>>();
+function hoodFaceTexture(key: string, paint: FacePaintOptions): ReturnType<typeof paintFace> {
+  const cached = hoodFaces.get(key);
+  if (cached) return cached;
+  const texture = markShared(paintFace(paint));
+  hoodFaces.set(key, texture);
+  return texture;
+}
+
+function hoodFace(
+  spec: HoodShellSpec,
+  patch: HoodPatchSpec,
+  key: string,
+  paint: FacePaintOptions,
+): Mesh {
+  const material = toonMaterial(0xffffff, {
+    map: hoodFaceTexture(key, paint),
+    transparent: true,
+  });
+  material.alphaTest = 0.02;
+  const mesh = decal(new Mesh(hoodPatchGeometry(spec, patch), material));
+  mesh.name = 'hoodFace';
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
+/**
+ * A pair of sewn plush ears, splayed outward and canted back.
  *
- * `RIPIKA_HEAD_SCALE` is the size it should have been all along, and it is a
- * derived number rather than a tuned one: this *is* a RiPika head, so it is
- * exactly as big as the one on RiPika walking past you in the park. The
- * wearer's own head still reads clearly underneath, and the hat is still by
- * some way the biggest in the shop.
+ * `rotation` order is **ZXY**: the splay has to happen before the cant, or the
+ * cant tips the ear sideways instead of backwards. And the splay is `-side`,
+ * because a positive rotation about Z carries `+y` towards `−x` — getting that
+ * sign wrong made both ears lean inwards and cross over the crown.
+ */
+function addPlushEars(
+  fit: Group,
+  ear: PlushEarSpec,
+  place: { x: number; y: number; z: number; splay: number; cant: number; droop: number },
+  shaftColour: number,
+  tipColour: number,
+): void {
+  const right = plushEarGeometry(ear);
+  const left = { shaft: mirrorEar(right.shaft), tip: mirrorEar(right.tip) };
+  for (const side of [-1, 1] as const) {
+    const group = new Group();
+    group.name = `hoodEar${side < 0 ? 'L' : 'R'}`;
+    group.position.set(side * place.x, place.y, place.z);
+    // One ear droops further than the other: the asymmetric feature every head
+    // in this game has to have (ART_DIRECTION.md §4).
+    group.rotation.set(place.cant, 0, -side * (place.splay + (side < 0 ? place.droop : 0)), 'ZXY');
+    const parts = side < 0 ? left : right;
+    const shaft = hoodPart(parts.shaft, shaftColour);
+    group.add(shaft);
+    addOutline(shaft, 0.011);
+    const tip = hoodPart(parts.tip, tipColour);
+    group.add(tip);
+    addOutline(tip, 0.009);
+    fit.add(group);
+  }
+}
+
+/** RiPika's face, appliquéd. Its own disc cheeks, cocoa nose and "w" mouth. */
+const RIPIKA_HOOD_FACE: FacePaintOptions = {
+  size: 512,
+  eyeY: 0.46,
+  // Much wider than RiPika's own 0.46, because the window this is mapped onto
+  // is wider than it is tall — a cap's front panel is, and the eyes have to
+  // land at ±21° off the front to sit where a character cap's do.
+  eyeGap: 0.6,
+  eyeW: 0.1,
+  eyeH: 0.15,
+  mouth: 'cat',
+  mouthW: 0.072,
+  mouthDrop: 0.235,
+  nose: ART.ripikaTip,
+  blush: ART.ripikaCheek,
+  blushStyle: 'disc',
+  blushR: 0.095,
+};
+
+const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, lift: 0.01 };
+
+/**
+ * The RiPika cap.
  *
- * The division by {@link FIT} is only the unit conversion — `buildRipikaHead`
- * works in metres and the `fit` group is in head units.
+ * A neat six-panel plush snapback in RiPika's yellow: deep-yellow peak with a
+ * cream lining, a cream hem roll for the band, a crown button, and RiPika's own
+ * painted face across the front.
+ *
+ * The ears are the design's main argument that this is a hat rather than a
+ * head. RiPika's own are round tapered cones standing up off the skull; these
+ * are **short, wide, blunt paddles, flattened front-to-back** — appliqué, the
+ * proportions a sewn ear actually has, and deliberately not the long thin
+ * spikes of the character-cap genre's most famous example.
  */
 function createRipikaHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.ripikaHat');
 
-  const ripikaHead = buildRipikaHead(RIPIKA_HEAD_SCALE / FIT);
-  // buildRipikaHead's group is centred on RiPika's own skull centre. Its
-  // lowest point is the underside of the skull, at `-skullR * 0.97` (the
-  // blob's own y-squash) — sink that point to `SIT`, exactly like every other
-  // hat's brim/band, so it grips the wearer's crown rather than floating.
-  ripikaHead.group.position.y = SIT + ripikaHead.skullR * 0.97;
-  fit.add(ripikaHead.group);
+  const shell = hoodPart(hoodShellGeometry(RIPIKA_HOOD), ART.ripikaYellow);
+  fit.add(shell);
+  addOutline(shell, 0.013);
 
-  // Measured to the actual top — the ear tips lean outward under two
-  // rotations, so there is no clean formula — and by walking the vertices
-  // rather than by `Box3`, which takes the axis-aligned box of an
-  // already-rotated ear and reported the tips 28 mm higher than they are.
+  const peak = hoodPart(hoodPeakGeometry(RIPIKA_HOOD, RIPIKA_PEAK), ART.ripikaYellowDeep);
+  fit.add(peak);
+  addOutline(peak, 0.011);
+
+  // The peak's lining is an open sheet, so it needs both sides: a child looking
+  // up at a friend sees the underside of the bill and nothing else of it.
+  const lining = decal(
+    new Mesh(
+      hoodPeakLiningGeometry(RIPIKA_HOOD, RIPIKA_PEAK),
+      toonMaterial(ART.ripikaBelly),
+    ),
+  );
+  (lining.material as MeshToonMaterial).side = DoubleSide;
+  fit.add(lining);
+
+  const band = hoodPart(hoodHemRollGeometry(RIPIKA_HOOD, 0.04), ART.ripikaBelly);
+  fit.add(band);
+
+  const button = blob(0.044, toonMaterial(ART.ripikaYellowDeep), [1, 0.72, 1], 14);
+  button.position.y = RIPIKA_HOOD.semiY + 0.013;
+  fit.add(button);
+
+  addPlushEars(
+    fit,
+    { base: 0.122, length: 0.315, flat: 0.66, curve: 0.58, taper: 0.46, split: 0.7 },
+    { x: 0.185, y: 0.17, z: -0.035, splay: 0.42, cant: -0.22, droop: 0.1 },
+    ART.ripikaYellow,
+    ART.ripikaTip,
+  );
+
+  fit.add(hoodFace(RIPIKA_HOOD, RIPIKA_HOOD_PATCH, 'hood.ripika', RIPIKA_HOOD_FACE));
+
   return finish(root);
 }
 
+/** Trilla's face. The puff's own big eyes and soft blush, no nose. */
+const TRILLA_HOOD_FACE: FacePaintOptions = {
+  size: 256,
+  eyeY: 0.46,
+  eyeGap: 0.58,
+  eyeW: 0.115,
+  eyeH: 0.18,
+  mouth: 'cat',
+  mouthW: 0.062,
+  mouthDrop: 0.205,
+  blush: PALETTE.cheek,
+  blushStyle: 'soft',
+  blushR: 0.11,
+};
+
+const TRILLA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.58, yLo: -0.185, yHi: 0.195, lift: 0.008 };
+
+/** How often the hood bursts into song, in seconds. Rarer than the pet's. */
+const TRILLA_SONG = { min: 12, max: 22, nearSpeedup: 1 };
+
 /**
- * The singing puff, worn as a hat.
+ * The Trilla bonnet — the singing puff, worn.
  *
- * Reuses `createPuffCreature` from `pets.ts` wholesale rather than building a
- * second copy — same ball, same jiggle, same song, just settled onto the
- * head instead of standing on its own paws. The one thing this wrapper does
- * is the origin translation every hat needs: `createPuffCreature` puts the
- * ground at y = 0 the way every creature does, but a hat's origin is the
- * point that sits on `hatAnchor` (the crown), with the model sinking a
- * little *below* that the way every other hat's base does (see `SIT`). So
- * the whole puff is shifted down by exactly the depth of its own paws —
- * measured off the built ball, not guessed at from its radius.
+ * Deliberately a different *kind* of hat from the RiPika cap, so the shop's two
+ * critter hoods do not read as one design in two colours: a soft round bonnet
+ * with **earflaps** that hang beside the wearer's ears, a small pale brim, a
+ * pale bib above it, and Trilla's own heart-pink curl worn as the topknot.
+ * Trilla has no ears of its own, so the flaps carry the silhouette instead —
+ * and a flap is a hem that dives at ±90°, which is the whole reason
+ * `hoodShell.ts` is a parametric surface rather than a stack of blobs.
+ *
+ * **It still sings.** The old builder got the melody, the note burst, the
+ * singing face and the jiggle for free by reusing `createPuffCreature`, and
+ * losing them would have been a real regression, so they are rebuilt here on
+ * top of the hood. The jiggle rides a `mount` group rather than `root`: the
+ * contract reserves `root.scale` for the caller's pop-in (`entities/WornHat.ts`
+ * writes it) and `check:assets` fails any asset that has spent it.
  */
 function createPuffHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.puff');
-  const puff = createPuffCreature({ variant: 'hat' });
 
-  // How deep the ball's own paws are, walked off its vertices — outline hull
-  // and all. It used to be guessed from `PUFF_BALL_RADIUS * 0.92`, a stand-in
-  // for the ball's y-squash that missed the 12 mm outline the ball wears, and
-  // the hat sat 30 mm off the crown instead of settling into the hair.
-  const { bottom } = visibleBounds(puff.root);
-
-  // Every other hat in this file leaves `root` at the origin and draws itself
-  // relative to `SIT`, because `root` *is* the crown anchor — `WornHat` parents
-  // it straight onto `hatAnchor` and pops it by writing `root.scale`, which
-  // scales about that origin. This one was shifting `root.position.y` instead,
-  // which put the hat's declared height and its geometry in two different
-  // spaces (and popped it from a point inside the wearer's skull). The shift
-  // goes on a group of its own between root and body: `body` cannot hold it,
-  // because the puff's jiggle rewrites `body.position` and `body.scale` every
-  // frame.
   const mount = new Group();
   mount.name = 'hat.puff:mount';
-  mount.add(puff.body);
-  // Into `fit`, not `puff.root`: the puff is authored in metres for the pet
-  // pen, and everything worn on a head belongs in head units. It grows with
-  // the head exactly as the sewn hats do — a ball that looked right on the
-  // old skull is a marble on this one (0.33× the head, measured).
   fit.add(mount);
-  // Settle it the same shallow depth into the hair that the bobble hat's rim
-  // and the cap's dome do (SIT + ~0.02), rather than the full SIT a brim uses.
-  mount.position.y = SIT + 0.02 - bottom;
 
-  // `puff.update`/`puff.dispose` are typed as possibly-`undefined` because
-  // `AssetHandle` declares them optional — but with `exactOptionalPropertyTypes`
-  // an optional property must be OMITTED rather than explicitly set to
-  // `undefined`. `createPuffCreature` always supplies both in practice, so
-  // build the object conditionally instead of assigning the (statically)
-  // possibly-undefined value straight through.
+  const shell = hoodPart(hoodShellGeometry(TRILLA_HOOD), PALETTE.blossomPink);
+  mount.add(shell);
+  addOutline(shell, 0.013);
+
+  const peak = hoodPart(hoodPeakGeometry(TRILLA_HOOD, TRILLA_PEAK), PALETTE.stonePinkLight);
+  mount.add(peak);
+  addOutline(peak, 0.011);
+
+  const band = hoodPart(hoodHemRollGeometry(TRILLA_HOOD, 0.036), ART.heartPink);
+  mount.add(band);
+
+  const bib = decal(
+    new Mesh(
+      hoodBibGeometry(TRILLA_HOOD, { halfX: 0.56, yLo: -0.18, yHi: -0.02, lift: 0.006 }),
+      toonMaterial(PALETTE.stonePinkLight),
+    ),
+  );
+  mount.add(bib);
+
+  // The curl: the puff's own asymmetric feature, off-centre and leaning, worn
+  // as the bonnet's knot. Built from the same swept ear the cap's are, wound
+  // most of the way round — a curl is an ear with the bend turned up.
+  const curl = plushEarGeometry({
+    base: 0.082,
+    length: 0.3,
+    flat: 0.88,
+    curve: 1.95,
+    taper: 0.6,
+    split: 0.98,
+  });
+  const knot = hoodPart(curl.shaft, ART.heartPink);
+  knot.position.set(0.062, TRILLA_HOOD.semiY - 0.05, -0.035);
+  knot.rotation.set(0.24, 0, -0.44, 'ZXY');
+  mount.add(knot);
+  addOutline(knot, 0.011);
+  curl.tip.dispose();
+
+  const facePatch = hoodFace(TRILLA_HOOD, TRILLA_HOOD_PATCH, 'hood.trilla', TRILLA_HOOD_FACE);
+  mount.add(facePatch);
+  const faceMaterial = facePatch.material as MeshToonMaterial;
+  const neutralFace = faceMaterial.map;
+  const singingFace = hoodFaceTexture('hood.trilla.singing', {
+    ...TRILLA_HOOD_FACE,
+    eyeStyle: 'archHappy',
+    mouth: 'oh',
+    mouthW: (TRILLA_HOOD_FACE.mouthW ?? 0.062) * 1.25,
+  });
+
+  // Measured before the notes join it: a burst of floating notes is not part of
+  // how tall a hat is, and the name label sits at `height + 0.42`.
+  const handle = finish(root);
+
+  // --------------------------------------------------------------- singing
+  const rng = new Rng(0x7211a + puffHatCount * 7919);
+  puffHatCount += 1;
+  const notes = createPuffNotes(0x7211a + puffHatCount * 104729);
+  mount.add(notes.root);
+  const scheduler = createSongScheduler(rng, TRILLA_SONG);
+  const mouthY = TRILLA_HOOD_PATCH.yLo + (TRILLA_HOOD_PATCH.yHi - TRILLA_HOOD_PATCH.yLo) * 0.3;
+  const mouthZ = TRILLA_HOOD.shellR * TRILLA_HOOD.depth;
+  const breathePhase = rng.range(0, Math.PI * 2);
+  let singing = false;
+  let singRemaining = 0;
+
   return {
-    ...finish(root),
-    ...(puff.update && { update: puff.update }),
-    ...(puff.dispose && { dispose: puff.dispose }),
+    ...handle,
+    update(dt: number, elapsed: number) {
+      if (scheduler.update(dt, false) && !singing) {
+        const song = playPuffMelody(rng, 0.8);
+        singing = true;
+        singRemaining = song.duration;
+        faceMaterial.map = singingFace;
+        faceMaterial.needsUpdate = true;
+        notes.burst(0, mouthY, mouthZ, song.noteCount);
+      }
+      if (singing) {
+        singRemaining -= dt;
+        if (singRemaining <= 0) {
+          singing = false;
+          faceMaterial.map = neutralFace;
+          faceMaterial.needsUpdate = true;
+        }
+      }
+      notes.update(dt);
+
+      // A gentle breathing squash, livelier while it is singing along.
+      const amount = singing ? 0.055 : 0.03;
+      const breathe = Math.sin(elapsed * 1.7 + breathePhase) * amount;
+      mount.scale.set(1 + breathe * 0.6, 1 - breathe, 1 + breathe * 0.6);
+    },
+    dispose() {
+      notes.root.removeFromParent();
+      notes.dispose();
+    },
   };
 }
+
+/** Staggers each bonnet's jiggle and song, deterministically — never `Math.random()`. */
+let puffHatCount = 0;
 
 const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   party: createPartyHat,
