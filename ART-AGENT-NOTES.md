@@ -374,6 +374,22 @@ camera sees).
 - **A stale service worker will make your changes invisible.** If the game is
   behaving as though your edits do not exist, that is why — CLAUDE.md has the
   console snippet.
+- **A `CanvasTexture` mip-maps by default, and a periodic pattern (stripes,
+  ribs, a repeating bump) averages towards flat grey at any mip level coarser
+  than one texel per period.** A bobble hat's knit-rib normal map rendered
+  completely smooth — material and texture both provably correct, RGB
+  oscillation confirmed by reading the canvas pixels back — until
+  `generateMipmaps = false` was set. If a canvas-painted texture has fine
+  repeating structure and is going to be viewed smaller than it was painted,
+  turn mipmaps off (or choose a frequency low enough that mip washout does not
+  matter at the size it will actually render at).
+- **This game's toon ramp has four bands (`TOON_RAMP`), and a "physically
+  correct" normal-map tilt is invisible under it almost everywhere except the
+  sliver of surface near a band boundary.** A bobble hat's ribs, painted at the
+  angle a real knit stitch actually has (`normalScale = 1`), read as
+  completely flat; `normalScale = 7` was the smallest multiplier that showed
+  up in a screenshot. Tune a normal map's strength by rendering at a few
+  multipliers and comparing, not by trusting the angle you painted.
 
 ---
 
@@ -389,3 +405,79 @@ camera sees).
 - A refactor is not a licence to restyle. If the ask is "move where the pixels
   live", prove the pixels did not change — and flag separately, with numbers,
   anything that genuinely had to move.
+
+---
+
+## 10. "It sits too high" is not always a height number (1 August 2026)
+
+`hats.ts`'s `finish()` grows a hat about its **brow line** — the lowest point
+anything in the hat crosses the wearer's eyes — specifically so a bigger hat
+never comes a millimetre further down her face (`HANDOFF-hat-sizing.md`,
+31 July). That guarantee is still correct and was not touched fixing the
+Sparkly Crown's "sits too high" complaint. What actually happened:
+
+The crown's brow contact point (found off to one side, since dead front has no
+eye at all — see `kidEyeTopAt`) sits very close to the band's *own* bottom
+edge. Scaling almost the whole hat outward from a point barely below its own
+base makes its **radius** balloon far faster than its vertical position
+drops. Measured: the band's lowest point was *lower* after the ×1.95 scale-up
+than before it — this was never a literal height bug. But the band
+(`CylinderGeometry`) is an open ring, not a solid disc, and once its radius
+passed the skull's actual width at that height, the background showed
+straight through the gap between the ring and the hair below it — which is
+exactly what "floating above the head" looks like in a screenshot, from a
+hat whose every vertex had in fact moved *down*.
+
+**The lesson: when a hat "floats", check whether it is a height problem or a
+radius-vs-silhouette problem before reaching for the obvious fix.** A ring- or
+band-shaped mesh (anything with an open centre) can look like it is hovering
+purely because it has grown wider than whatever is supposed to fill it, with
+its vertical position never having been wrong at all. The fix here was an
+*additional*, hat-specific sink applied to the pre-scale geometry
+(`CROWN_LOWER`/`SUN_LOWER` in `hats.ts`) — deep enough that the enlarged
+ring's lower half sits inside the *hair's* silhouette (wider than the bare
+skull `check:hat-fit` measures), not a change to the brow-anchoring formula
+itself, which would have reopened the face-covering bug it exists to prevent.
+There is no `check:*` gate for this — "does the background show through the
+gap" is a rendering question a bounding-box or vertex check cannot see — so it
+was tuned by eye against a frozen-clock screenshot and the reasoning recorded
+next to the constant, the same way every hand-tuned number in this codebase
+is supposed to be.
+
+## 11. Six-panel construction needs raised geometry, not just relief
+
+`hoodShellGeometry` already had a `panels`/`seamR`/`seamSharp` mechanism that
+creates a real `cos(panels·φ)` radius relief with sharpened creases at each
+seam. On the Cheery Cap (`panels: 6, seamR: 0.045, seamSharp: 6`) this does
+not read as a six-panel cap at any distance — it is a shallow, continuously
+shaded bump under a four-band toon ramp, and `computeVertexNormals` smooths
+straight across it. The fix that actually works is real raised geometry: six
+thin tubes swept down the shell's own panel-seam azimuths (the troughs of that
+same `cos(panels·φ)` relief), converging near the crown button, in a
+contrasting trim colour. See `hoodPanelSeamsGeometry` in `hoodShell.ts` — it
+reuses `hoodShellSampler` so the seams ride the real surface, the same
+discipline `hoodHemRollGeometry` and the peak already follow, just swept
+**vertically** (fixed azimuth, varying height) rather than **around**
+(fixed height, varying azimuth), which changes which two basis vectors the
+tube's cross-section is built from.
+
+**The general lesson: a subtle relief that is geometrically real can still be
+invisibly subtle once it goes through toon shading.** If a construction detail
+needs to *read*, not just be technically present, verify it by rendering — the
+same rule as everywhere else in this file, and the reason the cap's seams grew
+from a first pass that was still too faint (`tube: 0.014`) to one that
+actually shows in a screenshot (`tube: 0.022`).
+
+## 12. A shop-swappable hat is not a bake-vs-patch decision
+
+The bake-vs-patch rule (§5) is about a worn item with **one fixed identity**
+needing its own painted face — a specific hood, permanently that hood. A hat
+in a shop is the opposite shape of problem: one head wears **many** freely
+swapped hat kinds, shown and hidden by `entities/WornHat.ts`. Baking any hat
+into the character's own UV would need either one shared UV window fought
+over by eight unrelated shapes, or a UV variant per hat kind on the character
+asset — which is exactly the `InstancedCrowd` blow-up (§5's "deliberate
+exclusions") this codebase has already ruled out once, for the same reason.
+**Not every "should this be baked in" question has the same answer** — check
+whether the thing being drawn actually has one fixed identity before applying
+the pattern that was built for hoods.
