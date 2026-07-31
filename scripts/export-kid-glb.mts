@@ -53,7 +53,6 @@ import { createKid, KID_BODY_PARTS, type KidBodyPart } from '../src/art/models/k
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(here, '../src/art/assets/kid.glb');
-const OUT_TS = resolve(here, '../src/art/assets/kidGlb.ts');
 
 /**
  * `GLTFExporter`'s binary path reads its own `Blob` back through a `FileReader`,
@@ -204,41 +203,6 @@ const bytes = Buffer.from(glb);
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, bytes);
 
-/**
- * The same bytes again, as a TypeScript module.
- *
- * **Why the asset is imported rather than fetched.** `createKid` is synchronous
- * and has fifteen callers, five of them Node check scripts and one of them the
- * character creator rebuilding on every tap. A fetched asset would make the
- * model's arrival asynchronous for all of them, and this is a PWA whose service
- * worker has already cost hours by serving a stale copy of a file (CLAUDE.md).
- * An imported module is the same in Node, in Vitest and in the browser, arrives
- * with the code that uses it, and cannot go stale independently of it.
- *
- * It costs about 15 KB gzipped over fetching the `.glb` directly (60 KB against
- * 45 KB). **That trade stops being right at the second authored character** —
- * six of these in the JS bundle is not the same decision as one. When that day
- * comes, only `art/models/kidAsset.ts` changes: it becomes a lookup in a
- * registry that a preload step fills before the game boots.
- *
- * The `.glb` next to it is the real artefact — what Blender reads and writes,
- * and what `check:character-parity` puts through three.js's own `GLTFLoader`.
- * This file is generated from it and must never be hand-edited.
- */
-writeFileSync(
-  OUT_TS,
-  `/**\n` +
-    ` * The player kid's body and head, as authored geometry.\n` +
-    ` *\n` +
-    ` * **Generated — do not edit.** Run \`npm run export:kid\` to rebuild this from\n` +
-    ` * \`kid.glb\`, and see \`scripts/export-kid-glb.mts\` for what is in it, what is\n` +
-    ` * deliberately not, and why the bytes are imported rather than fetched.\n` +
-    ` *\n` +
-    ` * ${scene.children.length} parts, ${verts} vertices, ${tris} triangles, ${bytes.length} bytes.\n` +
-    ` */\n` +
-    `export const KID_GLB_BASE64 =\n  '${bytes.toString('base64')}';\n`,
-);
-
 const kb = (n: number): string => `${(n / 1024).toFixed(1)} KB`;
 
 console.log(`\nexport:kid — the player kid's body and head\n`);
@@ -248,9 +212,5 @@ console.log(
     ` — ${verts} verts, ${tris} tris stored`,
 );
 console.log(`  wrote ${OUT}`);
-console.log(`  wrote ${OUT_TS}`);
 console.log(`  ${kb(bytes.length)} on disk, ${kb(gzipSync(bytes).length)} gzipped`);
-console.log(
-  `  ${kb(bytes.toString('base64').length)} as a module, ` +
-    `${kb(gzipSync(Buffer.from(bytes.toString('base64'))).length)} gzipped\n`,
-);
+console.log(`  now run \`npm run pack:kid\` to rebuild the module the game imports.\n`);

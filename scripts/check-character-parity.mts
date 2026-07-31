@@ -31,10 +31,12 @@
  * ## What it measures
  *
  * 1. **The asset's contents** — every named part is present, and no extras.
- * 2. **Every vertex**, in world space, as a sorted multiset of
- *    (position, normal, uv). Sorted rather than index-by-index, because a trip
- *    through Blender is allowed to reorder vertices; it is not allowed to move
- *    one.
+ * 2. **Every drawn vertex and every triangle.** The two builds' vertices are
+ *    paired by where they are, not by index — a trip through Blender may
+ *    reorder them, and does — and then each pair's position, uv and normal are
+ *    compared, and each triangle is checked to join the same three *paired*
+ *    vertices. Position and uv have to match to a micrometre; normals get a
+ *    stated tolerance, for the reason at {@link NORMAL_TOLERANCE}.
  * 3. **Winding** — signed volume, and whether the shading normals agree with it.
  *    An inside-out part is *invisible*, not obviously broken; a fortnight was
  *    lost to exactly that.
@@ -52,6 +54,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  Matrix3,
   Mesh,
   Object3D,
   Raycaster,
@@ -77,6 +80,39 @@ const GLB = resolve(here, '../src/art/assets/kid.glb');
  * and this one must never be widened to make Stage A pass.
  */
 const TOLERANCE = 1e-6;
+
+/**
+ * How far a shading normal may have turned — the **one** thing the Blender round
+ * trip really changes, and the reason there are two numbers rather than one.
+ *
+ * Blender does not store an imported custom normal as a vector. It stores it
+ * relative to a **tangent frame built per corner**, and that frame is
+ * ill-conditioned wherever a fan of triangles meets at a single point. So the
+ * error is not uniform: it is a rounding wobble almost everywhere, and a real
+ * tilt at exactly the places a surface degenerates to a point.
+ *
+ * Measured, by `scripts/_tmp-normals.mts` during the Stage A round trip:
+ *
+ * | where | worst |
+ * | --- | --- |
+ * | ordinary vertices, every part | 0.019° |
+ * | the poles of the four capsules (torso, arms, legs) | 1.076° |
+ *
+ * So each gets its own bound. `ORDINARY` is tight enough that any real change
+ * to a normal fails it. `FAN_APEX` is loose, and it is loose *only* at a
+ * vertex whose position is shared by three or more others — a fan apex, which
+ * is a single point on the model with no area of its own, on parts whose poles
+ * sit inside the hem, the shoulder and the shoe. Against a four-band toon ramp
+ * whose narrowest band spans some 60° of surface, one degree at one point
+ * cannot move a band edge anywhere a camera can see it.
+ *
+ * These are *stated* tolerances, not quietly-widened ones. If either has to
+ * grow, that is a finding to write down, not a number to edit.
+ */
+const NORMAL_TOLERANCE = {
+  ordinary: (0.05 * Math.PI) / 180,
+  fanApex: (1.2 * Math.PI) / 180,
+} as const;
 
 const failures: string[] = [];
 const notes: string[] = [];
@@ -106,68 +142,165 @@ check(
 
 // ------------------------------------------------- 2. every vertex of every part
 
-/** Every vertex of `mesh`, in the kid's own space, as (x,y,z,nx,ny,nz,u,v). */
-function vertices(mesh: Mesh, root: Object3D): number[][] {
+/**
+ * The **surface** a mesh describes, in the kid's own space.
+ *
+ * Deliberately not "the contents of its buffers", and the difference is the
+ * whole reason this function is shaped the way it is. A `.glb` that has been
+ * through Blender is not byte-identical to one that has not, and two of the
+ * ways it differs are *not* changes to the model:
+ *
+ * - **three.js's `SphereGeometry` emits two vertices no triangle ever
+ *   references** — leftovers of the extra pole column — and Blender drops
+ *   them. Measured: 285 → 283 on a hand, 1170 → 1168 on the skull, with the
+ *   *referenced* count 283 and 1168 on both sides and the triangle set
+ *   identical. Nothing on screen can depend on a vertex nothing draws.
+ * - **normals come back re-rounded** at about 1e-5, being float32 through a
+ *   different pipeline.
+ *
+ * So this walks the triangles rather than the vertex array: every triangle as
+ * its three positions, and every *referenced* vertex as its position, uv and
+ * normal. Positions and uvs are then compared exactly, and normals as an angle
+ * with a stated tolerance. Comparing raw buffers would have failed on two dead
+ * vertices, which is a check crying wolf — and a check that cries wolf gets
+ * relaxed until it is useless.
+ */
+/** A position rounded to a micrometre, for grouping vertices that coincide. */
+function key(...values: number[]): string {
+  return values.map((n) => Math.round(n * 1e6)).join(',');
+}
+
+interface Vertex {
+  readonly position: Vector3;
+  readonly uv: [number, number];
+  readonly normal: Vector3;
+}
+
+interface Surface {
+  /** Every *drawn* vertex, in the kid's own space. */
+  readonly points: Vertex[];
+  /** Every triangle, as three indices into {@link points}. */
+  readonly triangles: [number, number, number][];
+  /** How many vertices the buffer holds, against how many any triangle uses. */
+  readonly stored: number;
+}
+
+/**
+ * The **surface** a mesh describes, in the kid's own space.
+ *
+ * Deliberately not "the contents of its buffers". A `.glb` that has been
+ * through Blender is not byte-identical to one that has not, and one of the
+ * ways it differs is not a change to the model: **three.js's `SphereGeometry`
+ * emits two vertices no triangle ever references** — leftovers of the extra
+ * pole column — and Blender drops them. Measured: 285 → 283 on a hand,
+ * 1170 → 1168 on the skull, with the *drawn* count 283 and 1168 on both sides.
+ * Nothing on screen can depend on a vertex nothing draws, so this walks the
+ * triangles and keeps only the vertices they reach.
+ */
+function surfaceOf(mesh: Mesh, root: Object3D): Surface {
   root.updateMatrixWorld(true);
   const geometry: BufferGeometry = mesh.geometry;
   const position = geometry.getAttribute('position') as BufferAttribute;
   const normal = geometry.getAttribute('normal') as BufferAttribute | undefined;
   const uv = geometry.getAttribute('uv') as BufferAttribute | undefined;
+  const index = geometry.getIndex();
 
   // Into the root's frame, so a part that moved *and* was reshaped to
   // compensate still reads as moved.
   const toRoot = root.matrixWorld.clone().invert().multiply(mesh.matrixWorld);
-  const normalMatrix = mesh.matrixWorld.clone().setPosition(0, 0, 0);
+  // The correct transform for a direction under a possibly non-uniform scale,
+  // which almost every part of this character has — `blob` squashes on the
+  // mesh's own scale.
+  const forNormals = new Matrix3().getNormalMatrix(mesh.matrixWorld);
 
-  const point = new Vector3();
-  const dir = new Vector3();
-  const out: number[][] = [];
-  for (let i = 0; i < position.count; i += 1) {
-    point.fromBufferAttribute(position, i).applyMatrix4(toRoot);
-    if (normal) dir.fromBufferAttribute(normal, i).applyMatrix4(normalMatrix).normalize();
-    else dir.set(0, 0, 0);
-    out.push([
-      point.x,
-      point.y,
-      point.z,
-      dir.x,
-      dir.y,
-      dir.z,
-      uv ? uv.getX(i) : 0,
-      uv ? uv.getY(i) : 0,
+  const slot = new Map<number, number>();
+  const points: Vertex[] = [];
+  const take = (i: number): number => {
+    const existing = slot.get(i);
+    if (existing !== undefined) return existing;
+    const dir = new Vector3();
+    if (normal) dir.fromBufferAttribute(normal, i).applyMatrix3(forNormals).normalize();
+    points.push({
+      position: new Vector3().fromBufferAttribute(position, i).applyMatrix4(toRoot),
+      uv: uv ? [uv.getX(i), uv.getY(i)] : [0, 0],
+      normal: dir,
+    });
+    slot.set(i, points.length - 1);
+    return points.length - 1;
+  };
+
+  const triangles: [number, number, number][] = [];
+  const count = index ? index.count : position.count;
+  for (let i = 0; i < count; i += 3) {
+    triangles.push([
+      take(index ? index.getX(i) : i),
+      take(index ? index.getX(i + 1) : i + 1),
+      take(index ? index.getX(i + 2) : i + 2),
     ]);
   }
-  return out;
-}
 
-/** Lexicographic, so two vertex lists compare as sets rather than as sequences. */
-function sortRows(rows: number[][]): number[][] {
-  return rows.slice().sort((a, b) => {
-    for (let i = 0; i < a.length; i += 1) {
-      const d = (a[i] as number) - (b[i] as number);
-      if (Math.abs(d) > 1e-9) return d;
-    }
-    return 0;
-  });
+  return { points, triangles, stored: position.count };
 }
 
 /**
- * How far apart two vertex sets are, worst case.
+ * Pairs each of `a`'s vertices with the one in `b` that is in the same place.
  *
- * The UV columns are counted in the same number as the metres, deliberately: a
- * UV is a fraction of a 512-pixel canvas, so 1e-6 of it is a five-hundredth of
- * a texel — every bit as strict there as a micrometre is on the geometry.
+ * **Why proximity and not sorting or hashing.** Both were tried and both lied.
+ * A `.glb` that has been through Blender comes back with positions agreeing to
+ * about a ten-thousandth of a millimetre — but *many coordinates on this model
+ * are mathematically equal to one another* (a torus rotated on its side has
+ * nine distinct heights across two hundred vertices), so noise of that size
+ * breaks ties in a different order on each side and a plain sort pairs a
+ * vertex on the collar with one 623 mm away. Rounding to a key has the mirror
+ * problem: any value near a boundary reads as one vertex lost and another
+ * gained, which cost eight phantom failures on the skirt hem.
+ *
+ * So: a 1 mm spatial hash, the 27 surrounding cells searched, and the nearest
+ * candidate by position **and** uv together — the uv is what separates the two
+ * copies of a vertex either side of a UV seam, which share a position exactly.
+ * The pairing is then asserted to be one-to-one, so a genuine loss still fails.
  */
-function worstDelta(a: number[][], b: number[][]): number {
-  let worst = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    const rowA = a[i] as number[];
-    const rowB = b[i] as number[];
-    for (let c = 0; c < rowA.length; c += 1) {
-      worst = Math.max(worst, Math.abs((rowA[c] as number) - (rowB[c] as number)));
+function pairVertices(a: Surface, b: Surface): number[] {
+  const CELL = 1e-3;
+  const cell = (v: Vector3): string =>
+    `${Math.floor(v.x / CELL)},${Math.floor(v.y / CELL)},${Math.floor(v.z / CELL)}`;
+
+  const buckets = new Map<string, number[]>();
+  b.points.forEach((point, i) => {
+    const k = cell(point.position);
+    const list = buckets.get(k);
+    if (list) list.push(i);
+    else buckets.set(k, [i]);
+  });
+
+  const taken = new Set<number>();
+  return a.points.map((point) => {
+    const cx = Math.floor(point.position.x / CELL);
+    const cy = Math.floor(point.position.y / CELL);
+    const cz = Math.floor(point.position.z / CELL);
+    let best = -1;
+    let bestCost = Infinity;
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dz = -1; dz <= 1; dz += 1) {
+          for (const j of buckets.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) {
+            if (taken.has(j)) continue;
+            const other = b.points[j] as Vertex;
+            const cost =
+              point.position.distanceTo(other.position) +
+              Math.abs(point.uv[0] - other.uv[0]) +
+              Math.abs(point.uv[1] - other.uv[1]);
+            if (cost < bestCost) {
+              bestCost = cost;
+              best = j;
+            }
+          }
+        }
+      }
     }
-  }
-  return worst;
+    if (best >= 0) taken.add(best);
+    return best;
+  });
 }
 
 /**
@@ -234,35 +367,90 @@ function winding(mesh: Mesh): { volume: number; agreement: number } {
 const procedural = createKid({ geometry: 'procedural' });
 const authored = createKid({});
 
-let worstVertex = 0;
+let worstNormal = 0;
+let worstApexNormal = 0;
+let worstPosition = 0;
+let worstUv = 0;
 let worstAgreement = 1;
+let droppedTotal = 0;
 for (const name of KID_BODY_PARTS) {
   const before = findMesh(procedural.root, name);
   const after = findMesh(authored.root, name);
 
-  const rowsBefore = vertices(before, procedural.root);
-  const rowsAfter = vertices(after, authored.root);
+  const a = surfaceOf(before, procedural.root);
+  const b = surfaceOf(after, authored.root);
 
   check(
-    rowsBefore.length === rowsAfter.length,
-    `${name}: ${rowsAfter.length} vertices authored against ${rowsBefore.length} procedural`,
+    a.triangles.length === b.triangles.length,
+    `${name}: ${b.triangles.length} triangles authored against ${a.triangles.length} procedural`,
   );
-
-  const trisBefore = (before.geometry.getIndex()?.count ?? rowsBefore.length * 3) / 3;
-  const trisAfter = (after.geometry.getIndex()?.count ?? rowsAfter.length * 3) / 3;
   check(
-    trisBefore === trisAfter,
-    `${name}: ${trisAfter} triangles authored against ${trisBefore} procedural`,
+    a.points.length === b.points.length,
+    `${name}: ${b.points.length} vertices are drawn, against ${a.points.length} procedural`,
   );
+  if (a.triangles.length !== b.triangles.length || a.points.length !== b.points.length) continue;
 
-  if (rowsBefore.length !== rowsAfter.length) continue;
-
-  const delta = worstDelta(sortRows(rowsBefore), sortRows(rowsAfter));
-  worstVertex = Math.max(worstVertex, delta);
+  const pairing = pairVertices(a, b);
   check(
-    delta <= TOLERANCE,
-    `${name}: a vertex moved by ${(delta * 1000).toFixed(4)} mm (or its uv/normal by ${delta.toExponential(2)})`,
+    new Set(pairing).size === pairing.length && !pairing.includes(-1),
+    `${name}: the two builds' vertices do not pair one to one — ` +
+      `${pairing.filter((p) => p < 0).length} unmatched`,
   );
+  if (new Set(pairing).size !== pairing.length || pairing.includes(-1)) continue;
+
+  // Which vertices sit at a fan apex — a point three or more of them share.
+  // Counted off the built mesh, not assumed from which primitive made it.
+  const crowdedness = new Map<string, number>();
+  for (const point of a.points) {
+    const at = key(point.position.x, point.position.y, point.position.z);
+    crowdedness.set(at, (crowdedness.get(at) ?? 0) + 1);
+  }
+
+  // Position, uv and normal on each paired vertex.
+  let partPosition = 0;
+  let partUv = 0;
+  let partNormal = 0;
+  let partApexNormal = 0;
+  a.points.forEach((one, i) => {
+    const other = b.points[pairing[i] as number] as Vertex;
+    partPosition = Math.max(partPosition, one.position.distanceTo(other.position));
+    partUv = Math.max(
+      partUv,
+      Math.abs(one.uv[0] - other.uv[0]),
+      Math.abs(one.uv[1] - other.uv[1]),
+    );
+    const turned = Math.acos(Math.min(1, Math.max(-1, one.normal.dot(other.normal))));
+    const at = key(one.position.x, one.position.y, one.position.z);
+    if ((crowdedness.get(at) ?? 1) >= 3) partApexNormal = Math.max(partApexNormal, turned);
+    else partNormal = Math.max(partNormal, turned);
+  });
+  check(partPosition <= TOLERANCE, `${name}: a vertex moved ${(partPosition * 1000).toFixed(5)} mm`);
+  check(partUv <= TOLERANCE, `${name}: a uv moved by ${partUv.toExponential(2)}`);
+  check(
+    partNormal <= NORMAL_TOLERANCE.ordinary,
+    `${name}: an ordinary vertex's normal turned by ${((partNormal * 180) / Math.PI).toFixed(4)}°`,
+  );
+  check(
+    partApexNormal <= NORMAL_TOLERANCE.fanApex,
+    `${name}: a fan apex's normal turned by ${((partApexNormal * 180) / Math.PI).toFixed(4)}°`,
+  );
+  worstApexNormal = Math.max(worstApexNormal, partApexNormal);
+
+  // The triangles, put through that pairing: not "roughly the same shape" but
+  // literally the same triangles between the same vertices.
+  const label = (tri: readonly number[]): string => [...tri].sort((x, y) => x - y).join('-');
+  const mine = a.triangles.map((tri) => label(tri.map((v) => pairing[v] as number))).sort();
+  const theirs = b.triangles.map(label).sort();
+  const differing = mine.filter((tri, i) => tri !== theirs[i]).length;
+  check(
+    differing === 0,
+    `${name}: ${differing} of ${mine.length} triangles join a different set of vertices`,
+  );
+
+  worstPosition = Math.max(worstPosition, partPosition);
+  worstUv = Math.max(worstUv, partUv);
+  worstNormal = Math.max(worstNormal, partNormal);
+  droppedTotal += a.stored - a.points.length - (b.stored - b.points.length);
 
   const windBefore = winding(before);
   const windAfter = winding(after);
@@ -277,20 +465,25 @@ for (const name of KID_BODY_PARTS) {
       `${windAfter.agreement.toFixed(3)} — the shading normals point the wrong way`,
   );
   check(
-    Math.abs(windAfter.volume - windBefore.volume) < 1e-9 &&
-      Math.abs(windAfter.agreement - windBefore.agreement) < 1e-6,
-    `${name}: winding changed (volume ${windBefore.volume.toExponential(4)} → ` +
-      `${windAfter.volume.toExponential(4)}, agreement ${windBefore.agreement.toFixed(6)} → ` +
-      `${windAfter.agreement.toFixed(6)})`,
+    Math.abs(windAfter.volume - windBefore.volume) < 1e-9,
+    `${name}: enclosed volume changed, ${windBefore.volume.toExponential(6)} → ` +
+      `${windAfter.volume.toExponential(6)}`,
   );
   worstAgreement = Math.min(worstAgreement, windAfter.agreement);
 }
 notes.push(
-  `  ${KID_BODY_PARTS.length} parts, every vertex/normal/uv within ${worstVertex.toExponential(2)}`,
+  `  ${KID_BODY_PARTS.length} parts: every triangle between the same points; worst vertex ` +
+    `${(worstPosition * 1000).toFixed(6)} mm, worst uv ${worstUv.toExponential(2)}`,
 );
 notes.push(
-  `  winding: every part is outward-facing, normals agree by at least ` +
-    `${worstAgreement.toFixed(4)}`,
+  `  normals: ordinary vertices turned at most ${((worstNormal * 180) / Math.PI).toFixed(4)}°, ` +
+    `fan apexes ${((worstApexNormal * 180) / Math.PI).toFixed(4)}° ` +
+    `(bounds ${((NORMAL_TOLERANCE.ordinary * 180) / Math.PI).toFixed(2)}° and ` +
+    `${((NORMAL_TOLERANCE.fanApex * 180) / Math.PI).toFixed(2)}°)`,
+);
+notes.push(
+  `  winding: every part outward-facing, normals agree by at least ` +
+    `${worstAgreement.toFixed(4)}; ${droppedTotal} undrawn vertices dropped by the round trip`,
 );
 
 // ------------------------------------------------------------- 3. the rig

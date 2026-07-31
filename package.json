@@ -25,6 +25,8 @@
     "check:hop-clearance": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hop-clearance.mts",
     "check:character-parity": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-character-parity.mts",
     "export:kid": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/export-kid-glb.mts",
+    "pack:kid": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-kid-asset.mts",
+    "blend:kid": "blender --background --factory-startup --python art/blend/kid_roundtrip.py && npm run pack:kid",
     "check:wall-tunnelling": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:all": "npm run build && npm run test:procgen && npm run check:wall-tunnelling",
     "preview": "vite preview",
