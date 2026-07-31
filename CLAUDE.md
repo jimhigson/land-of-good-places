@@ -68,6 +68,12 @@ foreground page steals the user's focus and switches macOS Spaces, which is
 horrible when they are doing something else. Close every page you open and
 kill your dev server when you finish. See QA-PLAYBOOK.md.
 
+**Kill only the dev server you started, by its PID.** Never `pkill -f vite`
+or any other blanket process match — an agent did this on 28 July and took
+out the user's own long-running hohjs GAME and EDITOR dev servers along with
+its own. Note the exact PID (or the port) when you start your server, and
+stop only that.
+
 ## A stale service worker will waste your hour
 
 This is a PWA. A service worker precached from **another agent's dev server on
