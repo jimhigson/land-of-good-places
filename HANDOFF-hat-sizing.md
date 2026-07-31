@@ -1,38 +1,63 @@
-# HANDOFF — hat-sizing
+# HANDOFF — hat-sizing (31 July 2026 re-open)
 
-Branch `hat-sizing`, worktree `.claude/worktrees/hat-sizing`.
-Family bug: **every hat is much too small, except the RiPika head, which is too large.**
+Branch `feat/hat-sizing`, off `origin/main` (986890d).
 
-## Root cause (measured, not guessed)
+## The ask (from the family, quoted verbatim in the session transcript)
 
-`art/models/kid.ts`'s cartoon pass took `HEAD` from 1 to 1.5. Everything inside
-the head group is written `x * HEAD`, so hair, ears, face patch and the hat
-anchor all grew. `art/models/hats.ts` is a different file holding the raw
-0.44 m-skull numbers with no reference to `HEAD`, so **the hats did not grow**.
+1. **"totally fine, but make all hats 50% bigger"** — every hat, ×1.5.
+2. **"make crown and cherry cap 30% bigger again"** — an *additional* ×1.3 on
+   the Sparkly Crown and the Cheery Cap only, so those two land at ~×1.95.
+   RiPika Cap and Trilla Hat are **not** named: base ×1.5 only.
 
-The RiPika hat is unrelated: it was added a day later at `RIPIKA_HAT_SCALE =
-2.1`, picked so the ball is as wide as the wearer's *whole head*. A ball worn
-on top of a head rises by its own diameter, so it took a 2.12 m child to
-3.65 m.
+Implemented once as scratch (`// TEMPORARY: for testing`, a `hatGroups(name,
+extra)` parameter) during a live-testing session, then lost when the Cheery Cap
+and the two critter hoods were rebuilt on `hoodShell.ts`. This branch makes it
+permanent.
 
-## Measuring
+## Finding 1 — a uniform scale about the hat anchor blinds the wearer
 
-`scripts/measure-hat-fit.mts` (run it with the same node flags as the other
-`.mts` checks; also wired as `npm run check:hat-fit`). Builds the real kid and
-the real hats, measures both about the hat anchor's axis, vertices not boxes.
+`hatGroups` puts every hat's geometry in a `fit` group scaled by
+`FIT = KID_HEAD_SCALE`, and the group's origin **is the hat anchor** (the crown
+of the skull). So multiplying `fit.scale` by `k` scales the hat about the crown:
+it gets `k×` wider **and its hem descends `k×` further down the face**.
 
-## Fix
+Measured (`scripts/probe-hat-scale.mts`, per-azimuth against `check:hair`'s own
+eye model — eye top is 0.385 m below the anchor):
 
-- `KID_HEAD_SCALE` exported from `kid.ts`; `RIPIKA_HEAD_SCALE` from `ripika.ts`.
-- `hats.ts` is authored in **head units** and converted once by a per-hat `fit`
-  group scaled by `KID_HEAD_SCALE`. `root.scale` stays 1 for the caller's pop.
-- Every hat's `height` is measured (`visibleTop`), not hand-written — retires
-  four `KNOWN_DRIFT` entries in `check:assets`.
-- The RiPika hat is built at `RIPIKA_HEAD_SCALE`: it *is* a RiPika head.
-- Shop stands use the exported `HAT_DISPLAY_SCALE` so the displays are
-  unchanged (life-size hats would saw through their neighbours at 0.85 m).
+| hat | clearance now | after a naive ×1.5 / ×1.95 |
+| --- | --- | --- |
+| party | 0.221 | 0.138 |
+| crown | 0.236 | **0.078** (×1.95) |
+| bobble | 0.159 | **0.039** |
+| sun | 0.253 | 0.182 |
+| cap | 0.101 | **−0.169** (×1.95) |
+| flower | 0.193 | 0.088 |
+| ripikaHat | 0.109 | **−0.029** |
+| puff | 0.107 | **−0.033** |
 
-## State
+Negative = the hat is *over the eyes*. The Cheery Cap's peak would sit 17 cm
+below the top of her eyes. That breaks GAME_DESIGN.md's rule that a critter
+hood never comes down over the wearer's face, and `hoodShell.ts`'s own
+"every peak clears the eyes by at least 0.15 head units".
 
-Committed, `npm run build` green (exit 0). No browser — another agent owns it,
-so the PR lists what needs visual QA.
+**So "bigger" cannot mean "scaled about the crown".** A hat must grow *upward
+and outward from the ring where it meets the head*, not sink into it.
+
+## Finding 2 — the ×1.95 cap the family approved is not this cap
+
+The scratch hack was approved by eye against the *old* Cheery Cap (a squashed
+sphere with a half-cylinder peak) and the old critter hats (shrunken creature
+heads). All three were rebuilt on `hoodShell.ts` afterwards, and the rebuilt
+cap already sits far lower on the skull (0.067 head units of eye clearance vs
+the crown's 0.157). The multiplier transfers; the visual result does not.
+Flag for family QA.
+
+## Status
+
+- [x] Baseline measured, mechanism problem found
+- [ ] Mechanism implemented
+- [ ] `check:hat-fit` bounds re-derived + eye-clearance gate added
+- [ ] `HAT_DISPLAY_SCALE` / shop stands checked
+- [ ] build green, PR open
+
+No browser: not confirmed as mine. PR will list what needs eyes on it.
