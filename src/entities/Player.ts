@@ -520,6 +520,18 @@ export class Player implements GameSystem {
     return this.flying;
   }
 
+  /**
+   * How high her feet are above the ground under them, in metres — 0 walking,
+   * positive mid-hop or in flight.
+   *
+   * This is the number `Collision.resolve` calls `clearance`, and the parade
+   * borrows it so the line is allowed over the same low walls she is rather
+   * than being shoved about by things it is currently ten metres above.
+   */
+  get heightAboveGround(): number {
+    return this.hopClearance;
+  }
+
   /** Throws the character upwards — the trampoline, later the corgi balloon. */
   launch(speed: number): void {
     this.verticalVelocity = speed;

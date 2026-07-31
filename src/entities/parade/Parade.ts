@@ -137,7 +137,13 @@ export class Parade implements GameSystem {
       }
     }
 
+    // "When you use it your pet gets one too" — Eleri. Told every frame rather
+    // than on the edge, because a toy that joins the line mid-flight has to get
+    // one as well, and `setFlying` is a comparison when the answer is the same.
+    const flying = player.isFlying;
+
     for (const member of this.members) {
+      member.setFlying(flying);
       this.aimAt(member);
       member.update(dt, elapsed);
     }
@@ -201,6 +207,24 @@ export class Parade implements GameSystem {
       point.copy(this.player.position);
       return;
     }
+
+    // In the air, the line flies at *her* altitude rather than at the height the
+    // trail remembers. The trail's arc length is horizontal, so hovering
+    // straight up drops no crumbs at all and a follower reading the recorded
+    // height would sit on the grass watching her go. Its x and z are still the
+    // trail's, so the line still rounds corners and still cannot cut through a
+    // wall on the way.
+    //
+    // Clearance is hers too, so the followers are allowed over the same low
+    // walls she is instead of being shoved about by things they are ten metres
+    // above. `y` is followed hard (see `ParadeMember.update`), so they rise and
+    // settle with her rather than lagging.
+    if (this.player.isFlying) {
+      this.collision.resolve(point, MEMBER_RADIUS, this.player.heightAboveGround);
+      point.y = this.player.position.y;
+      return;
+    }
+
     this.collision.resolve(point, MEMBER_RADIUS);
     point.y = this.groundAt(point.x, point.z, point.y);
   }

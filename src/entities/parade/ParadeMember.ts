@@ -1,8 +1,10 @@
 import { Group, Vector3 } from 'three';
-import { clamp01, TAU, turnTowards } from '../../core/mathUtils';
+import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
 import type { Expression } from '../../art/style/faces';
+import { createJetpack, type JetpackHandle } from '../../art/models/jetpack';
+import { KID_HEIGHT } from '../../art/models/kid';
 import type { ShopItem } from '../../world/building/shops/catalogue';
 
 /**
@@ -52,6 +54,17 @@ const POP_SECONDS = 0.34;
 /** Seconds a joyful face is held before going back to neutral. */
 const JOY_SECONDS = 1.1;
 
+/**
+ * The smallest a follower's jet pack may be shrunk, as a fraction of the one on
+ * the player's back.
+ *
+ * Scaled off the wearer so a mouse gets a mouse-sized rocket rather than a
+ * wardrobe — but floored, because past about a quarter size the tanks, the
+ * nozzles and the fin stop being readable at all and it reads as a smudge on
+ * the toy's back. Better slightly too big and obviously a jet pack.
+ */
+const MIN_JETPACK_SCALE = 0.28;
+
 export class ParadeMember {
   /** The purchase this member *is* — the key everything else identifies it by. */
   readonly uid: string;
@@ -96,6 +109,19 @@ export class ParadeMember {
   private pop = 0;
   private leaving = false;
   private placedYet = false;
+
+  /**
+   * This one's own jet pack, built the first time the player ever takes off and
+   * kept thereafter.
+   *
+   * Lazy on purpose: most children will never buy a jet pack, and building
+   * eight of these at construction would put a rocket's worth of geometry
+   * behind every toy in the park for a feature nobody had bought yet. Kept
+   * rather than rebuilt because a child who has one takes off constantly, and
+   * this is a `new` per take-off otherwise.
+   */
+  private jetpack: JetpackHandle | null = null;
+  private flying = false;
 
   constructor(uid: string, item: ShopItem) {
     this.uid = uid;
@@ -178,6 +204,30 @@ export class ParadeMember {
     this.rejoice();
   }
 
+  /**
+   * Straps a jet pack on this one, or takes it off.
+   *
+   * Eleri's rule: *"when you use it your pet gets one too."* The parade calls it
+   * every frame with `player.isFlying`; it does nothing at all when the answer
+   * has not changed, so a member that is walking costs one comparison.
+   *
+   * Everything in the line gets one, not only the pets — a teddy bear with a
+   * rocket on its back is exactly the sort of thing this game is for, and
+   * "everything you own comes with you" is already the rule the parade lives by.
+   */
+  setFlying(flying: boolean): void {
+    if (flying === this.flying) return;
+    this.flying = flying;
+    if (flying && !this.jetpack) this.jetpack = this.buildJetpack();
+    const pack = this.jetpack;
+    if (pack) {
+      pack.root.visible = flying;
+      pack.setThrust(flying ? 1 : 0);
+    }
+    // Delighted, obviously.
+    if (flying) this.rejoice();
+  }
+
   /** Pulls a delighted face for a moment. */
   rejoice(): void {
     this.joyRemaining = JOY_SECONDS;
@@ -219,15 +269,44 @@ export class ParadeMember {
     );
     this.root.rotation.y = this.facing;
     this.handle.update?.(dt, elapsed);
+    // Flickers the flames. Only while lit — see `createJetpack`.
+    if (this.flying) this.jetpack?.update?.(dt, elapsed);
   }
 
   dispose(): void {
     this.root.removeFromParent();
+    // Explicitly, rather than trusting the sweep below: a handle with its own
+    // `dispose` frees what *it* built, and the jet pack was added afterwards by
+    // this class.
+    if (this.jetpack) {
+      this.jetpack.root.removeFromParent();
+      disposeTree(this.jetpack.root);
+      this.jetpack = null;
+    }
     if (this.handle.dispose) this.handle.dispose();
     else disposeTree(this.root);
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Builds this one's jet pack and straps it to its back.
+   *
+   * Mounted on `body` where there is one, so it rides the bob and the squash
+   * with the rest of the creature rather than floating steadily behind a
+   * bouncing bunny. Placed and sized from the model's own measured `height`, so
+   * a mouse, a teddy and a squishy star each get one that fits without a table
+   * of per-asset offsets that a new toy would not be in.
+   */
+  private buildJetpack(): JetpackHandle {
+    const height = this.handle.height;
+    const pack = createJetpack(clamp(height / KID_HEIGHT, MIN_JETPACK_SCALE, 1));
+    // Mid-back, and proud of it: the same fractions of a body the player's own
+    // anchor sits at (0.56 / 2.12 up, 0.32 / 2.12 back — see `art/models/kid.ts`).
+    pack.root.position.set(0, height * 0.26, -height * 0.15);
+    (this.creature?.body ?? this.root).add(pack.root);
+    return pack;
+  }
 
   /** Squash-and-stretch pop on arrival, and the reverse on the way out. */
   private updatePop(dt: number): void {
@@ -264,7 +343,9 @@ export class ParadeMember {
         const creature = this.creature!;
         creature.setWalkPhase(this.phase, this.gait);
         // Airborne: legs tucked and arms up, over the top of the walk cycle.
-        if (hopLift > 0.01 && creature.limbs) {
+        // Flying counts — a jet pack is the longest hop there is, and the pose
+        // that reads as "off the ground" is the same one either way.
+        if ((hopLift > 0.01 || this.flying) && creature.limbs) {
           creature.limbs.leftArm.rotation.x = -1.5;
           creature.limbs.rightArm.rotation.x = -1.5;
           creature.limbs.leftLeg.rotation.x = 0.5;
