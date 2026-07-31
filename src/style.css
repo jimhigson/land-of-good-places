@@ -584,7 +584,10 @@ kbd {
   right: calc(0.875rem + env(safe-area-inset-right));
   bottom: calc(0.875rem + env(safe-area-inset-bottom));
   display: flex;
-  flex-direction: column;
+  /* A row, so fly sits *beside* hop — Eleri asked for the fly button "next to
+     the jump button". Stacked, the upper one would sit where the bottom-left
+     pills already reach on a short phone. */
+  flex-direction: row;
   align-items: flex-end;
   gap: 0.625rem;
   pointer-events: none;
@@ -630,7 +633,18 @@ kbd {
   background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 150%);
 }
 
-.touch-btn--hop .touch-glyph {
+/* The same size and shape as hop, in the sky blue the jet pack's own harness
+   is painted (ART.jetpackTrim), so the button and the thing on her back read
+   as the same object. Hidden until one is actually worn — see
+   `ui/TouchControls.setFlyAvailable`. */
+.touch-btn--fly {
+  width: 5.5rem;
+  height: 5.5rem;
+  background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
+}
+
+.touch-btn--hop .touch-glyph,
+.touch-btn--fly .touch-glyph {
   font-size: 1.875rem;
   line-height: 1;
   margin-top: -0.125rem;
@@ -646,7 +660,8 @@ kbd {
 /* On a short landscape phone the hint pill and the buttons fight for the
    bottom of the screen; give the buttons the corner and shrink the hint. */
 @media (max-height: 460px) {
-  .touch-btn--hop {
+  .touch-btn--hop,
+  .touch-btn--fly {
     width: 4.625rem;
     height: 4.625rem;
   }
@@ -658,6 +673,14 @@ kbd {
      buttons in the bottom-right corner. */
   .hud-row.bottom {
     padding-right: 6rem;
+  }
+
+  /* And twice that once the fly button is out, because the cluster is then two
+     buttons wide. Keyed off the button actually being visible rather than off
+     a second class somebody has to remember to set: owning a jet pack is the
+     only thing that shows it, and this rule follows on its own. */
+  #ui-root:has(.touch-btn--fly:not([hidden])) .hud-row.bottom {
+    padding-right: 12.25rem;
   }
 }
 

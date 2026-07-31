@@ -57,6 +57,8 @@ export class InputSystem {
 
   // Virtual state (on-screen buttons, tap-to-move) -------------------------
   private readonly virtualPresses = new Map<GameAction, number>();
+  /** Actions an on-screen button is *holding* down — see {@link holdVirtual}. */
+  private readonly virtualHolds = new Set<GameAction>();
   private manualMoveActiveValue = false;
   private navigationSprintValue = false;
 
@@ -139,6 +141,33 @@ export class InputSystem {
    */
   pressVirtual(action: GameAction): void {
     this.virtualPresses.set(action, VIRTUAL_PRESS_FRAMES);
+  }
+
+  /**
+   * Holds an action down from an on-screen button, for as long as a thumb is on
+   * it — {@link pressVirtual}'s twin for a control that is *held* rather than
+   * tapped.
+   *
+   * The fly button needs this and the hop button does not, which is the whole
+   * reason both exist. A hop is an edge: `pressVirtual`'s two-frame pulse gives
+   * `justPressed` a clean edge even when the finger was quicker than the frame,
+   * and then expires by itself so a lost `pointerup` can never leave a child
+   * hopping forever. Climbing on a jet pack is a *state*: it must last exactly
+   * as long as the thumb is down, so it is latched here and cleared on release.
+   *
+   * The caller owns both ends. `ui/TouchControls.ts` clears it on `pointerup`,
+   * `pointercancel` *and* `pointerleave`, which is the same triple that already
+   * clears the pressed styling — so a thumb sliding off the button stops the
+   * climb exactly as it stops the glow.
+   */
+  holdVirtual(action: GameAction, held: boolean): void {
+    if (held) this.virtualHolds.add(action);
+    else this.virtualHolds.delete(action);
+  }
+
+  /** Lets go of every on-screen hold. Called when the buttons are hidden. */
+  clearVirtualHolds(): void {
+    this.virtualHolds.clear();
   }
 
   /**
@@ -263,6 +292,9 @@ export class InputSystem {
       if (framesLeft <= 1) this.virtualPresses.delete(action);
       else this.virtualPresses.set(action, framesLeft - 1);
     }
+    // Held buttons never expire on their own — the button that set one clears
+    // it. See `holdVirtual`.
+    for (const action of this.virtualHolds) this.down.add(action);
 
     // --- merge ----------------------------------------------------------
     // Whichever device is being pushed hardest wins, so a resting stick never
@@ -329,6 +361,9 @@ export class InputSystem {
   /** Losing focus mid-stride would otherwise leave the player walking forever. */
   private readonly onBlur = (): void => {
     this.heldKeys.clear();
+    // And an on-screen hold would otherwise leave her climbing forever: a
+    // window that loses focus mid-press never delivers the `pointerup`.
+    this.virtualHolds.clear();
   };
 
   private readonly onGamepadConnected = (event: GamepadEvent): void => {

@@ -6,7 +6,7 @@ import { TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { AnchorPlots } from '../AnchorPlots';
-import type { Player } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 import type { StairDirection } from '../../ui/StairMenu';
 
 import { BallPit } from './BallPit';
@@ -410,6 +410,14 @@ export class Building implements GameSystem {
       this.checkRideTriggers(player);
       this.checkDoorways(player);
     }
+
+    // How high she may fly. A castle floor is `BUILDING_FLOOR_HEIGHT` from the
+    // one above it and there is no ceiling collider up there, so indoors the
+    // jet pack is a hover rather than a flight: enough to lift her over the
+    // furniture, never enough to put her head through the deck above with
+    // nothing up there she chose to land on. Written every frame from one
+    // place, the way `speedMultiplier` already is — see `entities/Player.ts`.
+    player.flyCeiling = this.inside ? INDOOR_FLY_CEILING : PARK_FLY_CEILING;
 
     this.grownUp.update(dt, elapsed, this.grownUpComing);
     this.shops.update(dt, elapsed);

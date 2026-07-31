@@ -8,6 +8,7 @@
 export type GameAction =
   | 'interact' // talk to things, ride rides, toss a coin in the fountain
   | 'jump' // hop (and later: corgi-balloon float)
+  | 'fly' // jet pack: tap to take off, hold to climb, let go to come down
   | 'cancel' // back out of a menu
   | 'menu' // open the pause / park menu
   | 'inventory' // open the backpack drawer
@@ -20,6 +21,7 @@ export type GameAction =
 export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
   'jump',
+  'fly',
   'cancel',
   'menu',
   'inventory',
@@ -36,6 +38,12 @@ export const GAME_ACTIONS: readonly GameAction[] = [
  */
 export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   Space: 'jump',
+  // Two keys for one action, because neither letter is obvious on its own and
+  // a child should not have to remember which we picked: **G** for "go up" and
+  // **R** for "rocket". Both are clear of the movement keys and of everything
+  // already bound.
+  KeyG: 'fly',
+  KeyR: 'fly',
   Enter: 'interact',
   KeyE: 'interact',
   KeyF: 'interact',
@@ -69,12 +77,14 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * 0 A / 1 B / 2 X / 3 Y / 4 LB / 5 RB / 6 LT / 7 RT / 8 Back / 9 Start
  * 10 L3 / 11 R3 / 12 D-up / 13 D-down / 14 D-left / 15 D-right
  *
- * LB/RB (4/5) are unbound: they used to rotate the camera, which no longer
- * exists (GAME_DESIGN.md #16 — see ARCHITECTURE.md, "One camera angle,
- * forever").
+ * LB (4) is unbound: it used to rotate the camera, which no longer exists
+ * (GAME_DESIGN.md #16 — see ARCHITECTURE.md, "One camera angle, forever").
+ * RB (5) is the jet pack — a shoulder button is where a hand already rests,
+ * and holding it to climb wants a finger that is not doing anything else.
  */
 export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   0: 'jump',
+  5: 'fly',
   2: 'interact',
   1: 'cancel',
   3: 'photo',

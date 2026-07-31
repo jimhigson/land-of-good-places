@@ -16,7 +16,7 @@ import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { setInteractPress, type InteractZone } from './world/interact';
 import type { InteriorControls } from './world/building';
-import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat } from './entities';
+import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CuteODex, Hud, LiftPanel, TapBurst, TouchControls, WhatsNew } from './ui';
@@ -93,6 +93,7 @@ export class Game {
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
+  readonly wornJetpack: WornJetpack;
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
@@ -163,6 +164,19 @@ export class Game {
     // So the name label can size itself off whatever hat is actually worn —
     // see `Player.labelTopHeight`.
     this.player.wornHat = this.wornHat;
+
+    // The jet pack, if one has been bought — see `entities/WornJetpack.ts`.
+    // Third of the three worn slots, and the same store-subscriber shape as the
+    // two above; its `onWornChange` puts her own backpack away, because you
+    // cannot strap two things to one back.
+    this.wornJetpack = new WornJetpack(this.player.model.jetpackAnchor, (worn) =>
+      this.player.model.setJetpackWorn(worn),
+    );
+    this.addSystem(this.wornJetpack);
+    // So the flight in `Player.update` can ask whether there is actually a pack
+    // on her back — the same object the HUD's fly button asks, so a button that
+    // is there and a flight that is allowed are one fact rather than two.
+    this.player.wornJetpack = this.wornJetpack;
 
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means
@@ -776,6 +790,10 @@ export class Game {
     // the buttons sit right where the view of the ride — or the panel's own OK
     // button — is. See {@link screenIsBusy}.
     this.touchControls?.setVisible(!this.screenIsBusy());
+    // And the fly button exists only while there is actually a jet pack on her
+    // back. Asked of the system that draws it rather than of the store, so a
+    // button on screen and a rocket on screen are the same fact.
+    this.touchControls?.setFlyAvailable(this.wornJetpack.isWorn);
     this.hud.updateDebug([
       // The park clock lives here now rather than in a pill of its own: the
       // family had the clock removed from the HUD entirely (GAME_DESIGN.md,

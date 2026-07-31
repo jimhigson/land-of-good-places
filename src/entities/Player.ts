@@ -23,6 +23,7 @@ import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { NameLabel } from '../ui/NameLabel';
 import { discoverSecret, gameStore } from '../state';
 import type { WornHat } from './WornHat';
+import type { WornJetpack } from './WornJetpack';
 
 /**
  * How fast counts as *running*, in metres per second.
@@ -102,6 +103,89 @@ const AUTO_HOP_LOOKAHEAD = 0.5;
 
 /** Drop further than this below the surface under your feet and you fall. */
 const FALL_THRESHOLD = 0.5;
+
+/**
+ * ---------------------------------------------------------------------------
+ * THE JET PACK
+ * ---------------------------------------------------------------------------
+ * Eleri's own ask, in her words: *"Button to use it next to the jump button and
+ * then you fly and control where you fly instead of walking."*
+ *
+ * **One button, one rule, no explaining.** Tap fly and she lifts off; hold it
+ * and she climbs; let go and she comes gently down; touch the ground and she is
+ * walking again. That is the whole control scheme, and a six-year-old has it
+ * after one press because she can see the flames.
+ *
+ * ### It obeys the CONTROL RULE, which is what most of this is about
+ *
+ * Steering in the air is the *same code* as steering on the ground: the
+ * camera's ground basis from `core/screenBasis.ts`, straight out of
+ * `this.moveDirection` above, with no branch for flight at all. Press left and
+ * she goes left, in the air exactly as on foot. **Nothing rotates to turn**, and
+ * her facing is written from the direction she ended up travelling — decoration,
+ * never an input.
+ *
+ * ### And nobody can get stuck (the EXIT RULE's spirit)
+ *
+ * - Letting go always sinks her to whatever is under her feet *right now*,
+ *   sampled through the same {@link Player.groundAt} the walk uses — so she
+ *   lands on the deck, the stair tread or the grass, whichever is really there.
+ * - Collision keeps running while she flies, with `clearance` set to her height
+ *   above the local ground. That is the existing wall-clearing machinery, not a
+ *   new one: fly high and a low wall stops pushing back, fly low and it pushes
+ *   exactly as it always did, and a tree trunk or a building (`topHeight:
+ *   Infinity`) never stops pushing at any height. **So the spot she comes down
+ *   on is always a spot she was allowed to be**, and she cannot land inside
+ *   anything.
+ * - The collision world's own circular soft boundary applies unchanged, so she
+ *   cannot fly out of the park, and {@link Player.flyCeiling} stops her leaving
+ *   the top of it.
+ * - Taking the pack off mid-air does not drop her: it takes the *thrust* away,
+ *   and she finishes the descent she was already making.
+ */
+const FLY_RISE_SPEED = 4.4;
+
+/**
+ * How fast she sinks with the button released.
+ *
+ * Slower than she rises, so letting go reads as *floating down* rather than as
+ * the jet pack failing — but not so slow that coming down from the ceiling is
+ * something a child has to wait through. At this rate the full descent from
+ * {@link PARK_FLY_CEILING} takes about four seconds.
+ */
+const FLY_SINK_SPEED = 3;
+
+/** How briskly the climb and the sink get up to speed. Snappy, not instant. */
+const FLY_VERTICAL_ACCELERATION = 24;
+
+/**
+ * How high above the ground under her feet she may fly, out in the park.
+ *
+ * High enough to look down on the whole thing — the castle's lower storeys, the
+ * tops of the trees — and low enough that coming home is never a chore.
+ */
+export const PARK_FLY_CEILING = 12;
+
+/**
+ * And how high indoors, where it is a hover rather than a flight.
+ *
+ * A castle floor is `BUILDING_FLOOR_HEIGHT` (3.6 m) below the one above it and
+ * there is **no ceiling collider up there** — nothing would stop her going
+ * through the slab, and a child inside the deck above has nothing to land on
+ * that she chose. She is `KID_HEIGHT` (2.12 m) tall and `position` is her feet,
+ * so this leaves her the better part of a third of a metre of headroom under
+ * the slab: enough to lift over the benches and the planters, never enough to
+ * leave the room she is in.
+ *
+ * `world/building/Building.ts` is what writes it — see `Player.flyCeiling`.
+ */
+export const INDOOR_FLY_CEILING = 1.2;
+
+/** Metres of soft approach to the ceiling, so it eases rather than clunks. */
+const FLY_CEILING_EASE = 2.5;
+
+/** Thrust shown on the pack while coasting down — a pilot light, not a climb. */
+const FLY_IDLE_THRUST = 0.3;
 
 /** How long the eyes stay shut. Any longer and she looks sleepy, not blinking. */
 const BLINK_DURATION = 0.11;
@@ -202,6 +286,29 @@ export class Player implements GameSystem {
    */
   wornHat: WornHat | null = null;
 
+  /**
+   * The system that draws the jet pack, if one is on her back — left `null`
+   * until `Game` wires it up, exactly like {@link wornHat}. Read for two
+   * things: whether she may take off at all, and where to send the thrust so
+   * the painted flames light while she climbs.
+   */
+  wornJetpack: WornJetpack | null = null;
+
+  /**
+   * How high above the ground under her feet she may fly, in metres.
+   *
+   * {@link speedMultiplier}'s sibling, and written by the same sort of caller:
+   * whichever system currently owns the ground underfoot. `Building` drops it
+   * to a hover indoors, because a castle floor is 3.6 m from the one above it
+   * and there is no ceiling collider up there to stop her — a child who flew
+   * through a slab would be inside the deck above with nothing to land on that
+   * she chose. Out in the park it stays at {@link PARK_FLY_CEILING}.
+   *
+   * One frame stale by construction, the same tolerance `hopClearance` and
+   * `speedMultiplier` already document.
+   */
+  flyCeiling = PARK_FLY_CEILING;
+
   private readonly desiredVelocity = new Vector3();
   private readonly moveDirection = new Vector3();
   private readonly previousPosition = new Vector3();
@@ -217,6 +324,20 @@ export class Player implements GameSystem {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * True while the jet pack is holding her up — a strict subset of
+   * {@link airborne}, so everything that already asks "is she off the ground?"
+   * (the parade's copycat hop, the flower flourish, the dust) gets the right
+   * answer for flight without being told about it.
+   *
+   * Only ever *entered* with a pack worn, and only ever left by touching the
+   * ground. Taking the pack off mid-air therefore takes the thrust away rather
+   * than the flight, and she finishes her descent at flying speed instead of
+   * dropping.
+   */
+  private flying = false;
+  /** 0..1, eased, so the flying pose fades on and off rather than snapping. */
+  private flightPose = 0;
   /**
    * How high the feet are above the local ground right now — 0 while
    * walking, positive mid-jump. Fed into `collision.resolve` as `clearance`
@@ -326,6 +447,10 @@ export class Player implements GameSystem {
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
+    // Landed, wherever this put her: a flight cannot survive being teleported
+    // into the castle (or out of it), because the ground under her is now a
+    // different ground entirely.
+    this.flying = false;
     // Whatever she was being walked out of, she is not in it any more.
     this.escorting = false;
     if (facing !== undefined) this.facingAngle = facing;
@@ -384,6 +509,17 @@ export class Player implements GameSystem {
     return this.airborne;
   }
 
+  /**
+   * True while the jet pack is holding her up.
+   *
+   * Read by `entities/parade/Parade.ts`, which takes the whole line into the
+   * air with her rather than dropping each toy onto the ground under the trail
+   * — see its `aimAt`.
+   */
+  get isFlying(): boolean {
+    return this.flying;
+  }
+
   /** Throws the character upwards — the trampoline, later the corgi balloon. */
   launch(speed: number): void {
     this.verticalVelocity = speed;
@@ -409,6 +545,9 @@ export class Player implements GameSystem {
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
+    // The ride is flying her now. She keeps the pack on — it is hers — but it
+    // stops being what holds her up, and its flames go out (see `update`).
+    this.flying = false;
   }
 
   /** Called by the ride every frame while it owns the character. */
@@ -443,6 +582,7 @@ export class Player implements GameSystem {
 
     if (this.ridingFlag) {
       // The ride positions us; all we do is hold a suitably delighted pose.
+      this.wornJetpack?.setThrust(0);
       this.gait = damp(this.gait, 0, 0.1, dt);
       this.animate(context, 0);
       this.model.leftArm.rotation.x = -2.5;
@@ -578,6 +718,21 @@ export class Player implements GameSystem {
       autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
     }
 
+    // --- take off (the jet pack) ---------------------------------------------
+    // A tap on the fly button, and only with a pack actually on her back — the
+    // HUD hides the button otherwise, and this is the same question asked of
+    // the same object, so the two can never disagree.
+    const packWorn = this.wornJetpack?.isWorn ?? false;
+    if (packWorn && !this.flying && input.justPressed('fly')) {
+      this.flying = true;
+      this.airborne = true;
+      // Straight to climbing speed: a take-off that has to build up reads as
+      // the button not having worked.
+      this.verticalVelocity = FLY_RISE_SPEED;
+      // A rainbow off the ground she is leaving, exactly like a hop.
+      this.spawnHopRing(groundY);
+    }
+
     // --- hop ----------------------------------------------------------------
     if ((input.justPressed('jump') || autoHopWanted) && !this.airborne) {
       this.verticalVelocity = JUMP_SPEED;
@@ -585,7 +740,32 @@ export class Player implements GameSystem {
       this.spawnHopRing(groundY);
     }
     let hopHeight = 0;
-    if (this.airborne) {
+    if (this.flying) {
+      // Hold to climb, let go to come down. `jump` counts too, so the space bar
+      // a child is already holding does the obvious thing rather than nothing.
+      const thrusting = packWorn && (input.isDown('fly') || input.isDown('jump'));
+      const height = this.position.y - groundY;
+      // Ease off into the ceiling instead of stopping dead against it.
+      const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
+      const target = thrusting ? FLY_RISE_SPEED * headroom : -FLY_SINK_SPEED;
+      this.verticalVelocity = approachScalar(
+        this.verticalVelocity,
+        target,
+        FLY_VERTICAL_ACCELERATION * dt,
+      );
+      this.position.y += this.verticalVelocity * dt;
+      if (this.position.y <= groundY) {
+        this.position.y = groundY;
+        this.verticalVelocity = 0;
+        this.airborne = false;
+        this.flying = false;
+        // And a rainbow on the way back in, so landing is an event too.
+        this.spawnHopRing(groundY);
+      }
+      hopHeight = this.position.y - groundY;
+      this.wornJetpack?.setThrust(thrusting ? 1 : FLY_IDLE_THRUST);
+    } else if (this.airborne) {
+      this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
       this.position.y += this.verticalVelocity * dt;
       if (this.position.y <= groundY) {
@@ -595,6 +775,7 @@ export class Player implements GameSystem {
       }
       hopHeight = this.position.y - groundY;
     } else {
+      this.wornJetpack?.setThrust(0);
       // Damp onto the ground so walking over the gentle hills isn't jittery.
       this.position.y = damp(this.position.y, groundY, 0.04, dt);
     }
@@ -840,6 +1021,52 @@ export class Player implements GameSystem {
     this.smelling = sniff * weight > 0.4;
   }
 
+  /**
+   * The flying pose: arms out like wings, legs together and trailing, leaning
+   * into wherever she is going.
+   *
+   * Eased in and out on {@link flightPose} rather than switched, so taking off
+   * and landing are a moment rather than a snap — and so the pose survives the
+   * frame she touches down on, which is the frame `flying` goes false.
+   *
+   * Angles follow the rig's own convention (forward is +Z), where a **negative**
+   * `rotation.x` pitches a body or a limb forwards.
+   */
+  private applyFlightPose(dt: number): void {
+    const wanted = this.flying ? 1 : 0;
+    this.flightPose = damp(this.flightPose, wanted, 0.08, dt);
+    const weight = this.flightPose;
+    if (weight <= 0.002) return;
+
+    const model = this.model;
+    const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    // Lean into the travel — but off *speed*, not off direction, because the
+    // model is already turned to face the way it is going. A lean derived from
+    // the direction would be the facing feeding back into the pose, and the
+    // whole point of the CONTROL RULE is that it never does.
+    const lean = clamp01(planarSpeed / PLAYER_MAX_SPEED);
+
+    model.body.rotation.x = lerp(model.body.rotation.x, -0.34 * lean - 0.06, weight);
+    model.body.rotation.z = lerp(model.body.rotation.z, 0, weight);
+
+    // Arms out and back, palms trailing — the shape a child makes when she
+    // pretends to fly, which is the only reference that matters here.
+    model.leftArm.rotation.x = lerp(model.leftArm.rotation.x, 0.55, weight);
+    model.rightArm.rotation.x = lerp(model.rightArm.rotation.x, 0.55, weight);
+    model.leftArm.rotation.z = lerp(model.leftArm.rotation.z, 1.05, weight);
+    model.rightArm.rotation.z = lerp(model.rightArm.rotation.z, -1.05, weight);
+
+    // Legs together and trailing, with the smallest kick apart so she is not a
+    // plank. Off the walk phase, so they keep paddling at the pace she moves.
+    const kick = Math.sin(this.walkPhase) * 0.12 * lean;
+    model.leftLeg.rotation.x = lerp(model.leftLeg.rotation.x, 0.34 + kick, weight);
+    model.rightLeg.rotation.x = lerp(model.rightLeg.rotation.x, 0.34 - kick, weight);
+
+    // Chin up, looking where she is going rather than at her own shoes.
+    model.head.rotation.x = lerp(model.head.rotation.x, 0.16, weight);
+    model.head.rotation.z = lerp(model.head.rotation.z, 0, weight);
+  }
+
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;
     const gait = this.gait;
@@ -881,6 +1108,12 @@ export class Player implements GameSystem {
     // Bend, pick, smell. Layered on top of everything above, and on top of a
     // pose that has just been written from scratch — see `applyFlowerPick`.
     this.applyFlowerPick(dt, gait);
+
+    // Flying. Also layered rather than branched, and for the same reason: every
+    // value it touches is rewritten from scratch at the top of the next
+    // `animate`, so landing restores the walk on the very next frame with
+    // nothing to unwind.
+    this.applyFlightPose(dt);
 
     // Blinking: a long pause, then a quick close-and-open.
     //
@@ -925,6 +1158,13 @@ export class Player implements GameSystem {
       this.camera.focusPoint.distanceTo(this.position),
     );
   }
+}
+
+/** Moves one number towards another by at most `maxDelta`. */
+function approachScalar(current: number, target: number, maxDelta: number): number {
+  const delta = target - current;
+  if (Math.abs(delta) <= maxDelta) return target;
+  return current + Math.sign(delta) * maxDelta;
 }
 
 /** Moves `current` towards `target` by at most `maxDelta`, componentwise in XZ. */
