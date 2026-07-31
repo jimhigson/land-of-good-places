@@ -89,6 +89,25 @@ caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 
 then hard-reload. Suspect it early rather than debugging code that is correct.
 
+## A face on a worn thing goes in its own UV texture, not a floating patch
+
+RiPika's and Trilla's hood faces (`hoodShell.ts`/`hats.ts`) were built as a
+separate decal mesh floating just in front of the hood's own dome, positioned
+by a formula meant to track the dome's surface. It didn't: the dome later
+grew panel-seam relief the decal's formula never learned about, so the dome's
+own bulge sat in front of the face and hid it completely — invisible in the
+running game while the mesh, the texture, and the code all looked correct on
+inspection. Found the hard way (31 July 2026), fixed by baking the face
+texture directly into the wearable's own UV mapping instead of a second mesh.
+
+**When a worn item needs a painted face (or any flat appliqué), paint it into
+that item's own UV space. Do not add a second mesh positioned by a formula
+that has to track the first one's surface.** One surface, one texture: there
+is then no second formula that can fall out of sync when the first one
+changes. This does not conflict with ART_DIRECTION.md §7's "nothing is
+sculpted, the face is flat appliqué" rule — only *where* the flat texture
+lives changes, not the no-sculpting principle.
+
 ## Handoff files
 
 You can be pulled at zero warning. Keep a short `HANDOFF-<your-task>.md` on
