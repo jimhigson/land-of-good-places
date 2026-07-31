@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Land of Good Places — hat fitting room</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎩</text></svg>"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #eaf4ff;
+        font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+      }
+      #preview-wrap {
+        position: absolute;
+        inset: 0;
+      }
+      #hat-label {
+        position: fixed;
+        top: 10px;
+        left: 12px;
+        font-size: 14px;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="preview-wrap"></div>
+    <div id="hat-label"></div>
+    <script type="module" src="/art/samples/hats.ts"></script>
+  </body>
+</html>
