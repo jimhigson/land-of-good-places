@@ -221,12 +221,52 @@ Numeric first, screenshots second, and neither alone.
 - [x] **`npm run export:kid`** writes `src/art/assets/kid.glb` + a generated
       `kid.glb.ts`. 134.8 KB / 45.3 KB gzipped, inside budget (`34fad43`)
 - [x] **`art/style/glb.ts`** — synchronous reader for the subset we author
-- [ ] Wire `createKid` to build from the asset
-- [ ] `check:character-parity` — authored vs procedural, and our reader vs
-      three.js's `GLTFLoader`
-- [ ] Blender: import the glb, save the `.blend`, re-export, prove the round
-      trip changed nothing
-- [ ] Before/after screenshots in the browser
+- [x] **`createKid` builds from the asset** (`ae72173`), with
+      `geometry: 'procedural'` keeping the old path alive for the harness
+- [x] **`check:character-parity`** — authored vs procedural, and our reader vs
+      three.js's `GLTFLoader`. In `build`, so it blocks the merge
+- [x] **Blender is the authoring home** (`2f88776`): `npm run blend:kid`
+- [x] **Before/after screenshots**, old dev server against new, clocks aligned
+
+**Stage A is done for the player kid.** What is left is Stage B (real
+re-topology) and, separately, deciding whether hair/hats/shoes/backpacks follow.
+
+### The measured result
+
+`npm run check:character-parity`, authored against procedural in one process:
+
+```
+14 parts: every triangle between the same points; worst vertex 0.000127 mm,
+          worst uv 4.47e-8
+normals:  ordinary vertices turned at most 0.0296°, fan apexes 1.1635°
+winding:  every part outward-facing; 14 undrawn vertices dropped
+height 2.0874 m, hat anchor 1.9809 m
+silhouette: 192 rays, worst 0.0003 mm, 192 hits
+walk cycle: 24 frames × 4 limb tips, worst 0.0000 mm
+.glb read twice — ours and three.js's GLTFLoader agree exactly
+```
+
+In the browser, `art-samples.html?only=eleri` on the old build (`5ae479d`,
+port 5198) against the new one (port 5199), clocks frozen and aligned to 1 ms:
+**0.388% of pixels differ at all, mean channel difference 0.006 / 255.** The
+control is that the *hair* — untouched by any of this — carries the same
+residual (0.15% of its pixels) as the parts that changed (0.03–0.21%), so what
+is left is sub-pixel turntable phase, not geometry.
+
+### What I have and have not seen running
+
+**Seen, myself, in a browser:** the art gallery portrait on both builds; the
+character creator (kid, hat, pet, hair, face all correct); the park with the
+player kid and the named NPC crowd; zero console errors or warnings.
+
+**Not seen:** `npm run test:procgen` — `vitest` is not installed in this
+environment (`node_modules/.bin` has no `vitest`), so I could not run it. No
+test file touches `createKid`, and `check:park`, which does build NPCs, passes
+inside `npm run build`. It needs running by someone who has it.
+
+**Not seen:** the game on a real phone, and any hat/hair/backpack combination
+beyond the defaults the creator opens with. `check:hat-fit` and `check:hair`
+cover those numerically and both pass.
 
 ### Decisions taken while building, that a reviewer should look at
 

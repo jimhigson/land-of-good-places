@@ -106,6 +106,10 @@ Two lessons:
 
 ## 5. Faces: bake into the UV, or use a patch?
 
+> **Done for the player kid (31 July 2026).** Her skull's UVs now come out of
+> `art/assets/kid.glb` and `remapSphereFaceUv` is not called on that path at
+> all — see §6a. Everything below still describes every other head in the game.
+>
 > **Where this is going (31 July 2026).** Jim has ruled that computing a face's
 > position independently of the geometry it is painted on is the root of a whole
 > bug class — the hood winding bug, the 72 mm face-paint mismatch and the
@@ -209,8 +213,108 @@ two that broke.
 > `SHOE_KINDS`. A check that names one case will keep passing while its
 > siblings rot.
 
+**3. Comparing two blank images and calling them identical.** 31 July 2026,
+doing the before/after for the authored kid: I pulled both frames with
+`canvas.toDataURL()`, got byte-identical PNGs and an identical SHA-256, and
+very nearly reported that as proof. **`toDataURL` on a WebGL canvas returns
+blank unless the context was made with `preserveDrawingBuffer`** — the buffer
+is cleared at composite. Two empty squares are identical. Caught only by
+opening the file and looking at it.
+
+> Look at the picture. Whatever the numbers say, open the image before you
+> report on it. This is the third variant of the same mistake and the cheapest
+> one to avoid.
+
+### How to actually get a matched before/after screenshot
+
+Run the *old* build and the *new* build as two dev servers and compare the same
+page — not the new build against itself with a flag flipped. The problem is
+that anything animated will be at a different point on each. For
+`art-samples.html` (whose turntable, walk phase and blink all come off one
+`elapsed`):
+
+- **Freeze the clock** by stubbing `requestAnimationFrame` to pass a timestamp
+  you control. The loop takes `dt` from that timestamp, so a constant one gives
+  `dt = 0` and everything holds.
+- **Then step it.** `dt` is `min(0.05, (now − last) / 1000)`, so advancing your
+  timestamp by up to 50 ms advances `elapsed` by exactly that, and a *negative*
+  step winds it back.
+- **Search for the offset that minimises the pixel difference.** Five samples
+  bracket it; a couple more refine it. Aligned to a millisecond, the two builds
+  came to a mean channel difference of 0.006/255.
+- **Keep a control in frame.** The kid's hair was not touched by that change,
+  so "the residual on the hair is the same size as the residual on the body" is
+  what turns a small difference into evidence rather than a hope.
+- Size the **canvas** (`style.width/height` plus a `resize` event), not the
+  window: `resize_page` acts on the shared browser window, and if another
+  agent's tab is in it you have just resized their game.
+
 Whatever you do, **say plainly in the PR what you have and have not seen
 running.** The Overseer has been fooled twice by a screenshot that looked right.
+
+---
+
+## 6a. Authored assets: the `.glb` pipeline
+
+Since 31 July 2026 the player kid's **body and head** are an asset, not code:
+`art/blend/kid.blend` → `src/art/assets/kid.glb` → `src/art/assets/kidGlb.ts` →
+`art/models/kidAsset.ts` → `createKid`. Three commands:
+
+| | |
+| --- | --- |
+| `npm run blend:kid` | Blender authors the `.glb`. **This is the normal one.** |
+| `npm run export:kid` | writes the `.glb` from the *procedural* build. A Stage A bootstrap; you will probably never need it again. |
+| `npm run pack:kid` | `.glb` → the module the game imports. Both of the above end by running it. |
+
+**What the asset owns:** each part's shape, its UVs, and its own local
+transform. **What stays in code:** materials, textures, the rig (`body`,
+`head`, `crown`, limb pivots, the four anchors) and the outlines. The rig stays
+because `KID_HEAD_HEIGHT`, `SKULL_RADIUS` and `KID_HEAD_SCALE` are imported by
+hats, hair and three check scripts — a copy in the asset would be a second
+description of them, which is the thing this work removes.
+
+**The prize** is that `remapSphereFaceUv` is no longer called: the face window
+*is* the authored UV. One surface, one description, nothing left to disagree.
+
+**Still procedural, and staying that way for now** (Jim, 31 July): hair
+(`hairShell.ts`), the hood hats (`hoodShell.ts`), the primitive hats
+(`hats.ts`), shoes (`shoes.ts`) and backpacks (`backpacks.ts`). All are
+candidates for the same pipeline once it is proven on the kid. Not urgent.
+
+### Four traps in this pipeline, all hit on the first day
+
+- **three.js's `GLTFLoader` deletes full stops from node names.** It runs them
+  through `PropertyBinding.sanitizeNodeName`, so `arm.upper.l` loads back as
+  `armupperl` — the node still has *a* name, just not yours, which is far
+  quieter than the `mesh_1` case below. The repo's dotted convention is
+  therefore unsafe **inside a `.glb`**; parts are hyphenated (`arm-upper-l`).
+- **A Blender round trip drops vertices no triangle references.** three.js's
+  `SphereGeometry` emits two (leftovers of the extra pole column). Drawn counts
+  and triangle sets are identical. Compare the *surface*, not the buffer.
+- **Blender does not store an imported custom normal as a vector.** It stores it
+  in a tangent frame built per corner, which is ill-conditioned where a fan of
+  triangles meets at a point. Error is 0.03° everywhere and **1.08° at a
+  capsule's pole**. Expect it; do not chase it.
+- **`GLTFExporter` still cannot write textures headlessly**, and its binary path
+  still needs a ten-line `FileReader` shim in Node.
+
+### Comparing two versions of a mesh: how to pair the vertices
+
+This took three attempts and each wrong one *invented* failures:
+
+1. **Round to a key** → any pair straddling a rounding boundary reads as one
+   vertex lost and another gained. Eight phantom failures on the skirt hem.
+2. **Sort exactly** → worse. Many coordinates on a model are mathematically
+   equal (a torus on its side has nine distinct heights across two hundred
+   vertices), so noise breaks ties differently on each side. It paired a collar
+   vertex with one 623 mm away.
+3. **Pair by proximity** — a 1 mm spatial hash, uv breaking the tie between the
+   two copies either side of a seam, then assert the pairing is one-to-one and
+   measure the exact deltas. This is the one that works.
+
+And check winding by **signed volume**, never by "does the face normal point
+away from the centroid" — the latter reports 0.10 on a perfectly good torus,
+because a torus's centroid is in its hole.
 
 ---
 
