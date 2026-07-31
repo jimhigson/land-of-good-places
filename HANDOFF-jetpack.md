@@ -60,6 +60,29 @@ The model faces its direction of travel, which is decoration only.
 - A ceiling (`MAX_FLY_HEIGHT`) and the collision world's existing circular soft
   play boundary keep her in the park.
 
+## Where everything is
+
+| Thing | File |
+| --- | --- |
+| The model | `src/art/models/jetpack.ts` (`createJetpack(scale)`, `setThrust(0..1)`) |
+| Colours | `src/art/style/artPalette.ts`, the `jetpack*` block |
+| The back anchor | `src/art/models/kid.ts` — `jetpackAnchor`, body space `(0, 0.56, -0.32)` |
+| Hiding the bag | `src/art/models/backpacks.ts` — `BackpackRig.setHidden` |
+| Drawing what is worn | `src/entities/WornJetpack.ts` |
+| The slot | `state/types.ts` (`kind: 'jetpack'`, `wornJetpackUid`), `state/store.ts` (`wearableSlot`, `setWornJetpack`, `buy`), `state/save.ts` |
+| On sale | `world/building/shops/catalogue.ts` — `gear.jetpack`, toy shop, 60 |
+| On the counter | `world/building/shops/fitouts.ts` — `toyShop()` |
+| The button | `core/input/actions.ts` (`fly`; keys **G**/**R**, gamepad RB), `ui/TouchControls.ts`, `style.css` `.touch-btn--fly` |
+| Held presses | `core/input/InputSystem.ts` — `holdVirtual` / `clearVirtualHolds` (new) |
+| The flight | `entities/Player.ts` — the `THE JET PACK` block, `flying`, `flyCeiling`, `applyFlightPose` |
+| The ceiling indoors | `world/building/Building.ts` — one line in `update` |
+| The followers | `entities/parade/ParadeMember.ts` (`setFlying`, `buildJetpack`), `entities/parade/Parade.ts` (`aimAt`) |
+
+## Numbers, if they need retuning
+
+Rise 4.4 m/s · sink 3.0 m/s · vertical acceleration 24 m/s² · park ceiling 12 m
+(soft over the last 2.5 m) · indoor ceiling 1.2 m. All in `entities/Player.ts`.
+
 ## State of play
 
 - [x] Asset `src/art/models/jetpack.ts`
@@ -69,6 +92,11 @@ The model faces its direction of travel, which is decoration only.
 - [x] `fly` action, HUD fly button beside hop
 - [x] Flight in `Player.update`
 - [x] Parade flies too, each member wearing a jetpack
-- [x] `npm run build` green
-- [ ] PR opened
-- [ ] Visual QA (browser not owned — see PR body)
+- [x] `npm run build` green (exit code checked directly, never piped)
+- [x] `vitest run` green — 45/45 procgen invariants. **Note:** `vitest` is not
+      installed in the shared checkout's `node_modules`, so `npm run
+      test:procgen` fails with "command not found" there. Installed locally in
+      this worktree with `npm i vitest --no-save` to run it.
+- [x] PR opened
+- [ ] Visual QA — the shared browser was **not** owned by this task, so none of
+      this has been seen running. The list is in the PR body.
