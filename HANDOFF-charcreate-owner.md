@@ -7,10 +7,11 @@ character-creation work here.
 
 ## Status right now (31 July 2026, second session — updated at end of session)
 
-Six commits this session (hashes below are post-rebase — see the note at the
-bottom of this section). `npm run build` exit 0 (checked directly, never
-piped) after every one. **No PR opened yet** — staying alive for more
-direction, per brief. In order:
+Eight numbered pieces of work this session across many commits (hashes cited
+below are post-rebase — see the note further down; run `git log --oneline`
+for the current list rather than trusting a count here). `npm run build`
+exit 0 (checked directly, never piped) after every one. **No PR opened yet**
+— staying alive for more direction, per brief. In order:
 
 1. **The "Look" HUD pill** — reopen the creator mid-game without losing the
    park. Reload-based v1; see the long entry below for why a live re-skin
@@ -51,19 +52,47 @@ direction, per brief. In order:
    one corrected call. **Still not visually confirmed by anyone** — I do not
    have browser access this session either; the coordinator said they'll do
    their own pass regardless.
+8. **Coordinator found a second bug by code reading** (browser was busy with
+   the artist agent's own Stage A verification): Spiky hair never rendered in
+   the creator at all, and — once traced further — the same mechanism would
+   have tucked Spiky away the moment *any* hat was worn over it in real
+   gameplay too, which is backwards (Jim: "just allow any hair other than
+   rooster with a hat, and disable the hat, not the hair in this case"). This
+   was a real design inversion, not a one-line fix: `hair.ts`'s `apply()` no
+   longer hides anything for `hideUnderHat` reasons — hair is always fully
+   drawn — and a new live `hidesHat`/`hairHidesHat` getter (`HairRig` →
+   `KidHandle` → `CharacterModel`) is what `entities/WornHat.ts` (real
+   gameplay) and `ui/characterCreationPreview.ts` (the creator) both now
+   check **before** attaching a hat mesh at all. `wornHatUid`/inventory/
+   Cute-o-dex are untouched — a hat still shows as "worn" in the backpack
+   drawer even while nothing is drawn over Spiky. `KidHandle.setHatWorn` kept
+   its name and signature for every external caller but now only re-measures
+   height; it no longer tells hair anything. Full details and every touched
+   file in commit `f9573e9`. `check:hair`/`check:hat-fit` both pass with
+   numbers identical to before the change (their scripts already hid hair by
+   hand, never relied on the removed tucking side effect).
 
 **Rebase note:** step 6's rebase onto `feat/mohican-hair` rewrote every
 commit's hash from steps 1–5. Use `git log --oneline` for current hashes
 rather than anything cited from memory of an earlier checkpoint.
 
-**Visually verified: steps 1–4 (by the coordinator), partially; step 6/7
-(Mohican) not yet, including after the fix in step 7.** Everything else
-marked "needs eyes" below is still real and outstanding.
+**Visually verified: steps 1–4 (by the coordinator), partially; steps 6/7/8
+not yet at all.** Everything marked "needs eyes" below is real and
+outstanding — this branch now carries three sessions' worth of unverified
+hat/hair interaction changes stacked on top of each other.
 
 ### Needs eyes (manual QA)
 
-- **Mohican — fixed once, unverified since.** Pick a distinct hat in the Hat
-  tab, switch to Rooster (Mohican) in the Hair tab, confirm the hat visibly
+- **Spiky + a hat, both directions — brand new, zero visual confirmation.**
+  In the creator: pick a hat in the Hat tab, switch to Spiky in the Hair tab,
+  confirm the spikes are **fully visible** (not tucked) and the hat is what
+  disappears. In real gameplay (harder to reach without the creator itself
+  being tested first): a character with Spiky hair who owns/wears a hat
+  should show full spikes, no hat mesh, while the backpack drawer still
+  marks that hat as worn.
+- **Mohican — fixed once, unverified since, and now sits on top of the Spiky
+  fix.** Pick a distinct hat in the Hat tab, switch to Rooster (Mohican) in
+  the Hair tab, confirm the hat visibly
   comes off **and the crest shows** (both symptoms of the one bug fixed in
   step 7 above); switch to a different hair style, confirm the hat visibly
   returns and the Hat tab shows it selected (not reset to the default).
