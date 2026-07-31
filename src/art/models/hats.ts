@@ -15,13 +15,13 @@ import {
 } from 'three';
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { visibleTop } from '../style/measure';
+import { visiblePoints, visibleTop } from '../style/measure';
 import { addOutline, decal, markShared, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
 import { paintFace, type FacePaintOptions } from '../style/faces';
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
 import { blob, type AssetHandle } from '../style/asset';
-import { KID_HEAD_SCALE } from './kid';
+import { KID_HEAD_SCALE, kidEyeTopAt } from './kid';
 import {
   CHEERY_HOOD,
   CHEERY_PEAK,
@@ -101,15 +101,62 @@ export const HAT_KINDS: readonly HatKind[] = [
 const FIT = KID_HEAD_SCALE;
 
 /**
+ * **How much bigger than life the family wants their hats** (31 July 2026).
+ *
+ * Live-testing session, in Jim's words: *"totally fine, but make all hats 50%
+ * bigger"*, and then *"make crown and cherry cap 30% bigger again"*. So every
+ * hat is ×1.5, and the Sparkly Crown and the Cheery Cap take a further ×1.3 on
+ * top of that ({@link HAT_SIZE_EXTRA}) for ≈×1.95. The two critter hoods are
+ * named in neither instruction and get the plain ×1.5.
+ *
+ * This is a **design decision, not a fudge factor**: hats in this park are
+ * deliberately, comically oversized, the way a dressing-up box is. It lived for
+ * one afternoon as a `// TEMPORARY: for testing` edit to {@link FIT}, was never
+ * written down as a requirement, and was therefore lost the moment the Cheery
+ * Cap and the two critter hoods were rebuilt on `hoodShell.ts` — which is why
+ * it is a named constant with the quote attached rather than a number folded
+ * into `FIT`. `check:hat-fit`'s `MIN_SPAN` now fails if it goes missing again.
+ *
+ * Kept separate from `FIT` because the two mean different things and drift
+ * apart on purpose: `FIT` is the head's own scale, and a hat must track it
+ * exactly or it stops fitting; this is taste, and only the family moves it.
+ */
+export const HAT_SIZE = 1.5;
+
+/**
+ * The further ×1.3 on the Sparkly Crown and the Cheery Cap. See {@link HAT_SIZE}.
+ *
+ * **Worth knowing before you retune it:** the ×1.3 was approved by eye against
+ * the *old* Cheery Cap — a squashed sphere with a half-cylinder peak, 0.94× the
+ * bare head across. The cap was rebuilt on `hoodShell.ts` afterwards and is
+ * 1.09× across before any of this is applied, so ×1.95 lands somewhere the
+ * family has not actually seen. It is the number they asked for; whether it is
+ * the *cap* they asked for is a question for the sofa.
+ */
+const HAT_SIZE_EXTRA: Partial<Record<HatKind, number>> = { crown: 1.3, cap: 1.3 };
+
+/** The total scale-up for one hat: {@link HAT_SIZE}, plus its own extra. */
+function hatSize(kind: HatKind): number {
+  return HAT_SIZE * (HAT_SIZE_EXTRA[kind] ?? 1);
+}
+
+/**
  * How big a hat is shown on a shop stand, as a fraction of life size.
  *
  * Exported so `world/building/shops/fitouts.ts` does not have to know about
- * {@link FIT}: the stands are 0.85 m apart, and a life-size sun hat is 1.4 m
- * across, so displaying them at life size would have each brim slicing through
- * its neighbours. Written as a fraction of `FIT` so the stands keep the size
- * they have always shown whatever the head does next.
+ * {@link FIT}: the stands are 0.85 m apart, and the widest hat in the shop is
+ * shown 0.85 m across, so displaying them at life size would have each brim
+ * slicing through its neighbours. Written as a fraction of `FIT` **and of
+ * {@link HAT_SIZE}** so the stands keep the size they have always shown
+ * whatever the head, or the family's taste in hat sizes, does next — without
+ * that second term the 31 July scale-up would have pushed every brim through
+ * its neighbour's.
+ *
+ * `HAT_SIZE` and not `hatSize(kind)`: the stands are meant to read as a row of
+ * hats of comparable size, so the crown and the cap keep their extra ×1.3 on
+ * the display too, exactly as they do on a head.
  */
-export const HAT_DISPLAY_SCALE = 0.85 / FIT;
+export const HAT_DISPLAY_SCALE = 0.85 / (FIT * HAT_SIZE);
 
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
 const SIT = -0.1;
@@ -122,6 +169,9 @@ const SIT = -0.1;
  * Two groups rather than writing `FIT` onto `root`, because the contract
  * reserves `root.scale` for the caller — `entities/WornHat.ts` pops a new hat
  * in by writing it, and `check:assets` fails any asset that has spent it.
+ *
+ * {@link HAT_SIZE} is deliberately *not* applied here: it goes on in
+ * {@link finish}, once the geometry exists to measure. See there for why.
  */
 function hatGroups(name: string): { root: Group; fit: Group } {
   const root = new Group();
@@ -134,16 +184,81 @@ function hatGroups(name: string): { root: Group; fit: Group } {
 }
 
 /**
- * Finishes a hat: its `height` measured off the geometry just built, never
- * hand-written.
+ * The lowest a hat comes **in front of the wearer's eyes**, in metres about the
+ * hat anchor — its brow line. `null` if nothing it is made of crosses the eyes
+ * at all (a flower crown very nearly does not).
  *
- * Four of these used to carry a hand-written height and four had an entry in
+ * Per azimuth, against {@link kidEyeTopAt}, for the reason that function gives:
+ * an eye is an ellipse with no height at all at its outer corner, so the lowest
+ * point *anywhere* in the eyes' azimuth range is not a fair comparison.
+ */
+function browLine(root: Group): number | null {
+  const TAU = Math.PI * 2;
+  const buckets = 360;
+  const lowest = new Array<number>(buckets).fill(Number.POSITIVE_INFINITY);
+  visiblePoints(root, (point) => {
+    if (point.z <= 0) return;
+    const bucket = Math.floor(((Math.atan2(point.x, point.z) + Math.PI) / TAU) * buckets);
+    lowest[bucket] = Math.min(lowest[bucket] as number, point.y);
+  });
+  let brow = Number.POSITIVE_INFINITY;
+  for (let bucket = 0; bucket < buckets; bucket += 1) {
+    const hat = lowest[bucket] as number;
+    if (!Number.isFinite(hat)) continue;
+    if (kidEyeTopAt(((bucket + 0.5) / buckets) * TAU - Math.PI) === null) continue;
+    brow = Math.min(brow, hat);
+  }
+  return Number.isFinite(brow) ? brow : null;
+}
+
+/**
+ * Finishes a hat: **grows it to {@link HAT_SIZE}**, then measures its `height`
+ * off the geometry, never hand-written.
+ *
+ * ## A hat grows about its own brow line
+ *
+ * The `fit` group's origin *is* the hat anchor, the crown of the skull. So the
+ * obvious way to make a hat bigger — multiply `fit.scale` — scales it about the
+ * crown, which makes it ×1.5 wider **and sinks its hem ×1.5 further down the
+ * wearer's face**. Measured on the built hats, the ×1.95 Cheery Cap's peak came
+ * out 62 mm *below* the top of her eyes: a hat pulled down over a child's face,
+ * against GAME_DESIGN.md's standing rule that a critter hood never covers it
+ * and against `hoodShell.ts`'s own peak-height table. That is what the one
+ * afternoon of `// TEMPORARY` scaling would have shipped.
+ *
+ * So the scale is applied about the **brow line** — the lowest the hat comes in
+ * front of the eyes — instead of about the crown:
+ *
+ * ```
+ * y ↦ brow + k · (y − brow)
+ * ```
+ *
+ * which is `fit.scale × k` plus a lift of `−(k−1) · brow`. Every point above
+ * the brow rises and every point below it is the brow itself, so **a hat gets
+ * bigger upward and outward and never comes one millimetre further down her
+ * face than the version the designer fitted**. It needs no threshold and no
+ * tuning: whatever clearance a hat has today it still has at any size, so a
+ * future hat, or a future number from the sofa, cannot quietly reintroduce this.
+ *
+ * The band still grips: it stays at the height its designer chose, which is the
+ * point. It is a *loose* grip afterwards — a ×1.5 hat on an unchanged head must
+ * stand proud of it — and that is what an oversized dressing-up hat looks like.
+ *
+ * Four hats used to carry a hand-written height and four had an entry in
  * `check:assets`'s KNOWN_DRIFT to match (crown −20 mm, sun −24 mm, flower
  * −38 mm, the RiPika hat −28 mm). Multiplying a hand-written number by `FIT`
  * would only have multiplied its error, so all four are measured now and all
- * four entries are gone.
+ * four entries are gone — and this is why the growth happens *here*, after the
+ * geometry exists, rather than in {@link hatGroups} before there is anything to
+ * measure.
  */
-function finish(root: Group): AssetHandle {
+function finish(root: Group, fit: Group, kind: HatKind): AssetHandle {
+  const k = hatSize(kind);
+  const brow = browLine(root);
+  fit.scale.multiplyScalar(k);
+  // No brow line means nothing this hat is made of crosses her eyes, so there
+  // is nothing to hold still and it simply grows about the crown.
+  fit.position.y -= (k - 1) * (brow ?? 0);
   return { root, height: visibleTop(root) };
 }
 
@@ -169,7 +284,7 @@ function createPartyHat(): AssetHandle {
   pom.position.y = SIT + 0.44;
   fit.add(pom);
 
-  return finish(root);
+  return finish(root, fit, 'party');
 }
 
 function createCrown(): AssetHandle {
@@ -192,7 +307,7 @@ function createCrown(): AssetHandle {
   jewel.position.set(0, SIT + 0.09, 0.26);
   fit.add(jewel);
 
-  return finish(root);
+  return finish(root, fit, 'crown');
 }
 
 function createBobbleHat(): AssetHandle {
@@ -217,7 +332,7 @@ function createBobbleHat(): AssetHandle {
   pom.position.y = SIT + 0.33;
   fit.add(pom);
 
-  return finish(root);
+  return finish(root, fit, 'bobble');
 }
 
 function createSunHat(): AssetHandle {
@@ -247,7 +362,7 @@ function createSunHat(): AssetHandle {
   ribbon.position.y = SIT + 0.07;
   fit.add(ribbon);
 
-  return finish(root);
+  return finish(root, fit, 'sun');
 }
 
 /**
@@ -313,7 +428,7 @@ function createCap(): AssetHandle {
   button.position.y = CHEERY_HOOD.semiY + 0.013;
   fit.add(button);
 
-  return finish(root);
+  return finish(root, fit, 'cap');
 }
 
 function createFlowerCrown(): AssetHandle {
@@ -350,7 +465,7 @@ function createFlowerCrown(): AssetHandle {
   heart.position.set(0, SIT + 0.09, 0.27);
   fit.add(heart);
 
-  return finish(root);
+  return finish(root, fit, 'flower');
 }
 
 // =============================================================================
@@ -518,7 +633,7 @@ function createRipikaHat(): AssetHandle {
 
   fit.add(hoodFace(RIPIKA_HOOD, RIPIKA_HOOD_PATCH, 'hood.ripika', RIPIKA_HOOD_FACE));
 
-  return finish(root);
+  return finish(root, fit, 'ripikaHat');
 }
 
 /** Trilla's face. The puff's own big eyes and soft blush, no nose. */
@@ -616,7 +731,7 @@ function createPuffHat(): AssetHandle {
 
   // Measured before the notes join it: a burst of floating notes is not part of
   // how tall a hat is, and the name label sits at `height + 0.42`.
-  const handle = finish(root);
+  const handle = finish(root, fit, 'puff');
 
   // --------------------------------------------------------------- singing
   const rng = new Rng(0x7211a + puffHatCount * 7919);
