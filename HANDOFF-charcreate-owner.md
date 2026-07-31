@@ -33,29 +33,43 @@ direction, per brief. In order:
 6. **Mohican landed for real** (PR #138, `feat/mohican-hair`, "Rooster" in the
    picker) — rebased onto it (clean, no conflicts), then activated the
    exclusivity mechanism: `HAT_EXCLUSIVE_HAIR_STYLES` is now
-   `new Set<HairStyle>(['mohican'])` instead of empty. **Not yet verified by
-   the coordinator** — they said they'll check it themselves once told it's
-   ready. It is: build's clean, the mechanism was fully built out in step 3
-   and needed no changes beyond the one line.
+   `new Set<HairStyle>(['mohican'])` instead of empty.
+7. **Coordinator's live QA on step 6 found a real bug**, pinned exactly with a
+   screenshot: the Hat tab correctly disappeared, but the worn hat stayed
+   visibly rendered and the crest never showed. Root cause — `applyHairStyle`
+   called `refreshPreview('hair')` (a one-shot read of `this.hatId`) *before*
+   `this.hatId` was set to `null`/restored a few lines later, so the 3D
+   preview always rendered one step stale. The hidden crest wasn't a second
+   bug: `setHatWorn(true)` was still firing (a hat asset was still being
+   built from the stale id), which tucks hair away under a hat exactly as
+   designed for every other style — it was just tucking away a crest that
+   should have had no hat to tuck under at all. Fixed by resolving every
+   field (`hatId`, `hatIdBeforeExclusiveHair`, the tab button, the rebuilt
+   Hat panel) *before* the single `refreshPreview` call, moved to the end of
+   the method. Traced both directions by hand (entering Mohican, leaving it,
+   and starting the screen already on it) — all three now flow through the
+   one corrected call. **Still not visually confirmed by anyone** — I do not
+   have browser access this session either; the coordinator said they'll do
+   their own pass regardless.
 
 **Rebase note:** step 6's rebase onto `feat/mohican-hair` rewrote every
 commit's hash from steps 1–5. Use `git log --oneline` for current hashes
 rather than anything cited from memory of an earlier checkpoint.
 
-**Visually verified: steps 1–4 (by the coordinator), partially.** Step 6
-(Mohican) still needs the specific sequence below run for real. Everything
-else marked "needs eyes" below is still real and outstanding.
+**Visually verified: steps 1–4 (by the coordinator), partially; step 6/7
+(Mohican) not yet, including after the fix in step 7.** Everything else
+marked "needs eyes" below is still real and outstanding.
 
 ### Needs eyes (manual QA)
 
-- **Mohican — not yet checked by anyone.** Pick a hat in the Hat tab, switch
-  to Rooster (Mohican) in the Hair tab, confirm the Hat tab disappears from
-  the strip and the hat comes off the live preview; switch to a different
-  hair style, confirm the Hat tab reappears with the *same* hat still
-  selected (not reset to the default). Then also check the reverse order:
-  open the creator with Mohican already selected (nothing to switch away
-  from) and confirm the Hat tab is simply absent from the start, no flash of
-  it appearing first.
+- **Mohican — fixed once, unverified since.** Pick a distinct hat in the Hat
+  tab, switch to Rooster (Mohican) in the Hair tab, confirm the hat visibly
+  comes off **and the crest shows** (both symptoms of the one bug fixed in
+  step 7 above); switch to a different hair style, confirm the hat visibly
+  returns and the Hat tab shows it selected (not reset to the default).
+  Then the edge case: open the creator with Mohican already selected
+  (nothing to switch away from) and confirm the Hat tab is simply absent
+  from the start, no flash of it appearing first.
 - **Tabs**: does the strip wrap sensibly on a phone width without becoming a
   second scroll hunt (reuses `.charcreate-styles`'s existing grid, which
   already solved this for the hair-style row, so it should); does each tab's
