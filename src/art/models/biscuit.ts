@@ -184,6 +184,7 @@ export function createBiscuit(): BiscuitHandle {
   });
   remapSphereFaceUv(muzzle.geometry, { spreadX: 1.7, spreadY: 1.7, tilt: 0.18 });
   muzzle.material = toonMaterial(0xffffff, { map: mouthTexture });
+  muzzle.name = 'bakedFace:muzzle';
 
   // --- eyes ---------------------------------------------------------------------
   // Baked into the skull's own texture — see ART_DIRECTION.md §3.

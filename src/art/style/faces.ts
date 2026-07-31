@@ -722,6 +722,10 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
       }
       remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
       mesh.material = material;
+      // Named for the same reason `createFacePatch` names its mesh `facePatch`:
+      // `check:baked-face` and QA need to find the surface a face went into
+      // without guessing which blob is the head.
+      if (!mesh.name) mesh.name = 'bakedFace';
     },
   };
 }
