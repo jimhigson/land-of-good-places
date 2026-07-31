@@ -43,12 +43,23 @@ swatch commits on click):
 - bar focused: ←/↓ darker, →/↑ brighter, ±10%, Home/End = ends.
 Escape closes the panel from anywhere inside it.
 
-## Status
-- `npm run build` — exit 0, confirmed directly (not piped).
-- Committed: `db21c28` "Add an exact-HSV custom colour picker to character creation".
-- **Not yet done:** browser QA (open each of the 4 fields, drag a genuinely
-  custom colour, confirm it applies/previews, confirm no hex/numbers visible,
-  test phone-portrait width). PR not yet raised.
+## Status — DONE
+- `npm run build` — exit 0, confirmed directly (not piped), on every commit.
+- Browser QA complete (chrome-devtools, dev server on :5183, killed by exact
+  PID when done): all 4 fields open/drag/keyboard/close correctly on desktop
+  and on an emulated 390x844 touch phone; no hex/RGB/HSL text anywhere in the
+  panel (checked via `innerText` regex); no console errors; picked a custom
+  green hair colour, completed character creation, and confirmed it renders
+  on the live player in the park (not just the preview) — full pipeline
+  proven end to end.
+- Two bugs found and fixed *during* this QA pass (see commits `ce90d4f`,
+  `3db1873`): a `[hidden]`-vs-`display:flex` specificity tie that kept closed
+  panels full-height (pushed later sections off-screen — this would have
+  been very visible and immediately reported), and an uncaught
+  `setPointerCapture` exception on non-standard pointer ids (defensive
+  try/catch added; real touch/mouse input was never actually at risk, but a
+  console error was).
+- PR raised, not merged (per house rule — Overseer merges after two reviews).
 
 ## If picking this up cold
 Read `src/ui/ColourWheelPicker.ts`'s doc comment first — it explains the
