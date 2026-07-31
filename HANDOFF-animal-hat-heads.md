@@ -81,10 +81,50 @@ Renders: `scratchpad/renders/ripika09_*.png`, `trilla04_*.png` (front / iso 38°
   notes, swaps to a singing face and jiggles). The bonnet must keep all of
   that — do not drop it when replacing the creature reuse.
 
+## Two numbers that bit, so they do not bite twice
+
+- **`check:hat-fit`'s `span` counts forward reach as width** — it is
+  `2 × max hypot(x, z)`. A long peak therefore fails the width bound even
+  though the hat is narrow. First pass had `peakLen` 0.26/0.175 and measured
+  1.32×/1.16× against a 1.15 limit. Shortened to 0.145/0.14, which is also
+  closer to the reference's own peak:crown ratio (0.39, not the 0.68 we had).
+- **A brim has to clear its own band.** Trilla's peak at y = −0.128 sat
+  entirely inside the hem roll's tube (±0.036 about −0.127) and was invisible
+  from every angle. Now −0.100.
+
+## Cross-check that the port is faithful
+
+`check:hat-fit`'s measured `rise` (the top of the hat above the crown, walked
+off the real three.js vertices) is 0.695 m for the cap and 0.683 m for the
+bonnet — 0.463 and 0.455 head units, which is where Blender puts the ear tips
+and the curl. The runtime build and the Blender prototype are the same shape.
+
 ## Status
 
 - [x] Reference studied, both designs modelled and rendered in Blender
-- [ ] Ported to `src/art/models/hoodShell.ts`
-- [ ] `hats.ts` rewired; puff song preserved
-- [ ] `npm run build` exit 0 (`check:hat-fit` bounds: span 0.45–1.15× the bare
-      head, tip ≤ 1.45× the kid's height — both designs measure ~1.0× span)
+- [x] Ported to `src/art/models/hoodShell.ts`
+- [x] `hats.ts` rewired; the puff's song, note burst, singing face and jiggle
+      all rebuilt on the bonnet (the old builder got them free from
+      `createPuffCreature`; losing them would have been a regression)
+- [x] Shop copy + GAME_DESIGN.md amendment + the now-stale `KNOWN_LONG` entry
+- [x] `npm run build` exit 0; `check:hat-fit` all 8 hats pass, spans 1.08 and
+      1.09 of the bare head, tips 1.28× the kid's height (limit 1.45×)
+- [ ] **No in-game QA.** The browser was contested (another agent's PR opened
+      today, many vite servers up) and CLAUDE.md says do not drive it unless
+      told you own it. Needs a look at `/art-samples.html` and at the hat shop
+      stands, plus one wear/remove cycle in the character creator to confirm
+      the pop-in scale and that the bonnet still sings.
+
+## Open questions for the next round
+
+1. **The RiPika cap's ears still lean toward the reference's silhouette** —
+   they are RiPika's own cocoa-tipped ears, so some of that is the character,
+   but if the family reads it as merchandise the move is blunter, rounder
+   tips and less splay.
+2. **A bolt badge was tried and dropped** (see above). If more RiPika
+   signature is wanted, it wants a properly extruded bolt polygon, not slabs.
+3. **Trilla's pale bib and pale brim merge** into one light area under the
+   face at the iso angle. Deeper pink on one of them would separate them.
+4. **The cap has panel seams (`seamR`), the bonnet barely any.** They are
+   invisible at gameplay distance by design; if we want the sewn read to
+   carry further, that is one number.
