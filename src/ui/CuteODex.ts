@@ -527,7 +527,18 @@ export class CuteODex {
     card.dataset.out = out ? 'true' : 'false';
     card.disabled = !paradeable;
 
-    const where = carried ? 'In my hands' : out ? 'Walking with me' : 'In my backpack';
+    // "Wearing it!" comes off the book's own `placement`, which the store
+    // already derives from every worn slot there is (`refreshPlacement`), so it
+    // is right for a hat and a jet pack alike and will be right for whatever
+    // gets worn next. Without it a jet pack — which goes straight onto her back
+    // when she buys one — reads as "In my backpack" while it is plainly on her.
+    const where = carried
+      ? 'In my hands'
+      : entry?.placement === 'worn'
+        ? 'Wearing it!'
+        : out
+          ? 'Walking with me'
+          : 'In my backpack';
 
     card.innerHTML =
       `<span class="dex-icon">${escapeHtml(item.icon)}</span>` +
