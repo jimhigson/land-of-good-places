@@ -1,7 +1,12 @@
 import { Group, Mesh, TorusGeometry } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createFacePatch, facePatchGeometry, paintFace, type Expression } from '../style/faces';
+import {
+  createBakedFace,
+  paintFaceOnFill,
+  remapSphereFaceUv,
+  type Expression,
+} from '../style/faces';
 import { heartGeometry } from '../style/shapes';
 import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
 
@@ -163,10 +168,13 @@ export function createBiscuit(): BiscuitHandle {
   muzzle.add(nose);
   addOutline(nose, 0.008);
 
-  // The mouth lives on its own little patch worn on the muzzle. It is a CHILD of
-  // the muzzle mesh, so it already inherits the muzzle's squash — applying that
-  // scale again would sink it inside the snout and the smile would vanish.
-  const mouthTexture = paintFace({
+  // The mouth is painted into the muzzle's own texture. It never changes and
+  // has no expressions, so it uses the plain `paintFaceOnFill` + UV remap rather
+  // than a `createBakedFace` that would paint five canvases for one static
+  // smile. The old note here — that the patch must not re-apply the muzzle's
+  // squash, or the smile sinks into the snout — stops applying: the muzzle IS
+  // the surface now, so it carries its own squash exactly once.
+  const mouthTexture = paintFaceOnFill(ART.biscuitMuzzle, {
     size: 256,
     eyes: false,
     mouth: 'smile',
@@ -174,18 +182,13 @@ export function createBiscuit(): BiscuitHandle {
     eyeY: 0.3,
     mouthDrop: 0.3,
   });
-  const mouthPatch = decal(
-    new Mesh(
-      facePatchGeometry(0.135 * HEAD * 1.035, 1.7, 1.7, 0.18),
-      toonMaterial(0xffffff, { map: mouthTexture, transparent: true }),
-    ),
-  );
-  mouthPatch.renderOrder = 3;
-  muzzle.add(mouthPatch);
+  remapSphereFaceUv(muzzle.geometry, { spreadX: 1.7, spreadY: 1.7, tilt: 0.18 });
+  muzzle.material = toonMaterial(0xffffff, { map: mouthTexture });
 
   // --- eyes ---------------------------------------------------------------------
-  const face = createFacePatch({
-    radius: skullR,
+  // Baked into the skull's own texture — see ART_DIRECTION.md §3.
+  const face = createBakedFace({
+    fill: ART.biscuitFur,
     spreadX: 1.8,
     spreadY: 1.8,
     tilt: 0.12,
@@ -200,8 +203,7 @@ export function createBiscuit(): BiscuitHandle {
     blushStyle: 'soft',
     blushR: 0.1,
   });
-  face.mesh.scale.set(1.06, 0.98, 1);
-  head.add(face.mesh);
+  face.applyTo(skull);
 
   return {
     root,

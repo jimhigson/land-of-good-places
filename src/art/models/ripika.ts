@@ -2,7 +2,7 @@ import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createFacePatch, type Expression } from '../style/faces';
+import { createBakedFace, facePatchGeometry, type Expression } from '../style/faces';
 import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
 
 /**
@@ -123,8 +123,12 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
   }
 
   // --- face ------------------------------------------------------------------
-  const face = createFacePatch({
-    radius: skullR,
+  // Baked into the skull's own texture rather than worn on a patch in front of
+  // it — ART_DIRECTION.md §3. Same window, same paint options, so the face lands
+  // where it always did; it just no longer floats 1.2% of a skull proud of the
+  // head, and no longer needs the squash below copied from the skull's own.
+  const face = createBakedFace({
+    fill: ART.ripikaYellow,
     spreadX: 1.85,
     spreadY: 1.85,
     tilt: 0.2,
@@ -141,12 +145,14 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
     blushStyle: 'disc',
     blushR: 0.105,
   });
-  face.mesh.scale.set(1.06, 0.97, 1);
-  head.add(face.mesh);
+  face.applyTo(skull);
 
   if (options.space) {
+    // The helmet used to clone the face patch's geometry. There is no face mesh
+    // to clone now, so it builds the same sector directly — the numbers are the
+    // face window's, which is what the clone was giving it anyway.
     const helmet = new Mesh(
-      face.mesh.geometry.clone(),
+      facePatchGeometry(skullR, 1.85, 1.85, 0.2),
       toonMaterial(0xffffff, { transparent: true, opacity: 0.34 }),
     );
     helmet.scale.setScalar(1.55);

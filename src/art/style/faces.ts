@@ -433,13 +433,17 @@ function drawFaceOnFill(
   ctx.fillStyle = css(fill);
   ctx.fillRect(0, 0, size, size);
 
-  const box = size * (1 - 2 * FACE_FILL_INSET);
-  const at = size * FACE_FILL_INSET;
+  // The face is painted at the inset size and blitted 1:1, rather than painted
+  // at full size and scaled down on the way in. Every shape in `paintFace` is a
+  // fraction of the canvas, so painting it smaller draws the same picture at a
+  // lower resolution — which is exactly what is wanted — whereas scaling a
+  // finished canvas would resample it and soften every ink edge for nothing.
+  const box = Math.round(size * (1 - 2 * FACE_FILL_INSET));
+  const at = Math.round(size * FACE_FILL_INSET);
   const inWindow = (draw: (ctx: CanvasRenderingContext2D, size: number) => void): void => {
     ctx.save();
     ctx.translate(at, at);
-    ctx.scale(box / size, box / size);
-    draw(ctx, size);
+    draw(ctx, box);
     ctx.restore();
   };
 
@@ -448,8 +452,8 @@ function drawFaceOnFill(
   // `paintFace` owns its own transparent canvas; this composites that canvas in
   // rather than re-implementing the drawing, so a change to how an eye is
   // painted reaches a baked face and a worn one alike.
-  const face = paintFace(options);
-  ctx.drawImage(face.image as CanvasImageSource, at, at, box, box);
+  const face = paintFace({ ...options, size: box });
+  ctx.drawImage(face.image as CanvasImageSource, at, at);
   face.dispose();
 
   if (layers.over) inWindow(layers.over);
