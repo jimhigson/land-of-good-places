@@ -559,12 +559,15 @@ const SPIKE_ROOT = 0.44;
  * but a wedge that comes to a point well clear of the skull — which is the
  * whole of what was wrong.
  *
- * **Sized to a height, deliberately.** Nine of these take the child to 2.37 m,
- * which is where `spiky` stood before the shells landed — `kid.ts` still
- * records it as "0.28 m taller than a bob", and it is 0.28 m taller than a bob
- * again. Standing them fully upright reaches 2.5 m, and she has to walk around
- * a park whose crowd is 2.12 m; a shorter dramatic spike beats a tall one that
- * clips a doorway, so the ceiling is restored rather than raised.
+ * **Sized to a height, deliberately.** Nine of these take the child to 2.329 m,
+ * with the points standing 241 mm proud of the crown. Longer and more upright
+ * both read better and both cost height, and she has to walk around a park
+ * whose crowd is 2.12 m: nothing in the world actually stops her at 2.43 m
+ * (the garlands hang at 3.1 and a shop floor is 3.6, and `npm run build` is
+ * green either way), but she would then be half a metre over every other child
+ * in the park, and a shorter dramatic spike beats a tall one that clips a
+ * doorway somebody adds later. So this sits back at the ~2.3 m the style was
+ * budgeted at before the shells landed.
  */
 const SPIKES: readonly (readonly [number, number])[] = [
   [0.42, 0.24],

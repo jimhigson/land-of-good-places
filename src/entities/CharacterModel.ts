@@ -41,7 +41,7 @@ export class CharacterModel {
    * nothing is worn.
    *
    * Read live off the model rather than snapshotted, because since hair styles
-   * landed it genuinely changes: spiky hair is 0.28 m taller than a bob, and
+   * landed it genuinely changes: spiky hair is 0.24 m taller than a bob, and
    * putting a hat on hides the spikes and brings it back down. See
    * `art/models/kid.ts`'s `height` getter.
    */

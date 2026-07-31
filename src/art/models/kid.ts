@@ -481,7 +481,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     holdAnchor,
     backpackAnchor,
     hairParts: hairRig.parts,
-    // Measured, not `KID_HEIGHT`: spiky hair is a good 0.28 m taller than a
+    // Measured, not `KID_HEIGHT`: spiky hair is a good 0.24 m taller than a
     // bob, and a name label placed from a constant would sit inside it.
     //
     // A **getter**, because the answer changes while the character is alive:
