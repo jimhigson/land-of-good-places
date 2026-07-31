@@ -5,7 +5,62 @@
 wires together. This role continues across sessions — Overseer routes future
 character-creation work here.
 
-## Status right now (31 July 2026, second session)
+## Status right now (31 July 2026, second session — updated at end of session)
+
+Four pieces of work landed this session, five commits, `npm run build` exit 0
+(checked directly, never piped) after every one of them. **No PR opened yet**
+— staying alive for more direction, per brief. In commit order:
+
+1. `42e61bb` — the urgent "Look" HUD pill (reopen the creator mid-game without
+   losing the park). Reload-based v1; see the long entry below for why a live
+   re-skin path doesn't exist yet and the one known wart (duplicate hat/pet
+   grant on repeat reopens).
+2. `07f4ffe` — tabbed the creator (Skin/Hair/Eyes/Outfit/Shoes/Hat/Backpack/
+   Pet), generalising the PREVIEW RULE's camera mechanism via `CharacterPreview.
+   setResting()`.
+3. `08a650f` — prepped Mohican/hat mutual exclusivity ahead of the `mohican`
+   `HairStyle` landing (it hasn't — checked `feat/mohican-hair`, zero commits
+   beyond `main`). Whole mechanism built and building against an empty
+   `HAT_EXCLUSIVE_HAIR_STYLES` set; turning it on the day the style lands is
+   one line (`ui/CharacterCreation.ts`, search that constant).
+4. `9f4c0f2` — wired `ShoeKind` end to end: a Shoes tab, state/save/store
+   fields, `Player.ts`, NPC crowd rolling and instancing. The shoe design
+   note two sessions ago is now superseded by the real thing; skip straight
+   to the commit message / diff if you need the specifics.
+
+**Not visually verified, any of it.** Did not own the shared Chrome profile
+at any point this session (CLAUDE.md's rule) — build/type-check is the only
+verification. Everything below marked "needs eyes" is real and outstanding.
+
+### Needs eyes (manual QA, next time someone owns the browser)
+
+- **The "Look" pill**: open the HUD menu mid-game, tap "Look" (🪞), confirm it
+  reopens the creator; finish it; confirm money/backpack/Cute-o-dex/where you
+  were standing are all unchanged and you land back in the same spot. Known
+  wart: reopening and re-picking the same hat/pet grants a *second* copy —
+  not a data-loss bug, just clutter; see commit `42e61bb`'s message for why
+  it was left rather than fixed under time pressure.
+- **Tabs**: does the strip wrap sensibly on a phone width without becoming a
+  second scroll hunt (reuses `.charcreate-styles`'s existing grid, which
+  already solved this for the hair-style row, so it should); does each tab's
+  camera framing look right the instant you switch to it, before touching any
+  control inside.
+- **Shoes**: each of the four kinds selectable and previewing live in the new
+  Shoes tab; the colour swatches (including the "+" wheel) behave like every
+  other swatch row; a sandal actually bares the foot in skin tone regardless
+  of the chosen shoe colour (per `FOOT_COLOUR` in `shoes.ts`); the 'feet'
+  camera framing (tight, low, front-on, no turntable) looks right instead of
+  cropping a foot out of shot. Also worth a glance at the park itself: do
+  background children now visibly wear plain shoes or sandals (the two
+  crowd-eligible kinds) without any draw-call/perf regression.
+- **Mohican**: nothing to see yet — the mechanism is inert (empty exclusivity
+  set) until `mohican` exists as a `HairStyle`. Once it does: flip the one
+  line in `HAT_EXCLUSIVE_HAIR_STYLES`, then actually run the sequence Jim
+  asked for — pick a hat, switch to Mohican, confirm the Hat tab vanishes and
+  the hat comes off the preview; switch to a different style, confirm the
+  same hat comes back selected in a rebuilt Hat tab.
+
+## Status as of end of first session (31 July 2026)
 
 Rebased cleanly onto `origin/main` at the top of this session — PR #131
 (backpack picker) and PR #132 (cap redesign, RiPika/Trilla hoods, shoe assets)
@@ -333,6 +388,13 @@ every one of those files by hand. **Two options, pick when shoe assets land:**
   order. Do **not** silently duplicate `buildChoiceSection` or re-invent the
   `Rng`-stream-per-feature convention — both already exist once backpack lands.
 
+## Draft shoe design — SUPERSEDED, shoe wiring is done
+
+Commit `9f4c0f2` did the whole checklist below against the real `shoes.ts`
+(`ShoeKind = 'plain' | 'ripika' | 'sandal' | 'sparkle'`, not the guessed
+`sneaker`/`sandal`/`sparklyPink`). Kept for the git-archaeology trail only —
+skip straight to that commit's message or diff for what actually shipped.
+
 ## Draft shoe design (to firm up once `ShoeKind` exists)
 
 Mirrors backpack's shape (kind + colour, chosen once, not a shop item) rather
@@ -423,14 +485,27 @@ were tuned against). If not free, build-verify only and list exactly what
 needs eyes in the PR, the way PR #131's own description does under "Needs
 visual QA".
 
-## Next actions
+## Next actions (superseded by the "Status right now" section at the top)
 
-1. Re-check `animal-hat-heads` for shoe commits (fetch + log) at the start of
-   the next session before anything else.
-2. If still absent: keep waiting, or ask the Overseer for a status check on
-   the Blender agent — don't start guessing at `ShoeKind` values and building
-   against a fiction.
-3. If present: read `src/art/models/shoes.ts` in full first, reconcile it
-   against the "expected" section above (it will differ — that's fine, the
-   real file wins), then work the checklist top to bottom, committing after
-   each file group compiles.
+The three steps below were this list's original next actions, from before
+shoes existed. All done now — see the top of this file for the current
+state and what still needs a pair of eyes on it (browser QA, mainly).
+
+1. ~~Re-check `animal-hat-heads` for shoe commits~~ — done; the real assets
+   landed in PR #132, confirmed and wired this session.
+2. ~~If still absent: keep waiting~~ — moot.
+3. ~~If present: read `src/art/models/shoes.ts` in full, work the checklist~~
+   — done, commit `9f4c0f2`.
+
+**Actual next actions, this session's end:**
+
+1. Whatever the Overseer routes here next — character-creation work stays
+   assigned to this branch/role.
+2. If nothing else comes in: keep half an eye on `feat/mohican-hair` (fetch +
+   log) — the moment it lands a real `mohican` `HairStyle`, flip
+   `HAT_EXCLUSIVE_HAIR_STYLES` in `ui/CharacterCreation.ts` and run the
+   manual QA sequence in the "Needs eyes" list above.
+3. Whenever the shared browser is free: work the "Needs eyes" checklist at
+   the top of this file top to bottom — four sessions of build-only work have
+   now stacked up with zero visual confirmation, which is the point past
+   which bugs stop being findable by reading the diff.
