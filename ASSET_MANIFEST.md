@@ -93,6 +93,7 @@ interface CreatureHandle extends AssetHandle {
 | 20 | Pet followers (bunny, kitten, mouse) | M | Also the "cute animal" player options — one rig, three skins. |
 | 21 | Hats (8+) | S | Mount to `head` via a `hatAnchor` empty at the crown. |
 | 22 | Backpack + peeking heads | M | Five shapes in `art/models/backpacks.ts` (`satchel`, `bubble`, `heart`, `ripikaHead`, `trillaHead`), chosen in the creator and rolled per NPC. Tagged per kind like hair, not built as separate assets — a bag is part of the body, never bought. The peek slot is `backpackAnchor`, which moves to the mouth of the shape worn. |
+| 22b | Jet pack | S | `art/models/jetpack.ts`. Built like a hat, not like a backpack (it is sold, displayed and swapped), so it is a factory + anchor rather than a tagged-part rig. Origin is the **mount point on the back**, so `jetpackAnchor.add(pack.root)` needs no offset maths; `check:assets` knows the `gear.` prefix alongside `hat.`. `createJetpack(scale)` shrinks it for a follower, and `setThrust(0..1)` lights the painted flames. Hides the wearer's own bag while it is on. |
 | 23 | Cute-o-dex + bedroom shelves | M | UI-adjacent; needs consistent 3D icon renders. |
 
 ## P2 — space show, Mayhem dressing, polish

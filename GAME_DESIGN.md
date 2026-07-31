@@ -544,6 +544,35 @@ Money **never runs out** in normal mode. Seven shops:
    pet-and-hat characters may follow this pattern.
 7. **Surprise egg shop** — mystery eggs with a random cute toy inside
 
+### The jet pack (31 July 2026 — Eleri's own ask, built)
+
+In her words: *"add a shop that sells a jet pack, and when you use it your
+pet gets one too. Button to use it next to the jump button and then you fly
+and control where you fly instead of walking."*
+
+- It is **sold in the toy shop**, and buying one puts it **straight on her
+  back** — there is one jet pack, it is the most exciting thing in the shop,
+  and she should not have to open a menu to use it.
+- A **fly button sits next to the hop button**, and only exists once she owns
+  one.
+- **One button, one rule:** tap to take off, **hold to go up**, let go and she
+  comes gently down, touch the ground and she is walking again.
+- **Her whole parade takes off with her**, each one wearing its own jet pack.
+
+*This is squarely a CONTROL RULE feature and it obeys it: steering in the air
+is the same code as steering on the ground, so pressing left goes left in the
+air exactly as on foot, and nothing anywhere rotates to turn. It obeys the
+EXIT RULE's spirit too — letting go always lands her on whatever is really
+under her feet, and collision keeps running while she flies (with her height
+as the wall clearance the hop already uses), so the spot she comes down on is
+always a spot she was allowed to be. Indoors it is a hover rather than a
+flight: a castle floor is 3.6 m below the one above and there is no ceiling up
+there to stop her.*
+
+*Where it lives: `art/models/jetpack.ts`, `entities/WornJetpack.ts`, the
+flight in `entities/Player.ts`, the followers in
+`entities/parade/ParadeMember.ts`.*
+
 ## The rides
 
 ### Space ferris wheel
