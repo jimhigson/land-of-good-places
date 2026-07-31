@@ -1,19 +1,22 @@
 import {
   BufferGeometry,
+  CanvasTexture,
   ConeGeometry,
   CylinderGeometry,
   DoubleSide,
   Group,
   InstancedMesh,
+  LinearFilter,
   Matrix4,
   Mesh,
   type MeshToonMaterial,
   Quaternion,
   SphereGeometry,
   TorusGeometry,
+  Vector2,
   Vector3,
 } from 'three';
-import { PALETTE, Rng } from '../style/bridge';
+import { PALETTE, Rng, TAU } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { visiblePoints, visibleTop } from '../style/measure';
 import { addOutline, decal, inkTint, markShared, solid, toonMaterial } from '../style/materials';
@@ -27,6 +30,7 @@ import {
   CHEERY_PEAK,
   hoodFaceUv,
   hoodHemRollGeometry,
+  hoodPanelSeamsGeometry,
   hoodPeakGeometry,
   hoodPeakLiningGeometry,
   hoodShellGeometry,
@@ -103,10 +107,7 @@ const FIT = KID_HEAD_SCALE;
  * **How much bigger than life the family wants their hats** (31 July 2026).
  *
  * Live-testing session, in Jim's words: *"totally fine, but make all hats 50%
- * bigger"*, and then *"make crown and cherry cap 30% bigger again"*. So every
- * hat is ×1.5, and the Sparkly Crown and the Cheery Cap take a further ×1.3 on
- * top of that ({@link HAT_SIZE_EXTRA}) for ≈×1.95. The two critter hoods are
- * named in neither instruction and get the plain ×1.5.
+ * bigger"*. So every hat is ×1.5 before its own {@link HAT_SIZE_EXTRA}.
  *
  * This is a **design decision, not a fudge factor**: hats in this park are
  * deliberately, comically oversized, the way a dressing-up box is. It lived for
@@ -123,19 +124,53 @@ const FIT = KID_HEAD_SCALE;
 export const HAT_SIZE = 1.5;
 
 /**
- * The further ×1.3 on the Sparkly Crown and the Cheery Cap. See {@link HAT_SIZE}.
+ * Per-hat correction on top of {@link HAT_SIZE}, from Jim's 1 August 2026
+ * verdict — a live screenshot of every hat on the character-creation preview,
+ * with the **Party Hat named as the calibration reference**: "big enough to
+ * read at a distance, not so big it swallows the head", cartoonish rather than
+ * realistic, and the characters are not anatomically proportioned so the hats
+ * need not be either.
  *
- * **Worth knowing before you retune it:** the ×1.3 was approved by eye against
- * the *old* Cheery Cap — a squashed sphere with a half-cylinder peak, 0.94× the
- * bare head across. The cap was rebuilt on `hoodShell.ts` afterwards and is
- * 1.09× across before any of this is applied, so ×1.95 lands somewhere the
- * family has not actually seen. It is the number they asked for; whether it is
- * the *cap* they asked for is a question for the sofa.
+ * The 31 July session's blanket "crown and cherry cap 30% bigger again" is
+ * gone from here — it was approved by eye against the *old* Cheery Cap, a
+ * squashed sphere 0.94× the bare head across (see git history), and the
+ * `hoodShell.ts` rebuild that replaced it is 1.09× across before any multiplier
+ * at all. ×1.95 on the new geometry measured **2.392 m wide on a 2.087 m
+ * child** — literally wider than she is tall — which is what Jim actually saw
+ * and rejected. Per hat, from that screenshot:
+ *
+ * - **crown** keeps ×1.3 (→ ×1.95 total): "size is good", only its position
+ *   moved (see {@link createCrown}).
+ * - **cap** drops to ×1 (→ ×1.5, the plain baseline): "far too big… bring it
+ *   down to a cartoonish-but-sane size using the Party Hat as your
+ *   calibration", plus the six-panel rebuild — see {@link createCap}.
+ * - **sun** gets ×1.1 (→ ×1.65): "make it 10% larger", the one hat asked to
+ *   grow.
+ * - **flower**, **ripikaHat**, **puff** drop to ×0.75 (→ ×1.125): all three
+ *   called "too big, reduce" with no target number given, so this is a
+ *   judgement call — see the before/after screenshots in
+ *   `HANDOFF-hat-rework.md` for what was actually approved against.
+ * - **party** and **bobble** are absent (→ ×1 → plain ×1.5): "good as-is" /
+ *   "size is good".
  */
-const HAT_SIZE_EXTRA: Partial<Record<HatKind, number>> = { crown: 1.3, cap: 1.3 };
+const HAT_SIZE_EXTRA: Partial<Record<HatKind, number>> = {
+  crown: 1.3,
+  sun: 1.1,
+  cap: 0.75,
+  flower: 0.75,
+  ripikaHat: 0.75,
+  puff: 0.75,
+};
 
-/** The total scale-up for one hat: {@link HAT_SIZE}, plus its own extra. */
-function hatSize(kind: HatKind): number {
+/**
+ * The total scale-up for one hat: {@link HAT_SIZE}, plus its own extra.
+ *
+ * Exported so `measure-hat-fit.mts` can print the *real* per-hat multiplier
+ * rather than a hand-typed copy of it — a hand-typed copy is exactly how the
+ * 31 July "crown and cap ×1.95" note in this script's own console output went
+ * stale the moment this file's numbers changed under it.
+ */
+export function hatSize(kind: HatKind): number {
   return HAT_SIZE * (HAT_SIZE_EXTRA[kind] ?? 1);
 }
 
@@ -309,6 +344,27 @@ function createPartyHat(): AssetHandle {
   return finish(root, fit, 'party');
 }
 
+/**
+ * How much further the crown sinks onto the head than a plain hat's {@link SIT}.
+ *
+ * Jim's 1 August verdict: the crown's *size* is right, only its position is
+ * wrong — "it sits too high; lower it onto the head". Measured, the cause is
+ * not that the band is too high up in absolute terms; it is that the band is
+ * a bare, uncapped ring (`CylinderGeometry`, open top and bottom), so once
+ * `finish`'s brow-anchored ×1.95 makes the ring far wider than the skull is at
+ * that height, the background shows straight through the gap between the
+ * ring's inner wall and the hair beneath it and it reads as floating rather
+ * than worn. The generic brow-line scaling in `finish` cannot fix this — the
+ * crown does not cross the eyes at all at the front, so the safety margin it
+ * protects has nothing to hold here — so the crown gets its own, additional
+ * sink, deep enough that the ring's lower half is behind the hair silhouette
+ * (the bunches, not the bare skull `check:hat-fit` measures) rather than
+ * hanging clear of it. Tuned by eye against the screenshot, not measured: there
+ * is no `check:*` gate this can be pinned to, because "does the background show
+ * through the gap" is a rendering question, not a geometry one.
+ */
+const CROWN_LOWER = 0.1;
+
 function createCrown(): AssetHandle {
   const { root, fit } = hatGroups('hat.crown');
 
@@ -317,19 +373,102 @@ function createCrown(): AssetHandle {
   const band = solid(
     new Mesh(new CylinderGeometry(0.26, 0.27, 0.16, 20), toonMaterial(ART.helmetGold)),
   );
-  band.position.y = SIT + 0.08;
+  band.position.y = SIT + 0.08 - CROWN_LOWER;
   fit.add(band);
   addOutline(band, 0.011);
 
   const points = solid(new Mesh(new ConeGeometry(0.27, 0.2, 5), toonMaterial(ART.helmetGold)));
-  points.position.y = SIT + 0.24;
+  points.position.y = SIT + 0.24 - CROWN_LOWER;
   fit.add(points);
 
   const jewel = decal(new Mesh(starGeometry(0.13, 0.03), toonMaterial(PALETTE.markerPink)));
-  jewel.position.set(0, SIT + 0.09, 0.26);
+  jewel.position.set(0, SIT + 0.09 - CROWN_LOWER, 0.26);
   fit.add(jewel);
 
   return finish(root, fit, 'crown');
+}
+
+/**
+ * How many knitted ribs run round the Bobble Hat's dome, and how far each
+ * tilts the surface at its steepest — the sides of a rib, not its crown or its
+ * groove, which is where the derivative of a smooth bump peaks.
+ *
+ * A **normal map**, not extra geometry: the dome is one `SphereGeometry`
+ * (`check:hat-fit` and the shop stand both walk its actual vertices, and a
+ * ribbed sphere would be a lot more of them for a shape that is, in silhouette,
+ * still just a dome). `SphereGeometry`'s own UV already runs `u` once round
+ * the azimuth and `v` from pole to equator, so a rib pattern that is a plain
+ * function of `u` — `height(u) = sin(2π·RIBS·u)` — repeats **vertically**,
+ * pole to hem, exactly like a knitted rib stitch, with no seam: `u` wraps at
+ * both texture edges by construction.
+ *
+ * Toon shading only has {@link TOON_RAMP}'s four bands, so a shallow bump is
+ * invisible almost everywhere and only shows up in the sliver of surface
+ * right at a band boundary. {@link BOBBLE_RIB_TILT} is chosen large enough
+ * (35°) that the ribs read across the whole dome, not just at the terminator —
+ * checked by rendering, not by eye on the texture (see `HANDOFF-hat-rework.md`).
+ */
+const BOBBLE_RIBS = 14;
+const BOBBLE_RIB_TILT = (35 * Math.PI) / 180;
+
+let bobbleRibNormalMap: CanvasTexture | null = null;
+
+/**
+ * Paints {@link BOBBLE_RIBS} vertical ribs as a tangent-space normal map.
+ *
+ * `height(u) = sin(2π·RIBS·u)`, so the tangent-space tilt (its derivative,
+ * `cos(2π·RIBS·u)`) is zero at the crown of each rib and at the bottom of each
+ * groove — flat, as a rounded rib should be at its high and low points — and
+ * at its steepest exactly between them, which is where a knitted rib actually
+ * catches the light. `v` (pole-to-hem) never enters the formula, which is
+ * what makes the ribs run the hem's whole height rather than being a repeating
+ * horizontal band.
+ *
+ * One texture, cached and `markShared`: every Bobble Hat in the game — worn,
+ * and the shop's own display copy — paints the same ribs, so there is exactly
+ * one canvas to redraw if this ever needs retuning.
+ */
+function bobbleKnitNormalMap(): CanvasTexture {
+  if (bobbleRibNormalMap) return bobbleRibNormalMap;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable — cannot paint the bobble ribs.');
+  const image = ctx.createImageData(size, size);
+  for (let x = 0; x < size; x += 1) {
+    const u = (x + 0.5) / size;
+    const tilt = BOBBLE_RIB_TILT * Math.cos(TAU * BOBBLE_RIBS * u);
+    const nx = Math.sin(tilt);
+    const nz = Math.cos(tilt);
+    const r = Math.round((nx * 0.5 + 0.5) * 255);
+    const g = 128; // no variation pole-to-hem: the ribs run the full height
+    const b = Math.round((nz * 0.5 + 0.5) * 255);
+    for (let y = 0; y < size; y += 1) {
+      const i = (y * size + x) * 4;
+      image.data[i] = r;
+      image.data[i + 1] = g;
+      image.data[i + 2] = b;
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  // Deliberately NOT `SRGBColorSpace` — a normal map is data, not colour, and
+  // decoding it as sRGB would warp every tilt away from what was painted.
+  const texture = new CanvasTexture(canvas);
+  // A sine-wave rib pattern mip-maps to flat grey — a minified mip level
+  // averages each rib's left tilt against its right and cancels to no tilt at
+  // all, which is why the very first render of this looked completely smooth
+  // despite the map being attached and correct. `RIBS` is deliberately not so
+  // high that turning mipmaps off aliases badly at gameplay distance.
+  texture.generateMipmaps = false;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+  texture.needsUpdate = true;
+  markShared(texture);
+  bobbleRibNormalMap = texture;
+  return texture;
 }
 
 function createBobbleHat(): AssetHandle {
@@ -341,6 +480,13 @@ function createBobbleHat(): AssetHandle {
       toonMaterial(PALETTE.markerSky),
     ),
   );
+  const domeMaterial = dome.material as MeshToonMaterial;
+  domeMaterial.normalMap = bobbleKnitNormalMap();
+  // 1.0 (the painted tilt, unamplified) turned out invisible under this ramp's
+  // four bands — verified by rendering, see `BOBBLE_RIB_TILT`'s comment and
+  // `HANDOFF-hat-rework.md`. 4 is the smallest multiplier that reads clearly
+  // in a screenshot at the character-creation preview's own distance.
+  domeMaterial.normalScale = new Vector2(7, 7);
   dome.position.y = SIT + 0.02;
   dome.scale.set(1, 1.1, 1);
   fit.add(dome);
@@ -357,13 +503,25 @@ function createBobbleHat(): AssetHandle {
   return finish(root, fit, 'bobble');
 }
 
+/**
+ * How much further the sun hat sinks onto the head than a plain hat's
+ * {@link SIT}. Jim's 1 August verdict, same diagnosis as {@link CROWN_LOWER}:
+ * once `finish`'s brow-anchored scale-up (now ×1.65, see {@link HAT_SIZE_EXTRA})
+ * makes the brim wider than the head, the gap between the brim's underside and
+ * the hair below it opens up and the hat reads as hovering rather than worn.
+ * The sun hat's brim is a *solid* disc rather than an open ring — there is
+ * nothing to see through — so this is purely the vertical gap, and a plain
+ * sink closes it. Tuned by eye against the screenshot, same as the crown.
+ */
+const SUN_LOWER = 0.07;
+
 function createSunHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.sun');
 
   const brim = solid(
     new Mesh(new CylinderGeometry(0.46, 0.46, 0.05, 24), toonMaterial(PALETTE.flowerYellow)),
   );
-  brim.position.y = SIT + 0.02;
+  brim.position.y = SIT + 0.02 - SUN_LOWER;
   // Nothing is plumb: a sun hat worn at a slight angle reads as jaunty rather
   // than as a dinner plate.
   brim.rotation.z = 0.08;
@@ -376,12 +534,12 @@ function createSunHat(): AssetHandle {
       toonMaterial(PALETTE.flowerYellow),
     ),
   );
-  dome.position.y = SIT + 0.04;
+  dome.position.y = SIT + 0.04 - SUN_LOWER;
   dome.scale.set(1, 0.9, 1);
   fit.add(dome);
 
   const ribbon = ring(0.235, 0.032, PALETTE.blossomPink);
-  ribbon.position.y = SIT + 0.07;
+  ribbon.position.y = SIT + 0.07 - SUN_LOWER;
   fit.add(ribbon);
 
   return finish(root, fit, 'sun');
@@ -431,6 +589,19 @@ function createCap(): AssetHandle {
   shell.name = 'hoodShell';
   fit.add(shell);
   addOutline(shell, 0.013);
+
+  // The six sewn seams, in the peak/button's own accent green rather than the
+  // crown's mint — same reason the peak is: at the game's 38° camera a raised
+  // ridge in the *same* colour as the surface it sits on reads as a bump, not
+  // a seam, and this ties "seam, peak, button" together as the one darker trim
+  // colour a real cap's stitching and hardware would be. See
+  // `hoodPanelSeamsGeometry` for why this is real geometry rather than relying
+  // on the shell's own (much subtler) panel relief.
+  const seams = hoodPart(
+    hoodPanelSeamsGeometry(CHEERY_HOOD, { tube: 0.022, lift: 0.02, topFrac: 0.8 }),
+    PALETTE.leafMid,
+  );
+  fit.add(seams);
 
   const peak = hoodPart(hoodPeakGeometry(CHEERY_HOOD, CHEERY_PEAK), PALETTE.leafMid);
   fit.add(peak);

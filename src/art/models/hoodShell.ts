@@ -561,6 +561,104 @@ export function hoodHemRollGeometry(spec: HoodShellSpec, roll: number): BufferGe
   return finish(positions, indices);
 }
 
+/**
+ * The Cheery Cap's **panel seams** — six raised, rounded ridges running from
+ * just below the crown button down to the hem, one down the centre of each
+ * panel boundary. A real six-panel baseball cap is sewn from six curved
+ * triangular panels that meet at a button on top; what actually reads as "six
+ * panels" from a few metres away is not the panels themselves (a smooth dome
+ * and a subtly-creased one look the same in flat toon shading) but the six
+ * **seams**, so this hat gets them as their own raised geometry rather than
+ * relying on `hoodShellGeometry`'s `seamR`/`seamSharp` relief alone — see
+ * {@link CHEERY_HOOD}'s comment for why that relief, alone, was not enough:
+ * on a plain, faceless hood it is a few millimetres of bump under a toon ramp
+ * with only three or four bands, and it did not read as construction at all.
+ *
+ * Built the same way {@link hoodHemRollGeometry} sweeps the band: a tube whose
+ * centreline sits on the shell's own surface (via {@link hoodShellSampler}),
+ * lifted a hair proud of it so it does not z-fight. The difference is which
+ * way it sweeps — the hem roll's tube runs *around* the shell at a fixed
+ * height; a seam's runs *down* it at a fixed azimuth, so its cross-section is
+ * built from the two **horizontal** basis vectors (radially outward, and
+ * azimuthal-tangent) rather than the hem roll's (radially outward, vertical) —
+ * correct because the path this tube follows is nearly vertical, so the plane
+ * perpendicular to it at any point is (to the accuracy a decorative seam
+ * needs) the horizontal plane.
+ *
+ * The six seams are troughs of `hoodShellGeometry`'s own `cos(panels·φ)`
+ * relief, at `φ = π/panels + k·2π/panels` — see {@link CHEERY_HOOD}'s
+ * `seamSharp`, which pulls the shell in slightly at exactly these azimuths, so
+ * the ridge sits right at the crease it is meant to be sewn along rather than
+ * floating over the middle of a panel.
+ */
+export interface HoodPanelSeamsSpec {
+  /** Tube radius at the hem end, in head units. */
+  readonly tube: number;
+  /** How far above the surface the tube's centreline is lifted, as a fraction of radius. */
+  readonly lift: number;
+  /** Where the seams stop, short of the pole, as a fraction of `semiY` — the crown button covers the rest. */
+  readonly topFrac: number;
+}
+
+export function hoodPanelSeamsGeometry(spec: HoodShellSpec, seam: HoodPanelSeamsSpec): BufferGeometry {
+  const { radiusAt, hem } = hoodShellSampler(spec);
+  const { panels, depth, semiY } = spec;
+  const steps = 14;
+  const ring = 8;
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let p = 0; p < panels; p += 1) {
+    // The troughs of `cos(panels·φ)` — see `hoodShellGeometry`'s `seam` — are
+    // where consecutive panels actually meet.
+    const phi = Math.PI / panels + p * (TAU / panels);
+    const bottom = hem(phi);
+    const top = semiY * seam.topFrac;
+    const base = positions.length / 3;
+    const nx = Math.sin(phi);
+    const nz = -Math.cos(phi);
+    const tx = Math.cos(phi);
+    const tz = Math.sin(phi);
+    for (let k = 0; k <= steps; k += 1) {
+      const t = k / steps;
+      const y = top + (bottom - top) * t;
+      // Thinner near the button, fuller towards the band — a real sewn seam
+      // is not a uniform bead, and this is also what lets the six converge
+      // near the pole without visibly intersecting each other.
+      const radius = seam.tube * (0.45 + 0.55 * t);
+      const r = radiusAt(y, phi) * (1 + seam.lift);
+      const cx = r * Math.sin(phi);
+      const cz = -r * Math.cos(phi) * depth;
+      for (let m = 0; m < ring; m += 1) {
+        const th = (m / ring) * TAU;
+        const ox = Math.cos(th) * radius;
+        const oz = Math.sin(th) * radius;
+        positions.push(cx + nx * ox + tx * oz, y, cz + nz * ox + tz * oz);
+      }
+    }
+    for (let k = 0; k < steps; k += 1) {
+      for (let m = 0; m < ring; m += 1) {
+        const m2 = (m + 1) % ring;
+        const a = base + k * ring + m;
+        const b = base + (k + 1) * ring + m;
+        const c = base + (k + 1) * ring + m2;
+        const d = base + k * ring + m2;
+        indices.push(a, b, c, a, c, d);
+      }
+    }
+    // A small fan cap at the top so the button-end is not an open ring — the
+    // bottom is left open, since it disappears into the hem roll and the band
+    // painted below it.
+    const apex = positions.length / 3;
+    positions.push(radiusAt(top, phi) * (1 + seam.lift) * Math.sin(phi), top, -radiusAt(top, phi) * (1 + seam.lift) * Math.cos(phi) * depth);
+    for (let m = 0; m < ring; m += 1) {
+      const m2 = (m + 1) % ring;
+      indices.push(apex, base + m, base + m2);
+    }
+  }
+  return finish(positions, indices);
+}
+
 // -----------------------------------------------------------------------------
 // `hoodPatchGeometry` and `hoodBibGeometry` used to live here: two little decal
 // meshes floating a few millimetres off the shell, one carrying the face and
