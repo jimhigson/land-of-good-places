@@ -3,6 +3,7 @@ import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
+import { CROWD_BACKPACK_KINDS } from '../../art/models/backpacks';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -275,6 +276,12 @@ export class NpcSystem implements GameSystem {
     // A separate stream for names, so shuffling the cast never shifts which
     // colours/hairstyles/paces the seeded `rng` above hands to which slot.
     const nameRng = new Rng(NPC_SEED + 424242);
+    // And another for the bags. Bag *colour* has always come off the main
+    // stream (`pickColours`), so the shape has to come from somewhere else or
+    // every child in the park would be handed somebody else's hair, pace and
+    // spot on the path the day this feature landed — the same reason the names
+    // above have their own stream.
+    const bagRng = new Rng(NPC_SEED + 90210);
     const otherNames = pickNames(nameRng, NPC_COUNT - 1);
     let nameCursor = 0;
 
@@ -311,7 +318,16 @@ export class NpcSystem implements GameSystem {
       // `EYE_VARIANT_COUNT`), same spirit as the skin/hair/outfit rolls above.
       const eyeVariant = isEthan ? BLUE_EYE_VARIANT : rng.int(0, EYE_VARIANT_COUNT - 1);
 
-      const avatar = this.kids.spawn(colours, hairStyle, rng.range(0.86, 1.04), eyeVariant);
+      const backpack =
+        CROWD_BACKPACK_KINDS[bagRng.int(0, CROWD_BACKPACK_KINDS.length - 1)] ?? 'satchel';
+
+      const avatar = this.kids.spawn(
+        colours,
+        hairStyle,
+        rng.range(0.86, 1.04),
+        eyeVariant,
+        backpack,
+      );
       // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default
       // 'neutral' would never call `setExpression` and Ethan would show the

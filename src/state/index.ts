@@ -12,6 +12,7 @@ export {
 export { shopWords, type ShopWords } from './wording';
 export { SECRETS, discoverSecret, type Secret } from './secrets';
 export type {
+  BackpackKind,
   CharacterKind,
   CuteCategory,
   CutePlacement,

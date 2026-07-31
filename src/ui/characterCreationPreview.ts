@@ -19,7 +19,7 @@ import { disposeTree, toonMaterial } from '../art/style/materials';
 import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
-import type { HairStyle } from '../state';
+import type { BackpackKind, HairStyle } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -60,6 +60,9 @@ export interface PreviewChoice {
   readonly hairStyle: HairStyle;
   readonly outfit: number;
   readonly eye: number;
+  /** Which bag she wears. Bare and non-optional for the same reason `hairStyle` is. */
+  readonly backpack: BackpackKind;
+  readonly backpackColour: number;
   readonly hatId: string;
   readonly petId: string;
   /**
@@ -106,7 +109,7 @@ const RESTING_FOCUS: Readonly<Record<PreviewFraming, PreviewFocus>> = {
  * the child in a front view, so that framing both measures the hair itself and
  * turns the plinth — see {@link CharacterPreview.updateTurntable}.
  */
-export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'pet';
+export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'backpack' | 'pet';
 
 /**
  * Where the camera sits relative to whatever it is framing: dead in front, and
@@ -139,6 +142,9 @@ const FOCUS_MARGIN: Readonly<Record<PreviewFocus, number>> = {
   hair: 1.18,
   face: 1.24,
   body: 1.14,
+  // A bag on a back seen three-quarters on is a small subject with a whole
+  // child beside it; the margin keeps her shoulder in shot for scale.
+  backpack: 1.2,
   pet: 1.32,
 };
 
@@ -213,6 +219,21 @@ const TURN_RATE = 2.2;
  * and then comes back, which swishes the tail again on the way.
  */
 const TAIL_FOCUSES: ReadonlySet<PreviewFocus> = new Set<PreviewFocus>(['all', 'hair', 'body']);
+
+/**
+ * How far round the plinth turns to show the backpack, in radians.
+ *
+ * Nearly all the way round — 126°, against {@link TAIL_TURN}'s 63° — because a
+ * backpack is not "partly hidden behind the child" the way a hanging ponytail
+ * is, it is *directly* behind her, and the whole of her is in front of it. The
+ * one way to look at somebody's bag is to walk round the back of them.
+ *
+ * It rides the same eased turn the tail does (see {@link CharacterPreview.tailShow}),
+ * so the plinth swings there and back rather than cutting, and it is added to
+ * that turn rather than replacing it — `backpack` is deliberately not in
+ * {@link TAIL_FOCUSES}, so exactly one of the two is ever non-zero.
+ */
+const BACK_TURN = 2.2;
 
 // Scratch vectors — `updateCamera` runs every frame and must not allocate.
 const SCRATCH_CENTRE = new Vector3();
@@ -293,6 +314,8 @@ export class CharacterPreview {
   private trailingHair = false;
   /** 0 = facing the camera, 1 = turned to {@link TAIL_TURN}. Eased, never cut. */
   private tailShow = 0;
+  /** The same, for {@link BACK_TURN} — how far round to show the backpack. */
+  private backShow = 0;
   /**
    * The rock's phase, accumulated rather than read off `elapsed`.
    *
@@ -388,6 +411,8 @@ export class CharacterPreview {
       hairStyle: choice.hairStyle,
       outfit: choice.outfit,
       eyeColour: choice.eye,
+      backpackKind: choice.backpack,
+      backpackColour: choice.backpackColour,
     });
     // A fresh choice gets an immediate happy face — the same "it worked!"
     // beat a purchase or a pet pick gets everywhere else in the game — and
@@ -515,18 +540,22 @@ export class CharacterPreview {
    */
   private updateTurntable(dt: number): void {
     const wanted = this.trailingHair && TAIL_FOCUSES.has(this.focus) ? 1 : 0;
+    const wantedBack = this.focus === 'backpack' ? 1 : 0;
     // A player who has asked for reduced motion still gets to see the style —
     // they just get it turned, rather than turning. Same rule the camera
     // follows, and the same rule the rock itself has always followed.
     const blend = this.spinsAllowed ? 1 - Math.exp(-dt * TURN_RATE) : 1;
     this.tailShow += (wanted - this.tailShow) * blend;
+    this.backShow += (wantedBack - this.backShow) * blend;
 
     const amplitude = ROCK_AMPLITUDE + (TAIL_ROCK_AMPLITUDE - ROCK_AMPLITUDE) * this.tailShow;
     const rate = ROCK_RATE + (TAIL_ROCK_RATE - ROCK_RATE) * this.tailShow;
     this.rockPhase += dt * rate;
 
     this.stage.rotation.y =
-      TAIL_TURN * this.tailShow + (this.spinsAllowed ? Math.sin(this.rockPhase) * amplitude : 0);
+      TAIL_TURN * this.tailShow +
+      BACK_TURN * this.backShow +
+      (this.spinsAllowed ? Math.sin(this.rockPhase) * amplitude : 0);
   }
 
   /**
@@ -579,6 +608,13 @@ export class CharacterPreview {
         box = this.measure(
           kid.head,
           ...kid.hairParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
+        );
+      } else if (focus === 'backpack') {
+        // Only the parts on show: the shapes she did not pick are hidden, not
+        // absent, and `expandByObject` does not check visibility — a box drawn
+        // round all five would frame a RiPika head nobody can see.
+        box = this.measure(
+          ...kid.backpackParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
         );
       } else if (focus === 'face') {
         const patch = kid.root.getObjectByName('facePatch');

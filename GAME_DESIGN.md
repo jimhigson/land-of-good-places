@@ -250,6 +250,13 @@ At the start you choose to play as either:
    *The physics ponytail is the only hard one — a springy chain like the
    balloon strings, not a rigid mesh. Everything else is modelling. Applies
    to NPCs too, so the crowd varies.*
+   **Your backpack too (31 July 2026 — done):** the bag on her back is a
+   choice, not a fixture — a plain backpack, a bubble, a heart, a **RiPika
+   head** or a **Trilla head** — in any colour, from the same swatch row and
+   the same colour wheel as her hair. *It is the thing every cute thing she
+   owns climbs out of, so it is on screen behind her all game.* The park's
+   children roll their own (shapes and colour both), so no two of them are
+   carrying the same bag.
 2. **A cute animal** — e.g. a bunny, kitten, or little mouse.
 
 The default character name is **Eleri**.

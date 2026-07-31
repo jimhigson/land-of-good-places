@@ -87,6 +87,13 @@ export const PALETTE = {
   eyeDark: 0x3b2d3f,
   /** Default iris colour — see `ART.kidEye`. A warm violet, not a "realistic" one. */
   iris: 0x6f4b9a,
+  /**
+   * Default backpack colour — see `ART.kidBackpack`, which now takes it from
+   * here. It moved down out of `ART` when the backpack became a choice: the
+   * store has to name a starting colour for a brand-new character, and
+   * `state/` never imports `art/` (see `state/types.ts`'s header).
+   */
+  backpack: 0x7fe3c0,
   cheek: 0xff9db4,
 
   // sky & light

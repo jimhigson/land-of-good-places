@@ -30,8 +30,12 @@
  * ART_DIRECTION.md §3: the eyes are 80% of the cuteness.
  *
  * **4. Nothing hangs where the arms swing or the backpack sits.** Measured
- * against the real `backpack` and `hand` meshes on a real `createKid`, not
- * against numbers copied out of it.
+ * against the real backpack and `hand` meshes on a real `createKid`, not
+ * against numbers copied out of it — and against **every backpack shape** she
+ * can choose (`art/models/backpacks.ts`), not just the sewn satchel that used
+ * to be the only one there was. A RiPika-head bag is a bigger ball than the
+ * satchel it replaces, and "the long hair goes through her bag" would be a
+ * silent, shape-specific bug that only one of five children ever saw.
  *
  * **5. The spikes are actually spikes** (added 31 July, second pass). The
  * family reported `spiky` as a bumpy texture rather than as hair, and the
@@ -66,6 +70,7 @@ import {
   SHELL_SKINS,
 } from '../src/art/models/hairShell.ts';
 import { HAIR_STYLES, type HairStyle } from '../src/art/models/hair.ts';
+import { BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
 
 const probes = JSON.parse(
   readFileSync(new URL('./hair-blender-probe.json', import.meta.url), 'utf8'),
@@ -219,7 +224,9 @@ function find(root: Object3D, name: string): Object3D[] {
 
 for (const style of HAIR_STYLES) {
   if (style === 'ponytail' || style === 'longPonytail') continue;
-  const kid = createKid({ hairStyle: style, backpack: true });
+  // Every shape built at once, so one kid per style answers for all five —
+  // the same thing the NPC crowd's prototype does with `backpackKinds`.
+  const kid = createKid({ hairStyle: style, backpack: true, backpackKinds: BACKPACK_KINDS });
   kid.root.updateMatrixWorld(true);
 
   const shells = find(kid.root, `hair.shell.long`)
@@ -245,12 +252,21 @@ for (const style of HAIR_STYLES) {
     }
   }
 
-  const bag = find(kid.root, 'backpack')[0];
-  if (bag) {
-    const box = new Box3().setFromObject(bag);
+  // The bag she is wearing, kind by kind: everything this shape shows, boxed.
+  // Measured off the built parts rather than off a mesh name, because a shape
+  // is several meshes and the shapes do not agree on what to call them.
+  for (const kind of BACKPACK_KINDS) {
+    kid.setBackpackKind(kind);
+    kid.root.updateMatrixWorld(true);
+    const worn = kid.backpackParts.filter((part) => part.mesh.visible).map((part) => part.mesh);
+    if (worn.length === 0) continue;
+    const box = new Box3();
+    for (const mesh of worn) box.expandByObject(mesh);
     const inside = hairPoints.filter((p) => box.containsPoint(p)).length;
-    check(inside === 0, `${style}: ${inside} hair vertices inside the backpack`);
+    check(inside === 0, `${style}: ${inside} hair vertices inside the ${kind} backpack`);
   }
+  kid.setBackpackKind('satchel');
+  kid.root.updateMatrixWorld(true);
 
   // The hands swing on a fixed arc about the shoulder. Sweep it and keep the
   // closest approach: a fist through a curtain of hair is what makes long hair

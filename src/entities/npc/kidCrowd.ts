@@ -9,6 +9,7 @@ import {
 } from 'three';
 import { createKid } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
+import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
 import { visibleTop } from '../../art/style/measure';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
@@ -124,6 +125,15 @@ const SHADOW_CASTER_PARTS = 3;
  */
 const PROTOTYPE_STYLE: HairStyle = 'bunches';
 
+/**
+ * The backpack the prototype is built wearing.
+ *
+ * Same reasoning as {@link PROTOTYPE_STYLE}: the crowd reads geometry, not
+ * visibility, so this only decides what happens to be `visible` on a model
+ * nobody ever renders — but naming it beats a bare string in three places.
+ */
+const PROTOTYPE_BACKPACK: BackpackKind = 'satchel';
+
 /** The joints a walk cycle needs, resolved once per child. */
 export interface KidRig {
   readonly root: Object3D;
@@ -170,6 +180,15 @@ export class KidCrowd {
    * well past what a heuristic can do, and the model already knows the answer.
    */
   private readonly hiddenParts: ReadonlyMap<HairStyle, readonly number[]>;
+  /**
+   * Per bag, the parts a child wearing it must **not** show.
+   *
+   * {@link hiddenParts}'s twin, built the same way out of the same kind of
+   * model-supplied tags — see `art/models/backpacks.ts`'s `BackpackPart`. The
+   * straps belong to every kind, so they are in nobody's hidden list and every
+   * child keeps them.
+   */
+  private readonly hiddenBags: ReadonlyMap<BackpackKind, readonly number[]>;
   /** Bare height per style — spikes reach 0.2 m higher than a bob. */
   private readonly heights: ReadonlyMap<HairStyle, number>;
   private readonly fixedColours: readonly number[];
@@ -187,6 +206,11 @@ export class KidCrowd {
       // see `CROWD_HAIR_STYLES` for the full reasoning.
       hairStyles: CROWD_HAIR_STYLES,
       backpack: true,
+      backpackKind: PROTOTYPE_BACKPACK,
+      // Every bag a background child can wear, built into the one prototype —
+      // exactly what `hairStyles` above does for hair. The two creature-head
+      // bags are deliberately not among them; see `CROWD_BACKPACK_KINDS`.
+      backpackKinds: CROWD_BACKPACK_KINDS,
     });
 
     this.prototype = handle.root;
@@ -315,6 +339,17 @@ export class KidCrowd {
       }
     }
     this.hiddenParts = hidden;
+
+    const hiddenBags = new Map<BackpackKind, number[]>();
+    for (const kind of CROWD_BACKPACK_KINDS) hiddenBags.set(kind, []);
+    for (const part of handle.backpackParts) {
+      const index = sources.indexOf(part.mesh as Mesh);
+      if (index < 0) continue;
+      for (const kind of CROWD_BACKPACK_KINDS) {
+        if (!part.kinds.includes(kind)) hiddenBags.get(kind)?.push(index);
+      }
+    }
+    this.hiddenBags = hiddenBags;
   }
 
   /**
@@ -325,8 +360,16 @@ export class KidCrowd {
    * `eyeVariant` selects one of the face-material sets baked in the
    * constructor — `0` for the default violet, `1..EYE_VARIANTS.length` for
    * the extras (see {@link EYE_VARIANT_COUNT}, {@link BLUE_EYE_VARIANT}).
+   * `backpack` must be one of {@link CROWD_BACKPACK_KINDS}; anything else
+   * would hide every bag part and leave a child in bare straps.
    */
-  spawn(colours: KidColours, hairStyle: HairStyle, scale: number, eyeVariant = 0): KidAvatar {
+  spawn(
+    colours: KidColours,
+    hairStyle: HairStyle,
+    scale: number,
+    eyeVariant = 0,
+    backpack: BackpackKind = PROTOTYPE_BACKPACK,
+  ): KidAvatar {
     const member = this.crowd.spawn();
     member.root.scale.setScalar(scale);
 
@@ -335,6 +378,7 @@ export class KidCrowd {
     }
 
     for (const part of this.hiddenParts.get(hairStyle) ?? []) member.shown[part] = 0;
+    for (const part of this.hiddenBags.get(backpack) ?? []) member.shown[part] = 0;
 
     const rig = resolveRig(member.root);
     const facePart = this.facePartIndex;

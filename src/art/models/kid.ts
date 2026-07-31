@@ -1,5 +1,4 @@
 import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import {
@@ -18,6 +17,7 @@ import {
 } from '../style/asset';
 import { visibleTop } from '../style/measure';
 import { buildHair, type HairPart, type HairStyle } from './hair';
+import { buildBackpacks, type BackpackKind, type BackpackPart } from './backpacks';
 
 /**
  * The player kid — Eleri by default.
@@ -181,6 +181,16 @@ export interface KidOptions {
   hairStyles?: readonly HairStyle[];
   backpack?: boolean;
   backpackColour?: number;
+  /** Which shape is worn on her back. `satchel` by default. See `backpacks.ts`. */
+  backpackKind?: BackpackKind;
+  /**
+   * Which backpack shapes are *built*, if more than the one worn.
+   *
+   * The twin of {@link hairStyles}, and only the NPC crowd wants it, for the
+   * same reason: its prototype has to carry every shape a background child can
+   * wear at once (`CROWD_BACKPACK_KINDS`). Everybody else builds one.
+   */
+  backpackKinds?: readonly BackpackKind[];
   /** Iris colour. Defaults to `ART.kidEye` — every kid but Ethan wears it. */
   eyeColour?: number;
 }
@@ -208,8 +218,21 @@ export interface KidHandle extends CreatureHandle {
   readonly hairAnchor: Group;
   /** Where a carried toy sits. */
   readonly holdAnchor: Group;
-  /** Where a peeking creature's head pops out of the bag. */
+  /**
+   * Where a peeking creature's head pops out of the bag.
+   *
+   * Moves with the shape worn — a creature-head bag opens above its ears, a
+   * sewn one at its rim — so a caller that keeps this group (the parade does)
+   * always has the mouth of the bag actually on the child's back.
+   */
   readonly backpackAnchor: Group;
+  /**
+   * Every backpack mesh built, each tagged with the kinds that show it.
+   *
+   * The twin of {@link hairParts}, and exposed for the same caller: the NPC
+   * crowd maps prototype meshes onto shapes without knowing what a strap is.
+   */
+  readonly backpackParts: readonly BackpackPart[];
   /**
    * Every hair mesh built, each tagged with the styles that show it.
    *
@@ -227,6 +250,12 @@ export interface KidHandle extends CreatureHandle {
    * `KidOptions.hairStyles` exist to switch to; anything else hides all hair.
    */
   setHairStyle(style: HairStyle): void;
+  /**
+   * Switches which built backpack shape is shown. Only shapes passed as
+   * `KidOptions.backpackKinds` exist to switch to; anything else leaves her
+   * wearing nothing but the straps.
+   */
+  setBackpackKind(kind: BackpackKind): void;
   /**
    * Tells the model a hat is on, so anything that would spear through one is
    * tucked away. Called by `entities/WornHat.ts` and by the creator's preview.
@@ -262,6 +291,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairStyle = 'bunches',
     backpack = true,
     backpackColour = ART.kidBackpack,
+    backpackKind = 'satchel',
     eyeColour = ART.kidEye,
   } = options;
 
@@ -356,32 +386,20 @@ export function createKid(options: KidOptions = {}): KidHandle {
   }
 
   // --- backpack -------------------------------------------------------------------
-  const backpackAnchor = new Group();
-  if (backpack) {
-    // Dropped and pushed back so it still clears the underside of the skull —
-    // the head now overhangs to z = -0.65, and a bag tucked under it vanishes.
-    const bag = solid(new Mesh(new RoundedBoxGeometry(0.36, 0.32, 0.2, 5, 0.09), bagMat));
-    // Named so `check:hair` can find the thing a fall of hair has to clear
-    // without a second copy of these numbers living in a script.
-    bag.name = 'backpack';
-    bag.position.set(0, 0.56, -0.32);
-    body.add(bag);
-    addOutline(bag, 0.016);
-
-    const flap = solid(new Mesh(new RoundedBoxGeometry(0.32, 0.14, 0.17, 4, 0.06), bagDarkMat));
-    flap.position.set(0, 0.69, -0.34);
-    body.add(flap);
-
-    for (const side of [-1, 1] as const) {
-      const strap = solid(new Mesh(new RoundedBoxGeometry(0.07, 0.36, 0.08, 3, 0.03), bagDarkMat));
-      strap.position.set(side * 0.17, 0.64, -0.16);
-      strap.rotation.x = -0.12;
-      body.add(strap);
-    }
-
-    backpackAnchor.position.set(0, 0.74, -0.3);
-    body.add(backpackAnchor);
-  }
+  // Every shape lives in `art/models/backpacks.ts`, for the same reason hair
+  // does: the NPC crowd needs one prototype carrying several shapes at once
+  // while the player wears exactly one. `backpack: false` (the pet-shop display
+  // kids, say) builds nothing at all and leaves the anchor sitting at the origin.
+  const backpackRig = backpack
+    ? buildBackpacks({
+        body,
+        bagMaterial: bagMat,
+        bagDarkMaterial: bagDarkMat,
+        kind: backpackKind,
+        ...(options.backpackKinds ? { kinds: options.backpackKinds } : {}),
+      })
+    : null;
+  const backpackAnchor = backpackRig?.anchor ?? new Group();
 
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
@@ -480,6 +498,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hairAnchor,
     holdAnchor,
     backpackAnchor,
+    backpackParts: backpackRig?.parts ?? [],
     hairParts: hairRig.parts,
     // Measured, not `KID_HEIGHT`: spiky hair is a good 0.24 m taller than a
     // bob, and a name label placed from a constant would sit inside it.
@@ -497,6 +516,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
       hairRig.setStyle(style);
       measuredHeight = visibleTop(root);
     },
+    // No re-measure: every backpack shape sits on the small of her back, a
+    // metre below the top of her hair, so none of them can be what makes the
+    // character taller. A `visibleTop` walk per switch would be a whole model's
+    // worth of vertices for a number that cannot have changed.
+    setBackpackKind: (kind: BackpackKind) => backpackRig?.setKind(kind),
     setHatWorn: (worn: boolean) => {
       hairRig.setHatWorn(worn);
       measuredHeight = visibleTop(root);

@@ -76,6 +76,7 @@ import { createBalloon } from '../src/art/models/balloons.ts';
 import { createHat, HAT_KINDS } from '../src/art/models/hats.ts';
 import { createLollipopTree, createPinkWall, createWoodWall } from '../src/art/models/props.ts';
 import { HAIR_STYLES } from '../src/art/models/hair.ts';
+import { BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -250,6 +251,15 @@ function collect(): Subject[] {
     const kid = createKid();
     kid.setHairStyle(style);
     add(`kid.hair.${style}`, kid);
+  }
+
+  // Every backpack shape, worn. None of them should move her origin, her
+  // facing or her height — a bag that did any of those would put her name
+  // label somewhere new or leave her hovering, and the shapes are built from
+  // three different sources (sewn boxes, RiPika's head, Trilla) so "they all
+  // still hang off her back the same way" is worth stating rather than hoping.
+  for (const kind of BACKPACK_KINDS) {
+    add(`kid.backpack.${kind}`, createKid({ backpackKind: kind }));
   }
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.
