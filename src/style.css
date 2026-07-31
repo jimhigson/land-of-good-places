@@ -682,6 +682,24 @@ kbd {
   box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
 }
 
+/* "Look" reopens the character creator over the running park — same pill
+   language, its own lilac so it reads as a different thing from the mint
+   backpack and the cream help pill either side of it. */
+.pill--look {
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, #e6dcff 150%);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.pill--look:active {
+  transform: translateY(0.1875rem);
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
+}
+
 .pill--prompt {
   background: linear-gradient(180deg, #fff 0%, #ffe9a8 150%);
   transition: opacity 180ms ease, transform 180ms ease;
