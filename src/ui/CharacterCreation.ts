@@ -906,26 +906,37 @@ export class CharacterCreation {
   private applyHairStyle(style: HairStyle): void {
     const wasExclusive = HAT_EXCLUSIVE_HAIR_STYLES.has(this.hairStyle);
     this.hairStyle = style;
-    this.refreshPreview('hair');
 
+    // `this.hatId` must be fully resolved *before* the one `refreshPreview`
+    // call below — that call reads `this.hatId` fresh, but only once, and it
+    // used to run first: caught in QA (31 July 2026) as the Sparkly Crown
+    // staying visibly worn the moment Rooster was picked, because the tab
+    // itself hid correctly (a direct DOM write, `hatTabButton.hidden`,
+    // independent of the preview) while the 3D preview kept rendering
+    // whatever `hatId` was still set to a line later. So: settle every field
+    // first, touch the preview last.
     const isExclusive = HAT_EXCLUSIVE_HAIR_STYLES.has(style);
-    if (isExclusive === wasExclusive) return;
-    this.hatTabButton.hidden = isExclusive;
+    if (isExclusive !== wasExclusive) {
+      this.hatTabButton.hidden = isExclusive;
 
-    if (isExclusive) {
-      this.hatIdBeforeExclusiveHair = this.hatId;
-      this.hatId = null;
-    } else {
-      this.hatId = this.hatIdBeforeExclusiveHair ?? DEFAULT_HAT_ID;
-      this.hatIdBeforeExclusiveHair = null;
-      // Only the card grid's *content* needs rebuilding — which card shows
-      // selected. The panel's own visibility is untouched here on purpose:
-      // she is on the Hair tab making this change, the Hat tab cannot be the
-      // active one (its button was hidden the whole time she could have
-      // picked an exclusive style), and `selectTab` alone decides when a
-      // panel is shown, the moment she actually taps its now-visible button.
-      this.hatPanel.replaceChildren(this.buildHatSection());
+      if (isExclusive) {
+        this.hatIdBeforeExclusiveHair = this.hatId;
+        this.hatId = null;
+      } else {
+        this.hatId = this.hatIdBeforeExclusiveHair ?? DEFAULT_HAT_ID;
+        this.hatIdBeforeExclusiveHair = null;
+        // Only the card grid's *content* needs rebuilding — which card shows
+        // selected. The panel's own visibility is untouched here on purpose:
+        // she is on the Hair tab making this change, the Hat tab cannot be
+        // the active one (its button was hidden the whole time she could
+        // have picked an exclusive style), and `selectTab` alone decides
+        // when a panel is shown, the moment she actually taps its
+        // now-visible button.
+        this.hatPanel.replaceChildren(this.buildHatSection());
+      }
     }
+
+    this.refreshPreview('hair');
   }
 
   /**
