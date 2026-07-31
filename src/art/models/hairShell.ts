@@ -222,14 +222,20 @@ function hemAt(hem: readonly number[], phi: number): number {
 }
 
 /**
- * Builds one hairstyle's shell.
+ * The surface itself, as two functions: how wide the shell is at a height, and
+ * where a point at a given azimuth and height ends up once it has been gathered
+ * behind the shoulders and tipped back with the skull.
  *
- * `skull` is the kid's skull radius in metres — every radial number in the spec
- * is a multiple of it, so the shell tracks a head retune.
+ * Shared so that the things which sit **on** the hair — messy tufts, spikes —
+ * can be placed on the real surface instead of at hand-picked coordinates.
+ * That is not a tidiness point: on `main` the messy tufts were parked 1.13 m
+ * from the head's centre with a cap 0.68 m across, so four of the eight were
+ * **floating in mid-air**, which is the same disconnection the family reported
+ * about the long hair and nobody had noticed. Placed on the surface, half of
+ * every tuft is inside the shell by construction and a gap is not expressible.
  */
-export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeometry {
+export function hairShellSampler(spec: HairShellSpec, skull: number) {
   const {
-    hem,
     tuck,
     tuckPow,
     flare,
@@ -239,13 +245,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
     narrow,
     flatten,
     pushBack,
-    locks,
-    lockR,
-    lockY,
-    asym,
     headTilt,
-    segments,
-    rings,
   } = spec;
   const shellR = spec.shell * skull;
   const semiY = spec.semiY * skull;
@@ -270,7 +270,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
    * game's 38° camera the player gets a dome and no face at all — exactly the
    * failure ART_DIRECTION.md §4 invented `HEAD_TILT` to avoid.
    */
-  const place = (phi: number, y: number, r: number, out: number[]): void => {
+  const at = (phi: number, y: number, r: number): [number, number, number] => {
     const g = smoothstep(gatherTop, gatherTop + gatherSpan, -y);
     const back = smoothstep(GATHER_NONE, GATHER_FULL, Math.abs(fold(phi)));
     const x = r * Math.sin(phi) * (1 - narrow * g);
@@ -278,7 +278,27 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
     const a = -headTilt * smoothstep(TILT_LOW, TILT_HIGH, y);
     const c = Math.cos(a);
     const s = Math.sin(a);
-    out.push(x, y * c - z * s, y * s + z * c);
+    return [x, y * c - z * s, y * s + z * c];
+  };
+
+  /** The outer surface at an azimuth and height, ready to hang something off. */
+  const surface = (phi: number, y: number): [number, number, number] =>
+    at(phi, y, radiusAt(y));
+
+  return { radiusAt, at, surface, shellR, semiY, thick };
+}
+
+/**
+ * Builds one hairstyle's shell.
+ *
+ * `skull` is the kid's skull radius in metres — every radial number in the spec
+ * is a multiple of it, so the shell tracks a head retune.
+ */
+export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeometry {
+  const { hem, locks, lockR, lockY, asym, segments, rings } = spec;
+  const { radiusAt, at, semiY, thick } = hairShellSampler(spec, skull);
+  const place = (phi: number, y: number, r: number, out: number[]): void => {
+    out.push(...at(phi, y, r));
   };
 
   const handover = Math.max(CAP_Y * semiY, ...hem);

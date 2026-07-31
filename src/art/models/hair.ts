@@ -11,7 +11,12 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { addOutline, solid } from '../style/materials';
 import { PonytailChain } from './ponytail';
-import { HAIR_SHELLS, hairShellGeometry, type HairShellName } from './hairShell';
+import {
+  HAIR_SHELLS,
+  hairShellGeometry,
+  hairShellSampler,
+  type HairShellName,
+} from './hairShell';
 
 /**
  * Every hairstyle in the game, in one place.
@@ -397,35 +402,43 @@ export function buildHair(options: HairOptions): HairRig {
   });
 
   // --- spiky ------------------------------------------------------------------
-  // Nine fat cones fanned off the crown. Fat, because ART_DIRECTION's "no thin
-  // parts" still applies to a spike: a needle reads as a rendering artefact
-  // where a wedge reads as hair. Kept as one merged mesh, and hidden whole when
-  // a hat goes on — everything else in this file sits inside the envelope hats
-  // already perch over, but a spike would go straight through the party hat.
+  // Nine fat cones fanned off the crop shell. Fat, because ART_DIRECTION's "no
+  // thin parts" still applies to a spike: a needle reads as a rendering
+  // artefact where a wedge reads as hair. A cone *is* the right primitive for a
+  // spike, so these stayed cones — but every base is now taken from the shell's
+  // own surface (`hairShellSampler`) rather than from a hand-picked radius, so
+  // a spike cannot come loose from the head it grows out of.
+  //
+  // Kept as one merged mesh, and hidden whole when a hat goes on: everything
+  // else in this file sits inside the envelope hats already perch over, but a
+  // spike would go straight through the party hat.
   add(
     ['spiky'],
-    crown,
+    drape,
     () => {
+      const surface = hairShellSampler(HAIR_SHELLS.crop, skull).surface;
       const spikes: BufferGeometry[] = [];
       for (let i = 0; i < 9; i += 1) {
         const azimuth = (i / 9) * Math.PI * 2 + 0.24;
         // Alternating lengths, so it reads as hacked-about rather than machined.
         const length = (i % 3 === 0 ? 0.3 : i % 3 === 1 ? 0.25 : 0.27) * H;
         // Leaning well out rather than straight up: it keeps the child inside
-        // about 2.33 m total instead of 2.5, which matters when the crowd she
-        // is standing in is 2.12 and the park's doorways were built for that.
-        const tilt = 0.72;
+        // about 2.3 m total instead of 2.5, which matters when the crowd she is
+        // standing in is 2.12 and the park's doorways were built for that.
+        const tilt = 0.66;
+        const [x, y, z] = surface(azimuth, SPIKE_ROOT);
         spikes.push(
           new ConeGeometry(0.105 * H, length, 8)
-            // Cone geometry is centred on its own height, so this puts the
-            // base at the origin and the tip at +length: a spike is then aimed
-            // by rotating about that base, not about its middle.
-            .translate(0, length / 2, 0)
+            // Cone geometry is centred on its own height, so this drops the
+            // base a little BELOW the surface and puts the tip at +length: a
+            // spike is aimed about its buried base, never about its middle.
+            .translate(0, length / 2 - 0.06, 0)
             .rotateZ(tilt)
-            // `rotateZ` tips +Y towards -X, so the azimuth that lands the spike
-            // at angle `a` on the crown is π - a, not a.
-            .rotateY(Math.PI - azimuth)
-            .translate(0.22 * H * Math.cos(azimuth), 0.42 * H, 0.22 * H * Math.sin(azimuth)),
+            // `rotateZ` tips +Y towards -X, so an azimuth measured the shell's
+            // way (from the back of the skull, x = r·sin φ) lands the spike
+            // where it belongs after this half turn.
+            .rotateY(-azimuth)
+            .translate(x, y, z),
         );
       }
       const spiky = solid(fuse(hair, spikes));
@@ -436,24 +449,27 @@ export function buildHair(options: HairOptions): HairRig {
   );
 
   // --- messy ------------------------------------------------------------------
-  // Tufts poking out SIDEWAYS rather than upwards, deliberately, and none of
-  // them centred above 0.38 × HEAD. Two reasons, one of them measured: sideways
-  // keeps the whole style inside the envelope a hat already perches over, so
-  // messy needs no hat special case the way spiky does — and the first version
-  // of this, with tufts up at 0.6 × HEAD leaning hard outwards, measured
-  // *taller than the spikes*, which is not what "messy" means to anybody.
-  add(['messy'], crown, () => {
+  // Tufts poking out SIDEWAYS rather than upwards, deliberately: it keeps the
+  // whole style inside the envelope a hat already perches over, so messy needs
+  // no hat special case the way spiky does, and an early version with tufts
+  // leaning hard upwards measured *taller than the spikes*, which is not what
+  // "messy" means to anybody.
+  //
+  // **Every tuft is centred on the shell's surface.** On `main` they were at
+  // hand-picked coordinates up to 1.13 m from the head's centre, over a cap
+  // 0.68 m across — four of the eight were floating in mid-air with a 130 mm
+  // gap, the very failure the family reported about the long hair. Centred on
+  // the surface, half of every tuft is inside the shell whatever anyone does to
+  // the numbers below.
+  add(['messy'], drape, () => {
+    const surface = hairShellSampler(HAIR_SHELLS.crop, skull).surface;
     const messy = solid(
-      fuse(hair, [
-        tuftGeometry(0.14 * H, 0.6 * H, 0.3 * H, 0.34 * H, 1.15),
-        tuftGeometry(0.12 * H, -0.5 * H, 0.36 * H, 0.28 * H, 0.9),
-        tuftGeometry(0.14 * H, 0.16 * H, 0.38 * H, -0.5 * H, 1.3),
-        tuftGeometry(0.11 * H, -0.6 * H, 0.18 * H, -0.2 * H, 0.8),
-        tuftGeometry(0.13 * H, 0.56 * H, 0.06 * H, -0.4 * H, 1.05),
-        tuftGeometry(0.1 * H, -0.22 * H, 0.38 * H, 0.4 * H, 1.4),
-        tuftGeometry(0.12 * H, 0.02 * H, 0.24 * H, 0.56 * H, 0.7),
-        tuftGeometry(0.1 * H, -0.42 * H, 0.34 * H, -0.42 * H, 1.2),
-      ]),
+      fuse(
+        hair,
+        MESSY_TUFTS.map(([radius, azimuth, height, lean]) =>
+          tuftGeometry(radius * H, surface(azimuth, height * H), lean),
+        ),
+      ),
     );
     addOutline(messy, OUTLINE_SMALL);
     return messy;
@@ -507,6 +523,29 @@ function fuse(material: Material, geometries: readonly BufferGeometry[]): Mesh {
   return new Mesh(merged, material);
 }
 
+/**
+ * Where the spikes are rooted on the crop shell, in metres up the drape frame.
+ * High enough to fan off the crown, low enough that the shell is still wide
+ * there and every base is properly buried.
+ */
+const SPIKE_ROOT = 0.44;
+
+/**
+ * The messy tufts: radius, azimuth from the back of the skull, height in HEAD
+ * units, and how much the tuft cants. Positions are (azimuth, height) rather
+ * than (x, y, z) precisely so that a tuft cannot be authored off the head.
+ */
+const MESSY_TUFTS: readonly (readonly [number, number, number, number])[] = [
+  [0.14, 1.06, 0.3, 1.15],
+  [0.12, -1.06, 0.36, 0.9],
+  [0.14, 2.83, 0.34, 1.3],
+  [0.11, -1.89, 0.18, 0.8],
+  [0.13, 2.19, 0.06, 1.05],
+  [0.1, -0.5, 0.34, 1.4],
+  [0.12, 3.11, 0.24, 0.7],
+  [0.1, -2.36, 0.3, 1.2],
+];
+
 /** A hair tie or bobble: a torus lying flat, ready to be positioned. */
 function ringGeometry(radius: number, tube: number): BufferGeometry {
   return new TorusGeometry(radius, tube, 8, 18).rotateX(Math.PI / 2);
@@ -520,7 +559,12 @@ function ringGeometry(radius: number, tube: number): BufferGeometry {
  * on X instead lays it flat *around* the head, which reads as a scale rather
  * than a tuft — worth the note, it was wrong the first time.
  */
-function tuftGeometry(radius: number, x: number, y: number, z: number, lean: number): BufferGeometry {
+function tuftGeometry(
+  radius: number,
+  centre: readonly [number, number, number],
+  lean: number,
+): BufferGeometry {
+  const [x, y, z] = centre;
   return new SphereGeometry(radius, 12, 10)
     .scale(0.85, 0.72, 1.5)
     // A modest cant, not a flick: the tuft is 1.5 radii long, so every extra
