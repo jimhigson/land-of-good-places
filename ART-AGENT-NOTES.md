@@ -106,6 +106,15 @@ Two lessons:
 
 ## 5. Faces: bake into the UV, or use a patch?
 
+> **Where this is going (31 July 2026).** Jim has ruled that computing a face's
+> position independently of the geometry it is painted on is the root of a whole
+> bug class — the hood winding bug, the 72 mm face-paint mismatch and the
+> whiskers-on-the-eyes regression are all the same shape: *two independent
+> descriptions of one surface, kept in step by hand*. The direction now is to
+> author geometry **and** its UVs together in Blender and ship that asset, so
+> the agreement is by construction. See `HANDOFF-character-modelling.md`. What
+> follows is still correct for everything not yet converted.
+
 Both exist on purpose. The rule:
 
 > **Bake when the texture can carry the surface's own colour. Keep the patch
@@ -176,6 +185,30 @@ are angles and fractions, and doing so reports differences that are not there.
 path alive behind a flag (as `KidOptions.facePatch` does for the crowd), you can
 build both and measure the difference directly instead of arguing about it.
 
+### The two ways a verification lies to you
+
+Both of these have happened, on this project, in one session. They are the
+reason a check can be green while the game is visibly wrong.
+
+**1. Comparing the new code against itself.** When the face paint was baked in,
+I checked the new cheek position against "where her blush is" — computed from
+the *same new constants*. It came out at 0.0 mm and I reported the realignment
+as verified. It was a tautology. The cat whiskers had in fact moved 76 mm and
+were being drawn across her eyes.
+
+> A parity check must compare against **the previous rendering**, reconstructed
+> or kept alive behind a flag. If both sides of your comparison come from the
+> code you just wrote, you have measured nothing.
+
+**2. Checking one member of a family and generalising.** That same check only
+covered the four designs that go through `paintCheekPoint`. `catWhiskers` and
+`starEye` compute their own anchors and were never looked at — and they were the
+two that broke.
+
+> Enumerate. Loop over `FACE_PAINT_DESIGNS`, over `HAT_KINDS`, over
+> `SHOE_KINDS`. A check that names one case will keep passing while its
+> siblings rot.
+
 Whatever you do, **say plainly in the PR what you have and have not seen
 running.** The Overseer has been fooled twice by a screenshot that looked right.
 
@@ -221,6 +254,19 @@ camera sees).
 - **Nothing is plumb** (ART_DIRECTION §4): every head gets one asymmetric
   feature, every sphere gets squashed. A perfectly symmetric upright object reads
   as a placeholder.
+- **Artwork is authored in a *space*, not in abstract fractions.** A face-paint
+  design's "0.46 of the canvas" means 0.46 of *the window it was drawn against*.
+  Hosting it on a different window is a **transform**, never a re-read against
+  different constants — see `FACE_PAINT_AUTHORED` in `faces.ts`. Re-reading is
+  how the whiskers ended up on the eyes.
+- **`GLTFExporter` cannot write textures headlessly** (it needs a real canvas to
+  encode an image), and its binary path needs a `FileReader` shim in Node.
+  `GLTFLoader.parse(arrayBuffer, '')` however works fine with no DOM at all —
+  verified on a 30-mesh, 25,622-vertex kid. So: assets carry geometry and UVs,
+  textures stay canvas-painted at runtime.
+- **Unnamed nodes come back from a glTF round trip as `mesh_1`, `mesh_2`.**
+  Anything the game finds by name — anchors, limb pivots, the face mesh — has to
+  be named in the modelling package, and asserted by a check.
 - **A stale service worker will make your changes invisible.** If the game is
   behaving as though your edits do not exist, that is why — CLAUDE.md has the
   console snippet.
