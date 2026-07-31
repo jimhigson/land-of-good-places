@@ -658,6 +658,19 @@ export interface BakedFace {
 export function createBakedFace(options: BakedFaceOptions): BakedFace {
   const { fill, spreadX = 1.7, spreadY = 1.7, tilt = 0.1, ...paint } = options;
   const size = paint.size ?? DEFAULTS.size;
+  /**
+   * Face paint is placed from **this character's** eye layout.
+   *
+   * The separate overlay decal could not do that — it was built at its own
+   * radius and tilt and positioned from `DEFAULTS`, so on the player kid (whose
+   * eyes are at `eyeY` 0.43 under a `tilt` of 0.03, not 0.46 under 0.1) every
+   * design landed **72 mm below her actual cheeks**, measured. Sharing one
+   * canvas makes that impossible: the paint and the face are drawn in the same
+   * coordinates now.
+   *
+   * That is a deliberate, visible change and the only one in this file. To go
+   * back to reproducing the old placement, pass `DEFAULT_FACE_LAYOUT` here.
+   */
   const layout = faceLayoutOf(paint);
   const paints = expressionPaints(paint);
 
