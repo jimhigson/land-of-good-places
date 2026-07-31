@@ -201,6 +201,13 @@ export class KidCrowd {
       shoe: SENTINEL_SHOE,
       backpackColour: SENTINEL_BAG,
       hairStyle: PROTOTYPE_STYLE,
+      // The crowd is the one place a *separate* face patch is still right, and
+      // it is not a style choice — see `KidOptions.facePatch`. Skin tone gets
+      // to a child's skull as an `instanceColor` multiply against a flat white
+      // material; a face baked into that skull would be multiplied by it too,
+      // and the twelve (expression × eye-colour) variants below would have to
+      // be crossed with every skin tone as well.
+      facePatch: true,
       // Every style a background child can wear, built into the one prototype.
       // The floor-length simulated ponytail is deliberately not among them —
       // see `CROWD_HAIR_STYLES` for the full reasoning.
@@ -264,6 +271,10 @@ export class KidCrowd {
         backpackColour: SENTINEL_BAG,
         hairStyle: 'bunches',
         backpack: true,
+        // Built only to steal its face canvases, so it needs the same patch
+        // path the prototype above is on or there would be no `facePatch` mesh
+        // to take them from.
+        facePatch: true,
         eyeColour,
       });
       const variantFaceMesh = findFaceMesh(variantHandle.root);

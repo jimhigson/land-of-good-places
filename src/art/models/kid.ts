@@ -2,10 +2,13 @@ import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import {
-  createFacePaintOverlay,
+  createBakedFace,
   createFacePatch,
+  type BakedFace,
   type Expression,
-  type FacePaintOverlayHandle,
+  type FacePaintControl,
+  type FacePaintDesign,
+  type FacePatch,
 } from '../style/faces';
 import {
   applyWalk,
@@ -88,14 +91,15 @@ export const KID_HEIGHT = 2.12;
 const HEAD_TILT = 0.17;
 
 /**
- * The skull's radius, and how the face patch worn on it is squashed to sit
- * flat against that curve.
+ * The skull's radius, and how a face *patch* worn on it is squashed to sit flat
+ * against that curve.
  *
- * Module constants rather than locals inside {@link createKid} because
- * {@link attachFacePaint} builds a second decal layer onto the same skull and
- * has to agree with the first one exactly. They used to be *copied* into
- * `world/FacePaintStall.ts`, which said so in a comment and asked to be kept
- * in step by hand; there is now one of each.
+ * {@link FACE_SQUASH} is now only used on the crowd's patch path — see
+ * `KidOptions.facePatch`. A baked face needs no such constant at all: it is
+ * painted into the skull's own texture, so it inherits the skull's squash and
+ * the crown's tilt by being the same surface. That is one of the two duplicated
+ * numbers this change deletes, and duplicated numbers on this model have a
+ * history (every hat sat at two thirds of its size for two days over one).
  */
 export const SKULL_RADIUS = 0.44 * HEAD;
 const FACE_SQUASH: readonly [number, number, number] = [1, 0.95, 0.98];
@@ -193,6 +197,24 @@ export interface KidOptions {
   backpackKinds?: readonly BackpackKind[];
   /** Iris colour. Defaults to `ART.kidEye` — every kid but Ethan wears it. */
   eyeColour?: number;
+  /**
+   * Build the face as a separate patch mesh instead of baking it into the
+   * skull's texture.
+   *
+   * **Only the NPC crowd wants this**, and it is not a preference — it is what
+   * makes an instanced crowd possible. `entities/npc/kidCrowd.ts` gives every
+   * child their skin tone as an `instanceColor` multiply against a flat white
+   * material, and finds the face by the mesh literally named `facePatch` to
+   * give it its twelve (expression × eye-colour) material variants. Bake the
+   * face into the skull and that skin multiply lands on the eyes too — a deep
+   * skin tone would drive the plum ink to near-black, and there is no black in
+   * this game — and the twelve variants would have to be crossed with skin tone
+   * as well, which is the combinatorial blow-up the crowd exists to avoid.
+   *
+   * See `createBakedFace`'s header for the general rule: bake when the texture
+   * can carry the head's colour, keep the patch when something else has to.
+   */
+  facePatch?: boolean;
 }
 
 export interface KidHandle extends CreatureHandle {
@@ -242,6 +264,14 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly hairParts: readonly HairPart[];
   setSkinColour(colour: number): void;
+  /**
+   * Paints a face-paint design over the face, or washes it off.
+   *
+   * On a baked face this repaints the skull's own canvases in place; the design
+   * lands on the eyes and cheeks this character actually has, rather than on
+   * the default layout a separate overlay decal had to assume.
+   */
+  setFacePaint(design: FacePaintDesign | null): void;
   setHairColour(colour: number): void;
   setOutfitColour(colour: number): void;
   setShoeColour(colour: number): void;
@@ -457,8 +487,15 @@ export function createKid(options: KidOptions = {}): KidHandle {
   }
 
   // --- face ------------------------------------------------------------------
-  const face = createFacePatch({
-    radius: skullR,
+  //
+  // Baked into the skull's own texture by default (ART_DIRECTION.md §3, and
+  // CLAUDE.md's rule for worn faces — this is the same idea applied to a head).
+  // The skull is a `blob`, which is to say a plain `SphereGeometry` with the
+  // squash on `mesh.scale`, so remapping its UVs costs nothing and the face
+  // comes out on exactly the part of the skull the patch used to cover.
+  //
+  // The crowd's prototype keeps the old patch — see `KidOptions.facePatch`.
+  const facePaint = {
     ...KID_FACE,
     size: 512,
     iris: eyeColour,
@@ -468,9 +505,18 @@ export function createKid(options: KidOptions = {}): KidHandle {
     blush: ART.blush,
     blushStyle: 'soft',
     blushR: 0.1,
-  });
-  face.mesh.scale.set(...FACE_SQUASH);
-  crown.add(face.mesh);
+  } as const;
+
+  let bakedFace: BakedFace | null = null;
+  let patchFace: FacePatch | null = null;
+  if (options.facePatch) {
+    patchFace = createFacePatch({ radius: skullR, ...facePaint });
+    patchFace.mesh.scale.set(...FACE_SQUASH);
+    crown.add(patchFace.mesh);
+  } else {
+    bakedFace = createBakedFace({ fill: skin, ...facePaint });
+    bakedFace.applyTo(skull);
+  }
 
   // Measured rather than hand-derived from `KID_HEAD_HEIGHT` + the anchor's
   // own local offset: the anchor rides on `crown`, which is tipped back by
@@ -511,7 +557,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     get height() {
       return measuredHeight;
     },
-    setExpression: (name: Expression) => face.setExpression(name),
+    setExpression: (name: Expression) => (bakedFace ?? patchFace)?.setExpression(name),
     setHairStyle: (style: HairStyle) => {
       hairRig.setStyle(style);
       measuredHeight = visibleTop(root);
@@ -528,7 +574,15 @@ export function createKid(options: KidOptions = {}): KidHandle {
     update: (dt: number) => hairRig.ponytail?.update(dt),
     resetHair: () => hairRig.ponytail?.reset(),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
-    setSkinColour: (colour: number) => skinMat.color.setHex(colour),
+    setSkinColour: (colour: number) => {
+      // Two things wear the skin now: the shared material (hands, legs, ears)
+      // and, on a baked face, the skull's own texture, whose background fill
+      // *is* the skin. `setFill` no-ops when the colour has not changed, so the
+      // creator repainting on every tap costs nothing when only hair moved.
+      skinMat.color.setHex(colour);
+      bakedFace?.setFill(colour);
+    },
+    setFacePaint: (design: FacePaintDesign | null) => bakedFace?.setFacePaint(design),
     setHairColour: (colour: number) => {
       hairMat.color.setHex(colour);
       hairDarkMat.color.copy(new Color(colour).multiplyScalar(0.86));
@@ -542,42 +596,39 @@ export function createKid(options: KidOptions = {}): KidHandle {
 }
 
 /**
- * Puts a face-paint decal layer on an already-built kid and hands back the
- * handle that swaps the design (or hides it again, for "wash it off").
+ * Face paint on an already-built kid, and the handle that swaps the design (or
+ * washes it off).
  *
- * Opt-in rather than part of {@link createKid}, because most kids in the park
- * never wear paint and the NPC crowd instances every mesh it finds on its
- * prototype — an always-present overlay would cost the whole crowd a draw
- * layer nobody asked for.
+ * **This used to build a second decal patch** over the face patch: a third
+ * curved shell, at its own radius, in its own tilt group, mirroring
+ * {@link FACE_SQUASH} by hand. It is now a repaint of the skull's own texture,
+ * so it is a layer in a canvas rather than a layer in the scene — one fewer
+ * mesh, one fewer draw call, and nothing left to keep aligned.
+ *
+ * That alignment was not hypothetical. The overlay defaulted to `tilt: 0.1` and
+ * the *default* eye layout, while the kid's face is built at `KID_FACE`'s
+ * `tilt: 0.03` and `eyeY: 0.43` — so every design was aimed at cheeks about
+ * 8 cm from where the kid's actually are. Sharing one canvas makes that
+ * impossible: the paint and the face are drawn in the same coordinates now.
  *
  * **One implementation, two callers**, which is the point of it living here:
  * `world/FacePaintStall.ts` paints the real player with this, and the face
  * stall's picker previews the choice with the very same call
  * (GAME_DESIGN.md's PREVIEW RULE — the preview must be the same code as the
- * thing it previews, or the two drift). The stall used to carry its own copies
- * of {@link SKULL_RADIUS}, {@link FACE_SQUASH} and `HEAD_TILT` with a note
- * asking for them to be updated by hand if the head was ever retuned; that
- * note is now unnecessary.
+ * thing it previews, or the two drift).
  *
- * The tilt group reproduces `crown`'s own rotation, so the overlay sits in
- * exactly the space `createFacePatch`'s mesh does — the expression it is drawn
- * over — rather than in the untilted head's.
- *
- * Takes the head rather than a whole {@link KidHandle} because that is all it
- * needs, and because the two callers hold the same kid in different wrappers:
- * the preview has the `KidHandle` itself, while the stall has a
- * `entities/CharacterModel`, which keeps its handle private and re-exposes
- * `head`. Anything passed here must be a head built by {@link createKid} —
- * the radius and tilt above are this model's, not a general creature's.
+ * Takes the narrowest thing that can wear paint rather than a whole
+ * {@link KidHandle}, because the two callers hold the same kid in different
+ * wrappers: the preview has the `KidHandle` itself, while the stall has an
+ * `entities/CharacterModel`, which keeps its handle private and re-exposes what
+ * is needed.
  */
-export function attachFacePaint(model: { readonly head: Group }, size = 512): FacePaintOverlayHandle {
-  const tilt = new Group();
-  tilt.name = 'facePaintTilt';
-  tilt.rotation.x = -HEAD_TILT;
-  model.head.add(tilt);
-
-  const overlay = createFacePaintOverlay(SKULL_RADIUS, { size });
-  overlay.mesh.scale.set(...FACE_SQUASH);
-  tilt.add(overlay.mesh);
-  return overlay;
+export function attachFacePaint(model: {
+  setFacePaint(design: FacePaintDesign | null): void;
+}): FacePaintControl {
+  return {
+    setDesign(design: FacePaintDesign | null) {
+      model.setFacePaint(design);
+    },
+  };
 }

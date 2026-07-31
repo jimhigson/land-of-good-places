@@ -1,7 +1,15 @@
-import { CanvasTexture, Mesh, SphereGeometry, SRGBColorSpace } from 'three';
+import {
+  CanvasTexture,
+  Mesh,
+  SphereGeometry,
+  SRGBColorSpace,
+  type BufferAttribute,
+  type BufferGeometry,
+  type MeshToonMaterial,
+} from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from './artPalette';
-import { decal, markShared, ownTextures, toonMaterial } from './materials';
+import { decal, isShared, markShared, ownTextures, toonMaterial } from './materials';
 
 /**
  * Faces are PAINTED, not built.
@@ -394,15 +402,65 @@ export function paintFace(options: FacePaintOptions = {}): CanvasTexture {
  */
 export const FACE_FILL_INSET = 0.08;
 
+/** Layers painted into a baked face, in the order they go down. */
+export interface FaceFillLayers {
+  /** Beneath the face — markings belonging to the garment, not the character. */
+  under?: (ctx: CanvasRenderingContext2D, size: number) => void;
+  /** Over the face — face paint, which is a sticker over the photograph. */
+  over?: (ctx: CanvasRenderingContext2D, size: number) => void;
+}
+
+/**
+ * Draws a face on an opaque background **into a canvas that already exists**.
+ *
+ * Separate from {@link paintFaceOnFill} so a baked face can be *redrawn in
+ * place* — a skin-tone change or a trip to the face-painting stall repaints the
+ * same canvases and sets `needsUpdate`, rather than allocating a fresh set of
+ * textures on the GPU every time a six-year-old taps a swatch.
+ *
+ * `under` and `over` draw in the **face window's** own coordinates (`0…size`
+ * across the window), not the whole canvas, so a caller never has to know about
+ * the inset.
+ */
+function drawFaceOnFill(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  fill: number,
+  options: FacePaintOptions,
+  layers: FaceFillLayers = {},
+): void {
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = css(fill);
+  ctx.fillRect(0, 0, size, size);
+
+  const box = size * (1 - 2 * FACE_FILL_INSET);
+  const at = size * FACE_FILL_INSET;
+  const inWindow = (draw: (ctx: CanvasRenderingContext2D, size: number) => void): void => {
+    ctx.save();
+    ctx.translate(at, at);
+    ctx.scale(box / size, box / size);
+    draw(ctx, size);
+    ctx.restore();
+  };
+
+  if (layers.under) inWindow(layers.under);
+
+  // `paintFace` owns its own transparent canvas; this composites that canvas in
+  // rather than re-implementing the drawing, so a change to how an eye is
+  // painted reaches a baked face and a worn one alike.
+  const face = paintFace(options);
+  ctx.drawImage(face.image as CanvasImageSource, at, at, box, box);
+  face.dispose();
+
+  if (layers.over) inWindow(layers.over);
+}
+
 /**
  * A face painted onto an **opaque** background, for baking into the UV map of
  * the thing that wears it.
  *
  * The face is drawn inset by {@link FACE_FILL_INSET} on all four sides, leaving
- * a border of pure `fill`. `under` paints beneath the face — markings that
- * belong to the garment rather than the character — in the face's own canvas
- * coordinates, i.e. `0…size` across the face window itself, not the whole
- * canvas.
+ * a border of pure `fill`.
  */
 export function paintFaceOnFill(
   fill: number,
@@ -411,27 +469,35 @@ export function paintFaceOnFill(
 ): CanvasTexture {
   const s = options.size ?? DEFAULTS.size;
   const { canvas, ctx } = newCanvas(s);
-  ctx.fillStyle = css(fill);
-  ctx.fillRect(0, 0, s, s);
-
-  const box = s * (1 - 2 * FACE_FILL_INSET);
-  const at = s * FACE_FILL_INSET;
-  if (under) {
-    ctx.save();
-    ctx.translate(at, at);
-    ctx.scale(box / s, box / s);
-    under(ctx, s);
-    ctx.restore();
-  }
-
-  // `paintFace` owns its own transparent canvas; this composites that canvas
-  // in rather than re-implementing the drawing, so a change to how an eye is
-  // painted reaches a baked face and a worn one alike.
-  const face = paintFace(options);
-  ctx.drawImage(face.image as CanvasImageSource, at, at, box, box);
-  face.dispose();
-
+  drawFaceOnFill(ctx, s, fill, options, under ? { under } : {});
   return finish(canvas);
+}
+
+export const EXPRESSIONS: readonly Expression[] = [
+  'neutral',
+  'blink',
+  'happy',
+  'surprised',
+  'sad',
+];
+
+/**
+ * What each expression *is*, as paint options — the one definition of the set.
+ *
+ * Split out from {@link paintExpressions} because a baked face has to be able to
+ * **redraw** an expression later (a skin-tone change, a trip to the face-paint
+ * stall) rather than only paint it once, and two copies of this table would be
+ * two places for `happy` to mean different things.
+ */
+function expressionPaints(base: FacePaintOptions): Record<Expression, FacePaintOptions> {
+  const happyMouth: MouthStyle = base.mouth === 'grin' ? 'grin' : 'bigSmile';
+  return {
+    neutral: base,
+    blink: { ...base, eyeStyle: 'closedHappy' },
+    happy: { ...base, eyeStyle: 'archHappy', mouth: happyMouth },
+    surprised: { ...base, eyeStyle: 'wide', mouth: 'oh', brows: true },
+    sad: { ...base, eyeStyle: 'worried', mouth: 'wobble', blush: base.blush ?? null },
+  };
 }
 
 /**
@@ -441,14 +507,10 @@ export function paintFaceOnFill(
  * expression system. Nothing else in the game animates a face.
  */
 export function paintExpressions(base: FacePaintOptions = {}): Record<Expression, CanvasTexture> {
-  const happyMouth: MouthStyle = base.mouth === 'grin' ? 'grin' : 'bigSmile';
-  return {
-    neutral: paintFace(base),
-    blink: paintFace({ ...base, eyeStyle: 'closedHappy' }),
-    happy: paintFace({ ...base, eyeStyle: 'archHappy', mouth: happyMouth }),
-    surprised: paintFace({ ...base, eyeStyle: 'wide', mouth: 'oh', brows: true }),
-    sad: paintFace({ ...base, eyeStyle: 'worried', mouth: 'wobble', blush: base.blush ?? null }),
-  };
+  const paints = expressionPaints(base);
+  const out = {} as Record<Expression, CanvasTexture>;
+  for (const name of EXPRESSIONS) out[name] = paintFace(paints[name]);
+  return out;
 }
 
 /**
@@ -484,6 +546,180 @@ export interface FacePatchOptions extends FacePaintOptions {
   spreadY?: number;
   /** Positive nudges the face down the skull. Eyes low = cute. */
   tilt?: number;
+}
+
+/** How much of a head a face wraps around, and where on it the face sits. */
+export interface FaceWindow {
+  spreadX?: number;
+  spreadY?: number;
+  tilt?: number;
+}
+
+/**
+ * Rewrites a **whole head sphere's** UVs so the face window fills the texture.
+ *
+ * This is the sphere counterpart of `hoodShell.ts`'s `hoodFaceUv`, and it is
+ * deliberately an *affine remap of three.js's own UV attribute* rather than a
+ * fresh computation from vertex positions. Two reasons, both learned the hard
+ * way:
+ *
+ * 1. **`SphereGeometry` already splits its own UV seam** — the column at the
+ *    far side is built twice, once with `u = 0` and once with `u = 1`. Recomputing
+ *    `u` from each vertex's azimuth would give both copies the same value and
+ *    the quad between them would smear the whole texture round the head. An
+ *    affine remap keeps the split three.js already made.
+ * 2. **The winding stays three.js's.** The hood faces were invisible for a
+ *    fortnight because a hand-rolled patch was wound inside out (see CLAUDE.md);
+ *    nothing here re-triangulates anything.
+ *
+ * The remap is exact: `facePatchGeometry` and a full sphere parameterise
+ * azimuth identically, differing only by an affine map, so a face texture
+ * painted for the patch lands on precisely the same part of the head. Which is
+ * why this is a like-for-like change and not a re-authoring of anybody's face.
+ *
+ * Where the seam lands matters and is checked rather than assumed: three.js
+ * puts `u = 0.25` at `+Z` (dead front) and the seam at 90° round the side, so a
+ * face spreading ±48.7° clears it by 41°. `check:baked-face` asserts it.
+ */
+export function remapSphereFaceUv(geometry: BufferGeometry, window: FaceWindow = {}): void {
+  const { spreadX = 1.7, spreadY = 1.7, tilt = 0.1 } = window;
+  const uv = geometry.getAttribute('uv') as BufferAttribute | undefined;
+  if (!uv) throw new Error('remapSphereFaceUv: geometry has no uv attribute — not a SphereGeometry?');
+
+  // u: the patch's u=0 sits at azimuth -spreadX/2, and a full sphere's u
+  // advances 2π of azimuth, so the window occupies `spreadX / 2π` of it.
+  const u0 = 0.25 - spreadX / (4 * Math.PI);
+  const du = spreadX / (2 * Math.PI);
+  // v: three.js's v is 1 at the top pole and 0 at the bottom, with polar angle
+  // θ = (1 − v)·π. The window runs from θ0 at its top down to θ0 + spreadY.
+  const theta0 = Math.PI / 2 - spreadY / 2 + tilt;
+
+  const span = 1 - 2 * FACE_FILL_INSET;
+  for (let i = 0; i < uv.count; i += 1) {
+    const u = (uv.getX(i) - u0) / du;
+    const theta = (1 - uv.getY(i)) * Math.PI;
+    const v = (theta0 + spreadY - theta) / spreadY;
+    uv.setXY(i, FACE_FILL_INSET + span * u, FACE_FILL_INSET + span * v);
+  }
+  uv.needsUpdate = true;
+}
+
+/**
+ * A face baked into the head's own texture, rather than worn on a patch in
+ * front of it. The sphere counterpart of the critter hoods' baked faces.
+ *
+ * ## When to use this, and when a patch is still right
+ *
+ * **Bake** when the head is a *unique* mesh with a colour of its own: the player
+ * kid, RiPika, Biscuit, Mini. One surface, one texture; the face inherits the
+ * head's squash and tilt for free instead of a `FACE_SQUASH` constant copied
+ * beside every call, and there is no second mesh to get wrong.
+ *
+ * **Keep the patch** when the head's colour is *not* the head's own:
+ *
+ * - `entities/npc/kidCrowd.ts` and any other `InstancedCrowd` prototype. Skin
+ *   tone reaches an instanced skull as an `instanceColor` multiply against a
+ *   flat white material. Bake the face in and that multiply lands on the eyes
+ *   too — a deep skin tone would drive the ink to near-black, and this game has
+ *   no black in it. Crossing the crowd's twelve (expression × eye-colour) face
+ *   variants with skin tone as well is the thing the crowd exists to avoid.
+ * - `sharedFace.ts`'s cache. Its whole point is that one set of five canvases
+ *   serves every shopkeeper and every shop pet; baking would need one set per
+ *   *body colour*, which is the cache deleted.
+ *
+ * The rule in one line: **bake when the texture can carry the head's colour;
+ * keep the patch when something else has to.**
+ */
+export interface BakedFaceOptions extends FacePaintOptions, FaceWindow {
+  /** The head's own colour. It becomes the texture's background fill. */
+  fill: number;
+}
+
+export interface BakedFace {
+  /** Give this to the head mesh in place of its flat-colour material. */
+  readonly material: MeshToonMaterial;
+  readonly expressions: Record<Expression, CanvasTexture>;
+  setExpression(name: Expression): void;
+  /** Repaints on a new base colour — a skin-tone change. */
+  setFill(colour: number): void;
+  /** Paints a face-paint design over every expression, or washes it off. */
+  setFacePaint(design: FacePaintDesign | null): void;
+  /**
+   * Points a head sphere at this face: its material, and its UVs remapped so
+   * the face window fills the texture.
+   */
+  applyTo(mesh: Mesh): void;
+}
+
+export function createBakedFace(options: BakedFaceOptions): BakedFace {
+  const { fill, spreadX = 1.7, spreadY = 1.7, tilt = 0.1, ...paint } = options;
+  const size = paint.size ?? DEFAULTS.size;
+  const layout = faceLayoutOf(paint);
+  const paints = expressionPaints(paint);
+
+  let colour = fill;
+  let design: FacePaintDesign | null = null;
+
+  const canvases = {} as Record<Expression, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }>;
+  const expressions = {} as Record<Expression, CanvasTexture>;
+  for (const name of EXPRESSIONS) {
+    const target = newCanvas(size);
+    canvases[name] = target;
+    drawFaceOnFill(target.ctx, size, colour, paints[name]);
+    expressions[name] = finish(target.canvas);
+  }
+
+  /**
+   * Redraws all five canvases in place and re-uploads them.
+   *
+   * In place, rather than painting a new set: the character creator rebuilds on
+   * every tap and the face stall repaints on every design, and allocating five
+   * fresh 512² textures per tap is the exact leak `ownTextures` was added for.
+   */
+  const repaint = (): void => {
+    for (const name of EXPRESSIONS) {
+      const target = canvases[name];
+      drawFaceOnFill(target.ctx, size, colour, paints[name], {
+        ...(design ? { over: (ctx, s) => drawFacePaint(ctx, s, design as FacePaintDesign, layout) } : {}),
+      });
+      expressions[name].needsUpdate = true;
+    }
+  };
+
+  const material = toonMaterial(0xffffff, { map: expressions.neutral });
+  // Opaque — no `transparent`, no `alphaTest`, nothing to sort. The head is a
+  // solid object again, which is what it always was underneath the patch.
+  ownTextures(material, Object.values(expressions));
+
+  return {
+    material,
+    expressions,
+    setExpression(name: Expression) {
+      material.map = expressions[name];
+      material.needsUpdate = true;
+    },
+    setFill(next: number) {
+      if (next === colour) return;
+      colour = next;
+      repaint();
+    },
+    setFacePaint(next: FacePaintDesign | null) {
+      if (next === design) return;
+      design = next;
+      repaint();
+    },
+    applyTo(mesh: Mesh) {
+      if (isShared(mesh.geometry)) {
+        throw new Error(
+          'createBakedFace: refusing to remap a shared geometry. A cached head ' +
+            'geometry is worn by more than one character and its UVs are not this ' +
+            "face's to rewrite — see sharedFace.ts.",
+        );
+      }
+      remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
+      mesh.material = material;
+    },
+  };
 }
 
 export interface FacePatch {
@@ -582,16 +818,43 @@ export const FACE_PAINT_INFO: Record<FacePaintDesign, { label: string; glyph: st
  */
 export const NPC_PAINT_DESIGNS: readonly FacePaintDesign[] = ['butterfly', 'rainbowCheeks', 'ripikaCheeks'];
 
-/** Canvas-fraction landmarks shared with the default face layout (`DEFAULTS`). */
-const PAINT_EYE_Y = DEFAULTS.eyeY;
-const PAINT_GAP_HALF = DEFAULTS.eyeGap / 2;
-const PAINT_EYE_W = DEFAULTS.eyeW;
-const PAINT_EYE_H = DEFAULTS.eyeH;
+/**
+ * Where a given character's eyes actually are, as canvas fractions.
+ *
+ * Face paint used to be positioned from `DEFAULTS` alone, which is only right
+ * for a character that happens to use the default layout. The kid does not
+ * (`KID_FACE` puts her eyes at `eyeY` 0.43, not 0.46) and neither do most of
+ * the creatures, so every design was landing a little off the cheeks it was
+ * aiming at. Baking the paint into the same canvas as the face makes that
+ * impossible to keep: they share one set of coordinates now.
+ */
+export interface FaceLayout {
+  readonly eyeY: number;
+  readonly eyeGap: number;
+  readonly eyeW: number;
+  readonly eyeH: number;
+}
+
+export const DEFAULT_FACE_LAYOUT: FaceLayout = {
+  eyeY: DEFAULTS.eyeY,
+  eyeGap: DEFAULTS.eyeGap,
+  eyeW: DEFAULTS.eyeW,
+  eyeH: DEFAULTS.eyeH,
+};
+
+function faceLayoutOf(paint: FacePaintOptions): FaceLayout {
+  return {
+    eyeY: paint.eyeY ?? DEFAULTS.eyeY,
+    eyeGap: paint.eyeGap ?? DEFAULTS.eyeGap,
+    eyeW: paint.eyeW ?? DEFAULTS.eyeW,
+    eyeH: paint.eyeH ?? DEFAULTS.eyeH,
+  };
+}
 
 /** Centre of the cheek blush spot, mirroring the maths in `paintFace`. */
-function paintCheekPoint(s: number, side: -1 | 1): { x: number; y: number } {
-  const blushY = PAINT_EYE_Y * s + PAINT_EYE_H * s * 0.95;
-  const blushX = PAINT_GAP_HALF * s + PAINT_EYE_W * s * 1.25;
+function paintCheekPoint(s: number, side: -1 | 1, layout: FaceLayout): { x: number; y: number } {
+  const blushY = layout.eyeY * s + layout.eyeH * s * 0.95;
+  const blushX = (layout.eyeGap / 2) * s + layout.eyeW * s * 1.25;
   return { x: s / 2 + side * blushX, y: blushY };
 }
 
@@ -650,9 +913,9 @@ function drawButterflyWing(ctx: CanvasRenderingContext2D, s: number, cx: number,
 }
 
 /** Cat whiskers plus a small painted nose above the mouth. */
-function drawCatWhiskers(ctx: CanvasRenderingContext2D, s: number, cx: number): void {
+function drawCatWhiskers(ctx: CanvasRenderingContext2D, s: number, cx: number, layout: FaceLayout): void {
   const ink = css(ART.ink);
-  const noseY = PAINT_EYE_Y * s + PAINT_EYE_H * s * 0.55;
+  const noseY = layout.eyeY * s + layout.eyeH * s * 0.55;
   const noseSize = s * 0.028;
 
   ctx.fillStyle = css(PALETTE.cheek);
@@ -715,9 +978,9 @@ function drawFlowerCheek(ctx: CanvasRenderingContext2D, s: number, cx: number, c
 }
 
 /** A little star sticker just above the outer corner of each eye. */
-function drawStarEye(ctx: CanvasRenderingContext2D, s: number, cx: number, side: -1 | 1): void {
-  const x = cx + side * (PAINT_GAP_HALF * s + PAINT_EYE_W * s * 1.35);
-  const y = PAINT_EYE_Y * s - PAINT_EYE_H * s * 1.05;
+function drawStarEye(ctx: CanvasRenderingContext2D, s: number, cx: number, side: -1 | 1, layout: FaceLayout): void {
+  const x = cx + side * ((layout.eyeGap / 2) * s + layout.eyeW * s * 1.35);
+  const y = layout.eyeY * s - layout.eyeH * s * 1.05;
   ctx.fillStyle = css(PALETTE.flowerYellow);
   ctx.strokeStyle = css(ART.ink);
   ctx.lineWidth = s * 0.008;
@@ -727,44 +990,55 @@ function drawStarEye(ctx: CanvasRenderingContext2D, s: number, cx: number, side:
   ctx.stroke();
 }
 
-/** Paints one face-paint design onto a transparent canvas. */
-export function paintFacePaintOverlay(design: FacePaintDesign, size = 512): CanvasTexture {
-  const { canvas, ctx } = newCanvas(size);
-  const s = size;
+/**
+ * Draws one face-paint design, at a given character's own face layout.
+ *
+ * Shared by the two ways paint reaches a face: composited over a baked face
+ * (`createBakedFace`'s `setFacePaint`) and painted onto its own transparent
+ * canvas for the separate overlay decal that the instanced NPC crowd still
+ * needs. One implementation, so a design cannot come out differently
+ * depending on which character is wearing it.
+ */
+export function drawFacePaint(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  design: FacePaintDesign,
+  layout: FaceLayout = DEFAULT_FACE_LAYOUT,
+): void {
   const cx = s / 2;
 
   switch (design) {
     case 'butterfly': {
-      const left = paintCheekPoint(s, -1);
-      const right = paintCheekPoint(s, 1);
+      const left = paintCheekPoint(s, -1, layout);
+      const right = paintCheekPoint(s, 1, layout);
       drawButterflyWing(ctx, s, left.x, left.y, -1);
       drawButterflyWing(ctx, s, right.x, right.y, 1);
       break;
     }
     case 'catWhiskers':
-      drawCatWhiskers(ctx, s, cx);
+      drawCatWhiskers(ctx, s, cx, layout);
       break;
     case 'rainbowCheeks': {
-      const left = paintCheekPoint(s, -1);
-      const right = paintCheekPoint(s, 1);
+      const left = paintCheekPoint(s, -1, layout);
+      const right = paintCheekPoint(s, 1, layout);
       drawRainbowCheek(ctx, s, left.x, left.y);
       drawRainbowCheek(ctx, s, right.x, right.y);
       break;
     }
     case 'flowerCheeks': {
-      const left = paintCheekPoint(s, -1);
-      const right = paintCheekPoint(s, 1);
+      const left = paintCheekPoint(s, -1, layout);
+      const right = paintCheekPoint(s, 1, layout);
       drawFlowerCheek(ctx, s, left.x, left.y);
       drawFlowerCheek(ctx, s, right.x, right.y);
       break;
     }
     case 'starEye':
-      drawStarEye(ctx, s, cx, -1);
-      drawStarEye(ctx, s, cx, 1);
+      drawStarEye(ctx, s, cx, -1, layout);
+      drawStarEye(ctx, s, cx, 1, layout);
       break;
     case 'ripikaCheeks': {
-      const left = paintCheekPoint(s, -1);
-      const right = paintCheekPoint(s, 1);
+      const left = paintCheekPoint(s, -1, layout);
+      const right = paintCheekPoint(s, 1, layout);
       // Bigger and bolder than the everyday blush (`DEFAULTS.blushR` 0.075) so
       // it reads as a deliberate paint job, not just rosy cheeks.
       //
@@ -778,7 +1052,12 @@ export function paintFacePaintOverlay(design: FacePaintDesign, size = 512): Canv
       break;
     }
   }
+}
 
+/** Paints one face-paint design onto a transparent canvas, for an overlay decal. */
+export function paintFacePaintOverlay(design: FacePaintDesign, size = 512): CanvasTexture {
+  const { canvas, ctx } = newCanvas(size);
+  drawFacePaint(ctx, size, design);
   return finish(canvas);
 }
 
@@ -796,11 +1075,15 @@ export function facePaintOverlayTexture(design: FacePaintDesign, size = 512): Ca
   return texture;
 }
 
-export interface FacePaintOverlayHandle {
+/** Anything that can wear face paint: the baked path and the decal path alike. */
+export interface FacePaintControl {
+  /** Swaps the design, or removes the paint entirely for `null` ("wash off"). */
+  setDesign(design: FacePaintDesign | null): void;
+}
+
+export interface FacePaintOverlayHandle extends FacePaintControl {
   /** Parent this under the character's head, alongside the base face patch. */
   readonly mesh: Mesh;
-  /** Swaps the design, or hides the paint entirely for `null` ("wash off"). */
-  setDesign(design: FacePaintDesign | null): void;
 }
 
 /**
