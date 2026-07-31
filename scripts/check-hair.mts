@@ -374,10 +374,12 @@ function worldPoints(root: Object3D): Vector3[] {
       const next = i === buried.length - 1 ? (buried[0] as number) + TAU : (buried[i + 1] as number);
       widest = Math.max(widest, next - (buried[i] as number));
     }
-    // Nine spikes sit 40° apart, so the gaps between neighbouring buried bases
-    // run to about 15°. Losing one root opens a gap past 55°; the bound sits
-    // between the two, nearer the failure, and is measured off the built model
-    // rather than taken off the spacing the builder aimed at.
+    // The spikes are spread over the whole dome on a golden-angle spiral, so
+    // the gaps between neighbouring buried bases run to about 15°. Losing a
+    // root opens a gap wider than the spike that left it — past 40° even for
+    // one of the small ones on the crown. The bound sits between the two,
+    // nearer the failure, and is measured off the built model rather than
+    // taken off the spacing the builder aimed at.
     const MAX_ROOT_GAP = (30 / 180) * Math.PI;
     check(
       buried.length > 0 && widest < MAX_ROOT_GAP,
