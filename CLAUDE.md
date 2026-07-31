@@ -92,13 +92,17 @@ then hard-reload. Suspect it early rather than debugging code that is correct.
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
 RiPika's and Trilla's hood faces (`hoodShell.ts`/`hats.ts`) were built as a
-separate decal mesh floating just in front of the hood's own dome, positioned
-by a formula meant to track the dome's surface. It didn't: the dome later
-grew panel-seam relief the decal's formula never learned about, so the dome's
-own bulge sat in front of the face and hid it completely — invisible in the
-running game while the mesh, the texture, and the code all looked correct on
-inspection. Found the hard way (31 July 2026), fixed by baking the face
-texture directly into the wearable's own UV mapping instead of a second mesh.
+separate decal mesh floating just in front of the hood's own dome. It was
+wound the opposite way round from the dome, so its normals pointed at the
+wearer's skull and `MeshToonMaterial`'s `FrontSide` culled it: invisible in
+the running game while the mesh, the texture and the code all looked correct
+on inspection, and *unfixable* by moving it further out — the first fix
+tried, padding the stand-off distance, could not have worked, because the
+mesh was never being drawn at all. Found the hard way (31 July 2026) by
+casting a ray in from outside and finding it hit nothing. Fixed by baking the
+face texture directly into the wearable's own UV mapping instead of a second
+mesh — a second mesh that has to be positioned right, every time, is a second
+place for exactly this kind of bug to hide.
 
 **When a worn item needs a painted face (or any flat appliqué), paint it into
 that item's own UV space. Do not add a second mesh positioned by a formula
