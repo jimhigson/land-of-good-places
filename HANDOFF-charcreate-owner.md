@@ -7,58 +7,66 @@ character-creation work here.
 
 ## Status right now (31 July 2026, second session — updated at end of session)
 
-Four pieces of work landed this session, five commits, `npm run build` exit 0
-(checked directly, never piped) after every one of them. **No PR opened yet**
-— staying alive for more direction, per brief. In commit order:
+Six commits this session (hashes below are post-rebase — see the note at the
+bottom of this section). `npm run build` exit 0 (checked directly, never
+piped) after every one. **No PR opened yet** — staying alive for more
+direction, per brief. In order:
 
-1. `42e61bb` — the urgent "Look" HUD pill (reopen the creator mid-game without
-   losing the park). Reload-based v1; see the long entry below for why a live
-   re-skin path doesn't exist yet and the one known wart (duplicate hat/pet
-   grant on repeat reopens).
-2. `07f4ffe` — tabbed the creator (Skin/Hair/Eyes/Outfit/Shoes/Hat/Backpack/
-   Pet), generalising the PREVIEW RULE's camera mechanism via `CharacterPreview.
+1. **The "Look" HUD pill** — reopen the creator mid-game without losing the
+   park. Reload-based v1; see the long entry below for why a live re-skin
+   path doesn't exist yet and the one known wart (duplicate hat/pet grant on
+   repeat reopens).
+2. **Tabbed the creator** (Skin/Hair/Eyes/Outfit/Shoes/Hat/Backpack/Pet),
+   generalising the PREVIEW RULE's camera mechanism via `CharacterPreview.
    setResting()`.
-3. `08a650f` — prepped Mohican/hat mutual exclusivity ahead of the `mohican`
-   `HairStyle` landing (it hasn't — checked `feat/mohican-hair`, zero commits
-   beyond `main`). Whole mechanism built and building against an empty
-   `HAT_EXCLUSIVE_HAIR_STYLES` set; turning it on the day the style lands is
-   one line (`ui/CharacterCreation.ts`, search that constant).
-4. `9f4c0f2` — wired `ShoeKind` end to end: a Shoes tab, state/save/store
-   fields, `Player.ts`, NPC crowd rolling and instancing. The shoe design
-   note two sessions ago is now superseded by the real thing; skip straight
-   to the commit message / diff if you need the specifics.
+3. **Prepped Mohican/hat mutual exclusivity** ahead of the `mohican`
+   `HairStyle` landing — built the whole mechanism against an empty
+   `HAT_EXCLUSIVE_HAIR_STYLES` set so it would compile and be ready.
+4. **Wired `ShoeKind` end to end**: a Shoes tab, state/save/store fields,
+   `Player.ts`, NPC crowd rolling and instancing.
+5. **Coordinator verified checkpoint 1–4 in the browser** — Shoes tab, Look
+   pill and tabs all confirmed working, no issues. One flag: Sparkly shoes
+   ignore the colour swatch (fixed pink glitter regardless of the selected
+   swatch) — confirmed intentional (`shoes.ts`'s `FOOT_COLOUR`, same
+   RiPika-keeps-its-own-colours precedent the backpacks already use), noted
+   with a comment at the shoe-colour section rather than changed.
+6. **Mohican landed for real** (PR #138, `feat/mohican-hair`, "Rooster" in the
+   picker) — rebased onto it (clean, no conflicts), then activated the
+   exclusivity mechanism: `HAT_EXCLUSIVE_HAIR_STYLES` is now
+   `new Set<HairStyle>(['mohican'])` instead of empty. **Not yet verified by
+   the coordinator** — they said they'll check it themselves once told it's
+   ready. It is: build's clean, the mechanism was fully built out in step 3
+   and needed no changes beyond the one line.
 
-**Not visually verified, any of it.** Did not own the shared Chrome profile
-at any point this session (CLAUDE.md's rule) — build/type-check is the only
-verification. Everything below marked "needs eyes" is real and outstanding.
+**Rebase note:** step 6's rebase onto `feat/mohican-hair` rewrote every
+commit's hash from steps 1–5. Use `git log --oneline` for current hashes
+rather than anything cited from memory of an earlier checkpoint.
 
-### Needs eyes (manual QA, next time someone owns the browser)
+**Visually verified: steps 1–4 (by the coordinator), partially.** Step 6
+(Mohican) still needs the specific sequence below run for real. Everything
+else marked "needs eyes" below is still real and outstanding.
 
-- **The "Look" pill**: open the HUD menu mid-game, tap "Look" (🪞), confirm it
-  reopens the creator; finish it; confirm money/backpack/Cute-o-dex/where you
-  were standing are all unchanged and you land back in the same spot. Known
-  wart: reopening and re-picking the same hat/pet grants a *second* copy —
-  not a data-loss bug, just clutter; see commit `42e61bb`'s message for why
-  it was left rather than fixed under time pressure.
+### Needs eyes (manual QA)
+
+- **Mohican — not yet checked by anyone.** Pick a hat in the Hat tab, switch
+  to Rooster (Mohican) in the Hair tab, confirm the Hat tab disappears from
+  the strip and the hat comes off the live preview; switch to a different
+  hair style, confirm the Hat tab reappears with the *same* hat still
+  selected (not reset to the default). Then also check the reverse order:
+  open the creator with Mohican already selected (nothing to switch away
+  from) and confirm the Hat tab is simply absent from the start, no flash of
+  it appearing first.
 - **Tabs**: does the strip wrap sensibly on a phone width without becoming a
   second scroll hunt (reuses `.charcreate-styles`'s existing grid, which
   already solved this for the hair-style row, so it should); does each tab's
   camera framing look right the instant you switch to it, before touching any
-  control inside.
-- **Shoes**: each of the four kinds selectable and previewing live in the new
-  Shoes tab; the colour swatches (including the "+" wheel) behave like every
-  other swatch row; a sandal actually bares the foot in skin tone regardless
-  of the chosen shoe colour (per `FOOT_COLOUR` in `shoes.ts`); the 'feet'
-  camera framing (tight, low, front-on, no turntable) looks right instead of
-  cropping a foot out of shot. Also worth a glance at the park itself: do
-  background children now visibly wear plain shoes or sandals (the two
-  crowd-eligible kinds) without any draw-call/perf regression.
-- **Mohican**: nothing to see yet — the mechanism is inert (empty exclusivity
-  set) until `mohican` exists as a `HairStyle`. Once it does: flip the one
-  line in `HAT_EXCLUSIVE_HAIR_STYLES`, then actually run the sequence Jim
-  asked for — pick a hat, switch to Mohican, confirm the Hat tab vanishes and
-  the hat comes off the preview; switch to a different style, confirm the
-  same hat comes back selected in a rebuilt Hat tab.
+  control inside. (Coordinator confirmed the desktop/basic case already;
+  phone-width specifically is still unconfirmed.)
+- **The "Look" pill's known wart**: reopening and re-picking the same hat/pet
+  grants a *second* copy — not a data-loss bug, just clutter. Left
+  deliberately; worth confirming it's actually as harmless in practice as it
+  looks on paper (e.g. does a duplicate pet in the parade look buggy to a
+  six-year-old even though nothing is lost).
 
 ## Status as of end of first session (31 July 2026)
 
@@ -495,17 +503,17 @@ state and what still needs a pair of eyes on it (browser QA, mainly).
    landed in PR #132, confirmed and wired this session.
 2. ~~If still absent: keep waiting~~ — moot.
 3. ~~If present: read `src/art/models/shoes.ts` in full, work the checklist~~
-   — done, commit `9f4c0f2`.
+   — done, commit "Wire ShoeKind into the character creator…" (see `git log`
+   for its current hash — the mohican rebase changed it).
 
-**Actual next actions, this session's end:**
+**Actual next actions, this session's end (also superseded, see the top):**
 
-1. Whatever the Overseer routes here next — character-creation work stays
-   assigned to this branch/role.
-2. If nothing else comes in: keep half an eye on `feat/mohican-hair` (fetch +
-   log) — the moment it lands a real `mohican` `HairStyle`, flip
-   `HAT_EXCLUSIVE_HAIR_STYLES` in `ui/CharacterCreation.ts` and run the
-   manual QA sequence in the "Needs eyes" list above.
+~~1. Whatever the Overseer routes here next.~~
+~~2. Keep half an eye on `feat/mohican-hair`; flip `HAT_EXCLUSIVE_HAIR_STYLES`
+   once it lands.~~ — done: rebased onto it, activated the exclusivity set.
+   Coordinator has not yet run the manual sequence on it — that's the one
+   real open item, at the top of "Needs eyes" now.
 3. Whenever the shared browser is free: work the "Needs eyes" checklist at
-   the top of this file top to bottom — four sessions of build-only work have
-   now stacked up with zero visual confirmation, which is the point past
-   which bugs stop being findable by reading the diff.
+   the top of this file top to bottom. Mohican is untested by anyone; tabs
+   and shoes have the coordinator's word but not a phone-width check; the
+   Look pill's duplicate-grant wart is unconfirmed-but-probably-harmless.
