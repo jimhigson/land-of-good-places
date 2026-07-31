@@ -620,6 +620,14 @@ kbd {
   transition: transform 90ms ease, box-shadow 90ms ease;
 }
 
+/* `display: flex` above is an author rule and so beats the browser's own
+   `[hidden] { display: none }`. Without this the fly button would be on screen
+   for a child who has never bought a jet pack — which is precisely the promise
+   `setFlyAvailable` exists to avoid making. */
+.touch-btn[hidden] {
+  display: none;
+}
+
 /* Presses squash the button onto its own shadow — the same squash-and-stretch
    language the character animation uses. */
 .touch-btn[data-pressed='true'] {
