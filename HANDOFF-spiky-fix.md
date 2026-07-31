@@ -111,8 +111,16 @@ Four instructions came in during the second round:
     stand 0.45  min_tilt 0.45  gravity 0.9   jag (1.0, 0.86, 0.94)
     -> 24 spikes, 2.392 m tall, lowest spike drape y -0.50
 
-Blender scripts (outside git, `.claude/` is gitignored):
-`.claude/blender-spiky/{hairgen,extras,shots,spikes6,spikes7}.py`.
+Blender scripts: `/tmp/blender-hair/scripts/{hairgen,extras,shots,spikes6,spikes7}.py`
+(next to the renders, the convention PR #128 used).
+
+> **Do not park scratch files in the shared checkout's `.claude/`.** CLAUDE.md
+> says `.claude/` is gitignored and it is **not**: `.gitignore` has `.claude/`
+> immediately followed by `!.claude/`, which cancels it. Only
+> `.claude/worktrees/` is ignored, and only via `.git/info/exclude`. Anything
+> else left in `.claude/` shows up as untracked in the shared checkout and is
+> one `git add -A` away from `main` — the exact accident CLAUDE.md was written
+> about. Worth fixing separately.
 `exec(open(P+f).read())` in order, then `build_spikes7(...)`,
 `show_spiky_bare()`, `make_sheet(path)`.
 
