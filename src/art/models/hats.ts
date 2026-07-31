@@ -464,7 +464,15 @@ const RIPIKA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.095,
 };
 
-const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, lift: 0.01 };
+// `lift` has to clear `RIPIKA_HOOD.seamR` (0.02): `hoodPatchGeometry` samples
+// the shell's smooth base surface, but the real dome mesh adds panel-seam
+// relief on top of it (`hoodShellGeometry`'s `r * (1 + amp * seam)`). At the
+// front (`panels: 6`, even, so `cos(6·π) = 1`) that relief is a bulge, not a
+// dent, and the old lift of 0.01 sat behind it — the face patch existed, was
+// correctly textured, and was invisible behind the cap's own panel seam. Found
+// by hiding every other mesh in the scene one at a time until the patch was
+// the last thing left and still didn't render with depth testing on.
+const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, lift: 0.03 };
 
 /**
  * The RiPika cap.
@@ -536,7 +544,10 @@ const TRILLA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.11,
 };
 
-const TRILLA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.58, yLo: -0.185, yHi: 0.195, lift: 0.008 };
+// Same fix as RIPIKA_HOOD_PATCH above: `lift` has to clear `TRILLA_HOOD.seamR`
+// (0.01), and 0.008 was under it — `panels: 8` is also even, so the front is a
+// panel bulge here too.
+const TRILLA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.58, yLo: -0.185, yHi: 0.195, lift: 0.025 };
 
 /** How often the hood bursts into song, in seconds. Rarer than the pet's. */
 const TRILLA_SONG = { min: 12, max: 22, nearSpeedup: 1 };
