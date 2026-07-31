@@ -5,13 +5,22 @@ scheduler keeps them in memory, so they die when the session exits and must
 be re-armed in a new one.
 
 A `SessionStart` hook prints this file into context at the start of every
-session in this repo, so whoever is overseeing can re-arm them immediately.
+session in this repo — but printing it is all the hook does. **Do not arm
+anything from it on your own.** Ask the user first, every time: a session
+starting is not consent to start five recurring jobs, and on 30 July the
+Overseer re-arming the daily trio without asking led to it firing mid-way
+through an unrelated conversation, batched and confusing enough that the
+user had to interrupt and cancel everything by hand.
 
-## Re-arm these on a new session
+## Ask before re-arming these on a new session
 
 All five jobs below (three loops plus the daily pause/resume pair) die with
-the session and must be recreated. Recurring jobs also auto-expire after
-seven days, so they need re-arming at least weekly regardless.
+the session and need re-arming if the user wants them back — **check with
+them first**, e.g. "Standing loops died with the last session — re-arm the
+cull/check-in/architecture-review loops and the daily pause/resume pair?"
+A yes can be scoped (just the cull, say) as easily as it can cover all five.
+Recurring jobs also auto-expire after seven days, so even a standing "yes"
+needs re-confirming at least weekly.
 
 | Cadence | Cron | Task |
 | --- | --- | --- |
@@ -29,7 +38,7 @@ alongside the loops above.
 | --- | --- | --- |
 | Daily 12:40 | `40 12 * * *` | **Landing call.** Tell every in-flight agent the pause is imminent: bring work to a safe, shippable state, start nothing new. **Flex scope, not quality** — an incomplete but useful feature is fine to ship if it regresses nothing, builds green, and meets the same QA-PLAYBOOK standards as any other PR. Cut scope, not corners. Anything unfinished gets committed, pushed and opened as a PR with the gaps listed as follow-ups, never left uncommitted in a worktree. |
 | Daily 12:48 | `48 12 * * *` | **Pause.** Harvest every in-flight agent's work (build, commit, push, PR), merge what is green, stop all agents, kill servers and browser pages, and delete the three loops above so nothing fires during the pause. Fires 12 minutes early on purpose — winding down properly takes time, and the aim is that work has actually stopped by 1pm. |
-| Daily 19:00 | `0 19 * * *` | **Resume.** Re-arm the three loops from this file, reload ARCHITECTURE-REVIEW.md and GAME_DESIGN.md, check what state the repo was left in, and restart work on the highest-priority outstanding items. |
+| Daily 19:00 | `0 19 * * *` | **Resume.** Ask the user before re-arming the three loops from this file — do not just do it. Reload ARCHITECTURE-REVIEW.md and GAME_DESIGN.md, check what state the repo was left in, and restart work on the highest-priority outstanding items regardless of whether the loops get re-armed. |
 
 The pause job must not delete the landing-call or pause/resume jobs
 themselves — only the three development loops.
