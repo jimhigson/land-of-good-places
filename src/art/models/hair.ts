@@ -143,6 +143,18 @@ export interface HairPart {
    * True for parts that stick up past the bare hair cap and would spear
    * straight through a worn hat — in practice, the spikes. Everything else
    * sits inside the envelope hats already sit over.
+   *
+   * **Never hides this part.** Jim's refinement (31 July 2026), after the
+   * first version of this rule tucked the hair away and Spiky turned out to
+   * be structurally unpreviewable in the character creator, which always has
+   * *some* hat selected: "just allow any hair other than rooster with a hat,
+   * and disable the hat, not the hair in this case." So this flag now feeds
+   * {@link HairRig.hidesHat} instead — a read the *hat* side checks
+   * (`art/models/kid.ts`'s `hairHidesHat`, `entities/WornHat.ts`,
+   * `ui/characterCreationPreview.ts`) before showing itself at all. The hair
+   * is always fully there; whichever hat she picked simply does not render
+   * while she is wearing a style like this — still hers, still "worn" as far
+   * as the inventory/Cute-o-dex are concerned, just not drawn.
    */
   readonly hideUnderHat: boolean;
 }
@@ -177,8 +189,18 @@ export interface HairRig {
   readonly ponytail: PonytailChain | null;
   /** Shows one style and hides the rest. */
   setStyle(style: HairStyle): void;
-  /** Tucks away anything that would poke through a hat. */
-  setHatWorn(worn: boolean): void;
+  /**
+   * Whether the **current** style has any part that would spear through a
+   * worn hat (`HairPart.hideUnderHat`) — Spiky, today. Live off {@link
+   * setStyle}, not snapshotted: the character creator rebuilds the whole kid
+   * per tap, but this stays correct even for a hypothetical caller that
+   * switched styles on a live rig instead.
+   *
+   * The hair rig no longer hides anything for this reason itself — see
+   * `HairPart.hideUnderHat`'s doc comment for why that inverted. This is the
+   * read the hat side of that inversion checks.
+   */
+  readonly hidesHat: boolean;
 }
 
 /** How far back the hanging styles sit, in `HEAD` units, clear of the backpack. */
@@ -526,10 +548,13 @@ export function buildHair(options: HairOptions): HairRig {
       addOutline(mohican, OUTLINE_SMALL);
       return mohican;
     },
-    // A hat is never worn with this style — picking it is meant to spend the
-    // hat slot (the creator owns that rule). This stays `true` anyway, so that
-    // until the exclusivity lands the crest tucks away under a hat rather than
-    // spearing through it, exactly as the spikes do.
+    // A hat is never worn with this style in the character creator — picking
+    // it clears the hat tab entirely (`ui/CharacterCreation.ts`'s
+    // `HAT_EXCLUSIVE_HAIR_STYLES`). `true` here is the backstop for anywhere
+    // that rule does not reach: if a hat is ever worn over this crest anyway
+    // (bought from a shop after the fact, say), it is the *hat* that declines
+    // to render, exactly like the spikes — see `hideUnderHat`'s doc comment,
+    // and `entities/WornHat.ts`, which is what actually checks it.
     true,
   );
 
@@ -563,11 +588,12 @@ export function buildHair(options: HairOptions): HairRig {
   // --------------------------------------------------------------------------
 
   let current: HairStyle = style;
-  let hatWorn = false;
 
+  // No `hatWorn` any more — hair is never the thing that hides. See
+  // `HairPart.hideUnderHat`'s doc comment.
   const apply = (): void => {
     for (const part of parts) {
-      part.mesh.visible = part.styles.includes(current) && !(hatWorn && part.hideUnderHat);
+      part.mesh.visible = part.styles.includes(current);
     }
   };
 
@@ -580,9 +606,8 @@ export function buildHair(options: HairOptions): HairRig {
       current = next;
       apply();
     },
-    setHatWorn: (worn: boolean) => {
-      hatWorn = worn;
-      apply();
+    get hidesHat() {
+      return parts.some((part) => part.styles.includes(current) && part.hideUnderHat);
     },
   };
 }

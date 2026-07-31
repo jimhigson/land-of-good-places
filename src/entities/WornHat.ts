@@ -19,6 +19,14 @@ import { shopItem } from '../world/building/shops/catalogue';
  * Parented to `hatAnchor` — the crown of the head, see `art/models/kid.ts` —
  * at the model's own natural scale: `art/models/hats.ts`'s own doc comment
  * promises "no offset maths" for exactly this attachment.
+ *
+ * **Checks `hairHidesHat` before ever drawing anything** (31 July 2026, Jim's
+ * words: "just allow any hair other than rooster with a hat, and disable the
+ * hat, not the hair in this case"). A style like Spiky spears straight
+ * through a worn hat, and it is the hat that gives way now, not the hair —
+ * `wornHatUid`, the inventory and the Cute-o-dex all still say the hat is
+ * worn; this file simply declines to draw a mesh for it, the same as if the
+ * catalogue lookup below had failed.
  */
 
 /** Seconds the pop-in takes, same beat as `WornFlower`'s and a purchase's. */
@@ -28,6 +36,7 @@ export class WornHat implements GameSystem {
   readonly name = 'wornHat';
 
   private readonly anchor: Group;
+  private readonly hairHidesHat: () => boolean;
   private readonly unsubscribe: () => void;
   private readonly onWornChange: ((worn: boolean) => void) | null;
 
@@ -41,13 +50,24 @@ export class WornHat implements GameSystem {
   /**
    * `anchor` is the character's `hatAnchor`.
    *
-   * `onWornChange` is told whenever a hat appears or disappears, so the model
-   * can tuck away hair that would spear straight through one — see
-   * `art/models/hair.ts`. Optional, because a hat worn on a character with no
-   * hair opinions (a display stand, a future NPC) needs no such courtesy.
+   * `hairHidesHat` is read fresh every time `wornHatUid` changes (see
+   * {@link sync}) — a live check rather than a value captured once, on the
+   * off chance a future caller does change hairstyle on a live model,
+   * though today's real `Player` never does (it is built once, from
+   * whatever the save/creator wrote, and there is no live "change my hair"
+   * path — see `ui/Hud.ts`'s "Look" pill, which reloads the page instead of
+   * trying to be one).
+   *
+   * `onWornChange` is told whenever a hat mesh actually appears or
+   * disappears — driven off `this.mesh`, so it already reads "nothing was
+   * drawn" the same way whether that's because nothing is worn or because
+   * `hairHidesHat()` said no. Optional, because a hat worn on a character
+   * with no hair opinions (a display stand, a future NPC) needs no such
+   * courtesy.
    */
-  constructor(anchor: Group, onWornChange?: (worn: boolean) => void) {
+  constructor(anchor: Group, hairHidesHat: () => boolean, onWornChange?: (worn: boolean) => void) {
     this.anchor = anchor;
+    this.hairHidesHat = hairHidesHat;
     this.onWornChange = onWornChange ?? null;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
   }
@@ -96,6 +116,12 @@ export class WornHat implements GameSystem {
     this.currentUid = state.wornHatUid;
     this.clear();
     if (!state.wornHatUid) return;
+
+    // The hairstyle, not the hat, decides whether anything actually shows —
+    // see this class's own doc comment. `wornHatUid` stays exactly what it
+    // was asked to be; only the drawing stops. Checked before the inventory/
+    // catalogue lookups below because it does not depend on either.
+    if (this.hairHidesHat()) return;
 
     const owned = state.inventory.find((item) => item.uid === state.wornHatUid);
     if (!owned) return;

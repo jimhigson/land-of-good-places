@@ -274,15 +274,16 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
  * **Scope, on purpose:** this governs only the character creator's own Hat
  * tab — where a hat is *chosen*, once, before the park exists. It does not
  * reach into the running game's shop-and-backpack-drawer hat-wearing flow
- * (`entities/WornHat.ts`, `state/store.ts`'s `setWornHat`), which already has
- * its own, separate accommodation for hair under a hat (`KidHandle.
- * setHatWorn`, which tucks a style like Spiky away rather than forbidding the
- * combination). Whether an exclusive style tucks the same way or genuinely
- * cannot coexist with a worn hat in the park is an art/geometry decision for
- * whoever lands the style, not assumed here — Jim's ask was specifically
- * about the creator's tab, and NPCs never wear hats at all
- * (`entities/npc/NpcSystem.ts` has no hat-rolling of any kind), so there is no
- * crowd-side mirror of this needed either.
+ * (`entities/WornHat.ts`, `state/store.ts`'s `setWornHat`), which has its own,
+ * separate mechanism for a style that cannot share the head with a hat
+ * (`KidHandle.hairHidesHat` — the *hat* declines to draw itself, not the
+ * hair; see `art/models/hair.ts`'s `HairPart.hideUnderHat`). That mechanism
+ * covers Mohican too, for whatever hat she happens to still own from before —
+ * it is just moot for Mohican specifically, because this file's own
+ * exclusivity already keeps `wornHatUid` clear while she is wearing it, so
+ * there is nothing left for `hairHidesHat` to hide. NPCs never wear hats at
+ * all (`entities/npc/NpcSystem.ts` has no hat-rolling of any kind), so there
+ * is no crowd-side mirror of any of this needed either.
  */
 const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>(['mohican']);
 

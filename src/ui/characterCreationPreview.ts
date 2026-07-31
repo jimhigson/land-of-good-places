@@ -454,13 +454,19 @@ export class CharacterPreview {
     if (paint) attachFacePaint(kid).setDesign(paint);
 
     // Same attachment every worn hat uses in the real game — see
-    // `art/models/hats.ts`'s doc comment: no offset maths needed.
-    const hatAsset = shopItem(choice.hatId)?.model();
+    // `art/models/hats.ts`'s doc comment: no offset maths needed. Gated on
+    // `!kid.hairHidesHat`: the freshly-built kid already knows whether the
+    // chosen hair style (Spiky, today) cannot coexist with a worn hat, and
+    // if so the *hat* is the one that does not get attached — hair is never
+    // the thing that hides any more, see `art/models/hair.ts`'s
+    // `HairPart.hideUnderHat`. `choice.hatId` itself is untouched either
+    // way: the creator's Hat tab still shows it selected, this only decides
+    // what actually renders.
+    const hatAsset = kid.hairHidesHat ? undefined : shopItem(choice.hatId)?.model();
     if (hatAsset) kid.hatAnchor.add(hatAsset.root);
     // Same courtesy `entities/WornHat.ts` does in the park: tell the model a
-    // hat is on so the spiky style tucks its spikes away instead of skewering
-    // it. The preview always puts *some* hat on, so this is always true today
-    // — written as a condition anyway, because "no hat" is one shop item away.
+    // hat's attachment just changed, so its measured height re-checks. Not
+    // "is a hat worn" any more — see `KidHandle.setHatWorn`'s doc comment.
     kid.setHatWorn(hatAsset !== undefined);
 
     // The chosen starting pet, stood beside the kid at its own natural scale

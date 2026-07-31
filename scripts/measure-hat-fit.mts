@@ -25,8 +25,10 @@
  *
  * Vertices, not bounding boxes, and instanced meshes expanded — same reasons
  * as `art/style/measure.ts`, whose `visibleBounds` this borrows the traversal
- * rules from (hidden meshes and meshes under hidden parents do not count: the
- * kid tucks her hair away under a hat, and measuring it would report a bunch).
+ * rules from (hidden meshes and meshes under hidden parents do not count —
+ * this file hides every hair part by hand below before measuring the bare
+ * head, and measuring a hidden bunch anyway would report one that was never
+ * meant to be there).
  */
 import '../scripts/headless-canvas.mjs';
 import { InstancedMesh, Matrix4, Mesh, Object3D, Vector3, type BufferAttribute } from 'three';
@@ -107,11 +109,15 @@ function widthAt(root: Object3D, frame: Object3D, y: number, band = 0.04): numbe
 
 // The bare head: skull, ears and face patch, with every hair part hidden.
 //
-// Hair is excluded deliberately rather than left to `setHatWorn(true)`, which
-// only tucks the parts that would spear *through* a hat (the spikes). Bunches
-// stay, and they hang out to 1.82 m across — comparing a hat's brim against a
-// pair of bunches would say the sun hat is too narrow when it is the skull, at
-// the crown, that a hat has to look right against.
+// Hair is hidden by hand here, in full, rather than through `setHatWorn`:
+// that call no longer touches hair visibility at all (31 July 2026 — a style
+// like Spiky is now always fully drawn, and it is a *worn hat* that declines
+// to render instead, see `art/models/hair.ts`'s `HairPart.hideUnderHat`),
+// and even before that change it only ever tucked the spikes. Bunches were
+// always left alone by it, and they hang out to 1.82 m across — comparing a
+// hat's brim against a pair of bunches would say the sun hat is too narrow
+// when it is the skull, at the crown, that a hat has to look right against.
+// `setHatWorn(true)` is still called, purely so `kid.height` below re-measures.
 const kid = createKid();
 kid.setHatWorn(true);
 for (const part of kid.hairParts) part.mesh.visible = false;

@@ -41,12 +41,21 @@ export class CharacterModel {
    * nothing is worn.
    *
    * Read live off the model rather than snapshotted, because since hair styles
-   * landed it genuinely changes: spiky hair is 0.24 m taller than a bob, and
-   * putting a hat on hides the spikes and brings it back down. See
+   * landed it genuinely changes: Spiky is 0.24 m taller than a bob. See
    * `art/models/kid.ts`'s `height` getter.
    */
   get height(): number {
     return this.kid.height;
+  }
+
+  /**
+   * Whether the worn hairstyle refuses to share the head with a hat — Spiky,
+   * today. `WornHat` checks this **before** attaching a hat mesh at all: the
+   * hat is what disappears, never the hair. See `art/models/kid.ts`'s
+   * `hairHidesHat` for the full reasoning.
+   */
+  get hairHidesHat(): boolean {
+    return this.kid.hairHidesHat;
   }
 
   /** Resting height of the head pivot, in metres. The animator nudges around it. */
@@ -110,8 +119,9 @@ export class CharacterModel {
   }
 
   /**
-   * Tells the model whether a hat is being worn, so hair that would spear
-   * straight through one is tucked away. Driven by `WornHat`.
+   * Tells the model a hat's attachment just changed, so `height` re-measures.
+   * No longer tucks any hair away — see `KidHandle.setHatWorn`'s doc comment
+   * and {@link hairHidesHat}. Driven by `WornHat`.
    */
   setHatWorn(worn: boolean): void {
     this.kid.setHatWorn(worn);

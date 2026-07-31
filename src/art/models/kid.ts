@@ -254,6 +254,17 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly hairParts: readonly HairPart[];
   /**
+   * Whether the **worn hairstyle**, not any hat, decides a hat cannot show —
+   * Spiky, today (`art/models/hair.ts`'s `HairPart.hideUnderHat`; its own
+   * `HairRig.hidesHat` is what this mirrors). Read by whoever is about to
+   * attach or show a hat mesh — `entities/WornHat.ts` in the running park,
+   * `ui/characterCreationPreview.ts` in the creator — **before** doing so:
+   * the hat is what disappears, never the hair. Jim's words, 31 July 2026:
+   * "just allow any hair other than rooster with a hat, and disable the hat,
+   * not the hair in this case."
+   */
+  readonly hairHidesHat: boolean;
+  /**
    * Every shoe mesh built beyond the bare foot blob, each tagged with the
    * kinds that show it — the twin of {@link backpackParts}/{@link hairParts},
    * for the same caller: the NPC crowd maps prototype meshes onto pairs
@@ -286,8 +297,17 @@ export interface KidHandle extends CreatureHandle {
    */
   setShoeKind(kind: ShoeKind): void;
   /**
-   * Tells the model a hat is on, so anything that would spear through one is
-   * tucked away. Called by `entities/WornHat.ts` and by the creator's preview.
+   * Tells the model a hat's attachment just changed, so `height` re-measures
+   * — a hat mesh added to `hatAnchor` (which sits inside `root`) can change
+   * what `visibleTop` finds. Called by `entities/WornHat.ts` and by the
+   * creator's preview, right after they attach or remove a hat mesh.
+   *
+   * Despite the name, this **no longer decides whether any hair tucks away**
+   * — see {@link hairHidesHat}, which the caller has to check *before*
+   * deciding whether to attach a hat mesh at all. `worn` is kept only
+   * because callers already know it at the call site and a bare
+   * "remeasure()" reads oddly out of context; the remeasure itself happens
+   * either way.
    */
   setHatWorn(worn: boolean): void;
   /**
@@ -543,15 +563,18 @@ export function createKid(options: KidOptions = {}): KidHandle {
     backpackAnchor,
     backpackParts: backpackRig?.parts ?? [],
     hairParts: hairRig.parts,
+    get hairHidesHat() {
+      return hairRig.hidesHat;
+    },
     shoeParts: shoeRig.parts,
     // Measured, not `KID_HEIGHT`: spiky hair is a good 0.24 m taller than a
     // bob, and a name label placed from a constant would sit inside it.
     //
     // A **getter**, because the answer changes while the character is alive:
-    // putting a hat on hides the spikes, and a height snapshotted at
-    // construction would leave the label of a spiky-haired child in a hat
-    // floating a third of a metre above her, pointing at nothing. Re-measured
-    // only when the style or the hat actually changes — never per frame.
+    // switching from a bob to Spiky changes it by that same 0.24 m, and a
+    // height snapshotted at construction would leave the label pointing at
+    // nowhere near her actual crown. Re-measured only when the style or a
+    // hat's own attachment actually changes — never per frame.
     get height() {
       return measuredHeight;
     },
@@ -569,8 +592,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
     // shoe part is cut from the foot blob's own small ellipsoid, nowhere near
     // tall enough to be what `visibleTop` finds.
     setShoeKind: (kind: ShoeKind) => shoeRig.setKind(kind),
-    setHatWorn: (worn: boolean) => {
-      hairRig.setHatWorn(worn);
+    // `worn` itself is unused now — see the interface doc comment on
+    // `setHatWorn` for why this stays a "tell me something changed" call
+    // rather than losing the parameter, and why the hair rig is no longer
+    // told anything at all.
+    setHatWorn: (_worn: boolean) => {
       measuredHeight = visibleTop(root);
     },
     update: (dt: number) => hairRig.ponytail?.update(dt),
