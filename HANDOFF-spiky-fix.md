@@ -58,6 +58,78 @@ bare bit is most of what you see.
 
 Still 2.342 m, 255 mm proud. One merged mesh, ~256 triangles.
 
+## Third round — IN BLENDER, NOT YET IN CODE
+
+**Nothing below is committed.** The branch still carries the second round (a
+shell + 16 spikes). This round is Blender-only, awaiting the family's sign-off,
+which is what they asked for ("iterate in blender and ask me to look when
+ready").
+
+Four instructions came in during the second round:
+
+1. "still a middle bald patch with no spikes" — confirmed from a **top-down**
+   render, which none of the earlier contact sheets included. The four angles
+   in `shots.py` all hide it. **Always render a top view when judging this.**
+2. "densely pack radiating spikes over the whole head"
+3. "blender tools should have something for distributing this evenly" — yes:
+   **Geometry Nodes `Distribute Points on Faces`, POISSON mode**. Used.
+4. "then apply gravity so that some of them bend downwards"
+5. "remove the hair 'body' and just have the spikes so head skin shows through;
+   packing is fine, not too dense" + "also needs some central spikes"
+
+### Where it landed (render: `/tmp/blender-hair/spiky-FINAL.png`)
+
+- **No hair shell at all for `spiky`.** The style stops wearing `crop`. Skin
+  shows between the spikes.
+- **Roots move to the skull.** The crop shell sits ~0.10 m proud of the skull,
+  so a root on the shell with no shell drawn is a cone floating off the head.
+  Every root is projected onto the skull ellipsoid — **0.66 x 0.627 x 0.647** in
+  the drape frame, measured off `KidRef_skull`, centred on the drape origin.
+- **The crop hem still defines the hairline** (it is the only thing that knows
+  where hair stops and face begins), + 0.05 margin. No spike below it.
+- **Poisson-disk packing** on a mesh of the shell's outer skin between hem and
+  0.70, `Distance Min` 0.40 -> 19 spikes, plus **5 placed crown spikes** (the
+  Poisson field's rings shrink to nothing at the pole, so sampling alone leaves
+  the middle bare — the exact complaint). 24 total.
+- **Spikes are swept tubes, not cones**, so gravity can *bend* them: 5 rings,
+  8 sides, direction rotated towards world-down at each step.
+- **Two bend traps, both paid for:**
+  - weighting the per-step bend by `(k+1)` alone **triples** the total, because
+    the weights sum to `(rings+1)/2`, not 1. That is what curled the crown
+    spikes flat onto the skull. Normalise by `2(k+1)/(rings(rings+1))`.
+  - droop must scale by `sin(lean)` — gravity has no purchase on a spike that
+    already points at it. No separate fudge by height is needed.
+- **`min_tilt` 0.45.** No spike may point dead vertical: it foreshortens to a
+  circle from the game's looking-down camera and gives gravity nothing to bend.
+  This is what turned the crown from flat splodges into a starburst.
+
+### Parameters, as rendered
+
+    min_distance 0.40   seed 7      hem_margin 0.05   top 0.70
+    crown  (0.35,0.700) (1.75,0.690) (3.05,0.695) (4.45,0.688) (5.60,0.698)
+    long 0.48  short 0.44   r_long 0.105  r_short 0.094
+    stand 0.45  min_tilt 0.45  gravity 0.9   jag (1.0, 0.86, 0.94)
+    -> 24 spikes, 2.392 m tall, lowest spike drape y -0.50
+
+Blender scripts (outside git, `.claude/` is gitignored):
+`.claude/blender-spiky/{hairgen,extras,shots,spikes6,spikes7}.py`.
+`exec(open(P+f).read())` in order, then `build_spikes7(...)`,
+`show_spiky_bare()`, `make_sheet(path)`.
+
+### OPEN QUESTIONS before this can be coded
+
+1. **A hat now makes her bald.** `hideUnderHat` hides the whole spike mesh, and
+   with no shell there is nothing left. Proposed: split the spikes into two
+   meshes — the low hairline ones stay under a hat (they sit below the brim and
+   read as a fringe), the tall ones hide. Costs the crowd one draw call, and
+   `spiky` gives one back by leaving the `crop` shell.
+2. **Height 2.39 m** against a 2.12 m crowd. Build was green at 2.43 m.
+3. `check:hair` will need reworking: it asserts exactly one shell visible per
+   style, and measures the spikes' prominence against the crop crown. Both
+   references go away. New references: the skull, and the hem.
+4. Triangle cost rises — swept tubes, ~90 tris each, ~2200 total, comparable to
+   one hair shell. Still one merged mesh (or two, per (1)).
+
 ## The fix (first pass — still the basis)
 
 - lean **outward**: `.rotateX(-tilt).rotateY(-azimuth)` (dot 1.000, was 0.000)
