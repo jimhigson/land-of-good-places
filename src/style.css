@@ -3028,7 +3028,14 @@ kbd {
 .charcreate-card {
   --shop-accent: var(--lgp-sky);
   width: min(74rem, 96vw);
-  max-height: min(48rem, 94vh);
+  /* `height`, not `max-height` (31 July 2026): with a cap, the card shrank
+     to fit whichever tab happened to be shortest — Skin (one row of
+     swatches) collapsed the whole card, then picking Hair (two sections)
+     grew it again, and the preview/tab-strip visibly jumped on every tab
+     change. Fixed height means every tab gets the same card, and
+     `.charcreate-body`'s existing `overflow-y: auto` still catches the one
+     tab (Hair or Backpack, two sections each) tall enough to need it. */
+  height: min(48rem, 94vh);
 }
 
 .charcreate-body {
@@ -3096,13 +3103,18 @@ kbd {
    `ui/CharacterCreation.ts`'s `TAB_META`) removed the problem the multi-column
    trick was solving — only one tab's panel is ever attached, and the tallest
    one is two sections (Hair: colour + style; Backpack: shape + colour) — so
-   this is a plain flex column now. `max-width` keeps a lone swatch row or a
-   two-up card grid from stretching edge to edge the way four columns of
-   content once filled the same space on purpose. */
+   this is a plain flex column now.
+
+   No `max-width` any more (31 July 2026): with the card's height now fixed
+   rather than content-shrunk (see `.charcreate-card`), a capped controls
+   column left a visible band of bare card down the right edge on anything
+   wider than a laptop. Two columns now — preview, fixed; controls, `flex: 1`
+   — so the second one genuinely takes the rest of the width on a wide
+   screen. The `max-width: 700px` block below still stacks them to full width
+   on a phone, unaffected by this. */
 .charcreate-controls {
   flex: 1;
   min-width: 0;
-  max-width: 26rem;
   display: flex;
   flex-direction: column;
 }
