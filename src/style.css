@@ -1116,8 +1116,12 @@ kbd {
    `.charcreate-body` / `.charcreate-preview` / `.charcreate-controls` further
    down this file, and everything those solved — the sticky preview column on a
    wide screen, and the phone-portrait split into a fixed preview band above a
-   scrolling controls pane — is inherited rather than re-solved here. The three
-   rules below are the whole difference. */
+   scrolling controls pane — is inherited rather than re-solved here. The two
+   rules below are the whole difference. A third, `.facepaint-controls`
+   (opting back out of `.charcreate-controls`'s `max-width` cap on a wide
+   screen), was removed 31 July 2026 when that cap was — see
+   `.charcreate-controls` further down: this screen never needed anything
+   beyond what it now gets by default. */
 
 .facepaint-card {
   --shop-accent: var(--lgp-mint);
@@ -1130,15 +1134,6 @@ kbd {
      itself to a pixel size. */
   width: min(46rem, 96vw);
   max-height: min(40rem, 92vh);
-}
-
-/* `.charcreate-controls`'s `max-width: 26rem` exists for the *tabbed*
-   character creator, where only one small tab panel is ever showing at once
-   (`ui/CharacterCreation.ts`'s `TAB_META`). This screen has no tabs — every
-   design shows at once, in the grid below — and wants the width
-   `.facepaint-card` above was actually sized for. */
-.facepaint-controls {
-  max-width: none;
 }
 
 /* Not a scroller any more. `.charcreate-controls` above is the scroll region
@@ -3579,11 +3574,6 @@ kbd {
 
   .charcreate-controls {
     width: 100%;
-    /* The desktop `max-width: 26rem` cap (single tab panel, keeps a lone
-       swatch row from stretching edge to edge) would otherwise also bite on a
-       tablet-width phone inside this same breakpoint — this band wants the
-       full width every other rule here already gives it. */
-    max-width: none;
     flex: 1;
     min-height: 0;
     overflow-y: auto;

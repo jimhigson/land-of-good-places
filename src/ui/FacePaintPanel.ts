@@ -128,14 +128,15 @@ export class FacePaintPanel {
     this.previewWrap = document.createElement('div');
     this.previewWrap.className = 'charcreate-preview';
 
-    // `charcreate-controls` for every layout rule it carries (a sticky sibling
+    // `charcreate-controls` for every layout rule it carries: a sticky sibling
     // column on a wide screen, the scroll region below the preview band on a
-    // phone); `facepaint-controls` to opt back out of its `max-width` cap,
-    // which exists for the *tabbed* character creator (one small panel showing
-    // at a time) and would otherwise squeeze this screen's design grid, which
-    // has no tabs and shows every design at once.
+    // phone. Used to also carry `facepaint-controls`, to opt back out of a
+    // `max-width` cap the tabbed character creator's own controls column
+    // needed and this screen's design grid did not — that cap is gone (31
+    // July 2026, `.charcreate-controls`'s own comment in style.css), so
+    // there is nothing left to opt out of.
     const controls = document.createElement('div');
-    controls.className = 'charcreate-controls facepaint-controls';
+    controls.className = 'charcreate-controls';
 
     this.grid = document.createElement('div');
     this.grid.className = 'facepaint-grid';
