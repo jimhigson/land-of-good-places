@@ -77,6 +77,7 @@ import { createHat, HAT_KINDS } from '../src/art/models/hats.ts';
 import { createLollipopTree, createPinkWall, createWoodWall } from '../src/art/models/props.ts';
 import { HAIR_STYLES } from '../src/art/models/hair.ts';
 import { BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
+import { SHOE_KINDS } from '../src/art/models/shoes.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -260,6 +261,14 @@ function collect(): Subject[] {
   // still hang off her back the same way" is worth stating rather than hoping.
   for (const kind of BACKPACK_KINDS) {
     add(`kid.backpack.${kind}`, createKid({ backpackKind: kind }));
+  }
+
+  // Every shoe pair, worn. Same reasoning as the backpack shapes above — cut
+  // from the foot's own ellipsoid rather than positioned by eye, so "still
+  // sitting on the same feet, still the same height" is worth proving rather
+  // than assuming.
+  for (const kind of SHOE_KINDS) {
+    add(`kid.shoe.${kind}`, createKid({ shoeKind: kind }));
   }
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.

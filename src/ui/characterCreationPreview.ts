@@ -19,7 +19,7 @@ import { disposeTree, toonMaterial } from '../art/style/materials';
 import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
-import type { BackpackKind, HairStyle } from '../state';
+import type { BackpackKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -63,6 +63,9 @@ export interface PreviewChoice {
   /** Which bag she wears. Bare and non-optional for the same reason `hairStyle` is. */
   readonly backpack: BackpackKind;
   readonly backpackColour: number;
+  /** Which pair she wears. Bare and non-optional for the same reason `hairStyle` is. */
+  readonly shoes: ShoeKind;
+  readonly shoesColour: number;
   readonly hatId: string;
   readonly petId: string;
   /**
@@ -108,8 +111,13 @@ const RESTING_FOCUS: Readonly<Record<PreviewFraming, PreviewFocus>> = {
  * styles that hang down the back are longer than the head, and hidden behind
  * the child in a front view, so that framing both measures the hair itself and
  * turns the plinth — see {@link CharacterPreview.updateTurntable}.
+ *
+ * `feet` needs none of `backpack`'s turntable trick — shoes sit on the
+ * *front* of the child, in plain sight from the same dead-on view every other
+ * close-up already uses, so it is simply a tighter, lower box (see
+ * {@link CharacterPreview.boxFor}).
  */
-export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'backpack' | 'pet';
+export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'backpack' | 'feet' | 'pet';
 
 /**
  * Where the camera sits relative to whatever it is framing: dead in front, and
@@ -145,6 +153,10 @@ const FOCUS_MARGIN: Readonly<Record<PreviewFocus, number>> = {
   // A bag on a back seen three-quarters on is a small subject with a whole
   // child beside it; the margin keeps her shoulder in shot for scale.
   backpack: 1.2,
+  // Feet are the smallest thing any screen frames on purpose — tighter than a
+  // head, but not as tight as `face`, which can crop right to the hairline
+  // because a face has no ground under it that also needs to read.
+  feet: 1.16,
   pet: 1.32,
 };
 
@@ -420,6 +432,8 @@ export class CharacterPreview {
       eyeColour: choice.eye,
       backpackKind: choice.backpack,
       backpackColour: choice.backpackColour,
+      shoe: choice.shoesColour,
+      shoeKind: choice.shoes,
     });
     // A fresh choice gets an immediate happy face — the same "it worked!"
     // beat a purchase or a pet pick gets everywhere else in the game — and
@@ -645,6 +659,17 @@ export class CharacterPreview {
       } else if (focus === 'face') {
         const patch = kid.root.getObjectByName('facePatch');
         box = patch ? this.measure(patch) : null;
+      } else if (focus === 'feet') {
+        // Both legs unconditionally, not `kid.shoeParts` alone: they carry the
+        // foot blob itself, which *is* the whole shoe for `'plain'` — a kind
+        // with no extra parts of its own to measure, unlike every other one.
+        // The extra parts on top are still filtered by visibility, same as
+        // `backpack` above, so a hidden RiPika toe cap never widens the box.
+        box = this.measure(
+          kid.limbs.leftLeg,
+          kid.limbs.rightLeg,
+          ...kid.shoeParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
+        );
       } else {
         // Clothes: the jumper and the limbs, deliberately NOT the head. The
         // hair bunches are wider than the kid's outstretched hands, so any box

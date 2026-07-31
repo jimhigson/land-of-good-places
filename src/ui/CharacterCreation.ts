@@ -3,7 +3,7 @@ import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
-import type { BackpackKind, CharacterCreationChoice, HairStyle } from '../state';
+import type { BackpackKind, CharacterCreationChoice, HairStyle, ShoeKind } from '../state';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 import { ColourWheelPicker } from './ColourWheelPicker';
 
@@ -160,6 +160,39 @@ const BACKPACKS: readonly Choice<BackpackKind>[] = [
   ),
 ].map((value) => ({ value, ...BACKPACK_OPTIONS[value] }));
 
+const SHOE_SWATCHES: readonly Swatch[] = [
+  { colour: PALETTE.shoe, label: 'Sky' },
+  { colour: PALETTE.markerMint, label: 'Mint' },
+  { colour: PALETTE.markerLemon, label: 'Lemon' },
+  { colour: PALETTE.markerPink, label: 'Pink' },
+  { colour: PALETTE.flowerViolet, label: 'Violet' },
+  { colour: PALETTE.flowerRed, label: 'Coral' },
+];
+
+/**
+ * What a child sees on each shoe button.
+ *
+ * A `Record` over the whole union for the same reason the hair styles and the
+ * backpack shapes are one: a pair added to `art/models/shoes.ts` and forgotten
+ * here would exist in the game and be unchoosable, exactly the bug that
+ * survives a review. `ripika` keeps the RiPika glyph the hat and the backpack
+ * both already use — she is the same character wherever she shows up, not a
+ * different picture on every screen that happens to feature her.
+ */
+const SHOE_OPTIONS: Readonly<Record<ShoeKind, { label: string; glyph: string }>> = {
+  plain: { label: 'Plain', glyph: '👟' },
+  ripika: { label: 'RiPika', glyph: '⚡' },
+  sandal: { label: 'Sandal', glyph: '🩴' },
+  sparkle: { label: 'Sparkly', glyph: '✨' },
+};
+
+const SHOE_ORDER: readonly ShoeKind[] = ['plain', 'ripika', 'sandal', 'sparkle'];
+
+const SHOES: readonly Choice<ShoeKind>[] = [
+  ...SHOE_ORDER,
+  ...(Object.keys(SHOE_OPTIONS) as ShoeKind[]).filter((kind) => !SHOE_ORDER.includes(kind)),
+].map((value) => ({ value, ...SHOE_OPTIONS[value] }));
+
 /** Every hat the hat shop sells — one source of truth, no duplicated data. */
 const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');
 
@@ -176,7 +209,7 @@ const DEFAULT_HAT_ID = HAT_OPTIONS.find((item) => item.id === 'hat.party')?.id ?
 const DEFAULT_PET_ID = PET_OPTIONS[0]?.id ?? '';
 
 /** One tab in the strip below — a customisation category, its own place on the child. */
-type TabId = 'skin' | 'hair' | 'eyes' | 'outfit' | 'hat' | 'backpack' | 'pet';
+type TabId = 'skin' | 'hair' | 'eyes' | 'outfit' | 'shoes' | 'hat' | 'backpack' | 'pet';
 
 /**
  * The tab strip: order, what a child sees on the button, and — the actual
@@ -210,6 +243,7 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
   { id: 'hair', label: 'Hair', glyph: '💇', focus: 'hair' },
   { id: 'eyes', label: 'Eyes', glyph: '👀', focus: 'face' },
   { id: 'outfit', label: 'Outfit', glyph: '👕', focus: 'body' },
+  { id: 'shoes', label: 'Shoes', glyph: '👟', focus: 'feet' },
   { id: 'hat', label: 'Hat', glyph: '🎩', focus: 'head' },
   { id: 'backpack', label: 'Backpack', glyph: '🎒', focus: 'backpack' },
   { id: 'pet', label: 'Pet', glyph: '🐾', focus: 'pet' },
@@ -268,6 +302,8 @@ export class CharacterCreation {
   private eyeColour: number = ART.kidEye;
   private backpackKind: BackpackKind = 'satchel';
   private backpackColour: number = PALETTE.backpack;
+  private shoeKind: ShoeKind = 'plain';
+  private shoeColour: number = PALETTE.shoe;
   /**
    * `null` means "no hat" — today that only ever happens transiently while an
    * exclusive hair style (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) is selected;
@@ -424,6 +460,22 @@ export class CharacterCreation {
       },
     );
 
+    // Shoes -------------------------------------------------------------------
+    const shoeKindSection = this.buildChoiceSection('Shoes', SHOES, this.shoeKind, (kind) => {
+      this.shoeKind = kind;
+      this.refreshPreview('feet');
+    });
+
+    const shoeColourSection = this.buildSwatchSection(
+      'Shoe colour',
+      SHOE_SWATCHES,
+      this.shoeColour,
+      (colour) => {
+        this.shoeColour = colour;
+        this.refreshPreview('feet');
+      },
+    );
+
     // Backpack ---------------------------------------------------------------
     // Both halves frame the bag, which means the preview turns her round to
     // show you her back — see `characterCreationPreview.ts`'s `BACK_TURN`.
@@ -475,6 +527,7 @@ export class CharacterCreation {
       hair: this.buildTabPanel('hair', [hairColourSection, hairStyleSection]),
       eyes: this.buildTabPanel('eyes', [eyeColourSection]),
       outfit: this.buildTabPanel('outfit', [outfitSection]),
+      shoes: this.buildTabPanel('shoes', [shoeKindSection, shoeColourSection]),
       hat: this.buildTabPanel('hat', [hatSection]),
       backpack: this.buildTabPanel('backpack', [backpackSection, backpackColourSection]),
       pet: this.buildTabPanel('pet', [petSection]),
@@ -879,6 +932,8 @@ export class CharacterCreation {
       eye: this.eyeColour,
       backpack: this.backpackKind,
       backpackColour: this.backpackColour,
+      shoes: this.shoeKind,
+      shoesColour: this.shoeColour,
       // `''` is the sentinel `characterCreationPreview.ts` already treats as
       // "no hat": `shopItem('')` misses the catalogue `Map` and returns
       // `null`, so the preview simply builds no hat asset — the same path a
@@ -911,6 +966,8 @@ export class CharacterCreation {
         eyeColour: this.eyeColour,
         backpackKind: this.backpackKind,
         backpackColour: this.backpackColour,
+        shoeKind: this.shoeKind,
+        shoeColour: this.shoeColour,
         hat,
         pet,
       };

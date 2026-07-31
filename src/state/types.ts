@@ -90,6 +90,15 @@ export type HairStyle = (typeof HAIR_STYLES)[number];
 export const BACKPACK_KINDS = ['satchel', 'bubble', 'heart', 'ripikaHead', 'trillaHead'] as const;
 export type BackpackKind = (typeof BACKPACK_KINDS)[number];
 
+/**
+ * Shoe pair chosen in the character creator. {@link BackpackKind}'s twin, for
+ * the same reasons: `state/` never imports `art/`, and a save read back off
+ * disk needs a runtime list to validate against rather than a compile-time-only
+ * type. The canonical list lives in `art/models/shoes.ts`.
+ */
+export const SHOE_KINDS = ['plain', 'ripika', 'sandal', 'sparkle'] as const;
+export type ShoeKind = (typeof SHOE_KINDS)[number];
+
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export const CUTE_CATEGORIES = [
   'toy',
@@ -227,6 +236,10 @@ export interface PlayerState {
   backpackKind: BackpackKind;
   /** What colour that bag is painted. A bare hex, like every other colour here. */
   backpackColour: number;
+  /** Which pair she wears — see `ShoeKind`. Chosen in the character creator. */
+  shoeKind: ShoeKind;
+  /** What colour that pair is painted. A bare hex, like every other colour here. */
+  shoeColour: number;
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
   maxHealth: number;

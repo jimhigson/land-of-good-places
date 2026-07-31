@@ -18,6 +18,7 @@ import {
 import { visibleTop } from '../style/measure';
 import { buildHair, type HairPart, type HairStyle } from './hair';
 import { buildBackpacks, type BackpackKind, type BackpackPart } from './backpacks';
+import { buildShoes, type ShoeKind, type ShoePart } from './shoes';
 
 /**
  * The player kid — Eleri by default.
@@ -169,6 +170,17 @@ export interface KidOptions {
   hair?: number;
   outfit?: number;
   shoe?: number;
+  /** Which pair is worn. `plain` by default — today's shoe, unchanged. See `art/models/shoes.ts`. */
+  shoeKind?: ShoeKind;
+  /**
+   * Which pairs are *built*, if more than the one worn.
+   *
+   * The twin of {@link hairStyles}/`backpackKinds`, and only the NPC crowd
+   * wants it, for the same reason: its prototype has to carry every pair a
+   * background child can wear at once (`CROWD_SHOE_KINDS`). Everybody else
+   * builds one.
+   */
+  shoeKinds?: readonly ShoeKind[];
   /** Which style is worn. `bunches` by default. See `art/models/hair.ts`. */
   hairStyle?: HairStyle;
   /**
@@ -241,6 +253,15 @@ export interface KidHandle extends CreatureHandle {
    * `entities/npc/kidCrowd.ts`.
    */
   readonly hairParts: readonly HairPart[];
+  /**
+   * Every shoe mesh built beyond the bare foot blob, each tagged with the
+   * kinds that show it — the twin of {@link backpackParts}/{@link hairParts},
+   * for the same caller: the NPC crowd maps prototype meshes onto pairs
+   * without knowing what a toe cap is. The plain pair has no parts of its
+   * own here — it *is* the bare, painted foot blob, which is not a "part" any
+   * kind can hide, so it is not in this list.
+   */
+  readonly shoeParts: readonly ShoePart[];
   setSkinColour(colour: number): void;
   setHairColour(colour: number): void;
   setOutfitColour(colour: number): void;
@@ -256,6 +277,14 @@ export interface KidHandle extends CreatureHandle {
    * wearing nothing but the straps.
    */
   setBackpackKind(kind: BackpackKind): void;
+  /**
+   * Switches which built pair is shown, and repaints the foot blob for it
+   * (see `art/models/shoes.ts`'s `FOOT_COLOUR` — a sandal bares the foot in
+   * skin tone regardless of the chosen shoe colour, everything else keeps the
+   * chosen colour). Only pairs passed as `KidOptions.shoeKinds` exist to
+   * switch to.
+   */
+  setShoeKind(kind: ShoeKind): void;
   /**
    * Tells the model a hat is on, so anything that would spear through one is
    * tucked away. Called by `entities/WornHat.ts` and by the creator's preview.
@@ -288,6 +317,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     hair = ART.kidHair,
     outfit = ART.kidOutfit,
     shoe = ART.kidShoe,
+    shoeKind = 'plain',
     hairStyle = 'bunches',
     backpack = true,
     backpackColour = ART.kidBackpack,
@@ -384,6 +414,19 @@ export function createKid(options: KidOptions = {}): KidHandle {
     pivot.add(foot);
     addOutline(foot, 0.014);
   }
+
+  // The plain pair *is* the foot blob just built above, painted `shoeMat` —
+  // `art/models/shoes.ts`'s own doc comment is explicit that this file dresses
+  // that blob rather than replacing it, unlike `buildBackpacks` below, which
+  // fully owns what it draws. One call, not one per leg: `buildShoes` takes
+  // both pivots at once and mirrors internally, the same shape `buildHair`
+  // and `buildBackpacks` already use for a part that is naturally a pair.
+  const shoeRig = buildShoes({
+    legs: [limbs.leftLeg, limbs.rightLeg],
+    footMaterial: shoeMat,
+    kind: shoeKind,
+    ...(options.shoeKinds ? { kinds: options.shoeKinds } : {}),
+  });
 
   // --- backpack -------------------------------------------------------------------
   // Every shape lives in `art/models/backpacks.ts`, for the same reason hair
@@ -500,6 +543,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     backpackAnchor,
     backpackParts: backpackRig?.parts ?? [],
     hairParts: hairRig.parts,
+    shoeParts: shoeRig.parts,
     // Measured, not `KID_HEIGHT`: spiky hair is a good 0.24 m taller than a
     // bob, and a name label placed from a constant would sit inside it.
     //
@@ -521,6 +565,10 @@ export function createKid(options: KidOptions = {}): KidHandle {
     // character taller. A `visibleTop` walk per switch would be a whole model's
     // worth of vertices for a number that cannot have changed.
     setBackpackKind: (kind: BackpackKind) => backpackRig?.setKind(kind),
+    // No re-measure, for the same reason `setBackpackKind` skips one: every
+    // shoe part is cut from the foot blob's own small ellipsoid, nowhere near
+    // tall enough to be what `visibleTop` finds.
+    setShoeKind: (kind: ShoeKind) => shoeRig.setKind(kind),
     setHatWorn: (worn: boolean) => {
       hairRig.setHatWorn(worn);
       measuredHeight = visibleTop(root);

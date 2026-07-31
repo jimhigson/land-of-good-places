@@ -45,6 +45,7 @@ import {
   GAME_MODES,
   HAIR_STYLES,
   INVENTORY_KINDS,
+  SHOE_KINDS,
   type BackpackKind,
   type CharacterKind,
   type CuteThing,
@@ -53,6 +54,7 @@ import {
   type GameTime,
   type HairStyle,
   type InventoryItem,
+  type ShoeKind,
 } from './types';
 
 /** The one and only key the game writes. */
@@ -146,6 +148,8 @@ export interface SavedPlayer {
   readonly eyeColour?: number;
   readonly backpackKind?: BackpackKind;
   readonly backpackColour?: number;
+  readonly shoeKind?: ShoeKind;
+  readonly shoeColour?: number;
   readonly health?: number;
   readonly maxHealth?: number;
   readonly facePaint?: FacePaintId;
@@ -384,6 +388,8 @@ function readPlayer(value: unknown): SavedPlayer | undefined {
   put(player, 'eyeColour', readColour(value['eyeColour']));
   put(player, 'backpackKind', readMember(value['backpackKind'], BACKPACK_KINDS));
   put(player, 'backpackColour', readColour(value['backpackColour']));
+  put(player, 'shoeKind', readMember(value['shoeKind'], SHOE_KINDS));
+  put(player, 'shoeColour', readColour(value['shoeColour']));
   put(player, 'health', readNumber(value['health']));
   put(player, 'maxHealth', readNumber(value['maxHealth']));
   // `facePaint` is a design id or `null` for a clean face, and `null` is a

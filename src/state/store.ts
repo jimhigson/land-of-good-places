@@ -13,6 +13,7 @@ import type {
   HairStyle,
   InventoryItem,
   InventoryKind,
+  ShoeKind,
 } from './types';
 
 /**
@@ -85,6 +86,8 @@ export interface CharacterCreationChoice {
   readonly eyeColour: number;
   readonly backpackKind: BackpackKind;
   readonly backpackColour: number;
+  readonly shoeKind: ShoeKind;
+  readonly shoeColour: number;
   /**
    * `null` means "no hat" — the creator's Hat tab hides itself while an
    * exclusive hair style is selected (a Mohican, once `art/models/hair.ts`
@@ -274,6 +277,8 @@ class GameStore {
     this.state.player.eyeColour = choice.eyeColour;
     this.state.player.backpackKind = choice.backpackKind;
     this.state.player.backpackColour = choice.backpackColour;
+    this.state.player.shoeKind = choice.shoeKind;
+    this.state.player.shoeColour = choice.shoeColour;
 
     if (choice.hat) {
       const hatItem = this.grantFree(choice.hat, true);
@@ -700,6 +705,8 @@ class GameStore {
       if (p.eyeColour !== undefined) next.player.eyeColour = p.eyeColour;
       if (p.backpackKind !== undefined) next.player.backpackKind = p.backpackKind;
       if (p.backpackColour !== undefined) next.player.backpackColour = p.backpackColour;
+      if (p.shoeKind !== undefined) next.player.shoeKind = p.shoeKind;
+      if (p.shoeColour !== undefined) next.player.shoeColour = p.shoeColour;
       if (p.maxHealth !== undefined) next.player.maxHealth = Math.max(1, p.maxHealth);
       if (p.health !== undefined) next.player.health = p.health;
       if (p.facePaint !== undefined) next.player.facePaint = p.facePaint;
@@ -815,6 +822,8 @@ function createInitialState(): GameState {
       eyeColour: PALETTE.iris,
       backpackKind: 'satchel',
       backpackColour: PALETTE.backpack,
+      shoeKind: 'plain',
+      shoeColour: PALETTE.shoe,
       health: 5,
       maxHealth: 5,
       facePaint: null,

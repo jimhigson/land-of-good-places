@@ -10,7 +10,6 @@ import {
   PLAYER_SPRINT_MULTIPLIER,
   PLAYER_TURN_SPEED,
 } from '../core/constants';
-import { PALETTE } from '../core/palette';
 import { clamp01, damp, DEG, lerp, smoothstep, TAU, turnTowards } from '../core/mathUtils';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
@@ -281,18 +280,19 @@ export class Player implements GameSystem {
         skin: playerState.skinColour,
         hair: playerState.hairColour,
         outfit: playerState.outfitColour,
-        shoe: PALETTE.shoe,
+        shoe: playerState.shoeColour,
       },
-      // Hair style, skin tone, eye colour and the backpack are chosen in the
-      // character creator (`ui/CharacterCreation.ts`) and have already been
-      // written to the store by the time this constructor runs — see `main.ts`'s
-      // `boot()`, which applies them before `Game` (and therefore `Player`)
-      // is ever built.
+      // Hair style, skin tone, eye colour, the backpack and the shoes are all
+      // chosen in the character creator (`ui/CharacterCreation.ts`) and have
+      // already been written to the store by the time this constructor runs —
+      // see `main.ts`'s `boot()`, which applies them before `Game` (and
+      // therefore `Player`) is ever built.
       {
         hairStyle: playerState.hairStyle,
         eyeColour: playerState.eyeColour,
         backpackKind: playerState.backpackKind,
         backpackColour: playerState.backpackColour,
+        shoeKind: playerState.shoeKind,
       },
     );
     this.group.add(this.model.root);

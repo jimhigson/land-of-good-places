@@ -26,5 +26,6 @@ export type {
   InventoryItem,
   InventoryKind,
   PlayerState,
+  ShoeKind,
   WorldState,
 } from './types';
