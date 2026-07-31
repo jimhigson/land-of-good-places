@@ -6,6 +6,11 @@ This branch has had three jobs in order. **§1–§8 are the two critter hoods,
 finished and approved by the family — do not redesign them.** §9 is the plain
 Cheery Cap, done. §10 is the shoes, in progress.
 
+**§11 is a later, separate job on branch `fix/hood-face-baked-texture`** — the
+hood faces turned out to be invisible in the running game, and fixing that
+retired the separate face-patch mesh entirely. Read it before touching
+`hoodShell.ts`.
+
 ---
 
 # 1–8. The critter hoods (done, approved)
@@ -324,3 +329,118 @@ Renders: `scratchpad/renders/shoe4_{ripika,sparkle}_{iso,out,kid}.png` and
       beside the hair loop. A new asset gets **no** `KNOWN_DRIFT` allowance.
 - [ ] No in-game QA (browser not mine — see §9).
 - [ ] Family has not seen them.
+
+---
+
+# 11. The invisible hood faces — root cause, and the baked-UV fix
+
+**Branch** `fix/hood-face-baked-texture`. **Worktree**
+`.claude/worktrees/hood-face-texture`.
+
+RiPika's and Trilla's painted faces did not appear in the running game at all.
+
+## The root cause is NOT the panel-seam bulge
+
+The working hypothesis when this task was handed over was depth occlusion:
+`hoodPatchGeometry` samples the shell's *smooth* base radius, while
+`hoodShellGeometry` adds panel-seam relief on top of it (`r = radiusAt(y, phi)
+* (1 + amp * seam)`), and at the front `panels` is even for both hoods, so
+`cos(panels·π) = +1` and the front sits on a bulge. The patch was said to be
+buried inside that bulge.
+
+**That is not what was happening, and it is why padding `lift` did nothing.**
+Two measurements, both taken in Node against the real built hats:
+
+1. **Arithmetic.** RiPika's front bulge is `radiusAt(0, π) · seamR` =
+   `0.385 × 0.02` = **0.0077** head units; the patch's `lift` was **0.010**.
+   Trilla's bulge is `0.42 × 0.01` = **0.0042** against a `lift` of **0.008**.
+   The patch was already standing clear of the bulge at the front, and clear by
+   more everywhere else — off the centre line the seam relief goes *negative*
+   and the shell pulls further in.
+
+2. **A ray cast from outside the hat, straight in at each painted feature**
+   (both eyes, the mouth, the middle of the face). Raycasting is what the depth
+   test does, so whatever comes back first is what the camera sees. The
+   `hoodFace` mesh **never appeared in any hit list at all** — not in front, not
+   behind, not anywhere. Only the shell and its outline were ever hit.
+
+The reason is a **reversed triangle winding**. `hoodShellGeometry`'s outer skin
+winds `a, c, b / a, d, c`; `hoodPatchGeometry` wound `a, b, c / a, c, d` — the
+other way round. Averaged over every vertex, `normal · outward-radial` came out
+at **−0.92** for the RiPika patch and **−0.93** for Trilla's. The face patch was
+facing the wearer's skull, and `MeshToonMaterial` is `FrontSide`, so it was
+back-face culled and never rasterised. No amount of `lift` can fix a surface
+that is pointing the wrong way.
+
+**`hoodBibGeometry` had the identical bug** (−0.998), so Trilla's pale bib has
+been invisible in game since it was written. Only `hoodPeakLiningGeometry`
+escaped, and only because `hats.ts` sets `side = DoubleSide` on it by hand.
+
+Reproduce either measurement with `npm run check:hood-face` (below), or read
+`scripts/check-hood-face.mts` — the ray test is the same one.
+
+## The fix: one surface, one texture
+
+Rather than fix the winding and leave two surfaces to be kept in step by a
+formula, the face is now **baked into the hood shell's own UV map**:
+
+- `hoodShellGeometry(spec, face?)` takes an optional {@link HoodFaceWindow} and,
+  when given one, emits `uv` on every vertex using the *same* `(φ, y)` window
+  the old patch used. No second mesh exists, so no second mesh can face the
+  wrong way, sink into a bulge, or drift out of sync.
+- The hood's material becomes `toonMaterial(0xffffff, { map })` where the map is
+  the base colour painted as a filled rect with the face composited on top
+  (`paintFaceOnFill` in `faces.ts`). Opaque — no `transparent`, no `alphaTest`,
+  no `renderOrder`.
+- **Opt-in.** Pass no window and `hoodShellGeometry` is byte-identical to
+  before, so the Cheery Cap keeps its flat-colour material and its exact
+  geometry.
+
+## Three things that had to be got right, and will bite again if changed
+
+1. **The seam column is split.** A UV that runs with azimuth cannot close: the
+   wrap quad would interpolate `u` from one end of the texture to the other and
+   smear the whole face across the back of the hood. So with a face window the
+   shell is built with `segments + 1` columns, the last duplicating the first at
+   `φ = 2π` with its own `u` — the same thing `SphereGeometry` does. Without a
+   window the old `(i + 1) % segments` wrap is kept exactly.
+2. **The duplicated seam's normals are welded** after `computeVertexNormals`.
+   Each copy would otherwise average only its own side's faces, and the toon
+   ramp draws a visible band edge down the back of the hood — and the
+   inverted-hull outline splits along the same line.
+3. **The face is inset into the canvas** by `FACE_FILL_INSET` (0.08), leaving a
+   border of pure base colour. Everything on the hood outside the face window
+   has UVs outside `[0, 1]` and clamps to that border. The border must stay
+   wide enough that mip-mapping cannot pull face pixels into it: 0.08 of 512 is
+   41 texels, and at gameplay distance the mip block is ~6 texels.
+
+   The cost is that the face is drawn at 84% of the canvas — 430 px of 512 for
+   RiPika, where it used to have the whole 512. Invisible at gameplay distance.
+
+Trilla's bib is baked into the same texture (the same lozenge taper, drawn in
+canvas space), so `hoodBibGeometry` and `hoodPatchGeometry` are both gone and
+neither hood has a decal patch left on it.
+
+## Verification
+
+`scripts/check-hood-face.mts`, wired into `npm run build` as
+`check:hood-face`, and it fails on the bug as it stood:
+
+- the shell of every faced hood carries a `uv` attribute;
+- **exactly one** mesh per hat carries a texture map, and it is the solid shell
+  — no transparent decal patch anywhere in the hat;
+- a ray cast from outside at each painted feature hits **the shell first**, and
+  the UV interpolated at that hit is within 0.02 of where the feature was
+  painted on the canvas. That is the assertion that would have caught the
+  original bug, and it checks the mapping rather than trusting the formula;
+- a ray at the back of the hood lands outside the face rect, i.e. on the
+  plain-colour border;
+- every face window sits strictly inside the crown (`yHi < semiY`), which is
+  what lets the pole fan clamp to the texture's top border.
+
+**No in-game QA — the browser was not this agent's to drive** (CLAUDE.md).
+Still needs eyes on: `/art-samples.html`, both hat shop stands, and one
+wear/remove cycle in the character creator, plus a check that the bonnet still
+sings and swaps to its singing face. Note the bib is now visible for the first
+time; open question 3 in §1–8 (bib and brim merging into one pale area at
+iso38) becomes live and may want a deeper pink.
