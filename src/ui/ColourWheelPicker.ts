@@ -110,8 +110,15 @@ export class ColourWheelPicker {
     this.wheel = document.createElement('div');
     this.wheel.className = 'colourwheel-wheel';
     this.wheel.tabIndex = 0;
+    // A true two-axis control has no single ARIA role built for it; `slider`
+    // is the closest fit for a screen reader, so it is given the one axis
+    // that reads as an "amount" (richness/saturation, the same 0–100 scale
+    // the brightness bar below already uses) rather than being left with no
+    // `aria-valuenow` at all, which browsers fill in with an arbitrary 50.
     this.wheel.setAttribute('role', 'slider');
     this.wheel.setAttribute('aria-label', 'Colour and richness');
+    this.wheel.setAttribute('aria-valuemin', '0');
+    this.wheel.setAttribute('aria-valuemax', '100');
     this.cursor = document.createElement('div');
     this.cursor.className = 'colourwheel-cursor';
     this.wheel.append(this.cursor);
@@ -230,7 +237,7 @@ export class ColourWheelPicker {
     let dragging = false;
     this.wheel.addEventListener('pointerdown', (event) => {
       dragging = true;
-      this.wheel.setPointerCapture(event.pointerId);
+      capturePointer(this.wheel, event.pointerId);
       this.wheel.focus();
       pick(event.clientX, event.clientY);
       event.preventDefault();
@@ -242,7 +249,7 @@ export class ColourWheelPicker {
     const stop = (event: PointerEvent) => {
       if (!dragging) return;
       dragging = false;
-      this.wheel.releasePointerCapture(event.pointerId);
+      releasePointer(this.wheel, event.pointerId);
     };
     this.wheel.addEventListener('pointerup', stop);
     this.wheel.addEventListener('pointercancel', stop);
@@ -287,7 +294,7 @@ export class ColourWheelPicker {
     let dragging = false;
     this.bar.addEventListener('pointerdown', (event) => {
       dragging = true;
-      this.bar.setPointerCapture(event.pointerId);
+      capturePointer(this.bar, event.pointerId);
       this.bar.focus();
       pick(event.clientX);
       event.preventDefault();
@@ -299,7 +306,7 @@ export class ColourWheelPicker {
     const stop = (event: PointerEvent) => {
       if (!dragging) return;
       dragging = false;
-      this.bar.releasePointerCapture(event.pointerId);
+      releasePointer(this.bar, event.pointerId);
     };
     this.bar.addEventListener('pointerup', stop);
     this.bar.addEventListener('pointercancel', stop);
@@ -350,6 +357,7 @@ export class ColourWheelPicker {
     const y = 50 + Math.sin(angleRad) * this.s * 50;
     this.cursor.style.left = `${x}%`;
     this.cursor.style.top = `${y}%`;
+    this.wheel.setAttribute('aria-valuenow', String(Math.round(this.s * 100)));
 
     // Exact HSV value ramp for this hue/saturation — see the class doc comment.
     const richHex = hsvToHex(this.h, this.s, 1);
@@ -359,5 +367,30 @@ export class ColourWheelPicker {
 
     const colour = hsvToHex(this.h, this.s, this.v);
     this.preview.style.setProperty('--colourwheel-preview', hexToCss(colour));
+  }
+}
+
+/**
+ * `setPointerCapture`/`releasePointerCapture` throw `NotFoundError` if the
+ * given pointer id is not currently active — which a real finger or mouse
+ * always is by the time `pointerdown` reaches this code, but a handful of
+ * older/edge-case UAs (and, usefully, any test harness driving pointer
+ * events synthetically) do not guarantee it. Capture is purely an upgrade
+ * (it keeps the drag tracking outside the element's own bounds); losing it
+ * must never take the rest of the handler down with an uncaught exception.
+ */
+function capturePointer(element: HTMLElement, pointerId: number): void {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // Not fatal — see the doc comment above.
+  }
+}
+
+function releasePointer(element: HTMLElement, pointerId: number): void {
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch {
+    // Not fatal — see the doc comment above.
   }
 }
