@@ -42,8 +42,8 @@ import { visiblePoints } from '../src/art/style/measure.ts';
 import {
   createHat,
   hatDisplayScale,
+  hatSize,
   HAT_KINDS,
-  HAT_SIZE,
   HAT_STAND_SPACING,
   type HatKind,
 } from '../src/art/models/hats.ts';
@@ -144,7 +144,11 @@ const kidHeight = kid.height;
 
 console.log(`kid: ${kidHeight.toFixed(3)} m tall, bare head ${head.width.toFixed(3)} m wide`);
 console.log(`hat anchor (crown): ${kid.hatAnchorHeight.toFixed(3)} m above the feet`);
-console.log(`hats are worn at ×${HAT_SIZE} life size (hats.ts: HAT_SIZE), crown and cap ×1.95\n`);
+// Read the real per-hat multiplier off `hats.ts` rather than typing it out —
+// see `hatSize`'s own doc comment for why a hand-typed copy here is exactly
+// what went stale on 31 July.
+const sizeNote = HAT_KINDS.map((k) => `${k} ×${hatSize(k).toFixed(3)}`).join(', ');
+console.log(`worn size, per hat: ${sizeNote}\n`);
 
 const header = [
   'hat'.padEnd(12),
@@ -165,42 +169,47 @@ console.log('-'.repeat(header.length));
  * height it may take the wearer, and how much clear air it must leave above her
  * eyes.
  *
- * **Re-derived 31 July 2026**, when the family asked for every hat ×1.5 and the
- * crown and the Cheery Cap ×1.95 (`hats.ts`'s `HAT_SIZE`). The old bounds —
- * 0.45/1.15/1.45 — were fitted to the sizes the hats happened to have that
- * morning, so a deliberate change of size necessarily moves them. That is not
- * the same thing as weakening an assertion to make a number pass, and the
- * distinction is worth stating out loud: **`MIN_SPAN` and `MAX_SPAN` are drift
- * detectors around a size the family chose, not physical limits.** When the
- * family chooses a different size they are re-derived from the new one; when
- * anything *else* moves them, that is the drift they exist to catch.
+ * **Re-derived 1 August 2026**, from Jim's live-screenshot verdict on every hat
+ * in the character-creation preview: the Cheery Cap was "literally wider than
+ * the kid is tall" at the old ×1.95 (2.392 m span on a 2.087 m child), and the
+ * Flower Crown, RiPika Cap and Trilla Hat were all "too big". Only the Sparkly
+ * Crown and the two hats named "good as-is" (Party, Bobble) kept their size —
+ * see `hats.ts`'s `HAT_SIZE_EXTRA` for the corrected per-hat multiplier and the
+ * quote it came from.
  *
- * The measured park is now 0.87–2.12 wide and up to 1.51× tall.
+ * As before (31 July 2026), **`MIN_SPAN`/`MAX_SPAN` are drift detectors around
+ * a size the family chose, not physical limits.** Re-deriving them when the
+ * family deliberately changes a size is correct; the thing that would be wrong
+ * is weakening them to paper over a size nobody signed off on. So each bound
+ * below is checked against *why* it would have caught the bug it exists for,
+ * not just moved to wherever today's numbers happen to sit.
  *
- * - **`MIN_SPAN` 0.75.** The important one, and the reason this whole branch
- *   exists. The pre-×1.5 hats spanned 0.58–1.09, and every one of them passed
- *   the old 0.45 bound — so when the Cheery Cap and the critter hoods were
- *   rebuilt at their original proportions and the family's ×1.5 was silently
- *   lost, `check:hat-fit` stayed green through it. 0.75 sits *above* the whole
- *   un-enlarged range and below the smallest enlarged hat (party, 0.87), so
- *   losing `HAT_SIZE` again fails here loudly. It also subsumes the old 0.45,
- *   which was set by the "much too small" party hat at 0.38.
- * - **`MAX_SPAN` 2.40**, ~13% above the widest hat built (the cap at 2.12).
- * - **`MAX_TIP` 1.60.** Squeezed deliberately: the tallest hat now takes the
- *   wearer to 1.51×, and the design the family rejected as "a second head, not
- *   a hat" — the old RiPika head worn whole — took her to 1.72×. A new hat has
- *   little room in this dimension on purpose, because it is the dimension a
- *   rejected design failed on.
- * - **`MIN_EYE`**, in metres, is not a drift detector but a rule:
- *   GAME_DESIGN.md's standing "a hood never comes down over the wearer's face".
- *   Taken from the game's own number for clear air above an eye — `check:hair`'s
- *   `EYE_MARGIN`, the margin a fringe must leave — because a brim in her eyes
- *   and a fringe in her eyes are the same complaint. The worst hat built has
- *   0.208 m, ten times over.
+ * The measured park is now 0.83–1.66 wide and up to 1.43× tall — tighter on
+ * both ends than the 31 July range (0.87–2.12, up to 1.51×), because this pass
+ * mostly made hats *smaller*.
+ *
+ * - **`MIN_SPAN` 0.7.** Sits below the narrowest hat today (the Flower Crown,
+ *   0.83) and still above the whole pre-×1.5 range from 31 July (0.58–1.09) —
+ *   the failure mode `MIN_SPAN` exists for (a hat quietly losing its `HAT_SIZE`
+ *   multiplier, exactly as happened when the Cheery Cap was rebuilt) still
+ *   trips it just as loudly as before.
+ * - **`MAX_SPAN` 2.0**, comfortably above the widest hat built (the Sun Hat,
+ *   1.66, now the widest after the Cheery Cap's own reduction) but well below
+ *   both the old ×1.95 Cheery Cap (2.12) and the "wider than she is tall" one
+ *   (2.392) — so either of those regressing reintroduces would fail here.
+ * - **`MAX_TIP` 1.5.** The tallest hat is unchanged (Party, ×1.43 — Jim's own
+ *   calibration reference, untouched by this pass) with headroom kept for the
+ *   same reason as before: the design the family rejected as "a second head,
+ *   not a hat" took her to 1.72×, and a hat should have little room in this
+ *   dimension.
+ * - **`MIN_EYE`**, in metres, is unchanged and is not a drift detector but a
+ *   rule: GAME_DESIGN.md's standing "a hood never comes down over the wearer's
+ *   face", taken from `check:hair`'s `EYE_MARGIN`. The crown now comes closest
+ *   at 195 mm, still nearly ten times over.
  */
-const MIN_SPAN = 0.75;
-const MAX_SPAN = 2.4;
-const MAX_TIP = 1.6;
+const MIN_SPAN = 0.7;
+const MAX_SPAN = 2.0;
+const MAX_TIP = 1.5;
 const MIN_EYE = 0.02;
 
 /**
