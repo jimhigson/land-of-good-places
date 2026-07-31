@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:crowd && npm run check:ride-camera && npm run check:orientation && npm run check:waypoints && npm run check:park && npm run check:jitter && vite build",
+    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:hair && npm run check:crowd && npm run check:ride-camera && npm run check:orientation && npm run check:waypoints && npm run check:park && npm run check:jitter && vite build",
     "check:text": "node scripts/check-text-sizes.mjs",
     "check:brevity": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-copy-brevity.mts",
     "check:hat-fit": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hat-fit.mts",
+    "check:hair": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hair.mts",
     "check:assets": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-asset-contract.mts",
     "check:crowd": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts",
     "check:ride-camera": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts",

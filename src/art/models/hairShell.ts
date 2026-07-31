@@ -60,6 +60,18 @@ import { TAU, smoothstep } from '../style/bridge';
 /** Hem samples run from the back of the skull to dead front, and are mirrored. */
 export const HEM_SAMPLES = 19;
 
+/**
+ * The vertex layout, for anything that needs to tell the two skins apart.
+ *
+ * Vertex 0 is the outer crown and vertex 1 the inner one; from
+ * {@link SHELL_FIRST_VERTEX} the two skins alternate, outer first. `check:hair`
+ * uses this to ask its questions of the **outer** skin only — a hand tucked
+ * inside the cavity is a hand under her hair, which is correct, and only a hand
+ * that reaches the outside is a hand coming *through* it.
+ */
+export const SHELL_FIRST_VERTEX = 2;
+export const SHELL_SKINS = 2;
+
 export interface HairShellSpec {
   /**
    * Hairline height in metres at each of {@link HEM_SAMPLES} azimuths, from the
@@ -150,15 +162,39 @@ const LOCK_FRONT: readonly [number, number] = [2.09, 2.88];
 const TILT_LOW = -0.25;
 const TILT_HIGH = 0.15;
 /**
- * How squarely the gather pushes hair backwards at the sides.
+ * How far round the head the gather pushes hair backwards.
  *
- * A plain `cos²(φ/2)` weight — the obvious one — leaves the fall only half
- * pushed back at the ears, and the hands swing to `z = −0.42` right there, so
- * a fist came out through the curtain on the back-swing. Flattening the weight
- * with this exponent puts the whole side of the fall behind the swing while
- * still letting the face-framing locks hang forward where they belong.
+ * Full push from the nape round to {@link GATHER_FULL} (100°), then fading to
+ * nothing by {@link GATHER_NONE} (150°) so the face-framing locks still hang
+ * forward where they belong.
+ *
+ * The obvious weight — `cos²(φ/2)`, or any power of it — instead fades
+ * smoothly all the way round, which leaves the fall only two thirds pushed back
+ * at the ears. `check:hair` measured a fist **187 mm through the outside of the
+ * curtain** on the back-swing there: the hands reach `z = −0.375` at `x = 0.38`
+ * and the hair sat at `z = −0.32`. Below the shoulders the whole fall has to be
+ * behind the swing, and only the part that is still beside the face may hang
+ * in front of it.
  */
-const GATHER_BIAS = 0.45;
+const GATHER_FULL = 1.75;
+const GATHER_NONE = 2.62;
+/**
+ * The top of the shell is a **shared dome**: the first {@link CAP_SPLIT} of the
+ * rings run from the crown down to {@link CAP_Y} at every azimuth alike, and
+ * only below that does each azimuth head for its own hem.
+ *
+ * Not cosmetic. Spacing the rings by each azimuth's own drop makes the first
+ * ring sit 1.7 m below the crown at the nape and 0.06 m below it at the fringe
+ * — and once the head tilt lifts the front, the ring in front of the crown ends
+ * up *above* it. The fan of triangles round the crown then folds back on itself
+ * and every child gets a crater in the top of her head. It rendered exactly
+ * like a modelling mistake, because it was one.
+ *
+ * `CAP_Y` is in units of the dome's semi-axis and must stay above every hem, so
+ * the handover is monotonic; it is clamped against the table to guarantee that.
+ */
+const CAP_SPLIT = 0.3;
+const CAP_Y = 0.45;
 
 /** Azimuth folded into ±π. The hem table is one side; the other is mirrored. */
 function fold(phi: number): number {
@@ -236,7 +272,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
    */
   const place = (phi: number, y: number, r: number, out: number[]): void => {
     const g = smoothstep(gatherTop, gatherTop + gatherSpan, -y);
-    const back = Math.pow(Math.max(0, 0.5 + 0.5 * Math.cos(phi)), GATHER_BIAS);
+    const back = smoothstep(GATHER_NONE, GATHER_FULL, Math.abs(fold(phi)));
     const x = r * Math.sin(phi) * (1 - narrow * g);
     const z = -r * Math.cos(phi) * (1 - flatten * g) - pushBack * g * back;
     const a = -headTilt * smoothstep(TILT_LOW, TILT_HIGH, y);
@@ -244,6 +280,8 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
     const s = Math.sin(a);
     out.push(x, y * c - z * s, y * s + z * c);
   };
+
+  const handover = Math.max(CAP_Y * semiY, ...hem);
 
   const positions: number[] = [];
   const indices: number[] = [];
@@ -255,7 +293,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
   place(0, semiY - thick * 0.25, 0, positions);
   const OUTER_POLE = 0;
   const INNER_POLE = 1;
-  const FIRST = 2;
+  const FIRST = SHELL_FIRST_VERTEX;
 
   for (let i = 0; i < segments; i += 1) {
     const phi = (i / segments) * TAU;
@@ -266,7 +304,10 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
     const bottom = hemAt(hem, phi) + lockY * lock - asym * Math.sin(phi) * front;
     for (let j = 1; j <= rings; j += 1) {
       const s = j / rings;
-      const y = semiY + (bottom - semiY) * s;
+      const y =
+        s <= CAP_SPLIT
+          ? semiY + (handover - semiY) * (s / CAP_SPLIT)
+          : handover + (bottom - handover) * ((s - CAP_SPLIT) / (1 - CAP_SPLIT));
       const amp = lockR * smoothstep(LOCK_FADE[0], LOCK_FADE[1], s);
       const r = radiusAt(y) * (1 + amp * lock);
       // The profile's own normal in the (r, y) plane, by finite difference —
@@ -283,7 +324,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
 
   // Two vertices per ring step, outer then inner, so a ring's stride is 2.
   const vertex = (i: number, j: number, inner: boolean): number =>
-    FIRST + (i * rings + (j - 1)) * 2 + (inner ? 1 : 0);
+    FIRST + (i * rings + (j - 1)) * SHELL_SKINS + (inner ? 1 : 0);
 
   for (let i = 0; i < segments; i += 1) {
     const k = (i + 1) % segments;
@@ -294,12 +335,12 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
       const b = vertex(i, j + 1, false);
       const c = vertex(k, j + 1, false);
       const d = vertex(k, j, false);
-      indices.push(a, b, c, a, c, d);
+      indices.push(a, c, b, a, d, c);
       const e = vertex(i, j, true);
       const f = vertex(i, j + 1, true);
       const g = vertex(k, j + 1, true);
       const h = vertex(k, j, true);
-      indices.push(e, g, f, e, h, g);
+      indices.push(e, f, g, e, g, h);
     }
     // The hem rim, joining the outer skin to the inner one. Long hair is a
     // painted wooden toy, not a sheet of paper: the edge has to have a width.
@@ -307,7 +348,7 @@ export function hairShellGeometry(spec: HairShellSpec, skull: number): BufferGeo
     const oi = vertex(i, rings, true);
     const p = vertex(k, rings, false);
     const pi = vertex(k, rings, true);
-    indices.push(o, oi, pi, o, pi, p);
+    indices.push(o, pi, oi, o, p, pi);
   }
 
   const geometry = new BufferGeometry();
@@ -350,9 +391,10 @@ export const HAIR_SHELLS: Record<HairShellName, HairShellSpec> = {
   long: {
     ...HAIR_SHELL_DEFAULTS,
     hem: [
-      -1.0, -1.0, -0.99, -0.98, -0.96, -0.94, -0.92, -0.89, -0.86, -0.83, -0.81, -0.8, -0.78,
-      -0.7, -0.45, -0.05, 0.13, 0.15, 0.15,
+      -1.0, -1.0, -0.99, -0.98, -0.96, -0.93, -0.9, -0.85, -0.79, -0.72, -0.65, -0.6, -0.57,
+      -0.57, -0.35, 0.178, 0.166, 0.14, 0.13,
     ],
+    pushBack: 0.4,
   },
 
   /** A jaw-length bob: a level line all round, turned very slightly under. */
@@ -360,7 +402,7 @@ export const HAIR_SHELLS: Record<HairShellName, HairShellSpec> = {
     ...HAIR_SHELL_DEFAULTS,
     hem: [
       -0.52, -0.52, -0.52, -0.51, -0.5, -0.49, -0.48, -0.47, -0.46, -0.45, -0.44, -0.44, -0.44,
-      -0.42, -0.3, -0.05, 0.13, 0.15, 0.15,
+      -0.42, -0.28, 0.178, 0.166, 0.14, 0.13,
     ],
     tuck: 0.1,
     flare: 0.07,
@@ -386,7 +428,7 @@ export const HAIR_SHELLS: Record<HairShellName, HairShellSpec> = {
     ...HAIR_SHELL_DEFAULTS,
     hem: [
       -0.24, -0.24, -0.24, -0.24, -0.23, -0.23, -0.22, -0.22, -0.21, -0.21, -0.21, -0.21, -0.22,
-      -0.23, -0.22, -0.1, 0.1, 0.14, 0.14,
+      -0.23, -0.2, 0.187, 0.175, 0.166, 0.16,
     ],
     tuck: 0.02,
     flare: 0.035,
@@ -415,8 +457,8 @@ export const HAIR_SHELLS: Record<HairShellName, HairShellSpec> = {
   crop: {
     ...HAIR_SHELL_DEFAULTS,
     hem: [
-      -0.3, -0.29, -0.28, -0.25, -0.21, -0.16, -0.1, -0.02, 0.05, 0.11, 0.13, 0.13, 0.12, 0.1,
-      0.09, 0.1, 0.12, 0.14, 0.14,
+      -0.3, -0.29, -0.28, -0.25, -0.21, -0.16, -0.1, -0.02, 0.05, 0.11, 0.13, 0.13, 0.12, 0.11,
+      0.13, 0.178, 0.166, 0.14, 0.13,
     ],
     tuck: 0.03,
     flare: 0.02,
