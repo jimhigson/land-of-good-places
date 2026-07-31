@@ -86,7 +86,8 @@ const DEFAULTS: Required<Omit<FacePaintOptions, 'iris' | 'blush' | 'nose'>> = {
   brows: false,
 };
 
-function css(hex: number): string {
+/** A palette number as a CSS colour string, for canvas painting. */
+export function css(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0')}`;
 }
 
@@ -346,6 +347,89 @@ export function paintFace(options: FacePaintOptions = {}): CanvasTexture {
   }
 
   drawMouth(ctx, s, cx, eyeY + o.mouthDrop * s, o.mouth, o.mouthW);
+
+  return finish(canvas);
+}
+
+// =============================================================================
+// Faces baked into a worn item's own surface.
+//
+// A face patch (above) is a transparent decal worn *over* a head. That is right
+// for a head — the skull is the thing the face belongs to. It is the wrong
+// shape for a face painted onto an object the child wears, like the critter
+// hoods in `models/hoodShell.ts`, and the reason is worth writing down because
+// it cost a whole bug:
+//
+// A second surface floating a fixed distance off a first one has to be kept in
+// step with it by hand, and every single thing about it is a way to get that
+// wrong. The hood faces were invisible in game for a fortnight because the
+// patch's triangles were wound the opposite way round from the shell's, so the
+// face pointed at the wearer's skull and was back-face culled. Padding the
+// stand-off distance — the obvious fix, and the one that was tried — could
+// never have worked. Sink it too far and it disappears into the base mesh;
+// float it too far and it detaches; get the winding backwards and it is never
+// drawn at all.
+//
+// So: **bake the face into the base surface's own UV map instead.** One
+// surface, one texture, no stand-off, no winding to match, nothing to keep in
+// sync. The base colour is the texture's background fill and the face is
+// composited on top of it. See `hoodShellGeometry`'s face window for the other
+// half of it.
+// =============================================================================
+
+/**
+ * The border of plain background colour left round a baked-in face, as a
+ * fraction of the canvas.
+ *
+ * Everything on the wearing surface that is *outside* the face window has UVs
+ * outside `[0, 1]` and clamps to the texture's edge, so the edge has to be the
+ * plain base colour or the whole object smears with whatever is at the canvas
+ * border. This is the width of that guard band, and it has to survive
+ * mip-mapping: at 0.08 of a 512² canvas it is 41 texels, against a mip block of
+ * about 6 texels at gameplay distance.
+ *
+ * It costs the face 16% of its canvas. Do not shrink it to buy that back
+ * without checking the object at a distance — the failure mode is a faint
+ * bloom of eye colour over the entire surface, which reads as a lighting bug.
+ */
+export const FACE_FILL_INSET = 0.08;
+
+/**
+ * A face painted onto an **opaque** background, for baking into the UV map of
+ * the thing that wears it.
+ *
+ * The face is drawn inset by {@link FACE_FILL_INSET} on all four sides, leaving
+ * a border of pure `fill`. `under` paints beneath the face — markings that
+ * belong to the garment rather than the character — in the face's own canvas
+ * coordinates, i.e. `0…size` across the face window itself, not the whole
+ * canvas.
+ */
+export function paintFaceOnFill(
+  fill: number,
+  options: FacePaintOptions = {},
+  under?: (ctx: CanvasRenderingContext2D, size: number) => void,
+): CanvasTexture {
+  const s = options.size ?? DEFAULTS.size;
+  const { canvas, ctx } = newCanvas(s);
+  ctx.fillStyle = css(fill);
+  ctx.fillRect(0, 0, s, s);
+
+  const box = s * (1 - 2 * FACE_FILL_INSET);
+  const at = s * FACE_FILL_INSET;
+  if (under) {
+    ctx.save();
+    ctx.translate(at, at);
+    ctx.scale(box / s, box / s);
+    under(ctx, s);
+    ctx.restore();
+  }
+
+  // `paintFace` owns its own transparent canvas; this composites that canvas
+  // in rather than re-implementing the drawing, so a change to how an eye is
+  // painted reaches a baked face and a worn one alike.
+  const face = paintFace(options);
+  ctx.drawImage(face.image as CanvasImageSource, at, at, box, box);
+  face.dispose();
 
   return finish(canvas);
 }

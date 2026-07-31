@@ -16,18 +16,17 @@ import {
 import { PALETTE, Rng } from '../style/bridge';
 import { ART } from '../style/artPalette';
 import { visibleTop } from '../style/measure';
-import { addOutline, decal, markShared, solid, toonMaterial } from '../style/materials';
+import { addOutline, decal, inkTint, markShared, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
-import { paintFace, type FacePaintOptions } from '../style/faces';
+import { css, FACE_FILL_INSET, paintFaceOnFill, type FacePaintOptions } from '../style/faces';
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
 import { blob, type AssetHandle } from '../style/asset';
 import { KID_HEAD_SCALE } from './kid';
 import {
   CHEERY_HOOD,
   CHEERY_PEAK,
-  hoodBibGeometry,
+  hoodFaceUv,
   hoodHemRollGeometry,
-  hoodPatchGeometry,
   hoodPeakGeometry,
   hoodPeakLiningGeometry,
   hoodShellGeometry,
@@ -37,7 +36,7 @@ import {
   RIPIKA_PEAK,
   TRILLA_HOOD,
   TRILLA_PEAK,
-  type HoodPatchSpec,
+  type HoodFaceWindow,
   type HoodShellSpec,
   type PlushEarSpec,
 } from './hoodShell';
@@ -291,6 +290,7 @@ function createCap(): AssetHandle {
   fit.rotation.y = CAP_JAUNT;
 
   const shell = hoodPart(hoodShellGeometry(CHEERY_HOOD), PALETTE.markerMint);
+  shell.name = 'hoodShell';
   fit.add(shell);
   addOutline(shell, 0.013);
 
@@ -376,37 +376,45 @@ function hoodPart(geometry: BufferGeometry, colour: number): Mesh {
 }
 
 /**
- * A face painted onto a window of the hood's own surface.
+ * A hood's skin: its base colour with the animal's face painted into it.
  *
- * The texture is cached per key and `markShared`, so the shop stand's copy and
- * the worn copy paint one canvas between them and `disposeTree` leaves it
- * alone. A hat is worn and taken off constantly in the character creator, and
- * a fresh 512² canvas per try-on is exactly the leak `ownTextures` was added
- * to stop.
+ * There is no separate face mesh. The face is baked into the shell's **own**
+ * texture, at the shell's own UVs — see `HoodFaceWindow` in `hoodShell.ts` for
+ * why, and for the bug that caused the change. The texture is opaque: no
+ * `transparent`, no `alphaTest`, no `renderOrder`, nothing to sort.
+ *
+ * Cached per key and `markShared`, so the shop stand's copy and the worn copy
+ * paint one canvas between them and `disposeTree` leaves it alone. A hat is
+ * worn and taken off constantly in the character creator, and a fresh 512²
+ * canvas per try-on is exactly the leak `ownTextures` was added to stop.
  */
-const hoodFaces = new Map<string, ReturnType<typeof paintFace>>();
-function hoodFaceTexture(key: string, paint: FacePaintOptions): ReturnType<typeof paintFace> {
-  const cached = hoodFaces.get(key);
+const hoodSkins = new Map<string, ReturnType<typeof paintFaceOnFill>>();
+function hoodSkinTexture(
+  key: string,
+  fill: number,
+  paint: FacePaintOptions,
+  under?: (ctx: CanvasRenderingContext2D, size: number) => void,
+): ReturnType<typeof paintFaceOnFill> {
+  const cached = hoodSkins.get(key);
   if (cached) return cached;
-  const texture = markShared(paintFace(paint));
-  hoodFaces.set(key, texture);
+  const texture = markShared(paintFaceOnFill(fill, paint, under));
+  hoodSkins.set(key, texture);
   return texture;
 }
 
-function hoodFace(
+/** A hood shell wearing its face, outlined in its own colour rather than white. */
+function facedHoodShell(
   spec: HoodShellSpec,
-  patch: HoodPatchSpec,
-  key: string,
-  paint: FacePaintOptions,
+  window: HoodFaceWindow,
+  colour: number,
+  texture: ReturnType<typeof paintFaceOnFill>,
 ): Mesh {
-  const material = toonMaterial(0xffffff, {
-    map: hoodFaceTexture(key, paint),
-    transparent: true,
-  });
-  material.alphaTest = 0.02;
-  const mesh = decal(new Mesh(hoodPatchGeometry(spec, patch), material));
-  mesh.name = 'hoodFace';
-  mesh.renderOrder = 2;
+  // White, because the map carries the colour — including the hood's own base
+  // colour, which is the texture's background fill. The outline would otherwise
+  // be tinted from white and come out grey, so it is given the real colour.
+  const mesh = solid(new Mesh(hoodShellGeometry(spec, window), toonMaterial(0xffffff, { map: texture })));
+  mesh.name = 'hoodShell';
+  addOutline(mesh, 0.013, inkTint(colour));
   return mesh;
 }
 
@@ -446,7 +454,7 @@ function addPlushEars(
 }
 
 /** RiPika's face, appliquéd. Its own disc cheeks, cocoa nose and "w" mouth. */
-const RIPIKA_HOOD_FACE: FacePaintOptions = {
+export const RIPIKA_HOOD_FACE: FacePaintOptions = {
   size: 512,
   eyeY: 0.46,
   // Much wider than RiPika's own 0.46, because the window this is mapped onto
@@ -464,7 +472,8 @@ const RIPIKA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.095,
 };
 
-const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, lift: 0.01 };
+/** Where that face sits on the cap — the window of the shell it is painted into. */
+export const RIPIKA_FACE_WINDOW: HoodFaceWindow = { halfX: 0.62, yLo: -0.15, yHi: 0.24 };
 
 /**
  * The RiPika cap.
@@ -482,9 +491,13 @@ const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, l
 function createRipikaHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.ripikaHat');
 
-  const shell = hoodPart(hoodShellGeometry(RIPIKA_HOOD), ART.ripikaYellow);
+  const shell = facedHoodShell(
+    RIPIKA_HOOD,
+    RIPIKA_FACE_WINDOW,
+    ART.ripikaYellow,
+    hoodSkinTexture('hood.ripika', ART.ripikaYellow, RIPIKA_HOOD_FACE),
+  );
   fit.add(shell);
-  addOutline(shell, 0.013);
 
   const peak = hoodPart(hoodPeakGeometry(RIPIKA_HOOD, RIPIKA_PEAK), ART.ripikaYellowDeep);
   fit.add(peak);
@@ -516,13 +529,11 @@ function createRipikaHat(): AssetHandle {
     ART.ripikaTip,
   );
 
-  fit.add(hoodFace(RIPIKA_HOOD, RIPIKA_HOOD_PATCH, 'hood.ripika', RIPIKA_HOOD_FACE));
-
   return finish(root);
 }
 
 /** Trilla's face. The puff's own big eyes and soft blush, no nose. */
-const TRILLA_HOOD_FACE: FacePaintOptions = {
+export const TRILLA_HOOD_FACE: FacePaintOptions = {
   size: 256,
   eyeY: 0.46,
   eyeGap: 0.58,
@@ -536,7 +547,52 @@ const TRILLA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.11,
 };
 
-const TRILLA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.58, yLo: -0.185, yHi: 0.195, lift: 0.008 };
+export const TRILLA_FACE_WINDOW: HoodFaceWindow = { halfX: 0.58, yLo: -0.185, yHi: 0.195 };
+
+/**
+ * The bonnet's bib: a sewn-on lozenge of pale fabric under the face.
+ *
+ * It was a second decal mesh (`hoodBibGeometry`), wound inside out and so never
+ * once drawn in the game. It is painted into the hood's own texture now, under
+ * the face, for exactly the reasons the face is — one surface, nothing to keep
+ * in step. It is drawn in the *face window's* canvas coordinates, so it goes
+ * through `hoodFaceUv` like everything else rather than being placed by eye.
+ *
+ * A rectangle of a second colour reads as a rendering seam, so the width tapers
+ * away top and bottom into a rounded lozenge — the same taper the mesh had, and
+ * the reason it reads as something someone sewed on.
+ */
+const TRILLA_BIB = { halfX: 0.56, yLo: -0.18, yHi: -0.02 };
+
+function drawTrillaBib(ctx: CanvasRenderingContext2D, size: number): void {
+  const win = TRILLA_FACE_WINDOW;
+  const steps = 48;
+  /** One edge of the lozenge at height fraction `t`, in canvas pixels. */
+  const edge = (t: number, side: -1 | 1): [number, number] => {
+    const y = TRILLA_BIB.yLo + (TRILLA_BIB.yHi - TRILLA_BIB.yLo) * t;
+    const taper = 0.35 + 0.65 * Math.sqrt(Math.max(0, 1 - ((2 * t - 1) * 0.92) ** 2));
+    const phi = Math.PI - side * TRILLA_BIB.halfX * taper;
+    const [u, v] = hoodFaceUv(win, phi, y);
+    // Back out of the canvas inset: `under` is drawn in the face window's own
+    // 0…size box, which `paintFaceOnFill` then insets as one piece.
+    const span = 1 - 2 * FACE_FILL_INSET;
+    return [((u - FACE_FILL_INSET) / span) * size, (1 - (v - FACE_FILL_INSET) / span) * size];
+  };
+
+  ctx.fillStyle = css(PALETTE.stonePinkLight);
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i += 1) {
+    const [x, y] = edge(i / steps, -1);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  for (let i = steps; i >= 0; i -= 1) {
+    const [x, y] = edge(i / steps, 1);
+    ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
 
 /** How often the hood bursts into song, in seconds. Rarer than the pet's. */
 const TRILLA_SONG = { min: 12, max: 22, nearSpeedup: 1 };
@@ -566,9 +622,15 @@ function createPuffHat(): AssetHandle {
   mount.name = 'hat.puff:mount';
   fit.add(mount);
 
-  const shell = hoodPart(hoodShellGeometry(TRILLA_HOOD), PALETTE.blossomPink);
+  const neutralFace = hoodSkinTexture(
+    'hood.trilla',
+    PALETTE.blossomPink,
+    TRILLA_HOOD_FACE,
+    drawTrillaBib,
+  );
+  const shell = facedHoodShell(TRILLA_HOOD, TRILLA_FACE_WINDOW, PALETTE.blossomPink, neutralFace);
   mount.add(shell);
-  addOutline(shell, 0.013);
+  const faceMaterial = shell.material as MeshToonMaterial;
 
   const peak = hoodPart(hoodPeakGeometry(TRILLA_HOOD, TRILLA_PEAK), PALETTE.stonePinkLight);
   mount.add(peak);
@@ -576,14 +638,6 @@ function createPuffHat(): AssetHandle {
 
   const band = hoodPart(hoodHemRollGeometry(TRILLA_HOOD, 0.036), ART.heartPink);
   mount.add(band);
-
-  const bib = decal(
-    new Mesh(
-      hoodBibGeometry(TRILLA_HOOD, { halfX: 0.56, yLo: -0.18, yHi: -0.02, lift: 0.006 }),
-      toonMaterial(PALETTE.stonePinkLight),
-    ),
-  );
-  mount.add(bib);
 
   // The curl: the puff's own asymmetric feature, off-centre and leaning, worn
   // as the bonnet's knot. Built from the same swept ear the cap's are, wound
@@ -603,16 +657,19 @@ function createPuffHat(): AssetHandle {
   addOutline(knot, 0.011);
   curl.tip.dispose();
 
-  const facePatch = hoodFace(TRILLA_HOOD, TRILLA_HOOD_PATCH, 'hood.trilla', TRILLA_HOOD_FACE);
-  mount.add(facePatch);
-  const faceMaterial = facePatch.material as MeshToonMaterial;
-  const neutralFace = faceMaterial.map;
-  const singingFace = hoodFaceTexture('hood.trilla.singing', {
-    ...TRILLA_HOOD_FACE,
-    eyeStyle: 'archHappy',
-    mouth: 'oh',
-    mouthW: (TRILLA_HOOD_FACE.mouthW ?? 0.062) * 1.25,
-  });
+  // Singing is a swap of the whole hood skin now rather than of a face decal —
+  // same two canvases, same swap, one fewer mesh.
+  const singingFace = hoodSkinTexture(
+    'hood.trilla.singing',
+    PALETTE.blossomPink,
+    {
+      ...TRILLA_HOOD_FACE,
+      eyeStyle: 'archHappy',
+      mouth: 'oh',
+      mouthW: (TRILLA_HOOD_FACE.mouthW ?? 0.062) * 1.25,
+    },
+    drawTrillaBib,
+  );
 
   // Measured before the notes join it: a burst of floating notes is not part of
   // how tall a hat is, and the name label sits at `height + 0.42`.
@@ -624,7 +681,7 @@ function createPuffHat(): AssetHandle {
   const notes = createPuffNotes(0x7211a + puffHatCount * 104729);
   mount.add(notes.root);
   const scheduler = createSongScheduler(rng, TRILLA_SONG);
-  const mouthY = TRILLA_HOOD_PATCH.yLo + (TRILLA_HOOD_PATCH.yHi - TRILLA_HOOD_PATCH.yLo) * 0.3;
+  const mouthY = TRILLA_FACE_WINDOW.yLo + (TRILLA_FACE_WINDOW.yHi - TRILLA_FACE_WINDOW.yLo) * 0.3;
   const mouthZ = TRILLA_HOOD.shellR * TRILLA_HOOD.depth;
   const breathePhase = rng.range(0, Math.PI * 2);
   let singing = false;
