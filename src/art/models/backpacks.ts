@@ -56,10 +56,12 @@ export const BACKPACK_KINDS: readonly BackpackKind[] = [
  * the simulated ponytail out of the crowd:
  *
  *  - The crowd is one instanced draw call **per mesh on the prototype**, whether
- *    one child wears that mesh or nobody does. RiPika's head is eleven meshes
- *    and Trilla's is four plus her song notes, so putting them in would cost the
- *    park something like twenty extra draw calls, permanently, for a 0.3 m prop
- *    on the back of somebody the player is not looking at.
+ *    one child wears that mesh or nobody does. Measured, by counting
+ *    `InstancedCrowd.partCount` with each list in turn: the three sewn shapes
+ *    take the crowd from 44 draw calls to 48, and adding the two creature heads
+ *    takes it to **65** — a 48% increase in what the park's children cost to
+ *    draw, permanently, for a 0.3 m prop on the back of somebody the player is
+ *    not looking at.
  *  - Both carry a painted **face patch**, and `entities/npc/kidCrowd.ts` finds
  *    *the* face of the model by name in order to bake its expression variants.
  *    A model with two faces on it is a different feature, not a free one.
