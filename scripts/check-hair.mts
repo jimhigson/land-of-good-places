@@ -33,12 +33,30 @@
  * against the real `backpack` and `hand` meshes on a real `createKid`, not
  * against numbers copied out of it.
  *
+ * **5. The spikes are actually spikes** (added 31 July, second pass). The
+ * family reported `spiky` as a bumpy texture rather than as hair, and the
+ * measurement agreed: it built to 2.087 m, *exactly* what `short` builds to on
+ * the same shell — nine cones and not one millimetre of extra silhouette,
+ * because they were leaning over far enough to stay under the crown. A style
+ * whose entire point is its outline needs its outline held, so this asserts
+ * both halves of it: the points stand **proud** of the head, and all nine are
+ * still **rooted in** it.
+ *
  * Thresholds come from the model, never from the generator's own targets — the
  * same rule `test/procgen/invariants.ts` sets out.
  */
 import '../scripts/headless-canvas.mjs';
 import { readFileSync } from 'node:fs';
-import { Box3, Mesh, Object3D, Vector3 } from 'three';
+import {
+  Box3,
+  DoubleSide,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  Object3D,
+  Raycaster,
+  Vector3,
+} from 'three';
 import { TAU } from '../src/core/mathUtils.ts';
 import { createKid, KID_FACE, KID_HEAD_SCALE, SKULL_RADIUS } from '../src/art/models/kid.ts';
 import {
@@ -267,6 +285,112 @@ for (const style of HAIR_STYLES) {
   notes.push(
     `  ${style.padEnd(8)} hand clearance ${((closestHand - handRadius) * 1000).toFixed(0)} mm`,
   );
+
+  kid.dispose?.();
+}
+
+// ------------------------------------------------------------- 5. spiky is spiky
+
+/** Every visible vertex of `root`, in world space. */
+function worldPoints(root: Object3D): Vector3[] {
+  root.updateMatrixWorld(true);
+  const points: Vector3[] = [];
+  root.traverse((node) => {
+    if (!(node instanceof Mesh) || !node.visible) return;
+    for (let up = node.parent; up; up = up.parent) if (!up.visible) return;
+    const position = node.geometry.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      points.push(
+        new Vector3(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(
+          node.matrixWorld,
+        ),
+      );
+    }
+  });
+  return points;
+}
+
+{
+  const kid = createKid({ hairStyle: 'spiky' });
+  kid.root.updateMatrixWorld(true);
+  const spikeParts = kid.hairParts.filter((part) => part.hideUnderHat);
+  check(spikeParts.length === 1, `spiky: ${spikeParts.length} spike mesh(es), expected exactly 1`);
+
+  const shell = find(kid.root, 'hair.shell.crop')[0] as Mesh | undefined;
+  const spikes = spikeParts[0]?.mesh;
+
+  if (shell && spikes) {
+    // **Proud.** The bare crop shell is the same head `short` wears, so the
+    // difference between the two is the spikes and nothing else. A point that
+    // rises less than a quarter of a skull above the head it grows from is a
+    // bump; the threshold is a skull radius (the game's number, from `kid.ts`)
+    // rather than anything the spike builder knows about itself.
+    const MIN_PROMINENCE = 0.25 * SKULL_RADIUS;
+    const crown = Math.max(...worldPoints(shell).map((p) => p.y));
+    const tip = Math.max(...worldPoints(spikes).map((p) => p.y));
+    check(
+      tip - crown > MIN_PROMINENCE,
+      `spiky: the spikes stand only ${((tip - crown) * 1000).toFixed(0)} mm above the crown ` +
+        `(need ${(MIN_PROMINENCE * 1000).toFixed(0)} mm) — that is a bumpy head, not a spiky one`,
+    );
+    notes.push(
+      `  spiky    stands ${((tip - crown) * 1000).toFixed(0)} mm proud of the crown, ` +
+        `kid ${kid.height.toFixed(3)} m`,
+    );
+
+    // **Rooted.** Classify every spike vertex inside/outside the shell by ray
+    // parity — legitimate here precisely because check 2 above has already
+    // proved the shell is closed — and then ask the one question that matters:
+    // **is there anywhere round the head where the spikes stop going into it?**
+    //
+    // Measured as the widest gap in azimuth between one buried vertex and the
+    // next. Rooted spikes leave only the gaps *between* neighbouring bases; a
+    // spike that has lifted off leaves a hole the width of two of those plus
+    // its own base, which no amount of vertex density can disguise. Counting
+    // the roots directly was tried first and is not robust — a cone this
+    // coarse buries its vertices in a scatter, not a contiguous arc.
+    //
+    // It has to be re-proved on every tilt change: standing a spike up out of a
+    // scalp that slopes away lifts its base straight off, which is exactly what
+    // `spikeBury` in `hair.ts` exists to stop and this is the proof of it.
+    const solidShell = new Mesh(shell.geometry.clone(), new MeshBasicMaterial({ side: DoubleSide }));
+    solidShell.applyMatrix4(shell.matrixWorld);
+    solidShell.updateMatrixWorld(true);
+    const raycaster = new Raycaster();
+    const direction = new Vector3(0.371, 0.743, 0.557).normalize(); // nothing axis-aligned
+    const toShell = new Matrix4().copy(shell.matrixWorld).invert();
+    const spikePoints = worldPoints(spikes);
+    const buried: number[] = [];
+    for (const point of spikePoints) {
+      raycaster.set(point, direction);
+      if (raycaster.intersectObject(solidShell, false).length % 2 === 0) continue;
+      const local = point.clone().applyMatrix4(toShell);
+      buried.push(Math.atan2(local.x, local.z));
+    }
+    buried.sort((a, b) => a - b);
+    let widest = 0;
+    for (let i = 0; i < buried.length; i += 1) {
+      const next = i === buried.length - 1 ? (buried[0] as number) + TAU : (buried[i + 1] as number);
+      widest = Math.max(widest, next - (buried[i] as number));
+    }
+    // Nine spikes sit 40° apart, so the gaps between neighbouring buried bases
+    // run to about 15°. Losing one root opens a gap past 55°; the bound sits
+    // between the two, nearer the failure, and is measured off the built model
+    // rather than taken off the spacing the builder aimed at.
+    const MAX_ROOT_GAP = (30 / 180) * Math.PI;
+    check(
+      buried.length > 0 && widest < MAX_ROOT_GAP,
+      `spiky: ${((widest * 180) / Math.PI).toFixed(0)}° of head with no spike going into it ` +
+        `(limit ${((MAX_ROOT_GAP * 180) / Math.PI).toFixed(0)}°) — a spike has come loose ` +
+        `from the shell it grows out of`,
+    );
+    notes.push(
+      `  spiky    ${buried.length}/${spikePoints.length} spike vertices buried, ` +
+        `widest unrooted gap ${((widest * 180) / Math.PI).toFixed(0)}°`,
+    );
+    solidShell.geometry.dispose();
+  }
 
   kid.dispose?.();
 }
