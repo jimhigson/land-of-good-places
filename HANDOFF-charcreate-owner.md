@@ -5,17 +5,106 @@
 wires together. This role continues across sessions — Overseer routes future
 character-creation work here.
 
-## Status right now
+## Status right now (31 July 2026, second session)
 
-Pure orientation + design-note checkpoint. **No game code changed yet.** The
-shoe assets (`ShoeKind`, builder functions) are not ready — see below — so per
-my brief I spent this session studying the codebase and preparing the design
-note that follows, so I can move fast the moment they land.
+Rebased cleanly onto `origin/main` at the top of this session — PR #131
+(backpack picker) and PR #132 (cap redesign, RiPika/Trilla hoods, shoe assets)
+are both merged, `git rebase origin/main` had zero conflicts. Two pieces of
+work landed on this branch since, each its own commit, `npm run build` exit 0
+(checked directly, never piped) after both:
 
-`npm run build`: not run this session (no code touched). Will run and report
-exit code the moment I start writing code.
+1. **`42e61bb`** — the urgent one, requested mid-session while Eleri was
+   playing live: a "Look" pill in the HUD menu (`ui/Hud.ts`) that reopens the
+   character creator from inside a running game **without** losing the park.
+   Investigated first whether the existing per-item live-reskin path
+   (`entities/WornHat.ts` swaps a hat mesh on the anchor live, driven by a
+   store subscription) could back a *full* creator reopen — it cannot: the
+   running `Player`'s `CharacterModel`/`KidHandle` is built once, in
+   `Player`'s constructor, from whatever the store held at that moment, and
+   nothing calls the `setSkinColour`/`setHairColour`/`setOutfitColour`/
+   `setHairStyle`/`setBackpackKind` setters `CharacterModel` already exposes
+   against the *live* player anywhere outside the creator's own preview kid.
+   Wiring that up for real (subscribe `Player` to the store, call every one of
+   those setters, rebuild the name label, handle a hair-style mesh swap
+   mid-walk-cycle) is a real feature, not a same-session fix. So: reload-based
+   v1, exactly as the brief allowed for. `Game.reopenCharacterCreator()`
+   flushes the autosave (`SaveSystem.flush()`, already existed for
+   pagehide/beforeunload), sets a `sessionStorage` flag
+   (`state/save.ts`'s `markReopenCharacterCreator`), and reloads. `main.ts`'s
+   `boot()` reads and clears that flag
+   (`consumeReopenCharacterCreator`) before the usual `ContinueOrRestart`
+   check, and if set, hydrates the store from the existing save (money,
+   inventory, Cute-o-dex, park name, `save.place` all survive — same call
+   `continueGame` makes) then opens `CharacterCreation` straight into that
+   hydrated store, **never** touching `clearSave()`. Finishing launches back
+   into `save.place`, not the default spawn.
+   **Known, accepted wart**: `completeCharacterCreation()` grants a fresh copy
+   of the chosen hat and pet every time it runs (`grantFree`, unconditional
+   push + uid mint) — reopening and pressing "Let's go!" again, even with the
+   same hat/pet picked, adds a second copy to the inventory/parade rather than
+   reusing the first. Does not lose anything and costs no money either mode,
+   but is visible clutter (two identical pets trailing her) if she reopens the
+   creator more than once. Flagged rather than fixed under the "ship the
+   simplest thing that cannot lose progress" instruction — the fix (skip
+   `grantFree` when the picked id matches what she already owns/wears) is
+   small if it turns out to bother her.
+   **Not visually verified** — did not own the shared Chrome profile this
+   session (CLAUDE.md's rule), and it was not clear anyone had handed it to
+   me. Needs a manual check: open the HUD menu mid-game, tap "Look", confirm
+   it reopens the creator, finish it, confirm the park (money/backpack/where
+   you were standing) is unchanged and you land back in the same place.
 
-## Shoe assets: not landed yet
+2. **`07f4ffe`** — reorganised `CharacterCreation.ts` into tabs, one per
+   customisation category (Skin/Hair/Eyes/Outfit/Hat/Backpack/Pet — Name stays
+   outside the strip, above it), requested right after #1 landed. Each tab
+   reuses the exact section(s) the screen already had — no `onPick` logic
+   changed anywhere. The actual mechanism: `characterCreationPreview.ts`'s
+   `CharacterPreview.resting` field, previously fixed for a screen's whole
+   lifetime (`'all'` for the creator, `'face'` for the face-paint stall, set
+   once at construction from `PreviewFraming`), is now mutable via a new
+   `setResting(focus)` method the tab strip calls on every switch — so opening
+   a tab moves where the camera *rests*, not just where a lone control's
+   transient zoom eases back to. Every existing tab's control(s) already
+   agreed on one `PreviewFocus` before tabs existed (documented in
+   `TAB_META`'s doc comment), so this needed zero new camera tuning.
+   `.charcreate-controls` dropped its `columns: 13rem` multi-column layout
+   (solved "many tall stacked sections", which a one-panel-at-a-time tab strip
+   makes moot) for a plain flex column with a `max-width` cap; had to also fix
+   `FacePaintPanel.ts`'s `.facepaint-controls` override (shares the
+   `.charcreate-controls` class, has no tabs, was picking up the new cap as an
+   unwanted side effect) and the phone-portrait breakpoint. **Also not
+   visually verified** for the same reason as #1 — build/type-check is the
+   only verification so far. Worth an eye on: does the tab strip wrap sensibly
+   at phone width without becoming a second scroll hunt (it reuses
+   `.charcreate-styles`'s existing `auto-fit, minmax(4rem, 1fr)` grid, which
+   is exactly what already avoided the hair-style row's own historical
+   overflow bug, so it should, but confirm).
+   **Shoes intentionally not added as a tab** — see below, that's the next
+   piece of work and `TAB_META` makes adding it a one-line entry once shoe
+   state exists.
+
+## Shoe assets: now real (confirmed this session)
+
+`src/art/models/shoes.ts` exists on `main` (landed in PR #132, merged). Reread
+the file directly rather than trusting the "expected" section below — it was
+written before the file existed and differs in the details:
+
+```
+export type ShoeKind = 'plain' | 'ripika' | 'sandal' | 'sparkle';
+export const SHOE_KINDS: readonly ShoeKind[] = ['plain', 'ripika', 'sandal', 'sparkle'];
+export const CROWD_SHOE_KINDS: readonly ShoeKind[] = ['plain', 'sandal'];
+export function buildShoes(options: ShoeOptions): ShoeRig { … }  // line ~495
+```
+
+So: four kinds, not the three-or-so guessed at below (`sneaker`/`sandal`/
+`sparklyPink` was the guess; the real names are `plain`/`ripika`/`sandal`/
+`sparkle`). `ripika` is presumably the RiPika-themed one the "collar/strap"
+colour-handling note below was written for — **confirm against the real file**
+before assuming that pattern holds; do not assume the names verbatim below are
+right, this paragraph is the correction.
+
+The rest of this section (the original "not landed yet" note, kept for the
+git-archaeology trail) follows below.
 
 - Branch `animal-hat-heads` (worktree `.claude/worktrees/animal-hat-heads`,
   **local only, not pushed to `origin`**) is the Blender artist's branch. As of
