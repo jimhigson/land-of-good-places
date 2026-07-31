@@ -97,8 +97,27 @@ const HEAD_TILT = 0.17;
  * `world/FacePaintStall.ts`, which said so in a comment and asked to be kept
  * in step by hand; there is now one of each.
  */
-const SKULL_RADIUS = 0.44 * HEAD;
+export const SKULL_RADIUS = 0.44 * HEAD;
 const FACE_SQUASH: readonly [number, number, number] = [1, 0.95, 0.98];
+
+/**
+ * Where the painted face sits on the skull.
+ *
+ * Exported, and spread into {@link createFacePatch} rather than written inline,
+ * because **something now has to know where the eyes are**: `check:hair` proves
+ * every fringe stops above them, and the alternative was a second copy of these
+ * numbers in a script, which is exactly the drift that put every hat at two
+ * thirds of its size for two days.
+ */
+export const KID_FACE = {
+  spreadX: 1.7,
+  spreadY: 1.7,
+  tilt: 0.03,
+  eyeY: 0.43,
+  eyeGap: 0.44,
+  eyeW: 0.122,
+  eyeH: 0.158,
+} as const;
 
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
@@ -306,6 +325,9 @@ export function createKid(options: KidOptions = {}): KidHandle {
     pivot.add(upper);
 
     const hand = blob(0.135, skinMat, [1, 1, 1], 18);
+    // Named for the same reason as the backpack: the arc these swing through
+    // is the other thing long hair must not be caught in.
+    hand.name = 'hand';
     hand.position.y = -0.32;
     pivot.add(hand);
     addOutline(hand, 0.012);
@@ -339,6 +361,9 @@ export function createKid(options: KidOptions = {}): KidHandle {
     // Dropped and pushed back so it still clears the underside of the skull —
     // the head now overhangs to z = -0.65, and a bag tucked under it vanishes.
     const bag = solid(new Mesh(new RoundedBoxGeometry(0.36, 0.32, 0.2, 5, 0.09), bagMat));
+    // Named so `check:hair` can find the thing a fall of hair has to clear
+    // without a second copy of these numbers living in a script.
+    bag.name = 'backpack';
     bag.position.set(0, 0.56, -0.32);
     body.add(bag);
     addOutline(bag, 0.016);
@@ -398,6 +423,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     crown,
     root,
     head: HEAD,
+    skull: SKULL_RADIUS,
     headTilt: HEAD_TILT,
     hairMaterial: hairMat,
     hairDarkMaterial: hairDarkMat,
@@ -415,14 +441,8 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // --- face ------------------------------------------------------------------
   const face = createFacePatch({
     radius: skullR,
-    spreadX: 1.7,
-    spreadY: 1.7,
-    tilt: 0.03,
+    ...KID_FACE,
     size: 512,
-    eyeY: 0.43,
-    eyeGap: 0.44,
-    eyeW: 0.122,
-    eyeH: 0.158,
     iris: eyeColour,
     mouth: 'smile',
     mouthW: 0.075,
