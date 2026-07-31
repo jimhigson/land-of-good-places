@@ -141,22 +141,45 @@ function hatSize(kind: HatKind): number {
 }
 
 /**
+ * **How far apart the hat shop stands its display stands**, in metres.
+ *
+ * Lives here rather than in `world/building/shops/fitouts.ts`, which lays the
+ * row out, because {@link hatDisplayScale} is derived from it and the two were
+ * separately-written copies of `0.85`. `check:hat-fit` asserts the widest two
+ * hats in the shop clear each other at this spacing.
+ */
+export const HAT_STAND_SPACING = 0.85;
+
+/**
+ * The head a hat is shown against on a stand, in metres — see
+ * {@link hatDisplayScale}. Tuned, and then asserted: at 0.85 the widest two
+ * hats overlap.
+ */
+const HAT_DISPLAY_HEAD = 0.77;
+
+/**
  * How big a hat is shown on a shop stand, as a fraction of life size.
  *
- * Exported so `world/building/shops/fitouts.ts` does not have to know about
- * {@link FIT}: the stands are 0.85 m apart, and the widest hat in the shop is
- * shown 0.85 m across, so displaying them at life size would have each brim
- * slicing through its neighbours. Written as a fraction of `FIT` **and of
- * {@link HAT_SIZE}** so the stands keep the size they have always shown
- * whatever the head, or the family's taste in hat sizes, does next — without
- * that second term the 31 July scale-up would have pushed every brim through
- * its neighbour's.
+ * Exported so `fitouts.ts` does not have to know about {@link FIT}: a life-size
+ * sun hat is 2.1 m across on stands {@link HAT_STAND_SPACING} apart, so showing
+ * them life size would have each brim sawing through its neighbours. A stand
+ * instead shows every hat as though it were sitting on a 0.77 m head.
  *
- * `HAT_SIZE` and not `hatSize(kind)`: the stands are meant to read as a row of
- * hats of comparable size, so the crown and the cap keep their extra ×1.3 on
- * the display too, exactly as they do on a head.
+ * **Per kind, dividing out {@link hatSize}** — which is the part that is easy to
+ * get wrong. A worn hat's size is a matter of family taste and moves when they
+ * say so; a shop display's size is a matter of the stands being 0.85 m apart
+ * and does not. Fold the two together and the 31 July ×1.5, and the crown and
+ * cap's further ×1.3, walk straight into the neighbouring stands — measured,
+ * the ×1.95 Cheery Cap overlapped the sun hat beside it by 109 mm. Dividing it
+ * out means the shop looks the same however big the family want to wear them.
+ *
+ * 0.77 rather than the 0.85 this used to be written as: the RiPika cap and the
+ * Trilla bonnet were *already* overlapping by 9 mm before any of this, which
+ * nothing measured. `check:hat-fit` measures it now.
  */
-export const HAT_DISPLAY_SCALE = 0.85 / (FIT * HAT_SIZE);
+export function hatDisplayScale(kind: HatKind): number {
+  return HAT_DISPLAY_HEAD / (FIT * hatSize(kind));
+}
 
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
 const SIT = -0.1;

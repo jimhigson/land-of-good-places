@@ -39,7 +39,14 @@ import '../scripts/headless-canvas.mjs';
 import { Object3D } from 'three';
 import { createKid, KID_HAT_ANCHOR_Y, kidEyeTopAt } from '../src/art/models/kid.ts';
 import { visiblePoints } from '../src/art/style/measure.ts';
-import { createHat, HAT_KINDS, HAT_SIZE, type HatKind } from '../src/art/models/hats.ts';
+import {
+  createHat,
+  hatDisplayScale,
+  HAT_KINDS,
+  HAT_SIZE,
+  HAT_STAND_SPACING,
+  type HatKind,
+} from '../src/art/models/hats.ts';
 
 const TAU = Math.PI * 2;
 
@@ -196,11 +203,27 @@ const MAX_SPAN = 2.4;
 const MAX_TIP = 1.6;
 const MIN_EYE = 0.02;
 
+/**
+ * How much air two hats must leave between them on neighbouring stands.
+ *
+ * The hat shop's stands are {@link HAT_STAND_SPACING} apart, and nothing ever
+ * measured whether what stood on them fitted: the RiPika cap and the Trilla
+ * bonnet were overlapping by 9 mm on `main`, and the 31 July ×1.95 put the
+ * Cheery Cap 109 mm into the sun hat beside it.
+ *
+ * Checked against **the widest two hats in the shop**, not against the pairs
+ * that happen to be adjacent today, so it holds however `fitouts.ts` reorders
+ * the row — and it is strictly the harder test.
+ */
+const MIN_STAND_GAP = 0.06;
+
 interface Row {
   readonly kind: HatKind;
   readonly grip: number;
   readonly span: number;
   readonly eye: number;
+  /** Width on a shop stand, in metres. */
+  readonly display: number;
 }
 const rows: Row[] = [];
 const failures: string[] = [];
@@ -225,7 +248,7 @@ for (const kind of HAT_KINDS) {
 
   const grip = skull > 0 ? band / skull : 0;
   const span = worn.width / head.width;
-  rows.push({ kind, grip, span, eye });
+  rows.push({ kind, grip, span, eye, display: worn.width * hatDisplayScale(kind) });
 
   // `tip` is where the top of the whole child ends up, and `of kid` is that as
   // a multiple of her bare height — a hat that adds three quarters of a child
@@ -282,6 +305,23 @@ console.log(
     `narrowest hat: ${narrow.kind} at ${narrow.span.toFixed(2)}× the head;\n` +
     `closest to an eye: ${nearest.kind}, ${(nearest.eye * 1000).toFixed(0)} mm clear.`,
 );
+
+// ------------------------------------------------------------ the shop stands
+const widest = [...rows].sort((a, b) => b.display - a.display);
+const [first, second] = widest as [Row, Row];
+const gap = HAT_STAND_SPACING - (first.display + second.display) / 2;
+console.log(
+  `\nshop stands ${HAT_STAND_SPACING} m apart: widest two are ${first.kind} at ` +
+    `${first.display.toFixed(3)} m and ${second.kind} at ${second.display.toFixed(3)} m, ` +
+    `leaving ${(gap * 1000).toFixed(0)} mm between them.`,
+);
+if (gap < MIN_STAND_GAP) {
+  failures.push(
+    `${first.kind} and ${second.kind} would come within ${(gap * 1000).toFixed(0)} mm on ` +
+      `neighbouring stands (want ${(MIN_STAND_GAP * 1000).toFixed(0)} mm) — turn ` +
+      `HAT_DISPLAY_HEAD down in hats.ts.`,
+  );
+}
 
 if (failures.length > 0) {
   console.error(`\nhat fit: ${failures.length} hat(s) do not fit the head:`);
