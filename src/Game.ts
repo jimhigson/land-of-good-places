@@ -501,6 +501,9 @@ export class Game {
         case 'lap':
           this.raceHud.setLap(`Lap ${moment.lap} of ${moment.of}`);
           break;
+        case 'bonk':
+          this.raceHud.flashBonk();
+          break;
         case 'result':
           this.raceHud.setLap(null);
           this.raceHud.setBanner(moment.won ? 'won' : 'lost');
