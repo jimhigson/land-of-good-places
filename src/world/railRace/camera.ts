@@ -56,16 +56,19 @@ import { LANE_RADII, PLAYER_LANE, type RailRaceRoute } from './route';
  * across its picture broadside, so it must stand far enough back to fit it. Let
  * the camera look somewhat *down* the track instead and the same span is
  * foreshortened — the far end is further away and lands closer to the near end
- * on screen — so the same 27 m of track fits from much nearer the rider.
+ * on screen — so the same stretch of {@link AHEAD} metres fits from much nearer
+ * the rider.
  *
- * That angle is not a fifth dial. It falls out of {@link RIDER_SCREEN_X}: the
- * rider is off to the left of the picture, so the middle of the picture is
- * already some way down the track from them, and the camera is therefore
- * already pointing that way. Pushing the rider from 28% of the way across
- * (a monitor) to 10% (a phone stood up) swings the aim from 1° off side-on to
- * 12°, and that alone brings the rig in from 27 m to 17 m of the rider and
- * shrinks the picture from 38 m of world across to 21 m. One asked-for number,
- * two dependent ones, no new dial.
+ * That angle is not a fifth dial. It falls out of `RIDER_SCREEN_X_PORTRAIT`/
+ * `RIDER_SCREEN_X_LANDSCAPE`: the rider is off to the left of the picture, so
+ * the middle of the picture is already some way down the track from them, and
+ * the camera is therefore already pointing that way. Pushing the rider further
+ * left (a phone stood up wants it further left than a monitor does) swings the
+ * aim further off side-on, and that alone brings the rig in closer to the rider
+ * and shrinks the picture. One asked-for number, two dependent ones, no new
+ * dial — run `npm run check:rail-race` for the actual current figures, which
+ * move whenever {@link AHEAD} or the screen-position constants do, so are not
+ * worth pinning in prose here a third time.
  *
  * ### Why there is no `eyeMount`
  *
@@ -89,11 +92,16 @@ import { LANE_RADII, PLAYER_LANE, type RailRaceRoute } from './route';
  * player had a second to react to is already past a landscape player's nose. At
  * the 22 m/s top speed of `simulate.ts` this is about 1.2 seconds of warning.
  *
- * 27 rather than a round 30 because 27 is a shade more than the 26.1 m the
- * shipped rig was measured to show: the fix for "too zoomed out" must not be
- * bought by quietly showing less road.
+ * Was 27 (a shade more than the 26.1 m the first "too zoomed out" fix's shipped
+ * rig showed, so that fix didn't quietly buy its win with less road). Still too
+ * zoomed out at 27, on the family's own playtest of the deployed rig on
+ * 1 August 2026 — halved to 13.5 on that verdict. A shorter promise costs a
+ * hazard some of its 1.2 seconds of warning, but the whole point of this rig is
+ * that the rider is the one being framed, not the road; if warning time turns
+ * out to matter more than closeness once this is played again, this is the
+ * number to raise, not {@link RIDER_SCREEN_X_PORTRAIT}.
  */
-const AHEAD = 27;
+export const AHEAD = 13.5;
 
 /**
  * Where the look-ahead point sits, as a fraction of the way across the picture.
@@ -118,9 +126,11 @@ const AHEAD_SCREEN_X = 0.95;
  *
  * Below 0.10 the rider starts to sit in the part of a wide lens where straight
  * things bend, and there is no longer enough behind them to see a rider who has
- * just been bonked drop back. It is a floor, not a value to keep tuning.
+ * just been bonked drop back. It is a floor, not a value to keep tuning — was
+ * 0.13, moved down to that floor on the same 1 August 2026 playtest verdict that
+ * halved {@link AHEAD}, and should not go lower than this even if asked again.
  */
-const RIDER_SCREEN_X_PORTRAIT = 0.13;
+const RIDER_SCREEN_X_PORTRAIT = 0.1;
 const RIDER_SCREEN_X_LANDSCAPE = 0.28;
 /** The window shapes those two are quoted for: a phone stood up, and a monitor. */
 const PORTRAIT_ASPECT = 0.5;

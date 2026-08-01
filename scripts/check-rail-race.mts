@@ -75,7 +75,7 @@ import {
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
 import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
-import { RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
+import { AHEAD, RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -381,11 +381,19 @@ say(
     `${Math.max(...frames.map((f) => f.ahead)).toFixed(1)} m across every shape ` +
     `(a monitor gets ${monitor.ahead.toFixed(1)} m)`,
 );
+// The floor is AHEAD itself, not a historical figure: AHEAD is the metres-ahead
+// promise this rig is solved from, and AHEAD_SCREEN_X insets the target point
+// short of the true edge, so every window shape shows a little more than AHEAD
+// — the promise is broken only if a shape shows *less*. (Previously pinned to
+// 26.1 m, the pre-solve rig's figure, back when AHEAD was 27 — that guarded
+// against buying "less zoomed out" with "less warning". On the family's own
+// 1 August 2026 playtest verdict on the deployed rig, AHEAD itself was halved
+// to 13.5, which is the number now being protected here.)
 require(
-  leastAhead > 26.1,
+  leastAhead > AHEAD,
   `only ${leastAhead.toFixed(1)} m of track is visible in front of the rider in the tightest ` +
-    'window shape, which is less than the 26.1 m the rig showed before it was solved rather ' +
-    'than dialled in. A fix for "too zoomed out" must not be bought by showing less road.',
+    `window shape, which is less than the ${AHEAD} m the rig is solved to promise. A window ` +
+    'shape must never see less than the promise, only more.',
 );
 // The rig pins AHEAD metres at a fixed place across the picture, so what varies
 // between shapes is only the sliver beyond that, which is why this is a floor
