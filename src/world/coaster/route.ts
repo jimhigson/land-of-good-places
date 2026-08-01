@@ -121,8 +121,12 @@ function tallObstacles(): TallObstacle[] {
 }
 
 /** Is the ground at (x, z) free of every plot? Layout only, no scene. */
-function groundClearOfPlots(x: number, z: number, radius: number): boolean {
+function groundClearOfPlots(x: number, z: number, radius: number, exceptId?: string): boolean {
   for (const entry of PARK_LAYOUT.entries.values()) {
+    // A station's own booth is the thing it is parked next to, not something
+    // to keep away from; the ring the candidate sits on is what keeps the
+    // track out of the booth itself.
+    if (entry.id === exceptId) continue;
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
   }
   return true;
@@ -182,10 +186,14 @@ function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof cir
   // reading as the thing the booth boards. It also has to stay inside the
   // loop's own outer limit, and the cruiser's stall is already 34 m from the
   // middle of the park, so there is not much room to spare on the outward side.
-  for (let ring = 0; ring < 5; ring += 1) {
-    const distance = 6.5 + ring * 1.1;
-    for (let i = 0; i < 32; i += 1) {
-      const angle = (i / 32) * TAU;
+  //
+  // Offering plenty of candidates is not generosity, it is the thing that makes
+  // this solve at all: a first cut offered six and the search failed on every
+  // one. Each is cheap to propose and the search abandons a bad one quickly.
+  for (let ring = 0; ring < 8; ring += 1) {
+    const distance = 5 + ring;
+    for (let i = 0; i < 48; i += 1) {
+      const angle = (i / 48) * TAU;
       const x = stall.x + Math.cos(angle) * distance;
       const z = stall.z + Math.sin(angle) * distance;
       // Two headings per spot: the track may run past the booth either way.
@@ -193,7 +201,7 @@ function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof cir
         const hx = -Math.sin(angle) * sign;
         const hz = Math.cos(angle) * sign;
         const pose: Pose2 = { x, z, hx, hz };
-        if (stationWindowIsClear(pose, boundary)) poses.push({ pose, key: rng.unit() });
+        if (stationWindowIsClear(pose, boundary, stallId)) poses.push({ pose, key: rng.unit() });
       }
     }
   }
@@ -214,6 +222,7 @@ function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof cir
 function stationWindowIsClear(
   pose: Pose2,
   boundary: ReturnType<typeof circleBoundary>,
+  ownStallId: string,
 ): boolean {
   // The boarding flat, plus a little of the ramp either side. Not the whole
   // ramp: by the far end of it the track is already climbing clear of the
@@ -223,7 +232,7 @@ function stationWindowIsClear(
   for (let along = -reach; along <= reach; along += 2) {
     const x = pose.x + pose.hx * along;
     const z = pose.z + pose.hz * along;
-    if (!groundClearOfPlots(x, z, CORRIDOR_RADIUS - 0.8)) return false;
+    if (!groundClearOfPlots(x, z, CORRIDOR_RADIUS - 1.5, ownStallId)) return false;
     if (boundary.distanceToEdge(x, z) < CORRIDOR_RADIUS) return false;
   }
   return true;
@@ -271,7 +280,7 @@ export class CoasterRoute {
       corridorRadius: CORRIDOR_RADIUS,
       selfClearance: SELF_CLEARANCE,
       minRadius: MIN_TURN_RADIUS,
-      budgets: { perJoint: 40, restarts: 24 },
+      budgets: { perJoint: 16, restarts: 90 },
     };
     const plan = solveRailRoute(brief);
     this.plan = plan;

@@ -1,4 +1,4 @@
-import { Rng, TAU } from '../../core/mathUtils';
+import { Rng, TAU, clamp } from '../../core/mathUtils';
 import type { ParkBoundary } from './boundary';
 import {
   type CubicSegment,
@@ -144,12 +144,15 @@ export interface SolvedRailRoute {
 
 /** Thrown when the search exhausts its budget, carrying why. */
 export class RailRouteUnsolvable extends Error {
-  constructor(
-    message: string,
-    readonly report: SolveReport,
-  ) {
+  // Assigned in the body rather than declared as a constructor parameter
+  // property: several of this repo's check scripts run node in strip-only mode,
+  // which cannot compile that syntax and dies at import time.
+  readonly report: SolveReport;
+
+  constructor(message: string, report: SolveReport) {
     super(message);
     this.name = 'RailRouteUnsolvable';
+    this.report = report;
   }
 }
 
@@ -169,7 +172,24 @@ const CLOSE_ONLY_AFTER = 1.45;
 const BIAS_FROM = 0.45;
 
 /** Seeded intermediate poses the closer swings out through when direct fails. */
-const CLOSER_VIA_TRIES = 40;
+const CLOSER_VIA_TRIES = 16;
+
+/**
+ * Beyond this gap, the closer does not bother swinging out through an
+ * intermediate pose. A detour spanning most of the park is not going to clear
+ * the obstacles in between, and trying costs more than the search saves.
+ */
+const VIA_MAX_GAP = 95;
+
+/**
+ * Iterations allowed per start pose.
+ *
+ * Deliberately modest. With a shortlist ranked at every joint, a start pose
+ * that is going to work usually works quickly; one that grinds is telling you
+ * it is the wrong place to start, and the budget is better spent on the next
+ * candidate station than on proving this one impossible.
+ */
+const STEPS_PER_START = 600;
 
 /**
  * How far behind the start the approach corridor sits.
@@ -181,6 +201,9 @@ const APPROACH_DISTANCE = 38;
 
 /** Within this of the approach point, steer to match its heading, not reach it. */
 const ALIGN_RANGE = 26;
+
+/** Legal pieces shortlisted and ranked at each joint before one is taken. */
+const CANDIDATES_PER_JOINT = 16;
 
 interface Sample {
   readonly x: number;
@@ -236,11 +259,28 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       : startPose;
 
     const chosen: CubicSegment[] = [];
-    const samples: Sample[] = [];
     const sampleCounts: number[] = [];
     const retries: number[] = [];
     const closerTried: boolean[] = [];
+    const options: ({ seg: CubicSegment; samples: Sample[]; score: number }[] | null)[] = [];
     let accumulated = 0;
+
+    /**
+     * Laid track, bucketed by grid cell.
+     *
+     * Self-clearance was a scan of every sample laid so far against every
+     * sample of every candidate — quadratic in the length of the route, run
+     * thousands of times, and by far the most expensive thing the search did.
+     * A grid whose cell is the clearance distance turns it into a look at nine
+     * cells. Pieces are added and removed strictly last-in-first-out as the
+     * search advances and backtracks, so a cell's most recent entry is always
+     * the one being taken back out.
+     */
+    const cell = Math.max(brief.selfClearance, 1);
+    const grid = new Map<string, Sample[]>();
+    const laid: Sample[] = [];
+    const keyOf = (x: number, z: number): string =>
+      `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
 
     const headPose = (): Pose2 => {
       const last = chosen[chosen.length - 1];
@@ -250,7 +290,13 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     const accept = (seg: CubicSegment, produced: readonly Sample[]): void => {
       chosen.push(seg);
       sampleCounts.push(produced.length);
-      for (const s of produced) samples.push(s);
+      for (const s of produced) {
+        laid.push(s);
+        const key = keyOf(s.x, s.z);
+        const bucket = grid.get(key);
+        if (bucket) bucket.push(s);
+        else grid.set(key, [s]);
+      }
       accumulated += seg.length;
     };
 
@@ -258,8 +304,33 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       const seg = chosen.pop();
       if (!seg) return;
       const count = sampleCounts.pop() ?? 0;
-      samples.length -= count;
+      for (let i = 0; i < count; i += 1) {
+        const s = laid.pop();
+        if (!s) break;
+        grid.get(keyOf(s.x, s.z))?.pop();
+      }
       accumulated -= seg.length;
+    };
+
+    /** Is (x, z) at arc `s` far enough from every earlier bit of track? */
+    const selfClear = (x: number, z: number, s: number, closing: boolean): boolean => {
+      const gx = Math.floor(x / cell);
+      const gz = Math.floor(z / cell);
+      for (let ix = gx - 1; ix <= gx + 1; ix += 1) {
+        for (let iz = gz - 1; iz <= gz + 1; iz += 1) {
+          const bucket = grid.get(`${ix},${iz}`);
+          if (!bucket) continue;
+          for (const earlier of bucket) {
+            // The track immediately behind the head is not a collision, it is
+            // where we just came from.
+            if (s - earlier.s < SELF_IGNORE_ARC) continue;
+            // A closer is aiming at the start pose; the start is not an obstacle.
+            if (closing && earlier.s < SELF_IGNORE_ARC) continue;
+            if (Math.hypot(x - earlier.x, z - earlier.z) < brief.selfClearance) return false;
+          }
+        }
+      }
+      return true;
     };
 
     /**
@@ -287,16 +358,9 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
           rejected.boundary += 1;
           return null;
         }
-        for (const earlier of samples) {
-          // The track immediately behind the head is not a collision, it is
-          // where we just came from.
-          if (s - earlier.s < SELF_IGNORE_ARC) continue;
-          // A closer is aiming at the start pose; the start is not an obstacle.
-          if (closing && earlier.s < SELF_IGNORE_ARC) continue;
-          if (Math.hypot(point.x - earlier.x, point.z - earlier.z) < brief.selfClearance) {
-            rejected.selfClearance += 1;
-            return null;
-          }
+        if (!selfClear(point.x, point.z, s, closing)) {
+          rejected.selfClearance += 1;
+          return null;
         }
         produced.push({ x: point.x, z: point.z, s });
       }
@@ -366,9 +430,10 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       // Nothing direct fits, so swing wide: go via a seeded intermediate pose
       // and biarc each half. This is where an obstacle sitting between the head
       // and home gets gone around.
+      const span = Math.hypot(startPose.x - head.x, startPose.z - head.z) || 1;
+      if (span > VIA_MAX_GAP) return null;
       const midX = (head.x + startPose.x) / 2;
       const midZ = (head.z + startPose.z) / 2;
-      const span = Math.hypot(startPose.x - head.x, startPose.z - head.z) || 1;
       const alongX = (startPose.x - head.x) / span;
       const alongZ = (startPose.z - head.z) / span;
 
@@ -403,10 +468,41 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       return null;
     };
 
+    /**
+     * How good a piece is, lower being better: how near its end lands to the
+     * approach corridor, and how well it lines up with it.
+     *
+     * Only once the route is long enough to be thinking about home — before
+     * that the score is pure seeded jitter, which is what keeps the loop an
+     * interesting shape instead of the shortest legal path to the corridor.
+     */
+    const scoreOf = (seg: CubicSegment): number => {
+      const jitter = rng.unit() * 12;
+      if (!brief.closed || accumulated / brief.desiredLength <= BIAS_FROM) return jitter;
+      const end = endPose(seg);
+      const dx = approach.x - end.x;
+      const dz = approach.z - end.z;
+      const range = Math.hypot(dx, dz);
+      let wantX = dx / (range || 1);
+      let wantZ = dz / (range || 1);
+      if (range < ALIGN_RANGE) {
+        const blend = range / ALIGN_RANGE;
+        wantX = approach.hx * (1 - blend) + wantX * blend;
+        wantZ = approach.hz * (1 - blend) + wantZ * blend;
+      }
+      const magnitude = Math.hypot(wantX, wantZ) || 1;
+      const headingError = Math.acos(
+        clamp((end.hx * wantX + end.hz * wantZ) / magnitude, -1, 1),
+      );
+      // A radian of misalignment is worth about 26 m of distance: arriving
+      // pointing the right way matters roughly as much as arriving at all.
+      return range + headingError * 26 + jitter;
+    };
+
     // --- the search ------------------------------------------------------
     let alive = true;
     let solved = false;
-    const stepLimit = brief.budgets.perJoint * 220;
+    const stepLimit = STEPS_PER_START;
     let steps = 0;
 
     while (alive) {
@@ -433,8 +529,33 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         }
       }
 
+      // The legal pieces at this joint, best first, worked out once on arrival.
+      //
+      // Picking one candidate at random and re-rolling on rejection wanders:
+      // it re-rolls the same bad region of the vocabulary and only stumbles
+      // onto the approach corridor by luck. Building the shortlist once and
+      // *ordering* it means the first thing tried at every joint is the piece
+      // that best lines the head up for home, and backtracking walks down a
+      // considered list rather than rolling dice again.
+      if (!options[depth]) {
+        const head = headPose();
+        const shortlist: { seg: CubicSegment; samples: Sample[]; score: number }[] = [];
+        for (let i = 0; i < CANDIDATES_PER_JOINT; i += 1) {
+          candidatesTried += 1;
+          const kind = pickKind(brief, rng, head, approach, accumulated);
+          const seg = kind.make(head, rng);
+          const produced = validate(seg, false);
+          if (produced) shortlist.push({ seg, samples: produced, score: scoreOf(seg) });
+        }
+        shortlist.sort((p, q) => p.score - q.score);
+        options[depth] = shortlist;
+        retries[depth] = 0;
+      }
+
+      const shortlist = options[depth] ?? [];
       const mustClose = brief.closed && accumulated >= brief.desiredLength * CLOSE_ONLY_AFTER;
-      const exhausted = (retries[depth] ?? 0) >= brief.budgets.perJoint;
+      const cursor = retries[depth] ?? 0;
+      const exhausted = cursor >= Math.min(shortlist.length, brief.budgets.perJoint);
 
       if (mustClose || exhausted) {
         if (depth === 0) {
@@ -444,20 +565,18 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         backtracks += 1;
         retries[depth] = 0;
         closerTried[depth] = false;
+        options[depth] = null;
         undo();
         continue;
       }
 
-      retries[depth] = (retries[depth] ?? 0) + 1;
-      candidatesTried += 1;
-
-      const kind = pickKind(brief, rng, headPose(), approach, accumulated);
-      const seg = kind.make(headPose(), rng);
-      const produced = validate(seg, false);
-      if (produced) {
-        accept(seg, produced);
+      retries[depth] = cursor + 1;
+      const pick = shortlist[cursor];
+      if (pick) {
+        accept(pick.seg, pick.samples);
         retries[chosen.length] = 0;
         closerTried[chosen.length] = false;
+        options[chosen.length] = null;
       }
     }
 
