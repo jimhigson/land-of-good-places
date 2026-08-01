@@ -596,28 +596,96 @@ function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean
 /**
  * How far `trestleSpots` will nudge a candidate before giving up on it — along
  * the route (metres of arc) and across it (metres off `NOMINAL_RADIUS`).
- * Ordered closest-first so the search always takes the smallest nudge that
- * actually clears, not an arbitrary one that happens to. Kept well inside
- * half of `TRESTLE_SPACING` (12 m) so two neighbouring slots' searches can
- * never land on the same ground.
+ * Kept well inside half of `TRESTLE_SPACING` (12 m) so two neighbouring
+ * slots' searches can never land on the same ground.
+ *
+ * Ordering within each array no longer matters (`searchForClearGround` picks
+ * its own priority, radial-first — see that function's doc comment); kept
+ * closest-to-zero-first anyway because it reads as "the nudge, ranked."
  */
 const ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3];
 const RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
 
 /**
- * The wider search a grid slot gets when a duck bar is actually scheduled on
- * it — see `planHazards`'s `snapToTrestleGrid`. An ambient, decorative slot
- * with nothing scheduled on it is allowed to go missing (the track "shrugs
- * it off"); a slot a bar is relying on for its own visible support is not,
- * so it is worth searching harder — still well inside half of
+ * The wider arc search a grid slot gets when a duck bar is actually scheduled
+ * on it — see `planHazards`'s `snapToTrestleGrid`. An ambient, decorative
+ * slot with nothing scheduled on it is allowed to go missing (the track
+ * "shrugs it off"); a slot a bar is relying on for its own visible support is
+ * not, so it is worth searching harder — still well inside half of
  * `TRESTLE_SPACING` so it can never reach into a neighbouring slot's ground.
  */
 const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
+
+/**
+ * The radial budget a *mandatory* slot's wide search is normally allowed —
+ * deliberately **not** the same `±8` a decorative slot's search would use if
+ * it had one (it doesn't; only mandatory slots get a second attempt at all).
+ *
+ * **Why radial is special and arc is not.** A duck bar renders at its lane's
+ * fixed radius (`route.pointAt`'s `LANE_RADII[lane]`, `route.ts`) — nothing
+ * ever nudges *that*. An arc nudge shifts `at` for the leg and the bar
+ * identically (both derive from the same `spot.at`, `track.ts`'s duck-bar
+ * loop above), so it costs nothing: bar and leg stay exactly as coincident as
+ * they always were, just moved together along the loop. A radial nudge only
+ * moves the leg — the bar has no radial nudge to match it with — so every
+ * metre of radial nudge is a metre the bar and its own support drift apart.
+ *
+ * Found the hard way (2 August 2026): PR #162 moved the rail-race stall to
+ * the rim, which (via the shared-RNG butterfly effect documented in that
+ * PR — an earlier consumer's draw count shifting every later one) changed
+ * which ground was clear near two mandatory slots enough that their old,
+ * uncapped `±8` wide search reached all the way to `dr = 8`. With `LANE_RADII`
+ * offsets up to `±3.9` off nominal (`LANE_SPAN / 2`, `route.ts`), that put
+ * the duck bar on the innermost lane a measured `|8 - (-3.9)| = 11.9 m` from
+ * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
+ * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
+ * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
+ * beside the droppers hanging down from the actual rails (drawn, correctly,
+ * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
+ * the trestle loop above), not under them.
+ *
+ * `4` keeps the worst case (`4 + 3.9 = 7.9 m`, the innermost lane against a
+ * full `+4` nudge) under the 8 m tolerance with a little room to spare, while
+ * still giving the search four full extra metres either way beyond the
+ * ordinary, non-mandatory `RADIAL_NUDGES` reach. Paired with
+ * `searchForClearGround`'s radial-outer ordering (below), a mandatory slot
+ * now always tries every `WIDE_ARC_NUDGES` offset at each radial step before
+ * growing the radial nudge further, so the search spends its "free" arc room
+ * before its costly radial room — the fix that actually matters; this cap is
+ * the backstop that makes the guarantee structural rather than merely
+ * "usually true of whatever the search happens to find."
+ */
+const MANDATORY_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4];
+
+/**
+ * The old, uncapped `±8` radial range — kept only as the last-resort
+ * fallback `trestleSpots` reaches for if even `MANDATORY_RADIAL_NUDGES`
+ * finds no clear ground at all. Accepting a support that may exceed the duck
+ * bar's own tolerance is still better than the alternative: `trestleSpots`
+ * drops the bar's geometry entirely when its slot has no support at all (see
+ * the duck-bar loop's `if (!spot) { ... continue; }`), and a duck bar with no
+ * support of any kind is a worse bug than one whose support is visibly a
+ * little off to the side. `trestleSpots` warns loudly whenever this fallback
+ * is the one that actually placed a mandatory slot, so it stays visible
+ * rather than becoming a silent, permanent crutch.
+ */
 const WIDE_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
 
 /**
- * Tries each (arc, radial) nudge in order and returns the first clear ground
+ * Tries each (radial, arc) nudge in order and returns the first clear ground
  * it finds.
+ *
+ * **Radial-outer, arc-inner — not the other way round.** A slot's search
+ * used to be arc-outer: try every radial nudge at `da = 0` before ever
+ * trying `da = ±1`. That is backwards for a mandatory slot, where a radial
+ * nudge costs real alignment (see `MANDATORY_RADIAL_NUDGES`'s doc comment)
+ * and an arc nudge costs nothing — the old order reached for the biggest,
+ * costliest radial nudges long before it had exhausted the free arc ones.
+ * Radial-outer instead tries every arc offset at the smallest radial
+ * deviation first, and only grows the radial nudge once the whole arc
+ * range has failed to turn up clear ground that close in. Harmless for the
+ * ordinary (non-mandatory) search too — a decorative trestle looking a
+ * little closer to its nominal radius is no worse than one that doesn't.
  *
  * `atArch` is arch-relative — the same convention `hazards.ts`'s `DuckBar.at`
  * uses ("metres along the loop, measured from the start/finish arch") —
@@ -637,11 +705,11 @@ function searchForClearGround(
   arcNudges: readonly number[],
   radialNudges: readonly number[],
 ): { at: number; x: number; z: number } | null {
-  for (const da of arcNudges) {
-    const at = route.wrap(route.startDistance + atArch0 + da);
-    const theta = route.angleAt(at);
-    for (const dr of radialNudges) {
-      const radius = NOMINAL_RADIUS + dr;
+  for (const dr of radialNudges) {
+    const radius = NOMINAL_RADIUS + dr;
+    for (const da of arcNudges) {
+      const at = route.wrap(route.startDistance + atArch0 + da);
+      const theta = route.angleAt(at);
       const x = Math.cos(theta) * radius;
       const z = Math.sin(theta) * radius;
       if (groundIsClear(x, z, collision)) return { at, x, z };
@@ -680,10 +748,16 @@ function searchForClearGround(
  * **`mandatoryIndices` may not go missing.** These are the grid slots
  * `planHazards`'s `snapToTrestleGrid` actually scheduled a duck bar onto — a
  * bar with no visible support underneath it is the exact bug this whole
- * mechanism exists to fix, so those slots get `WIDE_ARC_NUDGES`/
- * `WIDE_RADIAL_NUDGES` (a bigger, still-bounded search) rather than being
- * allowed to shrug. Every index is returned on the result so the duck-bar
- * geometry can look its own support up directly rather than re-deriving it.
+ * mechanism exists to fix, so those slots get a second, wider attempt rather
+ * than being allowed to shrug: `WIDE_ARC_NUDGES` paired with
+ * `MANDATORY_RADIAL_NUDGES` (bigger arc room, which costs a mandatory slot
+ * nothing, and a deliberately *capped* radial room, which does — see
+ * `MANDATORY_RADIAL_NUDGES`'s own doc comment for the bug this cap fixes).
+ * Only if even that fails does a third attempt reach for the old, uncapped
+ * `WIDE_RADIAL_NUDGES` — a support that may sit further from its bar than
+ * the invariant likes is still better than a bar rendered with no support at
+ * all. Every index is returned on the result so the duck-bar geometry can
+ * look its own support up directly rather than re-deriving it.
  */
 function trestleSpots(
   route: RailRaceRoute,
@@ -701,7 +775,24 @@ function trestleSpots(
     const mandatory = mandatoryIndices.has(i);
     let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
     if (!placed && mandatory) {
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
+    }
+    if (!placed && mandatory) {
+      // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
+      // because this is the one path where a duck bar's support can land
+      // further from it than `DUCK_BAR_SUPPORT_TOLERANCE`
+      // (`test/procgen/invariants.ts`) actually wants; if this fires on a
+      // real seed, that slot's ground is worth a closer look, not just a
+      // wider search.
       placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
+      if (placed) {
+        console.warn(
+          `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
+            `${atArch0.toFixed(1)}) only found clear ground beyond MANDATORY_RADIAL_NUDGES' ` +
+            `safe radial range — its duck bar may sit further from it than the ` +
+            `DUCK_BAR_SUPPORT_TOLERANCE invariant expects.`,
+        );
+      }
     }
     if (!placed && mandatory) {
       // Exceedingly rare given the search above — genuinely no clear ground

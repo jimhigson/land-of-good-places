@@ -1,6 +1,75 @@
 # Duck bar Blender asset — handoff
 
-Branch `feat/duck-bar-blender-asset`. Status: **done, PR open, awaiting review/merge.**
+Branch `feat/duck-bar-blender-asset` (PR #163). Status: **done, reviewed and
+approved, a post-review regression from a merge of `origin/main` is now
+fixed too, awaiting the Overseer's merge.**
+
+## 2 August 2026 — post-review regression fix
+
+PR #163 had already been reviewed and approved when Jim merged current
+`origin/main` into the branch (`264985a`) to pick up an unrelated conflict
+resolution in `test/procgen/invariants.ts`. `origin/main` had picked up
+PR #162 (moved the rail-race stall to the rim) since #163 was last built,
+and CI on the merged branch failed for real:
+
+```
+duck bar 8 at -49.2, -6.2 is 11.9 m from the nearest trestle leg, over the 8 m tolerance
+duck bar 9 at -51.8, -6.5 is 9.3 m from the nearest trestle leg, over the 8 m tolerance
+```
+
+on both the canonical seed and seed-2, from
+`duckBarsStandOnRealSupports` (`test/procgen/invariants.ts`).
+
+**Root cause — confirmed exactly, not just suspected.** A duck bar always
+renders at its lane's *fixed* radius (`route.ts`'s `LANE_RADII[lane]`, via
+`route.pointAt`) — nothing ever nudges that. But `track.ts`'s
+`trestleSpots()` can move a *mandatory* slot's support leg radially by up
+to `±8` (the old `WIDE_RADIAL_NUDGES`) to dodge an obstruction on the
+ground, and that radial nudge never fed back into where the duck bar
+itself renders — only the shared `at` (arc position) did. `LANE_RADII`
+offsets from nominal are `±3.9` (lane 0/3) and `±1.3` (lane 1/2)
+(`LANE_SPAN / 2` etc., `route.ts`). The two failures are `|dr − laneOffset|`
+exactly: `|8 − (−3.9)| = 11.9` (lane 0) and `|8 − (−1.3)| = 9.3` (lane 1) —
+both pinned to the search's maximum radial nudge, `dr = 8`. PR #162's
+stall move shifted the shared-RNG draw sequence (the butterfly effect that
+PR documented) enough that the ground near these two mandatory slots
+needed the full `±8` to clear, exposing a divergence bug that was always
+latent.
+
+This was also a genuine *visual* bug, not just a test artifact: the
+trestle's beam and leg are drawn at the leg's nudged `x,z`
+(`spots.forEach` in `track.ts`), while the droppers hanging down from the
+actual rails are drawn, correctly, at the unnudged `x,z`
+(`route.pointAt`). A large radial nudge would have stood the beam and leg
+visibly beside the droppers, not under them.
+
+**Fix, in `src/world/railRace/track.ts` only:**
+1. `searchForClearGround` now searches radial-outer, arc-inner (was
+   arc-outer, radial-inner) — arc nudges cost nothing (the bar and its leg
+   share the same `at`, so shifting arc moves them together), radial
+   nudges cost real alignment, so the search now spends its free arc room
+   before growing the costly radial one.
+2. New `MANDATORY_RADIAL_NUDGES` (`±4`, down from the old `±8`) is what a
+   mandatory slot's wide search actually uses, paired with the existing
+   `WIDE_ARC_NUDGES` (`±5`, unchanged) — `4 + 3.9 = 7.9 m` worst case,
+   safely under the `8 m` `DUCK_BAR_SUPPORT_TOLERANCE`.
+3. If that capped search finds nothing, `trestleSpots` falls back once
+   more to the old uncapped `±8` (`WIDE_RADIAL_NUDGES`, kept for exactly
+   this), logging a loud `console.warn` if it's the one that actually
+   places a slot — a support that might exceed the tolerance is still
+   better than a duck bar dropped with none at all.
+
+Did **not** touch `DUCK_BAR_SUPPORT_TOLERANCE` or any other test
+threshold — CLAUDE.md is explicit that thresholds come from the game, not
+the generator, and this was a real placement bug, not a bad number.
+
+**Verified:** `npm run build` exit 0. `npm run test:procgen` — 5/5 test
+files (canonical + 4 sweep seeds), 80/80 tests, exit 0. Grepped the test
+run's full output for `railRace/track.ts`/`warn` — nothing printed, so the
+capped search + reordering found safe ground for every mandatory slot on
+every seed without ever needing the uncapped last-resort fallback; the fix
+holds structurally, not by luck. Pushed to `feat/duck-bar-blender-asset`;
+`gh pr checks 163` confirmed green after the push.
 
 ## What this branch does
 
