@@ -26,12 +26,37 @@
  * The old race shipped with a bug the family reported as *"duck bars
  * invisible/ineffective — holding wins"*, and "holding wins" is fatal: a
  * one-button game in which the button should just be held down has nothing to
- * teach and nothing to enjoy. So the race is simulated end to end, four ways —
- * a child who never lets go, one who lets go correctly, one who lets go too
- * much, and one who is sloppy about it — and the ordering of their finishing
- * times is asserted. This is the check that would have caught the old bug, and
- * it is deliberately a *simulation of the real ride class*, not of a model of
- * it: `RailRace.step` is the same method the browser calls.
+ * teach and nothing to enjoy. So the race is simulated end to end, five ways,
+ * and the ordering of their finishing times is asserted. It is deliberately a
+ * *simulation of the real ride*, not of a model of it: `stepRider` is the same
+ * function the browser calls every frame.
+ *
+ * ### The strategy that matters, and why the obvious one was not enough
+ *
+ * Comparing "never lets go" against "plays well" is **not** a guard on the duck
+ * bars, and review caught this file claiming it was. A rider who never lets go
+ * also powers over every black stretch, so the whole of their deficit can be
+ * spark drag while a bonk costs nothing whatever — reconstructing the original
+ * bug still passed. `hold.bonks > 0` proves only that bars are *encountered*.
+ *
+ * `barsOnly` exists to isolate the one number that matters. It plays the black
+ * stretches perfectly and the bars not at all, so against `perfect` the spark
+ * drag cancels on both sides and what remains is exactly what a bonk costs.
+ *
+ * ### Mutation-tested, on 1 August 2026
+ *
+ * A regression guard nobody has watched fail is not a guard. Measured, by
+ * reintroducing the original faults one at a time:
+ *
+ * ```
+ * fix in place                          bars worth  15.6 s   exit 0
+ * thrust un-gated during the wobble      "     "     7.8 s   exit 1
+ * a bonk costs no speed                  "     "     7.3 s   exit 1
+ * both (the original Coaster behaviour)  "     "    -0.2 s   exit 1
+ * ```
+ *
+ * The threshold is 8 s: comfortably under the 15.6 s the real thing is worth,
+ * and comfortably over every way of breaking it.
  */
 
 import './headless-canvas.mjs';
@@ -309,6 +334,7 @@ const STRATEGIES: readonly { readonly name: string; readonly strategy: Strategy 
   { name: 'never lets go', strategy: 'alwaysHold' },
   { name: 'never holds', strategy: 'neverHold' },
   { name: 'sloppy', strategy: 'sloppy' },
+  { name: 'ducks nothing', strategy: 'barsOnly' },
   { name: 'plays well', strategy: 'perfect' },
 ];
 
@@ -327,6 +353,7 @@ const hold = results.get('alwaysHold')!;
 const perfect = results.get('perfect')!;
 const sloppy = results.get('sloppy')!;
 const never = results.get('neverHold')!;
+const barsOnly = results.get('barsOnly')!;
 
 // The bug this file exists for.
 require(
@@ -335,9 +362,39 @@ require(
     `${perfect.seconds.toFixed(1)} s for playing well. Letting go must be worth at least 4 s, ` +
     'or the one control has nothing to teach — this is the 28 July family bug.',
 );
+
+// --- what a duck bar actually costs, on its own ------------------------------
+//
+// The assertion above is NOT enough on its own, and review caught exactly that:
+// `alwaysHold` also powers over every black stretch, so its whole deficit can be
+// spark drag while a bonk costs nothing at all. Reconstructing the old bug
+// (thrust un-gated during the wobble, a free bonk) still passed it. `bonks > 0`
+// proves only that bars are *encountered*.
+//
+// `barsOnly` differs from `perfect` in one single thing: it does not let go for
+// the bars. Both play the black stretches perfectly, so spark drag cancels and
+// what is left is the duck-bar mechanic's entire contribution to the race.
+const barCost = barsOnly.seconds - perfect.seconds;
+say('');
+say(
+  `duck bars are worth ${barCost.toFixed(1)} s on their own ` +
+    `(${barsOnly.bonks} bonks, ${barsOnly.sparkSeconds.toFixed(2)} s sparking)`,
+);
 require(
-  hold.bonks > 0,
-  'a rider who never lets go hit no duck bars at all — the bars are not being tested.',
+  barsOnly.sparkSeconds < 0.05,
+  `the bars-only run sparked for ${barsOnly.sparkSeconds.toFixed(2)} s, so this comparison is ` +
+    'still contaminated by the black stretches and cannot isolate what a bonk costs.',
+);
+require(
+  barsOnly.bonks > 0,
+  'the bars-only run hit no duck bars at all — the bars are not being tested.',
+);
+require(
+  barCost > 8,
+  `DUCKING IS POINTLESS: hitting every duck bar costs only ${barCost.toFixed(1)} s once spark ` +
+    'drag is taken out of both sides. A bonk must cost more than the coasting it saved, or the ' +
+    'bars are decoration — this is the 28 July family bug, and it is the assertion that fails ' +
+    'when the wobble stops gating thrust.',
 );
 require(
   hold.sparkSeconds > 1,

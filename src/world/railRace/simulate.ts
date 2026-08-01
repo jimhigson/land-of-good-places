@@ -256,7 +256,7 @@ export function rivalWantsHold(rider: Rider, dt: number, skill: number, rng: Rng
 // ----------------------------------------------------------- the headless race
 
 /** The four ways `scripts/check-rail-race.mts` plays the game. */
-export type Strategy = 'alwaysHold' | 'neverHold' | 'perfect' | 'sloppy';
+export type Strategy = 'alwaysHold' | 'neverHold' | 'perfect' | 'sloppy' | 'barsOnly';
 
 function strategyWantsHold(strategy: Strategy, rider: Rider, dt: number, rng: Rng): boolean {
   switch (strategy) {
@@ -274,6 +274,18 @@ function strategyWantsHold(strategy: Strategy, rider: Rider, dt: number, rng: Rn
       // button for the black stretches.
       if (barIsHere(rider, dt, 0.05)) return rng.chance(0.35);
       if (zoneIsHere(rider, -2.5, 0)) return false;
+      return true;
+    case 'barsOnly':
+      // Plays the black stretches perfectly and the duck bars not at all.
+      //
+      // This exists to isolate one number: what a bonk actually costs. Against
+      // `perfect` — which differs from it *only* in letting go for the bars —
+      // the gap is the duck-bar mechanic's entire contribution to the race, with
+      // the spark drag subtracted out on both sides. Without it the checker was
+      // measuring the two hazards added together and could not tell which one
+      // was carrying the margin; it turned out the bars were carrying none of
+      // it. See `scripts/check-rail-race.mts`.
+      if (zoneIsHere(rider, 0.4, 0)) return false;
       return true;
   }
 }
