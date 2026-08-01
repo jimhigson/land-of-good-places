@@ -43,20 +43,31 @@
  * stretches perfectly and the bars not at all, so against `perfect` the spark
  * drag cancels on both sides and what remains is exactly what a bonk costs.
  *
- * ### Mutation-tested, on 1 August 2026
+ * ### Mutation-tested, on 1 August 2026 — and re-tested the same day
  *
  * A regression guard nobody has watched fail is not a guard. Measured, by
  * reintroducing the original faults one at a time:
  *
  * ```
- * fix in place                          bars worth  15.6 s   exit 0
- * thrust un-gated during the wobble      "     "     7.8 s   exit 1
- * a bonk costs no speed                  "     "     7.3 s   exit 1
- * both (the original Coaster behaviour)  "     "    -0.2 s   exit 1
+ *                                        BEFORE the physics tuning   AFTER
+ * fix in place                          bars worth  15.6 s  exit 0   24.5 s  exit 0
+ * thrust un-gated during the wobble      "     "     7.8 s  exit 1   13.2 s  exit 0 (!)
+ * a bonk costs no speed                  "     "     7.3 s  exit 1    9.9 s  exit 0 (!)
+ * both (the original Coaster behaviour)  "     "    -0.2 s  exit 1   -0.2 s  exit 1
  * ```
  *
- * The threshold is 8 s: comfortably under the 15.6 s the real thing is worth,
- * and comfortably over every way of breaking it.
+ * **The right-hand column is why this table is worth keeping.** The family's
+ * 1 August physics tuning roughly doubled the cart's speed and took the race to
+ * three laps, which scaled every figure here up — and the old 8 s threshold,
+ * left alone, would have gone on passing while *either* single fault was live.
+ * It would have kept reporting OK on precisely the bug it was written for. The
+ * mutations were re-run rather than the number re-guessed, and the threshold is
+ * now **18 s**: 36% clear of the worst surviving mutation (13.2 s) and 27% under
+ * what the real thing is worth (24.5 s), so it has real margin on both sides
+ * rather than the 2.5% the old 8-against-7.8 had.
+ *
+ * If you change `RACE_LAPS`, `THRUST` or the drag constants again, re-run these
+ * four mutations. The absolute figure moves with all of them.
  */
 
 import './headless-canvas.mjs';
@@ -622,7 +633,8 @@ const barCost = barsOnly.seconds - perfect.seconds;
 say('');
 say(
   `duck bars are worth ${barCost.toFixed(1)} s on their own ` +
-    `(${barsOnly.bonks} bonks, ${barsOnly.sparkSeconds.toFixed(2)} s sparking)`,
+    `(${barsOnly.bonks} bonks, ${barsOnly.sparkSeconds.toFixed(2)} s sparking) ` +
+    `= ${(barCost / Math.max(1, barsOnly.bonks)).toFixed(2)} s per bonk`,
 );
 require(
   barsOnly.sparkSeconds < 0.05,
@@ -634,11 +646,13 @@ require(
   'the bars-only run hit no duck bars at all — the bars are not being tested.',
 );
 require(
-  barCost > 8,
+  barCost > 18,
   `DUCKING IS POINTLESS: hitting every duck bar costs only ${barCost.toFixed(1)} s once spark ` +
     'drag is taken out of both sides. A bonk must cost more than the coasting it saved, or the ' +
     'bars are decoration — this is the 28 July family bug, and it is the assertion that fails ' +
-    'when the wobble stops gating thrust.',
+    'when the wobble stops gating thrust. See the mutation table at the top of this file before ' +
+    'touching this number: it was 8 s at the pre-1-August physics and had to be re-measured, not ' +
+    'rescaled, when the cart got faster.',
 );
 require(
   hold.sparkSeconds > 1,
