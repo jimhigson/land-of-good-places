@@ -95,6 +95,16 @@ export interface HazardSchedule {
   readonly sparkStretches: readonly SparkZone[];
 }
 
+/**
+ * Trestles this far apart around the ring.
+ *
+ * Lives here, not in `track.ts` (which builds the trestles themselves),
+ * because `planHazards` needs it too — see {@link snapToTrestleGrid} — and
+ * `track.ts` already imports from this file, so the constant living here
+ * avoids a circular import rather than creating one.
+ */
+export const TRESTLE_SPACING = 12;
+
 /** The first hazard is this far past the arch, so the race opens with speed. */
 const OPENING_RUN = 58;
 
@@ -108,6 +118,73 @@ const GAP_MAX = 39;
 /** How long a blackened stretch runs for. */
 const ZONE_MIN = 15;
 const ZONE_MAX = 23;
+
+/**
+ * How many trestle grid slots fit round one lap — `track.ts`'s own
+ * `Math.floor(route.length / TRESTLE_SPACING)`, duplicated as one line
+ * rather than imported, because importing it would mean this file reaching
+ * into `track.ts` while `track.ts` already reaches into this one (see
+ * `TRESTLE_SPACING`'s own doc comment on why that direction was chosen).
+ */
+function trestleGridCount(loopLength: number): number {
+  return Math.max(1, Math.floor(loopLength / TRESTLE_SPACING));
+}
+
+/**
+ * Which trestle grid slot a given arch-relative `at` belongs to — the same
+ * formula in both directions (`at -> index` here, `index -> at` in
+ * `snapToTrestleGrid`), so `track.ts` can recover exactly the slot a bar was
+ * snapped onto without either file re-deriving the other's arithmetic.
+ */
+export function trestleGridIndex(at: number, loopLength: number): number {
+  const count = trestleGridCount(loopLength);
+  const raw = Math.round((at / loopLength) * count);
+  return ((raw % count) + count) % count;
+}
+
+/**
+ * Snaps a raw cursor position onto `track.ts`'s own trestle grid, and returns
+ * exactly the `at` a trestle candidate at that grid index would compute
+ * (`(index / count) * loopLength`) — the same formula, not an approximation
+ * of it, so a bar and the support meant to carry it agree on position to the
+ * metre before any collision-driven search ever nudges the support a little.
+ *
+ * **Why a duck bar needs this at all.** Jim, 1 August 2026: the hazard
+ * schedule and the trestle placement were "completely independent systems
+ * with no relationship" — a bar could, and did, land anywhere a seeded RNG's
+ * cursor happened to stop, with nothing structural underneath it. Snapping
+ * the bar itself onto the same grid `trestleSpots` places supports on means
+ * every bar's `at` *is* a trestle grid index — the shared source Jim's own
+ * two suggested fixes both point at, rather than two positions that have to
+ * be reconciled after the fact.
+ *
+ * `usedIndices` guards against two different bars landing on the same
+ * support — vanishingly unlikely given `GAP_MIN` (27 m) is more than twice
+ * `TRESTLE_SPACING` (12 m), but a schedule silently losing a bar to a
+ * collision would be a worse bug than the few metres' nudge this costs when
+ * it actually happens.
+ */
+function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<number>): number {
+  const count = trestleGridCount(loopLength);
+  const raw = trestleGridIndex(cursor, loopLength);
+  for (let delta = 0; delta < count; delta += 1) {
+    const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
+    for (const candidate of candidates) {
+      const index = ((candidate % count) + count) % count;
+      if (!usedIndices.has(index)) {
+        usedIndices.add(index);
+        return (index / count) * loopLength;
+      }
+    }
+  }
+  // Every grid index already used — not reachable with this file's own
+  // GAP_MIN/TRESTLE_SPACING ratio, but fall back to the raw index rather than
+  // throwing, so a future tuning change that *does* reach this fails as a
+  // slightly crowded schedule, not a crash.
+  const fallback = ((raw % count) + count) % count;
+  usedIndices.add(fallback);
+  return (fallback / count) * loopLength;
+}
 
 /**
  * Lays out one lap, then repeats it.
@@ -128,6 +205,7 @@ export function planHazards(loopLength: number, laps: number): HazardSchedule {
   // time holding nothing, and five bars in a row never teaches the other rule.
   // Two bars to a zone keeps both fresh and lands about eight hazards a lap.
   let sinceZone = 0;
+  const usedTrestleIndices = new Set<number>();
   while (cursor < limit) {
     if (sinceZone >= 2 && cursor + ZONE_MAX < limit) {
       const to = cursor + rng.range(ZONE_MIN, ZONE_MAX);
@@ -135,7 +213,10 @@ export function planHazards(loopLength: number, laps: number): HazardSchedule {
       cursor = to;
       sinceZone = 0;
     } else {
-      bars.push({ at: cursor });
+      // Snapped onto the trestle grid — see `snapToTrestleGrid` — rather than
+      // left at the raw cursor: a duck bar now always sits at a position
+      // `track.ts` can guarantee a real support for.
+      bars.push({ at: snapToTrestleGrid(cursor, loopLength, usedTrestleIndices) });
       sinceZone += 1;
     }
     cursor += rng.range(GAP_MIN, GAP_MAX);
