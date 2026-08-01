@@ -1,38 +1,57 @@
-import { Color, CylinderGeometry, Group, Material, Mesh, SphereGeometry } from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { Color, Group, Mesh, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { cartAssetMesh, cartAssetPart } from '../../art/models/cartAsset';
+import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { heartGeometry } from '../../art/style/shapes';
 import { RIDE_SCALE } from './route';
-import { RAIL_GAUGE } from './track';
 
 /**
  * **A cart for the Rail Race** — one per rail, four on the ring.
  *
- * Replaces the two-box placeholder (a body and a nose, no wheels, no colour
- * discipline) with a proper mine-cart-style car: a tub with a driver's bench
- * and a smaller pet perch beside it, four wheels spaced to actually sit on
- * this ride's rails, and a pair of headlamps on the nose.
+ * The cart is now an **authored asset** (`art/blend/cart.blend` →
+ * `src/art/assets/cart.glb` → `cartGlb.ts` → `art/models/cartAsset.ts`), the
+ * same `.glb` pipeline the player kid's body and head already use
+ * (`ART-AGENT-NOTES.md` §6a). It replaces a hand-tuned procedural version
+ * that shipped with the tub's own walls and floor completely burying every
+ * wheel — twice, in two separate review passes, because a plausible-looking
+ * set of `RoundedBoxGeometry`/wheel numbers is easy to write and hard to
+ * eyeball-verify against each other. See `HANDOFF-rail-cart-blender-asset.md`
+ * for the measurements that found it and the numbers the asset was modelled
+ * against.
  *
- * Built the same way `minigames/dodgems/car.ts` builds its car — that file is
- * this one's model, down to the wheel-spin idiom (`rotation.z = PI/2` once,
- * then `rotation.y` driven every frame). The one real difference: a dodgem is
- * steered and bumped, so its geometry lives on a `chassis` sub-group that
- * leans and squashes independently of `root`. A rail cart never leaves its
- * rail and never bumps anything — `RailRace.ts` already drives this cart's
- * `root` position and rotation directly, every frame, off the route — so
- * there is no second transform to keep in sync here. Simpler on purpose.
+ * **What the asset owns:** each part's shape and its own local transform —
+ * `tub`, `nose`, `seat-back`, `seat-base`, `pet-seat`, `pet-back`, four
+ * wheels (`wheel-fl/fr/bl/br`, one shared geometry) and two headlamps
+ * (`lamp-l/r`, one shared geometry) — modelled in Blender against this
+ * file's own reference numbers (`WHEEL_RADIUS`, the rail gauge,
+ * `SEAT_HEIGHT`), not copied from them.
+ *
+ * **What stays in code**, same split the kid uses for skin/hair colour: every
+ * material (this cart's whole colour comes from `LANE_COLOURS[lane]` at
+ * runtime — see the file-level colour-bug note below), the wheel-spin idiom
+ * (`spinWheels`, unchanged from the procedural cart — the wheel geometry is
+ * still a plain unrotated cylinder, so `rotation.z = PI/2` once and
+ * `rotation.y` every frame still lays it on its side and rolls it exactly as
+ * before), and the headlamp glow (a separate task is adding real light
+ * sources to these lamps — their *mesh* now lives in the asset, but the
+ * emissive material/behaviour is still assigned here, so that work only
+ * needs to touch this file, not the asset).
  *
  * ## Scale
  *
  * Built at natural size, in the same metres the old two-box cart used
  * (`RailRace.ts`'s `buildCarts` applies `RIDE_SCALE` to the whole group
  * externally, once, alongside the rider riding inside it — baking a second
- * scale in here would double it up). The wheel gauge is the one number that
- * has to agree exactly with the world the cart is dropped into, so it is
- * *derived* from `RAIL_GAUGE` (already in world/post-scale metres) divided
- * back down by `RIDE_SCALE`, rather than a second hand-picked constant that
- * could quietly drift from the rails it needs to straddle.
+ * scale into the asset would double it up, which is why `blend:cart` never
+ * touches `RIDE_SCALE`). The wheel gauge is the one number that has to agree
+ * exactly with the world the cart is dropped into: it is baked into the
+ * asset at `0.31` m either side of centre, which is `RAIL_GAUGE / RIDE_SCALE
+ * / 2` — and, because `RAIL_GAUGE := 0.62 * RIDE_SCALE` (`track.ts`), that
+ * ratio is `0.62 / 2` regardless of what `RIDE_SCALE` is set to, so baking it
+ * is safe rather than a second hand-picked constant that could drift.
+ * `scripts/check-rail-race.mts` asserts the asset's actual baked gauge
+ * against `RAIL_GAUGE` so a future change to either number is caught rather
+ * than silently decoupled.
  *
  * ## Why the colour bug this replaces happened
  *
@@ -46,24 +65,50 @@ import { RAIL_GAUGE } from './track';
  * only one fact to ever get right.
  */
 
-/** Wheel radius, in this cart's own (pre-`RIDE_SCALE`) metres. */
-const WHEEL_RADIUS = 0.16;
+/** Every named part `art/blend/cart.blend` exports. */
+export const CART_PARTS = [
+  'tub',
+  'nose',
+  'seat-back',
+  'seat-base',
+  'pet-seat',
+  'pet-back',
+  'wheel-fl',
+  'wheel-fr',
+  'wheel-bl',
+  'wheel-br',
+  'lamp-l',
+  'lamp-r',
+] as const;
+
+export type CartPart = (typeof CART_PARTS)[number];
+
+/**
+ * Wheel radius, in this cart's own (pre-`RIDE_SCALE`) metres — baked into the
+ * asset's `wheel` mesh at this same radius, and still needed here for
+ * {@link CartHandle.spinWheels}'s circumference math.
+ */
+export const WHEEL_RADIUS = 0.16;
 
 /**
  * How high the seat's own sitting surface is, in this cart's own
  * (pre-`RIDE_SCALE`) metres — the one fact `RailRace.ts`'s `poseRider()` and
  * `buildCarts()` both need to actually put a rider *on* the seat rather than
- * hovering over the cart's floor, which is what a stray `+ 0.05` (a leftover
- * from the old placeholder cart, which had no distinct seat mesh at all) did
- * once this cart gained a real one roughly `RIDE_SCALE` metres taller.
+ * hovering over the cart's floor. Baked into the asset's `seat-base` node at
+ * this same height (its top surface sits at exactly `SEAT_HEIGHT`); kept as
+ * an explicit exported constant, same discipline as the kid rig's own
+ * `KID_HEAD_HEIGHT` staying in code rather than something a caller would have
+ * to measure out of the mesh.
  */
 export const SEAT_HEIGHT = 0.47;
 
-/** Half the wheel gauge, worked back down from the world-scale `RAIL_GAUGE`. */
-const WHEEL_HALF_GAUGE = RAIL_GAUGE / RIDE_SCALE / 2;
-
-/** Wheelbase: how far the front axle sits from the back one. */
-const WHEEL_Z = 0.62;
+/**
+ * Where a pet mark sits, relative to the asset's own `pet-seat` node —
+ * derived from that node's authored position rather than a second, absolute
+ * hand-picked coordinate that could quietly stop matching it if the perch
+ * ever moves in Blender.
+ */
+const PET_MARK_OFFSET = new Vector3(0, 0.13, -0.045);
 
 export interface CartHandle {
   readonly root: Group;
@@ -107,21 +152,9 @@ export function createCart(colour: number): CartHandle {
     emissiveIntensity: 1,
   });
   const petMarkMaterial = toonMaterial(PALETTE.buildingWall);
-  const disposables: Material[] = [
-    bodyMaterial,
-    deepMaterial,
-    petMaterial,
-    wheelMaterial,
-    lampMaterial,
-    petMarkMaterial,
-  ];
 
   // --- tub --------------------------------------------------------------
-  // Wider than the rail gauge on purpose — a mine cart's body oversails its
-  // wheels, the same way a real train's carriage does; the wheels themselves
-  // are the part that has to agree with the rails, not the tub.
-  const body = solid(new Mesh(new RoundedBoxGeometry(1.15, 0.6, 1.7, 4, 0.1), bodyMaterial));
-  body.position.y = 0.34;
+  const body = solid(cartAssetMesh('tub', bodyMaterial));
   addOutline(body, 0.02);
   root.add(body);
 
@@ -129,39 +162,34 @@ export function createCart(colour: number): CartHandle {
   // colour of its own — the old nose was always `markerLemon`, whatever the
   // cart's own colour, which is the same "second fact that can drift" bug
   // `LANE_COLOURS` fixes for the rails.
-  const nose = solid(new Mesh(new RoundedBoxGeometry(0.85, 0.34, 0.42, 3, 0.06), deepMaterial));
-  nose.position.set(0, 0.32, 1.0);
+  const nose = solid(cartAssetMesh('nose', deepMaterial));
   addOutline(nose, 0.02);
   root.add(nose);
 
-  // --- headlamps ----------------------------------------------------------
+  // --- headlamps ------------------------------------------------------------
   // A warm glowing disc either side of the nose — the same "emissive reads as
   // lit, no dynamic light needed" trick as the dodgem's spark and star, which
   // is deliberately cheap: up to four of these carts are on screen at once
   // over trestle-heavy scenery, and a `PointLight` per cart is not worth the
   // draw-call and shadow-map cost for a glow that reads just as well without it.
-  for (const side of [-1, 1] as const) {
-    const lamp = decal(new Mesh(new SphereGeometry(0.09, 10, 8), lampMaterial));
-    lamp.scale.z = 0.5;
-    lamp.position.set(side * 0.3, 0.34, 1.21);
-    root.add(lamp);
+  for (const name of ['lamp-l', 'lamp-r'] as const) {
+    root.add(decal(cartAssetMesh(name, lampMaterial)));
   }
 
   // --- wheels ---------------------------------------------------------------
-  // Gauge matches `RAIL_GAUGE` exactly (see the file header): these are the
-  // one part of the cart that has to sit where the rails actually are.
-  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.1, 12);
+  // Gauge matches `RAIL_GAUGE` exactly (see the file header): baked into the
+  // asset, checked against it by `scripts/check-rail-race.mts`.
   const wheels: Mesh[] = [];
-  for (const side of [-1, 1] as const) {
-    for (const z of [-WHEEL_Z / 2, WHEEL_Z / 2]) {
-      const wheel = solid(new Mesh(wheelGeometry, wheelMaterial));
-      // Same idiom as `minigames/dodgems/car.ts`: lay the cylinder on its side
-      // once, then drive its rolling angle through `rotation.y` every frame.
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(side * WHEEL_HALF_GAUGE, WHEEL_RADIUS, z);
-      root.add(wheel);
-      wheels.push(wheel);
-    }
+  for (const name of ['wheel-fl', 'wheel-fr', 'wheel-bl', 'wheel-br'] as const) {
+    const wheel = solid(cartAssetMesh(name, wheelMaterial));
+    // Same idiom as `minigames/dodgems/car.ts` and the procedural cart this
+    // replaces: lay the cylinder on its side once, then drive its rolling
+    // angle through `rotation.y` every frame. The asset's wheel geometry is
+    // still a plain unrotated cylinder (axis along local Y), so this still
+    // works unchanged.
+    wheel.rotation.z = Math.PI / 2;
+    root.add(wheel);
+    wheels.push(wheel);
   }
 
   // --- rider's seat -----------------------------------------------------
@@ -169,14 +197,11 @@ export function createCart(colour: number): CartHandle {
   // actually stands the rider (rivals' `kid.root` and the player's own model
   // both sit at `x = 0` inside/against this cart) — the backrest has to be
   // where she really is, not just somewhere in the tub.
-  const seatBack = solid(new Mesh(new RoundedBoxGeometry(0.58, 0.46, 0.12, 3, 0.06), deepMaterial));
-  seatBack.position.set(0, 0.58, -0.5);
+  const seatBack = solid(cartAssetMesh('seat-back', deepMaterial));
   addOutline(seatBack, 0.016);
   root.add(seatBack);
 
-  const seatBase = solid(new Mesh(new RoundedBoxGeometry(0.58, 0.1, 0.5, 3, 0.05), deepMaterial));
-  seatBase.position.set(0, SEAT_HEIGHT - 0.05, -0.28);
-  root.add(seatBase);
+  root.add(solid(cartAssetMesh('seat-base', deepMaterial)));
 
   // --- pet perch --------------------------------------------------------
   // A second, smaller bench beside the rider's — the physical space the brief
@@ -190,21 +215,20 @@ export function createCart(colour: number): CartHandle {
   // own members, sat rather than walked — would need new per-ride wiring
   // (which pet, spawned and posed for the ride, torn down at the dismount)
   // and is future work; see `HANDOFF-rail-cart-upgrade.md`.
-  const petSeat = solid(new Mesh(new RoundedBoxGeometry(0.38, 0.22, 0.42, 3, 0.06), petMaterial));
-  petSeat.position.set(-0.34, 0.44, -0.2);
+  const petSeat = solid(cartAssetMesh('pet-seat', petMaterial));
   addOutline(petSeat, 0.014);
   root.add(petSeat);
 
-  const petBack = solid(new Mesh(new RoundedBoxGeometry(0.38, 0.26, 0.1, 3, 0.05), petMaterial));
-  petBack.position.set(-0.34, 0.56, -0.4);
-  root.add(petBack);
+  root.add(solid(cartAssetMesh('pet-back', petMaterial)));
 
   // A little paw-print stand-in — a heart, the shape the park already uses
   // for "a pet belongs here" (`art/models/backpacks.ts`'s heart backpack
   // decal) — marking the perch as a pet's spot at a glance, without needing a
-  // second bespoke decal shape.
+  // second bespoke decal shape. Not part of the asset: it reuses an existing
+  // shared primitive rather than being a unique modelled surface, so it stays
+  // procedural, positioned off the asset's own `pet-seat` placement.
   const petMark = decal(new Mesh(heartGeometry(0.08, 0.02), petMarkMaterial));
-  petMark.position.set(-0.34, 0.57, -0.245);
+  petMark.position.copy(cartAssetPart('pet-seat').position).add(PET_MARK_OFFSET);
   petMark.rotation.x = -0.3;
   root.add(petMark);
 
@@ -217,11 +241,13 @@ export function createCart(colour: number): CartHandle {
     },
 
     dispose(): void {
-      root.traverse((object) => {
-        const mesh = object as Partial<Mesh>;
-        mesh.geometry?.dispose();
-      });
-      for (const material of disposables) material.dispose();
+      // `disposeTree`, not a hand-rolled walk: every part's geometry now
+      // comes from the shared asset cache (`cartAsset.ts`, `markShared`) —
+      // four carts, and every future one, all point at the same wheel and
+      // lamp buffers, so freeing them here would corrupt the other carts
+      // still on the ring. `disposeTree` already knows to skip anything
+      // `markShared` marked and to free only this cart's own materials.
+      disposeTree(root);
     },
   };
 }
