@@ -3,7 +3,7 @@ import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
-import type { BackpackKind, CharacterCreationChoice, HairStyle, ShoeKind } from '../state';
+import type { BackpackKind, CharacterCreationChoice, GlassesKind, HairStyle, ShoeKind } from '../state';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 import { ColourWheelPicker } from './ColourWheelPicker';
 
@@ -193,6 +193,41 @@ const SHOES: readonly Choice<ShoeKind>[] = [
   ...(Object.keys(SHOE_OPTIONS) as ShoeKind[]).filter((kind) => !SHOE_ORDER.includes(kind)),
 ].map((value) => ({ value, ...SHOE_OPTIONS[value] }));
 
+/**
+ * One more than {@link GlassesKind}: the tab's own "no glasses" choice, which
+ * `PlayerState.glassesKind` represents as `null` rather than a fourth kind —
+ * see that field's doc comment. Kept local to this file rather than asked of
+ * the state or art layers, the same way a bare-headed or bare-footed choice
+ * has no `HairStyle`/`ShoeKind` member of its own; unlike those two, glasses
+ * really do default to "none", so this file needs a word for it.
+ */
+type GlassesChoiceValue = GlassesKind | 'none';
+
+/**
+ * What a child sees on each glasses button.
+ *
+ * A `Record` over the whole (local) union for the same reason the hair styles,
+ * the backpack shapes and the shoe pairs each are one: a kind added to
+ * `art/models/glasses.ts` and forgotten here would exist in the game and be
+ * unchoosable, exactly the bug that survives a review.
+ */
+const GLASSES_OPTIONS: Readonly<Record<GlassesChoiceValue, { label: string; glyph: string }>> = {
+  none: { label: 'None', glyph: '🙈' },
+  sunglasses: { label: 'Sunglasses', glyph: '🕶️' },
+  star: { label: 'Star', glyph: '⭐' },
+  heart: { label: 'Heart', glyph: '💖' },
+};
+
+/** "None" comes first — it is the default, and the state every child starts from. */
+const GLASSES_ORDER: readonly GlassesChoiceValue[] = ['none', 'sunglasses', 'star', 'heart'];
+
+const GLASSES_CHOICES: readonly Choice<GlassesChoiceValue>[] = [
+  ...GLASSES_ORDER,
+  ...(Object.keys(GLASSES_OPTIONS) as GlassesChoiceValue[]).filter(
+    (value) => !GLASSES_ORDER.includes(value),
+  ),
+].map((value) => ({ value, ...GLASSES_OPTIONS[value] }));
+
 /** Every hat the hat shop sells — one source of truth, no duplicated data. */
 const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');
 
@@ -209,7 +244,7 @@ const DEFAULT_HAT_ID = HAT_OPTIONS.find((item) => item.id === 'hat.party')?.id ?
 const DEFAULT_PET_ID = PET_OPTIONS[0]?.id ?? '';
 
 /** One tab in the strip below — a customisation category, its own place on the child. */
-type TabId = 'skin' | 'hair' | 'eyes' | 'outfit' | 'shoes' | 'hat' | 'backpack' | 'pet';
+type TabId = 'skin' | 'hair' | 'eyes' | 'glasses' | 'outfit' | 'shoes' | 'hat' | 'backpack' | 'pet';
 
 /**
  * The tab strip: order, what a child sees on the button, and — the actual
@@ -242,6 +277,10 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
   { id: 'skin', label: 'Skin', glyph: '🖐️', focus: 'all' },
   { id: 'hair', label: 'Hair', glyph: '💇', focus: 'hair' },
   { id: 'eyes', label: 'Eyes', glyph: '👀', focus: 'face' },
+  // Sits between Eyes and Outfit — glasses sit on the face, right next to what
+  // the Eyes tab already frames, and `focus: 'face'` is the same framing that
+  // tab already uses, so no new `PreviewFocus` was needed for this tab at all.
+  { id: 'glasses', label: 'Glasses', glyph: '🕶️', focus: 'face' },
   { id: 'outfit', label: 'Outfit', glyph: '👕', focus: 'body' },
   { id: 'shoes', label: 'Shoes', glyph: '👟', focus: 'feet' },
   { id: 'hat', label: 'Hat', glyph: '🎩', focus: 'head' },
@@ -305,6 +344,8 @@ export class CharacterCreation {
   private backpackColour: number = PALETTE.backpack;
   private shoeKind: ShoeKind = 'plain';
   private shoeColour: number = PALETTE.shoe;
+  /** `'none'` (the default) becomes `null` at {@link complete} — see `GlassesChoiceValue`. */
+  private glassesKind: GlassesChoiceValue = 'none';
   /**
    * `null` means "no hat" — today that only ever happens transiently while an
    * exclusive hair style (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) is selected;
@@ -450,6 +491,12 @@ export class CharacterCreation {
       },
     );
 
+    // Glasses -------------------------------------------------------------
+    const glassesSection = this.buildChoiceSection('Glasses', GLASSES_CHOICES, this.glassesKind, (value) => {
+      this.glassesKind = value;
+      this.refreshPreview('face');
+    });
+
     // Clothes colour ---------------------------------------------------------
     const outfitSection = this.buildSwatchSection(
       'Clothes colour',
@@ -539,6 +586,7 @@ export class CharacterCreation {
       skin: this.buildTabPanel('skin', [skinToneSection]),
       hair: this.buildTabPanel('hair', [hairColourSection, hairStyleSection]),
       eyes: this.buildTabPanel('eyes', [eyeColourSection]),
+      glasses: this.buildTabPanel('glasses', [glassesSection]),
       outfit: this.buildTabPanel('outfit', [outfitSection]),
       shoes: this.buildTabPanel('shoes', [shoeKindSection, shoeColourSection]),
       hat: this.buildTabPanel('hat', [hatSection]),
@@ -964,6 +1012,7 @@ export class CharacterCreation {
       // typo'd id would take, not a special case added for this.
       hatId: this.hatId ?? '',
       petId: this.petId,
+      glasses: this.glassesKind === 'none' ? null : this.glassesKind,
     }, focus);
   }
 
@@ -992,6 +1041,7 @@ export class CharacterCreation {
         backpackColour: this.backpackColour,
         shoeKind: this.shoeKind,
         shoeColour: this.shoeColour,
+        glassesKind: this.glassesKind === 'none' ? null : this.glassesKind,
         hat,
         pet,
       };

@@ -18,8 +18,9 @@ import { ART } from '../art/style/artPalette';
 import { disposeTree, toonMaterial } from '../art/style/materials';
 import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
+import { createGlasses } from '../art/models/glasses';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
-import type { BackpackKind, HairStyle, ShoeKind } from '../state';
+import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -68,6 +69,8 @@ export interface PreviewChoice {
   readonly shoesColour: number;
   readonly hatId: string;
   readonly petId: string;
+  /** Which glasses she wears, or `null` for none. See `PlayerState.glassesKind`. */
+  readonly glasses: GlassesKind | null;
   /**
    * The face-paint design worn, `null` for a clean face — or **omitted** by a
    * screen that does not paint faces (the character creator), which is why it
@@ -468,6 +471,13 @@ export class CharacterPreview {
     // hat's attachment just changed, so its measured height re-checks. Not
     // "is a hat worn" any more — see `KidHandle.setHatWorn`'s doc comment.
     kid.setHatWorn(hatAsset !== undefined);
+
+    // Glasses — hats and glasses coexist cleanly (separate anchors, a hat's
+    // brim already contractually clears the eye line: see `art/models/
+    // kid.ts`'s `glassesAnchor` doc comment), so unlike the hat there is no
+    // hiding check here, and no `setXWorn` remeasure call: glasses do not
+    // change `height`. `null` ("None" in the creator) attaches nothing.
+    if (choice.glasses) kid.glassesAnchor.add(createGlasses(choice.glasses).root);
 
     // The chosen starting pet, stood beside the kid at its own natural scale
     // — the same scale it will actually walk behind the player at in the

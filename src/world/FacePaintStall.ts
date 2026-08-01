@@ -706,6 +706,7 @@ function playerLook(): FacePaintLook {
     shoesColour: state.player.shoeColour,
     hatId: worn?.id ?? '',
     petId: '',
+    glasses: state.player.glassesKind,
   };
 }
 
