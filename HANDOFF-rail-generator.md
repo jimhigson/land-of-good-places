@@ -105,9 +105,28 @@ is genuinely down among the scenery, unlike the rest of the loop which flies.
 - [x] rebased onto main incl. the tie-frame fix (#144); package.json conflict
       resolved keeping both `check:tie-frame` and `check:cruiser-solves`
 - [x] **PR #148 open**
-- [ ] live 3D screenshot — chrome-devtools was in use by #147; Overseer is
-      queueing it. NOT a blocker for review, but the PR must not merge until a
-      human has looked at the loop's shape.
+- [x] family shape approval — Jim reviewed the four plan-view salt renders and
+      said "any of those is great", so the canonical shape ships as-is
+- [x] live 3D screenshots — `art-samples/cruiser-3d-{loop,castle,station}.png`
+
+## Taking screenshots of this game
+
+`window.game` exists at runtime (QA-PLAYBOOK.md mentions it) and is the only
+sane way to frame a shot. Notes that cost time to find:
+
+- The camera is an **OrthographicCamera**. Moving it further away does nothing;
+  widen `camera.top/bottom/left/right` instead. The game rewrites those every
+  frame, so pin them with `Object.defineProperty` getters.
+- `game.camera.focus`/`desiredFocus`/`offset` also get rewritten each frame —
+  hold them with a `setInterval`.
+- `world.dayNight.setTimeOfDay(0.42)` for daylight. It resumes on its own, so
+  re-assert it on an interval too.
+- Synthetic `KeyboardEvent`s and synthetic clicks are **ignored** by the game;
+  only real CDP input (`press_key`) works. The park map's "tap a spot to walk
+  there" is the quick way to travel.
+- NPC name labels are 3D sprites, not DOM, so they cannot be hidden by hiding
+  DOM nodes. Hiding `document.body`'s children hides the canvas and gives you a
+  blank blue page.
 
 ## If you are taking over
 
