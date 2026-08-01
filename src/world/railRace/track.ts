@@ -137,9 +137,37 @@ export function buildRailRaceTrack(
   const ACROSS = new Vector3(1, 0, 0);
   const UP = new Vector3(0, 1, 0);
 
+  const INK = new Color(PALETTE.ink);
+
+  /**
+   * Every span of vertices that belongs to one zone×lane — both of that lane's
+   * rails, plus its plate on the ground — keyed the way `setSparking` is asked
+   * about them. Filled in as each piece of geometry is built below.
+   */
+  const zonePaint = new Map<string, PaintSpan[]>();
+  const addSpan = (zoneIndex: number, lane: number, span: PaintSpan): void => {
+    const key = segmentKey(zoneIndex, lane);
+    const existing = zonePaint.get(key);
+    if (existing) existing.push(span);
+    else zonePaint.set(key, [span]);
+  };
+
   // --- the rails -------------------------------------------------------------
-  const railMaterials = LANE_COLOURS.map((colour) => toonMaterial(colour));
-  for (const material of railMaterials) keep(material);
+  //
+  // **One white material for all eight rails, with the lane's colour carried in
+  // the geometry's own vertex colours instead of the material's.** That is what
+  // lets a rail *itself* go black over a spark stretch (family, 1 August 2026:
+  // the whole rail should go black, not just the strip between the rails) — the
+  // exact trick the ground plate below already used, moved onto the thing a
+  // child actually reads as "the track".
+  //
+  // The alternative — a separate material, and so a separate mesh, per zone per
+  // lane — would have turned eight draw calls into eight plus two a lane, and
+  // left a seam at every zone boundary for the swept tube to not quite close.
+  const railMaterial = toonMaterial(0xffffff);
+  railMaterial.vertexColors = true;
+  keep(railMaterial);
+  const laneColour = new Color();
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     // The adapter that makes a lane of this ring look like any other route in
     // the park to the shared sweeper.
@@ -148,7 +176,7 @@ export function buildRailRaceTrack(
       pointAt: (distance, target) => route.pointAt(lane, distance, target),
       tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
     };
-    const railMaterial = railMaterials[lane % railMaterials.length]!;
+    laneColour.set(LANE_COLOURS[lane % LANE_COLOURS.length] ?? PALETTE.markerPink);
     for (const geometry of sweptRails(sampler, {
       gauge: RAIL_GAUGE,
       radius: 0.075 * RIDE_SCALE,
@@ -164,6 +192,9 @@ export function buildRailRaceTrack(
       rail.castShadow = true;
       group.add(rail);
       keep(geometry);
+      for (const [zoneIndex, span] of paintRail(geometry, route, layout, laneColour, INK)) {
+        addSpan(zoneIndex, lane, span);
+      }
     }
   }
 
@@ -182,20 +213,23 @@ export function buildRailRaceTrack(
   keep(sparkGeometry);
   const sparkVertexCount = sparkGeometry.attributes.position!.count;
   const sparkColours = new Float32Array(sparkVertexCount * 3);
-  const inkFill = new Color(PALETTE.ink);
   for (let i = 0; i < sparkVertexCount; i += 1) {
-    sparkColours[i * 3] = inkFill.r;
-    sparkColours[i * 3 + 1] = inkFill.g;
-    sparkColours[i * 3 + 2] = inkFill.b;
+    sparkColours[i * 3] = INK.r;
+    sparkColours[i * 3 + 1] = INK.g;
+    sparkColours[i * 3 + 2] = INK.b;
   }
   const sparkColourAttribute = new BufferAttribute(sparkColours, 3);
   sparkGeometry.setAttribute('color', sparkColourAttribute);
   // Keyed the same way `active` segments arrive from `RailRace.ts`, so
   // `setSparking` is an O(active carts) lookup rather than a scan of every
-  // zone×lane every frame.
-  const sparkSegmentsByKey = new Map<string, { vertexStart: number; vertexCount: number }>();
+  // zone×lane every frame — and into the *same* map the rails registered
+  // themselves in, so lighting a stretch lights its rails and its plate
+  // together with no second code path to fall out of step.
   for (const segment of sparkSegments) {
-    sparkSegmentsByKey.set(segmentKey(segment.zoneIndex, segment.lane), segment);
+    addSpan(segment.zoneIndex, segment.lane, {
+      attribute: sparkColourAttribute,
+      vertices: rangeIndices(segment.vertexStart, segment.vertexCount),
+    });
   }
   const sparkRibbons = decal(new Mesh(sparkGeometry, sparkMaterial));
   sparkRibbons.name = 'railRace:spark-zones';
@@ -376,8 +410,30 @@ export function buildRailRaceTrack(
   // --- the live bits ---------------------------------------------------------
   const tint = new Color();
   const sparkColour = new Color();
-  const INK = new Color(PALETTE.ink);
   const FLASH = new Color(PALETTE.fairyWarm);
+  /**
+   * Which zone×lane keys were lit last frame.
+   *
+   * Only these are painted back to ink, rather than resetting every black
+   * stretch on the ring every frame. That mattered once the rails joined in:
+   * the plate was a few hundred vertices, the eight rail tubes are twenty-odd
+   * thousand, and almost none of them change from one frame to the next.
+   */
+  let litKeys: string[] = [];
+  const nextLitKeys: string[] = [];
+  const touched = new Set<BufferAttribute>();
+
+  const paintSpans = (key: string, colour: Color): void => {
+    for (const span of zonePaint.get(key) ?? []) {
+      const array = span.attribute.array as Float32Array;
+      for (const vertex of span.vertices) {
+        array[vertex * 3] = colour.r;
+        array[vertex * 3 + 1] = colour.g;
+        array[vertex * 3 + 2] = colour.b;
+      }
+      touched.add(span.attribute);
+    }
+  };
 
   return {
     group,
@@ -415,25 +471,22 @@ export function buildRailRaceTrack(
       // phases to read as "sparking", only as not-a-smooth-pulse.
       const flash = Math.sin(elapsed * 47) > 0 ? 1 : 0.35;
       sparkColour.copy(INK).lerp(FLASH, flash);
-      const array = sparkColourAttribute.array as Float32Array;
-      // Every vertex starts each frame calm, so a zone that stopped sparking
-      // since last frame goes dark again rather than sticking lit.
-      for (let i = 0; i < array.length; i += 3) {
-        array[i] = INK.r;
-        array[i + 1] = INK.g;
-        array[i + 2] = INK.b;
+
+      nextLitKeys.length = 0;
+      for (const { zoneIndex, lane } of active) nextLitKeys.push(segmentKey(zoneIndex, lane));
+
+      // A stretch that stopped sparking since last frame goes back to plain
+      // black — not back to its lane colour: a black stretch is black whether
+      // anyone is on it or not, and that is how a child knows where it is
+      // before she gets there.
+      for (const key of litKeys) {
+        if (!nextLitKeys.includes(key)) paintSpans(key, INK);
       }
-      for (const { zoneIndex, lane } of active) {
-        const segment = sparkSegmentsByKey.get(segmentKey(zoneIndex, lane));
-        if (!segment) continue;
-        const end = segment.vertexStart + segment.vertexCount;
-        for (let v = segment.vertexStart; v < end; v += 1) {
-          array[v * 3] = sparkColour.r;
-          array[v * 3 + 1] = sparkColour.g;
-          array[v * 3 + 2] = sparkColour.b;
-        }
-      }
-      sparkColourAttribute.needsUpdate = true;
+      for (const key of nextLitKeys) paintSpans(key, sparkColour);
+
+      for (const attribute of touched) attribute.needsUpdate = true;
+      touched.clear();
+      litKeys = nextLitKeys.slice();
     },
 
     dispose(): void {
@@ -453,6 +506,89 @@ interface SparkRibbonSegment extends SparkingSegment {
 /** The lookup key `setSparking` and `buildSparkRibbons` agree on. */
 function segmentKey(zoneIndex: number, lane: number): string {
   return `${zoneIndex}:${lane}`;
+}
+
+/**
+ * A run of vertices `setSparking` can recolour: which buffer, and which of its
+ * vertices.
+ *
+ * Deliberately an index list rather than a start/count range. The ground plate
+ * *is* contiguous, but a rail tube's vertices are laid out ring by ring along
+ * the curve and there is no promise anywhere that a zone's rings stay in one
+ * block once the curve wraps — an explicit list costs four bytes a vertex and
+ * removes the assumption entirely.
+ */
+interface PaintSpan {
+  readonly attribute: BufferAttribute;
+  readonly vertices: Uint32Array;
+}
+
+function rangeIndices(start: number, count: number): Uint32Array {
+  const indices = new Uint32Array(count);
+  for (let i = 0; i < count; i += 1) indices[i] = start + i;
+  return indices;
+}
+
+/**
+ * Gives one swept rail its lane's colour, and its black stretches ink.
+ *
+ * Returns which of its vertices belong to which zone, so `setSparking` can
+ * flash exactly those and nothing else.
+ *
+ * **How a vertex knows where it is on the route.** Not from the tube's own `u`
+ * parameter — that is the *rail's* arc-length fraction, and a rail swept at an
+ * offset from the centre line is a slightly different length from the route it
+ * follows. It is read straight back out of the vertex's world position
+ * instead, which the ring's shape makes exact: the lanes are concentric
+ * circles about the origin, and `route.angleAt(d) = -d / NOMINAL_RADIUS`, so
+ * the arc length at `(x, z)` is `-atan2(z, x) * NOMINAL_RADIUS`. The tube's own
+ * radius perturbs that by at most 0.19 m, against stretches 15–23 m long.
+ */
+function paintRail(
+  geometry: BufferGeometry,
+  route: RailRaceRoute,
+  layout: HazardLayout,
+  base: Color,
+  ink: Color,
+): Map<number, PaintSpan> {
+  const position = geometry.attributes.position as BufferAttribute;
+  const count = position.count;
+  const colours = new Float32Array(count * 3);
+  const buckets = new Map<number, number[]>();
+
+  for (let i = 0; i < count; i += 1) {
+    const distance = route.wrap(-Math.atan2(position.getZ(i), position.getX(i)) * NOMINAL_RADIUS);
+    // `layout.zones` are measured from the start/finish arch, which stands at
+    // `route.startDistance` rather than at the route's raw zero — the same
+    // correction `buildSparkRibbons` makes in the other direction.
+    const lapOffset = route.wrap(distance - route.startDistance);
+    let zoneIndex = -1;
+    for (let k = 0; k < layout.zones.length; k += 1) {
+      const zone = layout.zones[k]!;
+      if (lapOffset >= zone.from && lapOffset <= zone.to) {
+        zoneIndex = k;
+        break;
+      }
+    }
+    const colour = zoneIndex >= 0 ? ink : base;
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+    if (zoneIndex >= 0) {
+      const bucket = buckets.get(zoneIndex);
+      if (bucket) bucket.push(i);
+      else buckets.set(zoneIndex, [i]);
+    }
+  }
+
+  const attribute = new BufferAttribute(colours, 3);
+  geometry.setAttribute('color', attribute);
+  return new Map(
+    [...buckets].map(([zoneIndex, vertices]) => [
+      zoneIndex,
+      { attribute, vertices: Uint32Array.from(vertices) },
+    ]),
+  );
 }
 
 /**
