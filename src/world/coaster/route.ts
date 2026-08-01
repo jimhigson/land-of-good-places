@@ -77,7 +77,7 @@ const OUTER_RADIUS = 47;
 const CORRIDOR_RADIUS = 3;
 
 /** How close the loop may come to an earlier part of itself. */
-const SELF_CLEARANCE = 7;
+const SELF_CLEARANCE = 5;
 
 /**
  * Tightest turn the ride will make.
@@ -96,6 +96,7 @@ const DESIRED_LENGTH = 220;
 
 /** Roughly this far apart, in metres, along the loop. */
 const CONTROL_SPACING = 3;
+
 
 interface TallObstacle {
   readonly x: number;
@@ -135,11 +136,11 @@ function groundClearOfPlots(x: number, z: number, radius: number, exceptId?: str
 /** The pieces the Sky Cruiser is built from. `MIN_TURN_RADIUS` lives here. */
 const CRUISER_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
   [
-    { name: 'tight', minRadius: MIN_TURN_RADIUS, maxRadius: 18, minLength: 14, maxLength: 24 },
-    { name: 'sweep', minRadius: 18, maxRadius: 30, minLength: 18, maxLength: 30 },
-    { name: 'easy', minRadius: 30, maxRadius: 55, minLength: 20, maxLength: 34 },
+    { name: 'tight', minRadius: MIN_TURN_RADIUS, maxRadius: 18, minLength: 16, maxLength: 28 },
+    { name: 'sweep', minRadius: 18, maxRadius: 32, minLength: 22, maxLength: 38 },
+    { name: 'easy', minRadius: 32, maxRadius: 60, minLength: 26, maxLength: 46 },
   ],
-  { minLength: 16, maxLength: 28 },
+  { minLength: 22, maxLength: 40 },
 );
 
 export interface CoasterRouteOptions {
@@ -178,7 +179,11 @@ export interface CoasterRouteOptions {
  * scenery, where every plot is in its way. Putting that constraint on the start
  * pose keeps the plan-view search itself simple and purely horizontal.
  */
-function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof circleBoundary>): Pose2[] {
+function stationPoses(
+  stallId: string,
+  rng: Rng,
+  boundary: ReturnType<typeof circleBoundary>,
+): Pose2[] {
   const stall = placedEntry(stallId);
   const poses: { pose: Pose2; key: number }[] = [];
   // Beside the booth, not a walk away from it: the old solve put the track
@@ -190,10 +195,10 @@ function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof cir
   // Offering plenty of candidates is not generosity, it is the thing that makes
   // this solve at all: a first cut offered six and the search failed on every
   // one. Each is cheap to propose and the search abandons a bad one quickly.
-  for (let ring = 0; ring < 8; ring += 1) {
+  for (let ring = 0; ring < 11; ring += 1) {
     const distance = 5 + ring;
-    for (let i = 0; i < 48; i += 1) {
-      const angle = (i / 48) * TAU;
+    for (let i = 0; i < 64; i += 1) {
+      const angle = (i / 64) * TAU;
       const x = stall.x + Math.cos(angle) * distance;
       const z = stall.z + Math.sin(angle) * distance;
       // Two headings per spot: the track may run past the booth either way.
@@ -201,15 +206,30 @@ function stationPoses(stallId: string, rng: Rng, boundary: ReturnType<typeof cir
         const hx = -Math.sin(angle) * sign;
         const hz = Math.cos(angle) * sign;
         const pose: Pose2 = { x, z, hx, hz };
-        if (stationWindowIsClear(pose, boundary, stallId)) poses.push({ pose, key: rng.unit() });
+        if (!stationWindowIsClear(pose, boundary, stallId)) continue;
+        // Plain seeded shuffle, and it is worth recording what was tried
+        // instead, because both alternatives were worse.
+        //
+        // Ordering the roomiest first — march along the heading, see how far
+        // you get, prefer the longest run — was *slower*: the roomiest stations
+        // all sit in the same open corner and fail the same way, so the search
+        // ground through dozens of near-identical hopeless starts before
+        // reaching a genuinely different one.
+        //
+        // Using that same measurement as a filter was catastrophic: it cut
+        // every seed from solvable to unsolvable. A straight line along the
+        // heading is a bad predictor of whether a *curved* route can leave the
+        // station, and it threw away precisely the stations that work.
+        //
+        // Diversity beats cleverness here.
+        poses.push({ pose, key: rng.unit() });
       }
     }
   }
-  // Seeded order, so a different salt prefers a different station and the
-  // search is still deterministic.
   poses.sort((a, b) => a.key - b.key);
   return poses.map((entry) => entry.pose);
 }
+
 
 /**
  * Is the low, flat run through a candidate station on clear ground?
@@ -224,15 +244,22 @@ function stationWindowIsClear(
   boundary: ReturnType<typeof circleBoundary>,
   ownStallId: string,
 ): boolean {
-  // The boarding flat, plus a little of the ramp either side. Not the whole
-  // ramp: by the far end of it the track is already climbing clear of the
-  // scenery, and demanding 26 m of empty ground each way rejects every station
-  // this park can actually offer.
-  const reach = STATION_FLAT + 2;
+  // The platform deck and a little either side — not the whole ramp.
+  //
+  // This window is the single thing that decides how many stations the search
+  // gets to choose from, and it was originally far too greedy. Demanding the
+  // full flat plus ramp be clear of every plot asked for 22 m of empty ground
+  // in a park whose plots are laid out with 5 m corridors between them: it
+  // offered 2 to 24 candidate stations depending on the seed, and four seeds
+  // out of five then had no solvable loop from any of them.
+  //
+  // The deck itself is 6 m long (`plan.ts`), and past it the track is already
+  // climbing away, so this is what genuinely has to be standable.
+  const reach = 6;
   for (let along = -reach; along <= reach; along += 2) {
     const x = pose.x + pose.hx * along;
     const z = pose.z + pose.hz * along;
-    if (!groundClearOfPlots(x, z, CORRIDOR_RADIUS - 1.5, ownStallId)) return false;
+    if (!groundClearOfPlots(x, z, 1.2, ownStallId)) return false;
     if (boundary.distanceToEdge(x, z) < CORRIDOR_RADIUS) return false;
   }
   return true;
@@ -258,6 +285,16 @@ export class CoasterRoute {
     const boundary = circleBoundary(options.outerRadius ?? OUTER_RADIUS);
 
     // --- horizontal: the generator solves the plan view --------------------
+    const clear = (x: number, z: number, radius: number): boolean => {
+      for (const tall of obstacles) {
+        if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
+      }
+      if (other) {
+        const nearest = other.nearestPoint(x, z);
+        if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
+      }
+      return true;
+    };
     const brief: RouteBrief = {
       // A stream of its own, so changing how many random draws the height
       // profile takes cannot silently reshape the loop.
@@ -266,21 +303,12 @@ export class CoasterRoute {
       desiredLength: options.desiredLength ?? DESIRED_LENGTH,
       closed: true,
       startPoses: stationPoses(options.stationStallId, rng, boundary),
-      clear: (x, z, radius) => {
-        for (const tall of obstacles) {
-          if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
-        }
-        if (other) {
-          const nearest = other.nearestPoint(x, z);
-          if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
-        }
-        return true;
-      },
+      clear,
       boundary,
       corridorRadius: CORRIDOR_RADIUS,
       selfClearance: SELF_CLEARANCE,
       minRadius: MIN_TURN_RADIUS,
-      budgets: { perJoint: 16, restarts: 90 },
+      budgets: { perJoint: 16, restarts: 200 },
     };
     const plan = solveRailRoute(brief);
     this.plan = plan;

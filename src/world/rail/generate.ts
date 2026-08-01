@@ -156,8 +156,15 @@ export class RailRouteUnsolvable extends Error {
   }
 }
 
-/** Metres between validation samples along a candidate piece. */
-const SAMPLE_STEP = 0.6;
+/**
+ * Metres between validation samples along a candidate piece.
+ *
+ * One metre, not the 0.6 tried first. Everything being dodged is metres across
+ * — the castle's bounding circle is 19 m in radius, the corridor 3 m wide — so
+ * a sample every metre cannot slip between an obstacle and its neighbour, and
+ * the finer spacing bought nothing but a 40% slower search.
+ */
+const SAMPLE_STEP = 1;
 
 /** Arc distance behind the head that self-clearance ignores (it is the head). */
 const SELF_IGNORE_ARC = 22;
@@ -189,7 +196,7 @@ const VIA_MAX_GAP = 95;
  * it is the wrong place to start, and the budget is better spent on the next
  * candidate station than on proving this one impossible.
  */
-const STEPS_PER_START = 600;
+const STEPS_PER_START = 800;
 
 /**
  * How far behind the start the approach corridor sits.

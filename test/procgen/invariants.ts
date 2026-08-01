@@ -364,6 +364,78 @@ const railRaceFliesClear: Invariant = (facts) => {
 };
 
 /**
+ * Half a Sky Cruiser car, in metres.
+ *
+ * The car body is `toonBox(1.5, 0.7, 2.2, …)` in `Coaster.ts` — so 0.75 m of it
+ * sticks out either side of the centre line, and 0.75 m is therefore the gap at
+ * which the ride stops missing something and starts hitting it.
+ *
+ * Deliberately the *car*, not the rails (0.625 m) and emphatically not the 3 m
+ * corridor the generator aims for. Asserting the generator's own target would
+ * only prove it can do arithmetic, and would turn every future tuning change
+ * into a test failure. This is the number at which a child in a seat would feel
+ * the castle go past.
+ */
+const CAR_HALF_WIDTH = 0.75;
+
+/**
+ * Things the Sky Cruiser is too low to fly over and must go *around*.
+ *
+ * The cruise floor is 6.2 m, which clears the trees, the garlands and the
+ * train. It does not clear the castle or the big wheel, and those two are
+ * therefore the only horizontal obstacles the loop actually has.
+ */
+const TOO_TALL_TO_FLY_OVER = ['building', 'ferrisWheel'] as const;
+
+/**
+ * **The Sky Cruiser goes round the castle and the big wheel, not through them.**
+ *
+ * This invariant exists because its absence was a shipped bug (issue #113). The
+ * old route solver pushed its control points out of the castle and then
+ * *smoothed them*, which quietly pulled them back in, and nothing anywhere
+ * measured the finished curve against either obstacle — not `check:park`, not
+ * the boot assert, not this file. The coaster clipped the castle in plain sight
+ * for weeks with a green build.
+ *
+ * So this measures the built track, sampled the whole way round, against the
+ * built plots — never the generator's avoidance rule, which is exactly the
+ * thing that was wrong. It would have failed on the old solve.
+ */
+const skyCruiserClearsTheTallThings: Invariant = (facts) => {
+  const route = facts.world.coaster.route;
+  const complaints: string[] = [];
+  const point = new Vector3();
+
+  for (const id of TOO_TALL_TO_FLY_OVER) {
+    const plot = facts.plots.find((candidate) => candidate.id === id);
+    if (!plot) {
+      complaints.push(`the park has no plot called ${id} to measure the coaster against`);
+      continue;
+    }
+    let worst = Infinity;
+    let worstAt: readonly [number, number] = [0, 0];
+    // Every metre: the loop is a few hundred metres long and a clip can be
+    // brief, so a coarse sweep can step straight over the one bad bend.
+    for (let distance = 0; distance < route.length; distance += 1) {
+      route.pointAt(distance, point);
+      const gap = Math.hypot(point.x - plot.x, point.z - plot.z) - plot.boundingRadius;
+      if (gap < worst) {
+        worst = gap;
+        worstAt = [point.x, point.z];
+      }
+    }
+    if (worst < CAR_HALF_WIDTH) {
+      complaints.push(
+        `the Sky Cruiser passes ${worst.toFixed(2)} m from ${id} at ${fmt(worstAt)} — ` +
+          `a car is ${CAR_HALF_WIDTH * 2} m wide, so it clips it`,
+      );
+    }
+  }
+
+  expect(complaints, complaints.join('\n')).toHaveLength(0);
+};
+
+/**
  * The suite. **Add an invariant by adding a line here.**
  */
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
@@ -377,6 +449,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every path is lit end to end', everyPathIsLit],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
+  ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
 ];
 
 /**
