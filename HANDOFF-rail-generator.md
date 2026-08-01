@@ -100,10 +100,25 @@ is genuinely down among the scenery, unlike the rest of the loop which flies.
 - [x] clearance assert + procgen invariant
 - [x] `npm run build` passes; `npm run test:procgen` 55/55 across 5 seeds
 - [x] turning-radius measurement (`npm run measure:rail-radii`)
-- [ ] sweep:seeds comparison vs main (running)
-- [ ] screenshots for family shape approval
-- [ ] rebase onto main (tie-frame merged as #144)
-- [ ] PR
+- [x] sweep:seeds — 30/30 on this branch, 30/30 on origin/main, no regression
+- [x] plan-view renders for the shape approval (`art-samples/cruiser-plan-*.png`)
+- [x] rebased onto main incl. the tie-frame fix (#144); package.json conflict
+      resolved keeping both `check:tie-frame` and `check:cruiser-solves`
+- [x] **PR #148 open**
+- [ ] live 3D screenshot — chrome-devtools was in use by #147; Overseer is
+      queueing it. NOT a blocker for review, but the PR must not merge until a
+      human has looked at the loop's shape.
+
+## If you are taking over
+
+Everything is committed and pushed to `feat/rail-generator`. The only work left
+is the live browser screenshot, and re-checking the shape decision with Jim.
+
+`npm run test:procgen` needs vitest, which is **not installed in the shared
+checkout** (`/Users/jim/dev/landOfGoodPlaces/node_modules` has no vitest, and
+this is true on main too — it is not something this branch broke). I installed
+it into this worktree with `npm install vitest --no-save`. Worth telling the
+Overseer: nobody can run the procgen suite locally without doing that.
 
 ## Hard-won findings — read before changing any tuning constant
 
