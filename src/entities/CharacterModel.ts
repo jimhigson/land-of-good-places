@@ -78,6 +78,14 @@ export class CharacterModel {
   readonly backpackAnchor: Group;
   /** Where a jet pack straps on — the middle of her back. See `WornJetpack`. */
   readonly jetpackAnchor: Group;
+  /**
+   * Where glasses sit — the bridge of the nose, at eye height. See
+   * `art/models/glasses.ts` and `KidHandle.glassesAnchor`. Attached once, at
+   * construction (`Player`'s constructor), not driven by a `Worn*` system the
+   * way a hat is — glasses are chosen in the character creator and never sold,
+   * so there is nothing to swap mid-game.
+   */
+  readonly glassesAnchor: Group;
 
   private readonly kid: KidHandle;
 
@@ -96,6 +104,7 @@ export class CharacterModel {
     this.holdAnchor = this.kid.holdAnchor;
     this.backpackAnchor = this.kid.backpackAnchor;
     this.jetpackAnchor = this.kid.jetpackAnchor;
+    this.glassesAnchor = this.kid.glassesAnchor;
   }
 
   /**
