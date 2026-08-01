@@ -96,11 +96,16 @@ future pet model from.
   crowd/ride-camera/orientation/waypoint/park/jitter/rail-race/tie-frame/
   cruiser checks, then `vite build`): **exit 0**, no errors, log saved at
   `/tmp/rail-cart-build.log` on the machine this ran on.
-- `npm run test:procgen`: kicked off; check its result before merging if this
-  handoff is picked up mid-run — nothing in `test/procgen/invariants.ts`
-  measures the Rail Race cart today (checked: no `cart`/`Cart` hits in that
-  file or `scripts/check-rail-race.mts`), so this change shouldn't be able to
-  fail it, but it wasn't run to completion by the time this was written.
+- `npm run test:procgen`: **5 test files, 65 tests, all passed.** Nothing in
+  `test/procgen/invariants.ts` measures the Rail Race cart today (checked: no
+  `cart`/`Cart` hits in that file or `scripts/check-rail-race.mts`), and this
+  change doesn't touch procgen placement, so no invariant needed
+  adding/extending for it.
+- Note for whoever runs this next: this worktree had no `node_modules` (git
+  worktrees don't share it) and `vitest` wasn't installed in the shared
+  checkout's `node_modules` either, so `test:procgen` failed with
+  `vitest: command not found` until a plain `npm install` was run inside
+  *this worktree only*. Nothing was touched in the shared checkout.
 
 ## Visual QA — not done
 
