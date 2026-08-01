@@ -75,7 +75,28 @@ Portrait rider **1.83× bigger**, camera in from 30.6 m to 17.8 m. Landscape
       overlap to resolve; it touches RailRace.ts/track.ts/RaceHud.ts, this
       touches camera.ts + the check)
 - [x] PR **#147** — https://github.com/jimhigson/land-of-good-places/pull/147
-- [ ] browser QA — **the one thing outstanding**. chrome-devtools was owned by
+- [x] browser QA — **done**, and it found a real bug. See below.
+- [ ] (nothing outstanding)
+
+## What the browser found
+
+The rig solved its framing against a point on the rail, but the rider sits
+~1.9 m above the rail, and a tilted camera divides by a depth that raising a
+point shortens — so a raised point already off centre is pushed further off it.
+Live measurement: rider asked for at 10% across, arrived at 8%, dipping to 6.4%
+on the undulation — i.e. clipped by the left edge of a 390 px screen. Fixed at
+the cause in 60d235a (solve at the rider's height; RIDER_SCREEN_X_PORTRAIT to
+13%); re-measured live at 11.6–16.9%, never clipped. The check had the same
+fault and now shares the rig's constant.
+
+Final portrait numbers: 22.4 m picture, 17.4 px/m (was 10.4 = **1.67x**), 33.5 m
+of road ahead (was 28.7). Landscape 37.5 px/m (was 34.1). Screenshots committed
+to `art/renders/rail-race-portrait-{before,after}.png` and posted on the PR.
+
+Treeline occlusion at r≈75: clear, occludes neither track nor rider, and the
+before shot has more of it. Lane separation: reads well.
+
+Superseded note, kept for context — chrome-devtools was owned by
       the PR #145 agent throughout; the Overseer will message when free. Want a
       390x844 portrait before/after. Two things specifically worth eyes on:
       the rig now stands at r≈74 (was 83.5) and 5.7 m up (was 11), so it is
