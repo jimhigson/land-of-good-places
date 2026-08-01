@@ -43,6 +43,7 @@ import {
   CUTE_PLACEMENTS,
   FLOWER_COLOURS,
   GAME_MODES,
+  GLASSES_KINDS,
   HAIR_STYLES,
   INVENTORY_KINDS,
   SHOE_KINDS,
@@ -52,6 +53,7 @@ import {
   type FacePaintId,
   type GameMode,
   type GameTime,
+  type GlassesKind,
   type HairStyle,
   type InventoryItem,
   type ShoeKind,
@@ -151,6 +153,8 @@ export interface SavedPlayer {
   readonly backpackColour?: number;
   readonly shoeKind?: ShoeKind;
   readonly shoeColour?: number;
+  /** `null` ("no glasses") is a real answer here too — read like `facePaint`. */
+  readonly glassesKind?: GlassesKind | null;
   readonly health?: number;
   readonly maxHealth?: number;
   readonly facePaint?: FacePaintId;
@@ -392,6 +396,7 @@ function readPlayer(value: unknown): SavedPlayer | undefined {
   put(player, 'backpackColour', readColour(value['backpackColour']));
   put(player, 'shoeKind', readMember(value['shoeKind'], SHOE_KINDS));
   put(player, 'shoeColour', readColour(value['shoeColour']));
+  put(player, 'glassesKind', readNullableMember(value['glassesKind'], GLASSES_KINDS));
   put(player, 'health', readNumber(value['health']));
   put(player, 'maxHealth', readNumber(value['maxHealth']));
   // `facePaint` is a design id or `null` for a clean face, and `null` is a
@@ -581,4 +586,17 @@ function readMember<T extends string>(value: unknown, allowed: readonly T[]): T 
   return typeof value === 'string' && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : undefined;
+}
+
+/**
+ * {@link readMember}, with `null` ("no glasses") accepted as a real answer
+ * rather than a missing one — the same distinction {@link readUid} draws for
+ * `facePaint`.
+ */
+function readNullableMember<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | null | undefined {
+  if (value === null) return null;
+  return readMember(value, allowed);
 }

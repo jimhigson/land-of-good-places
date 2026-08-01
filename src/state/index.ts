@@ -22,6 +22,7 @@ export type {
   GameMode,
   GameState,
   GameTime,
+  GlassesKind,
   HairStyle,
   InventoryItem,
   InventoryKind,

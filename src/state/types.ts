@@ -99,6 +99,21 @@ export type BackpackKind = (typeof BACKPACK_KINDS)[number];
 export const SHOE_KINDS = ['plain', 'ripika', 'sandal', 'sparkle'] as const;
 export type ShoeKind = (typeof SHOE_KINDS)[number];
 
+/**
+ * Glasses chosen in the character creator, or `null` for none. {@link ShoeKind}'s
+ * twin, for the same reasons: `state/` never imports `art/`, and a save read
+ * back off disk needs a runtime list to validate against rather than a
+ * compile-time-only type. The canonical list lives in `art/models/glasses.ts`.
+ *
+ * Unlike a hair style, a backpack shape or a shoe pair, "none" is a genuine
+ * fourth answer here rather than one more entry in the list — every kid has
+ * *some* hair and *some* shoes, but most have no glasses at all, so the field
+ * this drives (`PlayerState.glassesKind`) is nullable rather than defaulting
+ * to the first kind in the union the way `hairStyle`/`shoeKind` do.
+ */
+export const GLASSES_KINDS = ['sunglasses', 'star', 'heart'] as const;
+export type GlassesKind = (typeof GLASSES_KINDS)[number];
+
 /** Which shop / activity a cute thing came from — drives Cute-o-dex grouping. */
 export const CUTE_CATEGORIES = [
   'toy',
@@ -248,6 +263,12 @@ export interface PlayerState {
   shoeKind: ShoeKind;
   /** What colour that pair is painted. A bare hex, like every other colour here. */
   shoeColour: number;
+  /**
+   * Which glasses she wears, or `null` for none — see `GlassesKind`. Chosen in
+   * the character creator, and worn from the very first spawn (`entities/
+   * Player.ts`), not just in the creator's own preview.
+   */
+  glassesKind: GlassesKind | null;
   /** Only meaningful in mayhem mode; in normal mode health never drops. */
   health: number;
   maxHealth: number;
