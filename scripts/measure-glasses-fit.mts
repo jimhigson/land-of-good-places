@@ -154,14 +154,27 @@ const MAX_CENTRE_DRIFT = 0.01;
  * change to how wide this one kind reads on the face, not drift to paper
  * over: the geometry was checked (rim inner hole still clears the nose
  * bridge by ~10 cm at kid scale, no mesh overlap at the centreline) before
- * this number was raised. 0.82 gives the same ~0.08 headroom above the
- * measured 0.79× that the general `MAX_SPAN` gives above the widest of the
- * three original kinds, rather than shrink-wrapping the bound to today's
- * exact figure. Star and heart are untouched and stay under the general
- * `MAX_SPAN`.
+ * this number was raised. 0.82 gives headroom above the measured 0.79×,
+ * rather than shrink-wrapping the bound to today's exact figure.
+ *
+ * Star and heart were grown to match on the same day, by the same request
+ * ("the star and heart also need to be much bigger to match") — see
+ * `glasses.ts`'s `STAR_FRAME_SIZE`/`HEART_FRAME_SIZE` doc comments for why
+ * each grew by a different ratio from its own baseline: unlike the
+ * sunglasses' torus, a star or heart frame is a filled, symmetric shape, so
+ * its near-nose edge moves in exactly as fast as its outer edge moves out,
+ * and each shape's own geometry caps how far it can grow before the two
+ * lenses meet over the nose bridge. Star's cap (`0.27`, checked ~30 mm clear
+ * of the other eye's star at kid scale) landed it at a measured span of
+ * 0.69× — still inside the general `MAX_SPAN`, so it needs no override here.
+ * Heart had far more headroom in its own geometry and was grown further
+ * (`0.36`, checked ~26 mm clear); its measured span, 0.73×, is a hair over
+ * the general bound, so it gets the same kind of override sunglasses did.
+ * 0.78 gives real headroom above that 0.73× without shrink-wrapping to it.
  */
 const MAX_SPAN_OVERRIDE: Partial<Record<GlassesKind, number>> = {
   sunglasses: 0.82,
+  heart: 0.78,
 };
 
 /**
