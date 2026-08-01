@@ -1,61 +1,35 @@
 import { Rng } from '../../core/mathUtils';
-import { RIDE_SCALE } from './route';
 
 /**
- * **The two things you have to let go for.**
+ * **The one thing you have to let go for.**
  *
  * The ride has exactly one control — hold to accelerate, release to coast — so
- * every hazard has to be answered with the same gesture, and the interest is
- * entirely in *when* and *for how long*:
+ * the hazard has to be answered with the same gesture, and the interest is
+ * entirely in *when* and *for how long*.
  *
- * - A **duck bar** is a moment. Release as you reach it and you drop into the
- *   cart and go under clean, however fast you were going. The rule is the
- *   family's own, verbatim from the playtest that settled it: *"so long as not
- *   holding when passing under the barrier that should be enough to avoid it."*
- *   No speed threshold, no minimum coast beforehand, no grace period while you
- *   are underneath. The whole game is learning when to let go.
- * - A **spark zone** is a stretch. The rail goes black for twenty-odd metres and
- *   you have to be off the button for *all* of it; hold anywhere inside and the
- *   rail throws sparks and drags you down. Holding through one is never a crash
- *   — it is simply slower than coasting through it, which is the kindest way to
- *   teach a rule there is.
+ * A **spark zone** is a stretch. The rail goes black for twenty-odd metres and
+ * you have to be off the button for *all* of it; hold anywhere inside and the
+ * rail throws sparks and drags you down. Holding through one is never a crash
+ * — it is simply slower than coasting through it, which is the kindest way to
+ * teach a rule there is.
  *
- * Together they ask for two different shapes of the same skill: a flick of the
- * thumb, and the patience to keep it off.
+ * **1 August 2026 — the duck bar retired.** The ride used to carry a second
+ * hazard, a bar you ducked under by releasing the instant before it, snapped
+ * onto a real trestle support so it always had something visible holding it
+ * up. Jim's own verdict after a full day building that support-snapping
+ * mechanism, the Blender asset and its hazard tape: "remove the head bump
+ * from the game's dynamics and replace entirely with more frequent black
+ * sections on the track." Deliberate simplification, not a bug fix — one
+ * mechanic teaches the one lesson ("when do I let go") on its own, so the
+ * spark zone below is now the *whole* game, laid out denser to carry the
+ * pacing the two hazards used to share. See `planHazards`'s own doc comment
+ * for the retuned numbers and why.
+ *
+ * The trestle-leg support structure the bar's snapping was built against is
+ * unrelated infrastructure — every lane still needs holding up — and stays
+ * exactly as it was; only the bar that once needed to coincide with a leg is
+ * gone. See `track.ts`'s `trestleSpots`.
  */
-
-/**
- * How high above the rail head a duck bar hangs. Ducking gets you under it.
- *
- * Scaled by `RIDE_SCALE` like the rail gauge and the cart itself — this is a
- * purely visual clearance (bonking is decided by button state at the moment
- * of crossing, not an actual pose/collision test, see the header above).
- *
- * **2.1, not 1.5.** A previous pass (1 August 2026) set this to 1.5,
- * documented as "measured live... setting the bar roughly halfway between
- * [her ducking and standing head heights]." Re-measured live against the
- * actual running dev build (1 August 2026, same day, during the duck-bar
- * asset work — see `HANDOFF-duck-bar-blender-asset.md`): querying
- * `window.game.world.railRace` and `window.game.player.model.hatAnchor`'s
- * real world position directly (not recomputing the pose formula and
- * checking it against itself — the exact tautology
- * `ART-AGENT-NOTES.md` §6 warns a parity check can quietly become), her
- * crown sits **4.70 m above the rail even while off the button** (the
- * *better* of her two states). The old 1.5 was still nearly a metre below
- * that — she passed through every bar whichever way she was holding, not
- * "occasionally clipped", which is exactly Jim's report ("even while
- * ducking the character clearly goes through them overlapping by a lot").
- *
- * `DUCK_DROP` (`RailRace.ts`) is a fixed vertical translate, not a pose
- * change, so her head-to-root distance is the same in both states; her
- * standing head height is the same 4.70 m plus `DUCK_DROP * RIDE_SCALE`
- * (1.25 m) = 5.95 m. 2.1 sits roughly halfway between the two measured
- * figures (4.70 m and 5.95 m) — the same "halfway between the two real
- * states" rule the previous pass intended, just re-grounded in what the
- * running game actually measures rather than a formula re-derived from the
- * same code that produces the pose.
- */
-export const DUCK_CLEARANCE = 2.1 * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.
@@ -64,14 +38,16 @@ export const DUCK_CLEARANCE = 2.1 * RIDE_SCALE;
  * it slides into frame and is never a surprise. About three seconds at racing
  * pace, against the second or so it takes to react — enough slack for a
  * six-year-old to notice, decide and act.
+ *
+ * Currently unused: the duck bar's warning lamps were the one thing this
+ * distance fed, and a black stretch is its own warning from as far away as it
+ * is visible at all, with nothing else needing a countdown to it. Kept rather
+ * than deleted — it is a real, still-true fact about the ride ("about three
+ * seconds of notice, on foot"), and a future zone-only warning treatment (a
+ * glow at the leading edge, say) would want exactly this number rather than
+ * reinventing it.
  */
 export const ALERT_RANGE = 34;
-
-/** A bar across a lane, at one arc distance. */
-export interface DuckBar {
-  /** Metres along the loop, measured from the start/finish arch. */
-  readonly at: number;
-}
 
 /** A blackened stretch of rail. */
 export interface SparkZone {
@@ -82,7 +58,6 @@ export interface SparkZone {
 }
 
 export interface HazardLayout {
-  readonly bars: readonly DuckBar[];
   readonly zones: readonly SparkZone[];
 }
 
@@ -93,27 +68,15 @@ export interface HazardLayout {
  * doing rather than clever wrap arithmetic at hit-test time: a rider's
  * `travelled` only ever increases, so a schedule in travelled-metres can be
  * walked with a single cursor per rider and there is no wrap, no guard band and
- * no "was that the same bar twice?" — the class of bug that made the old race's
+ * no "was that the same zone twice?" — the class of bug that made the old race's
  * barriers miss. See `RailRace.checkHazards`.
  */
 export interface HazardSchedule {
   /** Where the hazards sit on one lap, for the geometry to be built from. */
   readonly lap: HazardLayout;
-  /** Every bar crossing of the whole race, in travelled metres, ascending. */
-  readonly barCrossings: readonly number[];
   /** Every spark stretch of the whole race, in travelled metres, ascending. */
   readonly sparkStretches: readonly SparkZone[];
 }
-
-/**
- * Trestles this far apart around the ring.
- *
- * Lives here, not in `track.ts` (which builds the trestles themselves),
- * because `planHazards` needs it too — see {@link snapToTrestleGrid} — and
- * `track.ts` already imports from this file, so the constant living here
- * avoids a circular import rather than creating one.
- */
-export const TRESTLE_SPACING = 12;
 
 /** The first hazard is this far past the arch, so the race opens with speed. */
 const OPENING_RUN = 58;
@@ -121,83 +84,56 @@ const OPENING_RUN = 58;
 /** ...and the last one ends this far before it, so the finish is a clear dash. */
 const CLOSING_RUN = 34;
 
-/** Gap between the end of one hazard and the start of the next. */
-const GAP_MIN = 27;
-const GAP_MAX = 39;
-
-/** How long a blackened stretch runs for. */
-const ZONE_MIN = 15;
-const ZONE_MAX = 23;
-
 /**
- * How many trestle grid slots fit round one lap — `track.ts`'s own
- * `Math.floor(route.length / TRESTLE_SPACING)`, duplicated as one line
- * rather than imported, because importing it would mean this file reaching
- * into `track.ts` while `track.ts` already reaches into this one (see
- * `TRESTLE_SPACING`'s own doc comment on why that direction was chosen).
- */
-function trestleGridCount(loopLength: number): number {
-  return Math.max(1, Math.floor(loopLength / TRESTLE_SPACING));
-}
-
-/**
- * Which trestle grid slot a given arch-relative `at` belongs to — the same
- * formula in both directions (`at -> index` here, `index -> at` in
- * `snapToTrestleGrid`), so `track.ts` can recover exactly the slot a bar was
- * snapped onto without either file re-deriving the other's arithmetic.
- */
-export function trestleGridIndex(at: number, loopLength: number): number {
-  const count = trestleGridCount(loopLength);
-  const raw = Math.round((at / loopLength) * count);
-  return ((raw % count) + count) % count;
-}
-
-/**
- * Snaps a raw cursor position onto `track.ts`'s own trestle grid, and returns
- * exactly the `at` a trestle candidate at that grid index would compute
- * (`(index / count) * loopLength`) — the same formula, not an approximation
- * of it, so a bar and the support meant to carry it agree on position to the
- * metre before any collision-driven search ever nudges the support a little.
+ * Gap between the end of one zone and the start of the next.
  *
- * **Why a duck bar needs this at all.** Jim, 1 August 2026: the hazard
- * schedule and the trestle placement were "completely independent systems
- * with no relationship" — a bar could, and did, land anywhere a seeded RNG's
- * cursor happened to stop, with nothing structural underneath it. Snapping
- * the bar itself onto the same grid `trestleSpots` places supports on means
- * every bar's `at` *is* a trestle grid index — the shared source Jim's own
- * two suggested fixes both point at, rather than two positions that have to
- * be reconciled after the fact.
- *
- * `usedIndices` guards against two different bars landing on the same
- * support — vanishingly unlikely given `GAP_MIN` (27 m) is more than twice
- * `TRESTLE_SPACING` (12 m), but a schedule silently losing a bar to a
- * collision would be a worse bug than the few metres' nudge this costs when
- * it actually happens.
+ * **Retuned 1 August 2026, down from 27–39.** The old schedule alternated
+ * two bars to a zone, so this gap separated a bar or a zone from whatever
+ * followed it, indifferently — bars are gone now, and every hazard is a
+ * zone, so simply deleting the bar branch and leaving the gap alone was
+ * tried first (see `planHazards`'s own doc comment for what that measured:
+ * 5.4 s of "letting go is worth it", against the old two-hazard race's
+ * measured 18.1 s). Tightening the gap, and lengthening the zone below,
+ * together fit more and longer black stretches into the same 244 m usable
+ * span — the family's own ask, "more frequent black sections" — and get the
+ * checker's own measured gap back up near the old figure. See
+ * `scripts/check-rail-race.mts`'s header for the final, measured numbers.
  */
-function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<number>): number {
-  const count = trestleGridCount(loopLength);
-  const raw = trestleGridIndex(cursor, loopLength);
-  for (let delta = 0; delta < count; delta += 1) {
-    const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
-    for (const candidate of candidates) {
-      const index = ((candidate % count) + count) % count;
-      if (!usedIndices.has(index)) {
-        usedIndices.add(index);
-        return (index / count) * loopLength;
-      }
-    }
-  }
-  // Every grid index already used — not reachable with this file's own
-  // GAP_MIN/TRESTLE_SPACING ratio, but fall back to the raw index rather than
-  // throwing, so a future tuning change that *does* reach this fails as a
-  // slightly crowded schedule, not a crash.
-  const fallback = ((raw % count) + count) % count;
-  usedIndices.add(fallback);
-  return (fallback / count) * loopLength;
-}
+const GAP_MIN = 22;
+const GAP_MAX = 32;
+
+/**
+ * How long a blackened stretch runs for.
+ *
+ * **Retuned 1 August 2026, up from 15–23** — alongside `GAP_MIN`/`GAP_MAX`,
+ * see that constant's own doc comment for why both moved together rather
+ * than the gap alone.
+ */
+const ZONE_MIN = 18;
+const ZONE_MAX = 30;
 
 /**
  * Lays out one lap, then repeats it.
+ *
+ * **Retuned 1 August 2026 for the duck bar's removal.** The old schedule
+ * alternated two bars to a zone and landed about seven hazards a lap (five
+ * bars, two zones, `~37 m` of black track). With the bar branch simply
+ * removed and `GAP_MIN`/`GAP_MAX`/`ZONE_MIN`/`ZONE_MAX` left at their old
+ * values, the same gap-then-hazard loop lands five zones a lap but only
+ * `~37 m` of black track still — the same total the two zones alone used to
+ * carry, because a bar's own "when do I let go" moment carried none of it.
+ * Measured with `scripts/check-rail-race.mts`: playing well beat holding by
+ * only 5.4 s over the whole two-lap race, against the two-hazard race's
+ * 18.1 s — a real, measured regression in "how much does letting go
+ * matter", not a hunch.
+ *
+ * `GAP_MIN`/`GAP_MAX`/`ZONE_MIN`/`ZONE_MAX` were retuned from there, not left
+ * alone: five zones a lap, now averaging `~25 m` each (`~123 m` of black
+ * track a lap on the canonical route — over three times the old figure,
+ * matching the family's own "more frequent black sections" ask) brings the
+ * checker's measured gap to 15.6 s, back in the old race's ballpark. See
+ * that script's header for the exact figures and the mutation that proves
+ * the guard still catches a broken one.
  *
  * Seeded from a fixed constant rather than the park seed: this course is meant
  * to be *learnable*. A child who knows the sparky stretch before the ferris
@@ -206,43 +142,24 @@ function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<
  */
 export function planHazards(loopLength: number, laps: number): HazardSchedule {
   const rng = new Rng(0x9a11ce);
-  const bars: DuckBar[] = [];
   const zones: SparkZone[] = [];
 
   let cursor = OPENING_RUN;
   const limit = loopLength - CLOSING_RUN;
-  // Alternated rather than picked at random: two spark zones in a row is a long
-  // time holding nothing, and five bars in a row never teaches the other rule.
-  // Two bars to a zone keeps both fresh and lands about eight hazards a lap.
-  let sinceZone = 0;
-  const usedTrestleIndices = new Set<number>();
-  while (cursor < limit) {
-    if (sinceZone >= 2 && cursor + ZONE_MAX < limit) {
-      const to = cursor + rng.range(ZONE_MIN, ZONE_MAX);
-      zones.push({ from: cursor, to });
-      cursor = to;
-      sinceZone = 0;
-    } else {
-      // Snapped onto the trestle grid — see `snapToTrestleGrid` — rather than
-      // left at the raw cursor: a duck bar now always sits at a position
-      // `track.ts` can guarantee a real support for.
-      bars.push({ at: snapToTrestleGrid(cursor, loopLength, usedTrestleIndices) });
-      sinceZone += 1;
-    }
-    cursor += rng.range(GAP_MIN, GAP_MAX);
+  while (cursor + ZONE_MAX < limit) {
+    const to = cursor + rng.range(ZONE_MIN, ZONE_MAX);
+    zones.push({ from: cursor, to });
+    cursor = to + rng.range(GAP_MIN, GAP_MAX);
   }
 
-  const barCrossings: number[] = [];
   const sparkStretches: SparkZone[] = [];
   for (let lap = 0; lap < laps; lap += 1) {
     const base = lap * loopLength;
-    for (const bar of bars) barCrossings.push(base + bar.at);
     for (const zone of zones) {
       sparkStretches.push({ from: base + zone.from, to: base + zone.to });
     }
   }
-  barCrossings.sort((a, b) => a - b);
   sparkStretches.sort((a, b) => a.from - b.from);
 
-  return { lap: { bars, zones }, barCrossings, sparkStretches };
+  return { lap: { zones }, sparkStretches };
 }

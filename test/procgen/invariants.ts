@@ -490,86 +490,6 @@ const railRaceFliesClear: Invariant = (facts) => {
 };
 
 /**
- * Longest a duck bar is allowed to sit from the nearest real trestle leg,
- * horizontally.
- *
- * Not the generator's own bound (`track.ts`'s `WIDE_ARC_NUDGES`/
- * `WIDE_RADIAL_NUDGES` can in principle nudge a support a little over 9 m
- * from its nominal grid point) — deliberately tighter, because the actual
- * guarantee this invariant exists to protect is architectural: a duck bar's
- * `at` and its support's grid index are *the same number*
- * (`hazards.ts`'s `snapToTrestleGrid`, `trestleGridIndex`), not two
- * independently-placed things that merely tend to end up near each other.
- * With legs roughly every 13 m round the ring, "nearest leg" would often be
- * under this by pure chance even for a bar placed with no relationship to
- * the supports at all, which is exactly the bug this whole mechanism exists
- * to fix — so this number is a sanity cross-check on the real, measured
- * geometry, not the proof of correctness by itself; the shared grid index in
- * the code is that proof. Measured against the real built park before this
- * mechanism existed (bars placed by the old, independent RNG cursor): worst
- * observed gap to the nearest leg was several times this.
- */
-const DUCK_BAR_SUPPORT_TOLERANCE = 8;
-
-/**
- * **Every duck bar stands over a real trestle leg.**
- *
- * Jim, 1 August 2026: the hazard schedule and the trestle placement were
- * "completely independent systems with no relationship" — a bar could land
- * anywhere a seeded RNG's cursor happened to stop, with nothing structural
- * underneath it. `hazards.ts`'s `snapToTrestleGrid` and `track.ts`'s
- * `trestleSpots` now derive both from one shared grid index, and
- * `trestleSpots` treats a grid slot with a bar scheduled on it as mandatory
- * rather than something the ring is allowed to shrug off.
- *
- * Measured off the built scene — both `railRace:duck-bars` and
- * `railRace:trestle-legs` are read back by name and their instance matrices
- * decoded — not by recomputing `snapToTrestleGrid`/`trestleGridIndex` and
- * checking they agree with themselves, which is exactly the tautology
- * ART-AGENT-NOTES.md §6 warns a parity check can quietly become. A real
- * geometric distance between two real meshes is what a family would
- * actually see if this broke again.
- */
-const duckBarsStandOnRealSupports: Invariant = (facts) => {
-  const barsMesh = facts.world.railRace.group.getObjectByName('railRace:duck-bars');
-  const legsMesh = facts.world.railRace.group.getObjectByName('railRace:trestle-legs');
-  const complaints: string[] = [];
-
-  if (!(barsMesh instanceof InstancedMesh) || !(legsMesh instanceof InstancedMesh)) {
-    complaints.push('the Rail Race has no duck bars or trestle legs in the built scene to measure');
-    expect(complaints, complaints.join('\n')).toHaveLength(0);
-    return;
-  }
-
-  const matrix = new Matrix4();
-  const legPositions: Vector3[] = [];
-  for (let i = 0; i < legsMesh.count; i += 1) {
-    legsMesh.getMatrixAt(i, matrix);
-    legPositions.push(new Vector3().setFromMatrixPosition(matrix));
-  }
-
-  const barPosition = new Vector3();
-  for (let i = 0; i < barsMesh.count; i += 1) {
-    barsMesh.getMatrixAt(i, matrix);
-    barPosition.setFromMatrixPosition(matrix);
-    let nearest = Infinity;
-    for (const leg of legPositions) {
-      const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);
-      if (d < nearest) nearest = d;
-    }
-    if (nearest > DUCK_BAR_SUPPORT_TOLERANCE) {
-      complaints.push(
-        `duck bar ${i} at ${fmt([barPosition.x, barPosition.z])} is ${nearest.toFixed(1)} m from ` +
-          `the nearest trestle leg, over the ${DUCK_BAR_SUPPORT_TOLERANCE} m tolerance — it is ` +
-          `floating free of the ring's own support structure`,
-      );
-    }
-  }
-
-  expect(complaints, complaints.join('\n')).toHaveLength(0);
-};
-
-/**
  * **The rail-race stall stands at the park's rim, close to the actual rails**
  * — the family's 1 August 2026 ask, and the property two earlier attempts (PR
  * #159, then this move) found hardest to hold onto. Moving the booth out
@@ -809,7 +729,6 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
-  ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],

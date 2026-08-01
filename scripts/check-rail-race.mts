@@ -26,60 +26,61 @@
  * The old race shipped with a bug the family reported as *"duck bars
  * invisible/ineffective — holding wins"*, and "holding wins" is fatal: a
  * one-button game in which the button should just be held down has nothing to
- * teach and nothing to enjoy. So the race is simulated end to end, five ways,
+ * teach and nothing to enjoy. So the race is simulated end to end, four ways,
  * and the ordering of their finishing times is asserted. It is deliberately a
  * *simulation of the real ride*, not of a model of it: `stepRider` is the same
  * function the browser calls every frame.
  *
- * ### The strategy that matters, and why the obvious one was not enough
+ * ### 1 August 2026 — the duck bar retired, and this file with it
  *
- * Comparing "never lets go" against "plays well" is **not** a guard on the duck
- * bars, and review caught this file claiming it was. A rider who never lets go
- * also powers over every black stretch, so the whole of their deficit can be
- * spark drag while a bonk costs nothing whatever — reconstructing the original
- * bug still passed. `hold.bonks > 0` proves only that bars are *encountered*.
+ * The ride used to carry two hazards, and this file used to need a fifth
+ * strategy (`barsOnly`) purely to isolate what a duck bar cost on its own:
+ * comparing "never lets go" against "plays well" was not, by itself, a guard
+ * on the bar mechanic, because a rider who never lets go also powers over
+ * every black stretch, so the whole of their deficit could be spark drag
+ * while a bonk cost nothing whatever — reconstructing the original bug still
+ * passed. `barsOnly` played the black stretches perfectly and the bars not at
+ * all, so against `perfect` the spark drag cancelled on both sides and what
+ * remained was exactly what a bonk cost.
  *
- * `barsOnly` exists to isolate the one number that matters. It plays the black
- * stretches perfectly and the bars not at all, so against `perfect` the spark
- * drag cancels on both sides and what remains is exactly what a bonk costs.
+ * With the duck bar gone (Jim's verdict — "remove the head bump from the
+ * game's dynamics and replace entirely with more frequent black sections on
+ * the track" — see `hazards.ts`'s own header), there is only one hazard left
+ * to isolate anything *from*, so `barsOnly` and the "what a duck bar costs"
+ * section it existed for are gone too. `perfect.seconds < hold.seconds - N`
+ * is now the entire game-balance guard, and it is no longer a compound
+ * measurement of two mechanics' contamination — it *is* the spark-drag guard,
+ * directly.
  *
- * ### Mutation-tested, on 1 August 2026 — and re-tested twice the same day
+ * `Rider.bonks` is also gone; where this file used to print bonk counts it
+ * now prints `sparkEntries` — how many times a rider *started* sparking (a
+ * continuous spark through one whole zone counts once), the "mistake" count
+ * now that a mistake can only mean one thing.
  *
- * A regression guard nobody has watched fail is not a guard. Measured, by
- * reintroducing the original faults one at a time:
+ * ### Mutation-tested, 1 August 2026
+ *
+ * A regression guard nobody has watched fail is not a guard. Measured by
+ * temporarily setting `SPARK_DRAG` to 0 in `simulate.ts` — the one knob that
+ * makes holding through a black stretch free — and re-running:
  *
  * ```
- *                                     pre-1-Aug   1-Aug physics, 3 laps   1-Aug physics, 2 laps
- * fix in place                        15.6 s  0    24.5 s  0               16.3 s  0
- * thrust un-gated during the wobble    7.8 s  1    13.2 s  0 (!)            8.7 s  1
- * a bonk costs no speed                7.3 s  1     9.9 s  0 (!)            6.6 s  1
- * both (the original Coaster bug)     -0.2 s  1    -0.2 s  1               -0.1 s  1
+ *                          hold      perfect   gap      exit code
+ * fix in place             47.6 s    32.0 s    15.6 s   0
+ * SPARK_DRAG = 0           31.8 s    32.0 s    -0.2 s   1
  * ```
- * (exit code shown after each `s` figure)
  *
- * **The middle column is why this table is worth keeping.** The family's
- * 1 August physics tuning roughly doubled the cart's speed and took the race to
- * three laps, which scaled every figure here up — and the old 8 s threshold,
- * left alone, would have gone on passing while *either* single fault was live.
- * It would have kept reporting OK on precisely the bug it was written for. The
- * mutations were re-run rather than the number re-guessed, giving 18 s: 36%
- * clear of the worst surviving mutation (13.2 s) and 27% under what the real
- * thing was worth (24.5 s).
- *
- * **The right-hand column is the same exercise again, hours later, when the
- * family played the three-lap version live and asked for two laps instead
- * with the speed left alone.** Fewer laps means fewer duck bars encountered
- * overall, which scales every figure in this table down again even though
- * nothing about what a single bonk costs changed. Re-measured rather than
- * rescaled, the same as before: the threshold is now **12 s** — 38% clear of
- * the worst surviving mutation (8.7 s) and 26% under the real thing (16.3 s),
- * the same margins as the 18 s figure it replaces, just against smaller
- * numbers. `perfect.seconds > 30` moved the same way, to **20 s** — the real
- * figure is 25.1 s, a floor the family's own two-lap verdict makes the
- * correct floor to move, not a regression to paper over.
- *
- * If you change `RACE_LAPS`, `THRUST` or the drag constants again, re-run these
- * four mutations. The absolute figures move with all of them.
+ * With the one remaining hazard's whole cost zeroed out, `hold` actually
+ * finishes *faster* than `perfect` (playing "well" now buys nothing but the
+ * zones it would otherwise coast through for free) and the guard below fails
+ * loudly, exactly as it should — there is nothing left to contaminate the
+ * measurement with, so this is now a direct test of the thing that matters
+ * rather than an isolation exercise. `GAP_MIN_SECONDS` (10 s) sits 36% under
+ * the real, fix-in-place gap (15.6 s), the same margin the old two-hazard
+ * guard kept under its own real figure. If you change `RACE_LAPS`, `THRUST`,
+ * the drag constants or `hazards.ts`'s zone density again, re-run this
+ * mutation and re-measure the threshold rather than rescaling it — the ratio
+ * between the real gap and a broken one is what makes it a guard, not the
+ * absolute number.
  */
 
 import './headless-canvas.mjs';
@@ -596,22 +597,30 @@ for (const shape of POSES) {
 
 // --- is it still a game? -----------------------------------------------------
 
+/**
+ * Playing well must beat holding by at least this many seconds, over the
+ * whole `RACE_LAPS`-lap race — see the mutation table at the top of this
+ * file for how a broken value here (`SPARK_DRAG` doing nothing) actually
+ * measures, and this file's own header for why this is now the *entire*
+ * game-balance guard rather than one half of a compound one.
+ */
+const GAP_MIN_SECONDS = 10;
+
 say('');
 const STRATEGIES: readonly { readonly name: string; readonly strategy: Strategy }[] = [
   { name: 'never lets go', strategy: 'alwaysHold' },
   { name: 'never holds', strategy: 'neverHold' },
   { name: 'sloppy', strategy: 'sloppy' },
-  { name: 'ducks nothing', strategy: 'barsOnly' },
   { name: 'plays well', strategy: 'perfect' },
 ];
 
-const results = new Map<Strategy, { seconds: number; bonks: number; sparkSeconds: number }>();
+const results = new Map<Strategy, { seconds: number; sparkEntries: number; sparkSeconds: number }>();
 for (const { name, strategy } of STRATEGIES) {
   const run = simulateRailRace(strategy);
   results.set(strategy, run);
   say(
     `${name.padEnd(14)} ${run.seconds.toFixed(1)} s   ` +
-      `${run.bonks} bonk${run.bonks === 1 ? '' : 's'}   ` +
+      `${run.sparkEntries} spark${run.sparkEntries === 1 ? '' : 's'}   ` +
       `${run.sparkSeconds.toFixed(1)} s sparking`,
   );
 }
@@ -620,60 +629,26 @@ const hold = results.get('alwaysHold')!;
 const perfect = results.get('perfect')!;
 const sloppy = results.get('sloppy')!;
 const never = results.get('neverHold')!;
-const barsOnly = results.get('barsOnly')!;
 
-// The bug this file exists for.
+// The bug this file exists for, and — since the duck bar's retirement — the
+// entire game-balance guard: with one hazard left, this is no longer a
+// compound measurement two mechanics could hide inside each other, it *is*
+// the spark-drag guard. See this file's own header for the mutation that
+// proves it fails when it should.
 require(
-  perfect.seconds < hold.seconds - 4,
+  perfect.seconds < hold.seconds - GAP_MIN_SECONDS,
   `HOLDING WINS: never letting go finishes in ${hold.seconds.toFixed(1)} s against ` +
-    `${perfect.seconds.toFixed(1)} s for playing well. Letting go must be worth at least 4 s, ` +
-    'or the one control has nothing to teach — this is the 28 July family bug.',
-);
-
-// --- what a duck bar actually costs, on its own ------------------------------
-//
-// The assertion above is NOT enough on its own, and review caught exactly that:
-// `alwaysHold` also powers over every black stretch, so its whole deficit can be
-// spark drag while a bonk costs nothing at all. Reconstructing the old bug
-// (thrust un-gated during the wobble, a free bonk) still passed it. `bonks > 0`
-// proves only that bars are *encountered*.
-//
-// `barsOnly` differs from `perfect` in one single thing: it does not let go for
-// the bars. Both play the black stretches perfectly, so spark drag cancels and
-// what is left is the duck-bar mechanic's entire contribution to the race.
-const barCost = barsOnly.seconds - perfect.seconds;
-say('');
-say(
-  `duck bars are worth ${barCost.toFixed(1)} s on their own ` +
-    `(${barsOnly.bonks} bonks, ${barsOnly.sparkSeconds.toFixed(2)} s sparking) ` +
-    `= ${(barCost / Math.max(1, barsOnly.bonks)).toFixed(2)} s per bonk`,
-);
-require(
-  barsOnly.sparkSeconds < 0.05,
-  `the bars-only run sparked for ${barsOnly.sparkSeconds.toFixed(2)} s, so this comparison is ` +
-    'still contaminated by the black stretches and cannot isolate what a bonk costs.',
-);
-require(
-  barsOnly.bonks > 0,
-  'the bars-only run hit no duck bars at all — the bars are not being tested.',
-);
-require(
-  barCost > 12,
-  `DUCKING IS POINTLESS: hitting every duck bar costs only ${barCost.toFixed(1)} s once spark ` +
-    'drag is taken out of both sides. A bonk must cost more than the coasting it saved, or the ' +
-    'bars are decoration — this is the 28 July family bug, and it is the assertion that fails ' +
-    'when the wobble stops gating thrust. See the mutation table at the top of this file before ' +
-    'touching this number: it was 18 s at three laps and had to be re-measured, not rescaled, ' +
-    'when the race went to two.',
+    `${perfect.seconds.toFixed(1)} s for playing well. Letting go must be worth at least ` +
+    `${GAP_MIN_SECONDS} s, or the one control has nothing to teach — this is the 28 July family bug.`,
 );
 require(
   hold.sparkSeconds > 1,
   'a rider who never lets go never sparked — the black zones are not being tested.',
 );
 require(
-  perfect.bonks === 0 && perfect.sparkSeconds < 0.05,
-  `playing well still cost ${perfect.bonks} bonks and ${perfect.sparkSeconds.toFixed(2)} s of ` +
-    'sparks — the hazards cannot be cleared cleanly, so the game is unfair rather than hard.',
+  perfect.sparkEntries === 0 && perfect.sparkSeconds < 0.05,
+  `playing well still sparked ${perfect.sparkEntries} time(s) for ${perfect.sparkSeconds.toFixed(2)} s ` +
+    '— the hazards cannot be cleared cleanly, so the game is unfair rather than hard.',
 );
 // Coasting the whole way must be the slowest thing you can do, or "hold" is
 // pointless too — a one-button game needs both answers to be wrong sometimes.

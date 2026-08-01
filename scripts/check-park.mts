@@ -102,7 +102,7 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 20,
+    worst: 18,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
       'both sides. The §6 fence closed this from 231 (hand park) to ~20: the ' +
@@ -118,7 +118,17 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'was a solved loop through the middle of the park whose pylons stood ' +
       'beside the railway in one place, and it is gone — the race now flies ' +
       'round the rim on its own trestles, which are placed clear of the rail ' +
-      'corridor by construction and asserted so in test/procgen/invariants.ts.',
+      'corridor by construction and asserted so in test/procgen/invariants.ts. ' +
+      'TIGHTENED to 18 on 1 August by the duck bar\'s removal: `trestleSpots` ' +
+      'no longer force-places a leg into a wider, worse-fitting search just ' +
+      'because a duck bar needed a support there (that escalation — ' +
+      '`WIDE_ARC_NUDGES`/`MANDATORY_RADIAL_NUDGES`/`WIDE_RADIAL_NUDGES` — is ' +
+      'gone with the bars). A couple of legs that used to be pushed into a ' +
+      'wider, worse-fitting search purely to hold a bar up are now simply ' +
+      'allowed to go missing like any other decorative slot, which nudges the ' +
+      'downstream, shared-RNG park generation slightly and closed two more ' +
+      'metres of fence gap; loose, not a regression, so tightened rather than ' +
+      'left recorded against a number the park no longer produces.',
   },
   'rail.walkable': {
     worst: 30,

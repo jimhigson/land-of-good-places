@@ -1,4 +1,4 @@
-import { Rng, clamp } from '../../core/mathUtils';
+import { clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
 import { planHazards, type HazardSchedule } from './hazards';
 import type { RailRaceRoute } from './route';
@@ -8,7 +8,7 @@ import type { RailRaceRoute } from './route';
  *
  * Split out from `RailRace.ts` on purpose: this is the half that decides who
  * wins, and it is the half that shipped broken last time. Keeping it a pure
- * module means `scripts/check-rail-race.mts` can run four whole races on every
+ * module means `scripts/check-rail-race.mts` can run whole races on every
  * build and assert that letting go still beats holding — against *this* code,
  * not against a re-implementation of it that could agree with a model while
  * disagreeing with the game.
@@ -16,11 +16,25 @@ import type { RailRaceRoute } from './route';
  * ## The tuning, and where it came from
  *
  * Inherited from the retired 2D rail racer, which had already been tuned
- * against a simulation of its whole course for one specific property: **a bonk
- * must cost more than the coasting it saved**, or holding the button down for a
- * minute is the winning strategy and the game has nothing to teach. That is
- * exactly the property the in-park race then lost (see {@link WOBBLE_SECONDS}),
- * and exactly the property the checker now asserts.
+ * against a simulation of its whole course for one specific property:
+ * **letting go must cost less than the drag it saves**, or holding the button
+ * down for a minute is the winning strategy and the game has nothing to
+ * teach. That is exactly the property the in-park race lost once (the old
+ * duck-bar wobble not gating thrust — see git history for that fault), and
+ * exactly the property the checker still asserts, now purely against
+ * {@link SPARK_DRAG}.
+ *
+ * **1 August 2026 — the duck bar retired.** This file used to carry two
+ * hazards: a spark zone (drag while holding through a black stretch) and a
+ * duck bar (a bonk — lost speed and a thrust lockout — for holding through a
+ * single point). Jim's own verdict, after a full day building the bar's
+ * trestle-snapped support and hazard-tape asset: "remove the head bump from
+ * the game's dynamics and replace entirely with more frequent black
+ * sections on the track." The bonk mechanic (`WOBBLE_SECONDS`,
+ * `BONK_SPEED_FACTOR`, `WOBBLE_LOCKOUT`, `Rider.wobble`/`barCursor`/`bonks`,
+ * the `barIsHere` lookahead) is gone with it; the spark-zone mechanic below is
+ * untouched. See `hazards.ts`'s header for the retuned zone schedule that
+ * replaces the bars' share of the pacing.
  */
 
 /**
@@ -65,6 +79,9 @@ const DRAG_SQUARE = 0.01;
  * coasting through it — but it is *only* drag. There is no bonk, no wobble and
  * no stop: a child who holds the whole way through one gets a shower of sparks,
  * a slow patch and a lesson, which is the kindest way to teach a rule there is.
+ *
+ * **This is now the ride's entire cost of a mistake**, not one of two — see
+ * this file's own header.
  */
 const SPARK_DRAG = 6;
 
@@ -114,26 +131,6 @@ const HILL_PULL = 9.8;
 const MIN_SPEED = 3.4;
 const MAX_SPEED = 33;
 
-/**
- * How long a bonk's wobble lasts — and, crucially, **the button does nothing
- * for the first two thirds of it.**
- *
- * This is where the cost of a bonk actually lives. The old in-park race kept a
- * `bonkWobble` timer but never let it gate thrust: it shook the seat and
- * nothing else, so a bonk cost only a moment's speed and the lerp back to full
- * pace had a 0.3 s time constant. Holding the button down for the whole race
- * beat playing well, which is precisely the family's "duck bars ineffective —
- * holding wins" report. Gating thrust is the fix, and
- * `scripts/check-rail-race.mts` is the thing that stops it regressing.
- */
-const WOBBLE_SECONDS = 1.3;
-
-/** Fraction of your speed you keep through a bonk. */
-const BONK_SPEED_FACTOR = 0.35;
-
-/** Thrust is dead while the wobble is above this. */
-const WOBBLE_LOCKOUT = 0.35;
-
 /** The hazards, laid out once for the whole race. */
 export const HAZARDS: HazardSchedule = planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS);
 
@@ -145,16 +142,18 @@ export interface Rider {
   /** Metres run since the lights went out. Only ever increases. */
   travelled: number;
   speed: number;
-  /** The button state actually applied this step (a wobble can veto it). */
   holding: boolean;
-  wobble: number;
   /** True while the rail is sparking under this rider. */
   sparking: boolean;
-  /** How many bar crossings this rider has already passed. */
-  barCursor: number;
   /** How many black stretches this rider is already past. */
   zoneCursor: number;
-  bonks: number;
+  /**
+   * How many times this rider has started sparking — a spark that runs
+   * continuously through one whole zone still counts once. The "mistake"
+   * count now that the duck bar (and its own discrete `bonks`) is gone: see
+   * this file's own header.
+   */
+  sparkEntries: number;
   sparkSeconds: number;
   finished: boolean;
   place: number;
@@ -167,11 +166,9 @@ export function createRider(lane: number): Rider {
     travelled: 0,
     speed: 0,
     holding: false,
-    wobble: 0,
     sparking: false,
-    barCursor: 0,
     zoneCursor: 0,
-    bonks: 0,
+    sparkEntries: 0,
     sparkSeconds: 0,
     finished: false,
     place: 0,
@@ -181,15 +178,13 @@ export function createRider(lane: number): Rider {
 
 /** What happened to a rider in one step, for the scene and the HUD to react to. */
 export interface StepEvents {
-  /** Hit a duck bar this step. */
-  readonly bonked: boolean;
   /** Crossed the finish line this step. */
   readonly finishedNow: boolean;
   /** Started a new lap this step, 1-based, or 0. */
   readonly lap: number;
 }
 
-const NOTHING: StepEvents = { bonked: false, finishedNow: false, lap: 0 };
+const NOTHING: StepEvents = { finishedNow: false, lap: 0 };
 
 /**
  * One rider's step.
@@ -206,8 +201,7 @@ export function stepRider(
 ): StepEvents {
   if (rider.finished) return NOTHING;
 
-  const wobbling = rider.wobble > WOBBLE_LOCKOUT;
-  rider.holding = wantHold && !wobbling;
+  rider.holding = wantHold;
 
   // --- is the rail black under us? ------------------------------------------
   const stretches = HAZARDS.sparkStretches;
@@ -216,8 +210,12 @@ export function stepRider(
   }
   const stretch = stretches[rider.zoneCursor];
   const inZone = stretch !== undefined && rider.travelled >= stretch.from;
+  const wasSparking = rider.sparking;
   rider.sparking = inZone && rider.holding;
-  if (rider.sparking) rider.sparkSeconds += dt;
+  if (rider.sparking) {
+    rider.sparkSeconds += dt;
+    if (!wasSparking) rider.sparkEntries += 1;
+  }
 
   // --- physics ---------------------------------------------------------------
   const distance = route.wrap(route.startDistance + rider.travelled);
@@ -234,25 +232,6 @@ export function stepRider(
   const before = rider.travelled;
   rider.travelled += rider.speed * dt;
 
-  if (rider.wobble > 0) rider.wobble = Math.max(0, rider.wobble - dt / WOBBLE_SECONDS);
-
-  // --- did we cross a bar? ---------------------------------------------------
-  //
-  // Every crossing of the whole race is a single ascending list of travelled
-  // distances, so this is an interval test walked by one cursor: a bar between
-  // `before` and now is caught whatever the frame rate. The old race sampled
-  // `|distance - barrier| < 0.9` instead — a 1.8 m window that a 30 fps frame at
-  // racing speed steps most of the way across and a hitch steps clean over.
-  let bonked = false;
-  const crossings = HAZARDS.barCrossings;
-  while (rider.barCursor < crossings.length && (crossings[rider.barCursor] ?? Infinity) <= rider.travelled) {
-    if (rider.holding) {
-      bonk(rider);
-      bonked = true;
-    }
-    rider.barCursor += 1;
-  }
-
   // --- lap and finish --------------------------------------------------------
   const lapBefore = Math.floor(before / route.length);
   const lapNow = Math.floor(rider.travelled / route.length);
@@ -264,28 +243,10 @@ export function stepRider(
     finishedNow = true;
   }
 
-  return { bonked, finishedNow, lap };
-}
-
-function bonk(rider: Rider): void {
-  rider.speed = Math.max(MIN_SPEED, rider.speed * BONK_SPEED_FACTOR);
-  rider.wobble = 1;
-  rider.bonks += 1;
+  return { finishedNow, lap };
 }
 
 // ------------------------------------------------------------------ the brains
-
-/**
- * How far ahead a rider has to look to catch the next bar.
- *
- * One step's travel plus a margin: releasing any earlier only costs speed, and
- * the family's rule gives no credit for coasting down first.
- */
-function barIsHere(rider: Rider, dt: number, margin: number): boolean {
-  const next = HAZARDS.barCrossings[rider.barCursor];
-  if (next === undefined) return false;
-  return next - rider.travelled <= rider.speed * dt + margin;
-}
 
 /** Is a black stretch under us, or about to be? */
 function zoneIsHere(rider: Rider, lead: number, trail: number): boolean {
@@ -297,26 +258,25 @@ function zoneIsHere(rider: Rider, lead: number, trail: number): boolean {
 /**
  * The rivals' one decision, and their entire personality.
  *
- * `skill` is 0..1. A low-skill rival misses bars more often and enters black
- * stretches late; none of them is ever perfect, because a child has to be able
- * to win, and none of them is ever hopeless, because a race you cannot lose is
- * not a race either.
+ * `skill` is 0..1. A low-skill rival enters black stretches late; none of
+ * them is ever perfect, because a child has to be able to win, and none of
+ * them is ever hopeless, because a race you cannot lose is not a race either.
+ *
+ * No longer takes `dt`/`rng` — those fed the duck bar's per-bar judgement
+ * draw (a coin flip on whether a rival remembered a given bar), which went
+ * with the mechanic. The zone lead below is deterministic in `skill` alone.
  */
-export function rivalWantsHold(rider: Rider, dt: number, skill: number, rng: Rng): boolean {
-  if (rider.wobble > WOBBLE_LOCKOUT) return false;
-  // Judgement of each bar is drawn once, as it comes up, so a rival's mistakes
-  // are decided in advance rather than flickering frame to frame.
-  if (barIsHere(rider, dt, 0.8)) return rng.chance(1 - skill) ? true : false;
+export function rivalWantsHold(rider: Rider, skill: number): boolean {
   if (zoneIsHere(rider, 1.5 * skill, 0)) return false;
   return true;
 }
 
 // ----------------------------------------------------------- the headless race
 
-/** The four ways `scripts/check-rail-race.mts` plays the game. */
-export type Strategy = 'alwaysHold' | 'neverHold' | 'perfect' | 'sloppy' | 'barsOnly';
+/** The ways `scripts/check-rail-race.mts` plays the game. */
+export type Strategy = 'alwaysHold' | 'neverHold' | 'perfect' | 'sloppy';
 
-function strategyWantsHold(strategy: Strategy, rider: Rider, dt: number, rng: Rng): boolean {
+function strategyWantsHold(strategy: Strategy, rider: Rider): boolean {
   switch (strategy) {
     case 'alwaysHold':
       return true;
@@ -324,33 +284,25 @@ function strategyWantsHold(strategy: Strategy, rider: Rider, dt: number, rng: Rn
       return false;
     case 'perfect':
       // Release for exactly as long as the rule requires, and not a metre more.
-      if (barIsHere(rider, dt, 0.05)) return false;
       if (zoneIsHere(rider, 0.4, 0)) return false;
       return true;
     case 'sloppy':
-      // Remembers the bar about two thirds of the time, and is late off the
-      // button for the black stretches.
-      if (barIsHere(rider, dt, 0.05)) return rng.chance(0.35);
-      if (zoneIsHere(rider, -2.5, 0)) return false;
-      return true;
-    case 'barsOnly':
-      // Plays the black stretches perfectly and the duck bars not at all.
-      //
-      // This exists to isolate one number: what a bonk actually costs. Against
-      // `perfect` — which differs from it *only* in letting go for the bars —
-      // the gap is the duck-bar mechanic's entire contribution to the race, with
-      // the spark drag subtracted out on both sides. Without it the checker was
-      // measuring the two hazards added together and could not tell which one
-      // was carrying the margin; it turned out the bars were carrying none of
-      // it. See `scripts/check-rail-race.mts`.
-      if (zoneIsHere(rider, 0.4, 0)) return false;
+      // Late off the button for the black stretches — reacts a good way into
+      // a zone rather than ahead of it, but reacts every time. A per-frame
+      // "sometimes forgets" coin flip was tried here and dropped: a zone
+      // (unlike the old duck bar) is wide enough that flipping every step
+      // inside the window produced dozens of flickering on/off sparks per
+      // zone rather than one clean mistake, which is a worse model of "late"
+      // than simply being late.
+      if (zoneIsHere(rider, -14, 0)) return false;
       return true;
   }
 }
 
 export interface RaceOutcome {
   readonly seconds: number;
-  readonly bonks: number;
+  /** How many times sparking started — see `Rider.sparkEntries`. */
+  readonly sparkEntries: number;
   readonly sparkSeconds: number;
 }
 
@@ -364,16 +316,15 @@ export interface RaceOutcome {
 export function simulateRailRace(strategy: Strategy): RaceOutcome {
   const route = RAIL_RACE_PLAN.route;
   const rider = createRider(0);
-  const rng = new Rng(0x1a5e51);
   const dt = 1 / 60;
   let seconds = 0;
 
   // A generous ceiling: nothing that finishes is anywhere near it, and a rider
   // that somehow cannot finish should end the check rather than the process.
   while (!rider.finished && seconds < 400) {
-    stepRider(route, rider, strategyWantsHold(strategy, rider, dt, rng), dt);
+    stepRider(route, rider, strategyWantsHold(strategy, rider), dt);
     seconds += dt;
   }
 
-  return { seconds, bonks: rider.bonks, sparkSeconds: rider.sparkSeconds };
+  return { seconds, sparkEntries: rider.sparkEntries, sparkSeconds: rider.sparkSeconds };
 }

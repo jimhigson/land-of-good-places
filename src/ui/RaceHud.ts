@@ -28,7 +28,6 @@ export class RaceHud {
   private readonly lap: HTMLElement;
   private readonly count: HTMLElement;
   private readonly banner: HTMLElement;
-  private readonly bonk: HTMLElement;
 
   /** True while a finger (or a mouse) is down on the pad. */
   private held = false;
@@ -65,13 +64,7 @@ export class RaceHud {
     this.banner = document.createElement('div');
     this.banner.className = 'racehud-banner';
 
-    this.bonk = document.createElement('div');
-    this.bonk.className = 'racehud-bonk';
-    // Always the same friendly nudge, never a scold — GAME_DESIGN.md's "you
-    // cannot fail": a bonk is a wobble and lost speed, not a failure state.
-    this.bonk.textContent = 'Whoops — duck a little sooner!';
-
-    this.root.append(this.pad, this.lap, this.count, this.banner, this.bonk);
+    this.root.append(this.pad, this.lap, this.count, this.banner);
     container.append(this.root);
   }
 
@@ -88,7 +81,6 @@ export class RaceHud {
       this.setCount(null);
       this.setLap(null);
       this.setBanner(null);
-      this.bonk.dataset.shown = 'false';
     }
   }
 
@@ -107,22 +99,6 @@ export class RaceHud {
     // before the one below, which is what actually restarts the animation.
     void this.count.offsetWidth;
     this.count.dataset.shown = 'true';
-  }
-
-  /**
-   * A brief, friendly word when she bonks a duck bar.
-   *
-   * Fire-and-forget, unlike `setCount`/`setLap`/`setBanner`: a bonk is a
-   * one-off moment with nothing to clear it later, so the CSS animation pops
-   * it in and fades it back out on its own. Re-triggered the same way as
-   * `setCount` — flag off, then on, with a forced reflow between — so two
-   * bonks close together each get their own pop rather than the second being
-   * swallowed by the first's animation still running.
-   */
-  flashBonk(): void {
-    this.bonk.dataset.shown = 'false';
-    void this.bonk.offsetWidth;
-    this.bonk.dataset.shown = 'true';
   }
 
   /** 'Lap 1 of 2', or `null` for nothing. */

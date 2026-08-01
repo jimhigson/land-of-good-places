@@ -234,51 +234,6 @@ export function woodTexture(repeatX = 3, repeatY = 1): CanvasTexture {
   });
 }
 
-/**
- * Diagonal yellow-and-black hazard tape, for the Rail Race duck bar.
- *
- * Jim, 1 August 2026: "give it a yellow-and-black texture like diagonal
- * hazard/warning tape." Painted here, not baked into the Blender asset —
- * the same "shape from the asset, appearance from code" split the kid's
- * skin/hair and the cart's lane colour already use (ART_DIRECTION.md §7),
- * so the bar's material stays a plain, swappable texture rather than a
- * second copy of it living inside the geometry file. The asset's own UVs
- * (`art/blend/duckbar_export.py`, a cube projection) run `u` along the bar's
- * length, which is what makes the stripes repeat evenly along it rather
- * than stretching across its short ends.
- *
- * Drawn by rotating the canvas 45° and filling wide vertical bands across a
- * generously oversized area (comfortably past the rotated canvas's own
- * diagonal, `size * sqrt(2)`) — simpler and exactly as sharp as computing
- * each stripe's clipped parallelogram by hand, and immune to the classic
- * rotated-fill trap of leaving corners unpainted.
- */
-export function hazardTapeTexture(repeat = 4): CanvasTexture {
-  return cached(`hazardTape:${repeat}`, () => {
-    const size = 256;
-    const { canvas, ctx } = createCanvas(size);
-
-    ctx.fillStyle = hexToCss(PALETTE.markerLemon);
-    ctx.fillRect(0, 0, size, size);
-
-    ctx.fillStyle = hexToCss(PALETTE.ink);
-    const stripe = size / 4;
-    ctx.save();
-    ctx.translate(size / 2, size / 2);
-    ctx.rotate(Math.PI / 4);
-    ctx.translate(-size, -size);
-    for (let x = -size; x < size * 3; x += stripe * 2) {
-      ctx.fillRect(x, -size, stripe, size * 4);
-    }
-    ctx.restore();
-
-    const texture = finish(canvas, 1);
-    // Repeats along the bar's length only — see this function's own doc
-    // comment on why that is the `u` axis, not both.
-    texture.repeat.set(repeat, 1);
-    return texture;
-  });
-}
 
 /* ---------------------------------------------------------------------------
    Canvas-painted text and the TEXT RULE (GAME_DESIGN.md).

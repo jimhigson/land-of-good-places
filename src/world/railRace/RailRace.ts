@@ -1,6 +1,5 @@
 import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { Rng } from '../../core/mathUtils';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
@@ -33,10 +32,17 @@ import {
  * The reform of 31 July 2026, from the family's brief: a **side-on** race on
  * **four parallel tracks** that follow the **park's perimeter**, so the camera
  * looking in has the whole park as its backdrop; no steering, only hills, each
- * lane undulating independently; **duck bars** to release for, and **black
- * stretches** that spark if you power over them. It replaces the solver-grown
- * race coaster, which was a Sky Cruiser with barriers on it and a camera behind
- * the rider's head.
+ * lane undulating independently; **black stretches** that spark if you power
+ * over them. It replaces the solver-grown race coaster, which was a Sky
+ * Cruiser with barriers on it and a camera behind the rider's head.
+ *
+ * **1 August 2026 — the duck bar retired.** The ride briefly carried a second
+ * hazard, a bar released for at the last instant, snapped onto a real trestle
+ * support. Jim's own verdict, the same day it shipped: "remove the head bump
+ * from the game's dynamics and replace entirely with more frequent black
+ * sections on the track." A deliberate simplification, not a bug fix — see
+ * `hazards.ts`'s own header for the full reasoning and the retuned zone
+ * schedule that replaces it.
  *
  * The work is split four ways so that no one file has to be right about
  * everything:
@@ -51,8 +57,8 @@ import {
  *
  * ## What makes it a Land of Good Places race
  *
- * - **You cannot fail.** A bonk is a wobble and lost speed. Sparks are a slow
- *   patch. There are no lives, no damage and no way to end a run early.
+ * - **You cannot fail.** Sparks are a slow patch, never a crash. There are no
+ *   lives, no damage and no way to end a run early.
  * - **The rivals stay near you** — rubber-banded gently and asymmetrically, so a
  *   child who holds the whole way is chased and a child who never holds at all
  *   is waited for rather than lapped.
@@ -112,12 +118,6 @@ const CATCHUP = 0.004;
 const SWING = 0.22;
 
 /**
- * How far `poseRider()` drops the player when she is off the button, in this
- * ride's own pre-`RIDE_SCALE` metres — see the comment where it is used.
- */
-const DUCK_DROP = 0.5;
-
-/**
  * What the race wants said on screen, for whoever is holding the DOM.
  *
  * `RailRace` lives in `World` and has no business knowing about `uiRoot`; the
@@ -129,8 +129,6 @@ export type RaceMoment =
   /** A countdown digit, "GO!", or `null` to clear it. */
   | { readonly kind: 'count'; readonly text: string | null }
   | { readonly kind: 'lap'; readonly lap: number; readonly of: number }
-  /** The player hit a duck bar. Never raised for a rival's bonk — see `driveRiders`. */
-  | { readonly kind: 'bonk' }
   | { readonly kind: 'result'; readonly won: boolean }
   | { readonly kind: 'end' };
 
@@ -183,7 +181,6 @@ export class RailRace implements GameSystem {
   private readonly track: RailRaceTrack;
   private readonly sparks: Sparks;
   private readonly carts: Cart[] = [];
-  private readonly rng = new Rng(0x7a11ed);
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
 
@@ -196,7 +193,6 @@ export class RailRace implements GameSystem {
   private resultTimer = 0;
   private finishedCount = 0;
   private confetti: Confetti | null = null;
-  private ducking = false;
   /** Look-alike rivals who stand about at the exit when a race lets you off. */
   private readonly exitCrowd: RailRaceExitCrowd;
 
@@ -284,7 +280,6 @@ export class RailRace implements GameSystem {
     this.countdown = COUNTDOWN_SECONDS;
     this.raceTime = 0;
     this.finishedCount = 0;
-    this.ducking = false;
     this.placeCarts();
     this.rideView?.reset(0);
     this.onRaceMoment?.({ kind: 'start' });
@@ -374,7 +369,7 @@ export class RailRace implements GameSystem {
           playerDrives &&
           (input.isDown('jump') || input.isDown('interact') || this.raceHold?.() === true);
       } else {
-        wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
+        wantHold = rivalWantsHold(rider, skillOf(rider));
         // Rubber band: catching up is easier than running away.
         const lead = me.travelled - rider.travelled;
         band = 1 + Math.max(-SWING, Math.min(SWING, lead * CATCHUP));
@@ -382,18 +377,8 @@ export class RailRace implements GameSystem {
 
       const events = stepRider(RAIL_RACE_PLAN.route, rider, wantHold, dt, band);
 
-      if (cart.isPlayer) {
-        this.ducking = !rider.holding;
-        if (events.bonked) {
-          this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
-          // Only the player's own bonk gets a message — a rival's bonk has no
-          // action for her to take and would just be noise (unlike the sparks,
-          // which are meant to be visible so she can learn from watching them).
-          this.onRaceMoment?.({ kind: 'bonk' });
-        }
-        if (events.lap > 0) {
-          this.onRaceMoment?.({ kind: 'lap', lap: events.lap, of: RACE_LAPS });
-        }
+      if (cart.isPlayer && events.lap > 0) {
+        this.onRaceMoment?.({ kind: 'lap', lap: events.lap, of: RACE_LAPS });
       }
 
       if (events.finishedNow) {
@@ -427,12 +412,11 @@ export class RailRace implements GameSystem {
     for (const cart of this.carts) {
       if (cart.isPlayer) continue;
       const rider = cart.rider;
-      const wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
+      const wantHold = rivalWantsHold(rider, skillOf(rider));
       stepRider(route, rider, wantHold, dt);
       if (rider.finished) {
         rider.travelled %= route.length;
         rider.finished = false;
-        rider.barCursor = 0;
         rider.zoneCursor = 0;
       }
     }
@@ -490,13 +474,6 @@ export class RailRace implements GameSystem {
   }
 
   private animate(dt: number, elapsed: number): void {
-    const me = this.me.rider;
-    const route = RAIL_RACE_PLAN.route;
-
-    // The warning lamps, driven off how far round this lap she is.
-    const lapOffset = me.travelled % route.length;
-    this.track.setAlerts(lapOffset, !me.holding, elapsed);
-
     // Sparks fly off whichever carts are powering over a black stretch — the
     // rivals' too, which is how a child learns the rule by watching somebody
     // else get it wrong. But only *their* rail lights up: each cart's own
@@ -536,7 +513,9 @@ export class RailRace implements GameSystem {
         limbs.rightArm.rotation.x = -2.5 + flap;
         limbs.leftArm.rotation.x = -2.5 - flap;
       } else if (!cart.rider.holding) {
-        // Ducked: head down, arms tucked in.
+        // Coasting: head down, arms tucked in and aerodynamic. This used to be
+        // called "ducked" — the pose she took under a duck bar — but reads
+        // just as well as a released, relaxed coast now that bars are gone.
         limbs.rightArm.rotation.x = -0.4;
         limbs.leftArm.rotation.x = -0.4;
         kid.head.rotation.x = 0.5;
@@ -548,30 +527,25 @@ export class RailRace implements GameSystem {
         limbs.leftArm.rotation.z = 0.2;
         kid.head.rotation.x = 0;
       }
-      kid.setExpression(cart.rider.wobble > 0.2 ? 'surprised' : 'happy');
+      // Surprised while actually sparking, not on a bonk's now-gone wobble —
+      // the one hazard left is the one moment worth a face for.
+      kid.setExpression(cart.rider.sparking ? 'surprised' : 'happy');
     }
   }
 
-  /** Puts the player's model in her cart, ducking when she is off the button. */
+  /** Puts the player's model in her cart. */
   private poseRider(): void {
     if (!this.riding || !this.player) return;
     const cart = this.me.group;
-    const rider = this.me.rider;
-    // Ducking drops her into the cart, which is the thing the side view exists
-    // to show. The wobble after a bonk shakes the seat a little, cosy not
-    // punishing.
-    //
-    // Scaled by RIDE_SCALE — her own model is too (`requestBoard()`), so an
-    // unscaled drop stayed the same fixed 0.5m while her seated head height
-    // grew with everything else, and duck bars ended up sitting well below
-    // her head in *both* held and ducked states (see DUCK_CLEARANCE in
-    // hazards.ts). This and that value were picked together against her real
-    // measured head height in both states, live, on 1 August 2026.
-    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * RIDE_SCALE : 0;
-    const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
+    // No more duck drop here: that vertical translate existed to sink her
+    // under a duck bar (see `hazards.ts`'s `DUCK_CLEARANCE`, since removed),
+    // and there is nothing left in the ride to duck under — see this file's
+    // header and `hazards.ts`'s own, 1 August 2026. The bonk wobble that used
+    // to nudge her seat sideways is gone with it; nothing else in the ride
+    // ever needed it.
     this.player.setRidePose(
-      cart.position.x + wobble,
-      cart.position.y + SEAT_HEIGHT * RIDE_SCALE - duckDrop,
+      cart.position.x,
+      cart.position.y + SEAT_HEIGHT * RIDE_SCALE,
       cart.position.z,
       cart.rotation.y,
       // Rivals get this for free — `kid.root` is a child of the same group
