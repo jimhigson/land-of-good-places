@@ -174,6 +174,43 @@ const treesDoNotInterpenetrate: Invariant = (facts) => {
   expect(overlaps, overlaps.slice(0, 8).join('\n')).toHaveLength(0);
 };
 
+/**
+ * No tree grows into a wall.
+ *
+ * Measured canopy edge to wall face: `TreeFact.footprint` is the furthest any
+ * part the tree is actually built from reaches away from its trunk, and
+ * `halfWidth` is the widest part of the wall (a stone wall's coping stone
+ * overhangs its own courses), so this is the gap between the two things a
+ * child can see and walk between.
+ *
+ * Held to {@link WALKABLE_GAP} for the same reason `wallsDoNotClash` is. Every
+ * tree gets a collider of its own, so a tree beside a wall is two solid
+ * obstacles: a slot between them narrower than two player radii is not a way
+ * through, it is a dead end that looks like a way through — and the six-year-
+ * old this park is for will try to run down it. Requiring the clearance at the
+ * canopy edge rather than at the trunk is also what keeps a wall from
+ * vanishing into a bush of leaves, which is the visible half of the same bug.
+ */
+const treesKeepOffWalls: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const tree of facts.trees) {
+    for (const wall of facts.walls) {
+      const gap =
+        segmentDistance([tree.x, tree.z], [tree.x, tree.z], wall.from, wall.to) -
+        wall.halfWidth -
+        tree.footprint;
+      if (gap < WALKABLE_GAP) {
+        fouls.push(
+          `tree at (${tree.x.toFixed(1)}, ${tree.z.toFixed(1)}) reaching ` +
+            `${tree.footprint.toFixed(2)} m leaves ${gap.toFixed(2)} m to the ${wall.kind} run ` +
+            `(${fmt(wall.from)}->${fmt(wall.to)})`,
+        );
+      }
+    }
+  }
+  expect(fouls, fouls.slice(0, 8).join('\n')).toHaveLength(0);
+};
+
 /** No lamp stands in anything: another lamp, a wall, a plot, or the railway. */
 const lampsTouchNothing: Invariant = (facts) => {
   const fouls: string[] = [];
@@ -335,6 +372,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
+  ['no tree grows into a wall', treesKeepOffWalls],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
@@ -360,7 +398,31 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       expect(facts.seed).toBe(seed);
       // A park with no walls, no trees or no lamps would pass every clearance
       // invariant below vacuously. This is the guard against that.
-      expect(facts.trees.length, 'the park planted no trees').toBeGreaterThan(0);
+      //
+      // Trees get a real floor rather than `> 0`, because thinning the scatter
+      // is the cheapest possible way to make a clearance invariant go green and
+      // it is not a hypothetical: adding `treesKeepOffWalls` took the canonical
+      // seed from 30 trees to 19 until the scatter's attempt budget was raised
+      // to buy them back.
+      //
+      // **This floor cannot catch every thinning, and the number is chosen
+      // knowing that.** Measured both ways round — healthy park 26/27/26/30/28
+      // across the five seeds, the same park with the budget reverted
+      // 19/23/23/27/23 — the two sets *overlap*: seed 11 thinned (27) plants
+      // more than the canonical seed healthy (26). So no single floor can
+      // separate them everywhere, and any threshold low enough to keep a real
+      // park green necessarily lets seed 11's thinning through.
+      //
+      // 24 is the best a global floor does: it catches 4 of the 5 seeds and
+      // still leaves the healthiest-but-lowest real seed two trees of headroom
+      // for ordinary seed-to-seed drift. Four suites going red at once is a
+      // loud enough signal; running on five seeds is what makes it work, not
+      // the cleverness of the number. Raising it to 25 would catch no more and
+      // leave one tree of headroom, so it is not worth the false alarms.
+      //
+      // An anti-vacuity guard, not a placement threshold — the "thresholds come
+      // from the game" rule above is about the latter.
+      expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(24);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
