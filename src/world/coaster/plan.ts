@@ -33,9 +33,10 @@ interface CoasterSeed {
   readonly name: string;
   readonly routeSalt: number;
   readonly stationStallId: string;
-  readonly bandMin?: number;
-  readonly bandMax?: number;
-  readonly nominal?: number;
+  /** How far out this loop may reach. Defaults to the route's own limit. */
+  readonly outerRadius?: number;
+  /** Metres of track wanted. Defaults to the route's own target. */
+  readonly desiredLength?: number;
 }
 
 const CRUISER_SEED: CoasterSeed = {
@@ -81,9 +82,8 @@ function planCoaster(seed: CoasterSeed, avoid: CoasterRoute | null): PlannedCoas
     salt: seed.routeSalt,
     stationStallId: seed.stationStallId,
     avoid,
-    ...(seed.bandMin !== undefined ? { bandMin: seed.bandMin } : {}),
-    ...(seed.bandMax !== undefined ? { bandMax: seed.bandMax } : {}),
-    ...(seed.nominal !== undefined ? { nominal: seed.nominal } : {}),
+    ...(seed.outerRadius !== undefined ? { outerRadius: seed.outerRadius } : {}),
+    ...(seed.desiredLength !== undefined ? { desiredLength: seed.desiredLength } : {}),
   };
   const route = new CoasterRoute(options);
   const { exitX, exitZ } = planExit(route, seed.stationStallId);

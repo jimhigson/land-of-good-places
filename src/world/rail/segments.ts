@@ -146,32 +146,118 @@ function endOfArc(from: Pose2, length: number, theta: number): Pose2 {
 }
 
 /**
- * A cubic straight from one pose to another — the analytic closer's building
- * block. `tension` scales how far the control points reach along each heading;
- * larger is a lazier, wider join.
+ * A run of track of the given length and total turn, split into as many cubics
+ * as it takes to keep each one inside {@link MAX_TURN}.
  *
- * This is a Hermite fit in bezier clothing: the start tangent is `from`'s
- * heading and the end tangent is `to`'s, both by construction, so a closer
- * built from these lands on the start pose *facing the right way* rather than
- * merely arriving near it.
+ * Splitting rather than clamping matters: `arcSegment` silently shortens a turn
+ * it considers too sharp, which is fine when the generator is free to place
+ * whatever piece it likes and *fatal* for the closer, whose whole job is to
+ * land on an exact pose. A clamped closer would quietly miss the start.
  */
-export function joinSegment(from: Pose2, to: Pose2, tension: number, kind: string): CubicSegment {
-  const d = Math.hypot(to.x - from.x, to.z - from.z) * tension;
-  const hull = {
-    x0: from.x,
-    z0: from.z,
-    x1: from.x + from.hx * d,
-    z1: from.z + from.hz * d,
-    x2: to.x - to.hx * d,
-    z2: to.z - to.hz * d,
-    x3: to.x,
-    z3: to.z,
-    turn: 0,
-    kind,
-  };
-  // The length is measured on the curve rather than assumed, because a join is
-  // not an arc and has no length it was asked for.
-  return { ...hull, length: cubicLength({ ...hull, length: 0 }) };
+export function arcChain(from: Pose2, length: number, turn: number, kind: string): CubicSegment[] {
+  const pieces = Math.max(1, Math.ceil(Math.abs(turn) / MAX_TURN));
+  const out: CubicSegment[] = [];
+  let pose = from;
+  for (let i = 0; i < pieces; i += 1) {
+    const seg = arcSegment(pose, length / pieces, turn / pieces, kind);
+    out.push(seg);
+    pose = endPose(seg);
+  }
+  return out;
+}
+
+/** Two circular arcs meeting at a common tangent, joining two poses exactly. */
+export interface Biarc {
+  readonly arcs: readonly { readonly length: number; readonly turn: number }[];
+  /** The tighter of the two arcs. Known exactly, not sampled. */
+  readonly minRadius: number;
+}
+
+/** Signed angle from unit `u` to unit `w`, in the same sense as `turn`. */
+function signedAngle(ux: number, uz: number, wx: number, wz: number): number {
+  return Math.atan2(ux * wz - uz * wx, ux * wx + uz * wz);
+}
+
+/**
+ * **The closer.** Joins two poses exactly, with two circular arcs.
+ *
+ * A biarc is the right tool for landing on a given pose, and the wrong tool was
+ * tried first: a Hermite cubic between the two poses also matches both
+ * tangents, but its *curvature* is whatever falls out, and when the poses are
+ * awkwardly placed what falls out is a **cusp** — the curve stops, reverses and
+ * carries on. Sampled curvature cannot reliably see a cusp (the samples
+ * straddle it), so cusped closers passed a 12 m minimum-radius test and the
+ * generator happily returned loops with a 0.3 m hairpin in them.
+ *
+ * A biarc has no such failure mode, because its two radii are *known* — they
+ * come out of the construction as numbers, not as something to measure
+ * afterwards and hope about. A biarc that would turn too tightly says so
+ * exactly, and the search moves on.
+ *
+ * The construction is the standard equal-chord one: pick `d` such that the two
+ * arcs share a tangent at their joint, which reduces to a quadratic. Both roots
+ * are offered, gentlest first, since one is often a far wider turn than the
+ * other.
+ */
+export function biarcs(from: Pose2, to: Pose2): Biarc[] {
+  const vx = to.x - from.x;
+  const vz = to.z - from.z;
+  const tx = from.hx + to.hx;
+  const tz = from.hz + to.hz;
+  const a = 2 - 2 * (from.hx * to.hx + from.hz * to.hz);
+  const b = 2 * (vx * tx + vz * tz);
+  const c = -(vx * vx + vz * vz);
+
+  const roots: number[] = [];
+  if (Math.abs(a) < 1e-9) {
+    // Headings are parallel: the quadratic degenerates to a linear equation.
+    if (Math.abs(b) > 1e-9) roots.push(-c / b);
+  } else {
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const root = Math.sqrt(disc);
+      roots.push((-b + root) / (2 * a), (-b - root) / (2 * a));
+    }
+  }
+
+  const out: Biarc[] = [];
+  for (const d of roots) {
+    if (!(d > 1e-6) || !Number.isFinite(d)) continue;
+    const jx = (from.x + d * from.hx + (to.x - d * to.hx)) / 2;
+    const jz = (from.z + d * from.hz + (to.z - d * to.hz)) / 2;
+    const first = arcThrough(from, jx, jz);
+    if (!first) continue;
+    const midHeading = rotate(from.hx, from.hz, first.turn);
+    const second = arcThrough({ x: jx, z: jz, hx: midHeading.x, hz: midHeading.z }, to.x, to.z);
+    if (!second) continue;
+    out.push({
+      arcs: [first, second],
+      minRadius: Math.min(first.radius, second.radius),
+    });
+  }
+  // Gentlest first: a wider pair is a nicer ride and likelier to be legal.
+  out.sort((p, q) => q.minRadius - p.minRadius);
+  return out;
+}
+
+/** The single arc leaving `from` that passes through (x, z). */
+function arcThrough(
+  from: Pose2,
+  x: number,
+  z: number,
+): { length: number; turn: number; radius: number } | null {
+  const cx = x - from.x;
+  const cz = z - from.z;
+  const chord = Math.hypot(cx, cz);
+  if (chord < 1e-6) return null;
+  const phi = signedAngle(from.hx, from.hz, cx / chord, cz / chord);
+  // Turning more than a half circle to reach a chord is the degenerate branch;
+  // the other root is the one that means anything.
+  if (Math.abs(phi) > Math.PI / 2 - 1e-9) return null;
+  if (Math.abs(phi) < 1e-9) return { length: chord, turn: 0, radius: Infinity };
+  const radius = chord / (2 * Math.sin(Math.abs(phi)));
+  const turn = 2 * phi;
+  return { length: radius * Math.abs(turn), turn, radius };
 }
 
 /** Point on the cubic at parameter `t`. */
@@ -215,28 +301,53 @@ function cubicSecondDerivative(seg: CubicSegment, t: number, target: Vec2): Vec2
 }
 
 /**
- * The tightest radius of curvature anywhere on the piece.
+ * How many points curvature is measured at.
+ *
+ * Fixed, and shared by everything that asks, because a curvature limit that
+ * depends on sample density is not a limit. Sampling a cubic at 24 points let
+ * closer pieces with a **0.3 m cusp** pass a 12 m minimum radius: the samples
+ * simply straddled the cusp. The generator then reported a solved route with a
+ * hairpin tighter than the one the whole exercise was meant to remove.
+ */
+const CURVATURE_SAMPLES = 64;
+
+/**
+ * The tightest radius of curvature anywhere on the piece, or **zero if the
+ * piece doubles back on itself**.
  *
  * Measured on the cubic that will actually be built, not inferred from the
  * length and turn angle it was asked for — the closer's pieces are not arcs at
  * all and have no nominal radius, and this is the only honest way to hold them
  * to the same standard as the vocabulary.
+ *
+ * A cubic whose control points fold produces a cusp: the curve stops, reverses
+ * and carries on, and its speed passes through zero. Curvature there is
+ * unbounded, but sampled curvature near it is whatever the samples happened to
+ * catch, so a cusp cannot be caught reliably by curvature alone. It is caught
+ * directly instead — a piece whose speed collapses relative to its own average
+ * is reported as radius zero, which fails every minimum-radius test there is.
  */
-export function minCurvatureRadius(seg: CubicSegment, samples = 24): number {
+export function minCurvatureRadius(seg: CubicSegment, samples = CURVATURE_SAMPLES): number {
   const d1: Vec2 = { x: 0, z: 0 };
   const d2: Vec2 = { x: 0, z: 0 };
   let worst = Infinity;
+  let slowest = Infinity;
+  let totalSpeed = 0;
   for (let i = 0; i <= samples; i += 1) {
     const t = i / samples;
     cubicDerivative(seg, t, d1);
     cubicSecondDerivative(seg, t, d2);
     const speed = Math.hypot(d1.x, d1.z);
+    totalSpeed += speed;
+    if (speed < slowest) slowest = speed;
     const cross = Math.abs(d1.x * d2.z - d1.z * d2.x);
-    if (speed < 1e-6) continue;
+    if (speed < 1e-6) return 0;
     // radius = |r'|^3 / |r' x r''|
     const radius = cross < 1e-9 ? Infinity : (speed * speed * speed) / cross;
     if (radius < worst) worst = radius;
   }
+  const meanSpeed = totalSpeed / (samples + 1);
+  if (meanSpeed > 0 && slowest < meanSpeed * 0.2) return 0;
   return worst;
 }
 

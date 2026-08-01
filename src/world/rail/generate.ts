@@ -5,10 +5,11 @@ import {
   type Pose2,
   type SegmentKind,
   type Vec2,
+  arcChain,
+  biarcs,
   cubicPoint,
   cubicTangent,
   endPose,
-  joinSegment,
   minCurvatureRadius,
 } from './segments';
 
@@ -100,6 +101,8 @@ export interface RouteBrief {
 
 /** What the search did, for the diagnostic on failure and the report on success. */
 export interface SolveReport {
+  /** How many start poses the brief offered. Zero is its own kind of failure. */
+  readonly startPoseCount: number;
   readonly startPoseIndex: number;
   readonly segmentCount: number;
   readonly candidatesTried: number;
@@ -109,6 +112,20 @@ export interface SolveReport {
   readonly length: number;
   readonly minRadius: number;
   readonly elapsedMs: number;
+  /**
+   * Why candidates were thrown away, by cause.
+   *
+   * A generator that can throw owes whoever it throws at some idea of *what*
+   * was in the way. "Nothing fits" is not actionable; "eleven thousand pieces
+   * rejected for self-clearance and none for collision" says the loop is being
+   * asked to fit in too small a space, and points at the parameter to change.
+   */
+  readonly rejected: {
+    readonly collision: number;
+    readonly boundary: number;
+    readonly selfClearance: number;
+    readonly curvature: number;
+  };
 }
 
 /** A solved centre line: piecewise cubics, parameterised by arc length. */
@@ -151,11 +168,19 @@ const CLOSE_ONLY_AFTER = 1.45;
 /** Fraction after which the search steers home. Ramps to full bias at CLOSE_AFTER. */
 const BIAS_FROM = 0.45;
 
-/** Tensions the single-cubic closer tries, in order. */
-const CLOSER_TENSIONS = [0.36, 0.45, 0.55, 0.65, 0.78, 0.9, 1.05];
+/** Seeded intermediate poses the closer swings out through when direct fails. */
+const CLOSER_VIA_TRIES = 40;
 
-/** Two-cubic closer attempts, each using fresh RNG draws. */
-const CLOSER_TWO_PIECE_TRIES = 28;
+/**
+ * How far behind the start the approach corridor sits.
+ *
+ * Long enough that lining up with it is a real constraint on the head's
+ * heading, short enough that the biarc home is a small part of the loop.
+ */
+const APPROACH_DISTANCE = 38;
+
+/** Within this of the approach point, steer to match its heading, not reach it. */
+const ALIGN_RANGE = 26;
 
 interface Sample {
   readonly x: number;
@@ -172,6 +197,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   let backtracks = 0;
   let closerAttempts = 0;
   let restarts = 0;
+  const rejected = { collision: 0, boundary: 0, selfClearance: 0, curvature: 0 };
 
   const restartLimit = Math.min(brief.budgets.restarts, brief.startPoses.length);
 
@@ -183,6 +209,32 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     // Accepted pieces, and the samples they contributed, so self-clearance is
     // measured against the track that was actually laid rather than the poses
     // it was laid from.
+    /**
+     * The approach corridor: a pose sitting {@link APPROACH_DISTANCE} metres
+     * *behind* the start, facing the same way.
+     *
+     * Steering at the start itself is the obvious thing and it does not work.
+     * The head duly arrives near home — within 7 m, measured — but pointing
+     * wherever it happened to be pointing, and a biarc between two poses that
+     * are close together and badly aligned has to turn extremely tightly: 1 to
+     * 6 m radius, against a 12 m limit, over and over. Being 7 m from home
+     * facing the wrong way is *worse* than being 40 m away facing the right
+     * way.
+     *
+     * Aiming at a point behind the start instead means the head lines up with
+     * the start's own heading on the way in, and the closer is then joining two
+     * poses that are already nearly collinear — which is exactly the case a
+     * biarc handles with a gentle radius.
+     */
+    const approach: Pose2 = brief.closed
+      ? {
+          x: startPose.x - startPose.hx * APPROACH_DISTANCE,
+          z: startPose.z - startPose.hz * APPROACH_DISTANCE,
+          hx: startPose.hx,
+          hz: startPose.hz,
+        }
+      : startPose;
+
     const chosen: CubicSegment[] = [];
     const samples: Sample[] = [];
     const sampleCounts: number[] = [];
@@ -216,7 +268,10 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
      * is by definition heading straight for.
      */
     const validate = (seg: CubicSegment, closing: boolean): Sample[] | null => {
-      if (minCurvatureRadius(seg) < brief.minRadius) return null;
+      if (minCurvatureRadius(seg) < brief.minRadius) {
+        rejected.curvature += 1;
+        return null;
+      }
       const steps = Math.max(2, Math.ceil(seg.length / SAMPLE_STEP));
       const produced: Sample[] = [];
       const point: Vec2 = { x: 0, z: 0 };
@@ -224,8 +279,14 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         const t = i / steps;
         cubicPoint(seg, t, point);
         const s = accumulated + seg.length * t;
-        if (!brief.clear(point.x, point.z, brief.corridorRadius)) return null;
-        if (brief.boundary.distanceToEdge(point.x, point.z) < brief.corridorRadius) return null;
+        if (!brief.clear(point.x, point.z, brief.corridorRadius)) {
+          rejected.collision += 1;
+          return null;
+        }
+        if (brief.boundary.distanceToEdge(point.x, point.z) < brief.corridorRadius) {
+          rejected.boundary += 1;
+          return null;
+        }
         for (const earlier of samples) {
           // The track immediately behind the head is not a collision, it is
           // where we just came from.
@@ -233,6 +294,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
           // A closer is aiming at the start pose; the start is not an obstacle.
           if (closing && earlier.s < SELF_IGNORE_ARC) continue;
           if (Math.hypot(point.x - earlier.x, point.z - earlier.z) < brief.selfClearance) {
+            rejected.selfClearance += 1;
             return null;
           }
         }
@@ -248,28 +310,72 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
      * of the gap, pushed sideways and turned a little, which is enough freedom
      * to swing around something sitting between the head and home.
      */
+    /**
+     * Validates a run of pieces in order, each against a world that already
+     * contains the ones before it, so a closer cannot cross itself. Leaves the
+     * route exactly as it found it either way.
+     */
+    const tryChain = (
+      segs: readonly CubicSegment[],
+    ): { seg: CubicSegment; samples: Sample[] }[] | null => {
+      const taken: { seg: CubicSegment; samples: Sample[] }[] = [];
+      for (const seg of segs) {
+        const produced = validate(seg, true);
+        if (!produced) {
+          for (let i = 0; i < taken.length; i += 1) undo();
+          return null;
+        }
+        accept(seg, produced);
+        taken.push({ seg, samples: produced });
+      }
+      for (let i = 0; i < taken.length; i += 1) undo();
+      return taken;
+    };
+
+    /** Expands a biarc into cubics, if its radii are legal. */
+    const chainFor = (from: Pose2, to: Pose2, kind: string): CubicSegment[][] => {
+      const out: CubicSegment[][] = [];
+      for (const arc of biarcs(from, to)) {
+        if (arc.minRadius < brief.minRadius) {
+          rejected.curvature += 1;
+          continue;
+        }
+        let pose = from;
+        const segs: CubicSegment[] = [];
+        for (const piece of arc.arcs) {
+          const chain = arcChain(pose, piece.length, piece.turn, kind);
+          for (const seg of chain) segs.push(seg);
+          const last = chain[chain.length - 1];
+          if (last) pose = endPose(last);
+        }
+        out.push(segs);
+      }
+      return out;
+    };
+
     const tryClose = (): { seg: CubicSegment; samples: Sample[] }[] | null => {
       closerAttempts += 1;
       const head = headPose();
 
-      for (const tension of CLOSER_TENSIONS) {
-        const seg = joinSegment(head, startPose, tension, 'closer');
-        const produced = validate(seg, true);
-        if (produced) return [{ seg, samples: produced }];
+      // A biarc straight home, gentlest first.
+      for (const segs of chainFor(head, startPose, 'closer')) {
+        const taken = tryChain(segs);
+        if (taken) return taken;
       }
 
+      // Nothing direct fits, so swing wide: go via a seeded intermediate pose
+      // and biarc each half. This is where an obstacle sitting between the head
+      // and home gets gone around.
       const midX = (head.x + startPose.x) / 2;
       const midZ = (head.z + startPose.z) / 2;
       const span = Math.hypot(startPose.x - head.x, startPose.z - head.z) || 1;
       const alongX = (startPose.x - head.x) / span;
       const alongZ = (startPose.z - head.z) / span;
 
-      for (let attempt = 0; attempt < CLOSER_TWO_PIECE_TRIES; attempt += 1) {
-        const sideways = rng.range(-span * 0.6, span * 0.6);
-        const forward = rng.range(-span * 0.2, span * 0.2);
-        const swing = rng.range(-0.6, 0.6);
-        const tensionA = rng.range(0.4, 0.95);
-        const tensionB = rng.range(0.4, 0.95);
+      for (let attempt = 0; attempt < CLOSER_VIA_TRIES; attempt += 1) {
+        const sideways = rng.range(-span * 0.7, span * 0.7);
+        const forward = rng.range(-span * 0.3, span * 0.3);
+        const swing = rng.range(-0.9, 0.9);
         const hx = alongX * Math.cos(swing) - alongZ * Math.sin(swing);
         const hz = alongX * Math.sin(swing) + alongZ * Math.cos(swing);
         const via: Pose2 = {
@@ -278,20 +384,20 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
           hx,
           hz,
         };
-        const first = joinSegment(head, via, tensionA, 'closerA');
-        const firstSamples = validate(first, true);
-        if (!firstSamples) continue;
-        // The second piece is validated against a world that already contains
-        // the first, so a closer cannot cross itself.
-        accept(first, firstSamples);
-        const second = joinSegment(via, startPose, tensionB, 'closerB');
-        const secondSamples = validate(second, true);
-        undo();
-        if (secondSamples) {
-          return [
-            { seg: first, samples: firstSamples },
-            { seg: second, samples: secondSamples },
-          ];
+        for (const firstHalf of chainFor(head, via, 'closerA')) {
+          const takenFirst = tryChain(firstHalf);
+          if (!takenFirst) continue;
+          for (const { seg, samples: produced } of takenFirst) accept(seg, produced);
+          let result: { seg: CubicSegment; samples: Sample[] }[] | null = null;
+          for (const secondHalf of chainFor(via, startPose, 'closerB')) {
+            const takenSecond = tryChain(secondHalf);
+            if (takenSecond) {
+              result = [...takenFirst, ...takenSecond];
+              break;
+            }
+          }
+          for (let i = 0; i < takenFirst.length; i += 1) undo();
+          if (result) return result;
         }
       }
       return null;
@@ -345,7 +451,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       retries[depth] = (retries[depth] ?? 0) + 1;
       candidatesTried += 1;
 
-      const kind = pickKind(brief, rng, headPose(), startPose, accumulated);
+      const kind = pickKind(brief, rng, headPose(), approach, accumulated);
       const seg = kind.make(headPose(), rng);
       const produced = validate(seg, false);
       if (produced) {
@@ -357,6 +463,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
 
     if (solved) {
       const report: SolveReport = {
+        startPoseCount: brief.startPoses.length,
         startPoseIndex: startIndex,
         segmentCount: chosen.length,
         candidatesTried,
@@ -366,12 +473,14 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         length: accumulated,
         minRadius: Math.min(...chosen.map((s) => minCurvatureRadius(s))),
         elapsedMs: Date.now() - started,
+        rejected: { ...rejected },
       };
       return buildRoute(chosen, brief.closed, report);
     }
   }
 
   const report: SolveReport = {
+    startPoseCount: brief.startPoses.length,
     startPoseIndex: -1,
     segmentCount: 0,
     candidatesTried,
@@ -381,13 +490,25 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     length: 0,
     minRadius: 0,
     elapsedMs: Date.now() - started,
+    rejected: { ...rejected },
   };
+  // Which level ran out matters more than the fact that one did: no start poses
+  // at all is a brief that could never have worked, and says to go and look at
+  // how the caller is choosing them, not at the search.
+  const level =
+    brief.startPoses.length === 0
+      ? 'the brief offered no admissible start poses at all — the outermost ' +
+        'level of the search was empty before it began'
+      : `all ${restartLimit} start poses were tried and every one dead-ended`;
   throw new RailRouteUnsolvable(
-    `rail route did not solve: ${restartLimit} start poses tried, ` +
+    `rail route did not solve: ${level}. ` +
       `${candidatesTried} candidate pieces, ${backtracks} backtracks, ` +
       `${closerAttempts} closure attempts, in ${report.elapsedMs} ms. ` +
       `Brief wanted ${brief.desiredLength.toFixed(0)} m, closed=${brief.closed}, ` +
-      `corridor ${brief.corridorRadius} m, min radius ${brief.minRadius} m.`,
+      `corridor ${brief.corridorRadius} m, min radius ${brief.minRadius} m, ` +
+      `self-clearance ${brief.selfClearance} m. ` +
+      `Pieces rejected for: ${rejected.collision} collision, ${rejected.boundary} boundary, ` +
+      `${rejected.selfClearance} self-clearance, ${rejected.curvature} curvature.`,
     report,
   );
 }
@@ -414,12 +535,23 @@ function pickKind(
       : Math.min(0.85, (progress - BIAS_FROM) / (CLOSE_AFTER - BIAS_FROM)) * 0.85;
 
   if (bias > 0 && rng.unit() < bias) {
-    // Which way would turn us towards home? Cross product sign, in the same
-    // sense `turn` is measured.
+    // What heading do we want? Far from the approach point, the one that gets
+    // us there; near it, the approach's own heading — otherwise the head
+    // arrives at the corridor still turning and sails straight through it.
     const toHomeX = home.x - head.x;
     const toHomeZ = home.z - head.z;
-    const cross = head.hx * toHomeZ - head.hz * toHomeX;
-    const dot = head.hx * toHomeX + head.hz * toHomeZ;
+    const range = Math.hypot(toHomeX, toHomeZ);
+    let wantX = toHomeX;
+    let wantZ = toHomeZ;
+    if (range < ALIGN_RANGE) {
+      const blend = range / ALIGN_RANGE;
+      wantX = home.hx * (1 - blend) + (toHomeX / (range || 1)) * blend;
+      wantZ = home.hz * (1 - blend) + (toHomeZ / (range || 1)) * blend;
+    }
+    // Which way turns us towards that heading? Cross product sign, in the same
+    // sense `turn` is measured.
+    const cross = head.hx * wantZ - head.hz * wantX;
+    const dot = head.hx * wantX + head.hz * wantZ;
     const wanted: -1 | 0 | 1 = Math.abs(cross) < 1e-6 && dot > 0 ? 0 : cross > 0 ? 1 : -1;
     const steering = brief.vocabulary.filter((k) => k.turnSign === wanted || k.turnSign === 0);
     if (steering.length > 0) return rng.pick(steering);
@@ -488,7 +620,7 @@ function buildRoute(
   };
 
   let worst = Infinity;
-  for (const seg of segments) worst = Math.min(worst, minCurvatureRadius(seg, 40));
+  for (const seg of segments) worst = Math.min(worst, minCurvatureRadius(seg));
 
   return {
     length,
