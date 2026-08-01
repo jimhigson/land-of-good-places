@@ -113,24 +113,52 @@ changed, not `WHEEL_LAY_DOWN`/`spinWheels`).
   520, from the new torus), but still comfortably inside the 150 KB/asset
   budget.
 
-## Not yet done — pick this up if you inherit this
+## Visual verification — done, but via Blender render, not the live game
 
-**No screenshot yet.** Jim's instruction was explicit that this needs a real
-visual check, not just numeric verification — round 3 shipped on numeric
-checks alone and still needed a live correction. Next steps, in order:
-1. Start own dev server, own port, `--strictPort` (per CLAUDE.md — never
-   assume a port is free).
-2. `chrome-devtools` MCP — **check whether it's free first**; CLAUDE.md says
-   only one agent may drive it at a time and the Overseer says who. If not
-   available, fall back to `mcp__blender__render_viewport_to_path` on
-   `cart.blend` directly (a static render is a reasonable substitute for "is
-   this geometrically a tube," even if it can't show toon shading/game
-   lighting) and say so plainly in the PR.
-3. Get a screenshot from a normal in-game viewing distance (not a close-up)
-   — `/rail-race` deep link boards the ride directly. Confirm the rim reads
-   as a hollow tube, not a flat disc edge.
-4. Kill the dev server (by PID) and close the browser page before finishing.
-5. Open the PR (`gh pr create`) — do not merge.
+**Checked `chrome-devtools`'s `list_pages` first**: it already had an open
+page at `http://localhost:5260/` ("Land of Good Places") — clear sign another
+agent or Jim is using the single shared Chrome profile. CLAUDE.md is explicit
+that only one agent may drive it at a time and the Overseer says who; I was
+not told I own it, so I did not touch it (no navigate, no screenshot, no new
+page) — "build-verify instead and list in the PR exactly what needs visual
+QA," per CLAUDE.md.
+
+**Substitute**: rendered `cart.blend` directly (own background Blender
+instance, EEVEE, a sun + area fill light, simple grey/blue materials since
+the shipped asset carries none — colour is applied at runtime in `cart.ts`).
+Two renders:
+
+1. As-authored (wheel lying flat, Blender's own pre-lay-down pose): shows the
+   rim as an unmistakable rounded ring — a visible specular highlight arcing
+   round the tube's own curved cross-section, hub and spokes visible through
+   the open centre. Confirms the geometry itself (not just the numeric wall-
+   thickness/band-count assertions) is a genuine tube.
+2. **Wheels rotated 90° to approximate the actual in-game standing pose**
+   (Blender Y-axis rotation, which is the same physical axis as the runtime
+   `WHEEL_LAY_DOWN` quaternion's exported-Z axis, just sign-flipped — a
+   preview only, `cart.ts`'s own quaternion math is separately verified by
+   `check:cart-shape`'s rotation-axis assertions and untouched by this
+   round). Result: wheels stand correctly under the hopper, each showing a
+   clear doughnut-shaped rim with visible curvature/highlight banding and the
+   hub+spokes showing through the middle — reads unambiguously as a hollow
+   tube, not a flat disc edge, front/back wheel clearance looks reasonable
+   (no overlap).
+
+**What this does and doesn't prove**: strong evidence the *geometry* is
+correct and will read as a tube in-game, since the curvature is intrinsic to
+the mesh, not viewing-angle-dependent — this isn't a "the light happened to
+catch it right" result. What it can't show: the game's actual toon-shading
+bands (`MeshToonMaterial`'s stepped gradient, different from EEVEE's smooth
+one), the real lane colour, or the ride's real camera framing at speed.
+**Whoever gets the shared browser next should still take one real screenshot
+from `/rail-race`** and confirm the toon-shaded result matches — low risk
+given the geometry evidence above, but not yet a certainty.
+
+## Still to do
+
+1. Whoever owns the browser next: one real `/rail-race` screenshot, normal
+   viewing distance, confirming the toon-shaded rim reads as a tube.
+2. This worktree can be removed once the PR is merged.
 
 ## Files touched
 
