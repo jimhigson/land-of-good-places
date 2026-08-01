@@ -96,6 +96,25 @@ const CALM = new Color(PALETTE.signBoard);
 const WARN = new Color(PALETTE.fairyWarm);
 const SAFE = new Color(PALETTE.markerMint);
 
+/**
+ * One colour per lane, not one shared pink for the whole ring: with four
+ * racers on four separate rails, colour is how a child tells "my lane" from
+ * "their lane" at a glance, the same job livery plays on real racing lanes.
+ * Same bright, high-saturation family the character creator's own swatches
+ * use (`markerPink` etc in `core/palette.ts`) rather than inventing a new set.
+ *
+ * Exported and indexed by lane so `RailRace.ts` can paint each cart to match
+ * its own rail exactly — the single source of truth for "my colour", so a cart
+ * can never drift out of sync with the rail underneath it the way it once did
+ * (see the header of `cart.ts`).
+ */
+export const LANE_COLOURS: readonly number[] = [
+  PALETTE.markerPink,
+  PALETTE.markerSky,
+  PALETTE.markerLemon,
+  PALETTE.markerMint,
+];
+
 export function buildRailRaceTrack(
   route: RailRaceRoute,
   layout: HazardLayout,
@@ -119,17 +138,6 @@ export function buildRailRaceTrack(
   const UP = new Vector3(0, 1, 0);
 
   // --- the rails -------------------------------------------------------------
-  // One colour per lane, not one shared pink for the whole ring: with four
-  // racers on four separate rails, colour is how a child tells "my lane" from
-  // "their lane" at a glance, the same job livery plays on real racing lanes.
-  // Same bright, high-saturation family the character creator's own swatches
-  // use (`markerPink` etc in `core/palette.ts`) rather than inventing a new set.
-  const LANE_COLOURS: readonly number[] = [
-    PALETTE.markerPink,
-    PALETTE.markerSky,
-    PALETTE.markerLemon,
-    PALETTE.markerMint,
-  ];
   const railMaterials = LANE_COLOURS.map((colour) => toonMaterial(colour));
   for (const material of railMaterials) keep(material);
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
