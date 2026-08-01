@@ -11,7 +11,9 @@ Nothing here touches it.
 
 ## Item 1 — rivals appear at the exit after a race
 
-Status: **in progress** (see the commits after `d2f44d6`).
+Status: **DONE** — `e4e5c38`. New file `src/world/railRace/exitCrowd.ts`, plus
+`resolveDismountGroup` in `world/dismount.ts` and one new procgen invariant.
+Needs **visual QA only** (see the PR); the geometry is covered by the invariant.
 
 ### What is actually there today
 
@@ -50,9 +52,36 @@ cleanup, as `disembarkingKids.ts` documents.
 **single-point and stateless** — calling it three times with the same input
 returns the same point three times. Nothing in the park spaces multiple bodies;
 the only prior art is `Parade.ts`'s queue-along-a-trail and `NpcSystem`'s
-±0.8 m spawn jitter with no clearance re-check. So this needs either a small
-multi-body extension of `resolveDismount` or a fan of offsets around the exit,
-each fed through the existing single-point resolver.
+±0.8 m spawn jitter with no clearance re-check.
+
+Solved by `resolveDismountGroup` in `world/dismount.ts`: same spiral search,
+plus a candidate must clear everybody already placed, and the caller passes in
+the player's own spot as occupied. Two independent mechanisms keep the party
+apart — the fanned starting guesses, and the clearance rule — and the negative
+tests below show each one carries the load on its own.
+
+### Environment gap worth knowing
+
+`vitest` is a declared devDependency but is **not installed** in the shared
+`/Users/jim/dev/landOfGoodPlaces/node_modules`, so `npm run test:procgen` fails
+with `vitest: command not found` on this machine — for every agent, not just
+this branch. Worked around here by installing vitest to a scratch prefix and
+symlinking `node_modules/{vitest,@vitest,.bin/vitest}` inside the worktree
+(node walks *past* an incomplete `node_modules`, so nothing else is shadowed).
+Those symlinks point into this session's scratchpad and will dangle once it is
+cleaned; `npm install` in the shared checkout is the real fix, but that mutates
+a tree other agents are building against, so it was left alone.
+
+### Anti-vacuity, for the record
+
+The new invariant was checked in both directions rather than just watched to go
+green:
+
+| dismount.ts mutation | result |
+|---|---|
+| spacing rule removed, fan kept | **passes** — the fan alone separates them by 2.58 m on open lawn |
+| fan removed *and* spacing rule removed | **fails**, naming the pair: "the player and rival 1 are 0.00 m apart" |
+| fan removed, spacing rule kept | **passes** — the clearance rule does the work |
 
 ---
 
