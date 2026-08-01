@@ -3253,6 +3253,15 @@ kbd {
   transition: transform 90ms ease, box-shadow 90ms ease;
 }
 
+/* A two-tone preset (`ui/CharacterCreation.ts`'s `Swatch.armsColour`, today
+   only the outfit tab's "Red & White") splits the same circle between body
+   and arms instead of drawing a plain disc — a diagonal split reads as "two
+   colours on one thing" at this size better than a vertical one would, which
+   a round tile with legs either side of it can't really suggest. */
+.charcreate-swatch--two-tone {
+  background: linear-gradient(135deg, var(--swatch-colour) 50%, var(--swatch-arms-colour) 50%);
+}
+
 .charcreate-swatch[data-selected='true'] {
   border-color: var(--lgp-ink);
   box-shadow: 0 0 0 0.1875rem #fff, 0 0 0 0.375rem var(--lgp-ink);

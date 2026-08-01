@@ -148,6 +148,8 @@ export interface SavedPlayer {
   readonly hairColour?: number;
   readonly hairStyle?: HairStyle;
   readonly outfitColour?: number;
+  /** Absent on every save written before the two-tone shirt landed — see `PlayerState.outfitArmsColour`. */
+  readonly outfitArmsColour?: number;
   readonly eyeColour?: number;
   readonly backpackKind?: BackpackKind;
   readonly backpackColour?: number;
@@ -391,6 +393,7 @@ function readPlayer(value: unknown): SavedPlayer | undefined {
   put(player, 'hairColour', readColour(value['hairColour']));
   put(player, 'hairStyle', readMember(value['hairStyle'], HAIR_STYLES));
   put(player, 'outfitColour', readColour(value['outfitColour']));
+  put(player, 'outfitArmsColour', readColour(value['outfitArmsColour']));
   put(player, 'eyeColour', readColour(value['eyeColour']));
   put(player, 'backpackKind', readMember(value['backpackKind'], BACKPACK_KINDS));
   put(player, 'backpackColour', readColour(value['backpackColour']));

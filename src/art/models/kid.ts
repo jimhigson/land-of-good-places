@@ -286,6 +286,17 @@ export interface KidOptions {
   skin?: number;
   hair?: number;
   outfit?: number;
+  /**
+   * The arms' own colour, for a two-tone shirt — a red body with white arms,
+   * say. Defaults to {@link outfit}, which is what keeps every existing
+   * single-colour swatch (`ui/CharacterCreation.ts`'s `OUTFIT_SWATCHES`)
+   * rendering exactly as it did before this option existed: arms simply match
+   * the body unless a caller asks for something else.
+   *
+   * Only the arms read this — the torso, collar and hem stay {@link outfit}
+   * and its darker derivative, same as always. See {@link KidHandle.setOutfitColour}.
+   */
+  outfitArms?: number;
   shoe?: number;
   /** Which pair is worn. `plain` by default — today's shoe, unchanged. See `art/models/shoes.ts`. */
   shoeKind?: ShoeKind;
@@ -454,7 +465,13 @@ export interface KidHandle extends CreatureHandle {
    */
   setFacePaint(design: FacePaintDesign | null): void;
   setHairColour(colour: number): void;
-  setOutfitColour(colour: number): void;
+  /**
+   * Recolours the outfit. `armsColour` defaults to `colour` — a plain,
+   * single-tone repaint, exactly what every existing caller does — so it is
+   * only ever passed when the arms should read as a different colour from the
+   * body, the way {@link KidOptions.outfitArms} works at construction time.
+   */
+  setOutfitColour(colour: number, armsColour?: number): void;
   setShoeColour(colour: number): void;
   /**
    * Switches which built style is shown. Only styles passed as
@@ -521,6 +538,8 @@ export function createKid(options: KidOptions = {}): KidHandle {
     skin = ART.kidSkin,
     hair = ART.kidHair,
     outfit = ART.kidOutfit,
+    // Defaults to the body colour — see `KidOptions.outfitArms`'s doc comment.
+    outfitArms = outfit,
     shoe = ART.kidShoe,
     shoeKind = 'plain',
     hairStyle = 'bunches',
@@ -544,6 +563,12 @@ export function createKid(options: KidOptions = {}): KidHandle {
   const skinMat = toonMaterial(skin);
   const outfitMat = toonMaterial(outfit);
   const outfitDarkMat = toonMaterial(new Color(outfit).multiplyScalar(0.82).getHex());
+  // A separate material from `outfitMat` even when the two colours are equal —
+  // the ordinary case — rather than reusing one material for both: the arms
+  // need their own colour to be independently settable later
+  // (`setOutfitColour`'s `armsColour`), and sharing a material would tie them
+  // to the torso's colour again the moment anyone recoloured it.
+  const outfitArmsMat = toonMaterial(outfitArms);
   const hairMat = toonMaterial(hair);
   const hairDarkMat = toonMaterial(new Color(hair).multiplyScalar(0.86).getHex());
   const shoeMat = toonMaterial(shoe);
@@ -631,8 +656,11 @@ export function createKid(options: KidOptions = {}): KidHandle {
     pivot.position.set(side * 0.38, 0.72, 0);
     body.add(pivot);
 
-    const upper = part(`arm-upper-${sideTag(side)}`, outfitMat, solid, () => {
-      const mesh = stub(0.105, 0.16, outfitMat);
+    // The one part that wears `outfitArmsMat` rather than `outfitMat` — see
+    // `KidOptions.outfitArms`. Everything else the jumper touches (torso,
+    // collar, hem) stays on the body colour.
+    const upper = part(`arm-upper-${sideTag(side)}`, outfitArmsMat, solid, () => {
+      const mesh = stub(0.105, 0.16, outfitArmsMat);
       mesh.position.y = -0.14;
       return mesh;
     });
@@ -920,9 +948,10 @@ export function createKid(options: KidOptions = {}): KidHandle {
       hairMat.color.setHex(colour);
       hairDarkMat.color.copy(new Color(colour).multiplyScalar(0.86));
     },
-    setOutfitColour: (colour: number) => {
+    setOutfitColour: (colour: number, armsColour: number = colour) => {
       outfitMat.color.setHex(colour);
       outfitDarkMat.color.copy(new Color(colour).multiplyScalar(0.82));
+      outfitArmsMat.color.setHex(armsColour);
     },
     setShoeColour: (colour: number) => shoeMat.color.setHex(colour),
   };

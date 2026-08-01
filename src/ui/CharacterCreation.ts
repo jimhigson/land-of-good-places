@@ -44,6 +44,14 @@ export interface CharacterCreationHandlers {
 interface Swatch {
   readonly colour: number;
   readonly label: string;
+  /**
+   * The arms' own colour, for a two-tone shirt — omitted by every swatch that
+   * is not one (which today is every swatch but the outfit tab's own
+   * `'Red & White'`). `buildSwatchSection` falls back to {@link colour} when
+   * this is absent, so an ordinary single-colour swatch's arms always match
+   * its body, exactly as they did before this field existed.
+   */
+  readonly armsColour?: number;
 }
 
 /** One button in a glyph-and-label picker grid — a hair style, a bag shape. */
@@ -69,6 +77,14 @@ const OUTFIT_SWATCHES: readonly Swatch[] = [
   { colour: PALETTE.markerLemon, label: 'Lemon' },
   { colour: PALETTE.flowerViolet, label: 'Violet' },
   { colour: PALETTE.flowerRed, label: 'Coral' },
+  // The one two-tone preset: a red body with white arms. `ART.jumperRed`
+  // (Biscuit's own jumper) is the closest thing this game already has to a
+  // clean "shirt red" — `PALETTE.flowerRed` above reads as coral/salmon, not
+  // red, which is exactly why `flowerRed` is labelled Coral rather than Red.
+  // `ART.cream` is the game's general warm off-white (tummies, paw pads);
+  // palette.ts's own rule is "softened towards cream rather than white", so
+  // it is the arms colour that rule actually points at rather than `#fff`.
+  { colour: ART.jumperRed, armsColour: ART.cream, label: 'Red & White' },
 ];
 
 const BACKPACK_SWATCHES: readonly Swatch[] = [
@@ -339,6 +355,8 @@ export class CharacterCreation {
   private hairColour: number = PALETTE.hair;
   private hairStyle: HairStyle = 'bunches';
   private outfitColour: number = PALETTE.outfit;
+  /** The arms' own colour — equal to {@link outfitColour} until a two-tone swatch is picked. */
+  private outfitArmsColour: number = PALETTE.outfit;
   private eyeColour: number = ART.kidEye;
   private backpackKind: BackpackKind = 'satchel';
   private backpackColour: number = PALETTE.backpack;
@@ -514,8 +532,9 @@ export class CharacterCreation {
       'Clothes colour',
       OUTFIT_SWATCHES,
       this.outfitColour,
-      (colour) => {
+      (colour, armsColour) => {
         this.outfitColour = colour;
+        this.outfitArmsColour = armsColour;
         this.refreshPreview('body');
       },
     );
@@ -767,12 +786,18 @@ export class CharacterCreation {
    * `onPick`, so the rest of this screen (the preview, the saved choice)
    * cannot tell a custom pick from a curated one — a bare hex number either
    * way, exactly like every colour field already stores.
+   *
+   * `onPick`'s second argument is only ever interesting to the outfit tab: a
+   * two-tone {@link Swatch} passes its own `armsColour` through, and every
+   * other swatch — curated or from the wheel — passes the same colour twice,
+   * which is what makes every other caller's single-parameter callback still
+   * valid here (it simply never looks at the second argument).
    */
   private buildSwatchSection(
     label: string,
     swatches: readonly Swatch[],
     initial: number,
-    onPick: (colour: number) => void,
+    onPick: (colour: number, armsColour: number) => void,
   ): HTMLElement {
     const section = document.createElement('div');
     section.className = 'charcreate-section';
@@ -803,13 +828,22 @@ export class CharacterCreation {
       button.type = 'button';
       button.className = 'charcreate-swatch';
       button.style.setProperty('--swatch-colour', hexToCss(swatch.colour));
+      // Two-tone tiles (today, only the outfit tab's 'Red & White') get a
+      // second CSS custom property and a modifier class that splits the
+      // background between them — see `.charcreate-swatch--two-tone` in
+      // style.css. Every other swatch never sets this at all, so it keeps
+      // the plain single-colour circle it always had.
+      if (swatch.armsColour !== undefined) {
+        button.classList.add('charcreate-swatch--two-tone');
+        button.style.setProperty('--swatch-arms-colour', hexToCss(swatch.armsColour));
+      }
       button.dataset.selected = swatch.colour === initial ? 'true' : 'false';
       button.setAttribute('aria-pressed', swatch.colour === initial ? 'true' : 'false');
       button.setAttribute('aria-label', swatch.label);
       button.title = swatch.label;
       button.addEventListener('click', () => {
         current = swatch.colour;
-        onPick(swatch.colour);
+        onPick(swatch.colour, swatch.armsColour ?? swatch.colour);
         selectCurated(button);
       });
       buttons.push(button);
@@ -817,9 +851,11 @@ export class CharacterCreation {
     }
 
     const picker = new ColourWheelPicker({
+      // The wheel only ever offers one colour, so a custom pick is always
+      // single-tone — same behaviour a curated single-colour swatch gets.
       onChange: (colour) => {
         current = colour;
-        onPick(colour);
+        onPick(colour, colour);
         for (const other of buttons) {
           other.dataset.selected = 'false';
           other.setAttribute('aria-pressed', 'false');
@@ -1013,6 +1049,7 @@ export class CharacterCreation {
       hair: this.hairColour,
       hairStyle: this.hairStyle,
       outfit: this.outfitColour,
+      outfitArms: this.outfitArmsColour,
       eye: this.eyeColour,
       backpack: this.backpackKind,
       backpackColour: this.backpackColour,
@@ -1048,6 +1085,7 @@ export class CharacterCreation {
         hairColour: this.hairColour,
         hairStyle: this.hairStyle,
         outfitColour: this.outfitColour,
+        outfitArmsColour: this.outfitArmsColour,
         eyeColour: this.eyeColour,
         backpackKind: this.backpackKind,
         backpackColour: this.backpackColour,
