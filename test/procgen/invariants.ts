@@ -304,7 +304,16 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       expect(facts.seed).toBe(seed);
       // A park with no walls, no trees or no lamps would pass every clearance
       // invariant below vacuously. This is the guard against that.
-      expect(facts.trees.length, 'the park planted no trees').toBeGreaterThan(0);
+      //
+      // Trees get a real floor rather than `> 0`, because thinning the scatter
+      // is the cheapest possible way to make a clearance invariant go green and
+      // it is not a hypothetical: adding `treesKeepOffWalls` took the canonical
+      // seed from 30 trees to 19 until the scatter's attempt budget was raised
+      // to buy them back. Every seed plants 26-30, so 20 is a floor that a
+      // genuinely thinned park trips and ordinary seed-to-seed variation does
+      // not. It is an anti-vacuity guard, not a placement threshold — the
+      // "thresholds come from the game" rule above is about the latter.
+      expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(20);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);

@@ -15,7 +15,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { GARDEN_HALF_SIZE, TERRAIN_RADIUS } from '../core/constants';
+import { GARDEN_HALF_SIZE, PLAYER_RADIUS, TERRAIN_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
@@ -85,6 +85,28 @@ const WALL_HALF_WIDTH: Record<WallKind, number> = { wood: 0.24, stone: 0.36 };
  * classify it as solid anyway, leaving a visible gap the map says is a wall.
  */
 const WALL_RUN_GAP = 2;
+
+/**
+ * Lawn kept between a tree's widest possible reach and a wall's face.
+ *
+ * The trees and the walls used to know nothing whatever about each other. The
+ * scatter honoured the paths, the plots and the railway; the wall runs honoured
+ * the paths, the plots and the railway; neither honoured the other, so on every
+ * seed a dozen or more canopies grew through a wall — the worst of them on the
+ * canonical seed overlapping a stone run by **2.43 m**, which at a 3.24 m
+ * canopy is a wall buried in a tree.
+ *
+ * Two player radii is the floor, and it is the same number {@link WALL_RUN_GAP}
+ * is argued from: `NavGrid` fattens every collider by `PLAYER_RADIUS` before it
+ * decides a cell is walkable, and every tree carries a collider of its own, so
+ * a slot narrower than this between a trunk and a wall is not a way through —
+ * it is a dead end that looks like a way through.
+ *
+ * The extra 0.2 m is slack rather than rule. This is measured against
+ * {@link TREE_REACH}'s pessimistic ceiling, so the built park lands comfortably
+ * clear of the line the invariant checks rather than balanced on it.
+ */
+const TREE_WALL_GAP = PLAYER_RADIUS * 2 + 0.2;
 
 interface InstanceItem {
   readonly position: Vector3;
@@ -204,8 +226,9 @@ export class Scenery {
     this.foliageOccluders = foliage.occluders;
     this.hideableInstances = foliage.hideableInstances;
     this.group.add(buildTreeline());
-    // Collected as they are built, after `clearOfAnchors` has trimmed them,
-    // so what is published is what is standing.
+    // Collected as they are built, from the already-trimmed `wallPlan`, so
+    // what is published is what is standing — and is what `buildFoliage`
+    // above has just planted its trees around.
     const built: PlacedWallRun[] = [];
     this.group.add(buildWoodenWalls(collision, built));
     this.group.add(buildStoneWalls(collision, built));
@@ -303,9 +326,21 @@ function buildFoliage(collision: CollisionWorld): {
   // canopies grew through one another on the canonical seed, the worst by
   // 4.32 m, which at a 2.5 m canopy is one tree standing inside another.
   const planted: { x: number; z: number; reach: number }[] = [];
-  // Attempts raised with the new refusal: the old budget was sized for a test
-  // that almost never said no.
-  while (treeCount < targetTrees && attempts < 26000) {
+  // Attempts raised with each new refusal: the original budget was sized for a
+  // test that almost never said no.
+  //
+  // `targetTrees` has not actually been reachable for some time — the lawn is
+  // tight enough that the budget runs out first, and the canonical seed was
+  // already settling for 30 before the wall refusal was added. Adding it took
+  // that to 19 at the old 26 000, which is a visibly thinner park, so the
+  // budget goes up to buy the trees back: 26 on the canonical seed and 26-30
+  // across the sweep seeds, for about 400 ms of extra headless build.
+  //
+  // 260 000 would recover 28, and it is deliberately not taken: it costs a
+  // further half-second of load for two trees nobody can count. The honest fix
+  // for the shortfall is a scatter that does not rejection-sample a tight lawn
+  // at all, which is a bigger job than this one.
+  while (treeCount < targetTrees && attempts < 120000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
@@ -316,6 +351,9 @@ function buildFoliage(collision: CollisionWorld): {
     const kind = pickTreeKind(rng);
     const reach = TREE_REACH[kind];
     if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) continue;
+    // The walls are decided before any of this runs, so a tree that would grow
+    // into one is simply refused the spot. See `clearOfWalls`/`TREE_WALL_GAP`.
+    if (!clearOfWalls(x, z, reach)) continue;
     planted.push({ x, z, reach });
     const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
@@ -718,11 +756,23 @@ function fitsAmong(candidate: WallRun, placed: readonly WallRun[]): boolean {
  *
  * Memoised because both builders need the same answer and the generation is
  * pure: same {@link PARK_SEED}, same park.
+ *
+ * {@link clearOfAnchors} is applied **here**, not in the two builders, so that
+ * what this returns is exactly what ends up standing in the park. The foliage
+ * scatter now asks this the same question the builders do, and there is only
+ * one answer for it to get: a plan that had to be trimmed identically in three
+ * places would be three places for the trimming to fall out of step.
  */
-let cachedWallPlan: { readonly wood: readonly WallRun[]; readonly stone: readonly WallRun[] } | null =
-  null;
+interface WallPlan {
+  readonly wood: readonly WallRun[];
+  readonly stone: readonly WallRun[];
+  /** Every run that will stand, of either kind. See {@link clearOfWalls}. */
+  readonly all: readonly WallRun[];
+}
 
-function wallPlan(): { readonly wood: readonly WallRun[]; readonly stone: readonly WallRun[] } {
+let cachedWallPlan: WallPlan | null = null;
+
+function wallPlan(): WallPlan {
   if (cachedWallPlan) return cachedWallPlan;
   // One growing list of everything accepted so far, shared by both generators.
   const placed: WallRun[] = [];
@@ -736,10 +786,33 @@ function wallPlan(): { readonly wood: readonly WallRun[]; readonly stone: readon
   // plus 5.7 m, so the two structures really do compete. Measured on the
   // canonical seed — maze first gives 4 wooden and 6 stone segments; stone
   // first gives 8 stone and no hiding maze at all.
-  const wood = generateWallMaze(placed);
-  const stone = generateStoneRuns(placed);
-  cachedWallPlan = { wood, stone };
+  const wood = clearOfAnchors(generateWallMaze(placed));
+  const stone = clearOfAnchors(generateStoneRuns(placed));
+  cachedWallPlan = { wood, stone, all: [...wood, ...stone] };
   return cachedWallPlan;
+}
+
+/**
+ * Is there room for a tree of `reach` here, clear of every wall the park is
+ * about to stand up?
+ *
+ * Deliberately **not** folded into {@link isPlantable}, tempting though that
+ * is: the wall generator's own {@link runIsClear} calls `isPlantable` for every
+ * candidate run, so a wall test living in there would ask {@link wallPlan} for
+ * an answer while `wallPlan` was still busy computing it — infinite recursion,
+ * on the first tree of the first park.
+ *
+ * That the trees are the ones to give way is settled precedent in this file:
+ * the rail route stopped bending around foliage when it became a pure
+ * pre-scene plan, and the walls are a pure pre-scene plan too. Neither needs
+ * the collision world, so both are known before a single tree is planted.
+ */
+function clearOfWalls(x: number, z: number, reach: number): boolean {
+  for (const run of wallPlan().all) {
+    const needed = WALL_HALF_WIDTH[run.kind] + reach + TREE_WALL_GAP;
+    if (pointToSegment([x, z], run.from, run.to) < needed) return false;
+  }
+  return true;
 }
 
 /**
@@ -877,7 +950,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
   const postGeometry = new CylinderGeometry(0.19, 0.21, 1, 8);
   const capGeometry = new SphereGeometry(0.24, 10, 8);
 
-  for (const run of clearOfAnchors(runs)) {
+  for (const run of runs) {
     const [x1, z1] = run.from;
     const [x2, z2] = run.to;
     const length = Math.hypot(x2 - x1, z2 - z1);
@@ -944,7 +1017,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
   // Ball finial + collar at each end of every run — the one detail that makes a
   // wall look cared for rather than extruded. Instanced, because two extra draw
   // calls for the whole park is affordable and thirty-two is not.
-  const placed = clearOfAnchors(runs);
+  const placed = runs;
   const finials: InstanceItem[] = [];
   const collars: InstanceItem[] = [];
 
