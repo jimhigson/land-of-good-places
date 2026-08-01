@@ -73,8 +73,27 @@ const STATION_RAMP = 26;
  */
 const OUTER_RADIUS = 47;
 
-/** Half-width kept clear either side of the centre line. */
+/**
+ * Half-width kept clear either side of the centre line while solving.
+ *
+ * This is what the generator *aims* for, deliberately far more than the ride
+ * physically needs, so a solved loop has room to breathe rather than shaving
+ * past the castle.
+ */
 const CORRIDOR_RADIUS = 3;
+
+/**
+ * Half a car, in metres — the body is `toonBox(1.5, …)` in `Coaster.ts`.
+ *
+ * The width at which the ride stops missing something and starts hitting it,
+ * and so the threshold the boot assert uses. Emphatically **not**
+ * {@link CORRIDOR_RADIUS}: asserting the generator's own target would only
+ * prove it can do arithmetic, and the canonical loop clears the castle by
+ * 3.2 m against a 3 m corridor, so an assert set there would cry wolf at the
+ * first retune. The same number, for the same reason, is what the procgen
+ * invariant measures.
+ */
+const CAR_HALF_WIDTH = 0.75;
 
 /** How close the loop may come to an earlier part of itself. */
 const SELF_CLEARANCE = 5;
@@ -545,9 +564,10 @@ export function checkCoasterClearances(
     }
   }
   for (const [what, gap] of worst) {
-    if (gap < CORRIDOR_RADIUS) {
+    if (gap < CAR_HALF_WIDTH) {
       complaints.push(
-        `coaster passes ${gap.toFixed(1)} m from ${what} — the track is ${CORRIDOR_RADIUS} m wide, so it clips`,
+        `coaster passes ${gap.toFixed(1)} m from ${what} — a car is ` +
+          `${CAR_HALF_WIDTH * 2} m wide, so it clips it`,
       );
     }
   }
