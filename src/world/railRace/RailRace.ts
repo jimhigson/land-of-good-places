@@ -19,7 +19,9 @@ import { createSparks, type Sparks } from './sparks';
 import {
   HAZARDS,
   RACE_LAPS,
+  RIVAL_SKILL,
   createRider,
+  rivalBand,
   rivalWantsHold,
   stepRider,
   type Rider,
@@ -94,21 +96,11 @@ const RIVALS: readonly {
   readonly name: string;
   readonly outfit: number;
   readonly hairStyle: 'short' | 'bob';
-  readonly skill: number;
 }[] = [
-  { name: 'Pip', outfit: PALETTE.markerLemon, hairStyle: 'short', skill: 0.72 },
-  { name: 'Nell', outfit: PALETTE.markerMint, hairStyle: 'bob', skill: 0.8 },
-  { name: 'Otto', outfit: PALETTE.markerSky, hairStyle: 'short', skill: 0.86 },
+  { name: 'Pip', outfit: PALETTE.markerLemon, hairStyle: 'short' },
+  { name: 'Nell', outfit: PALETTE.markerMint, hairStyle: 'bob' },
+  { name: 'Otto', outfit: PALETTE.markerSky, hairStyle: 'short' },
 ];
-
-/**
- * How hard the rivals rubber-band.
- *
- * A metre of lead moves a rival's thrust by `CATCHUP`, clamped to ±`SWING`.
- * Asymmetric on purpose — the point is a close race, not a fair one.
- */
-const CATCHUP = 0.004;
-const SWING = 0.22;
 
 /**
  * How far `poseRider()` drops the player when she is off the button, in this
@@ -366,9 +358,9 @@ export class RailRace implements GameSystem {
           (input.isDown('jump') || input.isDown('interact') || this.raceHold?.() === true);
       } else {
         wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
-        // Rubber band: catching up is easier than running away.
-        const lead = me.travelled - rider.travelled;
-        band = 1 + Math.max(-SWING, Math.min(SWING, lead * CATCHUP));
+        // Rubber band: catching up is easier than running away — and, since 1
+        // August 2026, far *less* easy than it was. See `rivalBand`.
+        band = rivalBand(me.travelled - rider.travelled);
       }
 
       const events = stepRider(RAIL_RACE_PLAN.route, rider, wantHold, dt, band);
@@ -623,7 +615,13 @@ export class RailRace implements GameSystem {
   }
 }
 
-/** Rival skill, by lane. Kept out of the hot loop's closure. */
+/**
+ * Rival skill, by lane. Kept out of the hot loop's closure.
+ *
+ * The numbers themselves live in `simulate.ts` beside the brains that read
+ * them, so `scripts/check-rail-race.mts` races the same rivals the browser
+ * does rather than a second copy of their tuning.
+ */
 function skillOf(rider: Rider): number {
-  return RIVALS[rider.lane]?.skill ?? 0.8;
+  return RIVAL_SKILL[rider.lane] ?? 0.7;
 }
