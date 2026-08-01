@@ -1,7 +1,6 @@
-import { BoxGeometry, Group, Mesh, Vector3 } from 'three';
+import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
-import { addOutline, toonMaterial } from '../../art/style/materials';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
@@ -13,8 +12,9 @@ import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
-import { buildRailRaceTrack, type RailRaceTrack, type SparkingSegment } from './track';
+import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './route';
+import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
 import {
   HAZARDS,
@@ -81,17 +81,24 @@ const RACE_SECRET = 'secret.railRace';
  * has to be able to win; none is hopeless, because a race you cannot lose is not
  * a race. Ordered inside-out, so the nearest rival to the player is the sharpest
  * one — the cart she can actually see beside her is the one worth beating.
+ *
+ * No `cart` colour here any more — a rival's cart used to carry its own,
+ * hand-picked colour, and it had drifted out of step with `track.ts`'s
+ * `LANE_COLOURS`, the array that actually paints the rails. `buildCarts`
+ * below now derives every cart's colour from `LANE_COLOURS[lane]` instead, so
+ * a rival's cart always matches the rail she is riding, by construction.
+ * `outfit` stays independent — what a rival wears is her own choice, not tied
+ * to her rail.
  */
 const RIVALS: readonly {
   readonly name: string;
-  readonly cart: number;
   readonly outfit: number;
   readonly hairStyle: 'short' | 'bob';
   readonly skill: number;
 }[] = [
-  { name: 'Pip', cart: PALETTE.markerLemon, outfit: PALETTE.markerLemon, hairStyle: 'short', skill: 0.72 },
-  { name: 'Nell', cart: PALETTE.markerMint, outfit: PALETTE.markerMint, hairStyle: 'bob', skill: 0.8 },
-  { name: 'Otto', cart: PALETTE.markerSky, outfit: PALETTE.markerSky, hairStyle: 'short', skill: 0.86 },
+  { name: 'Pip', outfit: PALETTE.markerLemon, hairStyle: 'short', skill: 0.72 },
+  { name: 'Nell', outfit: PALETTE.markerMint, hairStyle: 'bob', skill: 0.8 },
+  { name: 'Otto', outfit: PALETTE.markerSky, hairStyle: 'short', skill: 0.86 },
 ];
 
 /**
@@ -125,6 +132,7 @@ type Phase = 'waiting' | 'countdown' | 'racing' | 'finishing';
 interface Cart {
   readonly rider: Rider;
   readonly group: Group;
+  readonly cart: CartHandle;
   readonly isPlayer: boolean;
   /** The child aboard. Null for the player's cart, and in a headless park. */
   readonly kid: KidHandle | null;
@@ -204,24 +212,31 @@ export class RailRace implements GameSystem {
 
   private buildCarts(): void {
     // The rivals ride the inner lanes; the player rides the outermost, nearest
-    // the camera, where nothing can ever be drawn in front of her.
+    // the camera, where nothing can ever be drawn in front of her. Each cart's
+    // colour comes from `LANE_COLOURS[lane]` — the same array that paints the
+    // rails — so a cart can never be a different colour from its own rail.
     RIVALS.forEach((rival, index) => {
-      const group = buildCart(rival.cart);
+      const cart = createCart(LANE_COLOURS[index] ?? PALETTE.markerPink);
+      const group = cart.root;
       const kid = createKid({ outfit: rival.outfit, hairStyle: rival.hairStyle });
-      kid.root.position.y = 0.05;
+      // Local to this still-unscaled `group` (the RIDE_SCALE below applies to
+      // both together), so this is the cart's own SEAT_HEIGHT, not the
+      // player's world-space `poseRider()` version of the same fact.
+      kid.root.position.y = SEAT_HEIGHT;
       kid.setExpression('happy');
       group.add(kid.root);
       // RIDE_SCALE scales the cart's own body/nose and, since the kid is a
       // child of this same group, the rival riding in it, together.
       group.scale.setScalar(RIDE_SCALE);
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, isPlayer: false, kid });
+      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid });
     });
 
-    const group = buildCart(PALETTE.markerPink);
+    const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
+    const group = playerCart.root;
     group.scale.setScalar(RIDE_SCALE);
     this.group.add(group);
-    this.carts.push({ rider: createRider(PLAYER_LANE), group, isPlayer: true, kid: null });
+    this.carts.push({ rider: createRider(PLAYER_LANE), group, cart: playerCart, isPlayer: true, kid: null });
   }
 
   /** Lazily, as the train does: the headless park has no player and no DOM. */
@@ -485,6 +500,11 @@ export class RailRace implements GameSystem {
     this.track.setSparking(sparkingSegments, elapsed);
     this.sparks.update(dt);
 
+    // Wheels turn with distance travelled, not with `dt` — an absolute angle
+    // off `Rider.travelled` rather than an accumulated one, so a fresh race
+    // (which resets `travelled` to 0) resets the wheels too. See `cart.ts`.
+    for (const cart of this.carts) cart.cart.spinWheels(cart.rider.travelled);
+
     for (const cart of this.carts) {
       const kid = cart.kid;
       if (!kid) continue;
@@ -524,7 +544,7 @@ export class RailRace implements GameSystem {
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     this.player.setRidePose(
       cart.position.x + wobble,
-      cart.position.y + 0.05 - duckDrop,
+      cart.position.y + SEAT_HEIGHT * RIDE_SCALE - duckDrop,
       cart.position.z,
       cart.rotation.y,
     );
@@ -562,7 +582,10 @@ export class RailRace implements GameSystem {
     this.confetti?.dispose();
     this.sparks.dispose();
     this.rideView?.dispose();
-    for (const cart of this.carts) cart.kid?.dispose?.();
+    for (const cart of this.carts) {
+      cart.kid?.dispose?.();
+      cart.cart.dispose();
+    }
   }
 
   // ------------------------------------------------------------- internals
@@ -577,22 +600,4 @@ export class RailRace implements GameSystem {
 /** Rival skill, by lane. Kept out of the hot loop's closure. */
 function skillOf(rider: Rider): number {
   return RIVALS[rider.lane]?.skill ?? 0.8;
-}
-
-/** A little cart: a body, a nose, and the house outline. */
-function buildCart(colour: number): Group {
-  const group = new Group();
-  const body = new Mesh(new BoxGeometry(1.15, 0.62, 1.7), toonMaterial(colour));
-  body.position.y = 0.32;
-  // The cart's own body casts — one more draw call, and it is the shadow the eye
-  // actually follows round the ring.
-  body.castShadow = true;
-  addOutline(body, 0.02);
-  group.add(body);
-
-  const nose = new Mesh(new BoxGeometry(0.85, 0.34, 0.42), toonMaterial(PALETTE.markerLemon));
-  nose.position.set(0, 0.32, 1.02);
-  addOutline(nose, 0.02);
-  group.add(nose);
-  return group;
 }
