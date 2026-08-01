@@ -46,6 +46,14 @@ import type { ParkTrain } from '../train';
  * cannot fall out, fall off, or lose — this is still Land of Good Places.
  */
 
+/**
+ * Rail centre-to-centre and the distance between ties. Exported so
+ * `scripts/check-tie-frame.mts` can sample the same points the track itself
+ * is built from, rather than a second guess at them that could drift.
+ */
+export const RAIL_GAUGE = 1.1;
+export const TIE_STEP = 1.4;
+
 const CHAIN_SPEED = 3.4;
 const MIN_SPEED = 4.2;
 const MAX_SPEED = 15;
@@ -274,7 +282,7 @@ export class Coaster implements GameSystem {
     const tieMaterial = toonMaterial(PALETTE.woodLight);
     const pylonMaterial = toonMaterial(PALETTE.stonePinkLight);
 
-    const step = 1.4;
+    const step = TIE_STEP;
     const segments = Math.ceil(this.route.length / step);
 
     // The rails are **swept**, not chopped (family note, 28 July): a rail built
@@ -289,7 +297,7 @@ export class Coaster implements GameSystem {
     // it) take `gauge` to mean the railway's own centre-to-centre. Hence 1.1
     // here: the same rails, the standard name for the number.
     const railGeometries = sweptRails(this.route, {
-      gauge: 1.1,
+      gauge: RAIL_GAUGE,
       radius: 0.075,
       // Denser than the 1.4 m this used to sample at, and a real fix rather than
       // a tidy-up. Measured against the solved track, the old sweep's rails
@@ -313,6 +321,9 @@ export class Coaster implements GameSystem {
     }
 
     const ties = new InstancedMesh(new BoxGeometry(1.5, 0.08, 0.3), tieMaterial, segments);
+    // Named so `scripts/check-tie-frame.mts` can find the real instance
+    // buffer in a headless build rather than guessing at group order.
+    ties.name = 'ties';
     const matrix = new Matrix4();
     const basis = new Matrix4();
     const rotation = new Quaternion();
