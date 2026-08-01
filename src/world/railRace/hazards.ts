@@ -31,21 +31,31 @@ import { RIDE_SCALE } from './route';
  * purely visual clearance (bonking is decided by button state at the moment
  * of crossing, not an actual pose/collision test, see the header above).
  *
- * **1.5, not 1.15.** The first pass just multiplied the pre-`RIDE_SCALE`
- * figure through, which undercounted a second thing that also grew:
- * `RIDE_SCALE` does not only move the rider up onto a taller seat
- * (`cart.ts`'s `SEAT_HEIGHT`), it also scales the rider's own model, so her
- * head sits noticeably higher above that seat than it used to. Measured live
- * (1 August 2026) against the deployed rig: at 1.15 the bar sat roughly a
- * metre *below* her head even while ducking, so she visibly passed through
- * it whichever way she was holding the button, not just "occasionally
- * clipped" — the two states never actually straddled the bar. 1.5 was picked
- * by measuring her real head height above the rail in both states
- * (`RailRace.ts`'s `poseRider`, ducking vs not, using the matching
- * `DUCK_DROP` fix there) and setting the bar roughly halfway between them,
- * so each state has real clearance rather than a hair's breadth.
+ * **2.1, not 1.5.** A previous pass (1 August 2026) set this to 1.5,
+ * documented as "measured live... setting the bar roughly halfway between
+ * [her ducking and standing head heights]." Re-measured live against the
+ * actual running dev build (1 August 2026, same day, during the duck-bar
+ * asset work — see `HANDOFF-duck-bar-blender-asset.md`): querying
+ * `window.game.world.railRace` and `window.game.player.model.hatAnchor`'s
+ * real world position directly (not recomputing the pose formula and
+ * checking it against itself — the exact tautology
+ * `ART-AGENT-NOTES.md` §6 warns a parity check can quietly become), her
+ * crown sits **4.70 m above the rail even while off the button** (the
+ * *better* of her two states). The old 1.5 was still nearly a metre below
+ * that — she passed through every bar whichever way she was holding, not
+ * "occasionally clipped", which is exactly Jim's report ("even while
+ * ducking the character clearly goes through them overlapping by a lot").
+ *
+ * `DUCK_DROP` (`RailRace.ts`) is a fixed vertical translate, not a pose
+ * change, so her head-to-root distance is the same in both states; her
+ * standing head height is the same 4.70 m plus `DUCK_DROP * RIDE_SCALE`
+ * (1.25 m) = 5.95 m. 2.1 sits roughly halfway between the two measured
+ * figures (4.70 m and 5.95 m) — the same "halfway between the two real
+ * states" rule the previous pass intended, just re-grounded in what the
+ * running game actually measures rather than a formula re-derived from the
+ * same code that produces the pose.
  */
-export const DUCK_CLEARANCE = 1.5 * RIDE_SCALE;
+export const DUCK_CLEARANCE = 2.1 * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.

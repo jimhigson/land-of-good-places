@@ -14,7 +14,9 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { clamp01, lerp } from '../../core/mathUtils';
+import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../paths';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -51,6 +53,14 @@ export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 
 /** How far a duck bar reaches either side of its lane's centre. */
 const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
+
+/**
+ * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
+ * `duckBarAsset.ts`'s own doc comment for why this asset has no per-part
+ * transform the way the cart's does.
+ */
+export const DUCKBAR_PARTS = ['post', 'bar'] as const;
+export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
 /** How far under the lowest a rail ever gets the cross-beam sits. */
 const BEAM_DROP = 0.45;
@@ -212,29 +222,38 @@ export function buildRailRaceTrack(
   // --- the duck bars ---------------------------------------------------------
   const barCount = layout.bars.length * LANE_COUNT;
   const frameMaterial = toonMaterial(PALETTE.buildingTrim);
-  const barMaterial = toonMaterial(PALETTE.slideRail);
+  // Diagonal yellow-and-black hazard tape (Jim, 1 August 2026) — a canvas
+  // texture, not baked into the asset; see `hazardTapeTexture`'s own doc
+  // comment for why, and why the base colour is white (the texture already
+  // carries both stripe colours — a tinted base would recolour the black
+  // stripes too).
+  const barMaterial = toonMaterial(0xffffff, { map: hazardTapeTexture() });
   keep(frameMaterial);
   keep(barMaterial);
 
-  const postGeometry = new CylinderGeometry(
-    0.07 * RIDE_SCALE,
-    0.09 * RIDE_SCALE,
-    DUCK_CLEARANCE + 0.3 * RIDE_SCALE,
-    6,
-  );
-  const barGeometry = new BoxGeometry(BAR_HALF_SPAN * 2, 0.22 * RIDE_SCALE, 0.26 * RIDE_SCALE);
+  // Shape from the asset (`art/blend/duckbar.blend`), not procedural
+  // primitives — see `HANDOFF-duck-bar-blender-asset.md` for why: Jim, after
+  // a numbers-only height fix still wasn't right, "sizing is a Blender asset
+  // issue not a game engine issue." Shared, `markShared` geometry (the whole
+  // ring's worth of posts and bars all point at these same two buffers), so
+  // — unlike `sleeveGeometry` below — these must never be pushed to
+  // `disposables`: see `dispose()`'s own note.
+  const postGeometry = duckBarAssetGeometry('post');
+  const barGeometry = duckBarAssetGeometry('bar');
   // The bar itself is the warning light. Lamps on the posts were legible at a
   // standstill and invisible at fourteen metres a second; a stripe of amber
   // right where the thing you must duck under is cannot be missed. A sleeve
   // around the bar rather than the bar's own material, so the toon shading
-  // underneath still shapes it.
+  // underneath still shapes it. Kept procedural (not part of the asset): its
+  // whole job is to be resized and recoloured every frame by `setAlerts`,
+  // which is exactly the "appearance from code" half of the split — a fixed
+  // authored shape has nothing to offer a part that never looks the same way
+  // twice.
   const sleeveGeometry = new BoxGeometry(
     BAR_HALF_SPAN * 2 - 0.04 * RIDE_SCALE,
     0.28 * RIDE_SCALE,
     0.32 * RIDE_SCALE,
   );
-  keep(postGeometry);
-  keep(barGeometry);
   keep(sleeveGeometry);
 
   const posts = new InstancedMesh(postGeometry, frameMaterial, Math.max(1, barCount * 2));
@@ -463,6 +482,12 @@ export function buildRailRaceTrack(
     },
 
     dispose(): void {
+      // `postGeometry`/`barGeometry` are deliberately never in `disposables`
+      // — they come from `duckBarAsset.ts`'s shared, `markShared` cache, the
+      // same one every other trestle span's posts and bars point at, so
+      // freeing them here would corrupt the rest of the ring. Everything
+      // else this track built for itself (rails, spark ribbons, the sleeve
+      // geometry, every material) is.
       for (const item of disposables) item.dispose();
     },
   };
