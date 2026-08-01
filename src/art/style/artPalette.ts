@@ -115,6 +115,21 @@ export const ART = {
   jetpackFlame: 0xffb45c,
   jetpackFlameCore: 0xffe9a8,
 
+  // --- glasses ----------------------------------------------------------------
+  /**
+   * Sunglasses, star glasses and heart glasses for the character creator
+   * (`art/models/glasses.ts`). Frames reuse an existing named colour wherever
+   * one already fits the shape (stars are yellow, hearts are `heartPink`); a
+   * lens tint is added fresh only where nothing already matches — a *tint*,
+   * because every lens is transparent (ART_DIRECTION.md — see that file's
+   * header for the transparency convention this follows).
+   */
+  glassesSunFrame: PALETTE.flowerRed,
+  glassesSunLens: 0xc98a52,
+  glassesStarFrame: PALETTE.flowerYellow,
+  glassesStarLens: 0xfff0a8,
+  glassesHeartLens: 0xffd6e8,
+
   // --- props ----------------------------------------------------------------
   lollipopStick: PALETTE.bark,
   lollipopLeaf: PALETTE.leafMid,

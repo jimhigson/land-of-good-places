@@ -167,6 +167,34 @@ export function kidEyeTopAt(azimuth: number): number | null {
   return SKULL_RADIUS * Math.cos(theta) * FACE_SQUASH[1];
 }
 
+/**
+ * **The centre of one painted eye**, in the `crown` group's frame — the same
+ * frame {@link kidEyeTopAt} and `hatAnchor`/`glassesAnchor` live in. `side` is
+ * -1 (the wearer's left, as she experiences it) or +1.
+ *
+ * Same sphere trigonometry as {@link kidEyeTopAt}, evaluated at the eye's own
+ * azimuth (`offset = 0`) instead of at its outer corner: an eye's ellipse sits
+ * at its vertical centre directly above its own horizontal centre, so this is
+ * `kidEyeTopAt`'s formula with the `halfH` dip dropped, not a second
+ * description of the eye. Both read the same `KID_FACE` numbers, so a future
+ * retune of the face has one place to change, not two — exactly the drift
+ * ART-AGENT-NOTES.md §2 warns about.
+ *
+ * Exists for {@link createKid}'s `glassesAnchor` and for `art/models/glasses.ts`,
+ * which needs the eyes' own spacing to centre a lens on each one.
+ */
+export function kidEyeCentre(side: -1 | 1): Vector3 {
+  const theta =
+    Math.PI / 2 - KID_FACE.spreadY / 2 + KID_FACE.tilt + KID_FACE.eyeY * KID_FACE.spreadY;
+  const azimuth = side * (KID_FACE.eyeGap / 2) * KID_FACE.spreadX;
+  const phi = Math.PI / 2 + azimuth;
+  return new Vector3(
+    -SKULL_RADIUS * Math.cos(phi) * Math.sin(theta) * FACE_SQUASH[0],
+    SKULL_RADIUS * Math.cos(theta) * FACE_SQUASH[1],
+    SKULL_RADIUS * Math.sin(phi) * Math.sin(theta) * FACE_SQUASH[2],
+  );
+}
+
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
   readonly colour: number;
@@ -370,6 +398,17 @@ export interface KidHandle extends CreatureHandle {
    * `art/models/jetpack.ts`.
    */
   readonly jetpackAnchor: Group;
+  /**
+   * Where glasses sit — the bridge of the nose, at the painted eyes' own
+   * height. A separate anchor from {@link hatAnchor} (the crown) and
+   * {@link hairAnchor} (a clip, up and to one side), so a sun hat and
+   * sunglasses can be worn together without either fighting the other for a
+   * mount point: a hat's brim already has to clear the eye line by contract
+   * (`hats.ts`'s `browLine`, gated against {@link kidEyeTopAt}), and this
+   * anchor sits exactly at that line, so nothing legitimately worn on the
+   * head competes with it. See `art/models/glasses.ts`.
+   */
+  readonly glassesAnchor: Group;
   /**
    * Every backpack mesh built, each tagged with the kinds that show it.
    *
@@ -716,6 +755,20 @@ export function createKid(options: KidOptions = {}): KidHandle {
   hairAnchor.position.set(0.32 * HEAD, 0.22 * HEAD, 0.14 * HEAD);
   crown.add(hairAnchor);
 
+  // Midpoint between the painted eyes, at their own height — see
+  // `kidEyeCentre`'s doc comment for why this is one description of "where the
+  // eyes are" rather than a second, hand-placed one. `kidEyeCentre(-1).y` and
+  // `.z` already equal `kidEyeCentre(1)`'s (the two eyes are mirror images at
+  // the same height and depth), but the midpoint is taken explicitly anyway
+  // so this keeps doing the sensible thing if the face layout ever stops being
+  // perfectly symmetric.
+  const glassesAnchor = new Group();
+  glassesAnchor.name = 'glassesAnchor';
+  const eyeL = kidEyeCentre(-1);
+  const eyeR = kidEyeCentre(1);
+  glassesAnchor.position.set(0, (eyeL.y + eyeR.y) / 2, (eyeL.z + eyeR.z) / 2);
+  crown.add(glassesAnchor);
+
   // --- hair --------------------------------------------------------------------
   // Every style lives in `art/models/hair.ts`, which hangs the head-mounted
   // parts off `crown` and the simulated ponytail off `root`. It is a separate
@@ -808,6 +861,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     holdAnchor,
     backpackAnchor,
     jetpackAnchor,
+    glassesAnchor,
     backpackParts: backpackRig?.parts ?? [],
     hairParts: hairRig.parts,
     get hairHidesHat() {
