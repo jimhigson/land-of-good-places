@@ -74,8 +74,14 @@ Portrait rider **1.83× bigger**, camera in from 30.6 m to 17.8 m. Landscape
 - [x] rebased onto main @ 9c65d78 (PR #145 spark/bonk not merged yet, so no
       overlap to resolve; it touches RailRace.ts/track.ts/RaceHud.ts, this
       touches camera.ts + the check)
-- [ ] PR
-- [ ] browser QA — Overseer says chrome-devtools is owned by the PR #145 agent;
-      they will message when free. Want a 390x844 before/after screenshot.
+- [x] PR **#147** — https://github.com/jimhigson/land-of-good-places/pull/147
+- [ ] browser QA — **the one thing outstanding**. chrome-devtools was owned by
+      the PR #145 agent throughout; the Overseer will message when free. Want a
+      390x844 portrait before/after. Two things specifically worth eyes on:
+      the rig now stands at r≈74 (was 83.5) and 5.7 m up (was 11), so it is
+      nearer the treeline outside the wall at r=60 — confirm nothing gets
+      between it and the race; and the four lanes separate in depth more
+      strongly from 18 m than they did from 30 m, which should read better but
+      is a judgement call. Everything else is measured and passing.
 
 Scratch scripts have been deleted; the tree is clean.
