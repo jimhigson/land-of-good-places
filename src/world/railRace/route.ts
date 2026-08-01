@@ -139,6 +139,9 @@ export const LANE_RADII: readonly number[] = Array.from(
   (_unused, lane) => NOMINAL_RADIUS + (lane - (LANE_COUNT - 1) / 2) * LANE_SPACING,
 );
 
+/** Radial distance from the innermost lane's centre to the outermost lane's. */
+export const LANE_SPAN = (LANE_COUNT - 1) * LANE_SPACING;
+
 /** Height of a lane's rail above the level base, at loop angle `theta`. */
 function undulation(lane: number, theta: number): number {
   const rotated = theta + lane * LANE_ROTATION * TAU;
@@ -200,7 +203,9 @@ export class RailRaceRoute {
     // rides carry her to a station she is not standing on.
     const stall = placedEntry(stationStallId);
     const bearing = Math.atan2(stall.z, stall.x);
-    this.startDistance = this.wrap(bearing * NOMINAL_RADIUS);
+    // Inverted to match `angleAt`'s clockwise sign, so this really is the arc
+    // length at which the ring passes the booth.
+    this.startDistance = this.wrap(-bearing * NOMINAL_RADIUS);
   }
 
   /** Brings any arc length into `[0, length)`. */
@@ -209,9 +214,21 @@ export class RailRaceRoute {
     return wrapped < 0 ? wrapped + this.length : wrapped;
   }
 
-  /** Loop angle at an arc length. */
+  /**
+   * Loop angle at an arc length.
+   *
+   * **Negative**, so the race runs clockwise seen from above — and that sign is
+   * not arbitrary. The camera stands outside the ring looking in, which fixes
+   * screen-right as `(sin θ, 0, −cos θ)`; running anticlockwise would carry
+   * every rider from right to left across the picture, backwards to every
+   * side-scroller a child has ever seen and backwards to the direction she
+   * reads. Flipping the sign here turns the whole race round at the one place
+   * that decides it, rather than leaving the camera to compensate. Measured, not
+   * argued: `scripts/check-rail-race.mts` asserts a rider's screen-space motion
+   * is rightward.
+   */
   angleAt(distance: number): number {
-    return distance / NOMINAL_RADIUS;
+    return -distance / NOMINAL_RADIUS;
   }
 
   /** Height of a lane's rail head, in world metres. */
@@ -243,8 +260,10 @@ export class RailRaceRoute {
     const theta = this.angleAt(distance);
     const radius = LANE_RADII[lane] ?? NOMINAL_RADIUS;
     const horizontal = radius / NOMINAL_RADIUS;
+    // d/ds of (cos θ · r, ·, sin θ · r) with θ = −s/R, so the horizontal part
+    // comes out as (sin θ, −cos θ) rather than the anticlockwise (−sin θ, cos θ).
     return target
-      .set(-Math.sin(theta) * horizontal, this.slopeAt(lane, distance), Math.cos(theta) * horizontal)
+      .set(Math.sin(theta) * horizontal, this.slopeAt(lane, distance), -Math.cos(theta) * horizontal)
       .normalize();
   }
 
@@ -261,8 +280,8 @@ export class RailRaceRoute {
     for (const harmonic of HARMONICS) {
       dydtheta += Math.cos(rotated * harmonic.n) * harmonic.amplitude * harmonic.n;
     }
-    // Chain rule: theta = s / NOMINAL_RADIUS.
-    return dydtheta / NOMINAL_RADIUS;
+    // Chain rule, with `angleAt`'s clockwise sign: dθ/ds = −1/NOMINAL_RADIUS.
+    return -dydtheta / NOMINAL_RADIUS;
   }
 
   /**

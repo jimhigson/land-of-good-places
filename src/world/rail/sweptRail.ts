@@ -45,6 +45,13 @@ export interface SweptRailOptions {
   readonly closed?: boolean;
   /** Radial segments around the tube. Default 6 — it is a toy railway. */
   readonly radialSegments?: number;
+  /**
+   * Tube segments per metre. Default 2, which is what the coaster needs for the
+   * tightest bend its solver can produce. A gentler route (the Rail Race's ring
+   * turns at a constant 1/53.5 per metre) reads just as smooth at less, and the
+   * saving is real: this is multiplied by eight rails there.
+   */
+  readonly tubularPerMetre?: number;
 }
 
 /**
@@ -90,11 +97,9 @@ export function sweptRail(
   }
 
   const curve = new CatmullRomCurve3(points, closed, 'catmullrom', 0.5);
-  // Two tubular segments a metre: enough that the tightest bend any route in
-  // this park can produce still reads as a curve rather than a polygon.
   return new TubeGeometry(
     curve,
-    Math.ceil(sampler.length * 2),
+    Math.ceil(sampler.length * (options.tubularPerMetre ?? 2)),
     options.radius,
     options.radialSegments ?? 6,
     closed,

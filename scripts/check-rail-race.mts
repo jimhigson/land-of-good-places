@@ -16,9 +16,10 @@
  * this park's checks are written in. It also asserts the thing that makes it a
  * *race*: every lane must be exactly as hard as every other, which for a course
  * whose only difficulty is its hills means identical total climb and identical
- * steepest gradient. A phase offset preserves both; a frequency or amplitude
- * offset would not, and this is what would catch someone "improving" the look by
- * giving lane 3 a bigger dipper.
+ * steepest gradient. Only a *rigid rotation* of one profile preserves both — a
+ * free phase per harmonic does not, which this caught on the first draft at
+ * 2.54 m of climb between the easiest and hardest lane. It is also what would
+ * catch someone "improving" the look by giving lane 3 a bigger dipper.
  *
  * ### The game
  *
@@ -49,6 +50,7 @@ import {
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
 import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
+import { RaceCamera } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -198,6 +200,107 @@ say(
     `r=${exitRadius.toFixed(1)}`,
 );
 require(exitRadius < 56, 'the ride exit is outside the walkable park.');
+
+// --- is the camera actually side-on, and the right way round? ----------------
+//
+// The lesson the coaster learned the hard way (every ride camera in this park
+// faced backwards for weeks, at dot(forward, travel) = -1.000, and it was found
+// by measuring rather than by reading). Nothing here is argued from the code; it
+// is all read off the built camera.
+
+const rig = new RaceCamera(route);
+rig.resize(1280, 720);
+
+const forward = new Vector3();
+const travel = new Vector3();
+const inward = new Vector3();
+const travelAtRider = new Vector3();
+const toCamera = new Vector3();
+
+let worstSideOn = 0;
+let worstInward = 1;
+let leastRightward = 1;
+let outsideEverywhere = true;
+let worstPitch = 0;
+
+for (let i = 0; i < 240; i += 1) {
+  const travelled = (i / 240) * route.length;
+  rig.reset(travelled);
+  const camera = rig.camera;
+  camera.getWorldDirection(forward);
+
+  // "Side-on" is a property of the middle of the picture, so it is measured
+  // there — the rider is deliberately held left of centre and is therefore
+  // always a little off-axis, which is the framing working, not a fault. The
+  // rig stands radially out from the point it aims at, so the bearing it stands
+  // at IS the bearing of the centre of the picture.
+  const centreBearing = Math.atan2(camera.position.z, camera.position.x);
+  inward.set(-Math.cos(centreBearing), 0, -Math.sin(centreBearing));
+  // The clockwise horizontal tangent at that bearing — see RailRaceRoute.angleAt.
+  travel.set(Math.sin(centreBearing), 0, -Math.cos(centreBearing));
+
+  // Compared flat, so the rig's downward tilt is not mistaken for looking along
+  // the track. The tilt is checked separately below.
+  const flat = new Vector3(forward.x, 0, forward.z).normalize();
+  worstSideOn = Math.max(worstSideOn, Math.abs(flat.dot(travel)));
+  worstInward = Math.min(worstInward, flat.dot(inward));
+  worstPitch = Math.max(worstPitch, Math.abs(Math.asin(forward.y)));
+
+  // The rider must cross the screen left to right. Screen-right is the camera's
+  // own local +X in world space, which is `matrixWorld`'s first column.
+  const at = route.wrap(route.startDistance + travelled);
+  route.tangentAt(PLAYER_LANE, at, travelAtRider);
+  const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  leastRightward = Math.min(leastRightward, right.dot(travelAtRider));
+
+  // The rig has to stand outside the ring, or it is looking out of the park.
+  route.pointAt(PLAYER_LANE, at, point);
+  toCamera.subVectors(camera.position, point);
+  outsideEverywhere &&= Math.hypot(camera.position.x, camera.position.z) > Math.hypot(point.x, point.z);
+}
+
+say('');
+say(`camera      |dot(forward, travel)| ≤ ${worstSideOn.toFixed(4)}  (0 is perfectly side-on)`);
+say(`            dot(forward, inward)  ≥ ${worstInward.toFixed(4)}  (1 is straight into the park)`);
+say(`            dot(screenRight, travel) ≥ ${leastRightward.toFixed(3)}  (1 is left-to-right)`);
+say(`            tilt ${((worstPitch * 180) / Math.PI).toFixed(1)}° down`);
+say(`            fov ${rig.camera.fov.toFixed(1)}° at 16:9`);
+
+require(
+  worstSideOn < 0.02,
+  `the camera is not side-on: it looks along the direction of travel by ` +
+    `${worstSideOn.toFixed(3)}. The brief asks for a side view, not a chase.`,
+);
+require(
+  worstInward > 0.99,
+  `the camera is not looking into the park (dot with inward is ${worstInward.toFixed(3)}). ` +
+    'The park is meant to be the backdrop of the whole race.',
+);
+require(
+  leastRightward > 0.95,
+  `riders cross the screen the wrong way (dot(screenRight, travel) = ` +
+    `${leastRightward.toFixed(3)}). A side-scroller reads left to right — see the sign of ` +
+    'RailRaceRoute.angleAt.',
+);
+require(outsideEverywhere, 'the camera rig strays inside the ring, so it would look outwards.');
+// Enough tilt to stack the four lanes into four rows of the picture, not so much
+// that the storybook side view turns into a plan view.
+require(
+  worstPitch > 0.12 && worstPitch < 0.5,
+  `the camera tilts ${((worstPitch * 180) / Math.PI).toFixed(1)}° down; it needs a little, to ` +
+    'separate the four lanes, and not a lot, or the side view becomes a map.',
+);
+
+// A portrait phone must see the same track ahead as a monitor.
+rig.resize(720, 1280);
+const portraitFov = rig.camera.fov;
+rig.resize(1280, 720);
+say(`            fov ${portraitFov.toFixed(1)}° in portrait — taller, not narrower`);
+require(
+  portraitFov > rig.camera.fov + 10,
+  'a portrait screen does not widen the view vertically, so it must be cropping the track ' +
+    'ahead — a hazard would arrive with less warning on a phone than on a monitor.',
+);
 
 // --- is it still a game? -----------------------------------------------------
 
