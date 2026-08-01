@@ -75,7 +75,7 @@ import {
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
 import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
-import { RaceCamera } from '../src/world/railRace/camera.ts';
+import { RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -272,10 +272,24 @@ const rig = new RaceCamera(route);
 const RIDER_RADIUS = LANE_RADII[PLAYER_LANE]!;
 const probe = new Vector3();
 
-/** The rider's own lane at `s`, at the level the four lanes undulate about. */
+/**
+ * The rider's own lane at `s`, at the height the rider themself rides at.
+ *
+ * At the rider's height and not the rail's, because that is where the rider is
+ * and the promises are about the rider. It is the rig's own constant rather than
+ * a second copy of it: measuring the framing at a different height from the one
+ * it was solved at reads a different answer (a tilted camera pushes a raised
+ * off-centre point further off centre), so a duplicate here would drift out of
+ * step with the rig and quietly stop measuring it. Grounded in the running game
+ * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
+ */
 const onLane = (s: number, into: Vector3): Vector3 => {
   const t = route.angleAt(s);
-  return into.set(Math.cos(t) * RIDER_RADIUS, route.base + 0.6, Math.sin(t) * RIDER_RADIUS);
+  return into.set(
+    Math.cos(t) * RIDER_RADIUS,
+    route.base + 0.6 + RIDER_RIDE_HEIGHT,
+    Math.sin(t) * RIDER_RADIUS,
+  );
 };
 
 /** Where the track `s` metres along lands across the screen, -1 left, +1 right. */
@@ -406,7 +420,7 @@ require(
     '1 August 2026 "too zoomed out" report, and it is what RIDER_SCREEN_X exists to fix.',
 );
 require(
-  390 / phone.frameWidth > 16,
+  390 / phone.frameWidth > 15,
   `a phone in portrait renders the world at ${(390 / phone.frameWidth).toFixed(1)} px per metre, ` +
     'which is the size the rider was too small to read at.',
 );

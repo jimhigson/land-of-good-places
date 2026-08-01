@@ -120,7 +120,7 @@ const AHEAD_SCREEN_X = 0.95;
  * things bend, and there is no longer enough behind them to see a rider who has
  * just been bonked drop back. It is a floor, not a value to keep tuning.
  */
-const RIDER_SCREEN_X_PORTRAIT = 0.1;
+const RIDER_SCREEN_X_PORTRAIT = 0.13;
 const RIDER_SCREEN_X_LANDSCAPE = 0.28;
 /** The window shapes those two are quoted for: a phone stood up, and a monitor. */
 const PORTRAIT_ASPECT = 0.5;
@@ -177,6 +177,20 @@ const FOLLOW_LAG = FOLLOW / Math.LN2;
 
 /** The rider's own lane. The framing promises are about the rider, so measured there. */
 const RIDER_RADIUS = LANE_RADII[PLAYER_LANE]!;
+
+/**
+ * How far above the rails the rider themself sits, in metres.
+ *
+ * The framing is solved for the rider, so it has to be solved at the height the
+ * rider *is*, not at the height of the rail they are riding on. Solving at the
+ * rail put them about two percent of the width further left than they were asked
+ * to be — a tilted camera divides by a depth that raising a point shortens, so a
+ * raised point that is already off centre is pushed further off it, and two
+ * percent of 390 px is the difference between a rider beside the edge and a
+ * rider clipped by it. Measured in the running game on 1 August 2026 at 1.2–2.0 m
+ * above the rail; solving at 1.9 lands the rider where the number above says.
+ */
+export const RIDER_RIDE_HEIGHT = 1.9;
 
 const UP = new Vector3(0, 1, 0);
 
@@ -242,7 +256,7 @@ export class RaceCamera {
     const theta = this.route.angleAt(s);
     return into.set(
       Math.cos(theta) * RIDER_RADIUS,
-      this.route.base + 0.6,
+      this.route.base + 0.6 + RIDER_RIDE_HEIGHT,
       Math.sin(theta) * RIDER_RADIUS,
     );
   }
