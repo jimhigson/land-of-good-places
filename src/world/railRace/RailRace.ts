@@ -364,6 +364,11 @@ export class RailRace implements GameSystem {
 
       if (cart.isPlayer) {
         this.ducking = !rider.holding;
+        // Same "that hurt" moments as the rivals get (see `animate()` below),
+        // but for her own face, which `animate()` never touches — her cart
+        // carries no `kid`, only the live `Player` model riding it (see
+        // `poseRider`). Cleared in `arrive()` so it can never outlive the ride.
+        if (this.player) this.player.railRaceFrown = rider.sparking || rider.wobble > 0.2;
         if (events.bonked) {
           this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
           // Only the player's own bonk gets a message — a rival's bonk has no
@@ -528,7 +533,11 @@ export class RailRace implements GameSystem {
         limbs.leftArm.rotation.z = 0.2;
         kid.head.rotation.x = 0;
       }
-      kid.setExpression(cart.rider.wobble > 0.2 ? 'surprised' : 'happy');
+      // Frown for the two moments the family asked to be readable from
+      // watching a rival: mid-wobble right after a bonk, and while actively
+      // powering over a sparking black stretch (`sparking` is only ever true
+      // while `holding` is, so it needs no separate lockout check here).
+      kid.setExpression(cart.rider.sparking || cart.rider.wobble > 0.2 ? 'frown' : 'happy');
     }
   }
 
@@ -554,6 +563,10 @@ export class RailRace implements GameSystem {
     this.phase = 'waiting';
     if (this.riding && this.player) {
       this.riding = false;
+      // Otherwise a frown caught mid-race would ride home with her forever —
+      // `driveRiders` (the only place that sets it) stops running the moment
+      // `phase` leaves 'racing'/'finishing'.
+      this.player.railRaceFrown = false;
       // The planned exit (`railRace/plan.ts`) — a clear patch beside the booth
       // — with the runtime safety net on top (see `world/dismount.ts`).
       const { x, z } = resolveDismount(

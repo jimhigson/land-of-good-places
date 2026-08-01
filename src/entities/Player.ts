@@ -413,6 +413,14 @@ export class Player implements GameSystem {
    */
   waterHappy = false;
 
+  /**
+   * True while some other system wants the face to read a frown without
+   * fighting the blink state machine in `animate()` — the Rail Race sets this
+   * for the moments a bonk's wobble is still fresh, and while she is actively
+   * holding through a sparking black stretch. See `RailRace.driveRiders`.
+   */
+  railRaceFrown = false;
+
   constructor(
     private readonly collision: CollisionWorld,
     private readonly camera: IsoCamera,
@@ -1208,9 +1216,11 @@ export class Player implements GameSystem {
     const blinking = this.blinkRemaining > 0;
     const desiredExpression: Expression = blinking
       ? 'blink'
-      : this.waterHappy || this.smelling
-        ? 'happy'
-        : 'neutral';
+      : this.railRaceFrown
+        ? 'frown'
+        : this.waterHappy || this.smelling
+          ? 'happy'
+          : 'neutral';
     if (desiredExpression !== this.currentExpression) {
       this.currentExpression = desiredExpression;
       model.setExpression(desiredExpression);
