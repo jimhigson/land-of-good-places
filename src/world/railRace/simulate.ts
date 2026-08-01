@@ -23,15 +23,44 @@ import type { RailRaceRoute } from './route';
  * and exactly the property the checker now asserts.
  */
 
-/** How many times round. Two laps is a little under a minute of racing. */
-export const RACE_LAPS = 2;
+/**
+ * How many times round.
+ *
+ * **Three, since the 1 August 2026 physics tuning — and the change is a
+ * consequence of that tuning rather than a wish of its own.** The family asked
+ * for a faster *cart*, not a shorter *race*, and the two are the same knob here:
+ * the new thrust and drag roughly double the cart's speed, which took a good run
+ * over two laps from 52 s down to 25 s and tripped this file's own "barely a
+ * ride" guard in `scripts/check-rail-race.mts`. A third lap gives that back —
+ * 37 s for a good run, 65 s for a child who never lets go — so the ride lasts
+ * about what it always did while feeling twice as quick, which is the whole of
+ * what was actually asked for.
+ *
+ * Four laps was measured too, and restores the old duration more exactly (49 s
+ * good, 87 s worst). It was rejected: 87 s is close to the 105 s ceiling this
+ * park calls "too long for one go", and the child who would sit through it is
+ * precisely the one who is not enjoying it.
+ */
+export const RACE_LAPS = 3;
 
-/** Acceleration while the button is held, m/s². */
-const THRUST = 9.9;
+/**
+ * Acceleration while the button is held, m/s².
+ *
+ * Raised by half on the family's 1 August 2026 ask ("increase the acceleration
+ * and max speed when pressing by 50%"), from the 9.9 the retired 2D racer had.
+ */
+const THRUST = 14.85;
 
-/** Coasting drag: a linear part and a squared part, m/s². */
-const DRAG_LINEAR = 0.35;
-const DRAG_SQUARE = 0.02;
+/**
+ * Coasting drag: a linear part and a squared part, m/s².
+ *
+ * Both halved on the same ask ("reduce the slowdown penalty for not pressing by
+ * 50%"), from 0.35 and 0.02. Note this is the whole of the slowdown when the
+ * button is up — there is nothing else acting on a coasting cart but this and
+ * the hills — so halving these two *is* the requested change, exactly.
+ */
+const DRAG_LINEAR = 0.175;
+const DRAG_SQUARE = 0.01;
 
 /**
  * Extra drag while the rail is sparking under you, m/s².
@@ -44,17 +73,50 @@ const DRAG_SQUARE = 0.02;
 const SPARK_DRAG = 6;
 
 /**
- * How hard the hills pull.
+ * How hard the hills pull. **Real gravity**, m/s².
  *
- * Well under real gravity on purpose. The undulation is there to make the four
- * lanes read apart and the ride feel like a rollercoaster, not to become a
- * second thing to manage.
+ * Raised from 5.6 on the family's 1 August 2026 report that the cart does not
+ * react to gravity — which turned out to be literally true while coasting, not
+ * merely faint. The sign was always right (`-HILL_PULL * slope`, and `slopeAt`
+ * is positive uphill), but the magnitude could never win:
+ *
+ * - the steepest gradient the route's `HARMONICS` produce is 0.2327 (13.1°)
+ * - so the strongest downhill pull available was `5.6 * 0.2327` = 1.303 m/s²
+ * - drag at the `MIN_SPEED` floor of 3.4 m/s was `0.35*3.4 + 0.02*3.4²` = 1.421 m/s²
+ *
+ * Drag beat the steepest downhill at *every speed the cart could legally be at*,
+ * so a released cart could never gain a metre per second anywhere on the course.
+ * Measured before the change: it sat on 3.40 m/s for an entire lap, dead flat.
+ *
+ * The old value's comment argued for staying "well under real gravity" so the
+ * hills never became a second thing to manage. That concern is now carried by
+ * `THRUST` instead, which is large enough that the hills move a *held* cart by
+ * only about 6% (29.9–31.6 m/s) — the ride still is not asking her to manage
+ * hills. What changed is the *coasting* case, which is where a hill should be
+ * felt and where the fiction lives: let go on the flat and you sag to 3.4 m/s,
+ * let go on a downhill and you keep rolling at 6.5. Twice the speed for reading
+ * the track, where before it made no difference at all.
+ *
+ * It is real gravity rather than a tuned number on purpose: "the cart reacts to
+ * gravity" has one obviously correct value, and a knob nobody can justify is a
+ * knob the next person will move.
  */
-const HILL_PULL = 5.6;
+const HILL_PULL = 9.8;
 
-/** You never stop and you never quite fly. */
+/**
+ * You never stop and you never quite fly.
+ *
+ * `MAX_SPEED` raised by half with the thrust, from 22. Worth knowing what this
+ * clamp actually does: at the old tuning it did **nothing at all**. Terminal
+ * speed while holding solves `DRAG_SQUARE·v² + DRAG_LINEAR·v = THRUST`, which
+ * came out at 15.2 m/s — the drag curve was the real cap and 22 was never
+ * reached. At the new tuning terminal is 30.8 m/s, so 33 is still headroom on
+ * the flat and is reached only where a downhill pushes the cart past its own
+ * terminal speed. That is the right shape for it: a ceiling the hills can find
+ * and the throttle cannot.
+ */
 const MIN_SPEED = 3.4;
-const MAX_SPEED = 22;
+const MAX_SPEED = 33;
 
 /**
  * How long a bonk's wobble lasts — and, crucially, **the button does nothing
