@@ -123,7 +123,7 @@ export type CartPart = (typeof CART_PARTS)[number];
  * visible") from the original 0.16 — the wheel's *gauge* (lateral position,
  * baked into the asset) is unchanged; only its own size is.
  */
-export const WHEEL_RADIUS = 0.32;
+export const WHEEL_RADIUS = 0.384;
 
 /**
  * How high the seat's own sitting surface is, in this cart's own
@@ -137,7 +137,7 @@ export const WHEEL_RADIUS = 0.32;
  * own floor rose (to stay above the now-doubled wheel's top point) and the
  * seat has to sit above *that* floor, not float below it.
  */
-export const SEAT_HEIGHT = 0.83;
+export const SEAT_HEIGHT = 0.958;
 
 /**
  * Where a pet mark sits, relative to the asset's own `pet-seat` node —
