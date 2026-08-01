@@ -82,20 +82,40 @@ pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
 Vite just picks the next free port for you and every note you take about
 "my server is on 5260" quietly goes stale.
 
+**Deep links for reaching a ride under test without walking there:**
+`/rail-race` and `/sky-cruiser` skip straight past the welcome-back prompt and
+board that ride the instant the park (or a freshly created character, on a
+save-less profile) exists — see `RIDE_DEEP_LINKS` in `main.ts`. Add a ride by
+adding one line there; it reuses whatever stall id `Game.ts` already wired
+into `MiniGameHost.boardRide`.
+
 ## A stale service worker will waste your hour
 
-This is a PWA. A service worker precached from **another agent's dev server on
-a different port** can keep serving old JS to yours: your code changes silently
-do not appear, and a field you just added looks like it has vanished from your
-own class. If the game is behaving as though your edits do not exist, this is
-why. In the page console:
+This is a PWA, but as of 1 August the dev-mode service worker is **off by
+default** (`vite.config.ts`'s `devOptions.enabled`) — a plain `npm run dev`
+no longer registers one at all, so a fresh port just shows the current files,
+like any other Vite project. Only `VITE_PWA_DEV=1 npm run dev` — testing the
+manifest/update-toast machinery itself — turns it back on, and only for that
+one run.
+
+If you deliberately ran with `VITE_PWA_DEV=1` (or you are testing the real
+production build via `vite preview`), the old trap still applies: a service
+worker precached from **another agent's dev server on a different port** can
+keep serving old JS to yours, so your code changes silently do not appear and
+a field you just added looks like it has vanished from your own class. In the
+page console:
 
 ```js
 navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
 caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 ```
 
-then hard-reload. Suspect it early rather than debugging code that is correct.
+then hard-reload. If the game is behaving as though your edits do not exist
+and you are on a plain `npm run dev` with no service worker running, suspect a
+broken Vite HMR state instead — swapping many files at once under a *running*
+dev server (a `git checkout`, a branch switch) can leave its module graph
+inconsistent (`Failed to reload ...` in the console). Killing and restarting
+the dev server fixes that in seconds; it is not worth debugging.
 
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
