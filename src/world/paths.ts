@@ -10,7 +10,7 @@ import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT } from './parkLayout';
+import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
@@ -282,6 +282,18 @@ function buildGraph(): PathGraph {
   const network = (): readonly RouteDefinition[] =>
     edges.filter((edge) => edge.paved).map((edge) => edge.route);
 
+  /**
+   * How far short of a plot's own edge the "past the doormat" extension below
+   * must stop.
+   *
+   * Without this, `past` can overshoot *through* the doormat and land inside
+   * the plot's own solid collision — see the note on `past` below. The margin
+   * has to clear two things: `poiGraph`'s own clearance probe (0.7 m) and a
+   * booth's wall thickness, so 1 m of daylight between the waypoint and the
+   * wall it is standing beside.
+   */
+  const PAST_CLEARANCE = 1;
+
   /** A spur edge from the network to (ex, ez), routed round the plots. When
    * the destination already stands on the network the edge is kept but not
    * paved — connectivity is a graph fact either way. `past` carries the
@@ -303,9 +315,30 @@ function buildGraph(): PathGraph {
     // booths; from the sky cruiser's spur it is a 21 m walk.
     const start = nearestNetworkPoint(network(), ringPoints, ex, ez);
     const l = Math.hypot(towardX - ex, towardZ - ez);
+    // `past` used to walk a flat 2 m towards the destination regardless of
+    // how far the doormat actually stands from the plot's own edge. For a
+    // stall (2.6 m footprint, 1.4 m standoff) that 2 m always overshoots the
+    // edge by 0.6 m — the waypoint `poiGraph` samples there lands *inside*
+    // the booth's own collision, and `findClearSpot`'s nudge search then has
+    // to rescue it with no notion of which side leads back to the path
+    // network. Inland, where waypoints are dense on every side, the rescued
+    // spot usually still sees a neighbour by luck; at the park rim, with
+    // nothing else nearby, a nudge onto the booth's far side strands the
+    // waypoint behind the booth's own wall — the exact failure that blocked
+    // moving the rail-race stall to the rim (see `parkManifest.ts`). So `past`
+    // is capped to stop `PAST_CLEARANCE` short of the plot's real edge,
+    // computed from the same footprint math the layout solver placed the
+    // doormat with, rather than trusting a flat distance to clear every plot
+    // shape and standoff combination.
+    const placedTarget = PARK_LAYOUT.entries.get(id);
+    let pastReach = 2;
+    if (placedTarget && l > 1e-6) {
+      const edge = edgeDistanceAlong(placedTarget.footprint, (ex - towardX) / l, (ez - towardZ) / l);
+      pastReach = Math.max(0, Math.min(pastReach, l - edge - PAST_CLEARANCE));
+    }
     const past: readonly (readonly [number, number])[] =
-      l > 1e-6
-        ? [[ex + ((towardX - ex) / l) * 2, ez + ((towardZ - ez) / l) * 2]]
+      l > 1e-6 && pastReach > 1e-6
+        ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
         : []; // no "past the doormat" when the node is its own destination
     edges.push({
       from: 'ring',

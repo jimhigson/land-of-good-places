@@ -92,7 +92,14 @@ function inGateCorridor(x: number, z: number, clearance: number): boolean {
   return Math.abs(x - gateX) < corridorHalf && z > 25;
 }
 
-function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ: number): number {
+/**
+ * How far a plot's edge lies from its centre along a direction.
+ *
+ * Exported for `paths.ts`'s `spur()`, which needs the same answer to keep a
+ * spur's "past the doormat" extension from overshooting into the plot it is
+ * approaching — see the fix note there.
+ */
+export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ: number): number {
   // How far the plot's edge lies from its centre along (dirX, dirZ).
   if (footprint.kind === 'circle') return footprint.radius;
   const ax = Math.abs(dirX);
