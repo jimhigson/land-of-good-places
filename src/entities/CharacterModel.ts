@@ -23,6 +23,8 @@ export interface CharacterColours {
   readonly skin: number;
   readonly hair: number;
   readonly outfit: number;
+  /** The arms' own colour, for a two-tone shirt. See `KidOptions.outfitArms`. */
+  readonly outfitArms: number;
   readonly shoe: number;
 }
 
@@ -171,9 +173,12 @@ export class CharacterModel {
     this.kid.setHairColour(colour);
   }
 
-  /** Recolours the outfit — used by the character creator. */
-  setOutfitColour(colour: number): void {
-    this.kid.setOutfitColour(colour);
+  /**
+   * Recolours the outfit — used by the character creator. `armsColour`
+   * defaults to `colour`, same as `KidHandle.setOutfitColour`.
+   */
+  setOutfitColour(colour: number, armsColour?: number): void {
+    this.kid.setOutfitColour(colour, armsColour);
   }
 
   setShoeColour(colour: number): void {

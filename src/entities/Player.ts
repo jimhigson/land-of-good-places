@@ -426,6 +426,7 @@ export class Player implements GameSystem {
         skin: playerState.skinColour,
         hair: playerState.hairColour,
         outfit: playerState.outfitColour,
+        outfitArms: playerState.outfitArmsColour,
         shoe: playerState.shoeColour,
       },
       // Hair style, skin tone, eye colour, the backpack and the shoes are all

@@ -84,6 +84,8 @@ export interface CharacterCreationChoice {
   readonly hairColour: number;
   readonly hairStyle: HairStyle;
   readonly outfitColour: number;
+  /** The arms' own colour, for a two-tone shirt. See `PlayerState.outfitArmsColour`. */
+  readonly outfitArmsColour: number;
   readonly eyeColour: number;
   readonly backpackKind: BackpackKind;
   readonly backpackColour: number;
@@ -284,6 +286,7 @@ class GameStore {
     this.state.player.hairColour = choice.hairColour;
     this.state.player.hairStyle = choice.hairStyle;
     this.state.player.outfitColour = choice.outfitColour;
+    this.state.player.outfitArmsColour = choice.outfitArmsColour;
     this.state.player.eyeColour = choice.eyeColour;
     this.state.player.backpackKind = choice.backpackKind;
     this.state.player.backpackColour = choice.backpackColour;
@@ -751,6 +754,13 @@ class GameStore {
       if (p.hairColour !== undefined) next.player.hairColour = p.hairColour;
       if (p.hairStyle !== undefined) next.player.hairStyle = p.hairStyle;
       if (p.outfitColour !== undefined) next.player.outfitColour = p.outfitColour;
+      // Every save written before this field existed has no opinion on the
+      // arms at all — it was always the same one outfit colour throughout.
+      // Falling back to the (just-resolved) body colour rather than to
+      // `createInitialState`'s own default reproduces that: a save with a
+      // Mint jumper still wears Mint arms, not whatever colour a brand-new
+      // character starts in.
+      next.player.outfitArmsColour = p.outfitArmsColour ?? next.player.outfitColour;
       if (p.eyeColour !== undefined) next.player.eyeColour = p.eyeColour;
       if (p.backpackKind !== undefined) next.player.backpackKind = p.backpackKind;
       if (p.backpackColour !== undefined) next.player.backpackColour = p.backpackColour;
@@ -873,6 +883,7 @@ function createInitialState(): GameState {
       hairColour: PALETTE.hair,
       hairStyle: 'bunches',
       outfitColour: PALETTE.outfit,
+      outfitArmsColour: PALETTE.outfit,
       eyeColour: PALETTE.iris,
       backpackKind: 'satchel',
       backpackColour: PALETTE.backpack,

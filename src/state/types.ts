@@ -253,6 +253,13 @@ export interface PlayerState {
   /** Chosen in the character creator — see `HairStyle` for why it's a bare union. */
   hairStyle: HairStyle;
   outfitColour: number;
+  /**
+   * The arms' own colour, for a two-tone shirt — a red body with white arms,
+   * say. Equal to {@link outfitColour} for every single-colour swatch, which
+   * is every swatch that existed before this field did; `art/models/kid.ts`'s
+   * `KidOptions.outfitArms` is what actually paints the difference.
+   */
+  outfitArmsColour: number;
   /** Iris colour, chosen in the character creator. Defaults to the game's violet. */
   eyeColour: number;
   /** Which bag she wears — see `BackpackKind`. Chosen in the character creator. */

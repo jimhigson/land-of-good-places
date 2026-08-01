@@ -60,6 +60,8 @@ export interface PreviewChoice {
    */
   readonly hairStyle: HairStyle;
   readonly outfit: number;
+  /** The arms' own colour, for a two-tone shirt. See `art/models/kid.ts`'s `KidOptions.outfitArms`. */
+  readonly outfitArms: number;
   readonly eye: number;
   /** Which bag she wears. Bare and non-optional for the same reason `hairStyle` is. */
   readonly backpack: BackpackKind;
@@ -432,6 +434,7 @@ export class CharacterPreview {
       hair: choice.hair,
       hairStyle: choice.hairStyle,
       outfit: choice.outfit,
+      outfitArms: choice.outfitArms,
       eyeColour: choice.eye,
       backpackKind: choice.backpack,
       backpackColour: choice.backpackColour,

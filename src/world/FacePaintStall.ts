@@ -699,6 +699,7 @@ function playerLook(): FacePaintLook {
     hair: state.player.hairColour,
     hairStyle: state.player.hairStyle,
     outfit: state.player.outfitColour,
+    outfitArms: state.player.outfitArmsColour,
     eye: state.player.eyeColour,
     backpack: state.player.backpackKind,
     backpackColour: state.player.backpackColour,
