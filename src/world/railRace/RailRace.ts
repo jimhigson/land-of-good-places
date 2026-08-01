@@ -263,6 +263,11 @@ export class RailRace implements GameSystem {
       const fresh = createRider(cart.rider.lane);
       Object.assign(cart.rider, fresh);
     }
+    // Headlamps on for the race, and only for the race. They are real
+    // `SpotLight`s (Jim, 1 August 2026) and the park has no other dynamic
+    // lights at all, so four idling carts must not leave eight of them burning
+    // in every material in the park — see `cart.ts`'s `HEADLAMP_RANGE`.
+    for (const cart of this.carts) cart.cart.setHeadlamps(true);
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.raceTime = 0;
@@ -569,7 +574,10 @@ export class RailRace implements GameSystem {
       this.onRideChange?.(false);
     }
     // Everybody back to the line, so the ring looks ready rather than abandoned.
-    for (const cart of this.carts) Object.assign(cart.rider, createRider(cart.rider.lane));
+    for (const cart of this.carts) {
+      cart.cart.setHeadlamps(false);
+      Object.assign(cart.rider, createRider(cart.rider.lane));
+    }
     this.placeCarts();
   }
 
