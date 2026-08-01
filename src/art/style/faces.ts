@@ -34,10 +34,10 @@ import { decal, isShared, markShared, ownTextures, toonMaterial } from './materi
  * and lines with round caps at ~3.5% of the canvas width.
  */
 
-export type Expression = 'neutral' | 'blink' | 'happy' | 'surprised' | 'sad';
+export type Expression = 'neutral' | 'blink' | 'happy' | 'surprised' | 'sad' | 'frown';
 
 export type EyeStyle = 'open' | 'wide' | 'closedHappy' | 'archHappy' | 'sly' | 'worried';
-export type MouthStyle = 'smile' | 'bigSmile' | 'grin' | 'oh' | 'cat' | 'wobble' | 'none';
+export type MouthStyle = 'smile' | 'bigSmile' | 'grin' | 'oh' | 'cat' | 'wobble' | 'frown' | 'none';
 
 export interface FacePaintOptions {
   /** Canvas edge length in pixels. 512 for heroes, 256 for small things. */
@@ -66,6 +66,12 @@ export interface FacePaintOptions {
   blushR?: number;
   /** Little eyebrows — used for the mini's mischief and for surprise. */
   brows?: boolean;
+  /**
+   * `worried` (default) raises the inner corners — puppy-dog, "surprised" or
+   * "sad" brows. `angry` is the opposite slant, inner corners pulled down
+   * toward the nose — furrowed, "that hurt" brows, used by `'frown'`.
+   */
+  browStyle?: 'worried' | 'angry';
   /** Drawn as a nose+mouth patch for a muzzle instead of a full face. */
   nose?: number | null;
   /**
@@ -92,6 +98,7 @@ const DEFAULTS: Required<Omit<FacePaintOptions, 'iris' | 'blush' | 'nose'>> = {
   blushStyle: 'soft',
   blushR: 0.075,
   brows: false,
+  browStyle: 'worried',
 };
 
 /** A palette number as a CSS colour string, for canvas painting. */
@@ -247,6 +254,18 @@ function drawMouth(
     return;
   }
 
+  if (style === 'frown') {
+    // The mirror of `smile`'s curve, so the shape reads as a clean, deliberate
+    // downturn rather than `sad`'s tremble — a wince, not a whimper. Less
+    // extreme than a straight mirror (0.6 instead of `smile`'s 0.85) so it
+    // reads as annoyed, not devastated.
+    ctx.beginPath();
+    ctx.moveTo(cx - half, cy + half * 0.18);
+    ctx.quadraticCurveTo(cx, cy - half * 0.6, cx + half, cy + half * 0.18);
+    ctx.stroke();
+    return;
+  }
+
   // bigSmile / grin: a filled open mouth with a tongue, and teeth for `grin`.
   ctx.beginPath();
   ctx.moveTo(cx - half, cy - half * 0.25);
@@ -329,11 +348,18 @@ export function paintFace(options: FacePaintOptions = {}): CanvasTexture {
     ctx.strokeStyle = css(ART.ink);
     ctx.lineWidth = s * 0.022;
     ctx.lineCap = 'round';
+    // `moveTo` is always the inner (nose-side) end of the brow, `lineTo` the
+    // outer end. `worried` raises the inner end (puppy-dog / surprised);
+    // `angry` swaps the two heights so the brows furrow down toward the nose
+    // instead — the universal "that hurt" / annoyed shape.
+    const angry = o.browStyle === 'angry';
+    const innerY = eyeY - o.eyeH * s * (angry ? 1.25 : 1.75);
+    const outerY = eyeY - o.eyeH * s * (angry ? 1.75 : 1.25);
     for (const side of [-1, 1] as const) {
       const bx = cx + side * gap;
       ctx.beginPath();
-      ctx.moveTo(bx - side * o.eyeW * s * 0.95, eyeY - o.eyeH * s * 1.75);
-      ctx.lineTo(bx + side * o.eyeW * s * 0.85, eyeY - o.eyeH * s * 1.25);
+      ctx.moveTo(bx - side * o.eyeW * s * 0.95, innerY);
+      ctx.lineTo(bx + side * o.eyeW * s * 0.85, outerY);
       ctx.stroke();
     }
   }
@@ -483,6 +509,7 @@ export const EXPRESSIONS: readonly Expression[] = [
   'happy',
   'surprised',
   'sad',
+  'frown',
 ];
 
 /**
@@ -501,6 +528,19 @@ function expressionPaints(base: FacePaintOptions): Record<Expression, FacePaintO
     happy: { ...base, eyeStyle: 'archHappy', mouth: happyMouth },
     surprised: { ...base, eyeStyle: 'wide', mouth: 'oh', brows: true },
     sad: { ...base, eyeStyle: 'worried', mouth: 'wobble', blush: base.blush ?? null },
+    // Distinct from `sad` on purpose: `sad` (worried brow-shaped eyes, a
+    // trembling mouth) reads as about-to-cry. `frown` is a wince — furrowed
+    // angry brows over ordinary open eyes, and a firm downturned mouth
+    // instead of a wobble — for a sudden "that hurt"/"ow" moment (a bonk, or
+    // holding through a sparking rail) rather than sustained upset.
+    frown: {
+      ...base,
+      eyeStyle: 'open',
+      mouth: 'frown',
+      brows: true,
+      browStyle: 'angry',
+      blush: base.blush ?? null,
+    },
   };
 }
 
@@ -691,7 +731,7 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
   }
 
   /**
-   * Redraws all five canvases in place and re-uploads them.
+   * Redraws all of `EXPRESSIONS`' canvases in place and re-uploads them.
    *
    * In place, rather than painting a new set: the character creator rebuilds on
    * every tap and the face stall repaints on every design, and allocating five
@@ -768,9 +808,10 @@ export function createFacePatch(options: FacePatchOptions): FacePatch {
   const expressions = paintExpressions(paint);
   const material = toonMaterial(0xffffff, { map: expressions.neutral, transparent: true });
   material.alphaTest = 0.02;
-  // Five canvases painted, one in `material.map` at a time. Without this the
-  // other four are invisible to `disposeTree` and leak on every rebuild — which
-  // is exactly what the character creator's preview does on every single tap.
+  // One canvas per `EXPRESSIONS` entry painted, one in `material.map` at a
+  // time. Without this the rest are invisible to `disposeTree` and leak on
+  // every rebuild — which is exactly what the character creator's preview
+  // does on every single tap.
   ownTextures(material, Object.values(expressions));
   const mesh = decal(new Mesh(facePatchGeometry(radius * 1.012, spreadX, spreadY, tilt), material));
   mesh.name = 'facePatch';
@@ -799,11 +840,12 @@ export function createFacePatch(options: FacePatchOptions): FacePatch {
 // photograph.
 //
 // This is deliberately NOT folded into `paintExpressions`/`FacePaintOptions`:
-// baking paint into all five expression canvases would mean five redraws per
-// design per character, and would give the crowd's shared, cached expression
-// textures (`sharedFace.ts`) nowhere to keep a "painted" variant without
-// touching the instanced-crowd material list. A second decal is one extra draw
-// call and reuses the base face for everything it does not draw.
+// baking paint into every expression canvas would mean one redraw per
+// expression per design per character, and would give the crowd's shared,
+// cached expression textures (`sharedFace.ts`) nowhere to keep a "painted"
+// variant without touching the instanced-crowd material list. A second decal
+// is one extra draw call and reuses the base face for everything it does not
+// draw.
 // =============================================================================
 
 /** The designs on offer at the face-painting stall. */
