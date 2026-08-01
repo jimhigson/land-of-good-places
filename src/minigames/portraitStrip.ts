@@ -88,10 +88,42 @@ export interface PortraitStripEntry {
   readonly circle: HTMLElement;
 }
 
+export interface PortraitStripOptions {
+  /**
+   * How the heads are arranged.
+   *
+   * - `banks` (the default) is the 28 July 2026 family layout described in the
+   *   file header: the list split down the middle, a column down each side in
+   *   landscape and a row top and bottom in portrait.
+   * - `row` is one row along the **top edge only**, which the Rail Race asked
+   *   for on 1 August 2026 and the banks genuinely cannot express — its strip
+   *   is a running order, and an order split across two opposite edges of the
+   *   screen is not an order anybody can read. Everything else about a
+   *   portrait — the painted face, the name, the accent ring, the pop — is the
+   *   same machinery either way, which is the whole point of it living here.
+   */
+  readonly layout?: 'banks' | 'row';
+}
+
 export interface PortraitStrip {
   readonly entries: readonly PortraitStripEntry[];
   /** Swaps which pre-painted expression is showing. Instant — no fade. */
   setExpression(index: number, expression: Expression): void;
+  /**
+   * A small second line under the name — the Rail Race puts "1st"/"2nd" there.
+   * `null` clears it, and an empty line takes no room (see `style.css`).
+   */
+  setSubtitle(index: number, text: string | null): void;
+  /**
+   * Where this portrait sits among its neighbours, smallest first.
+   *
+   * Written to CSS `order`, so re-ranking four racers every time the running
+   * order changes is four style writes and no DOM moves at all — nothing is
+   * detached, so nothing loses a running animation or a caller's own overlay
+   * child. Only meaningful under `layout: 'row'`; under `banks` the split is
+   * fixed by construction and this would fight it.
+   */
+  setOrder(index: number, order: number): void;
   /**
    * The little "something just happened to me" bounce.
    *
@@ -134,6 +166,9 @@ function faceSetFor(iris: number): Readonly<Record<Expression, string>> {
 interface Entry extends PortraitStripEntry {
   readonly faces: Readonly<Record<Expression, string>>;
   readonly faceElement: HTMLElement;
+  /** The row that holds the circle and its labels — what `setOrder` reorders. */
+  readonly item: HTMLElement;
+  readonly subtitle: HTMLElement;
   /** Cleared and re-set to restart the bounce; held so `dispose` can cancel it. */
   popHandle: number;
 }
@@ -151,15 +186,23 @@ interface Entry extends PortraitStripEntry {
 export function createPortraitStrip(
   container: HTMLElement,
   portraits: readonly PortraitInfo[],
+  options: PortraitStripOptions = {},
 ): PortraitStrip {
+  const layout = options.layout ?? 'banks';
   const strip = document.createElement('div');
   strip.className = 'mg-portrait-strip';
+  strip.dataset.layout = layout;
 
   // Half on each side. The first bank takes the larger half of an odd list, so
   // with five drivers it is 3 + 2 rather than 2 + 3 — the same way up as the
-  // reading order.
-  const split = Math.ceil(portraits.length / 2);
-  const banks = [document.createElement('div'), document.createElement('div')];
+  // reading order. A `row` strip has one bank and so never splits: `split` is
+  // pushed past the end of the list rather than special-cased at the append,
+  // so there is one code path building the items whichever layout is asked for.
+  const split = layout === 'row' ? portraits.length : Math.ceil(portraits.length / 2);
+  const banks =
+    layout === 'row'
+      ? [document.createElement('div')]
+      : [document.createElement('div'), document.createElement('div')];
   for (const bank of banks) bank.className = 'mg-portrait-bank';
 
   const entries: Entry[] = portraits.map((info, index) => {
@@ -192,13 +235,19 @@ export function createPortraitStrip(
     label.className = 'mg-portrait-name';
     label.textContent = info.isPlayer ? 'You' : info.name;
 
-    item.append(circle, label);
+    // Always built, never filled unless a caller asks: an empty one is
+    // `display: none` in the stylesheet, so the games that do not use it are
+    // laid out exactly as they were before it existed.
+    const subtitle = document.createElement('div');
+    subtitle.className = 'mg-portrait-rank';
+
+    item.append(circle, label, subtitle);
     (banks[index < split ? 0 : 1] ?? banks[0])?.append(item);
 
-    return { circle, faces, faceElement, popHandle: 0 };
+    return { circle, faces, faceElement, item, subtitle, popHandle: 0 };
   });
 
-  strip.append(banks[0] as Node, banks[1] as Node);
+  for (const bank of banks) strip.append(bank);
   container.append(strip);
 
   return {
@@ -208,6 +257,18 @@ export function createPortraitStrip(
       const entry = entries[index];
       if (!entry) return;
       entry.faceElement.style.backgroundImage = `url(${entry.faces[expression]})`;
+    },
+
+    setSubtitle(index: number, text: string | null): void {
+      const entry = entries[index];
+      if (!entry) return;
+      entry.subtitle.textContent = text ?? '';
+    },
+
+    setOrder(index: number, order: number): void {
+      const entry = entries[index];
+      if (!entry) return;
+      entry.item.style.order = String(order);
     },
 
     pop(index: number): void {

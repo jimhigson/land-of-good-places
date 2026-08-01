@@ -6,6 +6,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { createConfetti, type Confetti } from '../../minigames/railRacer/confetti';
+import { gameStore } from '../../state';
 import { discoverSecret } from '../../state/secrets';
 import { terrainHeight } from '../terrain';
 import { resolveDismount } from '../dismount';
@@ -95,11 +96,14 @@ const RACE_SECRET = 'secret.railRace';
 const RIVALS: readonly {
   readonly name: string;
   readonly outfit: number;
+  /** Given here, not left to `createKid`'s default, so the little painted head
+   * in the race HUD can be the same colour as the child in the cart. */
+  readonly hair: number;
   readonly hairStyle: 'short' | 'bob';
 }[] = [
-  { name: 'Pip', outfit: PALETTE.markerLemon, hairStyle: 'short' },
-  { name: 'Nell', outfit: PALETTE.markerMint, hairStyle: 'bob' },
-  { name: 'Otto', outfit: PALETTE.markerSky, hairStyle: 'short' },
+  { name: 'Pip', outfit: PALETTE.markerLemon, hair: 0x6b4a8f, hairStyle: 'short' },
+  { name: 'Nell', outfit: PALETTE.markerMint, hair: 0xd2694a, hairStyle: 'bob' },
+  { name: 'Otto', outfit: PALETTE.markerSky, hair: 0x4a3a52, hairStyle: 'short' },
 ];
 
 /**
@@ -116,7 +120,13 @@ const DUCK_DROP = 0.5;
  * wires it to `ui/RaceHud.ts`.
  */
 export type RaceMoment =
-  | { readonly kind: 'start' }
+  /** Boarding: who is racing, in cart order. The HUD builds its heads from this. */
+  | { readonly kind: 'start'; readonly racers: readonly RaceRacer[] }
+  /**
+   * The running order changed: racer indices (into the `start` list), leader
+   * first. Raised only when it actually changes, not every frame.
+   */
+  | { readonly kind: 'standings'; readonly order: readonly number[] }
   /** A countdown digit, "GO!", or `null` to clear it. */
   | { readonly kind: 'count'; readonly text: string | null }
   | { readonly kind: 'lap'; readonly lap: number; readonly of: number }
@@ -126,6 +136,20 @@ export type RaceMoment =
   | { readonly kind: 'end' };
 
 type Phase = 'waiting' | 'countdown' | 'racing' | 'finishing';
+
+/**
+ * One racer, as the HUD needs them.
+ *
+ * Deliberately the shape `minigames/portraitStrip.ts` already takes, so `Game`
+ * hands it straight across without a mapping step in between — the same reason
+ * a route *is* a `RailSampler` in `rail/sweptRail.ts`.
+ */
+export interface RaceRacer {
+  readonly name: string;
+  readonly hair: number;
+  readonly accent: number;
+  readonly isPlayer: boolean;
+}
 
 interface Cart {
   readonly rider: Rider;
@@ -188,6 +212,8 @@ export class RailRace implements GameSystem {
   private finishedCount = 0;
   private confetti: Confetti | null = null;
   private ducking = false;
+  /** The running order last sent to the HUD, so it is only sent on a change. */
+  private standings: number[] = [];
 
   constructor(collision: CollisionWorld) {
     this.collision = collision;
@@ -216,7 +242,11 @@ export class RailRace implements GameSystem {
     RIVALS.forEach((rival, index) => {
       const cart = createCart(LANE_COLOURS[index] ?? PALETTE.markerPink);
       const group = cart.root;
-      const kid = createKid({ outfit: rival.outfit, hairStyle: rival.hairStyle });
+      const kid = createKid({
+        outfit: rival.outfit,
+        hair: rival.hair,
+        hairStyle: rival.hairStyle,
+      });
       // Local to this still-unscaled `group` (the RIDE_SCALE below applies to
       // both together), so this is the cart's own SEAT_HEIGHT, not the
       // player's world-space `poseRider()` version of the same fact.
@@ -273,9 +303,70 @@ export class RailRace implements GameSystem {
     this.ducking = false;
     this.placeCarts();
     this.rideView?.reset(0);
-    this.onRaceMoment?.({ kind: 'start' });
+    this.standings = [];
+    this.onRaceMoment?.({ kind: 'start', racers: this.racers() });
+    this.updateStandings();
     this.emitCount(String(COUNTDOWN_SECONDS));
     return true;
+  }
+
+  /**
+   * Everybody in the race, in cart order — the order every `standings` index
+   * afterwards refers to.
+   *
+   * The player rides as herself: her own hair colour off the save, exactly as
+   * the dodgems do it, so the head at the top of the screen is recognisably
+   * hers. Accents come from `LANE_COLOURS`, the same array that paints the
+   * rails, the carts and the droppers, so "my colour" is one fact from the
+   * rail under her all the way up to the portrait in the corner.
+   */
+  private racers(): RaceRacer[] {
+    const hair = gameStore.get().player.hairColour ?? RIVALS[0]?.hair ?? 0x6b4a8f;
+    return this.carts.map((cart, index) => {
+      const accent = LANE_COLOURS[cart.rider.lane] ?? PALETTE.markerPink;
+      const rival = RIVALS[index];
+      return cart.isPlayer || !rival
+        ? { name: 'You', hair, accent, isPlayer: true }
+        : { name: rival.name, hair: rival.hair, accent, isPlayer: false };
+    });
+  }
+
+  /**
+   * Works out who is currently winning, and tells the HUD when that changes.
+   *
+   * **There was no such thing as a live position before this.** `Rider.place`
+   * was only ever written as somebody crossed the line, so for the whole race
+   * up to that point nothing in the game knew who was ahead — which is exactly
+   * what the family asked to see (1 August 2026).
+   *
+   * `travelled` alone is the whole ranking rule: it counts from the lights and
+   * never resets at a lap, so "most laps, then furthest round this one" is
+   * simply the largest number. Riders who have already finished are held above
+   * everyone still going, in the order they actually crossed, so a leader
+   * cannot appear to drop to fourth the instant she stops moving.
+   *
+   * Four riders sorted every frame is nothing; the *emit* is what is guarded,
+   * because rebuilding four labels sixty times a second would be silly and the
+   * order changes a handful of times a race.
+   */
+  private updateStandings(): void {
+    const ranked = this.carts
+      .map((cart, index) => ({ index, rider: cart.rider }))
+      .sort((a, b) => {
+        if (a.rider.finished !== b.rider.finished) return a.rider.finished ? -1 : 1;
+        if (a.rider.finished && b.rider.finished) return a.rider.place - b.rider.place;
+        return b.rider.travelled - a.rider.travelled;
+      })
+      .map((entry) => entry.index);
+
+    if (
+      ranked.length === this.standings.length &&
+      ranked.every((racer, place) => this.standings[place] === racer)
+    ) {
+      return;
+    }
+    this.standings = ranked;
+    this.onRaceMoment?.({ kind: 'standings', order: ranked });
   }
 
   update(context: FrameContext): void {
@@ -306,6 +397,7 @@ export class RailRace implements GameSystem {
       case 'racing': {
         this.raceTime += dt;
         this.driveRiders(context, true);
+        this.updateStandings();
         if (this.me.rider.finished || this.raceTime > RACE_TIME_LIMIT) this.finishRace();
         break;
       }
@@ -315,6 +407,7 @@ export class RailRace implements GameSystem {
         // freezes the moment you finish feels like it was never really running.
         this.raceTime += dt;
         this.driveRiders(context, false);
+        this.updateStandings();
         this.resultTimer -= dt;
         if (this.resultTimer <= 0) {
           this.onRaceMoment?.({ kind: 'end' });

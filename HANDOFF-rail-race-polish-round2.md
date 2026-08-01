@@ -47,11 +47,37 @@ one PR. I own the shared chrome-devtools profile for this task.
 ## Status
 
 - [x] Worktree + deps
-- [ ] 1 rails black
-- [ ] 2 supports
-- [ ] 3 standings HUD
-- [ ] 4 fallible rivals
-- [ ] live QA, PR
+- [x] 1 rails black — committed, verified live (screenshot: solid black block
+      of rails; `setSparking` proven to drive the rail buffers ink -> warm -> ink)
+- [x] 2 supports — committed, verified live. **Root cause was not spacing.**
+- [x] 5 headlamps as real SpotLights (new scope from Jim, mid-task) — committed,
+      verified live at night and at noon. +1.1 ms frame time with all 8 lit.
+- [x] 4 fallible rivals — committed. Root cause was the rubber band, not skill.
+- [ ] 3 standings HUD  <- IN PROGRESS
+- [ ] final live QA of 3 + 4 together, PR
+
+## What the two root causes actually were (do not lose these)
+
+**Supports.** Tightening `TRESTLE_SPACING` alone would have fixed nothing. Of
+67 candidate spots at 5 m, only **4** survived: 52 rejected by
+`collision.isClearCircle`, 7 by the railway, 4 by a path. The old
+`trestleSpots()` decided the cross-beam, the droppers *and* the ground leg on
+one question — can the ground 8 m below take a post. Fix: `deckSpots()` is
+unconditional (a beam 6 m up needs no ground), `footUnder()` is asked
+separately about the leg and may shuffle up to 4.6 m radially to find clear
+ground. Now 67 bays / 536 droppers / 26 legs.
+
+**Rivals.** The mistakes were already happening; the rubber band refunded them.
+Symmetric +/-0.22 band meant a trailing rival's terminal speed was 33 m/s
+against the player's 30.8 — permanently faster than her best. Fix: asymmetric
+on both swing and ramp rate. Measured with the new `simulateField` +
+`check:rail-race` guard.
+
+## Dev server
+
+Mine is port **5417**, `--strictPort`. Kill by PID only. Current PID recorded
+in the session; if unknown, `lsof -ti tcp:5417` and check it is `node`, not
+Chrome (Chrome shows up there as a client).
 
 ## Rules I must not forget
 
