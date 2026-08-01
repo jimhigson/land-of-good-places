@@ -131,6 +131,72 @@ assert(
   );
 }
 
+// --- the rim reads as a genuine hollow tube, not a flat band ----------------
+// Round 4 (Jim, live, 1 August: "the rim reads as a single flat surface, not
+// a hollow tube... give the rim real cross-sectional thickness/profile —
+// think torus/thick-ring cross-section"). The round-3 rim was a flat
+// extrusion: every vertex sat at exactly one of two fixed thickness values
+// (the mesh's front and back faces), with nothing in between — geometrically
+// indistinguishable from a flat washer no matter how close the camera gets.
+// The rebuilt rim is a genuine torus. Measuring the *asset's own real
+// vertices* (not the Blender build script's target numbers — the CLAUDE.md
+// procgen discipline applied here even though this isn't procgen) proves two
+// things a flat band cannot have: a real radial wall thickness at the tube's
+// own equator, and several distinct depth values near the outer edge, i.e. an
+// actually curved surface — not just a re-assertion of the numbers the build
+// script used to make it.
+{
+  const wheelGeom = cartAssetGeometry('wheel-fl');
+  const pos = wheelGeom.attributes.position;
+  const radii: number[] = [];
+  const thickness: number[] = [];
+  for (let i = 0; i < pos.count; i++) {
+    radii.push(Math.hypot(pos.getX(i), pos.getZ(i)));
+    thickness.push(pos.getY(i));
+  }
+  const outerRadius = Math.max(...radii);
+
+  assert(
+    Math.abs(outerRadius - WHEEL_RADIUS) < 0.01,
+    `wheel-fl's real outer radius (${outerRadius.toFixed(4)}) matches WHEEL_RADIUS (${WHEEL_RADIUS}) closely`,
+  );
+
+  // Equatorial vertices (thickness ~ 0) exist on a genuine tube's inner bore
+  // *and* outer edge, both at y=0 — a flat extruded band has no vertex at
+  // y=0 at all, since every one of its vertices sits on one of the two flat
+  // face planes.
+  const EQUATOR_EPS = 1e-4;
+  const equatorRadii = radii.filter((_, i) => Math.abs(thickness[i]) < EQUATOR_EPS);
+  assert(
+    equatorRadii.length >= 2,
+    `the rim has real geometry at its own equator (y≈0) — ${equatorRadii.length} such vertices found ` +
+      `(a flat extruded band, like the one this replaces, has none there: every vertex sits on one of ` +
+      `the two flat face planes)`,
+  );
+  if (equatorRadii.length >= 2) {
+    const wallThickness = Math.max(...equatorRadii) - Math.min(...equatorRadii);
+    const wallFraction = wallThickness / WHEEL_RADIUS;
+    assert(
+      wallFraction > 0.1,
+      `the rim's own radial wall thickness (${wallThickness.toFixed(4)} m, ${(wallFraction * 100).toFixed(1)}% ` +
+        `of WHEEL_RADIUS) clears 10% of the wheel's radius — a genuinely substantial tube, not a sliver`,
+    );
+  }
+
+  // Near the visible outer surface — the part a viewer actually judges "is
+  // this a tube" by at gameplay distance — a real tube's cross-section shows
+  // several distinct depth values as it curves round. A flat band shows
+  // exactly two (front face, back face), never anything between them.
+  const nearOuterThickness = thickness.filter((_, i) => radii[i] > outerRadius * 0.85);
+  const distinctBands = new Set(nearOuterThickness.map((t) => Math.round(t * 1000) / 1000)).size;
+  assert(
+    distinctBands >= 4,
+    `the rim's outer surface shows ${distinctBands} distinct depth values near its own edge — genuine ` +
+      `curvature, not the 2 flat planes a band would show (sampled from ${nearOuterThickness.length} ` +
+      `near-outer-edge vertices)`,
+  );
+}
+
 // --- build the actual cart, exactly as the game does ------------------------
 const cart = createCart(0x88ccee);
 
@@ -152,6 +218,18 @@ for (const name of ['wheel-fl', 'wheel-fr', 'wheel-bl', 'wheel-br'] as const) {
   const wheel = findMesh(name);
   wheel.updateWorldMatrix(true, false);
   const wheelBox = new Box3().setFromObject(wheel);
+
+  // The hopper-floor-clearance check above trusts the formula `WHEEL_RADIUS *
+  // 2` for the wheel's own top point rather than measuring it — this cross-
+  // checks that trust against the real, laid-down, built mesh's own measured
+  // top, so a future asset change that quietly stops matching the formula
+  // (a bigger tube profile, a re-centred torus, etc.) gets caught here rather
+  // than silently invalidating that other check's assumption.
+  assert(
+    Math.abs(wheelBox.max.y - WHEEL_RADIUS * 2) < 0.01,
+    `${name}'s real measured top (${wheelBox.max.y.toFixed(4)}) matches the WHEEL_RADIUS * 2 formula ` +
+      `(${(WHEEL_RADIUS * 2).toFixed(4)}) the hopper-clearance check above relies on`,
+  );
 
   assert(
     wheelBox.min.y < hopperBox.min.y - WHEEL_RADIUS * 0.4,
