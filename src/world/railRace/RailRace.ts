@@ -14,7 +14,7 @@ import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './route';
-import { createCart, type CartHandle } from './cart';
+import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
 import {
   HAZARDS,
@@ -219,7 +219,10 @@ export class RailRace implements GameSystem {
       const cart = createCart(LANE_COLOURS[index] ?? PALETTE.markerPink);
       const group = cart.root;
       const kid = createKid({ outfit: rival.outfit, hairStyle: rival.hairStyle });
-      kid.root.position.y = 0.05;
+      // Local to this still-unscaled `group` (the RIDE_SCALE below applies to
+      // both together), so this is the cart's own SEAT_HEIGHT, not the
+      // player's world-space `poseRider()` version of the same fact.
+      kid.root.position.y = SEAT_HEIGHT;
       kid.setExpression('happy');
       group.add(kid.root);
       // RIDE_SCALE scales the cart's own body/nose and, since the kid is a
@@ -541,7 +544,7 @@ export class RailRace implements GameSystem {
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     this.player.setRidePose(
       cart.position.x + wobble,
-      cart.position.y + 0.05 - duckDrop,
+      cart.position.y + SEAT_HEIGHT * RIDE_SCALE - duckDrop,
       cart.position.z,
       cart.rotation.y,
     );

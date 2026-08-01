@@ -49,6 +49,16 @@ import { RAIL_GAUGE } from './track';
 /** Wheel radius, in this cart's own (pre-`RIDE_SCALE`) metres. */
 const WHEEL_RADIUS = 0.16;
 
+/**
+ * How high the seat's own sitting surface is, in this cart's own
+ * (pre-`RIDE_SCALE`) metres — the one fact `RailRace.ts`'s `poseRider()` and
+ * `buildCarts()` both need to actually put a rider *on* the seat rather than
+ * hovering over the cart's floor, which is what a stray `+ 0.05` (a leftover
+ * from the old placeholder cart, which had no distinct seat mesh at all) did
+ * once this cart gained a real one roughly `RIDE_SCALE` metres taller.
+ */
+export const SEAT_HEIGHT = 0.47;
+
 /** Half the wheel gauge, worked back down from the world-scale `RAIL_GAUGE`. */
 const WHEEL_HALF_GAUGE = RAIL_GAUGE / RIDE_SCALE / 2;
 
@@ -61,10 +71,17 @@ export interface CartHandle {
    * Spins the wheels to match how far the cart has rolled.
    *
    * Takes **absolute** metres travelled (`Rider.travelled`), not a per-frame
-   * delta, and sets each wheel's angle outright (`distance / WHEEL_RADIUS`)
-   * rather than accumulating one — so a fresh race, which resets
-   * `Rider.travelled` to 0, resets the wheels to the same start angle too,
-   * and there is no drift to accumulate over a long race.
+   * delta, and sets each wheel's angle outright (`distance / (WHEEL_RADIUS *
+   * RIDE_SCALE)`) rather than accumulating one — so a fresh race, which
+   * resets `Rider.travelled` to 0, resets the wheels to the same start angle
+   * too, and there is no drift to accumulate over a long race.
+   *
+   * `travelled` is real, unscaled world arc-length (`route.ts`), but the
+   * wheel actually drawn is `RIDE_SCALE` bigger than `WHEEL_RADIUS` — the
+   * external `group.scale.setScalar(RIDE_SCALE)` this cart relies on grows it
+   * along with everything else. Dividing by the bare, pre-scale radius spins
+   * the wheel `RIDE_SCALE`× too fast for the ground it is actually rolling
+   * over; the rendered circumference is what has to match the distance.
    */
   spinWheels(travelled: number): void;
   dispose(): void;
@@ -158,7 +175,7 @@ export function createCart(colour: number): CartHandle {
   root.add(seatBack);
 
   const seatBase = solid(new Mesh(new RoundedBoxGeometry(0.58, 0.1, 0.5, 3, 0.05), deepMaterial));
-  seatBase.position.set(0, 0.42, -0.28);
+  seatBase.position.set(0, SEAT_HEIGHT - 0.05, -0.28);
   root.add(seatBase);
 
   // --- pet perch --------------------------------------------------------
@@ -195,7 +212,7 @@ export function createCart(colour: number): CartHandle {
     root,
 
     spinWheels(travelled: number): void {
-      const angle = -travelled / WHEEL_RADIUS;
+      const angle = -travelled / (WHEEL_RADIUS * RIDE_SCALE);
       for (const wheel of wheels) wheel.rotation.y = angle;
     },
 
