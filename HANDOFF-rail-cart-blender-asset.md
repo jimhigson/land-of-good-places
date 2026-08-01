@@ -141,12 +141,27 @@ cart-asset geometry is asserted `isShared` in `check:cart-shape`.
 
 ## Coordination note for whoever is adding real headlamp lights
 
-A separate task (per the brief) is adding real light sources to the cart's
-headlamps. The lamp *mesh* now lives in the asset (`lamp-l`/`lamp-r` nodes,
-positioned on the nose's face) — the emissive material/glow behaviour is
-still assigned in `cart.ts`, same as before, so that work should only need to
-touch `cart.ts`, not the asset. If it needs the lamp mesh repositioned, that's
-a Blender + `blend:cart` change, not a `cart.ts` number.
+**Found and identified, not yet merged with this branch (1 August, during
+round 2):** that separate task has already landed — `feat/rail-race-polish-round2`
+(commit `e044d61`, "Rail Race: the cart's headlamps are real lights that light
+the rail ahead") replaces the emissive-disc lamps with real `SpotLight`s (a
+`lampAim` target `Object3D`, `beams: SpotLight[]`, a new `setHeadlamps(on)`
+method on `CartHandle`, and `RailRace.ts` wiring to light them on boarding and
+douse them on dismount). **This branch does not include it** — checked via
+`git merge-base --is-ancestor e044d61 HEAD`, confirmed not an ancestor — and
+this branch's own `cart.ts` still has the old emissive-only lamp material,
+because round 2's full-file rewrite (to `hopper`/`frame-rail-l/r`) was done
+without that commit merged in first.
+
+**Whoever reconciles these two branches** needs to re-apply the `SpotLight`
+work on top of round 2's `hopper` shape rather than a plain merge — the old
+beam position (`side * 0.3, 0.34, 1.3`, hand-picked against the old `nose`)
+needs to move to wherever the new asset's `lamp-l`/`lamp-r` nodes actually
+sit (read via `cartAssetPart('lamp-l').position`, not a second hardcoded
+number), and `lampAim`'s target position (`0, -0.55, 9`) should be sanity
+checked against the new hopper's own forward-facing geometry. The lamp
+*mesh* still lives in the asset, mounted on the hopper's own sloped front
+face — only the beam's light-emission behaviour needs to move from `cart.ts`.
 
 ## Round 2 (same day): "half-wheels vanishing at random", and a reshape to a real mine-cart silhouette
 
