@@ -433,6 +433,87 @@ const railRaceFliesClear: Invariant = (facts) => {
 };
 
 /**
+ * **The rail-race stall stands at the park's rim, close to the actual rails**
+ * — the family's 1 August 2026 ask, and the property two earlier attempts (PR
+ * #159, then this move) found hardest to hold onto. Moving the booth out
+ * turned out to be easy to break in ways that only show up on a *different*
+ * seed than the one somebody happened to test: `parkManifest.ts`'s note on
+ * this pin records a wall landing across a completely unrelated waypoint's
+ * line of sight, a knock-on effect of the scenery generator's single shared
+ * RNG stream noticing the spur got longer. That failure mode is exactly what
+ * running across several seeds is for.
+ *
+ * "Close to the rails" is proved **relationally** rather than against an
+ * invented distance, per this file's own rule that thresholds should come
+ * from the game: the booth's gap to the built ring must be the *smallest of
+ * every plot in the park* — every anchor and every other stall. That is a
+ * strong claim (checked against the old, inland pin: the ferris wheel's own
+ * plot was closer to the rim, so this would have failed), and it stays true
+ * without a metre figure that would go stale the moment the ring or the
+ * park's own radius is retuned, on whatever this seed happens to place
+ * everything else at.
+ *
+ * The doormat is also proved standable and, separately, reachable from the
+ * park entrance on the real nav lattice — the exact two properties the
+ * `paths.ts` spur `past`-extension bug and the scenery RNG-cascade wall broke
+ * on the positions this move swept through before landing here. Standability
+ * is already covered generically for every entrance by `entrancesAreUsable`;
+ * reachability is not covered for any entrance anywhere else in this file, and
+ * it is the half `poiGraph`'s stranding bug actually broke.
+ */
+const railRaceStallStandsAtTheRim: Invariant = (facts) => {
+  const stall = facts.plots.find((plot) => plot.id === 'stall.railRacer');
+  expect(stall, "the built park has no 'stall.railRacer' plot").toBeDefined();
+  if (!stall) return;
+
+  // Closest approach to the built ring, sampled across every lane exactly as
+  // `railRaceFliesClear` samples it — the real solved geometry, not the
+  // nominal radius the ring aims for.
+  const { route, laneCount } = facts.world.railRace;
+  const point = new Vector3();
+  const gapToRing = (x: number, z: number): number => {
+    let best = Infinity;
+    const samples = 360;
+    for (let i = 0; i < samples; i += 1) {
+      const distance = (i / samples) * route.length;
+      for (let lane = 0; lane < laneCount; lane += 1) {
+        route.pointAt(lane, distance, point);
+        const gap = Math.hypot(point.x - x, point.z - z);
+        if (gap < best) best = gap;
+      }
+    }
+    return best;
+  };
+
+  const stallGap = gapToRing(stall.x, stall.z);
+  const closerPlots = facts.plots
+    .filter((plot) => plot.id !== stall.id)
+    .map((plot) => ({ plot, gap: gapToRing(plot.x, plot.z) }))
+    .filter(({ gap }) => gap <= stallGap);
+  expect(
+    closerPlots,
+    `the rail-race stall is ${stallGap.toFixed(1)} m from the rail-race ring, but so is ` +
+      closerPlots
+        .map(({ plot, gap }) => `'${plot.id}' at ${gap.toFixed(1)} m`)
+        .join(', ') +
+      ' — it does not stand alone at the rim',
+  ).toHaveLength(0);
+
+  const doormat = facts.entrances.find((entrance) => entrance.id === 'stall:railRacer');
+  expect(doormat, "the built park has no 'stall:railRacer' doormat").toBeDefined();
+  if (!doormat) return;
+  const at = `(${doormat.x.toFixed(1)}, ${doormat.z.toFixed(1)})`;
+  expect(
+    standableNear(facts, doormat.x, doormat.z),
+    `the rail-race stall's doormat at ${at} has no standable ground nearby`,
+  ).toBe(true);
+  expect(
+    facts.reachableFromEntrance(doormat.x, doormat.z),
+    `the rail-race stall's doormat at ${at} cannot be walked to from the park entrance`,
+  ).toBe(true);
+};
+
+/**
  * Half a Sky Cruiser car, in metres.
  *
  * The car body is `toonBox(1.5, 0.7, 2.2, …)` in `Coaster.ts` — so 0.75 m of it
@@ -591,6 +672,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
+  ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
 ];

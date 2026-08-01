@@ -151,12 +151,50 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     near: { id: 'building', min: 24, max: 30 },
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
+  //
+  // stall.railRacer stands at the park's rim (1 August 2026), close to the
+  // rail-race loop it boards: `railRace/route.ts` flies that ring at a
+  // constant 53.5 m nominal radius all the way round, so what "close to the
+  // rails" means for a booth is *radial* distance from the middle, not
+  // bearing — the arch that carries a rider out to the ring already tracks
+  // whatever bearing the booth stands at (`route.ts`'s `startDistance`).
+  //
+  // 41 m keeps the plot's own edge (41 + 3.4 = 44.4) a solid margin short of
+  // the train's 48 m inner edge, so the rail loop is untouched by this move.
+  // An earlier attempt (PR #159) tried moving this pin, found `check:park`
+  // failing with stranded `poiGraph` waypoints at every rim position it
+  // swept, and concluded the move was blocked. It was not the rim itself
+  // that was unreachable — two separate, fixable bugs were:
+  //
+  // 1. `paths.ts`'s spur `past` extension always overshot 2 m towards the
+  //    plot regardless of how close the doormat already stood to the plot's
+  //    edge — for every stall (2.6 m footprint, 1.4 m standoff) that put the
+  //    waypoint 0.6 m *inside* the booth's own collision. Inland, with a
+  //    dense waypoint mesh on every side, `findClearSpot`'s nudge search
+  //    could rescue that overshoot in any direction and still land near a
+  //    neighbour; at the rim, with only one way back to the network, a nudge
+  //    onto the booth's far side stranded the waypoint behind its own wall.
+  //    Fixed generically in `paths.ts` (`PAST_CLEARANCE`), for every stall,
+  //    not just this one.
+  // 2. Once fixed, most bearings still failed for two *unrelated* reasons
+  //    that only a real sweep (not one hand-picked point) would separate:
+  //    low bearings (0-15°) put this plot's edge within `CORRIDOR_GAP` of
+  //    the `waterFight` anchor's own 15 m plot, which the solver correctly
+  //    rejects as an unbuildable pin; and a band of bearings around 10-18°
+  //    happened to shift `Scenery`'s single shared RNG stream (this spur is
+  //    now ~2.5x longer, which changes how much ground counts as "on path"
+  //    early in that stream) into placing a garden wall across the *ferris
+  //    wheel kiosk's* own line of sight — a waypoint with no relation to
+  //    this stall, stranded as pure collateral. Swept bearing 0-35° x radius
+  //    38-46 m against the real built park (`sweep.sh`/`sweep2.sh` in the
+  //    branch handoff) rather than chase one seed by hand; 20°/41 m is
+  //    clean on every invariant, with headroom either side.
   {
     id: 'stall.railRacer',
-    pin: [26.896471713281517, 9.50805624751888],
+    pin: [38.527397452222246, 14.022825876352417],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 30 },
+    band: { min: 13, max: 42 },
   },
   {
     id: 'stall.spookyHouse',
