@@ -862,6 +862,16 @@ export class CharacterCreation {
         }
         picker.setSelected(true);
       },
+      // Only the "colour buttons" — the curated presets — hide while the
+      // wheel is open: they are not usefully tappable mid-drag, and hiding
+      // them frees the vertical space the wheel + brightness bar + Done
+      // button need most. The trigger tile itself (`picker.trigger`, also in
+      // `row`) stays put — it is how a child would notice the picker at all,
+      // and it doubles as the panel's own expanded/collapsed indicator via
+      // its `aria-expanded`.
+      onOpenChange: (open) => {
+        for (const button of buttons) button.hidden = open;
+      },
     });
     // Starts selected when the field's starting colour is not one of the
     // curated presets at all — e.g. a save file carrying an earlier custom
