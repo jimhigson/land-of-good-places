@@ -1,7 +1,7 @@
 import { ConeGeometry, Group, Mesh } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createFacePatch, type Expression } from '../style/faces';
+import { createBakedFace, type Expression } from '../style/faces';
 import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
 
 /**
@@ -120,8 +120,9 @@ export function createMini(): MiniHandle {
     addOutline(ear, 0.009);
   }
 
-  const face = createFacePatch({
-    radius: skullR,
+  // Baked into the skull's own texture — see ART_DIRECTION.md §3.
+  const face = createBakedFace({
+    fill: ART.miniLilac,
     spreadX: 1.9,
     spreadY: 1.8,
     tilt: 0.16,
@@ -139,8 +140,7 @@ export function createMini(): MiniHandle {
     blushStyle: 'soft',
     blushR: 0.075,
   });
-  face.mesh.scale.set(1.1, 0.98, 1);
-  head.add(face.mesh);
+  face.applyTo(skull);
 
   const grabBase = 0.5;
   return {

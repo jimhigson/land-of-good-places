@@ -74,6 +74,14 @@ out the user's own long-running hohjs GAME and EDITOR dev servers along with
 its own. Note the exact PID (or the port) when you start your server, and
 stop only that.
 
+**Always run your own dev server on your own port.** Several agents are
+often working at once, each wanting a live build to look at. Never assume a
+default port (5173, 5260, whatever you have seen in a handoff) is free —
+pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
+`--strictPort` is what makes a collision loud instead of silent: without it
+Vite just picks the next free port for you and every note you take about
+"my server is on 5260" quietly goes stale.
+
 ## A stale service worker will waste your hour
 
 This is a PWA. A service worker precached from **another agent's dev server on

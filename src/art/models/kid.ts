@@ -1,11 +1,14 @@
-import { Color, Group, Mesh, TorusGeometry, Vector3 } from 'three';
+import { Color, Group, Mesh, TorusGeometry, Vector3, type Material } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
 import {
-  createFacePaintOverlay,
+  createBakedFace,
   createFacePatch,
+  type BakedFace,
   type Expression,
-  type FacePaintOverlayHandle,
+  type FacePaintControl,
+  type FacePaintDesign,
+  type FacePatch,
 } from '../style/faces';
 import {
   applyWalk,
@@ -19,6 +22,7 @@ import { visibleTop } from '../style/measure';
 import { buildHair, type HairPart, type HairStyle } from './hair';
 import { buildBackpacks, type BackpackKind, type BackpackPart } from './backpacks';
 import { buildShoes, type ShoeKind, type ShoePart } from './shoes';
+import { kidAssetMesh } from './kidAsset';
 
 /**
  * The player kid — Eleri by default.
@@ -89,14 +93,15 @@ export const KID_HEIGHT = 2.12;
 const HEAD_TILT = 0.17;
 
 /**
- * The skull's radius, and how the face patch worn on it is squashed to sit
- * flat against that curve.
+ * The skull's radius, and how a face *patch* worn on it is squashed to sit flat
+ * against that curve.
  *
- * Module constants rather than locals inside {@link createKid} because
- * {@link attachFacePaint} builds a second decal layer onto the same skull and
- * has to agree with the first one exactly. They used to be *copied* into
- * `world/FacePaintStall.ts`, which said so in a comment and asked to be kept
- * in step by hand; there is now one of each.
+ * {@link FACE_SQUASH} is now only used on the crowd's patch path — see
+ * `KidOptions.facePatch`. A baked face needs no such constant at all: it is
+ * painted into the skull's own texture, so it inherits the skull's squash and
+ * the crown's tilt by being the same surface. That is one of the two duplicated
+ * numbers this change deletes, and duplicated numbers on this model have a
+ * history (every hat sat at two thirds of its size for two days over one).
  */
 export const SKULL_RADIUS = 0.44 * HEAD;
 const FACE_SQUASH: readonly [number, number, number] = [1, 0.95, 0.98];
@@ -119,6 +124,48 @@ export const KID_FACE = {
   eyeW: 0.122,
   eyeH: 0.158,
 } as const;
+
+/**
+ * Height of {@link KidHandle.hatAnchor} inside the `crown` group, in metres.
+ *
+ * Exported because a hat is authored about that anchor while the eyes are
+ * described about the skull's centre, so anything comparing the two — the
+ * eye-clearance gate in `check:hat-fit` — needs the one offset between them
+ * rather than its own copy of `0.42 * HEAD`.
+ */
+export const KID_HAT_ANCHOR_Y = 0.42 * HEAD;
+
+/**
+ * **Where the top of an eye is**, at azimuth `azimuth` radians round the face
+ * (0 is dead ahead, +x is the wearer's left as the camera sees it), measured in
+ * the **`crown` group's frame** — the frame a worn hat lives in. `null` outside
+ * the eyes' own arc.
+ *
+ * This exists so that nothing has to reconstruct it. `check:hair` had the only
+ * copy, and it is written in the *hair shells'* frame — `hair.ts` hangs them
+ * off a `drape` group carrying `rotation.x = headTilt` — so it rotates the
+ * result by `HEAD_TILT` on the way out and, being about hair rather than about
+ * the painted surface, leaves {@link FACE_SQUASH} out. Both are right there and
+ * wrong anywhere else: reusing that formula for hats puts the eyes 106 mm too
+ * high. One surface must have one description (ART-AGENT-NOTES §5); this is it,
+ * and it is checked against the built patch's own vertices by `check:hat-fit`.
+ *
+ * An eye is an **ellipse**, so this is a function of azimuth rather than one
+ * number: at its outer corner an eye has no height at all, and comparing a
+ * brim's lowest point anywhere in the eye's azimuth range against the eye's
+ * tallest point condemns every hat that correctly frames a face.
+ */
+export function kidEyeTopAt(azimuth: number): number | null {
+  const band =
+    Math.PI / 2 - KID_FACE.spreadY / 2 + KID_FACE.tilt + KID_FACE.eyeY * KID_FACE.spreadY;
+  const centre = (KID_FACE.eyeGap / 2) * KID_FACE.spreadX;
+  const halfW = (KID_FACE.eyeW / 2) * KID_FACE.spreadX;
+  const halfH = (KID_FACE.eyeH / 2) * KID_FACE.spreadY;
+  const offset = Math.abs(Math.abs(azimuth) - centre) / halfW;
+  if (offset >= 1) return null;
+  const theta = band - halfH * Math.sqrt(1 - offset * offset);
+  return SKULL_RADIUS * Math.cos(theta) * FACE_SQUASH[1];
+}
 
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
@@ -165,6 +212,48 @@ export const KID_EYE_COLOURS: readonly ToneSwatch[] = [
   { colour: ART.kidEye, label: 'Violet' },
 ] as const;
 
+/**
+ * The name of every mesh the kid's **body and head** are built from.
+ *
+ * One table, used three ways, which is the whole point of it existing:
+ *
+ * 1. `createKid` names each mesh from it as it builds;
+ * 2. `scripts/export-kid-glb.mts` walks it to decide what goes in the asset,
+ *    and a glTF node has to be *named* or it comes back from a round trip as
+ *    `mesh_1`, `mesh_2` (ART-AGENT-NOTES.md §8);
+ * 3. the parity harness pairs authored part against procedural part by it.
+ *
+ * Hair, backpacks, hats and shoes are **not** here: they are separate rigs
+ * (`hair.ts`, `backpacks.ts`, `hats.ts`, `shoes.ts`) that mount on anchors and
+ * are chosen per child, and they keep their current procedural build.
+ *
+ * The `.l` / `.r` suffix is the character's own left and right — the sign used
+ * for `side` in the loops below, so `.l` is `side === -1`, i.e. −X.
+ */
+export const KID_BODY_PARTS = [
+  'torso',
+  'collar',
+  'hem',
+  'arm-upper-l',
+  'arm-upper-r',
+  'hand-l',
+  'hand-r',
+  'leg-upper-l',
+  'leg-upper-r',
+  'foot-l',
+  'foot-r',
+  'skull',
+  'ear-l',
+  'ear-r',
+] as const;
+
+export type KidBodyPart = (typeof KID_BODY_PARTS)[number];
+
+/** `'l'` for the character's left (−X), `'r'` for her right. */
+function sideTag(side: -1 | 1): 'l' | 'r' {
+  return side < 0 ? 'l' : 'r';
+}
+
 export interface KidOptions {
   skin?: number;
   hair?: number;
@@ -205,6 +294,41 @@ export interface KidOptions {
   backpackKinds?: readonly BackpackKind[];
   /** Iris colour. Defaults to `ART.kidEye` — every kid but Ethan wears it. */
   eyeColour?: number;
+  /**
+   * Build the face as a separate patch mesh instead of baking it into the
+   * skull's texture.
+   *
+   * **Only the NPC crowd wants this**, and it is not a preference — it is what
+   * makes an instanced crowd possible. `entities/npc/kidCrowd.ts` gives every
+   * child their skin tone as an `instanceColor` multiply against a flat white
+   * material, and finds the face by the mesh literally named `facePatch` to
+   * give it its twelve (expression × eye-colour) material variants. Bake the
+   * face into the skull and that skin multiply lands on the eyes too — a deep
+   * skin tone would drive the plum ink to near-black, and there is no black in
+   * this game — and the twelve variants would have to be crossed with skin tone
+   * as well, which is the combinatorial blow-up the crowd exists to avoid.
+   *
+   * See `createBakedFace`'s header for the general rule: bake when the texture
+   * can carry the head's colour, keep the patch when something else has to.
+   */
+  facePatch?: boolean;
+  /**
+   * Where the body and head's shape comes from.
+   *
+   * - `'authored'` (the default) — `art/assets/kid.glb`, via
+   *   `models/kidAsset.ts`. Geometry and UVs authored together in one file.
+   * - `'procedural'` — the primitives the asset was generated from, still here
+   *   and still built by the same code.
+   *
+   * **The procedural path is kept for one reason and it is not nostalgia.** A
+   * parity claim has to be checked against the *previous* rendering, not
+   * against the constants of the change being made; comparing new code with
+   * new code is a tautology, and this project has filed a false "verified" that
+   * way twice (ART-AGENT-NOTES.md §6). `check:character-parity` builds one of
+   * each in a single process and measures the difference. Nothing in the game
+   * passes this — it is for the harness.
+   */
+  geometry?: 'authored' | 'procedural';
 }
 
 export interface KidHandle extends CreatureHandle {
@@ -274,6 +398,14 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly shoeParts: readonly ShoePart[];
   setSkinColour(colour: number): void;
+  /**
+   * Paints a face-paint design over the face, or washes it off.
+   *
+   * On a baked face this repaints the skull's own canvases in place; the design
+   * lands on the eyes and cheeks this character actually has, rather than on
+   * the default layout a separate overlay decal had to assume.
+   */
+  setFacePaint(design: FacePaintDesign | null): void;
   setHairColour(colour: number): void;
   setOutfitColour(colour: number): void;
   setShoeColour(colour: number): void;
@@ -345,9 +477,15 @@ export function createKid(options: KidOptions = {}): KidHandle {
     eyeColour = ART.kidEye,
   } = options;
 
+  const authored = options.geometry !== 'procedural';
+
   const root = new Group();
   root.name = 'kid';
   const body = new Group();
+  // Named for the same reason the meshes below are: the exported asset is a
+  // node hierarchy, and `applyWalk` finds nothing by name but a glTF round trip
+  // renames anything anonymous. See {@link KID_BODY_PARTS}.
+  body.name = 'body';
   root.add(body);
 
   const skinMat = toonMaterial(skin);
@@ -362,75 +500,131 @@ export function createKid(options: KidOptions = {}): KidHandle {
 
   const limbs = makeLimbs();
 
+  /**
+   * One body or head part — from the authored asset, or built from primitives.
+   *
+   * The asset (`art/assets/kid.glb`, read by `models/kidAsset.ts`) owns each
+   * part's **shape, UVs and where that shape sits in its own parent**. The rig
+   * around them — `body`, `head`, `crown`, the limb pivots and the four anchors
+   * — stays here, driven by `KID_HEAD_HEIGHT`, `SKULL_RADIUS` and
+   * `KID_HEAD_SCALE`, because hats, hair and three check scripts import those
+   * and a copy in the asset would be a second description of them.
+   *
+   * `make` is the *procedural* shape, and it is the code the asset was
+   * generated from — kept alive, and reachable with `geometry: 'procedural'`,
+   * because a parity claim has to compare against the previous rendering rather
+   * than against the new code. That mistake has been made twice on this
+   * project; see ART-AGENT-NOTES.md §6. `check:character-parity` builds both in
+   * one process and compares them vertex for vertex.
+   */
+  const part = (
+    name: KidBodyPart,
+    material: Material,
+    shadow: <T extends Mesh>(mesh: T) => T,
+    make: () => Mesh,
+  ): Mesh => {
+    const mesh = authored ? kidAssetMesh(name, material) : make();
+    mesh.name = name;
+    // Applied here rather than left to `blob`/`stub`, so the authored path and
+    // the procedural one cannot disagree about whether a part casts a shadow.
+    return shadow(mesh);
+  };
+
   // --- torso -------------------------------------------------------------------
   // Short and wide. Under a head this big the torso is a dumpling, not a trunk:
   // 0.80 m tall where it used to be 0.88, and the top 0.27 m of it disappears up
   // inside the skull, which is exactly what hides the neck.
-  const torso = stub(0.325, 0.15, outfitMat);
+  //
   // Named so the character creator's preview can measure the jumper and frame
   // the body on it when the child changes their clothes colour — see
   // `ui/characterCreationPreview.ts`. The limb pivots alone stop at the
   // shoulders, which leaves the collar and most of the jumper out of shot.
-  torso.name = 'torso';
-  torso.position.y = 0.6;
-  torso.scale.set(1.06, 1, 0.92);
+  const torso = part('torso', outfitMat, solid, () => {
+    const mesh = stub(0.325, 0.15, outfitMat);
+    mesh.position.y = 0.6;
+    mesh.scale.set(1.06, 1, 0.92);
+    return mesh;
+  });
   body.add(torso);
   addOutline(torso, 0.02);
 
   // Neckline. Sits just *below* the bottom of the skull — any higher and the
   // head swallows it whole and the jumper appears to have no opening.
-  const collar = solid(new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat));
-  collar.rotation.x = Math.PI / 2;
-  collar.position.y = 0.71;
+  const collar = part('collar', outfitDarkMat, solid, () => {
+    const mesh = new Mesh(new TorusGeometry(0.26, 0.055, 8, 22), outfitDarkMat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = 0.71;
+    return mesh;
+  });
   body.add(collar);
 
   // Skirt hem — a flared ring that stops the torso reading as a plain pill.
-  const hem = solid(new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat));
-  hem.rotation.x = Math.PI / 2;
-  hem.position.y = 0.4;
-  hem.scale.set(1.06, 1.06, 0.7);
+  const hem = part('hem', outfitDarkMat, solid, () => {
+    const mesh = new Mesh(new TorusGeometry(0.3, 0.075, 8, 24), outfitDarkMat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = 0.4;
+    mesh.scale.set(1.06, 1.06, 0.7);
+    return mesh;
+  });
   body.add(hem);
 
   // --- arms ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftArm : limbs.rightArm;
+    pivot.name = `arm-pivot-${sideTag(side)}`;
     // Shoulders set wide and low so the arms swing clear of the skull, and wider
     // than the skirt hem (0.32) so the hands are not swallowed by it — with a
     // torso this short, an arm tucked inside the silhouette simply disappears.
     pivot.position.set(side * 0.38, 0.72, 0);
     body.add(pivot);
 
-    const upper = stub(0.105, 0.16, outfitMat);
-    upper.position.y = -0.14;
+    const upper = part(`arm-upper-${sideTag(side)}`, outfitMat, solid, () => {
+      const mesh = stub(0.105, 0.16, outfitMat);
+      mesh.position.y = -0.14;
+      return mesh;
+    });
     pivot.add(upper);
 
-    const hand = blob(0.135, skinMat, [1, 1, 1], 18);
-    // Named for the same reason as the backpack: the arc these swing through
-    // is the other thing long hair must not be caught in.
-    hand.name = 'hand';
-    hand.position.y = -0.32;
+    // The hands are named for the same reason as the backpack: the arc these
+    // swing through is the other thing long hair must not be caught in.
+    // Side-suffixed since the asset needs every node uniquely named —
+    // `check:hair` sweeps both, so it looks them up through `KID_BODY_PARTS`
+    // rather than by a bare `'hand'` that used to match two meshes at once.
+    const hand = part(`hand-${sideTag(side)}`, skinMat, solid, () => {
+      const mesh = blob(0.135, skinMat, [1, 1, 1], 18);
+      mesh.position.y = -0.32;
+      return mesh;
+    });
     pivot.add(hand);
     addOutline(hand, 0.012);
   }
 
   const holdAnchor = new Group();
+  holdAnchor.name = 'holdAnchor';
   holdAnchor.position.set(0, -0.42, 0.1);
   limbs.rightArm.add(holdAnchor);
 
   // --- legs ---------------------------------------------------------------------
   for (const side of [-1, 1] as const) {
     const pivot = side < 0 ? limbs.leftLeg : limbs.rightLeg;
+    pivot.name = `leg-pivot-${sideTag(side)}`;
     pivot.position.set(side * 0.155, 0.36, 0);
     body.add(pivot);
 
-    const leg = stub(0.12, 0.1, skinMat);
-    leg.position.y = -0.1;
+    const leg = part(`leg-upper-${sideTag(side)}`, skinMat, solid, () => {
+      const mesh = stub(0.12, 0.1, skinMat);
+      mesh.position.y = -0.1;
+      return mesh;
+    });
     pivot.add(leg);
 
     // Big round shoes. Oversized feet read as "toy" from the iso camera — and
     // they carry even more weight now, because they are most of the body.
-    const foot = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
-    foot.position.set(0, -0.22, 0.045);
+    const foot = part(`foot-${sideTag(side)}`, shoeMat, solid, () => {
+      const mesh = blob(0.175, shoeMat, [1, 0.78, 1.28], 18);
+      mesh.position.set(0, -0.22, 0.045);
+      return mesh;
+    });
     pivot.add(foot);
     addOutline(foot, 0.014);
   }
@@ -469,6 +663,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // 1.36 rather than up by half the extra radius, because the head is meant to
   // sit ON the shoulders like a snowman's — a big head on a visible neck wobbles.
   const head = new Group();
+  head.name = 'head';
   head.position.y = KID_HEAD_HEIGHT;
   body.add(head);
 
@@ -476,15 +671,17 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // the face still points at the ISO CAMERA rather than at the grass. From 38°
   // above, an untilted head this large shows the player nothing but hair.
   const crown = new Group();
+  crown.name = 'crown';
   crown.rotation.x = -HEAD_TILT;
   head.add(crown);
 
   const skullR = SKULL_RADIUS;
-  const skull = blob(skullR, skinMat, [1, 0.95, 0.98], 38);
+  const skull = part('skull', skinMat, solid, () => blob(skullR, skinMat, [1, 0.95, 0.98], 38));
   crown.add(skull);
   addOutline(skull, 0.02);
 
   const hatAnchor = new Group();
+  hatAnchor.name = 'hatAnchor';
   hatAnchor.position.set(0, 0.42 * HEAD, 0);
   crown.add(hatAnchor);
 
@@ -492,6 +689,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
   // a flower worn here reads as "in her hair" alongside a hat rather than
   // fighting it for the same spot.
   const hairAnchor = new Group();
+  hairAnchor.name = 'hairAnchor';
   hairAnchor.position.set(0.32 * HEAD, 0.22 * HEAD, 0.14 * HEAD);
   crown.add(hairAnchor);
 
@@ -514,14 +712,24 @@ export function createKid(options: KidOptions = {}): KidHandle {
   });
 
   for (const side of [-1, 1] as const) {
-    const ear = decal(blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12));
-    ear.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
+    const ear = part(`ear-${sideTag(side)}`, skinMat, decal, () => {
+      const mesh = blob(0.085 * HEAD, skinMat, [0.55, 1, 0.85], 12);
+      mesh.position.set(side * 0.42 * HEAD, -0.04 * HEAD, 0.02 * HEAD);
+      return mesh;
+    });
     crown.add(ear);
   }
 
   // --- face ------------------------------------------------------------------
-  const face = createFacePatch({
-    radius: skullR,
+  //
+  // Baked into the skull's own texture by default (ART_DIRECTION.md §3, and
+  // CLAUDE.md's rule for worn faces — this is the same idea applied to a head).
+  // The skull is a `blob`, which is to say a plain `SphereGeometry` with the
+  // squash on `mesh.scale`, so remapping its UVs costs nothing and the face
+  // comes out on exactly the part of the skull the patch used to cover.
+  //
+  // The crowd's prototype keeps the old patch — see `KidOptions.facePatch`.
+  const facePaint = {
     ...KID_FACE,
     size: 512,
     iris: eyeColour,
@@ -531,9 +739,24 @@ export function createKid(options: KidOptions = {}): KidHandle {
     blush: ART.blush,
     blushStyle: 'soft',
     blushR: 0.1,
-  });
-  face.mesh.scale.set(...FACE_SQUASH);
-  crown.add(face.mesh);
+  } as const;
+
+  let bakedFace: BakedFace | null = null;
+  let patchFace: FacePatch | null = null;
+  if (options.facePatch) {
+    patchFace = createFacePatch({ radius: skullR, ...facePaint });
+    patchFace.mesh.scale.set(...FACE_SQUASH);
+    crown.add(patchFace.mesh);
+  } else {
+    bakedFace = createBakedFace({ fill: skin, ...facePaint });
+    // An authored skull already **is** the face window: the unwrap was made
+    // beside the geometry rather than recomputed from it afterwards, which is
+    // the whole point of Stage A. `remapSphereFaceUv` is therefore not called
+    // at all on that path — one fewer description of the same surface, and the
+    // one geometry can then be shared by every child in the park because
+    // nothing writes to it.
+    bakedFace.applyTo(skull, { uvsAuthored: authored });
+  }
 
   // Measured rather than hand-derived from `KID_HEAD_HEIGHT` + the anchor's
   // own local offset: the anchor rides on `crown`, which is tipped back by
@@ -578,7 +801,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     get height() {
       return measuredHeight;
     },
-    setExpression: (name: Expression) => face.setExpression(name),
+    setExpression: (name: Expression) => (bakedFace ?? patchFace)?.setExpression(name),
     setHairStyle: (style: HairStyle) => {
       hairRig.setStyle(style);
       measuredHeight = visibleTop(root);
@@ -602,7 +825,15 @@ export function createKid(options: KidOptions = {}): KidHandle {
     update: (dt: number) => hairRig.ponytail?.update(dt),
     resetHair: () => hairRig.ponytail?.reset(),
     setWalkPhase: (phase: number, speed: number) => applyWalk(limbs, body, phase, speed, 0.85, 0.09),
-    setSkinColour: (colour: number) => skinMat.color.setHex(colour),
+    setSkinColour: (colour: number) => {
+      // Two things wear the skin now: the shared material (hands, legs, ears)
+      // and, on a baked face, the skull's own texture, whose background fill
+      // *is* the skin. `setFill` no-ops when the colour has not changed, so the
+      // creator repainting on every tap costs nothing when only hair moved.
+      skinMat.color.setHex(colour);
+      bakedFace?.setFill(colour);
+    },
+    setFacePaint: (design: FacePaintDesign | null) => bakedFace?.setFacePaint(design),
     setHairColour: (colour: number) => {
       hairMat.color.setHex(colour);
       hairDarkMat.color.copy(new Color(colour).multiplyScalar(0.86));
@@ -616,42 +847,39 @@ export function createKid(options: KidOptions = {}): KidHandle {
 }
 
 /**
- * Puts a face-paint decal layer on an already-built kid and hands back the
- * handle that swaps the design (or hides it again, for "wash it off").
+ * Face paint on an already-built kid, and the handle that swaps the design (or
+ * washes it off).
  *
- * Opt-in rather than part of {@link createKid}, because most kids in the park
- * never wear paint and the NPC crowd instances every mesh it finds on its
- * prototype — an always-present overlay would cost the whole crowd a draw
- * layer nobody asked for.
+ * **This used to build a second decal patch** over the face patch: a third
+ * curved shell, at its own radius, in its own tilt group, mirroring
+ * {@link FACE_SQUASH} by hand. It is now a repaint of the skull's own texture,
+ * so it is a layer in a canvas rather than a layer in the scene — one fewer
+ * mesh, one fewer draw call, and nothing left to keep aligned.
+ *
+ * That alignment was not hypothetical. The overlay defaulted to `tilt: 0.1` and
+ * the *default* eye layout, while the kid's face is built at `KID_FACE`'s
+ * `tilt: 0.03` and `eyeY: 0.43` — so every design was aimed at cheeks about
+ * 8 cm from where the kid's actually are. Sharing one canvas makes that
+ * impossible: the paint and the face are drawn in the same coordinates now.
  *
  * **One implementation, two callers**, which is the point of it living here:
  * `world/FacePaintStall.ts` paints the real player with this, and the face
  * stall's picker previews the choice with the very same call
  * (GAME_DESIGN.md's PREVIEW RULE — the preview must be the same code as the
- * thing it previews, or the two drift). The stall used to carry its own copies
- * of {@link SKULL_RADIUS}, {@link FACE_SQUASH} and `HEAD_TILT` with a note
- * asking for them to be updated by hand if the head was ever retuned; that
- * note is now unnecessary.
+ * thing it previews, or the two drift).
  *
- * The tilt group reproduces `crown`'s own rotation, so the overlay sits in
- * exactly the space `createFacePatch`'s mesh does — the expression it is drawn
- * over — rather than in the untilted head's.
- *
- * Takes the head rather than a whole {@link KidHandle} because that is all it
- * needs, and because the two callers hold the same kid in different wrappers:
- * the preview has the `KidHandle` itself, while the stall has a
- * `entities/CharacterModel`, which keeps its handle private and re-exposes
- * `head`. Anything passed here must be a head built by {@link createKid} —
- * the radius and tilt above are this model's, not a general creature's.
+ * Takes the narrowest thing that can wear paint rather than a whole
+ * {@link KidHandle}, because the two callers hold the same kid in different
+ * wrappers: the preview has the `KidHandle` itself, while the stall has an
+ * `entities/CharacterModel`, which keeps its handle private and re-exposes what
+ * is needed.
  */
-export function attachFacePaint(model: { readonly head: Group }, size = 512): FacePaintOverlayHandle {
-  const tilt = new Group();
-  tilt.name = 'facePaintTilt';
-  tilt.rotation.x = -HEAD_TILT;
-  model.head.add(tilt);
-
-  const overlay = createFacePaintOverlay(SKULL_RADIUS, { size });
-  overlay.mesh.scale.set(...FACE_SQUASH);
-  tilt.add(overlay.mesh);
-  return overlay;
+export function attachFacePaint(model: {
+  setFacePaint(design: FacePaintDesign | null): void;
+}): FacePaintControl {
+  return {
+    setDesign(design: FacePaintDesign | null) {
+      model.setFacePaint(design);
+    },
+  };
 }

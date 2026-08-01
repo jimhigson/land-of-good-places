@@ -20,6 +20,7 @@ import {
   createFacePaintOverlay,
   FACE_PAINT_DESIGNS,
   type FacePaintDesign,
+  type FacePaintControl,
   type FacePaintOverlayHandle,
 } from '../art/style/faces';
 import { attachFacePaint } from '../art/models/kid';
@@ -145,7 +146,7 @@ export class FacePaintStall implements GameSystem {
   private frameElapsed = 0;
 
   private player: Player | null = null;
-  private playerOverlay: FacePaintOverlayHandle | null = null;
+  private playerOverlay: FacePaintControl | null = null;
 
   /**
    * `frameElapsed` when the painting moment began, or `null` when nobody is

@@ -1,5 +1,6 @@
 import type { Group } from 'three';
 import { createKid, KID_HEAD_HEIGHT, type KidHandle, type KidOptions } from '../art/models/kid';
+import type { FacePaintDesign } from '../art/style/faces';
 import type { Expression } from '../art/style/faces';
 
 /**
@@ -100,6 +101,14 @@ export class CharacterModel {
    */
   setExpression(name: Expression): void {
     this.kid.setExpression(name);
+  }
+
+  /**
+   * Face paint, from the painting stall. Repaints the skull's own texture — see
+   * `art/models/kid.ts`'s `attachFacePaint`, which is what calls this.
+   */
+  setFacePaint(design: FacePaintDesign | null): void {
+    this.kid.setFacePaint(design);
   }
 
   /**
