@@ -1,5 +1,9 @@
 export { Hud } from './Hud';
-export { CharacterCreation, type CharacterCreationHandlers } from './CharacterCreation';
+export {
+  CharacterCreation,
+  defaultCharacterChoice,
+  type CharacterCreationHandlers,
+} from './CharacterCreation';
 export { ContinueOrRestart, type ContinueOrRestartHandlers } from './ContinueOrRestart';
 export { DevBadge } from './DevBadge';
 export { ShopPanel, type ShopPanelContent, type ShopPanelItem } from './ShopPanel';

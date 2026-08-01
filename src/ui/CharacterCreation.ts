@@ -1115,6 +1115,43 @@ export class CharacterCreation {
   }
 }
 
+/**
+ * The exact same defaults this form itself starts on, packaged as a real
+ * `CharacterCreationChoice` rather than left implicit in a constructor's
+ * field initialisers — what a ride deep link (`main.ts`'s `RIDE_DEEP_LINKS`)
+ * uses to skip this form entirely on a profile with no save yet, so "goes
+ * straight into the ride" is true even from a completely empty profile, not
+ * only a returning one. Kept here, next to the fields it mirrors, so the two
+ * cannot drift without both being visible in the same diff.
+ */
+export function defaultCharacterChoice(): CharacterCreationChoice {
+  const hat = shopItem(DEFAULT_HAT_ID) ?? HAT_OPTIONS[0] ?? null;
+  const pet = shopItem(DEFAULT_PET_ID) ?? PET_OPTIONS[0];
+  if (!pet) {
+    // Same invariant `complete()` above leans on: the shop's live catalogue
+    // always has at least one pet. If that ever stopped being true this
+    // throws loudly at the one call site that needs it, rather than silently
+    // handing `Game` a save with no pet at all.
+    throw new Error('Land of Good Places: no pet in the shop catalogue to default to.');
+  }
+  return {
+    name: PLAYER_DEFAULT_NAME,
+    skinColour: ART.kidSkin,
+    hairColour: PALETTE.hair,
+    hairStyle: 'bunches',
+    outfitColour: PALETTE.outfit,
+    outfitArmsColour: PALETTE.outfit,
+    eyeColour: ART.kidEye,
+    backpackKind: 'satchel',
+    backpackColour: PALETTE.backpack,
+    shoeKind: 'plain',
+    shoeColour: PALETTE.shoe,
+    glassesKind: null,
+    hat,
+    pet,
+  };
+}
+
 function escapeHtml(text: string): string {
   return text.replace(
     /[&<>"']/g,

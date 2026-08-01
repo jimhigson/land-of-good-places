@@ -2,7 +2,7 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type GameOptions } from './Game';
 import { UpdateGate } from './ui/UpdateGate';
-import { CharacterCreation, ContinueOrRestart, DevBadge } from './ui';
+import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } from './state/save';
@@ -128,6 +128,13 @@ function continueGame(
  * tab halfway through making a new character cannot leave the old park behind
  * to be offered again — the child already said goodbye to it, and being asked
  * a second time would be worse than either answer.
+ *
+ * `boardStallId` set means a ride deep link brought us here with nobody to
+ * ask — "goes straight into the ride" has to be true even from a completely
+ * empty profile, not only a returning one, so this skips the form itself and
+ * hands `defaultCharacterChoice()` (`ui/CharacterCreation.ts` — the exact
+ * defaults the form would otherwise have started on) straight to
+ * `completeCharacterCreation`, same as the form's own "Let's go!" would.
  */
 function startFresh(
   canvas: HTMLCanvasElement,
@@ -136,6 +143,12 @@ function startFresh(
   boardStallId?: string,
 ): void {
   clearSave();
+  if (boardStallId) {
+    gameStore.completeCharacterCreation(defaultCharacterChoice());
+    saveFlags.markCharacterCreated();
+    launchGame(canvas, uiRoot, splash, {}, boardStallId);
+    return;
+  }
   new CharacterCreation(uiRoot, {
     onComplete: (choice) => {
       gameStore.completeCharacterCreation(choice);
