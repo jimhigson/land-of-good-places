@@ -1,7 +1,7 @@
 import { GARDEN_PLAY_RADIUS } from '../../core/constants';
 import { TAU } from '../../core/mathUtils';
 import { placedEntry } from '../parkLayout';
-import { clearOfPlots } from '../train/plan';
+import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
 import { RailRaceRoute } from './route';
 
 /**
@@ -39,6 +39,23 @@ export interface PlannedRailRace {
  * a child approaches from, and the ride should not spit her out into the
  * queue), then round the compass, then further out, taking the first spot clear
  * of every plot blocker and safely inside the soft park boundary.
+ *
+ * **And clear of the railway.** Plot blockers used to be the only obstacle this
+ * search knew about, and that is enough only while the booth stands inland with
+ * open lawn all round it — which is the only reason it has never misfired. The
+ * search runs *outward from the park's centre first*, so the further out the
+ * booth is, the more directly it aims at the train's 48–58 m band; and the train
+ * corridor is not a plot, so `clearOfPlots` cannot see it. Move the booth
+ * anywhere near the rim and the first "clear" patch it finds is a spot on the
+ * track, which `check:park` then reports as an exit node nobody can walk to —
+ * the railway's invisible walls cut it off from the park.
+ *
+ * Found while trying to move the booth out to the rails (1 August 2026); the
+ * move itself did not land, but the latent hole in this search is real and cheap
+ * to close, so it is closed. With the booth where it stands today the result is
+ * unchanged to the metre — this only ever rejects a candidate that was already
+ * on the railway. The clearance is the railway's own published figure rather
+ * than a number picked to suit.
  */
 function planExit(): { exitX: number; exitZ: number } {
   const stall = placedEntry(STATION_STALL_ID);
@@ -58,6 +75,7 @@ function planExit(): { exitX: number; exitZ: number } {
       const x = stall.x + Math.cos(bearing) * distance;
       const z = stall.z + Math.sin(bearing) * distance;
       if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2) continue;
+      if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) continue;
       if (clearOfPlots(x, z, 1.4)) return { exitX: x, exitZ: z };
     }
   }

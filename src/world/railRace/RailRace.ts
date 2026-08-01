@@ -10,6 +10,7 @@ import { discoverSecret } from '../../state/secrets';
 import { terrainHeight } from '../terrain';
 import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
+import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
@@ -196,6 +197,8 @@ export class RailRace implements GameSystem {
   private finishedCount = 0;
   private confetti: Confetti | null = null;
   private ducking = false;
+  /** Look-alike rivals who stand about at the exit when a race lets you off. */
+  private readonly exitCrowd: RailRaceExitCrowd;
 
   constructor(collision: CollisionWorld) {
     this.collision = collision;
@@ -212,6 +215,9 @@ export class RailRace implements GameSystem {
 
     this.confetti = createConfetti();
     this.group.add(this.confetti.root);
+
+    this.exitCrowd = createRailRaceExitCrowd(collision);
+    this.group.add(this.exitCrowd.root);
 
     this.placeCarts();
   }
@@ -337,8 +343,11 @@ export class RailRace implements GameSystem {
     this.placeCarts();
     this.animate(dt, elapsed);
     // Paper keeps falling after the race is over and after she has been set
-    // down, so these are ticked outside every phase test.
+    // down, so these are ticked outside every phase test — and so does the
+    // little crowd at the exit, which by definition only exists once the race
+    // has handed control back and the phase is `'waiting'` again.
     this.confetti?.update(dt);
+    this.exitCrowd.update(dt);
     this.rideView?.update(this.me.rider.travelled, dt);
     this.poseRider();
   }
@@ -585,6 +594,26 @@ export class RailRace implements GameSystem {
       this.player.model.root.scale.setScalar(1);
       this.player.endRide();
       this.onRideChange?.(false);
+
+      // Pip, Nell and Otto turn up beside her, as though the four of them had
+      // just climbed out together — read off the race that has this second
+      // finished, so whoever actually won is the one cheering hardest. This
+      // must happen *before* the reset below, which wipes `place`. They are
+      // look-alikes rather than the racers themselves, and they are not solid;
+      // `exitCrowd.ts` explains both at length.
+      this.exitCrowd.show(
+        x,
+        z,
+        x,
+        z,
+        this.carts
+          .filter((cart) => !cart.isPlayer)
+          .map((cart, index) => ({
+            outfit: RIVALS[index]?.outfit ?? PALETTE.markerLemon,
+            hairStyle: RIVALS[index]?.hairStyle ?? 'short',
+            place: cart.rider.place,
+          })),
+      );
     }
     // Everybody back to the line, so the ring looks ready rather than abandoned.
     for (const cart of this.carts) Object.assign(cart.rider, createRider(cart.rider.lane));
@@ -598,6 +627,7 @@ export class RailRace implements GameSystem {
   dispose(): void {
     this.track.dispose();
     this.confetti?.dispose();
+    this.exitCrowd.dispose();
     this.sparks.dispose();
     this.rideView?.dispose();
     for (const cart of this.carts) {
