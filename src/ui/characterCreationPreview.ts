@@ -19,7 +19,7 @@ import { disposeTree, toonMaterial } from '../art/style/materials';
 import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
-import type { BackpackKind, HairStyle } from '../state';
+import type { BackpackKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
 
@@ -63,6 +63,9 @@ export interface PreviewChoice {
   /** Which bag she wears. Bare and non-optional for the same reason `hairStyle` is. */
   readonly backpack: BackpackKind;
   readonly backpackColour: number;
+  /** Which pair she wears. Bare and non-optional for the same reason `hairStyle` is. */
+  readonly shoes: ShoeKind;
+  readonly shoesColour: number;
   readonly hatId: string;
   readonly petId: string;
   /**
@@ -108,8 +111,13 @@ const RESTING_FOCUS: Readonly<Record<PreviewFraming, PreviewFocus>> = {
  * styles that hang down the back are longer than the head, and hidden behind
  * the child in a front view, so that framing both measures the hair itself and
  * turns the plinth — see {@link CharacterPreview.updateTurntable}.
+ *
+ * `feet` needs none of `backpack`'s turntable trick — shoes sit on the
+ * *front* of the child, in plain sight from the same dead-on view every other
+ * close-up already uses, so it is simply a tighter, lower box (see
+ * {@link CharacterPreview.boxFor}).
  */
-export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'backpack' | 'pet';
+export type PreviewFocus = 'all' | 'head' | 'hair' | 'face' | 'body' | 'backpack' | 'feet' | 'pet';
 
 /**
  * Where the camera sits relative to whatever it is framing: dead in front, and
@@ -145,6 +153,10 @@ const FOCUS_MARGIN: Readonly<Record<PreviewFocus, number>> = {
   // A bag on a back seen three-quarters on is a small subject with a whole
   // child beside it; the margin keeps her shoulder in shot for scale.
   backpack: 1.2,
+  // Feet are the smallest thing any screen frames on purpose — tighter than a
+  // head, but not as tight as `face`, which can crop right to the hairline
+  // because a face has no ground under it that also needs to read.
+  feet: 1.16,
   pet: 1.32,
 };
 
@@ -287,8 +299,15 @@ export class CharacterPreview {
    * Where the camera lives when nothing has just changed — `all` for the
    * character creator, `face` for the face-painting stall. See
    * {@link PreviewFraming}.
+   *
+   * Mutable, not `readonly`: the character creator's tab strip
+   * ({@link setResting}) moves this whenever the child switches tabs, so
+   * "the whole character" is only ever one tab's resting place among several,
+   * not a fact fixed for the screen's whole lifetime the way it still is for
+   * the face-painting stall (which never calls {@link setResting} and simply
+   * keeps the value {@link PreviewFraming} gave it at construction).
    */
-  private readonly resting: PreviewFocus;
+  private resting: PreviewFocus;
   private focus: PreviewFocus;
   /** Elapsed-time deadline after which {@link focus} eases back to {@link resting}. */
   private focusUntil = 0;
@@ -413,6 +432,8 @@ export class CharacterPreview {
       eyeColour: choice.eye,
       backpackKind: choice.backpack,
       backpackColour: choice.backpackColour,
+      shoe: choice.shoesColour,
+      shoeKind: choice.shoes,
     });
     // A fresh choice gets an immediate happy face — the same "it worked!"
     // beat a purchase or a pet pick gets everywhere else in the game — and
@@ -433,13 +454,19 @@ export class CharacterPreview {
     if (paint) attachFacePaint(kid).setDesign(paint);
 
     // Same attachment every worn hat uses in the real game — see
-    // `art/models/hats.ts`'s doc comment: no offset maths needed.
-    const hatAsset = shopItem(choice.hatId)?.model();
+    // `art/models/hats.ts`'s doc comment: no offset maths needed. Gated on
+    // `!kid.hairHidesHat`: the freshly-built kid already knows whether the
+    // chosen hair style (Mohican, today) cannot coexist with a worn hat, and
+    // if so the *hat* is the one that does not get attached — hair is never
+    // the thing that hides any more, see `art/models/hair.ts`'s
+    // `HairPart.hideUnderHat`. `choice.hatId` itself is untouched either
+    // way: the creator's Hat tab still shows it selected, this only decides
+    // what actually renders.
+    const hatAsset = kid.hairHidesHat ? undefined : shopItem(choice.hatId)?.model();
     if (hatAsset) kid.hatAnchor.add(hatAsset.root);
     // Same courtesy `entities/WornHat.ts` does in the park: tell the model a
-    // hat is on so the spiky style tucks its spikes away instead of skewering
-    // it. The preview always puts *some* hat on, so this is always true today
-    // — written as a condition anyway, because "no hat" is one shop item away.
+    // hat's attachment just changed, so its measured height re-checks. Not
+    // "is a hat worn" any more — see `KidHandle.setHatWorn`'s doc comment.
     kid.setHatWorn(hatAsset !== undefined);
 
     // The chosen starting pet, stood beside the kid at its own natural scale
@@ -464,6 +491,25 @@ export class CharacterPreview {
     // has to happen before `boxFor('hair')` measures the tail, so the framing
     // is taken from a tail at rest rather than one mid-flight.
     kid.resetHair();
+  }
+
+  /**
+   * Moves where the camera rests once nothing is transiently in focus —
+   * what the character creator's tab strip calls on every switch, generalising
+   * the PREVIEW RULE's "framed for what it changes" from *the last thing
+   * tapped* to *the whole tab currently open* (GAME_DESIGN.md).
+   *
+   * Deliberately also retargets {@link focus} itself rather than only
+   * {@link resting}: nothing about the character changed, so there is nothing
+   * for the usual `update()`-driven "hold {@link FOCUS_HOLD_SECONDS}, then
+   * ease back" beat to hold *away from* — a tab switch is the new resting
+   * place, immediately, not a temporary detour that will ease back to
+   * wherever the old tab left it. `updateCamera`'s own damping still carries
+   * the actual camera move there smoothly; only the destination jumps.
+   */
+  setResting(focus: PreviewFocus): void {
+    this.resting = focus;
+    this.focus = focus;
   }
 
   /**
@@ -619,6 +665,17 @@ export class CharacterPreview {
       } else if (focus === 'face') {
         const patch = kid.root.getObjectByName('facePatch');
         box = patch ? this.measure(patch) : null;
+      } else if (focus === 'feet') {
+        // Both legs unconditionally, not `kid.shoeParts` alone: they carry the
+        // foot blob itself, which *is* the whole shoe for `'plain'` — a kind
+        // with no extra parts of its own to measure, unlike every other one.
+        // The extra parts on top are still filtered by visibility, same as
+        // `backpack` above, so a hidden RiPika toe cap never widens the box.
+        box = this.measure(
+          kid.limbs.leftLeg,
+          kid.limbs.rightLeg,
+          ...kid.shoeParts.filter((part) => part.mesh.visible).map((part) => part.mesh),
+        );
       } else {
         // Clothes: the jumper and the limbs, deliberately NOT the head. The
         // hair bunches are wider than the kid's outstretched hands, so any box

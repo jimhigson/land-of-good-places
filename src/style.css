@@ -743,6 +743,24 @@ kbd {
   box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
 }
 
+/* "Look" reopens the character creator over the running park — same pill
+   language, its own lilac so it reads as a different thing from the mint
+   backpack and the cream help pill either side of it. */
+.pill--look {
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  color: var(--lgp-ink);
+  background: linear-gradient(180deg, #fff 0%, #e6dcff 150%);
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+.pill--look:active {
+  transform: translateY(0.1875rem);
+  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.18);
+}
+
 .pill--prompt {
   background: linear-gradient(180deg, #fff 0%, #ffe9a8 150%);
   transition: opacity 180ms ease, transform 180ms ease;
@@ -1159,8 +1177,12 @@ kbd {
    `.charcreate-body` / `.charcreate-preview` / `.charcreate-controls` further
    down this file, and everything those solved — the sticky preview column on a
    wide screen, and the phone-portrait split into a fixed preview band above a
-   scrolling controls pane — is inherited rather than re-solved here. The three
-   rules below are the whole difference. */
+   scrolling controls pane — is inherited rather than re-solved here. The two
+   rules below are the whole difference. A third, `.facepaint-controls`
+   (opting back out of `.charcreate-controls`'s `max-width` cap on a wide
+   screen), was removed 31 July 2026 when that cap was — see
+   `.charcreate-controls` further down: this screen never needed anything
+   beyond what it now gets by default. */
 
 .facepaint-card {
   --shop-accent: var(--lgp-mint);
@@ -1173,15 +1195,6 @@ kbd {
      itself to a pixel size. */
   width: min(46rem, 96vw);
   max-height: min(40rem, 92vh);
-}
-
-/* `.charcreate-controls` is a multi-column box (`columns: 13rem`) so the
-   creator's eight sections flow into as many columns as fit. The design grid
-   is a grid and must not be fragmented into columns on top of that — this
-   takes the multicol formatting context away and leaves a plain block, exactly
-   as the phone rules already do for the creator itself. */
-.facepaint-controls {
-  columns: auto;
 }
 
 /* Not a scroller any more. `.charcreate-controls` above is the scroll region
@@ -3071,7 +3084,14 @@ kbd {
 .charcreate-card {
   --shop-accent: var(--lgp-sky);
   width: min(74rem, 96vw);
-  max-height: min(48rem, 94vh);
+  /* `height`, not `max-height` (31 July 2026): with a cap, the card shrank
+     to fit whichever tab happened to be shortest — Skin (one row of
+     swatches) collapsed the whole card, then picking Hair (two sections)
+     grew it again, and the preview/tab-strip visibly jumped on every tab
+     change. Fixed height means every tab gets the same card, and
+     `.charcreate-body`'s existing `overflow-y: auto` still catches the one
+     tab (Hair or Backpack, two sections each) tall enough to need it. */
+  height: min(48rem, 94vh);
 }
 
 .charcreate-body {
@@ -3132,40 +3152,56 @@ kbd {
    their name twice over. The input stayed; the caption went. See
    `ui/CharacterCreation.ts`.) */
 
-/* Columns, not one tall stack (ORDER-OF-WORK 1.8). The number of columns is
-   decided by how much room there actually is: one on a phone, two or three on
-   a laptop, four on a big monitor — no breakpoints.
+/* Used to be `columns: 13rem` (ORDER-OF-WORK 1.8) — a multi-column spread
+   built to fit nine stacked sections across one to four columns depending on
+   screen width, because a grid's row-per-section wasted a band of empty space
+   beside the tall hat/pet card grids at 2560x1600. Tabs (31 July 2026,
+   `ui/CharacterCreation.ts`'s `TAB_META`) removed the problem the multi-column
+   trick was solving — only one tab's panel is ever attached, and the tallest
+   one is two sections (Hair: colour + style; Backpack: shape + colour) — so
+   this is a plain flex column now.
 
-   MULTI-COLUMN, not grid. A grid puts sections into ROWS, and a grid row is as
-   tall as its tallest member, so the hat section (eight hats, two abreast)
-   inflated a whole row and left a band of empty space beside it — which is
-   what was still pushing "Clothes colour" and "Starting hat" off the bottom at
-   2560x1600 even after the card grew. Multi-column has no rows: it fills one
-   column to the balanced height, then starts the next, so a tall section costs
-   its own height and nothing more. `columns` takes the column *width* here, so
-   the count still follows the available room rather than a fixed number. */
+   No `max-width` any more (31 July 2026): with the card's height now fixed
+   rather than content-shrunk (see `.charcreate-card`), a capped controls
+   column left a visible band of bare card down the right edge on anything
+   wider than a laptop. Two columns now — preview, fixed; controls, `flex: 1`
+   — so the second one genuinely takes the rest of the width on a wide
+   screen. The `max-width: 700px` block below still stacks them to full width
+   on a phone, unaffected by this. */
 .charcreate-controls {
   flex: 1;
   min-width: 0;
-  columns: 13rem;
-  column-gap: 0.875rem;
-}
-
-/* The name is the first thing you fill in and the widest control there is, so
-   it spans whatever the column count turns out to be. */
-.charcreate-controls > .charcreate-section:first-child {
-  column-span: all;
+  display: flex;
+  flex-direction: column;
 }
 
 .charcreate-section {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  /* Multi-column has no row gap, so sections carry their own. */
+  /* A flex column has no row gap set, so sections carry their own. */
   margin-bottom: 0.875rem;
-  /* A section split across a column break would put a label at the foot of one
-     column and its swatches at the head of the next. */
-  break-inside: avoid;
+}
+
+/* One tab's contents — one `.charcreate-section` (most tabs) or two (Hair,
+   Backpack). Each section still carries its own `margin-bottom`, so this
+   needs nothing beyond stacking them; the only reason it exists as a rule at
+   all is `[hidden]` below.
+
+   Same same-specificity tie every other `[hidden]` toggle in this file breaks
+   the same way (`.colourwheel-panel[hidden]` above is the original case): an
+   author rule's `display: flex` and the UA's `[hidden]` rule are equal
+   specificity, so cascade order alone would decide it, and this class comes
+   later. Without the explicit override a hidden panel would keep its full
+   flex height while invisible, stacking every other tab's panel underneath it
+   in the same space. */
+.charcreate-tabpanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.charcreate-tabpanel[hidden] {
+  display: none;
 }
 
 .charcreate-label {
@@ -3481,6 +3517,18 @@ kbd {
   box-shadow: 0 0 0 rgba(74, 58, 82, 0.1);
 }
 
+/* Same same-specificity `[hidden]` tie as `.charcreate-tabpanel[hidden]`
+   above (and `.colourwheel-panel[hidden]` before that) — `.charcreate-
+   style-btn`'s own `display: flex` would otherwise win by cascade order and
+   leave a hidden button occupying its grid cell. Nothing today ever hides
+   one of these except the Hat tab's button while a hair style that cannot
+   wear a hat is selected (`ui/CharacterCreation.ts`'s `applyHairStyle`) —
+   every hair-style or backpack-shape button built with this same class is
+   simply never toggled `hidden` at all, so this rule is inert for them. */
+.charcreate-style-btn[hidden] {
+  display: none;
+}
+
 .charcreate-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3587,16 +3635,6 @@ kbd {
 
   .charcreate-controls {
     width: 100%;
-    /* NOT a multi-column container down here, and this is load-bearing rather
-       than cosmetic. `columns: 13rem` above makes this a multicol box; give a
-       multicol box a definite height and overflow and it does not scroll down,
-       it fragments into *overflow columns sideways* — the controls would march
-       off the right-hand edge. At this width it was only ever resolving to one
-       column anyway (a 13rem column inside about 16rem of room), so setting
-       both `column-width` and `column-count` back to `auto` — which is what
-       `columns: auto` does — takes the multicol formatting context away
-       entirely and leaves a plain block stack. */
-    columns: auto;
     flex: 1;
     min-height: 0;
     overflow-y: auto;

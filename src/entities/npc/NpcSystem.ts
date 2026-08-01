@@ -4,6 +4,7 @@ import { PALETTE } from '../../core/palette';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { CROWD_BACKPACK_KINDS } from '../../art/models/backpacks';
+import { CROWD_SHOE_KINDS } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -282,6 +283,9 @@ export class NpcSystem implements GameSystem {
     // spot on the path the day this feature landed — the same reason the names
     // above have their own stream.
     const bagRng = new Rng(NPC_SEED + 90210);
+    // And another for the shoes, same reasoning, own salt so it cannot
+    // collide with the bags' (90210) or the names' (424242).
+    const shoeRng = new Rng(NPC_SEED + 24680);
     const otherNames = pickNames(nameRng, NPC_COUNT - 1);
     let nameCursor = 0;
 
@@ -320,6 +324,7 @@ export class NpcSystem implements GameSystem {
 
       const backpack =
         CROWD_BACKPACK_KINDS[bagRng.int(0, CROWD_BACKPACK_KINDS.length - 1)] ?? 'satchel';
+      const shoes = CROWD_SHOE_KINDS[shoeRng.int(0, CROWD_SHOE_KINDS.length - 1)] ?? 'plain';
 
       const avatar = this.kids.spawn(
         colours,
@@ -327,6 +332,7 @@ export class NpcSystem implements GameSystem {
         rng.range(0.86, 1.04),
         eyeVariant,
         backpack,
+        shoes,
       );
       // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default

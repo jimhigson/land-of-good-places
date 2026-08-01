@@ -1,33 +1,36 @@
 import {
   BufferGeometry,
+  CanvasTexture,
   ConeGeometry,
   CylinderGeometry,
   DoubleSide,
   Group,
   InstancedMesh,
+  LinearFilter,
   Matrix4,
   Mesh,
   type MeshToonMaterial,
   Quaternion,
   SphereGeometry,
   TorusGeometry,
+  Vector2,
   Vector3,
 } from 'three';
-import { PALETTE, Rng } from '../style/bridge';
+import { PALETTE, Rng, TAU } from '../style/bridge';
 import { ART } from '../style/artPalette';
-import { visibleTop } from '../style/measure';
-import { addOutline, decal, markShared, solid, toonMaterial } from '../style/materials';
+import { visiblePoints, visibleTop } from '../style/measure';
+import { addOutline, decal, inkTint, markShared, solid, toonMaterial } from '../style/materials';
 import { starGeometry } from '../style/shapes';
-import { paintFace, type FacePaintOptions } from '../style/faces';
+import { css, FACE_FILL_INSET, paintFaceOnFill, type FacePaintOptions } from '../style/faces';
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
 import { blob, type AssetHandle } from '../style/asset';
-import { KID_HEAD_SCALE } from './kid';
+import { KID_HEAD_SCALE, kidEyeTopAt } from './kid';
 import {
   CHEERY_HOOD,
   CHEERY_PEAK,
-  hoodBibGeometry,
+  hoodFaceUv,
   hoodHemRollGeometry,
-  hoodPatchGeometry,
+  hoodPanelSeamsGeometry,
   hoodPeakGeometry,
   hoodPeakLiningGeometry,
   hoodShellGeometry,
@@ -37,7 +40,7 @@ import {
   RIPIKA_PEAK,
   TRILLA_HOOD,
   TRILLA_PEAK,
-  type HoodPatchSpec,
+  type HoodFaceWindow,
   type HoodShellSpec,
   type PlushEarSpec,
 } from './hoodShell';
@@ -101,15 +104,116 @@ export const HAT_KINDS: readonly HatKind[] = [
 const FIT = KID_HEAD_SCALE;
 
 /**
+ * **How much bigger than life the family wants their hats** (31 July 2026).
+ *
+ * Live-testing session, in Jim's words: *"totally fine, but make all hats 50%
+ * bigger"*. So every hat is ×1.5 before its own {@link HAT_SIZE_EXTRA}.
+ *
+ * This is a **design decision, not a fudge factor**: hats in this park are
+ * deliberately, comically oversized, the way a dressing-up box is. It lived for
+ * one afternoon as a `// TEMPORARY: for testing` edit to {@link FIT}, was never
+ * written down as a requirement, and was therefore lost the moment the Cheery
+ * Cap and the two critter hoods were rebuilt on `hoodShell.ts` — which is why
+ * it is a named constant with the quote attached rather than a number folded
+ * into `FIT`. `check:hat-fit`'s `MIN_SPAN` now fails if it goes missing again.
+ *
+ * Kept separate from `FIT` because the two mean different things and drift
+ * apart on purpose: `FIT` is the head's own scale, and a hat must track it
+ * exactly or it stops fitting; this is taste, and only the family moves it.
+ */
+export const HAT_SIZE = 1.5;
+
+/**
+ * Per-hat correction on top of {@link HAT_SIZE}, from Jim's 1 August 2026
+ * verdict — a live screenshot of every hat on the character-creation preview,
+ * with the **Party Hat named as the calibration reference**: "big enough to
+ * read at a distance, not so big it swallows the head", cartoonish rather than
+ * realistic, and the characters are not anatomically proportioned so the hats
+ * need not be either.
+ *
+ * The 31 July session's blanket "crown and cherry cap 30% bigger again" is
+ * gone from here — it was approved by eye against the *old* Cheery Cap, a
+ * squashed sphere 0.94× the bare head across (see git history), and the
+ * `hoodShell.ts` rebuild that replaced it is 1.09× across before any multiplier
+ * at all. ×1.95 on the new geometry measured **2.392 m wide on a 2.087 m
+ * child** — literally wider than she is tall — which is what Jim actually saw
+ * and rejected. Per hat, from that screenshot:
+ *
+ * - **crown** keeps ×1.3 (→ ×1.95 total): "size is good", only its position
+ *   moved (see {@link createCrown}).
+ * - **cap** drops to ×1 (→ ×1.5, the plain baseline): "far too big… bring it
+ *   down to a cartoonish-but-sane size using the Party Hat as your
+ *   calibration", plus the six-panel rebuild — see {@link createCap}.
+ * - **sun** gets ×1.1 (→ ×1.65): "make it 10% larger", the one hat asked to
+ *   grow.
+ * - **flower**, **ripikaHat**, **puff** drop to ×0.75 (→ ×1.125): all three
+ *   called "too big, reduce" with no target number given, so this is a
+ *   judgement call — see the before/after screenshots in
+ *   `HANDOFF-hat-rework.md` for what was actually approved against.
+ * - **party** and **bobble** are absent (→ ×1 → plain ×1.5): "good as-is" /
+ *   "size is good".
+ */
+const HAT_SIZE_EXTRA: Partial<Record<HatKind, number>> = {
+  crown: 1.3,
+  sun: 1.1,
+  cap: 0.75,
+  flower: 0.75,
+  ripikaHat: 0.75,
+  puff: 0.75,
+};
+
+/**
+ * The total scale-up for one hat: {@link HAT_SIZE}, plus its own extra.
+ *
+ * Exported so `measure-hat-fit.mts` can print the *real* per-hat multiplier
+ * rather than a hand-typed copy of it — a hand-typed copy is exactly how the
+ * 31 July "crown and cap ×1.95" note in this script's own console output went
+ * stale the moment this file's numbers changed under it.
+ */
+export function hatSize(kind: HatKind): number {
+  return HAT_SIZE * (HAT_SIZE_EXTRA[kind] ?? 1);
+}
+
+/**
+ * **How far apart the hat shop stands its display stands**, in metres.
+ *
+ * Lives here rather than in `world/building/shops/fitouts.ts`, which lays the
+ * row out, because {@link hatDisplayScale} is derived from it and the two were
+ * separately-written copies of `0.85`. `check:hat-fit` asserts the widest two
+ * hats in the shop clear each other at this spacing.
+ */
+export const HAT_STAND_SPACING = 0.85;
+
+/**
+ * The head a hat is shown against on a stand, in metres — see
+ * {@link hatDisplayScale}. Tuned, and then asserted: at 0.85 the widest two
+ * hats overlap.
+ */
+const HAT_DISPLAY_HEAD = 0.77;
+
+/**
  * How big a hat is shown on a shop stand, as a fraction of life size.
  *
- * Exported so `world/building/shops/fitouts.ts` does not have to know about
- * {@link FIT}: the stands are 0.85 m apart, and a life-size sun hat is 1.4 m
- * across, so displaying them at life size would have each brim slicing through
- * its neighbours. Written as a fraction of `FIT` so the stands keep the size
- * they have always shown whatever the head does next.
+ * Exported so `fitouts.ts` does not have to know about {@link FIT}: a life-size
+ * sun hat is 2.1 m across on stands {@link HAT_STAND_SPACING} apart, so showing
+ * them life size would have each brim sawing through its neighbours. A stand
+ * instead shows every hat as though it were sitting on a 0.77 m head.
+ *
+ * **Per kind, dividing out {@link hatSize}** — which is the part that is easy to
+ * get wrong. A worn hat's size is a matter of family taste and moves when they
+ * say so; a shop display's size is a matter of the stands being 0.85 m apart
+ * and does not. Fold the two together and the 31 July ×1.5, and the crown and
+ * cap's further ×1.3, walk straight into the neighbouring stands — measured,
+ * the ×1.95 Cheery Cap overlapped the sun hat beside it by 109 mm. Dividing it
+ * out means the shop looks the same however big the family want to wear them.
+ *
+ * 0.77 rather than the 0.85 this used to be written as: the RiPika cap and the
+ * Trilla bonnet were *already* overlapping by 9 mm before any of this, which
+ * nothing measured. `check:hat-fit` measures it now.
  */
-export const HAT_DISPLAY_SCALE = 0.85 / FIT;
+export function hatDisplayScale(kind: HatKind): number {
+  return HAT_DISPLAY_HEAD / (FIT * hatSize(kind));
+}
 
 /** How deep a hat sinks onto the skull, so the band grips rather than hovers. */
 const SIT = -0.1;
@@ -122,6 +226,9 @@ const SIT = -0.1;
  * Two groups rather than writing `FIT` onto `root`, because the contract
  * reserves `root.scale` for the caller — `entities/WornHat.ts` pops a new hat
  * in by writing it, and `check:assets` fails any asset that has spent it.
+ *
+ * {@link HAT_SIZE} is deliberately *not* applied here: it goes on in
+ * {@link finish}, once the geometry exists to measure. See there for why.
  */
 function hatGroups(name: string): { root: Group; fit: Group } {
   const root = new Group();
@@ -134,16 +241,81 @@ function hatGroups(name: string): { root: Group; fit: Group } {
 }
 
 /**
- * Finishes a hat: its `height` measured off the geometry just built, never
- * hand-written.
+ * The lowest a hat comes **in front of the wearer's eyes**, in metres about the
+ * hat anchor — its brow line. `null` if nothing it is made of crosses the eyes
+ * at all (a flower crown very nearly does not).
  *
- * Four of these used to carry a hand-written height and four had an entry in
+ * Per azimuth, against {@link kidEyeTopAt}, for the reason that function gives:
+ * an eye is an ellipse with no height at all at its outer corner, so the lowest
+ * point *anywhere* in the eyes' azimuth range is not a fair comparison.
+ */
+function browLine(root: Group): number | null {
+  const TAU = Math.PI * 2;
+  const buckets = 360;
+  const lowest = new Array<number>(buckets).fill(Number.POSITIVE_INFINITY);
+  visiblePoints(root, (point) => {
+    if (point.z <= 0) return;
+    const bucket = Math.floor(((Math.atan2(point.x, point.z) + Math.PI) / TAU) * buckets);
+    lowest[bucket] = Math.min(lowest[bucket] as number, point.y);
+  });
+  let brow = Number.POSITIVE_INFINITY;
+  for (let bucket = 0; bucket < buckets; bucket += 1) {
+    const hat = lowest[bucket] as number;
+    if (!Number.isFinite(hat)) continue;
+    if (kidEyeTopAt(((bucket + 0.5) / buckets) * TAU - Math.PI) === null) continue;
+    brow = Math.min(brow, hat);
+  }
+  return Number.isFinite(brow) ? brow : null;
+}
+
+/**
+ * Finishes a hat: **grows it to {@link HAT_SIZE}**, then measures its `height`
+ * off the geometry, never hand-written.
+ *
+ * ## A hat grows about its own brow line
+ *
+ * The `fit` group's origin *is* the hat anchor, the crown of the skull. So the
+ * obvious way to make a hat bigger — multiply `fit.scale` — scales it about the
+ * crown, which makes it ×1.5 wider **and sinks its hem ×1.5 further down the
+ * wearer's face**. Measured on the built hats, the ×1.95 Cheery Cap's peak came
+ * out 62 mm *below* the top of her eyes: a hat pulled down over a child's face,
+ * against GAME_DESIGN.md's standing rule that a critter hood never covers it
+ * and against `hoodShell.ts`'s own peak-height table. That is what the one
+ * afternoon of `// TEMPORARY` scaling would have shipped.
+ *
+ * So the scale is applied about the **brow line** — the lowest the hat comes in
+ * front of the eyes — instead of about the crown:
+ *
+ * ```
+ * y ↦ brow + k · (y − brow)
+ * ```
+ *
+ * which is `fit.scale × k` plus a lift of `−(k−1) · brow`. Every point above
+ * the brow rises and every point below it is the brow itself, so **a hat gets
+ * bigger upward and outward and never comes one millimetre further down her
+ * face than the version the designer fitted**. It needs no threshold and no
+ * tuning: whatever clearance a hat has today it still has at any size, so a
+ * future hat, or a future number from the sofa, cannot quietly reintroduce this.
+ *
+ * The band still grips: it stays at the height its designer chose, which is the
+ * point. It is a *loose* grip afterwards — a ×1.5 hat on an unchanged head must
+ * stand proud of it — and that is what an oversized dressing-up hat looks like.
+ *
+ * Four hats used to carry a hand-written height and four had an entry in
  * `check:assets`'s KNOWN_DRIFT to match (crown −20 mm, sun −24 mm, flower
  * −38 mm, the RiPika hat −28 mm). Multiplying a hand-written number by `FIT`
  * would only have multiplied its error, so all four are measured now and all
- * four entries are gone.
+ * four entries are gone — and this is why the growth happens *here*, after the
+ * geometry exists, rather than in {@link hatGroups} before there is anything to
+ * measure.
  */
-function finish(root: Group): AssetHandle {
+function finish(root: Group, fit: Group, kind: HatKind): AssetHandle {
+  const k = hatSize(kind);
+  const brow = browLine(root);
+  fit.scale.multiplyScalar(k);
+  // No brow line means nothing this hat is made of crosses her eyes, so there
+  // is nothing to hold still and it simply grows about the crown.
+  fit.position.y -= (k - 1) * (brow ?? 0);
   return { root, height: visibleTop(root) };
 }
 
@@ -169,8 +341,29 @@ function createPartyHat(): AssetHandle {
   pom.position.y = SIT + 0.44;
   fit.add(pom);
 
-  return finish(root);
+  return finish(root, fit, 'party');
 }
+
+/**
+ * How much further the crown sinks onto the head than a plain hat's {@link SIT}.
+ *
+ * Jim's 1 August verdict: the crown's *size* is right, only its position is
+ * wrong — "it sits too high; lower it onto the head". Measured, the cause is
+ * not that the band is too high up in absolute terms; it is that the band is
+ * a bare, uncapped ring (`CylinderGeometry`, open top and bottom), so once
+ * `finish`'s brow-anchored ×1.95 makes the ring far wider than the skull is at
+ * that height, the background shows straight through the gap between the
+ * ring's inner wall and the hair beneath it and it reads as floating rather
+ * than worn. The generic brow-line scaling in `finish` cannot fix this — the
+ * crown does not cross the eyes at all at the front, so the safety margin it
+ * protects has nothing to hold here — so the crown gets its own, additional
+ * sink, deep enough that the ring's lower half is behind the hair silhouette
+ * (the bunches, not the bare skull `check:hat-fit` measures) rather than
+ * hanging clear of it. Tuned by eye against the screenshot, not measured: there
+ * is no `check:*` gate this can be pinned to, because "does the background show
+ * through the gap" is a rendering question, not a geometry one.
+ */
+const CROWN_LOWER = 0.1;
 
 function createCrown(): AssetHandle {
   const { root, fit } = hatGroups('hat.crown');
@@ -180,19 +373,102 @@ function createCrown(): AssetHandle {
   const band = solid(
     new Mesh(new CylinderGeometry(0.26, 0.27, 0.16, 20), toonMaterial(ART.helmetGold)),
   );
-  band.position.y = SIT + 0.08;
+  band.position.y = SIT + 0.08 - CROWN_LOWER;
   fit.add(band);
   addOutline(band, 0.011);
 
   const points = solid(new Mesh(new ConeGeometry(0.27, 0.2, 5), toonMaterial(ART.helmetGold)));
-  points.position.y = SIT + 0.24;
+  points.position.y = SIT + 0.24 - CROWN_LOWER;
   fit.add(points);
 
   const jewel = decal(new Mesh(starGeometry(0.13, 0.03), toonMaterial(PALETTE.markerPink)));
-  jewel.position.set(0, SIT + 0.09, 0.26);
+  jewel.position.set(0, SIT + 0.09 - CROWN_LOWER, 0.26);
   fit.add(jewel);
 
-  return finish(root);
+  return finish(root, fit, 'crown');
+}
+
+/**
+ * How many knitted ribs run round the Bobble Hat's dome, and how far each
+ * tilts the surface at its steepest — the sides of a rib, not its crown or its
+ * groove, which is where the derivative of a smooth bump peaks.
+ *
+ * A **normal map**, not extra geometry: the dome is one `SphereGeometry`
+ * (`check:hat-fit` and the shop stand both walk its actual vertices, and a
+ * ribbed sphere would be a lot more of them for a shape that is, in silhouette,
+ * still just a dome). `SphereGeometry`'s own UV already runs `u` once round
+ * the azimuth and `v` from pole to equator, so a rib pattern that is a plain
+ * function of `u` — `height(u) = sin(2π·RIBS·u)` — repeats **vertically**,
+ * pole to hem, exactly like a knitted rib stitch, with no seam: `u` wraps at
+ * both texture edges by construction.
+ *
+ * Toon shading only has {@link TOON_RAMP}'s four bands, so a shallow bump is
+ * invisible almost everywhere and only shows up in the sliver of surface
+ * right at a band boundary. {@link BOBBLE_RIB_TILT} is chosen large enough
+ * (35°) that the ribs read across the whole dome, not just at the terminator —
+ * checked by rendering, not by eye on the texture (see `HANDOFF-hat-rework.md`).
+ */
+const BOBBLE_RIBS = 14;
+const BOBBLE_RIB_TILT = (35 * Math.PI) / 180;
+
+let bobbleRibNormalMap: CanvasTexture | null = null;
+
+/**
+ * Paints {@link BOBBLE_RIBS} vertical ribs as a tangent-space normal map.
+ *
+ * `height(u) = sin(2π·RIBS·u)`, so the tangent-space tilt (its derivative,
+ * `cos(2π·RIBS·u)`) is zero at the crown of each rib and at the bottom of each
+ * groove — flat, as a rounded rib should be at its high and low points — and
+ * at its steepest exactly between them, which is where a knitted rib actually
+ * catches the light. `v` (pole-to-hem) never enters the formula, which is
+ * what makes the ribs run the hem's whole height rather than being a repeating
+ * horizontal band.
+ *
+ * One texture, cached and `markShared`: every Bobble Hat in the game — worn,
+ * and the shop's own display copy — paints the same ribs, so there is exactly
+ * one canvas to redraw if this ever needs retuning.
+ */
+function bobbleKnitNormalMap(): CanvasTexture {
+  if (bobbleRibNormalMap) return bobbleRibNormalMap;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable — cannot paint the bobble ribs.');
+  const image = ctx.createImageData(size, size);
+  for (let x = 0; x < size; x += 1) {
+    const u = (x + 0.5) / size;
+    const tilt = BOBBLE_RIB_TILT * Math.cos(TAU * BOBBLE_RIBS * u);
+    const nx = Math.sin(tilt);
+    const nz = Math.cos(tilt);
+    const r = Math.round((nx * 0.5 + 0.5) * 255);
+    const g = 128; // no variation pole-to-hem: the ribs run the full height
+    const b = Math.round((nz * 0.5 + 0.5) * 255);
+    for (let y = 0; y < size; y += 1) {
+      const i = (y * size + x) * 4;
+      image.data[i] = r;
+      image.data[i + 1] = g;
+      image.data[i + 2] = b;
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  // Deliberately NOT `SRGBColorSpace` — a normal map is data, not colour, and
+  // decoding it as sRGB would warp every tilt away from what was painted.
+  const texture = new CanvasTexture(canvas);
+  // A sine-wave rib pattern mip-maps to flat grey — a minified mip level
+  // averages each rib's left tilt against its right and cancels to no tilt at
+  // all, which is why the very first render of this looked completely smooth
+  // despite the map being attached and correct. `RIBS` is deliberately not so
+  // high that turning mipmaps off aliases badly at gameplay distance.
+  texture.generateMipmaps = false;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+  texture.needsUpdate = true;
+  markShared(texture);
+  bobbleRibNormalMap = texture;
+  return texture;
 }
 
 function createBobbleHat(): AssetHandle {
@@ -204,6 +480,13 @@ function createBobbleHat(): AssetHandle {
       toonMaterial(PALETTE.markerSky),
     ),
   );
+  const domeMaterial = dome.material as MeshToonMaterial;
+  domeMaterial.normalMap = bobbleKnitNormalMap();
+  // 1.0 (the painted tilt, unamplified) turned out invisible under this ramp's
+  // four bands — verified by rendering, see `BOBBLE_RIB_TILT`'s comment and
+  // `HANDOFF-hat-rework.md`. 4 is the smallest multiplier that reads clearly
+  // in a screenshot at the character-creation preview's own distance.
+  domeMaterial.normalScale = new Vector2(7, 7);
   dome.position.y = SIT + 0.02;
   dome.scale.set(1, 1.1, 1);
   fit.add(dome);
@@ -217,8 +500,20 @@ function createBobbleHat(): AssetHandle {
   pom.position.y = SIT + 0.33;
   fit.add(pom);
 
-  return finish(root);
+  return finish(root, fit, 'bobble');
 }
+
+/**
+ * How much further the sun hat sinks onto the head than a plain hat's
+ * {@link SIT}. Jim's 1 August verdict, same diagnosis as {@link CROWN_LOWER}:
+ * once `finish`'s brow-anchored scale-up (now ×1.65, see {@link HAT_SIZE_EXTRA})
+ * makes the brim wider than the head, the gap between the brim's underside and
+ * the hair below it opens up and the hat reads as hovering rather than worn.
+ * The sun hat's brim is a *solid* disc rather than an open ring — there is
+ * nothing to see through — so this is purely the vertical gap, and a plain
+ * sink closes it. Tuned by eye against the screenshot, same as the crown.
+ */
+const SUN_LOWER = 0.07;
 
 function createSunHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.sun');
@@ -226,7 +521,7 @@ function createSunHat(): AssetHandle {
   const brim = solid(
     new Mesh(new CylinderGeometry(0.46, 0.46, 0.05, 24), toonMaterial(PALETTE.flowerYellow)),
   );
-  brim.position.y = SIT + 0.02;
+  brim.position.y = SIT + 0.02 - SUN_LOWER;
   // Nothing is plumb: a sun hat worn at a slight angle reads as jaunty rather
   // than as a dinner plate.
   brim.rotation.z = 0.08;
@@ -239,15 +534,15 @@ function createSunHat(): AssetHandle {
       toonMaterial(PALETTE.flowerYellow),
     ),
   );
-  dome.position.y = SIT + 0.04;
+  dome.position.y = SIT + 0.04 - SUN_LOWER;
   dome.scale.set(1, 0.9, 1);
   fit.add(dome);
 
   const ribbon = ring(0.235, 0.032, PALETTE.blossomPink);
-  ribbon.position.y = SIT + 0.07;
+  ribbon.position.y = SIT + 0.07 - SUN_LOWER;
   fit.add(ribbon);
 
-  return finish(root);
+  return finish(root, fit, 'sun');
 }
 
 /**
@@ -291,8 +586,22 @@ function createCap(): AssetHandle {
   fit.rotation.y = CAP_JAUNT;
 
   const shell = hoodPart(hoodShellGeometry(CHEERY_HOOD), PALETTE.markerMint);
+  shell.name = 'hoodShell';
   fit.add(shell);
   addOutline(shell, 0.013);
+
+  // The six sewn seams, in the peak/button's own accent green rather than the
+  // crown's mint — same reason the peak is: at the game's 38° camera a raised
+  // ridge in the *same* colour as the surface it sits on reads as a bump, not
+  // a seam, and this ties "seam, peak, button" together as the one darker trim
+  // colour a real cap's stitching and hardware would be. See
+  // `hoodPanelSeamsGeometry` for why this is real geometry rather than relying
+  // on the shell's own (much subtler) panel relief.
+  const seams = hoodPart(
+    hoodPanelSeamsGeometry(CHEERY_HOOD, { tube: 0.022, lift: 0.02, topFrac: 0.8 }),
+    PALETTE.leafMid,
+  );
+  fit.add(seams);
 
   const peak = hoodPart(hoodPeakGeometry(CHEERY_HOOD, CHEERY_PEAK), PALETTE.leafMid);
   fit.add(peak);
@@ -313,7 +622,7 @@ function createCap(): AssetHandle {
   button.position.y = CHEERY_HOOD.semiY + 0.013;
   fit.add(button);
 
-  return finish(root);
+  return finish(root, fit, 'cap');
 }
 
 function createFlowerCrown(): AssetHandle {
@@ -350,7 +659,7 @@ function createFlowerCrown(): AssetHandle {
   heart.position.set(0, SIT + 0.09, 0.27);
   fit.add(heart);
 
-  return finish(root);
+  return finish(root, fit, 'flower');
 }
 
 // =============================================================================
@@ -376,37 +685,45 @@ function hoodPart(geometry: BufferGeometry, colour: number): Mesh {
 }
 
 /**
- * A face painted onto a window of the hood's own surface.
+ * A hood's skin: its base colour with the animal's face painted into it.
  *
- * The texture is cached per key and `markShared`, so the shop stand's copy and
- * the worn copy paint one canvas between them and `disposeTree` leaves it
- * alone. A hat is worn and taken off constantly in the character creator, and
- * a fresh 512² canvas per try-on is exactly the leak `ownTextures` was added
- * to stop.
+ * There is no separate face mesh. The face is baked into the shell's **own**
+ * texture, at the shell's own UVs — see `HoodFaceWindow` in `hoodShell.ts` for
+ * why, and for the bug that caused the change. The texture is opaque: no
+ * `transparent`, no `alphaTest`, no `renderOrder`, nothing to sort.
+ *
+ * Cached per key and `markShared`, so the shop stand's copy and the worn copy
+ * paint one canvas between them and `disposeTree` leaves it alone. A hat is
+ * worn and taken off constantly in the character creator, and a fresh 512²
+ * canvas per try-on is exactly the leak `ownTextures` was added to stop.
  */
-const hoodFaces = new Map<string, ReturnType<typeof paintFace>>();
-function hoodFaceTexture(key: string, paint: FacePaintOptions): ReturnType<typeof paintFace> {
-  const cached = hoodFaces.get(key);
+const hoodSkins = new Map<string, ReturnType<typeof paintFaceOnFill>>();
+function hoodSkinTexture(
+  key: string,
+  fill: number,
+  paint: FacePaintOptions,
+  under?: (ctx: CanvasRenderingContext2D, size: number) => void,
+): ReturnType<typeof paintFaceOnFill> {
+  const cached = hoodSkins.get(key);
   if (cached) return cached;
-  const texture = markShared(paintFace(paint));
-  hoodFaces.set(key, texture);
+  const texture = markShared(paintFaceOnFill(fill, paint, under));
+  hoodSkins.set(key, texture);
   return texture;
 }
 
-function hoodFace(
+/** A hood shell wearing its face, outlined in its own colour rather than white. */
+function facedHoodShell(
   spec: HoodShellSpec,
-  patch: HoodPatchSpec,
-  key: string,
-  paint: FacePaintOptions,
+  window: HoodFaceWindow,
+  colour: number,
+  texture: ReturnType<typeof paintFaceOnFill>,
 ): Mesh {
-  const material = toonMaterial(0xffffff, {
-    map: hoodFaceTexture(key, paint),
-    transparent: true,
-  });
-  material.alphaTest = 0.02;
-  const mesh = decal(new Mesh(hoodPatchGeometry(spec, patch), material));
-  mesh.name = 'hoodFace';
-  mesh.renderOrder = 2;
+  // White, because the map carries the colour — including the hood's own base
+  // colour, which is the texture's background fill. The outline would otherwise
+  // be tinted from white and come out grey, so it is given the real colour.
+  const mesh = solid(new Mesh(hoodShellGeometry(spec, window), toonMaterial(0xffffff, { map: texture })));
+  mesh.name = 'hoodShell';
+  addOutline(mesh, 0.013, inkTint(colour));
   return mesh;
 }
 
@@ -446,7 +763,7 @@ function addPlushEars(
 }
 
 /** RiPika's face, appliquéd. Its own disc cheeks, cocoa nose and "w" mouth. */
-const RIPIKA_HOOD_FACE: FacePaintOptions = {
+export const RIPIKA_HOOD_FACE: FacePaintOptions = {
   size: 512,
   eyeY: 0.46,
   // Much wider than RiPika's own 0.46, because the window this is mapped onto
@@ -464,7 +781,8 @@ const RIPIKA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.095,
 };
 
-const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, lift: 0.01 };
+/** Where that face sits on the cap — the window of the shell it is painted into. */
+export const RIPIKA_FACE_WINDOW: HoodFaceWindow = { halfX: 0.62, yLo: -0.15, yHi: 0.24 };
 
 /**
  * The RiPika cap.
@@ -482,9 +800,13 @@ const RIPIKA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.62, yLo: -0.15, yHi: 0.24, l
 function createRipikaHat(): AssetHandle {
   const { root, fit } = hatGroups('hat.ripikaHat');
 
-  const shell = hoodPart(hoodShellGeometry(RIPIKA_HOOD), ART.ripikaYellow);
+  const shell = facedHoodShell(
+    RIPIKA_HOOD,
+    RIPIKA_FACE_WINDOW,
+    ART.ripikaYellow,
+    hoodSkinTexture('hood.ripika', ART.ripikaYellow, RIPIKA_HOOD_FACE),
+  );
   fit.add(shell);
-  addOutline(shell, 0.013);
 
   const peak = hoodPart(hoodPeakGeometry(RIPIKA_HOOD, RIPIKA_PEAK), ART.ripikaYellowDeep);
   fit.add(peak);
@@ -516,13 +838,11 @@ function createRipikaHat(): AssetHandle {
     ART.ripikaTip,
   );
 
-  fit.add(hoodFace(RIPIKA_HOOD, RIPIKA_HOOD_PATCH, 'hood.ripika', RIPIKA_HOOD_FACE));
-
-  return finish(root);
+  return finish(root, fit, 'ripikaHat');
 }
 
 /** Trilla's face. The puff's own big eyes and soft blush, no nose. */
-const TRILLA_HOOD_FACE: FacePaintOptions = {
+export const TRILLA_HOOD_FACE: FacePaintOptions = {
   size: 256,
   eyeY: 0.46,
   eyeGap: 0.58,
@@ -536,7 +856,52 @@ const TRILLA_HOOD_FACE: FacePaintOptions = {
   blushR: 0.11,
 };
 
-const TRILLA_HOOD_PATCH: HoodPatchSpec = { halfX: 0.58, yLo: -0.185, yHi: 0.195, lift: 0.008 };
+export const TRILLA_FACE_WINDOW: HoodFaceWindow = { halfX: 0.58, yLo: -0.185, yHi: 0.195 };
+
+/**
+ * The bonnet's bib: a sewn-on lozenge of pale fabric under the face.
+ *
+ * It was a second decal mesh (`hoodBibGeometry`), wound inside out and so never
+ * once drawn in the game. It is painted into the hood's own texture now, under
+ * the face, for exactly the reasons the face is — one surface, nothing to keep
+ * in step. It is drawn in the *face window's* canvas coordinates, so it goes
+ * through `hoodFaceUv` like everything else rather than being placed by eye.
+ *
+ * A rectangle of a second colour reads as a rendering seam, so the width tapers
+ * away top and bottom into a rounded lozenge — the same taper the mesh had, and
+ * the reason it reads as something someone sewed on.
+ */
+const TRILLA_BIB = { halfX: 0.56, yLo: -0.18, yHi: -0.02 };
+
+function drawTrillaBib(ctx: CanvasRenderingContext2D, size: number): void {
+  const win = TRILLA_FACE_WINDOW;
+  const steps = 48;
+  /** One edge of the lozenge at height fraction `t`, in canvas pixels. */
+  const edge = (t: number, side: -1 | 1): [number, number] => {
+    const y = TRILLA_BIB.yLo + (TRILLA_BIB.yHi - TRILLA_BIB.yLo) * t;
+    const taper = 0.35 + 0.65 * Math.sqrt(Math.max(0, 1 - ((2 * t - 1) * 0.92) ** 2));
+    const phi = Math.PI - side * TRILLA_BIB.halfX * taper;
+    const [u, v] = hoodFaceUv(win, phi, y);
+    // Back out of the canvas inset: `under` is drawn in the face window's own
+    // 0…size box, which `paintFaceOnFill` then insets as one piece.
+    const span = 1 - 2 * FACE_FILL_INSET;
+    return [((u - FACE_FILL_INSET) / span) * size, (1 - (v - FACE_FILL_INSET) / span) * size];
+  };
+
+  ctx.fillStyle = css(PALETTE.stonePinkLight);
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i += 1) {
+    const [x, y] = edge(i / steps, -1);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  for (let i = steps; i >= 0; i -= 1) {
+    const [x, y] = edge(i / steps, 1);
+    ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
 
 /** How often the hood bursts into song, in seconds. Rarer than the pet's. */
 const TRILLA_SONG = { min: 12, max: 22, nearSpeedup: 1 };
@@ -566,9 +931,15 @@ function createPuffHat(): AssetHandle {
   mount.name = 'hat.puff:mount';
   fit.add(mount);
 
-  const shell = hoodPart(hoodShellGeometry(TRILLA_HOOD), PALETTE.blossomPink);
+  const neutralFace = hoodSkinTexture(
+    'hood.trilla',
+    PALETTE.blossomPink,
+    TRILLA_HOOD_FACE,
+    drawTrillaBib,
+  );
+  const shell = facedHoodShell(TRILLA_HOOD, TRILLA_FACE_WINDOW, PALETTE.blossomPink, neutralFace);
   mount.add(shell);
-  addOutline(shell, 0.013);
+  const faceMaterial = shell.material as MeshToonMaterial;
 
   const peak = hoodPart(hoodPeakGeometry(TRILLA_HOOD, TRILLA_PEAK), PALETTE.stonePinkLight);
   mount.add(peak);
@@ -576,14 +947,6 @@ function createPuffHat(): AssetHandle {
 
   const band = hoodPart(hoodHemRollGeometry(TRILLA_HOOD, 0.036), ART.heartPink);
   mount.add(band);
-
-  const bib = decal(
-    new Mesh(
-      hoodBibGeometry(TRILLA_HOOD, { halfX: 0.56, yLo: -0.18, yHi: -0.02, lift: 0.006 }),
-      toonMaterial(PALETTE.stonePinkLight),
-    ),
-  );
-  mount.add(bib);
 
   // The curl: the puff's own asymmetric feature, off-centre and leaning, worn
   // as the bonnet's knot. Built from the same swept ear the cap's are, wound
@@ -603,20 +966,23 @@ function createPuffHat(): AssetHandle {
   addOutline(knot, 0.011);
   curl.tip.dispose();
 
-  const facePatch = hoodFace(TRILLA_HOOD, TRILLA_HOOD_PATCH, 'hood.trilla', TRILLA_HOOD_FACE);
-  mount.add(facePatch);
-  const faceMaterial = facePatch.material as MeshToonMaterial;
-  const neutralFace = faceMaterial.map;
-  const singingFace = hoodFaceTexture('hood.trilla.singing', {
-    ...TRILLA_HOOD_FACE,
-    eyeStyle: 'archHappy',
-    mouth: 'oh',
-    mouthW: (TRILLA_HOOD_FACE.mouthW ?? 0.062) * 1.25,
-  });
+  // Singing is a swap of the whole hood skin now rather than of a face decal —
+  // same two canvases, same swap, one fewer mesh.
+  const singingFace = hoodSkinTexture(
+    'hood.trilla.singing',
+    PALETTE.blossomPink,
+    {
+      ...TRILLA_HOOD_FACE,
+      eyeStyle: 'archHappy',
+      mouth: 'oh',
+      mouthW: (TRILLA_HOOD_FACE.mouthW ?? 0.062) * 1.25,
+    },
+    drawTrillaBib,
+  );
 
   // Measured before the notes join it: a burst of floating notes is not part of
   // how tall a hat is, and the name label sits at `height + 0.42`.
-  const handle = finish(root);
+  const handle = finish(root, fit, 'puff');
 
   // --------------------------------------------------------------- singing
   const rng = new Rng(0x7211a + puffHatCount * 7919);
@@ -624,7 +990,7 @@ function createPuffHat(): AssetHandle {
   const notes = createPuffNotes(0x7211a + puffHatCount * 104729);
   mount.add(notes.root);
   const scheduler = createSongScheduler(rng, TRILLA_SONG);
-  const mouthY = TRILLA_HOOD_PATCH.yLo + (TRILLA_HOOD_PATCH.yHi - TRILLA_HOOD_PATCH.yLo) * 0.3;
+  const mouthY = TRILLA_FACE_WINDOW.yLo + (TRILLA_FACE_WINDOW.yHi - TRILLA_FACE_WINDOW.yLo) * 0.3;
   const mouthZ = TRILLA_HOOD.shellR * TRILLA_HOOD.depth;
   const breathePhase = rng.range(0, Math.PI * 2);
   let singing = false;

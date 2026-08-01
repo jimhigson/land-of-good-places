@@ -3,7 +3,7 @@ import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
-import type { BackpackKind, CharacterCreationChoice, HairStyle } from '../state';
+import type { BackpackKind, CharacterCreationChoice, HairStyle, ShoeKind } from '../state';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 import { ColourWheelPicker } from './ColourWheelPicker';
 
@@ -25,6 +25,17 @@ import { ColourWheelPicker } from './ColourWheelPicker';
  * `<input>`, so Tab/Enter/Space "just work" without any bespoke key handling
  * — there is no game `InputSystem` running yet to fight over the keyboard
  * with, unlike `ShopPanel`/`FacePaintPanel`.
+ *
+ * **Tabbed**, one customisation category per tab (see {@link TAB_META}) — the
+ * name field is the one exception, fixed above the strip. Every tab is one
+ * (or two, for hair and the backpack) of the sections this screen already
+ * had; tabbing them did not change what a section builds or how a pick is
+ * applied, only which of them are attached to the DOM at once and which one
+ * the live preview's camera currently rests on (`characterCreationPreview.
+ * ts`'s `CharacterPreview.setResting`) — see that method's doc comment for
+ * how this generalises the PREVIEW RULE's existing "camera follows what
+ * changed" behaviour from *the last control tapped* to *the tab currently
+ * open*.
  */
 export interface CharacterCreationHandlers {
   onComplete(choice: CharacterCreationChoice): void;
@@ -87,6 +98,7 @@ const HAIR_STYLE_OPTIONS: Readonly<Record<HairStyle, { label: string; glyph: str
   bowl: { label: 'Bowl Cut', glyph: '🥣' },
   spiky: { label: 'Spiky', glyph: '⚡' },
   messy: { label: 'Messy', glyph: '🌪️' },
+  mohican: { label: 'Rooster', glyph: '🐓' },
 };
 
 /**
@@ -104,6 +116,7 @@ const HAIR_STYLE_ORDER: readonly HairStyle[] = [
   'bowl',
   'spiky',
   'messy',
+  'mohican',
 ];
 
 /**
@@ -147,6 +160,39 @@ const BACKPACKS: readonly Choice<BackpackKind>[] = [
   ),
 ].map((value) => ({ value, ...BACKPACK_OPTIONS[value] }));
 
+const SHOE_SWATCHES: readonly Swatch[] = [
+  { colour: PALETTE.shoe, label: 'Sky' },
+  { colour: PALETTE.markerMint, label: 'Mint' },
+  { colour: PALETTE.markerLemon, label: 'Lemon' },
+  { colour: PALETTE.markerPink, label: 'Pink' },
+  { colour: PALETTE.flowerViolet, label: 'Violet' },
+  { colour: PALETTE.flowerRed, label: 'Coral' },
+];
+
+/**
+ * What a child sees on each shoe button.
+ *
+ * A `Record` over the whole union for the same reason the hair styles and the
+ * backpack shapes are one: a pair added to `art/models/shoes.ts` and forgotten
+ * here would exist in the game and be unchoosable, exactly the bug that
+ * survives a review. `ripika` keeps the RiPika glyph the hat and the backpack
+ * both already use — she is the same character wherever she shows up, not a
+ * different picture on every screen that happens to feature her.
+ */
+const SHOE_OPTIONS: Readonly<Record<ShoeKind, { label: string; glyph: string }>> = {
+  plain: { label: 'Plain', glyph: '👟' },
+  ripika: { label: 'RiPika', glyph: '⚡' },
+  sandal: { label: 'Sandal', glyph: '🩴' },
+  sparkle: { label: 'Sparkly', glyph: '✨' },
+};
+
+const SHOE_ORDER: readonly ShoeKind[] = ['plain', 'ripika', 'sandal', 'sparkle'];
+
+const SHOES: readonly Choice<ShoeKind>[] = [
+  ...SHOE_ORDER,
+  ...(Object.keys(SHOE_OPTIONS) as ShoeKind[]).filter((kind) => !SHOE_ORDER.includes(kind)),
+].map((value) => ({ value, ...SHOE_OPTIONS[value] }));
+
 /** Every hat the hat shop sells — one source of truth, no duplicated data. */
 const HAT_OPTIONS: readonly ShopItem[] = itemsForShop('hat');
 
@@ -161,6 +207,85 @@ const PET_OPTIONS: readonly ShopItem[] = [
 
 const DEFAULT_HAT_ID = HAT_OPTIONS.find((item) => item.id === 'hat.party')?.id ?? HAT_OPTIONS[0]?.id ?? '';
 const DEFAULT_PET_ID = PET_OPTIONS[0]?.id ?? '';
+
+/** One tab in the strip below — a customisation category, its own place on the child. */
+type TabId = 'skin' | 'hair' | 'eyes' | 'outfit' | 'shoes' | 'hat' | 'backpack' | 'pet';
+
+/**
+ * The tab strip: order, what a child sees on the button, and — the actual
+ * point of tabbing this screen at all — which {@link PreviewFocus} the camera
+ * settles on while that tab is open.
+ *
+ * Requested directly (31 July 2026), after the screen had grown to nine
+ * stacked sections plus name, hat and pet: "one tab per thing you can
+ * change… so each customisation category gets its own tab instead of
+ * everything stacked on one long screen." Name stays outside the strip (see
+ * the constructor) — typing is not a "look" choice the way the rest of this
+ * table is, and it is the one thing every child does exactly once, so it gets
+ * to stay the first thing on the screen rather than hide behind a tap.
+ *
+ * The focus column is GAME_DESIGN.md's PREVIEW RULE generalised one level up:
+ * that rule already had the camera zoom to what a single control just
+ * changed (`refreshPreview`'s own `focus` argument, unchanged below); this
+ * table says the same thing about what a whole *tab* is for, so opening
+ * "Hat" alone — before touching a single hat card — already frames the head,
+ * and the "hold two seconds then ease back" beat a lone swatch tap gets
+ * (`characterCreationPreview.ts`'s `FOCUS_HOLD_SECONDS`) has nowhere to ease
+ * *back to* any more, because every control inside a tab already asks for
+ * that tab's own focus. `hair` and `backpack` both carry two controls
+ * (colour + style, kind + colour) that already agreed on one focus each
+ * before tabs existed — which is exactly why grouping them by tab rather than
+ * by control needed no new camera tuning at all, only `CharacterPreview.
+ * setResting` to move the destination on a switch instead of only a pick.
+ */
+const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly glyph: string; readonly focus: PreviewFocus }[] = [
+  { id: 'skin', label: 'Skin', glyph: '🖐️', focus: 'all' },
+  { id: 'hair', label: 'Hair', glyph: '💇', focus: 'hair' },
+  { id: 'eyes', label: 'Eyes', glyph: '👀', focus: 'face' },
+  { id: 'outfit', label: 'Outfit', glyph: '👕', focus: 'body' },
+  { id: 'shoes', label: 'Shoes', glyph: '👟', focus: 'feet' },
+  { id: 'hat', label: 'Hat', glyph: '🎩', focus: 'head' },
+  { id: 'backpack', label: 'Backpack', glyph: '🎒', focus: 'backpack' },
+  { id: 'pet', label: 'Pet', glyph: '🐾', focus: 'pet' },
+];
+
+/**
+ * Hair styles a hat cannot sit on top of — so far, none: the Mohican that
+ * would be the first entry (Jim's words, 31 July 2026: "a Mohican and a hat
+ * are mutually exclusive… selecting this should count against the hat,
+ * disabling the hat tab") is `'mohican'` — landed 31 July 2026 (PR #138,
+ * `feat/mohican-hair`, labelled "Rooster" in the picker: {@link
+ * HAIR_STYLE_OPTIONS}), and the whole mechanism below was built and wired
+ * against this set while it was still empty, exactly the way the shoe picker
+ * was designed against `ShoeKind` before that union existed — turning it on
+ * was the one-line edit this comment used to promise.
+ *
+ * Everything downstream of this set — hiding the Hat tab, remembering and
+ * restoring the hat she had on, taking a hat off if she is already wearing
+ * one when she picks an exclusive style — needed no further changes the day
+ * the style actually landed. See {@link applyHairStyle}.
+ *
+ * Deliberately a set of styles, not a single hard-coded `'mohican'` check
+ * scattered across this file: the rule is "some styles conflict with a hat",
+ * not "this one specific style does", and a future second exclusive style
+ * (a tall crest, say) is then also just one more entry rather than a second
+ * near-identical code path.
+ *
+ * **Scope, on purpose:** this governs only the character creator's own Hat
+ * tab — where a hat is *chosen*, once, before the park exists. It does not
+ * reach into the running game's shop-and-backpack-drawer hat-wearing flow
+ * (`entities/WornHat.ts`, `state/store.ts`'s `setWornHat`), which has its own,
+ * separate mechanism for a style that cannot share the head with a hat
+ * (`KidHandle.hairHidesHat` — the *hat* declines to draw itself, not the
+ * hair; see `art/models/hair.ts`'s `HairPart.hideUnderHat`). That mechanism
+ * covers Mohican too, for whatever hat she happens to still own from before —
+ * it is just moot for Mohican specifically, because this file's own
+ * exclusivity already keeps `wornHatUid` clear while she is wearing it, so
+ * there is nothing left for `hairHidesHat` to hide. NPCs never wear hats at
+ * all (`entities/npc/NpcSystem.ts` has no hat-rolling of any kind), so there
+ * is no crowd-side mirror of any of this needed either.
+ */
+const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>(['mohican']);
 
 export class CharacterCreation {
   private readonly root: HTMLElement;
@@ -178,8 +303,35 @@ export class CharacterCreation {
   private eyeColour: number = ART.kidEye;
   private backpackKind: BackpackKind = 'satchel';
   private backpackColour: number = PALETTE.backpack;
-  private hatId = DEFAULT_HAT_ID;
+  private shoeKind: ShoeKind = 'plain';
+  private shoeColour: number = PALETTE.shoe;
+  /**
+   * `null` means "no hat" — today that only ever happens transiently while an
+   * exclusive hair style (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) is selected;
+   * there is no independent "go bare-headed" choice on the Hat tab itself.
+   * `complete()` grants nothing and clears any previously-worn hat when this
+   * is `null` at submit time — see `state/store.ts`'s `completeCharacterCreation`.
+   */
+  private hatId: string | null = DEFAULT_HAT_ID;
+  /**
+   * The hat she had on right before an exclusive style took it off, so
+   * switching back to an ordinary style gives it back rather than resetting
+   * to {@link DEFAULT_HAT_ID} — see {@link applyHairStyle}. `null` whenever
+   * she is not currently in that borrowed state, including "started the
+   * screen already on an exclusive style and has never had a hat to lend".
+   */
+  private hatIdBeforeExclusiveHair: string | null = null;
   private petId = DEFAULT_PET_ID;
+
+  /** The Hat tab's own panel and button — see {@link applyHairStyle}. */
+  private hatPanel: HTMLElement;
+  // Definite-assignment: set inside a `for (const tab of TAB_META) { if
+  // (tab.id === 'hat') … }` in the constructor, which always assigns it in
+  // practice (`TAB_META` always carries exactly one `'hat'` entry — the
+  // `Record<TabId, HTMLElement>` two lines above it would fail to compile
+  // otherwise), but is one conditional deeper than TS's control-flow
+  // analysis for `strictPropertyInitialization` follows.
+  private hatTabButton!: HTMLButtonElement;
 
   private closed = false;
   private closeTimer: number | null = null;
@@ -277,14 +429,14 @@ export class CharacterCreation {
     );
 
     // Hair style ---------------------------------------------------------
+    // `applyHairStyle`, not an inline `this.hairStyle = style` — a style
+    // change is also the one thing on this whole screen that can reach across
+    // and change the Hat tab, see that method's doc comment.
     const hairStyleSection = this.buildChoiceSection(
       'Hair style',
       HAIR_STYLES,
       this.hairStyle,
-      (style) => {
-        this.hairStyle = style;
-        this.refreshPreview('hair');
-      },
+      (style) => this.applyHairStyle(style),
     );
 
     // Eye colour ---------------------------------------------------------------
@@ -306,6 +458,34 @@ export class CharacterCreation {
       (colour) => {
         this.outfitColour = colour;
         this.refreshPreview('body');
+      },
+    );
+
+    // Shoes -------------------------------------------------------------------
+    const shoeKindSection = this.buildChoiceSection('Shoes', SHOES, this.shoeKind, (kind) => {
+      this.shoeKind = kind;
+      this.refreshPreview('feet');
+    });
+
+    // Only `'plain'` actually shows this swatch's colour. Flagged in QA (31
+    // July 2026): picking Sparkly leaves "Sky" pressed here while the shoe
+    // renders its own fixed pink glitter. That is `art/models/shoes.ts`'s own
+    // design, not a bug this file introduced — its `FOOT_COLOUR` table gives
+    // `'ripika'`, `'sandal'` and `'sparkle'` each a fixed palette the same way
+    // the RiPika/Trilla backpacks keep their own colours (`backpacks.ts`'s
+    // `collar()`): a themed pair is that theme's own colours, not a canvas
+    // for whichever swatch happens to be selected. Left as-is rather than
+    // hiding the swatch for those three kinds — unlike the backpack, none of
+    // them has a collar/strap equivalent left over for the chosen colour to
+    // paint instead, so hiding it would leave those three tabs with nothing
+    // for the swatch row to do at all, which reads as more broken, not less.
+    const shoeColourSection = this.buildSwatchSection(
+      'Shoe colour',
+      SHOE_SWATCHES,
+      this.shoeColour,
+      (colour) => {
+        this.shoeColour = colour;
+        this.refreshPreview('feet');
       },
     );
 
@@ -333,10 +513,11 @@ export class CharacterCreation {
     );
 
     // Starting hat ------------------------------------------------------
-    const hatSection = this.buildCardSection('Starting hat', HAT_OPTIONS, this.hatId, (item) => {
-      this.hatId = item.id;
-      this.refreshPreview('head');
-    });
+    // Built through a method, not inline, because {@link applyHairStyle}
+    // needs to rebuild this same card grid later — with a *different*
+    // starting selection — the moment a hat comes back from being lent out to
+    // an exclusive hair style.
+    const hatSection = this.buildHatSection();
 
     // Starting pet ------------------------------------------------------
     const petSection = this.buildCardSection(
@@ -350,18 +531,101 @@ export class CharacterCreation {
       'toy.ripika',
     );
 
-    controls.append(
-      nameSection,
-      skinToneSection,
-      hairColourSection,
-      hairStyleSection,
-      eyeColourSection,
-      outfitSection,
-      backpackSection,
-      backpackColourSection,
-      hatSection,
-      petSection,
-    );
+    // --- the tab strip ----------------------------------------------------
+    // Panels grouped exactly as {@link TAB_META} names them — each one the
+    // section(s) that already agreed on a single camera focus before tabs
+    // existed (see that constant's doc comment).
+    const panels: Readonly<Record<TabId, HTMLElement>> = {
+      skin: this.buildTabPanel('skin', [skinToneSection]),
+      hair: this.buildTabPanel('hair', [hairColourSection, hairStyleSection]),
+      eyes: this.buildTabPanel('eyes', [eyeColourSection]),
+      outfit: this.buildTabPanel('outfit', [outfitSection]),
+      shoes: this.buildTabPanel('shoes', [shoeKindSection, shoeColourSection]),
+      hat: this.buildTabPanel('hat', [hatSection]),
+      backpack: this.buildTabPanel('backpack', [backpackSection, backpackColourSection]),
+      pet: this.buildTabPanel('pet', [petSection]),
+    };
+
+    // Reuses `.charcreate-styles`/`.charcreate-style-btn` verbatim — the same
+    // glyph-and-label grid `buildChoiceSection` already draws for a hair style
+    // or a backpack shape. A tab **is** a choice grid, one level up: "which
+    // category" rather than "which value within one", so it earns the same
+    // look rather than a bespoke one, and for free it also carries the fix
+    // documented on `.charcreate-styles` in style.css — the row wraps onto a
+    // second line instead of ever needing a horizontal scroll to find a tab.
+    const tabStrip = document.createElement('div');
+    tabStrip.className = 'charcreate-styles';
+    tabStrip.setAttribute('role', 'tablist');
+    tabStrip.setAttribute('aria-label', 'What to change');
+
+    // Tab + button paired up as they are built, and switched by reference —
+    // not by index into two parallel arrays, which `tsconfig`'s
+    // `noUncheckedIndexedAccess` (rightly) will not let stand unchecked, and
+    // which is more ceremony than this needs anyway.
+    interface TabHandle {
+      readonly meta: (typeof TAB_META)[number];
+      readonly button: HTMLButtonElement;
+    }
+    const tabHandles: TabHandle[] = [];
+
+    const selectTab = (target: TabHandle): void => {
+      for (const handle of tabHandles) {
+        const active = handle === target;
+        panels[handle.meta.id].hidden = !active;
+        handle.button.dataset.selected = active ? 'true' : 'false';
+        handle.button.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+      // The whole point: the camera's resting place moves with the tab, not
+      // just with the last thing tapped inside it. See `setResting`'s own
+      // doc comment for why this — not another `refreshPreview` call — is
+      // the right primitive here: nothing about the character changed.
+      this.preview.setResting(target.meta.focus);
+    };
+
+    let isFirstTab = true;
+    for (const tab of TAB_META) {
+      const active = isFirstTab;
+      isFirstTab = false;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'charcreate-style-btn';
+      button.id = `charcreate-tab-${tab.id}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', panels[tab.id].id);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.dataset.selected = active ? 'true' : 'false';
+      button.innerHTML =
+        `<span class="charcreate-style-glyph">${tab.glyph}</span><span>${escapeHtml(tab.label)}</span>`;
+      const handle: TabHandle = { meta: tab, button };
+      button.addEventListener('click', () => selectTab(handle));
+      tabHandles.push(handle);
+      tabStrip.append(button);
+      // The two references `applyHairStyle` needs to hide/show this one tab
+      // later — captured here rather than re-derived from `TAB_META`/`panels`
+      // each time, since `Record` access by a literal key is the only other
+      // safe option and `'hat'` typed out at every call site is worse than
+      // naming it once.
+      if (tab.id === 'hat') this.hatTabButton = button;
+    }
+    this.hatPanel = panels.hat;
+
+    // The strip itself is not a `.charcreate-section` (it carries no
+    // `.charcreate-label`, a tab button already names itself), but it still
+    // wants that class's bottom margin ahead of whichever panel is showing —
+    // easiest borrowed the same way `.charcreate-tabpanel` borrows nothing at
+    // all below.
+    const tabStripSection = document.createElement('div');
+    tabStripSection.className = 'charcreate-section';
+    tabStripSection.append(tabStrip);
+
+    // Every panel starts `hidden` (see `buildTabPanel`); the first tab is the
+    // one exception, un-hidden directly rather than through `selectTab` so
+    // construction does not also fire an unnecessary `preview.setResting`
+    // call before the preview it would move even exists.
+    panels.skin.hidden = false;
+
+    controls.append(nameSection, tabStripSection, ...TAB_META.map((tab) => panels[tab.id]));
     body.append(this.previewWrap, controls);
 
     // --- footer ----------------------------------------------------------
@@ -412,6 +676,29 @@ export class CharacterCreation {
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Wraps one or more sections into a tab's panel — the "Hair" tab is colour
+   * then style, everything else here is one section alone.
+   *
+   * `id`/`aria-labelledby` are derived from `id` rather than threaded through
+   * as a parameter, so this (built first, while the tab strip's buttons do
+   * not exist yet) and the button `aria-controls` points at it (built after,
+   * from the same {@link TAB_META} table) agree on the string without either
+   * one needing to hand it to the other. Starts `hidden` — the constructor
+   * unhides exactly the first tab once every panel in {@link TAB_META} exists,
+   * see `selectTab`'s initial call below.
+   */
+  private buildTabPanel(id: TabId, sections: readonly HTMLElement[]): HTMLElement {
+    const panel = document.createElement('div');
+    panel.className = 'charcreate-tabpanel';
+    panel.id = `charcreate-tabpanel-${id}`;
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', `charcreate-tab-${id}`);
+    panel.hidden = true;
+    panel.append(...sections);
+    return panel;
+  }
 
   /**
    * A row of curated one-tap swatches, **plus** a "Custom colour" tile that
@@ -579,6 +866,81 @@ export class CharacterCreation {
   }
 
   /**
+   * The Hat tab's own card grid — a method rather than an inline call so
+   * {@link applyHairStyle} can rebuild it later with a different starting
+   * selection, the moment a lent-out hat comes back.
+   */
+  private buildHatSection(): HTMLElement {
+    return this.buildCardSection('Starting hat', HAT_OPTIONS, this.hatId ?? DEFAULT_HAT_ID, (item) => {
+      this.hatId = item.id;
+      this.refreshPreview('head');
+    });
+  }
+
+  /**
+   * Applies a hair-style pick, and — the reason this is not simply
+   * `this.hairStyle = style` inline at the one call site — carries the hat
+   * across the boundary {@link HAT_EXCLUSIVE_HAIR_STYLES} draws.
+   *
+   * Jim's words, 31 July 2026: "a Mohican and a hat are mutually exclusive…
+   * selecting this should count against the hat, disabling the hat tab."
+   * Hidden, not merely disabled — greyed-out-and-tappable invites "why can't
+   * I press this" from a six-year-old, and the same "the button simply isn't
+   * there until it means something" precedent already exists for the jet
+   * pack's fly button (`entities/WornJetpack.ts`-adjacent work, `ui/
+   * ScreenControls.ts`), shown only once a jet pack is actually worn.
+   *
+   * The hat itself is **remembered, not thrown away**: entering an exclusive
+   * style stashes whatever `hatId` was in `hatIdBeforeExclusiveHair` and sets
+   * `hatId` to `null`; leaving one restores it (or falls back to
+   * {@link DEFAULT_HAT_ID} if she never had one — starting the screen already
+   * on an exclusive style, say). A six-year-old who tries a mohawk and then
+   * picks a different style finding her party hat waiting for her is the
+   * nicer behaviour, and it costs nothing extra to keep: this is pure
+   * in-session UI state, no different from every other tab already
+   * remembering whatever she last tapped in it. It does **not** persist
+   * across a whole creator session the way the save does — reopening the
+   * creator at all (`ui/Hud.ts`'s "Look" pill) already resets every field on
+   * this screen to its hardcoded default, hat included, and this does not
+   * change that; see `HANDOFF-charcreate-owner.md`.
+   */
+  private applyHairStyle(style: HairStyle): void {
+    const wasExclusive = HAT_EXCLUSIVE_HAIR_STYLES.has(this.hairStyle);
+    this.hairStyle = style;
+
+    // `this.hatId` must be fully resolved *before* the one `refreshPreview`
+    // call below — that call reads `this.hatId` fresh, but only once, and it
+    // used to run first: caught in QA (31 July 2026) as the Sparkly Crown
+    // staying visibly worn the moment Rooster was picked, because the tab
+    // itself hid correctly (a direct DOM write, `hatTabButton.hidden`,
+    // independent of the preview) while the 3D preview kept rendering
+    // whatever `hatId` was still set to a line later. So: settle every field
+    // first, touch the preview last.
+    const isExclusive = HAT_EXCLUSIVE_HAIR_STYLES.has(style);
+    if (isExclusive !== wasExclusive) {
+      this.hatTabButton.hidden = isExclusive;
+
+      if (isExclusive) {
+        this.hatIdBeforeExclusiveHair = this.hatId;
+        this.hatId = null;
+      } else {
+        this.hatId = this.hatIdBeforeExclusiveHair ?? DEFAULT_HAT_ID;
+        this.hatIdBeforeExclusiveHair = null;
+        // Only the card grid's *content* needs rebuilding — which card shows
+        // selected. The panel's own visibility is untouched here on purpose:
+        // she is on the Hair tab making this change, the Hat tab cannot be
+        // the active one (its button was hidden the whole time she could
+        // have picked an exclusive style), and `selectTab` alone decides
+        // when a panel is shown, the moment she actually taps its
+        // now-visible button.
+        this.hatPanel.replaceChildren(this.buildHatSection());
+      }
+    }
+
+    this.refreshPreview('hair');
+  }
+
+  /**
    * Rebuilds the preview, framed on whatever the child just changed.
    *
    * The family's note was that the hat they were choosing was cropped out of
@@ -594,7 +956,13 @@ export class CharacterCreation {
       eye: this.eyeColour,
       backpack: this.backpackKind,
       backpackColour: this.backpackColour,
-      hatId: this.hatId,
+      shoes: this.shoeKind,
+      shoesColour: this.shoeColour,
+      // `''` is the sentinel `characterCreationPreview.ts` already treats as
+      // "no hat": `shopItem('')` misses the catalogue `Map` and returns
+      // `null`, so the preview simply builds no hat asset — the same path a
+      // typo'd id would take, not a special case added for this.
+      hatId: this.hatId ?? '',
       petId: this.petId,
     }, focus);
   }
@@ -603,12 +971,16 @@ export class CharacterCreation {
     if (this.closed) return;
     this.closed = true;
 
-    const hat = shopItem(this.hatId) ?? HAT_OPTIONS[0];
+    // `null` only when an exclusive hair style is currently selected (see
+    // `HAT_EXCLUSIVE_HAIR_STYLES`/`applyHairStyle`) — a real "no hat" answer,
+    // not a lookup miss, so it is not defaulted to `HAT_OPTIONS[0]` the way a
+    // genuinely-unresolvable id below still is.
+    const hat = this.hatId === null ? null : (shopItem(this.hatId) ?? HAT_OPTIONS[0] ?? null);
     const pet = shopItem(this.petId) ?? PET_OPTIONS[0];
     // Both option lists are built from the live catalogue and always have at
     // least one entry in this game's shop line-up, but a fully-typed fallback
     // keeps this from ever throwing if that ever changed.
-    if (hat && pet) {
+    if (pet) {
       const choice: CharacterCreationChoice = {
         name: this.nameInput.value,
         skinColour: this.skinColour,
@@ -618,6 +990,8 @@ export class CharacterCreation {
         eyeColour: this.eyeColour,
         backpackKind: this.backpackKind,
         backpackColour: this.backpackColour,
+        shoeKind: this.shoeKind,
+        shoeColour: this.shoeColour,
         hat,
         pet,
       };

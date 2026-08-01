@@ -51,6 +51,7 @@ export class Hud {
   private readonly padPill: HTMLElement;
   private readonly debugPill: HTMLElement;
   private readonly backpackButton: HTMLButtonElement;
+  private readonly lookButton: HTMLButtonElement;
   private readonly promptPill: HTMLElement;
   private readonly hintToggle: HTMLButtonElement;
   private readonly keyHint: HTMLElement;
@@ -59,6 +60,7 @@ export class Hud {
   private fps = 60;
   private menuOpen = false;
   private backpackHandler: (() => void) | null = null;
+  private lookHandler: (() => void) | null = null;
   private promptText: string | null = null;
   private hintOpen = false;
 
@@ -122,6 +124,22 @@ export class Hud {
       this.backpackHandler?.();
     });
 
+    // "Change how I look" — reopens the character creator over the running
+    // park. Requested directly, mid-session, on 31 July 2026: a child picks a
+    // hairdo once at the very start and has no way back to that screen ever
+    // again otherwise. The handler is injected exactly like the backpack's,
+    // for the same reason — the HUD still knows nothing about the game, only
+    // that something wants to hear about a tap.
+    this.lookButton = document.createElement('button');
+    this.lookButton.type = 'button';
+    this.lookButton.className = 'pill pill--look';
+    this.lookButton.setAttribute('aria-label', 'Change how I look');
+    this.lookButton.innerHTML = '<span class="emoji">🪞</span><span>Look</span>';
+    this.lookButton.addEventListener('click', () => {
+      this.lookButton.blur();
+      this.lookHandler?.();
+    });
+
     // The controls help. It used to be a small "?" disc floating over the
     // bottom-left of the park, which the family had pressed by accident once
     // too often (GAME_DESIGN.md's SELECTION RULE entry, 28 July 2026: *"move
@@ -143,7 +161,7 @@ export class Hud {
       this.setHintOpen(!this.hintOpen);
     });
 
-    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton, this.hintToggle);
+    this.menuItems.append(this.parkPill, this.moneyPill, this.backpackButton, this.lookButton, this.hintToggle);
     this.menu.append(this.menuButton, this.menuItems);
     top.append(this.menu);
     this.applyMenu();
@@ -202,6 +220,11 @@ export class Hud {
   /** Who to tell when the backpack pill is pressed. */
   setBackpackHandler(handler: () => void): void {
     this.backpackHandler = handler;
+  }
+
+  /** Who to tell when the "Look" pill is pressed. */
+  setLookHandler(handler: () => void): void {
+    this.lookHandler = handler;
   }
 
   /**

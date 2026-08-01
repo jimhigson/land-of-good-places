@@ -45,6 +45,7 @@ import {
   GAME_MODES,
   HAIR_STYLES,
   INVENTORY_KINDS,
+  SHOE_KINDS,
   type BackpackKind,
   type CharacterKind,
   type CuteThing,
@@ -53,6 +54,7 @@ import {
   type GameTime,
   type HairStyle,
   type InventoryItem,
+  type ShoeKind,
 } from './types';
 
 /** The one and only key the game writes. */
@@ -147,6 +149,8 @@ export interface SavedPlayer {
   readonly eyeColour?: number;
   readonly backpackKind?: BackpackKind;
   readonly backpackColour?: number;
+  readonly shoeKind?: ShoeKind;
+  readonly shoeColour?: number;
   readonly health?: number;
   readonly maxHealth?: number;
   readonly facePaint?: FacePaintId;
@@ -216,6 +220,48 @@ export function clearSave(): void {
   } catch {
     // Same as above. A save we cannot delete is a save the fresh game will
     // overwrite within five seconds anyway.
+  }
+}
+
+// ------------------------------------------------------ reopen-creator flag
+
+/**
+ * A same-tab flag: "the next boot should reopen the character creator over
+ * the existing save, instead of the usual welcome-back prompt."
+ *
+ * `sessionStorage`, not the save file — this is about the *next page load
+ * only*. `Hud`'s "Look" pill (`Game.reopenCharacterCreator`) reloads the page
+ * to get there, because the character creator has to run *before* a `Game`
+ * exists (see `main.ts`'s `boot()` doc comment — there is no "rebuild the
+ * live player model" path, so reopening the creator mid-session means going
+ * back through boot rather than mounting it over the running game). If the
+ * reload never happens — the tab is closed instead — there is nothing to
+ * clean up: `sessionStorage` dies with the tab.
+ */
+const REOPEN_CREATOR_KEY = 'lgp:reopenCreator';
+
+/** Set just before the reload that `Game.reopenCharacterCreator` triggers. */
+export function markReopenCharacterCreator(): void {
+  try {
+    window.sessionStorage.setItem(REOPEN_CREATOR_KEY, '1');
+  } catch {
+    // Same tolerance as `writeSave` — private mode, a full quota. Worst case
+    // the next boot falls back to the ordinary continue/restart prompt.
+  }
+}
+
+/**
+ * Reads and clears the flag in one step — it must only ever fire once, so a
+ * later reload (say, the update gate) does not reopen the creator a second
+ * time.
+ */
+export function consumeReopenCharacterCreator(): boolean {
+  try {
+    const value = window.sessionStorage.getItem(REOPEN_CREATOR_KEY);
+    if (value !== null) window.sessionStorage.removeItem(REOPEN_CREATOR_KEY);
+    return value !== null;
+  } catch {
+    return false;
   }
 }
 
@@ -344,6 +390,8 @@ function readPlayer(value: unknown): SavedPlayer | undefined {
   put(player, 'eyeColour', readColour(value['eyeColour']));
   put(player, 'backpackKind', readMember(value['backpackKind'], BACKPACK_KINDS));
   put(player, 'backpackColour', readColour(value['backpackColour']));
+  put(player, 'shoeKind', readMember(value['shoeKind'], SHOE_KINDS));
+  put(player, 'shoeColour', readColour(value['shoeColour']));
   put(player, 'health', readNumber(value['health']));
   put(player, 'maxHealth', readNumber(value['maxHealth']));
   // `facePaint` is a design id or `null` for a clean face, and `null` is a

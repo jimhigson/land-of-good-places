@@ -1,5 +1,6 @@
 import { BufferAttribute, BufferGeometry } from 'three';
 import { TAU } from '../style/bridge';
+import { FACE_FILL_INSET } from '../style/faces';
 
 /**
  * The hood shell — the surface every critter hat in this park is cut out of.
@@ -25,6 +26,11 @@ import { TAU } from '../style/bridge';
  *    rather than anatomy, and they lean outward.
  * 3. **Nothing is sculpted.** The face is flat appliqué; the ears are flat
  *    plush paddles. A modelled muzzle immediately reads as a head again.
+ *
+ * That third rule is about *shape*, and it is unchanged. Where the flat face
+ * *lives* did change: it used to be a second, floating patch mesh and it is now
+ * painted into the shell's own texture, through the shell's own UV map. See
+ * {@link HoodFaceWindow}.
  *
  * None of that is reachable with squashed spheres. A cap crown is a continuous
  * shell whose **hem varies with azimuth** — high at the brow so the face has a
@@ -206,24 +212,100 @@ export function hoodShellSampler(spec: HoodShellSpec) {
   return { radiusAt, surface, hem: (phi: number) => hemAt(spec.hem, phi) };
 }
 
-/** One hood's shell. Origin is the hat anchor; head units throughout. */
-export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
+/**
+ * The window of the hood's surface a face is painted into — an azimuth range
+ * either side of the front, and a height range.
+ *
+ * This used to describe a **separate patch mesh** floating a hair off the
+ * shell. It does not any more, and the reason is the bug that retired it: a
+ * second surface has to be kept in step with the first one by hand, and the
+ * patch's triangles were wound the opposite way round from the shell's, so the
+ * face pointed at the wearer's skull and `MeshToonMaterial`'s `FrontSide` culled
+ * it. Both hood faces were simply never drawn. Nudging the patch further out —
+ * the obvious fix — could not have worked, because the patch was not behind
+ * anything; it was inside out.
+ *
+ * So a face window is now a **UV mapping of the shell itself**. There is no
+ * second surface to point the wrong way, sink into the crown's panel-seam
+ * relief, or drift when the shell's shape is retuned. `hats.ts` paints the
+ * hood's base colour as the texture's background and composites the face on
+ * top; see `paintFaceOnFill`.
+ *
+ * `u` runs left→right across the wearer's view (so `phi = π − (u − ½)·2·halfX`,
+ * because +x is screen right and `sin` runs the other way) and `v` runs
+ * bottom→top to match a `CanvasTexture`'s default `flipY` — the same
+ * parameterisation the patch used, so the face lands exactly where it did.
+ *
+ * **`yHi` must stay below the spec's `semiY`.** The rings fanning off the crown
+ * pole all sit above the window, which is what lets them clamp harmlessly to
+ * the texture's top border; a window reaching the pole would wrap the face
+ * round it. `check:hood-face` asserts it.
+ */
+export interface HoodFaceWindow {
+  /** Half-width of the window, in radians either side of the front. */
+  readonly halfX: number;
+  /** Bottom and top of the window, in the hood's frame. */
+  readonly yLo: number;
+  readonly yHi: number;
+}
+
+/**
+ * Where a point on the hood lands in its face texture.
+ *
+ * Outside the window this returns UVs outside `[0, 1]`, which clamp to the
+ * texture's edge — that is why {@link FACE_FILL_INSET} leaves a border of plain
+ * base colour there, and why the whole rest of the hood comes out the right
+ * flat colour from the same one texture.
+ */
+export function hoodFaceUv(win: HoodFaceWindow, phi: number, y: number): [number, number] {
+  const span = 1 - 2 * FACE_FILL_INSET;
+  const u = 0.5 - (phi - Math.PI) / (2 * win.halfX);
+  const v = (y - win.yLo) / (win.yHi - win.yLo);
+  return [FACE_FILL_INSET + span * u, FACE_FILL_INSET + span * v];
+}
+
+/**
+ * One hood's shell. Origin is the hat anchor; head units throughout.
+ *
+ * Pass a {@link HoodFaceWindow} for a hood that carries a painted face, and the
+ * outer and inner skins get `uv` coordinates mapping it. Pass nothing — the
+ * Cheery Cap — and the geometry is exactly what it always was, vertex for
+ * vertex, so a plain hood pays nothing for a feature it does not use.
+ */
+export function hoodShellGeometry(spec: HoodShellSpec, face?: HoodFaceWindow): BufferGeometry {
   const { depth, thick, panels, seamR, seamSharp, segments, rings } = spec;
   const { radiusAt } = hoodShellSampler(spec);
   const handover = Math.max(CAP_Y * spec.semiY, ...spec.hem);
 
   const positions: number[] = [];
   const indices: number[] = [];
+  const uvs: number[] | null = face ? [] : null;
+
+  /**
+   * A UV that runs with azimuth cannot close on itself. If the ring wrapped
+   * straight from the last column back to the first, that one quad would
+   * interpolate `u` from one end of the texture to the other and smear a
+   * squashed copy of the whole face down the back of the hood. So a faced hood
+   * is built with one **extra column**, duplicating the first at `φ = 2π` with
+   * its own `u` — the same seam split `SphereGeometry` has.
+   */
+  const columns = face ? segments + 1 : segments;
 
   // Two poles, not one shared vertex: the outer and inner skins meet there and
   // averaging their normals puts a pinprick of the wrong shade on the button.
   positions.push(0, spec.semiY, 0);
   positions.push(0, spec.semiY - thick * 0.3, 0);
+  if (face && uvs) {
+    // Above the window, so it clamps to the texture's plain top border — as
+    // does every ring in the pole's fan. See `HoodFaceWindow`.
+    uvs.push(...hoodFaceUv(face, Math.PI, spec.semiY));
+    uvs.push(...hoodFaceUv(face, Math.PI, spec.semiY));
+  }
   const OUTER_POLE = 0;
   const INNER_POLE = 1;
   const FIRST = 2;
 
-  for (let i = 0; i < segments; i += 1) {
+  for (let i = 0; i < columns; i += 1) {
     const phi = (i / segments) * TAU;
     const bottom = hemAt(spec.hem, phi);
     // 1 at a seam, 0 in the middle of a panel. See `seamSharp`: raising that to
@@ -250,6 +332,15 @@ export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
       positions.push(r * Math.sin(phi), y, -r * Math.cos(phi) * depth);
       const ri = r - wall / n;
       positions.push(ri * Math.sin(phi), y + (wall * dr) / n, -ri * Math.cos(phi) * depth);
+      if (face && uvs) {
+        // The inner skin takes its outer partner's UV rather than one of its
+        // own. It faces *inward*, so it is only ever seen from inside the hood
+        // where the wearer's head is; and sharing the UV keeps the hem rim —
+        // which joins the two skins — from stretching the texture across its
+        // own width.
+        const uv = hoodFaceUv(face, phi, y);
+        uvs.push(...uv, ...uv);
+      }
     }
   }
 
@@ -257,7 +348,7 @@ export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
     FIRST + (i * rings + (j - 1)) * 2 + (inner ? 1 : 0);
 
   for (let i = 0; i < segments; i += 1) {
-    const k = (i + 1) % segments;
+    const k = face ? i + 1 : (i + 1) % segments;
     indices.push(OUTER_POLE, vertex(k, 1, false), vertex(i, 1, false));
     indices.push(INNER_POLE, vertex(i, 1, true), vertex(k, 1, true));
     for (let j = 1; j < rings; j += 1) {
@@ -281,7 +372,42 @@ export function hoodShellGeometry(spec: HoodShellSpec): BufferGeometry {
     indices.push(o, pi, oi, o, p, pi);
   }
 
-  return finish(positions, indices);
+  const geometry = finish(positions, indices);
+  if (uvs) {
+    geometry.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+    weldSeam(geometry, (j, inner) => [vertex(0, j, inner), vertex(segments, j, inner)], rings);
+  }
+  return geometry;
+}
+
+/**
+ * Averages the normals of the split seam's two copies.
+ *
+ * `computeVertexNormals` averages the faces touching each vertex, and each copy
+ * of the seam column only touches the faces on its own side. Left alone, the
+ * two halves of the hood meet at slightly different normals and the toon ramp
+ * draws a band edge straight down the back of it — and the inverted-hull
+ * outline splits along the same line, which is far more obvious. The seam is
+ * geometrically continuous; its shading has to be too.
+ */
+function weldSeam(
+  geometry: BufferGeometry,
+  pair: (ring: number, inner: boolean) => [number, number],
+  rings: number,
+): void {
+  const normal = geometry.getAttribute('normal') as BufferAttribute;
+  for (let j = 1; j <= rings; j += 1) {
+    for (const inner of [false, true]) {
+      const [a, b] = pair(j, inner);
+      const x = (normal.getX(a) + normal.getX(b)) / 2;
+      const y = (normal.getY(a) + normal.getY(b)) / 2;
+      const z = (normal.getZ(a) + normal.getZ(b)) / 2;
+      const length = Math.hypot(x, y, z) || 1;
+      normal.setXYZ(a, x / length, y / length, z / length);
+      normal.setXYZ(b, x / length, y / length, z / length);
+    }
+  }
+  normal.needsUpdate = true;
 }
 
 export interface HoodPeakSpec {
@@ -435,120 +561,121 @@ export function hoodHemRollGeometry(spec: HoodShellSpec, roll: number): BufferGe
   return finish(positions, indices);
 }
 
-export interface HoodPatchSpec {
-  /** Half-width of the window, in radians either side of the front. */
-  readonly halfX: number;
-  /** Bottom and top of the window, in the hood's frame. */
-  readonly yLo: number;
-  readonly yHi: number;
-  /** How far the patch stands off the shell. */
+/**
+ * The Cheery Cap's **panel seams** — six raised, rounded ridges running from
+ * just below the crown button down to the hem, one down the centre of each
+ * panel boundary. A real six-panel baseball cap is sewn from six curved
+ * triangular panels that meet at a button on top; what actually reads as "six
+ * panels" from a few metres away is not the panels themselves (a smooth dome
+ * and a subtly-creased one look the same in flat toon shading) but the six
+ * **seams**, so this hat gets them as their own raised geometry rather than
+ * relying on `hoodShellGeometry`'s `seamR`/`seamSharp` relief alone — see
+ * {@link CHEERY_HOOD}'s comment for why that relief, alone, was not enough:
+ * on a plain, faceless hood it is a few millimetres of bump under a toon ramp
+ * with only three or four bands, and it did not read as construction at all.
+ *
+ * Built the same way {@link hoodHemRollGeometry} sweeps the band: a tube whose
+ * centreline sits on the shell's own surface (via {@link hoodShellSampler}),
+ * lifted a hair proud of it so it does not z-fight. The difference is which
+ * way it sweeps — the hem roll's tube runs *around* the shell at a fixed
+ * height; a seam's runs *down* it at a fixed azimuth, so its cross-section is
+ * built from the two **horizontal** basis vectors (radially outward, and
+ * azimuthal-tangent) rather than the hem roll's (radially outward, vertical) —
+ * correct because the path this tube follows is nearly vertical, so the plane
+ * perpendicular to it at any point is (to the accuracy a decorative seam
+ * needs) the horizontal plane.
+ *
+ * The six seams are troughs of `hoodShellGeometry`'s own `cos(panels·φ)`
+ * relief, at `φ = π/panels + k·2π/panels` — see {@link CHEERY_HOOD}'s
+ * `seamSharp`, which pulls the shell in slightly at exactly these azimuths, so
+ * the ridge sits right at the crease it is meant to be sewn along rather than
+ * floating over the middle of a panel.
+ */
+export interface HoodPanelSeamsSpec {
+  /** Tube radius at the hem end, in head units. */
+  readonly tube: number;
+  /** How far above the surface the tube's centreline is lifted, as a fraction of radius. */
   readonly lift: number;
+  /** Where the seams stop, short of the pole, as a fraction of `semiY` — the crown button covers the rest. */
+  readonly topFrac: number;
 }
 
-/**
- * The face patch: a UV-mapped window of the hood's **own** surface.
- *
- * Not `createFacePatch`'s spherical shell. That patch is a sector of a sphere,
- * and a hood is an ellipsoid with a flared band — a sphere big enough to touch
- * the brow stands 25 mm proud of the crown by the time it reaches the eyes, so
- * the face floats off the top of the hat. Cutting the window out of the hood
- * itself hugs by construction, and it costs the same one draw call.
- *
- * `u` runs left→right across the wearer's view (so `phi = π − (u−½)·2·halfX`,
- * because +x is screen right and `sin` runs the other way), `v` runs bottom→top
- * to match a `CanvasTexture`'s default `flipY`.
- */
-export function hoodPatchGeometry(spec: HoodShellSpec, patch: HoodPatchSpec): BufferGeometry {
-  const { surface } = hoodShellSampler(spec);
-  const nu = 28;
-  const nv = 20;
+export function hoodPanelSeamsGeometry(spec: HoodShellSpec, seam: HoodPanelSeamsSpec): BufferGeometry {
+  const { radiusAt, hem } = hoodShellSampler(spec);
+  const { panels, depth, semiY } = spec;
+  const steps = 14;
+  const ring = 8;
   const positions: number[] = [];
-  const uvs: number[] = [];
   const indices: number[] = [];
-  for (let j = 0; j <= nv; j += 1) {
-    const v = j / nv;
-    const y = patch.yLo + (patch.yHi - patch.yLo) * v;
-    for (let i = 0; i <= nu; i += 1) {
-      const u = i / nu;
-      const phi = Math.PI - (u - 0.5) * 2 * patch.halfX;
-      const [px, py, pz] = surface(phi, y);
-      // The true surface normal, including the profile's slope — pushing along
-      // the horizontal radius alone buries the top of the patch in the dome.
-      const d = 0.004;
-      const [ax, ay, az] = surface(phi, y - d);
-      const [bx, by, bz] = surface(phi, y + d);
-      const tl = Math.hypot(bx - ax, by - ay, bz - az) || 1;
-      const tx = (bx - ax) / tl;
-      const ty = (by - ay) / tl;
-      const tz = (bz - az) / tl;
-      const hl = Math.hypot(px, pz) || 1;
-      let nx = px / hl;
-      let ny = 0;
-      let nz = pz / hl;
-      const dot = nx * tx + ny * ty + nz * tz;
-      nx -= tx * dot;
-      ny -= ty * dot;
-      nz -= tz * dot;
-      const nl = Math.hypot(nx, ny, nz) || 1;
-      positions.push(
-        px + (nx / nl) * patch.lift,
-        py + (ny / nl) * patch.lift,
-        pz + (nz / nl) * patch.lift,
-      );
-      uvs.push(u, v);
-    }
-  }
-  for (let j = 0; j < nv; j += 1) {
-    for (let i = 0; i < nu; i += 1) {
-      const a = j * (nu + 1) + i;
-      const b = (j + 1) * (nu + 1) + i;
-      const c = (j + 1) * (nu + 1) + i + 1;
-      const d = j * (nu + 1) + i + 1;
-      indices.push(a, b, c, a, c, d);
-    }
-  }
-  const geometry = finish(positions, indices);
-  geometry.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
-  return geometry;
-}
 
-/**
- * A sewn-on patch of pale fabric — the bonnet's bib.
- *
- * Same window as {@link hoodPatchGeometry}, but its width tapers away at the
- * top and bottom so the outline is a rounded lozenge. A rectangle of a second
- * colour reads as a rendering seam; a lozenge reads as something someone sewed
- * on.
- */
-export function hoodBibGeometry(spec: HoodShellSpec, patch: HoodPatchSpec): BufferGeometry {
-  const { surface } = hoodShellSampler(spec);
-  const nu = 26;
-  const nv = 16;
-  const positions: number[] = [];
-  const indices: number[] = [];
-  for (let j = 0; j <= nv; j += 1) {
-    const v = j / nv;
-    const y = patch.yLo + (patch.yHi - patch.yLo) * v;
-    const taper = 0.35 + 0.65 * Math.sqrt(Math.max(0, 1 - ((2 * v - 1) * 0.92) ** 2));
-    for (let i = 0; i <= nu; i += 1) {
-      const u = i / nu;
-      const phi = Math.PI - (u - 0.5) * 2 * patch.halfX * taper;
-      const [px, py, pz] = surface(phi, y);
-      const hl = Math.hypot(px, pz) || 1;
-      positions.push(px * (1 + patch.lift / hl), py, pz * (1 + patch.lift / hl));
+  for (let p = 0; p < panels; p += 1) {
+    // The troughs of `cos(panels·φ)` — see `hoodShellGeometry`'s `seam` — are
+    // where consecutive panels actually meet.
+    const phi = Math.PI / panels + p * (TAU / panels);
+    const bottom = hem(phi);
+    const top = semiY * seam.topFrac;
+    const base = positions.length / 3;
+    const nx = Math.sin(phi);
+    const nz = -Math.cos(phi);
+    const tx = Math.cos(phi);
+    const tz = Math.sin(phi);
+    for (let k = 0; k <= steps; k += 1) {
+      const t = k / steps;
+      const y = top + (bottom - top) * t;
+      // Thinner near the button, fuller towards the band — a real sewn seam
+      // is not a uniform bead, and this is also what lets the six converge
+      // near the pole without visibly intersecting each other.
+      const radius = seam.tube * (0.45 + 0.55 * t);
+      const r = radiusAt(y, phi) * (1 + seam.lift);
+      const cx = r * Math.sin(phi);
+      const cz = -r * Math.cos(phi) * depth;
+      for (let m = 0; m < ring; m += 1) {
+        const th = (m / ring) * TAU;
+        const ox = Math.cos(th) * radius;
+        const oz = Math.sin(th) * radius;
+        positions.push(cx + nx * ox + tx * oz, y, cz + nz * ox + tz * oz);
+      }
     }
-  }
-  for (let j = 0; j < nv; j += 1) {
-    for (let i = 0; i < nu; i += 1) {
-      const a = j * (nu + 1) + i;
-      const b = (j + 1) * (nu + 1) + i;
-      const c = (j + 1) * (nu + 1) + i + 1;
-      const d = j * (nu + 1) + i + 1;
-      indices.push(a, b, c, a, c, d);
+    for (let k = 0; k < steps; k += 1) {
+      for (let m = 0; m < ring; m += 1) {
+        const m2 = (m + 1) % ring;
+        const a = base + k * ring + m;
+        const b = base + (k + 1) * ring + m;
+        const c = base + (k + 1) * ring + m2;
+        const d = base + k * ring + m2;
+        indices.push(a, b, c, a, c, d);
+      }
+    }
+    // A small fan cap at the top so the button-end is not an open ring — the
+    // bottom is left open, since it disappears into the hem roll and the band
+    // painted below it.
+    const apex = positions.length / 3;
+    positions.push(radiusAt(top, phi) * (1 + seam.lift) * Math.sin(phi), top, -radiusAt(top, phi) * (1 + seam.lift) * Math.cos(phi) * depth);
+    for (let m = 0; m < ring; m += 1) {
+      const m2 = (m + 1) % ring;
+      indices.push(apex, base + m, base + m2);
     }
   }
   return finish(positions, indices);
 }
+
+// -----------------------------------------------------------------------------
+// `hoodPatchGeometry` and `hoodBibGeometry` used to live here: two little decal
+// meshes floating a few millimetres off the shell, one carrying the face and
+// one the bonnet's pale bib.
+//
+// **Both were wound inside out** (mean `normal · outward-radial` of −0.92 and
+// −0.998), so both were back-face culled by their own `FrontSide` material and
+// neither had ever been drawn in the running game. They are gone rather than
+// fixed: a patch mesh has to be kept in step with the surface under it by hand
+// — winding, stand-off distance, and the shell's own panel-seam relief all have
+// to agree — and there was no reason for either to be a separate surface at
+// all. The face and the bib are painted into the shell's own texture through
+// {@link HoodFaceWindow}, and `hats.ts` draws the bib with `hoodFaceUv`.
+//
+// If you are about to add a third thing to the front of a hood, paint it into
+// that texture too.
+// -----------------------------------------------------------------------------
 
 export interface PlushEarSpec {
   /** Half-width at the base. */

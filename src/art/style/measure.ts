@@ -37,14 +37,42 @@ export interface VisibleBounds {
  * precise shape of the bug this exists to catch.
  */
 export function visibleBounds(root: Object3D): VisibleBounds {
+  let bottom = Number.POSITIVE_INFINITY;
+  let top = Number.NEGATIVE_INFINITY;
+  visiblePoints(root, (point) => {
+    if (point.y < bottom) bottom = point.y;
+    if (point.y > top) top = point.y;
+  });
+  if (top === Number.NEGATIVE_INFINITY) return { bottom: 0, top: 0 };
+  return { bottom, top };
+}
+
+/**
+ * Every visible vertex of `root`, in `frame`'s space — `root`'s own by default.
+ *
+ * The traversal {@link visibleBounds} is built on, exposed because measuring a
+ * model in *another* object's frame is what fit questions are made of: a hat
+ * against the skull under it, a brim against the wearer's eye line. Both
+ * `check:hat-fit` and `hats.ts`'s own brow measurement had grown their own copy
+ * of this loop, and a copied traversal is a copied set of rules about which
+ * meshes count.
+ *
+ * The same rules apply as {@link visibleBounds}: hidden meshes and meshes under
+ * a hidden parent are skipped, `InstancedMesh` is expanded per instance, and it
+ * is vertices rather than bounding boxes. `point` is reused between calls —
+ * copy it if you need to keep one.
+ */
+export function visiblePoints(
+  root: Object3D,
+  visit: (point: Vector3) => void,
+  frame: Object3D = root,
+): void {
   root.updateMatrixWorld(true);
+  frame.updateMatrixWorld(true);
   const point = new Vector3();
   const instance = new Matrix4();
   const combined = new Matrix4();
-  let bottom = Number.POSITIVE_INFINITY;
-  let top = Number.NEGATIVE_INFINITY;
-
-  const parentInverse = new Matrix4().copy(root.matrixWorld).invert();
+  const toFrame = new Matrix4().copy(frame.matrixWorld).invert();
 
   root.traverse((object) => {
     if (!(object instanceof Mesh) || !object.visible) return;
@@ -62,19 +90,14 @@ export function visibleBounds(root: Object3D): VisibleBounds {
       } else {
         combined.copy(object.matrixWorld);
       }
-      // Back into the root's own space, so a model measured while parented to
+      // Back into the frame's own space, so a model measured while parented to
       // a moving ride reports the same numbers as one measured on the bench.
-      combined.premultiply(parentInverse);
+      combined.premultiply(toFrame);
       for (let i = 0; i < position.count; i += 1) {
-        point.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(combined);
-        if (point.y < bottom) bottom = point.y;
-        if (point.y > top) top = point.y;
+        visit(point.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(combined));
       }
     }
   });
-
-  if (top === Number.NEGATIVE_INFINITY) return { bottom: 0, top: 0 };
-  return { bottom, top };
 }
 
 /**

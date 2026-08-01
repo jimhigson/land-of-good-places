@@ -33,7 +33,7 @@ import { resolveDismount } from './world/dismount';
 import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
 import { gameStore } from './state';
-import type { SavedPlace } from './state/save';
+import { markReopenCharacterCreator, type SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
 import { terrainHeight } from './world/terrain';
 
@@ -156,9 +156,13 @@ export class Game {
 
     // The hat chosen (or granted free) in the character creator — see
     // `entities/WornHat.ts`. Same store-subscriber shape as `wornFlower`
-    // above, parented to the head instead of the hairline.
-    this.wornHat = new WornHat(this.player.model.hatAnchor, (worn) =>
-      this.player.model.setHatWorn(worn),
+    // above, parented to the head instead of the hairline. `hairHidesHat`
+    // is what lets `WornHat` decline to draw a hat that Mohican's crest
+    // cannot share the head with, without touching `wornHatUid` itself.
+    this.wornHat = new WornHat(
+      this.player.model.hatAnchor,
+      () => this.player.model.hairHidesHat,
+      (worn) => this.player.model.setHatWorn(worn),
     );
     this.addSystem(this.wornHat);
     // So the name label can size itself off whatever hat is actually worn —
@@ -262,6 +266,7 @@ export class Game {
     // The HUD clears the overlay when it is built, so everything else that puts
     // DOM in there has to come after it.
     this.hud = new Hud(uiRoot);
+    this.hud.setLookHandler(() => this.reopenCharacterCreator());
     // The HIGHLIGHT RULE's activation flash, for the interface: press any
     // button anywhere and the same rainbow radiates off it. One delegated
     // listener and a pool of four overlays — see `ui/TapBurst.ts`; no panel
@@ -640,6 +645,25 @@ export class Game {
 
   private takeStairs(direction: StairDirection): void {
     this.world.building.takeStairs(this.stairMenuDeck, direction);
+  }
+
+  /**
+   * "Look" pill in the HUD menu (`Hud.ts`). There is no "rebuild the live
+   * player model" path — `CharacterModel`'s kid is built once, in `Player`'s
+   * constructor, from whatever the store held at that moment — so getting
+   * back to the character creator means going back through `main.ts`'s
+   * `boot()` rather than mounting it over this running `Game`.
+   *
+   * `saveSystem.flush()` first, so nothing since the last five-second
+   * autosave tick is lost; then a same-tab flag (`markReopenCharacterCreator`,
+   * `state/save.ts`) so the next boot skips the welcome-back prompt and
+   * `startFresh`'s `clearSave()`, and goes straight back into the creator
+   * over this same save; then the reload itself.
+   */
+  private reopenCharacterCreator(): void {
+    this.saveSystem.flush();
+    markReopenCharacterCreator();
+    window.location.reload();
   }
 
   start(): void {

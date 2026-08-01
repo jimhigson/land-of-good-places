@@ -10,6 +10,7 @@ import {
 import { createKid } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
+import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { visibleTop } from '../../art/style/measure';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
@@ -134,6 +135,15 @@ const PROTOTYPE_STYLE: HairStyle = 'bunches';
  */
 const PROTOTYPE_BACKPACK: BackpackKind = 'satchel';
 
+/**
+ * The shoes the prototype is built wearing.
+ *
+ * Same reasoning as {@link PROTOTYPE_STYLE}/{@link PROTOTYPE_BACKPACK}: the
+ * crowd reads geometry, not visibility, so this only decides what happens to
+ * be `visible` on a model nobody ever renders.
+ */
+const PROTOTYPE_SHOE: ShoeKind = 'plain';
+
 /** The joints a walk cycle needs, resolved once per child. */
 export interface KidRig {
   readonly root: Object3D;
@@ -189,6 +199,17 @@ export class KidCrowd {
    * child keeps them.
    */
   private readonly hiddenBags: ReadonlyMap<BackpackKind, readonly number[]>;
+  /**
+   * Per shoe, the parts a child wearing it must **not** show.
+   *
+   * {@link hiddenBags}'s twin. Unlike hair and bags, there is no "everyone
+   * keeps these" leftover here — the plain pair has no parts of its own at
+   * all (it *is* the bare foot blob, painted; see `art/models/shoes.ts`), so
+   * `CROWD_SHOE_KINDS.includes('plain')` simply never removes anything from
+   * this map's `'plain'` list, which stays empty rather than needing a
+   * special case.
+   */
+  private readonly hiddenShoes: ReadonlyMap<ShoeKind, readonly number[]>;
   /** Bare height per style — spikes reach 0.2 m higher than a bob. */
   private readonly heights: ReadonlyMap<HairStyle, number>;
   private readonly fixedColours: readonly number[];
@@ -201,6 +222,13 @@ export class KidCrowd {
       shoe: SENTINEL_SHOE,
       backpackColour: SENTINEL_BAG,
       hairStyle: PROTOTYPE_STYLE,
+      // The crowd is the one place a *separate* face patch is still right, and
+      // it is not a style choice — see `KidOptions.facePatch`. Skin tone gets
+      // to a child's skull as an `instanceColor` multiply against a flat white
+      // material; a face baked into that skull would be multiplied by it too,
+      // and the twelve (expression × eye-colour) variants below would have to
+      // be crossed with every skin tone as well.
+      facePatch: true,
       // Every style a background child can wear, built into the one prototype.
       // The floor-length simulated ponytail is deliberately not among them —
       // see `CROWD_HAIR_STYLES` for the full reasoning.
@@ -211,6 +239,10 @@ export class KidCrowd {
       // exactly what `hairStyles` above does for hair. The two creature-head
       // bags are deliberately not among them; see `CROWD_BACKPACK_KINDS`.
       backpackKinds: CROWD_BACKPACK_KINDS,
+      shoeKind: PROTOTYPE_SHOE,
+      // Every pair a background child can wear — the themed RiPika/sparkle
+      // pairs are deliberately not among them; see `CROWD_SHOE_KINDS`.
+      shoeKinds: CROWD_SHOE_KINDS,
     });
 
     this.prototype = handle.root;
@@ -264,6 +296,10 @@ export class KidCrowd {
         backpackColour: SENTINEL_BAG,
         hairStyle: 'bunches',
         backpack: true,
+        // Built only to steal its face canvases, so it needs the same patch
+        // path the prototype above is on or there would be no `facePatch` mesh
+        // to take them from.
+        facePatch: true,
         eyeColour,
       });
       const variantFaceMesh = findFaceMesh(variantHandle.root);
@@ -350,6 +386,17 @@ export class KidCrowd {
       }
     }
     this.hiddenBags = hiddenBags;
+
+    const hiddenShoes = new Map<ShoeKind, number[]>();
+    for (const kind of CROWD_SHOE_KINDS) hiddenShoes.set(kind, []);
+    for (const part of handle.shoeParts) {
+      const index = sources.indexOf(part.mesh as Mesh);
+      if (index < 0) continue;
+      for (const kind of CROWD_SHOE_KINDS) {
+        if (!part.kinds.includes(kind)) hiddenShoes.get(kind)?.push(index);
+      }
+    }
+    this.hiddenShoes = hiddenShoes;
   }
 
   /**
@@ -362,6 +409,9 @@ export class KidCrowd {
    * the extras (see {@link EYE_VARIANT_COUNT}, {@link BLUE_EYE_VARIANT}).
    * `backpack` must be one of {@link CROWD_BACKPACK_KINDS}; anything else
    * would hide every bag part and leave a child in bare straps.
+   * `shoe` must be one of {@link CROWD_SHOE_KINDS}; anything else would hide
+   * every shoe part — safe for `'plain'`, which has none, but a themed pair's
+   * toe cap or strap would simply vanish.
    */
   spawn(
     colours: KidColours,
@@ -369,6 +419,7 @@ export class KidCrowd {
     scale: number,
     eyeVariant = 0,
     backpack: BackpackKind = PROTOTYPE_BACKPACK,
+    shoe: ShoeKind = PROTOTYPE_SHOE,
   ): KidAvatar {
     const member = this.crowd.spawn();
     member.root.scale.setScalar(scale);
@@ -379,6 +430,7 @@ export class KidCrowd {
 
     for (const part of this.hiddenParts.get(hairStyle) ?? []) member.shown[part] = 0;
     for (const part of this.hiddenBags.get(backpack) ?? []) member.shown[part] = 0;
+    for (const part of this.hiddenShoes.get(shoe) ?? []) member.shown[part] = 0;
 
     const rig = resolveRig(member.root);
     const facePart = this.facePartIndex;

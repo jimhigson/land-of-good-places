@@ -13,6 +13,7 @@ import type {
   HairStyle,
   InventoryItem,
   InventoryKind,
+  ShoeKind,
 } from './types';
 
 /**
@@ -85,7 +86,16 @@ export interface CharacterCreationChoice {
   readonly eyeColour: number;
   readonly backpackKind: BackpackKind;
   readonly backpackColour: number;
-  readonly hat: PurchaseSpec;
+  readonly shoeKind: ShoeKind;
+  readonly shoeColour: number;
+  /**
+   * `null` means "no hat" — the creator's Hat tab hides itself while an
+   * exclusive hair style is selected (a Mohican, once `art/models/hair.ts`
+   * lands one; see `ui/CharacterCreation.ts`'s `HAT_EXCLUSIVE_HAIR_STYLES`),
+   * and `null` is the real, intentional answer that reaches here rather than
+   * a hat being defaulted onto someone who was never offered a choice.
+   */
+  readonly hat: PurchaseSpec | null;
   readonly pet: PurchaseSpec;
 }
 
@@ -245,6 +255,19 @@ class GameStore {
    * free, and routed straight to their real placement instead of into the
    * player's hands: the hat goes on the head (`wornHatUid`), the pet joins
    * the parade immediately.
+   *
+   * `choice.hat` may be `null` — an exclusive hair style (the Hat/Mohican
+   * rule, `ui/CharacterCreation.ts`) was selected, so nothing is granted, and
+   * whatever was worn is taken off through {@link setWornHat} rather than a
+   * bare field write, so the Cute-o-dex's `placement` bookkeeping for it
+   * (`refreshPlacement`) stays correct too. Taking it off unconditionally,
+   * not "only if it was worn", matters for one specific path: `ui/Hud.ts`'s
+   * "Look" pill reopens this screen over an *existing* save (`main.ts`'s
+   * `reopenCharacterCreation`), which hydrates `wornHatUid` from that save
+   * before this method ever runs — so a hat worn before she reopened the
+   * creator needs exactly the same "take it off" call a brand-new character
+   * (who never had one on) gets, which turns out to be free: `setWornHat`
+   * already no-ops when nothing is worn.
    */
   completeCharacterCreation(choice: CharacterCreationChoice): void {
     const trimmedName = choice.name.trim();
@@ -256,9 +279,15 @@ class GameStore {
     this.state.player.eyeColour = choice.eyeColour;
     this.state.player.backpackKind = choice.backpackKind;
     this.state.player.backpackColour = choice.backpackColour;
+    this.state.player.shoeKind = choice.shoeKind;
+    this.state.player.shoeColour = choice.shoeColour;
 
-    const hatItem = this.grantFree(choice.hat, true);
-    this.state.wornHatUid = hatItem.uid;
+    if (choice.hat) {
+      const hatItem = this.grantFree(choice.hat, true);
+      this.state.wornHatUid = hatItem.uid;
+    } else {
+      this.setWornHat(null);
+    }
     this.grantFree(choice.pet, false);
 
     this.notify();
@@ -716,6 +745,8 @@ class GameStore {
       if (p.eyeColour !== undefined) next.player.eyeColour = p.eyeColour;
       if (p.backpackKind !== undefined) next.player.backpackKind = p.backpackKind;
       if (p.backpackColour !== undefined) next.player.backpackColour = p.backpackColour;
+      if (p.shoeKind !== undefined) next.player.shoeKind = p.shoeKind;
+      if (p.shoeColour !== undefined) next.player.shoeColour = p.shoeColour;
       if (p.maxHealth !== undefined) next.player.maxHealth = Math.max(1, p.maxHealth);
       if (p.health !== undefined) next.player.health = p.health;
       if (p.facePaint !== undefined) next.player.facePaint = p.facePaint;
@@ -835,6 +866,8 @@ function createInitialState(): GameState {
       eyeColour: PALETTE.iris,
       backpackKind: 'satchel',
       backpackColour: PALETTE.backpack,
+      shoeKind: 'plain',
+      shoeColour: PALETTE.shoe,
       health: 5,
       maxHealth: 5,
       facePaint: null,

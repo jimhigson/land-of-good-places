@@ -87,7 +87,8 @@ export type HairStyle =
   | 'longPonytail'
   | 'bowl'
   | 'spiky'
-  | 'messy';
+  | 'messy'
+  | 'mohican';
 
 export const HAIR_STYLES: readonly HairStyle[] = [
   'bunches',
@@ -99,6 +100,7 @@ export const HAIR_STYLES: readonly HairStyle[] = [
   'bowl',
   'spiky',
   'messy',
+  'mohican',
 ] as const;
 
 /**
@@ -138,9 +140,23 @@ export interface HairPart {
   readonly mesh: Object3D;
   readonly styles: readonly HairStyle[];
   /**
-   * True for parts that stick up past the bare hair cap and would spear
-   * straight through a worn hat — in practice, the spikes. Everything else
-   * sits inside the envelope hats already sit over.
+   * True for a style that cannot share the head with a hat at all — in
+   * practice, Mohican, whose crest occupies the same space a hat wants.
+   * Spiky also sticks up past the bare hair cap and spears straight through
+   * a worn hat, but Jim's ruling below allows that overlap; every other
+   * style sits inside the envelope hats already sit over regardless.
+   *
+   * **Never hides this part.** Jim's refinement (31 July 2026), after the
+   * first version of this rule tucked the hair away and Spiky turned out to
+   * be structurally unpreviewable in the character creator, which always has
+   * *some* hat selected: "just allow any hair other than rooster with a hat,
+   * and disable the hat, not the hair in this case." So this flag now feeds
+   * {@link HairRig.hidesHat} instead — a read the *hat* side checks
+   * (`art/models/kid.ts`'s `hairHidesHat`, `entities/WornHat.ts`,
+   * `ui/characterCreationPreview.ts`) before showing itself at all. The hair
+   * is always fully there; whichever hat she picked simply does not render
+   * while she is wearing a style like this — still hers, still "worn" as far
+   * as the inventory/Cute-o-dex are concerned, just not drawn.
    */
   readonly hideUnderHat: boolean;
 }
@@ -175,8 +191,19 @@ export interface HairRig {
   readonly ponytail: PonytailChain | null;
   /** Shows one style and hides the rest. */
   setStyle(style: HairStyle): void;
-  /** Tucks away anything that would poke through a hat. */
-  setHatWorn(worn: boolean): void;
+  /**
+   * Whether the **current** style has any part that can't share the head
+   * with a hat (`HairPart.hideUnderHat`) — Mohican, today; spiky and a hat
+   * are allowed to overlap (31 July 2026), clipping included. Live off {@link
+   * setStyle}, not snapshotted: the character creator rebuilds the whole kid
+   * per tap, but this stays correct even for a hypothetical caller that
+   * switched styles on a live rig instead.
+   *
+   * The hair rig no longer hides anything for this reason itself — see
+   * `HairPart.hideUnderHat`'s doc comment for why that inverted. This is the
+   * read the hat side of that inversion checks.
+   */
+  readonly hidesHat: boolean;
 }
 
 /** How far back the hanging styles sit, in `HEAD` units, clear of the backpack. */
@@ -262,7 +289,7 @@ export function buildHair(options: HairOptions): HairRig {
    * property the old hair kept losing: a gap between a side piece and a back
    * piece is not something this shape can express.
    *
-   * `short`, `bunches`, `spiky` and `messy` share the `crop` shell rather than
+   * `short`, `bunches`, `spiky`, `messy` and `mohican` share the `crop` shell rather than
    * having one each. The crowd instances every prototype mesh whether it is
    * worn or not, so four crops would be three draw calls the park pays forever
    * to draw the same shape four times.
@@ -271,7 +298,11 @@ export function buildHair(options: HairOptions): HairRig {
     ['long', ['long']],
     ['bob', ['bob']],
     ['bowl', ['bowl']],
-    ['crop', ['short', 'bunches', 'spiky', 'messy']],
+    // `mohican` rides the crop shell too, and that is the whole reason its
+    // shaved sides cost the park nothing: the shell is already built and
+    // already instanced for four other styles, so the Mohican adds exactly one
+    // mesh to the crowd rather than two.
+    ['crop', ['short', 'bunches', 'spiky', 'messy', 'mohican']],
   ];
   for (const [name, styles] of shells) {
     add(styles, drape, () => {
@@ -409,9 +440,12 @@ export function buildHair(options: HairOptions): HairRig {
   // surface (`hairShellSampler`) rather than from a hand-picked radius, so a
   // spike cannot come loose from the head it grows out of.
   //
-  // Kept as one merged mesh, and hidden whole when a hat goes on: everything
-  // else in this file sits inside the envelope hats already perch over, but a
-  // spike goes straight through the party hat.
+  // Kept as one merged mesh. Used to hide itself whenever a hat was worn — a
+  // spike genuinely does go straight through the party hat's geometry — but
+  // Jim's call (31 July 2026): spiky and a hat are both allowed to show
+  // together, clipping included. Only Mohican keeps the "can't share the
+  // head with a hat" flag now; every other style, spiky included, no longer
+  // asks the hat to hide.
   add(
     ['spiky'],
     drape,
@@ -468,14 +502,75 @@ export function buildHair(options: HairOptions): HairRig {
       addOutline(spiky, OUTLINE_SMALL);
       return spiky;
     },
+  );
+
+  // --- mohican ----------------------------------------------------------------
+  // A stiff crest down the middle of the scalp, sides cropped close by the
+  // `crop` shell everything else in this group already shares.
+  //
+  // **Aimed at "friendly rooster", not "punk".** The client is six. So the
+  // blades are rounded lozenges rather than cones — ART_DIRECTION.md §4, sharp
+  // is never cute, and a comb of rounded bumps is what a rooster actually has —
+  // and the profile peaks a little forward of the crown and tapers away at both
+  // ends, which is what stops a row of equal spikes reading as a dinosaur.
+  //
+  // Every root is taken from the shell's own surface, walked as a real path
+  // over the scalp (see {@link sagittalPath}), for the same reason the spikes
+  // are: a blade placed at a hand-picked coordinate comes loose from the head
+  // the moment anybody retunes the skull. Neighbouring blades overlap at the
+  // base, so the crest merges into one continuous ridge with a scalloped top
+  // rather than reading as separate lumps.
+  add(
+    ['mohican'],
+    drape,
+    () => {
+      const path = sagittalPath(skull, MOHICAN_SPAN[0], MOHICAN_SPAN[1]);
+      const blades: BufferGeometry[] = [];
+      for (let i = 0; i < MOHICAN_BLADES; i += 1) {
+        const t = i / (MOHICAN_BLADES - 1);
+        const { point, lean } = pathAt(path, t);
+        // The comb profile: a raised cosine skewed forward, so the tallest
+        // blade sits just ahead of the crown where a real crest's does, and
+        // both ends taper into the cropped sides instead of stopping dead.
+        const skew = Math.pow(t, MOHICAN_SKEW);
+        const profile = MOHICAN_LOW + (1 - MOHICAN_LOW) * Math.sin(Math.PI * skew) ** MOHICAN_PEAK;
+        const length = MOHICAN_LONG * profile * H;
+        const halfW = MOHICAN_THICK * H;
+        const halfZ = MOHICAN_DEPTH * H;
+        blades.push(
+          new SphereGeometry(1, 12, 10)
+            .scale(halfW, length / 2, halfZ)
+            // Stand the blade out of its own patch of scalp: half of it is
+            // buried, so no blade can float however the shell is retuned.
+            .translate(0, length / 2 - MOHICAN_BURY * length, 0)
+            // A crest is stiff and near-upright, so it only takes a fraction of
+            // the scalp's own lean — unlike a spike, which radiates.
+            .rotateX(lean * MOHICAN_STAND)
+            .translate(point[0], point[1], point[2]),
+        );
+      }
+      const mohican = solid(fuse(hair, blades));
+      addOutline(mohican, OUTLINE_SMALL);
+      return mohican;
+    },
+    // A hat is never worn with this style in the character creator — picking
+    // it clears the hat tab entirely (`ui/CharacterCreation.ts`'s
+    // `HAT_EXCLUSIVE_HAIR_STYLES`). `true` here is the backstop for anywhere
+    // that rule does not reach: if a hat is ever worn over this crest anyway
+    // (bought from a shop after the fact, say), it is the *hat* that declines
+    // to render — see `hideUnderHat`'s doc comment, and `entities/WornHat.ts`,
+    // which is what actually checks it. Spiky used to share this flag; it no
+    // longer does (31 July 2026) — Mohican is the one style left that asks
+    // for it.
     true,
   );
 
   // --- messy ------------------------------------------------------------------
   // Tufts poking out SIDEWAYS rather than upwards, deliberately: it keeps the
-  // whole style inside the envelope a hat already perches over, so messy needs
-  // no hat special case the way spiky does, and an early version with tufts
-  // leaning hard upwards measured *taller than the spikes*, which is not what
+  // whole style inside the envelope a hat already perches over, so messy has
+  // never needed a hat special case (spiky no longer does either, 31 July
+  // 2026 — only Mohican still does), and an early version with tufts leaning
+  // hard upwards measured *taller than the spikes*, which is not what
   // "messy" means to anybody.
   //
   // **Every tuft is centred on the shell's surface.** On `main` they were at
@@ -501,11 +596,12 @@ export function buildHair(options: HairOptions): HairRig {
   // --------------------------------------------------------------------------
 
   let current: HairStyle = style;
-  let hatWorn = false;
 
+  // No `hatWorn` any more — hair is never the thing that hides. See
+  // `HairPart.hideUnderHat`'s doc comment.
   const apply = (): void => {
     for (const part of parts) {
-      part.mesh.visible = part.styles.includes(current) && !(hatWorn && part.hideUnderHat);
+      part.mesh.visible = part.styles.includes(current);
     }
   };
 
@@ -518,9 +614,8 @@ export function buildHair(options: HairOptions): HairRig {
       current = next;
       apply();
     },
-    setHatWorn: (worn: boolean) => {
-      hatWorn = worn;
-      apply();
+    get hidesHat() {
+      return parts.some((part) => part.styles.includes(current) && part.hideUnderHat);
     },
   };
 }
@@ -683,6 +778,119 @@ function ringGeometry(radius: number, tube: number): BufferGeometry {
  * on X instead lays it flat *around* the head, which reads as a scale rather
  * than a tuft — worth the note, it was wrong the first time.
  */
+/**
+ * The scalp's mid-line, from the nape up over the crown to the brow.
+ *
+ * The hair shell is parameterised by (azimuth, height), which does not walk a
+ * path over the top of the head: the back of the mid-line is azimuth 0 and the
+ * front is azimuth π, and they meet only at the crown. So this samples both
+ * branches finely, right up to the apex where the shell's radius goes to zero
+ * and the two coincide, and hands back one ordered path from nape to brow.
+ *
+ * Sampled rather than solved because the shell applies the head's own tilt on
+ * the way out — the crown apex lands at z ≈ −0.12, not at z = 0 — and asking
+ * the sampler is always right where reproducing its maths here would be one
+ * more thing to keep in step.
+ */
+function sagittalPath(
+  skull: number,
+  backHeight: number,
+  frontHeight: number,
+): readonly (readonly [number, number, number])[] {
+  const { surface } = hairShellSampler(HAIR_SHELLS.crop, skull);
+  const apex = HAIR_SHELLS.crop.semiY * skull;
+  const steps = 90;
+  const path: [number, number, number][] = [];
+  // Up the back, then down the front. Cosine spacing, because the profile turns
+  // fastest near the apex and even steps in height leave a gap over the crown.
+  for (let i = 0; i <= steps; i += 1) {
+    const ease = (1 - Math.cos((i / steps) * Math.PI)) / 2;
+    path.push(surface(0, backHeight + (apex - backHeight) * ease) as [number, number, number]);
+  }
+  for (let i = steps - 1; i >= 0; i -= 1) {
+    const ease = (1 - Math.cos((i / steps) * Math.PI)) / 2;
+    path.push(surface(Math.PI, frontHeight + (apex - frontHeight) * ease) as [number, number, number]);
+  }
+  return path;
+}
+
+/**
+ * A point a fraction of the way along a path by **arc length**, and how far the
+ * scalp leans there.
+ *
+ * Arc length rather than index, because the two branches of
+ * {@link sagittalPath} are sampled in their own heights: stepping by index
+ * bunches the blades up wherever the profile happens to be sampled densely.
+ */
+function pathAt(
+  path: readonly (readonly [number, number, number])[],
+  t: number,
+): { point: readonly [number, number, number]; lean: number } {
+  const lengths: number[] = [0];
+  for (let i = 1; i < path.length; i += 1) {
+    const a = path[i - 1] as readonly [number, number, number];
+    const b = path[i] as readonly [number, number, number];
+    lengths.push((lengths[i - 1] as number) + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
+  }
+  const total = lengths[lengths.length - 1] as number;
+  const target = t * total;
+  let i = 1;
+  while (i < lengths.length - 1 && (lengths[i] as number) < target) i += 1;
+  const a = path[i - 1] as readonly [number, number, number];
+  const b = path[i] as readonly [number, number, number];
+  const span = (lengths[i] as number) - (lengths[i - 1] as number);
+  const f = span > 0 ? (target - (lengths[i - 1] as number)) / span : 0;
+  const point: [number, number, number] = [
+    a[0] + (b[0] - a[0]) * f,
+    a[1] + (b[1] - a[1]) * f,
+    a[2] + (b[2] - a[2]) * f,
+  ];
+  // The scalp's outward direction here, as an angle from vertical in the
+  // sagittal plane: the path's tangent turned a quarter turn. Positive leans
+  // forward, which is what `rotateX` wants.
+  const lean = Math.atan2(b[1] - a[1], b[2] - a[2]);
+  return { point, lean };
+}
+
+/** Where the crest starts and stops, as shell heights: nape end, brow end. */
+const MOHICAN_SPAN: readonly [number, number] = [0.40, 0.46];
+/** Blades along the crest. Enough that neighbours overlap into one ridge. */
+const MOHICAN_BLADES = 13;
+/** The tallest blade, in head units. Comparable to a spike, deliberately. */
+const MOHICAN_LONG = 0.34;
+/**
+   * How tall the end blades are as a fraction of the tallest.
+   *
+   * High, and that is the whole difference between a crest and a fin. The sides
+   * are the `crop` shell — a full cap of hair — so a blade only reads at all
+   * once it clears that cap. At 0.3 the ends sank into the hair and the style
+   * came out as a single shark fin over the crown; at 0.6 the crest stays proud
+   * from nape to brow, which is what makes it a Mohican.
+   */
+const MOHICAN_LOW = 0.72;
+/**
+   * Skews the profile's peak forward of the crown, where a real crest's is.
+   *
+   * **Above 1, not below.** `t` runs 0 at the nape to 1 at the brow, and the
+   * peak of `sin(π · tᵏ)` sits at `t = 0.5^(1/k)` — so a value under 1 drags the
+   * peak *backwards*. The first pass used 0.78 and put the tallest blade at
+   * t = 0.41, behind the crown, which is exactly where it looked wrong. 1.3
+   * puts it at t = 0.59.
+   */
+const MOHICAN_SKEW = 1.15;
+/** Sharpens the peak. 1 is a plain raised cosine; higher is more of a quiff. */
+const MOHICAN_PEAK = 1.25;
+/** Half-width across the head. Thin enough to read as a strip, fat enough that
+ *  ART_DIRECTION's "no thin parts" still holds. */
+const MOHICAN_THICK = 0.092;
+/** Half-depth along the crest — bigger than the width, so blades overlap. */
+const MOHICAN_DEPTH = 0.115;
+/** How much of each blade is buried in the scalp, as a fraction of its length. */
+const MOHICAN_BURY = 0.22;
+/** How much of the scalp's lean a blade takes. A crest is stiff and upright, so
+ *  much less than a spike, which radiates out of the head. */
+const MOHICAN_STAND = 0.35;
+
 function tuftGeometry(
   radius: number,
   centre: readonly [number, number, number],

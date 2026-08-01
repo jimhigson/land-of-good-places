@@ -5,7 +5,7 @@ import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge } from './ui';
 import { gameStore } from './state';
 import { saveFlags } from './state/flags';
-import { clearSave, loadSave, type SaveFile } from './state/save';
+import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } from './state/save';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -25,7 +25,7 @@ import { clearSave, loadSave, type SaveFile } from './state/save';
  * cat-bus arrival sequence (`world/entrance/`), whenever that gets wired up —
  * nothing downstream of `new Game(...)` can run before this does.
  *
- * The three ways a load can go:
+ * The four ways a load can go:
  *
  * - **A readable save**: the welcome-back screen (`ui/ContinueOrRestart.ts`)
  *   offers *keep playing* or *start a new game*.
@@ -34,6 +34,11 @@ import { clearSave, loadSave, type SaveFile } from './state/save';
  *   `loadSave()` returns `null`, which is the same path as "no save". A
  *   fresh start is always offered rather than a crash or a half-loaded park;
  *   see `state/save.ts`.
+ * - **A readable save with the reopen-creator flag set**: the HUD's "Look"
+ *   pill reloaded the page to get here (`Game.reopenCharacterCreator`,
+ *   `state/save.ts`'s `markReopenCharacterCreator`). Skips both the
+ *   welcome-back prompt and `startFresh`'s `clearSave()` — see
+ *   {@link reopenCharacterCreation}.
  */
 function boot(): void {
   const canvas = document.getElementById('game-canvas');
@@ -45,6 +50,7 @@ function boot(): void {
   }
 
   const save = loadSave();
+  const reopenCreator = consumeReopenCharacterCreator();
 
   // A save from before the character creator existed, or one where "start
   // again" was pressed and the tab was closed mid-creation, has everything
@@ -55,6 +61,10 @@ function boot(): void {
     // them — hide it now rather than waiting for a first game frame that is
     // still a button press away.
     splash?.classList.add('hidden');
+    if (reopenCreator) {
+      reopenCharacterCreation(canvas, uiRoot, splash, save);
+      return;
+    }
     new ContinueOrRestart(uiRoot, save, {
       onContinue: () => continueGame(canvas, uiRoot, splash, save),
       onStartAgain: () => startFresh(canvas, uiRoot, splash),
@@ -99,6 +109,41 @@ function startFresh(
       gameStore.completeCharacterCreation(choice);
       saveFlags.markCharacterCreated();
       launchGame(canvas, uiRoot, splash, {});
+    },
+  });
+}
+
+/**
+ * Same park, brand-new look — what the HUD's "Look" pill triggers, by way of
+ * a reload (`Game.reopenCharacterCreator` sets the flag {@link
+ * consumeReopenCharacterCreator} reads above, then reloads the page).
+ *
+ * Unlike {@link startFresh} the save is **not** cleared and `createdCharacter`
+ * is left exactly as it was: this hydrates the store from the existing save
+ * first, exactly like {@link continueGame}, so money, the Cute-o-dex, the
+ * inventory and the park name are all already sitting in the store by the
+ * time the creator's "done" button fires `completeCharacterCreation`, which
+ * only overwrites the cosmetic fields. Finishing launches back into the same
+ * `save.place` rather than the default spawn, so she lands back where she was
+ * standing when she pressed the pill.
+ */
+function reopenCharacterCreation(
+  canvas: HTMLCanvasElement,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  save: SaveFile,
+): void {
+  gameStore.hydrate(save);
+  saveFlags.hydrate(save.flags);
+  new CharacterCreation(uiRoot, {
+    onComplete: (choice) => {
+      gameStore.completeCharacterCreation(choice);
+      // Already true on this save — restated so the flag and the fact can
+      // never disagree, the same reason `startFresh` sets it below.
+      saveFlags.markCharacterCreated();
+      // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
+      const options: GameOptions = save.place ? { startPlace: save.place } : {};
+      launchGame(canvas, uiRoot, splash, options);
     },
   });
 }

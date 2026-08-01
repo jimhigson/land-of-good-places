@@ -74,6 +74,14 @@ out the user's own long-running hohjs GAME and EDITOR dev servers along with
 its own. Note the exact PID (or the port) when you start your server, and
 stop only that.
 
+**Always run your own dev server on your own port.** Several agents are
+often working at once, each wanting a live build to look at. Never assume a
+default port (5173, 5260, whatever you have seen in a handoff) is free —
+pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
+`--strictPort` is what makes a collision loud instead of silent: without it
+Vite just picks the next free port for you and every note you take about
+"my server is on 5260" quietly goes stale.
+
 ## A stale service worker will waste your hour
 
 This is a PWA. A service worker precached from **another agent's dev server on
@@ -88,6 +96,29 @@ caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 ```
 
 then hard-reload. Suspect it early rather than debugging code that is correct.
+
+## A face on a worn thing goes in its own UV texture, not a floating patch
+
+RiPika's and Trilla's hood faces (`hoodShell.ts`/`hats.ts`) were built as a
+separate decal mesh floating just in front of the hood's own dome. It was
+wound the opposite way round from the dome, so its normals pointed at the
+wearer's skull and `MeshToonMaterial`'s `FrontSide` culled it: invisible in
+the running game while the mesh, the texture and the code all looked correct
+on inspection, and *unfixable* by moving it further out — the first fix
+tried, padding the stand-off distance, could not have worked, because the
+mesh was never being drawn at all. Found the hard way (31 July 2026) by
+casting a ray in from outside and finding it hit nothing. Fixed by baking the
+face texture directly into the wearable's own UV mapping instead of a second
+mesh — a second mesh that has to be positioned right, every time, is a second
+place for exactly this kind of bug to hide.
+
+**When a worn item needs a painted face (or any flat appliqué), paint it into
+that item's own UV space. Do not add a second mesh positioned by a formula
+that has to track the first one's surface.** One surface, one texture: there
+is then no second formula that can fall out of sync when the first one
+changes. This does not conflict with ART_DIRECTION.md §7's "nothing is
+sculpted, the face is flat appliqué" rule — only *where* the flat texture
+lives changes, not the no-sculpting principle.
 
 ## Handoff files
 

@@ -87,6 +87,17 @@ This is the highest-leverage decision in the whole art direction:
 
 ### Drawing rules
 
+**The governing rule for anything painted:** a texture should look like
+something that *could have been* built as geometry, just wasn't — for
+curvature, cost, or animation reasons. Flat colour fills, bold well-defined
+ink outlines, shapes with a clear silhouette. Not shading, not gradients
+across a whole shape, not photographic or painterly rendering — a painted
+texture must read in the same visual language as the toon-shaded primitives
+sitting right next to it, or the model looks like two different games glued
+together. The soft touches below (blush airbrush, iris gradient) are
+deliberate, bounded exceptions — a few percent of a small shape — not a
+licence for painted detail generally.
+
 - **Ink**: fill with `PALETTE.ink`. Never `#000`.
 - **Eyes**: one solid ink oval, **taller than wide** (height ≈ 1.3 × width). No
   white sclera — cartoon toys read cuter with a full dark eye.
@@ -117,6 +128,48 @@ This is the highest-leverage decision in the whole art direction:
 `neutral | blink | happy | surprised | sad`. Callers keep the record and swap
 `material.map`. **That is the entire expression system** — nothing else in the
 game animates a face.
+
+### A face on a worn object goes in that object's own UV map
+
+Everything above is about a face on a **head**, where a transparent patch worn
+over the skull is right: the skull is the thing the face belongs to, and the
+patch is what lets the eyes be bigger than the geometry allows.
+
+A face painted on something the child *wears* — the critter hoods, and anything
+like them — is a different problem, and the decal patch is the wrong answer to
+it. **Bake the face into the wearing surface's own UV map instead**
+(`paintFaceOnFill`, and `hoodShellGeometry`'s face window as the reference
+implementation): paint the object's base colour as the texture's background
+fill, then the face on top of it. One surface, one texture.
+
+This is not a preference. Both critter hoods' faces were **invisible in the game
+for a fortnight** and no check noticed. The patch mesh was wound the opposite
+way round from the shell under it, so its normals pointed at the wearer's skull
+and `MeshToonMaterial`'s `FrontSide` culled it outright — and the obvious fix,
+floating it further out, could never have worked. A second surface has to be
+kept in step with the first by hand, and every property of it is a way to get
+that wrong: winding, stand-off distance, and whatever relief the base mesh adds
+after you sampled it. There is nothing to keep in step if there is only one
+surface.
+
+Three things it costs, all cheap:
+
+- the surface needs real UVs, and a UV that runs with azimuth **cannot close** —
+  split the seam column the way `SphereGeometry` does, or one quad interpolates
+  across the whole texture and smears the face round the back;
+- weld the split seam's normals, or the toon ramp and the outline both draw a
+  line down it;
+- leave a border of plain base colour round the face (`FACE_FILL_INSET`), wide
+  enough to survive mip-mapping. Everything outside the face window clamps to
+  it, which is what makes the rest of the object come out the right flat colour
+  from the same one texture.
+
+Make it **opt-in** per object: something with no face keeps its flat-colour
+material and its exact geometry, and pays nothing.
+
+`npm run check:hood-face` holds this in place. It casts a ray in from outside at
+each painted feature and checks what the camera would actually hit — which an
+inside-out surface fails, and which measuring where the vertices *are* does not.
 
 ---
 
@@ -333,6 +386,15 @@ only, outlines ink-tinted per §4's rules — never black, never photoreal. And
 it is wrapped in the exact same `AssetHandle` factory function as everything
 above: origin at the base, `height` to the true top, seeded randomness if
 any is needed. The only thing that changed is where the vertices came from.
+
+**A painted face on an authored surface follows §3's governing rule too:**
+bake it into the surface's own UV mapping rather than a second mesh that has
+to independently agree with the first's geometry (31 July 2026, after the
+RiPika/Trilla hood faces went invisible when a hand-rolled second mesh was
+wound the wrong way round — see CLAUDE.md). And it still has to look like
+flat appliqué that could have been geometry, not a texture doing shading's
+job — §3's rule on that is not relaxed just because the base mesh is
+authored.
 
 ---
 
