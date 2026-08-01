@@ -97,7 +97,13 @@ import {
   PLAYER_LANE,
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
-import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
+import {
+  RACE_LAPS,
+  RIVAL_SKILL,
+  simulateField,
+  simulateRailRace,
+  type Strategy,
+} from '../src/world/railRace/simulate.ts';
 import { AHEAD, RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
@@ -696,6 +702,103 @@ require(
 require(
   perfect.seconds > 20,
   `a good run is over in ${perfect.seconds.toFixed(1)} s — barely a ride.`,
+);
+
+// --- can she actually win? ---------------------------------------------------
+//
+// Everything above races **one** rider against the clock, which answers "is
+// letting go worth it?" and nothing else. It cannot see the rivals at all — and
+// on 1 August 2026 the family's report was not about the clock, it was that the
+// three rivals were "far too good". A race can pass every assertion above and
+// still be one a six-year-old never wins.
+//
+// So this races the whole field, through `simulateField` — the same
+// `rivalWantsHold`, the same `rivalBand`, the same `stepRider` the browser runs
+// — across a spread of seeds, and asserts the shape of the result rather than
+// any one race. Seeds are fixed, so this is deterministic, not flaky.
+const FIELD_SEEDS = Array.from({ length: 24 }, (_unused, i) => 0x1000 + i * 0x3d7);
+
+function field(strategy: Strategy): {
+  wins: number;
+  margin: number;
+  minMargin: number;
+  maxMargin: number;
+  mistakes: number;
+} {
+  const runs = FIELD_SEEDS.map((seed) => simulateField(strategy, seed));
+  const margins = runs.map((run) => run.marginMetres);
+  return {
+    wins: runs.filter((run) => run.playerPlace === 1).length,
+    margin: margins.reduce((sum, m) => sum + m, 0) / margins.length,
+    minMargin: Math.min(...margins),
+    maxMargin: Math.max(...margins),
+    mistakes:
+      runs.reduce((sum, run) => sum + run.rivalBonks + run.rivalLapses, 0) / runs.length,
+  };
+}
+
+const wellPlayed = field('perfect');
+const scrappy = field('sloppy');
+const stuckDown = field('alwaysHold');
+
+say('');
+say(`rival skill ${RIVAL_SKILL.join(' / ')} (innermost lane first)`);
+say(
+  `over ${FIELD_SEEDS.length} seeded races: playing well wins ${wellPlayed.wins}, ` +
+    `by ${wellPlayed.margin.toFixed(0)} m on average (${wellPlayed.minMargin.toFixed(0)}–` +
+    `${wellPlayed.maxMargin.toFixed(0)} m per seed); being scrappy wins ${scrappy.wins}, ` +
+    `by ${scrappy.margin.toFixed(0)} m; never letting go wins ${stuckDown.wins}`,
+);
+say(`the three rivals make ${wellPlayed.mistakes.toFixed(1)} visible mistakes a race between them`);
+
+require(
+  wellPlayed.wins >= FIELD_SEEDS.length - 4,
+  `RIVALS TOO GOOD: playing perfectly wins only ${wellPlayed.wins} of ${FIELD_SEEDS.length} ` +
+    'races. This is the 1 August 2026 family report — a child who plays well has to be able ' +
+    'to win. Look at `rivalBand` before `RIVAL_SKILL`: a symmetric rubber band lets a trailing ' +
+    "rival exceed the player's own terminal speed and refunds every mistake she just watched.",
+);
+require(
+  stuckDown.wins === 0,
+  `holding the button down for the whole race still wins ${stuckDown.wins} of ` +
+    `${FIELD_SEEDS.length} — against the rivals as well as the clock, the one control has ` +
+    'nothing to teach.',
+);
+require(
+  scrappy.wins > 0 && scrappy.wins < FIELD_SEEDS.length,
+  `being scrappy wins ${scrappy.wins} of ${FIELD_SEEDS.length} races, so the race is ` +
+    'pass/fail rather than something a six-year-old gets gradually better at.',
+);
+require(
+  wellPlayed.mistakes > 6,
+  `the three rivals make only ${wellPlayed.mistakes.toFixed(1)} mistakes a race between them — ` +
+    'the family asked for rivals who are *visibly* fallible, and two or three bonks and lapses ' +
+    'each is what makes that readable from the next lane.',
+);
+// ...and not so far clear that it stops being a race. The ride's own promise
+// (see `RailRace.ts`'s header) is that the rivals stay near you; a lap is 336 m,
+// so a third of one is a procession, not a win.
+//
+// **This must be a per-race bound, not a field average.** A second reviewer on
+// PR #157 caught this file asserting `wellPlayed.margin < 90` — the *mean*
+// across the 24 seeds — while its own prose above claimed to fail "a good run
+// finishes more than 90 m clear", which is a promise about every race, not the
+// average of 24 of them. Run individually, the 24 seeds spread from 16.1 m to
+// 135.6 m at the tuning that shipped: the average (63.9) was a comfortable
+// pass while five of the 24 seeds individually broke the 90 m the comment
+// claimed to enforce, one of them by close to half again. A family on one of
+// those seeds got exactly the disengaging procession this whole check exists
+// to catch, invisibly to this assertion. Fixed by asserting the worst seed,
+// not the mean, and by tuning `rivalBand` (see its doc in `simulate.ts`) so
+// that worst seed is actually good enough to pass: 4.2–86.0 m as of that fix.
+require(
+  wellPlayed.maxMargin < 100,
+  `playing well finishes ${wellPlayed.maxMargin.toFixed(0)} m clear of the nearest rival on its ` +
+    `worst seed (mean ${wellPlayed.margin.toFixed(0)} m, range ${wellPlayed.minMargin.toFixed(0)}` +
+    `–${wellPlayed.maxMargin.toFixed(0)} m) — close to a third of a lap, which is a procession ` +
+    'rather than a race, on at least one seed a family could actually be dealt. This must be a ' +
+    "per-seed bound: the field average can pass while individual seeds don't. Raise `RIVAL_SKILL` " +
+    'or the behind-side of `rivalBand`.',
 );
 
 say('');
