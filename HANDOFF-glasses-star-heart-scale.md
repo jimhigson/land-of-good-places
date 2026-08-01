@@ -11,7 +11,7 @@ bigger to match" — following the sunglasses lens doubling (commit `006a966`,
 PR #143). Scale up star and heart glasses' whole silhouette (frame, lens,
 outline, temple hinge) the same way, not just the lens.
 
-## State: done, build green, fit-check green, screenshot pending
+## State: done — PR #146 open, build green, fit-check green, visual QA left to the Overseer
 
 `npm run build` exit 0 (checked as a real exit code, redirected to a file,
 never piped through `tail`/`head`).
@@ -93,20 +93,20 @@ inside `MAX_LENS_OFFSET` (50 mm).
 
 ## Not yet done
 
-- **No real screenshot yet.** Messaged the Overseer ("main") for
-  chrome-devtools ownership before doing anything with it (single shared
-  Chrome profile, per CLAUDE.md) — waiting to hear back. If granted: own dev
-  server on own port with `--strictPort`, `background: true` page, screenshot
-  old vs new, close page, kill server by PID.
-- If no reply lands in reasonable time: open the PR anyway with the numbers
-  above and flag visual QA as outstanding, same as the sunglasses PR did —
-  don't sit on it.
+- **No real screenshot.** Messaged the Overseer ("main") for chrome-devtools
+  ownership; reply came back: browser busy with #145 QA plus another agent
+  queued behind it, no need to wait — Overseer will do the visual check in
+  the character creator before merging (same flow as #143). PR #146 opened
+  with the numeric verification and this flagged plainly in the test plan.
+- Nothing else outstanding on this task. Worktree can be removed once #146
+  is merged (or if picked back up, reuse it).
 
-## Next agent, if you pick this up
+## If you pick this up
 
-1. Check for a reply from "main" re: Chrome profile access.
-2. If granted, screenshot and attach to the PR (or update it).
-3. If not granted, open the PR with the numbers above, note visual QA
-   outstanding, and don't block.
-4. Don't touch sunglasses or `bridgePiece`/`STANDOFF` — out of scope, already
-   correct on `main`.
+PR #146 is open at https://github.com/jimhigson/land-of-good-places/pull/146,
+branch `fix/glasses-star-heart-scale`, pushed to origin. Nothing further to
+do unless the Overseer's visual QA finds a problem — in which case, re-check
+the geometric-ceiling numbers above before changing `STAR_FRAME_SIZE` /
+`HEART_FRAME_SIZE`: growing either past its checked clearance will make the
+two lenses overlap across the nose bridge. Don't touch sunglasses or
+`bridgePiece`/`STANDOFF` — out of scope, already correct on `main`.
