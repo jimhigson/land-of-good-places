@@ -1,6 +1,12 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// No `@types/node` in this project (a browser game has no business seeing
+// `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — this
+// config file is the one place that legitimately needs the one field of
+// `process` it actually reads.
+declare const process: { readonly env: Readonly<Record<string, string | undefined>> };
+
 /**
  * Vite config.
  *
@@ -91,10 +97,23 @@ export default defineConfig({
         clientsClaim: false,
         skipWaiting: false,
       },
-      // Lets the manifest and the worker be checked with `npm run dev` rather
-      // than only in a production build.
+      // **Off by default.** A dev-mode service worker outlives the code it
+      // was built from: `registerType: 'prompt'` plus `skipWaiting: false`
+      // above mean once a browser tab registers one against a given
+      // origin+port, that origin keeps serving the old cached bundle through
+      // every subsequent edit, `git checkout`, or restart, until someone
+      // manually unregisters it — the exact trap CLAUDE.md's "a stale service
+      // worker will waste your hour" section warns about, except it used to
+      // fire on *every* dev server, not just after a real deploy. With a
+      // dozen agents each picking a fresh port for `npm run dev` all day,
+      // that was a service worker minted (and then gone stale) many times an
+      // hour for no reason a plain Vite dev server should have.
+      //
+      // Testing the manifest/update-toast machinery itself is rare enough to
+      // be worth an explicit opt-in instead of the default every dev server
+      // paid for: `VITE_PWA_DEV=1 npm run dev`.
       devOptions: {
-        enabled: true,
+        enabled: !!process.env.VITE_PWA_DEV,
         type: 'module',
       },
     }),
