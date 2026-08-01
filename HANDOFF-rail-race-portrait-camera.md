@@ -64,13 +64,18 @@ Portrait rider **1.83× bigger**, camera in from 30.6 m to 17.8 m. Landscape
 
 ## Status
 
-- [x] camera.ts rewritten, `tsc --noEmit` clean
-- [ ] check-rail-race.mts camera assertions updated for the deliberate angle
-- [ ] full `npm run build`
-- [ ] rebase onto main (PR #145, spark/bonk, touches RailRace.ts/track.ts/RaceHud.ts — no overlap expected)
+- [x] camera.ts rewritten
+- [x] check-rail-race.mts asserts the picture off the projection matrix at six
+      window shapes; side-on assertion is now a bounded range, swept at two
+      shapes. Watched to fail five ways (see the file's own note) — including
+      putting the shipped rig back, which turns out to have aimed 9.6° BACKWARDS
+      of the rider while the old check scored it a perfect 0.000.
+- [x] full `npm run build` exit 0, before and after the rebase
+- [x] rebased onto main @ 9c65d78 (PR #145 spark/bonk not merged yet, so no
+      overlap to resolve; it touches RailRace.ts/track.ts/RaceHud.ts, this
+      touches camera.ts + the check)
 - [ ] PR
 - [ ] browser QA — Overseer says chrome-devtools is owned by the PR #145 agent;
       they will message when free. Want a 390x844 before/after screenshot.
 
-Scratch scripts `scripts/_explore-camera.mts` and `scripts/_measure-old.mts` are
-uncommitted working tools — **delete before the PR**.
+Scratch scripts have been deleted; the tree is clean.
