@@ -7,7 +7,6 @@ import { terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
 import { createDodgems } from './dodgems/Dodgems';
 import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
-import { createRailRacer } from './railRacer/RailRacer';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
@@ -55,7 +54,7 @@ export const STALLS: readonly StallDefinition[] = [
     // described the controls of the retired 2D game and never said that there
     // is somebody to beat, which is the whole point of it.
     title: 'The Rail Race!',
-    subtitle: 'race the other cart, duck the bars!',
+    subtitle: 'four tracks, duck the bars, mind the sparks!',
     glyph: '🎢',
     accent: PALETTE.markerPink,
     stripe: PALETTE.buildingWall,
@@ -67,8 +66,11 @@ export const STALLS: readonly StallDefinition[] = [
     // A shade east of +Z: the counter, the awning stripes and the sign all face
     // the default camera, and the stand point in front of it sits between the
     // booth and the plaza, so walking up is a straight line from the fountain.
-
-    create: createRailRacer,
+    //
+    // No `create`: this booth boards a real ride in the real park rather than
+    // opening a mini-game world. `Game.boardRide` routes it to
+    // `world.railRace.requestBoard()` — see `MiniGameHost.checkStalls`, which
+    // offers every stall to `boardRide` before it opens anything.
   },
   {
     id: 'spookyHouse',

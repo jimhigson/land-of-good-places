@@ -102,7 +102,7 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 21,
+    worst: 20,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
       'both sides. The §6 fence closed this from 231 (hand park) to ~20: the ' +
@@ -113,7 +113,12 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'curve — the level crossing at 90 m plus the two platform gaps — see ' +
       'the race-coaster PR. Signs coming out of the 3D world (same day) also ' +
       'removed invisible sign-post obstacles that had been standing near some ' +
-      'anchors; re-verify this number reflects both changes together.',
+      'anchors; re-verify this number reflects both changes together. ' +
+      'TIGHTENED to 20 on 31 July by the Rail Race reform: the race coaster ' +
+      'was a solved loop through the middle of the park whose pylons stood ' +
+      'beside the railway in one place, and it is gone — the race now flies ' +
+      'round the rim on its own trestles, which are placed clear of the rail ' +
+      'corridor by construction and asserted so in test/procgen/invariants.ts.',
   },
   'rail.walkable': {
     worst: 30,

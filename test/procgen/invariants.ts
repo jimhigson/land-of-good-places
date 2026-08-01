@@ -18,6 +18,7 @@
  *    arithmetic, and it turns every future tuning change into a test failure.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
+import { InstancedMesh, Matrix4, Vector3 } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -58,6 +59,13 @@ const SHORTFALL_TOLERANCE = 1.6;
  * outer edge of the falloff curve.
  */
 const LAMP_REACH = 15;
+
+/**
+ * Rail-over-rail air where one ride passes over another — Decision 4's number,
+ * not the Rail Race's own target, so this keeps meaning something if the ring's
+ * cruise height is ever retuned.
+ */
+const RAIL_OVER_RAIL = 5.5;
 
 /**
  * Longest stretch of path allowed with no lamp within {@link LAMP_REACH}.
@@ -234,6 +242,91 @@ const everyPathIsLit: Invariant = (facts) => {
 };
 
 /**
+ * **The Rail Race flies clear of everything it crosses.**
+ *
+ * The ring runs round the park's rim at a radius the railway already occupies,
+ * so the two share ground the whole way round and only height keeps them apart
+ * — and the ground under it is different on every seed. Two things are measured
+ * off the built park:
+ *
+ * 1. **Air over the railway.** Decision 4 asks for 5.5 m of rail-over-rail
+ *    clearance. Measured from the Rail Race's own rail heights down to the
+ *    train's, wherever the two pass within a track's width of each other.
+ * 2. **Where the trestles landed.** The legs are read back out of the built
+ *    scene by name and their instance matrices decoded — not recomputed from
+ *    the placement predicate, which would only prove the predicate agrees with
+ *    itself. A leg standing on the railway is a leg the train drives through.
+ *
+ * `check:rail-race` asserts the same clearances in far more detail, but only on
+ * the canonical seed; this is the half that has to hold whatever park is grown.
+ */
+const railRaceFliesClear: Invariant = (facts) => {
+  // Reached through the built world, never imported: see the note on
+  // `RailRace.route`. A static import here would set the park seed too early.
+  const { route, laneCount } = facts.world.railRace;
+  const train = facts.world.train.route;
+  const complaints: string[] = [];
+
+  // --- 1. air over the railway ----------------------------------------------
+  const rail = new Vector3();
+  const under = new Vector3();
+  let worstAir = Infinity;
+  let worstAt: readonly [number, number] = [0, 0];
+
+  const samples = 720;
+  for (let i = 0; i < samples; i += 1) {
+    const distance = (i / samples) * route.length;
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      route.pointAt(lane, distance, rail);
+      if (facts.distanceToRail(rail.x, rail.z) > TRACK_CLEARANCE * 2) continue;
+      train.pointAt(train.distanceNear(rail.x, rail.z), under);
+      const air = rail.y - under.y;
+      if (air < worstAir) {
+        worstAir = air;
+        worstAt = [rail.x, rail.z];
+      }
+    }
+  }
+  if (worstAir < RAIL_OVER_RAIL) {
+    complaints.push(
+      `only ${worstAir.toFixed(2)} m of air over the railway at ${fmt(worstAt)} — ` +
+        `Decision 4 asks for ${RAIL_OVER_RAIL} m`,
+    );
+  }
+
+  // --- 2. where the trestle legs actually landed -----------------------------
+  const legs = facts.world.railRace.group.getObjectByName('railRace:trestle-legs');
+  if (!(legs instanceof InstancedMesh)) {
+    complaints.push('the Rail Race has no trestle legs in the built scene to measure');
+  } else {
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    for (let i = 0; i < legs.count; i += 1) {
+      legs.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      const toRail = facts.distanceToRail(at.x, at.z);
+      if (toRail < TRACK_CLEARANCE) {
+        complaints.push(
+          `a trestle leg at ${fmt([at.x, at.z])} stands ${toRail.toFixed(2)} m from the railway ` +
+            `centre line, inside the train`,
+        );
+      }
+      for (const entrance of facts.entrances) {
+        const gap = Math.hypot(at.x - entrance.x, at.z - entrance.z);
+        if (gap < WALKABLE_GAP) {
+          complaints.push(
+            `a trestle leg at ${fmt([at.x, at.z])} is ${gap.toFixed(2)} m from ` +
+              `${entrance.id}'s doormat, close enough to pinch it shut`,
+          );
+        }
+      }
+    }
+  }
+
+  expect(complaints, complaints.join('\n')).toHaveLength(0);
+};
+
+/**
  * The suite. **Add an invariant by adding a line here.**
  */
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
@@ -245,6 +338,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
+  ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
 ];
 
 /**
