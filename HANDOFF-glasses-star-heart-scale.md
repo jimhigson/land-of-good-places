@@ -11,6 +11,11 @@ bigger to match" — following the sunglasses lens doubling (commit `006a966`,
 PR #143). Scale up star and heart glasses' whole silhouette (frame, lens,
 outline, temple hinge) the same way, not just the lens.
 
+**Second round, same PR:** Jim also asked to (1) round the star's spike tips
+(currently sharp/pointy — soften without losing the star silhouette) and
+(2) fix the star's orientation to the classic "one point straight up"
+layout. Both landed as commit `af22e8d` on this same branch.
+
 ## State: done — PR #146 open, build green, fit-check green, visual QA left to the Overseer
 
 `npm run build` exit 0 (checked as a real exit code, redirected to a file,
@@ -66,7 +71,34 @@ trust the formula" discipline `check:glasses-fit` itself uses.
   sunglasses used), with a doc comment explaining both star's and heart's
   reasoning and why they differ from each other.
 
-## Numbers (after)
+## Star tip rounding + orientation (second round)
+
+`starGeometry` (`style/shapes.ts`) gained two new optional params,
+`pointRadius` and `rotation`, both defaulting to `0` — the exact original
+behaviour, so every other caller (crown jewel in `hats.ts`, balloon badge,
+sparkles, rainbow-outline ring, shop star, shoe star) is untouched; none of
+them pass either argument. Only the glasses star lens
+(`starLensGeometry` wrapper in `glasses.ts`) passes non-zero values:
+
+- `STAR_POINT_RADIUS = 0.16` — rounds only the outer (spike) vertices, via a
+  `quadraticCurveTo` that stops short of each sharp corner on both sides,
+  using the corner itself as the curve's control point. Inner concave
+  notches are untouched. 0.16 is a fixed fraction of a spike edge's own
+  length (~0.68 units at this star's radii) — enough to visibly soften the
+  point without turning it into a blob.
+- `STAR_ROTATION = Math.PI` — `starGeometry`'s default vertex formula puts
+  its first (tip) vertex at `(0, -1)`, point straight down (confirmed by
+  hand: `angle = i/vertexCount*2π - π/2 + rotation`, so at `i=0, rotation=0`
+  that's exactly `-π/2`). Adding `Math.PI` moves that same vertex to
+  `(0, 1)` — point straight up, the classic orientation Jim asked for.
+
+Verified the refactored `starGeometry` doesn't touch any other caller: all
+of them call it with only 2–3 positional args (size, depth[, points]), so
+the new 4th/5th params default in unchanged. Also spot-checked no NaN
+vertices come out of the rounding path at this radius (well under the
+~0.68-unit edge length, so no overshoot past the adjacent vertex).
+
+## Numbers (after both rounds)
 
 ```
 kid: bare head 1.398 m across, left ear to right ear
@@ -74,7 +106,7 @@ kid: bare head 1.398 m across, left ear to right ear
 glasses        span  centreX eyeY off halfSpan
 ----------------------------------------------
 sunglasses     0.79   0.0000   -0.0mm    0.555
-star           0.69   0.0000   +5.2mm    0.482
+star           0.67   0.0000   -0.3mm    0.467
 heart          0.73   0.0000   +3.3mm    0.509
 
 glasses fit: all 3 pairs sit correctly on the face.
@@ -87,17 +119,20 @@ star           0.64   0.0000   +2.6mm    0.445
 heart          0.60   0.0000   +1.7mm    0.418
 ```
 
-`eyeY off` grew a little (star +2.6mm → +5.2mm, heart +1.7mm → +3.3mm) as the
-shapes' own vertical centroid shifts slightly with size — both still far
-inside `MAX_LENS_OFFSET` (50 mm).
+Star's span actually dropped slightly from the size-only round (0.69× →
+0.67×, rounding shaves a touch off the tip's own reach) and its `eyeY off`
+improved (+5.2mm → -0.3mm — the point-up flip roughly balances the shape's
+vertical centroid, where point-down had it skewed). Both still comfortably
+inside bounds; heart and sunglasses numbers unchanged by this round.
 
 ## Not yet done
 
-- **No real screenshot.** Messaged the Overseer ("main") for chrome-devtools
-  ownership; reply came back: browser busy with #145 QA plus another agent
-  queued behind it, no need to wait — Overseer will do the visual check in
-  the character creator before merging (same flow as #143). PR #146 opened
-  with the numeric verification and this flagged plainly in the test plan.
+- **No real screenshot**, for either round. Messaged the Overseer ("main")
+  for chrome-devtools ownership on the first round; reply came back: browser
+  busy with #145 QA plus another agent queued behind it, no need to wait —
+  Overseer will do the visual check in the character creator before merging
+  (same flow as #143), and will fold in the tip-rounding/orientation commit
+  too. PR #146 updated; numeric verification for both rounds is above.
 - Nothing else outstanding on this task. Worktree can be removed once #146
   is merged (or if picked back up, reuse it).
 
