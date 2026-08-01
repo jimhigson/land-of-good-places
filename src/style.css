@@ -4162,3 +4162,47 @@ kbd {
     transform: translate(-50%, -50%) scale(1);
   }
 }
+
+/* The bonk message: a small friendly pop under the lap pill, never a scold.
+   Self-clearing — unlike the lap pill and the countdown digit it has nothing
+   else to tell it when to go away, so the animation itself pops it in and
+   fades it back out. */
+.racehud-bonk {
+  position: absolute;
+  top: calc(3.4rem + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.9rem;
+  border-radius: 999rem;
+  background: var(--lgp-pink-deep);
+  color: #fff;
+  box-shadow: var(--lgp-shadow);
+  font-size: var(--lgp-text-lg);
+  font-weight: 800;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.racehud-bonk[data-shown='true'] {
+  animation: lgp-race-bonk 1600ms ease-out forwards;
+}
+
+@keyframes lgp-race-bonk {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-0.4rem) scale(0.85);
+  }
+  18% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.05);
+  }
+  30% {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

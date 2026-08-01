@@ -13,7 +13,7 @@ import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
-import { buildRailRaceTrack, type RailRaceTrack } from './track';
+import { buildRailRaceTrack, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE } from './route';
 import { createSparks, type Sparks } from './sparks';
 import {
@@ -115,6 +115,8 @@ export type RaceMoment =
   /** A countdown digit, "GO!", or `null` to clear it. */
   | { readonly kind: 'count'; readonly text: string | null }
   | { readonly kind: 'lap'; readonly lap: number; readonly of: number }
+  /** The player hit a duck bar. Never raised for a rival's bonk — see `driveRiders`. */
+  | { readonly kind: 'bonk' }
   | { readonly kind: 'result'; readonly won: boolean }
   | { readonly kind: 'end' };
 
@@ -337,6 +339,10 @@ export class RailRace implements GameSystem {
         this.ducking = !rider.holding;
         if (events.bonked) {
           this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
+          // Only the player's own bonk gets a message — a rival's bonk has no
+          // action for her to take and would just be noise (unlike the sparks,
+          // which are meant to be visible so she can learn from watching them).
+          this.onRaceMoment?.({ kind: 'bonk' });
         }
         if (events.lap > 0) {
           this.onRaceMoment?.({ kind: 'lap', lap: events.lap, of: RACE_LAPS });
@@ -412,17 +418,25 @@ export class RailRace implements GameSystem {
 
     // Sparks fly off whichever carts are powering over a black stretch — the
     // rivals' too, which is how a child learns the rule by watching somebody
-    // else get it wrong.
-    let anySparking = false;
+    // else get it wrong. But only *their* rail lights up: each cart's own
+    // zone×lane, found from its own `zoneCursor`, not a ring-wide flag — a
+    // rival sparking on the far side must not light up every black stretch in
+    // the park, only the one they are actually standing on.
+    const sparkingSegments: SparkingSegment[] = [];
     for (const cart of this.carts) {
       if (!cart.rider.sparking) continue;
-      anySparking = true;
       const at = cart.group.position;
       // Struck from under the cart, a few per frame rather than a burst: a
       // continuous shower for as long as the button is held.
       this.sparks.emit(at.x, at.y - 0.15, at.z, 2);
+      // `sparkStretches` repeats `HAZARDS.lap.zones` once per lap in the same
+      // order, so the cursor modulo the lap's zone count is exactly the zone
+      // this rider is in right now — the same fact `stepRider` used to decide
+      // `sparking` in the first place, not a re-derived position match.
+      const zoneIndex = cart.rider.zoneCursor % HAZARDS.lap.zones.length;
+      sparkingSegments.push({ zoneIndex, lane: cart.rider.lane });
     }
-    this.track.setSparking(anySparking, elapsed);
+    this.track.setSparking(sparkingSegments, elapsed);
     this.sparks.update(dt);
 
     for (const cart of this.carts) {
