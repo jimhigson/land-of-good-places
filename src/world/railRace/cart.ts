@@ -1,4 +1,13 @@
-import { Color, CylinderGeometry, Group, Material, Mesh, SphereGeometry } from 'three';
+import {
+  Color,
+  CylinderGeometry,
+  Group,
+  Material,
+  Mesh,
+  Object3D,
+  SphereGeometry,
+  SpotLight,
+} from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
@@ -65,6 +74,44 @@ const WHEEL_HALF_GAUGE = RAIL_GAUGE / RIDE_SCALE / 2;
 /** Wheelbase: how far the front axle sits from the back one. */
 const WHEEL_Z = 0.62;
 
+/**
+ * The headlamp beams.
+ *
+ * **These are real `SpotLight`s, on Jim's explicit call (1 August 2026),
+ * overriding PR #153's review — which chose emissive-only discs for the perf
+ * reason spelled out below.** The ask is that the lamps actually light the
+ * rails ahead of the rider rather than only glowing themselves, and no amount
+ * of emissive does that: an emissive material lights *itself* and nothing else.
+ *
+ * Three deliberate choices keep the bill payable:
+ *
+ * - **They cast no shadows.** Eight shadow-casting spots would mean eight extra
+ *   shadow-map passes a frame over trestle-heavy scenery, which is the part of
+ *   a dynamic light that is genuinely expensive. A headlamp reads entirely from
+ *   the pool of warm light it throws down the rail.
+ * - **They are off unless somebody is riding** (see {@link CartHandle.setHeadlamps}).
+ *   The park scene has *no* other point or spot lights in it — only the day/night
+ *   rig's directionals — so leaving eight on permanently would put a per-fragment
+ *   spot-light loop into every material in the whole park for the sake of four
+ *   carts idling round an empty ring. Toggling `visible` is what three.js counts,
+ *   so an off lamp costs exactly nothing.
+ * - **Distances and angles are in world metres**, not the cart's own. `RailRace.ts`
+ *   scales the cart group by `RIDE_SCALE`, and three.js scales a light's
+ *   *position* by its parent's matrix but **not** its `distance` — so a range
+ *   picked in cart-local metres would come out 2.5x short.
+ */
+const HEADLAMP_RANGE = 26;
+const HEADLAMP_ANGLE = 0.5;
+const HEADLAMP_PENUMBRA = 0.55;
+const HEADLAMP_DECAY = 1.4;
+/**
+ * Bright, because of that decay and range: illuminance falls as
+ * `intensity / distance^HEADLAMP_DECAY`, so lighting rail twelve metres ahead
+ * takes a number that looks alarming next to the spooky house's 3.2 candela
+ * room lantern throwing 2 m. Tuned by eye against the ride at night.
+ */
+const HEADLAMP_INTENSITY = 90;
+
 export interface CartHandle {
   readonly root: Group;
   /**
@@ -84,6 +131,17 @@ export interface CartHandle {
    * over; the rendered circumference is what has to match the distance.
    */
   spinWheels(travelled: number): void;
+  /**
+   * Lights or douses this cart's two headlamp beams.
+   *
+   * Off is the default and is genuinely free: three.js counts only *visible*
+   * lights when it builds a material's shader, so a doused lamp costs nothing
+   * at all rather than costing a little. `RailRace.ts` lights them when a race
+   * starts and douses them when she is set back down — the rivals idling round
+   * an empty ring do not get to put a spot-light loop into every material in
+   * the park. See {@link HEADLAMP_RANGE}'s note.
+   */
+  setHeadlamps(on: boolean): void;
   dispose(): void;
 }
 
@@ -135,16 +193,44 @@ export function createCart(colour: number): CartHandle {
   root.add(nose);
 
   // --- headlamps ----------------------------------------------------------
-  // A warm glowing disc either side of the nose — the same "emissive reads as
-  // lit, no dynamic light needed" trick as the dodgem's spark and star, which
-  // is deliberately cheap: up to four of these carts are on screen at once
-  // over trestle-heavy scenery, and a `PointLight` per cart is not worth the
-  // draw-call and shadow-map cost for a glow that reads just as well without it.
+  // A warm glowing disc either side of the nose, and — since 1 August 2026 — a
+  // real `SpotLight` behind each one, throwing warm light down the rail ahead.
+  // See the constants above for why they cast no shadows and why they are dark
+  // until somebody boards.
+  //
+  // Both beams aim at one shared target sitting forward and a little below the
+  // nose, so they converge down the track exactly the way a pair of real
+  // headlamps do. A target per lamp would let the two drift apart, and it is
+  // the *pair* that has to point where the cart is going.
+  const lampAim = new Object3D();
+  lampAim.position.set(0, -0.55, 9);
+  root.add(lampAim);
+
+  const beams: SpotLight[] = [];
   for (const side of [-1, 1] as const) {
     const lamp = decal(new Mesh(new SphereGeometry(0.09, 10, 8), lampMaterial));
     lamp.scale.z = 0.5;
     lamp.position.set(side * 0.3, 0.34, 1.21);
     root.add(lamp);
+
+    const beam = new SpotLight(
+      PALETTE.fairyWarm,
+      HEADLAMP_INTENSITY,
+      HEADLAMP_RANGE,
+      HEADLAMP_ANGLE,
+      HEADLAMP_PENUMBRA,
+      HEADLAMP_DECAY,
+    );
+    // Just in front of the glowing disc, so the disc is not itself the first
+    // thing the beam lights.
+    beam.position.set(side * 0.3, 0.34, 1.3);
+    beam.target = lampAim;
+    // The expensive half of a dynamic light, and the half a headlamp does not
+    // need. See `HEADLAMP_RANGE`'s note.
+    beam.castShadow = false;
+    beam.visible = false;
+    root.add(beam);
+    beams.push(beam);
   }
 
   // --- wheels ---------------------------------------------------------------
@@ -216,11 +302,16 @@ export function createCart(colour: number): CartHandle {
       for (const wheel of wheels) wheel.rotation.y = angle;
     },
 
+    setHeadlamps(on: boolean): void {
+      for (const beam of beams) beam.visible = on;
+    },
+
     dispose(): void {
       root.traverse((object) => {
         const mesh = object as Partial<Mesh>;
         mesh.geometry?.dispose();
       });
+      for (const beam of beams) beam.dispose();
       for (const material of disposables) material.dispose();
     },
   };
