@@ -78,12 +78,13 @@ const RACE_TIME_LIMIT = 180;
 const RACE_SECRET = 'secret.railRace';
 
 /**
- * The three rivals, on the three inner lanes.
+ * The three rivals, on the three inner lanes — who they *are*, not how well
+ * they drive.
  *
- * `skill` is how often they get a hazard right. None is perfect, because a child
- * has to be able to win; none is hopeless, because a race you cannot lose is not
- * a race. Ordered inside-out, so the nearest rival to the player is the sharpest
- * one — the cart she can actually see beside her is the one worth beating.
+ * How well they drive is `RIVAL_SKILL` in `simulate.ts`, beside the brains that
+ * read it and the checker that races it. It used to be a fourth field here, and
+ * that meant the balance check had to keep its own copy of the tuning it was
+ * supposed to be proving.
  *
  * No `cart` colour here any more — a rival's cart used to carry its own,
  * hand-picked colour, and it had drifted out of step with `track.ts`'s

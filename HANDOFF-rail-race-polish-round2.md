@@ -53,8 +53,13 @@ one PR. I own the shared chrome-devtools profile for this task.
 - [x] 5 headlamps as real SpotLights (new scope from Jim, mid-task) — committed,
       verified live at night and at noon. +1.1 ms frame time with all 8 lit.
 - [x] 4 fallible rivals — committed. Root cause was the rubber band, not skill.
-- [ ] 3 standings HUD  <- IN PROGRESS
-- [ ] final live QA of 3 + 4 together, PR
+- [x] 3 standings HUD — committed, verified live in portrait and landscape
+- [x] Rebased onto origin/main f464373 (duck-bar clearance + player pitch).
+      One conflict, in `RailRace.ts`: main added `DUCK_DROP` next to the
+      `CATCHUP`/`SWING` constants this branch deletes. Kept `DUCK_DROP`, dropped
+      the other two. Build and procgen re-run green after the rebase, and the
+      balance guard reports identical numbers.
+- [x] PR raised. **Do not merge my own work** — Overseer merges.
 
 ## What the two root causes actually were (do not lose these)
 
