@@ -246,6 +246,36 @@ const STAR_OUTLINE = 0.016;
  * frame grows — the same reasoning as {@link SUN_TEMPLE_HINGE}. */
 const STAR_TEMPLE_HINGE = 0.095 * (STAR_FRAME_SIZE / 0.235);
 
+/**
+ * How far back from each spike to round it, in `starGeometry`'s own
+ * pre-`size`-scale units (see that function's `pointRadius` doc comment) — a
+ * fixed fraction of a spike edge's own length (≈0.68 units at this star's
+ * `outer`/`inner` radii), not of {@link STAR_FRAME_SIZE}, so the rounding
+ * reads the same "friendlier, cartoonish" amount whatever size the star ends
+ * up drawn at, rather than getting proportionally sharper as the frame grows.
+ * Jim: the star's points read as "sharp/pointy" and needed softening without
+ * losing the star silhouette — this rounds a visible corner off each tip
+ * while leaving most of each spike's edge straight.
+ */
+const STAR_POINT_RADIUS = 0.16;
+
+/**
+ * `starGeometry`'s default puts one point straight down (see that function's
+ * `rotation` doc comment) — not how a five-point star is normally drawn.
+ * Jim asked for the classic "one point straight up" layout on the glasses
+ * specifically, so this flips it by half a turn; every other caller of
+ * `starGeometry` is untouched.
+ */
+const STAR_ROTATION = Math.PI;
+
+/** `starGeometry`, pre-bent to this file's rounded-tip, point-up look — see
+ * {@link STAR_POINT_RADIUS} and {@link STAR_ROTATION}. Passed to
+ * `shapedLensPair` in place of the bare `starGeometry` import so the frame
+ * and lens (built at two different sizes) both pick up the same treatment. */
+function starLensGeometry(size: number, depth: number): BufferGeometry {
+  return starGeometry(size, depth, 5, STAR_POINT_RADIUS, STAR_ROTATION);
+}
+
 /** Star glasses: a five-point star lens over each eye, gold-rimmed. */
 function createStarGlasses(): AssetHandle {
   const { root, fit } = glassesGroups('glasses.star');
@@ -253,7 +283,7 @@ function createStarGlasses(): AssetHandle {
   bridgePiece(fit, ART.glassesStarFrame);
   shapedLensPair(
     fit,
-    starGeometry,
+    starLensGeometry,
     ART.glassesStarFrame,
     ART.glassesStarLens,
     STAR_FRAME_SIZE,
