@@ -1,7 +1,13 @@
 # Handoff: Rail Race cart → Blender-authored `.glb` asset
 
-**Status: done, built (`npm run build` exits 0), not yet PR'd — do that next if
-you're picking this up.**
+**Status: round 2 done, built (`npm run build` exits 0). PR #156 open from
+round 1; round 2's commits need pushing/adding to it (or a follow-up PR) —
+do that next if you're picking this up.**
+
+**Read the "Round 2" section below first if you're continuing this** — the
+shape changed substantially after live feedback and the part list is no
+longer what round 1 shipped (`tub`/`nose` are gone; it's `hopper` +
+`frame-rail-l/r` now).
 
 ## The ask
 
@@ -142,9 +148,145 @@ still assigned in `cart.ts`, same as before, so that work should only need to
 touch `cart.ts`, not the asset. If it needs the lamp mesh repositioned, that's
 a Blender + `blend:cart` change, not a `cart.ts` number.
 
-## Next steps
+## Round 2 (same day): "half-wheels vanishing at random", and a reshape to a real mine-cart silhouette
 
-1. Open the PR (`gh pr create`), stating plainly what's verified above and
-   what still needs a browser look.
-2. Someone with the shared Chrome profile should actually look at a cart from
-   the side.
+Two things landed on top of each other from the coordinator, both addressed
+in this round:
+
+**Bug report.** After PR #156 was combined with three other rail-race
+fixes (RIDE_SCALE duck-bar/pitch, 2 laps, lookahead) and put in front of Jim
+live, he reported wheels "vanishing at random below a weird looking box
+thing" while riding/watching. The coordinator had already ruled out winding,
+`.visible`/spin-math and frustum culling before handing this back.
+
+**Root cause, found by reproducing the real viewing conditions rather than
+the level, static ones `check:cart-shape` originally tested.** Round 1's
+asset cleared the wheel by a *partial* margin only — the tub's floor sat at
+exactly the wheel's own axle height (0.16 m), which is provably fine for a
+level cart viewed dead side-on (which is all the original check tested), but:
+
+- `RailRace.ts`'s `placeCarts()` pitches the whole rigid cart with the hill
+  it's on: `cart.group.rotation.x = -Math.asin(tangent.y)`, several degrees
+  either way around this route's real climbs.
+- `camera.ts`'s rig looks down at a real angle (confirmed via
+  `check:rail-race`'s own printed figures, ~20° declination) — it is not a
+  level ray.
+
+Neither of those was in the original `check:cart-shape`, which only cast a
+level ray at a level cart — a check that cannot catch "vanishes at some
+points on the track and not others" by construction, because it only ever
+looked at one point, one angle. Reproduced properly with a script (not
+committed until turned into the permanent lap-sweep check, see below) that
+built the real `RAIL_RACE_PLAN.route`, the real `RaceCamera` (`rig.reset(s)`
+— **not** `rig.update()`, which needs several damped steps to converge and
+gave a nonsense camera position on a single call), and applied
+`RailRace.ts`'s own pitch formula verbatim. First attempt aimed test rays at
+each wheel's exact centre and found ~100% occlusion everywhere — a **false
+positive**: a wheel's geometric centre sits nested under the tub by
+construction and is essentially never the thing a viewer judges "is this
+wheel visible" by. Rebuilt the probe to sample points round the wheel's own
+*rim*, counting only the camera-facing hemisphere (the wheel's own far side
+not being visible is correct, not a bug) — that gave real numbers: ~75-92%
+of the rim clear at every point on the lap, i.e. never *fully* vanishing but
+genuinely shrinking and growing as the cart pitches, which is exactly what
+"vanishing at random" reads as from the sofa even without ever hitting 0%.
+
+**While this was in progress, Jim separately sent a reference silhouette**
+(a TurboSquid "cartoon mine cart" listing) with direction to reshape to an
+actual mine-cart read — a hopper that flares wider at the rim than at the
+floor, on a visible wheeled underframe — using this game's own bright toon
+colours, not the reference's presumably muted/rusty ones. **Could not fetch
+the reference page (403)** — worked from the well-established generic
+"cartoon mine cart" archetype instead (tapered hopper + underframe), which
+is defensible given the direction was explicitly "for silhouette/general
+mine-cart read, not exact geometry."
+
+**The coordinator's call, once both were in flight: skip root-causing the
+partial-clearance bug further and go straight to the reshape, on the bet that
+a properly-proportioned mine-cart hopper would resolve wheel visibility as a
+side effect.** It did, decisively — see the numbers below.
+
+### What changed
+
+`CART_PARTS` is now: `hopper` (replaces `tub`, and absorbs what `nose` used
+to be — the front is now the hopper's own sloped face, no separate nose
+mesh), `frame-rail-l`/`frame-rail-r` (new — one shared mesh, mirrored),
+`seat-back`, `seat-base`, `pet-seat`, `pet-back`, `wheel-fl/fr/bl/br`,
+`lamp-l/lamp-r`. Headlamps now mount directly on the hopper's front slope
+(parametrically, from the same floor/rim numbers the hopper itself is built
+from — not a second hand-picked coordinate).
+
+**The load-bearing change, not just cosmetic:** rather than exposing the
+wheel by a *partial* margin (which is what broke under pitch), the hopper's
+floor is now set **entirely above the wheel's own top point** —
+`FLOOR_Y = 0.38` against a wheel top of `2 * WHEEL_RADIUS = 0.32`, a 0.06 m
+clear margin in the cart's own **local, unrotated frame**. Because this is a
+fact about the rigid assembly's own geometry, not about any particular
+camera/pitch combination, it holds at every pitch and every camera angle —
+there is no rotation of the whole cart that can bring the hopper's floor
+plane down through the wheel's silhouette, because it never has to cross
+zero clearance to do it.
+
+The underframe rails (`frame-rail-l/r`) are thin (9 cm wide) and deliberately
+**inboard** of the wheels (`x = ±0.20` against the wheel's `x = ±0.31`) —
+close enough to visually read as "the hopper sits on a frame that reaches the
+wheels" without ever being positioned to occlude one. Real mine carts often
+run the axle beam right at the wheel's own x, which would look slightly more
+authentic, but risks exactly the kind of partial, angle-dependent occlusion
+this whole round was about fixing — not worth it for a detail this minor.
+
+Pet perch also moved: `pet-seat`/`pet-back` were poking about 4.5 cm through
+the hopper's own tapered wall at the height they sat at (`x` reached −0.41 m
+against an interior half-width of ~0.366 m there) — caught by a small
+one-off script comparing each interior part's real bounds against the
+hopper's own floor/rim interpolation, not by eye. Narrowed and moved inboard
+(`x: −0.30 → −0.26`, width `0.22 → 0.20`); re-checked clear at both the
+bottom and top of each part's own height range.
+
+### Verification for round 2
+
+- **`check:cart-shape.mts` rewritten** to add a **lap sweep**: 240 samples
+  round the whole route, using the real `RAIL_RACE_PLAN.route`, the real
+  `RaceCamera` (`rig.reset(travelled)`), and `RailRace.ts`'s own pitch
+  formula verbatim (not a copy) — not the generator's own numbers, the
+  actual classes the game runs. For the wheel nearest the camera at each
+  sample, ray-casts from the camera's real position to 24 points round that
+  wheel's own rim, counting only camera-facing points. Result on the new
+  hopper: **mean 1.000, worst 1.000, at every single one of the 240
+  samples** — full clearance holds everywhere, not just at the points that
+  happened to get tested before. This is the check that would have caught
+  round 1's bug before it reached Jim; it didn't exist yet.
+- Also kept the round-1 checks (level ray-cast, `markShared`, rail gauge,
+  `SEAT_HEIGHT`), updated for the new part names, and added a direct
+  local-frame assertion (`hopper floor > wheel top + 20mm margin`) that's
+  true independent of any camera/pitch — the property that actually matters.
+- Interior-part clipping checked with a one-off script (not committed —
+  the geometry values it depends on live in the Blender authoring script,
+  not in `cart.ts`, so there's no natural permanent home for it without
+  duplicating those numbers; flagging here instead) comparing `pet-seat`/
+  `pet-back`'s real world bounds against the hopper's own floor/rim taper at
+  the heights they occupy. Both clear now.
+- `npm run build` exits 0 (checked the real exit code).
+- **Still no browser.** Everything above is geometric/ray-cast verification
+  against the real built meshes and the real route/camera classes — strong
+  evidence the *occlusion* bug is fixed and the silhouette is a tapered
+  mine-cart shape, but not a substitute for someone actually looking at the
+  toon-shaded, lit result at gameplay distance. The reference silhouette
+  itself was also never actually seen (403 on the TurboSquid URL) — the
+  "wider top, narrower bottom hopper on a frame" read is the generic
+  archetype, not a verified match to Jim's specific reference image.
+
+### If you're picking this up
+
+1. Get eyes on it — browser or a render — and confirm: (a) it reads as a
+   mine cart, not a box; (b) wheels stay visibly wheel-shaped in motion,
+   not just geometrically unoccluded; (c) it's at least roughly what Jim's
+   TurboSquid reference showed (nobody on this branch has actually seen that
+   image).
+2. If the pitch-tilt itself still doesn't read as tilting (a *separate*
+   report from the coordinator, not addressed here — they'd already verified
+   `RailRace.ts`'s pitch computation produces correct values, so if it's
+   still not visible it's a perception/shading/framing question, not a
+   numbers one) — investigate separately, don't assume it shares a root
+   cause with the wheel bug.
+3. Push these commits / open a follow-up PR if #156 is already in review.
