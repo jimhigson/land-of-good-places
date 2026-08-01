@@ -344,8 +344,20 @@ export class CharacterCreation {
   private backpackColour: number = PALETTE.backpack;
   private shoeKind: ShoeKind = 'plain';
   private shoeColour: number = PALETTE.shoe;
-  /** `'none'` (the default) becomes `null` at {@link complete} — see `GlassesChoiceValue`. */
+  /** `'none'` (the default) becomes `null` wherever this leaves the file — see {@link glasses}. */
   private glassesKind: GlassesChoiceValue = 'none';
+
+  /**
+   * {@link glassesKind}, resolved to what everything downstream of this
+   * screen actually wants: `PreviewChoice.glasses` and
+   * `CharacterCreationChoice.glassesKind` are both `GlassesKind | null`, with
+   * `null` the real "no glasses" answer — `'none'` is this file's own button,
+   * not a value either of those ever sees. One conversion, read at both call
+   * sites, rather than the same ternary repeated at each.
+   */
+  private get glasses(): GlassesKind | null {
+    return this.glassesKind === 'none' ? null : this.glassesKind;
+  }
   /**
    * `null` means "no hat" — today that only ever happens transiently while an
    * exclusive hair style (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) is selected;
@@ -1012,7 +1024,7 @@ export class CharacterCreation {
       // typo'd id would take, not a special case added for this.
       hatId: this.hatId ?? '',
       petId: this.petId,
-      glasses: this.glassesKind === 'none' ? null : this.glassesKind,
+      glasses: this.glasses,
     }, focus);
   }
 
@@ -1041,7 +1053,7 @@ export class CharacterCreation {
         backpackColour: this.backpackColour,
         shoeKind: this.shoeKind,
         shoeColour: this.shoeColour,
-        glassesKind: this.glassesKind === 'none' ? null : this.glassesKind,
+        glassesKind: this.glasses,
         hat,
         pet,
       };
