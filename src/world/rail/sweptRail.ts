@@ -24,14 +24,19 @@ import { CatmullRomCurve3, TubeGeometry, Vector3, type BufferGeometry } from 'th
 
 /**
  * Whatever can answer "where is the track at `distance`, and which way is it
- * heading?" — `TrainRoute`, `CoasterRoute` and `RailRaceRoute` all satisfy this
- * (the last one once a lane is bound to it), and none of them had to change to.
+ * heading?"
+ *
+ * Deliberately spelled `pointAt`/`tangentAt` — the names `TrainRoute` and
+ * `CoasterRoute` already use — so that a route **is** a `RailSampler` with no
+ * adapter, no wrapper and nothing to keep in step. `Coaster` hands `this.route`
+ * straight to {@link sweptRails}. Only the Rail Race needs a small adapter, and
+ * only because a lane has to be bound to its ring first.
  */
 export interface RailSampler {
   /** Total length of the run, in metres. */
   readonly length: number;
-  point(distance: number, target: Vector3): Vector3;
-  tangent(distance: number, target: Vector3): Vector3;
+  pointAt(distance: number, target: Vector3): Vector3;
+  tangentAt(distance: number, target: Vector3): Vector3;
 }
 
 export interface SweptRailOptions {
@@ -82,8 +87,8 @@ export function sweptRail(
   const last = closed ? samples - 1 : samples;
   for (let i = 0; i <= last; i += 1) {
     const distance = (i / samples) * sampler.length;
-    sampler.point(distance, centre);
-    sampler.tangent(distance, along);
+    sampler.pointAt(distance, centre);
+    sampler.tangentAt(distance, along);
     const sideX = along.z;
     const sideZ = -along.x;
     const norm = Math.hypot(sideX, sideZ) || 1;

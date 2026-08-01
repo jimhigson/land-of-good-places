@@ -1,16 +1,15 @@
 import {
   BoxGeometry,
-  CatmullRomCurve3,
   CylinderGeometry,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
   Quaternion,
-  TubeGeometry,
   Vector3,
 } from 'three';
 import { CoasterRoute, checkCoasterClearances, STATION_HEIGHT } from './route';
+import { sweptRails } from '../rail/sweptRail';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
@@ -277,42 +276,29 @@ export class Coaster implements GameSystem {
 
     const step = 1.4;
     const segments = Math.ceil(this.route.length / step);
-    const railGauge = 0.55;
+
     // The rails are **swept**, not chopped (family note, 28 July): a rail built
     // from one straight box per 1.4 m read as a row of disjointed sticks
-    // wherever the loop bends, which on a coaster is most of it. Two closed
-    // curves — the solved centre line offset left and right — tubed along their
-    // whole length instead, so a bend is a bend.
+    // wherever the loop bends, which on a coaster is most of it.
     //
-    // A circular cross-section is why this can be a plain `TubeGeometry`: the
-    // Frenet frame `TubeGeometry` builds may twist along a curve with torsion,
-    // and on a tube of circular section that twist is invisible. Two draw calls
-    // per coaster, and the ties and pylons stay instanced.
-    const railGeometries = [1, -1].map((sideSign) => {
-      const points: Vector3[] = [];
-      const centre = new Vector3();
-      const along = new Vector3();
-      for (let i = 0; i < segments; i += 1) {
-        const d = i * step;
-        this.route.pointAt(d, centre);
-        this.route.tangentAt(d, along);
-        // Sideways in the ground plane: the track has no banking, so "left of
-        // the rail" is the horizontal normal, not a rolled one.
-        const sideX = along.z;
-        const sideZ = -along.x;
-        const norm = Math.hypot(sideX, sideZ) || 1;
-        points.push(
-          new Vector3(
-            centre.x + (sideX / norm) * sideSign * railGauge,
-            centre.y,
-            centre.z + (sideZ / norm) * sideSign * railGauge,
-          ),
-        );
-      }
-      const railCurve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
-      // Two tubular segments a metre: enough that the tightest bend the solver
-      // can produce still reads as a curve rather than a polygon.
-      return new TubeGeometry(railCurve, Math.ceil(this.route.length * 2), 0.075, 6, true);
+    // The sweep itself lives in `world/rail/sweptRail.ts` — the park's one way
+    // of turning a route into rail geometry, shared with the Rail Race's four
+    // lanes. This used to be its own copy of the same twenty lines, which had
+    // already drifted: it called its offset `railGauge = 0.55` and applied it as
+    // a **half**-offset, while the shared helper (and `train/track.ts` before
+    // it) take `gauge` to mean the railway's own centre-to-centre. Hence 1.1
+    // here: the same rails, the standard name for the number.
+    const railGeometries = sweptRails(this.route, {
+      gauge: 1.1,
+      radius: 0.075,
+      // Denser than the 1.4 m this used to sample at, and a real fix rather than
+      // a tidy-up. Measured against the solved track, the old sweep's rails
+      // strayed up to 224 mm from it through the tightest bends — three times
+      // the rail's own radius, so the rail visibly left the ties it is supposed
+      // to be bolted to. At 0.45 m that is 20 mm, comfortably invisible. It
+      // costs control points, not vertices: the tube's segment count is set by
+      // `tubularPerMetre` and is unchanged, so this is the same two draw calls.
+      step: 0.45,
     });
     // The rails cast (ARCHITECTURE.md, *rendering notes*: shadow casting is
     // opt-out and every caster is drawn twice). A coaster is a thing in the

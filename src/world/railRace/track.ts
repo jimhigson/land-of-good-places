@@ -109,8 +109,8 @@ export function buildRailRaceTrack(
     // the park to the shared sweeper.
     const sampler: RailSampler = {
       length: route.length,
-      point: (distance, target) => route.pointAt(lane, distance, target),
-      tangent: (distance, target) => route.tangentAt(lane, distance, target),
+      pointAt: (distance, target) => route.pointAt(lane, distance, target),
+      tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
     };
     for (const geometry of sweptRails(sampler, {
       gauge: RAIL_GAUGE,
