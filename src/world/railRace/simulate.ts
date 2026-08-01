@@ -26,22 +26,18 @@ import type { RailRaceRoute } from './route';
 /**
  * How many times round.
  *
- * **Three, since the 1 August 2026 physics tuning — and the change is a
- * consequence of that tuning rather than a wish of its own.** The family asked
- * for a faster *cart*, not a shorter *race*, and the two are the same knob here:
- * the new thrust and drag roughly double the cart's speed, which took a good run
- * over two laps from 52 s down to 25 s and tripped this file's own "barely a
- * ride" guard in `scripts/check-rail-race.mts`. A third lap gives that back —
- * 37 s for a good run, 65 s for a child who never lets go — so the ride lasts
- * about what it always did while feeling twice as quick, which is the whole of
- * what was actually asked for.
- *
- * Four laps was measured too, and restores the old duration more exactly (49 s
- * good, 87 s worst). It was rejected: 87 s is close to the 105 s ceiling this
- * park calls "too long for one go", and the child who would sit through it is
- * precisely the one who is not enjoying it.
+ * **Two, per the family's own 1 August 2026 verdict, after actually racing
+ * the tripled-lap version live.** The 1 August physics tuning roughly doubled
+ * the cart's speed, which on its own would have taken a good run over two
+ * laps from 52 s down to 25 s and tripped this file's own "barely a ride"
+ * guard in `scripts/check-rail-race.mts` — a third lap was added same-day to
+ * paper over exactly that. Once the family played it, three read as too long
+ * rather than too short; two is the family's explicit answer, not a
+ * miscalculation being reintroduced. If `scripts/check-rail-race.mts`'s
+ * "barely a ride" guard trips at two laps with the current physics, that is
+ * the physics to revisit (`THRUST`/drag below), not this constant.
  */
-export const RACE_LAPS = 3;
+export const RACE_LAPS = 2;
 
 /**
  * Acceleration while the button is held, m/s².

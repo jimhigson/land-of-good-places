@@ -95,13 +95,13 @@ import { LANE_RADII, PLAYER_LANE, type RailRaceRoute } from './route';
  * Was 27 (a shade more than the 26.1 m the first "too zoomed out" fix's shipped
  * rig showed, so that fix didn't quietly buy its win with less road). Still too
  * zoomed out at 27, on the family's own playtest of the deployed rig on
- * 1 August 2026 — halved to 13.5 on that verdict. A shorter promise costs a
- * hazard some of its 1.2 seconds of warning, but the whole point of this rig is
- * that the rider is the one being framed, not the road; if warning time turns
- * out to matter more than closeness once this is played again, this is the
- * number to raise, not {@link RIDER_SCREEN_X_PORTRAIT}.
+ * 1 August 2026 — halved to 13.5 on that verdict. Raised again the same day,
+ * by 50% to 20.25, once the family had actually raced with the reworked
+ * physics (roughly 2x faster) and 2.5x `RIDE_SCALE` live: 13.5 read too close
+ * once the cart itself filled more of the screen. This is still the number to
+ * move if warning time and closeness pull against each other again.
  */
-export const AHEAD = 13.5;
+export const AHEAD = 20.25;
 
 /**
  * Where the look-ahead point sits, as a fraction of the way across the picture.

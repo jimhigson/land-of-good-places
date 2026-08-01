@@ -43,31 +43,43 @@
  * stretches perfectly and the bars not at all, so against `perfect` the spark
  * drag cancels on both sides and what remains is exactly what a bonk costs.
  *
- * ### Mutation-tested, on 1 August 2026 — and re-tested the same day
+ * ### Mutation-tested, on 1 August 2026 — and re-tested twice the same day
  *
  * A regression guard nobody has watched fail is not a guard. Measured, by
  * reintroducing the original faults one at a time:
  *
  * ```
- *                                        BEFORE the physics tuning   AFTER
- * fix in place                          bars worth  15.6 s  exit 0   24.5 s  exit 0
- * thrust un-gated during the wobble      "     "     7.8 s  exit 1   13.2 s  exit 0 (!)
- * a bonk costs no speed                  "     "     7.3 s  exit 1    9.9 s  exit 0 (!)
- * both (the original Coaster behaviour)  "     "    -0.2 s  exit 1   -0.2 s  exit 1
+ *                                     pre-1-Aug   1-Aug physics, 3 laps   1-Aug physics, 2 laps
+ * fix in place                        15.6 s  0    24.5 s  0               16.3 s  0
+ * thrust un-gated during the wobble    7.8 s  1    13.2 s  0 (!)            8.7 s  1
+ * a bonk costs no speed                7.3 s  1     9.9 s  0 (!)            6.6 s  1
+ * both (the original Coaster bug)     -0.2 s  1    -0.2 s  1               -0.1 s  1
  * ```
+ * (exit code shown after each `s` figure)
  *
- * **The right-hand column is why this table is worth keeping.** The family's
+ * **The middle column is why this table is worth keeping.** The family's
  * 1 August physics tuning roughly doubled the cart's speed and took the race to
  * three laps, which scaled every figure here up — and the old 8 s threshold,
  * left alone, would have gone on passing while *either* single fault was live.
  * It would have kept reporting OK on precisely the bug it was written for. The
- * mutations were re-run rather than the number re-guessed, and the threshold is
- * now **18 s**: 36% clear of the worst surviving mutation (13.2 s) and 27% under
- * what the real thing is worth (24.5 s), so it has real margin on both sides
- * rather than the 2.5% the old 8-against-7.8 had.
+ * mutations were re-run rather than the number re-guessed, giving 18 s: 36%
+ * clear of the worst surviving mutation (13.2 s) and 27% under what the real
+ * thing was worth (24.5 s).
+ *
+ * **The right-hand column is the same exercise again, hours later, when the
+ * family played the three-lap version live and asked for two laps instead
+ * with the speed left alone.** Fewer laps means fewer duck bars encountered
+ * overall, which scales every figure in this table down again even though
+ * nothing about what a single bonk costs changed. Re-measured rather than
+ * rescaled, the same as before: the threshold is now **12 s** — 38% clear of
+ * the worst surviving mutation (8.7 s) and 26% under the real thing (16.3 s),
+ * the same margins as the 18 s figure it replaces, just against smaller
+ * numbers. `perfect.seconds > 30` moved the same way, to **20 s** — the real
+ * figure is 25.1 s, a floor the family's own two-lap verdict makes the
+ * correct floor to move, not a regression to paper over.
  *
  * If you change `RACE_LAPS`, `THRUST` or the drag constants again, re-run these
- * four mutations. The absolute figure moves with all of them.
+ * four mutations. The absolute figures move with all of them.
  */
 
 import './headless-canvas.mjs';
@@ -646,13 +658,13 @@ require(
   'the bars-only run hit no duck bars at all — the bars are not being tested.',
 );
 require(
-  barCost > 18,
+  barCost > 12,
   `DUCKING IS POINTLESS: hitting every duck bar costs only ${barCost.toFixed(1)} s once spark ` +
     'drag is taken out of both sides. A bonk must cost more than the coasting it saved, or the ' +
     'bars are decoration — this is the 28 July family bug, and it is the assertion that fails ' +
     'when the wobble stops gating thrust. See the mutation table at the top of this file before ' +
-    'touching this number: it was 8 s at the pre-1-August physics and had to be re-measured, not ' +
-    'rescaled, when the cart got faster.',
+    'touching this number: it was 18 s at three laps and had to be re-measured, not rescaled, ' +
+    'when the race went to two.',
 );
 require(
   hold.sparkSeconds > 1,
@@ -682,7 +694,7 @@ require(
   `even the worst run takes ${hold.seconds.toFixed(1)} s — too long for one go.`,
 );
 require(
-  perfect.seconds > 30,
+  perfect.seconds > 20,
   `a good run is over in ${perfect.seconds.toFixed(1)} s — barely a ride.`,
 );
 

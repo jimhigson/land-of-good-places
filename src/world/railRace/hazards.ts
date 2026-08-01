@@ -1,4 +1,5 @@
 import { Rng } from '../../core/mathUtils';
+import { RIDE_SCALE } from './route';
 
 /**
  * **The two things you have to let go for.**
@@ -23,8 +24,16 @@ import { Rng } from '../../core/mathUtils';
  * thumb, and the patience to keep it off.
  */
 
-/** How high above the rail head a duck bar hangs. Ducking gets you under it. */
-export const DUCK_CLEARANCE = 1.15;
+/**
+ * How high above the rail head a duck bar hangs. Ducking gets you under it.
+ *
+ * Scaled by `RIDE_SCALE` like the rail gauge and the cart itself — this is a
+ * purely visual clearance (bonking is decided by button state at the moment
+ * of crossing, not an actual pose/collision test, see the header above), but
+ * it was missed when `RIDE_SCALE` first shipped, and a bar sized for the old,
+ * smaller cart hung far too low over the new 2.5x one.
+ */
+export const DUCK_CLEARANCE = 1.15 * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.

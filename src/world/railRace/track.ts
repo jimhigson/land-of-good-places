@@ -209,14 +209,23 @@ export function buildRailRaceTrack(
   keep(frameMaterial);
   keep(barMaterial);
 
-  const postGeometry = new CylinderGeometry(0.07, 0.09, DUCK_CLEARANCE + 0.3, 6);
-  const barGeometry = new BoxGeometry(BAR_HALF_SPAN * 2, 0.22, 0.26);
+  const postGeometry = new CylinderGeometry(
+    0.07 * RIDE_SCALE,
+    0.09 * RIDE_SCALE,
+    DUCK_CLEARANCE + 0.3 * RIDE_SCALE,
+    6,
+  );
+  const barGeometry = new BoxGeometry(BAR_HALF_SPAN * 2, 0.22 * RIDE_SCALE, 0.26 * RIDE_SCALE);
   // The bar itself is the warning light. Lamps on the posts were legible at a
   // standstill and invisible at fourteen metres a second; a stripe of amber
   // right where the thing you must duck under is cannot be missed. A sleeve
   // around the bar rather than the bar's own material, so the toon shading
   // underneath still shapes it.
-  const sleeveGeometry = new BoxGeometry(BAR_HALF_SPAN * 2 - 0.04, 0.28, 0.32);
+  const sleeveGeometry = new BoxGeometry(
+    BAR_HALF_SPAN * 2 - 0.04 * RIDE_SCALE,
+    0.28 * RIDE_SCALE,
+    0.32 * RIDE_SCALE,
+  );
   keep(postGeometry);
   keep(barGeometry);
   keep(sleeveGeometry);
@@ -253,7 +262,7 @@ export function buildRailRaceTrack(
       for (const side of [-1, 1] as const) {
         position.set(
           point.x + outward.x * side * BAR_HALF_SPAN,
-          point.y + (DUCK_CLEARANCE + 0.3) / 2 - 0.15,
+          point.y + (DUCK_CLEARANCE + 0.3 * RIDE_SCALE) / 2 - 0.15 * RIDE_SCALE,
           point.z + outward.z * side * BAR_HALF_SPAN,
         );
         matrix.compose(position, rotation, one);
