@@ -529,34 +529,75 @@ interface TrestleSpot {
   readonly z: number;
 }
 
+/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
+function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+  if (!collision.isClearCircle(x, z, 1.1)) return false;
+  if (distanceToPath(x, z) < 2.8) return false;
+  if (distanceToRailCorridor(x, z) < 2.4) return false;
+  const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
+    (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
+  );
+  return !pinchesCorridor;
+}
+
+/**
+ * How far `trestleSpots` will nudge a candidate before giving up on it — along
+ * the route (metres of arc) and across it (metres off `NOMINAL_RADIUS`).
+ * Ordered closest-first so the search always takes the smallest nudge that
+ * actually clears, not an arbitrary one that happens to. Kept well inside
+ * half of `TRESTLE_SPACING` (12 m) so two neighbouring slots' searches can
+ * never land on the same ground.
+ */
+const ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3];
+const RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
+
 /**
  * Where the ring can actually be stood up.
  *
  * The same predicate set the coaster's pylons use, plus one this ride needs and
  * the coaster does not: the ring runs *inside the railway's own band*, so a leg
- * has to clear the train's corridor as well as the walking network. Where it
- * cannot — over the railway, over a path, in the gap between two plots — the
- * trestle is simply skipped. The track shrugs off a missing support; the walk
- * network cannot shrug off a misplaced one.
+ * has to clear the train's corridor as well as the walking network.
+ *
+ * **A rigid, one-shot candidate grid found almost nowhere to stand.** The first
+ * version of this function tried exactly one point per slot — `NOMINAL_RADIUS`
+ * at the slot's own arc position — and gave up outright if that one point was
+ * blocked. Measured against the real, built park (1 August 2026): **1 of 28**
+ * candidates survived. The ride's own docs already say it "runs through a band
+ * of the park that is already full" — garden planting, the walking network, the
+ * railway corridor — and that density is exactly what a single fixed point
+ * cannot route around. The result was not "a few trestles skipped here and
+ * there", which the docs' "shrugs off a missing support" language anticipates;
+ * it was a 336 m elevated loop standing on one leg.
+ *
+ * So each slot now searches a small, bounded neighbourhood — a handful of
+ * along-the-route and across-the-ring nudges, closest first — before it is
+ * actually given up on. Against the same real park this finds a clear spot for
+ * **25 of 28**. The remaining few are still allowed to go missing, on purpose:
+ * over the railway, over a path, in the gap between two plots, no amount of
+ * local nudging *should* find a leg — the walk network cannot shrug off a
+ * misplaced one, and a rare true gap is what "the track shrugs off a missing
+ * support" was always meant to cover.
  */
 function trestleSpots(route: RailRaceRoute, collision: CollisionWorld): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
   const count = Math.floor(route.length / TRESTLE_SPACING);
   for (let i = 0; i < count; i += 1) {
-    const at = (i / count) * route.length;
-    const theta = route.angleAt(at);
-    const x = Math.cos(theta) * NOMINAL_RADIUS;
-    const z = Math.sin(theta) * NOMINAL_RADIUS;
-
-    if (!collision.isClearCircle(x, z, 1.1)) continue;
-    if (distanceToPath(x, z) < 2.8) continue;
-    if (distanceToRailCorridor(x, z) < 2.4) continue;
-    const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
-      (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
-    );
-    if (pinchesCorridor) continue;
-
-    spots.push({ at, x, z });
+    const at0 = (i / count) * route.length;
+    let placed: TrestleSpot | null = null;
+    search: for (const da of ARC_NUDGES) {
+      const at = at0 + da;
+      const theta = route.angleAt(at);
+      for (const dr of RADIAL_NUDGES) {
+        const radius = NOMINAL_RADIUS + dr;
+        const x = Math.cos(theta) * radius;
+        const z = Math.sin(theta) * radius;
+        if (groundIsClear(x, z, collision)) {
+          placed = { at, x, z };
+          break search;
+        }
+      }
+    }
+    if (placed) spots.push(placed);
   }
   return spots;
 }

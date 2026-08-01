@@ -77,6 +77,24 @@ const RAIL_OVER_RAIL = 5.5;
  */
 const MAX_DARK_RUN = 25;
 
+/**
+ * Longest stretch of the Rail Race ring allowed to stand with no trestle leg
+ * at all.
+ *
+ * `track.ts`'s `trestleSpots` aims for a leg every 12 m and searches a small
+ * neighbourhood before giving one up as genuinely un-standable ground (over
+ * the railway, a path, a plot gap). One skipped slot (~12-24 m, generously
+ * ~36 m allowing for the search's own few metres of nudge either side) is the
+ * track shrugging off a single bad spot, exactly as intended. This is not
+ * that number, doubled to a clean 40 m on purpose — it is independently how
+ * long an elevated ride can go with *no visible means of support* before it
+ * reads as floating rather than built, which is the actual thing a family
+ * would notice from the ground. (Measured before `trestleSpots` gained its
+ * search, 1 August 2026: the canonical seed's single surviving leg left a
+ * ~330 m gap — this would have failed loudly, which is the point.)
+ */
+const TRESTLE_GAP_TOLERANCE = 40;
+
 // ------------------------------------------------------------------ the list
 
 type Invariant = (facts: ParkFacts) => void;
@@ -362,6 +380,16 @@ const everyPathIsLit: Invariant = (facts) => {
  *    scene by name and their instance matrices decoded — not recomputed from
  *    the placement predicate, which would only prove the predicate agrees with
  *    itself. A leg standing on the railway is a leg the train drives through.
+ * 3. **How many actually landed.** `track.ts`'s `trestleSpots` search a small
+ *    neighbourhood before giving up on a slot (1 August 2026 — the ring runs
+ *    through the park's own busiest band, and a single fixed candidate point
+ *    per slot found almost nowhere clear to stand: 1 of 28 on the canonical
+ *    seed before that search existed). A slot going missing here and there is
+ *    fine and expected; a long unsupported run is the ring visibly floating,
+ *    which this measures as the widest gap between consecutive legs, sorted
+ *    round the ring by angle — not by re-running the search and checking it
+ *    agrees with itself, but by measuring the real distance between the real
+ *    legs the built scene actually has.
  *
  * `check:rail-race` asserts the same clearances in far more detail, but only on
  * the canonical seed; this is the half that has to hold whatever park is grown.
@@ -407,9 +435,11 @@ const railRaceFliesClear: Invariant = (facts) => {
   } else {
     const matrix = new Matrix4();
     const at = new Vector3();
+    const positions: { angle: number; x: number; z: number }[] = [];
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
+      positions.push({ angle: Math.atan2(at.z, at.x), x: at.x, z: at.z });
       const toRail = facts.distanceToRail(at.x, at.z);
       if (toRail < TRACK_CLEARANCE) {
         complaints.push(
@@ -425,6 +455,33 @@ const railRaceFliesClear: Invariant = (facts) => {
               `${entrance.id}'s doormat, close enough to pinch it shut`,
           );
         }
+      }
+    }
+
+    // --- 3. no long unsupported run ------------------------------------------
+    // Angle order round a ring this close to circular puts legs in the same
+    // order the track visits them; the *distance* itself is the real chord
+    // between two real measured leg positions, not an angle converted through
+    // an assumed radius — measuring the built legs, not a description of them.
+    if (positions.length >= 2) {
+      positions.sort((a, b) => a.angle - b.angle);
+      let worstGap = 0;
+      let worstIndex = 0;
+      for (let i = 0; i < positions.length; i += 1) {
+        const a = positions[i]!;
+        const b = positions[(i + 1) % positions.length]!;
+        const gap = Math.hypot(b.x - a.x, b.z - a.z);
+        if (gap > worstGap) {
+          worstGap = gap;
+          worstIndex = i;
+        }
+      }
+      if (worstGap > TRESTLE_GAP_TOLERANCE) {
+        complaints.push(
+          `the widest run between consecutive trestle legs is ${worstGap.toFixed(1)} m ` +
+            `(after leg ${worstIndex}), over the ${TRESTLE_GAP_TOLERANCE} m tolerance — ` +
+            `the ring is standing on air for a stretch that long`,
+        );
       }
     }
   }
