@@ -239,7 +239,8 @@ export function stepRider(
     DRAG_LINEAR * rider.speed +
     DRAG_SQUARE * rider.speed * rider.speed +
     (rider.sparking ? SPARK_DRAG : 0);
-  rider.speed = clamp(rider.speed + (thrust - drag - HILL_PULL * slope) * dt, MIN_SPEED, MAX_SPEED);
+  const speedCap = band > 1 ? MAX_SPEED * band : MAX_SPEED;
+  rider.speed = clamp(rider.speed + (thrust - drag - HILL_PULL * slope) * dt, MIN_SPEED, speedCap);
 
   const before = rider.travelled;
   rider.travelled += rider.speed * dt;
@@ -352,22 +353,55 @@ export const RIVAL_SKILL: readonly number[] = [0.62, 0.74, 0.85];
  * how quickly it gets there:
  *
  * - **Behind**: a *slow* ramp to a generous ceiling. A rival ten metres back
- *   gets almost nothing (band 1.018), so a bonk she just watched still costs
- *   that rival real ground in the stretch where she can see it. A rival ninety
- *   metres back gets the full +0.16 and is towed home, so the field never
- *   disintegrates and nobody is lapped. Measured: this is what keeps a
- *   perfectly-played race a race — with a flat ceiling instead, playing well
- *   won by over 100 m, a third of a lap, which is not "the rivals stay near
- *   you" by any reading.
+ *   gets almost nothing (band 1.07), so a bonk she just watched still costs
+ *   that rival real ground in the stretch where she can see it. A rival a
+ *   hundred metres back gets the full +0.7 and is towed home.
  * - **Ahead**: a *fast* ramp to a hard −0.26 (terminal 25.5 m/s against the
  *   player's 30.8). A rival who gets in front sags within forty metres and is
  *   reelable, which is the half of the mechanic that lets a child come back.
  *
- * The point is a close race that a six-year-old can *win*, not a fair one.
+ * **Raised again on 1 August 2026, PR #157 review round 2**, after a second
+ * reviewer ran `simulateField('perfect', seed)` per-seed across the 24 fixed
+ * seeds `scripts/check-rail-race.mts` sweeps, rather than trusting its
+ * field-average assertion, and found a 16.1–135.6 m spread — five of the 24
+ * individually over the "quarter of a lap" ceiling the check's own prose
+ * claimed to enforce, one of them a 135.6 m procession. Two things were
+ * wrong, not one:
+ *
+ * 1. `stepRider`'s speed clamp was a flat `MAX_SPEED`, so a badly-behind
+ *    rival's drag-limited terminal (33.7 m/s at the old ceiling, band 1.16)
+ *    was silently re-capped straight back down to 33 — the clamp, not the
+ *    band, was the real ceiling on a tow. Fixed by scaling the clamp with
+ *    `band` (`stepRider`'s `speedCap`), so a rubber-banded rival's ceiling
+ *    actually rises with it instead of quietly disappearing into a second,
+ *    unrelated cap.
+ * 2. Even with that fixed, the *old* ceiling and ramp (0.16 at 0.0018/m)
+ *    were too gentle to close the deficits a rival's own bad luck can
+ *    produce: a rival's lapses roll independently per second of open track
+ *    ({@link rivalWantsHold}), so a slow rival spends *longer* on that
+ *    track and gets *more* rolls, a compounding spiral that measured out to
+ *    leads of 150–230 m mid-race on the worst of the 24 seeds — over a third
+ *    of the whole 672 m race. Closing that from a ~7% speed edge in the
+ *    remaining distance was never going to happen. Raised the ramp and
+ *    ceiling until it could: `CATCHUP_BEHIND` from 0.0018 to 0.007 and
+ *    `SWING_BEHIND` from 0.16 to 0.7 (reached at 100 m behind rather than
+ *    89 m, but now worth far more once there — drag-limited terminal 42
+ *    m/s instead of a clamp-truncated 33).
+ *
+ * Together these take the 24-seed spread from 16.1–135.6 m (mean 63.9, the
+ * figure the old field-average assertion actually checked) to 4.2–86.0 m
+ * (mean 38.3) — every one of the 24 now inside a real, individually-checked
+ * ceiling, not just the average. A wider, non-canonical sweep of 500 seeds
+ * came back 2.4–113.7 m with only one seed over 110 m, so this is a thinned
+ * tail rather than a hard analytic bound — which is exactly why the check
+ * asserts the 24 fixed seeds individually rather than trusting a formula.
+ *
+ * The point is still a close race that a six-year-old can *win*, not a fair
+ * one — and, now, not a runaway one either.
  */
-const CATCHUP_BEHIND = 0.0018;
+const CATCHUP_BEHIND = 0.007;
 const CATCHUP_AHEAD = 0.006;
-const SWING_BEHIND = 0.16;
+const SWING_BEHIND = 0.7;
 const SWING_AHEAD = 0.26;
 
 /**
