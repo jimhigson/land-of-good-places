@@ -69,9 +69,25 @@ export interface RailRaceTrack {
    * game, where it taught the rule in about two hazards without a word.
    */
   setAlerts(lapOffset: number, safe: boolean, elapsed: number): void;
-  /** Brightens the black stretches while somebody is sparking on them. */
-  setSparking(sparking: boolean, elapsed: number): void;
+  /**
+   * Brightens only the black stretches somebody is actually sparking on —
+   * this zone, this lane — never the whole ring at once.
+   *
+   * `active` is every (zone, lane) currently sparking this frame, found by
+   * `RailRace.ts` from each cart's own `rider.zoneCursor`. A rival sparking on
+   * the far side of the loop still lights up on their own rail (that is
+   * intentional — see `RailRace.ts`'s header), it just no longer lights up
+   * every other black stretch in the park along with it.
+   */
+  setSparking(active: readonly SparkingSegment[], elapsed: number): void;
   dispose(): void;
+}
+
+/** One (zone, lane) pair currently sparking, for {@link RailRaceTrack.setSparking}. */
+export interface SparkingSegment {
+  /** Index into the lap's `HazardLayout.zones`, not the multi-lap schedule. */
+  readonly zoneIndex: number;
+  readonly lane: number;
 }
 
 /** The colours a warning runs through: calm cream, amber warning, mint safe. */
@@ -147,11 +163,31 @@ export function buildRailRaceTrack(
   // One ribbon geometry across every zone of every lane: a plate laid between
   // the two rails, dark instead of pink, which is the "black part of the track"
   // in the brief. One geometry and one material, so the whole set is one draw
-  // call however many stretches the layout produces.
-  const sparkMaterial = new MeshBasicMaterial({ color: PALETTE.ink, toneMapped: false });
+  // call however many stretches the layout produces — per-vertex colour (like
+  // the duck-bar sleeves' per-instance colour below) is what lets that one draw
+  // call still light up just the zone×lane actually sparking, rather than
+  // needing a material — and therefore a draw call — per stretch.
+  const sparkMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   keep(sparkMaterial);
-  const sparkGeometry = buildSparkRibbons(route, layout);
+  const { geometry: sparkGeometry, segments: sparkSegments } = buildSparkRibbons(route, layout);
   keep(sparkGeometry);
+  const sparkVertexCount = sparkGeometry.attributes.position!.count;
+  const sparkColours = new Float32Array(sparkVertexCount * 3);
+  const inkFill = new Color(PALETTE.ink);
+  for (let i = 0; i < sparkVertexCount; i += 1) {
+    sparkColours[i * 3] = inkFill.r;
+    sparkColours[i * 3 + 1] = inkFill.g;
+    sparkColours[i * 3 + 2] = inkFill.b;
+  }
+  const sparkColourAttribute = new BufferAttribute(sparkColours, 3);
+  sparkGeometry.setAttribute('color', sparkColourAttribute);
+  // Keyed the same way `active` segments arrive from `RailRace.ts`, so
+  // `setSparking` is an O(active carts) lookup rather than a scan of every
+  // zone×lane every frame.
+  const sparkSegmentsByKey = new Map<string, { vertexStart: number; vertexCount: number }>();
+  for (const segment of sparkSegments) {
+    sparkSegmentsByKey.set(segmentKey(segment.zoneIndex, segment.lane), segment);
+  }
   const sparkRibbons = decal(new Mesh(sparkGeometry, sparkMaterial));
   sparkRibbons.name = 'railRace:spark-zones';
   sparkRibbons.frustumCulled = false;
@@ -351,10 +387,31 @@ export function buildRailRaceTrack(
       sleeves.instanceMatrix.needsUpdate = true;
     },
 
-    setSparking(sparking: boolean, elapsed: number): void {
+    setSparking(active: readonly SparkingSegment[], elapsed: number): void {
       // A hard flicker rather than a smooth pulse: sparks are not a mood light.
-      const flash = sparking ? (Math.sin(elapsed * 47) > 0 ? 1 : 0.35) : 0;
-      sparkMaterial.color.copy(sparkColour.copy(INK).lerp(FLASH, flash));
+      // One shared clock for every active zone — they don't need independent
+      // phases to read as "sparking", only as not-a-smooth-pulse.
+      const flash = Math.sin(elapsed * 47) > 0 ? 1 : 0.35;
+      sparkColour.copy(INK).lerp(FLASH, flash);
+      const array = sparkColourAttribute.array as Float32Array;
+      // Every vertex starts each frame calm, so a zone that stopped sparking
+      // since last frame goes dark again rather than sticking lit.
+      for (let i = 0; i < array.length; i += 3) {
+        array[i] = INK.r;
+        array[i + 1] = INK.g;
+        array[i + 2] = INK.b;
+      }
+      for (const { zoneIndex, lane } of active) {
+        const segment = sparkSegmentsByKey.get(segmentKey(zoneIndex, lane));
+        if (!segment) continue;
+        const end = segment.vertexStart + segment.vertexCount;
+        for (let v = segment.vertexStart; v < end; v += 1) {
+          array[v * 3] = sparkColour.r;
+          array[v * 3 + 1] = sparkColour.g;
+          array[v * 3 + 2] = sparkColour.b;
+        }
+      }
+      sparkColourAttribute.needsUpdate = true;
     },
 
     dispose(): void {
@@ -365,6 +422,17 @@ export function buildRailRaceTrack(
 
 // ---------------------------------------------------------------- internals
 
+/** Where one zone×lane's vertices live in the combined spark-ribbon geometry. */
+interface SparkRibbonSegment extends SparkingSegment {
+  readonly vertexStart: number;
+  readonly vertexCount: number;
+}
+
+/** The lookup key `setSparking` and `buildSparkRibbons` agree on. */
+function segmentKey(zoneIndex: number, lane: number): string {
+  return `${zoneIndex}:${lane}`;
+}
+
 /**
  * The dark plates laid between the rails wherever the track goes black.
  *
@@ -372,19 +440,28 @@ export function buildRailRaceTrack(
  * `zones × lanes` of them, they are flat, and a strip of quads is both cheaper
  * to build and cheaper to draw than a dozen short tubes with their own
  * materials. Same idea as `train/track.ts`'s ballast ribbon.
+ *
+ * Also returns, per zone×lane, which vertices of the one combined buffer are
+ * theirs — `setSparking` writes a `color` attribute over just that range, so
+ * one draw call can still show one zone lit and its neighbours dark.
  */
-function buildSparkRibbons(route: RailRaceRoute, layout: HazardLayout): BufferGeometry {
+function buildSparkRibbons(
+  route: RailRaceRoute,
+  layout: HazardLayout,
+): { geometry: BufferGeometry; segments: readonly SparkRibbonSegment[] } {
   const positions: number[] = [];
   const normals: number[] = [];
   const indices: number[] = [];
+  const segments: SparkRibbonSegment[] = [];
   const point = new Vector3();
   const outward = new Vector3();
   const half = RAIL_GAUGE * 0.5;
 
-  for (const zone of layout.zones) {
+  layout.zones.forEach((zone, zoneIndex) => {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const divisions = Math.max(4, Math.ceil((zone.to - zone.from) / 1.2));
       const base = positions.length / 3;
+      const vertexStart = base;
       for (let i = 0; i <= divisions; i += 1) {
         const distance = zone.from + ((zone.to - zone.from) * i) / divisions;
         route.pointAt(lane, distance, point);
@@ -406,15 +483,16 @@ function buildSparkRibbons(route: RailRaceRoute, layout: HazardLayout): BufferGe
           indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
         }
       }
+      segments.push({ zoneIndex, lane, vertexStart, vertexCount: positions.length / 3 - vertexStart });
     }
-  }
+  });
 
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
-  return geometry;
+  return { geometry, segments };
 }
 
 interface TrestleSpot {
