@@ -16,6 +16,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
+import { createGlasses } from '../art/models/glasses';
 import type { Expression } from '../art/style/faces';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
@@ -441,6 +442,15 @@ export class Player implements GameSystem {
       },
     );
     this.group.add(this.model.root);
+
+    // Glasses, chosen in the character creator and worn from the first spawn —
+    // see `PlayerState.glassesKind`'s doc comment. Unlike the hat there is no
+    // `WornGlasses` system: glasses are never sold, so nothing ever changes
+    // this mid-game, and a static attach here is all that is needed. `null`
+    // ("None" in the creator) attaches nothing.
+    if (playerState.glassesKind) {
+      this.model.glassesAnchor.add(createGlasses(playerState.glassesKind).root);
+    }
 
     this.label = new NameLabel(playerState.name);
     this.label.sprite.position.y = this.labelTopHeight() + 0.42;

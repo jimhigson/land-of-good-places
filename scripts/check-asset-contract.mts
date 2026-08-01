@@ -74,6 +74,7 @@ import { createSpaceTurtle } from '../src/art/models/spaceTurtle.ts';
 import { createPet, PET_KINDS } from '../src/art/models/pets.ts';
 import { createBalloon } from '../src/art/models/balloons.ts';
 import { createHat, HAT_KINDS } from '../src/art/models/hats.ts';
+import { createGlasses, GLASSES_KINDS } from '../src/art/models/glasses.ts';
 import { createLollipopTree, createPinkWall, createWoodWall } from '../src/art/models/props.ts';
 import { HAIR_STYLES } from '../src/art/models/hair.ts';
 import { BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
@@ -238,6 +239,9 @@ function collect(): Subject[] {
   // Variants the catalogue might only sample one of.
   for (const kind of PET_KINDS) add(`pet.${kind}`, createPet(kind));
   for (const kind of HAT_KINDS) add(`hat.${kind}`, createHat(kind), 'anchor');
+  // Same family as hats: origin is the point that mounts on the wearer
+  // (`kid.glassesAnchor`), not the ground.
+  for (const kind of GLASSES_KINDS) add(`glasses.${kind}`, createGlasses(kind), 'anchor');
   for (const kind of ['dalmatian', 'corgi', 'chicken'] as const) {
     add(`balloon.${kind}`, createBalloon(kind));
   }

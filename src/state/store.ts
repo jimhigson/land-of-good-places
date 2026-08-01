@@ -10,6 +10,7 @@ import type {
   GameMode,
   GameState,
   GameTime,
+  GlassesKind,
   HairStyle,
   InventoryItem,
   InventoryKind,
@@ -88,6 +89,13 @@ export interface CharacterCreationChoice {
   readonly backpackColour: number;
   readonly shoeKind: ShoeKind;
   readonly shoeColour: number;
+  /**
+   * `null` means "no glasses" — the creator's Glasses tab has its own "None"
+   * choice for exactly this, not a lookup miss. Unlike `hat`, this needs no
+   * `PurchaseSpec`: glasses are not sold anywhere, so there is nothing for the
+   * store to file away beyond the bare kind — see `PlayerState.glassesKind`.
+   */
+  readonly glassesKind: GlassesKind | null;
   /**
    * `null` means "no hat" — the creator's Hat tab hides itself while an
    * exclusive hair style is selected (a Mohican, once `art/models/hair.ts`
@@ -281,6 +289,7 @@ class GameStore {
     this.state.player.backpackColour = choice.backpackColour;
     this.state.player.shoeKind = choice.shoeKind;
     this.state.player.shoeColour = choice.shoeColour;
+    this.state.player.glassesKind = choice.glassesKind;
 
     if (choice.hat) {
       const hatItem = this.grantFree(choice.hat, true);
@@ -747,6 +756,7 @@ class GameStore {
       if (p.backpackColour !== undefined) next.player.backpackColour = p.backpackColour;
       if (p.shoeKind !== undefined) next.player.shoeKind = p.shoeKind;
       if (p.shoeColour !== undefined) next.player.shoeColour = p.shoeColour;
+      if (p.glassesKind !== undefined) next.player.glassesKind = p.glassesKind;
       if (p.maxHealth !== undefined) next.player.maxHealth = Math.max(1, p.maxHealth);
       if (p.health !== undefined) next.player.health = p.health;
       if (p.facePaint !== undefined) next.player.facePaint = p.facePaint;
@@ -868,6 +878,7 @@ function createInitialState(): GameState {
       backpackColour: PALETTE.backpack,
       shoeKind: 'plain',
       shoeColour: PALETTE.shoe,
+      glassesKind: null,
       health: 5,
       maxHealth: 5,
       facePaint: null,
