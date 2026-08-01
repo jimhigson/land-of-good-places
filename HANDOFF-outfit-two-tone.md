@@ -2,11 +2,30 @@
 
 Branch `feat/outfit-two-tone`, worktree `.claude/worktrees/outfit-two-tone`.
 
-## Status: done, build green, PR not yet opened
+## Status: done, build green, live-verified, PR #149 open
 
-Commit `f5d166e` has the whole feature. `npm run build` exits 0 (tsc +
-every check script + vite build all pass). Not yet raised as a PR — do that
-next if you're picking this up.
+Commit `f5d166e` (+ `d310f0b` for this handoff) has the whole feature.
+`npm run build` exits 0 (tsc + every check script + vite build all pass).
+PR: https://github.com/jimhigson/land-of-good-places/pull/149
+
+**Live browser verification done** (Overseer granted chrome-devtools
+ownership; own dev server on port 5471, PID noted and killed after, page
+closed). Rather than eyeballing alone, read the actual live `THREE.Material`
+colours off the spawned player via `evaluate_script` against
+`window.game.player.model.root` — more reliable than a screenshot:
+
+- Picked "Red & White" in the creator, confirmed it renders as a split
+  red/cream circle and pressed-selected; the live preview showed a red torso
+  and cream arms. Spawned in (`Let's go!` → dismiss the What's New card),
+  then read the actual meshes: `torso: #ef5a52` (`ART.jumperRed`),
+  `arm-upper-l`/`arm-upper-r`: `#fff3e2` (`ART.cream`) — the two-tone choice
+  survives all the way into the real, running `Player`/`CharacterModel`, not
+  just the creator's own preview.
+- Regression check: cleared `localStorage`, redid the creator picking "Mint"
+  instead, spawned in, read the same three meshes: `torso`, `arm-upper-l`,
+  `arm-upper-r` all `#7fe3c0` — every existing single-colour swatch still
+  paints the arms to match the body exactly, confirmed live, not just by
+  reading the code.
 
 ## What was built
 
@@ -61,10 +80,6 @@ what a six-year-old would call red, and literally already named for a garment.
 
 ## What's NOT done / known gaps
 
-- **No live browser verification.** Tried to reach the Overseer ("main") to
-  ask for chrome-devtools ownership before doing this; see whatever the
-  SendMessage thread says. If nobody answered in time, this shipped on
-  build-verification only — flag this explicitly in the PR body.
 - `src/minigames/dodgems/Dodgems.ts`'s "You" driver (the player's kid, built
   as a simplified NPC stand-in for the dodgems minigame) does **not** carry
   `outfitArms` — its `DriverKind` union only has `hair`/`outfit`/`hairStyle`
@@ -84,9 +99,5 @@ what a six-year-old would call red, and literally already named for a garment.
 
 ## Next step if you're picking this up
 
-1. If you now have chrome-devtools ownership, spin up a dev server on your
-   own port, open the character creator, and check: the new "Red & White"
-   swatch renders as a split circle, picking it shows red torso / white arms
-   in the live preview, and every existing swatch still shows arms matching
-   body (this was explicitly required — check at least one, e.g. Mint).
-2. `gh pr create` — don't merge it yourself.
+PR #149 is open and needs the usual two peer reviews plus QA before the
+Overseer merges it. Nothing else outstanding on this branch.
