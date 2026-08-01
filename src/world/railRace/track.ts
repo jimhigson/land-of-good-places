@@ -231,10 +231,14 @@ export function buildRailRaceTrack(
 
   for (const bar of layout.bars) {
     const slots: number[] = [];
-    route.outwardAt(bar.at, outward);
+    // `bar.at` is measured from the start/finish arch (`hazards.ts`), which
+    // sits at `route.startDistance`, not at the route's own raw zero — see
+    // the matching note in `buildSparkRibbons` below.
+    const at = route.wrap(route.startDistance + bar.at);
+    route.outwardAt(at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, bar.at, point);
+      route.pointAt(lane, at, point);
       const barY = point.y + DUCK_CLEARANCE;
 
       for (const side of [-1, 1] as const) {
@@ -463,7 +467,13 @@ function buildSparkRibbons(
       const base = positions.length / 3;
       const vertexStart = base;
       for (let i = 0; i <= divisions; i += 1) {
-        const distance = zone.from + ((zone.to - zone.from) * i) / divisions;
+        // `zone.from`/`zone.to` are measured from the start/finish arch (see
+        // `hazards.ts`), but `route.pointAt`/`outwardAt` measure from the
+        // route's own raw zero — the arch sits at `route.startDistance`, not
+        // at 0. A rider at `travelled` renders at
+        // `route.wrap(route.startDistance + travelled)` (see `placeCarts` in
+        // `RailRace.ts`); the geometry has to land on that same point.
+        const distance = route.wrap(route.startDistance + zone.from + ((zone.to - zone.from) * i) / divisions);
         route.pointAt(lane, distance, point);
         route.outwardAt(distance, outward);
         // A whisker above the rail heads, so it reads as a plate on the track
