@@ -9,7 +9,7 @@ import {
   Vector3,
 } from 'three';
 import { CoasterRoute, checkCoasterClearances, STATION_HEIGHT } from './route';
-import { sweptRails } from '../rail/sweptRail';
+import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
@@ -45,6 +45,14 @@ import type { ParkTrain } from '../train';
  * energy trade the rest of the way round, braked into the station. You
  * cannot fall out, fall off, or lose — this is still Land of Good Places.
  */
+
+/**
+ * Rail centre-to-centre and the distance between ties. Exported so
+ * `scripts/check-tie-frame.mts` can sample the same points the track itself
+ * is built from, rather than a second guess at them that could drift.
+ */
+export const RAIL_GAUGE = 1.1;
+export const TIE_STEP = 1.4;
 
 const CHAIN_SPEED = 3.4;
 const MIN_SPEED = 4.2;
@@ -274,7 +282,7 @@ export class Coaster implements GameSystem {
     const tieMaterial = toonMaterial(PALETTE.woodLight);
     const pylonMaterial = toonMaterial(PALETTE.stonePinkLight);
 
-    const step = 1.4;
+    const step = TIE_STEP;
     const segments = Math.ceil(this.route.length / step);
 
     // The rails are **swept**, not chopped (family note, 28 July): a rail built
@@ -289,7 +297,7 @@ export class Coaster implements GameSystem {
     // it) take `gauge` to mean the railway's own centre-to-centre. Hence 1.1
     // here: the same rails, the standard name for the number.
     const railGeometries = sweptRails(this.route, {
-      gauge: 1.1,
+      gauge: RAIL_GAUGE,
       radius: 0.075,
       // Denser than the 1.4 m this used to sample at, and a real fix rather than
       // a tidy-up. Measured against the solved track, the old sweep's rails
@@ -313,21 +321,37 @@ export class Coaster implements GameSystem {
     }
 
     const ties = new InstancedMesh(new BoxGeometry(1.5, 0.08, 0.3), tieMaterial, segments);
+    // Named so `scripts/check-tie-frame.mts` can find the real instance
+    // buffer in a headless build rather than guessing at group order.
+    ties.name = 'ties';
     const matrix = new Matrix4();
+    const basis = new Matrix4();
     const rotation = new Quaternion();
-    const forward = new Vector3();
     const position = new Vector3();
     const one = new Vector3(1, 1, 1);
+    // A tie's long (1.5 m) axis is local X, its along-track thickness is
+    // local Z — so it must be oriented with local X on the rails' own
+    // horizontal `side` and local Z on `forward`, not by a minimal rotation
+    // onto `forward` alone. A minimal rotation only pins Z; it leaves X free
+    // to roll wherever the route climbs or dives, and a tie that rolls off
+    // horizontal stops bridging both rails. `railFrameAt` hands back exactly
+    // the horizontal `side` the rails themselves are swept with (see
+    // `sweptRail.ts`), so the ties land on the rails by shared construction,
+    // not by coincidence.
     const mid = new Vector3();
-    const next = new Vector3();
+    const frame: RailFrame = {
+      position: mid,
+      forward: new Vector3(),
+      side: new Vector3(),
+      up: new Vector3(),
+    };
 
     const pylonSpots: { x: number; z: number; height: number }[] = [];
     for (let i = 0; i < segments; i += 1) {
       const d = i * step;
-      this.route.pointAt(d, mid);
-      this.route.pointAt(d + step, next);
-      forward.subVectors(next, mid).normalize();
-      rotation.setFromUnitVectors(new Vector3(0, 0, 1), forward);
+      railFrameAt(this.route, d, frame);
+      basis.makeBasis(frame.side, frame.up, frame.forward);
+      rotation.setFromRotationMatrix(basis);
       matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
       ties.setMatrixAt(i, matrix);
 

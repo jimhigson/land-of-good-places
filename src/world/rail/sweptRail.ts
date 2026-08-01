@@ -39,6 +39,53 @@ export interface RailSampler {
   tangentAt(distance: number, target: Vector3): Vector3;
 }
 
+/**
+ * The rails' one convention for "which way is sideways": horizontal, and
+ * perpendicular to the tangent's horizontal projection — never rolled, since
+ * no track in this park banks (see the file header). Written once so nothing
+ * that needs to sit square across both rails — a tie, say — can reimplement
+ * it and quietly disagree with where the rails actually are.
+ *
+ * Provably perpendicular to `along` itself, not just its horizontal
+ * projection: `dot((along.z, 0, -along.x), along) = along.z*along.x +
+ * 0*along.y - along.x*along.z = 0` for any `along.y`. So `along`, this
+ * `side`, and their cross product always form a valid orthonormal frame,
+ * however steeply the route climbs or dives.
+ */
+function horizontalSide(along: Vector3, target: Vector3): Vector3 {
+  const sideX = along.z;
+  const sideZ = -along.x;
+  const norm = Math.hypot(sideX, sideZ) || 1;
+  return target.set(sideX / norm, 0, sideZ / norm);
+}
+
+/**
+ * An orthonormal cross-section frame at `distance` along `sampler`, built
+ * from the exact same horizontal `side` the rails are offset with (see
+ * {@link horizontalSide}). `forward` is the route's unit tangent; `up`
+ * completes the right-handed basis (`side × up === forward`).
+ *
+ * For anything that has to sit square across both rails — a tie is the
+ * motivating case — orient local axes (side, up, forward) with this frame
+ * rather than a generic minimal rotation onto `forward` alone: a minimal
+ * rotation leaves the side axis free to roll wherever the route climbs or
+ * dives, and the whole point of a tie is that it does not.
+ */
+export interface RailFrame {
+  readonly position: Vector3;
+  readonly forward: Vector3;
+  readonly side: Vector3;
+  readonly up: Vector3;
+}
+
+export function railFrameAt(sampler: RailSampler, distance: number, out: RailFrame): RailFrame {
+  sampler.pointAt(distance, out.position);
+  sampler.tangentAt(distance, out.forward).normalize();
+  horizontalSide(out.forward, out.side);
+  out.up.crossVectors(out.forward, out.side).normalize();
+  return out;
+}
+
 export interface SweptRailOptions {
   /** Rail centre-to-centre, in metres. */
   readonly gauge: number;
@@ -81,6 +128,7 @@ export function sweptRail(
   const points: Vector3[] = [];
   const centre = new Vector3();
   const along = new Vector3();
+  const side = new Vector3();
   // An open run needs the far end sampled too; a closed one must not repeat its
   // first point, which would leave `CatmullRomCurve3` a zero-length segment to
   // normalise a tangent from.
@@ -89,15 +137,9 @@ export function sweptRail(
     const distance = (i / samples) * sampler.length;
     sampler.pointAt(distance, centre);
     sampler.tangentAt(distance, along);
-    const sideX = along.z;
-    const sideZ = -along.x;
-    const norm = Math.hypot(sideX, sideZ) || 1;
+    horizontalSide(along, side);
     points.push(
-      new Vector3(
-        centre.x + (sideX / norm) * offset,
-        centre.y,
-        centre.z + (sideZ / norm) * offset,
-      ),
+      new Vector3(centre.x + side.x * offset, centre.y, centre.z + side.z * offset),
     );
   }
 
