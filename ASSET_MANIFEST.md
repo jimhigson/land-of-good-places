@@ -55,7 +55,7 @@ interface CreatureHandle extends AssetHandle {
   readonly body: THREE.Group;    // bob / squash target
   readonly head: THREE.Group;    // look-at target
   readonly limbs: { leftArm; rightArm; leftLeg; rightLeg } | null;
-  setExpression(name: ExpressionName): void;   // 'neutral' | 'blink' | 'happy' | 'surprised' | 'sad'
+  setExpression(name: ExpressionName): void;   // 'neutral' | 'blink' | 'happy' | 'surprised' | 'sad' | 'frown'
   setWalkPhase(phase01: number, speed01: number): void;
 }
 ```
