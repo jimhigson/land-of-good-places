@@ -26,6 +26,8 @@ import {
   pairKey,
   type ParkFacts,
 } from './parkFacts.ts';
+import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
+import { PLAYER_RADIUS } from '../../src/core/constants.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -254,6 +256,73 @@ const rideExitsAreUsable: Invariant = (facts) => {
     if (!facts.isStandable(exit.x, exit.z)) problems.push(`${at} is not clear ground`);
     if (!facts.reachableFromEntrance(exit.x, exit.z)) {
       problems.push(`${at} is not reachable from the entrance`);
+    }
+  }
+  expect(problems, problems.join('\n')).toHaveLength(0);
+};
+
+/**
+ * The Rail Race's exit has room for the whole **party** that arrives on it, not
+ * just for one child.
+ *
+ * A race ends with four riders, and since 1 August 2026 all four of them are
+ * put down at the exit: the player by `RailRace.arrive()`, and Pip, Nell and
+ * Otto — look-alikes, see `railRace/exitCrowd.ts` — gathered round her. Three
+ * extra bodies is three more chances for somebody to be standing inside a
+ * hedge, or inside the player, on a seed nobody looked at.
+ *
+ * This runs the **real** placement code (`resolveDismount` then
+ * `resolveDismountGroup`) against the **real** built collision world, in the
+ * same order and with the same radii the ride uses, and then measures where
+ * everybody actually ended up. It does not restate the rule that placed them:
+ * an assertion that the placer's output satisfies the placer's own constraint
+ * would prove nothing, so the check is against `facts.isStandable` — the same
+ * "can a walker of the player's radius stand here" question every other
+ * invariant in this file asks — and against {@link WALKABLE_GAP}, the width two
+ * bodies genuinely need, rather than the seed spacing the placer aims for.
+ *
+ * The rival count is read off the **built ride** (`laneCount` minus the
+ * player's own lane) rather than imported, for the reason `railRaceFliesClear`
+ * gives: a static import of `railRace/plan.ts` here would pull in
+ * `parkManifest` and fix the park seed before the harness has set it.
+ */
+const railRaceExitFitsTheParty: Invariant = (facts) => {
+  const exit = facts.exits.find((node) => node.id === 'exit-railRace');
+  expect(exit, `the built path graph has no 'exit-railRace' node`).toBeDefined();
+  if (!exit) return;
+
+  const collision = facts.world.collision;
+  // The player is set down first and keeps her spot — exactly `arrive()`'s
+  // order, which is what makes "nobody appears on top of her" true.
+  const player = resolveDismount(collision, exit.x, exit.z, PLAYER_RADIUS);
+  const rivals = facts.world.railRace.laneCount - 1;
+  const spots = resolveDismountGroup(collision, player.x, player.z, PLAYER_RADIUS, rivals, [
+    { x: player.x, z: player.z, radius: PLAYER_RADIUS },
+  ]);
+
+  expect(spots, `only ${spots.length} of ${rivals} rivals were given a spot`).toHaveLength(rivals);
+
+  const party = [
+    { who: 'the player', x: player.x, z: player.z },
+    ...spots.map((spot, index) => ({ who: `rival ${index + 1}`, x: spot.x, z: spot.z })),
+  ];
+
+  const problems: string[] = [];
+  for (let i = 0; i < party.length; i += 1) {
+    const a = party[i]!;
+    const at = `(${a.x.toFixed(1)}, ${a.z.toFixed(1)})`;
+    if (!facts.isStandable(a.x, a.z)) {
+      problems.push(`${a.who} is put down at ${at}, which is not clear ground`);
+    }
+    for (let j = i + 1; j < party.length; j += 1) {
+      const b = party[j]!;
+      const gap = Math.hypot(a.x - b.x, a.z - b.z);
+      if (gap < WALKABLE_GAP) {
+        problems.push(
+          `${a.who} and ${b.who} are ${gap.toFixed(2)} m apart at ${at} — ` +
+            `two bodies need ${WALKABLE_GAP} m, so they are standing inside each other`,
+        );
+      }
     }
   }
   expect(problems, problems.join('\n')).toHaveLength(0);
@@ -520,6 +589,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
+  ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
