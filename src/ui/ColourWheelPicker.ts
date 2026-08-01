@@ -55,6 +55,15 @@ import { hexToHsv, hsvToHex } from './colour';
 export interface ColourWheelPickerHandlers {
   /** Fires continuously — on every drag step and every coarse key step. */
   onChange(colour: number): void;
+  /**
+   * Fires once from {@link ColourWheelPicker.openWith} and once from
+   * {@link ColourWheelPicker.close} — never from `toggle` directly, since
+   * `toggle` only ever calls one of those two. Lets the owner (`buildSwatchSection`)
+   * hide the curated preset row while the wheel is open: those buttons are not
+   * usefully actionable mid-drag, and hiding them frees the vertical space the
+   * wheel + brightness bar + Done button need most on a small screen.
+   */
+  onOpenChange?(open: boolean): void;
 }
 
 /** Hue steps left/right on the wheel move by, in degrees. */
@@ -196,6 +205,25 @@ export class ColourWheelPicker {
     this.panel.hidden = false;
     this.panel.dataset.open = 'true';
     this.trigger.setAttribute('aria-expanded', 'true');
+    this.handlers.onOpenChange?.(true);
+    // The panel can expand below the visible fold of `.charcreate-controls`'s
+    // scroll region (see that class in style.css), especially once the wheel
+    // + brightness bar + hint + Done button are all showing at once on a
+    // phone — scroll it into view rather than leaving a child to find it.
+    // `requestAnimationFrame`: `hidden` was just cleared this same tick, and
+    // an element still `display: none` reports a zero-size bounding rect,
+    // which `scrollIntoView` cannot aim at correctly.
+    requestAnimationFrame(() => {
+      // Same accessibility rule the rest of the game's animations follow
+      // (see `characterCreationPreview.ts`'s `spinsAllowed`) — reduced-motion
+      // gets an instant jump instead of a smooth scroll. `?? true` treats an
+      // environment with no `matchMedia` at all the same way: instant, not
+      // smooth, is the safe fallback when the preference can't be read.
+      const reduceMotion =
+        typeof window === 'undefined' ||
+        (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? true);
+      this.panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
+    });
   }
 
   close(): void {
@@ -203,6 +231,7 @@ export class ColourWheelPicker {
     this.open = false;
     this.panel.dataset.open = 'false';
     this.trigger.setAttribute('aria-expanded', 'false');
+    this.handlers.onOpenChange?.(false);
     // Matches the game's other panels: fade out via CSS, then actually hide
     // (`hidden`) so a closed panel cannot be tabbed into.
     window.setTimeout(() => {
