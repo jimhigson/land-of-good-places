@@ -1,4 +1,5 @@
 import './style.css';
+import { Vector3 } from 'three';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type GameOptions } from './Game';
 import { UpdateGate } from './ui/UpdateGate';
@@ -58,6 +59,7 @@ function boot(): void {
   const save = loadSave();
   const reopenCreator = consumeReopenCharacterCreator();
   const rideDeepLink = RIDE_DEEP_LINKS[location.pathname];
+  const debugView = parseDebugView(location.pathname, location.search) ?? undefined;
 
   // A save from before the character creator existed, or one where "start
   // again" was pressed and the tab was closed mid-creation, has everything
@@ -76,6 +78,10 @@ function boot(): void {
       continueGame(canvas, uiRoot, splash, save, rideDeepLink);
       return;
     }
+    if (debugView) {
+      continueGame(canvas, uiRoot, splash, save, undefined, debugView);
+      return;
+    }
     new ContinueOrRestart(uiRoot, save, {
       onContinue: () => continueGame(canvas, uiRoot, splash, save),
       onStartAgain: () => startFresh(canvas, uiRoot, splash, rideDeepLink),
@@ -86,7 +92,7 @@ function boot(): void {
   // No save to skip past, but a deep link still boards the ride the instant
   // the brand-new character exists.
   splash?.classList.add('hidden');
-  startFresh(canvas, uiRoot, splash, rideDeepLink);
+  startFresh(canvas, uiRoot, splash, rideDeepLink, debugView);
 }
 
 /**
@@ -99,6 +105,58 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/rail-race': 'railRacer',
   '/sky-cruiser': 'skyCruiser',
 };
+
+/** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
+interface DebugViewParams {
+  readonly position: Vector3;
+  readonly lookAt: Vector3;
+  readonly timeOfDay?: number;
+}
+
+/**
+ * `/view?camPos=x,y,z&camDir=x,y,z&timeOfDay=HH:MM` — a debug-only way to look
+ * at any point in the built park, from any angle, at any time of day, without
+ * boarding a ride or walking there. A URL a developer types, never a button a
+ * child presses — same spirit as {@link RIDE_DEEP_LINKS}, and it reuses the
+ * same "skip the welcome-back prompt" wiring below.
+ *
+ * `camPos` defaults to a wide establishing view rather than the origin, which
+ * sits inside the ball pit; `camDir` defaults to looking back at the origin
+ * from wherever `camPos` is, so leaving it off (as in the family's own example
+ * URL) still points the camera at the park rather than off into empty sky.
+ * `timeOfDay` is genuinely optional — omit it and the clock runs normally.
+ */
+function parseDebugView(pathname: string, search: string): DebugViewParams | null {
+  if (pathname !== '/view') return null;
+  const params = new URLSearchParams(search);
+  const position = parseVector3(params.get('camPos')) ?? new Vector3(40, 30, 40);
+  const direction = parseVector3(params.get('camDir'));
+  const lookAt =
+    direction && direction.lengthSq() > 0
+      ? position.clone().add(direction.normalize())
+      : new Vector3(0, 0, 0);
+  const timeOfDay = parseClockFraction(params.get('timeOfDay'));
+  return timeOfDay === undefined ? { position, lookAt } : { position, lookAt, timeOfDay };
+}
+
+/** "x,y,z" -> a Vector3, or null if missing/malformed — never throws on a hand-typed URL. */
+function parseVector3(text: string | null): Vector3 | null {
+  if (!text) return null;
+  const parts = text.split(',').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  return new Vector3(parts[0], parts[1], parts[2]);
+}
+
+/** "HH:MM" -> a [0,1) fraction of a day, the same clock {@link DayNight} keeps. */
+function parseClockFraction(text: string | null): number | undefined {
+  if (!text) return undefined;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return undefined;
+  return (hours * 60 + minutes) / (24 * 60);
+}
 
 /**
  * Loads the park back exactly as it was left.
@@ -113,12 +171,13 @@ function continueGame(
   splash: HTMLElement | null,
   save: SaveFile,
   boardStallId?: string,
+  debugView?: DebugViewParams,
 ): void {
   gameStore.hydrate(save);
   saveFlags.hydrate(save.flags);
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
   const options: GameOptions = save.place ? { startPlace: save.place } : {};
-  launchGame(canvas, uiRoot, splash, options, boardStallId);
+  launchGame(canvas, uiRoot, splash, options, boardStallId, debugView);
 }
 
 /**
@@ -141,19 +200,20 @@ function startFresh(
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   boardStallId?: string,
+  debugView?: DebugViewParams,
 ): void {
   clearSave();
-  if (boardStallId) {
+  if (boardStallId || debugView) {
     gameStore.completeCharacterCreation(defaultCharacterChoice());
     saveFlags.markCharacterCreated();
-    launchGame(canvas, uiRoot, splash, {}, boardStallId);
+    launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);
     return;
   }
   new CharacterCreation(uiRoot, {
     onComplete: (choice) => {
       gameStore.completeCharacterCreation(choice);
       saveFlags.markCharacterCreated();
-      launchGame(canvas, uiRoot, splash, {}, boardStallId);
+      launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);
     },
   });
 }
@@ -199,6 +259,7 @@ function launchGame(
   splash: HTMLElement | null,
   options: GameOptions,
   boardStallId?: string,
+  debugView?: DebugViewParams,
 ): void {
   const game = new Game(canvas, uiRoot, options);
   game.start();
@@ -208,6 +269,10 @@ function launchGame(
     // already returned by this point — nothing here waits a frame.
     game.whatsNew.close();
     game.miniGames.boardRide?.(boardStallId);
+  }
+  if (debugView) {
+    game.whatsNew.close();
+    game.enterDebugView(debugView.position, debugView.lookAt, debugView.timeOfDay);
   }
 
   // Unmissable red "DEV" watermark — never present in a production build.

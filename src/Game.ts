@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { PerspectiveCamera, Vector3 } from 'three';
 import { Engine } from './core/Engine';
 import { Loop, type LoopTick } from './core/Loop';
 import { IsoCamera } from './core/IsoCamera';
@@ -667,6 +667,37 @@ export class Game {
     this.saveSystem.flush();
     markReopenCharacterCreator();
     window.location.reload();
+  }
+
+  /**
+   * Debug-only: drops a free camera at an arbitrary position/orientation and,
+   * if asked, freezes the clock at a given time of day — without boarding a
+   * ride, walking anywhere, or touching the player at all. See `/view` in
+   * `main.ts`, the only caller; a URL a developer types, never a button a
+   * child presses, same spirit as `RIDE_DEEP_LINKS`.
+   *
+   * Reuses the exact `cameraOverride` mechanism the ride cameras already use
+   * (`render()` below picks it up automatically) rather than inventing a
+   * second way to swap what's on screen.
+   */
+  enterDebugView(position: Vector3, lookAt: Vector3, timeOfDay?: number): void {
+    const camera = new PerspectiveCamera(50, window.innerWidth / Math.max(1, window.innerHeight), 0.1, 500);
+    camera.position.copy(position);
+    camera.lookAt(lookAt);
+    this.cameraOverride = camera;
+    if (timeOfDay !== undefined) {
+      this.world.dayNight.setTimeOfDay(timeOfDay);
+      // Freezing the *whole park* via `gameStore`, not `dayNight.setPaused`
+      // directly — `tick()` below re-derives `dayNight`'s own paused flag from
+      // `gameStore.get().paused` every single frame (that's how the pause
+      // menu freezes the clock along with everything else), so a one-off call
+      // straight to `dayNight.setPaused(true)` is overwritten the very next
+      // frame. Going through the store is also the *better* result here: it
+      // zeroes `frameContext.dt` for everything, not just the sky, so a
+      // requested moment stays a still photo — no NPC mid-stride, no wobbling
+      // ride — exactly what a debug screenshot wants.
+      gameStore.setPaused(true);
+    }
   }
 
   start(): void {

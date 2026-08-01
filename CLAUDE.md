@@ -101,6 +101,46 @@ save-less profile) exists — see `RIDE_DEEP_LINKS` in `main.ts`. Add a ride by
 adding one line there; it reuses whatever stall id `Game.ts` already wired
 into `MiniGameHost.boardRide`.
 
+**`/view` — a debug camera, for checking rendering without playing the game:**
+
+```
+/view?camPos=x,y,z&camDir=x,y,z&timeOfDay=HH:MM
+```
+
+Drops a free `PerspectiveCamera` at `camPos` looking along `camDir` (all
+three are plain metres/a direction vector, comma-separated, no encoding
+needed), and — only if `timeOfDay` is given — freezes the whole park at that
+clock time via `gameStore.setPaused(true)`, the same mechanism the pause menu
+uses. Frozen means genuinely still: `frameContext.dt` goes to zero for
+everything, not just the sky, so NPCs, rides and animations all hold exactly
+where they were rather than the sky alone matching the requested hour while
+everything else keeps moving underneath it.
+
+- Skips the welcome-back prompt and character creation the same way a ride
+  deep link does (works on a save-less profile too) — see `parseDebugView` in
+  `main.ts`, `Game.ts`'s `enterDebugView`.
+- All three params are optional. `camPos` defaults to a wide establishing
+  shot; `camDir` defaults to looking back at the origin from wherever `camPos`
+  is (so `/view` with no params at all still points at the park, not empty
+  sky); omitting `timeOfDay` leaves the clock running normally.
+- This is a URL a developer types, never a button a child presses — same
+  spirit as `RIDE_DEEP_LINKS`, and it works against a production build too
+  (not gated to dev), so it doubles as a way to inspect exactly what's live at
+  `landofgoodplaces.blockstack.ing/view?...`.
+- **Why this exists**: checking a single piece of geometry or lighting used to
+  mean boarding a ride, faking button-holds through the input system, or
+  pausing the whole engine and hoping nothing broke — all real techniques
+  tried and discarded on 1 August while checking the rail race's spark-zone
+  colouring. A URL that just puts the camera where you want it, frozen at the
+  hour you want, is enormously cheaper than any of that.
+- **The one non-obvious trap building this**: `dayNight.setPaused(true)`
+  called directly does *not* stick — `Game.tick()` re-derives `DayNight`'s
+  paused flag from `gameStore.get().paused` every single frame (that's how
+  the real pause menu freezes the clock), so a one-off call straight to
+  `DayNight` gets silently overwritten the very next frame. Go through
+  `gameStore.setPaused(true)` instead, which is also the *better* result: it
+  freezes everything, not just the sky.
+
 ## A stale service worker will waste your hour
 
 This is a PWA, but as of 1 August the dev-mode service worker is **off by
