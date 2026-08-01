@@ -39,6 +39,11 @@ import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } fro
  *   `state/save.ts`'s `markReopenCharacterCreator`). Skips both the
  *   welcome-back prompt and `startFresh`'s `clearSave()` — see
  *   {@link reopenCharacterCreation}.
+ *
+ * `RIDE_DEEP_LINKS` below is a fifth, developer-only path: a URL typed by
+ * hand, not a button a child presses, so it also skips the welcome-back
+ * prompt straight into {@link continueGame} — there being nobody to *ask*
+ * "keep playing?" is the entire point of pasting the link in the first place.
  */
 function boot(): void {
   const canvas = document.getElementById('game-canvas');
@@ -51,6 +56,7 @@ function boot(): void {
 
   const save = loadSave();
   const reopenCreator = consumeReopenCharacterCreator();
+  const rideDeepLink = RIDE_DEEP_LINKS[location.pathname];
 
   // A save from before the character creator existed, or one where "start
   // again" was pressed and the tab was closed mid-creation, has everything
@@ -65,29 +71,53 @@ function boot(): void {
       reopenCharacterCreation(canvas, uiRoot, splash, save);
       return;
     }
+    if (rideDeepLink) {
+      continueGame(canvas, uiRoot, splash, save, rideDeepLink);
+      return;
+    }
     new ContinueOrRestart(uiRoot, save, {
       onContinue: () => continueGame(canvas, uiRoot, splash, save),
-      onStartAgain: () => startFresh(canvas, uiRoot, splash),
+      onStartAgain: () => startFresh(canvas, uiRoot, splash, rideDeepLink),
     });
     return;
   }
 
+  // No save to skip past, but a deep link still boards the ride the instant
+  // the brand-new character exists.
   splash?.classList.add('hidden');
-  startFresh(canvas, uiRoot, splash);
+  startFresh(canvas, uiRoot, splash, rideDeepLink);
 }
 
-/** Loads the park back exactly as it was left. */
+/**
+ * `/rail-race` and friends: a URL a developer types to reach a ride under
+ * test without walking there. Maps straight to the stall id
+ * `MiniGameHost.boardRide` already knows (see `Game.ts`'s own wiring of it),
+ * so adding a ride here is one line, not a new boarding path.
+ */
+const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
+  '/rail-race': 'railRacer',
+  '/sky-cruiser': 'skyCruiser',
+};
+
+/**
+ * Loads the park back exactly as it was left.
+ *
+ * `boardStallId` — set only by a {@link RIDE_DEEP_LINKS} match — boards that
+ * ride the moment the park exists, ahead of wherever `save.place` would
+ * otherwise have put her.
+ */
 function continueGame(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   save: SaveFile,
+  boardStallId?: string,
 ): void {
   gameStore.hydrate(save);
   saveFlags.hydrate(save.flags);
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
   const options: GameOptions = save.place ? { startPlace: save.place } : {};
-  launchGame(canvas, uiRoot, splash, options);
+  launchGame(canvas, uiRoot, splash, options, boardStallId);
 }
 
 /**
@@ -102,13 +132,14 @@ function startFresh(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
+  boardStallId?: string,
 ): void {
   clearSave();
   new CharacterCreation(uiRoot, {
     onComplete: (choice) => {
       gameStore.completeCharacterCreation(choice);
       saveFlags.markCharacterCreated();
-      launchGame(canvas, uiRoot, splash, {});
+      launchGame(canvas, uiRoot, splash, {}, boardStallId);
     },
   });
 }
@@ -153,9 +184,17 @@ function launchGame(
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   options: GameOptions,
+  boardStallId?: string,
 ): void {
   const game = new Game(canvas, uiRoot, options);
   game.start();
+
+  if (boardStallId) {
+    // Both wired synchronously inside `Game`'s own constructor, which has
+    // already returned by this point — nothing here waits a frame.
+    game.whatsNew.close();
+    game.miniGames.boardRide?.(boardStallId);
+  }
 
   // Unmissable red "DEV" watermark — never present in a production build.
   DevBadge.mountIfDev(uiRoot);
