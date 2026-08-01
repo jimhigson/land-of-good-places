@@ -196,7 +196,7 @@ const VIA_MAX_GAP = 95;
  * it is the wrong place to start, and the budget is better spent on the next
  * candidate station than on proving this one impossible.
  */
-const STEPS_PER_START = 800;
+const STEPS_PER_START = 1200;
 
 /**
  * How far behind the start the approach corridor sits.

@@ -98,7 +98,7 @@ is genuinely down among the scenery, unlike the rest of the loop which flies.
 - [x] boundary.ts / segments.ts / generate.ts
 - [x] CoasterRoute migration (public surface unchanged)
 - [x] clearance assert + procgen invariant
-- [x] `npm run build` passes; `npm run test:procgen` 55/55 across 5 seeds
+- [x] `npm run build` passes; `npm run test:procgen` 65/65 across 5 seeds
 - [x] turning-radius measurement (`npm run measure:rail-radii`)
 - [x] sweep:seeds — 30/30 on this branch, 30/30 on origin/main, no regression
 - [x] plan-view renders for the shape approval (`art-samples/cruiser-plan-*.png`)
@@ -162,12 +162,35 @@ pieces, which shrinks an exponential tree; and `SAMPLE_STEP` of 1 m rather than
 **Budgets must be step counts, never wall-clock.** A time budget would make the
 park come out differently on a slower machine.
 
+**Validating the plan is not validating the ride** (found in review, PR #148).
+The generator checks turning radius on its own cubics, but `CoasterRoute`
+resamples the plan into control points and rebuilds it as a `CatmullRomCurve3`,
+and *a rebuild is not a copy*. At the original 3 m control spacing the rebuild
+ate 0.73-1.38 m of radius and two of the five CI seeds shipped a curve tighter
+than the 12 m the code declares (seed 2 at 11.68 m, seed 18 at 10.98 m).
+
+That is structurally the **same bug this generator was written to fix** — the
+old solver pushed control points clear of the castle and then smoothed them —
+recurring one layer down in the new code. Fixed with both halves: finer
+`CONTROL_SPACING` (the cause) and `PLAN_TURN_RADIUS = MIN_TURN_RADIUS + 1` (the
+margin, because the loss is not smooth in spacing — it depends where a control
+lands relative to the tightest bend, so a margin that merely happens to hold on
+today's seeds is luck). `skyCruiserTurnsGently` in the procgen suite and
+`npm run check:cruiser-turn-radius` both measure the **built** curve, so it
+cannot rot back.
+
+Raising the plan floor without raising the vocabulary's ceiling cost a seed;
+widening the bands to compensate cost three more. The lever that worked was
+`STEPS_PER_START` (800 -> 1200).
+
 ## Numbers as built
 
-- Canonical seed: 216 m of track, 10 pieces, tightest turn 12.8 m, solved in
-  ~350 ms at module load. Old polar solve: 221 m, tightest turn **1.7 m**.
-- All 21 seeds tried (canonical + 1..20) solve; worst solver time 1.4 s.
-- `measure:rail-radii`: Sky Cruiser 12.8 m, Rail Race 57.4 m, train 6.6 m. The
+- Canonical seed: 216 m of track, 10 pieces, tightest turn **13.2 m on the
+  built curve**, solved in ~525 ms at module load. Old polar solve: 221 m,
+  tightest turn **1.7 m**.
+- All 21 seeds tried (canonical + 1..20) solve; worst solver time 3.4 s on a
+  non-shipping seed, canonical 525 ms.
+- `measure:rail-radii`: Sky Cruiser 13.2 m, Rail Race 57.4 m, train 6.6 m. The
   family's stated ordering (Cruiser < Race < train) **does not hold** — because
   the *train* turns tighter than the Rail Race. Reported, not fixed; the brief
   says not to bend the other two rides to match.

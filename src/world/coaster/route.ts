@@ -99,7 +99,8 @@ const CAR_HALF_WIDTH = 0.75;
 const SELF_CLEARANCE = 5;
 
 /**
- * Tightest turn the ride will make.
+ * **Tightest turn the ride will make** — a promise about the curve riders are
+ * actually on, not about the plan it was grown from.
  *
  * The old polar solve produced a **1.7 m** minimum radius — a hairpin, at
  * cruise speed, measured on the built curve by `scripts/measure-rail-radii.mts`.
@@ -107,14 +108,57 @@ const SELF_CLEARANCE = 5;
  * six-year-old enjoys rather than one that throws them at the restraint, and
  * it keeps the family's "Sky Cruiser is the tightest of the three" ordering
  * comfortably (the Rail Race ring is 57 m).
+ *
+ * `scripts/check-cruiser-turn-radius.mts` holds the built curve to this, and it
+ * is the number the procgen invariant measures. See {@link PLAN_TURN_RADIUS}
+ * for why the generator is asked for something stricter.
  */
-const MIN_TURN_RADIUS = 12;
+export const MIN_TURN_RADIUS = 12;
+
+/**
+ * What the *plan* is held to, which is deliberately more than the ride
+ * promises.
+ *
+ * The generator validates radii on its own cubics, but `CoasterRoute` does not
+ * ship those cubics: it resamples them into control points and rebuilds them as
+ * a `CatmullRomCurve3`, and **a rebuild is not a copy**. The spline through
+ * sampled points sags away from the curve the points came from, and it sags
+ * most at the tightest bends — precisely the ones under a limit. Measured
+ * across the five CI seeds at the original 3 m control spacing, the rebuild ate
+ * between 0.73 m and 1.38 m of radius, and two seeds landed under the 12 m the
+ * ride claims: seed 2 at 11.68 m, seed 18 at 10.98 m.
+ *
+ * That is the same mistake this whole generator replaced. The old solver pushed
+ * its control points clear of the castle and then smoothed them, so the built
+ * curve did not respect what had been validated. Validating a plan and shipping
+ * a rebuild of it is that bug one layer down, in newer code.
+ *
+ * The fix is both halves, because either alone is thin. {@link CONTROL_SPACING}
+ * makes the rebuild faithful, which is the actual cause; this headroom covers
+ * what is left, because the loss is not a smooth function of spacing — it
+ * depends where a control point happens to fall relative to the tightest bend,
+ * so a margin that merely *happens* to hold on today's five seeds is luck, not
+ * a guarantee.
+ */
+const PLAN_TURN_RADIUS = MIN_TURN_RADIUS + 1;
 
 /** Metres of track wanted. The old loop came out at 221 m; this holds that. */
 const DESIRED_LENGTH = 220;
 
-/** Roughly this far apart, in metres, along the loop. */
-const CONTROL_SPACING = 3;
+/**
+ * Roughly this far apart, in metres, along the loop.
+ *
+ * Two metres rather than the three it started at. This is the half of the
+ * turning-radius fix that addresses the cause rather than the symptom: closer
+ * control points mean the rebuilt spline tracks the solved plan more closely,
+ * which took the worst rebuild loss across the CI seeds from 1.38 m to 0.46 m.
+ *
+ * Not finer still, because the vertical repair loop below works in control
+ * points and starts to get grainy when they are packed tighter than its own
+ * scan; two metres keeps the two in step. The rest of the margin is bought by
+ * {@link PLAN_TURN_RADIUS} instead.
+ */
+const CONTROL_SPACING = 2;
 
 
 interface TallObstacle {
@@ -155,7 +199,11 @@ function groundClearOfPlots(x: number, z: number, radius: number, exceptId?: str
 /** The pieces the Sky Cruiser is built from. `MIN_TURN_RADIUS` lives here. */
 const CRUISER_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
   [
-    { name: 'tight', minRadius: MIN_TURN_RADIUS, maxRadius: 18, minLength: 16, maxLength: 28 },
+    // Widening these to compensate for the raised floor was tried and made
+    // things worse (18 of 21 seeds, against 20 before): the vocabulary is not
+    // the binding constraint, and changing it mostly reshuffles which seeds get
+    // lucky. The search budget is the lever that actually moved.
+    { name: 'tight', minRadius: PLAN_TURN_RADIUS, maxRadius: 18, minLength: 16, maxLength: 28 },
     { name: 'sweep', minRadius: 18, maxRadius: 32, minLength: 22, maxLength: 38 },
     { name: 'easy', minRadius: 32, maxRadius: 60, minLength: 26, maxLength: 46 },
   ],
@@ -326,7 +374,7 @@ export class CoasterRoute {
       boundary,
       corridorRadius: CORRIDOR_RADIUS,
       selfClearance: SELF_CLEARANCE,
-      minRadius: MIN_TURN_RADIUS,
+      minRadius: PLAN_TURN_RADIUS,
       budgets: { perJoint: 16, restarts: 200 },
     };
     const plan = solveRailRoute(brief);

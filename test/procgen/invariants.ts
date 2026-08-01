@@ -436,6 +436,78 @@ const skyCruiserClearsTheTallThings: Invariant = (facts) => {
 };
 
 /**
+ * The gentlest turn a rail ride may make, in metres.
+ *
+ * A ride-comfort number, not a solver setting: the retired 2D game settled on
+ * "nothing a six-year-old has to brace against", and `coaster/route.ts` states
+ * 12 m as the tightest turn the Sky Cruiser will make. This file cannot import
+ * that constant — a static import of the coaster would solve the park layout at
+ * the default seed before the per-seed tests get to set theirs — so it is
+ * restated here, which is also the point: this is the *claim* being checked,
+ * and it is checked against the curve riders are actually on.
+ */
+const GENTLEST_TURN = 12;
+
+/** Arc spacing between the three points a curvature measurement is taken from. */
+const CURVATURE_SPAN = 2.5;
+
+/**
+ * Radius of the circle through three points, in plan view. Menger curvature.
+ * Infinity where they are collinear.
+ */
+const radiusThrough = (a: Vector3, b: Vector3, c: Vector3): number => {
+  const ab = Math.hypot(b.x - a.x, b.z - a.z);
+  const bc = Math.hypot(c.x - b.x, c.z - b.z);
+  const ca = Math.hypot(a.x - c.x, a.z - c.z);
+  const area = Math.abs((b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z)) / 2;
+  if (area < 1e-9) return Infinity;
+  return (ab * bc * ca) / (4 * area);
+};
+
+/**
+ * **The Sky Cruiser's built track really does turn as gently as it claims.**
+ *
+ * The generator validates turning radius on its own cubics, and that is not the
+ * same thing as the ride having it. `CoasterRoute` resamples the solved plan
+ * into control points and rebuilds it as a `CatmullRomCurve3`, and a rebuild is
+ * not a copy: the spline sags away from the curve its points came from, worst
+ * at the tightest bends. Measured before this was fixed, the rebuild ate up to
+ * 1.38 m and two of the five seeds here shipped a curve tighter than the 12 m
+ * the code declares — seed 2 at 11.68 m, seed 18 at 10.98 m.
+ *
+ * Which is the same mistake the old solver made, one layer down: it too pushed
+ * control points where it wanted them and then smoothed them, so the built
+ * curve did not honour what had been validated. A plan is a claim. This
+ * measures the fact, and it is the reason the fix cannot silently rot.
+ */
+const skyCruiserTurnsGently: Invariant = (facts) => {
+  const route = facts.world.coaster.route;
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  let tightest = Infinity;
+  let at = 0;
+  // Half-metre steps: a single tight bend is a few metres long, and a coarse
+  // sweep can step straight over the one that matters.
+  for (let d = 0; d < route.length; d += 0.5) {
+    route.pointAt(d - CURVATURE_SPAN, a);
+    route.pointAt(d, b);
+    route.pointAt(d + CURVATURE_SPAN, c);
+    const radius = radiusThrough(a, b, c);
+    if (radius < tightest) {
+      tightest = radius;
+      at = d;
+    }
+  }
+  expect(
+    tightest,
+    `the Sky Cruiser's built track turns at ${tightest.toFixed(2)} m radius ` +
+      `${at.toFixed(0)} m along the loop, tighter than the ${GENTLEST_TURN} m it promises — ` +
+      `the plan was validated but the rebuilt curve does not honour it`,
+  ).toBeGreaterThanOrEqual(GENTLEST_TURN);
+};
+
+/**
  * The suite. **Add an invariant by adding a line here.**
  */
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
@@ -450,6 +522,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
+  ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
 ];
 
 /**
