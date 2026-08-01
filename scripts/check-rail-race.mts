@@ -75,7 +75,7 @@ import {
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
 import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
-import { RaceCamera } from '../src/world/railRace/camera.ts';
+import { RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -226,106 +226,342 @@ say(
 );
 require(exitRadius < 56, 'the ride exit is outside the walkable park.');
 
-// --- is the camera actually side-on, and the right way round? ----------------
+// --- does the camera build the picture it promises? --------------------------
 //
-// The lesson the coaster learned the hard way (every ride camera in this park
-// faced backwards for weeks, at dot(forward, travel) = -1.000, and it was found
-// by measuring rather than by reading). Nothing here is argued from the code; it
-// is all read off the built camera.
+// The rig has no rig measurements left to read off. It is handed two things —
+// how many metres of track in front of the rider must reach the right-hand
+// edge, and where across the picture the rider sits — and solves its own
+// distance, aim and lens from them, to a different answer for every shape of
+// window. So the first half of this asserts the *picture*, read straight off
+// the built projection matrix, rather than the numbers that produced it.
+//
+// The second half still asserts the thing the coaster learned the hard way
+// (every ride camera in this park faced backwards for weeks, at
+// dot(forward, travel) = -1.000, and it was found by measuring rather than by
+// reading). What has changed is that the view is now *deliberately* angled a
+// little down the track — that angle is what lets the rig stand close enough
+// for a phone — so the assertion is a bounded range rather than a zero. The
+// bound is what keeps it a guard: a camera that had flipped measures -1.000 and
+// a camera that had become a chase measures +1.000, and the range below admits
+// neither. It is also swept at two window shapes now, because the rig is a
+// different rig at each and measuring one would leave the other unmeasured.
+//
+// ### Watched to fail, on 1 August 2026
+//
+// ```
+// the shipped pre-fix rig put back    portrait spans the same 37.6 m as a
+//                                     monitor; 10.4 px/m; 122° of fisheye in a
+//                                     sliver; and it aimed 9.6° BACKWARDS of
+//                                     the rider — which the old check, taking
+//                                     its bearing from the middle of the frame
+//                                     rather than from the rider, scored 0.000
+// the aim swung the other way          0.0 m of road ahead, rider 460% across
+// the rider asked for off-screen left  rider -55% across
+// AHEAD raised to 75 m                 7.3 px/m, aims 23.2° backwards
+// AHEAD cut to 9 m                     9.9 m of road ahead
+// ```
+//
+// The chase-camera ceiling (`mostAngled < 0.45`, about 27°) is the one thing
+// here no mutation reached: the rig measures 2.5° on a monitor and 14.5° on a
+// phone, and nothing that can be done to the two inputs pushes it past 27
+// without tripping something else first. It is honestly a ceiling on the design
+// rather than a detector of a fault, and it is what would catch a future rewrite
+// that puts an explicit swing dial back on the rig.
 
 const rig = new RaceCamera(route);
-rig.resize(1280, 720);
+const RIDER_RADIUS = LANE_RADII[PLAYER_LANE]!;
+const probe = new Vector3();
+
+/**
+ * The rider's own lane at `s`, at the height the rider themself rides at.
+ *
+ * At the rider's height and not the rail's, because that is where the rider is
+ * and the promises are about the rider. It is the rig's own constant rather than
+ * a second copy of it: measuring the framing at a different height from the one
+ * it was solved at reads a different answer (a tilted camera pushes a raised
+ * off-centre point further off centre), so a duplicate here would drift out of
+ * step with the rig and quietly stop measuring it. Grounded in the running game
+ * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
+ */
+const onLane = (s: number, into: Vector3): Vector3 => {
+  const t = route.angleAt(s);
+  return into.set(
+    Math.cos(t) * RIDER_RADIUS,
+    route.base + 0.6 + RIDER_RIDE_HEIGHT,
+    Math.sin(t) * RIDER_RADIUS,
+  );
+};
+
+/** Where the track `s` metres along lands across the screen, -1 left, +1 right. */
+const across = (s: number): number => onLane(s, probe).project(rig.camera).x;
+
+interface Framing {
+  /** The rider's own place across the picture, 0 at the left edge. */
+  riderX: number;
+  /** Metres of track in front of the rider that are on screen. */
+  ahead: number;
+  /** Metres of world the whole picture spans, at the rider. */
+  frameWidth: number;
+  fov: number;
+}
+
+function framing(width: number, height: number): Framing {
+  rig.resize(width, height);
+  rig.reset(0);
+  const start = route.startDistance;
+  // Walked, not bisected. The track is a ring, so far enough round it comes back
+  // into shot from behind the camera and `project` starts answering about a
+  // point that is behind the lens — bisecting straight off would have found one
+  // of those and reported 200 m of visible road, which it did.
+  const heading = new Vector3();
+  rig.camera.getWorldDirection(heading);
+  const walk = new Vector3();
+  let ahead = 0;
+  for (let s = 0.25; s <= 140; s += 0.25) {
+    onLane(start + s, walk).sub(rig.camera.position);
+    if (walk.dot(heading) <= 0) break;
+    if (across(start + s) >= 1) {
+      let near = ahead;
+      let far = s;
+      for (let i = 0; i < 40; i += 1) {
+        const mid = (near + far) / 2;
+        if (across(start + mid) < 1) near = mid;
+        else far = mid;
+      }
+      ahead = (near + far) / 2;
+      break;
+    }
+    ahead = s;
+  }
+  // How much world the picture spans: step one metre sideways from the rider and
+  // see how much of the screen that took.
+  const right = new Vector3().setFromMatrixColumn(rig.camera.matrixWorld, 0).normalize();
+  const stepped = onLane(start, new Vector3()).addScaledVector(right, 1).project(rig.camera).x;
+  return {
+    riderX: (across(start) + 1) / 2,
+    ahead,
+    frameWidth: 2 / (stepped - across(start)),
+    fov: rig.camera.fov,
+  };
+}
+
+const SHAPES: readonly { readonly name: string; readonly w: number; readonly h: number }[] = [
+  { name: 'monitor 1280x720', w: 1280, h: 720 },
+  { name: 'laptop 1440x900', w: 1440, h: 900 },
+  { name: 'square 900x900', w: 900, h: 900 },
+  { name: 'tablet 820x1180', w: 820, h: 1180 },
+  { name: 'phone 390x844', w: 390, h: 844 },
+  { name: 'sliver 320x900', w: 320, h: 900 },
+];
+
+say('');
+const frames = SHAPES.map((shape) => {
+  const f = framing(shape.w, shape.h);
+  say(
+    `${shape.name.padEnd(17)} rider ${(f.riderX * 100).toFixed(1).padStart(5)}% across   ` +
+      `${f.ahead.toFixed(1).padStart(5)} m of track ahead   ` +
+      `picture ${f.frameWidth.toFixed(1).padStart(5)} m wide   ` +
+      `${(shape.w / f.frameWidth).toFixed(1).padStart(5)} px/m   ` +
+      `fov ${f.fov.toFixed(0).padStart(3)}°`,
+  );
+  return f;
+});
+
+const monitor = frames[0]!;
+const phone = frames[4]!;
+
+// The promise the retired 2D game made and this rig inherited: the same amount
+// of track is *coming* whatever shape the window is, so a hazard does not arrive
+// with less warning on a phone than on a monitor. It used to be kept by fixing
+// the metres either side of the middle of the frame; it is now kept about the
+// rider, which is where it always meant something.
+const leastAhead = Math.min(...frames.map((f) => f.ahead));
+say(
+  `                  ahead ${leastAhead.toFixed(1)}–` +
+    `${Math.max(...frames.map((f) => f.ahead)).toFixed(1)} m across every shape ` +
+    `(a monitor gets ${monitor.ahead.toFixed(1)} m)`,
+);
+require(
+  leastAhead > 26.1,
+  `only ${leastAhead.toFixed(1)} m of track is visible in front of the rider in the tightest ` +
+    'window shape, which is less than the 26.1 m the rig showed before it was solved rather ' +
+    'than dialled in. A fix for "too zoomed out" must not be bought by showing less road.',
+);
+// The rig pins AHEAD metres at a fixed place across the picture, so what varies
+// between shapes is only the sliver beyond that, which is why this is a floor
+// against the monitor rather than a symmetric spread. The direction matters and
+// the size does not: a *narrow* window must never be the one that sees less.
+require(
+  leastAhead > monitor.ahead - 2,
+  `the tightest window shape sees ${leastAhead.toFixed(1)} m of track ahead against a ` +
+    `monitor's ${monitor.ahead.toFixed(1)} m. A hazard a landscape player had a second to ` +
+    "react to would already be past a portrait player's nose. See AHEAD in railRace/camera.ts.",
+);
+
+// Left of centre, because a side-scroller spends its screen on what is coming —
+// but on the screen, not half off the edge of it, and with enough behind them to
+// see a rider who has just been bonked drop back.
+for (const [i, f] of frames.entries()) {
+  require(
+    f.riderX > 0.06 && f.riderX < 0.36,
+    `in a ${SHAPES[i]!.name} the rider sits ${(f.riderX * 100).toFixed(1)}% across the picture. ` +
+      'They belong left of centre and clear of the edge — see RIDER_SCREEN_X.',
+  );
+}
+
+// The bug this whole rewrite is for. A phone stood up used to get the same 37.6
+// m of world across 390 px that a monitor got across 1280, which is 10.4 px per
+// metre against 34.1, which is what "it is too zoomed out" was.
+require(
+  phone.frameWidth < monitor.frameWidth * 0.8,
+  `a phone in portrait spans ${phone.frameWidth.toFixed(1)} m of world against a monitor's ` +
+    `${monitor.frameWidth.toFixed(1)} m. Portrait has no width to spare, so it must buy a ` +
+    'closer view with the room it does not have to spend behind the rider — this is the ' +
+    '1 August 2026 "too zoomed out" report, and it is what RIDER_SCREEN_X exists to fix.',
+);
+require(
+  390 / phone.frameWidth > 15,
+  `a phone in portrait renders the world at ${(390 / phone.frameWidth).toFixed(1)} px per metre, ` +
+    'which is the size the rider was too small to read at.',
+);
+
+// A very narrow window derives a very tall field of view from a fixed horizontal
+// one; past about 110° that stops being a picture and starts being a fisheye.
+const widestFov = Math.max(...frames.map((f) => f.fov));
+require(
+  widestFov <= 112.5,
+  `the vertical field of view reaches ${widestFov.toFixed(1)}°, which is a fisheye. ` +
+    'See MAX_V_FOV in railRace/camera.ts.',
+);
+
+// --- and is it pointed the right way, all the way round? ---------------------
 
 const forward = new Vector3();
-const travel = new Vector3();
 const inward = new Vector3();
 const travelAtRider = new Vector3();
-const toCamera = new Vector3();
 
-let worstSideOn = 0;
-let worstInward = 1;
-let leastRightward = 1;
-let outsideEverywhere = true;
-let worstPitch = 0;
+interface Pose {
+  mostAngled: number;
+  leastAngled: number;
+  leastInward: number;
+  leastRightward: number;
+  mostPitch: number;
+  outsideRing: boolean;
+  closestToPark: number;
+}
 
-for (let i = 0; i < 240; i += 1) {
-  const travelled = (i / 240) * route.length;
-  rig.reset(travelled);
-  const camera = rig.camera;
-  camera.getWorldDirection(forward);
+function sweep(width: number, height: number): Pose {
+  rig.resize(width, height);
+  const worst: Pose = {
+    mostAngled: -1,
+    leastAngled: 1,
+    leastInward: 1,
+    leastRightward: 1,
+    mostPitch: 0,
+    outsideRing: true,
+    closestToPark: Infinity,
+  };
+  for (let i = 0; i < 240; i += 1) {
+    const travelled = (i / 240) * route.length;
+    rig.reset(travelled);
+    const camera = rig.camera;
+    camera.getWorldDirection(forward);
+    // Compared flat, so the rig's downward tilt is not mistaken for looking
+    // along the track. The tilt is checked separately.
+    const flat = new Vector3(forward.x, 0, forward.z).normalize();
 
-  // "Side-on" is a property of the middle of the picture, so it is measured
-  // there — the rider is deliberately held left of centre and is therefore
-  // always a little off-axis, which is the framing working, not a fault. The
-  // rig stands radially out from the point it aims at, so the bearing it stands
-  // at IS the bearing of the centre of the picture.
-  const centreBearing = Math.atan2(camera.position.z, camera.position.x);
-  inward.set(-Math.cos(centreBearing), 0, -Math.sin(centreBearing));
-  // The clockwise horizontal tangent at that bearing — see RailRaceRoute.angleAt.
-  travel.set(Math.sin(centreBearing), 0, -Math.cos(centreBearing));
+    // Everything is measured against the rider, who is what the rig is for.
+    const at = route.wrap(route.startDistance + travelled);
+    route.pointAt(PLAYER_LANE, at, point);
+    route.tangentAt(PLAYER_LANE, at, travelAtRider);
+    travelAtRider.y = 0;
+    travelAtRider.normalize();
+    inward.set(-point.x, 0, -point.z).normalize();
 
-  // Compared flat, so the rig's downward tilt is not mistaken for looking along
-  // the track. The tilt is checked separately below.
-  const flat = new Vector3(forward.x, 0, forward.z).normalize();
-  worstSideOn = Math.max(worstSideOn, Math.abs(flat.dot(travel)));
-  worstInward = Math.min(worstInward, flat.dot(inward));
-  worstPitch = Math.max(worstPitch, Math.abs(Math.asin(forward.y)));
+    const angled = flat.dot(travelAtRider);
+    worst.mostAngled = Math.max(worst.mostAngled, angled);
+    worst.leastAngled = Math.min(worst.leastAngled, angled);
+    worst.leastInward = Math.min(worst.leastInward, flat.dot(inward));
+    worst.mostPitch = Math.max(worst.mostPitch, Math.abs(Math.asin(forward.y)));
 
-  // The rider must cross the screen left to right. Screen-right is the camera's
-  // own local +X in world space, which is `matrixWorld`'s first column.
-  const at = route.wrap(route.startDistance + travelled);
-  route.tangentAt(PLAYER_LANE, at, travelAtRider);
-  const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-  leastRightward = Math.min(leastRightward, right.dot(travelAtRider));
+    // The rider must cross the screen left to right. Screen-right is the
+    // camera's own local +X in world space, which is `matrixWorld`'s first column.
+    const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    worst.leastRightward = Math.min(worst.leastRightward, right.dot(travelAtRider));
 
-  // The rig has to stand outside the ring, or it is looking out of the park.
-  route.pointAt(PLAYER_LANE, at, point);
-  toCamera.subVectors(camera.position, point);
-  outsideEverywhere &&= Math.hypot(camera.position.x, camera.position.z) > Math.hypot(point.x, point.z);
+    const standsAt = Math.hypot(camera.position.x, camera.position.z);
+    worst.outsideRing &&= standsAt > Math.hypot(point.x, point.z);
+    worst.closestToPark = Math.min(worst.closestToPark, standsAt);
+  }
+  return worst;
 }
 
 say('');
-say(`camera      |dot(forward, travel)| ≤ ${worstSideOn.toFixed(4)}  (0 is perfectly side-on)`);
-say(`            dot(forward, inward)  ≥ ${worstInward.toFixed(4)}  (1 is straight into the park)`);
-say(`            dot(screenRight, travel) ≥ ${leastRightward.toFixed(3)}  (1 is left-to-right)`);
-say(`            tilt ${((worstPitch * 180) / Math.PI).toFixed(1)}° down`);
-say(`            fov ${rig.camera.fov.toFixed(1)}° at 16:9`);
+const POSES: readonly { readonly name: string; readonly w: number; readonly h: number }[] = [
+  { name: 'monitor', w: 1280, h: 720 },
+  { name: 'phone', w: 390, h: 844 },
+];
+for (const shape of POSES) {
+  const p = sweep(shape.w, shape.h);
+  say(
+    `camera ${shape.name.padEnd(9)} looks ${((Math.asin(p.leastAngled) * 180) / Math.PI).toFixed(1)}–` +
+      `${((Math.asin(p.mostAngled) * 180) / Math.PI).toFixed(1)}° down the track from side-on   ` +
+      `into the park ≥ ${p.leastInward.toFixed(3)}   ` +
+      `left-to-right ≥ ${p.leastRightward.toFixed(3)}   ` +
+      `tilt ${((p.mostPitch * 180) / Math.PI).toFixed(1)}° down   ` +
+      `stands r≥${p.closestToPark.toFixed(0)}`,
+  );
 
-require(
-  worstSideOn < 0.02,
-  `the camera is not side-on: it looks along the direction of travel by ` +
-    `${worstSideOn.toFixed(3)}. The brief asks for a side view, not a chase.`,
-);
-require(
-  worstInward > 0.99,
-  `the camera is not looking into the park (dot with inward is ${worstInward.toFixed(3)}). ` +
-    'The park is meant to be the backdrop of the whole race.',
-);
-require(
-  leastRightward > 0.95,
-  `riders cross the screen the wrong way (dot(screenRight, travel) = ` +
-    `${leastRightward.toFixed(3)}). A side-scroller reads left to right — see the sign of ` +
-    'RailRaceRoute.angleAt.',
-);
-require(outsideEverywhere, 'the camera rig strays inside the ring, so it would look outwards.');
-// Enough tilt to stack the four lanes into four rows of the picture, not so much
-// that the storybook side view turns into a plan view.
-require(
-  worstPitch > 0.12 && worstPitch < 0.5,
-  `the camera tilts ${((worstPitch * 180) / Math.PI).toFixed(1)}° down; it needs a little, to ` +
-    'separate the four lanes, and not a lot, or the side view becomes a map.',
-);
-
-// A portrait phone must see the same track ahead as a monitor.
-rig.resize(720, 1280);
-const portraitFov = rig.camera.fov;
-rig.resize(1280, 720);
-say(`            fov ${portraitFov.toFixed(1)}° in portrait — taller, not narrower`);
-require(
-  portraitFov > rig.camera.fov + 10,
-  'a portrait screen does not widen the view vertically, so it must be cropping the track ' +
-    'ahead — a hazard would arrive with less warning on a phone than on a monitor.',
-);
+  // Deliberately angled forward, and bounded at both ends. A rig that had been
+  // built facing the way the rider has come — the fault every other ride camera
+  // in this park has had at some point — measures -1.000 here, and a chase
+  // camera measures +1.000. Neither is within a mile of this range.
+  require(
+    p.leastAngled > -0.05,
+    `in a ${shape.name} window the camera looks BACK down the track by ` +
+      `${(-(Math.asin(p.leastAngled) * 180) / Math.PI).toFixed(1)}°. It is meant to lead the ` +
+      'rider, never trail them — this is the coaster eyeMount fault, in a new place.',
+  );
+  require(
+    p.mostAngled < 0.45,
+    `in a ${shape.name} window the camera looks ` +
+      `${((Math.asin(p.mostAngled) * 180) / Math.PI).toFixed(1)}° down the track. A little is ` +
+      'what lets the rig stand close enough for a phone; this much is a chase camera, and the ' +
+      'brief asks for a side view.',
+  );
+  require(
+    p.leastInward > 0.85,
+    `in a ${shape.name} window the camera is not looking into the park (dot with inward is ` +
+      `${p.leastInward.toFixed(3)}). The park is meant to be the backdrop of the whole race.`,
+  );
+  require(
+    p.leastRightward > 0.9,
+    `in a ${shape.name} window riders cross the screen the wrong way ` +
+      `(dot(screenRight, travel) = ${p.leastRightward.toFixed(3)}). A side-scroller reads left ` +
+      'to right — see the sign of RailRaceRoute.angleAt.',
+  );
+  require(
+    p.outsideRing,
+    `in a ${shape.name} window the camera rig strays inside the ring, so it would look outwards.`,
+  );
+  // Solving the rig for a tighter picture pulls it in towards the track. It must
+  // not come in so far that it is standing in the park among the trees and the
+  // boundary wall it is meant to be looking over.
+  require(
+    p.closestToPark > ENTRANCE_WALL_RADIUS,
+    `in a ${shape.name} window the rig stands at r=${p.closestToPark.toFixed(1)}, inside the ` +
+      `boundary wall at r=${ENTRANCE_WALL_RADIUS}, where the park's own scenery is between it ` +
+      'and the race.',
+  );
+  // Enough tilt to stack the four lanes into four rows of the picture, not so
+  // much that the storybook side view turns into a plan view.
+  require(
+    p.mostPitch > 0.12 && p.mostPitch < 0.5,
+    `in a ${shape.name} window the camera tilts ${((p.mostPitch * 180) / Math.PI).toFixed(1)}° ` +
+      'down; it needs a little, to separate the four lanes, and not a lot, or the side view ' +
+      'becomes a map.',
+  );
+}
 
 // --- is it still a game? -----------------------------------------------------
 
