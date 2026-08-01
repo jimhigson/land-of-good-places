@@ -144,6 +144,27 @@ const MAX_SPAN = 0.72;
 const MAX_CENTRE_DRIFT = 0.01;
 
 /**
+ * Per-kind override of {@link MAX_SPAN}, for a kind that is *deliberately*
+ * wider than the general "worn on the face" bracket above.
+ *
+ * Sunglasses were doubled in lens size on 1 August 2026, by explicit request
+ * ("exaggerated and theatrical... giant novelty sunglasses"), with the rim
+ * and temple arms scaled up alongside the lens rather than left behind it —
+ * see `glasses.ts`'s `SUN_LENS_RADIUS` doc comment. That is a real, intended
+ * change to how wide this one kind reads on the face, not drift to paper
+ * over: the geometry was checked (rim inner hole still clears the nose
+ * bridge by ~10 cm at kid scale, no mesh overlap at the centreline) before
+ * this number was raised. 0.82 gives the same ~0.08 headroom above the
+ * measured 0.79× that the general `MAX_SPAN` gives above the widest of the
+ * three original kinds, rather than shrink-wrapping the bound to today's
+ * exact figure. Star and heart are untouched and stay under the general
+ * `MAX_SPAN`.
+ */
+const MAX_SPAN_OVERRIDE: Partial<Record<GlassesKind, number>> = {
+  sunglasses: 0.82,
+};
+
+/**
  * How far a lens's own centre may sit from the eye it is meant to cover, in
  * metres — measured against `kidEyeCentre`, not against this file's own idea
  * of where a lens landed.
@@ -171,8 +192,9 @@ for (const kind of GLASSES_KINDS as readonly GlassesKind[]) {
     ].join(' '),
   );
 
-  if (span < MIN_SPAN || span > MAX_SPAN) {
-    failures.push(`${kind} is ${span.toFixed(2)}× the head wide; glasses run ${MIN_SPAN}–${MAX_SPAN}×.`);
+  const maxSpan = MAX_SPAN_OVERRIDE[kind] ?? MAX_SPAN;
+  if (span < MIN_SPAN || span > maxSpan) {
+    failures.push(`${kind} is ${span.toFixed(2)}× the head wide; glasses run ${MIN_SPAN}–${maxSpan}×.`);
   }
   if (Math.abs(worn.centreX) > MAX_CENTRE_DRIFT) {
     failures.push(

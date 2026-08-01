@@ -86,15 +86,51 @@ function bridgePiece(fit: Group, colour: number): void {
  * 38° iso camera — it does not need to reach the ear exactly, only to break
  * the lens's silhouette on its outer edge the way a real temple would.
  */
-function temple(fit: Group, side: -1 | 1, lensX: number, colour: number): void {
+function temple(fit: Group, side: -1 | 1, lensX: number, colour: number, hingeOffset = 0.095): void {
   const arm = solid(new Mesh(new CapsuleGeometry(0.012, 0.15, 4, 8), toonMaterial(colour)));
   // The capsule's own axis runs local +Y; rotating it onto Z lays it back
   // toward the ear, and the small extra yaw angles the tip in rather than
   // leaving it dead straight, which reads as "hinged" instead of "welded on".
   arm.rotation.set(Math.PI / 2, side * 0.16, 0, 'YXZ');
-  arm.position.set(side * (lensX + 0.095), 0.006, -0.03);
+  arm.position.set(side * (lensX + hingeOffset), 0.006, -0.03);
   fit.add(arm);
 }
+
+/**
+ * Sunglasses lens radius, in head units, fed to the `blob()` that makes the
+ * lens — literally Jim's ask ("about double their current size"): the shipped
+ * pair's lens blob was `0.092`, so this is that number doubled.
+ *
+ * {@link SUN_RIM_RADIUS} and {@link SUN_RIM_TUBE} scale up alongside it rather
+ * than staying put, on purpose: a doubled lens inside the old, normal-sized
+ * rim would read as lenses awkwardly bulging out of a frame built for a
+ * smaller face, not as one deliberately oversized pair of shades. Scaling the
+ * whole silhouette together is what makes it read as "giant novelty
+ * sunglasses" rather than "sunglasses with a rendering bug" — the exaggerated,
+ * theatrical look that was actually asked for (1 August 2026).
+ */
+const SUN_LENS_RADIUS = 0.092 * 2;
+/** Torus radius (rim centreline). Chosen so the rim's outer edge comfortably
+ * contains the doubled lens (see {@link SUN_LENS_RADIUS}) while its inner
+ * hole still leaves a real gap over the nose bridge — the two rims sit close
+ * together for the oversized look but never touch or cross the centreline;
+ * `check:glasses-fit`'s span and centre checks and a visual pass both confirm
+ * this at this radius. */
+const SUN_RIM_RADIUS = 0.16;
+/** Rim tube radius — thicker than the original `0.019` so the frame itself
+ * reads as chunkier and more theatrical, not just a bigger hole. */
+const SUN_RIM_TUBE = 0.034;
+/** Outline thickness for the rim, scaled up from the original `0.009` by the
+ * same ratio as {@link SUN_RIM_TUBE} grew over the original tube radius, so
+ * the ink line stays proportionate to the frame it outlines rather than
+ * looking thin on a much chunkier rim. Lands inside ART_DIRECTION.md §2's
+ * 0.016–0.022 "props" outline range. */
+const SUN_RIM_OUTLINE = 0.016;
+/** How far out the temple hinge sits from the lens centre, in head units —
+ * scaled up from the original `0.095` by the same ratio the rim's own outer
+ * radius grew, so the hinge still lands on the rim's surface instead of
+ * either floating past its edge or burying itself inside it. */
+const SUN_TEMPLE_HINGE = 0.095 * ((SUN_RIM_RADIUS + SUN_RIM_TUBE) / (0.1 + 0.019));
 
 /**
  * Sunglasses: a torus rim and a flattened, tinted, transparent lens per eye —
@@ -114,16 +150,16 @@ function createSunglasses(): AssetHandle {
   for (const side of [-1, 1] as const) {
     const x = side * EYE_HALF_GAP;
 
-    const rim = solid(new Mesh(new TorusGeometry(0.1, 0.019, 8, 22), rimMat));
+    const rim = solid(new Mesh(new TorusGeometry(SUN_RIM_RADIUS, SUN_RIM_TUBE, 8, 22), rimMat));
     rim.position.set(x, 0, STANDOFF);
     fit.add(rim);
-    addOutline(rim, 0.009);
+    addOutline(rim, SUN_RIM_OUTLINE);
 
-    const lens = decal(blob(0.092, lensMat, [1, 0.86, 0.3], 16));
+    const lens = decal(blob(SUN_LENS_RADIUS, lensMat, [1, 0.86, 0.3], 16));
     lens.position.set(x, 0, STANDOFF - 0.004);
     fit.add(lens);
 
-    temple(fit, side, EYE_HALF_GAP, ART.glassesSunFrame);
+    temple(fit, side, EYE_HALF_GAP, ART.glassesSunFrame, SUN_TEMPLE_HINGE);
   }
 
   return finish(root);
