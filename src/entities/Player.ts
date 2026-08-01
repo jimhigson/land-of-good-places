@@ -604,6 +604,14 @@ export class Player implements GameSystem {
    */
   waterHappy = false;
 
+  /**
+   * True while some other system wants the face to read a frown without
+   * fighting the blink state machine in `animate()` — the Rail Race sets this
+   * for the moments a bonk's wobble is still fresh, and while she is actively
+   * holding through a sparking black stretch. See `RailRace.driveRiders`.
+   */
+  railRaceFrown = false;
+
   constructor(
     private readonly collision: CollisionWorld,
     private readonly camera: IsoCamera,
@@ -1447,7 +1455,16 @@ export class Player implements GameSystem {
     // so a blink is a texture swap. That makes it cheap, but only if it happens
     // on the two TRANSITIONS — calling `setExpression` every frame would flip
     // `needsUpdate` every frame and re-upload the texture to the GPU.
-    this.face.update(dt, this.waterHappy || this.smelling ? 'happy' : 'neutral');
+    //
+    // `railRaceFrown` outranks `waterHappy`/`smelling` because a bonk is a
+    // sudden thing that happens *to* her and should win over an ambient good
+    // mood, but a blink still outranks the lot — `faceLife` punches one
+    // through whatever resting face it is handed, so the ordinary blink cycle
+    // keeps interrupting a held frown exactly as it does a held smile.
+    this.face.update(
+      dt,
+      this.railRaceFrown ? 'frown' : this.waterHappy || this.smelling ? 'happy' : 'neutral',
+    );
 
     // Secondary motion the model owns: the swishy ponytail, if that is what
     // the child chose. Last, and deliberately so — it is pinned to the world
