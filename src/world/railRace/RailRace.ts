@@ -306,6 +306,10 @@ export class RailRace implements GameSystem {
       }
 
       case 'waiting':
+        // Nobody is racing, but the rivals do not know that — they carry on
+        // round the ring exactly like the train does with an empty carriage.
+        // See {@link driveIdleRivals}.
+        this.driveIdleRivals(context);
         break;
     }
 
@@ -361,6 +365,40 @@ export class RailRace implements GameSystem {
         this.finishedCount += 1;
         rider.place = this.finishedCount;
         rider.finishTime = this.raceTime;
+      }
+    }
+  }
+
+  /**
+   * Keeps the rivals circling the ring whenever nobody is racing.
+   *
+   * The park train never stops going round just because nobody boarded it
+   * (`ParkTrain.drive` runs every frame regardless); this is the same idea
+   * for the Rail Race. It drives the three rival carts through the exact
+   * `stepRider` physics a real race uses — not a canned loop animation — and
+   * only the rivals: the player's own cart has nobody in it and stays parked
+   * at the line until {@link requestBoard} is pressed, which already resets
+   * every rider (including these) to a fresh start line for the real thing.
+   *
+   * A rival that reaches the finish line here is not "done" the way a real
+   * race ends it — there is no result card and nobody to show it to — so
+   * rather than freezing at the line (`stepRider` would, via `rider.finished`)
+   * it is quietly wrapped back into lap one and carries on at whatever speed
+   * it already had, for a seamless join rather than a stop-start.
+   */
+  private driveIdleRivals(context: FrameContext): void {
+    const { dt } = context;
+    const route = RAIL_RACE_PLAN.route;
+    for (const cart of this.carts) {
+      if (cart.isPlayer) continue;
+      const rider = cart.rider;
+      const wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
+      stepRider(route, rider, wantHold, dt);
+      if (rider.finished) {
+        rider.travelled %= route.length;
+        rider.finished = false;
+        rider.barCursor = 0;
+        rider.zoneCursor = 0;
       }
     }
   }
