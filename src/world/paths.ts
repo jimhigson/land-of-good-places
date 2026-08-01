@@ -13,6 +13,7 @@ import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
+import { RAIL_RACE_PLAN } from './railRace/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 
 /**
@@ -370,7 +371,7 @@ function buildGraph(): PathGraph {
   // helper's `towardX/towardZ` equal to `(ex, ez)` is the same "no past-the-
   // doormat extension" case a station's own node would use if it needed one:
   // an exit is a destination in itself, not a doorway into a plot.
-  for (const plan of [COASTER_PLANS.cruiser, COASTER_PLANS.race]) {
+  for (const plan of [COASTER_PLANS.cruiser, RAIL_RACE_PLAN]) {
     spur(`exit-${plan.name}`, 'exit', plan.exitX, plan.exitZ, plan.exitX, plan.exitZ, 2.2);
   }
   spur(

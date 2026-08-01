@@ -14,7 +14,7 @@ import type { CollisionWorld } from '../Collision';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, type RailRaceTrack } from './track';
-import { PLAYER_LANE } from './route';
+import { LANE_COUNT, PLAYER_LANE } from './route';
 import { createSparks, type Sparks } from './sparks';
 import {
   HAZARDS,
@@ -131,6 +131,18 @@ interface Cart {
 export class RailRace implements GameSystem {
   readonly name = 'railRace';
   readonly group = new Group();
+  /**
+   * The ring this race is run on, and how many lanes it has.
+   *
+   * Exposed rather than left implicit so that anything measuring the built park
+   * can reach them **through the world** — `test/procgen/invariants.ts` must not
+   * import `railRace/plan.ts` directly, because that pulls in `parkManifest`
+   * at module load and would fix the park seed before the harness has set it.
+   * (It did exactly that on the first attempt: four of the five seed suites
+   * built the canonical park instead of their own.)
+   */
+  readonly route = RAIL_RACE_PLAN.route;
+  readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
 

@@ -288,6 +288,12 @@ export function buildRailRaceTrack(
   legs.count = spots.length;
   beams.count = spots.length;
   droppers.count = dropperIndex;
+  // Named so `test/procgen/invariants.ts` can find the legs in the built scene
+  // and measure where they actually landed, rather than re-deriving the rules
+  // that placed them.
+  legs.name = 'railRace:trestle-legs';
+  beams.name = 'railRace:trestle-beams';
+  droppers.name = 'railRace:trestle-droppers';
   for (const mesh of [legs, beams, droppers]) {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.castShadow = true;

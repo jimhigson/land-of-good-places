@@ -14,6 +14,7 @@ import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { Coaster } from './coaster/Coaster';
 import { COASTER_PLANS } from './coaster/plan';
+import { RailRace } from './railRace/RailRace';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -59,7 +60,7 @@ export class World implements GameSystem {
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
-  readonly raceCoaster: Coaster;
+  readonly railRace: RailRace;
   readonly dodgems: DodgemsPlot;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
@@ -126,14 +127,11 @@ export class World implements GameSystem {
       plan: COASTER_PLANS.cruiser,
       camera: 'firstPerson',
     });
-    this.raceCoaster = new Coaster(this.collision, this.train, {
-      plan: COASTER_PLANS.race,
-      camera: 'chase',
-      // The thing that makes it a race rather than a second scenic ride:
-      // barriers, a rival, a countdown and a finish. Without it `buildRace`
-      // never runs and the Rail Race is a Sky Cruiser seen from behind.
-      race: true,
-    });
+    // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
+    // is four parallel rails round the park's rim, raced side-on with the park
+    // itself as the backdrop. Its own module owns the route, the physics, the
+    // geometry and the camera — see `railRace/RailRace.ts`.
+    this.railRace = new RailRace(this.collision);
 
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
@@ -188,7 +186,7 @@ export class World implements GameSystem {
       this.facePaintStall.group,
       this.train.group,
       this.coaster.group,
-      this.raceCoaster.group,
+      this.railRace.group,
     );
   }
 
@@ -227,7 +225,7 @@ export class World implements GameSystem {
     // instance buffer. The other way round they would ride a frame behind.
     this.train.update(context);
     this.coaster.update(context);
-    this.raceCoaster.update(context);
+    this.railRace.update(context);
     this.train.carryPassengers(this.npcs.riders);
 
     this.npcs.update(context);
@@ -278,7 +276,7 @@ export class World implements GameSystem {
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
-    this.raceCoaster.attachPlayer(player);
+    this.railRace.attachPlayer(player);
     // Lets the crowd push gently apart from the player instead of walking
     // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
     this.npcs.attachPlayer(player);
@@ -305,7 +303,7 @@ export class World implements GameSystem {
     this.facePaintStall.dispose();
     this.train.dispose();
     this.coaster.dispose();
-    this.raceCoaster.dispose();
+    this.railRace.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }
