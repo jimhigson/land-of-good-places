@@ -111,6 +111,12 @@ const CATCHUP = 0.004;
 const SWING = 0.22;
 
 /**
+ * How far `poseRider()` drops the player when she is off the button, in this
+ * ride's own pre-`RIDE_SCALE` metres — see the comment where it is used.
+ */
+const DUCK_DROP = 0.5;
+
+/**
  * What the race wants said on screen, for whoever is holding the DOM.
  *
  * `RailRace` lives in `World` and has no business knowing about `uiRoot`; the
@@ -540,13 +546,25 @@ export class RailRace implements GameSystem {
     // Ducking drops her into the cart, which is the thing the side view exists
     // to show. The wobble after a bonk shakes the seat a little, cosy not
     // punishing.
-    const duckDrop = this.ducking && this.phase === 'racing' ? 0.5 : 0;
+    //
+    // Scaled by RIDE_SCALE — her own model is too (`requestBoard()`), so an
+    // unscaled drop stayed the same fixed 0.5m while her seated head height
+    // grew with everything else, and duck bars ended up sitting well below
+    // her head in *both* held and ducked states (see DUCK_CLEARANCE in
+    // hazards.ts). This and that value were picked together against her real
+    // measured head height in both states, live, on 1 August 2026.
+    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * RIDE_SCALE : 0;
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     this.player.setRidePose(
       cart.position.x + wobble,
       cart.position.y + SEAT_HEIGHT * RIDE_SCALE - duckDrop,
       cart.position.z,
       cart.rotation.y,
+      // Rivals get this for free — `kid.root` is a child of the same group
+      // `placeCarts()` pitches — but the player's own model is positioned
+      // independently every frame, so it never inherited the cart's tilt on
+      // the ring's hills until `setRidePose` grew a pitch parameter to carry it.
+      cart.rotation.x,
     );
   }
 

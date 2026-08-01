@@ -29,11 +29,23 @@ import { RIDE_SCALE } from './route';
  *
  * Scaled by `RIDE_SCALE` like the rail gauge and the cart itself — this is a
  * purely visual clearance (bonking is decided by button state at the moment
- * of crossing, not an actual pose/collision test, see the header above), but
- * it was missed when `RIDE_SCALE` first shipped, and a bar sized for the old,
- * smaller cart hung far too low over the new 2.5x one.
+ * of crossing, not an actual pose/collision test, see the header above).
+ *
+ * **1.5, not 1.15.** The first pass just multiplied the pre-`RIDE_SCALE`
+ * figure through, which undercounted a second thing that also grew:
+ * `RIDE_SCALE` does not only move the rider up onto a taller seat
+ * (`cart.ts`'s `SEAT_HEIGHT`), it also scales the rider's own model, so her
+ * head sits noticeably higher above that seat than it used to. Measured live
+ * (1 August 2026) against the deployed rig: at 1.15 the bar sat roughly a
+ * metre *below* her head even while ducking, so she visibly passed through
+ * it whichever way she was holding the button, not just "occasionally
+ * clipped" — the two states never actually straddled the bar. 1.5 was picked
+ * by measuring her real head height above the rail in both states
+ * (`RailRace.ts`'s `poseRider`, ducking vs not, using the matching
+ * `DUCK_DROP` fix there) and setting the bar roughly halfway between them,
+ * so each state has real clearance rather than a hair's breadth.
  */
-export const DUCK_CLEARANCE = 1.15 * RIDE_SCALE;
+export const DUCK_CLEARANCE = 1.5 * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.

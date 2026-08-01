@@ -618,13 +618,24 @@ export class Player implements GameSystem {
     this.flying = false;
   }
 
-  /** Called by the ride every frame while it owns the character. */
-  setRidePose(x: number, y: number, z: number, facing: number): void {
+  /**
+   * Called by the ride every frame while it owns the character.
+   *
+   * `pitch` defaults to 0 (upright) — most rides that call this are flat, or
+   * put the rider inside a vehicle whose own tilt is enough on its own (a
+   * child of that vehicle's group inherits its pitch for free). A ride whose
+   * player model is positioned independently of any such parent, and that
+   * climbs or drops (the Rail Race's undulating ring), needs to pass its
+   * cart's actual pitch here explicitly, or the rider stays bolt upright
+   * through every hill while the cart under her visibly tilts.
+   */
+  setRidePose(x: number, y: number, z: number, facing: number, pitch = 0): void {
     this.position.set(x, y, z);
     this.previousPosition.copy(this.position);
     this.facingAngle = facing;
     this.group.position.copy(this.position);
     this.group.rotation.y = facing;
+    this.group.rotation.x = pitch;
   }
 
   /** Gives the character back, optionally still moving. */
