@@ -14,14 +14,16 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { clamp01, lerp } from '../../core/mathUtils';
+import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../paths';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import type { CollisionWorld } from '../Collision';
 import { sweptRails, type RailSampler } from '../rail/sweptRail';
-import { ALERT_RANGE, DUCK_CLEARANCE, type HazardLayout } from './hazards';
+import { ALERT_RANGE, DUCK_CLEARANCE, TRESTLE_SPACING, trestleGridIndex, type HazardLayout } from './hazards';
 import {
   LANE_COUNT,
   LANE_SPAN,
@@ -52,8 +54,13 @@ export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 /** How far a duck bar reaches either side of its lane's centre. */
 const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
 
-/** Trestles this far apart around the ring. */
-const TRESTLE_SPACING = 12;
+/**
+ * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
+ * `duckBarAsset.ts`'s own doc comment for why this asset has no per-part
+ * transform the way the cart's does.
+ */
+export const DUCKBAR_PARTS = ['post', 'bar'] as const;
+export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
 /** How far under the lowest a rail ever gets the cross-beam sits. */
 const BEAM_DROP = 0.45;
@@ -202,32 +209,51 @@ export function buildRailRaceTrack(
   sparkRibbons.frustumCulled = false;
   group.add(sparkRibbons);
 
+  // --- where the trestles actually stand, computed before the duck bars ------
+  // A duck bar's own visible support comes from here — see `hazards.ts`'s
+  // `snapToTrestleGrid` and `trestleSpots`'s own doc comment for why bars and
+  // trestles now share one grid index rather than being placed independently.
+  const mandatoryTrestleIndices = new Set(
+    layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
+  );
+  const spots = trestleSpots(route, collision, mandatoryTrestleIndices);
+  const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
+
   // --- the duck bars ---------------------------------------------------------
   const barCount = layout.bars.length * LANE_COUNT;
   const frameMaterial = toonMaterial(PALETTE.buildingTrim);
-  const barMaterial = toonMaterial(PALETTE.slideRail);
+  // Diagonal yellow-and-black hazard tape (Jim, 1 August 2026) — a canvas
+  // texture, not baked into the asset; see `hazardTapeTexture`'s own doc
+  // comment for why, and why the base colour is white (the texture already
+  // carries both stripe colours — a tinted base would recolour the black
+  // stripes too).
+  const barMaterial = toonMaterial(0xffffff, { map: hazardTapeTexture() });
   keep(frameMaterial);
   keep(barMaterial);
 
-  const postGeometry = new CylinderGeometry(
-    0.07 * RIDE_SCALE,
-    0.09 * RIDE_SCALE,
-    DUCK_CLEARANCE + 0.3 * RIDE_SCALE,
-    6,
-  );
-  const barGeometry = new BoxGeometry(BAR_HALF_SPAN * 2, 0.22 * RIDE_SCALE, 0.26 * RIDE_SCALE);
+  // Shape from the asset (`art/blend/duckbar.blend`), not procedural
+  // primitives — see `HANDOFF-duck-bar-blender-asset.md` for why: Jim, after
+  // a numbers-only height fix still wasn't right, "sizing is a Blender asset
+  // issue not a game engine issue." Shared, `markShared` geometry (the whole
+  // ring's worth of posts and bars all point at these same two buffers), so
+  // — unlike `sleeveGeometry` below — these must never be pushed to
+  // `disposables`: see `dispose()`'s own note.
+  const postGeometry = duckBarAssetGeometry('post');
+  const barGeometry = duckBarAssetGeometry('bar');
   // The bar itself is the warning light. Lamps on the posts were legible at a
   // standstill and invisible at fourteen metres a second; a stripe of amber
   // right where the thing you must duck under is cannot be missed. A sleeve
   // around the bar rather than the bar's own material, so the toon shading
-  // underneath still shapes it.
+  // underneath still shapes it. Kept procedural (not part of the asset): its
+  // whole job is to be resized and recoloured every frame by `setAlerts`,
+  // which is exactly the "appearance from code" half of the split — a fixed
+  // authored shape has nothing to offer a part that never looks the same way
+  // twice.
   const sleeveGeometry = new BoxGeometry(
     BAR_HALF_SPAN * 2 - 0.04 * RIDE_SCALE,
     0.28 * RIDE_SCALE,
     0.32 * RIDE_SCALE,
   );
-  keep(postGeometry);
-  keep(barGeometry);
   keep(sleeveGeometry);
 
   const posts = new InstancedMesh(postGeometry, frameMaterial, Math.max(1, barCount * 2));
@@ -249,10 +275,23 @@ export function buildRailRaceTrack(
 
   for (const bar of layout.bars) {
     const slots: number[] = [];
-    // `bar.at` is measured from the start/finish arch (`hazards.ts`), which
-    // sits at `route.startDistance`, not at the route's own raw zero — see
-    // the matching note in `buildSparkRibbons` below.
-    const at = route.wrap(route.startDistance + bar.at);
+    // The bar's own visible support — see the block above. Every bar's grid
+    // index is mandatory, so this should always be found; the fallback below
+    // (dropping the bar's geometry rather than rendering it with no support)
+    // is defence in depth for the `console.warn`-logged edge case in
+    // `trestleSpots`, not the expected path.
+    const index = trestleGridIndex(bar.at, route.length);
+    const spot = spotByIndex.get(index);
+    if (!spot) {
+      barSlots.push(slots);
+      continue;
+    }
+    // `spot.at` is already the wrapped, real route coordinate the matched
+    // trestle actually stands at — not re-derived from `bar.at` (which is
+    // arch-relative, per `hazards.ts`) — so the bar sits exactly where its
+    // support does, including the support's own small collision-avoidance
+    // nudge, rather than merely close to it.
+    const at = spot.at;
     route.outwardAt(at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
@@ -283,6 +322,11 @@ export function buildRailRaceTrack(
   posts.count = postIndex;
   bars.count = barIndex;
   sleeves.count = barIndex;
+  // Named so `test/procgen/invariants.ts` can find the bars in the built
+  // scene and measure them against the trestle legs directly, the same
+  // reason the trestle meshes below are named.
+  posts.name = 'railRace:duck-bar-posts';
+  bars.name = 'railRace:duck-bars';
   for (const mesh of [posts, bars, sleeves]) {
     mesh.instanceMatrix.needsUpdate = true;
     // The bars stand nine metres up on a ring that is mostly out of shot; per
@@ -303,7 +347,8 @@ export function buildRailRaceTrack(
   keep(timberMaterial);
   keep(trestleMaterial);
 
-  const spots = trestleSpots(route, collision);
+  // `spots` was already computed above, before the duck bars, so their
+  // supports could be looked up by grid index.
   const legGeometry = new CylinderGeometry(0.26, 0.34, 1, 8);
   const beamGeometry = new BoxGeometry(1, 0.26, 0.42);
   const dropperGeometry = new CylinderGeometry(0.08, 0.08, 1, 6);
@@ -437,6 +482,12 @@ export function buildRailRaceTrack(
     },
 
     dispose(): void {
+      // `postGeometry`/`barGeometry` are deliberately never in `disposables`
+      // — they come from `duckBarAsset.ts`'s shared, `markShared` cache, the
+      // same one every other trestle span's posts and bars point at, so
+      // freeing them here would corrupt the rest of the ring. Everything
+      // else this track built for itself (rails, spark ribbons, the sleeve
+      // geometry, every material) is.
       for (const item of disposables) item.dispose();
     },
   };
@@ -527,6 +578,144 @@ interface TrestleSpot {
   readonly at: number;
   readonly x: number;
   readonly z: number;
+  /** Which of `trestleSpots`'s `TRESTLE_SPACING` grid slots this is — see `planHazards`'s `snapToTrestleGrid`. */
+  readonly index: number;
+}
+
+/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
+function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+  if (!collision.isClearCircle(x, z, 1.1)) return false;
+  if (distanceToPath(x, z) < 2.8) return false;
+  if (distanceToRailCorridor(x, z) < 2.4) return false;
+  const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
+    (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
+  );
+  return !pinchesCorridor;
+}
+
+/**
+ * How far `trestleSpots` will nudge a candidate before giving up on it — along
+ * the route (metres of arc) and across it (metres off `NOMINAL_RADIUS`).
+ * Kept well inside half of `TRESTLE_SPACING` (12 m) so two neighbouring
+ * slots' searches can never land on the same ground.
+ *
+ * Ordering within each array no longer matters (`searchForClearGround` picks
+ * its own priority, radial-first — see that function's doc comment); kept
+ * closest-to-zero-first anyway because it reads as "the nudge, ranked."
+ */
+const ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3];
+const RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
+
+/**
+ * The wider arc search a grid slot gets when a duck bar is actually scheduled
+ * on it — see `planHazards`'s `snapToTrestleGrid`. An ambient, decorative
+ * slot with nothing scheduled on it is allowed to go missing (the track
+ * "shrugs it off"); a slot a bar is relying on for its own visible support is
+ * not, so it is worth searching harder — still well inside half of
+ * `TRESTLE_SPACING` so it can never reach into a neighbouring slot's ground.
+ */
+const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
+
+/**
+ * The radial budget a *mandatory* slot's wide search is normally allowed —
+ * deliberately **not** the same `±8` a decorative slot's search would use if
+ * it had one (it doesn't; only mandatory slots get a second attempt at all).
+ *
+ * **Why radial is special and arc is not.** A duck bar renders at its lane's
+ * fixed radius (`route.pointAt`'s `LANE_RADII[lane]`, `route.ts`) — nothing
+ * ever nudges *that*. An arc nudge shifts `at` for the leg and the bar
+ * identically (both derive from the same `spot.at`, `track.ts`'s duck-bar
+ * loop above), so it costs nothing: bar and leg stay exactly as coincident as
+ * they always were, just moved together along the loop. A radial nudge only
+ * moves the leg — the bar has no radial nudge to match it with — so every
+ * metre of radial nudge is a metre the bar and its own support drift apart.
+ *
+ * Found the hard way (2 August 2026): PR #162 moved the rail-race stall to
+ * the rim, which (via the shared-RNG butterfly effect documented in that
+ * PR — an earlier consumer's draw count shifting every later one) changed
+ * which ground was clear near two mandatory slots enough that their old,
+ * uncapped `±8` wide search reached all the way to `dr = 8`. With `LANE_RADII`
+ * offsets up to `±3.9` off nominal (`LANE_SPAN / 2`, `route.ts`), that put
+ * the duck bar on the innermost lane a measured `|8 - (-3.9)| = 11.9 m` from
+ * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
+ * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
+ * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
+ * beside the droppers hanging down from the actual rails (drawn, correctly,
+ * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
+ * the trestle loop above), not under them.
+ *
+ * `4` keeps the worst case (`4 + 3.9 = 7.9 m`, the innermost lane against a
+ * full `+4` nudge) under the 8 m tolerance with a little room to spare, while
+ * still giving the search four full extra metres either way beyond the
+ * ordinary, non-mandatory `RADIAL_NUDGES` reach. Paired with
+ * `searchForClearGround`'s radial-outer ordering (below), a mandatory slot
+ * now always tries every `WIDE_ARC_NUDGES` offset at each radial step before
+ * growing the radial nudge further, so the search spends its "free" arc room
+ * before its costly radial room — the fix that actually matters; this cap is
+ * the backstop that makes the guarantee structural rather than merely
+ * "usually true of whatever the search happens to find."
+ */
+const MANDATORY_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4];
+
+/**
+ * The old, uncapped `±8` radial range — kept only as the last-resort
+ * fallback `trestleSpots` reaches for if even `MANDATORY_RADIAL_NUDGES`
+ * finds no clear ground at all. Accepting a support that may exceed the duck
+ * bar's own tolerance is still better than the alternative: `trestleSpots`
+ * drops the bar's geometry entirely when its slot has no support at all (see
+ * the duck-bar loop's `if (!spot) { ... continue; }`), and a duck bar with no
+ * support of any kind is a worse bug than one whose support is visibly a
+ * little off to the side. `trestleSpots` warns loudly whenever this fallback
+ * is the one that actually placed a mandatory slot, so it stays visible
+ * rather than becoming a silent, permanent crutch.
+ */
+const WIDE_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
+
+/**
+ * Tries each (radial, arc) nudge in order and returns the first clear ground
+ * it finds.
+ *
+ * **Radial-outer, arc-inner — not the other way round.** A slot's search
+ * used to be arc-outer: try every radial nudge at `da = 0` before ever
+ * trying `da = ±1`. That is backwards for a mandatory slot, where a radial
+ * nudge costs real alignment (see `MANDATORY_RADIAL_NUDGES`'s doc comment)
+ * and an arc nudge costs nothing — the old order reached for the biggest,
+ * costliest radial nudges long before it had exhausted the free arc ones.
+ * Radial-outer instead tries every arc offset at the smallest radial
+ * deviation first, and only grows the radial nudge once the whole arc
+ * range has failed to turn up clear ground that close in. Harmless for the
+ * ordinary (non-mandatory) search too — a decorative trestle looking a
+ * little closer to its nominal radius is no worse than one that doesn't.
+ *
+ * `atArch` is arch-relative — the same convention `hazards.ts`'s `DuckBar.at`
+ * uses ("metres along the loop, measured from the start/finish arch") —
+ * **not** the raw route coordinate `route.angleAt`/`pointAt` actually want.
+ * Converting it here, the same way the duck-bar loop below always has
+ * (`route.wrap(route.startDistance + at)`), is what makes a trestle grid
+ * index and a hazard-schedule grid index agree on which physical point on
+ * the ring they mean. Before this, `trestleSpots` computed its candidates in
+ * the *raw* route coordinate directly — harmless when nothing else needed to
+ * agree with it, which stopped being true the moment a duck bar needed to
+ * find "its own" trestle by index.
+ */
+function searchForClearGround(
+  route: RailRaceRoute,
+  collision: CollisionWorld,
+  atArch0: number,
+  arcNudges: readonly number[],
+  radialNudges: readonly number[],
+): { at: number; x: number; z: number } | null {
+  for (const dr of radialNudges) {
+    const radius = NOMINAL_RADIUS + dr;
+    for (const da of arcNudges) {
+      const at = route.wrap(route.startDistance + atArch0 + da);
+      const theta = route.angleAt(at);
+      const x = Math.cos(theta) * radius;
+      const z = Math.sin(theta) * radius;
+      if (groundIsClear(x, z, collision)) return { at, x, z };
+    }
+  }
+  return null;
 }
 
 /**
@@ -534,29 +723,88 @@ interface TrestleSpot {
  *
  * The same predicate set the coaster's pylons use, plus one this ride needs and
  * the coaster does not: the ring runs *inside the railway's own band*, so a leg
- * has to clear the train's corridor as well as the walking network. Where it
- * cannot — over the railway, over a path, in the gap between two plots — the
- * trestle is simply skipped. The track shrugs off a missing support; the walk
- * network cannot shrug off a misplaced one.
+ * has to clear the train's corridor as well as the walking network.
+ *
+ * **A rigid, one-shot candidate grid found almost nowhere to stand.** The first
+ * version of this function tried exactly one point per slot — `NOMINAL_RADIUS`
+ * at the slot's own arc position — and gave up outright if that one point was
+ * blocked. Measured against the real, built park (1 August 2026): **1 of 28**
+ * candidates survived. The ride's own docs already say it "runs through a band
+ * of the park that is already full" — garden planting, the walking network, the
+ * railway corridor — and that density is exactly what a single fixed point
+ * cannot route around. The result was not "a few trestles skipped here and
+ * there", which the docs' "shrugs off a missing support" language anticipates;
+ * it was a 336 m elevated loop standing on one leg.
+ *
+ * So each slot now searches a small, bounded neighbourhood — a handful of
+ * along-the-route and across-the-ring nudges, closest first — before it is
+ * actually given up on. Against the same real park this finds a clear spot for
+ * **25 of 28**. The remaining few are still allowed to go missing, on purpose:
+ * over the railway, over a path, in the gap between two plots, no amount of
+ * local nudging *should* find a leg — the walk network cannot shrug off a
+ * misplaced one, and a rare true gap is what "the track shrugs off a missing
+ * support" was always meant to cover.
+ *
+ * **`mandatoryIndices` may not go missing.** These are the grid slots
+ * `planHazards`'s `snapToTrestleGrid` actually scheduled a duck bar onto — a
+ * bar with no visible support underneath it is the exact bug this whole
+ * mechanism exists to fix, so those slots get a second, wider attempt rather
+ * than being allowed to shrug: `WIDE_ARC_NUDGES` paired with
+ * `MANDATORY_RADIAL_NUDGES` (bigger arc room, which costs a mandatory slot
+ * nothing, and a deliberately *capped* radial room, which does — see
+ * `MANDATORY_RADIAL_NUDGES`'s own doc comment for the bug this cap fixes).
+ * Only if even that fails does a third attempt reach for the old, uncapped
+ * `WIDE_RADIAL_NUDGES` — a support that may sit further from its bar than
+ * the invariant likes is still better than a bar rendered with no support at
+ * all. Every index is returned on the result so the duck-bar geometry can
+ * look its own support up directly rather than re-deriving it.
  */
-function trestleSpots(route: RailRaceRoute, collision: CollisionWorld): TrestleSpot[] {
+function trestleSpots(
+  route: RailRaceRoute,
+  collision: CollisionWorld,
+  mandatoryIndices: ReadonlySet<number>,
+): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
+  // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
+  // same formula, not an approximation of it — so grid index `i` names the
+  // same physical point on the ring in both files. `searchForClearGround`
+  // converts it to the raw route coordinate `route.angleAt`/`pointAt` want.
   const count = Math.floor(route.length / TRESTLE_SPACING);
   for (let i = 0; i < count; i += 1) {
-    const at = (i / count) * route.length;
-    const theta = route.angleAt(at);
-    const x = Math.cos(theta) * NOMINAL_RADIUS;
-    const z = Math.sin(theta) * NOMINAL_RADIUS;
-
-    if (!collision.isClearCircle(x, z, 1.1)) continue;
-    if (distanceToPath(x, z) < 2.8) continue;
-    if (distanceToRailCorridor(x, z) < 2.4) continue;
-    const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
-      (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
-    );
-    if (pinchesCorridor) continue;
-
-    spots.push({ at, x, z });
+    const atArch0 = (i / count) * route.length;
+    const mandatory = mandatoryIndices.has(i);
+    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
+    if (!placed && mandatory) {
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
+    }
+    if (!placed && mandatory) {
+      // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
+      // because this is the one path where a duck bar's support can land
+      // further from it than `DUCK_BAR_SUPPORT_TOLERANCE`
+      // (`test/procgen/invariants.ts`) actually wants; if this fires on a
+      // real seed, that slot's ground is worth a closer look, not just a
+      // wider search.
+      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
+      if (placed) {
+        console.warn(
+          `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
+            `${atArch0.toFixed(1)}) only found clear ground beyond MANDATORY_RADIAL_NUDGES' ` +
+            `safe radial range — its duck bar may sit further from it than the ` +
+            `DUCK_BAR_SUPPORT_TOLERANCE invariant expects.`,
+        );
+      }
+    }
+    if (!placed && mandatory) {
+      // Exceedingly rare given the search above — genuinely no clear ground
+      // within 8 m of a bar's own scheduled position — but a bar must never
+      // silently render with no support, so this is loud rather than quiet.
+      console.warn(
+        `railRace/track.ts: no clear ground found for the mandatory trestle at slot ${i} ` +
+          `(arch-relative at=${atArch0.toFixed(1)}) even after the wide search — a duck bar is ` +
+          `scheduled here with no visible support. Widen WIDE_ARC_NUDGES/WIDE_RADIAL_NUDGES or move this bar.`,
+      );
+    }
+    if (placed) spots.push({ ...placed, index: i });
   }
   return spots;
 }

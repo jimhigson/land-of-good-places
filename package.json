@@ -36,6 +36,8 @@
     "blend:kid": "blender --background --factory-startup --python art/blend/kid_roundtrip.py && npm run pack:kid",
     "pack:cart": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-cart-asset.mts",
     "blend:cart": "blender --background --factory-startup --python art/blend/cart_export.py && npm run pack:cart",
+    "pack:duckbar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-duckbar-asset.mts",
+    "blend:duckbar": "blender --background --factory-startup --python art/blend/duckbar_export.py && npm run pack:duckbar",
     "check:wall-tunnelling": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:all": "npm run build && npm run test:procgen && npm run check:wall-tunnelling",
     "preview": "vite preview",

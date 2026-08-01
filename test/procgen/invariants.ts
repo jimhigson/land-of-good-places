@@ -77,6 +77,24 @@ const RAIL_OVER_RAIL = 5.5;
  */
 const MAX_DARK_RUN = 25;
 
+/**
+ * Longest stretch of the Rail Race ring allowed to stand with no trestle leg
+ * at all.
+ *
+ * `track.ts`'s `trestleSpots` aims for a leg every 12 m and searches a small
+ * neighbourhood before giving one up as genuinely un-standable ground (over
+ * the railway, a path, a plot gap). One skipped slot (~12-24 m, generously
+ * ~36 m allowing for the search's own few metres of nudge either side) is the
+ * track shrugging off a single bad spot, exactly as intended. This is not
+ * that number, doubled to a clean 40 m on purpose — it is independently how
+ * long an elevated ride can go with *no visible means of support* before it
+ * reads as floating rather than built, which is the actual thing a family
+ * would notice from the ground. (Measured before `trestleSpots` gained its
+ * search, 1 August 2026: the canonical seed's single surviving leg left a
+ * ~330 m gap — this would have failed loudly, which is the point.)
+ */
+const TRESTLE_GAP_TOLERANCE = 40;
+
 // ------------------------------------------------------------------ the list
 
 type Invariant = (facts: ParkFacts) => void;
@@ -362,6 +380,16 @@ const everyPathIsLit: Invariant = (facts) => {
  *    scene by name and their instance matrices decoded — not recomputed from
  *    the placement predicate, which would only prove the predicate agrees with
  *    itself. A leg standing on the railway is a leg the train drives through.
+ * 3. **How many actually landed.** `track.ts`'s `trestleSpots` search a small
+ *    neighbourhood before giving up on a slot (1 August 2026 — the ring runs
+ *    through the park's own busiest band, and a single fixed candidate point
+ *    per slot found almost nowhere clear to stand: 1 of 28 on the canonical
+ *    seed before that search existed). A slot going missing here and there is
+ *    fine and expected; a long unsupported run is the ring visibly floating,
+ *    which this measures as the widest gap between consecutive legs, sorted
+ *    round the ring by angle — not by re-running the search and checking it
+ *    agrees with itself, but by measuring the real distance between the real
+ *    legs the built scene actually has.
  *
  * `check:rail-race` asserts the same clearances in far more detail, but only on
  * the canonical seed; this is the half that has to hold whatever park is grown.
@@ -407,9 +435,11 @@ const railRaceFliesClear: Invariant = (facts) => {
   } else {
     const matrix = new Matrix4();
     const at = new Vector3();
+    const positions: { angle: number; x: number; z: number }[] = [];
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
+      positions.push({ angle: Math.atan2(at.z, at.x), x: at.x, z: at.z });
       const toRail = facts.distanceToRail(at.x, at.z);
       if (toRail < TRACK_CLEARANCE) {
         complaints.push(
@@ -426,6 +456,113 @@ const railRaceFliesClear: Invariant = (facts) => {
           );
         }
       }
+    }
+
+    // --- 3. no long unsupported run ------------------------------------------
+    // Angle order round a ring this close to circular puts legs in the same
+    // order the track visits them; the *distance* itself is the real chord
+    // between two real measured leg positions, not an angle converted through
+    // an assumed radius — measuring the built legs, not a description of them.
+    if (positions.length >= 2) {
+      positions.sort((a, b) => a.angle - b.angle);
+      let worstGap = 0;
+      let worstIndex = 0;
+      for (let i = 0; i < positions.length; i += 1) {
+        const a = positions[i]!;
+        const b = positions[(i + 1) % positions.length]!;
+        const gap = Math.hypot(b.x - a.x, b.z - a.z);
+        if (gap > worstGap) {
+          worstGap = gap;
+          worstIndex = i;
+        }
+      }
+      if (worstGap > TRESTLE_GAP_TOLERANCE) {
+        complaints.push(
+          `the widest run between consecutive trestle legs is ${worstGap.toFixed(1)} m ` +
+            `(after leg ${worstIndex}), over the ${TRESTLE_GAP_TOLERANCE} m tolerance — ` +
+            `the ring is standing on air for a stretch that long`,
+        );
+      }
+    }
+  }
+
+  expect(complaints, complaints.join('\n')).toHaveLength(0);
+};
+
+/**
+ * Longest a duck bar is allowed to sit from the nearest real trestle leg,
+ * horizontally.
+ *
+ * Not the generator's own bound (`track.ts`'s `WIDE_ARC_NUDGES`/
+ * `WIDE_RADIAL_NUDGES` can in principle nudge a support a little over 9 m
+ * from its nominal grid point) — deliberately tighter, because the actual
+ * guarantee this invariant exists to protect is architectural: a duck bar's
+ * `at` and its support's grid index are *the same number*
+ * (`hazards.ts`'s `snapToTrestleGrid`, `trestleGridIndex`), not two
+ * independently-placed things that merely tend to end up near each other.
+ * With legs roughly every 13 m round the ring, "nearest leg" would often be
+ * under this by pure chance even for a bar placed with no relationship to
+ * the supports at all, which is exactly the bug this whole mechanism exists
+ * to fix — so this number is a sanity cross-check on the real, measured
+ * geometry, not the proof of correctness by itself; the shared grid index in
+ * the code is that proof. Measured against the real built park before this
+ * mechanism existed (bars placed by the old, independent RNG cursor): worst
+ * observed gap to the nearest leg was several times this.
+ */
+const DUCK_BAR_SUPPORT_TOLERANCE = 8;
+
+/**
+ * **Every duck bar stands over a real trestle leg.**
+ *
+ * Jim, 1 August 2026: the hazard schedule and the trestle placement were
+ * "completely independent systems with no relationship" — a bar could land
+ * anywhere a seeded RNG's cursor happened to stop, with nothing structural
+ * underneath it. `hazards.ts`'s `snapToTrestleGrid` and `track.ts`'s
+ * `trestleSpots` now derive both from one shared grid index, and
+ * `trestleSpots` treats a grid slot with a bar scheduled on it as mandatory
+ * rather than something the ring is allowed to shrug off.
+ *
+ * Measured off the built scene — both `railRace:duck-bars` and
+ * `railRace:trestle-legs` are read back by name and their instance matrices
+ * decoded — not by recomputing `snapToTrestleGrid`/`trestleGridIndex` and
+ * checking they agree with themselves, which is exactly the tautology
+ * ART-AGENT-NOTES.md §6 warns a parity check can quietly become. A real
+ * geometric distance between two real meshes is what a family would
+ * actually see if this broke again.
+ */
+const duckBarsStandOnRealSupports: Invariant = (facts) => {
+  const barsMesh = facts.world.railRace.group.getObjectByName('railRace:duck-bars');
+  const legsMesh = facts.world.railRace.group.getObjectByName('railRace:trestle-legs');
+  const complaints: string[] = [];
+
+  if (!(barsMesh instanceof InstancedMesh) || !(legsMesh instanceof InstancedMesh)) {
+    complaints.push('the Rail Race has no duck bars or trestle legs in the built scene to measure');
+    expect(complaints, complaints.join('\n')).toHaveLength(0);
+    return;
+  }
+
+  const matrix = new Matrix4();
+  const legPositions: Vector3[] = [];
+  for (let i = 0; i < legsMesh.count; i += 1) {
+    legsMesh.getMatrixAt(i, matrix);
+    legPositions.push(new Vector3().setFromMatrixPosition(matrix));
+  }
+
+  const barPosition = new Vector3();
+  for (let i = 0; i < barsMesh.count; i += 1) {
+    barsMesh.getMatrixAt(i, matrix);
+    barPosition.setFromMatrixPosition(matrix);
+    let nearest = Infinity;
+    for (const leg of legPositions) {
+      const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);
+      if (d < nearest) nearest = d;
+    }
+    if (nearest > DUCK_BAR_SUPPORT_TOLERANCE) {
+      complaints.push(
+        `duck bar ${i} at ${fmt([barPosition.x, barPosition.z])} is ${nearest.toFixed(1)} m from ` +
+          `the nearest trestle leg, over the ${DUCK_BAR_SUPPORT_TOLERANCE} m tolerance — it is ` +
+          `floating free of the ring's own support structure`,
+      );
     }
   }
 
@@ -672,6 +809,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
+  ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
