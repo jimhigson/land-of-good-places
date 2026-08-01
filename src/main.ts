@@ -6,6 +6,7 @@ import { CharacterCreation, ContinueOrRestart, DevBadge } from './ui';
 import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } from './state/save';
+import { startVersionCheck } from './version-check';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -214,8 +215,17 @@ function launchGame(
  * Registers the service worker ourselves (rather than the PWA plugin's own
  * injected script — see `vite.config.ts`'s `injectRegister: false`) purely to
  * get at `onNeedRefresh`: the one hook that fires when a new deploy has
- * finished downloading in the background and is sat waiting. That is the
- * entire trigger for the gate — nothing here polls or schedules anything.
+ * finished downloading in the background and is sat waiting. That is the gate's
+ * entire trigger — this function itself polls or schedules nothing.
+ *
+ * `startVersionCheck` (`version-check.ts`), in production only, is what
+ * actually schedules anything: a browser only checks a service worker for
+ * updates on navigation, and the family leaves the game open on a phone for
+ * hours mid-session, so a deploy could otherwise sit undetected the whole
+ * time it is open. It polls a plain `version.txt` every two minutes and, the
+ * moment that disagrees with this bundle's own version, calls the service
+ * worker's own `update()` — which is what makes `onNeedRefresh` below fire,
+ * same as it always has. One trigger path, just two ways to reach it.
  *
  * Kept out of `Game` entirely, and called below independently of `boot()`'s
  * own try/catch: a new version of the *code*, not of the park, so it must
@@ -241,6 +251,10 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
     (window as unknown as { __triggerUpdateGate: () => void }).__triggerUpdateGate = () =>
       gate.show(() => updateSW(true));
   }
+  // `version.txt` only exists in a real build (`vite.config.ts`'s
+  // `versionFilePlugin`), so polling for it in dev would just be a 404 every
+  // two minutes for nothing — dev already gets instant feedback from HMR.
+  if (import.meta.env.PROD) startVersionCheck();
 }
 
 try {

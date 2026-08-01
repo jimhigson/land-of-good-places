@@ -82,6 +82,18 @@ pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
 Vite just picks the next free port for you and every note you take about
 "my server is on 5260" quietly goes stale.
 
+**When handing the user a URL to test, tell them to open it in a private/
+incognito window, every time.** A port with no *currently running* collision
+is not the same as a port nobody's *browser* has ever visited — this machine
+has been running dev servers, from many agents, across many sessions, for
+days, and port numbers get reused constantly. A stale service worker or save
+from some completely unrelated earlier session can be sitting on a "fresh"
+port already, silently serving old content with no error of any kind (found
+the hard way, 1 August, three times on three different "fresh" ports in one
+afternoon). A private window has guaranteed-empty storage regardless of that
+history — it is the only actually reliable answer, cheaper than any amount of
+cache-clearing forensics.
+
 **Deep links for reaching a ride under test without walking there:**
 `/rail-race` and `/sky-cruiser` skip straight past the welcome-back prompt and
 board that ride the instant the park (or a freshly created character, on a
@@ -116,6 +128,18 @@ broken Vite HMR state instead — swapping many files at once under a *running*
 dev server (a `git checkout`, a branch switch) can leave its module graph
 inconsistent (`Failed to reload ...` in the console). Killing and restarting
 the dev server fixes that in seconds; it is not worth debugging.
+
+## How a deployed park notices it is out of date
+
+Production polls `/version.txt` every two minutes (`src/version-check.ts`) and
+nudges the service worker to check for a real update the moment that
+disagrees with the bundle's own baked-in version — a browser only checks a
+service worker for updates on navigation otherwise, and the family leaves the
+game open on a phone for hours mid-session. `version.txt` is generated fresh
+every build (`vite.config.ts`'s `versionFilePlugin`, straight into `dist/`,
+never a tracked file) from the current commit; the poll is only a *trigger*
+for the existing `onNeedRefresh` → `UpdateGate` flow, not a second update
+path — pressing "Take me there!" still does exactly what it always did.
 
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 

@@ -1,11 +1,46 @@
-import { defineConfig } from 'vite';
+import { execSync } from 'child_process';
+import { writeFileSync } from 'fs';
+import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // No `@types/node` in this project (a browser game has no business seeing
-// `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — this
-// config file is the one place that legitimately needs the one field of
-// `process` it actually reads.
+// `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — the
+// `child_process`/`fs` typings this file needs are hand-declared in
+// `vite-config-env.d.ts` instead (a `.d.ts` file, not a module with its own
+// imports, is what lets an ambient `declare module` for an external module
+// actually take).
 declare const process: { readonly env: Readonly<Record<string, string | undefined>> };
+
+/**
+ * The running build's own identity — the current commit, or a timestamp if
+ * this somehow isn't a git checkout. Baked into the bundle as `__APP_VERSION__`
+ * (below) and written verbatim to `dist/version.txt` by {@link versionFilePlugin},
+ * so a client polling that file (`src/version-check.ts`) is comparing exactly
+ * what it already knows about itself against exactly what the server would
+ * hand a brand-new visitor right now.
+ */
+const APP_VERSION = (() => {
+  try {
+    return execSync('git rev-parse HEAD').toString().trim();
+  } catch {
+    return `unknown-${Date.now()}`;
+  }
+})();
+
+/**
+ * Writes `version.txt` straight into the build output, not `public/` — it is
+ * generated fresh every build, not hand-authored, so it has no business being
+ * a tracked source file that could go stale between commits.
+ */
+function versionFilePlugin(version: string): Plugin {
+  return {
+    name: 'land-of-good-places-version-file',
+    apply: 'build',
+    writeBundle(options) {
+      writeFileSync(`${options.dir ?? 'dist'}/version.txt`, version);
+    },
+  };
+}
 
 /**
  * Vite config.
@@ -42,7 +77,15 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 1200,
   },
+  // The bundle's own baked-in copy of `APP_VERSION`, read by
+  // `src/version-check.ts` — see that file for why polling a flat text file
+  // beats waiting on the service worker's own, much less frequent, update
+  // checks.
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
+    versionFilePlugin(APP_VERSION),
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
