@@ -95,12 +95,67 @@ is genuinely down among the scenery, unlike the rest of the loop which flies.
 ## Status
 
 - [x] Worktree, survey, design
-- [ ] boundary.ts / segments.ts / generate.ts
-- [ ] CoasterRoute migration
-- [ ] clearance assert + procgen invariant
-- [ ] build, sweep, turning-radius measurement
+- [x] boundary.ts / segments.ts / generate.ts
+- [x] CoasterRoute migration (public surface unchanged)
+- [x] clearance assert + procgen invariant
+- [x] `npm run build` passes; `npm run test:procgen` 55/55 across 5 seeds
+- [x] turning-radius measurement (`npm run measure:rail-radii`)
+- [ ] sweep:seeds comparison vs main (running)
 - [ ] screenshots for family shape approval
+- [ ] rebase onto main (tie-frame merged as #144)
 - [ ] PR
+
+## Hard-won findings — read before changing any tuning constant
+
+**Tune against all the seeds, never the canonical one.** The first
+configuration that solved the canonical park solved **5 of 21 seeds**. Use
+`npm run check:cruiser-solves` with `LGP_SEED` set — it builds only the route,
+so it answers in milliseconds where `check:park` takes seconds.
+
+**The curvature check must catch cusps.** Sampling a cubic's curvature at 24
+points let closer pieces with a **0.3 m cusp** pass a 12 m minimum-radius test,
+because the samples straddled the cusp. `minCurvatureRadius` now samples 64
+points *and* reports radius zero when a piece's speed collapses relative to its
+own mean. Without that, the generator cheerfully returns loops with a hairpin
+tighter than the one it exists to prevent.
+
+**Close with biarcs, not Hermite cubics.** A cubic between two poses matches
+both tangents but its curvature is whatever falls out — and between awkward
+poses what falls out is that cusp. A biarc's two radii are *known* from the
+construction, so an illegal closure says so exactly.
+
+**Aim behind the station, not at it.** Steering at the start pose gets the head
+within 7 m of home pointing the wrong way, which needs a 1-6 m radius biarc.
+The search aims at an approach corridor `APPROACH_DISTANCE` (38 m) behind the
+start, facing the same way, so the closer joins two nearly collinear poses.
+
+**Two things that seemed good and were not** (both are commented in
+`stationPoses` so they are not retried):
+- Ordering candidate stations by how much open space is ahead of them: *slower*.
+  The roomiest all sit in the same corner and fail identically, so the search
+  grinds through near-duplicates before reaching a different one.
+- Using that same measure as a filter: took every seed from **solvable to
+  unsolvable**. A straight line is a bad predictor for a curved route, and it
+  discarded exactly the stations that work.
+
+**What actually made it solve**, in order of impact: a much wider station
+window (the first cut demanded 22 m of clear ground in a park laid out with 5 m
+corridors, and offered 2-24 stations; it now offers ~200); fewer, longer track
+pieces, which shrinks an exponential tree; and `SAMPLE_STEP` of 1 m rather than
+0.6 m, which alone took the worst seed from 4.8 s to 1.4 s.
+
+**Budgets must be step counts, never wall-clock.** A time budget would make the
+park come out differently on a slower machine.
+
+## Numbers as built
+
+- Canonical seed: 216 m of track, 10 pieces, tightest turn 12.8 m, solved in
+  ~350 ms at module load. Old polar solve: 221 m, tightest turn **1.7 m**.
+- All 21 seeds tried (canonical + 1..20) solve; worst solver time 1.4 s.
+- `measure:rail-radii`: Sky Cruiser 12.8 m, Rail Race 57.4 m, train 6.6 m. The
+  family's stated ordering (Cruiser < Race < train) **does not hold** — because
+  the *train* turns tighter than the Rail Race. Reported, not fixed; the brief
+  says not to bend the other two rides to match.
 
 ## The landmine: this changes the Sky Cruiser's shape
 
