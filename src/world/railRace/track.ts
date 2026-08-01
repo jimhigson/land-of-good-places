@@ -51,6 +51,17 @@ import {
 /** Rail centre-to-centre within one lane. Narrow: it is a one-child cart. */
 export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 
+/**
+ * Tube/cross-section resolution for the rails' own `sweptRails` call, pulled
+ * out to constants (rather than left inline in the options object below) so
+ * `buildRailZoneVertexRanges` can compute exactly which vertex ring of the
+ * built tube each hazard zone falls in *before* any lane's geometry actually
+ * exists — see that function's own doc comment for why the mapping is the
+ * same for every lane and rail, and so only needs building once.
+ */
+const RAIL_TUBULAR_PER_METRE = 1.2;
+const RAIL_RADIAL_SEGMENTS = 6;
+
 /** How far a duck bar reaches either side of its lane's centre. */
 const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
 
@@ -145,8 +156,38 @@ export function buildRailRaceTrack(
   const UP = new Vector3(0, 1, 0);
 
   // --- the rails -------------------------------------------------------------
-  const railMaterials = LANE_COLOURS.map((colour) => toonMaterial(colour));
+  //
+  // Vertex-coloured, not a flat per-lane material colour: Jim, 1 August 2026,
+  // after the spark-zone plate shipped — "make the actual track back[sic,
+  // black] as well" — the pink/sky/lemon/mint rail was still visibly its own
+  // colour under and beside the black plate, especially from the side-on race
+  // camera. `setSparking` below repaints the same zone×lane's own rail
+  // vertices, exactly the way it already repaints the plate.
+  const railMaterials = LANE_COLOURS.map(() => {
+    const material = toonMaterial(0xffffff);
+    material.vertexColors = true;
+    return material;
+  });
   for (const material of railMaterials) keep(material);
+  // Every lane's rail tube has the same `tubularSegments` — same `route.length`,
+  // same `RAIL_TUBULAR_PER_METRE` for every lane's `sweptRails` call below — so
+  // the mapping from a ring of the tube to which hazard zone it falls in is
+  // identical for every lane and every rail. Built once, ahead of the lane
+  // loop, rather than once per lane×rail.
+  const railTubularSegments = Math.ceil(route.length * RAIL_TUBULAR_PER_METRE);
+  const railZoneVertexRanges = buildRailZoneVertexRanges(
+    route,
+    layout,
+    railTubularSegments,
+    RAIL_RADIAL_SEGMENTS,
+  );
+  // Per lane: every rail vertex's resting colour (the lane's own
+  // `LANE_COLOURS` entry), kept around so `setSparking` can cheaply copy it
+  // back over a zone that has stopped sparking — the rail's analogue of the
+  // spark ribbons resetting their whole buffer to ink before repainting the
+  // active ones each frame.
+  const railBaseColoursByLane: Float32Array[] = [];
+  const railColourAttributesByLane: BufferAttribute[][] = [];
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     // The adapter that makes a lane of this ring look like any other route in
     // the park to the shared sweeper.
@@ -156,13 +197,17 @@ export function buildRailRaceTrack(
       tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
     };
     const railMaterial = railMaterials[lane % railMaterials.length]!;
+    const laneColour = new Color(LANE_COLOURS[lane % LANE_COLOURS.length]!);
+    let baseColours: Float32Array | null = null;
+    const attributes: BufferAttribute[] = [];
     for (const geometry of sweptRails(sampler, {
       gauge: RAIL_GAUGE,
       radius: 0.075 * RIDE_SCALE,
       // The ring bends at a constant, gentle 1/53.5 per metre; it does not need
       // the coaster's two segments a metre, and this is paid eight times over.
-      tubularPerMetre: 1.2,
+      tubularPerMetre: RAIL_TUBULAR_PER_METRE,
       step: 2.2,
+      radialSegments: RAIL_RADIAL_SEGMENTS,
     })) {
       const rail = new Mesh(geometry, railMaterial);
       rail.name = `railRace:rail-${lane}`;
@@ -171,7 +216,25 @@ export function buildRailRaceTrack(
       rail.castShadow = true;
       group.add(rail);
       keep(geometry);
+
+      // Both rails of a lane (`sweptRails` returns `[left, right]`) share the
+      // same tube topology — only their sideways offset differs — so one base
+      // colour buffer built from the first is valid for the second too.
+      const vertexCount = geometry.attributes.position!.count;
+      if (!baseColours) {
+        baseColours = new Float32Array(vertexCount * 3);
+        for (let i = 0; i < vertexCount; i += 1) {
+          baseColours[i * 3] = laneColour.r;
+          baseColours[i * 3 + 1] = laneColour.g;
+          baseColours[i * 3 + 2] = laneColour.b;
+        }
+      }
+      const attribute = new BufferAttribute(baseColours.slice(), 3);
+      geometry.setAttribute('color', attribute);
+      attributes.push(attribute);
     }
+    railBaseColoursByLane[lane] = baseColours!;
+    railColourAttributesByLane[lane] = attributes;
   }
 
   // --- the black stretches ---------------------------------------------------
@@ -479,6 +542,35 @@ export function buildRailRaceTrack(
         }
       }
       sparkColourAttribute.needsUpdate = true;
+
+      // The rails themselves — same reset-then-repaint shape as the ribbons
+      // above, same `sparkColour` (one shared flash for the plate and the
+      // rail underneath it, so they never go out of phase with each other).
+      for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+        const base = railBaseColoursByLane[lane];
+        if (!base) continue;
+        for (const attribute of railColourAttributesByLane[lane] ?? []) {
+          (attribute.array as Float32Array).set(base);
+        }
+      }
+      for (const { zoneIndex, lane } of active) {
+        const ranges = railZoneVertexRanges[zoneIndex];
+        if (!ranges) continue;
+        for (const attribute of railColourAttributesByLane[lane] ?? []) {
+          const railArray = attribute.array as Float32Array;
+          for (const { vertexStart, vertexCount } of ranges) {
+            const end = vertexStart + vertexCount;
+            for (let v = vertexStart; v < end; v += 1) {
+              railArray[v * 3] = sparkColour.r;
+              railArray[v * 3 + 1] = sparkColour.g;
+              railArray[v * 3 + 2] = sparkColour.b;
+            }
+          }
+        }
+      }
+      for (const attributes of railColourAttributesByLane) {
+        for (const attribute of attributes) attribute.needsUpdate = true;
+      }
     },
 
     dispose(): void {
@@ -572,6 +664,76 @@ function buildSparkRibbons(
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
   return { geometry, segments };
+}
+
+/**
+ * Which vertex ranges of a lane's `sweptRails` tube fall inside each hazard
+ * zone — the rail's own analogue of {@link buildSparkRibbons}'s `segments`,
+ * used by `setSparking` to blacken the actual rail, not just the plate laid
+ * over it. Indexed by `HazardLayout.zones`' own index, one array of ranges
+ * per zone (almost always one range; two only if a zone straddles the route's
+ * own `0`/`length` seam).
+ *
+ * **Why an approximation, and why it is a safe one.** `three`'s `TubeGeometry`
+ * places ring `i`'s vertices at `path.getPointAt(i / tubularSegments)` (see
+ * its own `generateSegment`) — arc length along the *fitted* Catmull-Rom curve
+ * `sweptRail` builds through evenly-spaced samples of the route, not the
+ * route's own `distance` parameter directly. Treating ring `i` as sitting at
+ * route distance `(i / tubularSegments) * route.length` is therefore not
+ * exact. But `RailRaceRoute`'s horizontal shape is a plain circle (only
+ * height varies — see that file's own header) sampled every 2.2 m, so the
+ * fitted curve's arc length tracks `route.length` to within centimetres —
+ * orders of magnitude under a zone's 15–23 m length (`ZONE_MIN`/`ZONE_MAX`,
+ * `hazards.ts`). Good enough to blacken the same stretch the plate above it
+ * already blackens, without this file duplicating `sweptRail.ts`'s own
+ * cross-section maths to get an exact one.
+ *
+ * `rawFrom`/`rawTo` (built from `route.startDistance + zone.from/to`, never
+ * wrapped) are compared against each ring's distance offset by
+ * `-route.length`/`0`/`+route.length` rather than wrapping the zone bounds
+ * themselves — the same "does any copy of this point, one lap either way,
+ * land in the interval" test, just phrased so a zone that straddles the
+ * route's own coordinate seam does not need special-casing.
+ */
+function buildRailZoneVertexRanges(
+  route: RailRaceRoute,
+  layout: HazardLayout,
+  tubularSegments: number,
+  radialSegments: number,
+): readonly (readonly { vertexStart: number; vertexCount: number }[])[] {
+  const verticesPerRing = radialSegments + 1;
+  return layout.zones.map((zone) => {
+    const rawFrom = route.startDistance + zone.from;
+    const rawTo = route.startDistance + zone.to;
+    const ranges: { vertexStart: number; vertexCount: number }[] = [];
+    // Ring `tubularSegments` duplicates ring `0` (the tube is closed — see
+    // `generateSegment`'s own comment on why), so `ring % tubularSegments`
+    // gives it ring 0's distance rather than treating it as one step further
+    // round than the loop actually goes.
+    let runStart = -1;
+    for (let ring = 0; ring <= tubularSegments; ring += 1) {
+      const distance = ((ring % tubularSegments) / tubularSegments) * route.length;
+      const inZone = [distance - route.length, distance, distance + route.length].some(
+        (d) => d >= rawFrom && d <= rawTo,
+      );
+      if (inZone) {
+        if (runStart === -1) runStart = ring;
+      } else if (runStart !== -1) {
+        ranges.push({
+          vertexStart: runStart * verticesPerRing,
+          vertexCount: (ring - runStart) * verticesPerRing,
+        });
+        runStart = -1;
+      }
+    }
+    if (runStart !== -1) {
+      ranges.push({
+        vertexStart: runStart * verticesPerRing,
+        vertexCount: (tubularSegments + 1 - runStart) * verticesPerRing,
+      });
+    }
+    return ranges;
+  });
 }
 
 interface TrestleSpot {
