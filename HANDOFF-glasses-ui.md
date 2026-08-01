@@ -2,14 +2,18 @@
 
 Branch `feat/glasses-ui`, based on `origin/main` with `feat/glasses-assets`
 merged in (fast-forward, no conflicts — that branch only touched art/model
-files and a new script). Three commits on top of the assets:
+files and a new script). Commits on top of the assets:
 
 - `Add glassesKind to player state, with save/load support`
 - `Wear the character's chosen glasses in the running game`
 - `Add a Glasses tab to character creation`
+- `Handoff: Glasses tab done, build green, no browser QA yet`
+- `CharacterCreation: dedupe the glasses 'none'->null conversion`
 
-## Status: done, build green, PR not yet opened when this was last written —
-check `gh pr list` / `gh pr view` before assuming it still needs opening.
+## Status: PR #141 open (https://github.com/jimhigson/land-of-good-places/pull/141),
+build green, code and self-review complete. **Blocked only on live browser QA** —
+see the note below. Check `gh pr view 141` for the current state before assuming
+anything here is stale.
 
 ## What this adds
 
@@ -59,6 +63,38 @@ choices: None (default), Sunglasses 🕶️, Star ⭐, Heart 💖. Wired through
   this file to reuse (hair/shoes/backpack have no bare/none option), so this
   is a judgement call, not a house convention.
 
+## Self-review pass (simplify skill, 4 parallel agents)
+
+Ran reuse/simplification/efficiency/altitude review against just this branch's
+own diff (`git diff 22ef928...feat/glasses-ui`, i.e. excluding the merged-in
+asset commits). Findings:
+
+- **Fixed**: `refreshPreview()` and `complete()` both repeated
+  `this.glassesKind === 'none' ? null : this.glassesKind`. Pulled into a
+  private `glasses` getter, read at both sites (see the dedupe commit).
+- **Reuse/efficiency**: nothing else found — the diff was judged to correctly
+  reuse every established pattern it was modelled on (`ShoeKind`'s union
+  shape, `readUid`'s "null is a real answer" precedent, `buildChoiceSection`,
+  the hat's attach-to-anchor idiom), with no new per-frame or startup cost.
+- **Altitude finding, deliberately skipped**: one reviewer argued the glasses
+  attach should live *inside* `createKid`'s `KidOptions` (like
+  `hairStyle`/`backpackKind`/`shoeKind`) rather than as an externally-attached
+  anchor (like the hat), to avoid the attach logic being duplicated between
+  `Player.ts` and `characterCreationPreview.ts`. Deliberately not applied:
+  hairStyle/backpackKind/shoeKind live inside `createKid` specifically because
+  the **NPC crowd** needs one prototype kid carrying several built variants at
+  once (`hairStyles`/`backpackKinds`/`shoeKinds` options, `hairParts`/
+  `backpackParts`/`shoeParts`, `setHairStyle`/`setBackpackKind`/`setShoeKind`)
+  — glasses has no such requirement (no NPC ever wears glasses), so it is
+  architecturally much closer to the **hat**, which uses exactly this
+  "external attach to a named anchor" pattern for the identical reason (a
+  `ShopItem`-driven asset with no crowd multi-variant need), and which already
+  duplicates its own attach call between `Player`/`WornHat.ts` and the
+  preview. Following the hat's precedent here is the smaller, more consistent
+  choice, not a shortcut — and the change the reviewer wanted also reaches
+  into `art/models/kid.ts`, which belongs to the already-merged
+  `feat/glasses-assets` branch, not this diff.
+
 ## Verification
 
 - `npm run build` — exit 0 (ran and checked properly, not piped through
@@ -67,13 +103,13 @@ choices: None (default), Sunglasses 🕶️, Star ⭐, Heart 💖. Wired through
   (nothing here touches procedural generation) but ran it anyway per CLAUDE.md.
   Note: vitest was not present in the shared checkout's `node_modules`; had to
   run `npm install` inside this worktree to get it (fast, used local cache).
-- **No live browser verification.** Did not have chrome-devtools ownership —
-  messaged the Overseer ("main") once the PR-worthy state was reached, offering
-  to do a visual pass if granted ownership, but did not block on a reply.
-  Whoever reviews/QAs this should specifically check: the Glasses tab's four
-  tiles render and select correctly, the live preview actually swaps the worn
-  glasses (including "None" removing them), and a freshly-created character
-  spawns into the park wearing the chosen pair.
+- **No live browser verification yet.** Messaged the Overseer ("main") once
+  the PR-worthy state was reached; the Overseer replied that chrome-devtools
+  is currently owned by another agent QA-ing the rail-race PR, and will
+  message back when it frees up. Do the visual pass then, before this merges:
+  the Glasses tab's four tiles render and select correctly, the live preview
+  actually swaps the worn glasses (including "None" removing them), and a
+  freshly-created character spawns into the park wearing the chosen pair.
 
 ## If you're picking this up cold
 
