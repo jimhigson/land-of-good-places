@@ -23,16 +23,23 @@ trees. So nothing anywhere related a tree to a wall.
 
 Measured before the fix, worst tree-to-wall gap (canopy edge to wall face):
 
-| seed | worst gap | fouling pairs |
-| --- | --- | --- |
-| canonical 20260728 | **−2.65 m** | 18 |
-| 2 | −2.52 m | 13 |
-| 5 | −2.73 m | 17 |
-| 11 | −2.80 m | 15 |
-| 18 | −2.31 m | 17 |
+| seed | worst gap | fouling pairs | trees |
+| --- | --- | --- | --- |
+| canonical 20260728 | −2.65 m | 18 | 30 |
+| 2 | **−2.97 m** | 13 | 29 |
+| 5 | −2.73 m | 17 | 30 |
+| 11 | −2.80 m | 15 | 30 |
+| 18 | −2.31 m | 17 | 32 |
 
-Negative means properly interpenetrating. −2.43 m at a 3.24 m canopy is a wall
+Negative means properly interpenetrating. −2.65 m at a 3.24 m canopy is a wall
 buried inside a tree.
+
+**Measure these with a script, not from the test output.** My first pass read
+the worst gaps off the vitest failure message, which prints only
+`fouls.slice(0, 8)` — so the figure was the worst of the first eight pairs, not
+the worst overall. It was wrong for seed 2 (reported −2.52, actually −2.97) and
+right elsewhere only by luck. Review caught it. The table above is recomputed
+over every tree/wall pair.
 
 ## The fix, and why this shape
 
@@ -100,11 +107,38 @@ hypothetical — it happened here, on the first green run.
 Two consequences:
 
 - The scatter's attempt budget went from 26 000 to 120 000, restoring 26-30
-  trees across all seeds for about 400 ms of extra headless build. 260 000
-  would give 28 on canonical and is deliberately not taken: half a second of
+  trees across all seeds. **Cost: the headless park build roughly doubles, from
+  ~370 ms to ~750-800 ms** (i.e. about +400 ms). State it as the total, not
+  just the delta — quoting only "+400 ms" understated it in review. 260 000
+  would give 28 on canonical and is deliberately not taken: half a second more
   load for two trees nobody can count.
 - The suite's anti-vacuity guard was strengthened from `trees > 0` to
-  `trees > 20`, with the reasoning written down next to it.
+  `trees > 24`, with the reasoning written down next to it.
+
+### The guard needed a second pass — read before touching the number
+
+It was first set at `> 24`'s predecessor, **`> 20`, and that did not work**.
+Review reverted the budget with the wall fix still in place and got
+19/23/23/27/23; only the 19 tripped. Four of five seeds thinned by 21-28% and
+sailed straight through. The comment beside it claimed "20 is a floor that a
+genuinely thinned park trips", which was simply false.
+
+Measured properly, both ways round:
+
+| | canonical | 2 | 5 | 11 | 18 |
+| --- | --- | --- | --- | --- | --- |
+| healthy (120 000) | 26 | 27 | 26 | 30 | 28 |
+| thinned (26 000) | 19 | 23 | 23 | **27** | 23 |
+
+**The two sets overlap** — seed 11 thinned (27) plants more than the canonical
+seed healthy (26). So no single global floor can separate them everywhere, and
+any threshold low enough to keep a real park green must let seed 11's thinning
+through. `> 24` is the best a global floor does: catches 4 of 5, keeps two
+trees of headroom under the lowest healthy seed. `> 25` catches no more and
+leaves one tree of headroom, so it is not worth the false alarms.
+
+Verified both directions: real park 50/50 green; budget reverted, 4 suites go
+red on this guard.
 
 Also worth knowing: **`targetTrees = 72` has not been reachable for some time.**
 The lawn is tight enough that the attempt budget runs out first — the canonical

@@ -309,11 +309,26 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // is the cheapest possible way to make a clearance invariant go green and
       // it is not a hypothetical: adding `treesKeepOffWalls` took the canonical
       // seed from 30 trees to 19 until the scatter's attempt budget was raised
-      // to buy them back. Every seed plants 26-30, so 20 is a floor that a
-      // genuinely thinned park trips and ordinary seed-to-seed variation does
-      // not. It is an anti-vacuity guard, not a placement threshold — the
-      // "thresholds come from the game" rule above is about the latter.
-      expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(20);
+      // to buy them back.
+      //
+      // **This floor cannot catch every thinning, and the number is chosen
+      // knowing that.** Measured both ways round — healthy park 26/27/26/30/28
+      // across the five seeds, the same park with the budget reverted
+      // 19/23/23/27/23 — the two sets *overlap*: seed 11 thinned (27) plants
+      // more than the canonical seed healthy (26). So no single floor can
+      // separate them everywhere, and any threshold low enough to keep a real
+      // park green necessarily lets seed 11's thinning through.
+      //
+      // 24 is the best a global floor does: it catches 4 of the 5 seeds and
+      // still leaves the healthiest-but-lowest real seed two trees of headroom
+      // for ordinary seed-to-seed drift. Four suites going red at once is a
+      // loud enough signal; running on five seeds is what makes it work, not
+      // the cleverness of the number. Raising it to 25 would catch no more and
+      // leave one tree of headroom, so it is not worth the false alarms.
+      //
+      // An anti-vacuity guard, not a placement threshold — the "thresholds come
+      // from the game" rule above is about the latter.
+      expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(24);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
