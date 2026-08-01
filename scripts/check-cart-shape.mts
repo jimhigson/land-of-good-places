@@ -49,6 +49,19 @@
  * 4. **Every cart-asset geometry is `markShared`** — the precondition
  *    `CartHandle.dispose()`'s `disposeTree` call depends on, now that the
  *    same wheel/hopper buffers are shared across all four carts on the ring.
+ *
+ * **Round three, the one the wheel-spin section at the bottom of this file
+ * exists for.** Jim reported the wheels rolling on the wrong axis — a flat,
+ * coin-like spin, not a forward roll. Root cause: `wheel.rotation.z =
+ * Math.PI / 2` once, then mutating `wheel.rotation.y` every frame, does not
+ * compose as "spin about the tilted local axle axis" in three.js's Euler
+ * system — verified directly with a bare `Object3D` and a marked rim point,
+ * completely independent of this asset's geometry. Fixed with explicit
+ * `Quaternion` composition (`cart.ts`'s `WHEEL_LAY_DOWN`). The section below
+ * builds the real cart, calls the real `spinWheels()` at two different
+ * travelled distances, and asserts a marked point on the wheel's rim moves
+ * in the Y-Z plane (X held constant — a real roll about the axle) by the
+ * angle its own circumference implies, not by re-deriving the formula.
  */
 import { Box3, Mesh, Raycaster, Vector3 } from 'three';
 import { createCart, WHEEL_RADIUS, SEAT_HEIGHT, CART_PARTS } from '../src/world/railRace/cart.ts';
@@ -255,6 +268,85 @@ for (const name of ['wheel-fl', 'wheel-fr', 'wheel-bl', 'wheel-br'] as const) {
     worst.fraction > 0.6,
     `every sampled point on the lap keeps at least 60% of the nearest wheel's camera-facing rim clear ` +
       `(worst: ${(worst.fraction * 100).toFixed(0)}% at s=${worst.travelled.toFixed(1)}, pitch ${worst.pitchDeg.toFixed(1)}°)`,
+  );
+}
+
+// --- the wheel actually rolls about its own axle, not some other axis ------
+// Round three's bug: `wheel.rotation.z = PI/2` once then `wheel.rotation.y`
+// mutated every frame does not compose the way it looks like it should — see
+// this file's header and `cart.ts`'s `WHEEL_LAY_DOWN` doc comment. This
+// drives the real `spinWheels()` at two real travelled distances and checks
+// a marked point on the wheel's own rim moves the way a rolling wheel's
+// would: within the Y-Z plane (X — the axle direction — essentially fixed),
+// by the angle its own circumference implies for the distance travelled.
+{
+  const wheelFl = findMesh('wheel-fl');
+  // A point on the rim, in the wheel's own *original* (pre-lay-down) local
+  // frame — i.e. before `WHEEL_LAY_DOWN` is applied. The disc's radius shows
+  // in the original local X/Z (confirmed via readGlbParts elsewhere in this
+  // file's history); (0, 0, WHEEL_RADIUS) is a genuine rim point there, not
+  // a point that happens to land on the spin axis (a first attempt at this
+  // exact check used (WHEEL_RADIUS, 0, 0), which maps onto the world Y axis
+  // after the lay-down and is therefore invariant to any further spin —
+  // a degenerate, uninformative test point; not repeating that mistake here).
+  const rimLocal = new Vector3(0, 0, WHEEL_RADIUS);
+
+  function rimWorldAt(travelled: number): Vector3 {
+    cart.spinWheels(travelled);
+    wheelFl.updateWorldMatrix(true, false);
+    // wheel-fl's own world position, subtracted back out, isolates the
+    // *rotation*'s effect on the rim point from the wheel's own placement.
+    const centre = new Vector3();
+    wheelFl.getWorldPosition(centre);
+    return rimLocal.clone().applyQuaternion(wheelFl.quaternion).add(centre).sub(centre);
+  }
+
+  const travelledA = 0;
+  // Small on purpose: `Quaternion.angleTo` below reports the *shortest*
+  // angular distance between two orientations, which wraps once a swept
+  // angle approaches a full turn — a first attempt at this check used 2.5 m,
+  // which happened to sweep almost exactly half a turn, so doubling it swept
+  // almost exactly a full turn and read back as ~0°. Keeping the swept angle
+  // well under a quarter turn avoids that wraparound entirely.
+  const travelledB = 0.2;
+  const pA = rimWorldAt(travelledA);
+  const pB = rimWorldAt(travelledB);
+
+  assert(
+    Math.abs(pA.x - pB.x) < 1e-6,
+    `the wheel's own axle axis (world X, relative to its centre) stays fixed as it rolls ` +
+      `(rim point's x: ${pA.x.toFixed(4)} -> ${pB.x.toFixed(4)})`,
+  );
+  assert(
+    Math.abs(pA.y - pB.y) > 0.01 || Math.abs(pA.z - pB.z) > 0.01,
+    `the rim point actually moves in Y/Z as the wheel rolls, rather than sitting still ` +
+      `(a wrong-axis spin can leave a rim point that started on the new axis motionless too)`,
+  );
+
+  // Proportionality, not a re-derivation of `spinWheels`'s own formula
+  // (ART-AGENT-NOTES.md §6 warns against comparing new code to itself): the
+  // angle actually swept, read back from the real quaternions via
+  // `Quaternion.angleTo`, must simply *double* when the distance travelled
+  // doubles — true for any correctly-implemented constant-speed roll,
+  // regardless of exactly what radius/scale constant the formula uses, so
+  // this can't pass by accident the way asserting the literal formula could.
+  cart.spinWheels(0);
+  const quatStart = wheelFl.quaternion.clone();
+  cart.spinWheels(travelledB);
+  const quatOnce = wheelFl.quaternion.clone();
+  cart.spinWheels(travelledB * 2);
+  const quatTwice = wheelFl.quaternion.clone();
+
+  const angleOnce = quatStart.angleTo(quatOnce);
+  const angleTwice = quatStart.angleTo(quatTwice);
+  assert(
+    angleOnce > 0.01,
+    `rolling ${travelledB.toFixed(2)} m visibly turns the wheel at all (swept ${angleOnce.toFixed(4)} rad)`,
+  );
+  assert(
+    Math.abs(angleTwice - 2 * angleOnce) < 1e-6,
+    `doubling the distance travelled doubles the angle actually swept ` +
+      `(${angleOnce.toFixed(4)} rad -> ${angleTwice.toFixed(4)} rad, expected ${(2 * angleOnce).toFixed(4)} rad)`,
   );
 }
 

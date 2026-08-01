@@ -1,13 +1,18 @@
 # Handoff: Rail Race cart → Blender-authored `.glb` asset
 
-**Status: round 2 done, built (`npm run build` exits 0). PR #156 open from
-round 1; round 2's commits need pushing/adding to it (or a follow-up PR) —
-do that next if you're picking this up.**
+**Status: round 3 done, built (`npm run build` exits 0), pushed to
+`feat/rail-cart-blender-asset`, PR #156 updated.**
 
-**Read the "Round 2" section below first if you're continuing this** — the
-shape changed substantially after live feedback and the part list is no
-longer what round 1 shipped (`tub`/`nose` are gone; it's `hopper` +
-`frame-rail-l/r` now).
+**Read the "Round 3" section (bottom of this file) first if you're
+continuing this** — it fixes a real wheel-rotation-axis bug, doubles the
+wheel size with visible spokes, and reconciles this branch with a separate
+SpotLight-headlamp change that had landed on `feat/rail-race-polish-round2`
+and was never merged here. Also read it for **the worktree-hygiene incident**
+that happened twice in this task — the coordinator adding temporary "combine
+for local preview" commits directly onto this branch's checkout, which had
+to be un-done before pushing, twice. If you find this worktree on a branch
+you don't recognise (`tmp-*`), that is very likely what's happened again —
+check `git log` for a real commit of yours at the tip before building on it.
 
 ## The ask
 
@@ -305,3 +310,156 @@ bottom and top of each part's own height range.
    numbers one) — investigate separately, don't assume it shares a root
    cause with the wheel bug.
 3. Push these commits / open a follow-up PR if #156 is already in review.
+
+## Round 3 (same day): wrong wheel-spin axis, bigger spoked wheels, and a worktree-hygiene near-miss (twice)
+
+Two more live reports arrived together, plus a scope-creep-shaped extra ask
+that turned out to be the right move anyway:
+
+1. **"The wheels are rotating on the wrong axis — not rolling forward like a
+   real wheel, spinning around some other axis instead."**
+2. Immediately after, mid-investigation: **"the wheels are featureless flat
+   discs... make the wheels 100% larger (2x current radius/size) and give
+   each one 3 spokes."**
+
+### The rotation bug — a code bug, not an asset-orientation one
+
+`cart.ts` (and `minigames/dodgems/car.ts`, identically) built a wheel by
+setting `wheel.rotation.z = Math.PI / 2` **once**, then mutating
+`wheel.rotation.y` **every frame** for the roll, on the assumption that this
+composes as "tilt it onto its edge, then spin about the now-tilted local
+axle axis". **It does not.** Verified with a bare `Object3D` and a marked
+rim point — no mesh, no asset, nothing this task built, purely testing how
+three.js's `Euler` field mutation composes — sweeping `.rotation.y` while
+`.rotation.z` stays fixed traces the point through the **world X-Z (ground)
+plane**, not the Y-Z plane a rolling wheel needs. The wheel was spinning flat
+like a coin on a table.
+
+A first attempt at this same empirical test used the wrong marked point
+(`(0, WHEEL_RADIUS, 0)`, which happens to land exactly on the world Y axis
+after the tilt and is therefore invariant to *any* further Y-rotation — a
+degenerate test that looked like "no motion at all" rather than "wrong-axis
+motion"). Redone with a point at `(0, 0, WHEEL_RADIUS)` (not on the
+degenerate axis), which traced the actual wrong-plane motion clearly.
+
+**Fix:** replaced the Euler-mutation idiom with explicit `Quaternion`
+composition — `WHEEL_LAY_DOWN` (the one-time tilt, as a quaternion) composed
+each frame with a fresh spin quaternion about the wheel's *original* local Y
+axis: `wheel.quaternion.copy(WHEEL_LAY_DOWN).multiply(spinQuaternion)`.
+Verified with the same marked-point technique that this composition traces
+the point through Y-Z with X held constant — a genuine roll about the axle.
+**Not applied as a compensating offset** — the fix changes what axis the
+per-frame rotation is actually expressed in, not a fudge factor layered on
+top of the wrong one.
+
+**`minigames/dodgems/car.ts` almost certainly has the identical bug**, since
+it's the exact same idiom on a geometry with the same default orientation
+(three.js's own `CylinderGeometry`, axis Y before rotation). Out of scope
+for this task (a different file, different game, not asked for) — flagged
+here and in the coordinator reply so it can be picked up separately. Nobody
+has reported it there, which is itself interesting: possibly less noticeable
+on a smaller, faster-moving, more chaotic dodgem wheel than on a large,
+slow, clearly-visible mine-cart wheel — worth being reproduced properly
+rather than assumed, if someone picks it up.
+
+### The bigger, spoked wheels
+
+Folded into the same Blender pass rather than a separate round trip, per the
+coordinator's instruction. `WHEEL_RADIUS` doubled (0.16 → 0.32) and
+`WHEEL_THICKNESS` doubled proportionally (0.10 → 0.20); **gauge unchanged**
+(still `RAIL_GAUGE / RIDE_SCALE / 2`, checked by `check:cart-shape`). The
+wheel mesh itself is no longer a plain disc — it's a hub, a hollow rim band,
+and three radial spokes, built as one mesh (not a boolean cut: the gaps
+between spokes are genuinely empty space, not carved out), so a real
+silhouette shows the spokes turning under toon shading.
+
+Doubling the wheel forced several other numbers to move, all mechanically
+(not aesthetic taste):
+
+- **Wheelbase widened** (`WHEEL_HALF_WHEELBASE`: 0.31 m → 0.42 m) — at the
+  old spacing the now-bigger front and back wheels would have overlapped
+  each other by about 2 cm at the cart's midline. Gauge (lateral) is a
+  different, externally-constrained number and was left alone.
+- **Hopper floor raised** (`FLOOR_Y`: 0.38 m → 0.74 m) to stay entirely above
+  the new wheel's top point (`2 × WHEEL_RADIUS = 0.64 m`), preserving round
+  2's full-vertical-separation principle rather than reverting to a partial
+  margin. Rim raised by the same amount so the hopper's own height is
+  unchanged, just shifted up.
+- **`SEAT_HEIGHT` raised** (0.47 m → 0.83 m), keeping the same +0.09 m offset
+  above the hopper's own floor it always had. This is an **external contract
+  change** — `RailRace.ts`'s `poseRider()` imports `SEAT_HEIGHT` directly, so
+  it picks this up automatically, but it does mean the rider now sits
+  noticeably higher in the cart than before. Not asked for directly, but
+  mechanically forced by keeping the wheel fully clear of the hopper at the
+  new size; flagging in case it reads as too high once someone actually
+  looks at it.
+- **Underframe rails moved slightly further inboard** (`RAIL_X`: 0.20 m →
+  0.15 m) — the bigger wheel's own inner edge came within about 1 cm of the
+  rail's outer edge at the old position. Re-checked clear (3.7 cm gap) with
+  a Box3 intersection test, not just eyeballed.
+- Pet-seat/pet-back re-checked against the hopper's new floor/rim taper at
+  their own heights (same one-off technique as round 2) — still clear.
+
+### Verification
+
+- **`check:cart-shape` gained a direct, numeric wheel-rotation test** — the
+  thing the coordinator specifically asked for ("measure real rotation
+  deltas against real distance travelled, on the real axis that should be
+  moving"), not a visual claim. Builds the real cart, calls the real
+  `spinWheels()` at real travelled distances, and asserts on a genuine rim
+  point (not the degenerate one from the first attempt): the axle axis (X)
+  stays fixed; the point actually moves in Y/Z; and doubling the distance
+  travelled doubles the angle swept (checked via `Quaternion.angleTo`
+  between the real before/after orientations — proportionality, not a
+  re-assertion of `spinWheels`'s own formula, so it can't pass by
+  construction). One test-design mistake caught and fixed here too:
+  the first version used a 2.5 m travelled distance, which happened to sweep
+  almost exactly half a turn — doubling it swept almost exactly a *full*
+  turn, and `angleTo`'s shortest-path measurement reported that as ~0°. Not
+  a real failure; fixed by using a small enough distance (0.2 m) that the
+  swept angle stays well clear of the wraparound.
+- All of round 1/2's checks re-verified at the new dimensions: gauge, seat
+  height, floor clearance, level ray-cast, and the full 240-sample real-route/
+  real-camera/real-pitch lap sweep — still 100% clear at every sample.
+- `npm run build` exits 0.
+- **Still no browser access.** Everything above is geometric/quaternion
+  verification against the real built meshes and the real `spinWheels()`
+  function — strong evidence the rotation is now mathematically correct and
+  the wheel has real spoke geometry, but nobody has watched it actually spin
+  on screen. High priority for whoever gets the browser next.
+
+### The worktree-hygiene near-miss — happened twice, same shape both times
+
+While this round's Blender work was in progress, this worktree's checked-out
+branch changed out from under the session **twice**, both times the
+coordinator adding temporary "combine for local preview" commits directly
+onto (what had been) this branch, pulling in unrelated in-flight work
+(duck-bar/pitch fixes, rail-race polish, and — critically the second time —
+the real `SpotLight` headlamp change from `feat/rail-race-polish-round2`,
+commit `e044d61`).
+
+**First time** (round 2 → round 3 transition): caught before push by reading
+`git log --oneline --all --graph` and confirming via
+`git merge-base --is-ancestor` that the surprise commits weren't really part
+of this branch's history. Cherry-picked the real work back onto the correct
+branch tip.
+
+**Second time** (mid round 3): the SpotLight code showed up already merged
+into `cart.ts` on disk via a file-read, which was initially alarming (had my
+own in-progress edit clobbered it again?). Diagnosed the same way: `git log`
+showed a branch named `tmp-reconcile-156-157` with two "tmp:" commits on top
+of my last real push. Fixed by `git stash push -u` on the uncommitted Blender
+asset files (so the in-progress work wasn't lost), `git checkout -b
+round3-clean <my-last-real-commit-sha>`, `git stash pop`, and then —since I
+now knew exactly what the SpotLight commit contained — manually re-applying
+its `cart.ts`/`RailRace.ts` changes on top of my own clean work, re-homing
+the beam positions onto the asset's actual `lamp-l`/`lamp-r` node positions
+rather than leaving it as a note for someone else to reconcile later.
+
+**If this happens a third time:** don't assume the worktree's checked-out
+branch is still the one you left it on. Check `git branch --show-current`
+and `git log --oneline -3` before trusting anything on disk, especially
+after a Read tool call shows content that doesn't match what you last wrote.
+`git merge-base --is-ancestor <suspicious-commit> HEAD` is the reliable way
+to tell "is this actually part of my branch's history" from "did someone
+graft something on top of my checkout for a look".
