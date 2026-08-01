@@ -3,6 +3,9 @@
 Worktree: `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/rail-race-reform`
 (NOT the shared checkout.)
 
+**Status: complete, PR open, not merged.** Build exit 0, procgen 50/50 on 5
+seeds. No live browser QA — see "What I could not verify" at the bottom.
+
 ## The brief, verbatim from Jim
 
 > Rail race game reformed. It should now be a side-on perspective like before,
@@ -14,89 +17,153 @@ Worktree: `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/rail-race-reform`
 > to let go otherwise the tracks start to spark. The track rendering to 3d
 > objects should use our standard track path following. The ride is a 4-way race.
 
-## Investigation findings (do not re-derive these)
+## What was built
 
-### 1. Which of the two implementations is live
+`src/world/railRace/`, a new in-park ride, replacing `Coaster`'s `race: true`
+mode entirely.
 
-**`src/world/coaster/Coaster.ts` with `options.race` is LIVE.**
-`MiniGameHost.checkStalls` (line 217) calls `boardRide(stall.id)` *before*
-`begin(stall)`, and `Game.ts:461` routes `'railRacer'` →
-`world.raceCoaster.requestBoard()`, which returns true. So the stall never
-reaches `StallDefinition.create`.
+| file | owns |
+| --- | --- |
+| `route.ts` | the ring: 4 lanes, where they are, how they undulate |
+| `plan.ts` | `RAIL_RACE_PLAN` — solved at module load, gives `paths.ts` the exit |
+| `hazards.ts` | duck bars and spark zones, as data |
+| `simulate.ts` | the physics and who wins. Pure — the build races it |
+| `track.ts` | geometry: rails, trestles, bars, black plates, arch |
+| `camera.ts` | the side-on rig |
+| `sparks.ts` | pooled, allocation-free sparks |
+| `RailRace.ts` | the ride: carts, riders, boarding, countdown, finish |
 
-**`src/minigames/railRacer/` is DEAD CODE** reachable only through that unused
-`create`. `MiniGameHost`'s own comment says so out loud: *"The 2D rail racer
-scene is retired; its stall (and the Sky Cruiser's) stay as the ways in."*
+Plus `src/world/rail/sweptRail.ts` — the shared rail sweeper, lifted out of
+`Coaster.buildTrack`.
 
-But it is dead code that is **exactly what Jim means by "like before"**:
-- `course.ts` `LANES = [-4.8, -1.6, 1.6, 4.8]` — four parallel rails already,
-  "far to near", player on the nearest.
-- Already a 4-way race: player + `RIVALS` = Pip, Nell, Otto.
-- Side-on ortho camera, `CAMERA_YAW 0.17` / `CAMERA_PITCH 0.3` — just enough
-  pitch to stack four lanes into four rows of the picture.
-- Hold-to-accelerate, release-to-duck, with the amber→mint lamp language that
-  teaches the rule without words.
+## Findings a replacement should not have to rediscover
 
-So the reform is: **take the retired 2D game's shape and rebuild it on real
-in-park rails around the perimeter**, replacing the `Coaster` race mode.
+### 1. Which implementation was live (the "two competing implementations")
 
-### 2. `buildTrack` is NOT reusable as-is for this
+`Coaster.ts` with `options.race` **was** live: `MiniGameHost.checkStalls` offers
+every stall to `boardRide` *before* `begin(stall)`, and `Game.ts` routed
+`railRacer` → `raceCoaster.requestBoard()`, which returns true.
 
-`src/world/train/track.ts` `buildTrack(route)` drapes everything on
-`terrainHeight` (sleepers, ballast, `railCurve` all sample it). Our lanes carry
-their **own** elevation and undulate independently, so a terrain-draped builder
-is the wrong shared utility.
+`src/minigames/railRacer/` was **dead code** — reachable only via the stall's
+`create`, which never ran. It was, however, exactly what "like before" meant
+(four lanes, three rivals, side-on, hold/release, amber→mint lamps), so its
+*design* is what this reform rebuilt on real rails. It is now deleted; only
+`confetti.ts` survives, because `WaterFight` and the new race both use it.
 
-The real shared idiom for elevated rail is `Coaster.buildTrack`'s **swept
-tube**: sample the route, offset sideways by the horizontal normal
-(`sideX = tangent.z, sideZ = -tangent.x`), build a `CatmullRomCurve3`, then one
-`TubeGeometry` per rail. Circular cross-section is why a plain `TubeGeometry`
-works — Frenet-frame twist is invisible on a round tube.
+### 2. Four concentric circles are four different circumferences
 
-### 3. Camera facing — the trap, and why this ride sidesteps it
+311 m on the inside lane against 361 m on the outside — a sixth further to go
+for the lane you happened to draw. The course is therefore parameterised by
+**one shared arc length `s` on a nominal circle**, and each lane maps that same
+`s` onto its own radius. The outer cart really is moving faster through the
+world; nobody notices, and hazards at one `s` are fair in all four lanes.
 
-Everything in the park is modelled facing **+Z**; a three.js `PerspectiveCamera`
-looks down its own local **−Z**. So a camera bolted into a seat rotated by
-`atan2(tangent.x, tangent.z)` faces *backwards* — measured at
-`dot(cameraForward, travel) = -1.000`. `Coaster` fixes it with `eyeMount`, a
-child of `cartMount` turned π.
+### 3. A different phase per harmonic is a different waveform
 
-**This ride does not mount its camera on the cart at all.** Side-on means the
-view direction is the horizontal *inward* normal, not the tangent, so the camera
-is positioned in world space and `lookAt`s an aim point each frame. There is no
-seat rotation to get backwards. Verified numerically, not assumed — see the
-probe script.
+The first version gave each lane a free phase offset per harmonic. That is not a
+rotation — it changes the shape, and with it the total climb. **Measured at
+2.54 m of climb between the easiest and hardest lane**, by the checker, on the
+first run. Each lane is now the *same* profile **rigidly rotated** (one shift
+applied to the angle), over a **level** base. Climb spread is now 0.0000 m and
+gradient spread 0.00000.
 
-`npm run check:ride-camera` only drives `SpaceFerrisWheel`, so this ride cannot
-move that hash as long as `core/RideCamera.ts` is untouched.
+If you touch the hill profile, keep both properties or the race stops being one.
 
-### 4. The "duck bars invisible/ineffective — holding wins" bug
+### 4. The loop runs clockwise, and that sign is load-bearing
 
-Root cause in `Coaster.updateRace` (lines 419–427), two independent faults:
+The camera outside the ring looking in fixes screen-right as
+`(sin θ, 0, −cos θ)`. Running anticlockwise carries every rider **right to
+left**, backwards to every side-scroller and to the direction she reads.
+`RailRaceRoute.angleAt` returns `−distance / NOMINAL_RADIUS` for that reason;
+`tangentAt`, `slopeAt` and `startDistance` all carry the matching sign.
 
-- **The bonk barely costs anything.** A bonk sets `speed = max(2.5, speed*0.35)`
-  but the speed lerp back to target is `(target-speed) * min(1, 3.2*dt)` — a
-  ~0.31 s time constant. You are back to full pace in under a second. Compare
-  the retired 2D game, which tuned `BONK_SPEED_FACTOR = 0.35` *plus* a 1.3 s
-  wobble during which thrust does nothing, explicitly because "a bonk must cost
-  *more* than the coasting it saved, or holding the button down for a minute
-  would be the winning strategy and the game would have nothing to teach."
-  `Coaster`'s `bonkWobble` decays but **never gates thrust** — nothing reads it
-  except a seat wobble. So holding wins.
-- **The hit window is frame-rate dependent.** `gap < 0.9` is a 1.8 m window;
-  at `MAX_SPEED*0.9 = 13.5 m/s` a 30 fps frame steps 0.45 m and a hitch steps
-  straight over it. It samples position instead of testing the swept interval.
+### 5. The camera is deliberately not a `RideCamera`, and has no `eyeMount`
 
-Both are designed out of the rebuild: thrust is gated while wobbling, and hazard
-crossing is tested as **interval overlap** (did `[prev, now]` cross the bar),
-which cannot be stepped over at any frame rate. Verified numerically.
+`core/RideCamera.ts` is *first-person look-around on a moving mount* and opens
+with "never write a second look-around". This is not one — no look control at
+all — and GAME_DESIGN's CONTROL rule keeps rotation controls to first person.
 
-## Status
+The `eyeMount` trap (models face +Z, a three.js camera looks down its own −Z, so
+an unrotated eye in a seat faces the way you have just come) **cannot arise
+here**: there is no mount and no seat transform, just a world position and a
+`lookAt`. Verified anyway rather than argued — see below.
 
-- [x] Investigation
-- [ ] Perimeter route + 4 undulating lanes
-- [ ] Rail geometry
-- [ ] Race logic + hazards
-- [ ] Side-on camera
-- [ ] Numeric probe script
-- [ ] PR
+### 6. Root cause of "duck bars invisible/ineffective — holding wins"
+
+Two independent faults in `Coaster.updateRace`, both designed out:
+
+- **The bonk cost nothing.** `bonkWobble` was set but **never gated thrust** —
+  it shook the seat and that was all — and the speed lerp back to full pace had
+  a ~0.31 s time constant. The retired 2D game had tuned exactly this against a
+  simulation ("a bonk must cost more than the coasting it saved") and the in-park
+  port lost it. `simulate.ts` gates thrust while `wobble > WOBBLE_LOCKOUT`.
+- **The hit window was frame-rate dependent.** `gap < 0.9` is a 1.8 m window; at
+  13.5 m/s a 30 fps frame steps 0.45 m across it and a hitch steps clean over.
+  Hazards are now a single ascending list of **travelled** distances walked by
+  one cursor per rider, so a crossing is an interval test that cannot be
+  stepped over at any frame rate, and there is no wrap arithmetic anywhere.
+
+### 7. `test/procgen/invariants.ts` must not import the ride's modules
+
+A static `import` of `railRace/plan.ts` pulls in `parkManifest` at module load,
+which reads `LGP_SEED` **once** — before the harness has set it. Four of the
+five seed suites silently built the canonical park and the guard in
+`parkFacts.ts` caught it. The invariant reaches the route through
+`facts.world.railRace` instead; `RailRace` exposes `route` and `laneCount` for
+exactly that.
+
+## Verification
+
+`npm run check:rail-race` (wired into `npm run build`) measures the built
+thing, not the rules:
+
+```
+lane 0..3   climb 12.57 m each, steepest 13.1° each
+fairness    climb spread 0.0000 m, gradient spread 0.00000
+ground      lowest rail 7.28 m over the ground it crosses
+railway     7.26 m of air over the rail head (Decision 4 wants 5.5)
+gate        7.42 m of air over the entrance corridor
+camera      |dot(forward, travel)| = 0.0000   (perfectly side-on)
+            dot(forward, inward)  = 1.0000   (straight into the park)
+            dot(screenRight, travel) = 0.964 (left to right)
+            tilt 20.1°, fov 40.0° at 16:9, 98.0° in portrait
+never lets go  74.2 s  10 bonks  15.6 s sparking
+never holds   197.8 s
+sloppy         62.7 s   5 bonks
+plays well     52.1 s   0 bonks
+```
+
+The four-strategy race is the guard against the old bug: **letting go must beat
+holding by at least 4 s** or the build fails.
+
+- `npm run build` — **exit 0** (checked as the exit code, not through a pipe).
+- `npm run test:procgen` — **50/50 across 5 seeds**, exit 0.
+- `check:park` — 15/15 attractions route, 0 rail crossings, 71/71 waypoints.
+  `rail.exclusion` ratchet tightened 21 → 20.
+
+## What I could not verify
+
+- **No live browser QA.** I did not own the chrome-devtools MCP and did not ask
+  for it. Everything visual is inferred from geometry that was measured
+  headlessly. Worth a human's eyes on, in rough priority order:
+  1. Does the side-on view actually read? Lane separation at 2.6 m with 20° of
+     tilt is the number I would expect to want tuning first.
+  2. Are the four rails legible against a busy park backdrop, or does the park
+     behind them make a mess of the picture?
+  3. Do the black plates read as "let go" before a child hits one?
+  4. The trestles are skipped wherever the ground is not clear; is the run of
+     unsupported track over the railway too long to look right?
+- **`npm run sweep:seeds`** not run (only the 5 procgen seeds).
+- `vitest` was not installed anywhere on this machine; I ran `npm install`
+  **inside the worktree only**, never in the shared checkout.
+
+## Judgement calls Jim may want to overrule
+
+- **2 laps** (~52 s played well, ~75 s not). One lap would be ~26 s.
+- **Elevated at 9.5 m.** Forced by the ground being full, but it is also what
+  makes the camera able to see over the wall into the park.
+- **The booth stays where it is**, inland; she is carried to the rim by the iris
+  wipe, exactly as the other rides carry her to stations she is not stood on.
+- **The player rides the outermost lane**, nearest the camera.
+- **Sparks cost drag, never a bonk.** Holding through a black stretch is slower,
+  not punished.
