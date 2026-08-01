@@ -52,8 +52,20 @@ export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 /** How far a duck bar reaches either side of its lane's centre. */
 const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
 
-/** Trestles this far apart around the ring. */
-const TRESTLE_SPACING = 12;
+/**
+ * A bay of deck — cross-beam and droppers — this far apart around the ring.
+ *
+ * The family, having ridden it (1 August 2026): *"the rails have no visible
+ * supports — put them at regular distances of a few metres"*. It was 12 m,
+ * which at racing pace is a bay every four fifths of a second. Five is "a few
+ * metres", and the ring is 336 m round, so this is 67 bays rather than 28 —
+ * still three `InstancedMesh`es and so still three draw calls.
+ *
+ * Note this is now the spacing of a bay of *deck*, which is unconditional, and
+ * no longer the spacing of a ground leg, which is not. That split is the real
+ * fix — see {@link deckSpots}.
+ */
+const TRESTLE_SPACING = 5;
 
 /** How far under the lowest a rail ever gets the cross-beam sits. */
 const BEAM_DROP = 0.45;
@@ -135,7 +147,6 @@ export function buildRailRaceTrack(
   const outward = new Vector3();
   const point = new Vector3();
   const ACROSS = new Vector3(1, 0, 0);
-  const UP = new Vector3(0, 1, 0);
 
   const INK = new Color(PALETTE.ink);
 
@@ -337,22 +348,34 @@ export function buildRailRaceTrack(
   keep(timberMaterial);
   keep(trestleMaterial);
 
-  const spots = trestleSpots(route, collision);
+  // The droppers get a white material of their own rather than the trestle's
+  // stone: their per-instance colour *multiplies* the material's, so a lane's
+  // pink read as a stone-tinted pink against the pink rail above it.
+  const dropperMaterial = toonMaterial(0xffffff);
+  keep(dropperMaterial);
+
+  const spots = deckSpots(route);
   const legGeometry = new CylinderGeometry(0.26, 0.34, 1, 8);
   const beamGeometry = new BoxGeometry(1, 0.26, 0.42);
-  const dropperGeometry = new CylinderGeometry(0.08, 0.08, 1, 6);
+  // Thicker than the 0.08 it was: RIDE_SCALE took the rail tube up to 0.19 m
+  // radius and a dropper thinner than the rail it holds reads as a wire.
+  const dropperGeometry = new CylinderGeometry(0.11, 0.13, 1, 6);
   keep(legGeometry);
   keep(beamGeometry);
   keep(dropperGeometry);
 
   const legs = new InstancedMesh(legGeometry, trestleMaterial, Math.max(1, spots.length));
   const beams = new InstancedMesh(beamGeometry, timberMaterial, Math.max(1, spots.length));
+  // Two per lane, not one: see the loop below.
   const droppers = new InstancedMesh(
     dropperGeometry,
-    trestleMaterial,
-    Math.max(1, spots.length * LANE_COUNT),
+    dropperMaterial,
+    Math.max(1, spots.length * LANE_COUNT * 2),
   );
   let dropperIndex = 0;
+  let legIndex = 0;
+  const dropperColour = new Color();
+  const upright = new Quaternion();
   // Wide enough to carry the outer rail of the outer lane and the inner rail of
   // the inner lane, with a little overhang so the beam reads as holding them up.
   const beamSpan = LANE_SPAN + RAIL_GAUGE + 0.8;
@@ -361,37 +384,66 @@ export function buildRailRaceTrack(
     route.outwardAt(spot.at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
 
-    const ground = terrainHeight(spot.x, spot.z);
-    const legHeight = beamY - ground;
-    position.set(spot.x, ground + legHeight / 2, spot.z);
-    scale.set(1, legHeight, 1);
-    matrix.compose(position, rotation.clone().setFromAxisAngle(UP, 0), scale);
-    legs.setMatrixAt(index, matrix);
+    // A ground leg, wherever the ground under this stretch of deck can take one
+    // — which is nothing like everywhere. See {@link footUnder}. Legs go on a
+    // coarser grid than the deck: a pier every five metres is a fence, and at
+    // eight metres tall they would be the park's dominant feature.
+    if (index % LEG_EVERY === 0) {
+      const foot = footUnder(spot, outward, collision);
+      if (foot) {
+        const ground = terrainHeight(foot.x, foot.z);
+        const legHeight = beamY - ground;
+        position.set(foot.x, ground + legHeight / 2, foot.z);
+        scale.set(1, legHeight, 1);
+        matrix.compose(position, upright, scale);
+        legs.setMatrixAt(legIndex, matrix);
+        legIndex += 1;
+        // A post is a thing a child can walk into.
+        collision.addCircle(foot.x, foot.z, 0.36);
+      }
+    }
 
-    route.outwardAt(spot.at, outward);
-    rotation.setFromUnitVectors(ACROSS, outward);
     position.set(spot.x, beamY, spot.z);
     scale.set(beamSpan, 1, 1);
     matrix.compose(position, rotation, scale);
     beams.setMatrixAt(index, matrix);
 
+    // **One dropper under each actual rail, in that lane's own colour.**
+    //
+    // There used to be a single dropper per lane, standing on the lane's centre
+    // line — which was fine while `RAIL_GAUGE` was 0.62 m and the two rails were
+    // near enough one thing. `RIDE_SCALE` took the gauge to 1.55 m, and a lone
+    // post three quarters of a metre in from either rail holds up nothing you
+    // can see: that, as much as the spacing, is why the family reported the
+    // rails as having no supports at all.
+    //
+    // The colour is `LANE_COLOURS` again — the same array that paints the rails
+    // and the carts — so "my colour" stays one fact across the whole ride. The
+    // legs and cross-beam below stay structural stone and timber: everything in
+    // lane colour and the colour stops meaning "mine".
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       route.pointAt(lane, spot.at, point);
       const length = point.y - beamY;
-      position.set(point.x, beamY + length / 2, point.z);
-      scale.set(1, length, 1);
-      matrix.compose(position, rotation, scale);
-      droppers.setMatrixAt(dropperIndex, matrix);
-      dropperIndex += 1;
+      dropperColour.set(LANE_COLOURS[lane % LANE_COLOURS.length] ?? PALETTE.markerPink);
+      for (const side of [-1, 1] as const) {
+        position.set(
+          point.x + outward.x * side * RAIL_GAUGE * 0.5,
+          beamY + length / 2,
+          point.z + outward.z * side * RAIL_GAUGE * 0.5,
+        );
+        scale.set(1, length, 1);
+        matrix.compose(position, rotation, scale);
+        droppers.setMatrixAt(dropperIndex, matrix);
+        droppers.setColorAt(dropperIndex, dropperColour);
+        dropperIndex += 1;
+      }
     }
-
-    // A post is a thing a child can walk into.
-    collision.addCircle(spot.x, spot.z, 0.36);
   });
 
-  legs.count = spots.length;
+  legs.count = legIndex;
   beams.count = spots.length;
   droppers.count = dropperIndex;
+  if (droppers.instanceColor) droppers.instanceColor.needsUpdate = true;
   // Named so `test/procgen/invariants.ts` can find the legs in the built scene
   // and measure where they actually landed, rather than re-deriving the rules
   // that placed them.
@@ -666,24 +718,70 @@ interface TrestleSpot {
 }
 
 /**
- * Where the ring can actually be stood up.
+ * Where a bay of deck goes: **every {@link TRESTLE_SPACING} metres, without
+ * exception**.
  *
- * The same predicate set the coaster's pylons use, plus one this ride needs and
- * the coaster does not: the ring runs *inside the railway's own band*, so a leg
- * has to clear the train's corridor as well as the walking network. Where it
- * cannot — over the railway, over a path, in the gap between two plots — the
- * trestle is simply skipped. The track shrugs off a missing support; the walk
- * network cannot shrug off a misplaced one.
+ * This is the half of the old `trestleSpots` that had no business being
+ * conditional, and making it so is what actually answered the family's "the
+ * rails have no visible supports". The old function decided the cross-beam,
+ * the droppers *and* the ground leg together, on whether the ground 8 m below
+ * could take a post. Measured in the built canonical park, that threw away 63
+ * of 67 candidate bays — and, tellingly, only 7 of those to the railway and 4
+ * to a path. **52 went to `collision.isClearCircle`**: the park's rim at
+ * r=53.5 m is simply full of trees, fences and plots. So the ring flew with
+ * four supports in 336 m, one every 84 m, which is indistinguishable from
+ * none. It was never the spacing constant.
+ *
+ * A bay of deck needs no ground: it hangs at `beamY`, six-odd metres up, well
+ * over the train's canopy and everybody's head. Only the leg needs clear
+ * ground, and that is now asked separately — see {@link footUnder}.
  */
-function trestleSpots(route: RailRaceRoute, collision: CollisionWorld): TrestleSpot[] {
+function deckSpots(route: RailRaceRoute): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
   const count = Math.floor(route.length / TRESTLE_SPACING);
   for (let i = 0; i < count; i += 1) {
     const at = (i / count) * route.length;
     const theta = route.angleAt(at);
-    const x = Math.cos(theta) * NOMINAL_RADIUS;
-    const z = Math.sin(theta) * NOMINAL_RADIUS;
+    spots.push({ at, x: Math.cos(theta) * NOMINAL_RADIUS, z: Math.sin(theta) * NOMINAL_RADIUS });
+  }
+  return spots;
+}
 
+/**
+ * How far in or out of the ring a leg may stand to find clear ground.
+ *
+ * The cross-beam is `beamSpan` (10.15 m) wide, so anywhere within about 4.6 m
+ * of the centre line is still *under the deck* and reads as holding it up.
+ * Tried nearest-first, so a leg only wanders when it has to.
+ *
+ * This is most of where the extra supports come from. The rim is crowded, but
+ * it is crowded in patches — a leg that may shuffle three metres in from a
+ * tree finds ground where a leg pinned to r=53.5 m simply gives up.
+ */
+const FOOT_OFFSETS: readonly number[] = [0, -1.6, 1.6, -3.2, 3.2, -4.6, 4.6];
+
+/** One ground leg per this many bays of deck. */
+const LEG_EVERY = 2;
+
+/**
+ * Where a bay's leg can actually be stood up, or `null` for a bay that spans
+ * without one.
+ *
+ * The same predicate set the coaster's pylons use, plus one this ride needs and
+ * the coaster does not: the ring runs *inside the railway's own band*, so a leg
+ * has to clear the train's corridor as well as the walking network. Where it
+ * cannot — over the railway, over a path, in the gap between two plots — the
+ * leg is simply skipped, and the deck above it carries on regardless. The track
+ * shrugs off a missing leg; the walk network cannot shrug off a misplaced one.
+ */
+function footUnder(
+  spot: TrestleSpot,
+  outward: Vector3,
+  collision: CollisionWorld,
+): { readonly x: number; readonly z: number } | null {
+  for (const offset of FOOT_OFFSETS) {
+    const x = spot.x + outward.x * offset;
+    const z = spot.z + outward.z * offset;
     if (!collision.isClearCircle(x, z, 1.1)) continue;
     if (distanceToPath(x, z) < 2.8) continue;
     if (distanceToRailCorridor(x, z) < 2.4) continue;
@@ -691,10 +789,9 @@ function trestleSpots(route: RailRaceRoute, collision: CollisionWorld): TrestleS
       (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
     );
     if (pinchesCorridor) continue;
-
-    spots.push({ at, x, z });
+    return { x, z };
   }
-  return spots;
+  return null;
 }
 
 /** A striped arch over all four lanes, where the race starts and ends. */
