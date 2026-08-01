@@ -11,9 +11,10 @@ files and a new script). Commits on top of the assets:
 - `CharacterCreation: dedupe the glasses 'none'->null conversion`
 
 ## Status: PR #141 open (https://github.com/jimhigson/land-of-good-places/pull/141),
-build green, code and self-review complete. **Blocked only on live browser QA** —
-see the note below. Check `gh pr view 141` for the current state before assuming
-anything here is stale.
+build green, code + self-review + live browser QA all done and posted as a PR
+comment. Ready for peer review — not merged (that's the Overseer's call, and
+never self-merge per CLAUDE.md). Check `gh pr view 141` for the current state
+before assuming anything here is stale.
 
 ## What this adds
 
@@ -103,13 +104,20 @@ asset commits). Findings:
   (nothing here touches procedural generation) but ran it anyway per CLAUDE.md.
   Note: vitest was not present in the shared checkout's `node_modules`; had to
   run `npm install` inside this worktree to get it (fast, used local cache).
-- **No live browser verification yet.** Messaged the Overseer ("main") once
-  the PR-worthy state was reached; the Overseer replied that chrome-devtools
-  is currently owned by another agent QA-ing the rail-race PR, and will
-  message back when it frees up. Do the visual pass then, before this merges:
-  the Glasses tab's four tiles render and select correctly, the live preview
-  actually swaps the worn glasses (including "None" removing them), and a
-  freshly-created character spawns into the park wearing the chosen pair.
+- **Live browser verification — done.** Rail-race QA and merge finished, the
+  Overseer freed up chrome-devtools and I ran the pass: own dev server on
+  port 5263 (`--strictPort`), background page, killed the server by PID and
+  closed the page when done. Confirmed: all four Glasses tiles select
+  correctly (rainbow HIGHLIGHT ring, `aria-pressed`), the live preview swaps
+  Sunglasses/Star/Heart distinctly and **None** genuinely removes the mesh
+  (not just deselects), and a freshly spawned `Player` in the park wears the
+  chosen glasses (screenshotted Star glasses on "Eleri" after "Let's go!").
+  No console errors/warnings anywhere in the session. Findings posted as a PR
+  comment. One non-issue noted there: at a narrow/short viewport (700×700)
+  the tab content needs `.charcreate-controls` scrolled into view — this
+  reproduces identically on the pre-existing **Skin** tab, so it is the
+  documented 28 July 2026 phone-layout behaviour working as designed, not a
+  regression from this PR.
 
 ## If you're picking this up cold
 
