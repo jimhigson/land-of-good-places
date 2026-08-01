@@ -102,8 +102,19 @@ export function buildRailRaceTrack(
   const UP = new Vector3(0, 1, 0);
 
   // --- the rails -------------------------------------------------------------
-  const railMaterial = toonMaterial(PALETTE.markerPink);
-  keep(railMaterial);
+  // One colour per lane, not one shared pink for the whole ring: with four
+  // racers on four separate rails, colour is how a child tells "my lane" from
+  // "their lane" at a glance, the same job livery plays on real racing lanes.
+  // Same bright, high-saturation family the character creator's own swatches
+  // use (`markerPink` etc in `core/palette.ts`) rather than inventing a new set.
+  const LANE_COLOURS: readonly number[] = [
+    PALETTE.markerPink,
+    PALETTE.markerSky,
+    PALETTE.markerLemon,
+    PALETTE.markerMint,
+  ];
+  const railMaterials = LANE_COLOURS.map((colour) => toonMaterial(colour));
+  for (const material of railMaterials) keep(material);
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     // The adapter that makes a lane of this ring look like any other route in
     // the park to the shared sweeper.
@@ -112,6 +123,7 @@ export function buildRailRaceTrack(
       pointAt: (distance, target) => route.pointAt(lane, distance, target),
       tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
     };
+    const railMaterial = railMaterials[lane % railMaterials.length]!;
     for (const geometry of sweptRails(sampler, {
       gauge: RAIL_GAUGE,
       radius: 0.075,
