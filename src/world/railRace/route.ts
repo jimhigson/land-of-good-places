@@ -84,6 +84,31 @@ export const NOMINAL_RADIUS = 53.5;
 const LANE_SPACING = 2.6;
 
 /**
+ * A purely cosmetic size-up of the carts, riders and rail gauge, while racing.
+ *
+ * Deliberately not physics: the route itself (lane radii, arc length, the
+ * undulation, every hazard's position) is untouched, so nothing about *where*
+ * the race happens moves. Only how big the things riding it — and the rails
+ * they ride on — render.
+ *
+ * A scratch fix (1 August 2026) tried making the camera stand closer with a
+ * wider lens instead, and hit a real ceiling: past ~120° horizontal FOV the
+ * rider — pinned near the screen's edge by `RaceCamera`'s own
+ * `RIDER_SCREEN_X_PORTRAIT` — grew too big for her own anchor point and
+ * clipped off it, the opposite of "the character should be the focus of the
+ * screen." Worse, the solve at 130° broke down numerically (a bisection that
+ * had assumed a moderate lens produced a nonsense 140 m "visible ahead").
+ * Scaling what is actually drawn sidesteps both problems: no camera geometry
+ * to re-derive, and nothing to clip, since the anchor point itself does not
+ * move.
+ *
+ * The value is the family's own pick from a screenshot sweep at 1.5×, 2×,
+ * 2.5× and 3× — 1.5× already read clearly bigger without losing the park
+ * behind her; 3× was mostly a hat filling the screen. 2.5× is the answer.
+ */
+export const RIDE_SCALE = 2.5;
+
+/**
  * How high the rails fly above the ground under the nominal circle.
  *
  * Floored well above everything in this band: the train's rail head (0.17 m)

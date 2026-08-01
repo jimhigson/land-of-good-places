@@ -26,6 +26,7 @@ import {
   LANE_COUNT,
   LANE_SPAN,
   NOMINAL_RADIUS,
+  RIDE_SCALE,
   UNDULATION_REACH,
   type RailRaceRoute,
 } from './route';
@@ -46,10 +47,10 @@ import {
  */
 
 /** Rail centre-to-centre within one lane. Narrow: it is a one-child cart. */
-export const RAIL_GAUGE = 0.62;
+export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 
 /** How far a duck bar reaches either side of its lane's centre. */
-const BAR_HALF_SPAN = 1.15;
+const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
 
 /** Trestles this far apart around the ring. */
 const TRESTLE_SPACING = 12;
@@ -142,7 +143,7 @@ export function buildRailRaceTrack(
     const railMaterial = railMaterials[lane % railMaterials.length]!;
     for (const geometry of sweptRails(sampler, {
       gauge: RAIL_GAUGE,
-      radius: 0.075,
+      radius: 0.075 * RIDE_SCALE,
       // The ring bends at a constant, gentle 1/53.5 per metre; it does not need
       // the coaster's two segments a metre, and this is paid eight times over.
       tubularPerMetre: 1.2,

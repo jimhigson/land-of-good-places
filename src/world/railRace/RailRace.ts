@@ -14,7 +14,7 @@ import type { CollisionWorld } from '../Collision';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, type RailRaceTrack, type SparkingSegment } from './track';
-import { LANE_COUNT, PLAYER_LANE } from './route';
+import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './route';
 import { createSparks, type Sparks } from './sparks';
 import {
   HAZARDS,
@@ -211,11 +211,15 @@ export class RailRace implements GameSystem {
       kid.root.position.y = 0.05;
       kid.setExpression('happy');
       group.add(kid.root);
+      // RIDE_SCALE scales the cart's own body/nose and, since the kid is a
+      // child of this same group, the rival riding in it, together.
+      group.scale.setScalar(RIDE_SCALE);
       this.group.add(group);
       this.carts.push({ rider: createRider(index), group, isPlayer: false, kid });
     });
 
     const group = buildCart(PALETTE.markerPink);
+    group.scale.setScalar(RIDE_SCALE);
     this.group.add(group);
     this.carts.push({ rider: createRider(PLAYER_LANE), group, isPlayer: true, kid: null });
   }
@@ -231,6 +235,10 @@ export class RailRace implements GameSystem {
     if (this.riding || !this.player || this.phase !== 'waiting') return false;
     this.riding = true;
     this.player.beginRide();
+    // RIDE_SCALE scales her own live model too, not just the decorative
+    // rivals — reset in arrive() so she is her normal size again once she is
+    // walking around the park.
+    this.player.model.root.scale.setScalar(RIDE_SCALE);
     this.onRideChange?.(true);
 
     // Everybody back to the line. Nothing moves until the countdown runs out —
@@ -497,6 +505,8 @@ export class RailRace implements GameSystem {
         PLAYER_RADIUS,
       );
       this.player.setRidePose(x, terrainHeight(x, z), z, 0);
+      // Undo the RIDE_SCALE boarding scale-up now she's back on foot.
+      this.player.model.root.scale.setScalar(1);
       this.player.endRide();
       this.onRideChange?.(false);
     }
