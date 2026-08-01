@@ -173,6 +173,18 @@ function createSunglasses(): AssetHandle {
  * `style/shapes.ts` (already used for the crown's jewel and Biscuit's jumper),
  * so there is no hand-rolled triangulation here to get the winding order of
  * wrong — the exact trap ART-AGENT-NOTES.md §4 warns about.
+ *
+ * Unlike the sunglasses' torus rim, a star or heart frame is a **filled**
+ * shape, left-right symmetric about its own centre — so the distance it
+ * reaches out toward the ear and the distance it reaches in toward the nose
+ * are the same number. There is no separate "inner hole radius" to hold
+ * steady the way `SUN_RIM_RADIUS`/`SUN_RIM_TUBE` did while the outer edge
+ * grew; growing `frameSize` pushes the near-nose edge in exactly as far as it
+ * pushes the outer edge out. That is why {@link STAR_FRAME_SIZE} and
+ * {@link HEART_FRAME_SIZE} below grow by very different ratios from their own
+ * baselines — each is sized against how far its own shape's centre can move
+ * out before its near-nose edge reaches the other lens's, not against a
+ * shared percentage.
  */
 function shapedLensPair(
   fit: Group,
@@ -181,6 +193,7 @@ function shapedLensPair(
   lensColour: number,
   frameSize: number,
   lensSize: number,
+  outline: number,
 ): void {
   const frameMat = toonMaterial(frameColour);
   const lensMat = toonMaterial(lensColour, { transparent: true, opacity: 0.55 });
@@ -191,7 +204,7 @@ function shapedLensPair(
     const frame = solid(new Mesh(geometry(frameSize, 0.016), frameMat));
     frame.position.set(x, 0, STANDOFF - 0.008);
     fit.add(frame);
-    addOutline(frame, 0.008);
+    addOutline(frame, outline);
 
     const lens = decal(new Mesh(geometry(lensSize, 0.012), lensMat));
     lens.position.set(x, 0, STANDOFF + 0.006);
@@ -199,24 +212,103 @@ function shapedLensPair(
   }
 }
 
+/**
+ * Star lens/frame size, in head units, grown to match the sunglasses'
+ * 1 August 2026 "exaggerated and theatrical" scale-up (see
+ * {@link SUN_LENS_RADIUS}'s doc comment). The shipped pair used `0.235`.
+ *
+ * A star's points reach much further from its own centre, relative to this
+ * `size` parameter, than the sunglasses' torus does from *its* centre
+ * (`halfWidth ≈ 0.556 × size`, measured off the built geometry) — so unlike
+ * the sunglasses, which could double their lens and still keep a ~10 cm gap
+ * over the nose bridge, a star frame this size is already most of the way to
+ * the centreline before any growth at all (original gap ≈ 8.8 cm at kid
+ * scale). `0.27` is as far as this shape can grow and still clear the other
+ * eye's star with a real, checked margin: ~30 mm at kid scale between the two
+ * frames' near-nose edges (`EYE_HALF_GAP` 0.1601 − frame half-width 0.1502,
+ * ×2 sides ×`KID_HEAD_SCALE`), well short of the point (`size` ≈ 0.288) where
+ * they would touch. Past that the two stars overlap across the nose — this
+ * is a real ceiling from the shape's own geometry, not a stylistic choice to
+ * grow less than the sunglasses did.
+ */
+const STAR_FRAME_SIZE = 0.27;
+/** Kept at the shipped pair's lens-to-frame ratio (~0.81), so the visible
+ * gold "rim" stays proportionate to the frame it borders as both grow. */
+const STAR_LENS_SIZE = 0.218;
+/** Outline thickness, raised from the shipped `0.008` into
+ * ART_DIRECTION.md §2's 0.016–0.022 "props" range — the same range the
+ * sunglasses' rim outline was raised into for the same "chunkier, more
+ * theatrical" read, rather than left thin while the frame it borders grows. */
+const STAR_OUTLINE = 0.016;
+/** Temple hinge offset, scaled up from the shared `temple()` default `0.095`
+ * by the same ratio {@link STAR_FRAME_SIZE} grew over the shipped `0.235`, so
+ * the arm still meets the frame's own edge instead of drifting off it as the
+ * frame grows — the same reasoning as {@link SUN_TEMPLE_HINGE}. */
+const STAR_TEMPLE_HINGE = 0.095 * (STAR_FRAME_SIZE / 0.235);
+
 /** Star glasses: a five-point star lens over each eye, gold-rimmed. */
 function createStarGlasses(): AssetHandle {
   const { root, fit } = glassesGroups('glasses.star');
 
   bridgePiece(fit, ART.glassesStarFrame);
-  shapedLensPair(fit, starGeometry, ART.glassesStarFrame, ART.glassesStarLens, 0.235, 0.19);
-  for (const side of [-1, 1] as const) temple(fit, side, EYE_HALF_GAP, ART.glassesStarFrame);
+  shapedLensPair(
+    fit,
+    starGeometry,
+    ART.glassesStarFrame,
+    ART.glassesStarLens,
+    STAR_FRAME_SIZE,
+    STAR_LENS_SIZE,
+    STAR_OUTLINE,
+  );
+  for (const side of [-1, 1] as const) {
+    temple(fit, side, EYE_HALF_GAP, ART.glassesStarFrame, STAR_TEMPLE_HINGE);
+  }
 
   return finish(root);
 }
+
+/**
+ * Heart lens/frame size, in head units — grown to match the sunglasses' new
+ * scale the same way {@link STAR_FRAME_SIZE} was. The shipped pair used
+ * `0.22`.
+ *
+ * A heart's own `halfWidth ≈ 0.42 × size` (measured off the built geometry) —
+ * narrower relative to its `size` than the star's `0.556×`, so it starts with
+ * far more headroom over the nose bridge (original gap ≈ 20 cm at kid scale)
+ * and can grow much further before its near-nose edge reaches the other
+ * lens's. `0.36` leaves a checked ~26 mm margin at kid scale (`EYE_HALF_GAP`
+ * 0.1601 − frame half-width 0.1514, ×2 ×`KID_HEAD_SCALE`) — comparable in
+ * absolute terms to the star's own margin above, even though it is a much
+ * bigger jump from this shape's own baseline (+64% vs. the star's +15%),
+ * because this shape had far more room to give.
+ */
+const HEART_FRAME_SIZE = 0.36;
+/** Kept at the shipped pair's lens-to-frame ratio (~0.80). */
+const HEART_LENS_SIZE = 0.286;
+/** Same reasoning as {@link STAR_OUTLINE}: raised from the shipped `0.008`
+ * into ART_DIRECTION.md §2's props range, matching the sunglasses' rim. */
+const HEART_OUTLINE = 0.016;
+/** Same reasoning as {@link STAR_TEMPLE_HINGE}, scaled by how far
+ * {@link HEART_FRAME_SIZE} grew over the shipped `0.22`. */
+const HEART_TEMPLE_HINGE = 0.095 * (HEART_FRAME_SIZE / 0.22);
 
 /** Heart glasses: a heart-shaped lens over each eye, pink-rimmed. */
 function createHeartGlasses(): AssetHandle {
   const { root, fit } = glassesGroups('glasses.heart');
 
   bridgePiece(fit, ART.heartPink);
-  shapedLensPair(fit, heartGeometry, ART.heartPink, ART.glassesHeartLens, 0.22, 0.175);
-  for (const side of [-1, 1] as const) temple(fit, side, EYE_HALF_GAP, ART.heartPink);
+  shapedLensPair(
+    fit,
+    heartGeometry,
+    ART.heartPink,
+    ART.glassesHeartLens,
+    HEART_FRAME_SIZE,
+    HEART_LENS_SIZE,
+    HEART_OUTLINE,
+  );
+  for (const side of [-1, 1] as const) {
+    temple(fit, side, EYE_HALF_GAP, ART.heartPink, HEART_TEMPLE_HINGE);
+  }
 
   return finish(root);
 }
