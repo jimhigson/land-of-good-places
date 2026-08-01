@@ -308,7 +308,14 @@ export class NpcSystem implements GameSystem {
       const name = isEthan ? ETHAN_NAME : (otherNames[nameCursor++] ?? ETHAN_NAME);
 
       const rolledColours = pickColours(rng);
-      const colours = isEthan ? { ...rolledColours, hair: ART.kidHairBlonde } : rolledColours;
+      // Ethan's skin tone is pinned alongside his hair and eyes — the family
+      // asked for light skin tone specifically, so this rides the same
+      // override rather than the usual `KID_SKIN_TONES` roll. `ART.kidSkin`
+      // is the 'Fair' swatch (`KID_SKIN_TONES[1]`), the game's long-standing
+      // default light tone.
+      const colours = isEthan
+        ? { ...rolledColours, hair: ART.kidHairBlonde, skin: ART.kidSkin }
+        : rolledColours;
 
       // One `next()` off the stream, exactly as the `chance(0.35)` short-hair
       // coin flip this replaced took — so widening the crowd from two
