@@ -3,8 +3,8 @@
 Worktree: `/Users/jim/dev/landOfGoodPlaces/.claude/worktrees/rail-race-reform`
 (NOT the shared checkout.)
 
-**Status: complete, PR open, not merged.** Build exit 0, procgen 50/50 on 5
-seeds. No live browser QA — see "What I could not verify" at the bottom.
+**Status: PR #140 open, review round 1 addressed, not merged.** Build exit 0,
+procgen 50/50 on 5 seeds. No live browser QA — see "What I could not verify".
 
 ## The brief, verbatim from Jim
 
@@ -34,7 +34,7 @@ mode entirely.
 | `RailRace.ts` | the ride: carts, riders, boarding, countdown, finish |
 
 Plus `src/world/rail/sweptRail.ts` — the shared rail sweeper, lifted out of
-`Coaster.buildTrack`.
+`Coaster.buildTrack` and **used by both** the Sky Cruiser and the Rail Race.
 
 ## Findings a replacement should not have to rediscover
 
@@ -88,7 +88,45 @@ an unrotated eye in a seat faces the way you have just come) **cannot arise
 here**: there is no mount and no seat transform, just a world position and a
 `lookAt`. Verified anyway rather than argued — see below.
 
-### 6. Root cause of "duck bars invisible/ineffective — holding wins"
+### 6a. Two things review caught, and what they were (1 August)
+
+**The duck-bar guard did not guard anything.** Comparing "never lets go" against
+"plays well" is not a test of the bars: a rider who never lets go also powers
+over every black stretch, so the entire margin can be spark drag while a bonk
+costs nothing at all. Reconstructing the original bug still passed. `bonks > 0`
+proves only that bars are *encountered*.
+
+Fixed with a `barsOnly` strategy — plays the black stretches perfectly, the bars
+not at all — so against `perfect` the spark drag cancels and what is left is the
+duck bars' own contribution. Then **mutation-tested**, which is the only way to
+trust a regression guard:
+
+```
+fix in place                           bars worth  15.6 s   exit 0
+thrust un-gated during the wobble       bars worth   7.8 s   exit 1
+a bonk costs no speed                   bars worth   7.3 s   exit 1
+both, i.e. the original Coaster bug     bars worth  -0.2 s   exit 1
+```
+
+**`sweptRail.ts` was a second copy, not an extraction.** `Coaster.buildTrack`
+still had its own sweep and the two had already diverged: `Coaster` called 0.55
+a `railGauge` and applied it as a *half*-offset, while the helper takes `gauge`
+to mean centre-to-centre. Genuinely migrated now — `Coaster` has no curve or
+tube code left. Reconciled by naming the interface `pointAt`/`tangentAt` after
+the routes' own methods, so `CoasterRoute` **is** a `RailSampler` with no
+adapter.
+
+That uncovered a real fault: at the old 1.4 m sampling the cruiser's rails
+strayed up to **224 mm** from the solved track in tight bends — three times the
+rail's radius, so the rail visibly left its ties. Now 0.45 m sampling, 20 mm.
+**The Sky Cruiser's rails move slightly as a result** — towards the track they
+were always meant to follow. Worth a glance during QA.
+
+`train/track.ts` is still a third sweeper, deliberately untouched: its rails are
+draped on `terrainHeight` rather than carried by the route, a different
+operation, and migrating it would change how the train looks.
+
+### 6b. Root cause of "duck bars invisible/ineffective — holding wins"
 
 Two independent faults in `Coaster.updateRace`, both designed out:
 
@@ -129,12 +167,16 @@ camera      |dot(forward, travel)| = 0.0000   (perfectly side-on)
             tilt 20.1°, fov 40.0° at 16:9, 98.0° in portrait
 never lets go  74.2 s  10 bonks  15.6 s sparking
 never holds   197.8 s
-sloppy         62.7 s   5 bonks
+sloppy         62.7 s   6 bonks
+ducks nothing  67.7 s  10 bonks   0.00 s sparking
 plays well     52.1 s   0 bonks
+duck bars are worth 15.6 s on their own
 ```
 
-The four-strategy race is the guard against the old bug: **letting go must beat
-holding by at least 4 s** or the build fails.
+The guard against the old bug is the **isolated** one: `barsOnly` vs `perfect`
+differ only in whether the bars are ducked, so spark drag cancels and the
+remainder is what a bonk costs. Must exceed 8 s or the build fails; it is 15.6 s,
+and it has been watched to fail (see 6a).
 
 - `npm run build` — **exit 0** (checked as the exit code, not through a pipe).
 - `npm run test:procgen` — **50/50 across 5 seeds**, exit 0.
@@ -153,6 +195,9 @@ holding by at least 4 s** or the build fails.
   3. Do the black plates read as "let go" before a child hits one?
   4. The trestles are skipped wherever the ground is not clear; is the run of
      unsupported track over the railway too long to look right?
+  5. **The Sky Cruiser**, which this PR now also touches: its rails were
+     resampled 1.4 m -> 0.45 m and shift by up to ~0.2 m in the tightest bends,
+     onto the solved track rather than away from it.
 - **`npm run sweep:seeds`** not run (only the 5 procgen seeds).
 - `vitest` was not installed anywhere on this machine; I ran `npm install`
   **inside the worktree only**, never in the shared checkout.
