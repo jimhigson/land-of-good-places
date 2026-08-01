@@ -449,7 +449,7 @@ export class Game {
       this.camera.resize(width, height);
       this.world.train.rideView?.resize(width, height);
       this.world.coaster.rideView?.resize(width, height);
-      this.world.raceCoaster.rideView?.resize(width, height);
+      this.world.railRace.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -471,26 +471,26 @@ export class Game {
       rideCamera(riding ? (this.world.train.rideView?.camera ?? null) : null);
     this.world.coaster.onRideChange = (riding) =>
       rideCamera(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
-    this.world.raceCoaster.onRideChange = (riding) =>
+    this.world.railRace.onRideChange = (riding) =>
       rideCamera(
-        riding ? (this.world.raceCoaster.rideView?.camera ?? null) : null,
-        this.world.raceCoaster.playerStaysVisible,
+        riding ? (this.world.railRace.rideView?.camera ?? null) : null,
+        this.world.railRace.playerStaysVisible,
       );
     this.miniGames.boardRide = (stallId) => {
-      if (stallId === 'railRacer') return this.world.raceCoaster.requestBoard();
+      if (stallId === 'railRacer') return this.world.railRace.requestBoard();
       if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
       return false;
     };
 
     // The Rail Race's framing — the 3-2-1, the lap, and the card at the end.
-    // `Coaster` raises moments and knows nothing about the DOM; this is the
+    // `RailRace` raises moments and knows nothing about the DOM; this is the
     // only place the two meet, in the same idiom as `onRideChange` above.
     //
     // The HUD is also the *hold button on a phone*: `screenIsBusy()` hides the
     // touch controls while a ride has hold of you, so without this the race
     // would have no control at all on the device it is most likely played on.
-    this.world.raceCoaster.raceHold = () => this.raceHud.holding;
-    this.world.raceCoaster.onRaceMoment = (moment) => {
+    this.world.railRace.raceHold = () => this.raceHud.holding;
+    this.world.railRace.onRaceMoment = (moment) => {
       switch (moment.kind) {
         case 'start':
           this.raceHud.setShown(true);

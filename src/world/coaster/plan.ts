@@ -4,7 +4,7 @@ import { placedEntry } from '../parkLayout';
 import { clearOfPlots } from '../train/plan';
 
 /**
- * The coaster plan — the two rollercoasters as *data*, solved at module load
+ * The coaster plan — the Sky Cruiser as *data*, solved at module load
  * from the park layout alone, mirroring `train/plan.ts` exactly (see that
  * file's header for why this inversion matters).
  *
@@ -16,8 +16,8 @@ import { clearOfPlots } from '../train/plan';
  * object exists, and `paths.ts` gives each one's exit a node in the same walk
  * network a station gets.
  *
- * The race avoids the cruiser (`CoasterRouteOptions.avoid`), so the cruiser
- * must be solved first — same order `World.ts` used to build them in.
+ * `CoasterRouteOptions.avoid` still exists for a second loop that ever wants to
+ * grow here; nothing uses it now that the Rail Race is a perimeter ring.
  */
 
 export interface PlannedCoaster {
@@ -42,14 +42,6 @@ const CRUISER_SEED: CoasterSeed = {
   name: 'skyCruiser',
   routeSalt: 0xc0a57e,
   stationStallId: 'stall.skyCruiser',
-};
-
-const RACE_SEED: CoasterSeed = {
-  name: 'railRace',
-  routeSalt: 0x9ace12,
-  stationStallId: 'stall.railRacer',
-  nominal: 24,
-  bandMax: 38,
 };
 
 /**
@@ -98,14 +90,15 @@ function planCoaster(seed: CoasterSeed, avoid: CoasterRoute | null): PlannedCoas
   return { name: seed.name, route, stationStallId: seed.stationStallId, exitX, exitZ };
 }
 
-/** The two plans. Import this; never re-solve — same rule as `TRAIN_PLAN`. */
+/**
+ * The coaster plans. Import this; never re-solve — same rule as `TRAIN_PLAN`.
+ *
+ * There is only one now. The Rail Race used to be a second solved loop here,
+ * steering clear of the cruiser; the reform of 31 July 2026 moved it out to the
+ * park's perimeter, where it needs no solver at all — it is a circle. Its plan
+ * lives in `railRace/plan.ts` and satisfies the same shape `paths.ts` wants,
+ * which is why the walk network still gives its exit a node alongside this one.
+ */
 export const COASTER_PLANS: {
   readonly cruiser: PlannedCoaster;
-  readonly race: PlannedCoaster;
-} = (() => {
-  // Solved cruiser first: the race's solve steers clear of it (loop-over-loop
-  // avoidance in `CoasterRoute`), so the cruiser must already exist.
-  const cruiser = planCoaster(CRUISER_SEED, null);
-  const race = planCoaster(RACE_SEED, cruiser.route);
-  return { cruiser, race };
-})();
+} = { cruiser: planCoaster(CRUISER_SEED, null) };
