@@ -3891,6 +3891,28 @@ kbd {
   align-items: flex-start;
   justify-content: center;
   padding: calc(5.6rem + env(safe-area-inset-top)) 0.5rem 0;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
+}
+
+/* Hidden for as long as the level-select overlay is up.
+   `.racehud-levels` centres its own dialog vertically, so where its content
+   actually lands on screen depends on viewport shape, not a fixed offset —
+   padding on this unrelated layer can clear it on some shapes and not
+   others. Measured (2 August 2026 QA) on an 844×390 landscape phone: the
+   portrait row's own band sat at 92–196px, "Level 1" at 96–186px — the two
+   were drawn almost exactly on top of each other. Clicks were never actually
+   blocked (`.mg-portrait-strip` is `pointer-events: none` throughout, and
+   this rule does not need to add that), but a child could not *see* the
+   button she was tapping, which reads as broken even though the tap itself
+   would have landed. Hiding the row for the one moment it would collide is
+   the only fix that holds for every window shape — the same reason the lap
+   pill and the bonk message are also not shown until racing has actually
+   started (`RailRace.requestBoard` never calls `setLap`/`flashBonk` during
+   `levelSelect`). `~` reaches forward in the DOM from `.racehud-levels` to
+   `.mg-portrait-strip`, which is appended later — see `RaceHud.setRacers`. */
+.racehud-levels[data-shown='true'] ~ .mg-portrait-strip[data-layout='row'] {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .mg-portrait-strip[data-layout='row'] .mg-portrait-bank {
