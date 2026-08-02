@@ -4416,6 +4416,27 @@ kbd {
   opacity: 0;
 }
 
+/* Landscape: the same standings-column collision `.racehud-controls` was
+   nudged right for above, and the same fix — this pill centres at `left: 50%`
+   with `white-space: nowrap`'s full unwrapped width, so once the standings
+   HUD docks to the left edge in landscape (see the `@media (orientation:
+   landscape)` block above `.mg-portrait-strip[data-layout='row']`) its own
+   left edge lands squarely under that column on a modest landscape phone —
+   measured against 667x375, the bonk pill's left edge sat at 128px while the
+   standings column ran to 156px, overlapping "Otto 1st" outright.
+   `.racehud-bonk` sits at `top: 3.4rem`, `.racehud-controls` at `top: 70%` —
+   the two are never close enough vertically to collide with each other, so
+   this can reuse the same `left: 66%` without needing to check that. Nudged
+   right only, not narrowed: unlike `.racehud-controls` this pill has no
+   `max-width` and relies on `white-space: nowrap` to stay one line, so
+   shrinking it would just push the text off its own edge instead of fixing
+   anything. */
+@media (orientation: landscape) {
+  .racehud-bonk {
+    left: 66%;
+  }
+}
+
 .racehud-bonk[data-shown='true'] {
   animation: lgp-race-bonk 1600ms ease-out forwards;
 }
