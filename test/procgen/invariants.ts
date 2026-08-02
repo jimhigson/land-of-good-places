@@ -18,7 +18,7 @@
  *    arithmetic, and it turns every future tuning change into a test failure.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { InstancedMesh, Matrix4, Vector3 } from 'three';
+import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
@@ -27,7 +27,8 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
-import { PLAYER_RADIUS } from '../../src/core/constants.ts';
+import { PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
+import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -397,17 +398,24 @@ const everyPathIsLit: Invariant = (facts) => {
 const railRaceFliesClear: Invariant = (facts) => {
   // Reached through the built world, never imported: see the note on
   // `RailRace.route`. A static import here would set the park seed too early.
-  const { route, laneCount } = facts.world.railRace;
+  const { walkPastRoute, raceRoute, laneCount } = facts.world.railRace;
   const train = facts.world.train.route;
   const complaints: string[] = [];
 
   // --- 1. air over the railway ----------------------------------------------
+  //
+  // Both rings, though since 2 August 2026 they circle the park outside the
+  // boundary wall and the railway's own band is 48-58 m, so on a healthy park
+  // nothing here is ever within range and this passes vacuously. Kept, and kept
+  // measuring rather than assuming: it is the thing that would notice the day
+  // somebody moves a ring back inside.
   const rail = new Vector3();
   const under = new Vector3();
   let worstAir = Infinity;
   let worstAt: readonly [number, number] = [0, 0];
 
   const samples = 720;
+  for (const route of [walkPastRoute, raceRoute]) {
   for (let i = 0; i < samples; i += 1) {
     const distance = (i / samples) * route.length;
     for (let lane = 0; lane < laneCount; lane += 1) {
@@ -421,6 +429,7 @@ const railRaceFliesClear: Invariant = (facts) => {
       }
     }
   }
+  }
   if (worstAir < RAIL_OVER_RAIL) {
     complaints.push(
       `only ${worstAir.toFixed(2)} m of air over the railway at ${fmt(worstAt)} — ` +
@@ -429,9 +438,13 @@ const railRaceFliesClear: Invariant = (facts) => {
   }
 
   // --- 2. where the trestle legs actually landed -----------------------------
-  const legs = facts.world.railRace.group.getObjectByName('railRace:trestle-legs');
+  //
+  // Per ring, because there are two of them and `getObjectByName` on the ride's
+  // whole group would silently only ever find the first.
+  for (const ring of builtRings(facts)) {
+  const legs = ring.group.getObjectByName('railRace:trestle-legs');
   if (!(legs instanceof InstancedMesh)) {
-    complaints.push('the Rail Race has no trestle legs in the built scene to measure');
+    complaints.push(`the ${ring.label} ring has no trestle legs in the built scene to measure`);
   } else {
     const matrix = new Matrix4();
     const at = new Vector3();
@@ -478,11 +491,227 @@ const railRaceFliesClear: Invariant = (facts) => {
       }
       if (worstGap > TRESTLE_GAP_TOLERANCE) {
         complaints.push(
-          `the widest run between consecutive trestle legs is ${worstGap.toFixed(1)} m ` +
-            `(after leg ${worstIndex}), over the ${TRESTLE_GAP_TOLERANCE} m tolerance — ` +
-            `the ring is standing on air for a stretch that long`,
+          `the widest run between consecutive trestle legs on the ${ring.label} ring is ` +
+            `${worstGap.toFixed(1)} m (after leg ${worstIndex}), over the ` +
+            `${TRESTLE_GAP_TOLERANCE} m tolerance — the ring is standing on air for a stretch ` +
+            `that long`,
         );
       }
+    }
+  }
+  }
+
+  expect(complaints, complaints.join('\n')).toHaveLength(0);
+};
+
+/**
+ * The two rings the Rail Race actually built, read back out of the scene.
+ *
+ * Named groups, not a description of them: if a ring stops being built, or is
+ * renamed, or is quietly folded back into a single scaled one, this returns the
+ * wrong number of rings and every invariant below says so.
+ */
+interface BuiltRing {
+  readonly label: string;
+  readonly group: Object3D;
+  /** How big this ring claims to be, straight off the world's own route. */
+  readonly scale: number;
+}
+
+function builtRings(facts: ParkFacts): readonly BuiltRing[] {
+  const railRace = facts.world.railRace;
+  return (
+    [
+      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
+      ['race', 'railRace:race-ring', railRace.raceRoute.scale],
+    ] as const
+  )
+    .map(([label, name, scale]) => ({ label, group: railRace.group.getObjectByName(name), scale }))
+    .filter((ring): ring is BuiltRing => ring.group !== undefined);
+}
+
+/**
+ * Every horizontal radius the rails of one ring actually occupy, straight off
+ * the swept tube's own vertices.
+ *
+ * Not `route.pointAt` — that is the rule the rails were built from, and this
+ * file's first commandment is to measure the thing that was built. The lane
+ * centre line would also miss half a gauge of real structure either side of it,
+ * which is exactly the margin these checks are about.
+ */
+function railRadiusRange(ring: BuiltRing): { min: number; max: number; vertices: number } {
+  let min = Infinity;
+  let max = 0;
+  let vertices = 0;
+  ring.group.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+    if (!child.name.startsWith('railRace:rail-')) return;
+    const position = child.geometry.getAttribute('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      const radius = Math.hypot(position.getX(i), position.getZ(i));
+      if (radius < min) min = radius;
+      if (radius > max) max = radius;
+      vertices += 1;
+    }
+  });
+  return { min, max, vertices };
+}
+
+/**
+ * **Both Rail Race rings are built outside the park, at their own real size,
+ * and only the one you can walk up to is solid.**
+ *
+ * This is the invariant for the two-ring rebuild of 2 August 2026, and it is
+ * really one claim in four parts. All four are measured off the built scene —
+ * the rails from their own swept vertices, the legs from their instance
+ * matrices, the solidity from the collision world the park actually registered.
+ *
+ * 1. **Outside the wall, on real ground.** Every rail vertex of every lane of
+ *    both rings sits further out than the boundary masonry
+ *    (`ENTRANCE_WALL_RADIUS`) by at least `PLAYER_RADIUS` — a child pressed
+ *    against the outside of the wall is not standing in a rail — and further in
+ *    than the edge of the terrain disc, because a trestle needs ground under it.
+ *    The whole point of moving out here was that the apron is empty; this is
+ *    what stops a later tweak drifting the ring back over the park or off the
+ *    hill.
+ *
+ * 2. **Two sizes, genuinely built.** The race ring's measured radial width is
+ *    the ride's own scale factor times the walk-past ring's, taken as the ratio
+ *    of the two routes the world is holding rather than as an invented number.
+ *    A single ring drawn twice at different `group.scale` would pass a lane-span
+ *    check computed from the rules and fail this one, because this one measures
+ *    vertices.
+ *
+ * 3. **Nothing in the ride carries a scale multiply on its geometry.** Every
+ *    object under a ring group, and the ring groups themselves, must be at unit
+ *    scale — and so must every cart sitting in the park at rest. This is the
+ *    literal bug from Jim's screenshot: a rival's cart group was scaled 2.5x
+ *    once at construction and never unscaled, so the ambient riders were
+ *    two-and-a-half times life size to anyone who walked or flew past. A park
+ *    that has just been built is a park at rest, so at rest is what this asserts.
+ *
+ * 4. **Only the walk-past ring is solid.** Its trestle legs are registered as
+ *    collision circles; the race ring's are not. `CollisionWorld` cannot
+ *    un-register a collider, so a race ring that ever registered one would leave
+ *    an invisible solid post standing in the park for the rest of the session —
+ *    the classic "walked into a rail that is not drawn" bug. Checked by asking
+ *    the real collision world what is at each measured leg position.
+ */
+const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const rings = builtRings(facts);
+
+  if (rings.length !== 2) {
+    complaints.push(
+      `the Rail Race built ${rings.length} named ring group(s), not the two the ride is made of ` +
+        `— a walk-past ring at park scale and a race ring at ride scale`,
+    );
+    expect(complaints, complaints.join('\n')).toHaveLength(0);
+    return;
+  }
+
+  // --- 1. outside the wall, inside the hill ---------------------------------
+  const widths = new Map<string, number>();
+  for (const ring of rings) {
+    const { min, max, vertices } = railRadiusRange(ring);
+    if (vertices === 0) {
+      complaints.push(`the ${ring.label} ring has no rail geometry in the built scene to measure`);
+      continue;
+    }
+    widths.set(ring.label, max - min);
+    if (min < ENTRANCE_WALL_RADIUS + PLAYER_RADIUS) {
+      complaints.push(
+        `the ${ring.label} ring's innermost rail is at r=${min.toFixed(2)}, inside the boundary ` +
+          `wall at r=${ENTRANCE_WALL_RADIUS} once a child's own ${PLAYER_RADIUS} m is allowed for ` +
+          `— both rings belong outside the park`,
+      );
+    }
+    if (max > TERRAIN_RADIUS - 4) {
+      complaints.push(
+        `the ${ring.label} ring's outermost rail is at r=${max.toFixed(2)}, off the edge of the ` +
+          `terrain disc at r=${TERRAIN_RADIUS} — there is no ground there to stand a trestle on`,
+      );
+    }
+  }
+
+  // --- 2. two sizes, measured, not described --------------------------------
+  const walkPastWidth = widths.get('walk-past');
+  const raceWidth = widths.get('race');
+  if (walkPastWidth !== undefined && raceWidth !== undefined && walkPastWidth > 0) {
+    const measured = raceWidth / walkPastWidth;
+    // The ride's own factor, off the world rather than imported: `route.ts`
+    // pulls in the park manifest at module load and a static import here would
+    // fix the seed before the harness has set it.
+    const expected = facts.world.railRace.raceRoute.scale / facts.world.railRace.walkPastRoute.scale;
+    if (Math.abs(measured - expected) > 0.02) {
+      complaints.push(
+        `the race ring's rails span ${raceWidth.toFixed(2)} m against the walk-past ring's ` +
+          `${walkPastWidth.toFixed(2)} m — a ratio of ${measured.toFixed(3)}, not the ` +
+          `${expected.toFixed(3)} the two rings' scales claim. The rings are supposed to be built ` +
+          `to their own dimensions, not drawn once and multiplied`,
+      );
+    }
+  }
+
+  // --- 3. no scale multiply anywhere in the ride ----------------------------
+  const unit = (object: Object3D): boolean =>
+    Math.abs(object.scale.x - 1) < 1e-6 &&
+    Math.abs(object.scale.y - 1) < 1e-6 &&
+    Math.abs(object.scale.z - 1) < 1e-6;
+
+  for (const ring of rings) {
+    ring.group.traverse((child) => {
+      if (unit(child)) return;
+      complaints.push(
+        `${child.name || child.type} in the ${ring.label} ring is drawn at scale ` +
+          `${child.scale.x.toFixed(2)} — ring geometry is built at its own size, never scaled`,
+      );
+    });
+  }
+
+  const walkPastScale = facts.world.railRace.walkPastRoute.scale;
+  facts.world.railRace.group.traverse((child) => {
+    if (child.name !== 'railRace:cart') return;
+    if (Math.abs(child.scale.x - walkPastScale) < 1e-6) return;
+    complaints.push(
+      `a cart is sitting in the park at scale ${child.scale.x.toFixed(2)} with nobody racing — ` +
+        `at rest every cart and rider belongs on the walk-past ring at scale ` +
+        `${walkPastScale.toFixed(2)}. This is the 2 August 2026 bug: giant rivals idling past a ` +
+        `normal-sized child`,
+    );
+  });
+
+  // --- 4. only the walk-past ring is solid ----------------------------------
+  const solid: { x: number; z: number; radius: number }[] = [];
+  facts.world.collision.forEachCircle((x, z, radius) => {
+    solid.push({ x, z, radius });
+  });
+  const matrix = new Matrix4();
+  const at = new Vector3();
+  for (const ring of rings) {
+    const legs = ring.group.getObjectByName('railRace:trestle-legs');
+    if (!(legs instanceof InstancedMesh)) {
+      complaints.push(`the ${ring.label} ring has no trestle legs in the built scene to measure`);
+      continue;
+    }
+    const wantsSolid = ring.label === 'walk-past';
+    for (let i = 0; i < legs.count; i += 1) {
+      legs.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      const found = solid.some(
+        (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
+      );
+      if (found === wantsSolid) continue;
+      complaints.push(
+        wantsSolid
+          ? `the walk-past ring's trestle leg at ${fmt([at.x, at.z])} is not solid — it is the ` +
+            `ring that is standing there while a child is on foot, so it has to be something ` +
+            `she bumps into rather than walks through`
+          : `the race ring's trestle leg at ${fmt([at.x, at.z])} registered a collider. That ring ` +
+            `is hidden except mid-race, and CollisionWorld cannot un-register anything, so this ` +
+            `is an invisible solid post standing in the park for the rest of the session`,
+      );
     }
   }
 
@@ -531,38 +760,44 @@ const DUCK_BAR_SUPPORT_TOLERANCE = 8;
  * actually see if this broke again.
  */
 const duckBarsStandOnRealSupports: Invariant = (facts) => {
-  const barsMesh = facts.world.railRace.group.getObjectByName('railRace:duck-bars');
-  const legsMesh = facts.world.railRace.group.getObjectByName('railRace:trestle-legs');
   const complaints: string[] = [];
-
-  if (!(barsMesh instanceof InstancedMesh) || !(legsMesh instanceof InstancedMesh)) {
-    complaints.push('the Rail Race has no duck bars or trestle legs in the built scene to measure');
-    expect(complaints, complaints.join('\n')).toHaveLength(0);
-    return;
-  }
-
   const matrix = new Matrix4();
-  const legPositions: Vector3[] = [];
-  for (let i = 0; i < legsMesh.count; i += 1) {
-    legsMesh.getMatrixAt(i, matrix);
-    legPositions.push(new Vector3().setFromMatrixPosition(matrix));
-  }
-
   const barPosition = new Vector3();
-  for (let i = 0; i < barsMesh.count; i += 1) {
-    barsMesh.getMatrixAt(i, matrix);
-    barPosition.setFromMatrixPosition(matrix);
-    let nearest = Infinity;
-    for (const leg of legPositions) {
-      const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);
-      if (d < nearest) nearest = d;
-    }
-    if (nearest > DUCK_BAR_SUPPORT_TOLERANCE) {
+
+  // Both rings: each builds its own bars over its own legs, and a bar floating
+  // free on the ring nobody is currently looking at is still a bug.
+  for (const ring of builtRings(facts)) {
+    const barsMesh = ring.group.getObjectByName('railRace:duck-bars');
+    const legsMesh = ring.group.getObjectByName('railRace:trestle-legs');
+    if (!(barsMesh instanceof InstancedMesh) || !(legsMesh instanceof InstancedMesh)) {
       complaints.push(
-        `duck bar ${i} at ${fmt([barPosition.x, barPosition.z])} is ${nearest.toFixed(1)} m from ` +
-          `the nearest trestle leg, over the ${DUCK_BAR_SUPPORT_TOLERANCE} m tolerance — it is ` +
-          `floating free of the ring's own support structure`,
+        `the ${ring.label} ring has no duck bars or trestle legs in the built scene to measure`,
       );
+      continue;
+    }
+
+    const legPositions: Vector3[] = [];
+    for (let i = 0; i < legsMesh.count; i += 1) {
+      legsMesh.getMatrixAt(i, matrix);
+      legPositions.push(new Vector3().setFromMatrixPosition(matrix));
+    }
+
+    for (let i = 0; i < barsMesh.count; i += 1) {
+      barsMesh.getMatrixAt(i, matrix);
+      barPosition.setFromMatrixPosition(matrix);
+      let nearest = Infinity;
+      for (const leg of legPositions) {
+        const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);
+        if (d < nearest) nearest = d;
+      }
+      if (nearest > DUCK_BAR_SUPPORT_TOLERANCE) {
+        complaints.push(
+          `duck bar ${i} on the ${ring.label} ring at ${fmt([barPosition.x, barPosition.z])} is ` +
+            `${nearest.toFixed(1)} m from the nearest trestle leg, over the ` +
+            `${DUCK_BAR_SUPPORT_TOLERANCE} m tolerance — it is floating free of the ring's own ` +
+            `support structure`,
+        );
+      }
     }
   }
 
@@ -810,6 +1045,11 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
+  [
+    'both Rail Race rings stand outside the park, built to their own size, ' +
+      'and only the walk-past one is solid',
+    railRaceRingsStandOutsideThePark,
+  ],
   ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
