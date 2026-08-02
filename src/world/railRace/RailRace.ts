@@ -152,6 +152,14 @@ export type RaceMoment =
    */
   | { readonly kind: 'levelSelect'; readonly shown: boolean }
   /**
+   * Raised once, the instant `chooseLevel` picks a hazard composition and the
+   * countdown starts — the controls reminder's cue. Deliberately its own
+   * moment rather than piggybacked on `count`'s first tick: `count` fires
+   * again every second while this must fire exactly once, whichever level
+   * she picked.
+   */
+  | { readonly kind: 'controls' }
+  /**
    * The running order changed: racer indices (into the `start` list), leader
    * first. Raised only when it actually changes, not every frame.
    */
@@ -383,6 +391,11 @@ export class RailRace implements GameSystem {
     this.activeSchedule = scheduleForLevel(level);
     this.track.setHazardLevel(level);
     this.onRaceMoment?.({ kind: 'levelSelect', shown: false });
+    // Fired here, not in the countdown branch of `update()`: this is the one
+    // moment she has just committed to racing but nothing has moved yet,
+    // which is the point in `RaceMoment.controls`'s own doc comment about not
+    // being missed on the way past.
+    this.onRaceMoment?.({ kind: 'controls' });
     this.phase = 'countdown';
     this.countdown = COUNTDOWN_SECONDS;
     this.emitCount(String(COUNTDOWN_SECONDS));

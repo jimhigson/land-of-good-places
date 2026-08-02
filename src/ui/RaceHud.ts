@@ -1,4 +1,5 @@
 import type { RaceLevel } from '../world/railRace/hazards';
+import { isTouchDevice } from '../core/device';
 import {
   createPortraitStrip,
   type PortraitInfo,
@@ -53,10 +54,15 @@ interface RacePointer {
   ducking: boolean;
 }
 
-const LEVEL_COPY: readonly { readonly level: RaceLevel; readonly title: string; readonly line: string }[] = [
-  { level: 1, title: 'Level 1', line: 'Clear track — just for fun!' },
-  { level: 2, title: 'Level 2', line: 'Watch out for the black spark track!' },
-  { level: 3, title: 'Level 3', line: 'Spark track AND duck-under bars!' },
+// Title only — no description line. The three lines these used to carry
+// ("Clear track — just for fun!" etc.) were dropped 2 August 2026: a level
+// picker a child taps through fast does not need read-and-decide copy under
+// each button, and title-only leaves more headroom for the level cards to
+// fit a short landscape phone alongside the tip pill above them.
+const LEVEL_COPY: readonly { readonly level: RaceLevel; readonly title: string }[] = [
+  { level: 1, title: 'Level 1' },
+  { level: 2, title: 'Level 2' },
+  { level: 3, title: 'Level 3' },
 ];
 
 export class RaceHud {
@@ -67,6 +73,7 @@ export class RaceHud {
   private readonly count: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly bonk: HTMLElement;
+  private readonly controlsTip: HTMLElement;
 
   private readonly pointers = new Map<number, RacePointer>();
   private pendingBoostPresses = 0;
@@ -124,15 +131,13 @@ export class RaceHud {
     tip.className = 'racehud-levels-tip';
     tip.textContent = 'Tap the screen as fast as you can to zoom ahead!';
     this.levels.append(tip);
-    for (const { level, title, line } of LEVEL_COPY) {
+    for (const { level, title } of LEVEL_COPY) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'racehud-level';
       const strong = document.createElement('strong');
       strong.textContent = title;
-      const span = document.createElement('span');
-      span.textContent = line;
-      button.append(strong, span);
+      button.append(strong);
       button.addEventListener('click', () => this.onChooseLevel?.(level));
       this.levels.append(button);
     }
@@ -152,7 +157,27 @@ export class RaceHud {
     // cannot fail": a bonk is a wobble and lost speed, not a failure state.
     this.bonk.textContent = 'Whoops — duck a little sooner!';
 
-    this.root.append(this.pad, this.levels, this.lap, this.count, this.banner, this.bonk);
+    // The controls reminder, fired once as `chooseLevel` starts the countdown
+    // (see `flashControlsTip`). Two short lines rather than one long one —
+    // point 5's "prefer smaller text over more text" — and which lines they
+    // are depends on `isTouchDevice()`, the same switch `ui/Hud.ts` already
+    // uses to swap WASD copy for a tap hint: a phone player has no Space bar
+    // or right mouse button to be told about, and a desktop player has no
+    // "drag down" gesture.
+    this.controlsTip = document.createElement('div');
+    this.controlsTip.className = 'racehud-controls';
+    const boostLine = document.createElement('strong');
+    const duckLine = document.createElement('span');
+    if (isTouchDevice()) {
+      boostLine.textContent = 'Tap to BOOST';
+      duckLine.textContent = 'Drag down & hold to DUCK';
+    } else {
+      boostLine.textContent = 'Space or click to BOOST';
+      duckLine.textContent = 'Hold ↓, right-click or D-pad to DUCK';
+    }
+    this.controlsTip.append(boostLine, duckLine);
+
+    this.root.append(this.pad, this.levels, this.lap, this.count, this.banner, this.bonk, this.controlsTip);
     container.append(this.root);
   }
 
@@ -187,6 +212,7 @@ export class RaceHud {
       this.setLap(null);
       this.setBanner(null);
       this.bonk.dataset.shown = 'false';
+      this.controlsTip.dataset.shown = 'false';
       this.portraits?.dispose();
       this.portraits = null;
     }
@@ -261,6 +287,21 @@ export class RaceHud {
     this.bonk.dataset.shown = 'false';
     void this.bonk.offsetWidth;
     this.bonk.dataset.shown = 'true';
+  }
+
+  /**
+   * The controls reminder — fire-and-forget, same restart dance as
+   * {@link flashBonk}. `RailRace.chooseLevel` calls this the instant a level
+   * is picked, right as the countdown starts, so it is up and readable while
+   * she is still watching the "3-2-1" rather than a message she has already
+   * missed by the time the carts are let go. Its own CSS animation holds it
+   * on screen for the length of the countdown and fades it before racing
+   * starts, so it never has to compete with the lap pill.
+   */
+  flashControlsTip(): void {
+    this.controlsTip.dataset.shown = 'false';
+    void this.controlsTip.offsetWidth;
+    this.controlsTip.dataset.shown = 'true';
   }
 
   /** 'Lap 1 of 2', or `null` for nothing. */
