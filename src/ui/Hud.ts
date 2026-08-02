@@ -182,8 +182,7 @@ export class Hud {
         '<b>hop</b> button · <b>pinch</b> to zoom</span>'
       : '<span class="emoji">🕹️</span>' +
         '<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to walk · ' +
-        '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop · ' +
-        '<kbd>G</kbd>/<kbd>H</kbd> fly up/down · ' +
+        '<kbd>Shift</kbd> run · <kbd>Space</kbd> hop, hold to fly with a jet pack · ' +
         '<kbd>+</kbd>/<kbd>−</kbd> zoom · <kbd>E</kbd> to use what is outlined · ' +
         'or just <b>click</b> where to go</span>';
 
