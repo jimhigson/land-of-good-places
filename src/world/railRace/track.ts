@@ -112,8 +112,10 @@ export interface RailRaceTrack {
    * Shows or hides the hazard geometry for the level chosen this race — see
    * `hazards.ts`'s header and `ZONES_FROM_LEVEL`/`BARS_FROM_LEVEL`. The ring
    * is one physical structure whatever level is chosen, so there is no
-   * separate geometry to build per level; this just toggles `.visible` on
-   * the black-stretch plate and the duck-bar meshes, once, when
+   * separate geometry to build per level; this toggles `.visible` on
+   * the black-stretch plate and the duck-bar meshes, and repaints the rails'
+   * own resting vertex colours (black over every live zone — see
+   * `paintRestingRailColours`), once, when
    * `RailRace.chooseLevel` fires. The trestle legs, beams and droppers are
    * never touched here — they carry the rails at every level, not just the
    * ones with hazards on them.
@@ -201,11 +203,10 @@ export function buildRailRaceTrack(
     railTubularSegments,
     RAIL_RADIAL_SEGMENTS,
   );
-  // Per lane: every rail vertex's resting colour (the lane's own
-  // `LANE_COLOURS` entry), kept around so `setSparking` can cheaply copy it
-  // back over a zone that has stopped sparking — the rail's analogue of the
-  // spark ribbons resetting their whole buffer to ink before repainting the
-  // active ones each frame.
+  // Per lane: every rail vertex's own lane colour, the "nothing is black at
+  // all" state a hazard-free level shows. `paintRestingRailColours` below
+  // derives the actual resting buffer from this — with the spark zones inked
+  // over it whenever the chosen level has them live.
   const railBaseColoursByLane: Float32Array[] = [];
   const railColourAttributesByLane: BufferAttribute[][] = [];
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
@@ -291,6 +292,47 @@ export function buildRailRaceTrack(
   sparkRibbons.name = 'railRace:spark-zones';
   sparkRibbons.frustumCulled = false;
   group.add(sparkRibbons);
+
+  // The rails' *resting* colours — what `setSparking` resets every rail to
+  // each frame before painting the actively-sparking stretches. Not the same
+  // thing as `railBaseColoursByLane`: whenever the chosen level has live
+  // spark zones, the zone stretches of every rail are ink *at rest*. "Make
+  // the tracks black" (Jim, 1–2 August 2026, twice) means the bit the wheels
+  // run on, not just the plate laid between the rails — the first pass at
+  // this (PR #164) only ever inked the rail *while a rider was actively
+  // sparking on it*, a transient flicker, so in every calm frame the zone
+  // read as a black plate under proudly pink rails. Sparking now flashes
+  // over rail that is already black, exactly as it does over the plate.
+  const railRestingColoursByLane: Float32Array[] = railBaseColoursByLane.map((base) =>
+    base.slice(),
+  );
+  const paintRestingRailColours = (zonesLive: boolean): void => {
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const resting = railRestingColoursByLane[lane];
+      const base = railBaseColoursByLane[lane];
+      if (!resting || !base) continue;
+      resting.set(base);
+      if (zonesLive) {
+        for (const ranges of railZoneVertexRanges) {
+          for (const { vertexStart, vertexCount } of ranges) {
+            const end = vertexStart + vertexCount;
+            for (let v = vertexStart; v < end; v += 1) {
+              resting[v * 3] = inkFill.r;
+              resting[v * 3 + 1] = inkFill.g;
+              resting[v * 3 + 2] = inkFill.b;
+            }
+          }
+        }
+      }
+      // Stamped straight into the live attributes too, not left for the next
+      // `setSparking` to pick up — a headless park never calls `setSparking`
+      // at all, and the level choice should show the moment it is made.
+      for (const attribute of railColourAttributesByLane[lane] ?? []) {
+        (attribute.array as Float32Array).set(resting);
+        attribute.needsUpdate = true;
+      }
+    }
+  };
 
   // --- where the trestles actually stand, computed before the duck bars ------
   // A duck bar's own visible support comes from here — see `hazards.ts`'s
@@ -580,11 +622,15 @@ export function buildRailRaceTrack(
       // The rails themselves — same reset-then-repaint shape as the ribbons
       // above, same `sparkColour` (one shared flash for the plate and the
       // rail underneath it, so they never go out of phase with each other).
+      // Reset to the *resting* buffer, not the bright lane base: at any level
+      // with live zones the zone stretches are black at rest, and resetting
+      // to the base here was exactly how the first pass lost the static
+      // marking — see `paintRestingRailColours`'s own comment.
       for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-        const base = railBaseColoursByLane[lane];
-        if (!base) continue;
+        const resting = railRestingColoursByLane[lane];
+        if (!resting) continue;
         for (const attribute of railColourAttributesByLane[lane] ?? []) {
-          (attribute.array as Float32Array).set(base);
+          (attribute.array as Float32Array).set(resting);
         }
       }
       for (const { zoneIndex, lane } of active) {
@@ -608,7 +654,12 @@ export function buildRailRaceTrack(
     },
 
     setHazardLevel(level: RaceLevel): void {
-      sparkRibbons.visible = level >= ZONES_FROM_LEVEL;
+      const zonesLive = level >= ZONES_FROM_LEVEL;
+      sparkRibbons.visible = zonesLive;
+      // The rails' own black stretches follow the same switch as the plate:
+      // ink at rest wherever a zone is live, bright lane colour end to end on
+      // the hazard-free level.
+      paintRestingRailColours(zonesLive);
       const barsLive = level >= BARS_FROM_LEVEL;
       posts.visible = barsLive;
       bars.visible = barsLive;
