@@ -1,10 +1,15 @@
 import { isTouchDevice } from '../core/device';
-import type { GameAction } from '../core/input';
 import type { InputSystem } from '../core/input';
 
 /**
- * The on-screen buttons in the bottom-right corner: **hop**, and — once there
- * is a jet pack on her back and she is outdoors — **up** and **down**.
+ * The on-screen **hop** button in the bottom-right corner — and, once there is
+ * a jet pack on her back and she is outdoors, the fly button too. It is the
+ * same button, because it is the same key on a keyboard and the same button on
+ * a gamepad: {@link Player}'s "THE JET PACK" comment has the whole scheme —
+ * tap to hop, hold past a beat to climb, let go for gravity to take over.
+ * {@link setJetpackAvailable} just re-skins it once that becomes true, so a
+ * touch player sees the same promotion a keyboard player gets from `Player`'s
+ * own doc comment on `jump` — there is a second thing this button can now do.
  *
  * ## Why this is not called `TouchControls` any more
  *
@@ -13,123 +18,56 @@ import type { InputSystem } from '../core/input';
  * thumbstick would cover a quarter of a phone screen with plastic, and this game
  * is meant to be looked at; walking is a tap on the park itself.
  *
- * Then the jet pack landed and Jim played it on a desktop: *"there's no way to
- * see or use flight there beyond knowing to press G/R blind."* He is right, and
- * it is the same complaint the game answers everywhere else — an invisible
- * control is not a control. So the cluster now mounts on **every** device, and
- * each button decides for itself whether it belongs:
+ * ## Why it is a *held* virtual button, not a tapped one
  *
- * - **hop** is touch-only, because the space bar is right there and a mouse
- *   button for it would be clutter a desktop player never asked for;
- * - **up** and **down** are on both, because until now they existed only as two
- *   letters nobody had been told about.
- *
- * ## The buttons are wired two different ways, on purpose
- *
- * **Hop** is an *edge*: {@link InputSystem.pressVirtual}, a two-frame pulse, so
- * downstream a thumb on hop is indistinguishable from a thumb on the space bar
- * and a lost `pointerup` cannot leave a child hopping forever.
- *
- * **Up** and **down** are *states*: {@link InputSystem.holdVirtual}, latched for
- * exactly as long as the button is held. Eleri's rule, in one line — *tap it and
- * you take off, hold it and you go up, let go and you come gently down* — needs
- * a held button, not a pulse.
- *
- * ## Why there is a down button at all
- *
- * Because "let go and you come down" is, as a *control*, invisible: the way to
- * descend was to stop doing something, which is the least discoverable
- * instruction there is and is Jim's complaint in another form. So **down** is a
- * real control that does a real thing — hold it and she drops about twice as
- * briskly as she would on her own — and letting go of everything still floats
- * her gently down exactly as it always did. Nothing a child has already learned
- * changes; there is simply now a button for the thing that used to be an
- * absence.
- *
- * They are stacked rather than side by side, with **up above down**, because
- * the button that is higher on the screen taking you higher is a thing a
- * six-year-old reads without being told.
- *
- * ## What decides whether they are there
- *
- * {@link setFlyControls}, called every frame from `Game`. Both facts are read
- * from one place each and neither is re-derived here: `Player.canFlyHere` —
- * itself "a pack is worn *and* there is room here to fly", see
- * `entities/Player.ts` — and `Player.isFlying`. A button that does nothing is
- * worse than no button: it promises a six-year-old something and then does not
- * deliver.
+ * {@link InputSystem.pressVirtual} is a two-frame pulse — right for a plain
+ * hop, wrong for a control that must now tell a hold from a tap. So this wires
+ * through {@link InputSystem.holdVirtual} instead, latched for exactly as long
+ * as the thumb is down, the same way a real key or gamepad button already
+ * reports `isDown` for as long as it is physically held. `Player` reads
+ * `isDown('jump')` every frame regardless of which device produced it; this is
+ * what makes a touch hold and a keyboard hold indistinguishable to it.
  */
 export class ScreenControls {
   private readonly root: HTMLElement;
   private readonly buttons: HTMLElement[] = [];
-  /** Up and down together, so one `hidden` shows or hides the pair. */
-  private readonly flyStack: HTMLElement;
-  private readonly flyDown: HTMLButtonElement;
+  private readonly hop: HTMLButtonElement | null = null;
+  private readonly hopGlyph: HTMLElement | null = null;
+  private readonly hopLabel: HTMLElement | null = null;
 
-  private flyAvailable = false;
-  private descendEnabled = false;
+  private jetpackAvailable = false;
 
   constructor(container: HTMLElement, private readonly input: InputSystem) {
     this.root = document.createElement('div');
     this.root.className = 'screen-controls';
 
-    // The fly pair first in the DOM so it sits to the *left* of hop: the hop
-    // button has been under that thumb since the game had one button, and
-    // moving it now would be a change to a control a child already knows.
-    this.flyStack = document.createElement('div');
-    this.flyStack.className = 'screen-fly';
-    this.flyStack.hidden = true;
-
-    const up = this.button('screen-btn screen-btn--fly-up', '🚀', 'Fly up', 'fly', true);
-    up.append(label('up'));
-
-    this.flyDown = this.button('screen-btn screen-btn--fly-down', '⬇', 'Fly down', 'flyDown', true);
-    this.flyDown.append(label('down'));
-    // Nothing to come down from until she is actually up. `disabled` rather
-    // than dimmed-but-live: the global HIGHLIGHT rule already skips
-    // `:disabled`, so it neither glows a promise nor can latch a hold.
-    this.flyDown.disabled = true;
-
-    this.flyStack.append(up, this.flyDown);
-    this.root.append(this.flyStack);
-
-    // Touch only — see the header.
+    // Touch only — see the header. Held, not tapped, so it can also carry the
+    // jet pack's hold-to-fly: see the class doc comment.
     if (isTouchDevice()) {
-      const hop = this.button('screen-btn screen-btn--hop', '⤴', 'Hop', 'jump', false);
-      hop.append(label('hop'));
+      const hop = this.button('screen-btn screen-btn--hop', '⤴', 'Hop');
+      const hopLabel = label('hop');
+      hop.append(hopLabel);
       this.root.append(hop);
+      this.hop = hop;
+      this.hopGlyph = hop.querySelector<HTMLElement>('.screen-glyph');
+      this.hopLabel = hopLabel;
     }
 
     container.append(this.root);
   }
 
   /**
-   * Shows or hides the up/down pair, and says whether down has anything to do.
-   *
-   * @param available a jet pack is worn *and* there is room here to fly.
-   * @param canDescend she is off the ground, so "down" means something.
+   * Whether a jet pack is worn and there is room here to fly — the exact fact
+   * `Player.canFlyHere` answers. Re-skins the hop button to say so; does not
+   * change what it is bound to; it was always `jump`.
    */
-  setFlyControls(available: boolean, canDescend: boolean): void {
-    if (available !== this.flyAvailable) {
-      this.flyAvailable = available;
-      this.flyStack.hidden = !available;
-      // Taking the pack off — or stepping through the castle door — with a
-      // finger still down must not leave the thrust latched on.
-      if (!available) {
-        this.input.holdVirtual('fly', false);
-        this.input.holdVirtual('flyDown', false);
-        for (const button of this.buttons) delete button.dataset.pressed;
-      }
-    }
-
-    if (canDescend === this.descendEnabled) return;
-    this.descendEnabled = canDescend;
-    this.flyDown.disabled = !canDescend;
-    // A button disabled under a finger never gets its own `pointerup`.
-    if (!canDescend) {
-      this.input.holdVirtual('flyDown', false);
-      delete this.flyDown.dataset.pressed;
-    }
+  setJetpackAvailable(available: boolean): void {
+    if (available === this.jetpackAvailable) return;
+    this.jetpackAvailable = available;
+    this.hop?.classList.toggle('screen-btn--jetpack', available);
+    this.hop?.setAttribute('aria-label', available ? 'Hop, or hold to fly' : 'Hop');
+    if (this.hopGlyph) this.hopGlyph.textContent = available ? '🚀' : '⤴';
+    if (this.hopLabel) this.hopLabel.textContent = available ? 'hold to fly' : 'hop';
   }
 
   /** Fades the whole cluster in or out — used to hide it while a ride is on. */
@@ -145,17 +83,11 @@ export class ScreenControls {
     this.root.remove();
   }
 
-  private button(
-    className: string,
-    glyph: string,
-    label: string,
-    action: GameAction,
-    held: boolean,
-  ): HTMLButtonElement {
+  private button(className: string, glyph: string, ariaLabel: string): HTMLButtonElement {
     const element = document.createElement('button');
     element.type = 'button';
     element.className = className;
-    element.setAttribute('aria-label', label);
+    element.setAttribute('aria-label', ariaLabel);
 
     const face = document.createElement('span');
     face.className = 'screen-glyph';
@@ -165,18 +97,17 @@ export class ScreenControls {
     // pointerdown, not click: a game button must answer on the way down, and
     // `click` on iOS waits to see whether a double-tap is coming. It is also
     // the only event that gives a *mouse* a press-and-hold at all, which is
-    // the whole of how the two fly buttons work.
+    // what lets this button's hold-to-fly work at all on a touchpad.
     element.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       // Stops the press also counting as a tap on the park behind the button.
       event.stopPropagation();
-      if (held) this.input.holdVirtual(action, true);
-      else this.input.pressVirtual(action);
+      this.input.holdVirtual('jump', true);
       element.dataset.pressed = 'true';
     });
     const release = (): void => {
       delete element.dataset.pressed;
-      if (held) this.input.holdVirtual(action, false);
+      this.input.holdVirtual('jump', false);
     };
     element.addEventListener('pointerup', release);
     element.addEventListener('pointercancel', release);

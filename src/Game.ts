@@ -863,11 +863,11 @@ export class Game {
     // the buttons sit right where the view of the ride — or the panel's own OK
     // button — is. See {@link screenIsBusy}.
     this.screenControls.setVisible(!this.screenIsBusy());
-    // And the up/down buttons exist only where she may actually take off, which
-    // is one question `Player` answers for both them and the take-off itself —
-    // a pack on her back and room here to use it. `isFlying` is the second
-    // fact: "down" has nothing to do until she is off the ground.
-    this.screenControls.setFlyControls(this.player.canFlyHere, this.player.isFlying);
+    // The hop button re-skins itself into the fly button on exactly the same
+    // question the take-off itself asks — a pack on her back and room here to
+    // use it — so a control that looks like it will fly and a take-off that is
+    // refused can never happen at once.
+    this.screenControls.setJetpackAvailable(this.player.canFlyHere);
     this.hud.updateDebug([
       // The park clock lives here now rather than in a pill of its own: the
       // family had the clock removed from the HUD entirely (GAME_DESIGN.md,

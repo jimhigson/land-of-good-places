@@ -109,12 +109,25 @@ const FALL_THRESHOLD = 0.5;
  * THE JET PACK
  * ---------------------------------------------------------------------------
  * Eleri's own ask, in her words: *"Button to use it next to the jump button and
- * then you fly and control where you fly instead of walking."*
+ * then you fly and control where you fly instead of walking."* It started as a
+ * second button beside jump; Jim's follow-up request moved it onto jump itself
+ * — one control to learn instead of two, and nothing to press "blind".
  *
- * **One button, one rule, no explaining.** Tap fly and she lifts off; hold it
- * and she climbs; let go and she comes gently down; touch the ground and she is
- * walking again. That is the whole control scheme, and a six-year-old has it
- * after one press because she can see the flames.
+ * **One button, one rule, no explaining.** Tap jump and she hops, exactly as
+ * she always could, pack or no pack. Hold it — past {@link JETPACK_HOLD_THRESHOLD},
+ * so a normal tap can never be mistaken for one — and, with a pack on her back
+ * and room to use it, the hop turns into a climb. Let go and gravity takes over
+ * immediately: there is no separate "come down" input, because there is nothing
+ * to press to make gravity happen. Touch the ground and she is walking again.
+ *
+ * ### Why a hold threshold instead of reading the button instantly
+ *
+ * `jump` alone can't tell a tap from the first frame of a hold — both look
+ * identical the instant the button goes down. So every press starts as an
+ * ordinary hop, and only once it is still held {@link JETPACK_HOLD_THRESHOLD}
+ * later does the arc she is already rising through turn into a climb, smoothly
+ * — see {@link update}. Short enough that holding reads as instant, long enough
+ * that even an eager stab at the button never accidentally ignites the pack.
  *
  * ### It obeys the CONTROL RULE, which is what most of this is about
  *
@@ -127,9 +140,10 @@ const FALL_THRESHOLD = 0.5;
  *
  * ### And nobody can get stuck (the EXIT RULE's spirit)
  *
- * - Letting go always sinks her to whatever is under her feet *right now*,
- *   sampled through the same {@link Player.groundAt} the walk uses — so she
- *   lands on the deck, the stair tread or the grass, whichever is really there.
+ * - Letting go always falls her towards whatever is under her feet *right
+ *   now*, sampled through the same {@link Player.groundAt} the walk uses — so
+ *   she lands on the deck, the stair tread or the grass, whichever is really
+ *   there.
  * - Collision keeps running while she flies, with `clearance` set to her height
  *   above the local ground. That is the existing wall-clearing machinery, not a
  *   new one: fly high and a low wall stops pushing back, fly low and it pushes
@@ -141,37 +155,25 @@ const FALL_THRESHOLD = 0.5;
  *   cannot fly out of the park, and {@link Player.flyCeiling} stops her leaving
  *   the top of it.
  * - Taking the pack off mid-air does not drop her: it takes the *thrust* away,
- *   and she finishes the descent she was already making.
+ *   and — same as letting go of the button — she finishes the descent under
+ *   gravity instead.
  */
 const FLY_RISE_SPEED = 4.4;
 
-/**
- * How fast she sinks with the button released.
- *
- * Slower than she rises, so letting go reads as *floating down* rather than as
- * the jet pack failing — but not so slow that coming down from the ceiling is
- * something a child has to wait through. At this rate the full descent from
- * {@link PARK_FLY_CEILING} takes about four seconds.
- */
-const FLY_SINK_SPEED = 3;
-
-/**
- * And how fast she sinks with the **down** button held.
- *
- * Twice the drift, so pressing it is obviously doing something, and still well
- * under a free fall (`GRAVITY` reaches this in a fifth of a second) so it reads
- * as flying down rather than as the pack cutting out.
- *
- * The button exists because "let go and you come down" is, as a *control*,
- * invisible — the way to descend was to stop doing something, which is the
- * least discoverable instruction there is. See `ui/ScreenControls.ts`. Letting
- * go of everything still floats her down at {@link FLY_SINK_SPEED} exactly as
- * it always did; this is an addition, not a replacement.
- */
-const FLY_DIVE_SPEED = 6;
-
-/** How briskly the climb and the sink get up to speed. Snappy, not instant. */
+/** How briskly the climb gets up to speed. Snappy, not instant. */
 const FLY_VERTICAL_ACCELERATION = 24;
+
+/**
+ * How long `jump` must stay down, past the frame it was pressed, before it
+ * reads as "hold to fly" rather than a tap.
+ *
+ * A normal hop off this button already takes the better part of a second
+ * (see `JUMP_APEX_HEIGHT`'s own comment) so there is no risk of this making a
+ * deliberate hold feel late — it just needs to comfortably outlast the
+ * fastest tap a six-year-old's thumb can manage, which is well under a tenth
+ * of a second.
+ */
+const JETPACK_HOLD_THRESHOLD = 0.16;
 
 /**
  * How high above the ground under her feet she may fly, out in the park.
@@ -194,10 +196,10 @@ export const PARK_FLY_CEILING = 12;
  * separating into two fields:
  *
  * 1. It is the **sentinel** {@link Player.canFlyHere} compares against, so the
- *    castle refuses a take-off outright and the fly buttons are not on screen
- *    inside it. The jet pack is an outdoors thing, everywhere, consistently —
- *    rather than a full flight in the park and a puzzling one-metre hover
- *    indoors that no button offers you.
+ *    castle refuses a take-off outright and holding jump indoors is just a
+ *    hop, nothing more. The jet pack is an outdoors thing, everywhere,
+ *    consistently — rather than a full flight in the park and a puzzling
+ *    one-metre hover indoors that nothing tells you is even possible.
  * 2. It stays the **backstop** for a flight already in the air if the space
  *    under her ever changes, which is what it was written for.
  *
@@ -208,7 +210,8 @@ export const INDOOR_FLY_CEILING = 1.2;
 /** Metres of soft approach to the ceiling, so it eases rather than clunks. */
 const FLY_CEILING_EASE = 2.5;
 
-/** Thrust shown on the pack while coasting down — a pilot light, not a climb. */
+/** Thrust shown on the pack while falling with the button released — a pilot
+ * light, not a climb. */
 const FLY_IDLE_THRUST = 0.3;
 
 /** How long the eyes stay shut. Any longer and she looks sleepy, not blinking. */
@@ -349,15 +352,23 @@ export class Player implements GameSystem {
   private verticalVelocity = 0;
   private airborne = false;
   /**
+   * Seconds `jump` has been held since it last went down, while she is not
+   * yet flying — reset on every fresh press and every landing. Compared
+   * against {@link JETPACK_HOLD_THRESHOLD} in {@link update} to tell a hold
+   * from a tap; irrelevant once {@link flying} is true, when `isDown('jump')`
+   * is read directly every frame instead.
+   */
+  private jumpHeldFor = 0;
+  /**
    * True while the jet pack is holding her up — a strict subset of
    * {@link airborne}, so everything that already asks "is she off the ground?"
    * (the parade's copycat hop, the flower flourish, the dust) gets the right
    * answer for flight without being told about it.
    *
    * Only ever *entered* with a pack worn, and only ever left by touching the
-   * ground. Taking the pack off mid-air therefore takes the thrust away rather
-   * than the flight, and she finishes her descent at flying speed instead of
-   * dropping.
+   * ground. Taking the pack off mid-air therefore takes the thrust away
+   * rather than the flight: `canFlyHere` goes false, thrust stops, and she
+   * finishes her descent under gravity, same as letting go of the button.
    */
   private flying = false;
   /** 0..1, eased, so the flying pose fades on and off rather than snapping. */
@@ -486,6 +497,7 @@ export class Player implements GameSystem {
     // into the castle (or out of it), because the ground under her is now a
     // different ground entirely.
     this.flying = false;
+    this.jumpHeldFor = 0;
     // Whatever she was being walked out of, she is not in it any more.
     this.escorting = false;
     if (facing !== undefined) this.facingAngle = facing;
@@ -550,9 +562,9 @@ export class Player implements GameSystem {
    *
    * One question, asked in one place, because two things need the answer and
    * they must never disagree: the take-off in {@link update}, and whether
-   * `ui/ScreenControls.ts` puts the up and down buttons on screen at all. A
-   * button that is there while the take-off is refused is exactly the promise
-   * this game does not make.
+   * `ui/ScreenControls.ts` shows the on-screen hop button as also being the
+   * fly button. A control that looks like it will fly while the take-off is
+   * refused is exactly the promise this game does not make.
    *
    * "Room here" is read off {@link flyCeiling} rather than from a second
    * indoors flag, so there is still only one thing `Building` has to write and
@@ -616,6 +628,9 @@ export class Player implements GameSystem {
     // The ride is flying her now. She keeps the pack on — it is hers — but it
     // stops being what holds her up, and its flames go out (see `update`).
     this.flying = false;
+    // So a jump button still held from before boarding can't be mistaken for
+    // a fresh hold-past-the-threshold the moment she's handed back.
+    this.jumpHeldFor = 0;
   }
 
   /**
@@ -797,50 +812,47 @@ export class Player implements GameSystem {
       autoHopWanted = this.collision.wouldAutoHopClear(this.hopProbe, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
     }
 
-    // --- take off (the jet pack) ---------------------------------------------
-    // A tap on the fly button — and only where she may actually fly. The HUD
-    // hides the buttons on exactly the same question ({@link canFlyHere}), so a
-    // button that is there and a take-off that is allowed are one fact rather
-    // than two that can drift apart.
+    // --- hop, and — held past a beat — the jet pack --------------------------
+    // One button does both; see "THE JET PACK" above. A tap is the ordinary
+    // hop, unconditionally, pack or no pack: `canFlyHere` is never consulted
+    // here. Only whether it is *still* held once {@link JETPACK_HOLD_THRESHOLD}
+    // has passed decides whether that hop turns into a take-off.
     const canFly = this.canFlyHere;
-    if (canFly && !this.flying && input.justPressed('fly')) {
-      this.flying = true;
-      this.airborne = true;
-      // Straight to climbing speed: a take-off that has to build up reads as
-      // the button not having worked.
-      this.verticalVelocity = FLY_RISE_SPEED;
-      // A rainbow off the ground she is leaving, exactly like a hop.
-      this.spawnHopRing(groundY);
-    }
-
-    // --- hop ----------------------------------------------------------------
     if ((input.justPressed('jump') || autoHopWanted) && !this.airborne) {
       this.verticalVelocity = JUMP_SPEED;
       this.airborne = true;
+      this.jumpHeldFor = 0;
       this.spawnHopRing(groundY);
     }
+    if (this.airborne && !this.flying) {
+      this.jumpHeldFor = input.isDown('jump') ? this.jumpHeldFor + dt : 0;
+      if (canFly && this.jumpHeldFor >= JETPACK_HOLD_THRESHOLD) {
+        // No snap to climbing speed: she is already moving, mid-hop, and
+        // `approachScalar` below eases the existing velocity towards the
+        // climb target exactly as it eases any other change of heart in the
+        // air. The take-off is the hop that never came back down.
+        this.flying = true;
+      }
+    }
+
     let hopHeight = 0;
     if (this.flying) {
-      // Hold to climb, let go to come down. `jump` counts too, so the space bar
-      // a child is already holding does the obvious thing rather than nothing.
-      const thrusting = canFly && (input.isDown('fly') || input.isDown('jump'));
-      // And hold *down* to come down briskly rather than drifting. Up wins when
-      // both are held: it is the button that makes something happen, and a
-      // six-year-old with a thumb on each should go up rather than stall.
-      const diving = !thrusting && input.isDown('flyDown');
-      const height = this.position.y - groundY;
-      // Ease off into the ceiling instead of stopping dead against it.
-      const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
-      const target = thrusting
-        ? FLY_RISE_SPEED * headroom
-        : diving
-          ? -FLY_DIVE_SPEED
-          : -FLY_SINK_SPEED;
-      this.verticalVelocity = approachScalar(
-        this.verticalVelocity,
-        target,
-        FLY_VERTICAL_ACCELERATION * dt,
-      );
+      // Held: climb. Released: gravity, exactly as if there were no pack at
+      // all — the same formula the plain fall below uses. That absence *is*
+      // "come down"; there is nothing else to press.
+      const thrusting = canFly && input.isDown('jump');
+      if (thrusting) {
+        const height = this.position.y - groundY;
+        // Ease off into the ceiling instead of stopping dead against it.
+        const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
+        this.verticalVelocity = approachScalar(
+          this.verticalVelocity,
+          FLY_RISE_SPEED * headroom,
+          FLY_VERTICAL_ACCELERATION * dt,
+        );
+      } else {
+        this.verticalVelocity -= GRAVITY * dt;
+      }
       this.position.y += this.verticalVelocity * dt;
       if (this.position.y <= groundY) {
         this.position.y = groundY;

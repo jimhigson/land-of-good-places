@@ -577,23 +577,15 @@ kbd {
 
 /* -------------------------------------------------------- screen controls */
 
-/* Bottom-right and thumb-sized. Mounted on every device now — see
-   `ui/ScreenControls.ts` — but hop is still touch-only, because a keyboard has
-   the space bar and walking is a tap on the park itself either way. The fly
-   pair is on both: it used to exist only as two letters nobody had been told
-   about. */
+/* Bottom-right and thumb-sized, touch-only: a keyboard has the space bar and
+   walking is a tap on the park itself either way. One button — hop, and once
+   a jet pack is worn and there is room to fly, the same button climbs on a
+   hold too. See `ui/ScreenControls.ts`. */
 .screen-controls {
   position: absolute;
   right: calc(0.875rem + env(safe-area-inset-right));
   bottom: calc(0.875rem + env(safe-area-inset-bottom));
   display: flex;
-  /* A row, so the fly pair sits *beside* hop — Eleri asked for the fly button
-     "next to the jump button". The pair itself stacks inside its own column
-     below, which is what keeps the cluster two buttons wide rather than three
-     on a phone. */
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 0.625rem;
   pointer-events: none;
   transition: opacity 220ms ease, transform 220ms ease;
 }
@@ -625,22 +617,9 @@ kbd {
 }
 
 /* `display: flex` above is an author rule and so beats the browser's own
-   `[hidden] { display: none }`. Without this the fly buttons would be on screen
-   for a child who has never bought a jet pack — which is precisely the promise
-   `setFlyControls` exists to avoid making. The stack needs its own copy for the
-   same reason. */
-.screen-btn[hidden],
-.screen-fly[hidden] {
+   `[hidden] { display: none }`. */
+.screen-btn[hidden] {
   display: none;
-}
-
-/* Nothing to come down from until she is off the ground. Kept legible rather
-   than nearly invisible: it is still telling a child that the button exists
-   and what it is for, it just cannot be pressed yet. */
-.screen-btn:disabled {
-  cursor: default;
-  opacity: 0.42;
-  box-shadow: 0 0.125rem 0 rgba(74, 58, 82, 0.16);
 }
 
 /* Presses squash the button onto its own shadow — the same squash-and-stretch
@@ -654,33 +633,18 @@ kbd {
   width: 5.5rem;
   height: 5.5rem;
   background: linear-gradient(180deg, #fff 0%, var(--lgp-pink) 150%);
+  transition: background 220ms ease, transform 90ms ease, box-shadow 90ms ease;
 }
 
-/* Up above down, because the button that is higher on the screen taking you
-   higher is a thing a six-year-old reads without being told. One column, so
-   the whole cluster stays two buttons wide on a phone rather than three. */
-.screen-fly {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  pointer-events: none;
-}
-
-/* Both in the sky blue the jet pack's own harness is painted
-   (ART.jetpackTrim), so the buttons and the thing on her back read as the same
-   object. Hidden until one is worn and she is somewhere she can use it — see
-   `ui/ScreenControls.setFlyControls`. */
-.screen-btn--fly-up,
-.screen-btn--fly-down {
-  width: 5.5rem;
-  height: 5.5rem;
+/* Sky blue, the jet pack's own harness colour (ART.jetpackTrim), the moment a
+   pack is worn somewhere she can use it — see
+   `ui/ScreenControls.setJetpackAvailable`. Same button, same binding, just
+   telling her it can now also fly. */
+.screen-btn--hop.screen-btn--jetpack {
   background: linear-gradient(180deg, #fff 0%, var(--lgp-sky) 150%);
 }
 
-.screen-btn--hop .screen-glyph,
-.screen-btn--fly-up .screen-glyph,
-.screen-btn--fly-down .screen-glyph {
+.screen-btn--hop .screen-glyph {
   font-size: 1.875rem;
   line-height: 1;
   margin-top: -0.125rem;
@@ -696,29 +660,19 @@ kbd {
 /* On a short landscape phone the hint pill and the buttons fight for the
    bottom of the screen; give the buttons the corner and shrink the hint. */
 @media (max-height: 460px) {
-  .screen-btn--hop,
-  .screen-btn--fly-up,
-  .screen-btn--fly-down {
+  .screen-btn--hop {
     width: 4.625rem;
     height: 4.625rem;
   }
 }
 
 @media (max-width: 520px) {
-  /* The one thing left that is genuinely about a *narrow* screen rather than
-     about scale: the bottom-left pills must not slide under the thumb
-     buttons in the bottom-right corner. */
+  /* The bottom-left pills must not slide under the thumb button in the
+     bottom-right corner. Always one button wide now, jet pack or not — the
+     hop button re-skins itself rather than a second button appearing beside
+     it — so this needs no jet pack-specific variant any more. */
   .hud-row.bottom {
     padding-right: 6rem;
-  }
-
-  /* And twice that once the fly pair is out, because the cluster is then two
-     buttons wide. Keyed off the pair actually being visible rather than off a
-     second class somebody has to remember to set: wearing a jet pack somewhere
-     you can fly is the only thing that shows it, and this rule follows on its
-     own. */
-  #ui-root:has(.screen-fly:not([hidden])) .hud-row.bottom {
-    padding-right: 12.25rem;
   }
 }
 

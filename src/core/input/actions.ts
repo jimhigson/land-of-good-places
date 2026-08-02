@@ -7,9 +7,11 @@
  */
 export type GameAction =
   | 'interact' // talk to things, ride rides, toss a coin in the fountain
-  | 'jump' // hop (and later: corgi-balloon float)
-  | 'fly' // jet pack: tap to take off, hold to climb, let go to come down
-  | 'flyDown' // and hold this to come down briskly rather than drifting
+  // Hop on a tap. With a jet pack worn and room to fly, held past a beat it
+  // becomes the jet pack too — hold to climb, let go for gravity to take
+  // over. One button, so there is nothing extra to learn: see `Player.ts`'s
+  // "THE JET PACK" comment for the whole scheme.
+  | 'jump'
   | 'cancel' // back out of a menu
   | 'menu' // open the pause / park menu
   | 'inventory' // open the backpack drawer
@@ -34,8 +36,6 @@ export type GameAction =
 export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
   'jump',
-  'fly',
-  'flyDown',
   'cancel',
   'menu',
   'inventory',
@@ -53,18 +53,11 @@ export const GAME_ACTIONS: readonly GameAction[] = [
  * still sits under the same fingers on AZERTY).
  */
 export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
+  // Also the jet pack: hold it past a beat, with a pack worn and room to fly,
+  // and it climbs instead of hopping. See `Player.ts`'s "THE JET PACK" comment
+  // — one button now covers both, so the dedicated G/R (up) and H/T (down)
+  // keys this used to need are retired along with it.
   Space: 'jump',
-  // Two keys for one action, because neither letter is obvious on its own and
-  // a child should not have to remember which we picked: **G** for "go up" and
-  // **R** for "rocket". Both are clear of the movement keys and of everything
-  // already bound.
-  KeyG: 'fly',
-  KeyR: 'fly',
-  // And down is **the key to the right of whichever one you fly with** — H sits
-  // beside G, T beside R. No letter spells "descend", but a pair of adjacent
-  // keys is something a hand remembers even when a word would not have been.
-  KeyH: 'flyDown',
-  KeyT: 'flyDown',
   Enter: 'interact',
   KeyE: 'interact',
   KeyF: 'interact',
@@ -114,11 +107,10 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * 0 A / 1 B / 2 X / 3 Y / 4 LB / 5 RB / 6 LT / 7 RT / 8 Back / 9 Start
  * 10 L3 / 11 R3 / 12 D-up / 13 D-down / 14 D-left / 15 D-right
  *
- * LB/RB (4/5) are the jet pack: **RB up, LB down**. They used to rotate the
- * camera, which no longer exists (GAME_DESIGN.md #16 — see ARCHITECTURE.md,
- * "One camera angle, forever"), and a pair of shoulder buttons is where two
- * hands already rest — holding one to climb wants a finger that is not doing
- * anything else.
+ * A (0) is `jump` — the jet pack too, held past a beat with a pack worn and
+ * room to fly. LB/RB used to be a dedicated up/down pair for it; retired
+ * along with the keyboard's G/R/H/T once the pack moved onto the same button
+ * as the hop, so 4 and 5 are free again.
  *
  * `duck` (13, D-pad down) fixes a real bug a review caught on the Rail
  * Race's tap-rate rework (2 August 2026): every other device got an explicit
@@ -135,14 +127,10 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * `GAMEPAD_DPAD_BINDINGS` below already claims 13 for the movement stick
  * too; both tables are read independently in `InputSystem.update()`, so one
  * physical button can carry both meanings exactly the way one physical key
- * already does. Every shoulder button and trigger is already claimed by the
- * jet pack and zoom, so D-pad down — not a face button, not already meaning
- * something else mid-ride — is the free, ergonomic, and consistent choice.
+ * already does.
  */
 export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   0: 'jump',
-  4: 'flyDown',
-  5: 'fly',
   2: 'interact',
   1: 'cancel',
   3: 'photo',

@@ -21,11 +21,13 @@ import { gameStore, type GameState } from '../state';
  *
  * ## Two things read this rather than the store
  *
- * `Player` asks {@link isWorn} whether the fly button should exist and whether
- * flight is allowed, and calls {@link setThrust} so the painted flames light
- * when she is actually climbing. Going through the system rather than the store
- * means the answer can never be "she owns one" when what is on screen is a bare
- * back — there is one model and one flag, and they are the same object.
+ * `Player` asks {@link isWorn} whether flight is allowed at all — the jet pack
+ * has no button of its own any more, just the ordinary jump button held past a
+ * beat, see `Player.ts`'s "THE JET PACK" comment — and calls {@link setThrust}
+ * so the painted flames light when she is actually climbing. Going through the
+ * system rather than the store means the answer can never be "she owns one"
+ * when what is on screen is a bare back — there is one model and one flag, and
+ * they are the same object.
  */
 
 /** Seconds the pop-in takes, same beat as `WornHat`'s and a purchase's. */
