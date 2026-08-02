@@ -3837,9 +3837,19 @@ kbd {
    appended after both in `RaceHud`'s DOM would otherwise stack visually on
    top of a bonk message the instant one popped, burying the one piece of
    feedback a bonk gets. Attribute selectors out-specify the plain class rules
-   above *and* the portrait-orientation block below, so this holds whichever
-   way the phone is held — which is the point: the running order belongs
-   along the top in both. */
+   above *and* the portrait-orientation block below, so this holds in portrait
+   — see the `@media (orientation: landscape)` block further down for why
+   landscape is deliberately NOT the same.
+
+   **Landscape docks to the left edge instead (2 August 2026 family ask):**
+   *"the standings should move to the left edge of the screen when in
+   landscape, but stay at the top in portrait."* A phone in landscape has
+   width to spare and a screen that is short rather than narrow, so the row
+   that has to clear the lap pill and the bonk message by padding down from
+   the top in portrait can instead just stand beside them — a column down the
+   left, clear of both centred-top pills without needing to know how tall
+   they are. `camera.ts`'s `RIDER_SCREEN_X_LANDSCAPE` was nudged right the
+   same day so the cart does not ride under this column. */
 .mg-portrait-strip[data-layout='row'] {
   flex-direction: row;
   align-items: flex-start;
@@ -3894,6 +3904,37 @@ kbd {
     max-width: 4rem;
   }
   .mg-portrait-strip[data-layout='row'] { padding-top: calc(4.6rem + env(safe-area-inset-top)); }
+}
+
+/* Landscape: a column down the left edge instead of a row along the top — see
+   the file header above for the family's ask and why left-docking no longer
+   needs to clear the lap pill/bonk message by padding down from the top at
+   all (they are centred; this is not). Comes after both of the blocks above
+   in the cascade so it wins on every property it repeats, on a small
+   landscape phone that matches the `max-height: 520px` query too.
+
+   Only `.mg-portrait-strip[data-layout='row']` itself, its one bank and its
+   items change axis — `.mg-portrait`/`.mg-portrait-name` sizing is left to
+   whichever of the two blocks above already answered "is this screen small",
+   which is exactly as true sideways as it was for the row. */
+@media (orientation: landscape) {
+  .mg-portrait-strip[data-layout='row'] {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0 0 0 calc(0.6rem + env(safe-area-inset-left));
+  }
+
+  .mg-portrait-strip[data-layout='row'] .mg-portrait-bank {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .mg-portrait-strip[data-layout='row'] .mg-portrait-item {
+    flex-direction: row;
+    gap: 0.4rem;
+  }
 }
 
 /* ---------------------------------------------- water fight: wet portraits
@@ -4128,6 +4169,12 @@ kbd {
   justify-content: center;
   gap: 0.9rem;
   padding: 1.5rem;
+  /* Safety net, not the primary fix — the primary fix is the short-height
+     tightening below, sized off the actual dialog height so this should
+     never need to engage. But a `justify-content: center` column that
+     overflowed its `inset: 0` box would otherwise clip silently top and
+     bottom with nothing to scroll it back into view. */
+  overflow-y: auto;
   background: rgba(74, 58, 82, 0.45);
   opacity: 0;
   transition: opacity 200ms ease;
@@ -4153,11 +4200,10 @@ kbd {
 
 .racehud-level {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
+  justify-content: center;
   width: min(22rem, 88vw);
-  padding: 0.7rem 1.2rem;
+  padding: 0.55rem 1.2rem;
   border: none;
   border-radius: 1.1rem;
   background: var(--lgp-cream);
@@ -4179,9 +4225,17 @@ kbd {
   font-weight: 900;
 }
 
-.racehud-level span {
-  font-size: var(--lgp-text-md);
-  font-weight: 600;
+/* A short landscape phone (measured against the 375-825 shapes the root
+   scale's own header quotes) has height to spare for three title-only
+   buttons plus the tip, comfortably. This is insurance for shorter hardware
+   still, per point 5 of the 2 August 2026 HUD-layout ask ("prefer smaller
+   text over more text" wherever cramped) — smaller everything here rather
+   than reworded, since the copy is already as short as title-only gets. */
+@media (max-height: 420px) {
+  .racehud-levels { gap: 0.5rem; padding: 0.75rem; }
+  .racehud-levels-tip { margin-bottom: 0.1rem; padding: 0.35rem 0.9rem; font-size: var(--lgp-text-md); }
+  .racehud-level { padding: 0.35rem 1.1rem; }
+  .racehud-level strong { font-size: var(--lgp-text-lg); }
 }
 
 /* Lap counter: a cream pill at the top, out of the way of the track ahead. */
@@ -4316,6 +4370,27 @@ kbd {
   opacity: 0;
 }
 
+/* Landscape: the same standings-column collision `.racehud-controls` was
+   nudged right for above, and the same fix — this pill centres at `left: 50%`
+   with `white-space: nowrap`'s full unwrapped width, so once the standings
+   HUD docks to the left edge in landscape (see the `@media (orientation:
+   landscape)` block above `.mg-portrait-strip[data-layout='row']`) its own
+   left edge lands squarely under that column on a modest landscape phone —
+   measured against 667x375, the bonk pill's left edge sat at 128px while the
+   standings column ran to 156px, overlapping "Otto 1st" outright.
+   `.racehud-bonk` sits at `top: 3.4rem`, `.racehud-controls` at `top: 70%` —
+   the two are never close enough vertically to collide with each other, so
+   this can reuse the same `left: 66%` without needing to check that. Nudged
+   right only, not narrowed: unlike `.racehud-controls` this pill has no
+   `max-width` and relies on `white-space: nowrap` to stay one line, so
+   shrinking it would just push the text off its own edge instead of fixing
+   anything. */
+@media (orientation: landscape) {
+  .racehud-bonk {
+    left: 66%;
+  }
+}
+
 .racehud-bonk[data-shown='true'] {
   animation: lgp-race-bonk 1600ms ease-out forwards;
 }
@@ -4333,6 +4408,85 @@ kbd {
     transform: translateX(-50%) translateY(0) scale(1);
   }
   75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The controls reminder (2 August 2026, point 6 of the family's HUD-layout
+   ask): fired once by `RaceHud.flashControlsTip`, right as `chooseLevel`
+   starts the countdown. Sits below the countdown digit (`.racehud-count` is
+   centred on `top: 38%` at a towering 5rem) rather than above it, so the one
+   moment the screen is shouting "3… 2… 1…" is not also the moment two pills
+   land on top of each other — there is nothing else on screen down here
+   during the countdown to collide with. Self-clearing, the same restart dance
+   as `.racehud-bonk`: nothing else ever tells it to go away, so its own
+   animation fades it back out, timed to clear before racing starts rather
+   than truncated by `RaceHud.setShown`'s reset (which still zeroes the
+   attribute on the way out, in case a race is abandoned mid-countdown). */
+.racehud-controls {
+  position: absolute;
+  top: 70%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: min(22rem, 88vw);
+  padding: 0.5rem 1.1rem;
+  border-radius: 1rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  text-align: center;
+  opacity: 0;
+}
+
+.racehud-controls strong {
+  font-size: var(--lgp-text-md);
+  font-weight: 900;
+}
+
+.racehud-controls span {
+  font-size: var(--lgp-text-min);
+  font-weight: 600;
+}
+
+.racehud-controls[data-shown='true'] {
+  animation: lgp-race-controls 3500ms ease-out forwards;
+}
+
+/* Landscape: this pill's own countdown-avoidance (top: 70%, well below
+   `.racehud-count`'s 38%) is not enough on its own once the standings HUD
+   docks to the left edge (see the `@media (orientation: landscape)` block
+   above `.mg-portrait-strip[data-layout='row']`) — centred at `left: 50%`
+   with its full width, this pill's left edge lands under that column on a
+   modest landscape phone (measured against 667x375, a common shape: the
+   column reaches to about 155px in and the centred pill's left edge sat at
+   about 114px). Nudged right and narrowed instead of widened, because a
+   landscape window is short on height, not width — there is plenty of it to
+   spare over here. `left`/`max-width` only: `transform: translate(-50%, -50%)`
+   is untouched, and unrepeated here, so the same keyframes above keep
+   centring the box on whichever point `left` names. */
+@media (orientation: landscape) {
+  .racehud-controls {
+    left: 66%;
+    max-width: min(18rem, 42vw);
+  }
+}
+
+@keyframes lgp-race-controls {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  80% {
     opacity: 1;
   }
   100% {

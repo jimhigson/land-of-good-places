@@ -507,6 +507,9 @@ export class Game {
         case 'levelSelect':
           this.raceHud.setLevelSelect(moment.shown);
           break;
+        case 'controls':
+          this.raceHud.flashControlsTip();
+          break;
         case 'standings':
           this.raceHud.setStandings(moment.order);
           break;

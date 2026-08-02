@@ -129,9 +129,18 @@ const AHEAD_SCREEN_X = 0.95;
  * just been bonked drop back. It is a floor, not a value to keep tuning — was
  * 0.13, moved down to that floor on the same 1 August 2026 playtest verdict that
  * halved {@link AHEAD}, and should not go lower than this even if asked again.
+ *
+ * `RIDER_SCREEN_X_LANDSCAPE` moved from 0.28 to 0.34 on 2 August 2026: the
+ * standings HUD (`.mg-portrait-strip[data-layout='row']` in `style.css`) docks
+ * to the left edge in landscape instead of sitting in a top row, so the rider
+ * needed to sit further right to stay clear of it. `RIDER_SCREEN_X_PORTRAIT`
+ * is untouched — the standings HUD stays in its top row in portrait, exactly
+ * as before, so nothing there needed compensating. Re-verified with
+ * `npm run check:rail-race`, whose own `riderX > 0.06 && riderX < 0.36` bound
+ * is what keeps this number honest.
  */
 const RIDER_SCREEN_X_PORTRAIT = 0.1;
-const RIDER_SCREEN_X_LANDSCAPE = 0.28;
+const RIDER_SCREEN_X_LANDSCAPE = 0.34;
 /** The window shapes those two are quoted for: a phone stood up, and a monitor. */
 const PORTRAIT_ASPECT = 0.5;
 const LANDSCAPE_ASPECT = 1.6;
