@@ -355,6 +355,14 @@ export function buildRailRaceTrack(
   // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
   // `barSlots[b]` holds the instance ids of that bar across all four lanes.
   const barSlots: number[][] = [];
+  // Every post belongs to one lane's own bar — coloured to match, the same
+  // `LANE_COLOURS` entry as that lane's rails/cart/trestle, so a post reads as
+  // "this lane's post" at a glance instead of every post in the ring looking
+  // identical regardless of which rail it stands over. Per-instance colour on
+  // one shared `InstancedMesh`, the same trick `sleeves` below already uses
+  // for its alert-state colour — one draw call for every post in the ring,
+  // four lane colours and all.
+  const postLaneColour = new Color();
 
   for (const bar of layout.bars) {
     const slots: number[] = [];
@@ -380,6 +388,7 @@ export function buildRailRaceTrack(
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       route.pointAt(lane, at, point);
       const barY = point.y + DUCK_CLEARANCE;
+      postLaneColour.set(LANE_COLOURS[lane % LANE_COLOURS.length]!);
 
       for (const side of [-1, 1] as const) {
         position.set(
@@ -389,6 +398,7 @@ export function buildRailRaceTrack(
         );
         matrix.compose(position, rotation, one);
         posts.setMatrixAt(postIndex, matrix);
+        posts.setColorAt(postIndex, postLaneColour);
         postIndex += 1;
       }
 
@@ -417,6 +427,10 @@ export function buildRailRaceTrack(
     mesh.frustumCulled = false;
     group.add(mesh);
   }
+  // Every post's colour was set as it was placed above; flip the attribute
+  // live once, the same way the matrix update above is one flip after every
+  // instance is written rather than one per instance.
+  posts.instanceColor!.needsUpdate = true;
   // Per-instance colour is what lets one draw call hold four lanes' worth of
   // warning lamps at four different states of alarm.
   sleeves.setColorAt(0, CALM);
