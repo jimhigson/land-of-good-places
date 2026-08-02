@@ -7,6 +7,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { createConfetti, type Confetti } from '../../minigames/railRacer/confetti';
+import { gameStore } from '../../state';
 import { discoverSecret } from '../../state/secrets';
 import { terrainHeight } from '../terrain';
 import { resolveDismount } from '../dismount';
@@ -22,7 +23,9 @@ import type { RaceLevel } from './hazards';
 import {
   HAZARD_LAYOUT,
   RACE_LAPS,
+  RIVAL_SKILL,
   createRider,
+  rivalBand,
   rivalInput,
   scheduleForLevel,
   stepRider,
@@ -80,12 +83,16 @@ const RACE_TIME_LIMIT = 180;
 const RACE_SECRET = 'secret.railRace';
 
 /**
- * The three rivals, on the three inner lanes.
+ * The three rivals, on the three inner lanes — who they *are*, not how well
+ * they drive.
  *
- * `skill` is how often they get a hazard right. None is perfect, because a child
- * has to be able to win; none is hopeless, because a race you cannot lose is not
- * a race. Ordered inside-out, so the nearest rival to the player is the sharpest
- * one — the cart she can actually see beside her is the one worth beating.
+ * How well they drive is `RIVAL_SKILL` in `simulate.ts`, beside the brains
+ * that read it and the checker that races it. It used to be a fourth field
+ * here, and that meant the balance check had to keep its own copy of the
+ * tuning it was supposed to be proving — see `RIVAL_SKILL`'s own doc comment
+ * for the 2 August 2026 re-tune against the tap-rate rework. Ordered
+ * inside-out, so the nearest rival to the player is the sharpest one — the
+ * cart she can actually see beside her is the one worth beating.
  *
  * No `cart` colour here any more — a rival's cart used to carry its own,
  * hand-picked colour, and it had drifted out of step with `track.ts`'s
@@ -98,22 +105,15 @@ const RACE_SECRET = 'secret.railRace';
 const RIVALS: readonly {
   readonly name: string;
   readonly outfit: number;
+  /** Given here, not left to `createKid`'s default, so the little painted
+   * head in the standings HUD can be the same colour as the child in the cart. */
+  readonly hair: number;
   readonly hairStyle: 'short' | 'bob';
-  readonly skill: number;
 }[] = [
-  { name: 'Pip', outfit: PALETTE.markerLemon, hairStyle: 'short', skill: 0.72 },
-  { name: 'Nell', outfit: PALETTE.markerMint, hairStyle: 'bob', skill: 0.8 },
-  { name: 'Otto', outfit: PALETTE.markerSky, hairStyle: 'short', skill: 0.86 },
+  { name: 'Pip', outfit: PALETTE.markerLemon, hair: 0x6b4a8f, hairStyle: 'short' },
+  { name: 'Nell', outfit: PALETTE.markerMint, hair: 0xd2694a, hairStyle: 'bob' },
+  { name: 'Otto', outfit: PALETTE.markerSky, hair: 0x4a3a52, hairStyle: 'short' },
 ];
-
-/**
- * How hard the rivals rubber-band.
- *
- * A metre of lead moves a rival's thrust by `CATCHUP`, clamped to ±`SWING`.
- * Asymmetric on purpose — the point is a close race, not a fair one.
- */
-const CATCHUP = 0.004;
-const SWING = 0.22;
 
 /**
  * How far `poseRider()` drops the player when she is off the button, in this
@@ -141,7 +141,8 @@ const PRESSING_POSE_THRESHOLD = 0.15;
  * wires it to `ui/RaceHud.ts`.
  */
 export type RaceMoment =
-  | { readonly kind: 'start' }
+  /** Boarding: who is racing, in cart order. The HUD builds its heads from this. */
+  | { readonly kind: 'start'; readonly racers: readonly RaceRacer[] }
   /**
    * "Which level?" — shown the moment she boards, before the countdown even
    * starts (see `chooseLevel`), and cleared the instant she picks one. This
@@ -150,6 +151,11 @@ export type RaceMoment =
    * moment she is watching the track, not the text.
    */
   | { readonly kind: 'levelSelect'; readonly shown: boolean }
+  /**
+   * The running order changed: racer indices (into the `start` list), leader
+   * first. Raised only when it actually changes, not every frame.
+   */
+  | { readonly kind: 'standings'; readonly order: readonly number[] }
   /** A countdown digit, "GO!", or `null` to clear it. */
   | { readonly kind: 'count'; readonly text: string | null }
   | { readonly kind: 'lap'; readonly lap: number; readonly of: number }
@@ -164,6 +170,20 @@ export type RaceMoment =
  * hazard composition and starts the clock.
  */
 type Phase = 'waiting' | 'levelSelect' | 'countdown' | 'racing' | 'finishing';
+
+/**
+ * One racer, as the HUD needs them.
+ *
+ * Deliberately the shape `minigames/portraitStrip.ts` already takes, so
+ * `Game` hands it straight across without a mapping step in between — the
+ * same reason a route *is* a `RailSampler` in `rail/sweptRail.ts`.
+ */
+export interface RaceRacer {
+  readonly name: string;
+  readonly hair: number;
+  readonly accent: number;
+  readonly isPlayer: boolean;
+}
 
 interface Cart {
   readonly rider: Rider;
@@ -246,6 +266,8 @@ export class RailRace implements GameSystem {
   private activeSchedule = scheduleForLevel(1);
   /** Look-alike rivals who stand about at the exit when a race lets you off. */
   private readonly exitCrowd: RailRaceExitCrowd;
+  /** The running order last sent to the HUD, so it is only sent on a change. */
+  private standings: number[] = [];
 
   constructor(collision: CollisionWorld) {
     this.collision = collision;
@@ -342,7 +364,9 @@ export class RailRace implements GameSystem {
     // is scoped to the ride rather than a park-wide suppression of the
     // context menu.
     this.input?.setMouseCaptureActive(true);
-    this.onRaceMoment?.({ kind: 'start' });
+    this.standings = [];
+    this.onRaceMoment?.({ kind: 'start', racers: this.racers() });
+    this.updateStandings();
     this.onRaceMoment?.({ kind: 'levelSelect', shown: true });
     return true;
   }
@@ -363,6 +387,65 @@ export class RailRace implements GameSystem {
     this.countdown = COUNTDOWN_SECONDS;
     this.emitCount(String(COUNTDOWN_SECONDS));
     return true;
+  }
+
+  /**
+   * Everybody in the race, in cart order — the order every `standings` index
+   * afterwards refers to.
+   *
+   * The player rides as herself: her own hair colour off the save, exactly as
+   * the dodgems do it, so the head at the top of the screen is recognisably
+   * hers. Accents come from `LANE_COLOURS`, the same array that paints the
+   * rails, the carts and the droppers, so "my colour" is one fact from the
+   * rail under her all the way up to the portrait in the corner.
+   */
+  private racers(): RaceRacer[] {
+    const hair = gameStore.get().player.hairColour;
+    return this.carts.map((cart, index) => {
+      const accent = LANE_COLOURS[cart.rider.lane] ?? PALETTE.markerPink;
+      const rival = RIVALS[index];
+      return cart.isPlayer || !rival
+        ? { name: 'You', hair, accent, isPlayer: true }
+        : { name: rival.name, hair: rival.hair, accent, isPlayer: false };
+    });
+  }
+
+  /**
+   * Works out who is currently winning, and tells the HUD when that changes.
+   *
+   * **There was no such thing as a live position before this.** `Rider.place`
+   * was only ever written as somebody crossed the line, so for the whole race
+   * up to that point nothing in the game knew who was ahead — which is
+   * exactly what the family asked to see (1 August 2026).
+   *
+   * `travelled` alone is the whole ranking rule: it counts from the lights and
+   * never resets at a lap, so "most laps, then furthest round this one" is
+   * simply the largest number. Riders who have already finished are held
+   * above everyone still going, in the order they actually crossed, so a
+   * leader cannot appear to drop to fourth the instant she stops moving.
+   *
+   * Four riders sorted every frame is nothing; the *emit* is what is guarded,
+   * because rebuilding four labels sixty times a second would be silly and
+   * the order changes only a handful of times a race.
+   */
+  private updateStandings(): void {
+    const ranked = this.carts
+      .map((cart, index) => ({ index, rider: cart.rider }))
+      .sort((a, b) => {
+        if (a.rider.finished !== b.rider.finished) return a.rider.finished ? -1 : 1;
+        if (a.rider.finished && b.rider.finished) return a.rider.place - b.rider.place;
+        return b.rider.travelled - a.rider.travelled;
+      })
+      .map((entry) => entry.index);
+
+    if (
+      ranked.length === this.standings.length &&
+      ranked.every((racer, place) => this.standings[place] === racer)
+    ) {
+      return;
+    }
+    this.standings = ranked;
+    this.onRaceMoment?.({ kind: 'standings', order: ranked });
   }
 
   update(context: FrameContext): void {
@@ -399,6 +482,7 @@ export class RailRace implements GameSystem {
       case 'racing': {
         this.raceTime += dt;
         this.driveRiders(context, true);
+        this.updateStandings();
         if (this.me.rider.finished || this.raceTime > RACE_TIME_LIMIT) this.finishRace();
         break;
       }
@@ -408,6 +492,7 @@ export class RailRace implements GameSystem {
         // freezes the moment you finish feels like it was never really running.
         this.raceTime += dt;
         this.driveRiders(context, false);
+        this.updateStandings();
         this.resultTimer -= dt;
         if (this.resultTimer <= 0) {
           this.onRaceMoment?.({ kind: 'end' });
@@ -463,9 +548,10 @@ export class RailRace implements GameSystem {
           : { pressed: false, ducking: false };
       } else {
         riderInput = rivalInput(rider, this.activeSchedule, dt, skillOf(rider), this.rng);
-        // Rubber band: catching up is easier than running away.
-        const lead = me.travelled - rider.travelled;
-        band = 1 + Math.max(-SWING, Math.min(SWING, lead * CATCHUP));
+        // Rubber band: catching up is easier than running away — see
+        // `rivalBand`'s own doc comment for why this is asymmetric on both
+        // axes rather than the old flat ±22%.
+        band = rivalBand(me.travelled - rider.travelled);
       }
 
       const events = stepRider(RAIL_RACE_PLAN.route, rider, this.activeSchedule, riderInput, dt, band);
@@ -765,7 +851,13 @@ export class RailRace implements GameSystem {
   }
 }
 
-/** Rival skill, by lane. Kept out of the hot loop's closure. */
+/**
+ * Rival skill, by lane. Kept out of the hot loop's closure.
+ *
+ * The numbers themselves live in `simulate.ts` beside the brains that read
+ * them, so `scripts/check-rail-race.mts` races the same rivals the browser
+ * does rather than a second, driftable copy of their tuning.
+ */
 function skillOf(rider: Rider): number {
-  return RIVALS[rider.lane]?.skill ?? 0.8;
+  return RIVAL_SKILL[rider.lane] ?? 0.7;
 }

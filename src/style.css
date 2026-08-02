@@ -3851,6 +3851,75 @@ kbd {
   }
 }
 
+/* The rank line under a name — "1st", "2nd". Only the Rail Race fills it in;
+   an empty one takes no room at all, so the water fight and the dodgems are
+   laid out exactly as they were before it existed. */
+.mg-portrait-rank {
+  font-size: var(--lgp-text-min);
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--lgp-ink);
+  text-shadow:
+    0 0.0625rem 0 #fff6ea,
+    0 0 0.25rem #fff6eacc;
+  text-align: center;
+}
+.mg-portrait-rank:empty { display: none; }
+
+/* ------------------------------------------------- portraits as a running order
+   The Rail Race (1 August 2026): "show all 4 riders along the top edge, ranked,
+   with place and name". The two banks cannot express that — a running order
+   split across two opposite edges of the screen is not an order anybody can
+   read — so this is the one layout that overrides them, on `data-layout='row'`.
+   It is only the *placement* that changes: the painted faces, the names, the
+   accent rings and the pop are the same shared machinery underneath.
+
+   Ordering is CSS `order`, written by `PortraitStrip.setOrder`, so re-ranking
+   moves nothing in the DOM.
+
+   The top padding clears BOTH of the Rail Race's own top-edge pills —
+   `.racehud-lap` at `0.75rem` and `.racehud-bonk`, which pops up directly
+   under it at `3.4rem` — rather than overlapping either. A portrait strip
+   appended after both in `RaceHud`'s DOM would otherwise stack visually on
+   top of a bonk message the instant one popped, burying the one piece of
+   feedback a bonk gets. Attribute selectors out-specify the plain class rules
+   above *and* the portrait-orientation block below, so this holds whichever
+   way the phone is held — which is the point: the running order belongs
+   along the top in both. */
+.mg-portrait-strip[data-layout='row'] {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  padding: calc(5.6rem + env(safe-area-inset-top)) 0.5rem 0;
+}
+
+.mg-portrait-strip[data-layout='row'] .mg-portrait-bank {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.mg-portrait-strip[data-layout='row'] .mg-portrait-item {
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+/* Four heads plus their names have to fit across the *narrow* edge of a phone,
+   which the two-bank layout never had to do — it only ever put two or three
+   down one side. The height test matters as much as the width one and is easy
+   to forget: a phone held in landscape is barely 390 px tall, and four heads at
+   the full size ate nearly a third of it. */
+@media (max-width: 620px), (max-height: 520px) {
+  .mg-portrait-strip[data-layout='row'] .mg-portrait { width: 2.75rem; height: 2.75rem; border-width: 0.1875rem; }
+  .mg-portrait-strip[data-layout='row'] .mg-portrait-bank { gap: 0.4rem; }
+  .mg-portrait-strip[data-layout='row'] .mg-portrait-name {
+    font-size: var(--lgp-text-min);
+    max-width: 4rem;
+  }
+  .mg-portrait-strip[data-layout='row'] { padding-top: calc(4.6rem + env(safe-area-inset-top)); }
+}
+
 /* ---------------------------------------------- water fight: wet portraits
    The bluish tint pouring down from the top of the head, plus a few drips
    clinging to the bottom rim — water fight's own reaction, appended to a

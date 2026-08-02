@@ -1,7 +1,7 @@
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
 import { planHazards, type HazardLayout, type HazardSchedule, type RaceLevel } from './hazards';
-import type { RailRaceRoute } from './route';
+import { LANE_COUNT, PLAYER_LANE, type RailRaceRoute } from './route';
 
 /**
  * **The race, as arithmetic.** No scene, no camera, no DOM.
@@ -322,7 +322,15 @@ export function stepRider(
     DRAG_LINEAR * rider.speed +
     DRAG_SQUARE * rider.speed * rider.speed +
     (rider.sparking ? SPARK_DRAG : 0);
-  rider.speed = clamp(rider.speed + (thrust - drag - HILL_PULL * slope) * dt, MIN_SPEED, MAX_SPEED);
+  // The clamp scales with `band`, not just the thrust that feeds it. A flat
+  // `MAX_SPEED` here was the exact bug the family's "far too good" rivals
+  // report traced to under the old hold-based physics (see `rivalBand`'s own
+  // doc comment): a rubber-banded rival's thrust could rise, but its speed
+  // was silently re-capped back down to the player's own ceiling, so a
+  // trailing rival given a tow could never actually close on it. `band` is 1
+  // for the player always, so this is a no-op for her.
+  const speedCap = band > 1 ? MAX_SPEED * band : MAX_SPEED;
+  rider.speed = clamp(rider.speed + (thrust - drag - HILL_PULL * slope) * dt, MIN_SPEED, speedCap);
 
   const before = rider.travelled;
   rider.travelled += rider.speed * dt;
@@ -388,6 +396,94 @@ function zoneIsHere(rider: Rider, hazards: HazardSchedule, lead: number, trail: 
   const stretch = hazards.sparkStretches[rider.zoneCursor];
   if (stretch === undefined) return false;
   return rider.travelled >= stretch.from - lead && rider.travelled <= stretch.to + trail;
+}
+
+/**
+ * How good each rival is, by lane, innermost first.
+ *
+ * **Lowered on the family's 1 August 2026 verdict that the rivals were "far
+ * too good"**, and re-measured here on 2 August 2026 against the tap-rate
+ * rework — the old 0.72/0.8/0.86 survived PR #167's whole input-model rewrite
+ * untouched (nobody had reason to touch it while chasing the tap-rate work),
+ * and at those numbers a rival's *mash rate* alone
+ * (`RIVAL_MASH_RATE_MIN + (MAX-MIN) * skill`) sits at 5.2–5.7 taps/second —
+ * within a whisker of `mashPerfect`'s flat-out 6, which is a rival who is
+ * very nearly always mashing at full tilt. Skill has three levers now, not
+ * one: the mash rate itself, the chance of missing a duck bar
+ * (`1 - rng.chance(skill)` in {@link rivalInput}), and how much lead a rival
+ * gives a black stretch before easing off. Lowering only the number, without
+ * touching {@link rivalBand}, would have repeated the exact mistake PR #157's
+ * second review round caught under the old physics: a rubber band that
+ * refunds every mistake a low-skill rival makes reads as "the rivals are
+ * still unbeatable" no matter how low `skill` goes, because a low `skill`
+ * rival is *further behind* and so gets *more* of the tow.
+ *
+ * Picked by racing {@link simulateField} across the fixed seed sweep
+ * `scripts/check-rail-race.mts` prints (level 3, every hazard live — the
+ * hardest of the three the family can choose): a `mashPerfect` player wins
+ * every one of the 24 fixed seeds, comfortably but never by a procession,
+ * while a `mashSloppy` one wins under half of them — sloppy play is a real
+ * chance of losing, not a formality either way — and every rival lands a
+ * handful of real, visible bar-misses per race rather than either never
+ * missing (unbeatable) or missing constantly (a joke). See that script's own
+ * "the field" section for the live numbers.
+ */
+export const RIVAL_SKILL: readonly number[] = [0.62, 0.72, 0.82];
+
+/**
+ * How hard the rivals rubber-band, and **why a low `skill` alone was never
+ * going to be enough.**
+ *
+ * A metre of lead moves a rival's thrust by `CATCHUP`. Before this file, it
+ * was a single symmetric ±0.22 in `RailRace.ts`, clamped straight onto
+ * thrust with nothing scaling the speed ceiling that thrust was trying to
+ * push past — the exact defect PR #157's second review round found under the
+ * old hold-based physics, reproduced here in the tap-rate rework because
+ * nothing about the rubber band changed when the control scheme did. Two
+ * separate bugs, and lowering `RIVAL_SKILL` fixes neither:
+ *
+ * 1. **The speed clamp didn't scale with the band that was supposed to beat
+ *    it.** A trailing rival's thrust could rise (a bigger `band`), but
+ *    `stepRider` re-capped the resulting speed straight back down to the
+ *    player's own `MAX_SPEED` — see that function's `speedCap` fix. Whatever
+ *    edge the tow was meant to give a rival evaporated at the clamp.
+ * 2. **The band itself was symmetric and short.** A rival who fell behind —
+ *    which a *lower-skill* rival now does more often, precisely because it
+ *    is missing more bars and mashing slower — only ever got back to +22%
+ *    thrust, reached slowly. A rival who is genuinely worse plays worse
+ *    *more*, falls behind *more*, and needs *more* tow to stay a race rather
+ *    than a procession — the band has to grow with how far behind a rival
+ *    actually gets, not cap out at the same modest ceiling a rival who is
+ *    barely behind at all also gets.
+ *
+ * So, asymmetric on both axes, same shape as the fix that solved this once
+ * already under the old physics:
+ *
+ * - **Behind**: a gentle ramp to a generous ceiling — a rival ten metres back
+ *   gets almost nothing, so a mistake the player just watched still costs
+ *   real ground in the stretch where she can see it happen; a rival a long
+ *   way back is towed hard enough to stay in the race.
+ * - **Ahead**: a quicker ramp to a harder ceiling — a rival who gets in front
+ *   sags back within a modest lead, which is the half of the mechanic that
+ *   lets a child who is behind come back.
+ */
+const CATCHUP_BEHIND = 0.006;
+const CATCHUP_AHEAD = 0.01;
+const SWING_BEHIND = 0.55;
+const SWING_AHEAD = 0.32;
+
+/**
+ * A rival's thrust multiplier, from how far the player is ahead of them.
+ *
+ * `lead` is `player.travelled - rival.travelled`, so positive means the rival
+ * is behind. Lives here with the physics it multiplies rather than in
+ * `RailRace.ts`, so the balance checker races the same rubber band the
+ * browser does instead of a re-implementation of it.
+ */
+export function rivalBand(lead: number): number {
+  return lead >= 0
+    ? 1 + Math.min(lead * CATCHUP_BEHIND, SWING_BEHIND)
+    : 1 - Math.min(-lead * CATCHUP_AHEAD, SWING_AHEAD);
 }
 
 /** How many taps a second a rival lands while nothing needs their attention. */
@@ -549,4 +645,80 @@ export function simulateRailRace(strategy: Strategy, level: RaceLevel): RaceOutc
   }
 
   return { seconds, bonks: rider.bonks, sparkSeconds: rider.sparkSeconds };
+}
+
+/** How a whole four-cart race came out. */
+export interface FieldOutcome {
+  /** The player's finishing position, 1 is a win. */
+  readonly playerPlace: number;
+  /** Lanes in finishing order. */
+  readonly order: readonly number[];
+  /** How long the player's own race took, in seconds. */
+  readonly seconds: number;
+  /**
+   * How far the nearest rival was from the line **at the moment the player
+   * crossed it** — positive if that rival was still behind, negative if they
+   * had already finished ahead. Sampled then rather than at the end of the
+   * whole race, when everybody is on the line and every margin is zero.
+   */
+  readonly marginMetres: number;
+  /** Duck bars the three rivals missed between them, for the checker to report. */
+  readonly rivalBonks: number;
+}
+
+/**
+ * The **whole field** — the player and all three rivals — raced headlessly.
+ *
+ * The single-rider {@link simulateRailRace} above answers "is letting go
+ * worth it?". This answers the question the family actually asked on 1
+ * August 2026, unchanged by the tap-rate rework: *can she win?* It drives the
+ * very functions the browser drives — {@link rivalInput} for the rivals,
+ * {@link rivalBand} for the rubber band, {@link stepRider} for everybody —
+ * so rival tuning cannot pass this check by being right only in a model of
+ * the game that the browser does not actually run.
+ *
+ * Each rider gets its own `Rng` stream, keyed off the seed and its lane, so
+ * one rival's luck cannot shift another's: without that, changing a single
+ * skill value re-rolls every rival's whole race and the check reads as noise
+ * rather than a measurement of the change that was actually made.
+ */
+export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: number): FieldOutcome {
+  const route = RAIL_RACE_PLAN.route;
+  const hazards = scheduleForLevel(level);
+  const dt = 1 / 60;
+  const riders = Array.from({ length: LANE_COUNT }, (_unused, lane) => createRider(lane));
+  const rngs = riders.map((_unused, lane) => new Rng(seed + lane * 0x9e37));
+  const player = riders[PLAYER_LANE]!;
+  const rivals = riders.filter((rider) => rider.lane !== PLAYER_LANE);
+  const order: number[] = [];
+  let seconds = 0;
+  let playerSeconds = 0;
+  let marginMetres = 0;
+
+  while (order.length < riders.length && seconds < 400) {
+    for (const rider of riders) {
+      if (rider.finished) continue;
+      const rng = rngs[rider.lane]!;
+      const isPlayer = rider.lane === PLAYER_LANE;
+      const input = isPlayer
+        ? strategyInput(playerStrategy, rider, hazards, dt, rng)
+        : rivalInput(rider, hazards, dt, RIVAL_SKILL[rider.lane] ?? 0.7, rng);
+      const band = isPlayer ? 1 : rivalBand(player.travelled - rider.travelled);
+      if (!stepRider(route, rider, hazards, input, dt, band).finishedNow) continue;
+      order.push(rider.lane);
+      if (isPlayer) {
+        playerSeconds = seconds;
+        marginMetres = RACE_DISTANCE - Math.max(...rivals.map((other) => other.travelled));
+      }
+    }
+    seconds += dt;
+  }
+
+  return {
+    playerPlace: order.indexOf(PLAYER_LANE) + 1,
+    order,
+    seconds: playerSeconds,
+    marginMetres,
+    rivalBonks: rivals.reduce((sum, rider) => sum + rider.bonks, 0),
+  };
 }

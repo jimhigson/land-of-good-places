@@ -499,10 +499,16 @@ export class Game {
     this.world.railRace.onRaceMoment = (moment) => {
       switch (moment.kind) {
         case 'start':
+          // `setShown(true)` before `setRacers`: hiding is what disposes the
+          // strip, so building it first would throw it away again.
           this.raceHud.setShown(true);
+          this.raceHud.setRacers(moment.racers);
           break;
         case 'levelSelect':
           this.raceHud.setLevelSelect(moment.shown);
+          break;
+        case 'standings':
+          this.raceHud.setStandings(moment.order);
           break;
         case 'count':
           this.raceHud.setCount(moment.text);
