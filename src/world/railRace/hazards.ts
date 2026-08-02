@@ -78,7 +78,15 @@ import { RIDE_SCALE } from './route';
  * running game actually measures rather than a formula re-derived from the
  * same code that produces the pose.
  */
-export const DUCK_CLEARANCE = 2.1 * RIDE_SCALE;
+export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.1;
+
+/**
+ * The clearance on the ring a child actually races on. A ring builds its own
+ * bars at `DUCK_CLEARANCE_AT_PARK_SCALE * route.scale` (`track.ts`), so the
+ * walk-past ring's bars are proportioned to the park-scale kids under them
+ * rather than hanging at race height over half-size carts.
+ */
+export const DUCK_CLEARANCE = DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.

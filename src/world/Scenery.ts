@@ -15,7 +15,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { GARDEN_HALF_SIZE, PLAYER_RADIUS, TERRAIN_RADIUS } from '../core/constants';
+import { PLAYER_RADIUS, TERRAIN_RADIUS, TREELINE_INNER_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
@@ -575,6 +575,13 @@ function buildFoliage(collision: CollisionWorld): {
  * the ground appears to disappear into trees rather than simply stopping in
  * mid-air. Nothing here is reachable, so none of it registers collision and the
  * trees are cheap: trunk plus one blob.
+ *
+ * The band starts at {@link TREELINE_INNER_RADIUS} rather than a metre outside
+ * the park, because the apron outside the wall is no longer empty — the Rail
+ * Race's two rings stand on it (2 August 2026). The count went up with the band:
+ * the annulus is about 60% larger in area than the one 340 trees used to fill,
+ * and a treeline that thins out is a treeline you can see the edge of the world
+ * through, which is the one thing it exists to prevent.
  */
 function buildTreeline(): Group {
   const group = new Group();
@@ -584,11 +591,11 @@ function buildTreeline(): Group {
   const trunks: InstanceItem[] = [];
   const canopies: InstanceItem[] = [];
 
-  const bandInner = GARDEN_HALF_SIZE + 1;
+  const bandInner = TREELINE_INNER_RADIUS;
   const bandOuter = TERRAIN_RADIUS - 1.5;
   const colours = [PALETTE.leafDeep, PALETTE.leafMid, PALETTE.leafBlue, PALETTE.leafLight];
 
-  for (let i = 0; i < 340; i += 1) {
+  for (let i = 0; i < 540; i += 1) {
     const angle = rng.range(0, TAU);
     const distance = rng.range(bandInner, bandOuter);
     const x = Math.cos(angle) * distance;

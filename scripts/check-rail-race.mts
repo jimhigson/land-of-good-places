@@ -67,6 +67,7 @@
 
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
+import { RIM_START, TERRAIN_RADIUS } from '../src/core/constants.ts';
 import { TAU } from '../src/core/mathUtils.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
@@ -75,11 +76,12 @@ import { RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
 import {
   BASE_HEIGHT,
   LANE_COUNT,
-  LANE_RADII,
   NOMINAL_RADIUS,
   PLAYER_LANE,
+  RIDE_SCALE,
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
+import { RAIL_GAUGE_AT_PARK_SCALE } from '../src/world/railRace/track.ts';
 import {
   RACE_LAPS,
   RIVAL_SKILL,
@@ -95,7 +97,13 @@ const require = (ok: boolean, complaint: string): void => {
   if (!ok) problems.push(complaint);
 };
 
-const route = RAIL_RACE_PLAN.route;
+// The race ring — the one a child is actually on. Its walk-past twin shares
+// this route's arc length, start distance and undulation exactly (see
+// `route.ts`), so everything below about *when* things happen holds for both;
+// what differs is lane spread, and that is checked on its own at the bottom.
+const route = RAIL_RACE_PLAN.raceRing;
+const walkPast = RAIL_RACE_PLAN.walkPastRing;
+const LANE_RADII = route.laneRadii;
 const SAMPLES = 1400;
 
 say(`loop        ${route.length.toFixed(1)} m at r=${NOMINAL_RADIUS} m, ${LANE_COUNT} lanes`);
@@ -221,14 +229,57 @@ say(
 );
 require(lowestOverGate > 6, `only ${lowestOverGate.toFixed(2)} m of air over the entrance arch.`);
 
-// Every lane must sit inside the boundary wall, so the ring reads as the park's
-// own rim rather than something hovering out over the treeline.
-const outermost = Math.max(...LANE_RADII);
+// Every rail of every lane of **both** rings must sit outside the boundary wall
+// (2 August 2026 — this used to assert the opposite, back when the ring flew
+// over the park's own crowded rim band at 53.5 m). Measured to the rail head,
+// not the lane centre: half a gauge either side is real structure.
+const rings = [
+  { name: 'race     ', route, half: (RAIL_GAUGE_AT_PARK_SCALE * route.scale) / 2 },
+  { name: 'walk-past', route: walkPast, half: (RAIL_GAUGE_AT_PARK_SCALE * walkPast.scale) / 2 },
+];
+for (const ring of rings) {
+  const innermost = Math.min(...ring.route.laneRadii) - ring.half;
+  const outermost = Math.max(...ring.route.laneRadii) + ring.half;
+  require(
+    innermost > ENTRANCE_WALL_RADIUS,
+    `the ${ring.name.trim()} ring's inner rail at r=${innermost.toFixed(2)} is inside the ` +
+      `boundary wall at r=${ENTRANCE_WALL_RADIUS} — both rings belong outside the park.`,
+  );
+  require(
+    outermost < TERRAIN_RADIUS - 4,
+    `the ${ring.name.trim()} ring's outer rail at r=${outermost.toFixed(2)} runs off the edge ` +
+      `of the terrain disc at r=${TERRAIN_RADIUS}.`,
+  );
+  require(
+    outermost < RIM_START,
+    `the ${ring.name.trim()} ring's outer rail at r=${outermost.toFixed(2)} is out past the ` +
+      `hilltop crest at r=${RIM_START}, where its trestles would stand on the falling rim.`,
+  );
+  say(
+    `rim         ${ring.name} ring rails r=${innermost.toFixed(1)}-${outermost.toFixed(1)}, ` +
+      `outside the wall at r=${ENTRANCE_WALL_RADIUS}, inside the crest at r=${RIM_START}`,
+  );
+}
+
+// The two rings are built, not scaled: the race ring's lanes really are
+// RIDE_SCALE further apart than the walk-past ring's. Asserted here rather than
+// left to read, because "one geometry with a group scale on it" is exactly the
+// shortcut this ride had before and exactly what put a 2.5x rival in the park.
+const spanRatio = route.laneSpan / walkPast.laneSpan;
 require(
-  outermost < ENTRANCE_WALL_RADIUS - 1,
-  `the outer lane at r=${outermost} reaches the boundary wall at r=${ENTRANCE_WALL_RADIUS}.`,
+  Math.abs(spanRatio - RIDE_SCALE) < 1e-6,
+  `the race ring's lane span is ${spanRatio.toFixed(3)}x the walk-past ring's, not ${RIDE_SCALE}x.`,
 );
-say(`rim         outer lane r=${outermost.toFixed(1)} inside the wall at r=${ENTRANCE_WALL_RADIUS}`);
+require(
+  Math.abs(route.length - walkPast.length) < 1e-9 &&
+    Math.abs(route.startDistance - walkPast.startDistance) < 1e-9,
+  `the two rings disagree about arc length or start distance, so a rider's travelled distance ` +
+    `would not survive being moved from one to the other.`,
+);
+say(
+  `rings       race lane span ${route.laneSpan.toFixed(2)} m = ${spanRatio.toFixed(1)}x the ` +
+    `walk-past ring's ${walkPast.laneSpan.toFixed(2)} m, on one shared ${route.length.toFixed(1)} m lap`,
+);
 
 // The dismount has to be somewhere a person can stand.
 const exitRadius = Math.hypot(RAIL_RACE_PLAN.exitX, RAIL_RACE_PLAN.exitZ);

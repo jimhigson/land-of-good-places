@@ -1,6 +1,6 @@
 import { PerspectiveCamera, Vector3 } from 'three';
 import { damp } from '../../core/mathUtils';
-import { LANE_RADII, PLAYER_LANE, type RailRaceRoute } from './route';
+import { PLAYER_LANE, type RailRaceRoute } from './route';
 
 /**
  * **The Rail Race's side-on camera.**
@@ -194,8 +194,15 @@ const FOLLOW = 0.12;
  */
 const FOLLOW_LAG = FOLLOW / Math.LN2;
 
-/** The rider's own lane. The framing promises are about the rider, so measured there. */
-const RIDER_RADIUS = LANE_RADII[PLAYER_LANE]!;
+/**
+ * The rider's own lane radius, on the ring this camera was given. The framing
+ * promises are about the rider, so they are measured there — and read off the
+ * route rather than a module constant, because there are two rings of
+ * different widths and only one of them is ever raced on.
+ */
+function riderRadius(route: RailRaceRoute): number {
+  return route.laneRadii[PLAYER_LANE] ?? route.nominalRadius;
+}
 
 /**
  * How far above the rails the rider themself sits, in metres.
@@ -273,10 +280,11 @@ export class RaceCamera {
   /** The rider's lane at arc distance `s`, at the level the lanes undulate about. */
   private ringPoint(s: number, into: Vector3): Vector3 {
     const theta = this.route.angleAt(s);
+    const radius = riderRadius(this.route);
     return into.set(
-      Math.cos(theta) * RIDER_RADIUS,
+      Math.cos(theta) * radius,
       this.route.base + 0.6 + RIDER_RIDE_HEIGHT,
-      Math.sin(theta) * RIDER_RADIUS,
+      Math.sin(theta) * radius,
     );
   }
 

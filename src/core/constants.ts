@@ -23,16 +23,44 @@ export const GARDEN_PLAY_RADIUS = 58;
  * ground plane would fill the frame forever and the sky would never be seen.
  * The cut edge is hidden behind the treeline (see Scenery).
  */
-export const TERRAIN_RADIUS = 72;
+export const TERRAIN_RADIUS = 83.5;
 
 /**
  * The hilltop crest. Between RIM_START and RIM_END the ground falls away by
  * RIM_DROP metres, which is steeper than the camera pitch — so the slope hides
- * itself and the horizon appears just above the boundary wall.
+ * itself and the horizon appears just past the crest.
+ *
+ * **The crest moved out on 2 August 2026, from 61 m to 72 m**, and the terrain
+ * disc with it (72 m to 83.5 m). The Rail Race's two rings now circle the park
+ * *outside* the boundary masonry at 60 m rather than flying over the crowded
+ * band inside it, and the wider of the two is 9.35 m across, reaching 70.2 m.
+ * The old crest started 11 m inside that: the ring's trestles would have had to
+ * stand on a 60° hillside on legs half again as long as the ones they replace,
+ * and the treeline (which used to run 63–70.5 m) would have grown straight
+ * through the track.
+ *
+ * So the hilltop keeps an apron outside the wall wide enough to stand the ride
+ * on. `smoothstep(72, 82)` over the same 17 m drop is the same 60°-ish slope as
+ * before — steeper than the camera's 38° pitch, so it still hides itself — and
+ * the treeline (see {@link TREELINE_INNER_RADIUS}) moved out past the rings to
+ * go on screening the cut edge. What actually changes on screen is that the
+ * ground beyond the wall now runs on to a coaster instead of stopping at a
+ * horizon a metre past the masonry.
  */
-export const RIM_START = 61;
-export const RIM_END = 71;
+export const RIM_START = 72;
+export const RIM_END = 82;
 export const RIM_DROP = 17;
+
+/**
+ * Where the woodland that hides the terrain's cut edge begins.
+ *
+ * Was `GARDEN_HALF_SIZE + 1` — one metre outside the park, which was the right
+ * answer while there was nothing outside the park. There is now: both Rail Race
+ * rings stand on the apron, the wider reaching 70.2 m. Trees are planted beyond
+ * them instead of among them, close enough behind the ride to still read as the
+ * edge of the world.
+ */
+export const TREELINE_INNER_RADIUS = 71.5;
 
 /** Rings on the terrain disc. Higher = smoother hills. */
 export const TERRAIN_SEGMENTS = 72;

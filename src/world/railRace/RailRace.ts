@@ -16,7 +16,7 @@ import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
-import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './route';
+import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
 import type { RaceLevel } from './hazards';
@@ -202,6 +202,19 @@ interface Cart {
   readonly kid: KidHandle | null;
 }
 
+/**
+ * One of the ride's two rings: the geometry, and the route it was built from.
+ *
+ * See `route.ts`'s header. Both are built once, at park load — **never** when a
+ * race starts. Rebuilding a 400 m loop of swept rail, trestles and duck bars
+ * mid-game would mean a mesh rebuild and the collection that follows it, in the
+ * one moment a six-year-old has just pressed the button and is watching.
+ */
+interface Ring {
+  readonly route: RailRaceRoute;
+  readonly track: RailRaceTrack;
+}
+
 export class RailRace implements GameSystem {
   readonly name = 'railRace';
   readonly group = new Group();
@@ -215,7 +228,15 @@ export class RailRace implements GameSystem {
    * (It did exactly that on the first attempt: four of the five seed suites
    * built the canonical park instead of their own.)
    */
-  readonly route = RAIL_RACE_PLAN.route;
+  readonly route = RAIL_RACE_PLAN.raceRing;
+  /**
+   * The ring the rivals idle round at park scale, and the ring a race is run
+   * on at toy scale — both exposed for the same reason `route` is: an
+   * invariant has to be able to measure them **through the built world**
+   * rather than by importing `railRace/plan.ts`.
+   */
+  readonly walkPastRoute = RAIL_RACE_PLAN.walkPastRing;
+  readonly raceRoute = RAIL_RACE_PLAN.raceRing;
   readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
@@ -243,7 +264,16 @@ export class RailRace implements GameSystem {
   touchDucking: (() => boolean) | null = null;
 
   private readonly collision: CollisionWorld;
-  private readonly track: RailRaceTrack;
+  /** The ring the rivals live on between races. Always visible; always solid. */
+  private readonly walkPastRing: Ring;
+  /** The ring a race is run on. Visible only between `requestBoard` and `arrive`. */
+  private readonly raceRing: Ring;
+  /**
+   * Whichever of the two is live right now. **Exactly one ever is** — the two
+   * rings are concentric, so this is the whole mutual-exclusion rule and it
+   * lives in one place ({@link setActiveRing}).
+   */
+  private activeRing: Ring;
   private readonly sparks: Sparks;
   private readonly carts: Cart[] = [];
   private readonly rng = new Rng(0x7a11ed);
@@ -281,13 +311,35 @@ export class RailRace implements GameSystem {
     this.collision = collision;
     this.group.name = 'railRace';
 
-    const route = RAIL_RACE_PLAN.route;
-    // Level-independent — see `HAZARD_LAYOUT`'s own doc comment. The ring's
-    // hazard geometry is built once, in full, whichever level ends up
-    // chosen; `setHazardLevel` below only ever toggles its visibility.
-    this.track = buildRailRaceTrack(route, HAZARD_LAYOUT, collision);
-    this.track.setHazardLevel(this.activeLevel);
-    this.group.add(this.track.group);
+    // Both rings, built here and never again — see {@link Ring}. Level-
+    // independent, as `HAZARD_LAYOUT`'s own doc comment explains: a ring's
+    // hazard geometry is built once, in full, whichever level ends up chosen;
+    // `setHazardLevel` only ever toggles its visibility.
+    //
+    // The walk-past ring goes up **first**, and it is the one that registers
+    // collision. The race ring's own trestle search then sees those posts as
+    // occupied ground and stands its legs clear of them for free, so the two
+    // rings' supports never land on the same square metre even though the
+    // rings are concentric.
+    this.walkPastRing = {
+      route: RAIL_RACE_PLAN.walkPastRing,
+      track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
+        ringName: 'railRace:walk-past-ring',
+        registerCollision: true,
+      }),
+    };
+    this.raceRing = {
+      route: RAIL_RACE_PLAN.raceRing,
+      track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
+        ringName: 'railRace:race-ring',
+        registerCollision: false,
+      }),
+    };
+    for (const ring of [this.walkPastRing, this.raceRing]) {
+      ring.track.setHazardLevel(this.activeLevel);
+      this.group.add(ring.track.group);
+    }
+    this.activeRing = this.walkPastRing;
 
     this.sparks = createSparks();
     this.group.add(this.sparks.root);
@@ -300,6 +352,32 @@ export class RailRace implements GameSystem {
     this.exitCrowd = createRailRaceExitCrowd(collision);
     this.group.add(this.exitCrowd.root);
 
+    this.setActiveRing(this.walkPastRing);
+  }
+
+  /**
+   * Puts one ring on show and takes the other off, and moves every cart and
+   * rider onto it.
+   *
+   * **The rivals are relocated, not duplicated.** These are the same three
+   * `Cart` objects with the same `Rider` state and the same `KidHandle` — all
+   * that changes is which route `placeCarts` reads and how big the cart group
+   * is drawn. `travelled` carries across untouched, because both rings share
+   * one arc length and one start distance (`route.ts`). A second, parallel set
+   * of rivals kept "in sync" with the first is exactly how you end up with two
+   * copies of Pip idling in two places the first time a swap is missed; there
+   * is only ever one Pip.
+   *
+   * This is also the one and only place a cart's `scale` is written. It used to
+   * be set once in `buildCarts()` and never touched again, which is why the
+   * rivals were 2.5x life-size to anybody walking past between races — the bug
+   * that started all this.
+   */
+  private setActiveRing(ring: Ring): void {
+    this.activeRing = ring;
+    this.walkPastRing.track.group.visible = ring === this.walkPastRing;
+    this.raceRing.track.group.visible = ring === this.raceRing;
+    for (const cart of this.carts) cart.group.scale.setScalar(ring.route.scale);
     this.placeCarts();
   }
 
@@ -312,22 +390,21 @@ export class RailRace implements GameSystem {
       const cart = createCart(LANE_COLOURS[index] ?? PALETTE.markerPink);
       const group = cart.root;
       const kid = createKid({ outfit: rival.outfit, hairStyle: rival.hairStyle });
-      // Local to this still-unscaled `group` (the RIDE_SCALE below applies to
-      // both together), so this is the cart's own SEAT_HEIGHT, not the
-      // player's world-space `poseRider()` version of the same fact.
+      // Local to this group, whose scale is the ring's (see `setActiveRing`)
+      // and applies to the cart and the kid sitting in it together — so this
+      // is the cart's own SEAT_HEIGHT, not the player's world-space
+      // `poseRider()` version of the same fact.
       kid.root.position.y = SEAT_HEIGHT;
       kid.setExpression('happy');
       group.add(kid.root);
-      // RIDE_SCALE scales the cart's own body/nose and, since the kid is a
-      // child of this same group, the rival riding in it, together.
-      group.scale.setScalar(RIDE_SCALE);
+      // No scale here. A cart is sized by the ring it is currently on, and
+      // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
       this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
     const group = playerCart.root;
-    group.scale.setScalar(RIDE_SCALE);
     this.group.add(group);
     this.carts.push({ rider: createRider(PLAYER_LANE), group, cart: playerCart, isPlayer: true, kid: null });
   }
@@ -335,7 +412,7 @@ export class RailRace implements GameSystem {
   /** Lazily, as the train does: the headless park has no player and no DOM. */
   attachPlayer(player: Player): void {
     this.player = player;
-    this.rideView = new RaceCamera(RAIL_RACE_PLAN.route);
+    this.rideView = new RaceCamera(RAIL_RACE_PLAN.raceRing);
   }
 
   /** The stall's interact press lands here. */
@@ -365,7 +442,12 @@ export class RailRace implements GameSystem {
     this.raceTime = 0;
     this.finishedCount = 0;
     this.ducking = false;
-    this.placeCarts();
+    // Up onto the race ring: the big one appears, the little one goes away, and
+    // the three rivals come with her. Both rings were built at park load, so
+    // this is two `visible` flags and a scale, not a rebuild. It is hidden
+    // behind the boarding iris either way — she never sees the swap, only that
+    // the ring she is on is suddenly enormous.
+    this.setActiveRing(this.raceRing);
     this.rideView?.reset(0);
     // The right mouse button is the desktop duck control for the whole race —
     // see `InputSystem.setMouseCaptureActive`'s own doc comment for why this
@@ -389,7 +471,7 @@ export class RailRace implements GameSystem {
     if (this.phase !== 'levelSelect') return false;
     this.activeLevel = level;
     this.activeSchedule = scheduleForLevel(level);
-    this.track.setHazardLevel(level);
+    for (const ring of [this.walkPastRing, this.raceRing]) ring.track.setHazardLevel(level);
     this.onRaceMoment?.({ kind: 'levelSelect', shown: false });
     // Fired here, not in the countdown branch of `update()`: this is the one
     // moment she has just committed to racing but nothing has moved yet,
@@ -567,7 +649,7 @@ export class RailRace implements GameSystem {
         band = rivalBand(me.travelled - rider.travelled);
       }
 
-      const events = stepRider(RAIL_RACE_PLAN.route, rider, this.activeSchedule, riderInput, dt, band);
+      const events = stepRider(this.activeRing.route, rider, this.activeSchedule, riderInput, dt, band);
 
       if (cart.isPlayer) {
         this.ducking = rider.ducking;
@@ -610,7 +692,7 @@ export class RailRace implements GameSystem {
    */
   private driveIdleRivals(context: FrameContext): void {
     const { dt } = context;
-    const route = RAIL_RACE_PLAN.route;
+    const route = this.activeRing.route;
     for (const cart of this.carts) {
       if (cart.isPlayer) continue;
       const rider = cart.rider;
@@ -669,7 +751,7 @@ export class RailRace implements GameSystem {
   }
 
   private placeCarts(): void {
-    const route = RAIL_RACE_PLAN.route;
+    const route = this.activeRing.route;
     for (const cart of this.carts) {
       const at = route.wrap(route.startDistance + cart.rider.travelled);
       route.pointAt(cart.rider.lane, at, this.point);
@@ -683,13 +765,13 @@ export class RailRace implements GameSystem {
 
   private animate(dt: number, elapsed: number): void {
     const me = this.me.rider;
-    const route = RAIL_RACE_PLAN.route;
+    const route = this.activeRing.route;
 
     // The warning lamps, driven off how far round this lap she is. Safe now
     // means "actively ducking" (the dedicated held control), not "not
     // holding the old accelerate button" — see `hazards.ts`'s header.
     const lapOffset = me.travelled % route.length;
-    this.track.setAlerts(lapOffset, me.ducking, elapsed);
+    this.activeRing.track.setAlerts(lapOffset, me.ducking, elapsed);
 
     // Sparks fly off whichever carts are powering over a black stretch — the
     // rivals' too, which is how a child learns the rule by watching somebody
@@ -711,7 +793,7 @@ export class RailRace implements GameSystem {
       const zoneIndex = cart.rider.zoneCursor % HAZARD_LAYOUT.zones.length;
       sparkingSegments.push({ zoneIndex, lane: cart.rider.lane });
     }
-    this.track.setSparking(sparkingSegments, elapsed);
+    this.activeRing.track.setSparking(sparkingSegments, elapsed);
     this.sparks.update(dt);
 
     // Wheels turn with distance travelled, not with `dt` — an absolute angle
@@ -772,11 +854,18 @@ export class RailRace implements GameSystem {
     // her head in *both* held and ducked states (see DUCK_CLEARANCE in
     // hazards.ts). This and that value were picked together against her real
     // measured head height in both states, live, on 1 August 2026.
-    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * RIDE_SCALE : 0;
+    //
+    // Taken off the ring she is actually on rather than off `RIDE_SCALE`
+    // directly. She only ever rides the race ring, so the number is the same —
+    // but reading it from the ring is what stops this drifting the day a third
+    // one exists, and it is the same rule every other size in this file now
+    // follows.
+    const rideScale = this.activeRing.route.scale;
+    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * rideScale : 0;
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     this.player.setRidePose(
       cart.position.x + wobble,
-      cart.position.y + SEAT_HEIGHT * RIDE_SCALE - duckDrop,
+      cart.position.y + SEAT_HEIGHT * rideScale - duckDrop,
       cart.position.z,
       cart.rotation.y,
       // Rivals get this for free — `kid.root` is a child of the same group
@@ -835,8 +924,12 @@ export class RailRace implements GameSystem {
     // own doc comment.
     this.activeLevel = 1;
     this.activeSchedule = scheduleForLevel(1);
-    this.track.setHazardLevel(1);
-    this.placeCarts();
+    for (const ring of [this.walkPastRing, this.raceRing]) ring.track.setHazardLevel(1);
+    // Back down onto the walk-past ring, at park scale, where Pip, Nell and
+    // Otto go back to being three normal-sized children riding a normal-sized
+    // coaster round the outside of the park. This is the line that fixes the
+    // bug in Jim's screenshot.
+    this.setActiveRing(this.walkPastRing);
   }
 
   interactZones(): [] {
@@ -844,7 +937,7 @@ export class RailRace implements GameSystem {
   }
 
   dispose(): void {
-    this.track.dispose();
+    for (const ring of [this.walkPastRing, this.raceRing]) ring.track.dispose();
     this.confetti?.dispose();
     this.exitCrowd.dispose();
     this.sparks.dispose();

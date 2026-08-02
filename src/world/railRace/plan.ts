@@ -2,7 +2,7 @@ import { GARDEN_PLAY_RADIUS } from '../../core/constants';
 import { TAU } from '../../core/mathUtils';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
-import { RailRaceRoute } from './route';
+import { RailRaceRoute, RIDE_SCALE } from './route';
 
 /**
  * The Rail Race as *data*, solved at module load from the park layout alone —
@@ -18,6 +18,26 @@ const STATION_STALL_ID = 'stall.railRacer';
 export interface PlannedRailRace {
   /** Matches `PlannedCoaster.name` — `paths.ts` names the exit node with it. */
   readonly name: string;
+  /**
+   * The ring the rival kids idle round all day, at park scale. Always built,
+   * always visible, and the only one of the two that registers collision.
+   */
+  readonly walkPastRing: RailRaceRoute;
+  /**
+   * The ring a race is actually run on, at `RIDE_SCALE`. Built at load like
+   * its sibling — never regenerated when a race starts, which would mean a
+   * mesh rebuild and a collection pause in the middle of the game — and simply
+   * shown or hidden.
+   */
+  readonly raceRing: RailRaceRoute;
+  /**
+   * The race ring, under the name every arc-length consumer already used.
+   *
+   * Both rings share `length`, `startDistance` and the whole undulation, so
+   * anything asking the route a question about *distance* (`simulate.ts`'s
+   * hazard schedule, `RACE_DISTANCE`, `stepRider`'s gradient) gets the same
+   * answer from either and does not need to know there are two.
+   */
   readonly route: RailRaceRoute;
   readonly stationStallId: string;
   /** Where a rider is put down afterwards (GAME_DESIGN.md's EXIT rule). */
@@ -92,7 +112,16 @@ function planExit(): { exitX: number; exitZ: number } {
 
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
 export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
-  const route = new RailRaceRoute(STATION_STALL_ID);
+  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1);
+  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE);
   const { exitX, exitZ } = planExit();
-  return { name: 'railRace', route, stationStallId: STATION_STALL_ID, exitX, exitZ };
+  return {
+    name: 'railRace',
+    walkPastRing,
+    raceRing,
+    route: raceRing,
+    stationStallId: STATION_STALL_ID,
+    exitX,
+    exitZ,
+  };
 })();

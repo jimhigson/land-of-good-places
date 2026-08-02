@@ -102,7 +102,7 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
   'rail.exclusion': {
-    worst: 20,
+    worst: 21,
     why:
       'Metres of solved train curve with nothing solid beside it on one or ' +
       'both sides. The §6 fence closed this from 231 (hand park) to ~20: the ' +
@@ -118,7 +118,17 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'was a solved loop through the middle of the park whose pylons stood ' +
       'beside the railway in one place, and it is gone — the race now flies ' +
       'round the rim on its own trestles, which are placed clear of the rail ' +
-      'corridor by construction and asserted so in test/procgen/invariants.ts.',
+      'corridor by construction and asserted so in test/procgen/invariants.ts. ' +
+      'RE-RECORDED at 21 on 2 August when both Rail Race rings moved outside ' +
+      'the boundary wall (r=65.5, from 53.5). That 20 was never really 20: the ' +
+      'ring used to circle the park INSIDE the railway band, and its trestle ' +
+      'search may nudge a leg five metres either side of nominal, so a handful ' +
+      'of legs landed just clear of the rail corridor and one of them happened ' +
+      'to be the only solid thing beside a metre of track. It was the ' +
+      "railway's fence by accident, never by design — the leg answers to the " +
+      "Rail Race's own placement rules, not to the train's. With the rings out " +
+      'past the wall the metre is honestly reported. This is a MORE ACCURATE ' +
+      'number, not a looser one, and closing it belongs to the §6 fence.',
   },
   'rail.walkable': {
     worst: 30,
