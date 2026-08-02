@@ -1,6 +1,7 @@
-import type { Group } from 'three';
+import type { Group, Object3D } from 'three';
 import { clamp01 } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
+import { visiblePoints } from '../../art/style/measure';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
 import { shopItem } from '../../world/building/shops/catalogue';
 
@@ -42,8 +43,11 @@ const UP_Y = -0.14;
  *
  * Sized against the cartoon-pass head, which is enormous and overhangs the
  * shoulders: much smaller than this and the peeker is lost in the player's hair.
+ *
+ * Exported so `check-backpack-peek.mts` measures every catalogue item against
+ * the real target rather than a copied-out number.
  */
-const PEEK_HEIGHT = 0.4;
+export const PEEK_HEIGHT = 0.4;
 
 /**
  * How far to one side the peeker leans out, in metres.
@@ -77,6 +81,8 @@ export class BackpackPeek {
   private handle: AssetHandle | null = null;
   private creature: CreatureHandle | null = null;
   private lastId: string | null = null;
+  /** {@link footprint} of the current `handle`, measured once in {@link begin}. */
+  private size = PEEK_HEIGHT;
 
   private phase: Phase = 'waiting';
   /** Which shoulder this one is craning round. Re-rolled for every peek. */
@@ -172,8 +178,14 @@ export class BackpackPeek {
 
     const handle = item.model();
     // Scaled to the bag rather than to itself: a teddy and a sticker sheet both
-    // have to fit through the same opening.
-    handle.root.scale.setScalar(PEEK_HEIGHT / Math.max(0.12, handle.height));
+    // have to fit through the same opening. Bounded by width as well as height
+    // — a hat's defining dimension is often its brim, not its crown (the sun
+    // hat is 0.38 m tall but 2.33 m wide), and sizing by height alone barely
+    // shrinks a wide, flat item: it erupted from the backpack almost life
+    // size, overlapping the player, instead of coming out bag-sized. See
+    // {@link footprint}.
+    this.size = footprint(handle.root);
+    handle.root.scale.setScalar(PEEK_HEIGHT / Math.max(0.12, this.size));
     this.lean = Math.random() < 0.5 ? -LEAN : LEAN;
     handle.root.position.set(0, DOWN_Y, 0);
     this.anchor.add(handle.root);
@@ -204,7 +216,7 @@ export class BackpackPeek {
   private place(rise: number, pop: number): void {
     const handle = this.handle;
     if (!handle) return;
-    const base = PEEK_HEIGHT / Math.max(0.12, handle.height);
+    const base = PEEK_HEIGHT / Math.max(0.12, this.size);
     handle.root.position.set(this.lean * rise, DOWN_Y + (UP_Y - DOWN_Y) * rise, 0);
     // Tipped the way it is leaning, so it looks like it is holding on to the
     // strap and craning out rather than levitating sideways.
@@ -242,6 +254,36 @@ export class BackpackPeek {
 
 function hasHead(handle: AssetHandle): handle is CreatureHandle {
   return typeof (handle as Partial<CreatureHandle>).setWalkPhase === 'function';
+}
+
+/**
+ * How big a model reads at a glance: the larger of its vertical extent and its
+ * horizontal width, in metres.
+ *
+ * `AssetHandle.height` (used everywhere else a size is needed, e.g. name-label
+ * placement) is vertical extent alone, which is a fair stand-in for a
+ * creature's or a held item's overall size but not for a hat, whose bulk can
+ * be mostly sideways — a wide brim on a short crown. Scaling *only* by height
+ * let the sun hat (0.38 m tall, 2.33 m wide) through this feature almost at
+ * full size: `PEEK_HEIGHT / height` came out to ≈1.0 instead of shrinking it,
+ * so it erupted from the backpack overlapping the player. Bounding by both
+ * axes keeps every peeker inside the same roughly-`PEEK_HEIGHT`-sized box
+ * regardless of which axis its bulk sits on.
+ *
+ * Exported for the same reason as {@link PEEK_HEIGHT}: `check-backpack-peek.mts`
+ * calls this directly so it is checking the formula that actually runs, not a
+ * second copy of it that could drift out of step.
+ */
+export function footprint(root: Object3D): number {
+  let top = 0;
+  let bottom = 0;
+  let radius = 0;
+  visiblePoints(root, (point) => {
+    if (point.y > top) top = point.y;
+    if (point.y < bottom) bottom = point.y;
+    radius = Math.max(radius, Math.hypot(point.x, point.z));
+  });
+  return Math.max(top - bottom, radius * 2);
 }
 
 /** Overshoots a little at the top, like a head popping up too eagerly. */
