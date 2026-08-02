@@ -181,12 +181,14 @@ export class InputSystem {
    * it — {@link pressVirtual}'s twin for a control that is *held* rather than
    * tapped.
    *
-   * The fly button needs this and the hop button does not, which is the whole
-   * reason both exist. A hop is an edge: `pressVirtual`'s two-frame pulse gives
-   * `justPressed` a clean edge even when the finger was quicker than the frame,
-   * and then expires by itself so a lost `pointerup` can never leave a child
-   * hopping forever. Climbing on a jet pack is a *state*: it must last exactly
-   * as long as the thumb is down, so it is latched here and cleared on release.
+   * `jump` needs this: the on-screen hop button doubles as the jet pack's fly
+   * button (see `ui/ScreenControls.ts` and `Player.ts`'s "THE JET PACK"
+   * comment), and `Player` tells a tap from a hold by reading `isDown` over
+   * several frames — the same way a real key or gamepad button already
+   * reports "held" for as long as it is physically down. `pressVirtual`'s
+   * two-frame pulse could only ever produce an edge, never a state, so it
+   * cannot stand in for a key here. `interact` still uses `pressVirtual`; it
+   * has no hold behaviour to represent.
    *
    * The caller owns both ends. `ui/ScreenControls.ts` clears it on `pointerup`,
    * `pointercancel` *and* `pointerleave`, which is the same triple that already
