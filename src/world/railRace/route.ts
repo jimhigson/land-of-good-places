@@ -16,17 +16,47 @@ import { placedEntry } from '../parkLayout';
  * perimeter, a circle, and the only thing that varies along it is **height**.
  * There is no steering input in this ride and nothing for a solver to decide.
  *
- * ### Why it flies
+ * ### Two rings, built to their own dimensions
  *
- * The ground at this radius is already spoken for. The train owns the 48–58 m
- * band (`train/route.ts`), the boundary wall is at 60 m, and the entrance's gate
- * corridor cuts straight through the ring at bearing +Z. Rather than thread a
- * fifth path through all that, the race **flies over the lot** at
- * {@link BASE_HEIGHT}, the way the coaster clears the park with its
- * `CRUISE_FLOOR`. That is not only the cheap way out of a crowded band — it is
- * the *point*: a camera outside a rim-height track looks in **over** the
- * boundary wall and the treeline at the whole park, which is the backdrop the
- * brief asks for. Down at ground level it would be looking at a wall.
+ * A {@link RailRaceRoute} is built **per ring**, and a ring is described by one
+ * number: its {@link RailRaceRoute.scale}. There are two of them
+ * (`railRace/plan.ts`):
+ *
+ * - the **walk-past ring** at park scale (`scale = 1`), which the rival kids
+ *   idle round permanently as ambient park life, and
+ * - the **race ring** at toy scale (`scale =` {@link RIDE_SCALE}), which only
+ *   exists while a child is actually aboard.
+ *
+ * They share one nominal radius, one arc length, one start distance and one
+ * undulation, so a rider's `travelled` means the same thing on either and the
+ * whole hazard schedule is shared verbatim. What differs is **lane spacing**
+ * (and, in `track.ts`, rail gauge, duck-bar size, trestle beam span): the ring
+ * is genuinely *built* at its own size rather than drawn once and multiplied by
+ * a group transform.
+ *
+ * That distinction is the whole point of the split, and it is not academic. A
+ * single ring drawn at toy scale meant every rival's cart and rider carried a
+ * permanent `scale.setScalar(RIDE_SCALE)` — so the ambient rivals were 2.5x
+ * life-size to anyone who walked or flew past, race or no race. Jim's
+ * screenshot, 2 August 2026. There is no scale multiply on a ring any more;
+ * only the cart and rider models take one, and only for the ring they are
+ * currently on.
+ *
+ * ### Why it flies, and why it is outside the wall
+ *
+ * The ring used to circle the park *inside* the boundary at 53.5 m, flying over
+ * the train's 48–58 m band and the entrance's gate corridor because that ground
+ * was already spoken for. Since 2 August 2026 both rings stand **outside** the
+ * masonry (`ENTRANCE_WALL_RADIUS`, 60 m) instead, on the hilltop apron: out
+ * there is no planting, no path network, no railway and no plot to fight, which
+ * is what lets a second ring of a completely different size be stood up beside
+ * the first without a clearance search that can fail. It also means a child
+ * walking the park never meets the ride's structure at all.
+ *
+ * It still **flies**, at {@link BASE_HEIGHT}, for the reason it always did: a
+ * camera outside a rim-height track looks in **over** the boundary wall and the
+ * treeline at the whole park, which is the backdrop the brief asks for. Down at
+ * ground level it would be looking at a wall.
  *
  * ### Why every lane is the same length
  *
@@ -77,19 +107,37 @@ export const LANE_COUNT = 4;
  */
 export const PLAYER_LANE = LANE_COUNT - 1;
 
-/** The circle the shared arc length `s` is measured on. */
-export const NOMINAL_RADIUS = 53.5;
-
-/** Metres between neighbouring rails. */
-const LANE_SPACING = 2.6;
+/**
+ * The circle the shared arc length `s` is measured on — the same for both
+ * rings, so `travelled` means the same distance whichever one a rider is on.
+ *
+ * **Chosen by the wide ring's outer edge, not by taste.** The race ring is four
+ * lanes at `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.6 m plus a 1.55 m
+ * gauge: 9.35 m of radial width, 4.675 m of it either side of this circle. At
+ * 65.5 m its innermost rail sits at 60.8 m — clear of the boundary masonry at
+ * `ENTRANCE_WALL_RADIUS` (60 m) with the better part of a metre to spare, which
+ * is what "outside the park" has to mean if it is to mean anything. Any smaller
+ * and the inner rail is back over the wall; any larger and the outer rail walks
+ * out onto the hillside for no gain.
+ */
+export const NOMINAL_RADIUS = 65.5;
 
 /**
- * A purely cosmetic size-up of the carts, riders and rail gauge, while racing.
+ * Metres between neighbouring rails **at park scale**. A ring's own spacing is
+ * this times its {@link RailRaceRoute.scale}, so the race ring keeps the 2.6 m
+ * it has always had and the walk-past ring is a genuinely narrower structure
+ * rather than the same one drawn small.
+ */
+const LANE_SPACING_AT_PARK_SCALE = 1.04;
+
+/**
+ * The size-up of the carts, riders, rail gauge and lane spacing on the **race
+ * ring** — `RailRaceRoute.scale` for that ring, and the multiplier the cart and
+ * rider models take while they are on it.
  *
- * Deliberately not physics: the route itself (lane radii, arc length, the
- * undulation, every hazard's position) is untouched, so nothing about *where*
- * the race happens moves. Only how big the things riding it — and the rails
- * they ride on — render.
+ * Deliberately not physics: the arc length, the undulation and every hazard's
+ * position are shared with the walk-past ring, so nothing about *when* anything
+ * happens in a race moves. Only how big the ring and the things riding it are.
  *
  * A scratch fix (1 August 2026) tried making the camera stand closer with a
  * wider lens instead, and hit a real ceiling: past ~120° horizontal FOV the
@@ -111,13 +159,13 @@ export const RIDE_SCALE = 2.5;
 /**
  * How high the rails fly above the ground under the nominal circle.
  *
- * Floored well above everything in this band: the train's rail head (0.17 m)
- * and its cars (2.6 m), its platform canopy (3.7 m), the boundary wall, and the
- * entrance arch the ring crosses at bearing +Z. Decision 4 asks for 5.5 m of
- * rail-over-rail air where one ride passes over another; the lowest this track
- * ever gets is `BASE_HEIGHT - UNDULATION_REACH` above the ground, which leaves
- * more than that over the railway. Asserted, not assumed — see
- * `scripts/check-rail-race.mts`.
+ * Nothing in the park has to be cleared out here any more — the rings stand on
+ * the empty hilltop apron outside the wall — so this is now a *sightline*
+ * number rather than a clearance one: high enough that the side-on camera,
+ * standing outside the ring, looks in over the boundary wall and the treeline
+ * at the park rather than at masonry. Kept at the value the family already
+ * approved the race's framing at rather than re-picked, and still asserted
+ * against the ground it crosses by `scripts/check-rail-race.mts`.
  */
 export const BASE_HEIGHT = 9.5;
 
@@ -158,14 +206,16 @@ export const UNDULATION_REACH = HARMONICS.reduce((sum, h) => sum + h.amplitude, 
  */
 const LANE_ROTATION = 0.27;
 
-/** Radius of each lane, innermost first. Lane `PLAYER_LANE` is the outermost. */
-export const LANE_RADII: readonly number[] = Array.from(
-  { length: LANE_COUNT },
-  (_unused, lane) => NOMINAL_RADIUS + (lane - (LANE_COUNT - 1) / 2) * LANE_SPACING,
-);
-
-/** Radial distance from the innermost lane's centre to the outermost lane's. */
-export const LANE_SPAN = (LANE_COUNT - 1) * LANE_SPACING;
+/**
+ * Half the radial width of the **widest** ring's lane centres.
+ *
+ * The level the lanes undulate about is sampled across this, not across each
+ * ring's own span, so both rings come out with the *same* {@link
+ * RailRaceRoute.base} to the millimetre. If they did not, swapping rings on
+ * boarding would step the whole track (and the camera that follows it) up or
+ * down by a few centimetres for no reason anybody could name.
+ */
+const WIDEST_HALF_SPAN = (((LANE_COUNT - 1) / 2) * LANE_SPACING_AT_PARK_SCALE) * RIDE_SCALE;
 
 /** Height of a lane's rail above the level base, at loop angle `theta`. */
 function undulation(lane: number, theta: number): number {
@@ -189,7 +239,28 @@ function undulation(lane: number, theta: number): number {
  * is what "our standard track path following" actually means here.
  */
 export class RailRaceRoute {
-  /** One lap, in metres of shared arc length. */
+  /**
+   * How big this ring is built: `1` for the walk-past ring, {@link RIDE_SCALE}
+   * for the race ring. Everything with a real width — lane spacing here, rail
+   * gauge and duck-bar size in `track.ts`, the cart and rider models in
+   * `RailRace.ts` — derives from it, so there is exactly one number that says
+   * "how big is this ring" and nothing has to be kept in step with it by hand.
+   */
+  readonly scale: number;
+
+  /** The circle this ring's arc length is measured on. Shared by both rings. */
+  readonly nominalRadius = NOMINAL_RADIUS;
+
+  /** Metres between neighbouring rails **on this ring**. */
+  readonly laneSpacing: number;
+
+  /** Radius of each lane, innermost first. Lane `PLAYER_LANE` is the outermost. */
+  readonly laneRadii: readonly number[];
+
+  /** Radial distance from the innermost lane's centre to the outermost lane's. */
+  readonly laneSpan: number;
+
+  /** One lap, in metres of shared arc length. Identical on both rings. */
   readonly length = TAU * NOMINAL_RADIUS;
 
   /** Where the start/finish arch stands, in metres along the loop. */
@@ -198,24 +269,38 @@ export class RailRaceRoute {
   /**
    * The level the four lanes undulate about, in world metres.
    *
-   * Taken from the **highest** ground anywhere under the ring plus
+   * Taken from the **highest** ground anywhere under the widest ring plus
    * {@link BASE_HEIGHT}, so the promised clearance holds at the worst point
-   * rather than on average — the rim is a hilltop and the ground under the ring
-   * is not flat, even if it is close.
+   * rather than on average — the apron outside the wall is not perfectly flat,
+   * even if it is close — and so that both rings share one base exactly (see
+   * {@link WIDEST_HALF_SPAN}).
    */
   readonly base: number;
 
   private readonly scratch = new Vector3();
 
-  constructor(stationStallId: string) {
+  constructor(stationStallId: string, scale: number) {
+    this.scale = scale;
+    this.laneSpacing = LANE_SPACING_AT_PARK_SCALE * scale;
+    this.laneRadii = Array.from(
+      { length: LANE_COUNT },
+      (_unused, lane) => NOMINAL_RADIUS + (lane - (LANE_COUNT - 1) / 2) * this.laneSpacing,
+    );
+    this.laneSpan = (LANE_COUNT - 1) * this.laneSpacing;
+
     let highest = -Infinity;
     const samples = 360;
     for (let i = 0; i < samples; i += 1) {
       const theta = (i / samples) * TAU;
-      // Sampled across the full width of the track, not just the nominal circle:
-      // the inner and outer rails are 2.6 m either side of it and can be over
-      // higher ground than the middle is.
-      for (const radius of [LANE_RADII[0]!, NOMINAL_RADIUS, LANE_RADII[LANE_COUNT - 1]!]) {
+      // Sampled across the full width of the *widest* ring, not just the
+      // nominal circle and not just this ring's own lanes: the outer rails can
+      // be over higher ground than the middle is, and both rings must agree on
+      // the answer.
+      for (const radius of [
+        NOMINAL_RADIUS - WIDEST_HALF_SPAN,
+        NOMINAL_RADIUS,
+        NOMINAL_RADIUS + WIDEST_HALF_SPAN,
+      ]) {
         const height = terrainHeight(Math.cos(theta) * radius, Math.sin(theta) * radius);
         if (height > highest) highest = height;
       }
@@ -264,7 +349,7 @@ export class RailRaceRoute {
   /** A point on a lane's rail. */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
     const theta = this.angleAt(distance);
-    const radius = LANE_RADII[lane] ?? NOMINAL_RADIUS;
+    const radius = this.laneRadii[lane] ?? NOMINAL_RADIUS;
     return target.set(
       Math.cos(theta) * radius,
       this.heightAt(lane, distance),
@@ -283,7 +368,7 @@ export class RailRaceRoute {
    */
   tangentAt(lane: number, distance: number, target: Vector3 = new Vector3()): Vector3 {
     const theta = this.angleAt(distance);
-    const radius = LANE_RADII[lane] ?? NOMINAL_RADIUS;
+    const radius = this.laneRadii[lane] ?? NOMINAL_RADIUS;
     const horizontal = radius / NOMINAL_RADIUS;
     // d/ds of (cos θ · r, ·, sin θ · r) with θ = −s/R, so the horizontal part
     // comes out as (sin θ, −cos θ) rather than the anticlockwise (−sin θ, cos θ).

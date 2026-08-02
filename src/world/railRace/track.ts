@@ -26,21 +26,14 @@ import { sweptRails, type RailSampler } from '../rail/sweptRail';
 import {
   ALERT_RANGE,
   BARS_FROM_LEVEL,
-  DUCK_CLEARANCE,
+  DUCK_CLEARANCE_AT_PARK_SCALE,
   TRESTLE_SPACING,
   trestleGridIndex,
   ZONES_FROM_LEVEL,
   type HazardLayout,
   type RaceLevel,
 } from './hazards';
-import {
-  LANE_COUNT,
-  LANE_SPAN,
-  NOMINAL_RADIUS,
-  RIDE_SCALE,
-  UNDULATION_REACH,
-  type RailRaceRoute,
-} from './route';
+import { LANE_COUNT, NOMINAL_RADIUS, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './route';
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
@@ -57,8 +50,21 @@ import {
  * `InstancedMesh`es is five draw calls, whatever the layout turns out to be.
  */
 
-/** Rail centre-to-centre within one lane. Narrow: it is a one-child cart. */
-export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
+/**
+ * Rail centre-to-centre within one lane, **at park scale**. Narrow: it is a
+ * one-child cart.
+ *
+ * A ring builds its own rails at this times its own `route.scale`, so the two
+ * rings are two genuinely different structures rather than one geometry with a
+ * group transform on it. See `route.ts`'s header for why that matters.
+ */
+export const RAIL_GAUGE_AT_PARK_SCALE = 0.62;
+
+/**
+ * The gauge on the ring a child actually races on — the number `cart.ts` builds
+ * its wheelbase against (see that file's header, which asserts the two agree).
+ */
+export const RAIL_GAUGE = RAIL_GAUGE_AT_PARK_SCALE * RIDE_SCALE;
 
 /**
  * Tube/cross-section resolution for the rails' own `sweptRails` call, pulled
@@ -71,8 +77,8 @@ export const RAIL_GAUGE = 0.62 * RIDE_SCALE;
 const RAIL_TUBULAR_PER_METRE = 1.2;
 const RAIL_RADIAL_SEGMENTS = 6;
 
-/** How far a duck bar reaches either side of its lane's centre. */
-const BAR_HALF_SPAN = 1.15 * RIDE_SCALE;
+/** How far a duck bar reaches either side of its lane's centre, at park scale. */
+const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
 
 /**
  * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
@@ -155,13 +161,57 @@ export const LANE_COLOURS: readonly number[] = [
   PALETTE.markerMint,
 ];
 
+/** How a ring is built, beyond its route. */
+export interface RailRaceTrackOptions {
+  /**
+   * A name for the built group, so the two rings can be told apart in the
+   * scene graph (and by `test/procgen/invariants.ts`, which measures them
+   * separately).
+   */
+  readonly ringName: string;
+  /**
+   * Whether this ring's trestle legs become things a child can walk into.
+   *
+   * **Only the walk-past ring says yes**, and there is no way to say it twice.
+   * `CollisionWorld` has no per-collider removal — only `clear()` — so a ring
+   * that registered colliders and was then hidden would leave invisible solid
+   * posts standing in the park forever. The race ring never needs them: it only
+   * exists while a child is strapped into a cart, and nobody is walking then.
+   * So the one ring that is ever there while you are on foot is the one ring
+   * that is ever solid, and the classic bug (walking into a rail that is not
+   * drawn) has nowhere to live.
+   */
+  readonly registerCollision: boolean;
+}
+
 export function buildRailRaceTrack(
   route: RailRaceRoute,
   layout: HazardLayout,
   collision: CollisionWorld,
+  options: RailRaceTrackOptions,
 ): RailRaceTrack {
+  // Everything with a real width on this ring comes off its own scale — there
+  // is no `RIDE_SCALE` below this line.
+  const ringScale = route.scale;
+  const railGauge = RAIL_GAUGE_AT_PARK_SCALE * ringScale;
+  const barHalfSpan = BAR_HALF_SPAN_AT_PARK_SCALE * ringScale;
+  const duckClearance = DUCK_CLEARANCE_AT_PARK_SCALE * ringScale;
+  /**
+   * How big this ring is **relative to the race ring** — 1 on the race ring,
+   * 0.4 on the walk-past one.
+   *
+   * Everything in this file that is written as a bare number (a leg's radius, a
+   * flag's width, the duck-bar asset's own authored size) was authored looking
+   * at the race ring, so that is the size it means; multiplying by this gives
+   * the same thing on a smaller ring and leaves the race ring untouched to the
+   * bit. Vertical *clearances* deliberately do not take it: a park-scale child
+   * riding the walk-past ring still needs her head-height under the arch,
+   * whatever size the ring she is on.
+   */
+  const ringSizeVsRace = ringScale / RIDE_SCALE;
+
   const group = new Group();
-  group.name = 'railRace:track';
+  group.name = options.ringName;
   const disposables: { dispose(): void }[] = [];
   const keep = (item: { dispose(): void }): void => {
     disposables.push(item);
@@ -171,6 +221,8 @@ export function buildRailRaceTrack(
   const rotation = new Quaternion();
   const position = new Vector3();
   const one = new Vector3(1, 1, 1);
+  /** The duck-bar asset's own size on this ring — see {@link ringSizeVsRace}. */
+  const assetScale = new Vector3(ringSizeVsRace, ringSizeVsRace, ringSizeVsRace);
   const scale = new Vector3();
   const outward = new Vector3();
   const point = new Vector3();
@@ -222,8 +274,8 @@ export function buildRailRaceTrack(
     let baseColours: Float32Array | null = null;
     const attributes: BufferAttribute[] = [];
     for (const geometry of sweptRails(sampler, {
-      gauge: RAIL_GAUGE,
-      radius: 0.075 * RIDE_SCALE,
+      gauge: railGauge,
+      radius: 0.075 * ringSizeVsRace * RIDE_SCALE,
       // The ring bends at a constant, gentle 1/53.5 per metre; it does not need
       // the coaster's two segments a metre, and this is paid eight times over.
       tubularPerMetre: RAIL_TUBULAR_PER_METRE,
@@ -375,9 +427,9 @@ export function buildRailRaceTrack(
   // authored shape has nothing to offer a part that never looks the same way
   // twice.
   const sleeveGeometry = new BoxGeometry(
-    BAR_HALF_SPAN * 2 - 0.04 * RIDE_SCALE,
-    0.28 * RIDE_SCALE,
-    0.32 * RIDE_SCALE,
+    barHalfSpan * 2 - 0.04 * ringScale,
+    0.28 * ringScale,
+    0.32 * ringScale,
   );
   keep(sleeveGeometry);
 
@@ -429,24 +481,29 @@ export function buildRailRaceTrack(
     rotation.setFromUnitVectors(ACROSS, outward);
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       route.pointAt(lane, at, point);
-      const barY = point.y + DUCK_CLEARANCE;
+      const barY = point.y + duckClearance;
       postLaneColour.set(LANE_COLOURS[lane % LANE_COLOURS.length]!);
 
       for (const side of [-1, 1] as const) {
         position.set(
-          point.x + outward.x * side * BAR_HALF_SPAN,
-          point.y + (DUCK_CLEARANCE + 0.3 * RIDE_SCALE) / 2 - 0.15 * RIDE_SCALE,
-          point.z + outward.z * side * BAR_HALF_SPAN,
+          point.x + outward.x * side * barHalfSpan,
+          point.y + (duckClearance + 0.3 * ringScale) / 2 - 0.15 * ringScale,
+          point.z + outward.z * side * barHalfSpan,
         );
-        matrix.compose(position, rotation, one);
+        matrix.compose(position, rotation, assetScale);
         posts.setMatrixAt(postIndex, matrix);
         posts.setColorAt(postIndex, postLaneColour);
         postIndex += 1;
       }
 
       position.set(point.x, barY, point.z);
-      matrix.compose(position, rotation, one);
+      matrix.compose(position, rotation, assetScale);
       bars.setMatrixAt(barIndex, matrix);
+      // The sleeve's own geometry is already built at this ring's size (see
+      // `sleeveGeometry`), so it must not take the asset scale on top — and
+      // `setAlerts` below decomposes this matrix and re-composes it with
+      // `(1, size, size)`, which assumes exactly that.
+      matrix.compose(position, rotation, one);
       sleeves.setMatrixAt(barIndex, matrix);
       slots.push(barIndex);
       barIndex += 1;
@@ -505,7 +562,7 @@ export function buildRailRaceTrack(
   let dropperIndex = 0;
   // Wide enough to carry the outer rail of the outer lane and the inner rail of
   // the inner lane, with a little overhang so the beam reads as holding them up.
-  const beamSpan = LANE_SPAN + RAIL_GAUGE + 0.8;
+  const beamSpan = route.laneSpan + railGauge + 0.8 * ringSizeVsRace;
 
   spots.forEach((spot, index) => {
     route.outwardAt(spot.at, outward);
@@ -514,14 +571,14 @@ export function buildRailRaceTrack(
     const ground = terrainHeight(spot.x, spot.z);
     const legHeight = beamY - ground;
     position.set(spot.x, ground + legHeight / 2, spot.z);
-    scale.set(1, legHeight, 1);
+    scale.set(ringSizeVsRace, legHeight, ringSizeVsRace);
     matrix.compose(position, rotation.clone().setFromAxisAngle(UP, 0), scale);
     legs.setMatrixAt(index, matrix);
 
     route.outwardAt(spot.at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
     position.set(spot.x, beamY, spot.z);
-    scale.set(beamSpan, 1, 1);
+    scale.set(beamSpan, ringSizeVsRace, ringSizeVsRace);
     matrix.compose(position, rotation, scale);
     beams.setMatrixAt(index, matrix);
 
@@ -529,14 +586,15 @@ export function buildRailRaceTrack(
       route.pointAt(lane, spot.at, point);
       const length = point.y - beamY;
       position.set(point.x, beamY + length / 2, point.z);
-      scale.set(1, length, 1);
+      scale.set(ringSizeVsRace, length, ringSizeVsRace);
       matrix.compose(position, rotation, scale);
       droppers.setMatrixAt(dropperIndex, matrix);
       dropperIndex += 1;
     }
 
-    // A post is a thing a child can walk into.
-    collision.addCircle(spot.x, spot.z, 0.36);
+    // A post is a thing a child can walk into — on the ring that is actually
+    // there while she is on foot. See `RailRaceTrackOptions.registerCollision`.
+    if (options.registerCollision) collision.addCircle(spot.x, spot.z, 0.36 * ringSizeVsRace);
   });
 
   legs.count = spots.length;
@@ -555,7 +613,7 @@ export function buildRailRaceTrack(
   }
 
   // --- the start/finish arch -------------------------------------------------
-  group.add(buildArch(route, keep));
+  group.add(buildArch(route, ringSizeVsRace, keep));
 
   // --- the live bits ---------------------------------------------------------
   const tint = new Color();
@@ -713,7 +771,10 @@ function buildSparkRibbons(
   const segments: SparkRibbonSegment[] = [];
   const point = new Vector3();
   const outward = new Vector3();
-  const half = RAIL_GAUGE * 0.5;
+  // This ring's own gauge, not the race ring's: the plate has to lie between
+  // the rails of the track it is actually painted on.
+  const half = RAIL_GAUGE_AT_PARK_SCALE * route.scale * 0.5;
+  const lift = 0.055 * (route.scale / RIDE_SCALE);
 
   layout.zones.forEach((zone, zoneIndex) => {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
@@ -732,7 +793,7 @@ function buildSparkRibbons(
         route.outwardAt(distance, outward);
         // A whisker above the rail heads, so it reads as a plate on the track
         // rather than a stripe buried in it.
-        const y = point.y + 0.055;
+        const y = point.y + lift;
         positions.push(
           point.x - outward.x * half,
           y,
@@ -1065,7 +1126,11 @@ function trestleSpots(
 }
 
 /** A striped arch over all four lanes, where the race starts and ends. */
-function buildArch(route: RailRaceRoute, keep: (item: { dispose(): void }) => void): Group {
+function buildArch(
+  route: RailRaceRoute,
+  ringSizeVsRace: number,
+  keep: (item: { dispose(): void }) => void,
+): Group {
   const group = new Group();
   group.name = 'railRace:arch';
 
@@ -1084,11 +1149,20 @@ function buildArch(route: RailRaceRoute, keep: (item: { dispose(): void }) => vo
     Math.sin(route.angleAt(at)) * NOMINAL_RADIUS,
   );
   const yaw = Math.atan2(outward.x, outward.z);
-  const span = LANE_SPAN / 2 + 1.6;
+  // Wide enough to clear this ring's own lanes, with the same overhang either
+  // side. The vertical clearances are *not* scaled: a park-scale child riding
+  // the walk-past ring needs her head height under the beam just as much as a
+  // toy-scale one does on the race ring.
+  const span = route.laneSpan / 2 + 1.6 * ringSizeVsRace;
   const beamY = route.base + UNDULATION_REACH + 2.2;
   const footY = route.base - UNDULATION_REACH - 1.4;
 
-  const legGeometry = new CylinderGeometry(0.24, 0.3, beamY - footY, 10);
+  const legGeometry = new CylinderGeometry(
+    0.24 * ringSizeVsRace,
+    0.3 * ringSizeVsRace,
+    beamY - footY,
+    10,
+  );
   keep(legGeometry);
   for (const side of [-1, 1] as const) {
     const leg = solid(new Mesh(legGeometry, cream));
@@ -1101,7 +1175,11 @@ function buildArch(route: RailRaceRoute, keep: (item: { dispose(): void }) => vo
     addOutline(leg, 0.024);
   }
 
-  const beamGeometry = new BoxGeometry(span * 2 + 0.6, 0.55, 0.55);
+  const beamGeometry = new BoxGeometry(
+    span * 2 + 0.6 * ringSizeVsRace,
+    0.55 * ringSizeVsRace,
+    0.55 * ringSizeVsRace,
+  );
   keep(beamGeometry);
   const beam = solid(new Mesh(beamGeometry, accent));
   beam.position.set(centre.x, beamY, centre.z);
@@ -1110,7 +1188,11 @@ function buildArch(route: RailRaceRoute, keep: (item: { dispose(): void }) => vo
   addOutline(beam, 0.024);
 
   // Chequered flags hanging off the beam: the finish line, unmistakably.
-  const flagGeometry = new BoxGeometry(0.72, 0.72, 0.08);
+  const flagGeometry = new BoxGeometry(
+    0.72 * ringSizeVsRace,
+    0.72 * ringSizeVsRace,
+    0.08 * ringSizeVsRace,
+  );
   keep(flagGeometry);
   const flags = 13;
   for (let i = 0; i < flags; i += 1) {
@@ -1118,7 +1200,7 @@ function buildArch(route: RailRaceRoute, keep: (item: { dispose(): void }) => vo
     const flag = decal(new Mesh(flagGeometry, i % 2 === 0 ? cream : dark));
     flag.position.set(
       centre.x + outward.x * t * span * 2,
-      beamY - 0.66,
+      beamY - 0.66 * ringSizeVsRace,
       centre.z + outward.z * t * span * 2,
     );
     flag.rotation.y = yaw + Math.PI / 2;
