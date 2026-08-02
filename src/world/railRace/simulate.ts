@@ -1,6 +1,6 @@
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
-import { planHazards, type HazardSchedule } from './hazards';
+import { planHazards, type HazardLayout, type HazardSchedule, type RaceLevel } from './hazards';
 import type { RailRaceRoute } from './route';
 
 /**
@@ -13,47 +13,117 @@ import type { RailRaceRoute } from './route';
  * not against a re-implementation of it that could agree with a model while
  * disagreeing with the game.
  *
- * ## The tuning, and where it came from
+ * ## The tap-rate rework (2 August 2026)
  *
- * Inherited from the retired 2D rail racer, which had already been tuned
- * against a simulation of its whole course for one specific property: **a bonk
- * must cost more than the coasting it saved**, or holding the button down for a
- * minute is the winning strategy and the game has nothing to teach. That is
- * exactly the property the in-park race then lost (see {@link WOBBLE_SECONDS}),
- * and exactly the property the checker now asserts.
+ * The family's brief: no more hold-to-accelerate. Speed is driven by how
+ * *fast* you press — mash a tap-only button (Space, the left mouse button,
+ * a finger tapping the screen) and the cart goes faster; stop and it coasts.
+ * Ducking, previously "not holding the accelerate button," is now its own
+ * dedicated HELD control — a real gesture (drag down and hold on a phone,
+ * hold Down or the right mouse button on a keyboard) with its own signal, not
+ * derived from the absence of another one.
+ *
+ * The property the old hold-based tuning existed to protect — **a bonk must
+ * cost more than the coasting it saved, and a black stretch must cost more
+ * than the speed it bought, or the one control has nothing to teach** — is
+ * unchanged. What changed is only what feeds the thrust:
+ *
+ * - {@link Rider.boost} replaces the old boolean "is the button down right
+ *   now". Every discrete press bumps it by {@link BOOST_GAIN_PER_PRESS} and it
+ *   bleeds away continuously ({@link BOOST_DECAY_RATE}), so a steady mash
+ *   sustains a high boost, an occasional tap gives a short-lived pulse, and
+ *   doing nothing gives zero. Thrust is `THRUST_MAX * boost`.
+ * - **Ducking cancels boost gain and thrust output, completely**, exactly
+ *   like the old "not holding = no thrust" rule. This is the one piece that
+ *   is not obvious from "duck is now a separate control": duck and boost are
+ *   genuinely independent signals (a keyboard player *can* hold Down and mash
+ *   Space at the same instant), so without this coupling a keyboard player
+ *   could hold duck permanently and take zero bonks while still going full
+ *   speed — the duck bars would be decoration for exactly the players who
+ *   can hold two things at once. Coupling them the way the old single-button
+ *   game did restores the same "being safe costs you speed" trade, just fed
+ *   by two hands instead of one finger.
+ * - Sparking is now "any boost still on board while the rail is black" rather
+ *   than "the button is down right now" — the practical difference is that a
+ *   single startled tap right as you cross into a black stretch costs a
+ *   little (the boost it added has to decay away, a few tenths of a second),
+ *   where the old rule would have forgiven it instantly. Mashing all the way
+ *   through still costs the same running drag it always did.
  */
 
 /**
  * How many times round.
  *
- * **Two, per the family's own 1 August 2026 verdict, after actually racing
- * the tripled-lap version live.** The 1 August physics tuning roughly doubled
- * the cart's speed, which on its own would have taken a good run over two
- * laps from 52 s down to 25 s and tripped this file's own "barely a ride"
- * guard in `scripts/check-rail-race.mts` — a third lap was added same-day to
- * paper over exactly that. Once the family played it, three read as too long
- * rather than too short; two is the family's explicit answer, not a
- * miscalculation being reintroduced. If `scripts/check-rail-race.mts`'s
- * "barely a ride" guard trips at two laps with the current physics, that is
- * the physics to revisit (`THRUST`/drag below), not this constant.
+ * Unchanged by the tap-rate rework and by the three-levels rework — "three
+ * levels" (see `hazards.ts`'s header) means three separately-chosen hazard
+ * compositions, picked once before the countdown, not three laps of one
+ * race. Lap count is the family's own 1 August 2026 verdict, after actually
+ * racing a tripled-lap version live and asking for two instead; nothing
+ * about levels touches it. (An earlier pass in this file's git history raised
+ * this to 3 on a mistaken "escalate by lap" reading of the levels brief —
+ * corrected back to 2 the same day.)
  */
 export const RACE_LAPS = 2;
 
 /**
- * Acceleration while the button is held, m/s².
+ * How much one discrete press adds to {@link Rider.boost}, 0..1.
  *
- * Raised by half on the family's 1 August 2026 ask ("increase the acceleration
- * and max speed when pressing by 50%"), from the 9.9 the retired 2D racer had.
+ * Tuned together with {@link BOOST_DECAY_RATE} and {@link THRUST_MAX} against
+ * a swept range of tap rates (`scripts/check-rail-race.mts` prints the result
+ * for several) so that a brisk, sustained mash (about 6 taps/second — fast
+ * but within a child's reach) approaches the old hold-based terminal speed,
+ * a moderate tap rate (about 2/second) gives roughly 60% of that, and no
+ * presses at all coasts on drag and hills alone, same as before.
  */
-const THRUST = 14.85;
+const BOOST_GAIN_PER_PRESS = 0.22;
+
+/**
+ * How fast {@link Rider.boost} bleeds away when nothing is topping it up,
+ * per second, applied exponentially (`boost *= exp(-BOOST_DECAY_RATE * dt)`)
+ * rather than as a flat per-second subtraction — a proportional leak gives a
+ * smooth, forgiving decay curve rather than a hard cliff, and it is what
+ * lets a single press produce a short, clean pulse rather than a value that
+ * can go straight to zero mid-frame.
+ */
+const BOOST_DECAY_RATE = 2.0;
+
+/** {@link Rider.boost} never goes above this. */
+const BOOST_MAX = 1;
+
+/** Thrust while sustaining full boost, m/s². See {@link BOOST_GAIN_PER_PRESS}. */
+const THRUST_MAX = 20;
+
+/**
+ * How long a press keeps counting as "still pressing" for the purposes of
+ * sparking, in seconds — {@link Rider.sparkGuard}.
+ *
+ * Deliberately its **own** timer rather than reading {@link Rider.boost}
+ * directly. The first version of this file tried exactly that (sparking
+ * while `boost` sat above a small threshold), and it does not work: `boost`
+ * is tuned for the *throttle feel* — enough inertia that a sustained mash
+ * reads as smooth power rather than a jittery on/off — which at
+ * {@link BOOST_DECAY_RATE}'s tuning takes over a second to bleed from a
+ * typical cruising level down near zero. A rider who stopped pressing a
+ * sensible distance before a black stretch was still measured as "pressing"
+ * for most of it, which `scripts/check-rail-race.mts` caught immediately: a
+ * perfect run sparked for 3.7 s it should never have sparked at all. Sparking
+ * wants a short, decisive window — "did a press land recently" — completely
+ * independent of how slowly the *speed* itself eases off.
+ */
+const SPARK_GUARD_SECONDS = 0.3;
+
+/**
+ * How long the pump/pedal animation takes to spring back to neutral after a
+ * press, in seconds. See {@link Rider.bob} — purely cosmetic, nothing in this
+ * file reads it back.
+ */
+const BOB_SECONDS = 0.22;
 
 /**
  * Coasting drag: a linear part and a squared part, m/s².
  *
- * Both halved on the same ask ("reduce the slowdown penalty for not pressing by
- * 50%"), from 0.35 and 0.02. Note this is the whole of the slowdown when the
- * button is up — there is nothing else acting on a coasting cart but this and
- * the hills — so halving these two *is* the requested change, exactly.
+ * Unchanged by the tap-rate rework — this is the whole of the slowdown when
+ * nothing is pressing, whatever drives the pressing.
  */
 const DRAG_LINEAR = 0.175;
 const DRAG_SQUARE = 0.01;
@@ -61,81 +131,56 @@ const DRAG_SQUARE = 0.01;
 /**
  * Extra drag while the rail is sparking under you, m/s².
  *
- * Enough that holding through a black stretch is plainly, visibly worse than
+ * Enough that mashing through a black stretch is plainly, visibly worse than
  * coasting through it — but it is *only* drag. There is no bonk, no wobble and
- * no stop: a child who holds the whole way through one gets a shower of sparks,
- * a slow patch and a lesson, which is the kindest way to teach a rule there is.
+ * no stop: a child who mashes the whole way through one gets a shower of
+ * sparks, a slow patch and a lesson, which is the kindest way to teach a rule
+ * there is.
  */
 const SPARK_DRAG = 6;
 
 /**
- * How hard the hills pull. **Real gravity**, m/s².
- *
- * Raised from 5.6 on the family's 1 August 2026 report that the cart does not
- * react to gravity — which turned out to be literally true while coasting, not
- * merely faint. The sign was always right (`-HILL_PULL * slope`, and `slopeAt`
- * is positive uphill), but the magnitude could never win:
- *
- * - the steepest gradient the route's `HARMONICS` produce is 0.2327 (13.1°)
- * - so the strongest downhill pull available was `5.6 * 0.2327` = 1.303 m/s²
- * - drag at the `MIN_SPEED` floor of 3.4 m/s was `0.35*3.4 + 0.02*3.4²` = 1.421 m/s²
- *
- * Drag beat the steepest downhill at *every speed the cart could legally be at*,
- * so a released cart could never gain a metre per second anywhere on the course.
- * Measured before the change: it sat on 3.40 m/s for an entire lap, dead flat.
- *
- * The old value's comment argued for staying "well under real gravity" so the
- * hills never became a second thing to manage. That concern is now carried by
- * `THRUST` instead, which is large enough that the hills move a *held* cart by
- * only about 6% (29.9–31.6 m/s) — the ride still is not asking her to manage
- * hills. What changed is the *coasting* case, which is where a hill should be
- * felt and where the fiction lives: let go on the flat and you sag to 3.4 m/s,
- * let go on a downhill and you keep rolling at 6.5. Twice the speed for reading
- * the track, where before it made no difference at all.
- *
- * It is real gravity rather than a tuned number on purpose: "the cart reacts to
- * gravity" has one obviously correct value, and a knob nobody can justify is a
- * knob the next person will move.
+ * How hard the hills pull. Real gravity, m/s². Unchanged by the tap-rate
+ * rework — see the git history on this constant for the derivation.
  */
 const HILL_PULL = 9.8;
 
-/**
- * You never stop and you never quite fly.
- *
- * `MAX_SPEED` raised by half with the thrust, from 22. Worth knowing what this
- * clamp actually does: at the old tuning it did **nothing at all**. Terminal
- * speed while holding solves `DRAG_SQUARE·v² + DRAG_LINEAR·v = THRUST`, which
- * came out at 15.2 m/s — the drag curve was the real cap and 22 was never
- * reached. At the new tuning terminal is 30.8 m/s, so 33 is still headroom on
- * the flat and is reached only where a downhill pushes the cart past its own
- * terminal speed. That is the right shape for it: a ceiling the hills can find
- * and the throttle cannot.
- */
+/** You never stop and you never quite fly. */
 const MIN_SPEED = 3.4;
 const MAX_SPEED = 33;
 
 /**
- * How long a bonk's wobble lasts — and, crucially, **the button does nothing
- * for the first two thirds of it.**
+ * How long a bonk's wobble lasts — and, crucially, **thrust is dead for the
+ * first two thirds of it.**
  *
- * This is where the cost of a bonk actually lives. The old in-park race kept a
- * `bonkWobble` timer but never let it gate thrust: it shook the seat and
- * nothing else, so a bonk cost only a moment's speed and the lerp back to full
- * pace had a 0.3 s time constant. Holding the button down for the whole race
- * beat playing well, which is precisely the family's "duck bars ineffective —
- * holding wins" report. Gating thrust is the fix, and
- * `scripts/check-rail-race.mts` is the thing that stops it regressing.
+ * This is where the cost of a bonk actually lives. See {@link WOBBLE_LOCKOUT}.
  */
 const WOBBLE_SECONDS = 1.3;
 
 /** Fraction of your speed you keep through a bonk. */
 const BONK_SPEED_FACTOR = 0.35;
 
-/** Thrust is dead while the wobble is above this. */
+/** Thrust is dead, and presses do not build boost, while the wobble is above this. */
 const WOBBLE_LOCKOUT = 0.35;
 
-/** The hazards, laid out once for the whole race. */
-export const HAZARDS: HazardSchedule = planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS);
+/**
+ * The ring's own physical bar/zone positions — level-independent (see
+ * `hazards.ts`'s header), built once at module load. `track.ts` builds the
+ * whole ring's hazard geometry from this, whichever level ends up chosen;
+ * `RailRace.ts` never has to know both the geometry and a race's own
+ * schedule come from the same `planHazards` call.
+ */
+export const HAZARD_LAYOUT: HazardLayout = planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, 1).lap;
+
+/**
+ * The hazard schedule for one chosen level — see `hazards.ts`'s header.
+ * Called once when `RailRace.chooseLevel` fires, and once more at
+ * construction for the calm, hazard-free level-1 default the ring and the
+ * idling rivals sit in between races.
+ */
+export function scheduleForLevel(level: RaceLevel): HazardSchedule {
+  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level);
+}
 
 /** The finish line, in metres travelled. */
 export const RACE_DISTANCE = RAIL_RACE_PLAN.route.length * RACE_LAPS;
@@ -145,11 +190,17 @@ export interface Rider {
   /** Metres run since the lights went out. Only ever increases. */
   travelled: number;
   speed: number;
-  /** The button state actually applied this step (a wobble can veto it). */
-  holding: boolean;
+  /** 0..1: the tap-rate charge that drives thrust. See this file's header. */
+  boost: number;
+  /** True while the dedicated duck control is actively held this step. */
+  ducking: boolean;
+  /** 0 (neutral) .. 1 (fully pressed down): the per-tap pump/pedal pose. */
+  bob: number;
   wobble: number;
   /** True while the rail is sparking under this rider. */
   sparking: boolean;
+  /** Seconds left before a recent press stops counting as "still pressing" for sparking. See {@link SPARK_GUARD_SECONDS}. */
+  sparkGuard: number;
   /** How many bar crossings this rider has already passed. */
   barCursor: number;
   /** How many black stretches this rider is already past. */
@@ -159,6 +210,13 @@ export interface Rider {
   finished: boolean;
   place: number;
   finishTime: number;
+  /**
+   * Internal accumulator for a synthetic, regular tap stream — used by
+   * {@link rivalInput} and the headless checker's own strategies, never by a
+   * rider driven from real input (a real player's presses arrive as actual
+   * frame-by-frame edges, with nothing to accumulate).
+   */
+  mashPhase: number;
 }
 
 export function createRider(lane: number): Rider {
@@ -166,9 +224,12 @@ export function createRider(lane: number): Rider {
     lane,
     travelled: 0,
     speed: 0,
-    holding: false,
+    boost: 0,
+    ducking: false,
+    bob: 0,
     wobble: 0,
     sparking: false,
+    sparkGuard: 0,
     barCursor: 0,
     zoneCursor: 0,
     bonks: 0,
@@ -176,7 +237,16 @@ export function createRider(lane: number): Rider {
     finished: false,
     place: 0,
     finishTime: 0,
+    mashPhase: 0,
   };
+}
+
+/** What a rider is asking for this exact step. */
+export interface RiderInput {
+  /** A boost press (tap, Space, a mouse click) landed on this step. */
+  readonly pressed: boolean;
+  /** The dedicated duck control is held down this step. */
+  readonly ducking: boolean;
 }
 
 /** What happened to a rider in one step, for the scene and the HUD to react to. */
@@ -194,37 +264,60 @@ const NOTHING: StepEvents = { bonked: false, finishedNow: false, lap: 0 };
 /**
  * One rider's step.
  *
- * `band` multiplies thrust, and is how a rival is rubber-banded; it is 1 for the
- * player, always.
+ * `hazards` is the schedule for whichever level was chosen for this race
+ * (see `hazards.ts`'s header and `RailRace.chooseLevel`) — never a fixed
+ * module-level constant, because which bars/zones are actually live is now a
+ * per-race choice, not a build-time fact. `band` multiplies thrust, and is
+ * how a rival is rubber-banded; it is 1 for the player, always.
  */
 export function stepRider(
   route: RailRaceRoute,
   rider: Rider,
-  wantHold: boolean,
+  hazards: HazardSchedule,
+  input: RiderInput,
   dt: number,
   band = 1,
 ): StepEvents {
   if (rider.finished) return NOTHING;
 
   const wobbling = rider.wobble > WOBBLE_LOCKOUT;
-  rider.holding = wantHold && !wobbling;
+  rider.ducking = input.ducking;
+
+  // Bob: a quick pump down on every fresh press, springing back up between
+  // them — see this file's header. Purely cosmetic.
+  rider.bob = input.pressed ? 1 : Math.max(0, rider.bob - dt / BOB_SECONDS);
+
+  // Boost: a discrete bump per press, bleeding away continuously. Ducking or
+  // the dead window right after a bonk both cancel a press's bump — the same
+  // "no free speed while you should be doing something else" rule the old
+  // hold-based thrust used.
+  const registersAsPressed = input.pressed && !rider.ducking && !wobbling;
+  const gain = registersAsPressed ? BOOST_GAIN_PER_PRESS : 0;
+  rider.boost = Math.min(BOOST_MAX, (rider.boost + gain) * Math.exp(-BOOST_DECAY_RATE * dt));
+
+  // A short, decisive "was that a real press, recently" window — see
+  // SPARK_GUARD_SECONDS' own doc comment for why this is not just `boost`
+  // read against a threshold.
+  rider.sparkGuard = registersAsPressed ? SPARK_GUARD_SECONDS : Math.max(0, rider.sparkGuard - dt);
 
   // --- is the rail black under us? ------------------------------------------
-  const stretches = HAZARDS.sparkStretches;
+  const stretches = hazards.sparkStretches;
   while (rider.zoneCursor < stretches.length && (stretches[rider.zoneCursor]?.to ?? 0) < rider.travelled) {
     rider.zoneCursor += 1;
   }
   const stretch = stretches[rider.zoneCursor];
   const inZone = stretch !== undefined && rider.travelled >= stretch.from;
-  rider.sparking = inZone && rider.holding;
+  rider.sparking = inZone && rider.sparkGuard > 0;
   if (rider.sparking) rider.sparkSeconds += dt;
 
   // --- physics ---------------------------------------------------------------
   const distance = route.wrap(route.startDistance + rider.travelled);
   const slope = route.slopeAt(rider.lane, distance);
-  // Sparking cancels the thrust as well as adding drag: the rail is not carrying
-  // the power, which is the whole fiction of a black section.
-  const thrust = rider.holding && !rider.sparking ? THRUST * band : 0;
+  // Ducking and sparking both cancel thrust outright, not just growth — the
+  // rail is not carrying the power in either case, which is the whole
+  // fiction of "you must let go for this".
+  const thrustGate = !rider.ducking && !rider.sparking && !wobbling;
+  const thrust = thrustGate ? THRUST_MAX * rider.boost * band : 0;
   const drag =
     DRAG_LINEAR * rider.speed +
     DRAG_SQUARE * rider.speed * rider.speed +
@@ -240,13 +333,11 @@ export function stepRider(
   //
   // Every crossing of the whole race is a single ascending list of travelled
   // distances, so this is an interval test walked by one cursor: a bar between
-  // `before` and now is caught whatever the frame rate. The old race sampled
-  // `|distance - barrier| < 0.9` instead — a 1.8 m window that a 30 fps frame at
-  // racing speed steps most of the way across and a hitch steps clean over.
+  // `before` and now is caught whatever the frame rate.
   let bonked = false;
-  const crossings = HAZARDS.barCrossings;
+  const crossings = hazards.barCrossings;
   while (rider.barCursor < crossings.length && (crossings[rider.barCursor] ?? Infinity) <= rider.travelled) {
-    if (rider.holding) {
+    if (!rider.ducking) {
       bonk(rider);
       bonked = true;
     }
@@ -270,6 +361,11 @@ export function stepRider(
 function bonk(rider: Rider): void {
   rider.speed = Math.max(MIN_SPEED, rider.speed * BONK_SPEED_FACTOR);
   rider.wobble = 1;
+  // A crisp punishment, not just a gate on new gain: without this a rider
+  // who had built up a lot of boost right before the bar would keep coasting
+  // on it the instant the wobble drops back under WOBBLE_LOCKOUT.
+  rider.boost = 0;
+  rider.sparkGuard = 0;
   rider.bonks += 1;
 }
 
@@ -278,73 +374,148 @@ function bonk(rider: Rider): void {
 /**
  * How far ahead a rider has to look to catch the next bar.
  *
- * One step's travel plus a margin: releasing any earlier only costs speed, and
+ * One step's travel plus a margin: ducking any earlier only costs speed, and
  * the family's rule gives no credit for coasting down first.
  */
-function barIsHere(rider: Rider, dt: number, margin: number): boolean {
-  const next = HAZARDS.barCrossings[rider.barCursor];
+function barIsHere(rider: Rider, hazards: HazardSchedule, dt: number, margin: number): boolean {
+  const next = hazards.barCrossings[rider.barCursor];
   if (next === undefined) return false;
   return next - rider.travelled <= rider.speed * dt + margin;
 }
 
 /** Is a black stretch under us, or about to be? */
-function zoneIsHere(rider: Rider, lead: number, trail: number): boolean {
-  const stretch = HAZARDS.sparkStretches[rider.zoneCursor];
+function zoneIsHere(rider: Rider, hazards: HazardSchedule, lead: number, trail: number): boolean {
+  const stretch = hazards.sparkStretches[rider.zoneCursor];
   if (stretch === undefined) return false;
   return rider.travelled >= stretch.from - lead && rider.travelled <= stretch.to + trail;
 }
 
+/** How many taps a second a rival lands while nothing needs their attention. */
+const RIVAL_MASH_RATE_MIN = 2.5;
+const RIVAL_MASH_RATE_MAX = 6.2;
+
 /**
- * The rivals' one decision, and their entire personality.
- *
- * `skill` is 0..1. A low-skill rival misses bars more often and enters black
- * stretches late; none of them is ever perfect, because a child has to be able
- * to win, and none of them is ever hopeless, because a race you cannot lose is
- * not a race either.
+ * Ticks a rider's own {@link Rider.mashPhase} accumulator at `rate` taps a
+ * second and reports whether one landed this step — a regular, deterministic
+ * tap stream rather than one jittered per frame, which is plenty: a rival
+ * skips a tap here and there through `skill` and `rng` at the call site
+ * instead (see {@link rivalInput}), not by making the underlying rhythm
+ * ragged.
  */
-export function rivalWantsHold(rider: Rider, dt: number, skill: number, rng: Rng): boolean {
-  if (rider.wobble > WOBBLE_LOCKOUT) return false;
+function tickMash(rider: Rider, rate: number, dt: number): boolean {
+  if (rate <= 0) return false;
+  rider.mashPhase += rate * dt;
+  if (rider.mashPhase < 1) return false;
+  rider.mashPhase -= 1;
+  return true;
+}
+
+/**
+ * The rivals' whole personality: how hard they mash, and whether they
+ * remember to duck and to ease off.
+ *
+ * `skill` is 0..1. A low-skill rival mashes slower, misses bars more often
+ * and eases off a black stretch late; none of them is ever perfect, because a
+ * child has to be able to win, and none of them is ever hopeless, because a
+ * race you cannot lose is not a race either.
+ */
+export function rivalInput(
+  rider: Rider,
+  hazards: HazardSchedule,
+  dt: number,
+  skill: number,
+  rng: Rng,
+): RiderInput {
+  if (rider.wobble > WOBBLE_LOCKOUT) return { pressed: false, ducking: false };
+
   // Judgement of each bar is drawn once, as it comes up, so a rival's mistakes
   // are decided in advance rather than flickering frame to frame.
-  if (barIsHere(rider, dt, 0.8)) return rng.chance(1 - skill) ? true : false;
-  if (zoneIsHere(rider, 1.5 * skill, 0)) return false;
-  return true;
+  if (barIsHere(rider, hazards, dt, 0.8)) {
+    return { pressed: false, ducking: rng.chance(skill) };
+  }
+  // Scaled by SPARK_AVOID_LEAD, same as the checker's own `mashPerfect`: a
+  // rival at skill 1 eases off with (almost) enough lead to never spark, one
+  // at skill 0 eases off right at the edge of the zone and sparks visibly —
+  // which is the point, see this function's own doc comment.
+  if (zoneIsHere(rider, hazards, SPARK_AVOID_LEAD * skill, 0)) return { pressed: false, ducking: false };
+
+  const rate = RIVAL_MASH_RATE_MIN + (RIVAL_MASH_RATE_MAX - RIVAL_MASH_RATE_MIN) * skill;
+  return { pressed: tickMash(rider, rate, dt), ducking: false };
 }
 
 // ----------------------------------------------------------- the headless race
 
-/** The four ways `scripts/check-rail-race.mts` plays the game. */
-export type Strategy = 'alwaysHold' | 'neverHold' | 'perfect' | 'sloppy' | 'barsOnly';
+/** The five ways `scripts/check-rail-race.mts` plays the game. */
+export type Strategy = 'mashThroughEverything' | 'neverPress' | 'mashPerfect' | 'mashSloppy' | 'ducksNothing';
 
-function strategyWantsHold(strategy: Strategy, rider: Rider, dt: number, rng: Rng): boolean {
+/**
+ * Sustained tap rate for each strategy, taps a second, while nothing needs
+ * attention. Every strategy but `neverPress` mashes at the same top rate —
+ * this table exists to isolate *hazard judgement*, not mashing stamina, so a
+ * strategy's whole difference from `mashPerfect` should be how it handles a
+ * bar or a zone, not how fast its thumb is the rest of the time. (An earlier
+ * draft gave `mashSloppy` a slower rate too, on top of worse judgement —
+ * `scripts/check-rail-race.mts` caught that it then finished *slower* than
+ * `mashThroughEverything` even after avoiding most of its bonks, because the
+ * slow mash rate dominated the whole ~50 s race far more than a handful of
+ * ~2 s bonks ever could. Isolate one variable at a time.)
+ */
+const STRATEGY_MASH_RATE: Readonly<Record<Strategy, number>> = {
+  mashThroughEverything: 6,
+  neverPress: 0,
+  mashPerfect: 6,
+  mashSloppy: 6,
+  ducksNothing: 6,
+};
+
+/**
+ * How far ahead of a black stretch a strategy that means to play it cleanly
+ * has to stop pressing, in metres — sized against {@link SPARK_GUARD_SECONDS}
+ * at {@link MAX_SPEED} (0.3 s × 33 m/s ≈ 10 m) so the guard window has
+ * genuinely expired by the time the zone starts, whatever speed the rider
+ * arrives at. The first draft used 0.4 m, copied from the old hold-based
+ * game where releasing was instant; against a decaying `sparkGuard` that
+ * left a "perfect" run sparking for 3.7 s of a race it should have sparked
+ * for none of — see `SPARK_GUARD_SECONDS`'s own doc comment.
+ */
+const SPARK_AVOID_LEAD = 10;
+
+function strategyInput(
+  strategy: Strategy,
+  rider: Rider,
+  hazards: HazardSchedule,
+  dt: number,
+  rng: Rng,
+): RiderInput {
+  const pressed = tickMash(rider, STRATEGY_MASH_RATE[strategy], dt);
   switch (strategy) {
-    case 'alwaysHold':
-      return true;
-    case 'neverHold':
-      return false;
-    case 'perfect':
-      // Release for exactly as long as the rule requires, and not a metre more.
-      if (barIsHere(rider, dt, 0.05)) return false;
-      if (zoneIsHere(rider, 0.4, 0)) return false;
-      return true;
-    case 'sloppy':
+    case 'mashThroughEverything':
+      // Never lets go for anything — the old game-breaking bug this file
+      // exists to catch, rephrased for a tap button: mash flat out, forever,
+      // duck for nothing.
+      return { pressed, ducking: false };
+    case 'neverPress':
+      return { pressed: false, ducking: false };
+    case 'mashPerfect':
+      // Ducks for exactly as long as a bar needs and stops pressing early
+      // enough that the black stretch never sees a live press.
+      if (barIsHere(rider, hazards, dt, 0.05)) return { pressed: false, ducking: true };
+      if (zoneIsHere(rider, hazards, SPARK_AVOID_LEAD, 0)) return { pressed: false, ducking: false };
+      return { pressed, ducking: false };
+    case 'mashSloppy':
       // Remembers the bar about two thirds of the time, and is late off the
-      // button for the black stretches.
-      if (barIsHere(rider, dt, 0.05)) return rng.chance(0.35);
-      if (zoneIsHere(rider, -2.5, 0)) return false;
-      return true;
-    case 'barsOnly':
-      // Plays the black stretches perfectly and the duck bars not at all.
-      //
-      // This exists to isolate one number: what a bonk actually costs. Against
-      // `perfect` — which differs from it *only* in letting go for the bars —
-      // the gap is the duck-bar mechanic's entire contribution to the race, with
-      // the spark drag subtracted out on both sides. Without it the checker was
-      // measuring the two hazards added together and could not tell which one
-      // was carrying the margin; it turned out the bars were carrying none of
-      // it. See `scripts/check-rail-race.mts`.
-      if (zoneIsHere(rider, 0.4, 0)) return false;
-      return true;
+      // gas for the black stretches — presses right up until it is already
+      // inside one, so it always sparks a little rather than never.
+      if (barIsHere(rider, hazards, dt, 0.05)) return { pressed: false, ducking: rng.chance(0.65) };
+      if (zoneIsHere(rider, hazards, -2.5, 0)) return { pressed: false, ducking: false };
+      return { pressed, ducking: false };
+    case 'ducksNothing':
+      // Isolates what a bonk actually costs. Against `mashPerfect` — which
+      // differs from it *only* in ducking for the bars — the gap is the
+      // duck-bar mechanic's entire contribution to the race, with the spark
+      // drag subtracted out on both sides. See `scripts/check-rail-race.mts`.
+      if (zoneIsHere(rider, hazards, SPARK_AVOID_LEAD, 0)) return { pressed: false, ducking: false };
+      return { pressed, ducking: false };
   }
 }
 
@@ -359,10 +530,12 @@ export interface RaceOutcome {
  *
  * Deliberately drives {@link stepRider} — the very function the browser calls
  * every frame — so a change to the physics cannot pass the check by only being
- * made in one of two places.
+ * made in one of two places. `level` picks which hazard composition the race
+ * is run against — see `hazards.ts`'s header.
  */
-export function simulateRailRace(strategy: Strategy): RaceOutcome {
+export function simulateRailRace(strategy: Strategy, level: RaceLevel): RaceOutcome {
   const route = RAIL_RACE_PLAN.route;
+  const hazards = scheduleForLevel(level);
   const rider = createRider(0);
   const rng = new Rng(0x1a5e51);
   const dt = 1 / 60;
@@ -371,7 +544,7 @@ export function simulateRailRace(strategy: Strategy): RaceOutcome {
   // A generous ceiling: nothing that finishes is anywhere near it, and a rider
   // that somehow cannot finish should end the check rather than the process.
   while (!rider.finished && seconds < 400) {
-    stepRider(route, rider, strategyWantsHold(strategy, rider, dt, rng), dt);
+    stepRider(route, rider, hazards, strategyInput(strategy, rider, hazards, dt, rng), dt);
     seconds += dt;
   }
 

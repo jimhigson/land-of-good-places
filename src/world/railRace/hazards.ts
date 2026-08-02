@@ -22,6 +22,29 @@ import { RIDE_SCALE } from './route';
  *
  * Together they ask for two different shapes of the same skill: a flick of the
  * thumb, and the patience to keep it off.
+ *
+ * ## Three separately-chosen levels, not an escalation within one race (2 August 2026)
+ *
+ * Jim's brief for the tap-rate rework: three distinct levels, picked once
+ * after boarding, before the countdown (see `RailRace.ts`'s `chooseLevel`).
+ * Level 1 is hazard-free, level 2 adds the black spark stretches, level 3
+ * adds the duck bars on top — a fixed composition for the *whole* race,
+ * every lap identical, not something that changes lap to lap within one go.
+ * (An earlier pass read this brief as "escalate by lap" instead — Jim
+ * corrected that mid-build; see the git history on this file and on
+ * `RailRace.ts`/`simulate.ts` if the shape of the old reading is useful.)
+ *
+ * `planHazards` still lays out exactly one physical set of bar and zone
+ * positions around the ring, **independent of `level`** — the RNG that
+ * decides where a bar or a black stretch actually sits never looks at
+ * `level` at all; only whether the *schedule* built from those positions
+ * (`barCrossings`/`sparkStretches`, the absolute travelled-distance lists
+ * `stepRider` actually walks) includes them depends on
+ * {@link ZONES_FROM_LEVEL} and {@link BARS_FROM_LEVEL}. This is what lets
+ * `simulate.ts`'s `HAZARD_LAYOUT` (built once, for the ring's geometry) and a
+ * freshly-chosen race's own schedule agree on where everything physically
+ * is, whichever level she picked — `track.ts`'s `setHazardLevel` only
+ * toggles which of that already-built geometry is visible.
  */
 
 /**
@@ -115,6 +138,18 @@ export interface HazardSchedule {
  */
 export const TRESTLE_SPACING = 12;
 
+/** The three levels `RailRace.chooseLevel` offers. See this file's own header. */
+export type RaceLevel = 1 | 2 | 3;
+
+/**
+ * First level the black stretches spark on. See this file's own header —
+ * level 1 is deliberately hazard-free.
+ */
+export const ZONES_FROM_LEVEL: RaceLevel = 2;
+
+/** First level the duck bars are live on. */
+export const BARS_FROM_LEVEL: RaceLevel = 3;
+
 /** The first hazard is this far past the arch, so the race opens with speed. */
 const OPENING_RUN = 58;
 
@@ -197,14 +232,18 @@ function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<
 }
 
 /**
- * Lays out one lap, then repeats it.
+ * Lays out one lap, then repeats it — the physical positions, always; whether
+ * a given level's schedule actually includes them is decided afterwards, see
+ * this file's own header.
  *
  * Seeded from a fixed constant rather than the park seed: this course is meant
  * to be *learnable*. A child who knows the sparky stretch before the ferris
  * wheel is a child who is enjoying the game, and re-rolling the layout every
- * park would throw that away for nothing.
+ * park would throw that away for nothing. The seed, and everything about
+ * *where* a bar or a zone sits, is deliberately the same whichever level is
+ * chosen — level only ever adds or removes whole hazards, never moves one.
  */
-export function planHazards(loopLength: number, laps: number): HazardSchedule {
+export function planHazards(loopLength: number, laps: number, level: RaceLevel): HazardSchedule {
   const rng = new Rng(0x9a11ce);
   const bars: DuckBar[] = [];
   const zones: SparkZone[] = [];
@@ -232,13 +271,23 @@ export function planHazards(loopLength: number, laps: number): HazardSchedule {
     cursor += rng.range(GAP_MIN, GAP_MAX);
   }
 
+  // Which of the physical layout above actually makes it into this level's
+  // schedule — uniformly across every lap (unlike the old lap-escalation
+  // reading of the brief this replaced): a level is a fixed composition for
+  // the whole race, not something that changes as the laps go by.
+  const includeZones = level >= ZONES_FROM_LEVEL;
+  const includeBars = level >= BARS_FROM_LEVEL;
   const barCrossings: number[] = [];
   const sparkStretches: SparkZone[] = [];
   for (let lap = 0; lap < laps; lap += 1) {
     const base = lap * loopLength;
-    for (const bar of bars) barCrossings.push(base + bar.at);
-    for (const zone of zones) {
-      sparkStretches.push({ from: base + zone.from, to: base + zone.to });
+    if (includeZones) {
+      for (const zone of zones) {
+        sparkStretches.push({ from: base + zone.from, to: base + zone.to });
+      }
+    }
+    if (includeBars) {
+      for (const bar of bars) barCrossings.push(base + bar.at);
     }
   }
   barCrossings.sort((a, b) => a - b);

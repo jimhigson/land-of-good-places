@@ -2,6 +2,7 @@ import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { PLAYER_RADIUS } from '../../core/constants';
+import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import { createKid, type KidHandle } from '../../art/models/kid';
@@ -17,13 +18,16 @@ import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegm
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
+import type { RaceLevel } from './hazards';
 import {
-  HAZARDS,
+  HAZARD_LAYOUT,
   RACE_LAPS,
   createRider,
-  rivalWantsHold,
+  rivalInput,
+  scheduleForLevel,
   stepRider,
   type Rider,
+  type RiderInput,
 } from './simulate';
 
 /**
@@ -118,6 +122,18 @@ const SWING = 0.22;
 const DUCK_DROP = 0.5;
 
 /**
+ * How far the seat dips on the per-press pump/pedal bob, same pre-`RIDE_SCALE`
+ * units as `DUCK_DROP` above (the cart's own group carries the `RIDE_SCALE`
+ * multiply for both the rivals, via `kid.root` being its child, and the
+ * player, via `poseRider()`'s own explicit multiply). Small — this is a quick
+ * tactile "yes, that press landed", not a ducking-sized motion.
+ */
+const BOB_DROP = 0.12;
+
+/** `Rider.boost` above which a rival's cart pose reads as "actively mashing". */
+const PRESSING_POSE_THRESHOLD = 0.15;
+
+/**
  * What the race wants said on screen, for whoever is holding the DOM.
  *
  * `RailRace` lives in `World` and has no business knowing about `uiRoot`; the
@@ -126,6 +142,14 @@ const DUCK_DROP = 0.5;
  */
 export type RaceMoment =
   | { readonly kind: 'start' }
+  /**
+   * "Which level?" — shown the moment she boards, before the countdown even
+   * starts (see `chooseLevel`), and cleared the instant she picks one. This
+   * is also where the "tap fast to win" instructions live: read while she's
+   * deciding, rather than a separate pill flashed during 3-2-1, which is a
+   * moment she is watching the track, not the text.
+   */
+  | { readonly kind: 'levelSelect'; readonly shown: boolean }
   /** A countdown digit, "GO!", or `null` to clear it. */
   | { readonly kind: 'count'; readonly text: string | null }
   | { readonly kind: 'lap'; readonly lap: number; readonly of: number }
@@ -134,7 +158,12 @@ export type RaceMoment =
   | { readonly kind: 'result'; readonly won: boolean }
   | { readonly kind: 'end' };
 
-type Phase = 'waiting' | 'countdown' | 'racing' | 'finishing';
+/**
+ * `levelSelect` sits between boarding and the countdown: everybody is at the
+ * line, the ride view is up, but nothing moves until `chooseLevel` picks a
+ * hazard composition and starts the clock.
+ */
+type Phase = 'waiting' | 'levelSelect' | 'countdown' | 'racing' | 'finishing';
 
 interface Cart {
   readonly rider: Rider;
@@ -169,15 +198,21 @@ export class RailRace implements GameSystem {
   /** The race's on-screen framing. Wired by `Game` to `ui/RaceHud.ts`. */
   onRaceMoment: ((moment: RaceMoment) => void) | null = null;
   /**
-   * "Is a finger down on the race pad?"
+   * The touch half of the tap-rate control, read *alongside* the keyboard and
+   * mouse, never instead of them — same reason the old `raceHold` existed:
+   * `Game.screenIsBusy()` hides the on-screen buttons while a ride has hold of
+   * you, which is fatal here, where a finger is the only way a phone can play
+   * at all. Wired by `Game` to `ui/RaceHud.ts`, whose whole-screen pad now
+   * tells a tap (this) apart from a drag-down-and-hold (`touchDucking` below).
    *
-   * Read *alongside* the keyboard, never instead of it. It exists because
-   * `Game.screenIsBusy()` hides the touch controls while a ride has hold of you
-   * — correct for the train and the Sky Cruiser, and fatal here, where holding
-   * is the whole game and the hop button is the only thing bound to `jump` that
-   * a finger can reach. See `ui/RaceHud.ts`.
+   * Drained once a frame, not read as a level: a boost press is a discrete
+   * event, and a finger can tap faster than a frame, so `RaceHud` queues them
+   * and this call empties the queue rather than losing everything but the
+   * last one still down.
    */
-  raceHold: (() => boolean) | null = null;
+  takeTouchBoostPresses: (() => number) | null = null;
+  /** The touch half of duck: true for as long as a finger is dragged down and held. */
+  touchDucking: (() => boolean) | null = null;
 
   private readonly collision: CollisionWorld;
   private readonly track: RailRaceTrack;
@@ -188,6 +223,9 @@ export class RailRace implements GameSystem {
   private readonly tangent = new Vector3();
 
   private player: Player | null = null;
+  /** Cached off `FrameContext` every `update()`, so `requestBoard`/`arrive` — which
+   *  are called from outside the frame loop — can reach the input system too. */
+  private input: InputSystem | null = null;
   private riding = false;
   private phase: Phase = 'waiting';
   private countdown = 0;
@@ -197,6 +235,15 @@ export class RailRace implements GameSystem {
   private finishedCount = 0;
   private confetti: Confetti | null = null;
   private ducking = false;
+  /**
+   * The hazard composition for the race in progress — chosen once, in
+   * `chooseLevel`, before the countdown, and reset to the calm level-1
+   * default in `arrive()`. Also what the idling rivals race against between
+   * races (see `driveIdleRivals`), so the ring is quiet until somebody
+   * actually picks a level.
+   */
+  private activeLevel: RaceLevel = 1;
+  private activeSchedule = scheduleForLevel(1);
   /** Look-alike rivals who stand about at the exit when a race lets you off. */
   private readonly exitCrowd: RailRaceExitCrowd;
 
@@ -205,7 +252,11 @@ export class RailRace implements GameSystem {
     this.group.name = 'railRace';
 
     const route = RAIL_RACE_PLAN.route;
-    this.track = buildRailRaceTrack(route, HAZARDS.lap, collision);
+    // Level-independent — see `HAZARD_LAYOUT`'s own doc comment. The ring's
+    // hazard geometry is built once, in full, whichever level ends up
+    // chosen; `setHazardLevel` below only ever toggles its visibility.
+    this.track = buildRailRaceTrack(route, HAZARD_LAYOUT, collision);
+    this.track.setHazardLevel(this.activeLevel);
     this.group.add(this.track.group);
 
     this.sparks = createSparks();
@@ -268,9 +319,9 @@ export class RailRace implements GameSystem {
     this.player.model.root.scale.setScalar(RIDE_SCALE);
     this.onRideChange?.(true);
 
-    // Everybody back to the line. Nothing moves until the countdown runs out —
-    // a race that has already started when the camera arrives is a race a
-    // six-year-old has already lost.
+    // Everybody back to the line. Nothing moves until she picks a level and
+    // the countdown runs out — a race that has already started when the
+    // camera arrives is a race a six-year-old has already lost.
     for (const cart of this.carts) {
       const fresh = createRider(cart.rider.lane);
       Object.assign(cart.rider, fresh);
@@ -280,20 +331,43 @@ export class RailRace implements GameSystem {
     // lights at all, so four idling carts must not leave eight of them burning
     // in every material in the park — see `cart.ts`'s `HEADLAMP_RANGE`.
     for (const cart of this.carts) cart.cart.setHeadlamps(true);
-    this.phase = 'countdown';
-    this.countdown = COUNTDOWN_SECONDS;
+    this.phase = 'levelSelect';
     this.raceTime = 0;
     this.finishedCount = 0;
     this.ducking = false;
     this.placeCarts();
     this.rideView?.reset(0);
+    // The right mouse button is the desktop duck control for the whole race —
+    // see `InputSystem.setMouseCaptureActive`'s own doc comment for why this
+    // is scoped to the ride rather than a park-wide suppression of the
+    // context menu.
+    this.input?.setMouseCaptureActive(true);
     this.onRaceMoment?.({ kind: 'start' });
+    this.onRaceMoment?.({ kind: 'levelSelect', shown: true });
+    return true;
+  }
+
+  /**
+   * The level-select screen's own choice lands here. Builds the schedule for
+   * the chosen level, arms the track's hazard geometry to match, and starts
+   * the countdown — the tail end of what `requestBoard` used to do in one go
+   * before there was a choice to make first.
+   */
+  chooseLevel(level: RaceLevel): boolean {
+    if (this.phase !== 'levelSelect') return false;
+    this.activeLevel = level;
+    this.activeSchedule = scheduleForLevel(level);
+    this.track.setHazardLevel(level);
+    this.onRaceMoment?.({ kind: 'levelSelect', shown: false });
+    this.phase = 'countdown';
+    this.countdown = COUNTDOWN_SECONDS;
     this.emitCount(String(COUNTDOWN_SECONDS));
     return true;
   }
 
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
+    this.input = context.input;
 
     // The countdown digit ticks off the screen on its own clock, so it keeps
     // running through the change from counting down to racing — "GO!" is raised
@@ -304,6 +378,11 @@ export class RailRace implements GameSystem {
     }
 
     switch (this.phase) {
+      case 'levelSelect':
+        // Everybody sits at the line while she decides — `chooseLevel` moves
+        // the phase on. Nothing to step here.
+        break;
+
       case 'countdown': {
         const before = Math.ceil(this.countdown);
         this.countdown -= dt;
@@ -362,28 +441,37 @@ export class RailRace implements GameSystem {
     const { dt } = context;
     const me = this.me.rider;
 
+    // Drained every frame regardless of `playerDrives`, so a tap that landed
+    // while the result card was up cannot queue up and fire late once she
+    // boards again.
+    const touchPresses = this.takeTouchBoostPresses?.() ?? 0;
+
     for (const cart of this.carts) {
       const rider = cart.rider;
-      let wantHold: boolean;
+      let riderInput: RiderInput;
       let band = 1;
 
       if (cart.isPlayer) {
-        // The old racer's one button, on real rails.
+        // Mash Space or the left mouse button, or tap the screen — see
+        // `actions.ts`'s `boost`/`duck` and `RaceHud`'s touch pad.
         const input = context.input;
-        wantHold =
-          playerDrives &&
-          (input.isDown('jump') || input.isDown('interact') || this.raceHold?.() === true);
+        riderInput = playerDrives
+          ? {
+              pressed: input.justPressed('jump') || input.justPressed('boost') || touchPresses > 0,
+              ducking: input.isDown('duck') || this.touchDucking?.() === true,
+            }
+          : { pressed: false, ducking: false };
       } else {
-        wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
+        riderInput = rivalInput(rider, this.activeSchedule, dt, skillOf(rider), this.rng);
         // Rubber band: catching up is easier than running away.
         const lead = me.travelled - rider.travelled;
         band = 1 + Math.max(-SWING, Math.min(SWING, lead * CATCHUP));
       }
 
-      const events = stepRider(RAIL_RACE_PLAN.route, rider, wantHold, dt, band);
+      const events = stepRider(RAIL_RACE_PLAN.route, rider, this.activeSchedule, riderInput, dt, band);
 
       if (cart.isPlayer) {
-        this.ducking = !rider.holding;
+        this.ducking = rider.ducking;
         if (events.bonked) {
           this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
           // Only the player's own bonk gets a message — a rival's bonk has no
@@ -427,8 +515,13 @@ export class RailRace implements GameSystem {
     for (const cart of this.carts) {
       if (cart.isPlayer) continue;
       const rider = cart.rider;
-      const wantHold = rivalWantsHold(rider, dt, skillOf(rider), this.rng);
-      stepRider(route, rider, wantHold, dt);
+      stepRider(
+        route,
+        rider,
+        this.activeSchedule,
+        rivalInput(rider, this.activeSchedule, dt, skillOf(rider), this.rng),
+        dt,
+      );
       if (rider.finished) {
         rider.travelled %= route.length;
         rider.finished = false;
@@ -493,9 +586,11 @@ export class RailRace implements GameSystem {
     const me = this.me.rider;
     const route = RAIL_RACE_PLAN.route;
 
-    // The warning lamps, driven off how far round this lap she is.
+    // The warning lamps, driven off how far round this lap she is. Safe now
+    // means "actively ducking" (the dedicated held control), not "not
+    // holding the old accelerate button" — see `hazards.ts`'s header.
     const lapOffset = me.travelled % route.length;
-    this.track.setAlerts(lapOffset, !me.holding, elapsed);
+    this.track.setAlerts(lapOffset, me.ducking, elapsed);
 
     // Sparks fly off whichever carts are powering over a black stretch — the
     // rivals' too, which is how a child learns the rule by watching somebody
@@ -510,11 +605,11 @@ export class RailRace implements GameSystem {
       // Struck from under the cart, a few per frame rather than a burst: a
       // continuous shower for as long as the button is held.
       this.sparks.emit(at.x, at.y - 0.15, at.z, 2);
-      // `sparkStretches` repeats `HAZARDS.lap.zones` once per lap in the same
-      // order, so the cursor modulo the lap's zone count is exactly the zone
-      // this rider is in right now — the same fact `stepRider` used to decide
-      // `sparking` in the first place, not a re-derived position match.
-      const zoneIndex = cart.rider.zoneCursor % HAZARDS.lap.zones.length;
+      // `sparkStretches` repeats `HAZARD_LAYOUT.zones` once per lap in the
+      // same order, so the cursor modulo the lap's zone count is exactly the
+      // zone this rider is in right now — the same fact `stepRider` used to
+      // decide `sparking` in the first place, not a re-derived position match.
+      const zoneIndex = cart.rider.zoneCursor % HAZARD_LAYOUT.zones.length;
       sparkingSegments.push({ zoneIndex, lane: cart.rider.lane });
     }
     this.track.setSparking(sparkingSegments, elapsed);
@@ -530,22 +625,33 @@ export class RailRace implements GameSystem {
       if (!kid) continue;
       kid.update(dt);
       const limbs = kid.limbs;
+      // The pump/pedal bob: a quick dip on every fresh press, springing back
+      // up between them (`Rider.bob`, see `simulate.ts`'s header) — the seat
+      // itself moves, on top of whatever pose the arms are holding.
+      kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP;
       if (cart.rider.finished) {
         // Arms up, cheering.
         const flap = Math.sin(elapsed * 11) * 0.3;
         limbs.rightArm.rotation.x = -2.5 + flap;
         limbs.leftArm.rotation.x = -2.5 - flap;
-      } else if (!cart.rider.holding) {
+      } else if (cart.rider.ducking) {
         // Ducked: head down, arms tucked in.
         limbs.rightArm.rotation.x = -0.4;
         limbs.leftArm.rotation.x = -0.4;
         kid.head.rotation.x = 0.5;
-      } else {
-        // Hands on the rail, leaning into it.
+      } else if (cart.rider.boost > PRESSING_POSE_THRESHOLD) {
+        // Mashing: hands on the rail, leaning into it.
         limbs.rightArm.rotation.x = -1.2;
         limbs.rightArm.rotation.z = -0.2;
         limbs.leftArm.rotation.x = -1.2;
         limbs.leftArm.rotation.z = 0.2;
+        kid.head.rotation.x = 0;
+      } else {
+        // Coasting: hands resting, nobody's pressing anything right now.
+        limbs.rightArm.rotation.x = -0.7;
+        limbs.rightArm.rotation.z = 0;
+        limbs.leftArm.rotation.x = -0.7;
+        limbs.leftArm.rotation.z = 0;
         kid.head.rotation.x = 0;
       }
       kid.setExpression(cart.rider.wobble > 0.2 ? 'surprised' : 'happy');
@@ -599,6 +705,7 @@ export class RailRace implements GameSystem {
       this.player.model.root.scale.setScalar(1);
       this.player.endRide();
       this.onRideChange?.(false);
+      this.input?.setMouseCaptureActive(false);
 
       // Pip, Nell and Otto turn up beside her, as though the four of them had
       // just climbed out together — read off the race that has this second
@@ -625,6 +732,11 @@ export class RailRace implements GameSystem {
       cart.cart.setHeadlamps(false);
       Object.assign(cart.rider, createRider(cart.rider.lane));
     }
+    // Back to the calm level-1 default between races — see `activeLevel`'s
+    // own doc comment.
+    this.activeLevel = 1;
+    this.activeSchedule = scheduleForLevel(1);
+    this.track.setHazardLevel(1);
     this.placeCarts();
   }
 

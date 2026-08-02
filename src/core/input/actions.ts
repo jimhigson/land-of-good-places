@@ -17,7 +17,19 @@ export type GameAction =
   | 'sprint' // run faster
   | 'zoomIn'
   | 'zoomOut'
-  | 'debug'; // toggle the developer overlay
+  | 'debug' // toggle the developer overlay
+  // The Rail Race's own two controls, added for the tap-rate rework (2 August
+  // 2026). `duck` is a HELD control — hold Down to drop under a bar — and is
+  // safe to bind into the general vocabulary because ArrowDown already means
+  // "move backward" and movement has no effect while riding. `boost` has
+  // deliberately no keyboard binding below: Space already produces `jump`,
+  // and the ride reads `jump` directly for its keyboard/gamepad mash, so a
+  // second action bound to the same key would just be a second name for the
+  // same edge. `boost` exists purely so a left mouse click can drive the ride
+  // without also making Space (bound to `jump`) fire everywhere a mouse is
+  // clicked in the rest of the park — see `InputSystem`'s mouse handling.
+  | 'duck'
+  | 'boost';
 
 export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
@@ -32,6 +44,8 @@ export const GAME_ACTIONS: readonly GameAction[] = [
   'zoomIn',
   'zoomOut',
   'debug',
+  'duck',
+  'boost',
 ];
 
 /**
@@ -65,6 +79,22 @@ export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   Minus: 'zoomOut',
   NumpadSubtract: 'zoomOut',
   F3: 'debug',
+  ArrowDown: 'duck',
+};
+
+/**
+ * Mouse buttons, keyed by `MouseEvent.button` (0 = left, 2 = right — 1, the
+ * middle button, is left alone).
+ *
+ * Only the Rail Race reads either of these actions, so a stray click landing
+ * on a DOM button elsewhere in the park (a paused menu, a shop panel) firing
+ * `boost` or `duck` for a frame has no effect anywhere else — unlike `jump`,
+ * which genuinely does something the moment she's on foot, this pair is safe
+ * to wire globally exactly because nothing outside the ride is listening.
+ */
+export const MOUSE_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
+  0: 'boost',
+  2: 'duck',
 };
 
 /** Keyboard codes that push the movement stick. */

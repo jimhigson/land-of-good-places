@@ -1,5 +1,7 @@
+import type { RaceLevel } from '../world/railRace/hazards';
+
 /**
- * The Rail Race's framing: the 3-2-1, the lap, and how it ended.
+ * The Rail Race's framing: which level, the 3-2-1, the lap, and how it ended.
  *
  * The race happens out in the real park rather than inside the mini-game
  * framework, so it cannot borrow `minigames/overlay.ts` — that layer only
@@ -7,31 +9,62 @@
  * living in the HUD root and styled from `src/style.css` like everything else
  * the park owns.
  *
- * ### It is also the phone's go button
+ * ### It is also the phone's whole control scheme
  *
  * `Game.screenIsBusy()` hides the touch controls while a ride has hold of you,
  * which is right for the train and the Sky Cruiser and would have made the
- * race literally unplayable on a phone: holding is the whole game, and the hop
- * button — the only thing bound to `jump` a finger can reach — is hidden the
- * moment she boards. So this layer takes the mini-game framework's answer, for
- * the mini-game framework's reason: **the whole screen is the button**, because
- * the most reliable button a small hand can find is "anywhere". `holding` is
- * read by `world/coaster/Coaster.ts` alongside the keyboard, never instead of
- * it.
+ * race literally unplayable on a phone: tapping fast is the whole game, and a
+ * tiny on-screen button is not something a small thumb can find and re-find
+ * many times a second. So this layer takes the mini-game framework's answer,
+ * for the mini-game framework's reason: **the whole screen is the pad**,
+ * because the most reliable target a small hand can find is "anywhere" — and
+ * it now has to tell two gestures apart on that one pad, since boost and duck
+ * are separate controls (2 August 2026 tap-rate rework):
  *
- * Everything else in here is `pointer-events: none`, so no pill, banner or
- * countdown digit can ever swallow a press meant for the pad underneath.
+ * - A quick tap, released before it has dragged far, is a **boost press** —
+ *   queued in {@link pendingBoostPresses} and drained once a frame by
+ *   `RailRace` via {@link takeBoostPresses}, never read as a level, because a
+ *   press is a discrete event and a finger can tap faster than a frame.
+ * - A finger that drags down past {@link DUCK_DRAG_PX} before release enters
+ *   **duck**, held for as long as it stays down there — read every frame via
+ *   {@link ducking}. One finger cannot do both at once, which is the same
+ *   trade-off duck-vs-boost has on a keyboard (see `simulate.ts`'s header):
+ *   being safe costs you the speed.
+ *
+ * Everything else in here is `pointer-events: none`, so no pill, banner,
+ * countdown digit or level card can ever swallow a press meant for the pad
+ * underneath it — except the level cards themselves while they're shown,
+ * which are real buttons and need to catch a tap on purpose.
  */
+
+/** How far a finger has to drag down, in CSS pixels, before it counts as duck rather than a tap. */
+const DUCK_DRAG_PX = 40;
+
+interface RacePointer {
+  readonly startY: number;
+  ducking: boolean;
+}
+
+const LEVEL_COPY: readonly { readonly level: RaceLevel; readonly title: string; readonly line: string }[] = [
+  { level: 1, title: 'Level 1', line: 'Clear track — just for fun!' },
+  { level: 2, title: 'Level 2', line: 'Watch out for the black spark track!' },
+  { level: 3, title: 'Level 3', line: 'Spark track AND duck-under bars!' },
+];
+
 export class RaceHud {
   private readonly root: HTMLElement;
   private readonly pad: HTMLElement;
+  private readonly levels: HTMLElement;
   private readonly lap: HTMLElement;
   private readonly count: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly bonk: HTMLElement;
 
-  /** True while a finger (or a mouse) is down on the pad. */
-  private held = false;
+  private readonly pointers = new Map<number, RacePointer>();
+  private pendingBoostPresses = 0;
+
+  /** Fires the moment a level card is tapped or clicked. Wired by `Game`. */
+  onChooseLevel: ((level: RaceLevel) => void) | null = null;
 
   constructor(container: HTMLElement) {
     this.root = document.createElement('div');
@@ -41,20 +74,50 @@ export class RaceHud {
     this.pad = document.createElement('div');
     this.pad.className = 'racehud-pad';
     // pointerdown/up rather than click, exactly as `ui/ScreenControls.ts`: a
-    // game control must answer on the way down, and this one has to answer on
-    // the way *up* too, which `click` cannot express at all.
+    // game control must answer on the way down (to start tracking a possible
+    // duck-drag) and on the way up (to know whether it ended as a tap).
     this.pad.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.held = true;
+      this.pointers.set(event.pointerId, { startY: event.clientY, ducking: false });
     });
-    const release = (): void => {
-      this.held = false;
+    this.pad.addEventListener('pointermove', (event) => {
+      const pointer = this.pointers.get(event.pointerId);
+      if (!pointer || pointer.ducking) return;
+      if (event.clientY - pointer.startY > DUCK_DRAG_PX) pointer.ducking = true;
+    });
+    const release = (event: PointerEvent): void => {
+      const pointer = this.pointers.get(event.pointerId);
+      this.pointers.delete(event.pointerId);
+      // A pointer that never crossed the drag threshold was a tap, not a duck
+      // — queue a boost press. One that was already ducking just ends the
+      // duck; it was never a tap and does not also fire a press on release.
+      if (pointer && !pointer.ducking) this.pendingBoostPresses += 1;
     };
     this.pad.addEventListener('pointerup', release);
     this.pad.addEventListener('pointercancel', release);
     this.pad.addEventListener('pointerleave', release);
     this.pad.addEventListener('contextmenu', (event) => event.preventDefault());
+
+    this.levels = document.createElement('div');
+    this.levels.className = 'racehud-levels';
+    this.levels.dataset.shown = 'false';
+    const tip = document.createElement('div');
+    tip.className = 'racehud-levels-tip';
+    tip.textContent = 'Tap the screen as fast as you can to zoom ahead!';
+    this.levels.append(tip);
+    for (const { level, title, line } of LEVEL_COPY) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'racehud-level';
+      const strong = document.createElement('strong');
+      strong.textContent = title;
+      const span = document.createElement('span');
+      span.textContent = line;
+      button.append(strong, span);
+      button.addEventListener('click', () => this.onChooseLevel?.(level));
+      this.levels.append(button);
+    }
 
     this.lap = document.createElement('div');
     this.lap.className = 'racehud-lap';
@@ -71,25 +134,47 @@ export class RaceHud {
     // cannot fail": a bonk is a wobble and lost speed, not a failure state.
     this.bonk.textContent = 'Whoops — duck a little sooner!';
 
-    this.root.append(this.pad, this.lap, this.count, this.banner, this.bonk);
+    this.root.append(this.pad, this.levels, this.lap, this.count, this.banner, this.bonk);
     container.append(this.root);
   }
 
-  /** What `Coaster` asks every frame: is she holding? */
-  get holding(): boolean {
-    return this.held;
+  /**
+   * Drains every boost press queued since the last call — `RailRace` calls
+   * this once a frame. Draining rather than peeking means a tap that lands
+   * and lifts between two frames is never lost, and two taps in one frame
+   * both count.
+   */
+  takeBoostPresses(): number {
+    const presses = this.pendingBoostPresses;
+    this.pendingBoostPresses = 0;
+    return presses;
+  }
+
+  /** True while any finger is doing the drag-down-and-hold duck gesture. */
+  get ducking(): boolean {
+    for (const pointer of this.pointers.values()) {
+      if (pointer.ducking) return true;
+    }
+    return false;
   }
 
   /** Shows or hides the whole layer. Hiding clears everything on it. */
   setShown(shown: boolean): void {
     this.root.dataset.shown = shown ? 'true' : 'false';
     if (!shown) {
-      this.held = false;
+      this.pointers.clear();
+      this.pendingBoostPresses = 0;
+      this.setLevelSelect(false);
       this.setCount(null);
       this.setLap(null);
       this.setBanner(null);
       this.bonk.dataset.shown = 'false';
     }
+  }
+
+  /** The "which level?" screen, shown after boarding and before the countdown. */
+  setLevelSelect(shown: boolean): void {
+    this.levels.dataset.shown = shown ? 'true' : 'false';
   }
 
   /** The big centred digit: '3', '2', '1', 'GO!'. `null` clears it. */
