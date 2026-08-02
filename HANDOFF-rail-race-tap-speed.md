@@ -165,9 +165,46 @@ in `track.ts` are byte-for-byte what they were before this branch. No
 recovery from git history was ever needed — see "Key finding before
 starting" above.
 
-## Status
+## Status: done, PR open
 
-See git log on this branch for progress. Run `npm run build`,
-`npm run test:procgen`, `npm run check:rail-race` before opening the PR.
-`/view` screenshot of black lap-2/3 track and lap-3 bars still needed before
-claiming visual verification.
+All headless verification is green:
+- `npx tsc --noEmit` — clean (strict mode, `noUnusedLocals`/`noUnusedParameters` on).
+- `npm run build` — real exit code 0, checked without piping through `tail`/`head`.
+- `npm run test:procgen` — 80/80 across all 5 seed suites (this exercises a
+  real `RailRace` construction via `World`, including the new
+  `HAZARD_LAYOUT`/`setHazardLevel` wiring — not just `simulate.ts` in
+  isolation).
+- `npm run check:rail-race` — rewritten and passing with real margin: playing
+  well (28.6s) beats mashing blind through every hazard (52.2s) by 45%;
+  sloppy play (37.6s) sits properly between the two; duck bars are worth
+  21.5s on their own once spark drag is isolated out; level 1 is verified
+  hazard-free and level 2 verified zones-only, both measured against the
+  physics directly (a rider that mashes blindly at level 1/2), not trusted
+  from `hazards.ts` alone.
+
+**Environment note for whoever picks this up next**: this worktree had no
+local `node_modules` — `vite`/`tsc`/`three` resolved via Node's parent-directory
+walk-up to the shared checkout's `node_modules`, which is missing `vitest`
+entirely, so `test:procgen` failed with `command not found` until I ran
+`npm ci` locally in the worktree (safe — only touches this worktree's own
+`node_modules`, never the shared checkout). If `test:procgen` mysteriously
+can't find `vitest` in a fresh worktree, this is why.
+
+**Visual verification NOT done**: `mcp__chrome-devtools__list_pages` showed
+an existing page open at `localhost:5260` — per CLAUDE.md's shared-profile
+policy ("if you have not been told you own it, do not use it"), I did not
+touch the shared browser. I started my own dev server on port 5299,
+confirmed the app boots and serves `/`, `/view`, and `/rail-race` with 200s,
+then killed it. **Still needs real eyes before merge**:
+- A `/view` screenshot proving the spark-zone plate is genuinely black on
+  level 2/3 (the mechanism is unchanged from the already-shipped
+  `setSparking`/ink-fill code — only the new `sparkRibbons.visible` toggle is
+  untested live).
+- Confirming duck bars render only when level 3 is chosen, not levels 1/2.
+- The level-select screen's actual look (three buttons + tip text,
+  `src/style.css`'s new `.racehud-levels`/`.racehud-level` rules) — a
+  reasonable-but-unverified UI call, see the "Assumption" note above.
+- The per-press bob animation and the tap-vs-drag-down touch gesture split in
+  `RaceHud.ts` — no way to exercise real pointer events headlessly.
+
+PR: see `gh pr list` / the branch `rail-race-tap-speed` on this repo.
