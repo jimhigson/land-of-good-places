@@ -1,4 +1,12 @@
 import type { RaceLevel } from '../world/railRace/hazards';
+import {
+  createPortraitStrip,
+  type PortraitInfo,
+  type PortraitStrip,
+} from '../minigames/portraitStrip';
+
+/** Spelled out rather than computed: four racers, four words, no arithmetic. */
+const PLACE_NAMES: readonly string[] = ['1st', '2nd', '3rd', '4th'];
 
 /**
  * The Rail Race's framing: which level, the 3-2-1, the lap, and how it ended.
@@ -62,6 +70,16 @@ export class RaceHud {
 
   private readonly pointers = new Map<number, RacePointer>();
   private pendingBoostPresses = 0;
+
+  /**
+   * The four racers' heads along the top, in running order.
+   *
+   * Built on boarding rather than in the constructor, because who is racing —
+   * and what colour the player's own hair is — is not known until then. Torn
+   * down on `setShown(false)`, the same moment everything else on this layer
+   * is cleared.
+   */
+  private portraits: PortraitStrip | null = null;
 
   /** Fires the moment a level card is tapped or clicked. Wired by `Game`. */
   onChooseLevel: ((level: RaceLevel) => void) | null = null;
@@ -169,12 +187,47 @@ export class RaceHud {
       this.setLap(null);
       this.setBanner(null);
       this.bonk.dataset.shown = 'false';
+      this.portraits?.dispose();
+      this.portraits = null;
     }
   }
 
   /** The "which level?" screen, shown after boarding and before the countdown. */
   setLevelSelect(shown: boolean): void {
     this.levels.dataset.shown = shown ? 'true' : 'false';
+  }
+
+  /**
+   * Puts up a head for every racer, along the top edge.
+   *
+   * The same shared `createPortraitStrip` the water fight and the dodgems use
+   * — painted faces, name labels, the pop — asked for its `row` layout rather
+   * than the two banks, because this strip is a *running order* and an order
+   * split across the left and right edges of the screen is not one. See
+   * `minigames/portraitStrip.ts`.
+   *
+   * Order in `racers` is the caller's own and is never re-derived: index `i`
+   * here is index `i` in every {@link setStandings} call after it.
+   */
+  setRacers(racers: readonly PortraitInfo[]): void {
+    this.portraits?.dispose();
+    this.portraits = createPortraitStrip(this.root, racers, { layout: 'row' });
+  }
+
+  /**
+   * Who is currently winning: `order` holds racer indices, leader first.
+   *
+   * Both the place text and the left-to-right position come from this one
+   * call, so the label under a head and where that head sits can never
+   * disagree. Position is CSS `order`, so nothing moves in the DOM.
+   */
+  setStandings(order: readonly number[]): void {
+    const strip = this.portraits;
+    if (!strip) return;
+    order.forEach((racer, place) => {
+      strip.setOrder(racer, place);
+      strip.setSubtitle(racer, PLACE_NAMES[place] ?? `${place + 1}th`);
+    });
   }
 
   /** The big centred digit: '3', '2', '1', 'GO!'. `null` clears it. */
@@ -243,6 +296,8 @@ export class RaceHud {
   }
 
   dispose(): void {
+    this.portraits?.dispose();
+    this.portraits = null;
     this.root.remove();
   }
 }

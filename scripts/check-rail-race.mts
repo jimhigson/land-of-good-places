@@ -80,7 +80,13 @@ import {
   PLAYER_LANE,
   UNDULATION_REACH,
 } from '../src/world/railRace/route.ts';
-import { RACE_LAPS, simulateRailRace, type Strategy } from '../src/world/railRace/simulate.ts';
+import {
+  RACE_LAPS,
+  RIVAL_SKILL,
+  simulateField,
+  simulateRailRace,
+  type Strategy,
+} from '../src/world/railRace/simulate.ts';
 import { AHEAD, RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
 
 const problems: string[] = [];
@@ -713,6 +719,103 @@ require(
 require(
   level2.sparkSeconds > 1,
   'level 2 never sparked — the black stretches should already be live at level 2.',
+);
+
+// --- the field: can she actually win? -----------------------------------
+//
+// Everything above races the player alone against the clock. It cannot
+// answer the family's actual complaint (1 August 2026 — "the competitor NPCs
+// are far too good... make them make mistakes and sometimes not play
+// optimally, at random"), because there is no field to be too good *at*
+// without the three rivals actually racing alongside her. `simulateField`
+// drives all four carts through the same `stepRider`/`rivalInput`/`rivalBand`
+// the browser calls, at level 3 (every hazard live, the hardest of the three
+// the family can pick), across a fixed sweep of seeds — so a change to
+// `RIVAL_SKILL` or the rubber band constants in `simulate.ts` is measured
+// against the real physics, not carried over from a figure that belonged to
+// a different control scheme (the hold-based rivals this file's git history
+// once tuned raced a game that no longer exists after the 2 August tap-rate
+// rework).
+say('');
+say(`rival skill (inside-out)   ${RIVAL_SKILL.map((s) => s.toFixed(2)).join('  ')}`);
+
+const FIELD_SEEDS = [
+  1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946, 17711,
+  28657, 46368, 75025,
+];
+
+function fieldSummary(strategy: Strategy): {
+  wins: number;
+  margins: number[];
+  rivalBonks: number[];
+} {
+  const margins: number[] = [];
+  const rivalBonks: number[] = [];
+  let wins = 0;
+  for (const seed of FIELD_SEEDS) {
+    const outcome = simulateField(strategy, 3, seed);
+    if (outcome.playerPlace === 1) wins += 1;
+    margins.push(outcome.marginMetres);
+    rivalBonks.push(outcome.rivalBonks);
+  }
+  return { wins, margins, rivalBonks };
+}
+
+const perfectField = fieldSummary('mashPerfect');
+const sloppyField = fieldSummary('mashSloppy');
+const perfectMeanMargin = perfectField.margins.reduce((a, b) => a + b, 0) / perfectField.margins.length;
+const perfectMeanBonks = perfectField.rivalBonks.reduce((a, b) => a + b, 0) / perfectField.rivalBonks.length;
+say(
+  `plays well vs field      ${perfectField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `margin ${Math.min(...perfectField.margins).toFixed(1)}–${Math.max(...perfectField.margins).toFixed(1)} m ` +
+    `(mean ${perfectMeanMargin.toFixed(1)} m)   ${perfectMeanBonks.toFixed(1)} rival bonks/race`,
+);
+const sloppyMeanMargin = sloppyField.margins.reduce((a, b) => a + b, 0) / sloppyField.margins.length;
+say(
+  `sloppy vs field           ${sloppyField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `margin ${Math.min(...sloppyField.margins).toFixed(1)}–${Math.max(...sloppyField.margins).toFixed(1)} m ` +
+    `(mean ${sloppyMeanMargin.toFixed(1)} m)`,
+);
+
+// She has to be able to win playing well — every seed, not just on average,
+// because an "on average" pass hides individual seeds where the rivals are
+// still unbeatable (exactly what caught the old hold-based rubber band: a
+// field-average assertion passed while five of 24 seeds individually blew
+// past the ceiling its own prose claimed to enforce).
+require(
+  perfectField.wins === FIELD_SEEDS.length,
+  `playing well only wins ${perfectField.wins}/${FIELD_SEEDS.length} of the fixed seeds — the rivals ` +
+    'are still beating a child who plays every hazard cleanly. Lower RIVAL_SKILL or raise the ' +
+    "rubber band's SWING_BEHIND in simulate.ts.",
+);
+// ...but not a procession. A margin the checker itself thinns to "generous
+// but bounded" rather than a fixed historical figure, because that figure
+// belongs to whatever the current physics happens to produce — re-measure,
+// don't rescale, same rule as the rest of this file.
+require(
+  Math.max(...perfectField.margins) < 140,
+  `playing well finishes as much as ${Math.max(...perfectField.margins).toFixed(1)} m clear of the ` +
+    'nearest rival on one of the fixed seeds — a procession, not a race. Raise RIVAL_SKILL or the ' +
+    "rubber band's CATCHUP_BEHIND.",
+);
+// A sloppy player must not always win — losing sometimes is what makes
+// playing well worth doing — but must not be hopeless either.
+require(
+  sloppyField.wins < FIELD_SEEDS.length,
+  'playing sloppily still wins every single seed — the rivals have nothing to teach a careless player.',
+);
+require(
+  sloppyField.wins > 0,
+  'playing sloppily never wins a single seed — a race a careless child can never win either is not ' +
+    'the "far too good" complaint fixed, just moved.',
+);
+// The rivals must actually be seen to make mistakes — bonks are the one
+// mistake visible from the player's own lane (a rival sparking is visible
+// too, but bonks are the ask the family named directly: "make mistakes").
+require(
+  perfectMeanBonks > 0.5,
+  `the rivals only bonk ${perfectMeanBonks.toFixed(2)} times a race between the three of them — too ` +
+    'rarely to read as "makes mistakes" rather than "plays perfectly". Lower RIVAL_SKILL.',
 );
 
 say('');
