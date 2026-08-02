@@ -6,6 +6,7 @@ import {
   GAME_ACTIONS,
   KEYBOARD_ACTION_BINDINGS,
   KEYBOARD_MOVE_BINDINGS,
+  MOUSE_ACTION_BINDINGS,
   type GameAction,
 } from './actions';
 
@@ -54,6 +55,19 @@ export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
   private gamepadIndex: number | null = null;
+  /** `MouseEvent.button` values currently held — see {@link MOUSE_ACTION_BINDINGS}. */
+  private readonly heldMouseButtons = new Set<number>();
+  /**
+   * While true, a right-click's context menu is swallowed rather than shown.
+   *
+   * Off by default: mouse buttons are tracked (harmlessly, see
+   * `actions.ts`'s `MOUSE_ACTION_BINDINGS` doc comment) everywhere in the
+   * park, but suppressing the browser's own context menu everywhere would be
+   * a surprising thing for this game to do outside the one ride that uses a
+   * right-click at all. `RailRace` toggles this on boarding and off on
+   * dismount.
+   */
+  private mouseCaptureActive = false;
 
   // Virtual state (on-screen buttons, tap-to-move) -------------------------
   private readonly virtualPresses = new Map<GameAction, number>();
@@ -85,6 +99,9 @@ export class InputSystem {
     target.addEventListener('blur', this.onBlur);
     target.addEventListener('gamepadconnected', this.onGamepadConnected as EventListener);
     target.addEventListener('gamepaddisconnected', this.onGamepadDisconnected as EventListener);
+    target.addEventListener('mousedown', this.onMouseDown);
+    target.addEventListener('mouseup', this.onMouseUp);
+    target.addEventListener('contextmenu', this.onContextMenu);
   }
 
   detach(target: Window = window): void {
@@ -95,6 +112,22 @@ export class InputSystem {
     target.removeEventListener('blur', this.onBlur);
     target.removeEventListener('gamepadconnected', this.onGamepadConnected as EventListener);
     target.removeEventListener('gamepaddisconnected', this.onGamepadDisconnected as EventListener);
+    target.removeEventListener('mousedown', this.onMouseDown);
+    target.removeEventListener('mouseup', this.onMouseUp);
+    target.removeEventListener('contextmenu', this.onContextMenu);
+  }
+
+  /**
+   * Whether a right-click should open the browser's context menu.
+   *
+   * `RailRace` calls this `true` the moment she boards (right mouse button is
+   * the desktop duck control) and `false` again the moment she gets off. See
+   * {@link mouseCaptureActive}'s own doc comment for why this is scoped
+   * rather than a permanent, park-wide suppression.
+   */
+  setMouseCaptureActive(active: boolean): void {
+    this.mouseCaptureActive = active;
+    if (!active) this.heldMouseButtons.clear();
   }
 
   // ----------------------------------------------------------- public API
@@ -284,6 +317,16 @@ export class InputSystem {
     }
     const padActive = Math.hypot(padX, padY) > 0;
 
+    // --- mouse buttons ----------------------------------------------------
+    // Same shape as the gamepad loop above: a held button's bound action goes
+    // into `this.down` for the frame. Tracked whether or not `mouseCaptureActive`
+    // is on — see that flag's own doc comment for why only the context-menu
+    // suppression, not the tracking itself, is scoped to the ride.
+    for (const button of this.heldMouseButtons) {
+      const action = MOUSE_ACTION_BINDINGS[button];
+      if (action) this.down.add(action);
+    }
+
     // --- on-screen buttons ----------------------------------------------
     // Merged in with the devices so that a thumb on the hop button is
     // indistinguishable, downstream, from a thumb on the space bar.
@@ -364,6 +407,22 @@ export class InputSystem {
     // And an on-screen hold would otherwise leave her climbing forever: a
     // window that loses focus mid-press never delivers the `pointerup`.
     this.virtualHolds.clear();
+    // Same failure mode as a held key: a window switch mid-click never
+    // delivers the `mouseup`, which would otherwise leave duck stuck on.
+    this.heldMouseButtons.clear();
+  };
+
+  private readonly onMouseDown = (event: MouseEvent): void => {
+    this.heldMouseButtons.add(event.button);
+    this.lastDeviceUsed = 'keyboard';
+  };
+
+  private readonly onMouseUp = (event: MouseEvent): void => {
+    this.heldMouseButtons.delete(event.button);
+  };
+
+  private readonly onContextMenu = (event: Event): void => {
+    if (this.mouseCaptureActive) event.preventDefault();
   };
 
   private readonly onGamepadConnected = (event: GamepadEvent): void => {

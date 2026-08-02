@@ -4028,15 +4028,16 @@ kbd {
 }
 
 /* ============================================================== THE RAIL RACE
-   The countdown, the lap and the result card for the coaster race out in the
-   park (see `src/ui/RaceHud.ts` and `src/world/coaster/Coaster.ts`).
+   The level choice, the countdown, the lap and the result card for the race
+   out in the park (see `src/ui/RaceHud.ts` and `src/world/railRace/`).
 
    Sits at z-index 18: above the park's own HUD row, below every panel (20+),
    so a panel opening over it still behaves. The whole layer is
-   pointer-events: none EXCEPT `.racehud-pad`, which is the phone's hold
-   button and must never have a pill, a digit or a card stealing a press from
-   it — the park hides the touch hop button while a ride has hold of you, and
-   holding is the entire game here. */
+   pointer-events: none EXCEPT `.racehud-pad` (the phone's tap-to-boost/
+   drag-to-duck pad) and `.racehud-level` (the level-choice buttons, real
+   `<button>`s, only reachable while `.racehud-levels` itself is shown) —
+   nothing else may ever have a pill, a digit or a card stealing a press from
+   either of those. */
 .racehud {
   position: absolute;
   inset: 0;
@@ -4056,8 +4057,8 @@ kbd {
   transition: opacity 200ms ease;
 }
 
-/* The whole screen is the go button. Transparent, and the only thing on this
-   layer that takes a pointer at all. */
+/* The whole screen is the boost/duck pad — tap for boost, drag down and hold
+   for duck (see RaceHud.ts's header). Transparent. */
 .racehud-pad {
   position: absolute;
   inset: 0;
@@ -4068,6 +4069,74 @@ kbd {
 
 .racehud[data-shown='true'] .racehud-pad {
   pointer-events: auto;
+}
+
+/* The level-choice screen: shown right after boarding, before the countdown.
+   A real button per level, over a dimmed backdrop, so it reads as a pause on
+   the way in rather than part of the race itself. */
+.racehud-levels {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  padding: 1.5rem;
+  background: rgba(74, 58, 82, 0.45);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.racehud-levels[data-shown='true'] {
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.racehud-levels-tip {
+  max-width: min(26rem, 88vw);
+  margin-bottom: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  font-size: var(--lgp-text-lg);
+  font-weight: 800;
+  text-align: center;
+}
+
+.racehud-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: min(22rem, 88vw);
+  padding: 0.7rem 1.2rem;
+  border: none;
+  border-radius: 1.1rem;
+  background: var(--lgp-cream);
+  box-shadow: var(--lgp-shadow);
+  color: var(--lgp-ink);
+  font-family: var(--lgp-font);
+  text-align: center;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.racehud-level:hover,
+.racehud-level:focus-visible {
+  transform: scale(1.03);
+}
+
+.racehud-level strong {
+  font-size: 1.4rem;
+  font-weight: 900;
+}
+
+.racehud-level span {
+  font-size: var(--lgp-text-md);
+  font-weight: 600;
 }
 
 /* Lap counter: a cream pill at the top, out of the way of the track ahead. */

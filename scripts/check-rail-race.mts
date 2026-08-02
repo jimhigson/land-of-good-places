@@ -23,63 +23,46 @@
  *
  * ### The game
  *
- * The old race shipped with a bug the family reported as *"duck bars
- * invisible/ineffective — holding wins"*, and "holding wins" is fatal: a
- * one-button game in which the button should just be held down has nothing to
- * teach and nothing to enjoy. So the race is simulated end to end, five ways,
- * and the ordering of their finishing times is asserted. It is deliberately a
- * *simulation of the real ride*, not of a model of it: `stepRider` is the same
- * function the browser calls every frame.
+ * The old hold-to-accelerate race shipped with a bug the family reported as
+ * *"duck bars invisible/ineffective — holding wins"*, and "holding wins" is
+ * fatal: a control the player should just mash flat out and never think about
+ * has nothing to teach and nothing to enjoy. The 2 August 2026 tap-rate rework
+ * replaced hold-to-accelerate with mash-to-go-faster and made duck a separate
+ * held control (see `simulate.ts`'s own header) — a bigger surface for the
+ * exact same failure mode to hide in, so this file simulates the race end to
+ * end, five ways, and asserts the ordering of their finishing times. It is
+ * deliberately a *simulation of the real ride*, not of a model of it:
+ * `stepRider` is the same function the browser calls every frame, and it is
+ * run at **level 3** (every hazard live) so both the spark zones and the duck
+ * bars are actually being exercised — see "the levels are gated correctly"
+ * below for a separate, direct check that level 1 and level 2 really are
+ * quieter than level 3.
  *
  * ### The strategy that matters, and why the obvious one was not enough
  *
- * Comparing "never lets go" against "plays well" is **not** a guard on the duck
- * bars, and review caught this file claiming it was. A rider who never lets go
- * also powers over every black stretch, so the whole of their deficit can be
- * spark drag while a bonk costs nothing whatever — reconstructing the original
- * bug still passed. `hold.bonks > 0` proves only that bars are *encountered*.
+ * Comparing "mashes through everything" against "plays well" is **not** a
+ * guard on the duck bars, and review caught the pre-rework version of this
+ * file claiming it was. A rider who never ducks also powers over every black
+ * stretch, so the whole of their deficit can be spark drag while a bonk costs
+ * nothing whatever — reconstructing the original bug still passed.
+ * `mashThroughEverything.bonks > 0` proves only that bars are *encountered*.
  *
- * `barsOnly` exists to isolate the one number that matters. It plays the black
- * stretches perfectly and the bars not at all, so against `perfect` the spark
- * drag cancels on both sides and what remains is exactly what a bonk costs.
+ * `ducksNothing` exists to isolate the one number that matters. It plays the
+ * black stretches perfectly and the bars not at all, so against `mashPerfect`
+ * the spark drag cancels on both sides and what remains is exactly what a
+ * bonk costs.
  *
- * ### Mutation-tested, on 1 August 2026 — and re-tested twice the same day
+ * ### Tuned against the physics itself, not carried over from the old numbers
  *
- * A regression guard nobody has watched fail is not a guard. Measured, by
- * reintroducing the original faults one at a time:
- *
- * ```
- *                                     pre-1-Aug   1-Aug physics, 3 laps   1-Aug physics, 2 laps
- * fix in place                        15.6 s  0    24.5 s  0               16.3 s  0
- * thrust un-gated during the wobble    7.8 s  1    13.2 s  0 (!)            8.7 s  1
- * a bonk costs no speed                7.3 s  1     9.9 s  0 (!)            6.6 s  1
- * both (the original Coaster bug)     -0.2 s  1    -0.2 s  1               -0.1 s  1
- * ```
- * (exit code shown after each `s` figure)
- *
- * **The middle column is why this table is worth keeping.** The family's
- * 1 August physics tuning roughly doubled the cart's speed and took the race to
- * three laps, which scaled every figure here up — and the old 8 s threshold,
- * left alone, would have gone on passing while *either* single fault was live.
- * It would have kept reporting OK on precisely the bug it was written for. The
- * mutations were re-run rather than the number re-guessed, giving 18 s: 36%
- * clear of the worst surviving mutation (13.2 s) and 27% under what the real
- * thing was worth (24.5 s).
- *
- * **The right-hand column is the same exercise again, hours later, when the
- * family played the three-lap version live and asked for two laps instead
- * with the speed left alone.** Fewer laps means fewer duck bars encountered
- * overall, which scales every figure in this table down again even though
- * nothing about what a single bonk costs changed. Re-measured rather than
- * rescaled, the same as before: the threshold is now **12 s** — 38% clear of
- * the worst surviving mutation (8.7 s) and 26% under the real thing (16.3 s),
- * the same margins as the 18 s figure it replaces, just against smaller
- * numbers. `perfect.seconds > 30` moved the same way, to **20 s** — the real
- * figure is 25.1 s, a floor the family's own two-lap verdict makes the
- * correct floor to move, not a regression to paper over.
- *
- * If you change `RACE_LAPS`, `THRUST` or the drag constants again, re-run these
- * four mutations. The absolute figures move with all of them.
+ * The tap-rate rework changed the whole shape of the control (a continuous
+ * `boost` charge fed by discrete presses, rather than a boolean "is the
+ * button down"), so the pre-rework thresholds in this file's own git history
+ * do not transfer — they were measured against a different game. The
+ * constants below were re-measured against the rework directly: run this
+ * file and read `mashThroughEverything`/`mashPerfect`/`ducksNothing`'s own
+ * printed figures if you change `BOOST_GAIN_PER_PRESS`, `BOOST_DECAY_RATE`,
+ * `THRUST_MAX` or the drag constants in `simulate.ts` — the numbers below
+ * will need the same re-measurement, not a rescale.
  */
 
 import './headless-canvas.mjs';
@@ -595,107 +578,141 @@ for (const shape of POSES) {
 }
 
 // --- is it still a game? -----------------------------------------------------
+//
+// Run at level 3 — every hazard live — so both mechanics are actually being
+// exercised. "the levels are gated correctly" below checks level 1 and 2
+// directly.
 
 say('');
 const STRATEGIES: readonly { readonly name: string; readonly strategy: Strategy }[] = [
-  { name: 'never lets go', strategy: 'alwaysHold' },
-  { name: 'never holds', strategy: 'neverHold' },
-  { name: 'sloppy', strategy: 'sloppy' },
-  { name: 'ducks nothing', strategy: 'barsOnly' },
-  { name: 'plays well', strategy: 'perfect' },
+  { name: 'mashes through everything', strategy: 'mashThroughEverything' },
+  { name: 'never presses', strategy: 'neverPress' },
+  { name: 'sloppy', strategy: 'mashSloppy' },
+  { name: 'ducks nothing', strategy: 'ducksNothing' },
+  { name: 'plays well', strategy: 'mashPerfect' },
 ];
 
 const results = new Map<Strategy, { seconds: number; bonks: number; sparkSeconds: number }>();
 for (const { name, strategy } of STRATEGIES) {
-  const run = simulateRailRace(strategy);
+  const run = simulateRailRace(strategy, 3);
   results.set(strategy, run);
   say(
-    `${name.padEnd(14)} ${run.seconds.toFixed(1)} s   ` +
+    `${name.padEnd(24)} ${run.seconds.toFixed(1)} s   ` +
       `${run.bonks} bonk${run.bonks === 1 ? '' : 's'}   ` +
       `${run.sparkSeconds.toFixed(1)} s sparking`,
   );
 }
 
-const hold = results.get('alwaysHold')!;
-const perfect = results.get('perfect')!;
-const sloppy = results.get('sloppy')!;
-const never = results.get('neverHold')!;
-const barsOnly = results.get('barsOnly')!;
+const mashThrough = results.get('mashThroughEverything')!;
+const perfect = results.get('mashPerfect')!;
+const sloppy = results.get('mashSloppy')!;
+const never = results.get('neverPress')!;
+const ducksNothing = results.get('ducksNothing')!;
 
-// The bug this file exists for.
+// The bug this file exists for, rephrased for a tap button: mashing flat out
+// through every hazard and never ducking must lose to playing well.
 require(
-  perfect.seconds < hold.seconds - 4,
-  `HOLDING WINS: never letting go finishes in ${hold.seconds.toFixed(1)} s against ` +
-    `${perfect.seconds.toFixed(1)} s for playing well. Letting go must be worth at least 4 s, ` +
-    'or the one control has nothing to teach — this is the 28 July family bug.',
+  perfect.seconds < mashThrough.seconds - 4,
+  `MASHING WINS: mashing through everything finishes in ${mashThrough.seconds.toFixed(1)} s against ` +
+    `${perfect.seconds.toFixed(1)} s for playing well. Playing well must be worth at least 4 s, or ` +
+    'the controls have nothing to teach — this is the 28 July family bug, in its new shape.',
 );
 
 // --- what a duck bar actually costs, on its own ------------------------------
 //
-// The assertion above is NOT enough on its own, and review caught exactly that:
-// `alwaysHold` also powers over every black stretch, so its whole deficit can be
-// spark drag while a bonk costs nothing at all. Reconstructing the old bug
-// (thrust un-gated during the wobble, a free bonk) still passed it. `bonks > 0`
+// The assertion above is NOT enough on its own — the same review finding that
+// shaped the old hold-based version of this file applies just as much here:
+// `mashThroughEverything` also powers over every black stretch, so its whole
+// deficit can be spark drag while a bonk costs nothing at all. `bonks > 0`
 // proves only that bars are *encountered*.
 //
-// `barsOnly` differs from `perfect` in one single thing: it does not let go for
-// the bars. Both play the black stretches perfectly, so spark drag cancels and
-// what is left is the duck-bar mechanic's entire contribution to the race.
-const barCost = barsOnly.seconds - perfect.seconds;
+// `ducksNothing` differs from `mashPerfect` in one single thing: it does not
+// duck for the bars. Both play the black stretches perfectly, so spark drag
+// cancels and what is left is the duck-bar mechanic's entire contribution to
+// the race.
+const barCost = ducksNothing.seconds - perfect.seconds;
 say('');
 say(
   `duck bars are worth ${barCost.toFixed(1)} s on their own ` +
-    `(${barsOnly.bonks} bonks, ${barsOnly.sparkSeconds.toFixed(2)} s sparking) ` +
-    `= ${(barCost / Math.max(1, barsOnly.bonks)).toFixed(2)} s per bonk`,
+    `(${ducksNothing.bonks} bonks, ${ducksNothing.sparkSeconds.toFixed(2)} s sparking) ` +
+    `= ${(barCost / Math.max(1, ducksNothing.bonks)).toFixed(2)} s per bonk`,
 );
 require(
-  barsOnly.sparkSeconds < 0.05,
-  `the bars-only run sparked for ${barsOnly.sparkSeconds.toFixed(2)} s, so this comparison is ` +
+  ducksNothing.sparkSeconds < 0.05,
+  `the ducks-nothing run sparked for ${ducksNothing.sparkSeconds.toFixed(2)} s, so this comparison is ` +
     'still contaminated by the black stretches and cannot isolate what a bonk costs.',
 );
 require(
-  barsOnly.bonks > 0,
-  'the bars-only run hit no duck bars at all — the bars are not being tested.',
+  ducksNothing.bonks > 0,
+  'the ducks-nothing run hit no duck bars at all — the bars are not being tested.',
 );
 require(
   barCost > 12,
   `DUCKING IS POINTLESS: hitting every duck bar costs only ${barCost.toFixed(1)} s once spark ` +
     'drag is taken out of both sides. A bonk must cost more than the coasting it saved, or the ' +
-    'bars are decoration — this is the 28 July family bug, and it is the assertion that fails ' +
-    'when the wobble stops gating thrust. See the mutation table at the top of this file before ' +
-    'touching this number: it was 18 s at three laps and had to be re-measured, not rescaled, ' +
-    'when the race went to two.',
+    'bars are decoration. See this file\'s own header before touching this number: re-measure it ' +
+    'against the physics directly rather than rescaling it.',
 );
 require(
-  hold.sparkSeconds > 1,
-  'a rider who never lets go never sparked — the black zones are not being tested.',
+  mashThrough.sparkSeconds > 1,
+  'a rider who mashes through everything never sparked — the black zones are not being tested.',
 );
 require(
   perfect.bonks === 0 && perfect.sparkSeconds < 0.05,
   `playing well still cost ${perfect.bonks} bonks and ${perfect.sparkSeconds.toFixed(2)} s of ` +
     'sparks — the hazards cannot be cleared cleanly, so the game is unfair rather than hard.',
 );
-// Coasting the whole way must be the slowest thing you can do, or "hold" is
-// pointless too — a one-button game needs both answers to be wrong sometimes.
+// Coasting the whole way must be the slowest thing you can do, or mashing is
+// pointless too — the control needs both answers to be wrong sometimes.
 require(
   never.seconds > perfect.seconds,
-  'never holding is as quick as playing well — the accelerate half of the control does nothing.',
+  'never pressing is as quick as playing well — mashing does nothing.',
 );
 // ...and being sloppy has to land in between, or the game is pass/fail rather
 // than something a six-year-old gets gradually better at.
 require(
-  sloppy.seconds > perfect.seconds && sloppy.seconds < hold.seconds,
+  sloppy.seconds > perfect.seconds && sloppy.seconds < mashThrough.seconds,
   `being sloppy finishes in ${sloppy.seconds.toFixed(1)} s, which is not between playing well ` +
-    `(${perfect.seconds.toFixed(1)} s) and never letting go (${hold.seconds.toFixed(1)} s).`,
+    `(${perfect.seconds.toFixed(1)} s) and mashing through everything (${mashThrough.seconds.toFixed(1)} s).`,
 );
 // Cheerful and forgiving: nobody should be out there for two minutes.
 require(
-  hold.seconds < 105,
-  `even the worst run takes ${hold.seconds.toFixed(1)} s — too long for one go.`,
+  mashThrough.seconds < 105,
+  `even the worst run takes ${mashThrough.seconds.toFixed(1)} s — too long for one go.`,
 );
 require(
   perfect.seconds > 20,
   `a good run is over in ${perfect.seconds.toFixed(1)} s — barely a ride.`,
+);
+
+// --- the levels are gated correctly ------------------------------------------
+//
+// A direct check on the "three levels" ask itself, run against the physics
+// rather than trusted from `hazards.ts` alone: level 1 must be completely
+// clear, level 2 must have the spark zones but not the bars, whatever the
+// player does — measured here with a rider who mashes through everything and
+// never ducks, so a bar or a zone that shouldn't be live has nowhere to hide.
+say('');
+const level1 = simulateRailRace('mashThroughEverything', 1);
+const level2 = simulateRailRace('mashThroughEverything', 2);
+say(
+  `level 1, mashing blindly    ${level1.bonks} bonks   ${level1.sparkSeconds.toFixed(1)} s sparking`,
+);
+say(
+  `level 2, mashing blindly    ${level2.bonks} bonks   ${level2.sparkSeconds.toFixed(1)} s sparking`,
+);
+require(
+  level1.bonks === 0 && level1.sparkSeconds === 0,
+  `level 1 has a live hazard (${level1.bonks} bonks, ${level1.sparkSeconds.toFixed(1)} s sparking) — ` +
+    'it should be completely clear, per the family brief.',
+);
+require(
+  level2.bonks === 0,
+  `level 2 bonked ${level2.bonks} times — duck bars should only appear from level 3.`,
+);
+require(
+  level2.sparkSeconds > 1,
+  'level 2 never sparked — the black stretches should already be live at level 2.',
 );
 
 say('');

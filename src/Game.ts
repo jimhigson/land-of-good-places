@@ -482,18 +482,27 @@ export class Game {
       return false;
     };
 
-    // The Rail Race's framing — the 3-2-1, the lap, and the card at the end.
-    // `RailRace` raises moments and knows nothing about the DOM; this is the
-    // only place the two meet, in the same idiom as `onRideChange` above.
+    // The Rail Race's framing — the 3-2-1, the lap, the level choice and the
+    // card at the end. `RailRace` raises moments and knows nothing about the
+    // DOM; this is the only place the two meet, in the same idiom as
+    // `onRideChange` above.
     //
-    // The HUD is also the *hold button on a phone*: `screenIsBusy()` hides the
-    // touch controls while a ride has hold of you, so without this the race
-    // would have no control at all on the device it is most likely played on.
-    this.world.railRace.raceHold = () => this.raceHud.holding;
+    // The HUD is also the *touch controls on a phone*: `screenIsBusy()` hides
+    // the normal on-screen buttons while a ride has hold of you, so without
+    // this the race would have no control at all on the device it is most
+    // likely played on. Two separate signals now, not one hold button — see
+    // `RaceHud`'s own header for how its single pad tells a tap from a
+    // drag-down-and-hold.
+    this.world.railRace.takeTouchBoostPresses = () => this.raceHud.takeBoostPresses();
+    this.world.railRace.touchDucking = () => this.raceHud.ducking;
+    this.raceHud.onChooseLevel = (level) => this.world.railRace.chooseLevel(level);
     this.world.railRace.onRaceMoment = (moment) => {
       switch (moment.kind) {
         case 'start':
           this.raceHud.setShown(true);
+          break;
+        case 'levelSelect':
+          this.raceHud.setLevelSelect(moment.shown);
           break;
         case 'count':
           this.raceHud.setCount(moment.text);

@@ -17,7 +17,19 @@ export type GameAction =
   | 'sprint' // run faster
   | 'zoomIn'
   | 'zoomOut'
-  | 'debug'; // toggle the developer overlay
+  | 'debug' // toggle the developer overlay
+  // The Rail Race's own two controls, added for the tap-rate rework (2 August
+  // 2026). `duck` is a HELD control — hold Down to drop under a bar — and is
+  // safe to bind into the general vocabulary because ArrowDown already means
+  // "move backward" and movement has no effect while riding. `boost` has
+  // deliberately no keyboard binding below: Space already produces `jump`,
+  // and the ride reads `jump` directly for its keyboard/gamepad mash, so a
+  // second action bound to the same key would just be a second name for the
+  // same edge. `boost` exists purely so a left mouse click can drive the ride
+  // without also making Space (bound to `jump`) fire everywhere a mouse is
+  // clicked in the rest of the park — see `InputSystem`'s mouse handling.
+  | 'duck'
+  | 'boost';
 
 export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
@@ -32,6 +44,8 @@ export const GAME_ACTIONS: readonly GameAction[] = [
   'zoomIn',
   'zoomOut',
   'debug',
+  'duck',
+  'boost',
 ];
 
 /**
@@ -65,6 +79,22 @@ export const KEYBOARD_ACTION_BINDINGS: Readonly<Record<string, GameAction>> = {
   Minus: 'zoomOut',
   NumpadSubtract: 'zoomOut',
   F3: 'debug',
+  ArrowDown: 'duck',
+};
+
+/**
+ * Mouse buttons, keyed by `MouseEvent.button` (0 = left, 2 = right — 1, the
+ * middle button, is left alone).
+ *
+ * Only the Rail Race reads either of these actions, so a stray click landing
+ * on a DOM button elsewhere in the park (a paused menu, a shop panel) firing
+ * `boost` or `duck` for a frame has no effect anywhere else — unlike `jump`,
+ * which genuinely does something the moment she's on foot, this pair is safe
+ * to wire globally exactly because nothing outside the ride is listening.
+ */
+export const MOUSE_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
+  0: 'boost',
+  2: 'duck',
 };
 
 /** Keyboard codes that push the movement stick. */
@@ -89,6 +119,25 @@ export const KEYBOARD_MOVE_BINDINGS: Readonly<Record<string, readonly [number, n
  * "One camera angle, forever"), and a pair of shoulder buttons is where two
  * hands already rest — holding one to climb wants a finger that is not doing
  * anything else.
+ *
+ * `duck` (13, D-pad down) fixes a real bug a review caught on the Rail
+ * Race's tap-rate rework (2 August 2026): every other device got an explicit
+ * duck control, but a gamepad player was left with nothing bound to it at
+ * all, which on Level 3 meant a guaranteed bonk on every single bar — before
+ * that rework, ducking was simply "not holding A", so a gamepad control had
+ * never needed its own binding. `boost` needs no entry here for the same
+ * reason it needs none on keyboard: button 0 already produces `jump`, and
+ * the ride reads `jump` directly as its mash signal (see `RailRace.ts`'s
+ * `driveRiders`), so a second action on the same button would just be a
+ * second name for the same edge. `13` is chosen to echo the keyboard exactly
+ * — `ArrowDown` is already double-bound to both the movement stick and
+ * `duck` (see `KEYBOARD_ACTION_BINDINGS`/`KEYBOARD_MOVE_BINDINGS`), and
+ * `GAMEPAD_DPAD_BINDINGS` below already claims 13 for the movement stick
+ * too; both tables are read independently in `InputSystem.update()`, so one
+ * physical button can carry both meanings exactly the way one physical key
+ * already does. Every shoulder button and trigger is already claimed by the
+ * jet pack and zoom, so D-pad down — not a face button, not already meaning
+ * something else mid-ride — is the free, ergonomic, and consistent choice.
  */
 export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   0: 'jump',
@@ -102,6 +151,7 @@ export const GAMEPAD_ACTION_BINDINGS: Readonly<Record<number, GameAction>> = {
   8: 'inventory',
   9: 'menu',
   10: 'sprint',
+  13: 'duck',
 };
 
 /** D-pad buttons also drive the movement stick. */

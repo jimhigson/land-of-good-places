@@ -23,7 +23,16 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import type { CollisionWorld } from '../Collision';
 import { sweptRails, type RailSampler } from '../rail/sweptRail';
-import { ALERT_RANGE, DUCK_CLEARANCE, TRESTLE_SPACING, trestleGridIndex, type HazardLayout } from './hazards';
+import {
+  ALERT_RANGE,
+  BARS_FROM_LEVEL,
+  DUCK_CLEARANCE,
+  TRESTLE_SPACING,
+  trestleGridIndex,
+  ZONES_FROM_LEVEL,
+  type HazardLayout,
+  type RaceLevel,
+} from './hazards';
 import {
   LANE_COUNT,
   LANE_SPAN,
@@ -99,6 +108,17 @@ export interface RailRaceTrack {
    * every other black stretch in the park along with it.
    */
   setSparking(active: readonly SparkingSegment[], elapsed: number): void;
+  /**
+   * Shows or hides the hazard geometry for the level chosen this race — see
+   * `hazards.ts`'s header and `ZONES_FROM_LEVEL`/`BARS_FROM_LEVEL`. The ring
+   * is one physical structure whatever level is chosen, so there is no
+   * separate geometry to build per level; this just toggles `.visible` on
+   * the black-stretch plate and the duck-bar meshes, once, when
+   * `RailRace.chooseLevel` fires. The trestle legs, beams and droppers are
+   * never touched here — they carry the rails at every level, not just the
+   * ones with hazards on them.
+   */
+  setHazardLevel(level: RaceLevel): void;
   dispose(): void;
 }
 
@@ -571,6 +591,14 @@ export function buildRailRaceTrack(
       for (const attributes of railColourAttributesByLane) {
         for (const attribute of attributes) attribute.needsUpdate = true;
       }
+    },
+
+    setHazardLevel(level: RaceLevel): void {
+      sparkRibbons.visible = level >= ZONES_FROM_LEVEL;
+      const barsLive = level >= BARS_FROM_LEVEL;
+      posts.visible = barsLive;
+      bars.visible = barsLive;
+      sleeves.visible = barsLive;
     },
 
     dispose(): void {
