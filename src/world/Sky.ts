@@ -75,12 +75,21 @@ const ORTHO_ALTITUDE_OFFSET = -0.4;
  * happening" — see this file's header.
  */
 export interface SkyView {
-  /** Bearing of the view axis: `atan2(forward.x, forward.z)`. */
+  /** Bearing of the view axis: `atan2(forward.x, forward.z)`. Ortho path only. */
   readonly yaw: number;
-  /** Altitude of the view axis, radians, positive up. Zero for the park's rig. */
-  readonly pitch: number;
-  /** Half the vertical field of view, radians. Zero when there is no such thing. */
-  readonly halfFovY: number;
+  /**
+   * The camera's own axes in world space. These are what make the sky honest:
+   * with them and the field of view, every pixel of the backdrop can work out
+   * **which way it is looking**, and put a star at a fixed direction in the
+   * world rather than at a fixed spot on the screen.
+   *
+   * Scratch vectors, rewritten every frame — read them, never keep them.
+   */
+  readonly right: Vector3;
+  readonly up: Vector3;
+  readonly forward: Vector3;
+  /** `tan` of half the vertical field of view. Zero when there is no such thing. */
+  readonly tanHalfFovY: number;
   /**
    * True when a perspective camera is drawing.
    *
@@ -91,7 +100,17 @@ export interface SkyView {
 }
 
 /** Scratch for {@link skyViewFor}. Module-level so a per-frame call allocates nothing. */
+const VIEW_RIGHT = new Vector3();
+const VIEW_UP = new Vector3();
 const VIEW_FORWARD = new Vector3();
+/** Scratch for {@link Sky.directionToScreen}. Same reason: no per-frame allocation. */
+const DIRECTION = new Vector3();
+
+/**
+ * Where a disc behind the camera is parked: far enough outside the frame that
+ * neither it nor its exponential bloom can contribute a single pixel.
+ */
+const BEHIND_THE_CAMERA = 1e3;
 
 /**
  * Reads a {@link SkyView} off whichever camera is drawing.
@@ -118,16 +137,26 @@ export function skyViewFor(
   if (!override) {
     return {
       yaw: Math.atan2(groundForward.x, groundForward.z),
-      pitch: 0,
-      halfFovY: 0,
+      right: VIEW_RIGHT.set(1, 0, 0),
+      up: VIEW_UP.set(0, 1, 0),
+      forward: VIEW_FORWARD.set(0, 0, 1),
+      tanHalfFovY: 0,
       perspective: false,
     };
   }
-  override.getWorldDirection(VIEW_FORWARD);
+  // The camera's own axes, straight off its world matrix. A three.js camera
+  // looks down its **−z**, so the third basis vector is "back" and is negated.
+  override.updateMatrixWorld();
+  override.matrixWorld.extractBasis(VIEW_RIGHT, VIEW_UP, VIEW_FORWARD);
+  VIEW_RIGHT.normalize();
+  VIEW_UP.normalize();
+  VIEW_FORWARD.normalize().negate();
   return {
     yaw: Math.atan2(VIEW_FORWARD.x, VIEW_FORWARD.z),
-    pitch: Math.asin(clamp(VIEW_FORWARD.y, -1, 1)),
-    halfFovY: (override.fov * DEG) / 2,
+    right: VIEW_RIGHT,
+    up: VIEW_UP,
+    forward: VIEW_FORWARD,
+    tanHalfFovY: Math.tan((override.fov * DEG) / 2),
     perspective: true,
   };
 }
@@ -184,7 +213,14 @@ export function skyViewFor(
  *   further work here.
  */
 /** What {@link Sky.setView} reports for the park's own camera: level, unturned. */
-const LEVEL_VIEW: SkyView = { yaw: 0, pitch: 0, halfFovY: 0, perspective: false };
+const LEVEL_VIEW: SkyView = {
+  yaw: 0,
+  right: new Vector3(1, 0, 0),
+  up: new Vector3(0, 1, 0),
+  forward: new Vector3(0, 0, 1),
+  tanHalfFovY: 0,
+  perspective: false,
+};
 
 export class Sky {
   private readonly scene = new Scene();
@@ -193,34 +229,17 @@ export class Sky {
   /** Kept alongside `uAspect` because the direction mapping needs it too. */
   private aspect = 1;
   private view: SkyView = LEVEL_VIEW;
-  /**
-   * The view's bearing, **unwrapped** — it keeps counting past ±π instead of
-   * jumping back round, and it is what the star field is panned by.
-   *
-   * `SkyView.yaw` is an `atan2`, so it snaps from +π to −π as you turn past
-   * due south. Panning by that directly moves the whole star field across the
-   * frame in a single frame — about thirteen screen widths at a 62° field of
-   * view — which is a bright, obvious flick, and precisely the sort of thing
-   * nobody would have found by turning slowly and watching. `check:sky-view`
-   * caught it and now guards it.
-   *
-   * The discs do not need this: `angleDelta` already brings their bearing into
-   * ±π, which is continuous everywhere except directly behind the camera,
-   * where nothing is drawn.
-   *
-   * One residual, and it is deliberate: a **net** full turn leaves the field
-   * panned a whole turn along, so the stars overhead are a different patch of
-   * the hash grid than the ones you started under. The grid is unbounded and
-   * statistically the same everywhere, so there is nothing to notice — and the
-   * things a child actually navigates by (the sun, the moon, and in the ferris
-   * wheel the Earth and the friends) are real directions that come back
-   * exactly. Making the field itself periodic would mean forcing a whole turn
-   * to be a whole number of star cells, which would break the honest
-   * one-half-width-per-half-field-of-view scale the moment `fov` changed.
-   */
-  private panYaw = 0;
-  /** Last frame's wrapped bearing, or NaN when the last frame was not perspective. */
-  private lastViewYaw = Number.NaN;
+  //
+  // There is deliberately **no accumulated pan** here any more.
+  //
+  // The first version of this file slid a flat star grid sideways by the
+  // camera's bearing, which needed the bearing unwrapped past ±pi (an `atan2`
+  // snaps there, and the field flicked thirteen screen widths in one frame),
+  // and which was still about 30% too fast because a lens projects `tan` of an
+  // angle rather than the angle. Both problems were the same problem: a screen
+  // offset standing in for a rotation. Passing the camera's axes to the shader
+  // and letting each pixel find its own ray removes the stand-in, and with it
+  // every rate, wrap and seam that came with it.
 
   constructor() {
     this.material = new ShaderMaterial({
@@ -243,12 +262,20 @@ export class Sky {
         // How far the whole sky has slid, in screen half-heights. Written by
         // {@link Sky.setParallax} from where the camera is standing.
         uSkyOffset: { value: new Vector2(0, 0) },
-        // How far the sky has turned, same units. Written by {@link Sky.setView}
-        // from where the camera is *looking*. Deliberately a second uniform
-        // rather than folded into `uSkyOffset`: that one is deliberately
-        // saturated so walking can never push the moon off the frame
-        // (DISC_TRAVEL_LIMIT), and turning your head absolutely should.
-        uSkyRotation: { value: new Vector2(0, 0) },
+        // Which way the camera is looking, as its own three axes plus the two
+        // tangents of its field of view. With these every pixel can work out
+        // its own view ray, which is what lets stars sit at fixed directions in
+        // the world instead of being slid about the screen. Zero for the park's
+        // orthographic rig, where there is no such thing as a per-pixel ray.
+        uPerspective: { value: 0 },
+        uViewRight: { value: new Vector3(1, 0, 0) },
+        uViewUp: { value: new Vector3(0, 1, 0) },
+        uViewForward: { value: new Vector3(0, 0, 1) },
+        uTanHalfFovX: { value: 1 },
+        uTanHalfFovY: { value: 1 },
+        // 1 once there is no horizon left to fade towards — see
+        // {@link Sky.setStarsEverywhere}.
+        uStarsEverywhere: { value: 0 },
         // Screen height (0 = bottom, 1 = top) treated as the horizon line. The
         // park's hill crest sits around 60% up the frame, so anchoring the
         // gradient here is what puts the sunset glow just above the treetops
@@ -281,11 +308,41 @@ export class Sky {
         uniform float uTime;
         uniform float uHorizonY;
         uniform vec2 uSkyOffset;
-        uniform vec2 uSkyRotation;
+        uniform float uPerspective;
+        uniform vec3 uViewRight;
+        uniform vec3 uViewUp;
+        uniform vec3 uViewForward;
+        uniform float uTanHalfFovX;
+        uniform float uTanHalfFovY;
+        uniform float uStarsEverywhere;
 
         // Cheap 2D hash for the star field.
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+
+        /**
+         * Where a star field cell lives for a given view ray.
+         *
+         * The direction is dropped onto whichever face of a cube around the
+         * camera it points at, and that face's own 2D coordinates are what get
+         * hashed. A cube face is the cheapest way to cut a sphere into cells
+         * that are all roughly the same size and shape — hashing the raw xyz
+         * instead clumps stars towards the axes, and hashing latitude/longitude
+         * piles them up at the poles, which is exactly overhead.
+         *
+         * The face index is folded into the coordinates so no two faces draw
+         * the same stars.
+         */
+        vec2 skyCell(vec3 direction) {
+          vec3 a = abs(direction);
+          if (a.x >= a.y && a.x >= a.z) {
+            return vec2(direction.z, direction.y) / a.x + (direction.x > 0.0 ? 11.0 : 23.0);
+          }
+          if (a.y >= a.z) {
+            return vec2(direction.x, direction.z) / a.y + (direction.y > 0.0 ? 37.0 : 51.0);
+          }
+          return vec2(direction.x, direction.y) / a.z + (direction.z > 0.0 ? 67.0 : 83.0);
         }
 
         void main() {
@@ -293,18 +350,24 @@ export class Sky {
           vec2 p = vec2(ndc.x * uAspect, ndc.y);
 
           // The sky's own coordinates: the screen's, slid by however far the
-          // park has slid under the camera, and turned by however far the
-          // camera has turned. Everything that is *in* the sky — stars, moon,
-          // sun — is placed in these; everything that is the sky itself — the
-          // gradient, the horizon band, the altitude fade — stays in screen
-          // space, because the horizon does not move when you walk towards it.
-          // (It does move when you look *up*, which is uHorizonY's job, not
-          // this one's.)
-          //
-          // The star field is a hash grid over an unbounded domain, so panning
-          // it has no seam, no wrap and no edge to reach: turning all the way
-          // round costs one subtraction and finds new stars the whole way.
-          vec2 skyP = p - uSkyOffset - uSkyRotation;
+          // park has slid under the camera. Used by the orthographic path,
+          // where there is no view ray to speak of. Everything that is the sky
+          // itself — the gradient, the horizon band — stays in screen space,
+          // because the horizon does not move when you walk towards it. (It
+          // does move when you look *up*, which is uHorizonY's job.)
+          vec2 skyP = p - uSkyOffset;
+
+          // This pixel's own view ray, in world space. The whole reason the
+          // camera's axes are passed in: with a real ray, a star can be a fixed
+          // *direction* rather than a spot on the screen that has to be slid
+          // about to fake one. Slide it and the rate is wrong by however much
+          // tan differs from the angle itself — about 30% at a 62 degree
+          // field of view, which is very visible as stars racing the world.
+          vec3 ray = normalize(
+            uViewForward
+              + uViewRight * (ndc.x * uTanHalfFovX)
+              + uViewUp * (ndc.y * uTanHalfFovY)
+          );
 
           // The two discs saturate rather than travel forever, so neither can
           // ever leave the frame. See DISC_TRAVEL_LIMIT.
@@ -322,8 +385,15 @@ export class Sky {
           colour = mix(colour, uHorizonColour, pow(1.0 - h, 2.0) * uHorizonStrength);
 
           // Stars: one candidate per cell of a coarse grid, jittered within it.
+          //
+          // Under a perspective camera the grid is wrapped round a cube in the
+          // *world* (see skyCell), so a star holds its direction however the
+          // camera turns, tilts or widens its lens — the projection does all
+          // the work, and there is no pan rate left to get wrong. The
+          // orthographic park keeps the flat screen grid, because a parallel
+          // projection has no per-pixel ray to hang a direction on.
           if (uStarStrength > 0.001) {
-            vec2 grid = skyP * 26.0;
+            vec2 grid = uPerspective > 0.5 ? skyCell(ray) * 40.0 : skyP * 26.0;
             vec2 cell = floor(grid);
             vec2 local = fract(grid);
             float r = hash(cell);
@@ -332,8 +402,15 @@ export class Sky {
               float d = length(local - starPoint);
               float twinkle = 0.55 + 0.45 * sin(uTime * 2.2 + r * 40.0);
               float brightness = smoothstep(0.09, 0.0, d) * twinkle;
-              // Fade stars out towards the horizon so they sit behind the park.
-              float altitudeFade = smoothstep(0.05, 0.55, h);
+              // Fade stars out towards the horizon so they sit behind the park
+              // — by the ray's own altitude where there is one, which is what
+              // makes looking *down* from a ride dark and starless rather than
+              // starry-because-it-is-high-on-the-screen.
+              //
+              // In space there is no horizon to fade towards and the stars go
+              // all the way round, underfoot included: uStarsEverywhere.
+              float altitude = uPerspective > 0.5 ? smoothstep(-0.04, 0.30, ray.y) : smoothstep(0.05, 0.55, h);
+              float altitudeFade = mix(altitude, 1.0, uStarsEverywhere);
               colour += vec3(1.0, 0.97, 0.9) * brightness * uStarStrength * altitudeFade;
             }
           }
@@ -386,77 +463,104 @@ export class Sky {
    *
    * Call once a frame, before {@link render}, with whatever camera the world
    * pass is about to use — `Game.cameraOverride ?? camera.camera`. The park's
-   * orthographic rig reports a level, unrotated view and everything below
-   * collapses to zero, so ordinary play is untouched.
+   * orthographic rig reports a level, unturned view and everything below
+   * collapses to the mapping it always had, so ordinary play is untouched.
    *
-   * Two things move, and they have to move together or the sky comes apart:
-   * the **star field**, panned by `uSkyRotation`, and the **sun and moon**,
-   * placed by {@link directionToScreen}. Both take their scale from the same
-   * {@link SkyView}, which is the only reason a `RideCamera` widening its own
-   * `fov` with speed cannot slide one against the other.
+   * **The camera's axes are the whole trick.** Handing them to the shader lets
+   * every pixel of the backdrop reconstruct its own view ray, so a star is a
+   * fixed direction in the world and the projection is what moves it. There is
+   * no pan rate to get wrong, no wrap at ±pi to flick over, and a `RideCamera`
+   * widening its own `fov` with speed is handled by the arithmetic rather than
+   * by anything here having to notice.
+   *
+   * The first version of this *did* slide a flat star grid about, scaled
+   * linearly in the turn angle. Jim rode it and said the stars scrolled too
+   * fast — they did, by about 30% at this ride's 62 degree lens, because a
+   * lens projects `tan(angle)` and not the angle. That is the bug this shape
+   * makes unrepresentable.
    */
   setView(view: SkyView): void {
-    const rotation = (this.material.uniforms.uSkyRotation as { value: Vector2 }).value;
+    const uniforms = this.material.uniforms;
+    (uniforms.uPerspective as { value: number }).value = view.perspective ? 1 : 0;
+    this.view = view;
+
     if (!view.perspective) {
-      rotation.set(0, 0);
-      (this.material.uniforms.uHorizonY as { value: number }).value = HORIZON_Y_LEVEL;
-      // Forget the running bearing, so the next ride starts from its own first
-      // frame rather than accumulating a jump across the curtain wipe.
-      this.lastViewYaw = Number.NaN;
-      this.view = view;
+      (uniforms.uHorizonY as { value: number }).value = HORIZON_Y_LEVEL;
       return;
     }
 
-    // Unwrap: accumulate the frame-to-frame change rather than taking the
-    // bearing itself. See {@link panYaw}.
-    this.panYaw = Number.isNaN(this.lastViewYaw)
-      ? view.yaw
-      : this.panYaw + angleDelta(this.lastViewYaw, view.yaw);
-    this.lastViewYaw = view.yaw;
-
-    const halfFovX = this.halfFovX(view);
-    // Turn right and the stars go left, look up and they go down — hence both
-    // negative. Radians into screen half-widths/half-heights: **linear in the
-    // angle**, not `tan`, because a tangent mapping diverges at 90° and this
-    // field has to survive being turned all the way round. Linear in angle is
-    // a cylindrical projection, which is exactly the right feel for a sky that
-    // wraps around you.
-    rotation.set((-this.panYaw * this.aspect) / halfFovX, -view.pitch / view.halfFovY);
+    (uniforms.uViewRight as { value: Vector3 }).value.copy(view.right);
+    (uniforms.uViewUp as { value: Vector3 }).value.copy(view.up);
+    (uniforms.uViewForward as { value: Vector3 }).value.copy(view.forward);
+    (uniforms.uTanHalfFovY as { value: number }).value = view.tanHalfFovY;
+    (uniforms.uTanHalfFovX as { value: number }).value = view.tanHalfFovY * this.aspect;
 
     // Look up and the horizon slides down the frame. Without this the stars
-    // would pan while the gradient and the horizon band stayed nailed across
-    // the middle of the screen — the same wallpaper tell, one level down, and
-    // most obvious in a gondola looking up into space.
-    (this.material.uniforms.uHorizonY as { value: number }).value = clamp(
-      HORIZON_Y_LEVEL - (view.pitch / view.halfFovY) * HORIZON_Y_LEVEL,
+    // would move correctly while the gradient and the horizon band stayed
+    // nailed across the middle of the screen.
+    const pitch = Math.asin(clamp(view.forward.y, -1, 1));
+    const halfFovY = Math.atan(view.tanHalfFovY);
+    (uniforms.uHorizonY as { value: number }).value = clamp(
+      HORIZON_Y_LEVEL - (pitch / halfFovY) * HORIZON_Y_LEVEL,
       0.02,
       0.98,
     );
-    this.view = view;
+  }
+
+  /**
+   * Fades the horizon out of the star field: 0 in the park, 1 in space.
+   *
+   * On the ground stars fade towards the horizon so they sit behind the park.
+   * A hundred kilometres up there is no horizon to fade towards and no ground
+   * to sit behind — stars go all the way round, underfoot included, which is
+   * what Jim asked for after riding it. Driven by `DayNight`'s space factor.
+   */
+  setStarsEverywhere(amount: number): void {
+    (this.material.uniforms.uStarsEverywhere as { value: number }).value = clamp(amount, 0, 1);
   }
 
   /**
    * Where something at a given compass bearing and altitude lands on screen,
-   * in the shader's own coordinates (x spans ±aspect, y spans ±1).
+   * in the shader's own coordinates (x spans +/-aspect, y spans +/-1).
    *
-   * This is the one place that answers "where in the sky is that?", so the sun,
-   * the moon and anything added later cannot disagree with each other or with
-   * the star field.
+   * Under a perspective camera this is a **real projection** through the
+   * camera's own axes and lens — the same arithmetic the star field's rays
+   * come from, so the sun and the moon cannot drift against the stars. Under
+   * the park's orthographic rig it is the old cheat, because a parallel
+   * projection has no true projection of something at infinity.
    */
   directionToScreen(azimuth: number, altitude: number, into: Vector2): Vector2 {
     const view = this.view;
-    const relative = angleDelta(view.yaw, azimuth);
     if (!view.perspective) {
       // The legacy cheat, byte for byte: bearing straight onto x, altitude
       // straight onto y. There is no field of view to do better with.
+      const relative = angleDelta(view.yaw, azimuth);
       return into.set(
         relative / ORTHO_HALF_FOV_X,
         ORTHO_ALTITUDE_OFFSET + (altitude / (Math.PI / 2)) * ORTHO_ALTITUDE_SCALE,
       );
     }
+
+    // The world direction it sits in, then that direction in the camera's own
+    // frame, then a perspective divide. Textbook, and the point is precisely
+    // that it is textbook: nothing here is tuned, so nothing here can be
+    // tuned wrong.
+    const cosAltitude = Math.cos(altitude);
+    DIRECTION.set(
+      Math.sin(azimuth) * cosAltitude,
+      Math.sin(altitude),
+      Math.cos(azimuth) * cosAltitude,
+    );
+    const forward = DIRECTION.dot(view.forward);
+    if (forward <= 1e-4) {
+      // Behind the camera. There is no projection of that onto the frame, so
+      // park it far outside instead — the disc is not drawn and its bloom,
+      // which falls off exponentially, contributes nothing.
+      return into.set(BEHIND_THE_CAMERA, BEHIND_THE_CAMERA);
+    }
     return into.set(
-      (relative * this.aspect) / this.halfFovX(view),
-      (altitude - view.pitch) / view.halfFovY,
+      (DIRECTION.dot(view.right) / forward / (view.tanHalfFovY * this.aspect)) * this.aspect,
+      DIRECTION.dot(view.up) / forward / view.tanHalfFovY,
     );
   }
 
@@ -470,10 +574,6 @@ export class Sky {
     return this.view.yaw;
   }
 
-  /** Half the horizontal field of view, widened from the vertical by the aspect. */
-  private halfFovX(view: SkyView): number {
-    return Math.atan(Math.tan(view.halfFovY) * this.aspect);
-  }
 
   setTime(elapsed: number): void {
     (this.material.uniforms.uTime as { value: number }).value = elapsed;
