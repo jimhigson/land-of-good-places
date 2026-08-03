@@ -135,6 +135,12 @@ const START_PITCH = -0.06;
 /** Radians of extra tilt at the very start — the establishing shot. */
 const ESTABLISHING_PITCH = 0.34;
 
+/**
+ * The render layer the car is drawn a second time on, over the top of
+ * everything else. See {@link FerrisWheelRide.drawsCarInFront}.
+ */
+export const GONDOLA_LAYER = 1;
+
 interface Cue {
   readonly at: number;
   readonly say: string;
@@ -285,6 +291,13 @@ export class FerrisWheelRide implements GameSystem {
     // `gondola.ts`'s decision — it is where a child on the player's seat has
     // her eye, and the pets' chairs are built to keep their heads below it.
     this.rideView.mountOn(this.gondola.seat, GONDOLA_EYE);
+
+    // The car goes on a second layer as well as its own, so `Game.render` can
+    // draw it again on top of the finished frame. See `drawsCarInFront`.
+    // `enable` rather than `set`: three.js lights only illuminate objects that
+    // share a layer with them, so a car moved *off* layer 0 would be lit by
+    // nothing at all.
+    this.gondola.root.traverse((object) => object.layers.enable(GONDOLA_LAYER));
   }
 
   /** Throws the ride away again. The park keeps nothing but the wheel. */
@@ -476,6 +489,30 @@ export class FerrisWheelRide implements GameSystem {
     this.setParkVisible(true);
     this.setSpaceFactor(0);
     this.teardown();
+  }
+
+  /**
+   * True while the car should be drawn again over the finished frame.
+   *
+   * **A cloud must never come between a child and the car she is sitting in.**
+   * The camera is bolted inside the gondola, so the car is by definition the
+   * nearest thing in the world — but a cloud puff is a twelve-metre sphere the
+   * ride flies straight through, and while it is passing, parts of it are
+   * genuinely nearer to the eye than parts of the car around it. The depth
+   * buffer is right and the picture is wrong: cloud across the window frames,
+   * cloud over the pets in their chairs.
+   *
+   * So the car is a **viewmodel**, the same way a held object is in a
+   * first-person game: the world is drawn, the depth buffer is cleared, and the
+   * car is drawn again on top of it. Nothing outside the car can ever cover it,
+   * and inside its own second pass it still depth-sorts against itself, so the
+   * seats, the pets and the far window are all in the right order.
+   *
+   * Cheaper than it sounds — the car is one small object drawn twice, and the
+   * pass only exists while somebody is riding.
+   */
+  get drawsCarInFront(): boolean {
+    return this.riding && this.gondola !== null;
   }
 
   /** The ✕, Backspace, the pause menu — anything that says "let me out". */

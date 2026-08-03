@@ -12,6 +12,7 @@ import {
 } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor } from './world';
+import { GONDOLA_LAYER } from './world/ferrisWheel/FerrisWheelRide';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { setInteractPress, type InteractZone } from './world/interact';
@@ -979,7 +980,21 @@ export class Game {
     if (!this.miniGames.hidesPark) {
       this.sky.render(renderer);
       renderer.clearDepth();
-      renderer.render(this.engine.scene, this.cameraOverride ?? this.camera.camera);
+      const camera = this.cameraOverride ?? this.camera.camera;
+      renderer.render(this.engine.scene, camera);
+      // The ferris wheel's car, drawn a second time over the finished frame.
+      // The camera is bolted inside it, so nothing outside it should ever be in
+      // front — but the ride flies through twelve-metre cloud puffs, and while
+      // one is passing, parts of it really are nearer than parts of the car.
+      // The depth buffer is right and the picture is wrong. So the car is a
+      // viewmodel: clear the depth and put it back on top, where it still sorts
+      // correctly against itself. See `FerrisWheelRide.drawsCarInFront`.
+      if (this.world.ferrisWheel.drawsCarInFront && this.cameraOverride) {
+        renderer.clearDepth();
+        this.cameraOverride.layers.set(GONDOLA_LAYER);
+        renderer.render(this.engine.scene, this.cameraOverride);
+        this.cameraOverride.layers.set(0);
+      }
     }
     this.miniGames.render(renderer);
   }
