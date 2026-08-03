@@ -14,6 +14,7 @@ import {
   SphereGeometry,
   TorusGeometry,
   Vector3,
+  type Object3D,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
@@ -27,6 +28,7 @@ import { shopItem, type ShopItem } from '../../world/building/shops/catalogue';
 import { FERRIS_CAR_COLOURS } from './wheelProp';
 import { ART } from '../../art/style/artPalette';
 import { createKid } from '../../art/models/kid';
+import { PET_KINDS, createPet } from '../../art/models/pets';
 
 /**
  * The car you ride in, and the piece of wheel it hangs from.
@@ -153,6 +155,13 @@ const NEIGHBOUR_HEIGHT = 1.45;
 
 /** Scaled down to their car, which is about half the size of yours. */
 const NEIGHBOUR_RIDER_SCALE = 0.52;
+
+/** Their pet, a little smaller again — same idea as your own low tub chairs. */
+const NEIGHBOUR_PET_SCALE = 0.34;
+
+/** Where the two of them sit, across the car. */
+const NEIGHBOUR_SEAT_X = 0.36;
+const NEIGHBOUR_SEAT_Y = 0.2;
 
 /** So the four of them are not quadruplets. Indexed, not random: same wheel every ride. */
 const NEIGHBOUR_HAIR = [ART.kidHair, PALETTE.hair, PALETTE.wood, PALETTE.stonePinkDark];
@@ -624,11 +633,63 @@ export function createGondola(): Gondola {
   }
 
   /** Where a passenger looks when it looks at *you*: the player's own eye. */
-const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
+  const playerLookPoint = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
 
-/** What the passengers are watching, in car space. See `watch`. */
+  /** What the passengers are watching, in car space. See `watch`. */
   const watchPoint = new Vector3();
   let watching = false;
+  /** Scratch for working out where a neighbour's occupant actually is. */
+  const occupantOrigin = new Vector3();
+
+  /**
+   * Turns a seated figure to look at something, or lets it idle.
+   *
+   * **The whole toy turns, not its neck** — the face comes round with the body,
+   * so a separate head yaw would be a second formula tracking the first. Pitch
+   * stays on the head, and only pitch: a seated toy tipped backwards to look up
+   * at the Moon reads as one that has fallen over, whereas a head that looks up
+   * reads as one that is looking up.
+   *
+   * Shared by the people in *your* car and the people in the four cars you
+   * watch go past, so a change to how anybody looks around is a change to how
+   * everybody does.
+   *
+   * `origin` and `target` are both in car space; `baseYaw` is the way the seat
+   * faces, which everything else is measured out from.
+   */
+  const turnToward = (
+    figure: Object3D,
+    head: Object3D | null,
+    baseYaw: number,
+    origin: Vector3,
+    target: Vector3 | null,
+    phase: number,
+    dt: number,
+    elapsed: number,
+  ): void => {
+    let yaw = Math.sin(elapsed * 0.5 + phase) * 0.16;
+    let pitch = -0.12 + Math.sin(elapsed * 1.1 + phase) * 0.05;
+
+    if (target) {
+      const dx = target.x - origin.x;
+      const dz = target.z - origin.z;
+      const dy = target.y - (origin.y + PASSENGER_EYE_Y);
+      // `angleDelta` takes the short way, so a passenger turns whichever way is
+      // nearer and there is nothing it will refuse to turn to.
+      yaw = angleDelta(baseYaw, Math.atan2(dx, dz));
+      pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
+    }
+
+    // Eased, never snapped — the difference between noticing something and
+    // snapping to it.
+    const ease = Math.min(1, dt * TURN_EASE);
+    figure.rotation.y += (baseYaw + yaw - figure.rotation.y) * ease;
+    if (head) {
+      head.rotation.x += (pitch - head.rotation.x) * ease;
+      // Anything an older neck-turn left behind, unwound.
+      head.rotation.y += (0 - head.rotation.y) * ease;
+    }
+  };
 
   // --- the wheel above -------------------------------------------------------------
   // **The wheel's plane runs away through the window, not across it.**
@@ -787,9 +848,26 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
     stem.position.y = 1.05;
     car.add(stem);
 
-    // Somebody in it. Sat down, facing out of the wheel the way you would if
-    // the view were the reason you got on — and scaled to this car rather than
-    // to yours, since these are the wheel's own size.
+    // Two seats, side by side, facing out of the wheel. The same bench-and-
+    // cushion idea as your own car, at this car's size.
+    const floorY = -NEIGHBOUR_HEIGHT / 2 + 0.06;
+    const cushion = toonMaterial(PALETTE.markerLilac);
+    for (const seatX of [-NEIGHBOUR_SEAT_X, NEIGHBOUR_SEAT_X] as const) {
+      const pad = solid(
+        new Mesh(new RoundedBoxGeometry(0.52, 0.1, 0.42, 2, 0.04), cushion),
+      );
+      pad.position.set(seatX, floorY + NEIGHBOUR_SEAT_Y, 0.16);
+      car.add(pad);
+      const back = solid(
+        new Mesh(new RoundedBoxGeometry(0.52, 0.34, 0.08, 2, 0.03), cushion),
+      );
+      back.position.set(seatX, floorY + NEIGHBOUR_SEAT_Y + 0.2, 0.37);
+      car.add(back);
+    }
+
+    // Somebody in it, and their pet beside them — because nobody rides this
+    // wheel on their own, and the car you are in is proof of it. Scaled to
+    // this car rather than to yours, since these are the wheel's own size.
     const rider = createKid({
       hair: NEIGHBOUR_HAIR[index % NEIGHBOUR_HAIR.length] ?? ART.kidHair,
       outfit: NEIGHBOUR_OUTFIT[index % NEIGHBOUR_OUTFIT.length] ?? ART.kidOutfit,
@@ -797,18 +875,36 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
       backpack: false,
     });
     rider.root.scale.setScalar(NEIGHBOUR_RIDER_SCALE);
-    rider.root.position.set(0, -NEIGHBOUR_HEIGHT / 2 + 0.06, 0.1);
-    rider.root.rotation.y = Math.PI;
-    // Sat, not stood to attention — the same courtesy the pets in your own car
-    // get, and the difference between a passenger and a doll in a box.
-    rider.limbs.leftLeg.rotation.x = -1.25;
-    rider.limbs.rightLeg.rotation.x = -1.15;
-    rider.limbs.leftArm.rotation.x = 0.2;
-    rider.limbs.rightArm.rotation.x = 0.2;
+    rider.root.position.set(-NEIGHBOUR_SEAT_X, floorY + NEIGHBOUR_SEAT_Y + 0.05, 0.16);
     car.add(rider.root);
 
+    const pet = createPet(PET_KINDS[index % PET_KINDS.length] ?? 'bunny');
+    pet.root.scale.setScalar(NEIGHBOUR_PET_SCALE);
+    pet.root.position.set(NEIGHBOUR_SEAT_X, floorY + NEIGHBOUR_SEAT_Y + 0.05, 0.16);
+    car.add(pet.root);
+
+    // Sat, not stood to attention — the same courtesy the pets in your own car
+    // get, and the difference between a passenger and a doll in a box.
+    for (const limbs of [rider.limbs, pet.limbs]) {
+      if (!limbs) continue;
+      limbs.leftLeg.rotation.x = -1.25;
+      limbs.rightLeg.rotation.x = -1.15;
+      limbs.leftArm.rotation.x = 0.2;
+      limbs.rightArm.rotation.x = 0.2;
+    }
+
     root.add(car);
-    return { root: car, offset, phase: index * 1.9, rider };
+    return {
+      root: car,
+      offset,
+      phase: index * 1.9,
+      rider,
+      // Both of them look around, so `turnToward` gets one list to walk.
+      occupants: [
+        { root: rider.root, head: rider.head, phase: index * 1.9 },
+        { root: pet.root, head: pet.head, phase: index * 1.9 + 0.8 },
+      ],
+    };
   });
 
   const bulbColour = new Color();
@@ -879,6 +975,23 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
         );
         neighbour.root.rotation.x = swing;
         neighbour.rider.update(dt);
+
+        // They are watching the same sky you are. Their car has moved this
+        // frame, so where each of them *is* has to be worked out fresh before
+        // asking which way to turn.
+        for (const occupant of neighbour.occupants) {
+          occupantOrigin.copy(neighbour.root.position).add(occupant.root.position);
+          turnToward(
+            occupant.root,
+            occupant.head,
+            0,
+            occupantOrigin,
+            watching ? watchPoint : null,
+            occupant.phase,
+            dt,
+            elapsed,
+          );
+        }
       }
 
       // The car hangs level and sways. Two frequencies, so it never repeats
@@ -906,34 +1019,17 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
         //    turtles. Half the show deliberately happens behind and beside
         //    you, so this is often most of the way round;
         //  - **otherwise**: back to the glass, with a slow idle drift.
-        const target = joy > 0 ? PLAYER_LOOK_POINT : watching ? watchPoint : null;
-        const seat = passenger.handle.root;
-        const head = passenger.creature?.head;
-
-        let yaw = Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
-        let pitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
-
-        if (target) {
-          const dx = target.x - seat.position.x;
-          const dz = target.z - seat.position.z;
-          const dy = target.y - (seat.position.y + PASSENGER_EYE_Y);
-          // How far round from its own chair the thing is. `angleDelta` takes
-          // the short way, so a passenger turns whichever way is nearer and
-          // there is nothing it will refuse to turn to.
-          yaw = angleDelta(passenger.baseYaw, Math.atan2(dx, dz));
-          pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
-        }
-
-        // The whole toy comes round; only the tilt is the head's. Eased, never
-        // snapped — the difference between noticing something and snapping to
-        // it.
-        const ease = Math.min(1, dt * TURN_EASE);
-        seat.rotation.y += (passenger.baseYaw + yaw - seat.rotation.y) * ease;
-        if (head) {
-          head.rotation.x += (pitch - head.rotation.x) * ease;
-          // Anything the old neck-turn left behind, unwound.
-          head.rotation.y += (0 - head.rotation.y) * ease;
-        }
+        const target = joy > 0 ? playerLookPoint : watching ? watchPoint : null;
+        turnToward(
+          passenger.handle.root,
+          passenger.creature?.head ?? null,
+          passenger.baseYaw,
+          passenger.handle.root.position,
+          target,
+          passenger.phase,
+          dt,
+          elapsed,
+        );
         if (joy <= 0 && passenger.expression !== 'neutral') {
           passenger.expression = 'neutral';
           passenger.creature?.setExpression('neutral');
