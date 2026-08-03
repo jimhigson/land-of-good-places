@@ -1,17 +1,12 @@
 import {
-  Color,
   Group,
-  InstancedMesh,
-  Matrix4,
   Mesh,
   MeshBasicMaterial,
-  Quaternion,
   RingGeometry,
   SphereGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { ART } from '../../art/style/artPalette';
 import { Rng, TAU, clamp01 } from '../../core/mathUtils';
 import { decal, disposeTree, toonMaterial } from '../../art/style/materials';
 
@@ -35,12 +30,6 @@ import { decal, disposeTree, toonMaterial } from '../../art/style/materials';
  * rewrite are 240 quads the phone never has to think about. Twinkling is done
  * in the instance colour instead, which is one buffer upload for the lot.
  */
-
-/** How many stars. Enough to read as "sky", few enough to stay tidy. */
-const STAR_COUNT = 320;
-
-/** Radius of the shell the stars sit on. Well beyond everything else. */
-const STAR_SHELL = 620;
 
 /**
  * The Earth: radius, and how far below and in front of the gondola it hangs.
@@ -102,52 +91,19 @@ export function createSpaceShow(): SpaceShow {
 
   const rng = new Rng(0x5ce7a5);
 
-  // --- stars -----------------------------------------------------------------
-  const starMaterial = new MeshBasicMaterial({ toneMapped: false, transparent: true });
-  const stars = new InstancedMesh(starGeometry(), starMaterial, STAR_COUNT);
-  stars.name = 'stars';
-  stars.frustumCulled = false;
-  root.add(stars);
-
-  const matrix = new Matrix4();
-  const position = new Vector3();
-  const quaternion = new Quaternion();
-  const scale = new Vector3();
-  const twinkle: { phase: number; rate: number; size: number; tint: Color }[] = [];
-  const starColour = new Color();
-  const up = new Vector3(0, 1, 0);
-  const aim = new Vector3();
-
-  const starTints = [ART.shine, PALETTE.markerLemon, PALETTE.markerSky, PALETTE.markerPink];
-
-  for (let i = 0; i < STAR_COUNT; i += 1) {
-    // Biased towards the upper half of the sphere: below the gondola is where
-    // the Earth is, and a star behind the Earth is a wasted star.
-    const theta = rng.range(0, TAU);
-    const y = rng.range(-0.25, 1);
-    const radial = Math.sqrt(Math.max(0, 1 - y * y));
-    position.set(
-      Math.cos(theta) * radial * STAR_SHELL,
-      y * STAR_SHELL,
-      Math.sin(theta) * radial * STAR_SHELL,
-    );
-    aim.copy(position).normalize();
-    quaternion.setFromUnitVectors(up, aim);
-    // Sized in metres on a 620-metre shell: a five-metre sparkle is about half
-    // a degree across, which is the smallest a star can be and still twinkle
-    // rather than flicker on a phone.
-    const size = rng.range(3.4, 11);
-    scale.setScalar(size);
-    matrix.compose(position, quaternion, scale);
-    stars.setMatrixAt(i, matrix);
-    twinkle.push({
-      phase: rng.range(0, TAU),
-      rate: rng.range(0.6, 2.4),
-      size,
-      tint: new Color(rng.pick(starTints)),
-    });
-  }
-  stars.instanceMatrix.needsUpdate = true;
+  // --- stars? not any more --------------------------------------------------
+  //
+  // There used to be a shell of 320 instanced sparkles here. It went when the
+  // ride moved into the park (3 August 2026): the park's own sky grows stars
+  // from the real view direction now (`world/Sky.ts`), so a child in space saw
+  // **two** star fields at once, which is exactly what Jim reported. The sky's
+  // are the ones to keep — they cost no draw call, they go on forever in every
+  // direction rather than stopping at a 620-metre shell, and they are the same
+  // stars the park has at night, so the climb fades into them instead of
+  // swapping to a second set.
+  //
+  // What is left in this file is everything the sky cannot do: the Moon you
+  // fly past, the planets, and the whole Earth.
 
   // --- the Moon ---------------------------------------------------------------
   const moon = new Group();
@@ -316,22 +272,11 @@ export function createSpaceShow(): SpaceShow {
     setDepth(next: number): void {
       depth = clamp01(next);
       root.visible = depth > 0.001;
-      starMaterial.opacity = clamp01((depth - 0.08) / 0.5);
       halo.material.opacity = 0.3 * depth;
     },
 
     update(_dt: number, elapsed: number): void {
       if (!root.visible) return;
-
-      // Twinkle. One instance-colour upload for the whole sky.
-      for (let i = 0; i < STAR_COUNT; i += 1) {
-        const star = twinkle[i];
-        if (!star) continue;
-        const pulse = 0.55 + 0.45 * Math.sin(elapsed * star.rate + star.phase);
-        starColour.copy(star.tint).multiplyScalar(0.45 + pulse * 0.75);
-        stars.setColorAt(i, starColour);
-      }
-      if (stars.instanceColor) stars.instanceColor.needsUpdate = true;
 
       moon.rotation.y = elapsed * 0.02;
       earth.rotation.y = elapsed * 0.012;
@@ -350,21 +295,7 @@ export function createSpaceShow(): SpaceShow {
 
     dispose(): void {
       disposeTree(root);
-      stars.dispose();
     },
   };
 }
 
-/**
- * One star: a four-pointed sparkle, built as a lozenge rather than a dot.
- *
- * A circle at this size is a pixel of noise; a pointed star is unmistakably a
- * star even when it is three pixels across on a phone.
- */
-function starGeometry(): SphereGeometry {
-  // A sphere squashed to nothing on one axis is a cheap diamond — and it comes
-  // with the normals and UVs already right, which a hand-built quad does not.
-  const geometry = new SphereGeometry(0.12, 4, 2);
-  geometry.scale(1, 0.35, 1);
-  return geometry;
-}

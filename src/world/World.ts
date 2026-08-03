@@ -1,4 +1,4 @@
-import type { Scene } from 'three';
+import type { Object3D, Scene } from 'three';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
@@ -13,6 +13,7 @@ import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { Coaster } from './coaster/Coaster';
+import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
 import { MiniGameStalls } from '../minigames';
@@ -62,10 +63,14 @@ export class World implements GameSystem {
   readonly coaster: Coaster;
   readonly railRace: RailRace;
   readonly dodgems: DodgemsPlot;
+  /** The Space Ferris Wheel, ridden in the park itself. See its own header. */
+  readonly ferrisWheel: FerrisWheelRide;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
+  /** Every group that makes up the park itself. See {@link setParkVisible}. */
+  private readonly parkGroups: readonly Object3D[];
 
   constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
@@ -140,6 +145,18 @@ export class World implements GameSystem {
     this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
+    // The ferris wheel's ride. Built after `anchorPlots` (whose wheel it stands
+    // in for while somebody is aboard) and after `dayNight` (whose sky it takes
+    // past night and into space). Both are handed in as narrow closures rather
+    // than whole objects: this ride needs to raise a sky and hide a wheel, and
+    // nothing else.
+    this.ferrisWheel = new FerrisWheelRide(
+      this.collision,
+      (value) => this.dayNight.setSpaceFactor(value),
+      (visible) => this.anchorPlots.setFerrisWheelVisible(visible),
+      (visible) => this.setParkVisible(visible),
+    );
+
     // The face-painting stall (additive): built here, before the NPCs, because
     // it registers four walls with `this.collision` and `NpcSystem` must be
     // built last of all (see below) — the order genuinely matters for the
@@ -167,7 +184,12 @@ export class World implements GameSystem {
       this.scenery.climbableTrees,
     );
 
-    scene.add(
+    // Everything the park *is*, as far as the scene is concerned. Kept as a
+    // list rather than only spread into `scene.add` so {@link setParkVisible}
+    // can take the whole park off screen in one go — see its own note. The
+    // ferris wheel's ride is deliberately **not** in here: it is the one thing
+    // that has to stay when the park goes.
+    this.parkGroups = [
       this.garden.group,
       this.scenery.group,
       this.flowers.group,
@@ -187,7 +209,28 @@ export class World implements GameSystem {
       this.train.group,
       this.coaster.group,
       this.railRace.group,
-    );
+    ];
+    scene.add(...this.parkGroups, this.ferrisWheel.group);
+  }
+
+  /**
+   * Shows or hides the whole park.
+   *
+   * There is exactly one caller and it is the ferris wheel
+   * (`ferrisWheel/FerrisWheelRide.ts`), for the stretch of the ride spent above
+   * the cloud band. Up there the Earth is out — three hundred metres of it,
+   * against a park a hundred and ten metres across — and the two cannot share a
+   * frame: looking straight down through the gondola's glass floor otherwise
+   * showed the real park sitting in front of the planet it is supposed to be
+   * part of.
+   *
+   * The change happens **inside the cloud**, which is the whole reason the band
+   * is there, so nothing is ever seen to vanish. Visibility only: nothing is
+   * disposed, nothing stops updating, and the park is exactly as she left it
+   * when the clouds part again on the way down.
+   */
+  setParkVisible(visible: boolean): void {
+    for (const group of this.parkGroups) group.visible = visible;
   }
 
   update(context: FrameContext): void {
@@ -226,6 +269,7 @@ export class World implements GameSystem {
     this.train.update(context);
     this.coaster.update(context);
     this.railRace.update(context);
+    this.ferrisWheel.update(context);
     this.train.carryPassengers(this.npcs.riders);
 
     this.npcs.update(context);
@@ -277,6 +321,7 @@ export class World implements GameSystem {
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
     this.railRace.attachPlayer(player);
+    this.ferrisWheel.attachPlayer(player);
     // Lets the crowd push gently apart from the player instead of walking
     // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
     this.npcs.attachPlayer(player);
@@ -304,6 +349,7 @@ export class World implements GameSystem {
     this.train.dispose();
     this.coaster.dispose();
     this.railRace.dispose();
+    this.ferrisWheel.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }

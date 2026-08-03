@@ -9,10 +9,13 @@ based on the one above it:
 
 | PR | Branch | Base | State |
 | --- | --- | --- | --- |
-| 4 | `ferris-route` | `main` | in progress |
-| 1 | `sky-follows-camera` | `ferris-route` | not started |
-| 2 | `space-super-night` | `sky-follows-camera` | not started |
-| 3 | `ferris-world-ride` | `space-super-night` | not started |
+| 4 | `ferris-route` | `main` | **done** — PR #176 |
+| 1 | `sky-follows-camera` | `ferris-route` | **done** — PR #177 |
+| 2 | `space-super-night` | `sky-follows-camera` | **done** — PR #178 |
+| 3 | `ferris-world-ride` | `space-super-night` | **done** — PR #179 |
+
+All four build green (`npm run build`, exit 0). **None has been seen in a
+browser** — this agent does not own the chrome-devtools profile.
 
 Jim asked for `/ferris` (PR 4) first, hence the stack order — it is
 independent of the other three and can be reviewed on its own.
@@ -101,3 +104,52 @@ motion controls. Walking up to the kiosk still is.
 
 Nothing in this stack has been seen in a browser — this agent does not own the
 chrome-devtools profile. Every PR body lists its own visual QA.
+
+
+## PR 1 — done
+
+`Sky.setView(skyViewFor(cameraOverride, camera.forward))` each frame. New
+`uSkyRotation` pans the star field; `directionToScreen` places both discs
+through the same mapping; `uHorizonY` finally gets written. `check:sky-view`
+(7567 checks) caught the `atan2` wrap — turning past due south flicked the
+field thirteen screen widths — so the pan accumulates frame to frame now.
+
+**Do not** repoint `FrameContext.cameraForward` at the ride camera. `Fireflies`
+and `TreeLights` billboard against it and want the isometric rig's forward.
+That was the first plan and it was wrong.
+
+## PR 2 — done
+
+`SPACE_KEY` + `DayNight.setSpaceFactor`, blended at the one seam. Two nights
+are kept apart on purpose — `clockNight` builds the fog distances (space
+pushes them *out*, night pulls them *in*), `nightFactor` drives everything
+else. `/view?space=0..1` exists so the look can be judged without a ride.
+
+## PR 3 — done
+
+`src/world/ferrisWheel/` — `FerrisWheelRide` (fourth client of the ride seam)
+and `clouds.ts`. The gondola genuinely rises 340 m; the show is re-hosted, not
+rewritten. `wheelProp` gained `setCarsVisible` and `FERRIS_CAR_LOW_Y`.
+
+Things learned doing it:
+
+- `RideCamera.board()` requests the iOS motion permission itself, so boarding
+  through `boardRide` is *not* a regression on the stall's `firstPerson` flag
+  — the Sky Cruiser and Rail Race already rely on this.
+- The ride's camera is built in the **constructor**, not `attachPlayer`: that
+  is what lets `check:ride-camera` trace the real ride without constructing a
+  whole `Player`.
+- `check:ride-camera`'s hash moved to `adcc0319`, and only because the camera
+  is hashed in world space and the car is no longer at a private origin. The
+  coverage counters — the thing that actually fails that check — are unchanged.
+- `check:ride-camera` needed `--experimental-transform-types`, not
+  `--experimental-strip-types`: `FerrisWheelRide` uses parameter properties.
+
+## Deliberately left for a follow-up
+
+`src/minigames/ferrisWheel/SpaceFerrisWheel.ts` and `below.ts` are now
+unreachable but are **not deleted**, following the Rail Race's own precedent
+(ARCHITECTURE-DECISIONS PR-5: retire the old scene in a separate PR after
+family sign-off). If the world ride does not survive QA, the mini-game is
+still there. `gondola.ts`, `space.ts`, `friends.ts`, `sparks.ts`, `hud.ts`,
+`wheelProp.ts` and `exit.ts` are all still live and shared.

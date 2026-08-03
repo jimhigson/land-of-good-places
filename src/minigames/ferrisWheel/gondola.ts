@@ -17,7 +17,7 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
-import { TAU, clamp01 } from '../../core/mathUtils';
+import { TAU, angleDelta, clamp, clamp01 } from '../../core/mathUtils';
 import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { AssetHandle } from '../../art/style/asset';
@@ -83,11 +83,57 @@ const RIDE_RIM_R = 7;
 /** Height above the car floor of the rim point it hangs from. */
 const ATTACH_Y = 3.05;
 
-/** How far apart the two rims sit — just outside the car's shoulders. */
-const RIM_HALF_GAP = 1.9;
+/** Half-thickness of the rim's own tube. The rims are torus sections. */
+const RIM_TUBE_R = 0.16;
+
+/**
+ * How far apart the two rims sit — clear outside the car's shoulders.
+ *
+ * **Derived, not dialled in.** It was a bare 1.9, which put the rim's *inner
+ * surface* at 1.74 — inboard of the car's own half-width of 1.8, and further
+ * still inside the floor skirt at 1.88. So the two big circles cut straight
+ * through the car's edges, which is what Jim saw from inside it.
+ *
+ * The arithmetic, so it cannot drift again if the car is ever resized: the
+ * widest part of the car is the floor skirt at `(CAR_WIDTH + 0.16) / 2`, the
+ * rim's inner surface is `RIM_HALF_GAP - RIM_TUBE_R`, and the difference is
+ * {@link RIM_CLEARANCE} — enough that the car can swing on its hanger without
+ * ever touching, since it swings and the rig does not.
+ */
+const RIM_CLEARANCE = 0.26;
+const RIM_HALF_GAP = (CAR_WIDTH + 0.16) / 2 + RIM_TUBE_R + RIM_CLEARANCE;
 
 /** Spokes on the ride's wheel. Matches the landmark. */
 const SPOKES = 12;
+
+/** How far a passenger's own head sits above its seat, near enough for aiming. */
+const PASSENGER_EYE_Y = 1.1;
+
+/**
+ * How a passenger turns to look at something.
+ *
+ * **The whole toy turns, not its neck.** Jim's call, and it is the right one:
+ * these are squashed-sphere toys, the face comes round with the body, and a
+ * separate head yaw was a second formula tracking the first for nothing
+ * visible. It went through two wrong shapes first — a neck clamped so tight
+ * that anything over a shoulder barely moved anybody, then a neck-plus-body
+ * split with three constants and two ease rates to keep in step. One rotation,
+ * one number.
+ *
+ * There is no clamp either. `angleDelta` already turns whichever way is
+ * nearer, so a passenger takes the short way round to anything at all — and
+ * there is no direction it should refuse, since half this show deliberately
+ * happens behind you and the car is glass on every side.
+ *
+ * **Pitch stays on the head**, and only pitch. A seated toy tipped backwards
+ * to look up at the Moon reads as one that has fallen over; a head that looks
+ * up reads as one that is looking up. That is a genuinely different axis
+ * rather than a duplicate of this one.
+ */
+const WATCH_PITCH_LIMIT = 0.5;
+
+/** How quickly a passenger comes round onto whatever it is looking at. */
+const TURN_EASE = 2.6;
 
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
@@ -138,6 +184,8 @@ interface Passenger {
   readonly handle: AssetHandle;
   readonly creature: CreatureHandle | null;
   readonly baseY: number;
+  /** The way its chair faces. Everything below is measured out from here. */
+  readonly baseYaw: number;
   readonly phase: number;
   expression: Expression;
 }
@@ -157,6 +205,16 @@ export interface Gondola {
   setWheelAngle(angle: number): void;
   /** Everyone in the car looks delighted and turns to look at you. */
   rejoice(): void;
+  /**
+   * Turn the passengers to watch something out of the window.
+   *
+   * `point` is in **car space** — the same coordinates `space.ts`'s `fromAngle`
+   * lays the show out in. `null` puts their noses back to the glass.
+   *
+   * A wave still wins: being looked *at* by your own pet is the point of
+   * bringing it, and a passing planet does not get to interrupt that.
+   */
+  watch(point: Vector3 | null): void;
   /** Warm lamp inside, off in daylight and on once you are in the dark. */
   setLampGlow(glow: number): void;
   update(dt: number, elapsed: number): void;
@@ -523,6 +581,7 @@ export function createGondola(): Gondola {
       handle,
       creature: asCreature(handle),
       baseY: seatY,
+      baseYaw: chair.rotation.y,
       phase: index * 1.7,
       expression: 'neutral',
     });
@@ -538,6 +597,13 @@ export function createGondola(): Gondola {
     limbs.leftArm.rotation.x = 0.25;
     limbs.rightArm.rotation.x = 0.25;
   }
+
+  /** Where a passenger looks when it looks at *you*: the player's own eye. */
+const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
+
+/** What the passengers are watching, in car space. See `watch`. */
+  const watchPoint = new Vector3();
+  let watching = false;
 
   // --- the wheel above -------------------------------------------------------------
   // **The wheel's plane runs away through the window, not across it.**
@@ -562,7 +628,7 @@ export function createGondola(): Gondola {
   const rimMaterial = toonMaterial(PALETTE.stonePinkDark);
 
   for (const side of [-1, 1] as const) {
-    const rim = solid(new Mesh(new TorusGeometry(RIDE_RIM_R, 0.16, 8, 48), rimMaterial));
+    const rim = solid(new Mesh(new TorusGeometry(RIDE_RIM_R, RIM_TUBE_R, 8, 48), rimMaterial));
     rim.position.z = side * RIM_HALF_GAP;
     rig.add(rim);
   }
@@ -664,6 +730,15 @@ export function createGondola(): Gondola {
       wheelAngle = angle;
     },
 
+    watch(point: Vector3 | null): void {
+      if (!point) {
+        watching = false;
+        return;
+      }
+      watchPoint.copy(point);
+      watching = true;
+    },
+
     rejoice(): void {
       joy = 1.6;
       for (const passenger of passengers) {
@@ -723,13 +798,42 @@ export function createGondola(): Gondola {
         passenger.handle.root.position.y = passenger.baseY + bob + (joy > 0 ? Math.abs(Math.sin(elapsed * 7)) * 0.05 : 0);
         passenger.handle.update?.(dt, elapsed);
 
+        // What, if anything, this passenger is looking at — in car space.
+        //
+        //  - **somebody waved**: it turns to *you*, and nothing interrupts
+        //    that; being looked at by your own pet is the reason you brought
+        //    it along;
+        //  - **something is out of the window**: the alien, RiPika, the
+        //    turtles. Half the show deliberately happens behind and beside
+        //    you, so this is often most of the way round;
+        //  - **otherwise**: back to the glass, with a slow idle drift.
+        const target = joy > 0 ? PLAYER_LOOK_POINT : watching ? watchPoint : null;
+        const seat = passenger.handle.root;
         const head = passenger.creature?.head;
+
+        let yaw = Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
+        let pitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+
+        if (target) {
+          const dx = target.x - seat.position.x;
+          const dz = target.z - seat.position.z;
+          const dy = target.y - (seat.position.y + PASSENGER_EYE_Y);
+          // How far round from its own chair the thing is. `angleDelta` takes
+          // the short way, so a passenger turns whichever way is nearer and
+          // there is nothing it will refuse to turn to.
+          yaw = angleDelta(passenger.baseYaw, Math.atan2(dx, dz));
+          pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
+        }
+
+        // The whole toy comes round; only the tilt is the head's. Eased, never
+        // snapped — the difference between noticing something and snapping to
+        // it.
+        const ease = Math.min(1, dt * TURN_EASE);
+        seat.rotation.y += (passenger.baseYaw + yaw - seat.rotation.y) * ease;
         if (head) {
-          // Nose to the glass, until somebody waves — then they turn and look
-          // back at you, which is the whole reason they came along.
-          const look = joy > 0 ? 0.85 : Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
-          head.rotation.y = look * (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
-          head.rotation.x = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+          head.rotation.x += (pitch - head.rotation.x) * ease;
+          // Anything the old neck-turn left behind, unwound.
+          head.rotation.y += (0 - head.rotation.y) * ease;
         }
         if (joy <= 0 && passenger.expression !== 'neutral') {
           passenger.expression = 'neutral';

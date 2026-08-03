@@ -93,6 +93,17 @@ export class AnchorPlots implements GameSystem {
   }
 
   /** Hide the "coming soon" dressing once the real thing exists. */
+  /**
+   * Shows or hides the park's ferris wheel.
+   *
+   * Hidden for the length of a ride: `world/ferrisWheel/FerrisWheelRide.ts`
+   * brings its own wheel with it (the gondola carries the rim and spokes it
+   * hangs from), so leaving this one up puts two wheels on screen at once.
+   */
+  setFerrisWheelVisible(visible: boolean): void {
+    this.ferrisWheel?.setVisible(visible);
+  }
+
   setPlaceholderVisible(id: AnchorId, visible: boolean): void {
     const placeholder = this.placeholders.get(id);
     if (placeholder) placeholder.visible = visible;

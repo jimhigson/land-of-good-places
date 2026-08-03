@@ -16,7 +16,7 @@
     "check:hair": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-hair.mts",
     "check:assets": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-asset-contract.mts",
     "check:crowd": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-npc-driver.mts",
-    "check:ride-camera": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts",
+    "check:ride-camera": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/trace-ride-camera.mts",
     "check:orientation": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-orientation-math.mts",
     "check:sky-view": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-sky-view.mts",
     "check:space-night": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-space-night.mts",

@@ -19,10 +19,19 @@
  *
  * ## What it drives
  *
- * The **real** `SpaceFerrisWheel` — not a model of one. The whole mini-game is
+ * The **real** `FerrisWheelRide` — not a model of one. The whole ride is
  * built in Node behind `scripts/headless-dom.mjs`: the real gondola with its
  * real wheel rotation and sway, the real `look.ts` listening on a real (if
- * stubbed) `window`, the real ninety-second clock. Every frame the camera's
+ * stubbed) `window`, the real ninety-second clock.
+ *
+ * **The hash moved to `adcc0319` when the ferris wheel became a world ride**
+ * (3 August 2026), and that is the only reason it moved. It had to: the camera
+ * is hashed in *world* space, and the car it is bolted into no longer sits in a
+ * private scene at the origin — it stands where the wheel stands in the park,
+ * and rises three hundred and forty metres over it. The look-around itself is
+ * untouched, and the coverage counters below (which are what actually fail this
+ * check) are unchanged. Previous values: `26a241cc`, then `d1a4bbf0` when the
+ * pitch clamps were opened up for the glass floor. Every frame the camera's
  * **world** position and orientation are hashed, which is the number that
  * actually decides what a child sees — it catches a change to the look maths, to
  * the eye offset, to the seat's transform, or to how the camera hangs off it.
@@ -49,11 +58,13 @@
  */
 
 import './headless-dom.mjs';
-import { dispatch, overlayElement, setViewport } from './headless-dom.mjs';
+import { dispatch, setViewport } from './headless-dom.mjs';
 import type { PerspectiveCamera } from 'three';
 import { Quaternion, Vector3 } from 'three';
-import { createSpaceFerrisWheel } from '../src/minigames/ferrisWheel/SpaceFerrisWheel.ts';
-import type { MiniGame, MiniGameContext } from '../src/minigames/types.ts';
+import { FerrisWheelRide } from '../src/world/ferrisWheel/FerrisWheelRide.ts';
+import { CollisionWorld } from '../src/world/Collision.ts';
+import type { Player } from '../src/entities/Player.ts';
+import type { FrameContext } from '../src/core/types.ts';
 
 const DT = 1 / 60;
 /** Long enough for the whole ride plus the card at the end. */
@@ -145,9 +156,9 @@ class Harness {
   private origin: { x: number; y: number } | null = null;
   private at = { x: 0, y: 0 };
 
-  private readonly game: MiniGame;
+  private readonly game: FerrisWheelRide;
 
-  constructor(game: MiniGame) {
+  constructor(game: FerrisWheelRide) {
     this.game = game;
   }
 
@@ -212,7 +223,7 @@ class Harness {
     this.width = width;
     this.height = height;
     setViewport(width, height);
-    this.game.resize(width, height);
+    this.game.rideView?.resize(width, height);
   }
 }
 
@@ -259,21 +270,27 @@ const STICK_DEADZONE = 10;
 function run(coverage: Coverage): string {
   setViewport(LANDSCAPE.width, LANDSCAPE.height);
 
-  const game = createSpaceFerrisWheel();
-  const overlay = overlayElement();
-  const canvas = overlayElement();
-  const context = {
-    renderer: { domElement: canvas },
-    touch: true,
-    overlay,
-    finish: () => {},
-  } as unknown as MiniGameContext;
+  // The **real** ride, now that it is a world ride rather than a mini-game:
+  // still the whole thing, still not a model of one. What it needs from the
+  // park is narrow enough to stub — a collision world, and three closures it
+  // only calls to raise the sky, hide the park's own ferris wheel and hide the
+  // park itself, none of which the look-around can see.
+  const game = new FerrisWheelRide(new CollisionWorld(), () => {}, () => {}, () => {});
+  game.touch = true;
+  // Only three methods of `Player` are ever reached from a ride, and none of
+  // them move the camera. Building a real one would drag the whole character
+  // model, the store and the save into a camera trace.
+  game.attachPlayer({
+    beginRide: () => {},
+    endRide: () => {},
+    teleportTo: () => {},
+  } as unknown as Player);
+  game.requestBoard();
 
-  game.init(context);
   const harness = new Harness(game);
   harness.resize(LANDSCAPE.width, LANDSCAPE.height);
 
-  const camera = game.camera as PerspectiveCamera;
+  const camera = game.rideView!.camera as PerspectiveCamera;
   const worldPosition = new Vector3();
   const worldQuaternion = new Quaternion();
   const fovsSeen = new Set<number>();
@@ -303,18 +320,17 @@ function run(coverage: Coverage): string {
     game.update({
       dt: DT,
       elapsed,
-      input: {
-        hold: harness.pressed,
-        holdPressed: harness.pressed,
-        holdReleased: false,
-        quit: false,
-      },
-    });
+      // The ride reads exactly three edges off this, none of which the sweep
+      // presses: `cancel` to get out, and `interact`/`jump` to dismiss the end
+      // card. Leaving them all false is what keeps the full ninety seconds in
+      // the trace rather than ending it early.
+      input: { justPressed: () => false },
+    } as unknown as FrameContext);
     harness.pressed = false;
 
     // What a child actually sees is the camera's place in the world, which is
     // the seat's transform and the eye offset and the look-around, together.
-    game.scene.updateMatrixWorld(true);
+    game.group.updateMatrixWorld(true);
     camera.getWorldPosition(worldPosition);
     camera.getWorldQuaternion(worldQuaternion);
 

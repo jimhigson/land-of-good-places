@@ -445,6 +445,28 @@ class GameStore {
   }
 
   /**
+   * Makes sure at least one cute thing is out and able to join in.
+   *
+   * Exists for the **ride deep links** and nothing else. `/ferris` boards the
+   * ferris wheel on the very first frame, and the gondola seats whatever is
+   * paradeable and not stowed at the moment it is built — so a profile that
+   * has never met the shop, or one whose owner put the pet away in the
+   * backpack, arrives in an empty car. That is a poor way to look at a ride
+   * whose whole second half is "your parade rides with you", and it is
+   * precisely the case a developer typing the URL is trying to look at.
+   *
+   * Deliberately a no-op when anything is already out: it must never override
+   * a child who chose to stow her pets, which is why it is not simply "grant a
+   * pet". Returns true only if it actually added one.
+   */
+  ensureSomethingToParade(spec: PurchaseSpec): boolean {
+    if (this.state.inventory.some((item) => item.paradeable && !item.stowed)) return false;
+    this.grantFree(spec, false);
+    this.notify();
+    return true;
+  }
+
+  /**
    * Picks a free flower straight out of the meadow — no shop, no price.
    *
    * Unlike `buy()` it never touches the purse and it is never carryable or

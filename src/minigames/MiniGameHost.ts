@@ -209,8 +209,24 @@ export class MiniGameHost {
    */
   boardRide: ((stallId: string) => boolean) | null = null;
 
+  /**
+   * True while a world ride has hold of the player, so no stall may open.
+   *
+   * The proximity test below has always assumed that anybody within reach of a
+   * booth is *standing* there. That is true of the train and both coasters,
+   * which carry her away down a track — and false of the ferris wheel, whose
+   * rider never moves: `beginRide` freezes her, the gondola is what rises, and
+   * she stays on the wheel's own doormat, well inside REACH, for the whole
+   * ninety seconds. So a press of E mid-ride re-entered her own booth, dropped
+   * the curtain over the running ride, found no mini-game behind it and wiped
+   * back out. Worse, E is one of the two keys that dismisses the end card, so
+   * it happened on the ordinary way *out* of the ride.
+   */
+  riding: (() => boolean) | null = null;
+
   private checkStalls(context: FrameContext): void {
     if (!context.input.justPressed('interact')) return;
+    if (this.riding?.()) return;
     const { x, z } = context.playerPosition;
     for (const stall of this.stalls) {
       if (Math.hypot(x - stall.standX, z - stall.standZ) <= REACH) {
