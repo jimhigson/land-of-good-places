@@ -166,6 +166,45 @@ interface RideStick {
   readonly y: number;
 }
 
+/**
+ * The narrow bits of the park this ride is allowed to reach.
+ *
+ * Handed in as one object rather than a row of positional closures: there were
+ * three, a fourth was wanted the moment a castle turned up floating in the
+ * middle distance, and four anonymous `(visible: boolean) => void` parameters
+ * in a row is a call site nobody can read.
+ */
+export interface FerrisWorldHooks {
+  /** Raises the park's sky past night and into space. `DayNight.setSpaceFactor`. */
+  readonly setSpaceFactor: (value: number) => void;
+  /**
+   * Shows or hides the park's own ferris wheel.
+   *
+   * Hidden for the length of the ride and put back on the way out. The gondola
+   * carries the rim, spokes and hanger it swings from, which is what a child
+   * sees through the skylight — so the park's wheel standing there as well is
+   * simply a second ferris wheel.
+   */
+  readonly setParkWheelVisible: (visible: boolean) => void;
+  /**
+   * Shows or hides the whole park — `World.setParkVisible`.
+   *
+   * Only ever false above the cloud band, and always put back on the way out.
+   */
+  readonly setParkVisible: (visible: boolean) => void;
+  /**
+   * Shows or hides the places that are not the park — `World.setElsewhereVisible`.
+   *
+   * False for the **whole** ride, not just above the cloud. The castle is
+   * bigger on the inside and its interior lives 848 m out on a 45 degree
+   * bearing; nothing ever saw it because fog closed long before it, and this
+   * ride pushes fog out past everything so the park is visible from three
+   * hundred metres up. Jim turned about 135 degrees and found a building
+   * floating in the background.
+   */
+  readonly setElsewhereVisible: (visible: boolean) => void;
+}
+
 export class FerrisWheelRide implements GameSystem {
   readonly name = 'ferrisWheel';
 
@@ -209,23 +248,7 @@ export class FerrisWheelRide implements GameSystem {
 
   constructor(
     private readonly collision: CollisionWorld,
-    /** Raises the park's sky past night and into space. `DayNight.setSpaceFactor`. */
-    private readonly setSpaceFactor: (value: number) => void,
-    /**
-     * Shows or hides the park's own ferris wheel.
-     *
-     * Hidden for the length of the ride and put back on the way out. The
-     * gondola carries the rim, spokes and hanger it swings from, which is what
-     * a child sees through the skylight — so the park's wheel standing there
-     * as well is simply a second ferris wheel.
-     */
-    private readonly setParkWheelVisible: (visible: boolean) => void,
-    /**
-     * Shows or hides the whole park — `World.setParkVisible`.
-     *
-     * Only ever false above the cloud band, and always put back on the way out.
-     */
-    private readonly setParkVisible: (visible: boolean) => void,
+    private readonly world: FerrisWorldHooks,
   ) {
     const wheel = placedEntry('ferrisWheel');
     this.boardX = wheel.x;
@@ -294,19 +317,26 @@ export class FerrisWheelRide implements GameSystem {
     // her eye, and the pets' chairs are built to keep their heads below it.
     this.rideView.mountOn(this.gondola.seat, GONDOLA_EYE);
 
-    // The car goes on the viewmodel layer as well as its own, so `Game.render`
-    // can draw it again on top of the finished frame — see `drawsCarInFront`.
-    // `enable`, not `set`: it still has to be drawn in the ordinary world pass
-    // too, or it would vanish from anything that is not that second pass.
+    // The car moves **onto** the viewmodel layer and off the ordinary one, so
+    // `Game.render` draws it once, in the second pass, over the finished frame
+    // — see `drawsCarInFront`.
     //
-    // **Everything inside the car has to come too**, the pets in their chairs
-    // most of all: the second pass clears the depth buffer, so anything left
-    // off this layer is painted over by the car's own floor and seats and
-    // simply disappears. Done after the whole car exists, and skipping the
-    // camera, which is parented to the seat by `mountOn` above and whose
-    // `layers` mean something quite different — what it can *see*.
+    // `set`, not `enable`. It was `enable` at first, which left the car on both
+    // layers and therefore **drawn twice every frame**: once in the world pass
+    // and again over the top of itself. The reason given at the time was that
+    // three.js lights only illuminate objects sharing a layer with them, so a
+    // car off layer 0 would be lit by nothing — which was true until the fix
+    // for exactly that put `DayNight`'s four lights on this layer as well.
+    // With the lights on both, the world pass's copy is pure waste.
+    //
+    // **Everything inside the car comes too**, the pets in their chairs most of
+    // all: the second pass clears the depth buffer, so anything left behind on
+    // layer 0 is painted over by the car's own floor and seats and simply
+    // disappears. Done after the whole car exists, and skipping the camera,
+    // which `mountOn` has just parented to the seat and whose `layers` mean
+    // something quite different — what it can *see*.
     this.gondola.root.traverse((object) => {
-      if (object !== this.rideView?.camera) object.layers.enable(VIEWMODEL_LAYER);
+      if (object !== this.rideView?.camera) object.layers.set(VIEWMODEL_LAYER);
     });
   }
 
@@ -350,7 +380,9 @@ export class FerrisWheelRide implements GameSystem {
     this.cardTime = -1;
     this.waves = 0;
     this.group.visible = true;
-    this.setParkWheelVisible(false);
+    this.world.setParkWheelVisible(false);
+    // Another place entirely, and never meant to be seen from this one.
+    this.world.setElsewhereVisible(false);
 
     this.player.beginRide();
     this.onRideChange?.(true);
@@ -391,7 +423,7 @@ export class FerrisWheelRide implements GameSystem {
     // The park's own sky, taken past night — see `DayNight.setSpaceFactor`.
     // Driven from the same curve as the climb, so the sky and the altitude can
     // never disagree about how high up she is.
-    this.setSpaceFactor(height);
+    this.world.setSpaceFactor(height);
 
     // The Earth comes out **as the cloud closes over**, asked of the band
     // itself rather than worked out from a fraction of the climb. There used to
@@ -408,7 +440,7 @@ export class FerrisWheelRide implements GameSystem {
     // floor showed the real park sitting in front of the planet it is meant to
     // be part of. Both halves of the swap now happen inside the cloud, which is
     // the only reason the cloud is there.
-    this.setParkVisible(enveloped < PARK_HIDDEN_FROM);
+    this.world.setParkVisible(enveloped < PARK_HIDDEN_FROM);
 
     // One revolution of the wheel fragment the car hangs from, bottom to
     // bottom, plus a slow drift up there so the view never quite stops moving.
@@ -493,11 +525,12 @@ export class FerrisWheelRide implements GameSystem {
    */
   hideRide(): void {
     this.group.visible = false;
-    this.setParkWheelVisible(true);
+    this.world.setParkWheelVisible(true);
+    this.world.setElsewhereVisible(true);
     // Whatever height she left at — quitting from the top must not leave the
     // park she is being put back into invisible.
-    this.setParkVisible(true);
-    this.setSpaceFactor(0);
+    this.world.setParkVisible(true);
+    this.world.setSpaceFactor(0);
     this.teardown();
   }
 
