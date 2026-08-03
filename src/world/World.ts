@@ -13,6 +13,7 @@ import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
 import { Coaster } from './coaster/Coaster';
+import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
 import { MiniGameStalls } from '../minigames';
@@ -62,6 +63,8 @@ export class World implements GameSystem {
   readonly coaster: Coaster;
   readonly railRace: RailRace;
   readonly dodgems: DodgemsPlot;
+  /** The Space Ferris Wheel, ridden in the park itself. See its own header. */
+  readonly ferrisWheel: FerrisWheelRide;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
@@ -140,6 +143,17 @@ export class World implements GameSystem {
     this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
+    // The ferris wheel's ride. Built after `anchorPlots` (whose prop it hangs
+    // its gondola under, and whose scenery cars it hides while somebody is
+    // aboard) and after `dayNight` (whose sky it takes past night and into
+    // space). Both are handed in as narrow closures rather than whole objects:
+    // this ride needs to raise a sky and hide twelve cars, and nothing else.
+    this.ferrisWheel = new FerrisWheelRide(
+      this.collision,
+      (value) => this.dayNight.setSpaceFactor(value),
+      (visible) => this.anchorPlots.setFerrisCarsVisible(visible),
+    );
+
     // The face-painting stall (additive): built here, before the NPCs, because
     // it registers four walls with `this.collision` and `NpcSystem` must be
     // built last of all (see below) — the order genuinely matters for the
@@ -187,6 +201,7 @@ export class World implements GameSystem {
       this.train.group,
       this.coaster.group,
       this.railRace.group,
+      this.ferrisWheel.group,
     );
   }
 
@@ -226,6 +241,7 @@ export class World implements GameSystem {
     this.train.update(context);
     this.coaster.update(context);
     this.railRace.update(context);
+    this.ferrisWheel.update(context);
     this.train.carryPassengers(this.npcs.riders);
 
     this.npcs.update(context);
@@ -277,6 +293,7 @@ export class World implements GameSystem {
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);
     this.railRace.attachPlayer(player);
+    this.ferrisWheel.attachPlayer(player);
     // Lets the crowd push gently apart from the player instead of walking
     // through them (design feedback #31d) — see `NpcSystem.attachPlayer`.
     this.npcs.attachPlayer(player);
@@ -304,6 +321,7 @@ export class World implements GameSystem {
     this.train.dispose();
     this.coaster.dispose();
     this.railRace.dispose();
+    this.ferrisWheel.dispose();
     this.flowers.dispose();
     this.dodgems.dispose();
   }

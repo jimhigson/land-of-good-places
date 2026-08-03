@@ -4493,3 +4493,14 @@ kbd {
     opacity: 0;
   }
 }
+
+/* The Space Ferris Wheel's caption/shout/card layer while a child is aboard.
+   `RideHud` was written for a mini-game's overlay and is reused unchanged, so
+   this host has to provide what that overlay used to: the whole screen, above
+   the park's HUD, and swallowing no presses of its own. */
+.ferris-hud-host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}

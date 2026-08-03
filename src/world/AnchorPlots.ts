@@ -93,6 +93,17 @@ export class AnchorPlots implements GameSystem {
   }
 
   /** Hide the "coming soon" dressing once the real thing exists. */
+  /**
+   * Hides the ferris wheel's twelve scenery cars, leaving the wheel standing.
+   *
+   * For the length of a ride only: `world/ferrisWheel/FerrisWheelRide.ts` hangs
+   * its own detailed gondola at the bottom of this wheel, and two cars in one
+   * place reads as a glitch through that one's windows.
+   */
+  setFerrisCarsVisible(visible: boolean): void {
+    this.ferrisWheel?.setCarsVisible(visible);
+  }
+
   setPlaceholderVisible(id: AnchorId, visible: boolean): void {
     const placeholder = this.placeholders.get(id);
     if (placeholder) placeholder.visible = visible;

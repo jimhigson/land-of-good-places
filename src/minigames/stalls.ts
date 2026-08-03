@@ -6,7 +6,6 @@ import { pressZone, type InteractZone } from '../world/interact';
 import { terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
 import { createDodgems } from './dodgems/Dodgems';
-import { createSpaceFerrisWheel } from './ferrisWheel/SpaceFerrisWheel';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
@@ -140,7 +139,10 @@ export const STALLS: readonly StallDefinition[] = [
     // and the placeholder's collision post ends up inside the booth's own walls
     // instead of being left behind as an invisible obstacle on the lawn.
     ...STALL_PLACEMENTS.spaceFerrisWheel,
-    create: createSpaceFerrisWheel,
+    // No `create`: this booth boards a **world ride** now
+    // (`world/ferrisWheel/FerrisWheelRide.ts`), so `MiniGameHost.boardRide`
+    // takes it before a mini-game would ever be built — same as the Sky
+    // Cruiser's and the Rail Race's booths.
     // The only stall behind which you sit in a seat and turn your head, so the
     // only one that needs iOS asked about the motion sensors while the opening
     // press is still a gesture. See `StallDefinition.firstPerson`.
