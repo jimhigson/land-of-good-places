@@ -110,18 +110,30 @@ const SPOKES = 12;
 const PASSENGER_EYE_Y = 1.1;
 
 /**
- * How far round a passenger will turn its head to watch something, and how
- * far up or down.
+ * How a passenger turns to look at something behind it.
  *
- * Short of anything a real neck would object to. Past this they simply watch
- * as far as they can and let it go by, which reads as a toy being interested
- * rather than a toy being possessed.
+ * **The neck goes first and the body follows it round**, which is what a person
+ * in a seat actually does and is the whole reason this is two numbers rather
+ * than one. The first attempt clamped the neck at 66 degrees and left the body
+ * alone, so a saucer arriving over the child's shoulder — where half the show
+ * deliberately happens — barely moved anybody. Widening the neck instead would
+ * have bought a head rotating most of the way round a body that never moved,
+ * which is a horror film rather than a fairground ride.
+ *
+ * So: the head takes up to {@link HEAD_COMFORT} on its own, and everything
+ * beyond that turns the passenger in its chair, up to {@link BODY_YAW_LIMIT} —
+ * nearly the whole way round, because these are toys in tub chairs and there is
+ * glass on every side to look through. The body eases more slowly than the
+ * head, so the look lands first and the shoulders come after it.
  */
-const WATCH_YAW_LIMIT = 1.15;
+const HEAD_COMFORT = 0.7;
+const NECK_LIMIT = 0.95;
+const BODY_YAW_LIMIT = 2.5;
 const WATCH_PITCH_LIMIT = 0.5;
 
-/** How quickly a head settles onto whatever it is looking at. */
+/** How quickly a head settles onto whatever it is looking at, and a body after it. */
 const WATCH_EASE = 4;
+const BODY_EASE = 2.2;
 
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
@@ -172,6 +184,8 @@ interface Passenger {
   readonly handle: AssetHandle;
   readonly creature: CreatureHandle | null;
   readonly baseY: number;
+  /** The way its chair faces. Everything below is measured out from here. */
+  readonly baseYaw: number;
   readonly phase: number;
   expression: Expression;
 }
@@ -567,6 +581,7 @@ export function createGondola(): Gondola {
       handle,
       creature: asCreature(handle),
       baseY: seatY,
+      baseYaw: chair.rotation.y,
       phase: index * 1.7,
       expression: 'neutral',
     });
@@ -583,7 +598,10 @@ export function createGondola(): Gondola {
     limbs.rightArm.rotation.x = 0.25;
   }
 
-  /** What the passengers are watching, in car space. See `watch`. */
+  /** Where a passenger looks when it looks at *you*: the player's own eye. */
+const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.z);
+
+/** What the passengers are watching, in car space. See `watch`. */
   const watchPoint = new Vector3();
   let watching = false;
 
@@ -780,52 +798,48 @@ export function createGondola(): Gondola {
         passenger.handle.root.position.y = passenger.baseY + bob + (joy > 0 ? Math.abs(Math.sin(elapsed * 7)) * 0.05 : 0);
         passenger.handle.update?.(dt, elapsed);
 
+        // What, if anything, this passenger is looking at — in car space.
+        //
+        //  - **somebody waved**: it looks back at *you*, and nothing
+        //    interrupts that; being looked at by your own pet is the reason
+        //    you brought it along;
+        //  - **something is out of the window**: the alien, RiPika, the
+        //    turtles. Half the show deliberately happens behind and beside
+        //    you, so this is often a long way round;
+        //  - **otherwise**: nose to the glass, with a slow idle wander.
+        const target = joy > 0 ? PLAYER_LOOK_POINT : watching ? watchPoint : null;
+        const seat = passenger.handle.root;
         const head = passenger.creature?.head;
+
+        let bodyYaw = 0;
+        let headYaw = Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
+        let headPitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+
+        if (target) {
+          const dx = target.x - seat.position.x;
+          const dz = target.z - seat.position.z;
+          const dy = target.y - (seat.position.y + PASSENGER_EYE_Y);
+          // How far round from its own chair the thing is. `angleDelta` picks
+          // the short way, so a passenger turns whichever way is nearer.
+          const total = clamp(
+            angleDelta(passenger.baseYaw, Math.atan2(dx, dz)),
+            -(HEAD_COMFORT + BODY_YAW_LIMIT),
+            HEAD_COMFORT + BODY_YAW_LIMIT,
+          );
+          // The neck takes what it comfortably can; the chair takes the rest.
+          bodyYaw = clamp(total - clamp(total, -HEAD_COMFORT, HEAD_COMFORT), -BODY_YAW_LIMIT, BODY_YAW_LIMIT);
+          headYaw = clamp(total - bodyYaw, -NECK_LIMIT, NECK_LIMIT);
+          headPitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
+        }
+
+        // Eased, never snapped, and the body more slowly than the head — so
+        // the look lands first and the shoulders come round after it, which is
+        // the order a person does it in.
+        seat.rotation.y += (passenger.baseYaw + bodyYaw - seat.rotation.y) * Math.min(1, dt * BODY_EASE);
         if (head) {
-          // Three things a passenger can be doing with its head, in order of
-          // who gets to win:
-          //
-          //  - **somebody waved**: it turns and looks back at *you*, which is
-          //    the whole reason it came along, and nothing interrupts that;
-          //  - **something is out of the window**: it watches the alien, or
-          //    RiPika, or the turtles — see `watch`. A car full of toys staring
-          //    politely ahead while a flying saucer goes past was the tell that
-          //    they were scenery rather than passengers;
-          //  - **otherwise**: nose to the glass, with a slow idle wander.
-          let yaw: number;
-          let pitch: number;
-          if (joy > 0) {
-            yaw = 0.85 * (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
-            pitch = -0.12;
-          } else if (watching) {
-            const seat = passenger.handle.root;
-            const dx = watchPoint.x - seat.position.x;
-            const dz = watchPoint.z - seat.position.z;
-            const dy = watchPoint.y - (seat.position.y + PASSENGER_EYE_Y);
-            // Into the head's own frame: the chairs face the window, so the
-            // seat's yaw has to come back out before this becomes a neck.
-            yaw = clamp(
-              angleDelta(seat.rotation.y, Math.atan2(dx, dz)),
-              -WATCH_YAW_LIMIT,
-              WATCH_YAW_LIMIT,
-            );
-            pitch = clamp(
-              Math.atan2(dy, Math.hypot(dx, dz)),
-              -WATCH_PITCH_LIMIT,
-              WATCH_PITCH_LIMIT,
-            );
-          } else {
-            yaw =
-              Math.sin(elapsed * 0.5 + passenger.phase) *
-              0.16 *
-              (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
-            pitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
-          }
-          // Eased, never snapped: a head that arrives instantly reads as a
-          // glitch, and these are meant to be *noticing* things.
           const ease = Math.min(1, dt * WATCH_EASE);
-          head.rotation.y += (yaw - head.rotation.y) * ease;
-          head.rotation.x += (pitch - head.rotation.x) * ease;
+          head.rotation.y += (headYaw - head.rotation.y) * ease;
+          head.rotation.x += (headPitch - head.rotation.x) * ease;
         }
         if (joy <= 0 && passenger.expression !== 'neutral') {
           passenger.expression = 'neutral';
