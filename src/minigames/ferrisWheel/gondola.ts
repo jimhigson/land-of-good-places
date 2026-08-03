@@ -749,14 +749,30 @@ export function createGondola(): Gondola {
 
   // Bulbs on the rim, seen through the skylight once it gets dark.
   const bulbMaterial = new MeshBasicMaterial({ color: PALETTE.fairyWarm, toneMapped: false });
+  // **On the rims, not between them.** They used to sit at z = 0 — dead centre
+  // in the gap the car hangs in — and the bulb circle passes exactly through
+  // the point the car hangs from, so every one of them sailed 30 cm over the
+  // middle of the glass roof, directly above a child's head. Jim saw "a yellow
+  // ball that flies straight through your carriage", and it was 24 of them,
+  // once per revolution each.
+  //
+  // Exactly the mistake the rims themselves had before RIM_HALF_GAP was
+  // derived rather than dialled in — the bulbs simply did not move with them.
+  // A real wheel carries its lamps on the rims anyway.
   const bulbCount = 24;
-  const bulbs = new InstancedMesh(new SphereGeometry(0.16, 8, 6), bulbMaterial, bulbCount);
+  const bulbs = new InstancedMesh(new SphereGeometry(0.16, 8, 6), bulbMaterial, bulbCount * 2);
   bulbs.frustumCulled = false;
   for (let i = 0; i < bulbCount; i += 1) {
     const angle = (i / bulbCount) * TAU;
-    position.set(Math.cos(angle) * RIDE_RIM_R, Math.sin(angle) * RIDE_RIM_R, 0);
-    matrix.compose(position, new Quaternion(), unit);
-    bulbs.setMatrixAt(i, matrix);
+    for (let side = 0; side < 2; side += 1) {
+      position.set(
+        Math.cos(angle) * RIDE_RIM_R,
+        Math.sin(angle) * RIDE_RIM_R,
+        (side === 0 ? -1 : 1) * RIM_HALF_GAP,
+      );
+      matrix.compose(position, new Quaternion(), unit);
+      bulbs.setMatrixAt(i * 2 + side, matrix);
+    }
   }
   bulbs.instanceMatrix.needsUpdate = true;
   rig.add(bulbs);
@@ -1044,7 +1060,10 @@ export function createGondola(): Gondola {
         const wave = 0.55 + 0.45 * Math.sin(chase - (i / bulbCount) * TAU * 3);
         bulbColour.copy(litColour).multiplyScalar(0.5 + wave * 0.8);
         bulbColour.lerp(dimColour, 1 - lampGlow);
-        bulbs.setColorAt(i, bulbColour);
+        // The pair either side of the wheel chase together, so the two rims
+        // read as one string of lights rather than two out of step.
+        bulbs.setColorAt(i * 2, bulbColour);
+        bulbs.setColorAt(i * 2 + 1, bulbColour);
       }
       if (bulbs.instanceColor) bulbs.instanceColor.needsUpdate = true;
     },
