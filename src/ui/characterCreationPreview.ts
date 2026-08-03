@@ -20,6 +20,7 @@ import { attachFacePaint, createKid, type KidHandle } from '../art/models/kid';
 import { TRAILING_HAIR_STYLES } from '../art/models/hair';
 import { createGlasses } from '../art/models/glasses';
 import type { Expression, FacePaintDesign } from '../art/style/faces';
+import { createFaceLife } from '../art/style/faceLife';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../state';
 import { pixelRatioCap } from '../core/device';
 import { shopItem } from '../world/building/shops/catalogue';
@@ -258,9 +259,6 @@ const SCRATCH_SIZE = new Vector3();
 const SCRATCH_TARGET = new Vector3();
 const SCRATCH_DESIRED = new Vector3();
 
-/** How long the eyes stay shut — same beat as `Player.ts`'s blink. */
-const BLINK_DURATION = 0.11;
-
 /** Seconds a "just picked something" happy face is held before idling resumes. */
 const REACT_SECONDS = 1.2;
 
@@ -290,14 +288,13 @@ export class CharacterPreview {
   // --- face life: blink timer, idle mood drift, and the "you picked something"
   // reaction. Mirrors `Player.ts`'s own blink state machine so the preview kid
   // and the in-game one feel like the same character. ------------------------
-  private blinkTimer = 1.4 + Math.random() * 2.2;
-  private blinkRemaining = 0;
+  /** Blinks, on the beat every face in the game shares. */
+  private readonly face = createFaceLife((expression) => this.kid?.setExpression(expression));
   private moodTimer = 3 + Math.random() * 3;
   private mood: Expression = 'neutral';
   private moodRemaining = 0;
   /** Elapsed-time deadline until which a fresh choice's happy face holds. */
   private reactUntil = 0;
-  private currentExpression: Expression = 'neutral';
 
   // --- camera framing: what the child just changed, and where that is. -------
   /**
@@ -446,7 +443,6 @@ export class CharacterPreview {
     // `reactUntil` keeps `frame()`'s idle blink/mood logic from stepping on
     // it for a moment.
     kid.setExpression('happy');
-    this.currentExpression = 'happy';
     this.reactUntil = this.elapsed + REACT_SECONDS;
     this.moodRemaining = 0;
     this.kid = kid;
@@ -770,13 +766,6 @@ export class CharacterPreview {
     const kid = this.kid;
     if (!kid) return;
 
-    this.blinkTimer -= dt;
-    if (this.blinkTimer <= 0) {
-      this.blinkTimer = 2.2 + Math.random() * 3.4;
-      this.blinkRemaining = BLINK_DURATION;
-    }
-    if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
-
     const reacting = this.elapsed < this.reactUntil;
     if (!reacting) {
       if (this.moodRemaining > 0) {
@@ -791,10 +780,9 @@ export class CharacterPreview {
       }
     }
 
+    // The mood is this preview's own; the blink and the only-swap-on-a-change
+    // rule are everybody's — see `art/style/faceLife.ts`.
     const resting: Expression = reacting ? 'happy' : this.moodRemaining > 0 ? this.mood : 'neutral';
-    const desired: Expression = this.blinkRemaining > 0 ? 'blink' : resting;
-    if (desired === this.currentExpression) return;
-    this.currentExpression = desired;
-    kid.setExpression(desired);
+    this.face.update(dt, resting);
   }
 }

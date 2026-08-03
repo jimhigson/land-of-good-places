@@ -22,8 +22,8 @@ import { TAU, angleDelta, clamp, clamp01 } from '../../core/mathUtils';
 import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { AssetHandle } from '../../art/style/asset';
-import type { Expression } from '../../art/style/faces';
 import { gameStore } from '../../state';
+import { createFaceLife, type FaceLife } from '../../art/style/faceLife';
 import { shopItem, type ShopItem } from '../../world/building/shops/catalogue';
 import { FERRIS_CAR_COLOURS } from './wheelProp';
 import { ART } from '../../art/style/artPalette';
@@ -154,22 +154,6 @@ const NEIGHBOUR_DEPTH = 1.5;
 const NEIGHBOUR_HEIGHT = 1.45;
 
 /**
- * Blinking, on the same beat the player herself uses (`Player.ts`).
- *
- * Nobody in this car blinked at all until Jim asked. The face is painted onto
- * a canvas, so a blink is a **texture swap** — cheap, but only if it happens on
- * the two transitions; calling `setExpression` every frame would flip
- * `needsUpdate` every frame and re-upload the texture to the GPU. Hence the
- * "only when it changes" guard in `blink`.
- *
- * Each face gets its own starting phase, so a car full of toys does not blink
- * in unison — which is considerably more unsettling than not blinking at all.
- */
-const BLINK_DURATION = 0.11;
-const BLINK_GAP_MIN = 2.6;
-const BLINK_GAP_RANGE = 3.4;
-
-/**
  * The rim lamps: how big, and how far proud of the rim they stand.
  *
  * They were centred *on* the rim, which put a 0.16 m ball inside a 0.16 m tube
@@ -241,17 +225,6 @@ const PET_CHAIR_Z = -0.64;
  * translation, with no rotation of the seat group, or those directions change.
  */
 export const GONDOLA_EYE = Object.freeze({ x: 0, y: 1.8, z: 0.78 });
-
-/** One face's blink clock. Its own phase, so nobody blinks in unison. */
-interface FaceLife {
-  until: number;
-  shut: number;
-  showing: Expression;
-}
-
-function newFace(): FaceLife {
-  return { until: BLINK_GAP_MIN * Math.random(), shut: 0, showing: 'neutral' };
-}
 
 interface Passenger {
   readonly handle: AssetHandle;
@@ -656,7 +629,7 @@ export function createGondola(): Gondola {
       baseY: seatY,
       baseYaw: chair.rotation.y,
       phase: index * 1.7,
-      face: newFace(),
+      face: createFaceLife((expression) => asCreature(handle)?.setExpression(expression)),
     });
   });
 
@@ -680,26 +653,6 @@ export function createGondola(): Gondola {
   /** Scratch for working out where a neighbour's occupant actually is. */
   const occupantOrigin = new Vector3();
 
-  /**
-   * Keeps a face alive: blinks it, over whatever it is otherwise doing.
-   *
-   * `resting` is what the face should show between blinks — 'happy' while
-   * somebody is being waved at, 'neutral' the rest of the time — so this can
-   * punch a blink through without arguing with the joy state.
-   */
-  const blink = (face: FaceLife, creature: CreatureHandle | null, resting: Expression, dt: number): void => {
-    if (!creature) return;
-    face.until -= dt;
-    if (face.until <= 0) {
-      face.until = BLINK_GAP_MIN + Math.random() * BLINK_GAP_RANGE;
-      face.shut = BLINK_DURATION;
-    }
-    if (face.shut > 0) face.shut -= dt;
-    const wanted: Expression = face.shut > 0 ? 'blink' : resting;
-    if (wanted === face.showing) return;
-    face.showing = wanted;
-    creature.setExpression(wanted);
-  };
 
   /**
    * Turns a seated figure to look at something, or lets it idle.
@@ -977,8 +930,18 @@ export function createGondola(): Gondola {
       rider,
       // Both of them look around, so `turnToward` gets one list to walk.
       occupants: [
-        { root: rider.root, head: rider.head, phase: index * 1.9, creature: rider, face: newFace() },
-        { root: pet.root, head: pet.head, phase: index * 1.9 + 0.8, creature: pet, face: newFace() },
+        {
+          root: rider.root,
+          head: rider.head,
+          phase: index * 1.9,
+          face: createFaceLife((expression) => rider.setExpression(expression)),
+        },
+        {
+          root: pet.root,
+          head: pet.head,
+          phase: index * 1.9 + 0.8,
+          face: createFaceLife((expression) => pet.setExpression(expression)),
+        },
       ],
     };
   });
@@ -1065,7 +1028,7 @@ export function createGondola(): Gondola {
             dt,
             elapsed,
           );
-          blink(occupant.face, occupant.creature, 'neutral', dt);
+          occupant.face.update(dt, 'neutral');
         }
       }
 
@@ -1105,7 +1068,7 @@ export function createGondola(): Gondola {
           dt,
           elapsed,
         );
-        blink(passenger.face, passenger.creature, joy > 0 ? 'happy' : 'neutral', dt);
+        passenger.face.update(dt, joy > 0 ? 'happy' : 'neutral');
       }
 
       lamp.intensity = lampGlow * 3.2;

@@ -1,4 +1,5 @@
 import type { Rng } from '../../core/mathUtils';
+import { createBlinkClock, type BlinkClock } from '../../art/style/faceLife';
 import { clamp01 } from '../../core/mathUtils';
 import { RUN_INTENT, type CharacterDriver, type CharacterIntent, type DriverContext } from './driver';
 import type { PoiGraph } from './poiGraph';
@@ -130,8 +131,9 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   private hopCooldown = 0;
   private hopRequest = false;
 
-  private blinkTimer: number;
-  private blinkRemaining = 0;
+  /** The one blink beat, on this child's own seeded random. See `faceLife.ts`. */
+  private readonly blinkClock: BlinkClock;
+  private blinkingNow = false;
 
   constructor(options: WanderOptions) {
     this.graph = options.graph;
@@ -140,7 +142,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.current = options.startNode;
     this.previous = options.startNode;
     this.target = options.startNode;
-    this.blinkTimer = this.rng.range(1.5, 5.5);
+    this.blinkClock = createBlinkClock(() => this.rng.range(0, 1));
     // Activities are constructed exactly where their state used to be
     // initialised, because several of them draw from this child's seeded
     // stream and the order of those draws is behaviour, not detail.
@@ -221,15 +223,10 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
     this.waveCooldown -= dt;
     this.hopCooldown -= dt;
-    this.blinkTimer -= dt;
-    if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
     // Kept above the activities so a child blinks whether they are wandering,
     // riding or up a tree: an activity holding the whole intent never reaches
     // the expression line at the bottom of this method.
-    if (this.blinkTimer <= 0) {
-      this.blinkTimer = this.rng.range(2.4, 6.2);
-      this.blinkRemaining = 0.12;
-    }
+    this.blinkingNow = this.blinkClock.expressionFor(dt, 'neutral') === 'blink';
 
     // Where a painted child's face is, for the stall to hang their decal near.
     // Above the activities rather than inside the visit, because a climb or a
@@ -309,7 +306,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // Blinking is an expression hint, not an animation: the body only pushes it
     // to the model when it changes, because a blink is a texture swap.
     intent.expression =
-      this.waveAmount > 0.15 ? 'happy' : this.blinkRemaining > 0 ? 'blink' : 'neutral';
+      this.waveAmount > 0.15 ? 'happy' : this.blinkingNow ? 'blink' : 'neutral';
   }
 
   // ------------------------------------------------------------- running them
@@ -345,7 +342,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
 
   /** True on the frames this child's eyes are shut. */
   get blinking(): boolean {
-    return this.blinkRemaining > 0;
+    return this.blinkingNow;
   }
 
   /** True if any activity other than `asking` is mid-something. */

@@ -1,4 +1,5 @@
 import { CapsuleGeometry, Group, Mesh, SphereGeometry, TorusGeometry } from 'three';
+import { createBlinkClock } from '../../art/style/faceLife';
 import { PALETTE } from '../../core/palette';
 import { castAndReceive, softMaterial } from './parts';
 
@@ -16,7 +17,8 @@ export class GrownUp {
   readonly height = 2.2;
 
   private blink = 0;
-  private blinkTimer = 2;
+  /** The one blink beat. Its eyes are meshes, so only the timing is shared. */
+  private readonly blinkClock = createBlinkClock();
   private readonly eyes: Mesh[] = [];
 
   constructor() {
@@ -99,11 +101,9 @@ export class GrownUp {
     this.body.rotation.z = Math.sin(elapsed * 1.1) * 0.02;
     this.head.rotation.z = Math.sin(elapsed * 1.4) * 0.05;
 
-    this.blinkTimer -= dt;
-    if (this.blinkTimer <= 0) {
-      this.blinkTimer = 2.4 + Math.random() * 3;
-      this.blink = 1;
-    }
+    // This one has no painted face — its eyes are meshes and it blinks by
+    // squashing them — so it takes the shared *beat* and does its own squash.
+    if (this.blinkClock.expressionFor(dt, 'neutral') === 'blink') this.blink = 1;
     this.blink = Math.max(0, this.blink - dt * 9);
     const scale = 1 - this.blink * 0.9;
     for (const eye of this.eyes) eye.scale.y = 1.1 * scale;
