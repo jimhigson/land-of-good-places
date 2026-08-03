@@ -25,6 +25,8 @@ import type { Expression } from '../../art/style/faces';
 import { gameStore } from '../../state';
 import { shopItem, type ShopItem } from '../../world/building/shops/catalogue';
 import { FERRIS_CAR_COLOURS } from './wheelProp';
+import { ART } from '../../art/style/artPalette';
+import { createKid } from '../../art/models/kid';
 
 /**
  * The car you ride in, and the piece of wheel it hangs from.
@@ -137,6 +139,29 @@ const TURN_EASE = 2.6;
 
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
+
+/**
+ * The neighbouring cars' own size — the park wheel's, not yours.
+ *
+ * Yours is deliberately roomy because you are sitting in it with three cute
+ * things; theirs stay the size the wheel's twelve cars actually are, since at
+ * this radius cars this far apart are already almost touching.
+ */
+const NEIGHBOUR_WIDTH = 1.75;
+const NEIGHBOUR_DEPTH = 1.5;
+const NEIGHBOUR_HEIGHT = 1.45;
+
+/** Scaled down to their car, which is about half the size of yours. */
+const NEIGHBOUR_RIDER_SCALE = 0.52;
+
+/** So the four of them are not quadruplets. Indexed, not random: same wheel every ride. */
+const NEIGHBOUR_HAIR = [ART.kidHair, PALETTE.hair, PALETTE.wood, PALETTE.stonePinkDark];
+const NEIGHBOUR_OUTFIT = [
+  PALETTE.markerSky,
+  PALETTE.markerLemon,
+  PALETTE.markerMint,
+  PALETTE.markerPink,
+];
 
 // ------------------------------------------------------- the two seat heights
 //
@@ -689,15 +714,68 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
   // wheel turns underneath them, so they are placed in car space every frame
   // rather than parented to the rig — which is also what lets them swing on
   // their own, slightly out of step with yours.
+  //
+  // **They are the same design as the car you are in**: a coloured floor and
+  // roof, corner posts, and glass all the way round. They used to be solid
+  // painted boxes, which was fine while nothing was expected to be inside one
+  // and wrong the moment you looked: a ferris wheel whose every other car is
+  // a sealed crate reads as scenery, and yours as the odd one out. Jim's note,
+  // 3 August 2026 — and once they were glass there was obviously somebody
+  // missing, so **there is a child in each of them**.
+  //
+  // They stay at the park wheel's own car size rather than growing to match
+  // yours: at this radius, cars this far apart on the rim are already almost
+  // touching, and yours is deliberately roomy because you are sitting in it.
   const neighbourOffsets = [-2, -1, 1, 2].map((step) => (step * TAU) / SPOKES);
   const neighbours = neighbourOffsets.map((offset, index) => {
     const car = new Group();
     car.name = `neighbour:${index}`;
     const colour = FERRIS_CAR_COLOURS[(index + 1) % FERRIS_CAR_COLOURS.length] ?? PALETTE.markerMint;
+    const shell = toonMaterial(colour);
 
-    const body = solid(new Mesh(new RoundedBoxGeometry(1.75, 1.45, 1.5, 4, 0.36), toonMaterial(colour)));
-    car.add(body);
-    addOutline(body, 0.02);
+    // Floor and roof, with the posts between them. Same read as your own car:
+    // the colour is the frame, everything between it is glass.
+    for (const y of [0, NEIGHBOUR_HEIGHT] as const) {
+      const slab = solid(
+        new Mesh(new RoundedBoxGeometry(NEIGHBOUR_WIDTH, 0.12, NEIGHBOUR_DEPTH, 3, 0.05), shell),
+      );
+      slab.position.y = y - NEIGHBOUR_HEIGHT / 2;
+      car.add(slab);
+      addOutline(slab, 0.02);
+    }
+
+    for (const px of [-1, 1] as const) {
+      for (const pz of [-1, 1] as const) {
+        const post = solid(
+          new Mesh(new CylinderGeometry(0.05, 0.05, NEIGHBOUR_HEIGHT, 6), shell),
+        );
+        post.position.set(
+          (px * (NEIGHBOUR_WIDTH - 0.1)) / 2,
+          0,
+          (pz * (NEIGHBOUR_DEPTH - 0.1)) / 2,
+        );
+        car.add(post);
+      }
+    }
+
+    // The same glass as your own windows, so the whole wheel is one material.
+    // Four panes: two across the width at either end of the depth, two along
+    // the depth at either end of the width.
+    const paneHeight = NEIGHBOUR_HEIGHT - 0.16;
+    for (const alongX of [true, false] as const) {
+      const length = (alongX ? NEIGHBOUR_WIDTH : NEIGHBOUR_DEPTH) - 0.1;
+      const stand = ((alongX ? NEIGHBOUR_DEPTH : NEIGHBOUR_WIDTH) - 0.1) / 2;
+      for (const side of [-1, 1] as const) {
+        const pane = decal(
+          new Mesh(
+            new BoxGeometry(alongX ? length : 0.03, paneHeight, alongX ? 0.03 : length),
+            glass,
+          ),
+        );
+        pane.position.set(alongX ? 0 : side * stand, 0, alongX ? side * stand : 0);
+        car.add(pane);
+      }
+    }
 
     const canopy = solid(
       new Mesh(new CylinderGeometry(1.02, 1.02, 0.24, 14), toonMaterial(PALETTE.buildingWall)),
@@ -709,8 +787,28 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
     stem.position.y = 1.05;
     car.add(stem);
 
+    // Somebody in it. Sat down, facing out of the wheel the way you would if
+    // the view were the reason you got on — and scaled to this car rather than
+    // to yours, since these are the wheel's own size.
+    const rider = createKid({
+      hair: NEIGHBOUR_HAIR[index % NEIGHBOUR_HAIR.length] ?? ART.kidHair,
+      outfit: NEIGHBOUR_OUTFIT[index % NEIGHBOUR_OUTFIT.length] ?? ART.kidOutfit,
+      hairStyle: index % 2 === 0 ? 'bunches' : 'bob',
+      backpack: false,
+    });
+    rider.root.scale.setScalar(NEIGHBOUR_RIDER_SCALE);
+    rider.root.position.set(0, -NEIGHBOUR_HEIGHT / 2 + 0.06, 0.1);
+    rider.root.rotation.y = Math.PI;
+    // Sat, not stood to attention — the same courtesy the pets in your own car
+    // get, and the difference between a passenger and a doll in a box.
+    rider.limbs.leftLeg.rotation.x = -1.25;
+    rider.limbs.rightLeg.rotation.x = -1.15;
+    rider.limbs.leftArm.rotation.x = 0.2;
+    rider.limbs.rightArm.rotation.x = 0.2;
+    car.add(rider.root);
+
     root.add(car);
-    return { root: car, offset, phase: index * 1.9 };
+    return { root: car, offset, phase: index * 1.9, rider };
   });
 
   const bulbColour = new Color();
@@ -780,6 +878,7 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
           hubZ + Math.sin(around) * RIDE_RIM_R,
         );
         neighbour.root.rotation.x = swing;
+        neighbour.rider.update(dt);
       }
 
       // The car hangs level and sways. Two frequencies, so it never repeats
