@@ -97,13 +97,21 @@ function boot(): void {
 
 /**
  * `/rail-race` and friends: a URL a developer types to reach a ride under
- * test without walking there. Maps straight to the stall id
- * `MiniGameHost.boardRide` already knows (see `Game.ts`'s own wiring of it),
- * so adding a ride here is one line, not a new boarding path.
+ * test without walking there.
+ *
+ * Every entry maps straight to a **stall id**, and that is deliberately the
+ * only thing it knows about the ride. Two quite different things can sit
+ * behind one: a world ride that `MiniGameHost.boardRide` boards in the park
+ * (the Rail Race, the Sky Cruiser — see `Game.ts`'s own wiring of it), or a
+ * stall with a curtain mini-game behind it (the Space Ferris Wheel, until it
+ * becomes a world ride too). {@link launchGame} tries the ride first and falls
+ * back to opening the stall, so adding one here is one line either way — and a
+ * ride that later changes from one kind to the other needs no change at all.
  */
 const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/rail-race': 'railRacer',
   '/sky-cruiser': 'skyCruiser',
+  '/ferris': 'spaceFerrisWheel',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */
@@ -268,7 +276,13 @@ function launchGame(
     // Both wired synchronously inside `Game`'s own constructor, which has
     // already returned by this point — nothing here waits a frame.
     game.whatsNew.close();
-    game.miniGames.boardRide?.(boardStallId);
+    // A world ride boards through `boardRide`; a stall with a curtain
+    // mini-game behind it opens through `open()`. Trying the ride first and
+    // falling back is what lets one deep-link table serve both kinds — and
+    // what means a stall that graduates from mini-game to world ride is
+    // already wired the day it does. `boardRide` returns false for an id it
+    // does not know, which is exactly the signal needed here.
+    if (!game.miniGames.boardRide?.(boardStallId)) game.miniGames.open(boardStallId);
   }
   if (debugView) {
     game.whatsNew.close();

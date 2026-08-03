@@ -95,11 +95,14 @@ history — it is the only actually reliable answer, cheaper than any amount of
 cache-clearing forensics.
 
 **Deep links for reaching a ride under test without walking there:**
-`/rail-race` and `/sky-cruiser` skip straight past the welcome-back prompt and
-board that ride the instant the park (or a freshly created character, on a
-save-less profile) exists — see `RIDE_DEEP_LINKS` in `main.ts`. Add a ride by
-adding one line there; it reuses whatever stall id `Game.ts` already wired
-into `MiniGameHost.boardRide`.
+`/rail-race`, `/sky-cruiser` and `/ferris` skip straight past the welcome-back
+prompt and board that ride the instant the park (or a freshly created
+character, on a save-less profile) exists — see `RIDE_DEEP_LINKS` in
+`main.ts`. Add a ride by adding one line there. It maps to a stall id and
+works for **both** kinds of ride: a world ride that `Game.ts` wired into
+`MiniGameHost.boardRide`, and a stall with a curtain mini-game behind it
+(`/ferris` today), because `launchGame` tries the ride and falls back to
+`MiniGameHost.open`.
 
 **`/view` — a debug camera, for checking rendering without playing the game:**
 
