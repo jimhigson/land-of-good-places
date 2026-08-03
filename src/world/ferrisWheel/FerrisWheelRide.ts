@@ -1,7 +1,7 @@
 import { Group, Raycaster, Vector2, Vector3 } from 'three';
 import { clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { RideCamera } from '../../core/RideCamera';
-import { PLAYER_RADIUS } from '../../core/constants';
+import { PLAYER_RADIUS, VIEWMODEL_LAYER } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { CollisionWorld } from '../Collision';
@@ -134,12 +134,6 @@ const PITCH_MAX = 1.222;
 const START_PITCH = -0.06;
 /** Radians of extra tilt at the very start — the establishing shot. */
 const ESTABLISHING_PITCH = 0.34;
-
-/**
- * The render layer the car is drawn a second time on, over the top of
- * everything else. See {@link FerrisWheelRide.drawsCarInFront}.
- */
-export const GONDOLA_LAYER = 1;
 
 interface Cue {
   readonly at: number;
@@ -292,12 +286,11 @@ export class FerrisWheelRide implements GameSystem {
     // her eye, and the pets' chairs are built to keep their heads below it.
     this.rideView.mountOn(this.gondola.seat, GONDOLA_EYE);
 
-    // The car goes on a second layer as well as its own, so `Game.render` can
-    // draw it again on top of the finished frame. See `drawsCarInFront`.
-    // `enable` rather than `set`: three.js lights only illuminate objects that
-    // share a layer with them, so a car moved *off* layer 0 would be lit by
-    // nothing at all.
-    this.gondola.root.traverse((object) => object.layers.enable(GONDOLA_LAYER));
+    // The car goes on the viewmodel layer as well as its own, so `Game.render`
+    // can draw it again on top of the finished frame — see `drawsCarInFront`.
+    // `enable`, not `set`: it still has to be drawn in the ordinary world pass
+    // too, or it would vanish from anything that is not that second pass.
+    this.gondola.root.traverse((object) => object.layers.enable(VIEWMODEL_LAYER));
   }
 
   /** Throws the ride away again. The park keeps nothing but the wheel. */

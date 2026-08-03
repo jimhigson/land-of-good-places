@@ -17,6 +17,7 @@ import {
   NIGHT_FOG_FAR,
   NIGHT_FOG_NEAR,
   SHADOW_AREA,
+  VIEWMODEL_LAYER,
 } from '../core/constants';
 import { shadowMapSize } from '../core/device';
 import { PALETTE } from '../core/palette';
@@ -361,6 +362,15 @@ export class DayNight implements GameSystem {
 
     this.ambientLight = new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.1);
     scene.add(this.ambientLight);
+
+    // The park's lights have to reach the viewmodel pass as well as the world
+    // pass. three.js skips every object the camera's layers exclude and a light
+    // is an object, so without this the ferris wheel's car — drawn a second
+    // time on VIEWMODEL_LAYER, over the top of everything — comes out pure
+    // black. See VIEWMODEL_LAYER's own note.
+    for (const light of [this.keyLight, this.moonLight, this.fillLight, this.ambientLight]) {
+      light.layers.enable(VIEWMODEL_LAYER);
+    }
 
     // One look applied before the first frame, so nothing is ever drawn
     // against an unwritten sky. `Sky`'s own view starts level and unturned,

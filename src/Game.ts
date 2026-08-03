@@ -9,10 +9,10 @@ import {
   CAMERA_ZOOM_STEP,
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
+  VIEWMODEL_LAYER,
 } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor } from './world';
-import { GONDOLA_LAYER } from './world/ferrisWheel/FerrisWheelRide';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { setInteractPress, type InteractZone } from './world/interact';
@@ -991,7 +991,7 @@ export class Game {
       // correctly against itself. See `FerrisWheelRide.drawsCarInFront`.
       if (this.world.ferrisWheel.drawsCarInFront && this.cameraOverride) {
         renderer.clearDepth();
-        this.cameraOverride.layers.set(GONDOLA_LAYER);
+        this.cameraOverride.layers.set(VIEWMODEL_LAYER);
         renderer.render(this.engine.scene, this.cameraOverride);
         this.cameraOverride.layers.set(0);
       }
