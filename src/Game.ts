@@ -309,6 +309,20 @@ export class Game {
     this.ferrisHudHost = document.createElement('div');
     this.ferrisHudHost.className = 'ferris-hud-host';
     this.ferrisHudHost.hidden = true;
+    // The way off the ride. GAME_DESIGN's EXIT rule is not optional, and on a
+    // phone this is the *only* way off: the on-screen controls hide themselves
+    // while a ride has her (`screenIsBusy`), and `cancel` is a keyboard and
+    // gamepad action with no touch binding at all. The curtain framework used
+    // to supply this X; the ferris wheel stopped being a curtain mini-game, so
+    // it brings its own — same shape, same corner, so it is the same button a
+    // child already knows from every other stall.
+    const ferrisQuit = document.createElement('button');
+    ferrisQuit.className = 'ferris-quit';
+    ferrisQuit.type = 'button';
+    ferrisQuit.textContent = '\u2715';
+    ferrisQuit.setAttribute('aria-label', 'Leave the ride');
+    ferrisQuit.addEventListener('click', () => this.world.ferrisWheel.quit());
+    this.ferrisHudHost.appendChild(ferrisQuit);
     uiRoot.appendChild(this.ferrisHudHost);
 
     this.transitions = new Transitions(uiRoot);
@@ -478,8 +492,22 @@ export class Game {
         this.world.railRace.playerStaysVisible,
       );
     this.world.ferrisWheel.touch = isTouchDevice();
-    this.world.ferrisWheel.onRideChange = (riding) =>
-      rideCamera(riding ? (this.world.ferrisWheel.rideView?.camera ?? null) : null);
+    this.world.ferrisWheel.onRideChange = (riding) => {
+      if (riding) {
+        rideCamera(this.world.ferrisWheel.rideView?.camera ?? null);
+        return;
+      }
+      // Getting *off* needs the teardown to happen at the wipe's midpoint,
+      // where the camera swaps and the iris is shut — not before it, which left
+      // the closing half of the wipe looking through the gondola's camera at
+      // 340 m with the gondola already gone. `rideCamera` cannot express that,
+      // so this one spells the wipe out.
+      this.transitions.irisWipe(() => {
+        this.cameraOverride = null;
+        this.player.group.visible = true;
+        this.world.ferrisWheel.hideRide();
+      });
+    };
     // The ride raises moments and knows nothing about the DOM; this is the only
     // place the two meet, in the same idiom as the Rail Race's `onRaceMoment`.
     // The HUD is built on boarding and torn down on landing rather than kept
@@ -489,6 +517,7 @@ export class Game {
         case 'start':
           this.ferrisHud?.dispose();
           this.ferrisHudHost.hidden = false;
+          // Appends its own layer; the X above is a sibling and survives.
           this.ferrisHud = createRideHud(this.ferrisHudHost);
           break;
         case 'caption':
@@ -510,6 +539,8 @@ export class Game {
           break;
       }
     };
+    // No stall may open while a ride has her — see `MiniGameHost.riding`.
+    this.miniGames.riding = () => this.player.riding;
     this.miniGames.boardRide = (stallId) => {
       if (stallId === 'railRacer') return this.world.railRace.requestBoard();
       if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();

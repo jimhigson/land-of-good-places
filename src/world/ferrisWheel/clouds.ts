@@ -76,6 +76,9 @@ export function createCloudBand(centreX: number, centreZ: number): CloudBand {
       cloud.add(puff);
     }
     cloud.userData.drift = rng.range(0.4, 1.5);
+    // Where it was put. The bob below is measured from here every frame rather
+    // than accumulated onto the current position — see `update`.
+    cloud.userData.baseY = cloud.position.y;
     root.add(cloud);
   }
 
@@ -96,7 +99,15 @@ export function createCloudBand(centreX: number, centreZ: number): CloudBand {
       for (const cloud of root.children) {
         const drift = (cloud.userData.drift as number) ?? 1;
         cloud.rotation.y += dt * 0.02 * drift;
-        cloud.position.y += Math.sin(elapsed * 0.14 * drift) * dt * 0.6;
+        // **Set, never accumulate.** This was `+= sin(...) * dt`, which
+        // integrates a sine instead of offsetting by one: the ride clock always
+        // runs 0 to 90 seconds, so every ride left a *net* displacement — about
+        // 7 m for the slowest clouds and 11 m for the middling ones, while the
+        // fastest happened to land back where they started. Ten rides in, the
+        // band had pulled itself apart and CLOUD_BASE meant nothing. The band
+        // used to be rebuilt for every visit, which is why it never showed.
+        const baseY = (cloud.userData.baseY as number) ?? cloud.position.y;
+        cloud.position.y = baseY + Math.sin(elapsed * 0.14 * drift) * 1.4;
       }
     },
 

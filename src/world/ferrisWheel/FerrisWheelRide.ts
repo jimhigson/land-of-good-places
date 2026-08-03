@@ -113,17 +113,6 @@ const NEBULA_HEIGHT = 9;
  */
 const CLIMB_METRES = 340;
 
-/**
- * Where the space show starts coming out, as a fraction of the climb.
- *
- * Chosen so it lands inside the cloud band rather than in clear air: `clouds.ts`
- * puts the band's underside at 96 m, which is 0.28 of the way up, and its top at
- * 164 m, which is 0.48. Bringing the Earth out at 0.5 means it appears in the
- * last of the cloud and is fully out just above it.
- */
-const SPACE_FROM = 0.5;
-const SPACE_OVER = 0.35;
-
 /** Field of view. Wide: you are sitting inside a small box looking out of it. */
 const FOV = 62;
 
@@ -222,12 +211,30 @@ export class FerrisWheelRide implements GameSystem {
 
     this.group.name = 'ferrisWheel:ride';
     this.show.name = 'ferrisWheel:show';
-    // Everything is built up front and simply hidden: a ninety-second ride
-    // that spent its first frames building a gondola, a cloud band and a whole
-    // Earth would hitch exactly as the curtain opened, and the park has the
-    // memory to spare. `visible = false` costs nothing per frame.
+    this.group.add(this.show);
     this.group.visible = false;
+  }
 
+  /**
+   * Builds the ride, for this ride only.
+   *
+   * **Everything here used to be built in the constructor and kept for the
+   * life of the session**, which was wrong twice over. The friends carry a
+   * `greeted` flag that is never cleared, so from the second ride on every
+   * "tap the alien!" cue was suppressed, waving raised no cheer and won no
+   * sparks, and the end card always read "All the way to space and back."
+   * however many friends a child waved at. And `createGondola` reads which
+   * pets are owned out of the store as it builds, so a pet bought from the
+   * shop between rides never got in the car.
+   *
+   * The curtain mini-game built all of this in `init` and threw it away in
+   * `dispose`, once per visit, and that was right: a ride is a *visit*, and
+   * a visit starts fresh. So it does that again. The cost is a build on
+   * boarding, which happens behind the iris wipe where the old curtain hid the
+   * same work — and the park gets the memory back when nobody is riding, which
+   * on a phone is most of the time.
+   */
+  private build(): void {
     this.clouds = createCloudBand(this.boardX, this.boardZ);
     this.group.add(this.clouds.root);
 
@@ -253,12 +260,6 @@ export class FerrisWheelRide implements GameSystem {
     this.sparks = createSparks();
     this.show.add(this.sparks.root);
 
-    this.group.add(this.show);
-
-    // Built here rather than in `attachPlayer` — unlike the coaster's, this
-    // ride's camera does not depend on who is riding, and building it up front
-    // is what lets `check:ride-camera` trace the real thing without having to
-    // construct a whole Player to do it.
     this.rideView = new RideCamera({
       fov: FOV,
       pitchMin: PITCH_MIN,
@@ -271,18 +272,41 @@ export class FerrisWheelRide implements GameSystem {
     this.rideView.mountOn(this.gondola.seat, GONDOLA_EYE);
   }
 
+  /** Throws the ride away again. The park keeps nothing but the wheel. */
+  private teardown(): void {
+    this.rideView?.dispose();
+    this.rideView = null;
+    this.gondola?.dispose();
+    this.gondola = null;
+    this.clouds?.dispose();
+    this.clouds = null;
+    this.space?.dispose();
+    this.space = null;
+    this.alien?.dispose();
+    this.alien = null;
+    this.ripika?.dispose();
+    this.ripika = null;
+    this.nebula?.dispose();
+    this.nebula = null;
+    this.turtles?.dispose();
+    this.turtles = null;
+    this.sparks?.dispose();
+    this.sparks = null;
+    this.group.clear();
+    this.show.clear();
+    this.group.add(this.show);
+  }
+
   attachPlayer(player: Player): void {
     this.player = player;
   }
 
-  /** True while the ride owns the screen — `Game` blocks saving on this. */
-  get isRiding(): boolean {
-    return this.riding;
-  }
-
   requestBoard(): boolean {
-    if (this.riding || !this.player || !this.gondola) return false;
+    if (this.riding || !this.player) return false;
     this.riding = true;
+    // Fresh every visit — see `build`. Before `onRideChange`, which reads
+    // `rideView.camera` the moment it fires.
+    this.build();
     this.clock = 0;
     this.rate = 1;
     this.cardTime = -1;
@@ -299,7 +323,10 @@ export class FerrisWheelRide implements GameSystem {
     this.onMoment?.({ kind: 'caption', text: 'all aboard!' });
     this.onMoment?.({
       kind: 'shout',
-      text: this.gondola.passengerCount > 0 ? 'Everybody in! Up we go!' : 'All aboard! Up we go!',
+      text:
+        (this.gondola?.passengerCount ?? 0) > 0
+          ? 'Everybody in! Up we go!'
+          : 'All aboard! Up we go!',
       seconds: 2.6,
     });
     window.addEventListener('pointerdown', this.onPointerDown, true);
@@ -328,8 +355,13 @@ export class FerrisWheelRide implements GameSystem {
     // never disagree about how high up she is.
     this.setSpaceFactor(height);
 
-    const depth = clamp01((height - SPACE_FROM) / SPACE_OVER);
-    this.space?.setDepth(depth);
+    // The Earth comes out **as the cloud closes over**, asked of the band
+    // itself rather than worked out from a fraction of the climb. There used to
+    // be a pair of constants here whose comment re-derived 96/340 by hand, so
+    // moving CLOUD_BASE silently desynchronised the swap from the curtain
+    // meant to hide it — the same shape as CLAUDE.md's hood-face rule, one
+    // formula tracking another. Now there is only the one.
+    this.space?.setDepth(this.clouds?.enveloped(altitude) ?? 0);
 
     // One revolution of the wheel fragment the car hangs from, bottom to
     // bottom, plus a slow drift up there so the view never quite stops moving.
@@ -367,16 +399,21 @@ export class FerrisWheelRide implements GameSystem {
     }
   }
 
-  /** Puts her down beside the wheel and gives the park back. */
+  /**
+   * Puts her down beside the wheel and gives the park back.
+   *
+   * Only the *state* changes here. Everything a child can see — the gondola,
+   * the clouds, the space show and the sky's space factor — is left exactly as
+   * it is and torn down by {@link hideRide} instead, which `Game` calls at the
+   * **midpoint of the iris wipe**, which is also where the camera swaps back.
+   * Doing it here meant the closing half of that wipe was spent looking through
+   * the gondola's own camera at three hundred metres with the gondola gone and
+   * a daylight sky behind it.
+   */
   private leave(): void {
     if (!this.riding) return;
     this.riding = false;
     this.cardTime = -1;
-    this.group.visible = false;
-    this.setParkWheelVisible(true);
-    // **Always**, and before anything else can go wrong: a child who quits
-    // half way up must not leave the park's sky stuck in space.
-    this.setSpaceFactor(0);
     window.removeEventListener('pointerdown', this.onPointerDown, true);
 
     const { x, z } = resolveDismount(
@@ -388,7 +425,25 @@ export class FerrisWheelRide implements GameSystem {
     this.player?.teleportTo(x, terrainHeight(x, z), z);
     this.player?.endRide();
     this.onMoment?.({ kind: 'end' });
-    this.onRideChange?.(false);
+
+    if (this.onRideChange) this.onRideChange(false);
+    // Nobody is driving a wipe (a headless trace, a torn-down game): there is
+    // no midpoint to wait for, so do it now rather than leaking a sky stuck in
+    // space and a hidden ferris wheel.
+    else this.hideRide();
+  }
+
+  /**
+   * Takes the ride off the screen. Called behind the closed iris.
+   *
+   * Putting the park's sky back is the part that must never be missed: a child
+   * who quits half way up must not leave the whole park in space.
+   */
+  hideRide(): void {
+    this.group.visible = false;
+    this.setParkWheelVisible(true);
+    this.setSpaceFactor(0);
+    this.teardown();
   }
 
   /** The ✕, Backspace, the pause menu — anything that says "let me out". */
@@ -487,7 +542,15 @@ export class FerrisWheelRide implements GameSystem {
   }
 
   private readonly onPointerDown = (event: PointerEvent): void => {
-    if (this.cardTime >= 0 || !this.rideView) return;
+    // The card says "Tap to go back to the park", so a tap has to do it — on a
+    // phone there is no other press that can. The X belongs to the framework
+    // around this and is not a wave, nor a dismissal.
+    if ((event.target as HTMLElement | null)?.classList.contains('ferris-quit')) return;
+    if (this.cardTime >= 0) {
+      if (this.cardTime > CARD_LOCKOUT) this.leave();
+      return;
+    }
+    if (!this.rideView) return;
     const canvas = document.getElementById('game-canvas');
     if (!(canvas instanceof HTMLCanvasElement)) return;
     const bounds = canvas.getBoundingClientRect();
@@ -542,15 +605,7 @@ export class FerrisWheelRide implements GameSystem {
 
   dispose(): void {
     window.removeEventListener('pointerdown', this.onPointerDown, true);
-    this.rideView?.dispose();
-    this.gondola?.dispose();
-    this.clouds?.dispose();
-    this.space?.dispose();
-    this.alien?.dispose();
-    this.ripika?.dispose();
-    this.nebula?.dispose();
-    this.turtles?.dispose();
-    this.sparks?.dispose();
+    this.teardown();
   }
 }
 
