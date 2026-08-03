@@ -1,4 +1,4 @@
-import type { Scene } from 'three';
+import type { Object3D, Scene } from 'three';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
@@ -69,6 +69,8 @@ export class World implements GameSystem {
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
+  /** Every group that makes up the park itself. See {@link setParkVisible}. */
+  private readonly parkGroups: readonly Object3D[];
 
   constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
     this.garden = new Garden(this.collision);
@@ -152,6 +154,7 @@ export class World implements GameSystem {
       this.collision,
       (value) => this.dayNight.setSpaceFactor(value),
       (visible) => this.anchorPlots.setFerrisWheelVisible(visible),
+      (visible) => this.setParkVisible(visible),
     );
 
     // The face-painting stall (additive): built here, before the NPCs, because
@@ -181,7 +184,12 @@ export class World implements GameSystem {
       this.scenery.climbableTrees,
     );
 
-    scene.add(
+    // Everything the park *is*, as far as the scene is concerned. Kept as a
+    // list rather than only spread into `scene.add` so {@link setParkVisible}
+    // can take the whole park off screen in one go — see its own note. The
+    // ferris wheel's ride is deliberately **not** in here: it is the one thing
+    // that has to stay when the park goes.
+    this.parkGroups = [
       this.garden.group,
       this.scenery.group,
       this.flowers.group,
@@ -201,8 +209,28 @@ export class World implements GameSystem {
       this.train.group,
       this.coaster.group,
       this.railRace.group,
-      this.ferrisWheel.group,
-    );
+    ];
+    scene.add(...this.parkGroups, this.ferrisWheel.group);
+  }
+
+  /**
+   * Shows or hides the whole park.
+   *
+   * There is exactly one caller and it is the ferris wheel
+   * (`ferrisWheel/FerrisWheelRide.ts`), for the stretch of the ride spent above
+   * the cloud band. Up there the Earth is out — three hundred metres of it,
+   * against a park a hundred and ten metres across — and the two cannot share a
+   * frame: looking straight down through the gondola's glass floor otherwise
+   * showed the real park sitting in front of the planet it is supposed to be
+   * part of.
+   *
+   * The change happens **inside the cloud**, which is the whole reason the band
+   * is there, so nothing is ever seen to vanish. Visibility only: nothing is
+   * disposed, nothing stops updating, and the park is exactly as she left it
+   * when the clouds part again on the way down.
+   */
+  setParkVisible(visible: boolean): void {
+    for (const group of this.parkGroups) group.visible = visible;
   }
 
   update(context: FrameContext): void {

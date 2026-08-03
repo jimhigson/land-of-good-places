@@ -34,8 +34,17 @@ const CLOUD_DEPTH = 68;
 /** How far out from the wheel the band spreads. */
 const CLOUD_SPREAD = 150;
 
-/** How many clouds. Enough to close over you, few enough to stay a toy sky. */
-const CLOUD_COUNT = 26;
+/**
+ * How many clouds.
+ *
+ * Three times the first attempt (26). The band has to be genuinely **opaque
+ * overhead** — the whole staging argument is that the park is put away and the
+ * Earth brought out while there is cloud in the way — and 26 spread over a
+ * 150 m radius was about four times sparser than the diorama's 16 over 60 m,
+ * which is where the number came from. Jim rode it and asked for three times
+ * as many.
+ */
+const CLOUD_COUNT = 78;
 
 export interface CloudBand {
   readonly root: Group;

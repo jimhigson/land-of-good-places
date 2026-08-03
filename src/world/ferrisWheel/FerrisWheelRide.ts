@@ -113,6 +113,15 @@ const NEBULA_HEIGHT = 9;
  */
 const CLIMB_METRES = 340;
 
+/**
+ * How deep into the cloud band the park is put away, 0..1 of the band.
+ *
+ * Well short of the top on purpose: the swap has to happen with cloud still
+ * above her, or she watches the park wink out through a gap. Same number
+ * governs the way down, so the park is already back before the band thins.
+ */
+const PARK_HIDDEN_FROM = 0.55;
+
 /** Field of view. Wide: you are sitting inside a small box looking out of it. */
 const FOV = 62;
 
@@ -203,6 +212,12 @@ export class FerrisWheelRide implements GameSystem {
      * as well is simply a second ferris wheel.
      */
     private readonly setParkWheelVisible: (visible: boolean) => void,
+    /**
+     * Shows or hides the whole park — `World.setParkVisible`.
+     *
+     * Only ever false above the cloud band, and always put back on the way out.
+     */
+    private readonly setParkVisible: (visible: boolean) => void,
   ) {
     const wheel = placedEntry('ferrisWheel');
     this.boardX = wheel.x;
@@ -361,7 +376,16 @@ export class FerrisWheelRide implements GameSystem {
     // moving CLOUD_BASE silently desynchronised the swap from the curtain
     // meant to hide it — the same shape as CLAUDE.md's hood-face rule, one
     // formula tracking another. Now there is only the one.
-    this.space?.setDepth(this.clouds?.enveloped(altitude) ?? 0);
+    const enveloped = this.clouds?.enveloped(altitude) ?? 0;
+    this.space?.setDepth(enveloped);
+
+    // ...and the park goes away behind the same curtain, on the same number.
+    // Above the band the Earth is out — three hundred metres of planet against
+    // a hundred and ten metres of park — and looking down through the glass
+    // floor showed the real park sitting in front of the planet it is meant to
+    // be part of. Both halves of the swap now happen inside the cloud, which is
+    // the only reason the cloud is there.
+    this.setParkVisible(enveloped < PARK_HIDDEN_FROM);
 
     // One revolution of the wheel fragment the car hangs from, bottom to
     // bottom, plus a slow drift up there so the view never quite stops moving.
@@ -442,6 +466,9 @@ export class FerrisWheelRide implements GameSystem {
   hideRide(): void {
     this.group.visible = false;
     this.setParkWheelVisible(true);
+    // Whatever height she left at — quitting from the top must not leave the
+    // park she is being put back into invisible.
+    this.setParkVisible(true);
     this.setSpaceFactor(0);
     this.teardown();
   }
