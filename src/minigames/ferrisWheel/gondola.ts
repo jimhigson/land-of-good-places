@@ -83,8 +83,25 @@ const RIDE_RIM_R = 7;
 /** Height above the car floor of the rim point it hangs from. */
 const ATTACH_Y = 3.05;
 
-/** How far apart the two rims sit — just outside the car's shoulders. */
-const RIM_HALF_GAP = 1.9;
+/** Half-thickness of the rim's own tube. The rims are torus sections. */
+const RIM_TUBE_R = 0.16;
+
+/**
+ * How far apart the two rims sit — clear outside the car's shoulders.
+ *
+ * **Derived, not dialled in.** It was a bare 1.9, which put the rim's *inner
+ * surface* at 1.74 — inboard of the car's own half-width of 1.8, and further
+ * still inside the floor skirt at 1.88. So the two big circles cut straight
+ * through the car's edges, which is what Jim saw from inside it.
+ *
+ * The arithmetic, so it cannot drift again if the car is ever resized: the
+ * widest part of the car is the floor skirt at `(CAR_WIDTH + 0.16) / 2`, the
+ * rim's inner surface is `RIM_HALF_GAP - RIM_TUBE_R`, and the difference is
+ * {@link RIM_CLEARANCE} — enough that the car can swing on its hanger without
+ * ever touching, since it swings and the rig does not.
+ */
+const RIM_CLEARANCE = 0.26;
+const RIM_HALF_GAP = (CAR_WIDTH + 0.16) / 2 + RIM_TUBE_R + RIM_CLEARANCE;
 
 /** Spokes on the ride's wheel. Matches the landmark. */
 const SPOKES = 12;
@@ -562,7 +579,7 @@ export function createGondola(): Gondola {
   const rimMaterial = toonMaterial(PALETTE.stonePinkDark);
 
   for (const side of [-1, 1] as const) {
-    const rim = solid(new Mesh(new TorusGeometry(RIDE_RIM_R, 0.16, 8, 48), rimMaterial));
+    const rim = solid(new Mesh(new TorusGeometry(RIDE_RIM_R, RIM_TUBE_R, 8, 48), rimMaterial));
     rim.position.z = side * RIM_HALF_GAP;
     rig.add(rim);
   }
