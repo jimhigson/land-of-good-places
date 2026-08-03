@@ -3,7 +3,6 @@ import type { Engine } from '../core/Engine';
 import type { InputSystem } from '../core/input';
 import type { FrameContext } from '../core/types';
 import { PALETTE } from '../core/palette';
-import { requestOrientationPermission } from '../core/deviceOrientationLook';
 import { Transition } from './Transition';
 import { MiniGameOverlay } from './overlay';
 import type { StallInstance } from './stalls';
@@ -209,8 +208,24 @@ export class MiniGameHost {
    */
   boardRide: ((stallId: string) => boolean) | null = null;
 
+  /**
+   * True while a world ride has hold of the player, so no stall may open.
+   *
+   * The proximity test below has always assumed that anybody within reach of a
+   * booth is *standing* there. That is true of the train and both coasters,
+   * which carry her away down a track — and false of the ferris wheel, whose
+   * rider never moves: `beginRide` freezes her, the gondola is what rises, and
+   * she stays on the wheel's own doormat, well inside REACH, for the whole
+   * ninety seconds. So a press of E mid-ride re-entered her own booth, dropped
+   * the curtain over the running ride, found no mini-game behind it and wiped
+   * back out. Worse, E is one of the two keys that dismisses the end card, so
+   * it happened on the ordinary way *out* of the ride.
+   */
+  riding: (() => boolean) | null = null;
+
   private checkStalls(context: FrameContext): void {
     if (!context.input.justPressed('interact')) return;
+    if (this.riding?.()) return;
     const { x, z } = context.playerPosition;
     for (const stall of this.stalls) {
       if (Math.hypot(x - stall.standX, z - stall.standZ) <= REACH) {
@@ -222,13 +237,11 @@ export class MiniGameHost {
   }
 
   private begin(stall: StallInstance): void {
-    // Still inside the interact press. For a first-person ride this is the last
-    // moment iOS will accept a motion-sensor request from — `startGame()` runs
-    // once the curtain has closed, which is too late for a gesture. Not
-    // awaited: the curtain must not wait on a dialog, and the answer is cached
-    // by the time the ride's first frame asks for a reading. Refused, or a
-    // device that has no such prompt, both end with the child dragging.
-    if (stall.definition.firstPerson) void requestOrientationPermission();
+    // The sensor permission used to be asked for here, on the theory that this
+    // was the last gesture before the ride began. It is asked for once on the
+    // first gesture of the *session* now (`askForOrientationOnFirstGesture`),
+    // because asking late and outside a gesture cached a `denied` that killed
+    // the sensor for every ride afterwards.
 
     this.pending = stall;
     this.pendingResult = null;

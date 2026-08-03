@@ -344,6 +344,28 @@ export const SHADOW_MAP_SIZE = 2048;
 export const SHADOW_AREA = 26;
 
 /**
+ * The render layer for things drawn **on top of the finished frame**.
+ *
+ * One customer so far: the ferris wheel's gondola, which the camera sits
+ * inside, and which a twelve-metre cloud puff would otherwise be drawn in front
+ * of while the ride flies through it (`world/ferrisWheel/FerrisWheelRide.ts`'s
+ * `drawsCarInFront`). `Game.render` draws the world, clears the depth buffer,
+ * and draws this layer again over the top.
+ *
+ * **Anything that lights such an object has to be on this layer too.** three.js
+ * skips every object the camera's layers exclude, and a light is an object — so
+ * a second pass on a layer with no lights on it renders pure black, which is
+ * exactly what the first attempt did. `DayNight` enables it on all four of its
+ * lights for that reason; a light that ever needs to reach a viewmodel must do
+ * the same.
+ *
+ * Because the lights are on both layers, a viewmodel object moves **onto** this
+ * layer rather than adding it: left on layer 0 as well it is drawn twice a
+ * frame, once in the world pass and again over the top of itself.
+ */
+export const VIEWMODEL_LAYER = 1;
+
+/**
  * Strength of the cool fill light, as a fraction of the key.
  *
  * The third light in the rig the art was authored and approved under

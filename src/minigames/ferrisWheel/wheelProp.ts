@@ -98,9 +98,33 @@ const CAR_COLOURS = [
   PALETTE.blossomWhite,
 ];
 
+/**
+ * How high the lowest car's centre sits above the plot's ground.
+ *
+ * Exported because the ride has to put the car a child actually sits in at
+ * exactly the same height as the car she watched come down to meet her — see
+ * `world/ferrisWheel/FerrisWheelRide.ts`. Derived here rather than copied
+ * there, so the two cannot drift if the wheel is ever resized.
+ */
+export const FERRIS_CAR_LOW_Y = HUB_Y - RIM_R - HANG;
+
 export interface FerrisWheelProp {
   /** Add to the anchor plot group. Origin at the plot centre, on the ground. */
   readonly root: Group;
+  /**
+   * Shows or hides the whole wheel.
+   *
+   * Hidden for the length of a ride. The ride brings its own wheel — the
+   * gondola carries the rim, spokes and hanger it swings from
+   * (`ferrisWheel/gondola.ts`), which is what a child sees through the
+   * skylight and what tells her what she is riding — so leaving this one
+   * standing put **two** ferris wheels on screen at once. Jim rode it and
+   * said so.
+   *
+   * Hiding the lot rather than just the twelve scenery cars, because the
+   * doubling was the wheel itself, not the cars.
+   */
+  setVisible(visible: boolean): void;
   update(dt: number, elapsed: number): void;
   dispose(): void;
 }
@@ -360,6 +384,10 @@ export function createFerrisWheelProp(
 
   return {
     root,
+
+    setVisible(visible: boolean): void {
+      root.visible = visible;
+    },
 
     update(dt: number, elapsed: number): void {
       const spin = (elapsed / TURN_SECONDS) * TAU;

@@ -17,7 +17,7 @@ import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
-import type { Expression } from '../art/style/faces';
+import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { NameLabel } from '../ui/NameLabel';
@@ -214,8 +214,6 @@ const FLY_CEILING_EASE = 2.5;
  * light, not a climb. */
 const FLY_IDLE_THRUST = 0.3;
 
-/** How long the eyes stay shut. Any longer and she looks sleepy, not blinking. */
-const BLINK_DURATION = 0.11;
 
 /**
  * The beats of the flower-picking flourish, in seconds from the pick — see
@@ -394,9 +392,8 @@ export class Player implements GameSystem {
    * for ordinary contact and banked as speed.
    */
   private escorting = false;
-  private blinkTimer = 2.4;
-  private blinkRemaining = 0;
-  private currentExpression: Expression = 'neutral';
+  /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
+  private readonly face: FaceLife;
   private ridingFlag = false;
   /**
    * Seconds into the flower-picking flourish, or `-1` when there is none.
@@ -453,6 +450,8 @@ export class Player implements GameSystem {
         shoeKind: playerState.shoeKind,
       },
     );
+    // One blink clock, shared with every other face in the game.
+    this.face = createFaceLife((expression) => this.model.setExpression(expression));
     this.group.add(this.model.root);
 
     // Glasses, chosen in the character creator and worn from the first spawn —
@@ -1221,23 +1220,7 @@ export class Player implements GameSystem {
     // so a blink is a texture swap. That makes it cheap, but only if it happens
     // on the two TRANSITIONS — calling `setExpression` every frame would flip
     // `needsUpdate` every frame and re-upload the texture to the GPU.
-    this.blinkTimer -= dt;
-    if (this.blinkTimer <= 0) {
-      this.blinkTimer = 2.6 + Math.random() * 3.4;
-      this.blinkRemaining = BLINK_DURATION;
-    }
-    if (this.blinkRemaining > 0) this.blinkRemaining -= dt;
-
-    const blinking = this.blinkRemaining > 0;
-    const desiredExpression: Expression = blinking
-      ? 'blink'
-      : this.waterHappy || this.smelling
-        ? 'happy'
-        : 'neutral';
-    if (desiredExpression !== this.currentExpression) {
-      this.currentExpression = desiredExpression;
-      model.setExpression(desiredExpression);
-    }
+    this.face.update(dt, this.waterHappy || this.smelling ? 'happy' : 'neutral');
 
     // Secondary motion the model owns: the swishy ponytail, if that is what
     // the child chose. Last, and deliberately so — it is pinned to the world

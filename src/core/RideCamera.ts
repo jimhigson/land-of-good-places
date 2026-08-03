@@ -4,7 +4,6 @@ import { createLookControl, type LookControl, type LookReading } from './rideLoo
 import {
   createOrientationLook,
   isOrientationLookSupported,
-  requestOrientationPermission,
   type OrientationLook,
 } from './deviceOrientationLook';
 
@@ -279,9 +278,11 @@ export class RideCamera {
   board(): void {
     if (!this.orientation) return;
     this.orientation.recentre();
-    // Deliberately not awaited: boarding must not wait on a dialog, and the
-    // answer is picked up by the next frame's reading either way.
-    void requestOrientationPermission();
+    // **No permission request here.** Boarding runs in the frame loop, not in
+    // the gesture that asked for it, so asking here threw "not a user gesture"
+    // and cached a `denied` that killed the sensor for the whole session — for
+    // every later ride as well as this one. It is asked for once, on the first
+    // gesture of the session: `askForOrientationOnFirstGesture`, from `main.ts`.
   }
 
   /**

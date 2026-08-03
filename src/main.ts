@@ -8,6 +8,7 @@ import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } from './state/save';
 import { startVersionCheck } from './version-check';
+import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -119,6 +120,8 @@ interface DebugViewParams {
   readonly position: Vector3;
   readonly lookAt: Vector3;
   readonly timeOfDay?: number;
+  /** 0..1 towards space — see `DayNight.setSpaceFactor`. */
+  readonly space?: number;
 }
 
 /**
@@ -144,7 +147,42 @@ function parseDebugView(pathname: string, search: string): DebugViewParams | nul
       ? position.clone().add(direction.normalize())
       : new Vector3(0, 0, 0);
   const timeOfDay = parseClockFraction(params.get('timeOfDay'));
-  return timeOfDay === undefined ? { position, lookAt } : { position, lookAt, timeOfDay };
+  const space = parseUnitFraction(params.get('space'));
+  // Assigned rather than spread, so an absent param stays *absent* — under
+  // `exactOptionalPropertyTypes` an optional property may be missing but never
+  // explicitly `undefined`.
+  const view: {
+    position: Vector3;
+    lookAt: Vector3;
+    timeOfDay?: number;
+    space?: number;
+  } = { position, lookAt };
+  if (timeOfDay !== undefined) view.timeOfDay = timeOfDay;
+  if (space !== undefined) view.space = space;
+  return view;
+}
+
+/**
+ * Makes sure a ride deep link has somebody to ride with.
+ *
+ * `/ferris` boards on the first frame, and the gondola seats whatever is
+ * paradeable and not stowed at the instant it is built — so a continued
+ * profile whose pets are all in the backpack arrives in an empty car, and
+ * "your parade rides with you" is the half of that ride a developer typing the
+ * URL most often wants to see. Does nothing at all if anything is already out,
+ * so it can never overrule a child who put her pets away on purpose.
+ */
+function grantRideCompanion(): void {
+  const pet = defaultCharacterChoice().pet;
+  if (pet) gameStore.ensureSomethingToParade(pet);
+}
+
+/** "0.6" -> 0.6, clamped to 0..1. Anything else is treated as absent. */
+function parseUnitFraction(text: string | null): number | undefined {
+  if (!text) return undefined;
+  const value = Number(text);
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
 }
 
 /** "x,y,z" -> a Vector3, or null if missing/malformed — never throws on a hand-typed URL. */
@@ -183,6 +221,7 @@ function continueGame(
 ): void {
   gameStore.hydrate(save);
   saveFlags.hydrate(save.flags);
+  if (boardStallId) grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
   const options: GameOptions = save.place ? { startPlace: save.place } : {};
   launchGame(canvas, uiRoot, splash, options, boardStallId, debugView);
@@ -212,6 +251,10 @@ function startFresh(
 ): void {
   clearSave();
   if (boardStallId || debugView) {
+    // `defaultCharacterChoice` includes the default pet and
+    // `completeCharacterCreation` grants it unstowed, so a brand-new profile
+    // already has something to ride with. The belt-and-braces call is for the
+    // *continued* profile above, which may have none.
     gameStore.completeCharacterCreation(defaultCharacterChoice());
     saveFlags.markCharacterCreated();
     launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);
@@ -286,7 +329,12 @@ function launchGame(
   }
   if (debugView) {
     game.whatsNew.close();
-    game.enterDebugView(debugView.position, debugView.lookAt, debugView.timeOfDay);
+    game.enterDebugView(
+      debugView.position,
+      debugView.lookAt,
+      debugView.timeOfDay,
+      debugView.space,
+    );
   }
 
   // Unmissable red "DEV" watermark — never present in a production build.
@@ -348,6 +396,12 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
   // two minutes for nothing — dev already gets instant feedback from HMR.
   if (import.meta.env.PROD) startVersionCheck();
 }
+
+// The phone-tilt look, for every first-person ride. Armed at boot and fired on
+// the first thing the child touches — see the function's own note for why "at
+// startup" is not a thing iOS will accept, and why asking per-ride was worse
+// than asking late.
+askForOrientationOnFirstGesture();
 
 try {
   boot();

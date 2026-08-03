@@ -17,6 +17,7 @@ import {
   NIGHT_FOG_FAR,
   NIGHT_FOG_NEAR,
   SHADOW_AREA,
+  VIEWMODEL_LAYER,
 } from '../core/constants';
 import { shadowMapSize } from '../core/device';
 import { PALETTE } from '../core/palette';
@@ -179,6 +180,58 @@ const SKY_KEYS: readonly SkyKey[] = [
 ];
 
 /**
+ * **Space, as one more keyframe past the far end of night.**
+ *
+ * Jim's idea, 3 August 2026, and it is the right shape: the ferris wheel does
+ * not need a private sky, it needs the park's own sky taken further than the
+ * clock can take it. Everything downstream — the gradient, the star strength,
+ * the four lights, the fog — is already driven from one interpolated
+ * {@link SkyKey}, so "space" is just a key the clock never reaches and a
+ * {@link DayNight.setSpaceFactor} that blends towards it.
+ *
+ * The colour is not invented here. `minigames/ferrisWheel/below.ts`'s own climb
+ * table ends on `PALETTE.skyNightTop`, which is the space the family has
+ * already seen and approved — so that is what this is, flat: **no gradient and
+ * no horizon band**, because from up there the sky is the same colour all the
+ * way round and a warm band hugging the bottom of the frame would be a horizon
+ * that is not there any more.
+ *
+ * The lights stay deliberately close to deep night rather than going properly
+ * airless. A cosy park keeps its rules a hundred kilometres up: nothing bottoms
+ * out at black (ART_DIRECTION.md), and the park falling away below still has to
+ * be legible while it does.
+ */
+const SPACE_KEY: SkyKey = {
+  t: 0,
+  top: PALETTE.skyNightTop,
+  bottom: PALETTE.skyNightTop,
+  horizon: PALETTE.skyNightTop,
+  horizonStrength: 0,
+  sun: PALETTE.moon,
+  sunIntensity: 0.34,
+  ambientSky: 0x4a5590,
+  ambientGround: 0x2b3054,
+  ambientIntensity: 0.5,
+  fog: PALETTE.skyNightTop,
+};
+
+/**
+ * Where fog sits in space — pushed out past everything, not pulled in.
+ *
+ * This is the one place the "space is just more night" analogy breaks, and it
+ * breaks hard enough to be worth the two constants. Night deliberately pulls
+ * the fog *in* (see {@link NIGHT_FOG_COLOUR} and NIGHT_FOG_NEAR) so distance
+ * falls away into the dark. A climb needs the exact opposite: the whole point
+ * is looking down at a park that is getting further away, and fog that closes
+ * at fifty metres would swallow it before it was worth looking at.
+ *
+ * Far enough out that the ferris wheel's own space show — a star shell at 620 m
+ * and the Earth beyond it — is never touched either.
+ */
+const SPACE_FOG_NEAR = 1200;
+const SPACE_FOG_FAR = 5000;
+
+/**
  * How hard the moon shines straight down on the park at its highest.
  *
  * Deliberately about a third of the noon sun. The brief from the family is
@@ -241,6 +294,16 @@ export class DayNight implements GameSystem {
   private lightsOnValue = false;
   private paused = false;
   /**
+   * How far towards {@link SPACE_KEY} the sky is blended. 0 in the park.
+   *
+   * Set by whatever is climbing — the ferris wheel — and by nothing else. It is
+   * a **look** override and nothing more: it never touches {@link time},
+   * {@link days} or the store, so a ride to space and back cannot move the park
+   * clock by a second or put anything in the save. Whoever raises it owns
+   * putting it back to zero, including when a child quits half way up.
+   */
+  private spaceFactorValue = 0;
+  /**
    * True while the player is indoors under a ceiling (`Building.
    * playerInRoofedInterior`, item 18). The sun stops moving and stops
    * shining the moment this flips on — see `update`.
@@ -300,12 +363,61 @@ export class DayNight implements GameSystem {
     this.ambientLight = new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.1);
     scene.add(this.ambientLight);
 
-    this.applyLook(this.time, new Vector3(0, 0, -1));
+    // The park's lights have to reach the viewmodel pass as well as the world
+    // pass. three.js skips every object the camera's layers exclude and a light
+    // is an object, so without this the ferris wheel's car — drawn a second
+    // time on VIEWMODEL_LAYER, over the top of everything — comes out pure
+    // black. See VIEWMODEL_LAYER's own note.
+    for (const light of [this.keyLight, this.moonLight, this.fillLight, this.ambientLight]) {
+      light.layers.enable(VIEWMODEL_LAYER);
+    }
+
+    // One look applied before the first frame, so nothing is ever drawn
+    // against an unwritten sky. `Sky`'s own view starts level and unturned,
+    // which is exactly right for a park that has not been ridden yet.
+    this.applyLook(this.time);
   }
 
-  /** 0 in broad daylight, 1 in the middle of the night. */
+  /**
+   * 0 in broad daylight, 1 in the middle of the night — **and 1 in space**,
+   * whatever the clock says.
+   *
+   * That is not a side effect to work around, it is the good half of the idea.
+   * `World` fans this out to the lamp posts, the fairy lights, the tree lights,
+   * the fireflies, the fountain glow and the train, so as the wheel climbs and
+   * the sky darkens, the whole park lights up underneath the child — for free,
+   * and in exactly the right order.
+   */
   get nightFactor(): number {
     return this.nightFactorValue;
+  }
+
+  /** How far towards space the sky is taken. See {@link setSpaceFactor}. */
+  get spaceFactor(): number {
+    return this.spaceFactorValue;
+  }
+
+  /**
+   * Takes the sky past night, towards space. 0 is the park, 1 is up there.
+   *
+   * Drive it from a climb's own progress. Everything follows from this one
+   * number: the sky flattens to {@link SPACE_KEY}'s indigo, the stars come out
+   * (they are the park's own stars — the same field, faded up by
+   * {@link nightFactor}, so the transition is continuous rather than a swap),
+   * the fog is pushed out instead of pulled in, the sun and moon discs fade
+   * off, and the park below lights itself up.
+   *
+   * Ride in the afternoon and the climb *is* a sunset, fast-forwarded, because
+   * that is what walking the keyframe table towards night looks like. Ride at
+   * midnight and you are most of the way there already and space arrives
+   * sooner. Both are correct, and neither had to be written.
+   *
+   * **Put it back to zero when the climb ends** — including when a child quits
+   * half way up. Nothing here does that for you: this is a look override with
+   * no notion of a ride.
+   */
+  setSpaceFactor(value: number): void {
+    this.spaceFactorValue = clamp01(value);
   }
 
   /** True once the fairy lights have switched on for the evening. */
@@ -384,7 +496,7 @@ export class DayNight implements GameSystem {
     this.ambientLight.visible = !this.indoors;
 
     if (!this.indoors) {
-      this.applyLook(this.time, context.cameraForward);
+      this.applyLook(this.time);
       this.followPlayer(context.playerPosition);
     } else {
       // Fog is the one thing in this method that is *not* a light, so it does
@@ -418,7 +530,15 @@ export class DayNight implements GameSystem {
     this.keyLight.updateMatrixWorld();
   }
 
-  private applyLook(time: number, cameraForward: Readonly<Vector3>): void {
+  /**
+   * No longer takes the camera's forward vector: where the sun and moon land
+   * on screen is now `Sky`'s to answer, because the star field has to be
+   * answered the same way (`Sky.setView`). `FrameContext.cameraForward` stays
+   * exactly what it was — the *isometric* rig's ground-plane forward, which is
+   * what `Fireflies` and `TreeLights` billboard against — and is deliberately
+   * not repointed at the ride camera, which would tip both of them over.
+   */
+  private applyLook(time: number): void {
     // --- sun position ----------------------------------------------------
     // Sunrise at t=0.25 in the east (+X), noon overhead, sunset in the west.
     // The arc leans north so midday shadows fall towards the camera and the
@@ -430,7 +550,13 @@ export class DayNight implements GameSystem {
 
     const altitude = Math.asin(clamp(this.sunDirection.y, -1, 1));
     const daylight = smoothstep(-0.12, 0.12, this.sunDirection.y);
-    this.nightFactorValue = 1 - daylight;
+    // Two different nights, and they are not interchangeable. `clockNight` is
+    // how dark it actually is down there, and is what the *fog distances* are
+    // built from — space then pushes those the other way. `nightFactorValue`
+    // is how dark the sky is being asked to look, space included, and is what
+    // the park's lights come on by. See `setSpaceFactor`.
+    const clockNight = 1 - daylight;
+    this.nightFactorValue = Math.max(clockNight, this.spaceFactorValue);
 
     // Hysteresis on the fairy lights so they don't flicker around the
     // threshold at dusk.
@@ -441,7 +567,15 @@ export class DayNight implements GameSystem {
     }
 
     // --- interpolate the look table --------------------------------------
-    const look = sampleSkyKeys(time);
+    //
+    // The one seam. Everything below this line — the sky uniforms, the star
+    // strength, the two discs, all four lights, the fog — is decided from
+    // `look` and nothing else, which is exactly why space can be one more
+    // keyframe blended in here rather than a second lighting rig.
+    const look =
+      this.spaceFactorValue > 0
+        ? mixKeys(sampleSkyKeys(time), SPACE_KEY, this.spaceFactorValue)
+        : sampleSkyKeys(time);
 
     const uniforms = this.sky.uniforms;
     (uniforms.uTopColour as { value: Color }).value.setHex(look.top);
@@ -449,29 +583,56 @@ export class DayNight implements GameSystem {
     (uniforms.uHorizonColour as { value: Color }).value.setHex(look.horizon);
     (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
     (uniforms.uStarStrength as { value: number }).value = smoothstep(0.35, 0.85, this.nightFactorValue);
+    // How high up we are, handed to the sky unshaped. It uses it to ease off
+    // the star field's horizon fade: on the ground stars fade out low so they
+    // sit behind the park, and in space there is no horizon to fade towards,
+    // so they go the whole way round and underfoot — a child looking down
+    // through the glass floor is looking at the bottom of the sky. Jim's note
+    // after riding it: "the stars need to be all around in every direction,
+    // not just upwards."
+    this.sky.setSpace(this.spaceFactorValue);
 
-    // --- project sun and moon into screen space ---------------------------
-    // The camera is orthographic, so there is no true projection for something
-    // at infinity. Instead the sun's compass bearing relative to the camera is
-    // mapped straight onto the screen's x axis, and its altitude onto y. It is
-    // a cheat, but it tracks convincingly as the view rotates.
-    const cameraAzimuth = Math.atan2(cameraForward.x, cameraForward.z);
+    // --- place sun and moon on screen ------------------------------------
+    // `Sky` owns the mapping from "a bearing and an altitude" to "a spot on
+    // the frame", because the star field has to use the same one — see
+    // `Sky.setView`. Under the park's orthographic rig it is the same cheat it
+    // always was (there is no true projection of something at infinity through
+    // a parallel projection); under a ride's perspective camera it is the
+    // camera's real field of view, and both discs then track a turning head.
     const sunAzimuth = Math.atan2(this.sunDirection.x, this.sunDirection.z);
-    const relative = angleDelta(cameraAzimuth, sunAzimuth);
+    const perspective = this.sky.viewIsPerspective;
 
     const sunPosition = (uniforms.uSunPosition as { value: Vector2 }).value;
-    sunPosition.set(relative / (Math.PI / 3), -0.4 + (altitude / (Math.PI / 2)) * 1.55);
+    this.sky.directionToScreen(sunAzimuth, altitude, sunPosition);
     (uniforms.uSunColour as { value: Color }).value.setHex(
       this.sunDirection.y > 0 ? look.sun : PALETTE.sunSet,
     );
+    // Below the horizon it fades out, always. The *bearing* fade is the
+    // orthographic cheat's own safety rail: with no field of view, a disc more
+    // than about 83° off axis has nowhere sensible to be drawn and would wrap
+    // across the frame. A real projection has no such problem — a disc behind
+    // you simply lands far outside the quad and is not drawn, while its bloom
+    // keeps contributing the faint off-frame glow that is actually correct.
+    const sunBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, sunAzimuth)));
+    // Both discs fade off as space comes in. They are painted *into the sky
+    // quad*, which is drawn before the world and behind everything in it — so
+    // in space they would sit behind the ferris wheel's own 3D Moon and the
+    // whole Earth, which reads as a bug rather than as astronomy. Up there the
+    // show owns the sky; down here nothing changes, because this is 1.
+    const inSky = 1 - this.spaceFactorValue;
     (uniforms.uSunVisible as { value: number }).value =
-      smoothstep(1.45, 0.85, Math.abs(relative)) * smoothstep(-0.14, 0.05, this.sunDirection.y);
+      inSky * sunBearingFade * smoothstep(-0.14, 0.05, this.sunDirection.y);
 
-    const moonRelative = angleDelta(cameraAzimuth, sunAzimuth + Math.PI);
+    const moonAzimuth = sunAzimuth + Math.PI;
     const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
-    moonPosition.set(moonRelative / (Math.PI / 3), -0.4 + (-altitude / (Math.PI / 2)) * 1.55);
+    this.sky.directionToScreen(moonAzimuth, -altitude, moonPosition);
+    const moonBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, moonAzimuth)));
     (uniforms.uMoonVisible as { value: number }).value =
-      smoothstep(1.45, 0.85, Math.abs(moonRelative)) * smoothstep(0.02, 0.2, -this.sunDirection.y);
+      inSky * moonBearingFade * smoothstep(0.02, 0.2, -this.sunDirection.y);
 
     // --- lights ----------------------------------------------------------
     // The sun and the moon cross-fade through the horizon, in **mirrored**
@@ -538,8 +699,21 @@ export class DayNight implements GameSystem {
       // while the ground under the lamps stays bright and legible — see
       // NIGHT_FOG_NEAR. The old 0.7/0.72 scaling put full fog 96 m out, which
       // is further than the far side of the park, so it never did anything.
-      fog.near = lerp(FOG_NEAR, NIGHT_FOG_NEAR, this.nightFactorValue);
-      fog.far = lerp(FOG_FAR, NIGHT_FOG_FAR, this.nightFactorValue);
+      //
+      // Built from `clockNight`, not `nightFactorValue`: this is the one thing
+      // space must move the *opposite* way, and blending it towards night
+      // first and then back out again would be a fight rather than a fade.
+      // Climbing pushes fog past everything instead — see SPACE_FOG_NEAR.
+      fog.near = lerp(
+        lerp(FOG_NEAR, NIGHT_FOG_NEAR, clockNight),
+        SPACE_FOG_NEAR,
+        this.spaceFactorValue,
+      );
+      fog.far = lerp(
+        lerp(FOG_FAR, NIGHT_FOG_FAR, clockNight),
+        SPACE_FOG_FAR,
+        this.spaceFactorValue,
+      );
     }
   }
 }
@@ -560,8 +734,22 @@ function sampleSkyKeys(time: number): SkyKey {
   const along = time >= from.t ? time - from.t : time + 1 - from.t;
   const t = clamp01(span > 0 ? along / span : 0);
 
+  const look = mixKeys(from, to, t);
+  return { ...look, t: time };
+}
+
+/**
+ * Blends one look into another, field by field.
+ *
+ * Pulled out of {@link sampleSkyKeys} so the clock's own interpolation and the
+ * blend towards {@link SPACE_KEY} are the *same* arithmetic. Two copies of this
+ * would be two places to add a field to, and the one that got missed would fail
+ * silently — a sky that is almost right is much harder to spot than one that
+ * is obviously wrong.
+ */
+function mixKeys(from: SkyKey, to: SkyKey, t: number): SkyKey {
   return {
-    t: time,
+    t: from.t,
     top: mixHex(from.top, to.top, t),
     bottom: mixHex(from.bottom, to.bottom, t),
     horizon: mixHex(from.horizon, to.horizon, t),
