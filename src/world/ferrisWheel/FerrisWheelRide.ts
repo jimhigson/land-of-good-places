@@ -394,6 +394,11 @@ export class FerrisWheelRide implements GameSystem {
     this.gondola?.setLampGlow(clamp01((height - 0.25) / 0.4));
     this.gondola?.update(dt, this.clock);
 
+    // Fades the band out above itself and hides it altogether once there is
+    // nothing left to see: in space there is no weather, and left alone the
+    // band sat under the gondola for the whole forty seconds up there like a
+    // white floor beneath a child looking at the Earth.
+    this.clouds?.setAltitude(altitude);
     this.clouds?.update(dt, this.clock);
     this.space?.update(dt, this.clock);
     this.updateFriends(dt);
