@@ -62,26 +62,6 @@ body[data-minigame='true'] .screen-controls {
   gap: 0.625rem;
 }
 
-.mg-quit {
-  position: absolute;
-  top: calc(0.75rem + env(safe-area-inset-top));
-  right: calc(0.75rem + env(safe-area-inset-right));
-  width: 2.75rem;
-  height: 2.75rem;
-  border: none;
-  border-radius: 50%;
-  background: #fff6ea;
-  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.2);
-  color: #4a3a52;
-  font-size: 1.25rem;
-  font-weight: 700;
-  line-height: 1;
-  pointer-events: auto;
-  cursor: pointer;
-  z-index: 3;
-}
-.mg-quit:active { transform: translateY(0.1875rem); box-shadow: 0 0.0625rem 0 rgba(74, 58, 82, 0.2); }
-
 /* The hold pad is a picture of the control, not the control itself — the whole
    layer is the button, so this must never eat the press. */
 .mg-hold {
@@ -226,7 +206,6 @@ export class MiniGameOverlay {
 
   private readonly hold: HTMLElement;
   private readonly holdText: HTMLElement;
-  private readonly quitButton: HTMLButtonElement;
 
   private pointerHeld = false;
   private quitRequested = false;
@@ -249,13 +228,7 @@ export class MiniGameOverlay {
     this.holdText.textContent = 'HOLD to go!';
     this.hold.append(dot, this.holdText);
 
-    this.quitButton = document.createElement('button');
-    this.quitButton.type = 'button';
-    this.quitButton.className = 'mg-quit';
-    this.quitButton.textContent = '✕';
-    this.quitButton.setAttribute('aria-label', 'Back to the park');
-
-    this.root.append(this.content, this.hold, this.quitButton);
+    this.root.append(this.content, this.hold);
     container.append(this.root);
 
     // pointerdown/up rather than click: a game button has to answer on the way
@@ -265,7 +238,6 @@ export class MiniGameOverlay {
     this.root.addEventListener('pointercancel', this.onPointerUp);
     this.root.addEventListener('pointerleave', this.onPointerUp);
     this.root.addEventListener('contextmenu', preventDefault);
-    this.quitButton.addEventListener('pointerdown', this.onQuit);
   }
 
   /** True while a finger or mouse button is down anywhere on the layer. */
@@ -319,7 +291,6 @@ export class MiniGameOverlay {
     this.root.removeEventListener('pointercancel', this.onPointerUp);
     this.root.removeEventListener('pointerleave', this.onPointerUp);
     this.root.removeEventListener('contextmenu', preventDefault);
-    this.quitButton.removeEventListener('pointerdown', this.onQuit);
     this.root.remove();
   }
 
@@ -340,11 +311,6 @@ export class MiniGameOverlay {
     this.pointerHeld = false;
   };
 
-  private readonly onQuit = (event: PointerEvent): void => {
-    event.preventDefault();
-    event.stopPropagation();
-    this.quitRequested = true;
-  };
 }
 
 function preventDefault(event: Event): void {

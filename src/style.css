@@ -4494,35 +4494,6 @@ kbd {
   }
 }
 
-/* The way off the ride, and on a phone the *only* way off it.
-   `minigames/overlay.ts` supplies this button to every curtain mini-game; the
-   ferris wheel stopped being one, so it has to bring its own. Deliberately the
-   same shape, size and place as that one — a child should not have to learn a
-   second X. `pointer-events: auto` against a host that is otherwise
-   transparent to presses. */
-.ferris-quit {
-  position: absolute;
-  top: calc(0.75rem + env(safe-area-inset-top));
-  right: calc(0.75rem + env(safe-area-inset-right));
-  width: 2.75rem;
-  height: 2.75rem;
-  border: none;
-  border-radius: 50%;
-  background: #fff6ea;
-  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.2);
-  color: #4a3a52;
-  font-size: 1.25rem;
-  font-weight: 700;
-  line-height: 1;
-  pointer-events: auto;
-  cursor: pointer;
-  z-index: 3;
-}
-.ferris-quit:active {
-  transform: translateY(0.1875rem);
-  box-shadow: 0 0.0625rem 0 rgba(74, 58, 82, 0.2);
-}
-
 /* The Space Ferris Wheel's caption/shout/card layer while a child is aboard.
    `RideHud` was written for a mini-game's overlay and is reused unchanged, so
    this host has to provide what that overlay used to: the whole screen, above

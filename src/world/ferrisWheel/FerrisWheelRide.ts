@@ -687,9 +687,7 @@ export class FerrisWheelRide implements GameSystem {
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     // The card says "Tap to go back to the park", so a tap has to do it — on a
-    // phone there is no other press that can. The X belongs to the framework
-    // around this and is not a wave, nor a dismissal.
-    if ((event.target as HTMLElement | null)?.classList.contains('ferris-quit')) return;
+    // phone there is no other press that can.
     if (this.cardTime >= 0) {
       if (this.cardTime > CARD_LOCKOUT) this.leave();
       return;

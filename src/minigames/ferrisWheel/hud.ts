@@ -35,8 +35,7 @@ const STYLES = `
   font-weight: 700;
   white-space: nowrap;
 }
-.fw-title b { font-size: 1.125rem; }
-.fw-title span { opacity: 0.72; }
+.fw-title span { opacity: 0.9; font-size: 1.125rem; }
 
 .fw-centre {
   position: absolute;
@@ -134,13 +133,16 @@ export function createRideHud(container: HTMLElement): RideHud {
   const root = document.createElement('div');
   root.className = 'fw-root';
 
+  // **No heading.** It used to read "🎡 Space Ferris Wheel", which earned its
+  // place when this was a curtain mini-game: you had been wiped out of the park
+  // into a world of its own and the banner told you where you were. Riding the
+  // real wheel in the real park, you walked up to it and climbed in — and no
+  // other world ride names itself. The narration below stays; that does work.
   const title = document.createElement('div');
   title.className = 'fw-title';
   const caption = document.createElement('span');
   caption.textContent = 'all aboard!';
-  const heading = document.createElement('b');
-  heading.textContent = '🎡 Space Ferris Wheel ';
-  title.append(heading, caption);
+  title.append(caption);
 
   const centre = document.createElement('div');
   centre.className = 'fw-centre';
