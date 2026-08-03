@@ -25,17 +25,6 @@ const STYLES = `
 
 .fw-root { display: contents; }
 
-.fw-title {
-  align-self: flex-start;
-  padding: 0.4375rem 1rem;
-  border-radius: 999px;
-  background: #fff6eae6;
-  box-shadow: 0 0.25rem 0 rgba(74, 58, 82, 0.16);
-  font-size: var(--lgp-text-min);
-  font-weight: 700;
-  white-space: nowrap;
-}
-.fw-title span { opacity: 0.9; font-size: 1.125rem; }
 
 .fw-centre {
   position: absolute;
@@ -113,8 +102,6 @@ const STYLES = `
 `;
 
 export interface RideHud {
-  /** The little line under the ride's name: "Through the clouds…". */
-  setCaption(text: string): void;
   /** A short cheerful interjection. Clears itself. */
   shout(text: string, seconds?: number): void;
   /** The end-of-ride card. */
@@ -133,17 +120,6 @@ export function createRideHud(container: HTMLElement): RideHud {
   const root = document.createElement('div');
   root.className = 'fw-root';
 
-  // **No heading.** It used to read "🎡 Space Ferris Wheel", which earned its
-  // place when this was a curtain mini-game: you had been wiped out of the park
-  // into a world of its own and the banner told you where you were. Riding the
-  // real wheel in the real park, you walked up to it and climbed in — and no
-  // other world ride names itself. The narration below stays; that does work.
-  const title = document.createElement('div');
-  title.className = 'fw-title';
-  const caption = document.createElement('span');
-  caption.textContent = 'all aboard!';
-  title.append(caption);
-
   const centre = document.createElement('div');
   centre.className = 'fw-centre';
 
@@ -154,17 +130,13 @@ export function createRideHud(container: HTMLElement): RideHud {
   knob.className = 'fw-stick-knob';
   stick.append(knob);
 
-  root.append(title, centre, stick);
+  root.append(centre, stick);
   container.append(root);
 
   let shoutElement: HTMLElement | null = null;
   let shoutTimer = 0;
 
   return {
-    setCaption(text: string): void {
-      if (caption.textContent === text) return;
-      caption.textContent = text;
-    },
 
     shout(text: string, seconds = 2.4): void {
       shoutElement?.remove();
