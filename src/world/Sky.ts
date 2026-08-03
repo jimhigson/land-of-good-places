@@ -273,9 +273,11 @@ export class Sky {
         uViewForward: { value: new Vector3(0, 0, 1) },
         uTanHalfFovX: { value: 1 },
         uTanHalfFovY: { value: 1 },
-        // 1 once there is no horizon left to fade towards — see
-        // {@link Sky.setStarsEverywhere}.
-        uStarsEverywhere: { value: 0 },
+        // How far towards space the sky has been taken, 0..1 — `DayNight`'s
+        // own space factor, passed straight through. The shader decides what
+        // that means; right now it means the star field's horizon fade eases
+        // off until there is none, because up there there is no horizon.
+        uSpace: { value: 0 },
         // Screen height (0 = bottom, 1 = top) treated as the horizon line. The
         // park's hill crest sits around 60% up the frame, so anchoring the
         // gradient here is what puts the sunset glow just above the treetops
@@ -314,7 +316,7 @@ export class Sky {
         uniform vec3 uViewForward;
         uniform float uTanHalfFovX;
         uniform float uTanHalfFovY;
-        uniform float uStarsEverywhere;
+        uniform float uSpace;
 
         // Cheap 2D hash for the star field.
         float hash(vec2 p) {
@@ -407,10 +409,14 @@ export class Sky {
               // makes looking *down* from a ride dark and starless rather than
               // starry-because-it-is-high-on-the-screen.
               //
-              // In space there is no horizon to fade towards and the stars go
-              // all the way round, underfoot included: uStarsEverywhere.
+              // ...and the higher you climb the less horizon there is to fade
+              // towards, until in space there is none at all and the stars go
+              // the whole way round, underfoot included. Straight in
+              // proportion to uSpace: no second curve, so how quickly the
+              // stars wrap around a child is exactly how quickly she is
+              // getting to space.
               float altitude = uPerspective > 0.5 ? smoothstep(-0.04, 0.30, ray.y) : smoothstep(0.05, 0.55, h);
-              float altitudeFade = mix(altitude, 1.0, uStarsEverywhere);
+              float altitudeFade = mix(altitude, 1.0, uSpace);
               colour += vec3(1.0, 0.97, 0.9) * brightness * uStarStrength * altitudeFade;
             }
           }
@@ -508,15 +514,17 @@ export class Sky {
   }
 
   /**
-   * Fades the horizon out of the star field: 0 in the park, 1 in space.
+   * How far towards space the sky has been taken, 0..1.
    *
-   * On the ground stars fade towards the horizon so they sit behind the park.
-   * A hundred kilometres up there is no horizon to fade towards and no ground
-   * to sit behind — stars go all the way round, underfoot included, which is
-   * what Jim asked for after riding it. Driven by `DayNight`'s space factor.
+   * `DayNight`'s own space factor, passed through **unshaped** — the sky is
+   * told how high up it is and works out what that means, rather than being
+   * handed a second curve someone would then have to keep in step with the
+   * first. Today it means the star field's horizon fade eases off: on the
+   * ground stars fade out low so they sit behind the park, and up there is no
+   * horizon to fade towards, so they go all the way round and underfoot.
    */
-  setStarsEverywhere(amount: number): void {
-    (this.material.uniforms.uStarsEverywhere as { value: number }).value = clamp(amount, 0, 1);
+  setSpace(amount: number): void {
+    (this.material.uniforms.uSpace as { value: number }).value = clamp(amount, 0, 1);
   }
 
   /**

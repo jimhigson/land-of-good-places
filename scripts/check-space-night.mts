@@ -88,6 +88,7 @@ function look(): Record<string, number> {
     horizon: hex('uHorizonColour'),
     horizonStrength: num('uHorizonStrength'),
     stars: num('uStarStrength'),
+    space: num('uSpace'),
     sunVisible: num('uSunVisible'),
     moonVisible: num('uMoonVisible'),
     keyIntensity: dayNight.keyLight.intensity,
@@ -143,10 +144,29 @@ for (const hour of [MIDNIGHT, NOON, AFTERNOON]) {
   near(inSpace.horizonStrength as number, 0, 1e-9, `space horizon band at ${hour}:00`);
   near(inSpace.nightFactor as number, 1, 1e-9, `space night factor at ${hour}:00`);
   near(inSpace.stars as number, 1, 1e-9, `space star strength at ${hour}:00`);
+  // No horizon left to fade towards: stars go all the way round, including
+  // underfoot. Jim's note after riding it.
+  near(inSpace.space as number, 1, 1e-9, `sky space uniform at ${hour}:00`);
   // The discs are painted into the sky quad, behind everything in the world —
   // in space they would sit behind the 3D Moon and the Earth.
   near(inSpace.sunVisible as number, 0, 1e-9, `space sun disc at ${hour}:00`);
   near(inSpace.moonVisible as number, 0, 1e-9, `space moon disc at ${hour}:00`);
+}
+
+// On the ground the fade must be fully in place, or the park's own night sky
+// would grow stars down at the hedge line.
+for (const hour of [MIDNIGHT, NOON, AFTERNOON]) {
+  const ground = frameAt(hour, 0);
+  near(ground.space as number, 0, 0, `ground sky space uniform at ${hour}:00`);
+}
+
+// The sky is told how high up it is, unshaped — no second curve to drift out
+// of step with the first. So the uniform simply *is* the climb.
+for (const hour of [MIDNIGHT, NOON, AFTERNOON]) {
+  for (let space = 0; space <= 1.0001; space += 0.05) {
+    const now = frameAt(hour, space);
+    near(now.space as number, Math.min(1, space), 1e-9, `the sky's space uniform at ${hour}:00`);
+  }
 }
 
 console.log('climbing in the afternoon darkens the sky the whole way, never back');

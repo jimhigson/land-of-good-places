@@ -573,6 +573,14 @@ export class DayNight implements GameSystem {
     (uniforms.uHorizonColour as { value: Color }).value.setHex(look.horizon);
     (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
     (uniforms.uStarStrength as { value: number }).value = smoothstep(0.35, 0.85, this.nightFactorValue);
+    // How high up we are, handed to the sky unshaped. It uses it to ease off
+    // the star field's horizon fade: on the ground stars fade out low so they
+    // sit behind the park, and in space there is no horizon to fade towards,
+    // so they go the whole way round and underfoot — a child looking down
+    // through the glass floor is looking at the bottom of the sky. Jim's note
+    // after riding it: "the stars need to be all around in every direction,
+    // not just upwards."
+    this.sky.setSpace(this.spaceFactorValue);
 
     // --- place sun and moon on screen ------------------------------------
     // `Sky` owns the mapping from "a bearing and an altitude" to "a spot on
