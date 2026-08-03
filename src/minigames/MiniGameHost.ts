@@ -3,7 +3,6 @@ import type { Engine } from '../core/Engine';
 import type { InputSystem } from '../core/input';
 import type { FrameContext } from '../core/types';
 import { PALETTE } from '../core/palette';
-import { requestOrientationPermission } from '../core/deviceOrientationLook';
 import { Transition } from './Transition';
 import { MiniGameOverlay } from './overlay';
 import type { StallInstance } from './stalls';
@@ -238,13 +237,11 @@ export class MiniGameHost {
   }
 
   private begin(stall: StallInstance): void {
-    // Still inside the interact press. For a first-person ride this is the last
-    // moment iOS will accept a motion-sensor request from — `startGame()` runs
-    // once the curtain has closed, which is too late for a gesture. Not
-    // awaited: the curtain must not wait on a dialog, and the answer is cached
-    // by the time the ride's first frame asks for a reading. Refused, or a
-    // device that has no such prompt, both end with the child dragging.
-    if (stall.definition.firstPerson) void requestOrientationPermission();
+    // The sensor permission used to be asked for here, on the theory that this
+    // was the last gesture before the ride began. It is asked for once on the
+    // first gesture of the *session* now (`askForOrientationOnFirstGesture`),
+    // because asking late and outside a gesture cached a `denied` that killed
+    // the sensor for every ride afterwards.
 
     this.pending = stall;
     this.pendingResult = null;

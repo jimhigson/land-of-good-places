@@ -179,6 +179,38 @@ export async function requestOrientationPermission(): Promise<boolean> {
   return permissionInFlight;
 }
 
+/**
+ * Asks for the sensor **once, on the first thing the child touches.**
+ *
+ * Call it at boot. It waits for the first real gesture of the session — any
+ * tap, any key — asks then, and unhooks itself.
+ *
+ * There is no such thing as asking "at startup" on iOS: the permission is only
+ * granted from inside a user gesture, and a page that has just loaded has not
+ * had one. So the earliest honest moment is the first one there is.
+ *
+ * **Asking per-ride was actively harmful, not merely late.** A ride is boarded
+ * from the frame loop — `input.justPressed` reads a key that was pressed in an
+ * earlier task — so `requestPermission()` threw "not a user gesture", and the
+ * `catch` above caches that as `denied` **for the rest of the session**. One
+ * ride boarded at the wrong moment therefore killed the sensor for every ride
+ * after it, including ones boarded perfectly well. Jim found the train working
+ * and the others not, which is exactly the shape of that bug.
+ */
+export function askForOrientationOnFirstGesture(): void {
+  if (!isOrientationLookSupported()) return;
+
+  const ask = (): void => {
+    window.removeEventListener('pointerdown', ask, true);
+    window.removeEventListener('keydown', ask, true);
+    void requestOrientationPermission();
+  };
+  // Capture, so a handler that stops propagation cannot swallow the one gesture
+  // this gets. Passive: it never touches the event, it only notices it.
+  window.addEventListener('pointerdown', ask, { capture: true, passive: true });
+  window.addEventListener('keydown', ask, { capture: true, passive: true });
+}
+
 /** True once permission is settled and positive. Nothing listens without it. */
 function permitted(): boolean {
   return permission === 'granted' || (isOrientationLookSupported() && !needsOrientationPermission());
