@@ -143,15 +143,15 @@ export class World implements GameSystem {
     this.dodgems = buildDodgemsPlot(this.anchorPlots, this.collision);
     this.dayNight = new DayNight(scene, sky);
 
-    // The ferris wheel's ride. Built after `anchorPlots` (whose prop it hangs
-    // its gondola under, and whose scenery cars it hides while somebody is
-    // aboard) and after `dayNight` (whose sky it takes past night and into
-    // space). Both are handed in as narrow closures rather than whole objects:
-    // this ride needs to raise a sky and hide twelve cars, and nothing else.
+    // The ferris wheel's ride. Built after `anchorPlots` (whose wheel it stands
+    // in for while somebody is aboard) and after `dayNight` (whose sky it takes
+    // past night and into space). Both are handed in as narrow closures rather
+    // than whole objects: this ride needs to raise a sky and hide a wheel, and
+    // nothing else.
     this.ferrisWheel = new FerrisWheelRide(
       this.collision,
       (value) => this.dayNight.setSpaceFactor(value),
-      (visible) => this.anchorPlots.setFerrisCarsVisible(visible),
+      (visible) => this.anchorPlots.setFerrisWheelVisible(visible),
     );
 
     // The face-painting stall (additive): built here, before the NPCs, because

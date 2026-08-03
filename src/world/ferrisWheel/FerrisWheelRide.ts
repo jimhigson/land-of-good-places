@@ -205,8 +205,15 @@ export class FerrisWheelRide implements GameSystem {
     private readonly collision: CollisionWorld,
     /** Raises the park's sky past night and into space. `DayNight.setSpaceFactor`. */
     private readonly setSpaceFactor: (value: number) => void,
-    /** Hides the wheel's twelve scenery cars while its real one is being ridden. */
-    private readonly setPropCarsVisible: (visible: boolean) => void,
+    /**
+     * Shows or hides the park's own ferris wheel.
+     *
+     * Hidden for the length of the ride and put back on the way out. The
+     * gondola carries the rim, spokes and hanger it swings from, which is what
+     * a child sees through the skylight — so the park's wheel standing there
+     * as well is simply a second ferris wheel.
+     */
+    private readonly setParkWheelVisible: (visible: boolean) => void,
   ) {
     const wheel = placedEntry('ferrisWheel');
     this.boardX = wheel.x;
@@ -281,7 +288,7 @@ export class FerrisWheelRide implements GameSystem {
     this.cardTime = -1;
     this.waves = 0;
     this.group.visible = true;
-    this.setPropCarsVisible(false);
+    this.setParkWheelVisible(false);
 
     this.player.beginRide();
     this.onRideChange?.(true);
@@ -366,7 +373,7 @@ export class FerrisWheelRide implements GameSystem {
     this.riding = false;
     this.cardTime = -1;
     this.group.visible = false;
-    this.setPropCarsVisible(true);
+    this.setParkWheelVisible(true);
     // **Always**, and before anything else can go wrong: a child who quits
     // half way up must not leave the park's sky stuck in space.
     this.setSpaceFactor(0);

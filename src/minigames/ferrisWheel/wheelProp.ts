@@ -112,16 +112,19 @@ export interface FerrisWheelProp {
   /** Add to the anchor plot group. Origin at the plot centre, on the ground. */
   readonly root: Group;
   /**
-   * Hides the twelve scenery cars, leaving the wheel itself standing.
+   * Shows or hides the whole wheel.
    *
-   * Used while somebody is riding: the ride hangs its own, far more detailed
-   * gondola (`ferrisWheel/gondola.ts`, with seats, pets and a glass floor) at
-   * the bottom of this wheel, and two cars in one place reads as a glitch
-   * through the ride's own windows. The rim, spokes, hub, lamps and legs all
-   * stay, so the thing she is sitting in is still visibly part of the wheel
-   * she boarded.
+   * Hidden for the length of a ride. The ride brings its own wheel — the
+   * gondola carries the rim, spokes and hanger it swings from
+   * (`ferrisWheel/gondola.ts`), which is what a child sees through the
+   * skylight and what tells her what she is riding — so leaving this one
+   * standing put **two** ferris wheels on screen at once. Jim rode it and
+   * said so.
+   *
+   * Hiding the lot rather than just the twelve scenery cars, because the
+   * doubling was the wheel itself, not the cars.
    */
-  setCarsVisible(visible: boolean): void;
+  setVisible(visible: boolean): void;
   update(dt: number, elapsed: number): void;
   dispose(): void;
 }
@@ -382,10 +385,8 @@ export function createFerrisWheelProp(
   return {
     root,
 
-    setCarsVisible(visible: boolean): void {
-      pods.visible = visible;
-      canopies.visible = visible;
-      hangers.visible = visible;
+    setVisible(visible: boolean): void {
+      root.visible = visible;
     },
 
     update(dt: number, elapsed: number): void {
