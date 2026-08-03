@@ -8,6 +8,7 @@ import { gameStore } from './state';
 import { saveFlags } from './state/flags';
 import { clearSave, consumeReopenCharacterCreator, loadSave, type SaveFile } from './state/save';
 import { startVersionCheck } from './version-check';
+import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
 /**
  * Entry point. Finds the canvas, offers to continue a saved park, shows the
@@ -395,6 +396,12 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
   // two minutes for nothing — dev already gets instant feedback from HMR.
   if (import.meta.env.PROD) startVersionCheck();
 }
+
+// The phone-tilt look, for every first-person ride. Armed at boot and fired on
+// the first thing the child touches — see the function's own note for why "at
+// startup" is not a thing iOS will accept, and why asking per-ride was worse
+// than asking late.
+askForOrientationOnFirstGesture();
 
 try {
   boot();

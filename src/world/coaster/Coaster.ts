@@ -179,7 +179,12 @@ export class Coaster implements GameSystem {
   attachPlayer(player: Player): void {
     this.player = player;
     if (this.options.camera === 'firstPerson') {
-      this.rideView = new RideCamera({ yawLimit: 2.1, startPitch: -0.06 });
+      // **First person, so the view is unbounded and the phone can drive it.**
+      // Jim's rule, 3 August 2026: tilt-to-look belongs to first-person rides
+      // and to nothing else, and a first-person ride does not fence off part of
+      // its own sky. It used to stop at ±2.1 rad, which is most of the way
+      // round and therefore reads as a fault rather than as a limit.
+      this.rideView = new RideCamera({ startPitch: -0.06 });
       this.rideView.mountOn(this.eyeMount, EYE);
     } else {
       // The chase view: the same shared camera, mounted behind and above the
@@ -188,7 +193,17 @@ export class Coaster implements GameSystem {
       //
       // `z` is **positive** because `eyeMount` faces the camera's way round:
       // +Z here is behind the cart, which is where a chase camera goes.
-      this.rideView = new RideCamera({ yawLimit: 0.55, startPitch: -0.14, fov: 60 });
+      // **Not first person, so no tilt-to-look at all.** This is the chase
+      // camera: it looks at the child from behind rather than out of her own
+      // eyes, so turning the phone should move nothing — a third-person view
+      // that swings with the handset is a camera that has come loose. Its yaw
+      // stays clamped for the same reason: the ride is ahead of you.
+      this.rideView = new RideCamera({
+        yawLimit: 0.55,
+        startPitch: -0.14,
+        fov: 60,
+        sensorLook: false,
+      });
       this.rideView.mountOn(this.eyeMount, { x: 0, y: 2.1, z: 3.4 });
     }
   }
