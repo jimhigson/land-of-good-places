@@ -153,6 +153,34 @@ const NEIGHBOUR_WIDTH = 1.75;
 const NEIGHBOUR_DEPTH = 1.5;
 const NEIGHBOUR_HEIGHT = 1.45;
 
+/**
+ * Blinking, on the same beat the player herself uses (`Player.ts`).
+ *
+ * Nobody in this car blinked at all until Jim asked. The face is painted onto
+ * a canvas, so a blink is a **texture swap** — cheap, but only if it happens on
+ * the two transitions; calling `setExpression` every frame would flip
+ * `needsUpdate` every frame and re-upload the texture to the GPU. Hence the
+ * "only when it changes" guard in `blink`.
+ *
+ * Each face gets its own starting phase, so a car full of toys does not blink
+ * in unison — which is considerably more unsettling than not blinking at all.
+ */
+const BLINK_DURATION = 0.11;
+const BLINK_GAP_MIN = 2.6;
+const BLINK_GAP_RANGE = 3.4;
+
+/**
+ * The rim lamps: how big, and how far proud of the rim they stand.
+ *
+ * They were centred *on* the rim, which put a 0.16 m ball inside a 0.16 m tube
+ * — embedded rather than fitted, so all you saw was a glow in the metal. They
+ * sit on the **outer face** of each rim now, far enough out to read as lamps
+ * bolted to the sides of the wheel and just far enough in that they are
+ * plainly attached to it.
+ */
+const BULB_R = 0.16;
+const BULB_STAND = RIM_TUBE_R + 0.1;
+
 /** Scaled down to their car, which is about half the size of yours. */
 const NEIGHBOUR_RIDER_SCALE = 0.52;
 
@@ -214,6 +242,17 @@ const PET_CHAIR_Z = -0.64;
  */
 export const GONDOLA_EYE = Object.freeze({ x: 0, y: 1.8, z: 0.78 });
 
+/** One face's blink clock. Its own phase, so nobody blinks in unison. */
+interface FaceLife {
+  until: number;
+  shut: number;
+  showing: Expression;
+}
+
+function newFace(): FaceLife {
+  return { until: BLINK_GAP_MIN * Math.random(), shut: 0, showing: 'neutral' };
+}
+
 interface Passenger {
   readonly handle: AssetHandle;
   readonly creature: CreatureHandle | null;
@@ -221,7 +260,7 @@ interface Passenger {
   /** The way its chair faces. Everything below is measured out from here. */
   readonly baseYaw: number;
   readonly phase: number;
-  expression: Expression;
+  readonly face: FaceLife;
 }
 
 export interface Gondola {
@@ -617,7 +656,7 @@ export function createGondola(): Gondola {
       baseY: seatY,
       baseYaw: chair.rotation.y,
       phase: index * 1.7,
-      expression: 'neutral',
+      face: newFace(),
     });
   });
 
@@ -640,6 +679,27 @@ export function createGondola(): Gondola {
   let watching = false;
   /** Scratch for working out where a neighbour's occupant actually is. */
   const occupantOrigin = new Vector3();
+
+  /**
+   * Keeps a face alive: blinks it, over whatever it is otherwise doing.
+   *
+   * `resting` is what the face should show between blinks — 'happy' while
+   * somebody is being waved at, 'neutral' the rest of the time — so this can
+   * punch a blink through without arguing with the joy state.
+   */
+  const blink = (face: FaceLife, creature: CreatureHandle | null, resting: Expression, dt: number): void => {
+    if (!creature) return;
+    face.until -= dt;
+    if (face.until <= 0) {
+      face.until = BLINK_GAP_MIN + Math.random() * BLINK_GAP_RANGE;
+      face.shut = BLINK_DURATION;
+    }
+    if (face.shut > 0) face.shut -= dt;
+    const wanted: Expression = face.shut > 0 ? 'blink' : resting;
+    if (wanted === face.showing) return;
+    face.showing = wanted;
+    creature.setExpression(wanted);
+  };
 
   /**
    * Turns a seated figure to look at something, or lets it idle.
@@ -760,7 +820,7 @@ export function createGondola(): Gondola {
   // derived rather than dialled in — the bulbs simply did not move with them.
   // A real wheel carries its lamps on the rims anyway.
   const bulbCount = 24;
-  const bulbs = new InstancedMesh(new SphereGeometry(0.16, 8, 6), bulbMaterial, bulbCount * 2);
+  const bulbs = new InstancedMesh(new SphereGeometry(BULB_R, 8, 6), bulbMaterial, bulbCount * 2);
   bulbs.frustumCulled = false;
   for (let i = 0; i < bulbCount; i += 1) {
     const angle = (i / bulbCount) * TAU;
@@ -768,7 +828,7 @@ export function createGondola(): Gondola {
       position.set(
         Math.cos(angle) * RIDE_RIM_R,
         Math.sin(angle) * RIDE_RIM_R,
-        (side === 0 ? -1 : 1) * RIM_HALF_GAP,
+        (side === 0 ? -1 : 1) * (RIM_HALF_GAP + BULB_STAND),
       );
       matrix.compose(position, new Quaternion(), unit);
       bulbs.setMatrixAt(i * 2 + side, matrix);
@@ -917,8 +977,8 @@ export function createGondola(): Gondola {
       rider,
       // Both of them look around, so `turnToward` gets one list to walk.
       occupants: [
-        { root: rider.root, head: rider.head, phase: index * 1.9 },
-        { root: pet.root, head: pet.head, phase: index * 1.9 + 0.8 },
+        { root: rider.root, head: rider.head, phase: index * 1.9, creature: rider, face: newFace() },
+        { root: pet.root, head: pet.head, phase: index * 1.9 + 0.8, creature: pet, face: newFace() },
       ],
     };
   });
@@ -950,12 +1010,10 @@ export function createGondola(): Gondola {
     },
 
     rejoice(): void {
+      // The face itself is left to `blink`, which shows 'happy' as its resting
+      // expression for as long as `joy` lasts. Setting it here as well would be
+      // two things writing one texture.
       joy = 1.6;
-      for (const passenger of passengers) {
-        if (passenger.expression === 'happy') continue;
-        passenger.expression = 'happy';
-        passenger.creature?.setExpression('happy');
-      }
     },
 
     setLampGlow(glow: number): void {
@@ -1007,6 +1065,7 @@ export function createGondola(): Gondola {
             dt,
             elapsed,
           );
+          blink(occupant.face, occupant.creature, 'neutral', dt);
         }
       }
 
@@ -1046,10 +1105,7 @@ export function createGondola(): Gondola {
           dt,
           elapsed,
         );
-        if (joy <= 0 && passenger.expression !== 'neutral') {
-          passenger.expression = 'neutral';
-          passenger.creature?.setExpression('neutral');
-        }
+        blink(passenger.face, passenger.creature, joy > 0 ? 'happy' : 'neutral', dt);
       }
 
       lamp.intensity = lampGlow * 3.2;
