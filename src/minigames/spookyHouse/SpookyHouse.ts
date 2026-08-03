@@ -13,6 +13,15 @@ import { createScreenSplash, createSquirt, type ScreenSplash, type Squirt } from
 import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
 
 /**
+ * How long a visit lasts, in seconds.
+ *
+ * There is still no score and no fail state — it is a toy box — but it does
+ * have an ending now, because every other ride and game in the park ends by
+ * itself and being let out is how you leave one.
+ */
+const VISIT_SECONDS = 30;
+
+/**
  * **The Spooky House** — a fun-fair stall that opens onto a dim, cosy little
  * room with one enormous comic-scary face on the back wall. The family spec
  * (GAME_DESIGN.md, "The spooky house") is three exact interactions and
@@ -23,11 +32,11 @@ import type { MiniGame, MiniGameContext, MiniGameFrame } from '../types';
  * - tap the mouth **twice quickly** → candy pours out, and it's a real
  *   collectible (the Cute-o-dex entry, `catalogue.ts`'s `candy.spookyHouse`)
  *
- * No score, no fail state, no time limit — "it's a toy box" — so unlike Rail
- * Racer this game never calls `context.finish()` itself. Pressing the
- * framework's own ✕ (or Escape / gamepad B) is the only way out, and the
- * framework already turns that into a `quit` result on its own (see
- * `MiniGameHost.updateGame`), so there is nothing to wire up here.
+ * No score and no fail state — "it's a toy box" — but it does have an *ending*:
+ * {@link VISIT_SECONDS}. It used to have none at all, and leaving meant
+ * pressing the framework's ✕. That ✕ is gone (getting out of anything in this
+ * park is waiting for it to finish), and a toy box with no ending would have
+ * been a toy box with no way out.
  *
  * The one wrinkle: every other stall in this park is a one-button "hold"
  * game (`types.ts`), but this one needs to know *which* of three things was
@@ -85,6 +94,9 @@ class SpookyHouse implements MiniGame {
   private readonly rng = new Rng(0x5900d1);
   private aspect = 1;
   private candyCount = 0;
+  private context: MiniGameContext | null = null;
+  /** Seconds left in the house. See {@link VISIT_SECONDS}. */
+  private remaining = VISIT_SECONDS;
   private nextBoo = BOO_MIN_SECONDS;
   private splashTimer: ReturnType<typeof window.setTimeout> | null = null;
 
@@ -94,6 +106,7 @@ class SpookyHouse implements MiniGame {
   // ------------------------------------------------------------------ setup
 
   init(context: MiniGameContext): void {
+    this.context = context;
 
     // Warm-purple ambient plus one cool fill: the "cosy dim room" look comes
     // from colour temperature, not from actually dropping the light level —
@@ -154,6 +167,23 @@ class SpookyHouse implements MiniGame {
 
   update(frame: MiniGameFrame): void {
     const { dt, elapsed } = frame;
+
+    // The visit ends itself. It used to run until a child pressed the
+    // framework's ✕, which was the only game here that could not finish on its
+    // own — and once getting out of anything became "wait for it to finish"
+    // (Jim, 3 August 2026), a toy box with no ending was a toy box with no way
+    // out. Half a minute is long enough to find all three tricks and short
+    // enough to want another go.
+    this.remaining -= dt;
+    if (this.remaining <= 0) {
+      this.remaining = Number.POSITIVE_INFINITY;
+      this.context?.finish({
+        id: this.id,
+        outcome: 'finished',
+        seconds: VISIT_SECONDS,
+        message: this.candyCount > 0 ? 'You found the candy!' : 'Boo! Come back soon.',
+      });
+    }
 
     this.room?.update(elapsed);
     this.face?.update(dt, elapsed);

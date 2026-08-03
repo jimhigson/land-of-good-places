@@ -310,20 +310,10 @@ export class Game {
     this.ferrisHudHost = document.createElement('div');
     this.ferrisHudHost.className = 'ferris-hud-host';
     this.ferrisHudHost.hidden = true;
-    // The way off the ride. GAME_DESIGN's EXIT rule is not optional, and on a
-    // phone this is the *only* way off: the on-screen controls hide themselves
-    // while a ride has her (`screenIsBusy`), and `cancel` is a keyboard and
-    // gamepad action with no touch binding at all. The curtain framework used
-    // to supply this X; the ferris wheel stopped being a curtain mini-game, so
-    // it brings its own — same shape, same corner, so it is the same button a
-    // child already knows from every other stall.
-    const ferrisQuit = document.createElement('button');
-    ferrisQuit.className = 'ferris-quit';
-    ferrisQuit.type = 'button';
-    ferrisQuit.textContent = '\u2715';
-    ferrisQuit.setAttribute('aria-label', 'Leave the ride');
-    ferrisQuit.addEventListener('click', () => this.world.ferrisWheel.quit());
-    this.ferrisHudHost.appendChild(ferrisQuit);
+    // **No way off, on purpose.** Getting off a ride is waiting for it to
+    // finish (Jim, 3 August 2026): ninety seconds, and it sets her down beside
+    // the wheel itself. There was an X here, added when the review found no
+    // touch exit at all — the right fix for the wrong requirement.
     uiRoot.appendChild(this.ferrisHudHost);
 
     this.transitions = new Transitions(uiRoot);
