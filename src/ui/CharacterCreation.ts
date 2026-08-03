@@ -3,7 +3,9 @@ import { ART } from '../art/style/artPalette';
 import { PLAYER_DEFAULT_NAME } from '../core/constants';
 import { KID_EYE_COLOURS, KID_SKIN_TONES } from '../art/models/kid';
 import { itemsForShop, shopItem, type ShopItem } from '../world/building/shops/catalogue';
-import type { BackpackKind, CharacterCreationChoice, GlassesKind, HairStyle, ShoeKind } from '../state';
+import { gameStore } from '../state';
+import type { BackpackKind, CharacterCreationChoice, GlassesKind, HairStyle, PlayerState, ShoeKind } from '../state';
+import { saveFlags } from '../state/flags';
 import { CharacterPreview, type PreviewFocus } from './characterCreationPreview';
 import { ColourWheelPicker } from './ColourWheelPicker';
 
@@ -59,6 +61,23 @@ interface Choice<T extends string> {
   readonly value: T;
   readonly label: string;
   readonly glyph: string;
+}
+
+/**
+ * A `buildCardSection` grid's own extra "none of these" card — today, only
+ * the Hat tab's "No hat" (see {@link CharacterCreation.buildHatSection}).
+ * Its own type rather than a `ShopItem` with fields papered over: a "none"
+ * card is not a catalogue entry (no price, no shop, no Cute-o-dex page), and
+ * `selected`/`onPick` (rather than an `id` matched against `initialId`) are
+ * what let the caller decide "is this the current answer" itself, since
+ * `null` — the value this always resolves to — cannot be an `initialId` to
+ * compare `ShopItem.id` against.
+ */
+interface NoneCardOption {
+  readonly icon: string;
+  readonly label: string;
+  readonly selected: boolean;
+  readonly onPick: () => void;
 }
 
 const HAIR_SWATCHES: readonly Swatch[] = [
@@ -342,6 +361,35 @@ const TAB_META: readonly { readonly id: TabId; readonly label: string; readonly 
  */
 const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>(['mohican']);
 
+/**
+ * The player's current look, if she already has one — read fresh every time
+ * this screen is built, so the constructor can seed every field from it
+ * instead of this file's own hardcoded defaults.
+ *
+ * `null` on a genuinely fresh profile (`saveFlags.createdCharacter` still
+ * `false` — `main.ts`'s `startFresh`, before `completeCharacterCreation` has
+ * ever run): there is no "current" look yet, `gameStore`'s own player is
+ * still sitting on `createInitialState`'s defaults, and those already equal
+ * this file's own hardcoded ones, so the constructor's fallback to the
+ * literal default is exactly the same answer either way.
+ *
+ * Not `null` whenever a character already exists — most obviously the HUD's
+ * "Look" pill reopening this screen over a live save (`main.ts`'s
+ * `reopenCharacterCreation`, which hydrates `gameStore` from that save
+ * *before* building this screen), which is the exact path that used to reset
+ * every field to a hardcoded default the moment she reopened it. `hatId`
+ * resolves `wornHatUid` back to the catalogue id this screen actually wants
+ * (or `null`, bare-headed, if nothing is worn — a real answer since the Hat
+ * tab's own "No hat" card, not a lookup miss); a save that predates hats
+ * entirely never sets `wornHatUid` at all, which reads the same way.
+ */
+function currentAppearance(): { readonly player: PlayerState; readonly hatId: string | null } | null {
+  if (!saveFlags.createdCharacter) return null;
+  const state = gameStore.get();
+  const wornHat = state.inventory.find((item) => item.uid === state.wornHatUid);
+  return { player: state.player, hatId: wornHat?.id ?? null };
+}
+
 export class CharacterCreation {
   private readonly root: HTMLElement;
   private readonly preview: CharacterPreview;
@@ -351,19 +399,28 @@ export class CharacterCreation {
   private readonly handlers: CharacterCreationHandlers;
   private readonly resizeObserver: ResizeObserver;
 
-  private skinColour: number = ART.kidSkin;
-  private hairColour: number = PALETTE.hair;
-  private hairStyle: HairStyle = 'bunches';
-  private outfitColour: number = PALETTE.outfit;
+  /**
+   * Every field below (bar {@link petId} — see its own comment) is seeded in
+   * the constructor from {@link currentAppearance}, not from a literal here:
+   * a hardcoded initializer is exactly what used to make reopening this
+   * screen over an existing character reset her back to a brand-new arrival.
+   * Declared without an initializer on purpose — `strictPropertyInitialization`
+   * still holds the constructor to assigning every one of these before it
+   * returns, it just cannot be a field-literal default any more.
+   */
+  private skinColour: number;
+  private hairColour: number;
+  private hairStyle: HairStyle;
+  private outfitColour: number;
   /** The arms' own colour — equal to {@link outfitColour} until a two-tone swatch is picked. */
-  private outfitArmsColour: number = PALETTE.outfit;
-  private eyeColour: number = ART.kidEye;
-  private backpackKind: BackpackKind = 'satchel';
-  private backpackColour: number = PALETTE.backpack;
-  private shoeKind: ShoeKind = 'plain';
-  private shoeColour: number = PALETTE.shoe;
+  private outfitArmsColour: number;
+  private eyeColour: number;
+  private backpackKind: BackpackKind;
+  private backpackColour: number;
+  private shoeKind: ShoeKind;
+  private shoeColour: number;
   /** `'none'` (the default) becomes `null` wherever this leaves the file — see {@link glasses}. */
-  private glassesKind: GlassesChoiceValue = 'none';
+  private glassesKind: GlassesChoiceValue;
 
   /**
    * {@link glassesKind}, resolved to what everything downstream of this
@@ -377,21 +434,40 @@ export class CharacterCreation {
     return this.glassesKind === 'none' ? null : this.glassesKind;
   }
   /**
-   * `null` means "no hat" — today that only ever happens transiently while an
-   * exclusive hair style (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) is selected;
-   * there is no independent "go bare-headed" choice on the Hat tab itself.
-   * `complete()` grants nothing and clears any previously-worn hat when this
-   * is `null` at submit time — see `state/store.ts`'s `completeCharacterCreation`.
+   * `null` means "no hat" — either the child's own explicit pick (the Hat
+   * tab's own "No hat" card) or the automatic one an exclusive hair style
+   * makes for her (see {@link HAT_EXCLUSIVE_HAIR_STYLES}). `complete()`
+   * grants nothing and clears any previously-worn hat when this is `null` at
+   * submit time — see `state/store.ts`'s `completeCharacterCreation`. Seeded
+   * in the constructor from {@link currentAppearance}, not a literal — see
+   * the comment on {@link skinColour} and its neighbours above.
    */
-  private hatId: string | null = DEFAULT_HAT_ID;
+  private hatId: string | null;
   /**
    * The hat she had on right before an exclusive style took it off, so
    * switching back to an ordinary style gives it back rather than resetting
-   * to {@link DEFAULT_HAT_ID} — see {@link applyHairStyle}. `null` whenever
-   * she is not currently in that borrowed state, including "started the
-   * screen already on an exclusive style and has never had a hat to lend".
+   * to {@link DEFAULT_HAT_ID} — see {@link applyHairStyle}. Three states, not
+   * two: `undefined` means "not currently in that borrowed state at all"
+   * (including "started the screen already on an exclusive style and has
+   * never had a hat to lend"); `null` means she *was* borrowed from, and the
+   * honest answer is "no hat" — the Hat tab's own "No hat" card, not a lookup
+   * miss (see {@link buildHatSection}); anything else is the catalogue id she
+   * gets back. `undefined` rather than `null` for "nothing stashed" is the
+   * whole reason this is three states: `null` was already spoken for the
+   * moment "no hat" became a deliberate, reachable choice rather than
+   * something that only ever happened transiently mid-exclusivity-switch.
+   * Seeded in the constructor alongside {@link hatId}, for the same reason.
    */
-  private hatIdBeforeExclusiveHair: string | null = null;
+  private hatIdBeforeExclusiveHair: string | null | undefined;
+  /**
+   * Unlike every other field above, this one has no "current" value to seed
+   * from: a pet is a one-time free grant into the parade
+   * (`completeCharacterCreation`'s `grantFree`), not an equippable slot with
+   * a single live `worn*Uid` the way a hat is, so there is nothing in the
+   * store that means "the pet she currently has". The suggested default is
+   * exactly as good a starting point on a reopened screen as it always was
+   * on a fresh one.
+   */
   private petId = DEFAULT_PET_ID;
 
   /** The Hat tab's own panel and button — see {@link applyHairStyle}. */
@@ -409,6 +485,45 @@ export class CharacterCreation {
 
   constructor(container: HTMLElement, handlers: CharacterCreationHandlers) {
     this.handlers = handlers;
+
+    // Seed every appearance field from her current look when one already
+    // exists, rather than this screen's own hardcoded defaults — see
+    // `currentAppearance`'s doc comment. `current` is `null` on a genuinely
+    // fresh profile, in which case every `??` below falls back to exactly the
+    // literal default this screen always started on.
+    const current = currentAppearance();
+    this.skinColour = current?.player.skinColour ?? ART.kidSkin;
+    this.hairColour = current?.player.hairColour ?? PALETTE.hair;
+    this.hairStyle = current?.player.hairStyle ?? 'bunches';
+    this.outfitColour = current?.player.outfitColour ?? PALETTE.outfit;
+    this.outfitArmsColour = current?.player.outfitArmsColour ?? PALETTE.outfit;
+    this.eyeColour = current?.player.eyeColour ?? ART.kidEye;
+    this.backpackKind = current?.player.backpackKind ?? 'satchel';
+    this.backpackColour = current?.player.backpackColour ?? PALETTE.backpack;
+    this.shoeKind = current?.player.shoeKind ?? 'plain';
+    this.shoeColour = current?.player.shoeColour ?? PALETTE.shoe;
+    this.glassesKind = current ? current.player.glassesKind ?? 'none' : 'none';
+
+    // The hat is one step further removed: `currentAppearance` has already
+    // resolved `wornHatUid` back to a catalogue id (or `null`, genuinely
+    // bare-headed) for a returning character; a fresh one has no worn hat yet
+    // at all, so she gets the same suggested default this screen always
+    // opened on. Either way, an exclusive hair style already selected (only
+    // possible on a returning character — see {@link HAT_EXCLUSIVE_HAIR_STYLES})
+    // takes it off immediately, exactly as `applyHairStyle` would if she
+    // picked that style by hand a moment after this screen opened, and
+    // stashes whatever hat that was so switching hair styles hands it straight
+    // back — see that method's own doc comment.
+    const resolvedHatId = current ? current.hatId : DEFAULT_HAT_ID;
+    if (HAT_EXCLUSIVE_HAIR_STYLES.has(this.hairStyle)) {
+      this.hatId = null;
+      this.hatIdBeforeExclusiveHair = resolvedHatId;
+    } else {
+      this.hatId = resolvedHatId;
+      // `undefined`, not `null` — "nothing is stashed", not "what's stashed
+      // is 'no hat'". See {@link hatIdBeforeExclusiveHair}'s own doc comment.
+      this.hatIdBeforeExclusiveHair = undefined;
+    }
 
     this.root = document.createElement('div');
     // `.shop-panel` gives this the same full-screen backdrop and open/close
@@ -685,7 +800,15 @@ export class CharacterCreation {
       // each time, since `Record` access by a literal key is the only other
       // safe option and `'hat'` typed out at every call site is worse than
       // naming it once.
-      if (tab.id === 'hat') this.hatTabButton = button;
+      if (tab.id === 'hat') {
+        this.hatTabButton = button;
+        // Matches what `applyHairStyle` would do a moment later if she picked
+        // an exclusive style by hand: hidden from the very first frame, not
+        // shown then immediately hidden, on a reopened screen that starts
+        // already on one (`this.hairStyle` is seeded above, before this loop
+        // runs).
+        button.hidden = HAT_EXCLUSIVE_HAIR_STYLES.has(this.hairStyle);
+      }
     }
     this.hatPanel = panels.hat;
 
@@ -930,12 +1053,19 @@ export class CharacterCreation {
     return section;
   }
 
+  /**
+   * `noneOption` is additive, and only the Hat tab uses it — see
+   * {@link buildHatSection}. Every other caller (today, only "Starting pet")
+   * omits it and gets exactly the plain item grid this always built: one
+   * button per {@link ShopItem}, `onPick` given the item tapped.
+   */
   private buildCardSection(
     label: string,
     items: readonly ShopItem[],
     initialId: string,
     onPick: (item: ShopItem) => void,
     suggestedId?: string,
+    noneOption?: NoneCardOption,
   ): HTMLElement {
     const section = document.createElement('div');
     section.className = 'charcreate-section';
@@ -945,6 +1075,32 @@ export class CharacterCreation {
     const grid = document.createElement('div');
     grid.className = 'charcreate-grid';
     const buttons: HTMLButtonElement[] = [];
+
+    // First, so a bare head reads as a real, always-available choice rather
+    // than something tucked away after every hat there is to buy — the same
+    // "the safe answer comes first" ordering `GLASSES_ORDER` already uses for
+    // its own "None".
+    if (noneOption) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'shop-row charcreate-row';
+      button.dataset.selected = noneOption.selected ? 'true' : 'false';
+      button.setAttribute('aria-pressed', noneOption.selected ? 'true' : 'false');
+      button.innerHTML =
+        `<span class="row-icon">${noneOption.icon}</span>` +
+        `<span class="row-name">${escapeHtml(noneOption.label)}</span>`;
+      button.addEventListener('click', () => {
+        noneOption.onPick();
+        for (const other of buttons) {
+          const selected = other === button;
+          other.dataset.selected = selected ? 'true' : 'false';
+          other.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        }
+      });
+      buttons.push(button);
+      grid.append(button);
+    }
+
     for (const item of items) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -975,12 +1131,41 @@ export class CharacterCreation {
    * The Hat tab's own card grid — a method rather than an inline call so
    * {@link applyHairStyle} can rebuild it later with a different starting
    * selection, the moment a lent-out hat comes back.
+   *
+   * Carries its own "No hat" card (`noneOption`) — a real, always-available
+   * choice, distinct from an exclusive hair style automatically taking the
+   * hat off (see {@link HAT_EXCLUSIVE_HAIR_STYLES}) and distinct from simply
+   * never having bought one: a child who owns every hat in the shop can still
+   * choose to wear none of them. Not a catalogue entry (`world/building/
+   * shops/catalogue.ts`'s `ShopItem`) — nobody buys nothing, and a fake entry
+   * there would need a shop shelf, a price and a Cute-o-dex page that make no
+   * sense, the same reason `GLASSES_OPTIONS`'s own `'none'` lives in this file
+   * rather than `art/models/glasses.ts`. Picking it just sets `hatId` to
+   * `null`, a value `complete()`, `state/store.ts`'s
+   * `completeCharacterCreation` and `entities/WornHat.ts` already all treat
+   * as "bare-headed" perfectly happily — the mechanism already existed for
+   * the Mohican case, this only adds a second, deliberate way to reach it.
    */
   private buildHatSection(): HTMLElement {
-    return this.buildCardSection('Starting hat', HAT_OPTIONS, this.hatId ?? DEFAULT_HAT_ID, (item) => {
-      this.hatId = item.id;
-      this.refreshPreview('head');
-    });
+    return this.buildCardSection(
+      'Starting hat',
+      HAT_OPTIONS,
+      this.hatId ?? '',
+      (item) => {
+        this.hatId = item.id;
+        this.refreshPreview('head');
+      },
+      DEFAULT_HAT_ID,
+      {
+        icon: '🙅',
+        label: 'No hat',
+        selected: this.hatId === null,
+        onPick: () => {
+          this.hatId = null;
+          this.refreshPreview('head');
+        },
+      },
+    );
   }
 
   /**
@@ -1005,10 +1190,13 @@ export class CharacterCreation {
    * nicer behaviour, and it costs nothing extra to keep: this is pure
    * in-session UI state, no different from every other tab already
    * remembering whatever she last tapped in it. It does **not** persist
-   * across a whole creator session the way the save does — reopening the
-   * creator at all (`ui/Hud.ts`'s "Look" pill) already resets every field on
-   * this screen to its hardcoded default, hat included, and this does not
-   * change that; see `HANDOFF-charcreate-owner.md`.
+   * across a whole browser session the way the save does — but reopening the
+   * creator on an *existing* character (`ui/Hud.ts`'s "Look" pill) now starts
+   * every field, hat included, from her current look rather than a hardcoded
+   * default (see `currentAppearance`), and this method's own constructor-time
+   * counterpart (see the constructor's seeding block) applies exactly this
+   * same exclusivity rule up front if she reopens the screen already on an
+   * exclusive style.
    */
   private applyHairStyle(style: HairStyle): void {
     const wasExclusive = HAT_EXCLUSIVE_HAIR_STYLES.has(this.hairStyle);
@@ -1030,8 +1218,16 @@ export class CharacterCreation {
         this.hatIdBeforeExclusiveHair = this.hatId;
         this.hatId = null;
       } else {
-        this.hatId = this.hatIdBeforeExclusiveHair ?? DEFAULT_HAT_ID;
-        this.hatIdBeforeExclusiveHair = null;
+        // `!== undefined`, not `??`: `hatIdBeforeExclusiveHair` being `null`
+        // is itself a real, stashed answer since the Hat tab's own "No hat"
+        // card landed — she may have entered the exclusive style already
+        // bare-headed by her own choice, and `??` cannot tell that apart from
+        // "nothing was ever stashed" (also `null`-shaped before that card
+        // existed, back when `hatId` was never deliberately `null`). Only
+        // `undefined` — this field's own "no borrow in progress" state —
+        // falls back to {@link DEFAULT_HAT_ID}.
+        this.hatId = this.hatIdBeforeExclusiveHair !== undefined ? this.hatIdBeforeExclusiveHair : DEFAULT_HAT_ID;
+        this.hatIdBeforeExclusiveHair = undefined;
         // Only the card grid's *content* needs rebuilding — which card shows
         // selected. The panel's own visibility is untouched here on purpose:
         // she is on the Hair tab making this change, the Hat tab cannot be
