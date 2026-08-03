@@ -17,7 +17,7 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../../core/palette';
-import { TAU, clamp01 } from '../../core/mathUtils';
+import { TAU, angleDelta, clamp, clamp01 } from '../../core/mathUtils';
 import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { AssetHandle } from '../../art/style/asset';
@@ -106,6 +106,23 @@ const RIM_HALF_GAP = (CAR_WIDTH + 0.16) / 2 + RIM_TUBE_R + RIM_CLEARANCE;
 /** Spokes on the ride's wheel. Matches the landmark. */
 const SPOKES = 12;
 
+/** How far a passenger's own head sits above its seat, near enough for aiming. */
+const PASSENGER_EYE_Y = 1.1;
+
+/**
+ * How far round a passenger will turn its head to watch something, and how
+ * far up or down.
+ *
+ * Short of anything a real neck would object to. Past this they simply watch
+ * as far as they can and let it go by, which reads as a toy being interested
+ * rather than a toy being possessed.
+ */
+const WATCH_YAW_LIMIT = 1.15;
+const WATCH_PITCH_LIMIT = 0.5;
+
+/** How quickly a head settles onto whatever it is looking at. */
+const WATCH_EASE = 4;
+
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
 
@@ -174,6 +191,16 @@ export interface Gondola {
   setWheelAngle(angle: number): void;
   /** Everyone in the car looks delighted and turns to look at you. */
   rejoice(): void;
+  /**
+   * Turn the passengers to watch something out of the window.
+   *
+   * `point` is in **car space** — the same coordinates `space.ts`'s `fromAngle`
+   * lays the show out in. `null` puts their noses back to the glass.
+   *
+   * A wave still wins: being looked *at* by your own pet is the point of
+   * bringing it, and a passing planet does not get to interrupt that.
+   */
+  watch(point: Vector3 | null): void;
   /** Warm lamp inside, off in daylight and on once you are in the dark. */
   setLampGlow(glow: number): void;
   update(dt: number, elapsed: number): void;
@@ -556,6 +583,10 @@ export function createGondola(): Gondola {
     limbs.rightArm.rotation.x = 0.25;
   }
 
+  /** What the passengers are watching, in car space. See `watch`. */
+  const watchPoint = new Vector3();
+  let watching = false;
+
   // --- the wheel above -------------------------------------------------------------
   // **The wheel's plane runs away through the window, not across it.**
   //
@@ -681,6 +712,15 @@ export function createGondola(): Gondola {
       wheelAngle = angle;
     },
 
+    watch(point: Vector3 | null): void {
+      if (!point) {
+        watching = false;
+        return;
+      }
+      watchPoint.copy(point);
+      watching = true;
+    },
+
     rejoice(): void {
       joy = 1.6;
       for (const passenger of passengers) {
@@ -742,11 +782,50 @@ export function createGondola(): Gondola {
 
         const head = passenger.creature?.head;
         if (head) {
-          // Nose to the glass, until somebody waves — then they turn and look
-          // back at you, which is the whole reason they came along.
-          const look = joy > 0 ? 0.85 : Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
-          head.rotation.y = look * (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
-          head.rotation.x = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+          // Three things a passenger can be doing with its head, in order of
+          // who gets to win:
+          //
+          //  - **somebody waved**: it turns and looks back at *you*, which is
+          //    the whole reason it came along, and nothing interrupts that;
+          //  - **something is out of the window**: it watches the alien, or
+          //    RiPika, or the turtles — see `watch`. A car full of toys staring
+          //    politely ahead while a flying saucer goes past was the tell that
+          //    they were scenery rather than passengers;
+          //  - **otherwise**: nose to the glass, with a slow idle wander.
+          let yaw: number;
+          let pitch: number;
+          if (joy > 0) {
+            yaw = 0.85 * (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
+            pitch = -0.12;
+          } else if (watching) {
+            const seat = passenger.handle.root;
+            const dx = watchPoint.x - seat.position.x;
+            const dz = watchPoint.z - seat.position.z;
+            const dy = watchPoint.y - (seat.position.y + PASSENGER_EYE_Y);
+            // Into the head's own frame: the chairs face the window, so the
+            // seat's yaw has to come back out before this becomes a neck.
+            yaw = clamp(
+              angleDelta(seat.rotation.y, Math.atan2(dx, dz)),
+              -WATCH_YAW_LIMIT,
+              WATCH_YAW_LIMIT,
+            );
+            pitch = clamp(
+              Math.atan2(dy, Math.hypot(dx, dz)),
+              -WATCH_PITCH_LIMIT,
+              WATCH_PITCH_LIMIT,
+            );
+          } else {
+            yaw =
+              Math.sin(elapsed * 0.5 + passenger.phase) *
+              0.16 *
+              (passenger.handle.root.rotation.y > Math.PI ? -1 : 1);
+            pitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+          }
+          // Eased, never snapped: a head that arrives instantly reads as a
+          // glitch, and these are meant to be *noticing* things.
+          const ease = Math.min(1, dt * WATCH_EASE);
+          head.rotation.y += (yaw - head.rotation.y) * ease;
+          head.rotation.x += (pitch - head.rotation.x) * ease;
         }
         if (joy <= 0 && passenger.expression !== 'neutral') {
           passenger.expression = 'neutral';
