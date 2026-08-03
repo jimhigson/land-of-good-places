@@ -272,10 +272,15 @@ function run(coverage: Coverage): string {
 
   // The **real** ride, now that it is a world ride rather than a mini-game:
   // still the whole thing, still not a model of one. What it needs from the
-  // park is narrow enough to stub — a collision world, and three closures it
-  // only calls to raise the sky, hide the park's own ferris wheel and hide the
-  // park itself, none of which the look-around can see.
-  const game = new FerrisWheelRide(new CollisionWorld(), () => {}, () => {}, () => {});
+  // park is narrow enough to stub — a collision world, and four hooks it only
+  // calls to raise the sky and hide things, none of which the look-around can
+  // see.
+  const game = new FerrisWheelRide(new CollisionWorld(), {
+    setSpaceFactor: () => {},
+    setParkWheelVisible: () => {},
+    setParkVisible: () => {},
+    setElsewhereVisible: () => {},
+  });
   game.touch = true;
   // Only three methods of `Player` are ever reached from a ride, and none of
   // them move the camera. Building a real one would drag the whole character

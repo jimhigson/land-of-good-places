@@ -150,12 +150,12 @@ export class World implements GameSystem {
     // past night and into space). Both are handed in as narrow closures rather
     // than whole objects: this ride needs to raise a sky and hide a wheel, and
     // nothing else.
-    this.ferrisWheel = new FerrisWheelRide(
-      this.collision,
-      (value) => this.dayNight.setSpaceFactor(value),
-      (visible) => this.anchorPlots.setFerrisWheelVisible(visible),
-      (visible) => this.setParkVisible(visible),
-    );
+    this.ferrisWheel = new FerrisWheelRide(this.collision, {
+      setSpaceFactor: (value) => this.dayNight.setSpaceFactor(value),
+      setParkWheelVisible: (visible) => this.anchorPlots.setFerrisWheelVisible(visible),
+      setParkVisible: (visible) => this.setParkVisible(visible),
+      setElsewhereVisible: (visible) => this.setElsewhereVisible(visible),
+    });
 
     // The face-painting stall (additive): built here, before the NPCs, because
     // it registers four walls with `this.collision` and `NpcSystem` must be
@@ -199,10 +199,6 @@ export class World implements GameSystem {
       this.treeLights.group,
       this.fireflies.group,
       this.anchorPlots.group,
-      // The building is bigger on the inside: its interior is its own place,
-      // six hundred metres from the park rather than inside the plot the facade
-      // stands on, so it joins the scene on its own rather than through a plot.
-      this.building.interiorRoot,
       this.npcs.group,
       this.stalls.group,
       this.facePaintStall.group,
@@ -210,7 +206,29 @@ export class World implements GameSystem {
       this.coaster.group,
       this.railRace.group,
     ];
-    scene.add(...this.parkGroups, this.ferrisWheel.group);
+    // The building is bigger on the inside: its interior is its own place, six
+    // hundred metres from the park rather than inside the plot the facade
+    // stands on. Deliberately **not** one of the park groups above — it is not
+    // the park, and {@link setElsewhereVisible} is what hides it.
+    scene.add(...this.parkGroups, this.building.interiorRoot, this.ferrisWheel.group);
+  }
+
+  /**
+   * Shows or hides the places that are not the park.
+   *
+   * Today that is the castle interior, which sits at (600, 600) — 848 m out on
+   * a 45 degree bearing — because it is bigger on the inside and has to live
+   * somewhere. Nothing ever saw it from the park, for one accidental reason:
+   * fog closed long before it. The ferris wheel pushes fog out past everything
+   * so a child can look down at the park from three hundred metres, and the
+   * castle's insides duly appeared, floating in the middle distance, when Jim
+   * turned about 135 degrees.
+   *
+   * So the ride hides it outright for the whole climb. Safe by construction:
+   * you cannot board a ferris wheel from indoors.
+   */
+  setElsewhereVisible(visible: boolean): void {
+    this.building.interiorRoot.visible = visible;
   }
 
   /**

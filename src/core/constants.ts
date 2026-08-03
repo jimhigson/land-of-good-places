@@ -358,6 +358,10 @@ export const SHADOW_AREA = 26;
  * exactly what the first attempt did. `DayNight` enables it on all four of its
  * lights for that reason; a light that ever needs to reach a viewmodel must do
  * the same.
+ *
+ * Because the lights are on both layers, a viewmodel object moves **onto** this
+ * layer rather than adding it: left on layer 0 as well it is drawn twice a
+ * frame, once in the world pass and again over the top of itself.
  */
 export const VIEWMODEL_LAYER = 1;
 
