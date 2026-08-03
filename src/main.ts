@@ -161,6 +161,21 @@ function parseDebugView(pathname: string, search: string): DebugViewParams | nul
   return view;
 }
 
+/**
+ * Makes sure a ride deep link has somebody to ride with.
+ *
+ * `/ferris` boards on the first frame, and the gondola seats whatever is
+ * paradeable and not stowed at the instant it is built — so a continued
+ * profile whose pets are all in the backpack arrives in an empty car, and
+ * "your parade rides with you" is the half of that ride a developer typing the
+ * URL most often wants to see. Does nothing at all if anything is already out,
+ * so it can never overrule a child who put her pets away on purpose.
+ */
+function grantRideCompanion(): void {
+  const pet = defaultCharacterChoice().pet;
+  if (pet) gameStore.ensureSomethingToParade(pet);
+}
+
 /** "0.6" -> 0.6, clamped to 0..1. Anything else is treated as absent. */
 function parseUnitFraction(text: string | null): number | undefined {
   if (!text) return undefined;
@@ -205,6 +220,7 @@ function continueGame(
 ): void {
   gameStore.hydrate(save);
   saveFlags.hydrate(save.flags);
+  if (boardStallId) grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
   const options: GameOptions = save.place ? { startPlace: save.place } : {};
   launchGame(canvas, uiRoot, splash, options, boardStallId, debugView);
@@ -234,6 +250,10 @@ function startFresh(
 ): void {
   clearSave();
   if (boardStallId || debugView) {
+    // `defaultCharacterChoice` includes the default pet and
+    // `completeCharacterCreation` grants it unstowed, so a brand-new profile
+    // already has something to ride with. The belt-and-braces call is for the
+    // *continued* profile above, which may have none.
     gameStore.completeCharacterCreation(defaultCharacterChoice());
     saveFlags.markCharacterCreated();
     launchGame(canvas, uiRoot, splash, {}, boardStallId, debugView);

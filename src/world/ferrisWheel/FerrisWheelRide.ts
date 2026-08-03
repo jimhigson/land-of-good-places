@@ -290,7 +290,16 @@ export class FerrisWheelRide implements GameSystem {
     // can draw it again on top of the finished frame — see `drawsCarInFront`.
     // `enable`, not `set`: it still has to be drawn in the ordinary world pass
     // too, or it would vanish from anything that is not that second pass.
-    this.gondola.root.traverse((object) => object.layers.enable(VIEWMODEL_LAYER));
+    //
+    // **Everything inside the car has to come too**, the pets in their chairs
+    // most of all: the second pass clears the depth buffer, so anything left
+    // off this layer is painted over by the car's own floor and seats and
+    // simply disappears. Done after the whole car exists, and skipping the
+    // camera, which is parented to the seat by `mountOn` above and whose
+    // `layers` mean something quite different — what it can *see*.
+    this.gondola.root.traverse((object) => {
+      if (object !== this.rideView?.camera) object.layers.enable(VIEWMODEL_LAYER);
+    });
   }
 
   /** Throws the ride away again. The park keeps nothing but the wheel. */
