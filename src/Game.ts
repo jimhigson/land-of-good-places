@@ -698,11 +698,17 @@ export class Game {
    * (`render()` below picks it up automatically) rather than inventing a
    * second way to swap what's on screen.
    */
-  enterDebugView(position: Vector3, lookAt: Vector3, timeOfDay?: number): void {
+  enterDebugView(position: Vector3, lookAt: Vector3, timeOfDay?: number, space?: number): void {
     const camera = new PerspectiveCamera(50, window.innerWidth / Math.max(1, window.innerHeight), 0.1, 500);
     camera.position.copy(position);
     camera.lookAt(lookAt);
     this.cameraOverride = camera;
+    // `space=0..1` takes the sky past night towards space without needing a
+    // ferris wheel to climb — the only way to look at that blend, and to get
+    // the family's verdict on it, before the ride that drives it exists. Not
+    // paired with `gameStore.setPaused` the way `timeOfDay` is: this is a look
+    // override, not a clock, and freezing the park is `timeOfDay`'s business.
+    if (space !== undefined) this.world.dayNight.setSpaceFactor(space);
     if (timeOfDay !== undefined) {
       this.world.dayNight.setTimeOfDay(timeOfDay);
       // Freezing the *whole park* via `gameStore`, not `dayNight.setPaused`

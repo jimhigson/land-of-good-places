@@ -119,6 +119,8 @@ interface DebugViewParams {
   readonly position: Vector3;
   readonly lookAt: Vector3;
   readonly timeOfDay?: number;
+  /** 0..1 towards space — see `DayNight.setSpaceFactor`. */
+  readonly space?: number;
 }
 
 /**
@@ -144,7 +146,27 @@ function parseDebugView(pathname: string, search: string): DebugViewParams | nul
       ? position.clone().add(direction.normalize())
       : new Vector3(0, 0, 0);
   const timeOfDay = parseClockFraction(params.get('timeOfDay'));
-  return timeOfDay === undefined ? { position, lookAt } : { position, lookAt, timeOfDay };
+  const space = parseUnitFraction(params.get('space'));
+  // Assigned rather than spread, so an absent param stays *absent* — under
+  // `exactOptionalPropertyTypes` an optional property may be missing but never
+  // explicitly `undefined`.
+  const view: {
+    position: Vector3;
+    lookAt: Vector3;
+    timeOfDay?: number;
+    space?: number;
+  } = { position, lookAt };
+  if (timeOfDay !== undefined) view.timeOfDay = timeOfDay;
+  if (space !== undefined) view.space = space;
+  return view;
+}
+
+/** "0.6" -> 0.6, clamped to 0..1. Anything else is treated as absent. */
+function parseUnitFraction(text: string | null): number | undefined {
+  if (!text) return undefined;
+  const value = Number(text);
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
 }
 
 /** "x,y,z" -> a Vector3, or null if missing/malformed — never throws on a hand-typed URL. */
@@ -286,7 +308,12 @@ function launchGame(
   }
   if (debugView) {
     game.whatsNew.close();
-    game.enterDebugView(debugView.position, debugView.lookAt, debugView.timeOfDay);
+    game.enterDebugView(
+      debugView.position,
+      debugView.lookAt,
+      debugView.timeOfDay,
+      debugView.space,
+    );
   }
 
   // Unmissable red "DEV" watermark — never present in a production build.

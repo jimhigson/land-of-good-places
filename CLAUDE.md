@@ -107,7 +107,7 @@ works for **both** kinds of ride: a world ride that `Game.ts` wired into
 **`/view` — a debug camera, for checking rendering without playing the game:**
 
 ```
-/view?camPos=x,y,z&camDir=x,y,z&timeOfDay=HH:MM
+/view?camPos=x,y,z&camDir=x,y,z&timeOfDay=HH:MM&space=0..1
 ```
 
 Drops a free `PerspectiveCamera` at `camPos` looking along `camDir` (all
@@ -122,10 +122,17 @@ everything else keeps moving underneath it.
 - Skips the welcome-back prompt and character creation the same way a ride
   deep link does (works on a save-less profile too) — see `parseDebugView` in
   `main.ts`, `Game.ts`'s `enterDebugView`.
-- All three params are optional. `camPos` defaults to a wide establishing
+- All four params are optional. `camPos` defaults to a wide establishing
   shot; `camDir` defaults to looking back at the origin from wherever `camPos`
   is (so `/view` with no params at all still points at the park, not empty
   sky); omitting `timeOfDay` leaves the clock running normally.
+- `space=0..1` takes the sky **past night, towards space** —
+  `DayNight.setSpaceFactor`, the blend the ferris wheel's climb drives. At 1
+  the sky is flat space indigo whatever the clock says, the stars are full
+  out, the sun and moon discs are gone and the park lights itself up below
+  you. It is here so the look can be judged (and shown to the family) without
+  a ride to climb. Unlike `timeOfDay` it does **not** freeze the park: it is a
+  look override, not a clock.
 - This is a URL a developer types, never a button a child presses — same
   spirit as `RIDE_DEEP_LINKS`, and it works against a production build too
   (not gated to dev), so it doubles as a way to inspect exactly what's live at
