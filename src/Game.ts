@@ -11,7 +11,7 @@ import {
   PLAYER_RADIUS,
 } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
-import { FoliageFade, Sky, TreeClimbing, World } from './world';
+import { FoliageFade, Sky, TreeClimbing, World, skyViewFor } from './world';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { setInteractPress, type InteractZone } from './world/interact';
@@ -851,6 +851,13 @@ export class Game {
       this.camera.skyAnchor.y,
       this.camera.viewHalfHeight,
     );
+    // And which camera is about to draw it, which is a different question:
+    // parallax above is about where she is *standing* (and is deliberately fed
+    // from the isometric rig even mid-ride), this is about where the view is
+    // *pointing*. The park's own rig cannot turn, so this collapses to nothing
+    // in ordinary play; a ride's first-person camera turns as she turns her
+    // head, and without this the whole sky turned with it. See `Sky.setView`.
+    this.sky.setView(skyViewFor(this.cameraOverride, this.camera.forward));
     this.world.update(this.frameContext);
 
     for (const system of this.systems) system.update(this.frameContext);

@@ -300,7 +300,10 @@ export class DayNight implements GameSystem {
     this.ambientLight = new HemisphereLight(PALETTE.ambientDay, PALETTE.grass, 1.1);
     scene.add(this.ambientLight);
 
-    this.applyLook(this.time, new Vector3(0, 0, -1));
+    // One look applied before the first frame, so nothing is ever drawn
+    // against an unwritten sky. `Sky`'s own view starts level and unturned,
+    // which is exactly right for a park that has not been ridden yet.
+    this.applyLook(this.time);
   }
 
   /** 0 in broad daylight, 1 in the middle of the night. */
@@ -384,7 +387,7 @@ export class DayNight implements GameSystem {
     this.ambientLight.visible = !this.indoors;
 
     if (!this.indoors) {
-      this.applyLook(this.time, context.cameraForward);
+      this.applyLook(this.time);
       this.followPlayer(context.playerPosition);
     } else {
       // Fog is the one thing in this method that is *not* a light, so it does
@@ -418,7 +421,15 @@ export class DayNight implements GameSystem {
     this.keyLight.updateMatrixWorld();
   }
 
-  private applyLook(time: number, cameraForward: Readonly<Vector3>): void {
+  /**
+   * No longer takes the camera's forward vector: where the sun and moon land
+   * on screen is now `Sky`'s to answer, because the star field has to be
+   * answered the same way (`Sky.setView`). `FrameContext.cameraForward` stays
+   * exactly what it was — the *isometric* rig's ground-plane forward, which is
+   * what `Fireflies` and `TreeLights` billboard against — and is deliberately
+   * not repointed at the ride camera, which would tip both of them over.
+   */
+  private applyLook(time: number): void {
     // --- sun position ----------------------------------------------------
     // Sunrise at t=0.25 in the east (+X), noon overhead, sunset in the west.
     // The arc leans north so midday shadows fall towards the camera and the
@@ -450,28 +461,41 @@ export class DayNight implements GameSystem {
     (uniforms.uHorizonStrength as { value: number }).value = look.horizonStrength;
     (uniforms.uStarStrength as { value: number }).value = smoothstep(0.35, 0.85, this.nightFactorValue);
 
-    // --- project sun and moon into screen space ---------------------------
-    // The camera is orthographic, so there is no true projection for something
-    // at infinity. Instead the sun's compass bearing relative to the camera is
-    // mapped straight onto the screen's x axis, and its altitude onto y. It is
-    // a cheat, but it tracks convincingly as the view rotates.
-    const cameraAzimuth = Math.atan2(cameraForward.x, cameraForward.z);
+    // --- place sun and moon on screen ------------------------------------
+    // `Sky` owns the mapping from "a bearing and an altitude" to "a spot on
+    // the frame", because the star field has to use the same one — see
+    // `Sky.setView`. Under the park's orthographic rig it is the same cheat it
+    // always was (there is no true projection of something at infinity through
+    // a parallel projection); under a ride's perspective camera it is the
+    // camera's real field of view, and both discs then track a turning head.
     const sunAzimuth = Math.atan2(this.sunDirection.x, this.sunDirection.z);
-    const relative = angleDelta(cameraAzimuth, sunAzimuth);
+    const perspective = this.sky.viewIsPerspective;
 
     const sunPosition = (uniforms.uSunPosition as { value: Vector2 }).value;
-    sunPosition.set(relative / (Math.PI / 3), -0.4 + (altitude / (Math.PI / 2)) * 1.55);
+    this.sky.directionToScreen(sunAzimuth, altitude, sunPosition);
     (uniforms.uSunColour as { value: Color }).value.setHex(
       this.sunDirection.y > 0 ? look.sun : PALETTE.sunSet,
     );
+    // Below the horizon it fades out, always. The *bearing* fade is the
+    // orthographic cheat's own safety rail: with no field of view, a disc more
+    // than about 83° off axis has nowhere sensible to be drawn and would wrap
+    // across the frame. A real projection has no such problem — a disc behind
+    // you simply lands far outside the quad and is not drawn, while its bloom
+    // keeps contributing the faint off-frame glow that is actually correct.
+    const sunBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, sunAzimuth)));
     (uniforms.uSunVisible as { value: number }).value =
-      smoothstep(1.45, 0.85, Math.abs(relative)) * smoothstep(-0.14, 0.05, this.sunDirection.y);
+      sunBearingFade * smoothstep(-0.14, 0.05, this.sunDirection.y);
 
-    const moonRelative = angleDelta(cameraAzimuth, sunAzimuth + Math.PI);
+    const moonAzimuth = sunAzimuth + Math.PI;
     const moonPosition = (uniforms.uMoonPosition as { value: Vector2 }).value;
-    moonPosition.set(moonRelative / (Math.PI / 3), -0.4 + (-altitude / (Math.PI / 2)) * 1.55);
+    this.sky.directionToScreen(moonAzimuth, -altitude, moonPosition);
+    const moonBearingFade = perspective
+      ? 1
+      : smoothstep(1.45, 0.85, Math.abs(angleDelta(this.sky.viewYaw, moonAzimuth)));
     (uniforms.uMoonVisible as { value: number }).value =
-      smoothstep(1.45, 0.85, Math.abs(moonRelative)) * smoothstep(0.02, 0.2, -this.sunDirection.y);
+      moonBearingFade * smoothstep(0.02, 0.2, -this.sunDirection.y);
 
     // --- lights ----------------------------------------------------------
     // The sun and the moon cross-fade through the horizon, in **mirrored**

@@ -1,5 +1,5 @@
 export { World } from './World';
-export { Sky } from './Sky';
+export { Sky, skyViewFor, type SkyView } from './Sky';
 export { DayNight } from './DayNight';
 export { CollisionWorld } from './Collision';
 export { AnchorPlots } from './AnchorPlots';
