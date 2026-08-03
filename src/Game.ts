@@ -511,9 +511,6 @@ export class Game {
           // Appends its own layer; the X above is a sibling and survives.
           this.ferrisHud = createRideHud(this.ferrisHudHost);
           break;
-        case 'caption':
-          this.ferrisHud?.setCaption(moment.text);
-          break;
         case 'shout':
           this.ferrisHud?.shout(moment.text, moment.seconds);
           break;

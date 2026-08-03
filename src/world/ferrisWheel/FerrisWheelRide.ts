@@ -27,7 +27,7 @@ import { createSparks, type Sparks } from '../../minigames/ferrisWheel/sparks';
  * **The Space Ferris Wheel, riding in the real park.**
  *
  * It used to be a curtain mini-game: its own `Scene`, its own lights, and a
- * forty-metre toy diorama of the park (`minigames/ferrisWheel/below.ts`) that
+ * forty-metre toy diorama of the park (`below.ts`, deleted with it) that
  * fell away beneath you while the real park sat frozen behind the curtain. That
  * was the right way to build it first, and it is the wrong way to keep it.
  * Jim's brief, 3 August 2026: **the wheel should use the normal park as its
@@ -153,7 +153,6 @@ interface Cue {
 /** What the ride wants said on screen. `Game` owns the DOM; this owns the words. */
 export type FerrisMoment =
   | { readonly kind: 'start' }
-  | { readonly kind: 'caption'; readonly text: string }
   | { readonly kind: 'shout'; readonly text: string; readonly seconds?: number }
   | { readonly kind: 'stick'; readonly stick: RideStick | null }
   | { readonly kind: 'card'; readonly title: string; readonly line: string; readonly hint: string }
@@ -390,7 +389,6 @@ export class FerrisWheelRide implements GameSystem {
 
     this.buildCues();
     this.onMoment?.({ kind: 'start' });
-    this.onMoment?.({ kind: 'caption', text: 'all aboard!' });
     this.onMoment?.({
       kind: 'shout',
       text:
@@ -461,7 +459,6 @@ export class FerrisWheelRide implements GameSystem {
     this.aimCamera(dt);
 
     this.fireCues();
-    this.onMoment?.({ kind: 'caption', text: captionFor(this.clock) });
 
     if (this.clock >= RIDE_END && this.cardTime < 0) this.showCard();
 
@@ -785,14 +782,6 @@ function window01(clock: number, from: number, to: number): number {
   return clamp01((clock - from) / 3);
 }
 
-function captionFor(clock: number): string {
-  if (clock < BOARD_END) return 'all aboard!';
-  if (clock < 20) return 'up we go!';
-  if (clock < CLIMB_END) return 'through the clouds…';
-  if (clock < SPACE_END) return 'SPACE!';
-  if (clock < DESCEND_END) return 'home we go…';
-  return 'back in the park!';
-}
 
 const GREETING: Record<FriendId, string> = {
   alien: 'The alien waves back!',

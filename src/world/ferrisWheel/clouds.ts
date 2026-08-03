@@ -7,7 +7,7 @@ import { disposeTree, toonMaterial } from '../../art/style/materials';
  * The cloud band the ferris wheel climbs through, at a real height over the
  * real park.
  *
- * Lifted from `minigames/ferrisWheel/below.ts`, where the same clouds hung over
+ * Lifted from the retired `below.ts` diorama, where the same clouds hung over
  * a forty-metre diorama and were slid downwards to fake a climb. Here nothing is
  * faked: the gondola genuinely rises, and these genuinely sit at
  * {@link CLOUD_BASE} metres over the wheel, so a child flies through them.

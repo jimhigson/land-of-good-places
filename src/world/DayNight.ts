@@ -189,7 +189,7 @@ const SKY_KEYS: readonly SkyKey[] = [
  * {@link SkyKey}, so "space" is just a key the clock never reaches and a
  * {@link DayNight.setSpaceFactor} that blends towards it.
  *
- * The colour is not invented here. `minigames/ferrisWheel/below.ts`'s own climb
+ * The colour is not invented here. the retired `below.ts` diorama's own climb
  * table ends on `PALETTE.skyNightTop`, which is the space the family has
  * already seen and approved — so that is what this is, flat: **no gradient and
  * no horizon band**, because from up there the sky is the same colour all the
