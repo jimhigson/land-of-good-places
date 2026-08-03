@@ -110,30 +110,30 @@ const SPOKES = 12;
 const PASSENGER_EYE_Y = 1.1;
 
 /**
- * How a passenger turns to look at something behind it.
+ * How a passenger turns to look at something.
  *
- * **The neck goes first and the body follows it round**, which is what a person
- * in a seat actually does and is the whole reason this is two numbers rather
- * than one. The first attempt clamped the neck at 66 degrees and left the body
- * alone, so a saucer arriving over the child's shoulder — where half the show
- * deliberately happens — barely moved anybody. Widening the neck instead would
- * have bought a head rotating most of the way round a body that never moved,
- * which is a horror film rather than a fairground ride.
+ * **The whole toy turns, not its neck.** Jim's call, and it is the right one:
+ * these are squashed-sphere toys, the face comes round with the body, and a
+ * separate head yaw was a second formula tracking the first for nothing
+ * visible. It went through two wrong shapes first — a neck clamped so tight
+ * that anything over a shoulder barely moved anybody, then a neck-plus-body
+ * split with three constants and two ease rates to keep in step. One rotation,
+ * one number.
  *
- * So: the head takes up to {@link HEAD_COMFORT} on its own, and everything
- * beyond that turns the passenger in its chair, up to {@link BODY_YAW_LIMIT} —
- * nearly the whole way round, because these are toys in tub chairs and there is
- * glass on every side to look through. The body eases more slowly than the
- * head, so the look lands first and the shoulders come after it.
+ * There is no clamp either. `angleDelta` already turns whichever way is
+ * nearer, so a passenger takes the short way round to anything at all — and
+ * there is no direction it should refuse, since half this show deliberately
+ * happens behind you and the car is glass on every side.
+ *
+ * **Pitch stays on the head**, and only pitch. A seated toy tipped backwards
+ * to look up at the Moon reads as one that has fallen over; a head that looks
+ * up reads as one that is looking up. That is a genuinely different axis
+ * rather than a duplicate of this one.
  */
-const HEAD_COMFORT = 0.7;
-const NECK_LIMIT = 0.95;
-const BODY_YAW_LIMIT = 2.5;
 const WATCH_PITCH_LIMIT = 0.5;
 
-/** How quickly a head settles onto whatever it is looking at, and a body after it. */
-const WATCH_EASE = 4;
-const BODY_EASE = 2.2;
+/** How quickly a passenger comes round onto whatever it is looking at. */
+const TURN_EASE = 2.6;
 
 /** How far below its rim point a neighbouring car's middle hangs. */
 const NEIGHBOUR_HANG = 1.7;
@@ -800,46 +800,40 @@ const PLAYER_LOOK_POINT = new Vector3(GONDOLA_EYE.x, GONDOLA_EYE.y, GONDOLA_EYE.
 
         // What, if anything, this passenger is looking at — in car space.
         //
-        //  - **somebody waved**: it looks back at *you*, and nothing
-        //    interrupts that; being looked at by your own pet is the reason
-        //    you brought it along;
+        //  - **somebody waved**: it turns to *you*, and nothing interrupts
+        //    that; being looked at by your own pet is the reason you brought
+        //    it along;
         //  - **something is out of the window**: the alien, RiPika, the
         //    turtles. Half the show deliberately happens behind and beside
-        //    you, so this is often a long way round;
-        //  - **otherwise**: nose to the glass, with a slow idle wander.
+        //    you, so this is often most of the way round;
+        //  - **otherwise**: back to the glass, with a slow idle drift.
         const target = joy > 0 ? PLAYER_LOOK_POINT : watching ? watchPoint : null;
         const seat = passenger.handle.root;
         const head = passenger.creature?.head;
 
-        let bodyYaw = 0;
-        let headYaw = Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
-        let headPitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
+        let yaw = Math.sin(elapsed * 0.5 + passenger.phase) * 0.16;
+        let pitch = -0.12 + Math.sin(elapsed * 1.1 + passenger.phase) * 0.05;
 
         if (target) {
           const dx = target.x - seat.position.x;
           const dz = target.z - seat.position.z;
           const dy = target.y - (seat.position.y + PASSENGER_EYE_Y);
-          // How far round from its own chair the thing is. `angleDelta` picks
-          // the short way, so a passenger turns whichever way is nearer.
-          const total = clamp(
-            angleDelta(passenger.baseYaw, Math.atan2(dx, dz)),
-            -(HEAD_COMFORT + BODY_YAW_LIMIT),
-            HEAD_COMFORT + BODY_YAW_LIMIT,
-          );
-          // The neck takes what it comfortably can; the chair takes the rest.
-          bodyYaw = clamp(total - clamp(total, -HEAD_COMFORT, HEAD_COMFORT), -BODY_YAW_LIMIT, BODY_YAW_LIMIT);
-          headYaw = clamp(total - bodyYaw, -NECK_LIMIT, NECK_LIMIT);
-          headPitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
+          // How far round from its own chair the thing is. `angleDelta` takes
+          // the short way, so a passenger turns whichever way is nearer and
+          // there is nothing it will refuse to turn to.
+          yaw = angleDelta(passenger.baseYaw, Math.atan2(dx, dz));
+          pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -WATCH_PITCH_LIMIT, WATCH_PITCH_LIMIT);
         }
 
-        // Eased, never snapped, and the body more slowly than the head — so
-        // the look lands first and the shoulders come round after it, which is
-        // the order a person does it in.
-        seat.rotation.y += (passenger.baseYaw + bodyYaw - seat.rotation.y) * Math.min(1, dt * BODY_EASE);
+        // The whole toy comes round; only the tilt is the head's. Eased, never
+        // snapped — the difference between noticing something and snapping to
+        // it.
+        const ease = Math.min(1, dt * TURN_EASE);
+        seat.rotation.y += (passenger.baseYaw + yaw - seat.rotation.y) * ease;
         if (head) {
-          const ease = Math.min(1, dt * WATCH_EASE);
-          head.rotation.y += (headYaw - head.rotation.y) * ease;
-          head.rotation.x += (headPitch - head.rotation.x) * ease;
+          head.rotation.x += (pitch - head.rotation.x) * ease;
+          // Anything the old neck-turn left behind, unwound.
+          head.rotation.y += (0 - head.rotation.y) * ease;
         }
         if (joy <= 0 && passenger.expression !== 'neutral') {
           passenger.expression = 'neutral';
