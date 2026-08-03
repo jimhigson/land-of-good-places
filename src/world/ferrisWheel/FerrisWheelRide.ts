@@ -122,6 +122,14 @@ const CLIMB_METRES = 340;
  */
 const PARK_HIDDEN_FROM = 0.55;
 
+/**
+ * How far out a beat has to be before the passengers turn to it.
+ *
+ * Keeps them from swinging round to something that has only just started
+ * fading in, or holding on to one that is nearly gone.
+ */
+const PRESENT_ENOUGH = 0.25;
+
 /** Field of view. Wide: you are sitting inside a small box looking out of it. */
 const FOV = 62;
 
@@ -549,14 +557,20 @@ export class FerrisWheelRide implements GameSystem {
   private readonly attraction = new Vector3();
 
   private updateFriends(dt: number): void {
-    // Who is most out of the window right now. The friends' presence windows
-    // overlap, so "most present" rather than "most recent": a saucer that is
-    // still fading out does not hold every head in the car while RiPika is
-    // arriving dead ahead.
-    let bestPresence = 0;
-    const consider = (friend: SpaceFriend | null, presence: number): void => {
-      if (!friend || presence <= bestPresence) return;
-      bestPresence = presence;
+    // **Whatever arrived most recently and is still out there.**
+    //
+    // Not "whoever is most present", which is what this did first and which
+    // left every passenger staring at the flying saucer for the rest of the
+    // ride: `window01` saturates at 1 after three seconds, so once the alien
+    // was fully out it tied with everything that came after it, and a tie went
+    // to whoever got there first. The show is a sequence of arrivals — each one
+    // announced by its own cue — so the rule that matches what a child is being
+    // told is *the newest thing*, tracked until the next one is announced or it
+    // leaves.
+    let newest = -1;
+    const consider = (friend: SpaceFriend | null, presence: number, arrival: number): void => {
+      if (!friend || presence <= PRESENT_ENOUGH || arrival < newest) return;
+      newest = arrival;
       this.attraction.copy(friend.root.position);
     };
 
@@ -569,7 +583,7 @@ export class FerrisWheelRide implements GameSystem {
         .copy(fromAngle(lerp(ALIEN_ANGLE_FROM, ALIEN_ANGLE_TO, eased), lerp(30, 21, eased), 0))
         .setY(lerp(2.4, 6.2, across) + Math.sin(this.clock * 0.6) * 0.6);
       alien.update(dt, this.clock);
-      consider(alien, window01(this.clock, ALIEN_IN, ALIEN_OUT));
+      consider(alien, window01(this.clock, ALIEN_IN, ALIEN_OUT), ALIEN_IN);
     }
 
     const ripika = this.ripika;
@@ -581,14 +595,14 @@ export class FerrisWheelRide implements GameSystem {
         .copy(fromAngle(lerp(RIPIKA_ANGLE_FROM, RIPIKA_ANGLE_TO, eased), lerp(7.2, 6.6, across), 0))
         .setY(lerp(0.4, 2.6, across) + Math.sin(this.clock * 0.8 + 1.4) * 0.35);
       ripika.update(dt, this.clock);
-      consider(ripika, window01(this.clock, RIPIKA_IN, RIPIKA_OUT));
+      consider(ripika, window01(this.clock, RIPIKA_IN, RIPIKA_OUT), RIPIKA_IN);
     }
 
     const nebula = this.nebula;
     if (nebula) {
       nebula.setPresence(window01(this.clock, NEBULA_IN, NEBULA_OUT));
       nebula.update(dt, this.clock);
-      consider(nebula, window01(this.clock, NEBULA_IN, NEBULA_OUT));
+      consider(nebula, window01(this.clock, NEBULA_IN, NEBULA_OUT), NEBULA_IN);
     }
 
     const turtles = this.turtles;
@@ -600,14 +614,13 @@ export class FerrisWheelRide implements GameSystem {
         .copy(fromAngle(lerp(TURTLES_ANGLE_FROM, TURTLES_ANGLE_TO, eased), lerp(26, 17, eased), 0))
         .setY(lerp(1.1, 3.2, across) + Math.sin(this.clock * 0.5 + 2.4) * 0.4);
       turtles.update(dt, this.clock);
-      consider(turtles, window01(this.clock, TURTLES_IN, TURTLES_OUT));
+      consider(turtles, window01(this.clock, TURTLES_IN, TURTLES_OUT), TURTLES_IN);
     }
 
-    // Below about a quarter presence there is not enough of anything out there
-    // to be worth turning round for, and the car goes back to watching the
-    // window. The show's coordinates are already car-space — `fromAngle`
-    // measures from the child's own seat — so this needs no conversion.
-    this.gondola?.watch(bestPresence > 0.25 ? this.attraction : null);
+    // Nothing out there worth turning round for: back to the window. The
+    // show's coordinates are already car-space — `fromAngle` measures from the
+    // child's own seat — so this needs no conversion.
+    this.gondola?.watch(newest >= 0 ? this.attraction : null);
   }
 
   /**
