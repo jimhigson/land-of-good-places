@@ -72,6 +72,13 @@ export class TreeClimbing implements GameSystem {
   private readonly npcHideParts = new WeakMap<KidAvatar, readonly number[]>();
   /** What each part's `shown` flag was before climbing, so it restores exactly. */
   private readonly npcShownBackup = new Map<NpcCharacter, Uint8Array>();
+  /**
+   * The player-style `.visible` toggle's own bookkeeping, for a pinned kid
+   * built as a one-off `CharacterModel` rather than an instanced `KidAvatar`
+   * — see `hideNpcBody`'s doc comment for why it needs a different mechanism
+   * from the crowd's `shown` array entirely. Mirrors {@link playerHiddenParts}.
+   */
+  private readonly npcHiddenVisibleParts = new Map<NpcCharacter, Object3D[]>();
 
   constructor(
     private readonly player: Player,
@@ -328,19 +335,48 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
+  /**
+   * Hides everything but the head, whichever of the two shapes `avatar` is —
+   * see the class doc's "Body hidden, head out" section. An instanced
+   * `KidAvatar` (has `member`) goes through `member.shown`, same as always;
+   * a pinned kid's one-off `CharacterModel`-backed avatar (no `member`,
+   * real scene-graph meshes) gets exactly the player's own `.visible`
+   * toggle, because it *is* the player's own kind of model.
+   */
   private hideNpcBody(character: NpcCharacter): void {
     const { avatar } = character;
-    const parts = this.hidePartsFor(avatar);
-    const shown = avatar.member.shown;
-    this.npcShownBackup.set(character, Uint8Array.from(shown));
-    for (const index of parts) shown[index] = 0;
+    const member = avatar.member;
+    if (member) {
+      const parts = this.hidePartsFor(avatar as KidAvatar);
+      this.npcShownBackup.set(character, Uint8Array.from(member.shown));
+      for (const index of parts) member.shown[index] = 0;
+      return;
+    }
+
+    const hidden: Object3D[] = [];
+    for (const child of avatar.rig.body.children) {
+      if (child === avatar.rig.head) continue;
+      if (!child.visible) continue;
+      child.visible = false;
+      hidden.push(child);
+    }
+    this.npcHiddenVisibleParts.set(character, hidden);
   }
 
   private showNpcBody(character: NpcCharacter): void {
-    const backup = this.npcShownBackup.get(character);
-    if (!backup) return;
-    character.avatar.member.shown.set(backup);
-    this.npcShownBackup.delete(character);
+    const member = character.avatar.member;
+    if (member) {
+      const backup = this.npcShownBackup.get(character);
+      if (!backup) return;
+      member.shown.set(backup);
+      this.npcShownBackup.delete(character);
+      return;
+    }
+
+    const hidden = this.npcHiddenVisibleParts.get(character);
+    if (!hidden) return;
+    for (const child of hidden) child.visible = true;
+    this.npcHiddenVisibleParts.delete(character);
   }
 
   /** Every part index that is not the head or one of its own parts. Cached. */

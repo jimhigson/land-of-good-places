@@ -10,7 +10,7 @@ import { terrainHeight } from '../../world/terrain';
 import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
-import type { KidAvatar } from './kidCrowd';
+import type { NpcAvatar } from './npcAvatar';
 
 /**
  * A character that is not the player.
@@ -26,9 +26,13 @@ import type { KidAvatar } from './kidCrowd';
  * already running the same movement and the same collision as the local one, so
  * a remote child bumps into the same wall at the same place.
  *
- * The model is not a scene-graph object. It is a rig inside a
- * {@link KidCrowd}, so posing it means writing joint transforms and letting the
- * crowd upload the instance matrices — see `kidCrowd.ts` for why.
+ * The model is whatever {@link NpcAvatar} the caller hands in. For an ordinary
+ * background child that is a rig inside a `KidCrowd` — posing it means writing
+ * joint transforms and letting the crowd upload the instance matrices, see
+ * `kidCrowd.ts` for why — but nothing here actually depends on that: a pinned,
+ * named NPC whose look needs a hat or a pet hands in a one-off
+ * `CharacterModel`-backed avatar instead (see `NpcSystem.ts`'s
+ * `buildIndividualAvatar`), and this class poses it exactly the same way.
  */
 
 /** Comfortable child walking pace. A full run is this times `RUN_INTENT`. */
@@ -47,7 +51,7 @@ const GRAVITY = 17;
 const FALL_THRESHOLD = 0.5;
 
 export class NpcCharacter {
-  readonly avatar: KidAvatar;
+  readonly avatar: NpcAvatar;
   readonly driver: CharacterDriver;
   /** This child's name, for the floating label above their head (see NpcSystem). */
   readonly name: string;
@@ -87,7 +91,7 @@ export class NpcCharacter {
   private carriedFlag = false;
 
   constructor(
-    avatar: KidAvatar,
+    avatar: NpcAvatar,
     driver: CharacterDriver,
     private readonly collision: CollisionWorld,
     x: number,

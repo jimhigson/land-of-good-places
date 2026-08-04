@@ -16,6 +16,7 @@ import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import type { Expression } from '../../art/style/faces';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
+import type { NpcAvatar } from './npcAvatar';
 
 /**
  * The park's children, drawn as one crowd.
@@ -155,8 +156,15 @@ export interface KidRig {
   readonly rightLeg: Object3D;
 }
 
-/** One child in the crowd: a rig to pose and a face to swap. */
-export interface KidAvatar {
+/**
+ * One child in the crowd: a rig to pose and a face to swap.
+ *
+ * Structurally an {@link NpcAvatar} — see that file for why `NpcCharacter`
+ * only ever depends on the general shape, never on this instanced one — plus
+ * the one field only an instanced member needs: something for `NpcSystem` to
+ * `commit()` every frame.
+ */
+export interface KidAvatar extends NpcAvatar {
   readonly rig: KidRig;
   readonly member: CrowdMember;
   /** Resting head height, read off the prototype so a retune carries through. */
