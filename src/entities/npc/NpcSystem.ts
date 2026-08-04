@@ -3,19 +3,26 @@ import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
-import { CROWD_BACKPACK_KINDS } from '../../art/models/backpacks';
-import { CROWD_SHOE_KINDS } from '../../art/models/shoes';
+import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
+import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
 import { circleSeparation, MAX_DEPENETRATION_SPEED, type CollisionWorld } from '../../world/Collision';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { GroundSampler, Player } from '../Player';
+import { CharacterModel } from '../CharacterModel';
+import { ParadeMember } from '../parade/ParadeMember';
+import { disposeTree } from '../../art/style/materials';
+import { createHat, type HatKind } from '../../art/models/hats';
+import { shopItem } from '../../world/building/shops/catalogue';
+import { gameStore } from '../../state';
 import { NameLabel } from '../../ui/NameLabel';
 import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
+import type { NpcAvatar } from './npcAvatar';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
@@ -107,11 +114,11 @@ const PET_TRAIL = 1.15;
  * name labels, so the children needed names. No duplicates within one park:
  * `pickNames` below draws from this pool without replacement.
  *
- * `ETHAN_NAME` is reserved out of the general draw — see {@link ETHAN_INDEX}.
+ * Every {@link PINNED_KIDS} name is reserved out of the general draw — see
+ * `pickNames`.
  */
-const ETHAN_NAME = 'Ethan';
 const KID_NAMES: readonly string[] = [
-  ETHAN_NAME,
+  'Ethan',
   'Amara',
   'Bodhi',
   'Cleo',
@@ -144,12 +151,112 @@ const KID_NAMES: readonly string[] = [
 ];
 
 /**
- * Ethan's fixed spawn slot — a family request: a blonde, blue-eyed boy named
- * Ethan is always somewhere in the park, not just "usually". Fixed to an
- * index rather than picked by the seeded `rng` so he survives any reordering
- * of the random draws around him.
+ * A child whose look is pinned rather than rolled — a family request, one
+ * per name. Everything left `undefined` still rolls normally (pace, spawn
+ * spot, backpack/shoe *kind* are never pinned today), same as Ethan always
+ * worked before this became a list.
+ *
+ * `hat`/`petItemId`/a `hairStyle` outside {@link CROWD_HAIR_STYLES} all cost
+ * more than the shared instanced crowd can give a member — see
+ * `needsIndividualModel` — so a pinned kid asking for any of those is built
+ * as a one-off {@link CharacterModel} instead of an instanced `KidAvatar`.
+ * That is a real, individually-rendered character exactly like the player,
+ * not a new rendering path: it already has a working `hatAnchor`, and
+ * already drives the simulated ponytail, because `CharacterModel` always
+ * did.
  */
-const ETHAN_INDEX = 0;
+interface PinnedKidSpec {
+  readonly name: string;
+  readonly hair?: number;
+  readonly skin?: number;
+  readonly hairStyle?: HairStyle;
+  readonly outfit?: number;
+  readonly shoe?: number;
+  readonly bag?: number;
+  /** Crowd-only: which baked face variant to use. See {@link BLUE_EYE_VARIANT}. */
+  readonly eyeVariant?: number;
+  /** Individual-model-only: a literal eye colour. Defaults to `ART.kidEye`. */
+  readonly eyeColour?: number;
+  /** A hat, worn permanently — see `art/models/hats.ts`'s `HatKind`. */
+  readonly hat?: HatKind;
+  /** A shop item id (`world/building/shops/catalogue.ts`) that trails this
+   *  kid specifically, driven the same way the parade follows the player —
+   *  see `buildPinnedPet`. */
+  readonly petItemId?: string;
+}
+
+/** Family request (26 July): always a blonde, blue-eyed boy named Ethan. */
+const ETHAN: PinnedKidSpec = {
+  name: 'Ethan',
+  hair: ART.kidHairBlonde,
+  // 'Fair' (`KID_SKIN_TONES[1]`) — the game's long-standing default light
+  // tone, pinned alongside his hair and eyes (1 August).
+  skin: ART.kidSkin,
+  hairStyle: 'short',
+  eyeVariant: BLUE_EYE_VARIANT,
+};
+
+/** Eleri's own pinned look: brown hair worn long, RiPika's hat and pet, pink dress and shoes. */
+const ELERI: PinnedKidSpec = {
+  name: 'Eleri',
+  hair: PALETTE.hair,
+  hairStyle: 'long',
+  // `PALETTE.outfit` is already the game's own pink, so "pink dress" needs no
+  // colour of its own — the crowd's one garment silhouette already reads as
+  // a dress. `ART.heartPink` for the shoes rather than the same pink twice.
+  outfit: PALETTE.outfit,
+  shoe: ART.heartPink,
+  hat: 'ripikaHat',
+  petItemId: 'toy.ripika',
+  // No eye override: the crowd's own default variant (0) already bakes
+  // `ART.kidEye`, a warm violet — exactly what nobody asked her to have but
+  // everyone else in the park already wears by default.
+};
+
+/** Rumi's own pinned look: purple hair in a simulated swishy ponytail, all black, purple eyes. */
+const RUMI: PinnedKidSpec = {
+  name: 'Rumi',
+  hair: ART.miniLilac,
+  hairStyle: 'longPonytail',
+  // 'Honey' (`KID_SKIN_TONES[2]`).
+  skin: 0xf0b787,
+  // `PALETTE.ink` rather than a literal black — ART_DIRECTION's rule of
+  // thumb is "never pure black" (see `artPalette.ts`'s own header), and ink
+  // is the darkest tone already in the palette.
+  outfit: PALETTE.ink,
+  shoe: PALETTE.ink,
+  bag: PALETTE.ink,
+  // No eye override, same reasoning as Eleri's: the default bake is already
+  // violet/purple (`ART.kidEye`).
+};
+
+/**
+ * The whole pinned cast. Order does not matter — see `pinnedSlots` below,
+ * which assigns fixed slot indices at construction time, not here — but
+ * names must never repeat, including against {@link KID_NAMES}'s general
+ * pool: `pickNames` filters every one of these out before drawing.
+ */
+const PINNED_KIDS: readonly PinnedKidSpec[] = [ETHAN, ELERI, RUMI];
+
+/**
+ * Whether a pinned kid's look exceeds what the shared instanced crowd can
+ * give one member: a hat (no crowd member has an attachable hatAnchor — see
+ * `npcAvatar.ts`), a pet of their own (the crowd's pet blob is one shared
+ * shape for everyone), or the floor-length simulated ponytail (deliberately
+ * excluded from `CROWD_HAIR_STYLES` — see `art/models/hair.ts` — because
+ * simulating it for the whole crowd would cost every background child eight
+ * more draw calls and a physics chain nobody would ever look at).
+ *
+ * `true` means this one is built as a one-off {@link CharacterModel} instead
+ * — see `NpcSystem.buildIndividualAvatar`.
+ */
+function needsIndividualModel(pinned: PinnedKidSpec): boolean {
+  return (
+    pinned.hat != null ||
+    pinned.petItemId != null ||
+    (pinned.hairStyle != null && !CROWD_HAIR_STYLES.includes(pinned.hairStyle))
+  );
+}
 
 /** Softer and quieter than the player's pink label, so Eleri still stands out. */
 const NPC_LABEL_ACCENT = PALETTE.markerSky;
@@ -235,6 +342,11 @@ export class NpcSystem implements GameSystem {
   private readonly graph: PoiGraph;
   private readonly characters: NpcCharacter[] = [];
   private readonly petList: Pet[] = [];
+  /** One-off `CharacterModel`s built by `buildIndividualAvatar` — disposed by hand in `dispose()`,
+   *  since they are real scene objects rather than members of `this.kids`' instanced batch. */
+  private readonly individualModels: CharacterModel[] = [];
+  /** A named pet trailing a specific pinned kid — see `buildPinnedPet`/`updatePinnedPets`. */
+  private readonly pinnedPets: { readonly member: ParadeMember; readonly owner: NpcCharacter }[] = [];
   private readonly labels: NameLabel[] = [];
   /** Parallel to `characters` — kept as the concrete class (rather than the
    *  narrower `CharacterDriver`) purely to read `chatBubbleText` back out; see
@@ -286,7 +398,26 @@ export class NpcSystem implements GameSystem {
     // And another for the shoes, same reasoning, own salt so it cannot
     // collide with the bags' (90210) or the names' (424242).
     const shoeRng = new Rng(NPC_SEED + 24680);
-    const otherNames = pickNames(nameRng, NPC_COUNT - 1);
+
+    // If the player named themselves after one of the pinned cast, that one
+    // is not in the park — a family request (Jim, 4 August): "if the player
+    // makes their name any of the canned names, that NPC isn't in the game."
+    // The slot itself is not dropped, so the park still has `NPC_COUNT`
+    // children: it just rolls a normal random kid instead, same as if this
+    // pinned kid had never existed. Read once, at construction, rather than
+    // subscribed to — a save's cast is fixed the moment the park is built,
+    // same as everyone else's colours and hairstyle.
+    const playerName = gameStore.get().player.name;
+    const activePinned = PINNED_KIDS.filter((pinned) => pinned.name !== playerName);
+    // Fixed slot indices, assigned in list order — deterministic for a given
+    // player name, which is all "fixed" needs to mean here. A pinned kid
+    // dropping out for a name collision shifts the ones after it down by one
+    // rather than leaving a gap, so the park never spawns fewer than
+    // `NPC_COUNT` children over a collision.
+    const pinnedSlots = new Map<number, PinnedKidSpec>();
+    activePinned.forEach((pinned, index) => pinnedSlots.set(index, pinned));
+
+    const otherNames = pickNames(nameRng, NPC_COUNT - activePinned.length);
     let nameCursor = 0;
 
     this.graph = new PoiGraph(collision);
@@ -300,51 +431,55 @@ export class NpcSystem implements GameSystem {
       const node = spawnNodes[Math.floor((i / NPC_COUNT) * spawnNodes.length)];
       if (!node) break;
 
-      // Ethan is a family request: always present, always a blonde,
-      // blue-eyed boy. Every `rng` call below still fires in the same order
-      // for every slot — only the results for his slot are overridden — so
-      // moving him would not reshuffle anyone else's look.
-      const isEthan = i === ETHAN_INDEX;
-      const name = isEthan ? ETHAN_NAME : (otherNames[nameCursor++] ?? ETHAN_NAME);
+      // A pinned kid (Ethan, say) is a family request: always present,
+      // always looking the way they were asked to. Every `rng` call below
+      // still fires in the same order for every slot regardless — only the
+      // results for a pinned slot are overridden — so adding or removing one
+      // never reshuffles anyone else's look.
+      const pinned = pinnedSlots.get(i);
+      const name = pinned ? pinned.name : (otherNames[nameCursor++] ?? 'Friend');
 
       const rolledColours = pickColours(rng);
-      // Ethan's skin tone is pinned alongside his hair and eyes — the family
-      // asked for light skin tone specifically, so this rides the same
-      // override rather than the usual `KID_SKIN_TONES` roll. `ART.kidSkin`
-      // is the 'Fair' swatch (`KID_SKIN_TONES[1]`), the game's long-standing
-      // default light tone.
-      const colours = isEthan
-        ? { ...rolledColours, hair: ART.kidHairBlonde, skin: ART.kidSkin }
+      const colours: KidColours = pinned
+        ? {
+            skin: pinned.skin ?? rolledColours.skin,
+            hair: pinned.hair ?? rolledColours.hair,
+            outfit: pinned.outfit ?? rolledColours.outfit,
+            shoe: pinned.shoe ?? rolledColours.shoe,
+            bag: pinned.bag ?? rolledColours.bag,
+          }
         : rolledColours;
 
       // One `next()` off the stream, exactly as the `chance(0.35)` short-hair
       // coin flip this replaced took — so widening the crowd from two
       // hairstyles to eight changes what each child *wears* without reshuffling
-      // any of their other rolls, and Ethan stays where he is.
+      // any of their other rolls, and a pinned kid stays where they are.
       const styleRoll = CROWD_HAIR_STYLES[rng.int(0, CROWD_HAIR_STYLES.length - 1)] ?? 'bunches';
-      const hairStyle: HairStyle = isEthan ? 'short' : styleRoll;
+      const hairStyle: HairStyle = pinned?.hairStyle ?? styleRoll;
 
-      // Ethan's blue eyes are pinned to their own variant; everyone else
-      // rolls across the crowd's whole eye-colour range (see `kidCrowd.ts`'s
-      // `EYE_VARIANT_COUNT`), same spirit as the skin/hair/outfit rolls above.
-      const eyeVariant = isEthan ? BLUE_EYE_VARIANT : rng.int(0, EYE_VARIANT_COUNT - 1);
+      // A pinned kid's eyes, if given, are a crowd face *variant* — everyone
+      // else rolls across the crowd's whole eye-colour range (see
+      // `kidCrowd.ts`'s `EYE_VARIANT_COUNT`), same spirit as the skin/hair/
+      // outfit rolls above. Only read for a crowd-rendered pinned kid — an
+      // individually-modelled one uses `pinned.eyeColour` directly instead,
+      // see `buildIndividualAvatar`.
+      const eyeVariant = pinned?.eyeVariant ?? rng.int(0, EYE_VARIANT_COUNT - 1);
 
       const backpack =
         CROWD_BACKPACK_KINDS[bagRng.int(0, CROWD_BACKPACK_KINDS.length - 1)] ?? 'satchel';
       const shoes = CROWD_SHOE_KINDS[shoeRng.int(0, CROWD_SHOE_KINDS.length - 1)] ?? 'plain';
+      const scale = rng.range(0.86, 1.04);
 
-      const avatar = this.kids.spawn(
-        colours,
-        hairStyle,
-        rng.range(0.86, 1.04),
-        eyeVariant,
-        backpack,
-        shoes,
-      );
+      const avatar: NpcAvatar =
+        pinned && needsIndividualModel(pinned)
+          ? this.buildIndividualAvatar(pinned, colours, hairStyle, scale, backpack, shoes)
+          : this.kids.spawn(colours, hairStyle, scale, eyeVariant, backpack, shoes);
       // Forces the face variant to match immediately — otherwise a
       // child whose expression never transitions away from the default
-      // 'neutral' would never call `setExpression` and Ethan would show the
-      // crowd's normal (non-blue) eyes until the first blink.
+      // 'neutral' would never call `setExpression` and a pinned kid's eyes
+      // would show the crowd's normal (un-pinned) colour until the first
+      // blink. Harmless on an individually-modelled avatar, which already
+      // baked its own eye colour in at construction.
       avatar.setExpression('neutral');
 
       const driver = new WanderDriver({
@@ -370,6 +505,22 @@ export class NpcSystem implements GameSystem {
       character.groundSampler = groundSampler;
       character.setWalkPhase(rng.range(0, TAU));
       this.characters.push(character);
+
+      if (pinned?.petItemId) {
+        const pet = this.buildPinnedPet(pinned.petItemId, pinned.name);
+        if (pet) {
+          // Drop it right on its owner rather than letting it follow in from
+          // wherever `ParadeMember`'s own construction left it — the same
+          // "no chase-in on spawn" courtesy `placeAt` gives every parade
+          // member that pops in already placed. Facing is re-derived the
+          // moment it starts moving (`ParadeMember.update` turns to face
+          // wherever it is actually heading), so `0` here is only ever seen
+          // for the first still frame.
+          pet.placeAt(character.position.x, character.position.y, character.position.z, 0);
+          this.group.add(pet.root);
+          this.pinnedPets.push({ member: pet, owner: character });
+        }
+      }
 
       const label = new NameLabel(name, NPC_LABEL_ACCENT, NPC_LABEL_SCALE);
       label.sprite.position.set(
@@ -497,14 +648,20 @@ export class NpcSystem implements GameSystem {
         FAR_DISTANCE * FAR_DISTANCE;
       if (far && (this.frame + i) % 2 !== 0) continue;
 
+      const charDt = far ? dt * 2 : dt;
       character.update(
-        far ? dt * 2 : dt,
+        charDt,
         elapsed,
         this.playerPosition,
         playerHopped,
         this.playerStationaryFor,
         playerWearingHat,
       );
+      // Only an individually-modelled avatar has anything here — the
+      // simulated ponytail's physics update, today. Must run after
+      // `character.update` has posed this frame; see `NpcAvatar.tick`'s own
+      // doc comment.
+      character.avatar.tick?.(charDt);
     }
 
     this.separate();
@@ -512,11 +669,15 @@ export class NpcSystem implements GameSystem {
 
     for (const character of this.characters) {
       character.syncTransform();
-      this.kids.crowd.commit(character.avatar.member);
+      // Only set on an instanced `KidAvatar` — a one-off `CharacterModel`
+      // avatar is a real scene object with no instance buffer to flush.
+      const member = character.avatar.member;
+      if (member) this.kids.crowd.commit(member);
     }
     this.kids.crowd.flush();
 
     this.updatePets(dt, elapsed);
+    this.updatePinnedPets(dt, elapsed);
     this.updateLabels();
     this.updateBubbles();
   }
@@ -526,6 +687,11 @@ export class NpcSystem implements GameSystem {
     this.pets.dispose();
     for (const label of this.labels) label.dispose();
     for (const bubble of this.bubbles) bubble.dispose();
+    for (const model of this.individualModels) {
+      model.root.removeFromParent();
+      disposeTree(model.root);
+    }
+    for (const pet of this.pinnedPets) pet.member.dispose();
   }
 
   // ---------------------------------------------------------------- internals
@@ -645,6 +811,106 @@ export class NpcSystem implements GameSystem {
   }
 
   /**
+   * Trots a pinned kid's own named pet along behind them — a `ParadeMember`
+   * (`entities/parade/ParadeMember.ts`), same class the shop's toys already
+   * use to follow the player, just fed a different target every frame. Its
+   * own `update` handles the follow spring, the walk-cycle gait and the
+   * expression; all this does is say where "behind its owner" currently is,
+   * identical geometry to {@link updatePets}'s blob trail.
+   */
+  private updatePinnedPets(dt: number, elapsed: number): void {
+    for (const { member, owner } of this.pinnedPets) {
+      const facing = owner.avatar.rig.root.rotation.y;
+      const targetX = owner.position.x - Math.sin(facing) * PET_TRAIL;
+      const targetZ = owner.position.z - Math.cos(facing) * PET_TRAIL;
+      member.target.set(targetX, owner.position.y, targetZ);
+      member.update(dt, elapsed);
+    }
+  }
+
+  /**
+   * Builds a pinned kid whose look exceeds the shared instanced crowd — see
+   * `needsIndividualModel` — as a one-off {@link CharacterModel}: the exact
+   * model the player wears, individually rendered rather than instanced, so
+   * it already has a real `hatAnchor` a hat mesh can simply be parented to
+   * and already drives the simulated ponytail through its own `update`.
+   *
+   * Added straight to `this.group` here, since (unlike a `KidCrowd` member)
+   * it is a real scene-graph object rather than a proxy skeleton the crowd
+   * uploads for it.
+   */
+  private buildIndividualAvatar(
+    pinned: PinnedKidSpec,
+    colours: KidColours,
+    hairStyle: HairStyle,
+    scale: number,
+    backpack: BackpackKind,
+    shoes: ShoeKind,
+  ): NpcAvatar {
+    const model = new CharacterModel(
+      {
+        skin: colours.skin,
+        hair: colours.hair,
+        outfit: colours.outfit,
+        outfitArms: colours.outfit,
+        shoe: colours.shoe,
+      },
+      {
+        hairStyle,
+        // `exactOptionalPropertyTypes`: an absent eye colour must be an
+        // omitted key, never an explicit `undefined`, so this is spread
+        // rather than written as a plain `eyeColour: pinned.eyeColour`.
+        ...(pinned.eyeColour !== undefined ? { eyeColour: pinned.eyeColour } : {}),
+        backpackKind: backpack,
+        backpackColour: colours.bag,
+        shoeKind: shoes,
+      },
+    );
+    model.root.scale.setScalar(scale);
+    this.group.add(model.root);
+    this.individualModels.push(model);
+
+    if (pinned.hat) {
+      // The same attachment `entities/WornHat.ts` gives the player, minus
+      // the reactive machinery: a pinned kid's hat is chosen once and never
+      // taken off, so there is nothing to subscribe to.
+      const hat = createHat(pinned.hat);
+      model.hatAnchor.add(hat.root);
+      model.setHatWorn(true);
+    }
+
+    return {
+      rig: {
+        root: model.root,
+        body: model.body,
+        head: model.head,
+        leftArm: model.leftArm,
+        rightArm: model.rightArm,
+        leftLeg: model.leftLeg,
+        rightLeg: model.rightLeg,
+      },
+      headBaseY: model.head.position.y,
+      height: model.height,
+      setExpression: (expression) => model.setExpression(expression),
+      tick: (dt) => model.update(dt),
+    };
+  }
+
+  /**
+   * Builds the standalone creature that trails a pinned kid with a
+   * `petItemId` — a `ParadeMember` wrapping the same shop item's model
+   * (`world/building/shops/catalogue.ts`'s `shopItem`), the same class and
+   * the same catalogue the parade already uses to follow the player. `null`
+   * only if the id is not a real catalogue entry — defensive, since these are
+   * all string literals authored alongside their `PinnedKidSpec`.
+   */
+  private buildPinnedPet(itemId: string, ownerName: string): ParadeMember | null {
+    const item = shopItem(itemId);
+    if (!item) return null;
+    return new ParadeMember(`pinned-pet:${ownerName}`, item);
+  }
+
+  /**
    * Floats each child's name pill above their head, screen-constant size —
    * the same {@link NameLabel} mechanism the player wears (design feedback:
    * "name labels, larger and screen-constant").
@@ -720,12 +986,14 @@ export class NpcSystem implements GameSystem {
 // ------------------------------------------------------------------ helpers
 
 /**
- * Draws `count` names from {@link KID_NAMES} without replacement (and without
- * `ETHAN_NAME`, which is reserved for the fixed slot) — so nobody in one park
- * shares a name with anybody else.
+ * Draws `count` names from {@link KID_NAMES} without replacement (and
+ * without any {@link PINNED_KIDS} name, whether or not it is active this
+ * park — a name reserved for the pinned cast is never handed to a random
+ * kid instead) — so nobody in one park shares a name with anybody else.
  */
 function pickNames(rng: Rng, count: number): string[] {
-  const pool = KID_NAMES.filter((n) => n !== ETHAN_NAME);
+  const reserved = new Set(PINNED_KIDS.map((pinned) => pinned.name));
+  const pool = KID_NAMES.filter((n) => !reserved.has(n));
   const picked: string[] = [];
   for (let i = 0; i < count && pool.length > 0; i += 1) {
     const index = Math.floor(rng.unit() * pool.length);
