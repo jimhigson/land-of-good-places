@@ -110,9 +110,9 @@ in the balls.
 
 ## What QA should ride, and the worst case
 
-Canonical seed. Reach it by walking into the castle, up to the roof (TOP_DECK),
-and standing on the slide entry — there is no deep link for it yet; adding one
-is a single line in `RIDE_DEEP_LINKS` in `main.ts` if QA wants it.
+Canonical seed. Use `/slide` or `/slide-with-grownup` (see the top of this
+file) rather than walking into the castle and climbing four decks — that is
+what they are for.
 
 **Worst case for comfort: the tightest bend is 6.20 m radius, 10.6 m along —
 11% of the way down, only 1.6 s in, at full roof height (14.8 m).** It is 0.69 g
