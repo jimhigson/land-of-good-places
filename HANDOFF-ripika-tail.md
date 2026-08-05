@@ -177,3 +177,83 @@ back trailing its zig-zag behind her, not hang limp and straight down.
 
 **PR: https://github.com/jimhigson/land-of-good-places/pull/199.** Merges first;
 `feat/ripika-fountain-statue` (PR #200) is stacked on this and merges after.
+
+---
+
+# REVIEW ROUND — one real defect in my work, one gap in my check
+
+## The wag did not wag. My error, and worth understanding why.
+
+When the tail moved behind her I moved the wag from `rotation.z` to
+`rotation.y`, reasoning that a rear tail swinging in the vertical plane bobs
+like a lever where a swing about Y sweeps it side to side.
+
+The Euler-order half was right and independently verified (three.js XYZ =
+`Rx·Ry·Rz`, so `y` applies before the backward pitch). **The conclusion was
+still wrong, because every slab of this tail is built along the group's own
+local +Y** — so rotating about Y turns the tail about an axis half a degree
+off its own length. A roll, not a wag. It did not move.
+
+Measured on the real model, tracking the tip mesh's world position:
+
+| axis | lateral travel | vertical |
+| --- | --- | --- |
+| `rotation.y` | 0.2 mm | — |
+| `rotation.z` | **141.8 mm** | 48.1 mm |
+
+**The lesson, narrow and worth keeping: an axis argument about a rotation means
+nothing until you know which way the geometry runs.** I reasoned carefully
+about rotation order and never asked which way the tail pointed.
+
+Fixed back to `z`, **added** to `TAIL_ROLL` (which names the 0.06 that had been
+a literal in the rest pose) so the zero-speed invariant still holds. `TAIL_YAW`
+is now static asymmetry only. The rest pose is untouched — 29.9° above
+horizontal, trailing backwards, which is what Jim approved.
+
+## `pet.puff` was passing vacuously
+
+Its `setWalkPhase` only records phase and speed; the walk-bob is applied in
+`update()`, which the check never called. It moved nothing because nothing had
+asked it to. **A subject that cannot fail should not be counted as passing.**
+
+`check:assets` now has two parts:
+
+1. `setWalkPhase(phase, 0)` must not disturb the built pose — unchanged, and
+   what catches the tail bug.
+2. For handles with `update()`, the pose after `setWalkPhase(phase, 0)` then
+   `update()` must not depend on phase, with `elapsed` held fixed and `dt` at 0.
+
+Part 2 compares **between phases**, not against the built pose, and that is the
+strongest statement that is *true*: the puff breathes on `elapsed` whether
+walking or not, so demanding the built pose back would fail a correct model.
+Fixing `elapsed` freezes the idle contribution so walk phase is the only
+variable.
+
+**Both halves verified to bite**, rather than assuming the refactor preserved
+the first: a fault injected into puff's own `update()` now fails it by name
+(`pet.puff/petSizer/[0] position.y`) where it previously passed clean; and
+re-injecting the original tail bug still fails all four RiPika subjects.
+
+The summary now reports `21 also posed through update()` — that count being
+visible is the point, and is what would have made this gap noticeable.
+
+## Reviewer confirmed the invariant's reach is real
+
+`main`'s `ripika.ts` under the new check fails all four RiPika subjects, and a
+fault injected into shared `applyWalk` fails **33** creatures.
+
+## Filed elsewhere, not mine
+
+The three pre-existing sibling instances of the assign-vs-add bug are **issue
+#204** (`spookyHouse/face.ts:275` — teleports the face 5.3 m off the wall;
+`FacePaintStall.ts:371`; `fitouts.ts:237`). None caused by this branch.
+
+## Verification (read off the terminal)
+
+```
+BUILD_EXIT=0
+PROCGEN_EXIT=0
+ Test Files  5 passed (5)
+      Tests  85 passed (85)
+asset contract: 95 assets check out, 35 of them creatures that stand still as built (21 also posed through update())
+```
