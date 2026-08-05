@@ -4004,7 +4004,11 @@ kbd {
   overflow-y: auto;
   scrollbar-gutter: stable both-edges;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Three, not two: dropping the name tile (it just repeated the header —
+     see `ContinueOrRestart.factsHtml`'s own doc comment) left at most three
+     of these — hat, cute things, day — which now fit in a single row
+     instead of wrapping to a cramped, partly-scrolled second one. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
   padding: 0.75rem;
   -webkit-overflow-scrolling: touch;
@@ -4043,6 +4047,28 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
+}
+
+/* Landscape: side by side rather than stacked. `.shop-card`'s own height is
+   capped at `88vh` (see its own rule), which on a typical landscape phone is
+   short enough that two full-height buttons stacked on top of each other
+   eat a real fraction of the card — side by side costs one row instead of
+   two. `.welcome-keep` gets the larger share: it is still the safe answer
+   under the thumb, same as the portrait column, just wide rather than tall. */
+@media (orientation: landscape) {
+  .welcome-foot {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .welcome-keep {
+    flex: 1.6;
+  }
+
+  .welcome-restart {
+    flex: 1;
+    width: auto;
+  }
 }
 
 /* Deliberately not a `.shop-buy`: no fill, no shadow, no lift on press, and

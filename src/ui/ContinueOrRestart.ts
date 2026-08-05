@@ -77,7 +77,6 @@ export class ContinueOrRestart {
       '<span class="shop-glyph">🌈</span>' +
       '<div class="shop-titles">' +
       `<h2 class="shop-title">Welcome back, ${name}!</h2>` +
-      '<p class="shop-greeting">Your park is just how you left it.</p>' +
       '</div>' +
       '</div>' +
       `<div class="welcome-facts">${this.factsHtml()}</div>` +
@@ -85,7 +84,7 @@ export class ContinueOrRestart {
       '<button type="button" class="shop-buy welcome-keep">' +
       '<span class="emoji">▶️</span><span>Keep playing!</span>' +
       '</button>' +
-      '<button type="button" class="welcome-restart">Start a new game instead</button>' +
+      '<button type="button" class="welcome-restart">New game instead</button>' +
       '</div>';
 
     this.card.querySelector('.welcome-keep')?.addEventListener('click', () => this.keep());
@@ -96,7 +95,11 @@ export class ContinueOrRestart {
   }
 
   /**
-   * What continuing keeps, as four little pictures.
+   * What continuing keeps, as a few little pictures.
+   *
+   * Her name is not one of them — `showChoice`'s own header already says
+   * "Welcome back, {name}!", so a repeat here as the first tile was just the
+   * same word twice before you had read anything else on the card.
    *
    * Read straight off the save rather than the store: the store is not
    * hydrated yet at this point and must not be, because pressing "start
@@ -104,9 +107,7 @@ export class ContinueOrRestart {
    */
   private factsHtml(): string {
     const game = this.save.game;
-    const facts: { glyph: string; text: string }[] = [
-      { glyph: '🙂', text: escapeHtml(this.playerName()) },
-    ];
+    const facts: { glyph: string; text: string }[] = [];
 
     const hat = game.inventory?.find((item) => item.uid === game.wornHatUid);
     if (hat) facts.push({ glyph: hat.icon, text: escapeHtml(hat.displayName) });
