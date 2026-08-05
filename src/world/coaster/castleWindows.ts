@@ -5,6 +5,8 @@ import {
   CASTLE_OUTER_X,
   CASTLE_OUTER_Z,
   CASTLE_WALL_HEIGHT,
+  CROSSING_MAX_Y,
+  CROSSING_MIN_Y,
   TOWER_CENTRES,
   TOWER_KEEPOUT_RADIUS,
   TOWER_MASONRY_MARGIN,
@@ -321,22 +323,39 @@ export function checkCastleWindows(
     );
   }
 
+  // The opening's *height* is the same for every window in the park — sill and
+  // head are constants, and the run through the castle is pinned level — so it
+  // is asked once, here. It used to sit inside the per-opening loop below, where
+  // it could do nothing but repeat itself and report the same constant fault
+  // once per hole.
+  if (WINDOW_SILL_Y <= 0 || WINDOW_HEAD_Y >= CASTLE_WALL_HEIGHT) {
+    complaints.push(
+      `the castle windows span ${WINDOW_SILL_Y.toFixed(2)}-${WINDOW_HEAD_Y.toFixed(2)} m of an ` +
+        `${CASTLE_WALL_HEIGHT} m wall — they break the courtyard floor or the battlement`,
+    );
+  }
+  // And the height the loop is carved to must sit in the band that leaves a sill
+  // above the courtyard floor and a lintel under the wall top. `CROSSING_MIN_Y`
+  // and `CROSSING_MAX_Y` described that band but nothing consumed them, so
+  // retuning `WINDOW_TRACK_Y` through the battlements would have been caught
+  // only by the ray sweep, and only once it was bad enough to hit stone.
+  if (WINDOW_TRACK_Y < CROSSING_MIN_Y || WINDOW_TRACK_Y > CROSSING_MAX_Y) {
+    complaints.push(
+      `the level run through the castle is authored at ${WINDOW_TRACK_Y} m, outside the ` +
+        `${CROSSING_MIN_Y.toFixed(2)}-${CROSSING_MAX_Y.toFixed(2)} m band a crossing can sit in ` +
+        `and still leave masonry above and below it`,
+    );
+  }
+
   for (const opening of openings) {
     const width = opening.maxZ - opening.minZ;
 
-    // 1. Fully within a single wall panel: inside the run's own z extent, and
-    //    between the courtyard and the wall top rather than notching either.
+    // 1. Fully within a single wall panel: inside the run's own z extent.
     const edge = Math.max(Math.abs(opening.minZ), Math.abs(opening.maxZ));
     if (edge > CASTLE_INNER_Z) {
       complaints.push(
         `the ${opening.wall} window reaches z ${edge.toFixed(2)} m, past the end of its wall ` +
           `panel at ${CASTLE_INNER_Z.toFixed(2)} m — it is not within one panel`,
-      );
-    }
-    if (WINDOW_SILL_Y <= 0 || WINDOW_HEAD_Y >= CASTLE_WALL_HEIGHT) {
-      complaints.push(
-        `the ${opening.wall} window spans ${WINDOW_SILL_Y.toFixed(2)}-${WINDOW_HEAD_Y.toFixed(2)} m ` +
-          `of a ${CASTLE_WALL_HEIGHT} m wall — it breaks the courtyard floor or the battlement`,
       );
     }
 

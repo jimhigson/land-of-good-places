@@ -23,9 +23,9 @@ import { BUILDING_BASE_Y, BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout'
  *
  * ### The opening is cut from the route, never the route bent to the opening
  *
- * Nothing in this file names a place where a window goes. {@link windowFor}
- * takes a **measured crossing of the built curve** and returns the opening that
- * fits it. Move the castle, reseed the park, retune the loop, and the hole
+ * Nothing in this file names a place where a window goes. `openingsFor` in
+ * `coaster/castleWindows.ts` takes a **measured crossing of the built curve**
+ * and returns the opening that fits it. Move the castle, reseed the park, retune the loop, and the hole
  * follows, because the hole is derived from the thing it has to line up with.
  *
  * ### The frame
@@ -60,8 +60,15 @@ export const CASTLE_WALL_HEIGHT = 8.8;
 /**
  * Where the number above comes from, so a future reader can check it rather
  * than trust it: `Shell.ts`'s `CASTLE_WALL_HEIGHT`, which is module-private
- * there. `check:castle-window` asserts the two agree by measuring the built
- * wall mesh, so this cannot drift silently.
+ * there.
+ *
+ * **Nothing asserts the two are equal**, and an earlier version of this comment
+ * claimed `check:castle-window` did — it does not. What catches a drift is
+ * indirect but real: if this copy and `Shell.ts`'s disagree, the opening is cut
+ * at the wrong height in a wall of the true height, and `sweptCartHits` finds
+ * the car passing through masonry. That is a strictly later alarm than a
+ * direct comparison would be, so if these two are ever hard to keep in step,
+ * measure the built wall mesh rather than restating the number a third time.
  */
 export const CASTLE_WALL_HEIGHT_SOURCE = 'Shell.ts CASTLE_WALL_HEIGHT';
 
@@ -123,8 +130,9 @@ export const WINDOW_SILL_CLEARANCE = 1.5;
  *
  * Derived, not picked: the tower eats the last `TOWER_KEEPOUT_RADIUS - 0.4`
  * (the cylinder, 2.05) of the panel, {@link TOWER_MASONRY_MARGIN} of solid wall
- * has to survive beyond the opening, and the opening is
- * {@link windowHalfWidth} wide. What is left is where a crossing may land.
+ * has to survive beyond the opening, and the opening is `halfWidth` wide —
+ * {@link WINDOW_HALF_WIDTH} at every call site the park makes. What is left is
+ * where a crossing may land.
  */
 export function crossingBand(halfWidth: number): number {
   const towerBite = TOWER_KEEPOUT_RADIUS - 0.4;
