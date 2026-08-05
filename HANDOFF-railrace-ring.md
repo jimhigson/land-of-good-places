@@ -381,11 +381,89 @@ touched the assertion — restoring `main`'s race is what was asked, and buying
 check margin by making the race tighter than it has ever been would be
 inventing a new feel. Flagged for the Overseer as a separate decision.
 
-## Left
+**4. The two stale constants — `beff881`, `12d5d4d`. Both done.**
 
-3. Move the rail race booth via a `near:` relation (`stall.skyCruiser` is the
-   precedent). Rail race booth only — #117 owns generalising.
-4. `WALL_INNER_RADIUS` (59.55, `train/route.ts`) and the exit clamp
-   (56, `railRace/plan.ts:97`) still mean "the edge" from when it was a circle.
+- The **ride exit clamp** (`plan.ts`, and its mirror `exitRadius < 56` in
+  `check-rail-race.mts`) now asks `PARK_BOUNDARY.distanceToEdge` for a 2 m
+  inset. No behaviour change: the exit stands 37.9 m inside the edge either way.
+- **`WALL_INNER_RADIUS`** was `GARDEN_HALF_SIZE - 2 - 0.45` = 59.55, and it was
+  *right by coincidence*: `GARDEN_HALF_SIZE - 2` is 60, and 60 is separately the
+  gate pin the boundary generator constrains the edge to, which is also the
+  edge's closest approach. Two unrelated numbers agreeing only while the park was
+  a disc. It now asks the built boundary for its minimum radius.
+
+  **Deliberately the minimum, not a per-bearing clamp.** Per-bearing would let
+  the loop drift out toward the bulge, buying nothing (`NOMINAL_RADIUS` is 56.2,
+  plots only push the loop to ~53.5, so the bound never binds) while moving a
+  train four `check:park` invariants are measured against. Verified: `check:park`
+  identical afterwards, down to the same first-gap point (49.3, 0.0).
+
+  One thing left for somebody: the `0.45` is `Garden.ts`'s
+  `BOUNDARY_WALL_COLLISION_HALF`, **restated rather than imported**, because
+  `Garden -> paths -> train/plan -> train/route` is a real import cycle. It wants
+  a home both can reach — `boundary.ts` is the natural one — but Garden's own doc
+  argues "a number that describes built geometry belongs to the module that
+  builds it", so moving it is somebody's call, not a silent edit from here.
+
+## 3. The booth — NOT done, and it is a genuine conflict, not unfinished work
+
+`npm run build`, `check:rail-race` and `check:park` are all green; `test:procgen`
+is **90/95**, failing only `railRaceStallStandsAtTheRim` on all five seeds — the
+state this branch was inherited in.
+
+I built the fix and then reverted it, because it cannot be made green. **The
+working code is saved as a patch at
+`scratchpad/atrim.patch` (see the worktree note above); it is 177 lines and
+applies cleanly to `12d5d4d`'s parent tree.** What it does:
+
+- `ManifestEntry` gains `atRim?: boolean` — a relation to the *boundary*, in the
+  same spirit as `near` being a relation to another plot. A band cannot express
+  "at the rim" any more: a band is a radius, and the edge is a per-seed spline.
+- `parkLayout.ts` gains `rimPositions()`, which ranks candidate spots by
+  `distanceToEdge` ascending and lets the existing constraint check take the
+  first that works. It **draws no random numbers**, exactly as a pin does, so
+  every other plot lands precisely where it did — the park is not re-rolled.
+
+With it, `test:procgen` is **95/95 on all five seeds**. But `check:park` then
+reports three regressions: `poi.stranded 2` (new), `rail.exclusion 36` (recorded
+21), `rail.walkable 44` (recorded 30).
+
+### Why it is a conflict and not a tuning problem
+
+- Bearing 20°, where the booth was pinned, is the canonical seed's **bulge** —
+  the edge stands 98 m out there. The invariant needs the booth within ~34 m of
+  the ring, which at that bearing needs radius ~64. `PLOT_EXTENT_LIMIT` is 52.
+  **No radius at the historic bearing can ever satisfy the invariant.**
+- Swept the rim reach over 44.5–48.6 in 0.5 m steps. Every value ≥ 45 puts the
+  booth on the south rim, passes procgen 95/95, and produces the *identical*
+  check:park regressions — 36 and 44, not moving by a single point as the booth
+  slides from 271.5° to 267°. 44.5 moves it to bearing 9° and breaks procgen on
+  two seeds instead. **The two checks pull in opposite directions across the
+  whole feasible range.**
+- The regressions are **collateral through Scenery's single shared RNG stream**,
+  the mechanism this very manifest entry's comment already documents. The first
+  rail gap is at (55.7, 0.0) — east side, nowhere near the booth. The booth's
+  spur length shifts the stream, garden walls land elsewhere, and the train's
+  flanking changes. It is not proximity, and no booth radius fixes it.
+- The old pin is a **hand-tuned local optimum** found by PR #159's own sweep.
+  Even a small move (bearing 20°/41 → bearing 9°/44.5) costs two regressions.
+
+### What I would want decided before anyone spends more on it
+
+Three options, none of which I should pick alone:
+
+(a) Land `atrim.patch` and treat the `check:park` regressions as the next piece
+    of work — they are real (2 waypoints nobody can walk to), so this means the
+    branch is not green.
+(b) Decouple Scenery's RNG from path lengths so booth moves stop having
+    action-at-a-distance. That is the actual root cause and it is somebody's
+    whole task, not a line in this one.
+(c) Re-derive `railRaceStallStandsAtTheRim`. I was explicitly told not to, and I
+    have not — but it is worth knowing *why* it now bites: with the ring 60–108 m
+    out and plots capped at 52 m, "the booth is the closest plot to the rails" is
+    no longer a statement about the booth being *at* the rim. It is a statement
+    about plot ordering, and it forces the booth to the park's pinch, which is
+    the one place the path network cannot absorb it.
 
 `check:rail-race` green (fairness still **0.0000 m**, all four lanes 12.57 m).
+`npm run build` exits 0.
