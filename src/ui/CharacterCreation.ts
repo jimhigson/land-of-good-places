@@ -583,7 +583,12 @@ export class CharacterCreation {
     this.nameInput.maxLength = 18;
     this.nameInput.autocomplete = 'off';
     this.nameInput.spellcheck = false;
-    this.nameInput.value = PLAYER_DEFAULT_NAME;
+    // Seeded from her current name when she has one already, same reasoning
+    // as every appearance field above (`currentAppearance`'s doc comment) —
+    // this one field used to be the exception, hardcoded to the literal
+    // default even when the Look pill reopened this screen over a save that
+    // already had a name, which is exactly what reset it.
+    this.nameInput.value = current?.player.name ?? PLAYER_DEFAULT_NAME;
     this.nameInput.setAttribute('aria-label', 'Your name');
     nameSection.append(nameLabel, this.nameInput);
 

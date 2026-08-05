@@ -229,48 +229,6 @@ export function clearSave(): void {
   }
 }
 
-// ------------------------------------------------------ reopen-creator flag
-
-/**
- * A same-tab flag: "the next boot should reopen the character creator over
- * the existing save, instead of the usual welcome-back prompt."
- *
- * `sessionStorage`, not the save file — this is about the *next page load
- * only*. `Hud`'s "Look" pill (`Game.reopenCharacterCreator`) reloads the page
- * to get there, because the character creator has to run *before* a `Game`
- * exists (see `main.ts`'s `boot()` doc comment — there is no "rebuild the
- * live player model" path, so reopening the creator mid-session means going
- * back through boot rather than mounting it over the running game). If the
- * reload never happens — the tab is closed instead — there is nothing to
- * clean up: `sessionStorage` dies with the tab.
- */
-const REOPEN_CREATOR_KEY = 'lgp:reopenCreator';
-
-/** Set just before the reload that `Game.reopenCharacterCreator` triggers. */
-export function markReopenCharacterCreator(): void {
-  try {
-    window.sessionStorage.setItem(REOPEN_CREATOR_KEY, '1');
-  } catch {
-    // Same tolerance as `writeSave` — private mode, a full quota. Worst case
-    // the next boot falls back to the ordinary continue/restart prompt.
-  }
-}
-
-/**
- * Reads and clears the flag in one step — it must only ever fire once, so a
- * later reload (say, the update gate) does not reopen the creator a second
- * time.
- */
-export function consumeReopenCharacterCreator(): boolean {
-  try {
-    const value = window.sessionStorage.getItem(REOPEN_CREATOR_KEY);
-    if (value !== null) window.sessionStorage.removeItem(REOPEN_CREATOR_KEY);
-    return value !== null;
-  } catch {
-    return false;
-  }
-}
-
 // --------------------------------------------------------------- reading
 
 /**

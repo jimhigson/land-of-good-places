@@ -20,8 +20,9 @@ import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
+import { disposeTree } from '../art/style/materials';
 import { NameLabel } from '../ui/NameLabel';
-import { discoverSecret, gameStore } from '../state';
+import { discoverSecret, gameStore, type PlayerState } from '../state';
 import type { WornHat } from './WornHat';
 import type { WornJetpack } from './WornJetpack';
 
@@ -272,7 +273,13 @@ export type GroundSampler = (x: number, z: number, y: number) => number;
 export class Player implements GameSystem {
   readonly name = 'player';
   readonly group = new Group();
-  readonly model: CharacterModel;
+  /**
+   * Not `readonly` — see {@link replaceModel}, the HUD's "Look" pill's whole
+   * reason for existing: changing your look used to mean reloading the page
+   * and rebuilding the entire park from scratch, because there was no way to
+   * hand this a new one in place.
+   */
+  model: CharacterModel;
   readonly label: NameLabel;
 
   /**
@@ -429,39 +436,10 @@ export class Player implements GameSystem {
     this.group.name = 'player';
 
     const playerState = gameStore.get().player;
-    this.model = new CharacterModel(
-      {
-        skin: playerState.skinColour,
-        hair: playerState.hairColour,
-        outfit: playerState.outfitColour,
-        outfitArms: playerState.outfitArmsColour,
-        shoe: playerState.shoeColour,
-      },
-      // Hair style, skin tone, eye colour, the backpack and the shoes are all
-      // chosen in the character creator (`ui/CharacterCreation.ts`) and have
-      // already been written to the store by the time this constructor runs —
-      // see `main.ts`'s `boot()`, which applies them before `Game` (and
-      // therefore `Player`) is ever built.
-      {
-        hairStyle: playerState.hairStyle,
-        eyeColour: playerState.eyeColour,
-        backpackKind: playerState.backpackKind,
-        backpackColour: playerState.backpackColour,
-        shoeKind: playerState.shoeKind,
-      },
-    );
+    this.model = this.buildModel(playerState);
     // One blink clock, shared with every other face in the game.
     this.face = createFaceLife((expression) => this.model.setExpression(expression));
     this.group.add(this.model.root);
-
-    // Glasses, chosen in the character creator and worn from the first spawn —
-    // see `PlayerState.glassesKind`'s doc comment. Unlike the hat there is no
-    // `WornGlasses` system: glasses are never sold, so nothing ever changes
-    // this mid-game, and a static attach here is all that is needed. `null`
-    // ("None" in the creator) attaches nothing.
-    if (playerState.glassesKind) {
-      this.model.glassesAnchor.add(createGlasses(playerState.glassesKind).root);
-    }
 
     this.label = new NameLabel(playerState.name);
     this.label.sprite.position.y = this.labelTopHeight() + 0.42;
@@ -471,6 +449,67 @@ export class Player implements GameSystem {
     this.position.y = terrainHeight(spawn.x, spawn.z);
     this.previousPosition.copy(this.position);
     this.group.position.copy(this.position);
+  }
+
+  /**
+   * Builds a fresh {@link CharacterModel} (and its glasses, if any) from a
+   * `PlayerState` slice — the constructor's own model-building, pulled out
+   * so {@link replaceModel} can do exactly the same thing later without a
+   * second copy of the field mapping to drift out of step with the first.
+   *
+   * Glasses are attached here directly rather than through a live setter:
+   * `CharacterModel` has none for them (see its own `glassesAnchor` doc
+   * comment — "glasses are never sold, so nothing ever changes this
+   * mid-game" was true right up until the Look pill stopped reloading the
+   * page to get a new one).
+   */
+  private buildModel(playerState: PlayerState): CharacterModel {
+    const model = new CharacterModel(
+      {
+        skin: playerState.skinColour,
+        hair: playerState.hairColour,
+        outfit: playerState.outfitColour,
+        outfitArms: playerState.outfitArmsColour,
+        shoe: playerState.shoeColour,
+      },
+      {
+        hairStyle: playerState.hairStyle,
+        eyeColour: playerState.eyeColour,
+        backpackKind: playerState.backpackKind,
+        backpackColour: playerState.backpackColour,
+        shoeKind: playerState.shoeKind,
+      },
+    );
+    if (playerState.glassesKind) {
+      model.glassesAnchor.add(createGlasses(playerState.glassesKind).root);
+    }
+    return model;
+  }
+
+  /**
+   * Rebuilds this character's own model in place from `playerState` — the
+   * HUD's "Look" pill, by way of `Game.applyLiveLook`, so a new hairstyle,
+   * colour or hat no longer means reloading the page and rebuilding the
+   * whole park (`main.ts`'s old `reopenCharacterCreation` path). The old
+   * model is fully torn down first; `model.root`, `hatAnchor`,
+   * `glassesAnchor` and every other anchor on it are gone the moment this
+   * returns, which is why every system that reached into one of them at
+   * construction time (`WornFlower`, `WornHat`, `WornJetpack`, the shop's
+   * `CarriedItem`/`EatenTreat`, the parade's `BackpackPeek`, the face-paint
+   * stall) has to be told to do it again afterwards — see
+   * `Game.applyLiveLook`, which is the only caller and owns that list.
+   *
+   * The name label is untouched here: `label.setName` already updates it
+   * live, so `Game.applyLiveLook` calls that separately rather than this
+   * method reaching past its own job.
+   */
+  replaceModel(playerState: PlayerState): void {
+    const old = this.model;
+    this.group.remove(old.root);
+    disposeTree(old.root);
+
+    this.model = this.buildModel(playerState);
+    this.group.add(this.model.root);
   }
 
   /** Puts the character somewhere immediately, clearing momentum. */

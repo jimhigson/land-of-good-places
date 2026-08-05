@@ -20,7 +20,7 @@ import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
-import { CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
+import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -31,8 +31,8 @@ import { MiniGameHost } from './minigames';
 import { createRideHud, type RideHud } from './minigames/ferrisWheel/hud';
 import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
-import { gameStore } from './state';
-import { markReopenCharacterCreator, type SavedPlace } from './state/save';
+import { gameStore, type CharacterCreationChoice } from './state';
+import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
 
 /** Where a brand-new player starts: the plaza, just south of the fountain. */
@@ -89,9 +89,15 @@ export class Game {
   readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
   readonly parade: Parade;
-  readonly wornFlower: WornFlower;
-  readonly wornHat: WornHat;
-  readonly wornJetpack: WornJetpack;
+  /**
+   * Not `readonly` — see {@link applyLiveLook}, which disposes and rebuilds
+   * all three of these worn-item systems in place whenever the HUD's "Look"
+   * pill hands the player a new model, since each one was built pointing at
+   * an anchor Group that the old model owned and just got disposed with it.
+   */
+  wornFlower: WornFlower;
+  wornHat: WornHat;
+  wornJetpack: WornJetpack;
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
@@ -119,7 +125,14 @@ export class Game {
   private readonly ferrisHudHost: HTMLElement;
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
-  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, options: GameOptions = {}) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    // Kept as a field (not just a constructor-local) for `applyLiveLook`,
+    // which needs somewhere to mount the "Look" pill's `CharacterCreation`
+    // overlay long after the constructor has returned.
+    private readonly uiRoot: HTMLElement,
+    options: GameOptions = {},
+  ) {
     this.engine = new Engine(canvas);
     this.camera = new IsoCamera();
     this.input = new InputSystem();
@@ -596,6 +609,17 @@ export class Game {
   }
 
   /**
+   * The other half of {@link addSystem} — needed only by {@link
+   * applyLiveLook}, which throws away and rebuilds `wornFlower`/`wornHat`/
+   * `wornJetpack` in place rather than leaving the disposed originals in the
+   * update loop doing nothing forever.
+   */
+  private removeSystem(system: GameSystem): void {
+    const index = this.systems.indexOf(system);
+    if (index >= 0) this.systems.splice(index, 1);
+  }
+
+  /**
    * Every interactable in the park this frame, built once and shared.
    *
    * Three systems want this list now — tap-to-move, the action button and the
@@ -723,22 +747,78 @@ export class Game {
   }
 
   /**
-   * "Look" pill in the HUD menu (`Hud.ts`). There is no "rebuild the live
-   * player model" path — `CharacterModel`'s kid is built once, in `Player`'s
-   * constructor, from whatever the store held at that moment — so getting
-   * back to the character creator means going back through `main.ts`'s
-   * `boot()` rather than mounting it over this running `Game`.
-   *
-   * `saveSystem.flush()` first, so nothing since the last five-second
-   * autosave tick is lost; then a same-tab flag (`markReopenCharacterCreator`,
-   * `state/save.ts`) so the next boot skips the welcome-back prompt and
-   * `startFresh`'s `clearSave()`, and goes straight back into the creator
-   * over this same save; then the reload itself.
+   * "Look" pill in the HUD menu (`Hud.ts`). Mounts `CharacterCreation`
+   * straight over this running `Game` — the park, the save, the session all
+   * stay exactly as they are; only `onComplete` (below, {@link
+   * applyLiveLook}) does anything, and only to the player's own model and
+   * name. This used to flush the save, set a same-tab flag and reload the
+   * whole page back through `main.ts`'s `boot()`, because there was no way
+   * to rebuild a live player model — see `Player.replaceModel`, which is
+   * what closed that gap.
    */
   private reopenCharacterCreator(): void {
-    this.saveSystem.flush();
-    markReopenCharacterCreator();
-    window.location.reload();
+    new CharacterCreation(this.uiRoot, {
+      onComplete: (choice) => this.applyLiveLook(choice),
+    });
+  }
+
+  /**
+   * What the "Look" pill's `CharacterCreation` overlay actually changes: the
+   * store (name plus every cosmetic field, exactly as a fresh character
+   * creation would), the player's own model and name label, and every system
+   * that had reached into a piece of the *old* model at construction time and
+   * would otherwise be left pointing at a disposed `Group` forever. The list
+   * below is exhaustive — found by grepping `src/` for everything that reads
+   * `player.model.<anchor>` outside `Player` itself:
+   *
+   * - `wornFlower`/`wornHat`/`wornJetpack` — each is itself a `GameSystem`
+   *   built around one anchor, so each is disposed and rebuilt in place
+   *   (`removeSystem`/`addSystem`), not merely re-pointed.
+   * - `shopping`'s `CarriedItem`/`EatenTreat` and `parade`'s `BackpackPeek`
+   *   are private to their owners, which is why those two get a narrow
+   *   `rebindPlayerModel()` each instead of this method reaching in itself.
+   * - the face-paint stall's overlay is keyed off `player.model` by identity,
+   *   not an anchor, so simply calling `attachPlayer` again picks up the new
+   *   one — see `FacePaintStall.attachPlayer`'s own doc comment.
+   *
+   * Every one of these systems already redraws itself from `gameStore` the
+   * moment it is (re)built — that is what "worn/carried/held" already meant
+   * before this method existed — so nothing here has to say what hat she has
+   * on or what is in her hand; only where it now goes.
+   */
+  private applyLiveLook(choice: CharacterCreationChoice): void {
+    gameStore.completeCharacterCreation(choice);
+    const playerState = gameStore.get().player;
+
+    this.player.replaceModel(playerState);
+    this.player.label.setName(playerState.name);
+
+    this.removeSystem(this.wornFlower);
+    this.wornFlower.dispose();
+    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    this.addSystem(this.wornFlower);
+
+    this.removeSystem(this.wornHat);
+    this.wornHat.dispose();
+    this.wornHat = new WornHat(
+      this.player.model.hatAnchor,
+      () => this.player.model.hairHidesHat,
+      (worn) => this.player.model.setHatWorn(worn),
+    );
+    this.addSystem(this.wornHat);
+    this.player.wornHat = this.wornHat;
+
+    this.removeSystem(this.wornJetpack);
+    this.wornJetpack.dispose();
+    this.wornJetpack = new WornJetpack(this.player.model.jetpackAnchor, (worn) =>
+      this.player.model.setJetpackWorn(worn),
+    );
+    this.addSystem(this.wornJetpack);
+    this.player.wornJetpack = this.wornJetpack;
+
+    this.shopping.rebindPlayerModel();
+    this.parade.rebindPlayerModel();
+    this.world.facePaintStall.attachPlayer(this.player);
   }
 
   /**

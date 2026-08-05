@@ -78,7 +78,7 @@ export class Parade implements GameSystem {
   private readonly player: Player;
   private readonly collision: CollisionWorld;
   private readonly camera: IsoCamera;
-  private readonly peek: BackpackPeek;
+  private peek: BackpackPeek;
 
   private readonly trail = new PlayerTrail();
   private readonly members: ParadeMember[] = [];
@@ -112,6 +112,18 @@ export class Parade implements GameSystem {
   /** How many owned things are waiting their turn behind the visible eight. */
   get waitingCount(): number {
     return this.overflow;
+  }
+
+  /**
+   * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
+   * just been rebuilt, so `backpackAnchor` is a new `Group` and the old
+   * peeker was reaching into one that no longer exists. Rebuilt exactly as
+   * the constructor built the first one — nothing else about the parade
+   * (the line itself, the trail, who is in the backpack) needs touching.
+   */
+  rebindPlayerModel(): void {
+    this.peek.dispose();
+    this.peek = new BackpackPeek(this.player.model.backpackAnchor);
   }
 
   update(context: FrameContext): void {

@@ -61,8 +61,8 @@ export class Shopping implements GameSystem {
   private readonly world: World;
   private readonly panel: ShopPanel;
   private readonly drawer: InventoryDrawer;
-  private readonly carried: CarriedItem;
-  private readonly eating: EatenTreat;
+  private carried: CarriedItem;
+  private eating: EatenTreat;
 
   private wasPausedByUs = false;
 
@@ -91,6 +91,21 @@ export class Shopping implements GameSystem {
   /** True while a shop panel or the backpack owns the screen. */
   get uiOpen(): boolean {
     return this.panel.isOpen || this.drawer.isOpen;
+  }
+
+  /**
+   * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
+   * just been rebuilt from scratch, so `holdAnchor` is a new `Group` and
+   * whatever `carried`/`eating` had reached into the old one is gone with it.
+   * Rebuilding both here is exactly what the constructor did the first time —
+   * their own `gameStore` subscription redraws whatever is actually carried
+   * or being eaten right now onto the new hand the moment each is built.
+   */
+  rebindPlayerModel(): void {
+    this.carried.dispose();
+    this.carried = new CarriedItem(this.player.model.holdAnchor);
+    this.eating.dispose();
+    this.eating = new EatenTreat(this.player.model.holdAnchor);
   }
 
   update(context: FrameContext): void {
