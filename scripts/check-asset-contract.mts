@@ -61,8 +61,9 @@
  * coverage — that is this script's one blind spot.
  */
 import '../scripts/headless-canvas.mjs';
+import type { Object3D } from 'three';
 import { visibleBounds } from '../src/art/style/measure.ts';
-import type { AssetHandle } from '../src/art/style/asset.ts';
+import type { AssetHandle, CreatureHandle } from '../src/art/style/asset.ts';
 import { SHOP_ITEMS, EGG_PRIZES } from '../src/world/building/shops/catalogue.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { createKid } from '../src/art/models/kid.ts';
@@ -365,8 +366,111 @@ function check(subject: Subject): void {
   );
 }
 
+// =============================================================================
+// Standing still means standing as built.
+//
+// RiPika's tail (#191) was rolled over 1.05 rad at build time so its zig-zag
+// flash fans across the screen, and `setWalkPhase` ended with
+//
+//     tail.rotation.z = Math.sin(...) * 0.18 * speed;
+//
+// which is zero whenever `speed` is zero. That did not return the tail to its
+// rest pose — it ASSIGNED THE REST POSE AWAY. Every RiPika in the park stood
+// with a limp tail the moment she stopped walking, and nothing caught it for
+// months because every *other* limb `applyWalk` drives happens to be authored
+// at rotation zero, where the multiply-only form is harmless.
+//
+// That is a coincidence, not a property, and it is one authored non-zero pose
+// away from happening again on any creature. So this asserts the invariant
+// directly, for every creature the script already enumerates:
+//
+//   **at zero speed, a walk cycle must not move anything, whatever the phase.**
+//
+// Phase is swept rather than pinned at 0 to assert the stronger property:
+// **at zero speed the pose must be phase-INDEPENDENT as well as correct.** The
+// tail bug happens to fail at every phase (its amplitude is `speed`, so the
+// whole expression is zero regardless), but a sibling whose amplitude is driven
+// by phase rather than by speed would sail through a phase-0-only test. Sweeping
+// costs six calls per creature and removes that blind spot.
+//
+// Verified to bite: reintroducing the tail line fails this on all four RiPika
+// subjects (`ripika`, `ripika.space`, `toy.ripika`, `egg.prize.ripika`) and
+// names the offending node. A check nobody has watched fail is not a check.
+// =============================================================================
+
+/** The ten numbers that fully describe one node's local transform. */
+const POSE_CHANNELS = [
+  'position.x', 'position.y', 'position.z',
+  'quaternion.x', 'quaternion.y', 'quaternion.z', 'quaternion.w',
+  'scale.x', 'scale.y', 'scale.z',
+] as const;
+
+interface PoseSample {
+  readonly path: string;
+  readonly values: readonly number[];
+}
+
+/** Every node's local transform, in a stable traversal order. */
+function poseOf(root: Object3D): PoseSample[] {
+  const out: PoseSample[] = [];
+  const walk = (node: Object3D, path: string): void => {
+    out.push({
+      path,
+      values: [
+        node.position.x, node.position.y, node.position.z,
+        node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w,
+        node.scale.x, node.scale.y, node.scale.z,
+      ],
+    });
+    node.children.forEach((child, index) => {
+      walk(child, `${path}/${child.name || `[${index}]`}`);
+    });
+  };
+  walk(root, root.name || 'root');
+  return out;
+}
+
+/** Floating-point slack. A real pose collapse is orders of magnitude bigger. */
+const POSE_EPSILON = 1e-6;
+
+let posesChecked = 0;
+
+function checkRestPose(subject: Subject): void {
+  const creature = subject.handle as Partial<CreatureHandle>;
+  if (typeof creature.setWalkPhase !== 'function') return;
+
+  const rest = poseOf(subject.handle.root);
+  for (const phase of [0, 0.17, 0.25, 0.5, 0.83, 0.99]) {
+    creature.setWalkPhase(phase, 0);
+    const now = poseOf(subject.handle.root);
+    for (let i = 0; i < rest.length; i += 1) {
+      const before = rest[i];
+      const after = now[i];
+      if (!before || !after) continue;
+      for (let c = 0; c < POSE_CHANNELS.length; c += 1) {
+        const a = before.values[c] ?? 0;
+        const b = after.values[c] ?? 0;
+        if (Math.abs(a - b) <= POSE_EPSILON) continue;
+        failures.push({
+          name: subject.name,
+          problem:
+            `setWalkPhase(${phase}, 0) moved '${before.path}' ${POSE_CHANNELS[c]} ` +
+            `from ${a.toFixed(4)} to ${b.toFixed(4)}. At zero speed a walk cycle must ` +
+            `leave the model exactly as built — an animation offset has to be ADDED to ` +
+            `the rest pose (REST + swing), not assigned over it.`,
+        });
+        return; // one report per creature is enough to act on
+      }
+    }
+  }
+  posesChecked += 1;
+}
+
 const subjects = collect();
 for (const subject of subjects) check(subject);
+// After `check`, never before: a creature that fails this leaves its model in a
+// mutated pose, which would contaminate the height and origin measurements.
+for (const subject of subjects) checkRestPose(subject);
 
 if (process.argv.includes('--verbose') || failures.length > 0) {
   console.log(['asset'.padEnd(26), 'declared', 'measured', '   error', '  bottom'].join('  '));
@@ -385,7 +489,9 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-const summary = `asset contract: ${subjects.length} assets check out`;
+const summary =
+  `asset contract: ${subjects.length} assets check out` +
+  `, ${posesChecked} of them creatures that stand still as built`;
 if (drifting === 0) {
   console.log(`${summary}.`);
 } else {
