@@ -5,9 +5,16 @@ import { CART_ENVELOPE } from './cart';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { circleBoundary } from '../rail/boundary';
-import { type RouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
+import {
+  type RouteBrief,
+  type RouteInfluence,
+  type SolvedRailRoute,
+  solveRailRoute,
+} from '../rail/generate';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import {
+  CASTLE_OUTER_X,
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
   castleClear,
@@ -250,6 +257,57 @@ function tallObstacles(): TallObstacle[] {
  * chosen position.
  */
 const CROSSING_BAND = crossingBand(WINDOW_HALF_WIDTH);
+
+/**
+ * **The Sky Cruiser asks to be drawn through the castle.**
+ *
+ * The family's ask is that the ride *always* flies through it, and before this
+ * it did not: the generator returns the first route that fits, and on one CI
+ * seed in five that route simply closed before it got to the castle, leaving a
+ * child an ordinary loop and an unbroken building. Nothing was wrong with those
+ * routes — nothing had ever asked them for anything.
+ *
+ * So the ask is made where the choice is made. `weight` is deliberately modest:
+ * the score it competes in carries up to 12 m of seeded jitter, and at 0.3 a
+ * 40 m detour is worth about the same, which tilts the search without
+ * flattening the variety that makes each park its own. The result is a
+ * *tendency*; {@link crossesTheCastle} is what turns a tendency into a promise.
+ *
+ * `radius` is the castle's own outer half-width plus a little, so the pull
+ * switches off once the route is at the walls rather than going on tugging it
+ * around a building it has already reached.
+ *
+ * **This reserves nothing** (Decision 6, and Decision 7 which records this
+ * mechanism). No space is held for the ride and no opening exists until the
+ * built curve is measured; the influence only changes which routes the search
+ * is likely to find first.
+ */
+const CASTLE_INFLUENCE: RouteInfluence = {
+  name: 'the castle',
+  x: BUILDING_CENTRE_X,
+  z: BUILDING_CENTRE_Z,
+  radius: CASTLE_OUTER_X + 2,
+  weight: 0.3,
+};
+
+/**
+ * Does this solved plan actually pass through the castle?
+ *
+ * The backstop behind {@link CASTLE_INFLUENCE}. A weight makes the crossing
+ * likely; this is what makes it required — a route that solves without one is
+ * discarded and the search moves to the next start pose.
+ *
+ * It asks the same question `spanInsideCastle` asks of the finished curve, of
+ * the plan, which is the only thing that exists at this point. The two
+ * parameterisations differ by about 1.5%, which is why the real span is
+ * re-measured on the built curve later; for "does it go in at all" the plan is
+ * exact enough, and being slightly stricter here is the safe direction.
+ */
+function crossesTheCastle(candidate: SolvedRailRoute): boolean {
+  return (
+    spanInsideCastle((d, into) => candidate.pointAt(d, into), candidate.length) !== null
+  );
+}
 
 /** Metres of level flight held either side of the castle before the hills resume. */
 const WINDOW_FLAT = 5;
@@ -530,6 +588,11 @@ export class CoasterRoute {
       // lands on one that does not, and a park that bails is far worse than a
       // park that took a fifth of a second longer to decide it could not.
       budgets: { perJoint: 16, restarts: 2000 },
+      // The family asked that the ride always flies through the castle. The
+      // influence makes that likely at the decision point; the backstop makes
+      // it required. See `CASTLE_INFLUENCE` and `crossesTheCastle`.
+      influences: [CASTLE_INFLUENCE],
+      satisfies: crossesTheCastle,
     };
     const plan = solveRailRoute(brief);
     this.plan = plan;
