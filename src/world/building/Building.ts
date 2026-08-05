@@ -2,6 +2,7 @@ import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
 import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, PLAYER_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
+import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
 import { resolveDismount } from '../dismount';
 import { RideCamera } from '../../core/RideCamera';
 import { terrainHeight } from '../terrain';
@@ -246,6 +247,9 @@ export class Building implements GameSystem {
   private readonly helterSkelter: SlideRide;
   /** The ginormous slide itself, so `test/procgen` can measure what was built. */
   readonly ginormousSlide: SlideRide;
+
+  /** Where its legs stand, so `test/procgen` can measure those too. */
+  readonly slideLegs: readonly SlideLeg[];
   private readonly stairRide: StairRide;
   /** The building's own fixed lights — on indoors, off outside and on the roof. */
   private readonly interiorLighting = new InteriorLighting();
@@ -344,6 +348,16 @@ export class Building implements GameSystem {
     // space* — see `startGiantSlide`.
     this.ginormousSlide = buildGinormousSlide();
     this.gardenRoot.add(this.ginormousSlide.group);
+
+    // Something to stand it on. ~95 m of chute with nothing under it reads as
+    // floating, and this park's things are meant to look built — see
+    // `slide/supports.ts` for why the legs are sparse rather than regular.
+    this.slideLegs = planSlideLegs(SLIDE_PLAN.points, (x, z, radius) =>
+      collision.isClearCircle(x, z, radius),
+    );
+    // At park level, not under the castle's plot — the ride spans two plots and
+    // its legs stand in the park between them. See `buildSlideSupports`.
+    anchorPlots.group.add(buildSlideSupports(this.slideLegs, collision));
 
     // The rider's seat rides in the garden with the chute, so its mount hangs
     // off the same group — the chute's points and the mount's position are then

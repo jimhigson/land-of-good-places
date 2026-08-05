@@ -237,7 +237,7 @@ const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
 
 
 /** Is (x, z) inside the facade's own footprint, padded by `radius`? */
-function insideCastle(x: number, z: number, radius: number): boolean {
+export function insideCastle(x: number, z: number, radius: number): boolean {
   return (
     Math.abs(x - BUILDING_CENTRE_X) < BUILDING_HALF_X + radius &&
     Math.abs(z - BUILDING_CENTRE_Z) < BUILDING_HALF_Z + radius
@@ -265,6 +265,32 @@ const CRUISER_LINE: readonly { readonly x: number; readonly y: number; readonly 
     }
     return samples;
   })();
+
+/**
+ * Would a post standing at (x, z) between `fromY` and `toY` run through the
+ * Sky Cruiser?
+ *
+ * A support is a *column*, not a point: the slide passes over the coaster, so
+ * a leg dropped straight down from that stretch is the obvious way to spear it.
+ * Tested against the whole height the post occupies rather than against the
+ * chute's height at the top of it.
+ */
+export function cruiserCrossesColumn(
+  x: number,
+  z: number,
+  fromY: number,
+  toY: number,
+): boolean {
+  const low = Math.min(fromY, toY);
+  const high = Math.max(fromY, toY);
+  for (const point of CRUISER_LINE) {
+    const dx = point.x - x;
+    const dz = point.z - z;
+    if (dx * dx + dz * dz > CRUISER_OVERLAP * CRUISER_OVERLAP) continue;
+    if (point.y > low - CRUISER_AIR && point.y < high + CRUISER_AIR) return true;
+  }
+  return false;
+}
 
 /** Does a point at (x, y, z) keep {@link CRUISER_AIR} from the Sky Cruiser? */
 function clearsCruiser(x: number, y: number, z: number): boolean {

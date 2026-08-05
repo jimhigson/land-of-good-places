@@ -139,6 +139,19 @@ export interface ParkFacts {
    * walls in the wrong place and duly accuses an innocent slide of flying
    * through them — which is exactly what the first draft of this did.
    */
+  /**
+   * Where the ginormous slide's legs stand, and how tall each one is.
+   *
+   * A support plan that quietly places *nothing* is the failure mode worth
+   * testing for here: it looks exactly like a healthy one from every angle
+   * except the park's.
+   */
+  readonly slideLegs: readonly {
+    readonly x: number;
+    readonly z: number;
+    readonly ground: number;
+    readonly top: number;
+  }[];
   readonly castleFootprint: {
     readonly x: number;
     readonly z: number;
@@ -411,6 +424,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathNodes,
     pathEdges,
     slideChute,
+    slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,
     routes,

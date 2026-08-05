@@ -139,6 +139,17 @@ const ARRIVAL = 2 * PLAYER_RADIUS;
  */
 const DOORWAY_GRACE = 6;
 
+/**
+ * The ginormous slide's legs, as built: `supports.ts`'s foot radius, and how
+ * far from the chute one may stand and still be holding it up.
+ *
+ * The reach is the arc nudge the placer is allowed (8.5 m) plus a little — a
+ * leg further from the chute than the placer could possibly have moved it is a
+ * leg attached to nothing.
+ */
+const SLIDE_LEG_RADIUS = 0.52;
+const SLIDE_LEG_REACH = 10;
+
 // ------------------------------------------------------------------ the list
 
 /**
@@ -1364,6 +1375,89 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The ginormous slide is standing on something, and you can walk between the
+ * legs.**
+ *
+ * Separate from the chute's own invariant because it fails differently. A
+ * support planner that places *nothing* looks healthy from every angle except
+ * the park's — the ride still works, the tests still pass, and a 95 m trough
+ * hangs in the air. That happened here: the "do not pinch a plot corridor"
+ * rule counted the castle and the ball pit, whose bounding circles cover this
+ * entire ride between them, and it rejected all 37 viable spots in silence.
+ *
+ * The second clause is the opposite failure. Legs a child cannot walk between
+ * turn the ground under the slide into a paddock, which is worse than no legs
+ * at all — so the gap between the nearest two is measured at the width a child
+ * actually is.
+ */
+const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const legs = facts.slideLegs;
+  const chute = facts.slideChute;
+
+  // --- 1. it is held up at all ----------------------------------------------
+  //
+  // Scaled to the ride: a leg roughly every 20 m of chute is sparse, and
+  // anything sparser than that is not "deliberately generous spacing", it is a
+  // planner that has quietly given up.
+  let chuteLength = 0;
+  for (let i = 1; i < chute.length; i += 1) {
+    const before = chute[i - 1];
+    const here = chute[i];
+    if (!before || !here) continue;
+    chuteLength += Math.hypot(here[0] - before[0], here[1] - before[1], here[2] - before[2]);
+  }
+  const wanted = Math.floor(chuteLength / 20);
+  if (legs.length < wanted) {
+    complaints.push(
+      `the ginormous slide is ${chuteLength.toFixed(0)} m long and stands on ` +
+        `${legs.length} legs — at least ${wanted} were expected, and a chute this ` +
+        'long with nothing under it reads as floating',
+    );
+  }
+
+  // --- 2. a child can walk between them -------------------------------------
+  for (let i = 0; i < legs.length; i += 1) {
+    for (let j = i + 1; j < legs.length; j += 1) {
+      const a = legs[i];
+      const b = legs[j];
+      if (!a || !b) continue;
+      const faces = Math.hypot(a.x - b.x, a.z - b.z) - 2 * SLIDE_LEG_RADIUS;
+      if (faces < WALKABLE_GAP) {
+        complaints.push(
+          `two of the ginormous slide's legs leave ${faces.toFixed(2)} m between their ` +
+            `faces at ${fmt([a.x, a.z])} and ${fmt([b.x, b.z])} — a child cannot get through`,
+        );
+      }
+    }
+  }
+
+  // --- 3. each one actually reaches its chute -------------------------------
+  //
+  // A leg is only support if it meets the thing it is supporting. Measured
+  // against the built chute rather than against what the planner believed.
+  for (const leg of legs) {
+    if (leg.top <= leg.ground) {
+      complaints.push(`a ginormous slide leg at ${fmt([leg.x, leg.z])} has no height at all`);
+      continue;
+    }
+    let nearest = Infinity;
+    for (const point of chute) {
+      const gap = Math.hypot(point[0] - leg.x, point[2] - leg.z);
+      if (gap < nearest) nearest = gap;
+    }
+    if (nearest > SLIDE_LEG_REACH) {
+      complaints.push(
+        `a ginormous slide leg at ${fmt([leg.x, leg.z])} is ${nearest.toFixed(1)} m from the ` +
+          'chute it is supposed to be holding up',
+      );
+    }
+  }
+
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1391,6 +1485,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide goes downhill all the way, lands in the ball pit, ' +
       'and never runs back inside the castle',
     theGinormousSlideIsRideable,
+  ],
+  [
+    'the ginormous slide stands on legs a child can walk between',
+    theGinormousSlideStandsOnSomething,
   ],
 ];
 
