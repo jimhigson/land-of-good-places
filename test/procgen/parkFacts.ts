@@ -72,6 +72,41 @@ export interface ExitFact {
   readonly z: number;
 }
 
+/**
+ * One node of the destination graph the network is grown from: somewhere a
+ * child might actually be going.
+ */
+export interface PathNodeFact {
+  readonly id: string;
+  readonly kind: string;
+  readonly x: number;
+  readonly z: number;
+  /**
+   * How far the destination's own paving reaches out from that point. Zero for
+   * every node but the plaza, which is a paved disc rather than a doorway, so
+   * a ribbon arrives at it by touching its rim rather than its centre.
+   */
+  readonly reach: number;
+}
+
+/**
+ * One edge of that graph, paired with the ribbon actually drawn for it.
+ *
+ * `from` and `to` are node ids, except for `'ring'`, which is `paths.ts`'s name
+ * for the paved network itself: a spur branches off wherever the paving already
+ * runs, which may be the backbone or an earlier spur.
+ */
+export interface PathEdgeFact {
+  readonly name: string;
+  readonly from: string;
+  readonly to: string;
+  /** The closed backbone loop, which has no ends to arrive anywhere. */
+  readonly backbone: boolean;
+  readonly halfWidth: number;
+  /** The drawn centre line, every ~0.5 m. */
+  readonly points: readonly (readonly [number, number])[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -82,6 +117,10 @@ export interface ParkFacts {
   readonly entrances: readonly EntranceFact[];
   readonly routes: readonly RouteFact[];
   readonly exits: readonly ExitFact[];
+  /** The destination graph `paths.ts` grows the network from. */
+  readonly pathNodes: readonly PathNodeFact[];
+  /** Its paved edges, each with the ribbon that was drawn for it. */
+  readonly pathEdges: readonly PathEdgeFact[];
   /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
@@ -138,8 +177,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
-  const { ROUTES, PATH_GRAPH } = await import('../../src/world/paths.ts');
-  const { STALL_STANDS } = await import('../../src/minigames/stallPlacement.ts');
+  const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
   const { CatmullRomCurve3 } = await import('three');
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
@@ -179,16 +217,37 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     if (entry.near) nearPairs.add(pairKey(entry.id, entry.near.id));
   }
 
+  // Stall counters are read off the **built world's interact zones** — the
+  // coordinates the game actually sends a child to, computed by the booths
+  // themselves — rather than off `STALL_STANDS`.
+  //
+  // That distinction is the whole value of the fact, and it is measured, not
+  // assumed. `paths.ts` now builds its stall nodes *from* `STALL_STANDS`, so an
+  // invariant comparing the graph against that same table compares a source
+  // with itself. Injecting a booth into the built world that never reaches the
+  // table — the exact ferris-kiosk defect — the table-based form reported 19
+  // passed and saw nothing; this form fails with the booth named. The interact
+  // zones are also what `MiniGameStalls` and `FacePaintStall` each compute for
+  // themselves, so this polices those two against the table as well.
   const entrances: EntranceFact[] = [
     ...ANCHORS.map((anchor) => ({
       id: `anchor:${anchor.id}`,
       x: anchor.entrance[0],
       z: anchor.entrance[1],
     })),
-    ...STALL_STANDS.map((stand) => ({ id: `stall:${stand.id}`, x: stand.x, z: stand.z })),
+    ...world
+      .interactZones()
+      .filter((zone) => zone.id.startsWith('stall:'))
+      .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
 
-  const routes: RouteFact[] = ROUTES.map((route) => {
+  // The drawn ribbon, not the control points it was drawn from. `paths.ts`
+  // sweeps a Catmull-Rom (tension 0.4) through those controls, and the curve
+  // bows away from them — so where the paving actually runs, and where it
+  // actually stops, is only visible on the sampled curve.
+  const drawnCentreLine = (
+    route: (typeof PATH_GRAPH.edges)[number]['route'],
+  ): { length: number; points: [number, number][] } => {
     const curve = new CatmullRomCurve3(
       route.points.map(([x, z]) => new Vector3(x, 0, z)),
       route.closed,
@@ -202,8 +261,37 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       const point = curve.getPointAt(i / steps);
       points.push([point.x, point.z]);
     }
-    return { name: route.name, length, points };
-  });
+    return { length, points };
+  };
+
+  // Read straight off the graph's paved edges rather than off `ROUTES`, which
+  // is that same filter with the node ids thrown away: keeping them is what
+  // lets an invariant ask whether a ribbon reached the destination it names.
+  const paved = PATH_GRAPH.edges.filter((edge) => edge.paved);
+  const drawn = paved.map((edge) => drawnCentreLine(edge.route));
+
+  const pathEdges: PathEdgeFact[] = paved.map((edge, index) => ({
+    name: edge.route.name,
+    from: edge.from,
+    to: edge.to,
+    backbone: edge.route.closed,
+    halfWidth: edge.route.width / 2,
+    points: drawn[index]!.points,
+  }));
+
+  const pathNodes: PathNodeFact[] = PATH_GRAPH.nodes.map((node) => ({
+    id: node.id,
+    kind: node.kind,
+    x: node.x,
+    z: node.z,
+    reach: node.kind === 'plaza' ? PLAZA.radius : 0,
+  }));
+
+  const routes: RouteFact[] = paved.map((edge, index) => ({
+    name: edge.route.name,
+    length: drawn[index]!.length,
+    points: drawn[index]!.points,
+  }));
 
   // The *solved* curve, not the control points and not the corridor Scenery
   // planned against — those are what the fix used, so measuring them would
@@ -229,7 +317,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // rather than off `coaster/plan.ts`/`ferrisWheel/exit.ts` directly, so this
   // measures what the graph actually contains rather than restating the plan
   // that was meant to produce it.
-  const exits: ExitFact[] = PATH_GRAPH.nodes
+  const exits: ExitFact[] = pathNodes
     .filter((node) => node.kind === 'exit')
     .map((node) => ({ id: node.id, x: node.x, z: node.z }));
 
@@ -263,6 +351,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     plots,
     entrances,
     exits,
+    pathNodes,
+    pathEdges,
     reachableFromEntrance,
     routes,
     nearPairs,

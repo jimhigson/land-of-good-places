@@ -5,7 +5,7 @@
  * {@link INVARIANTS}. It then runs against every seed automatically, because
  * each seed file just calls {@link registerParkInvariants}.
  *
- * Two rules for anything added here:
+ * Three rules for anything added here:
  *
  * 1. **Measure the built park, never the rules that built it.** `ParkFacts`
  *    reads everything back off a real `World`. An invariant that re-derives a
@@ -16,12 +16,23 @@
  *    already mean something — over the constant the generator happens to aim
  *    for. Asserting the generator's own target only proves it can do
  *    arithmetic, and it turns every future tuning change into a test failure.
+ * 3. **Return your complaints; do not assert them.** {@link Invariant} is
+ *    `=> readonly string[]` and {@link registerParkInvariants} does the
+ *    asserting. See that type's own comment for why it is not `=> void`:
+ *    briefly, a hollow invariant that passed unconditionally shipped into this
+ *    suite, and the return type is what makes writing another one a compile
+ *    error rather than a thing you have to remember.
+ *
+ * **Whichever you write, prove it can fail.** Break the thing it guards, watch
+ * it go red, put it back. An invariant nobody has ever seen fail is a claim
+ * about the park, not a check on it.
  */
 import { describe, it, beforeAll, expect } from 'vitest';
 import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
+  pointToSegment,
   alongRun,
   pairKey,
   type ParkFacts,
@@ -96,9 +107,52 @@ const MAX_DARK_RUN = 25;
  */
 const TRESTLE_GAP_TOLERANCE = 40;
 
+/**
+ * How close a ribbon has to come to count as having arrived somewhere.
+ *
+ * A child's full width — `2 x PLAYER_RADIUS`, the same derivation
+ * {@link WALKABLE_GAP} is built from — so "the paving reaches the counter"
+ * means a child standing at the counter is standing on the paving rather than
+ * out on the grass beside it. Not `paths.ts`'s own numbers: neither the 4 m it
+ * uses to decide a node is already served, nor any route width it happens to
+ * draw with.
+ *
+ * There is one deliberate overshoot in the generator and this clears it
+ * comfortably. A spur is carried a little *past* a doormat into the plot mouth,
+ * but that extension is structurally capped at 0.4 m: it is
+ * `min(2, l - edge - PAST_CLEARANCE)` where `l = edge + standOff`, which
+ * collapses to `min(2, 1.4 - 1)` for anything with a footprint. Meanwhile the
+ * bug this was written for — every stall's ribbon stopping short of its own
+ * counter, issue #114 — missed by 3.4 to 6.9 m on all five seeds, so there is
+ * no risk of the tolerance swallowing the thing it exists to catch.
+ */
+const ARRIVAL = 2 * PLAYER_RADIUS;
+
 // ------------------------------------------------------------------ the list
 
-type Invariant = (facts: ParkFacts) => void;
+/**
+ * An invariant **returns** what it found wrong. It does not assert.
+ *
+ * One string per complaint, empty for a healthy park;
+ * {@link registerParkInvariants} is the only thing here that calls `expect`.
+ *
+ * This return type is load-bearing, not a style choice. These functions all
+ * have the same shape — walk the built park, push a sentence into an array for
+ * anything wrong — and while the type was `=> void` it was possible to build
+ * that array and simply forget to assert it. The result compiled, ran on every
+ * seed, and passed unconditionally: a test that could never fail, sitting in
+ * the suite that CI blocks merges on. That happened (5 August 2026, caught only
+ * because the author reverted their own fix to check the new invariant went
+ * red, and it did not).
+ *
+ * With a return type, forgetting is a compile error — `strict` rejects a
+ * function that declares an array and falls off the end. The runner cannot be
+ * bypassed by accident, so the mistake is unavailable rather than merely
+ * discouraged. That matters here more than in most files, because CLAUDE.md
+ * *requires* a new invariant with every procgen change: this is a mandated
+ * path, walked by people who have never opened this file before.
+ */
+type Invariant = (facts: ParkFacts) => readonly string[];
 
 /**
  * Every wall run keeps clear of every other one.
@@ -122,7 +176,7 @@ const wallsDoNotClash: Invariant = (facts) => {
       }
     }
   }
-  expect(clashes, clashes.join('\n')).toHaveLength(0);
+  return clashes;
 };
 
 /** No wall stands on the railway. Measured against the *solved* centre line. */
@@ -140,7 +194,7 @@ const wallsClearTheRailway: Invariant = (facts) => {
       );
     }
   }
-  expect(fouls, fouls.join('\n')).toHaveLength(0);
+  return fouls;
 };
 
 /**
@@ -162,7 +216,7 @@ const plotsDoNotOverlap: Invariant = (facts) => {
       if (gap < 0) overlaps.push(`${a.id} and ${b.id} overlap by ${(-gap).toFixed(2)} m`);
     }
   }
-  expect(overlaps, overlaps.join('\n')).toHaveLength(0);
+  return overlaps;
 };
 
 /** Every doormat and stall counter has ground a visitor can stand on. */
@@ -170,10 +224,12 @@ const entrancesAreUsable: Invariant = (facts) => {
   const blocked: string[] = [];
   for (const entrance of facts.entrances) {
     if (standableNear(facts, entrance.x, entrance.z)) continue;
-    blocked.push(`${entrance.id} at (${entrance.x.toFixed(1)}, ${entrance.z.toFixed(1)})`);
+    blocked.push(
+      `${entrance.id} at (${entrance.x.toFixed(1)}, ${entrance.z.toFixed(1)}) has no standable ` +
+        `ground within ${SHORTFALL_TOLERANCE} m`,
+    );
   }
-  expect(blocked, `no standable ground within ${SHORTFALL_TOLERANCE} m of: ${blocked.join(', ')}`)
-    .toHaveLength(0);
+  return blocked;
 };
 
 /** No two trees grow through each other. */
@@ -192,7 +248,7 @@ const treesDoNotInterpenetrate: Invariant = (facts) => {
       }
     }
   }
-  expect(overlaps, overlaps.slice(0, 8).join('\n')).toHaveLength(0);
+  return overlaps;
 };
 
 /**
@@ -229,7 +285,7 @@ const treesKeepOffWalls: Invariant = (facts) => {
       }
     }
   }
-  expect(fouls, fouls.slice(0, 8).join('\n')).toHaveLength(0);
+  return fouls;
 };
 
 /** No lamp stands in anything: another lamp, a wall, a plot, or the railway. */
@@ -257,7 +313,7 @@ const lampsTouchNothing: Invariant = (facts) => {
       fouls.push(`${where} is ${rail.toFixed(2)} m from the rail centre line`);
     }
   }
-  expect(fouls, fouls.join('\n')).toHaveLength(0);
+  return fouls;
 };
 
 /**
@@ -277,7 +333,7 @@ const rideExitsAreUsable: Invariant = (facts) => {
       problems.push(`${at} is not reachable from the entrance`);
     }
   }
-  expect(problems, problems.join('\n')).toHaveLength(0);
+  return problems;
 };
 
 /**
@@ -307,8 +363,7 @@ const rideExitsAreUsable: Invariant = (facts) => {
  */
 const railRaceExitFitsTheParty: Invariant = (facts) => {
   const exit = facts.exits.find((node) => node.id === 'exit-railRace');
-  expect(exit, `the built path graph has no 'exit-railRace' node`).toBeDefined();
-  if (!exit) return;
+  if (!exit) return [`the built path graph has no 'exit-railRace' node`];
 
   const collision = facts.world.collision;
   // The player is set down first and keeps her spot — exactly `arrive()`'s
@@ -319,7 +374,12 @@ const railRaceExitFitsTheParty: Invariant = (facts) => {
     { x: player.x, z: player.z, radius: PLAYER_RADIUS },
   ]);
 
-  expect(spots, `only ${spots.length} of ${rivals} rivals were given a spot`).toHaveLength(rivals);
+  // Fail here rather than carrying on: the crowding checks below walk whatever
+  // party was actually placed, so a short list would quietly check fewer bodies
+  // against each other and still come back clean.
+  if (spots.length !== rivals) {
+    return [`only ${spots.length} of ${rivals} rivals were given a spot`];
+  }
 
   const party = [
     { who: 'the player', x: player.x, z: player.z },
@@ -344,7 +404,119 @@ const railRaceExitFitsTheParty: Invariant = (facts) => {
       }
     }
   }
-  expect(problems, problems.join('\n')).toHaveLength(0);
+  return problems;
+};
+
+/**
+ * **No paved ribbon stops anywhere but a destination.**
+ *
+ * REQUIREMENTS-2026-07-28 §5, the family's "paths to nowhere" ruling: the
+ * walking network derives from a graph of places to visit only, and no ribbon
+ * may terminate anywhere but a node. A spur has two ends and both are held to
+ * it — the far end must reach the node its edge names, and the near end must
+ * genuinely meet the rest of the paving rather than beginning in the grass a
+ * few metres off it.
+ *
+ * Measured on the **drawn** curve, which is the point. The ribbon is a
+ * Catmull-Rom swept through control points, and `paths.ts` chooses a spur's
+ * junction by walking the control *polygon* of the routes built so far — a
+ * polygon the drawn curve bows away from. Checking the control points would
+ * only restate the generator's intention; these are the metres of paving a
+ * child actually walks on.
+ *
+ * The backbone is exempt: it is a closed loop and has no ends.
+ */
+const noPathEndsNowhere: Invariant = (facts) => {
+  const nodes = new Map(facts.pathNodes.map((node) => [node.id, node]));
+  const strays: string[] = [];
+
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    const first = edge.points[0];
+    const last = edge.points[edge.points.length - 1];
+    if (!first || !last) {
+      strays.push(`${edge.name} is a paved edge that drew no ribbon at all`);
+      continue;
+    }
+
+    const ends = [
+      ['start', edge.from, first],
+      ['end', edge.to, last],
+    ] as const;
+
+    for (const [which, id, point] of ends) {
+      // `'ring'` is not a node: it is `paths.ts`'s name for the paved network
+      // itself. A spur branches off wherever paving already runs — the
+      // backbone or an earlier spur — so what has to be true of this end is
+      // that it really does land on some other paving.
+      if (id === 'ring') {
+        const gap = distanceToOtherPaving(facts, edge.name, point);
+        if (gap > ARRIVAL) {
+          strays.push(
+            `${edge.name}'s ${which} at ${fmt(point)} is ${gap.toFixed(2)} m from the ` +
+              `nearest other paving — it branches off nothing`,
+          );
+        }
+        continue;
+      }
+
+      const node = nodes.get(id);
+      if (!node) {
+        strays.push(`${edge.name}'s ${which} names '${id}', which is not a node in the graph`);
+        continue;
+      }
+      const gap = Math.max(
+        0,
+        Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach,
+      );
+      if (gap > ARRIVAL) {
+        strays.push(
+          `${edge.name}'s ${which} at ${fmt(point)} stops ${gap.toFixed(2)} m short of ` +
+            `'${node.id}' (${node.kind}) at ${fmt([node.x, node.z])} — a path to nowhere`,
+        );
+      }
+    }
+  }
+  return strays;
+};
+
+/**
+ * **Every place a child can be served is a node in the graph.**
+ *
+ * The other half of §5's ruling: the network derives from a graph of *real*
+ * destinations, and the entrance of every ride and building is one of them. So
+ * this asks the question the other way round from {@link noPathEndsNowhere} —
+ * not "does this ribbon end somewhere real?" but "does every real place have a
+ * node?".
+ *
+ * `facts.entrances` is built from the coordinates the **game** uses — the
+ * anchors' own entrances and `STALL_STANDS`, the same points the interact zones
+ * and the NPC waypoint graph are seeded from — so this compares the
+ * destinations the park actually has against the destinations the path network
+ * knows about, rather than comparing the generator to itself.
+ *
+ * The ferris wheel's ticket kiosk was missing from the graph entirely until
+ * issue #114: it is placed by relation to the wheel rather than by the layout
+ * solver, so the loop that built stall nodes by walking `PARK_LAYOUT`'s
+ * `stall.` entries never saw it, and it survived only by happening to stand
+ * near the wheel's own spur.
+ */
+const everyDestinationIsANode: Invariant = (facts) => {
+  const missing: string[] = [];
+  for (const entrance of facts.entrances) {
+    let best = Infinity;
+    for (const node of facts.pathNodes) {
+      const gap = Math.hypot(entrance.x - node.x, entrance.z - node.z) - node.reach;
+      if (gap < best) best = gap;
+    }
+    if (best > ARRIVAL) {
+      missing.push(
+        `${entrance.id} at ${fmt([entrance.x, entrance.z])} is ${best.toFixed(2)} m from the ` +
+          `nearest path-graph node — nothing in the network leads to it`,
+      );
+    }
+  }
+  return missing;
 };
 
 /** Every path is lit along its whole length. */
@@ -363,7 +535,7 @@ const everyPathIsLit: Invariant = (facts) => {
       dark.push(`${route.name} has ${worst.toFixed(1)} m with no lamp within ${LAMP_REACH} m`);
     }
   }
-  expect(dark, dark.join('\n')).toHaveLength(0);
+  return dark;
 };
 
 /**
@@ -501,7 +673,7 @@ const railRaceFliesClear: Invariant = (facts) => {
   }
   }
 
-  expect(complaints, complaints.join('\n')).toHaveLength(0);
+  return complaints;
 };
 
 /**
@@ -607,8 +779,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
       `the Rail Race built ${rings.length} named ring group(s), not the two the ride is made of ` +
         `— a walk-past ring at park scale and a race ring at ride scale`,
     );
-    expect(complaints, complaints.join('\n')).toHaveLength(0);
-    return;
+    return complaints;
   }
 
   // --- 1. outside the wall, inside the hill ---------------------------------
@@ -715,7 +886,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
     }
   }
 
-  expect(complaints, complaints.join('\n')).toHaveLength(0);
+  return complaints;
 };
 
 /**
@@ -801,7 +972,7 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
     }
   }
 
-  expect(complaints, complaints.join('\n')).toHaveLength(0);
+  return complaints;
 };
 
 /**
@@ -834,9 +1005,9 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
  * it is the half `poiGraph`'s stranding bug actually broke.
  */
 const railRaceStallStandsAtTheRim: Invariant = (facts) => {
+  const complaints: string[] = [];
   const stall = facts.plots.find((plot) => plot.id === 'stall.railRacer');
-  expect(stall, "the built park has no 'stall.railRacer' plot").toBeDefined();
-  if (!stall) return;
+  if (!stall) return ["the built park has no 'stall.railRacer' plot"];
 
   // Closest approach to the built ring, sampled across every lane exactly as
   // `railRaceFliesClear` samples it — the real solved geometry, not the
@@ -862,27 +1033,29 @@ const railRaceStallStandsAtTheRim: Invariant = (facts) => {
     .filter((plot) => plot.id !== stall.id)
     .map((plot) => ({ plot, gap: gapToRing(plot.x, plot.z) }))
     .filter(({ gap }) => gap <= stallGap);
-  expect(
-    closerPlots,
-    `the rail-race stall is ${stallGap.toFixed(1)} m from the rail-race ring, but so is ` +
-      closerPlots
-        .map(({ plot, gap }) => `'${plot.id}' at ${gap.toFixed(1)} m`)
-        .join(', ') +
-      ' — it does not stand alone at the rim',
-  ).toHaveLength(0);
+  if (closerPlots.length > 0) {
+    complaints.push(
+      `the rail-race stall is ${stallGap.toFixed(1)} m from the rail-race ring, but so is ` +
+        closerPlots.map(({ plot, gap }) => `'${plot.id}' at ${gap.toFixed(1)} m`).join(', ') +
+        ' — it does not stand alone at the rim',
+    );
+  }
 
   const doormat = facts.entrances.find((entrance) => entrance.id === 'stall:railRacer');
-  expect(doormat, "the built park has no 'stall:railRacer' doormat").toBeDefined();
-  if (!doormat) return;
+  if (!doormat) {
+    complaints.push("the built park has no 'stall:railRacer' doormat");
+    return complaints;
+  }
   const at = `(${doormat.x.toFixed(1)}, ${doormat.z.toFixed(1)})`;
-  expect(
-    standableNear(facts, doormat.x, doormat.z),
-    `the rail-race stall's doormat at ${at} has no standable ground nearby`,
-  ).toBe(true);
-  expect(
-    facts.reachableFromEntrance(doormat.x, doormat.z),
-    `the rail-race stall's doormat at ${at} cannot be walked to from the park entrance`,
-  ).toBe(true);
+  if (!standableNear(facts, doormat.x, doormat.z)) {
+    complaints.push(`the rail-race stall's doormat at ${at} has no standable ground nearby`);
+  }
+  if (!facts.reachableFromEntrance(doormat.x, doormat.z)) {
+    complaints.push(
+      `the rail-race stall's doormat at ${at} cannot be walked to from the park entrance`,
+    );
+  }
+  return complaints;
 };
 
 /**
@@ -954,7 +1127,7 @@ const skyCruiserClearsTheTallThings: Invariant = (facts) => {
     }
   }
 
-  expect(complaints, complaints.join('\n')).toHaveLength(0);
+  return complaints;
 };
 
 /**
@@ -1021,12 +1194,14 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
       at = d;
     }
   }
-  expect(
-    tightest,
-    `the Sky Cruiser's built track turns at ${tightest.toFixed(2)} m radius ` +
-      `${at.toFixed(0)} m along the loop, tighter than the ${GENTLEST_TURN} m it promises — ` +
-      `the plan was validated but the rebuilt curve does not honour it`,
-  ).toBeGreaterThanOrEqual(GENTLEST_TURN);
+  if (tightest < GENTLEST_TURN) {
+    return [
+      `the Sky Cruiser's built track turns at ${tightest.toFixed(2)} m radius ` +
+        `${at.toFixed(0)} m along the loop, tighter than the ${GENTLEST_TURN} m it promises — ` +
+        `the plan was validated but the rebuilt curve does not honour it`,
+    ];
+  }
+  return [];
 };
 
 /**
@@ -1041,6 +1216,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no tree grows into a wall', treesKeepOffWalls],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
+  ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
@@ -1104,13 +1281,33 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
     });
 
+    // The one place in this file that asserts. See {@link Invariant}.
     for (const [name, check] of INVARIANTS) {
-      it(name, () => check(facts));
+      it(name, () => {
+        const complaints = check(facts);
+        expect(complaints, describeComplaints(complaints)).toHaveLength(0);
+      });
     }
   });
 }
 
 // ------------------------------------------------------------------ helpers
+
+/**
+ * How many complaints a failure prints before it starts summarising.
+ *
+ * A badly-placed park can produce hundreds — `treesDoNotInterpenetrate` used to
+ * cap its own message at eight for exactly this reason — and a wall of them
+ * buries the first one, which is usually the one worth reading.
+ */
+const MAX_COMPLAINTS_SHOWN = 8;
+
+/** The failure message for a set of complaints, capped so one bad seed does not bury the console. */
+function describeComplaints(complaints: readonly string[]): string {
+  const shown = complaints.slice(0, MAX_COMPLAINTS_SHOWN);
+  const rest = complaints.length - shown.length;
+  return rest > 0 ? `${shown.join('\n')}\n…and ${rest} more` : shown.join('\n');
+}
 
 function standableNear(facts: ParkFacts, x: number, z: number): boolean {
   if (facts.isStandable(x, z)) return true;
@@ -1122,6 +1319,36 @@ function standableNear(facts: ParkFacts, x: number, z: number): boolean {
     if (facts.isStandable(px, pz)) return true;
   }
   return false;
+}
+
+/**
+ * How far `point` is from the paved *surface* of every ribbon but `exclude`'s
+ * — zero once it is standing on one of them.
+ *
+ * The surface rather than the centre line: two ribbons have joined when their
+ * paving meets, which is what makes a junction something a child can walk
+ * through, and a 3.6 m backbone offers 1.8 m of that on either side.
+ */
+function distanceToOtherPaving(
+  facts: ParkFacts,
+  exclude: string,
+  point: readonly [number, number],
+): number {
+  let best = Infinity;
+  for (const edge of facts.pathEdges) {
+    if (edge.name === exclude) continue;
+    for (let i = 0; i < edge.points.length - 1; i += 1) {
+      const gap = pointToSegment(point, edge.points[i]!, edge.points[i + 1]!) - edge.halfWidth;
+      if (gap < best) best = gap;
+    }
+  }
+  // The plaza is paving too, and a disc rather than a ribbon.
+  for (const node of facts.pathNodes) {
+    if (node.reach <= 0) continue;
+    const gap = Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach;
+    if (gap < best) best = gap;
+  }
+  return Math.max(0, best);
 }
 
 function fmt(point: readonly [number, number]): string {

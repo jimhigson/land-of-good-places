@@ -10,7 +10,7 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
-import { placedEntry } from './parkLayout';
+import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
 import { Rng } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
@@ -86,24 +86,19 @@ export const FACE_PAINT_SIGN: ZoneSign = {
  * `Scenery.ts` (nearest, the `[-10, 2]`–`[-4, 1]` wood run, is ~6.8 m away).
  * Confirmed clear by eye in the running game (see PROGRESS-FACEPAINT.md).
  */
-const STALL_X = placedEntry('stall.facePaint').x;
-const STALL_Z = placedEntry('stall.facePaint').z;
 /**
- * A shade east of +Z, same as the rail racer's own `+0.3` — counter faces the
- * default camera. The *position* mirrors the rail racer's across the X axis,
- * but the facing must not: the camera angle is one fixed absolute direction
- * everywhere on the map (GAME_DESIGN.md #16, ARCHITECTURE.md "One camera
- * angle, forever"), not something relative to which side of the plaza a stall
- * stands on. An earlier version of this constant mirrored the sign to `-0.3`
- * along with the position, which quietly turned the counter away from the
- * camera.
+ * Position, yaw and stand point all come from `minigames/stallPlacement.ts`,
+ * which is the one table `world/paths.ts` grows its spurs from. This booth
+ * used to derive its own from `placedEntry` plus two local constants, and a
+ * booth whose stand point only it knows about is a booth the path network
+ * cannot lead to — the bug behind issue #114. One table, one formula.
  */
-const STALL_FACING = 0.3;
+const FACE_PAINT_PLACEMENT = STALL_PLACEMENTS.facePaint;
+const [STALL_X, STALL_Z] = FACE_PAINT_PLACEMENT.position;
+const STALL_FACING = FACE_PAINT_PLACEMENT.facing;
 
 const STALL_WIDTH = 3.1;
 const STALL_DEPTH = 2.1;
-/** How far in front of the counter a child (or the player) stands to be served. */
-const STAND_DISTANCE = 2.3;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.2;
 
@@ -175,10 +170,10 @@ export class FacePaintStall implements GameSystem {
     this.group.position.set(STALL_X, ground, STALL_Z);
     this.group.rotation.y = STALL_FACING;
 
-    const forwardX = Math.sin(STALL_FACING);
-    const forwardZ = Math.cos(STALL_FACING);
-    this.standX = STALL_X + forwardX * STAND_DISTANCE;
-    this.standZ = STALL_Z + forwardZ * STAND_DISTANCE;
+    const stand = STALL_STANDS_BY_ID.get('facePaint');
+    if (!stand) throw new Error('FacePaintStall: no stand point in STALL_PLACEMENTS.facePaint');
+    this.standX = stand.x;
+    this.standZ = stand.z;
 
     this.painterUpper = this.buildBooth();
     this.buildCollision(collision);

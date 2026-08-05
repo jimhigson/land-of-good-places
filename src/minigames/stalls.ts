@@ -8,8 +8,8 @@ import { highlightObject } from '../world/highlight';
 import { createDodgems } from './dodgems/Dodgems';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createWaterFight } from './waterFight/WaterFight';
-import { createStallProp, STALL_STAND_DISTANCE, type StallProp } from './stallProp';
-import { STALL_PLACEMENTS } from './stallPlacement';
+import { createStallProp, type StallProp } from './stallProp';
+import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
 import type { StallDefinition } from './types';
 
 /**
@@ -212,15 +212,22 @@ export class MiniGameStalls implements GameSystem {
       // can run right up to the counter.
       addBoothCollision(collision, x, z, definition.facing);
 
-      const forwardX = Math.sin(definition.facing);
-      const forwardZ = Math.cos(definition.facing);
+      // Taken from `STALL_STANDS`, not recomputed here. This used to derive its
+      // own from `STALL_STAND_DISTANCE`, which was harmless only for as long as
+      // every booth used that one distance — the moment a placement sets its
+      // own `standDistance`, a locally-recomputed stand point silently stops
+      // agreeing with the one `world/paths.ts` runs the paving to. That is
+      // exactly the split this whole change exists to close (issue #114), so it
+      // must not be left open here.
+      const stand = STALL_STANDS_BY_ID.get(definition.id);
+      if (!stand) throw new Error(`MiniGameStalls: no stand point for '${definition.id}'`);
       instances.push({
         definition,
         x,
         z,
         booth: prop.root,
-        standX: x + forwardX * STALL_STAND_DISTANCE,
-        standZ: z + forwardZ * STALL_STAND_DISTANCE,
+        standX: stand.x,
+        standZ: stand.z,
       });
     }
     this.stalls = instances;

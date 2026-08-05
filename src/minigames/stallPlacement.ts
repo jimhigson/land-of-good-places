@@ -32,6 +32,13 @@ export interface StallPlacement {
   readonly position: readonly [number, number];
   /** Yaw in radians the counter faces. 0 looks down +Z. */
   readonly facing: number;
+  /**
+   * How far in front of the counter a child stands, when this booth wants
+   * something other than {@link STALL_STAND_DISTANCE}. Omitted by every
+   * mini-game booth; the face-paint stall is shallower and stands its
+   * customer closer.
+   */
+  readonly standDistance?: number;
 }
 
 /** How far in front of the centre a child stands to be served. */
@@ -75,6 +82,29 @@ function ferrisKiosk(): StallPlacement {
   return { position: [ex + sideX * 5, ez + sideZ * 5], facing: wheel.signYaw };
 }
 
+/**
+ * The face-paint stall, which `world/FacePaintStall.ts` builds rather than
+ * `stalls.ts`.
+ *
+ * It is here so that {@link STALL_STANDS} is the *complete* list of stall
+ * destinations. `world/paths.ts` grows a path spur to every entry, and a booth
+ * missing from this table is a booth the path network cannot know about — the
+ * ferris kiosk was exactly that until issue #114.
+ *
+ * Its two numbers are its own, not a mini-game booth's: the counter is
+ * shallower, so the customer stands 2.3 m out rather than 3.1 m, and the yaw
+ * is the fixed `+0.3` the booth has always been turned to — a shade east of
+ * +Z, the one absolute direction the fixed isometric camera can read a counter
+ * from (GAME_DESIGN.md #16, ARCHITECTURE.md "One camera angle, forever"). That
+ * yaw must *not* be mirrored to match the position mirroring the rail racer's
+ * across the X axis; an earlier version did, and quietly turned the counter
+ * away from the camera.
+ */
+function facePaintStall(): StallPlacement {
+  const p = placedEntry('stall.facePaint');
+  return { position: [p.x, p.z], facing: 0.3, standDistance: 2.3 };
+}
+
 export const STALL_PLACEMENTS = {
   railRacer: placedStall('stall.railRacer'),
   skyCruiser: placedStall('stall.skyCruiser'),
@@ -82,6 +112,7 @@ export const STALL_PLACEMENTS = {
   waterFight: placedStall('stall.waterFight'),
   spaceFerrisWheel: ferrisKiosk(),
   dodgems: placedStall('stall.dodgems'),
+  facePaint: facePaintStall(),
 } as const satisfies Record<string, StallPlacement>;
 
 /** Where a child stands to be served at a stall. */
@@ -101,9 +132,17 @@ export interface StallStand {
  * regenerated.
  */
 export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMENTS).map(
-  ([id, placement]) => ({
-    id,
-    x: placement.position[0] + Math.sin(placement.facing) * STALL_STAND_DISTANCE,
-    z: placement.position[1] + Math.cos(placement.facing) * STALL_STAND_DISTANCE,
-  }),
+  ([id, placement]) => {
+    const reach = placement.standDistance ?? STALL_STAND_DISTANCE;
+    return {
+      id,
+      x: placement.position[0] + Math.sin(placement.facing) * reach,
+      z: placement.position[1] + Math.cos(placement.facing) * reach,
+    };
+  },
+);
+
+/** The same stands, by id — for the one-off booths that build themselves. */
+export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = new Map(
+  STALL_STANDS.map((stand) => [stand.id, stand]),
 );
