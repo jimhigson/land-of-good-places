@@ -1074,65 +1074,98 @@ const railRaceStallStandsAtTheRim: Invariant = (facts) => {
 const CAR_HALF_WIDTH = 0.75;
 
 /**
- * Things the Sky Cruiser is too low to fly over and must go *around*.
+ * **The Sky Cruiser flies clear of the entire park.** (Issue #198.)
  *
- * The cruise floor is 6.2 m, which clears the trees, the garlands and the
- * train. It does not clear the big wheel, so the loop must go round it.
+ * ### What this replaces, and why the thing it replaces was wrong
  *
- * **The castle used to be in this list and deliberately is not any more**
- * (#113). The Sky Cruiser now flies *through* it, in one side wall and out the
- * other, so measuring the loop against the castle's plot circle would fail the
- * feature rather than test it — and that circle was never a description of the
- * castle anyway: 19 m about a point 3.54 m from the building, which does not
- * even contain its corner towers. Dropping it here loses nothing, because
- * {@link skyCruiserFitsThroughTheCastle} replaces one crude circle with the
- * real masonry and a swept car, which is a strictly stronger claim.
+ * There used to be a `TOO_TALL_TO_FLY_OVER` list here — two plot ids, latterly
+ * one — with a comment explaining that the 6.2 m cruise floor "clears the trees,
+ * the garlands and the train", and that the big wheel was therefore *"the only
+ * horizontal obstacle the loop actually has"*.
+ *
+ * **That claim was false when it was last written down, and the park had been
+ * contradicting it for as long as the station ramp existed.** The ride flew
+ * through a tree canopy and a bush beside its own station on every one of the
+ * five seeds below, and through a wooden hiding wall on seed 5. It was invisible
+ * because all three checks that asked "does the coaster hit anything?" — this
+ * one, the boot assert and the route solver — asked it of that same typed-out
+ * list rather than of the park.
+ *
+ * Two measurements say why it could not have been kept true by hand. A canopy
+ * reaches **6.68 m** above its own ground while the car's underside at cruise is
+ * 6.04 m, so the cruise floor does *not* clear the trees; and **83 m of the
+ * 185 m loop** has the car below 6 m, because the profile dips at the station
+ * and again to thread the castle. A sentence cannot track that, and nothing
+ * warns you when it stops being true.
+ *
+ * ### What it does instead
+ *
+ * Sweeps the car's own envelope — 0.75 m either side, 1.55 m up to the
+ * first-person eye, 0.16 m down to the ties — along the whole loop as eight rays
+ * (four corners **plus four edge midpoints**, because corners alone leave a
+ * 1.5 m gap across the beam that a lamp post passes clean through) and reports
+ * whatever real triangles they hit. No list, no plot circles, no height
+ * threshold: a thing added to the park is covered from the day it appears.
+ *
+ * The requirement is simply **"does not intersect"**. There is deliberately no
+ * generous clearance band, and the threshold is emphatically not the generator's
+ * `CORRIDOR_RADIUS` of 3 m — asserting a solver's own target proves only that it
+ * can do arithmetic and turns every future retune red.
+ *
+ * A near miss is therefore a pass, and one in particular is meant to stay that
+ * way: the RiPika statue at 2.01 m of clear air. It is *reported* as the
+ * tightest approach by `check:cruiser-clearance` and fails nothing, and whether
+ * a rider passing level with a giant RiPika's chest is a good idea belongs to
+ * the family, not to a collision check.
+ *
+ * Rays decide and boxes only report, and that split is load-bearing: no bounding
+ * volume can fly through the castle window, because the wall band has a hole in
+ * it and its box does not.
+ *
+ * Same `cruiserStrikes` the `check:cruiser-clearance` build gate runs, so there
+ * is one definition of "does the ride hit anything".
+ *
+ * Proven red rather than assumed: against the pre-fix scatter it names both
+ * original strikes, the canopy at 167 m and the bush at 182 m along the loop.
  */
-const TOO_TALL_TO_FLY_OVER = ['ferrisWheel'] as const;
+const skyCruiserFliesClearOfThePark: Invariant = (facts) => facts.cruiserStrikes;
 
 /**
- * **The Sky Cruiser goes round the castle and the big wheel, not through them.**
+ * **The Sky Cruiser still goes round the big wheel.**
  *
- * This invariant exists because its absence was a shipped bug (issue #113). The
- * old route solver pushed its control points out of the castle and then
- * *smoothed them*, which quietly pulled them back in, and nothing anywhere
- * measured the finished curve against either obstacle — not `check:park`, not
- * the boot assert, not this file. The coaster clipped the castle in plain sight
- * for weeks with a green build.
+ * Kept alongside the sweep above rather than folded into it, because it is a
+ * different kind of claim. The sweep asks whether the built ride *touches*
+ * anything; this asks whether the loop respects the one plot it is required to
+ * route around, measured against the built curve and the built plot.
  *
- * So this measures the built track, sampled the whole way round, against the
- * built plots — never the generator's avoidance rule, which is exactly the
- * thing that was wrong. It would have failed on the old solve.
+ * The distinction matters at the margin the sweep cannot see: a loop threading
+ * between the wheel's legs would strike nothing and still be wrong.
  */
-const skyCruiserClearsTheTallThings: Invariant = (facts) => {
+const skyCruiserGoesRoundTheBigWheel: Invariant = (facts) => {
   const route = facts.world.coaster.route;
   const complaints: string[] = [];
   const point = new Vector3();
 
-  for (const id of TOO_TALL_TO_FLY_OVER) {
-    const plot = facts.plots.find((candidate) => candidate.id === id);
-    if (!plot) {
-      complaints.push(`the park has no plot called ${id} to measure the coaster against`);
-      continue;
+  const plot = facts.plots.find((candidate) => candidate.id === 'ferrisWheel');
+  if (!plot) return ['the park has no ferrisWheel plot to measure the coaster against'];
+
+  let worst = Infinity;
+  let worstAt: readonly [number, number] = [0, 0];
+  // Every metre: the loop is a few hundred metres long and a clip can be
+  // brief, so a coarse sweep can step straight over the one bad bend.
+  for (let distance = 0; distance < route.length; distance += 1) {
+    route.pointAt(distance, point);
+    const gap = Math.hypot(point.x - plot.x, point.z - plot.z) - plot.boundingRadius;
+    if (gap < worst) {
+      worst = gap;
+      worstAt = [point.x, point.z];
     }
-    let worst = Infinity;
-    let worstAt: readonly [number, number] = [0, 0];
-    // Every metre: the loop is a few hundred metres long and a clip can be
-    // brief, so a coarse sweep can step straight over the one bad bend.
-    for (let distance = 0; distance < route.length; distance += 1) {
-      route.pointAt(distance, point);
-      const gap = Math.hypot(point.x - plot.x, point.z - plot.z) - plot.boundingRadius;
-      if (gap < worst) {
-        worst = gap;
-        worstAt = [point.x, point.z];
-      }
-    }
-    if (worst < CAR_HALF_WIDTH) {
-      complaints.push(
-        `the Sky Cruiser passes ${worst.toFixed(2)} m from ${id} at ${fmt(worstAt)} — ` +
-          `a car is ${CAR_HALF_WIDTH * 2} m wide, so it clips it`,
-      );
-    }
+  }
+  if (worst < CAR_HALF_WIDTH) {
+    complaints.push(
+      `the Sky Cruiser passes ${worst.toFixed(2)} m from the big wheel at ${fmt(worstAt)} — ` +
+        `a car is ${CAR_HALF_WIDTH * 2} m wide, so it clips it`,
+    );
   }
 
   return complaints;
@@ -1273,7 +1306,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railRaceRingsStandOutsideThePark,
   ],
   ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
-  ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
+  ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
+  ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
 ];
