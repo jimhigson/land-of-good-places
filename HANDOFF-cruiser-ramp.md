@@ -143,12 +143,53 @@ plan-view search, which must be told where not to go before there is a route to
 measure. Replacing it with a measurement taken afterwards would let the loop
 grow through the big wheel and then complain about it. Its comment now says so.
 
-## PR #203 (the castle) — its CI red is fixed by this branch
+## PR #203 — fixed there, on the Overseer's ruling
 
-#203 fails `seed-5 > built the park it was asked for` at exactly 24 trees.
-Measured: `main` plants 26 on seed 5, #203 plants 24, this branch plants 25.
-So it is #203's regression and this branch already carries the remedy. Either
-merge #203 first and let this follow, or lift the budget bump into #203.
+The tree-budget bump was **lifted into #203** (commit 608970c) where the
+regression originates, and this branch was restacked on top. #203 is now green
+standalone: build exit 0, `test:procgen` 117 passed. This branch's `Scenery.ts`
+diff against #203 is now **189 insertions and no deletions** — pure addition,
+with the budget owned entirely by #203.
+
+`main` 26 trees on seed 5, #203 at 180 000 gives 26, this branch 25.
+
+## What the tree floor actually is — the answer to "which was it written to be"
+
+**Neither.** It is a *thinning-regression detector*, and its calibration is now
+stale. Traced through `git log -L` on the assertion:
+
+- `7f2e81e` introduced it (#107).
+- `562ee8e` set it to **20**, calling it "an anti-vacuity guard, not a
+  placement threshold", reasoning "every seed plants 26-30, so 20 is a floor
+  that a genuinely thinned park trips and ordinary seed-to-seed variation does
+  not".
+- `901895d` — **a review — found that claim false and raised it to 24.** The
+  reviewer reverted the attempt-budget fix while keeping the wall-clearance
+  fix and got 19/23/23/27/23. Only the 19 tripped `> 20`: "four of five seeds
+  thinned by 21-28% and sailed straight through, so the guard did not catch the
+  one regression it exists to catch".
+
+So 24 was chosen to **catch a specific historical thinning**, measured both
+ways round (healthy 26/27/26/30/28 vs thinned 19/23/23/27/23) — distributions
+that *overlap*, so the commit explicitly records that no global floor can
+separate them and that the number is not watertight.
+
+**The decisive detail: that commit rejected 25 for exactly the reason we are
+now living with.** "24 is the best a global floor does: catches 4 of the 5
+seeds, keeps two trees of headroom under the lowest healthy seed. 25 catches no
+more and leaves one." One tree of headroom was already ruled insufficient.
+
+The calibration assumed **lowest-healthy = 26**. It is now 25 on this branch,
+so the floor's own stated premise — two trees under the lowest healthy seed —
+no longer holds. The number did not drift; the park moved underneath it.
+
+**Recommendation, for the Overseer to rule on.** Do *not* lower the floor to
+23 to restore the premise — that is weakening an assertion to make a seed pass.
+Restore the headroom at source instead: seed 5's losses are the castle exit
+moving `paths.ts`'s routing plus #196's longer spurs, and 210 000 is unavailable
+here only because the scatter at that density strands a waypoint. Fixing *that*
+(a scatter that will not wall in a POI) unlocks 210 000, which gives seed 5
+27-28 and restores three trees of slack without touching the assertion.
 
 ## Queued behind this (from the Overseer)
 
