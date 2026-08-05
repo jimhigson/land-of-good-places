@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import { placedEntry } from '../parkLayout';
+import { RingPath } from './ringPath';
 
 /**
  * **The Rail Race's four tracks** — a ring around the park's rim, flown high.
@@ -120,7 +121,35 @@ export const PLAYER_LANE = LANE_COUNT - 1;
  * and the inner rail is back over the wall; any larger and the outer rail walks
  * out onto the hillside for no gain.
  */
-export const NOMINAL_RADIUS = 65.5;
+export const NOMINAL_OUTSET = 6.5;
+
+/**
+ * The ring's centre line, built once and shared by both rings.
+ *
+ * Was `NOMINAL_RADIUS = 65.5`, a circle. The park is a spline now (59.7 m at the
+ * pinch, 101.4 m at the bulge), so a concentric circle is not available at any
+ * radius — see `ringPath.ts` for the measurements.
+ *
+ * ### Why 6.5 and not the 5.5 the old circle worked out at
+ *
+ * The corridor is bounded at both ends and it is narrow. The race ring's own
+ * half-width is 4.675 m of lanes and gauge, which the curve's own bending widens
+ * to about 4.85 m of true perpendicular reach. So:
+ *
+ * - **inner limit 5.92 m** — the innermost rail must stand `1.07 m` clear of the
+ *   outline (a child stopped by the collision wall, plus her own radius), and
+ *   `1.07 + 4.85 = 5.92`.
+ * - **outer limit 7.15 m** — the outermost rail must stay inside
+ *   `RIM_OUTSET_START` (12 m), where the ground starts falling 17 m away, or
+ *   there is nothing to stand a trestle on. `12 - 4.85 = 7.15`.
+ *
+ * 6.5 sits in the middle with about 0.6 m either side. Note the old circle put
+ * the innermost rail **0.825 m** outside the wall at the gate — already inside
+ * that 1.07 m, so the ride was marginally clipping the masonry there before any
+ * of this; the old invariant did not catch it because it compared against the
+ * wall's centre line plus a player radius and forgot the stone had thickness.
+ */
+const RING_PATH = new RingPath(NOMINAL_OUTSET);
 
 /**
  * Metres between neighbouring rails **at park scale**. A ring's own spacing is
@@ -217,9 +246,33 @@ const LANE_ROTATION = 0.27;
  */
 const WIDEST_HALF_SPAN = (((LANE_COUNT - 1) / 2) * LANE_SPACING_AT_PARK_SCALE) * RIDE_SCALE;
 
-/** Height of a lane's rail above the level base, at loop angle `theta`. */
-function undulation(lane: number, theta: number): number {
-  const rotated = theta + lane * LANE_ROTATION * TAU;
+/**
+ * Height of a lane's rail above the level base, at loop **phase**.
+ *
+ * ### Phase is arc length now, and lane fairness depends on it
+ *
+ * This took `theta`, the compass bearing, which was interchangeable with arc
+ * length while the ring was a circle (`s = R theta`). On a ring that follows the
+ * park's edge they are **not** interchangeable: the ring sweeps bearing quickly
+ * round the pinch and slowly round the bulge.
+ *
+ * Rotating the profile rigidly *in bearing* would therefore give each lane a
+ * differently-stretched sequence of hills once measured in metres travelled —
+ * one lane climbing more per lap than another. Lane fairness is the whole point
+ * of the Rail Race; a ring where one lane is quietly easier is a ride that
+ * cheats a six-year-old, and `check:rail-race` asserts `climbSpread < 0.02`
+ * precisely to stop it.
+ *
+ * Phasing by normalised arc length keeps every lane an exact shifted copy of one
+ * profile **in `s`**, so total climb per lap is identical across lanes by
+ * construction rather than by luck. Integer harmonics still close seamlessly at
+ * the join, because the phase advances by exactly `TAU` over one lap.
+ *
+ * Note this **degenerates to the old maths exactly** when the park is a circle:
+ * there `length = TAU * R`, so `TAU * s / length` is `s / R`.
+ */
+function undulation(lane: number, phase: number): number {
+  const rotated = phase + lane * LANE_ROTATION * TAU;
   let y = 0;
   for (const harmonic of HARMONICS) {
     y += Math.sin(rotated * harmonic.n) * harmonic.amplitude;
@@ -248,20 +301,36 @@ export class RailRaceRoute {
    */
   readonly scale: number;
 
-  /** The circle this ring's arc length is measured on. Shared by both rings. */
-  readonly nominalRadius = NOMINAL_RADIUS;
+  /** The centre line this ring's arc length is measured on. Shared by both rings. */
+  readonly path = RING_PATH;
+
+  /**
+   * How far outside the park's edge the ring's centre line runs.
+   *
+   * Replaces `nominalRadius`. A radius is no longer a statement about where the
+   * ride is relative to the park — the edge is 59.7 m away on one bearing and
+   * 101.4 m on another — so the number that stays meaningful is the outset.
+   */
+  readonly nominalOutset = NOMINAL_OUTSET;
 
   /** Metres between neighbouring rails **on this ring**. */
   readonly laneSpacing: number;
 
-  /** Radius of each lane, innermost first. Lane `PLAYER_LANE` is the outermost. */
-  readonly laneRadii: readonly number[];
+  /**
+   * Lateral offset of each lane from the centre line, innermost first —
+   * negative is toward the park. Lane `PLAYER_LANE` is the outermost.
+   *
+   * Was `laneRadii`, absolute radii of concentric circles. Lanes are offsets
+   * along the local outward normal now, because the centre line is not a circle
+   * and "radius" no longer places anything.
+   */
+  readonly laneOffsets: readonly number[];
 
-  /** Radial distance from the innermost lane's centre to the outermost lane's. */
+  /** Distance from the innermost lane's centre to the outermost lane's. */
   readonly laneSpan: number;
 
   /** One lap, in metres of shared arc length. Identical on both rings. */
-  readonly length = TAU * NOMINAL_RADIUS;
+  readonly length = RING_PATH.length;
 
   /** Where the start/finish arch stands, in metres along the loop. */
   readonly startDistance: number;
@@ -282,26 +351,25 @@ export class RailRaceRoute {
   constructor(stationStallId: string, scale: number) {
     this.scale = scale;
     this.laneSpacing = LANE_SPACING_AT_PARK_SCALE * scale;
-    this.laneRadii = Array.from(
+    this.laneOffsets = Array.from(
       { length: LANE_COUNT },
-      (_unused, lane) => NOMINAL_RADIUS + (lane - (LANE_COUNT - 1) / 2) * this.laneSpacing,
+      (_unused, lane) => (lane - (LANE_COUNT - 1) / 2) * this.laneSpacing,
     );
     this.laneSpan = (LANE_COUNT - 1) * this.laneSpacing;
 
     let highest = -Infinity;
     const samples = 360;
     for (let i = 0; i < samples; i += 1) {
-      const theta = (i / samples) * TAU;
-      // Sampled across the full width of the *widest* ring, not just the
-      // nominal circle and not just this ring's own lanes: the outer rails can
-      // be over higher ground than the middle is, and both rings must agree on
-      // the answer.
-      for (const radius of [
-        NOMINAL_RADIUS - WIDEST_HALF_SPAN,
-        NOMINAL_RADIUS,
-        NOMINAL_RADIUS + WIDEST_HALF_SPAN,
-      ]) {
-        const height = terrainHeight(Math.cos(theta) * radius, Math.sin(theta) * radius);
+      const sample = RING_PATH.sampleAt((i / samples) * RING_PATH.length);
+      // Sampled across the full width of the *widest* ring, not just the centre
+      // line and not just this ring's own lanes: the outer rails can be over
+      // higher ground than the middle is, and both rings must agree on the
+      // answer. Offsets are along the local normal now rather than radial.
+      for (const offset of [-WIDEST_HALF_SPAN, 0, WIDEST_HALF_SPAN]) {
+        const height = terrainHeight(
+          sample.x + sample.normalX * offset,
+          sample.z + sample.normalZ * offset,
+        );
         if (height > highest) highest = height;
       }
     }
@@ -313,9 +381,10 @@ export class RailRaceRoute {
     // rides carry her to a station she is not standing on.
     const stall = placedEntry(stationStallId);
     const bearing = Math.atan2(stall.z, stall.x);
-    // Inverted to match `angleAt`'s clockwise sign, so this really is the arc
-    // length at which the ring passes the booth.
-    this.startDistance = this.wrap(-bearing * NOMINAL_RADIUS);
+    // A search, not a division: `s = -R * bearing` only held while the ring was
+    // a circle. Valid because the boundary is star-shaped, so bearing is
+    // monotone in arc length.
+    this.startDistance = this.wrap(RING_PATH.distanceAtBearing(bearing));
   }
 
   /** Brings any arc length into `[0, length)`. */
@@ -338,22 +407,34 @@ export class RailRaceRoute {
    * is rightward.
    */
   angleAt(distance: number): number {
-    return -distance / NOMINAL_RADIUS;
+    return RING_PATH.bearingAt(distance);
+  }
+
+  /**
+   * Loop phase at an arc length — what the undulation is drawn against.
+   *
+   * Negative, keeping the clockwise sense `angleAt`'s doc argues for, and
+   * advancing by exactly `TAU` over one lap so integer harmonics close at the
+   * join. This is the quantity that used to *be* `angleAt`; the two separated
+   * when the ring stopped being a circle.
+   */
+  phaseAt(distance: number): number {
+    return (-distance / this.length) * TAU;
   }
 
   /** Height of a lane's rail head, in world metres. */
   heightAt(lane: number, distance: number): number {
-    return this.base + undulation(lane, this.angleAt(distance));
+    return this.base + undulation(lane, this.phaseAt(distance));
   }
 
   /** A point on a lane's rail. */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
-    const theta = this.angleAt(distance);
-    const radius = this.laneRadii[lane] ?? NOMINAL_RADIUS;
+    const sample = RING_PATH.sampleAt(distance);
+    const offset = this.laneOffsets[lane] ?? 0;
     return target.set(
-      Math.cos(theta) * radius,
+      sample.x + sample.normalX * offset,
       this.heightAt(lane, distance),
-      Math.sin(theta) * radius,
+      sample.z + sample.normalZ * offset,
     );
   }
 
@@ -367,13 +448,13 @@ export class RailRaceRoute {
    * would tilt every cart on the outer lanes by the wrong pitch.
    */
   tangentAt(lane: number, distance: number, target: Vector3 = new Vector3()): Vector3 {
-    const theta = this.angleAt(distance);
-    const radius = this.laneRadii[lane] ?? NOMINAL_RADIUS;
-    const horizontal = radius / NOMINAL_RADIUS;
-    // d/ds of (cos θ · r, ·, sin θ · r) with θ = −s/R, so the horizontal part
-    // comes out as (sin θ, −cos θ) rather than the anticlockwise (−sin θ, cos θ).
+    const sample = RING_PATH.sampleAt(distance);
+    // The horizontal part is the centre line's own tangent. It is normalised at
+    // the end, so the lane's own slightly different speed through `s` (an outer
+    // lane covers more ground per metre of shared arc length) falls out of the
+    // ratio rather than needing the radius factor the circular version used.
     return target
-      .set(Math.sin(theta) * horizontal, this.slopeAt(lane, distance), -Math.cos(theta) * horizontal)
+      .set(sample.tangentX, this.slopeAt(lane, distance), sample.tangentZ)
       .normalize();
   }
 
@@ -385,13 +466,15 @@ export class RailRaceRoute {
    * than a sampled approximation of it.
    */
   slopeAt(lane: number, distance: number): number {
-    const rotated = this.angleAt(distance) + lane * LANE_ROTATION * TAU;
-    let dydtheta = 0;
+    const rotated = this.phaseAt(distance) + lane * LANE_ROTATION * TAU;
+    let dydphase = 0;
     for (const harmonic of HARMONICS) {
-      dydtheta += Math.cos(rotated * harmonic.n) * harmonic.amplitude * harmonic.n;
+      dydphase += Math.cos(rotated * harmonic.n) * harmonic.amplitude * harmonic.n;
     }
-    // Chain rule, with `angleAt`'s clockwise sign: dθ/ds = −1/NOMINAL_RADIUS.
-    return -dydtheta / NOMINAL_RADIUS;
+    // Chain rule, against phase rather than bearing: dphase/ds = -TAU/length.
+    // Still exact and still closed form — the undulation is three sinusoids in
+    // a quantity that is now linear in `s`, which it was not in bearing.
+    return (-dydphase * TAU) / this.length;
   }
 
   /**
@@ -400,7 +483,12 @@ export class RailRaceRoute {
    * stacked along.
    */
   outwardAt(distance: number, target: Vector3 = new Vector3()): Vector3 {
-    const theta = this.angleAt(distance);
-    return target.set(Math.cos(theta), 0, Math.sin(theta));
+    // The centre line's own outward normal. On a circle this was the radial
+    // direction `(cos theta, 0, sin theta)` and the two were the same vector;
+    // on a curve that follows the park's edge they are not, and using the radial
+    // one would lean every cart and every camera slightly the wrong way
+    // wherever the boundary's radius is changing.
+    const sample = RING_PATH.sampleAt(distance);
+    return target.set(sample.normalX, 0, sample.normalZ);
   }
 }

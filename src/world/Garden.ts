@@ -32,6 +32,35 @@ import type { CollisionWorld } from './Collision';
  * Everything here is static — built once, never updated — so it is a plain
  * builder rather than a GameSystem.
  */
+/**
+ * Half the width the boundary masonry occupies about the park's outline, in
+ * metres — the pillar caps, which are the widest part of it.
+ *
+ * Exported because anything asking "is this thing clear of the park wall?" has
+ * to measure against the *widest* stone, not the collision half-width (0.45)
+ * that only the physics sees. A rail passing 0.5 m outside the outline would
+ * clear the collider and still be driven straight through a pillar cap.
+ *
+ * Exported rather than copied, deliberately. This session alone has produced
+ * four bugs of the form "the same number declared twice, then diverging" —
+ * two stall stand points (#114), two `ParkBoundary` types, two `circleBoundary`
+ * functions, and a `BRIDGE_RISE` that no longer matched the locomotive it was
+ * supposed to clear. A number that describes built geometry belongs to the
+ * module that builds it.
+ */
+export const BOUNDARY_MASONRY_HALF_WIDTH = 0.86;
+
+/**
+ * Half-thickness of the boundary wall as **collision** sees it — what a child
+ * is actually stopped by, as opposed to the stone she can see.
+ *
+ * Narrower than {@link BOUNDARY_MASONRY_HALF_WIDTH} because the pillar caps
+ * bulge past the run of blocks and nothing needs to collide with a decorative
+ * bulge. Both numbers are real and they answer different questions: "could a
+ * child be standing here?" is this one, "is there stone here?" is that one.
+ */
+export const BOUNDARY_WALL_COLLISION_HALF = 0.45;
+
 export class Garden {
   readonly group = new Group();
 
@@ -214,7 +243,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   pillars.castShadow = true;
   pillars.receiveShadow = true;
 
-  const capGeometry = new SphereGeometry(0.86, 14, 10);
+  const capGeometry = new SphereGeometry(BOUNDARY_MASONRY_HALF_WIDTH, 14, 10);
   const capMaterial = new MeshStandardMaterial({
     color: PALETTE.stonePinkLight,
     roughness: 0.6,
@@ -249,7 +278,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   for (let i = 0; i < collisionStations.length; i += 1) {
     const a = collisionStations[i] as EdgeStation;
     const b = collisionStations[(i + 1) % collisionStations.length] as EdgeStation;
-    collision.addWall(a.x, a.z, b.x, b.z, 0.45);
+    collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
   }
 
   return group;

@@ -17,6 +17,7 @@
  */
 import { Vector3 } from 'three';
 import type { World } from '../../src/world/World.ts';
+import type { ParkBoundary } from '../../src/world/boundary.ts';
 
 /** A wall run flattened to what a clearance test needs. */
 export interface WallFact {
@@ -129,6 +130,20 @@ export interface ParkFacts {
    */
   readonly nearPairs: ReadonlySet<string>;
   /** Distance from a point to the solved rail centre line. */
+  /**
+   * The park's own edge, off the **built** world (`collision.playBounds`).
+   *
+   * Not `boundary.ts`'s `PARK_BOUNDARY`. Importing that statically anywhere in
+   * this test tree loads `parkManifest.ts` before `LGP_SEED` is set, pinning
+   * every seed to the default park — the exact silent failure the seed guard
+   * above exists to catch, and it does catch it. Anything seed-dependent
+   * reaches an invariant through `ParkFacts`, never through a static import.
+   */
+  readonly boundary: ParkBoundary;
+  /** Half the width the boundary masonry occupies, off `Garden.ts`. */
+  readonly masonryHalfWidth: number;
+  /** Half-thickness of the boundary wall as collision sees it, off `Garden.ts`. */
+  readonly wallCollisionHalf: number;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
@@ -175,6 +190,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   const { world, buildMs, sample } = buildHeadlessPark();
 
+  const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
+    '../../src/world/Garden.ts'
+  );
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
@@ -356,6 +374,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     reachableFromEntrance,
     routes,
     nearPairs,
+    boundary: world.collision.playBounds,
+    masonryHalfWidth: BOUNDARY_MASONRY_HALF_WIDTH,
+    wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
     buildMs,

@@ -38,7 +38,7 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
-import { PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
+import { PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
 import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
 
 /**
@@ -127,6 +127,7 @@ const TRESTLE_GAP_TOLERANCE = 40;
  * no risk of the tolerance swallowing the thing it exists to catch.
  */
 const ARRIVAL = 2 * PLAYER_RADIUS;
+
 
 // ------------------------------------------------------------------ the list
 
@@ -703,17 +704,30 @@ function builtRings(facts: ParkFacts): readonly BuiltRing[] {
 }
 
 /**
- * Every horizontal radius the rails of one ring actually occupy, straight off
- * the swept tube's own vertices.
+ * How far outside the park's edge the rails of one ring actually run — the
+ * nearest and furthest, straight off the swept tube's own vertices.
+ *
+ * **Outset, not radius, and that is the whole point.** This measured
+ * `Math.hypot(x, z)` until the park stopped being a circle. A radius is only a
+ * statement about the edge when the edge is the same distance away on every
+ * bearing; once the boundary ran 59.7 m at the pinch and 101.4 m at the bulge,
+ * `r = 65.5` meant "comfortably outside" on one bearing and "35 m inside, with
+ * the masonry running between the rails" on another — and the assertion built
+ * on it went on passing, because 65.5 > 60 is true regardless of where the park
+ * actually is. Asking the boundary itself is what makes the claim survive a
+ * change of shape.
  *
  * Not `route.pointAt` — that is the rule the rails were built from, and this
  * file's first commandment is to measure the thing that was built. The lane
  * centre line would also miss half a gauge of real structure either side of it,
  * which is exactly the margin these checks are about.
  */
-function railRadiusRange(ring: BuiltRing): { min: number; max: number; vertices: number } {
+function railOutsetRange(
+  ring: BuiltRing,
+  boundary: ParkFacts['boundary'],
+): { min: number; max: number; vertices: number } {
   let min = Infinity;
-  let max = 0;
+  let max = -Infinity;
   let vertices = 0;
   ring.group.traverse((child) => {
     if (!(child instanceof Mesh)) return;
@@ -721,9 +735,11 @@ function railRadiusRange(ring: BuiltRing): { min: number; max: number; vertices:
     const position = child.geometry.getAttribute('position');
     if (!position) return;
     for (let i = 0; i < position.count; i += 1) {
-      const radius = Math.hypot(position.getX(i), position.getZ(i));
-      if (radius < min) min = radius;
-      if (radius > max) max = radius;
+      // Outset, not radius. `distanceToEdge` is positive inside the park, so a
+      // rail out beyond the wall — where both rings belong — reads positive here.
+      const outset = -boundary.distanceToEdge(position.getX(i), position.getZ(i));
+      if (outset < min) min = outset;
+      if (outset > max) max = outset;
       vertices += 1;
     }
   });
@@ -784,24 +800,40 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
 
   // --- 1. outside the wall, inside the hill ---------------------------------
   const widths = new Map<string, number>();
+  // Two separate claims, and the rail has to satisfy both, so the threshold is
+  // whichever binds harder. Neither number is chosen here; both are read off the
+  // built park.
+  //
+  //  - **No child is standing in a rail.** She is stopped by the *collision*
+  //    wall, so the furthest out she can be is its half-thickness plus her own
+  //    radius.
+  //  - **No rail is driven through stone.** The widest masonry is the pillar
+  //    cap, which bulges past the collision wall — a rail clearing the collider
+  //    can still pass through a cap, invisible to physics and obvious to a
+  //    six-year-old.
+  const clearOfMasonry = Math.max(
+    facts.wallCollisionHalf + PLAYER_RADIUS,
+    facts.masonryHalfWidth,
+  );
   for (const ring of rings) {
-    const { min, max, vertices } = railRadiusRange(ring);
+    const { min, max, vertices } = railOutsetRange(ring, facts.boundary);
     if (vertices === 0) {
       complaints.push(`the ${ring.label} ring has no rail geometry in the built scene to measure`);
       continue;
     }
     widths.set(ring.label, max - min);
-    if (min < ENTRANCE_WALL_RADIUS + PLAYER_RADIUS) {
+    if (min < clearOfMasonry) {
       complaints.push(
-        `the ${ring.label} ring's innermost rail is at r=${min.toFixed(2)}, inside the boundary ` +
-          `wall at r=${ENTRANCE_WALL_RADIUS} once a child's own ${PLAYER_RADIUS} m is allowed for ` +
-          `— both rings belong outside the park`,
+        `the ${ring.label} ring's innermost rail comes ${min.toFixed(2)} m outside the park edge, ` +
+          `inside the ${clearOfMasonry.toFixed(2)} m the boundary masonry and a child's own ` +
+          `${PLAYER_RADIUS} m need — the wall runs through the ride there`,
       );
     }
-    if (max > TERRAIN_RADIUS - 4) {
+    if (max > RIM_OUTSET_START) {
       complaints.push(
-        `the ${ring.label} ring's outermost rail is at r=${max.toFixed(2)}, off the edge of the ` +
-          `terrain disc at r=${TERRAIN_RADIUS} — there is no ground there to stand a trestle on`,
+        `the ${ring.label} ring's outermost rail runs ${max.toFixed(2)} m outside the park edge, ` +
+          `past the ${RIM_OUTSET_START} m where the hill starts falling away — there is no flat ` +
+          `ground out there to stand a trestle on`,
       );
     }
   }
