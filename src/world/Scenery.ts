@@ -30,6 +30,7 @@ import {
 import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
+import { COASTER_PLANS } from './coaster/plan';
 import type { CollisionWorld } from './Collision';
 
 /**
@@ -336,11 +337,31 @@ function buildFoliage(collision: CollisionWorld): {
   // budget goes up to buy the trees back: 26 on the canonical seed and 26-30
   // across the sweep seeds, for about 400 ms of extra headless build.
   //
-  // 260 000 would recover 28, and it is deliberately not taken: it costs a
-  // further half-second of load for two trees nobody can count. The honest fix
-  // for the shortfall is a scatter that does not rejection-sample a tight lawn
-  // at all, which is a bigger job than this one.
-  while (treeCount < targetTrees && attempts < 120000) {
+  // Raised again to 180 000 for the castle pass (#113), and the reason is a
+  // knock-on rather than anything this branch plants: the Sky Cruiser now
+  // threads the castle, which moves its station exit, and `paths.ts` routes the
+  // walk network to that exit. #196 separately lengthened every stall spur. Two
+  // independently-green changes each took a bite out of the same lawn, and seed
+  // 5 came out at exactly 24 against a floor of `> 24`.
+  //
+  // The budget is bounded on *both* sides, and both bounds were measured. Below
+  // it the tree floor reds; at 150 000 `check:park` reds instead, because the
+  // scatter's arrangement at that density walls in a waypoint nothing can then
+  // walk to (`poi.stranded`, no allowance). Trees across the five CI seeds:
+  //
+  //   120 000 -> 29 / 29 / 24 / 27 / 26   tree floor red (seed 5 at 24)
+  //   150 000 -> 29 / 30 / 25 / 27 / 26   check:park red (waypoint walled in)
+  //   180 000 -> 29 / 30 / 26 / 28 / 27   both green
+  //   210 000 -> 31 / 31 / 28 / 30 / 29   both green, +0.3 s for trees nobody
+  //                                       counts — and red on the stacked #198
+  //                                       branch, whose scatter arranges
+  //                                       differently and strands a waypoint
+  //
+  // So this is the *smallest* budget at which both guards pass, which is the
+  // rule worth keeping: the extra attempts are load time a child waits through.
+  // The honest fix for the shortfall is still a scatter that does not
+  // rejection-sample a tight lawn at all, which is a bigger job than this one.
+  while (treeCount < targetTrees && attempts < 180000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
@@ -670,8 +691,43 @@ function facetted<T extends BufferGeometry>(geometry: T): T {
   return geometry;
 }
 
+/**
+ * How much standing room a ride's exit keeps to itself, in metres.
+ *
+ * A dismount needs `isStandable`'s 0.62 m of body, and the widest collider this
+ * file plants is a bush clump's 0.85 m, so 1.5 m clears the pair with room for
+ * the exit to be approached from any side rather than merely stood on.
+ */
+const RIDE_EXIT_CLEAR = 1.5;
+
+/**
+ * Is this spot where a ride puts a child down?
+ *
+ * The exits are pure pre-scene plans, solved at module load from the layout —
+ * the same property that makes the train's route and the Sky Cruiser's loop
+ * things the scatter gives way to rather than bends around.
+ *
+ * This exists because `planExit` searches with `clearOfPlots`, which knows
+ * about the twelve plots and **nothing about the scatter**, so it can hand back
+ * a point that is clear of every plot and still has a bush standing in it. That
+ * is the same category error as #198 one level along: a pre-scene planner
+ * reading a list that does not contain the thing in its way. It bit seed 2 the
+ * moment the statue obstacle re-solved the loop and moved the station — the
+ * exit landed 1.2 m from a bush and `rideExitsAreUsable` called it, correctly,
+ * ground a child cannot stand on.
+ *
+ * Fixing it here rather than in `planExit` is deliberate: `planExit` cannot see
+ * the scatter (it runs before any of it exists, and reaching the other way
+ * would make `Scenery` and `coaster/plan` import each other), whereas the
+ * scatter can trivially see the exit. The dependency only points one way.
+ */
+function onRideExit(x: number, z: number, clearance: number): boolean {
+  const cruiser = COASTER_PLANS.cruiser;
+  return Math.hypot(x - cruiser.exitX, z - cruiser.exitZ) < RIDE_EXIT_CLEAR + clearance;
+}
+
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
- * not on the railway. */
+ * not on the railway, not where a ride sets a child down. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
   if (Math.hypot(x, z) > 55) return false;
   if (isOnPath(x, z, clearance)) return false;
@@ -679,6 +735,7 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
   if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
   if (insideAnyAnchor(x, z, clearance)) return false;
   if (onRailway(x, z, clearance)) return false;
+  if (onRideExit(x, z, clearance)) return false;
   return true;
 }
 

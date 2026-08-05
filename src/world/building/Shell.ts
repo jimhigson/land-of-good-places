@@ -32,6 +32,11 @@ import {
 } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import {
+  CASTLE_WINDOWS,
+  WINDOW_HEAD_Y,
+  WINDOW_SILL_Y,
+} from '../coaster/castleWindows';
+import {
   castAndReceive,
   extrudePlan,
   glassMaterial,
@@ -609,6 +614,14 @@ const DOOR_CENTRE_X = (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2;
 const DOOR_ARCH_RADIUS = (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4;
 const DOOR_ARCH_TUBE = 0.42;
 
+/** Width of the stone band framing a cruiser window, and how deep it stands. */
+const SURROUND_BAND = 0.55;
+const SURROUND_DEPTH = 0.3;
+/** How far a surround block bites into the wall, so it never floats off it. */
+const SURROUND_BITE = 0.08;
+/** Nominal height of one quoin up a jamb. */
+const SURROUND_COURSE = 0.62;
+
 const ROSE_WINDOW_RADIUS = 1.35;
 const ROSE_WINDOW_Y = CASTLE_DOOR_HEIGHT + DOOR_ARCH_RADIUS + 1.9;
 
@@ -631,28 +644,48 @@ function buildCastle(plan: ShellPlan, group: Group): void {
   group.add(buildEntranceSteps());
   group.add(buildCourtyard(plan));
   group.add(buildCastleWalls(plan));
+  group.add(buildCruiserWindows(plan));
   group.add(buildCrenellations(plan));
   group.add(buildCornerTowers(plan));
   group.add(buildEntranceArch(plan));
   group.add(buildRoseWindow(plan));
 }
 
-/** One ring of four walls in plan, with the given gaps left in the south face. */
-function ringShapes(plan: ShellPlan, southGaps: readonly (readonly [number, number])[]): Shape[] {
+/**
+ * Gaps to leave in a ring of wall, per run.
+ *
+ * `south` is the doorway, and predates everything else. `east` and `west` are
+ * the Sky Cruiser's windows (#113) — spans of **z**, not x, because those runs
+ * lie along z. They exist per-run rather than as one shared list precisely
+ * because the two openings are cut wherever the solved loop crossed, and it
+ * crosses the two side walls at slightly different places.
+ */
+interface RingGaps {
+  readonly south: readonly (readonly [number, number])[];
+  readonly east: readonly (readonly [number, number])[];
+  readonly west: readonly (readonly [number, number])[];
+}
+
+const NO_GAPS: RingGaps = { south: [], east: [], west: [] };
+
+/** One ring of four walls in plan, with the given gaps left in each run. */
+function ringShapes(plan: ShellPlan, gaps: RingGaps): Shape[] {
   const shapes: Shape[] = [];
   const ox = outerX(plan);
   const oz = outerZ(plan);
+  const runMinZ = -plan.halfZ + HALF_WALL;
+  const runMaxZ = plan.halfZ - HALF_WALL;
 
-  shapes.push(planRect(-ox, ox, -oz, -plan.halfZ + HALF_WALL));
-  for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
-    shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
+  shapes.push(planRect(-ox, ox, -oz, runMinZ));
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, gaps.south)) {
+    shapes.push(planRect(start, end, runMaxZ, oz));
   }
-  shapes.push(
-    planRect(plan.halfX - HALF_WALL, ox, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
-  );
-  shapes.push(
-    planRect(-ox, -plan.halfX + HALF_WALL, -plan.halfZ + HALF_WALL, plan.halfZ - HALF_WALL),
-  );
+  for (const [start, end] of segmentsMinusGaps(runMinZ, runMaxZ, gaps.east)) {
+    shapes.push(planRect(plan.halfX - HALF_WALL, ox, start, end));
+  }
+  for (const [start, end] of segmentsMinusGaps(runMinZ, runMaxZ, gaps.west)) {
+    shapes.push(planRect(-ox, -plan.halfX + HALF_WALL, start, end));
+  }
 
   return shapes;
 }
@@ -669,24 +702,148 @@ function buildCastleWalls(plan: ShellPlan): Group {
   const group = new Group();
   group.name = 'castle-walls';
 
-  const lower = castAndReceive(
-    new Mesh(
-      extrudePlan(ringShapes(plan, [[plan.doorMinX, plan.doorMaxX]]), CASTLE_DOOR_HEIGHT),
-      softMaterial(PALETTE.buildingWall, 0.78),
-    ),
-  );
-  lower.name = 'castle-wall-lower';
-  group.add(lower);
+  const band = (name: string, shapes: Shape[], fromY: number, toY: number): void => {
+    const mesh = castAndReceive(
+      new Mesh(extrudePlan(shapes, toY - fromY), softMaterial(PALETTE.buildingWall, 0.78)),
+    );
+    mesh.name = name;
+    mesh.position.y = fromY;
+    group.add(mesh);
+  };
 
-  const upper = castAndReceive(
-    new Mesh(
-      extrudePlan(ringShapes(plan, []), CASTLE_WALL_HEIGHT - CASTLE_DOOR_HEIGHT),
-      softMaterial(PALETTE.buildingWall, 0.78),
-    ),
+  const doorGaps: RingGaps = {
+    south: [[plan.doorMinX, plan.doorMaxX]],
+    east: [],
+    west: [],
+  };
+  band('castle-wall-lower', ringShapes(plan, doorGaps), 0, CASTLE_DOOR_HEIGHT);
+
+  // No loop through the castle on this seed, so no holes: the wall is the two
+  // bands it has always been, built by exactly the code that always built them.
+  if (CASTLE_WINDOWS.length === 0) {
+    band('castle-wall-upper', ringShapes(plan, NO_GAPS), CASTLE_DOOR_HEIGHT, CASTLE_WALL_HEIGHT);
+    return group;
+  }
+
+  // Three bands instead of one, split at the sill and the head. Cheaper and far
+  // less fragile than punching a hole through a single extrusion: the doorway
+  // has always been a *gap between wall segments* rather than a cut-out (see
+  // `ringShapes`), and this is the same trick turned on its side, so a window is
+  // made of the same operation the front door is.
+  const windowGaps: RingGaps = {
+    south: [],
+    east: CASTLE_WINDOWS.filter((w) => w.wall === 'east').map((w) => [w.minZ, w.maxZ] as const),
+    west: CASTLE_WINDOWS.filter((w) => w.wall === 'west').map((w) => [w.minZ, w.maxZ] as const),
+  };
+  band('castle-wall-upper', ringShapes(plan, NO_GAPS), CASTLE_DOOR_HEIGHT, WINDOW_SILL_Y);
+  band('castle-wall-window', ringShapes(plan, windowGaps), WINDOW_SILL_Y, WINDOW_HEAD_Y);
+  band('castle-wall-lintel', ringShapes(plan, NO_GAPS), WINDOW_HEAD_Y, CASTLE_WALL_HEIGHT);
+
+  return group;
+}
+
+/**
+ * A chunky stone surround around each opening: quoined jambs, a lintel and a
+ * projecting sill, standing **proud of the wall face** on both sides.
+ *
+ * Decoration around a plain rectangular hole, exactly as the entrance arch is
+ * decoration around the plain rectangular doorway — that idiom is already the
+ * castle's, and re-using it is what makes a window the coaster made look like
+ * part of the building rather than damage to it. An arched head was the first
+ * thing tried and the wall is not tall enough for one: the rider's eye sits
+ * 1.55 m above the track, so the head cannot come below 7.65 m, and a
+ * semicircular arch over a 3.2 m opening would then break through the
+ * battlements — which the issue's own "fully within a wall panel" assert
+ * forbids. Alternating quoin depths do the "this is masonry" work instead.
+ *
+ * Both faces get one. The outer face is what the park sees; the inner face is
+ * what a rider sees for the half-second they are inside the courtyard, and a
+ * hole framed on one side only reads as a mistake from precisely the viewpoint
+ * this whole feature exists for.
+ */
+function buildCruiserWindows(plan: ShellPlan): Group {
+  const group = new Group();
+  group.name = 'cruiser-windows';
+  if (CASTLE_WINDOWS.length === 0) return group;
+
+  const blocks: { x: number; y: number; z: number; sx: number; sy: number; sz: number }[] = [];
+  const ox = outerX(plan);
+  const innerX = plan.halfX - HALF_WALL;
+
+  for (const window of CASTLE_WINDOWS) {
+    const side = window.wall === 'east' ? 1 : -1;
+    const faces: readonly (readonly [number, number])[] = [
+      [side * ox, side], // outer face, standing outwards
+      [side * innerX, -side], // inner face, standing into the courtyard
+    ];
+    for (const [faceX, out] of faces) {
+      const x = faceX + out * (SURROUND_DEPTH / 2 - SURROUND_BITE);
+      const minZ = window.minZ - SURROUND_BAND;
+      const maxZ = window.maxZ + SURROUND_BAND;
+      const minY = WINDOW_SILL_Y - SURROUND_BAND;
+      const maxY = WINDOW_HEAD_Y + SURROUND_BAND;
+
+      // Jambs, as a stack of quoins with every other one standing a little
+      // further out — the cheapest thing that reads as cut stone rather than a
+      // picture frame, and it costs instances, not draw calls.
+      const runY = maxY - minY;
+      const courses = Math.max(2, Math.round(runY / SURROUND_COURSE));
+      const course = runY / courses;
+      for (let i = 0; i < courses; i += 1) {
+        const proud = i % 2 === 0 ? SURROUND_DEPTH : SURROUND_DEPTH * 0.72;
+        const y = minY + course * (i + 0.5);
+        for (const z of [minZ + SURROUND_BAND / 2, maxZ - SURROUND_BAND / 2]) {
+          blocks.push({
+            x: faceX + out * (proud / 2 - SURROUND_BITE),
+            y,
+            z,
+            sx: proud,
+            sy: course * 0.92,
+            sz: SURROUND_BAND,
+          });
+        }
+      }
+
+      // Lintel over the top and a deeper sill under the bottom.
+      blocks.push({
+        x,
+        y: maxY - SURROUND_BAND / 2,
+        z: (minZ + maxZ) / 2,
+        sx: SURROUND_DEPTH,
+        sy: SURROUND_BAND,
+        sz: maxZ - minZ,
+      });
+      blocks.push({
+        x: faceX + out * (SURROUND_DEPTH * 1.3 / 2 - SURROUND_BITE),
+        y: minY + SURROUND_BAND / 2,
+        z: (minZ + maxZ) / 2,
+        sx: SURROUND_DEPTH * 1.3,
+        sy: SURROUND_BAND,
+        sz: maxZ - minZ + SURROUND_BAND,
+      });
+    }
+  }
+
+  const stones = new InstancedMesh(
+    new BoxGeometry(1, 1, 1),
+    softMaterial(PALETTE.buildingTrim, 0.72),
+    blocks.length,
   );
-  upper.name = 'castle-wall-upper';
-  upper.position.y = CASTLE_DOOR_HEIGHT;
-  group.add(upper);
+  stones.name = 'cruiser-window-stones';
+  stones.castShadow = true;
+  stones.receiveShadow = true;
+  const matrix = new Matrix4();
+  const rotation = new Quaternion();
+  const position = new Vector3();
+  const scale = new Vector3();
+  blocks.forEach((b, index) => {
+    position.set(b.x, b.y, b.z);
+    scale.set(b.sx, b.sy, b.sz);
+    matrix.compose(position, rotation, scale);
+    stones.setMatrixAt(index, matrix);
+  });
+  stones.instanceMatrix.needsUpdate = true;
+  group.add(stones);
 
   return group;
 }

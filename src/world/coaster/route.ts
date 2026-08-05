@@ -1,11 +1,20 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
+import { CART_ENVELOPE } from './cart';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { circleBoundary } from '../rail/boundary';
 import { type RouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
+import {
+  WINDOW_HALF_WIDTH,
+  WINDOW_TRACK_Y,
+  castleClear,
+  castleY,
+  crossingBand,
+  insideCastleFootprint,
+} from '../building/cruiserWindow';
 
 /**
  * The coaster's track — grown, not authored (Decision 4 C4 on Decision 5's
@@ -83,17 +92,15 @@ const OUTER_RADIUS = 47;
 const CORRIDOR_RADIUS = 3;
 
 /**
- * Half a car, in metres — the body is `toonBox(1.5, …)` in `Coaster.ts`.
+ * Half a car, in metres — now read from `coaster/cart.ts` rather than restated.
  *
  * The width at which the ride stops missing something and starts hitting it,
  * and so the threshold the boot assert uses. Emphatically **not**
  * {@link CORRIDOR_RADIUS}: asserting the generator's own target would only
- * prove it can do arithmetic, and the canonical loop clears the castle by
- * 3.2 m against a 3 m corridor, so an assert set there would cry wolf at the
- * first retune. The same number, for the same reason, is what the procgen
- * invariant measures.
+ * prove it can do arithmetic, so an assert set there would cry wolf at the
+ * first retune.
  */
-const CAR_HALF_WIDTH = 0.75;
+const CAR_HALF_WIDTH = CART_ENVELOPE.halfWidth;
 
 /** How close the loop may come to an earlier part of itself. */
 const SELF_CLEARANCE = 5;
@@ -175,13 +182,119 @@ interface TallObstacle {
  * obstacle and a corridor stays a corridor. The sum is the same 22 m about the
  * castle it always was.
  */
+/**
+ * How far the RiPika statue's *tall* part reaches from the middle of the
+ * fountain, in metres.
+ *
+ * Measured on the built park rather than declared: every mesh under the
+ * fountain's own root whose bounds top out above the car's underside at cruise
+ * (6.04 m) reaches **3.47 m** from `PARK_LAYOUT.fountain`, and the statue's
+ * crown stands at 10.81 m.
+ *
+ * **Deliberately the statue and not the fountain's plot**, whose bounding
+ * radius is 10.5 m. The plaza is the park's social middle and the Sky Cruiser
+ * is *allowed* to fly over it — the basin and its rim are barely a metre tall.
+ * The only thing here it cannot fly over is the statue, so the only thing it
+ * has to go round is the statue. Routing the loop around the whole plot would
+ * be avoiding the wrong shape, and would over-constrain a solver that already
+ * gives up on some seeds.
+ *
+ * The corridor is supplied separately (see {@link CORRIDOR_RADIUS}), so this is
+ * the obstacle and not the obstacle-plus-clearance.
+ */
+const STATUE_TALL_RADIUS = 3.5;
+
 function tallObstacles(): TallObstacle[] {
-  const castle = placedEntry('building');
   const wheel = placedEntry('ferrisWheel');
   return [
-    { x: castle.x, z: castle.z, radius: castle.boundingRadius },
     { x: wheel.x, z: wheel.z, radius: wheel.boundingRadius },
+    // The RiPika statue in the fountain (#121/#200). It reaches 10.81 m against
+    // a 6.2 m cruise floor, so it is the same category as the big wheel: a thing
+    // the loop cannot fly over and must go round.
+    //
+    // It was missing here, and the omission was invisible until two branches
+    // met. The statue merged (#200) with no cruiser sweep to run, and the castle
+    // pass (#113) re-solved the loop from 216 m to 185 m; on the new route four
+    // of five seeds sent the car **through the statue's head**, at 8.84 m up.
+    // The ride is `camera: 'firstPerson'`, so that is a screen full of the
+    // inside of a stone head rather than a mesh brushing past unseen.
+    //
+    // Nothing kept the loop off the plaza at all before this, which is the
+    // actual hole; the statue merely made it visible.
+    { x: PARK_LAYOUT.fountain.x, z: PARK_LAYOUT.fountain.z, radius: STATUE_TALL_RADIUS },
   ];
+}
+
+/**
+ * How far from the middle of a side wall panel a crossing may land.
+ *
+ * See `building/cruiserWindow.ts`: derived from the tower's own bite out of the
+ * panel, the masonry that has to survive beside the opening, and the opening's
+ * width — which is itself the car's width plus clearance. Nothing here is a
+ * chosen position.
+ */
+const CROSSING_BAND = crossingBand(WINDOW_HALF_WIDTH);
+
+/** Metres of level flight held either side of the castle before the hills resume. */
+const WINDOW_FLAT = 5;
+
+/**
+ * Metres the profile takes to blend from window height back to the hills.
+ *
+ * Shorter than the station's 26 m ramp on purpose: the station ramp has to be
+ * gentle because riders are boarding at walking pace, whereas this is mid-ride
+ * at cruise and a brisker rise and fall *is* the moment — the loop drops to
+ * thread the window and climbs away again.
+ */
+const WINDOW_RAMP = 16;
+
+/** How far outside the castle's footprint the level run starts and ends. */
+const CASTLE_SPAN_PAD = 2;
+
+/**
+ * The stretch of the solved plan that runs inside the castle, in metres along.
+ *
+ * `to` may exceed the loop's length, meaning the stretch wraps through the
+ * loop's start — which it is perfectly entitled to do, and getting that wrong
+ * would silently carve the wrong half of the ride. Found by taking every
+ * sample that lands inside the footprint and keeping the complement of the
+ * **largest cyclic gap** between them, which is exact for the ordinary case of
+ * one visit and degrades sanely to "the whole visit" if a loop ever managed two.
+ */
+function spanInsideCastle(
+  sampleAt: (distance: number, into: Vec2) => void,
+  length: number,
+): { from: number; to: number } | null {
+  const probe: Vec2 = { x: 0, z: 0 };
+  const inside: number[] = [];
+  for (let d = 0; d < length; d += 0.5) {
+    sampleAt(d, probe);
+    if (insideCastleFootprint(probe.x, probe.z, CASTLE_SPAN_PAD)) inside.push(d);
+  }
+  if (inside.length === 0) return null;
+  let widestGap = -Infinity;
+  let gapAt = 0;
+  for (let i = 0; i < inside.length; i += 1) {
+    const here = inside[i]!;
+    const next = inside[(i + 1) % inside.length]!;
+    const gap = i === inside.length - 1 ? next + length - here : next - here;
+    if (gap > widestGap) {
+      widestGap = gap;
+      gapAt = i;
+    }
+  }
+  const from = inside[(gapAt + 1) % inside.length]!;
+  const to = inside[gapAt]!;
+  return { from: from - 0.5, to: (to >= from ? to : to + length) + 0.5 };
+}
+
+/** Metres from `s` to the nearest end of a (possibly wrapping) span; 0 inside. */
+function outsideSpan(span: { from: number; to: number }, s: number, length: number): number {
+  const shifted = s < span.from ? s + length : s;
+  if (shifted >= span.from && shifted <= span.to) return 0;
+  const before = span.from - s < 0 ? span.from - s + length : span.from - s;
+  const after = shifted - span.to;
+  return Math.min(Math.abs(before), Math.abs(after));
 }
 
 /** Is the ground at (x, z) free of every plot? Layout only, no scene. */
@@ -341,6 +454,18 @@ export class CoasterRoute {
   readonly crestY: number;
   /** The solved plan-view centre line, kept for diagnostics and the asserts. */
   readonly plan: SolvedRailRoute;
+  /**
+   * The stretch of the loop that runs inside the castle, in metres along, or
+   * `null` on a seed whose loop went round it instead.
+   *
+   * **Null is a normal park, not a failure.** Nothing places the loop at the
+   * castle; if the search never went that way there is no level run, no window
+   * and no hole in the wall, and that park simply has an unbroken castle. Every
+   * consumer of this — the wall builder, the boot assert, the invariant — has
+   * to treat it as optional, or the first seed that misses would fail a build
+   * for doing exactly what it is allowed to do.
+   */
+  readonly castleSpan: { readonly from: number; readonly to: number } | null;
 
   private readonly scratch = new Vector3();
 
@@ -356,6 +481,7 @@ export class CoasterRoute {
       for (const tall of obstacles) {
         if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
       }
+      if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
       if (other) {
         const nearest = other.nearestPoint(x, z);
         if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
@@ -375,7 +501,19 @@ export class CoasterRoute {
       corridorRadius: CORRIDOR_RADIUS,
       selfClearance: SELF_CLEARANCE,
       minRadius: PLAN_TURN_RADIUS,
-      budgets: { perJoint: 16, restarts: 200 },
+      // Enough that the cap is never the thing that gives up (Decision 6:
+      // "only bail if backtracking fails for a very large number of tries").
+      //
+      // `stationPoses` offers 210 candidates on the canonical seed and the
+      // search takes index 0, so at 200 this abandoned the last ten for no
+      // reason — and the reason it can afford not to is measured, not hoped:
+      // `npm run measure:solver-budget` times a deliberately unsolvable brief
+      // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
+      // about 0.1 ms each. A successful solve stops at the first start pose
+      // that works, so this costs nothing on a park that works; the whole cost
+      // lands on one that does not, and a park that bails is far worse than a
+      // park that took a fifth of a second longer to decide it could not.
+      budgets: { perJoint: 16, restarts: 2000 },
     };
     const plan = solveRailRoute(brief);
     this.plan = plan;
@@ -426,6 +564,49 @@ export class CoasterRoute {
         const t = (along - STATION_FLAT) / STATION_RAMP;
         const eased = t * t * (3 - 2 * t);
         heights[i] = STATION_HEIGHT + (heights[i]! - STATION_HEIGHT) * eased;
+      }
+    }
+
+    // The castle window carve (issue #113). Applied **after** the station's,
+    // and that order is load-bearing rather than incidental.
+    //
+    // The cruiser's booth is placed 21-26 m from the castle, so the station and
+    // the castle are always near neighbours, and the station's 26 m ramp
+    // reaches the castle on most seeds. Carving the castle first and letting
+    // the station ramp run over it was tried and measured: **one crossing came
+    // out pinned at window height and the other at 2-4 m**, halfway down the
+    // ramp — an opening that would have been cut through the courtyard floor.
+    // The flat run through the masonry is the one part of the profile that
+    // cannot be blended with anything, because a hole was cut to fit it, so it
+    // is applied last and wins outright.
+    //
+    // What the station keeps is its own flat: the two flats overlapping would
+    // tilt the boarding deck, so `checkCoasterClearances` complains if they come
+    // within reach of each other rather than letting either quietly deform.
+    //
+    // Level, not merely low: both openings then sit at the same height, the
+    // masonry surround is a plain rectangle rather than a swept slot, and the
+    // cart flies straight at the window instead of arriving at it climbing.
+    // Measured on the **plan**, because the curve this carves does not exist
+    // yet. The public `castleSpan` below is re-measured on the finished curve:
+    // the two parameterisations are not the same length, and treating one as
+    // the other is a bug this had — plan metres ran ~1.5% short of curve metres,
+    // so the span stopped just before the second wall crossing and one of the
+    // two windows was silently never cut. Three of the five CI seeds caught it.
+    const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
+    if (castleSpan) {
+      const windowY = castleY(WINDOW_TRACK_Y);
+      for (let i = 0; i < controls; i += 1) {
+        const s = (i / controls) * plan.length;
+        const away = outsideSpan(castleSpan, s, plan.length);
+        const spot = flat[i]!;
+        const wanted = windowY - terrainHeight(spot.x, spot.z);
+        if (away < WINDOW_FLAT) heights[i] = wanted;
+        else if (away < WINDOW_FLAT + WINDOW_RAMP) {
+          const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
+          const eased = t * t * (3 - 2 * t);
+          heights[i] = wanted + (heights[i]! - wanted) * eased;
+        }
       }
     }
 
@@ -494,8 +675,19 @@ export class CoasterRoute {
       // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
       // is fair game: steepening the ramp's tail is exactly how a sag just past
       // the window gets fixed.
+      // A control carrying the level run through the castle is not liftable
+      // either, and for a sharper reason than the station's: lifting it would
+      // raise the track *inside a hole cut to fit it*, which is the one place
+      // in the park where gaining height is how you hit something rather than
+      // how you miss it. The ramp's outer two-thirds stay liftable, exactly as
+      // the station's do, so a sag just past the castle can still be repaired.
+      const holdsWindow = (index: number): boolean =>
+        castleSpan !== null &&
+        outsideSpan(castleSpan, (index / controls) * plan.length, plan.length) <
+          WINDOW_FLAT + WINDOW_RAMP * 0.35;
       const liftable = (index: number): boolean =>
-        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65;
+        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65 &&
+        !holdsWindow(index);
       for (const [control, lift] of lifts) {
         if (liftable(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
         for (const side of [-1, 1]) {
@@ -513,6 +705,16 @@ export class CoasterRoute {
     this.curve = curve;
     this.length = length;
     this.stationDistance = station;
+
+    // The span riders actually fly, in the metres every other consumer counts
+    // in: `openingsFor`, the swept-car assert and the station-overlap check all
+    // index the built curve, so this is measured on the built curve.
+    const built = new Vector3();
+    this.castleSpan = spanInsideCastle((d, into) => {
+      curve.getPointAt(this.wrap(d) / length, built);
+      into.x = built.x;
+      into.z = built.z;
+    }, length);
 
     let crest = 0;
     for (let d = 0; d < length; d += 1) {
@@ -607,10 +809,29 @@ export function checkCoasterClearances(
     for (let i = 0; i < obstacles.length; i += 1) {
       const tall = obstacles[i]!;
       const gap = Math.hypot(point.x - tall.x, point.z - tall.z) - tall.radius;
-      const key = i === 0 ? 'the castle' : 'the ferris wheel';
-      worst.set(key, Math.min(worst.get(key) ?? Infinity, gap));
+      worst.set('the ferris wheel', Math.min(worst.get('the ferris wheel') ?? Infinity, gap));
     }
   }
+  // The two authored height features must not reach each other. The station is
+  // pinned to 1.1 m because a platform is there and the castle to window height
+  // because a hole is there, and neither can give: a station flat that gets
+  // dragged upwards is a deck riders step off into fresh air, and a castle flat
+  // dragged downwards is a hole cut through the courtyard floor.
+  if (route.castleSpan) {
+    const span = route.castleSpan;
+    const gap = Math.min(
+      outsideSpan(span, route.stationDistance, route.length),
+      outsideSpan(span, route.stationDistance + STATION_FLAT, route.length),
+      outsideSpan(span, route.stationDistance - STATION_FLAT + route.length, route.length),
+    );
+    if (gap < WINDOW_FLAT) {
+      complaints.push(
+        `the station platform is ${gap.toFixed(1)} m of track from the castle's level run — ` +
+          `they would deform each other, and ${WINDOW_FLAT} m is the least that keeps them apart`,
+      );
+    }
+  }
+
   for (const [what, gap] of worst) {
     if (gap < CAR_HALF_WIDTH) {
       complaints.push(

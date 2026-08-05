@@ -274,7 +274,7 @@ export class Flowers implements GameSystem {
     if (this.petals.instanceColor) this.petals.instanceColor.needsUpdate = true;
   }
 
-  update({ dt, input, playerPosition }: FrameContext): void {
+  update({ dt }: FrameContext): void {
     let matrixDirty = false;
 
     for (let i = 0; i < this.count; i += 1) {
@@ -320,10 +320,12 @@ export class Flowers implements GameSystem {
 
     this.pickEffect.update(dt);
 
-    if (input.justPressed('interact')) {
-      const nearest = this.nearestWithin(playerPosition.x, playerPosition.z, PICK_RADIUS);
-      if (nearest !== null) this.tryInteract(nearest, playerPosition);
-    }
+    // No interact handling here any more, and that is the point of issue #122.
+    // This used to read the press itself and pick the nearest flower within
+    // {@link PICK_RADIUS} — which is how a flower growing beside a platform
+    // stole a press from the station's own "Get on" chip. Picking is now
+    // reached only through this flower's own zone action below, so a press can
+    // only ever pick the flower the child is actually being shown.
   }
 
   /**
@@ -381,6 +383,11 @@ export class Flowers implements GameSystem {
             highlight:
               petalRow >= 0 ? highlightInstance(this.petals, petalRow) : highlightInstance(this.heads, i),
           },
+          // This flower, by row, and no other. `Selection` has already checked
+          // that she is standing within `standRadius` (= PICK_RADIUS) of it
+          // before this runs, so there is no second proximity test to disagree
+          // with the chip — see `world/InteractRouter.ts`.
+          () => this.pickByIndex(i),
           '🌼',
         ),
       );
@@ -410,6 +417,18 @@ export class Flowers implements GameSystem {
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Pick (or prod) flower `index` — the run body of its own chip.
+   *
+   * The player is where the picked bloom flies to, so a flowerbed with nobody
+   * attached simply does nothing; `attachPlayer` is what turns the park on.
+   */
+  private pickByIndex(index: number): void {
+    const player = this.player;
+    if (!player) return;
+    this.tryInteract(index, player.position);
+  }
 
   /** Bloomed → picked. Growing → a wiggle of resistance. Nothing else reacts. */
   private tryInteract(index: number, playerPosition: Vector3): void {
@@ -456,24 +475,6 @@ export class Flowers implements GameSystem {
     this.stems.instanceMatrix.needsUpdate = true;
     this.heads.instanceMatrix.needsUpdate = true;
     this.petals.instanceMatrix.needsUpdate = true;
-  }
-
-  /** Nearest live (not-picked) **large** flower within `radius`, or null. */
-  private nearestWithin(x: number, z: number, radius: number): number | null {
-    let best: number | null = null;
-    let bestDistance = radius;
-    for (let i = 0; i < this.count; i += 1) {
-      if (this.large[i] !== 1) continue;
-      if (this.stage[i] === STAGE_PICKED) continue;
-      const dx = (this.posX[i] ?? 0) - x;
-      const dz = (this.posZ[i] ?? 0) - z;
-      const distance = Math.hypot(dx, dz);
-      if (distance < bestDistance) {
-        best = i;
-        bestDistance = distance;
-      }
-    }
-    return best;
   }
 
   /**

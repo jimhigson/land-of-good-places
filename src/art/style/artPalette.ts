@@ -32,6 +32,77 @@ export const ART = {
   ripikaCheekDark: 0xe8464a,
   ripikaBolt: 0xffb52e,
 
+  // --- carved grey stone (the fountain statue) ------------------------------
+  /**
+   * **The park's stone grey.** One colour; the four either side of it are its
+   * tonal steps, not four more colours.
+   *
+   * ## Why this exact grey (ART_DIRECTION §5)
+   *
+   * §5's test for a new colour is *"would it look right on a plastic toy?"* —
+   * bright and saturated but softened towards cream, never neon, never washed
+   * out. A grey is the awkward case for that test, because the obvious answer
+   * fails it: a **neutral** grey (`0xcccccc` and friends) put next to this
+   * park's `PALETTE.stonePink` (0xffc2d8) reads as a hole punched in the
+   * picture. Nothing else here is desaturated, so a genuinely desaturated
+   * object stops looking like stone and starts looking like missing texture.
+   *
+   * So this grey is not neutral. R 211, G 202, B 203: a nine-point red lift
+   * carries the park's warmth, and blue held a single point above green tips it
+   * to the faintest rose rather than to cream. That whisper of rose is what
+   * relates it to the pink stone the rest of the fountain is built from — it
+   * reads unmistakably as *grey*, which is what the family asked for, while
+   * still belonging to a park whose masonry is pink.
+   *
+   * §5 also forbids redefining something the world already names. This does not:
+   * `PALETTE.stonePink*` is the pink cobble the basin and rim are made of, and a
+   * grey statue is a different material standing on it, not a second opinion
+   * about the same one.
+   *
+   * ## Why it is light, not dark (ART_DIRECTION §6)
+   *
+   * Checked against §6's authoring light, because a stone that reads right at
+   * noon can go dead after dark. Two pressures both push the same way:
+   *
+   *  - The toon ramp's darkest band sits at ~68% perceived brightness, so
+   *    everything in this park is *already* lifted off its own shadow. Starting
+   *    dark leaves the shaded side muddy, and §2 is emphatic that the shadow
+   *    side must stay obviously the same colour, only cosier.
+   *  - At night the statue's only real light is the fountain's own cyan
+   *    `PointLight`, sitting below it in the water. A light stone takes that
+   *    uplight and reads as pale carved rock; a dark stone swallows it and the
+   *    statue disappears into the plaza exactly when the fountain is supposed
+   *    to be the bright thing in the middle of it.
+   *
+   * ## Why a ladder and not one flat grey
+   *
+   * The statue is RiPika built in stone rather than a second model of her
+   * (`models/ripikaStatue.ts`), so each step substitutes for one of the yellow
+   * mouse's colours. Collapse them all to one grey and the cocoa ear tips, the
+   * cream tummy and the amber tail tip vanish — the statue reads as an
+   * undifferentiated lump at gameplay distance, which is the exact failure the
+   * cream tummy exists to prevent on the live mouse (see `ripika.ts`).
+   *
+   * The steps are therefore ordered by **the luminance of the colour each one
+   * replaces** — belly (lightest) → yellow → yellowDeep → bolt → tip (darkest)
+   * — so the markings survive the trip to stone as tonal steps instead of hue
+   * changes. This is also how the world already treats stone: `PALETTE`
+   * carries `stonePink`, `stonePinkDark` and `stonePinkLight` for one material.
+   * All five hold the same faint rose lean, so they read as one rock.
+   *
+   * `statueStoneDark` stays well clear of `PALETTE.ink` (0x4a3a52). Nothing in
+   * this game goes darker than that plum.
+   */
+  statueStone: 0xd3cacb,
+  /** One step up — the cream tummy and collar flash in stone. */
+  statueStoneLight: 0xe8e1e0,
+  /** One step down — the cowlick tuft, the thighs, the plinth's drum. */
+  statueStoneMid: 0xb9afb1,
+  /** Two steps down — the tail's tip, the cheek discs, the plinth's courses. */
+  statueStoneDeep: 0x9d9296,
+  /** The darkest step — ear tips, feet, paws, the painted nose. */
+  statueStoneDark: 0x7e7379,
+
   // --- Biscuit (teddy bear) -------------------------------------------------
   biscuitFur: 0xdca873,
   biscuitFurDark: 0xc28a58,

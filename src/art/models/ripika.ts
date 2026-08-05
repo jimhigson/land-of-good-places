@@ -2,7 +2,13 @@ import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createBakedFace, facePatchGeometry, type Expression } from '../style/faces';
+import {
+  applyStaticBakedFace,
+  createBakedFace,
+  facePatchGeometry,
+  type BakedFaceOptions,
+  type Expression,
+} from '../style/faces';
 import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
 
 /**
@@ -42,9 +48,146 @@ export const RIPIKA_HEAD_SCALE = 1.32;
 
 /** Local shorthand for {@link RIPIKA_HEAD_SCALE}. */
 const HEAD = RIPIKA_HEAD_SCALE;
+
+/**
+ * The tail's resting pitch, in radians — how far the zig-zag flash is tipped
+ * **back** from vertical, so it trails behind her the way a tail does.
+ *
+ * Applied as `rotation.x = -TAIL_CANT`: negative pitches the tail towards −Z,
+ * and +Z is forward under the asset contract. At 1.05 rad it stands about 30°
+ * above horizontal, which keeps the flash clear of the body without turning it
+ * into a flagpole.
+ *
+ * **It used to be a roll (`rotation.z`), fanning the tail out sideways.** Jim
+ * looked at it in the park on 5 August 2026: "tail should extend behind, not to
+ * the side — rotate it 90º and relocate to match". Rotating alone would have
+ * swung the tail through the hip it was still pinned to, so the mount moved to
+ * the centre line at the back of the torso in the same change.
+ *
+ * The old sideways cant was defended in this file as the thing that stopped the
+ * tail "hiding behind the body at every camera angle the game ever uses". That
+ * worry does not survive contact with the actual camera: it looks **down** at
+ * 38°, so a tail trailing back and up projects *up the screen*, landing around
+ * shoulder height behind her rather than disappearing. Fanning it sideways was
+ * solving a problem an isometric camera does not have.
+ *
+ * This is a named constant because it was a literal in two places that had to
+ * agree and silently did not. `setWalkPhase` ended with
+ *
+ * ```ts
+ * tail.rotation.z = Math.sin(...) * 0.18 * speed;   // the bug
+ * ```
+ *
+ * which is zero whenever `speed` is zero — so it did not return the tail to its
+ * rest pose, it **assigned the rest pose away**. Every RiPika in the park stood
+ * with a limp, straight-down tail the instant she stopped walking, which is
+ * exactly when a child is most likely to be standing still looking at her. The
+ * cant is not decoration: the tail is documented right where it is built as the
+ * thing without which she "is just a yellow mouse".
+ *
+ * The shape of the bug is worth remembering, because it is not specific to
+ * tails. **A per-frame `x = f(speed)` that multiplies the whole expression by
+ * an amplitude destroys any non-zero authored value of `x` when that amplitude
+ * reaches zero.** An animation offset must be *added* to the rest pose
+ * (`REST + swing`), or the rest pose has to be zero. `applyWalk` gets away with
+ * the multiply-only form purely because every limb it drives is authored at
+ * rotation zero.
+ */
+const TAIL_CANT = 1.05;
+
+/**
+ * A few degrees of yaw at rest, so the tail is not dead-square behind her.
+ * ART_DIRECTION §4, "nothing is plumb". Static — nothing animates it.
+ */
+const TAIL_YAW = 0.12;
+/**
+ * RiPika's six colours, as one swappable set.
+ *
+ * Exists so the fountain statue can be **this** mouse rendered in stone rather
+ * than a second mouse carved to look like it (`models/ripikaStatue.ts`). Two
+ * models of one character have to be kept in step by hand forever; one model
+ * with two colourways cannot drift, and a retune of RiPika's proportions
+ * reaches her statue for free.
+ *
+ * The fields are named for the live mouse's colours rather than for their role
+ * ("yellow", not "primary") on purpose — every number inside this file is
+ * written against RiPika, and renaming them to something colour-neutral would
+ * make the model harder to read to buy nothing.
+ */
+export interface RipikaPalette {
+  /** Skull, torso, ear shafts, arms — and the baked face's background fill. */
+  readonly yellow: number;
+  /** Cowlick tuft and thighs: one step down, so they read against the body. */
+  readonly yellowDeep: number;
+  /** Tummy and collar flash. The lightest step. */
+  readonly belly: number;
+  /** Ear tips, feet, paws, painted nose. The darkest step. */
+  readonly tip: number;
+  /** The tail's warm tip. */
+  readonly bolt: number;
+  /** The painted cheek discs. */
+  readonly cheek: number;
+}
+
+/** RiPika as she actually is: the electric yellow mouse. */
+export const RIPIKA_PALETTE: RipikaPalette = {
+  yellow: ART.ripikaYellow,
+  yellowDeep: ART.ripikaYellowDeep,
+  belly: ART.ripikaBelly,
+  tip: ART.ripikaTip,
+  bolt: ART.ripikaBolt,
+  cheek: ART.ripikaCheek,
+};
+
+/**
+ * The tail's resting roll, and the value its **wag** swings around.
+ *
+ * ## The wag is on `z`, and it took a review to get that right
+ *
+ * When the tail moved behind her I moved the wag from `z` to `y`, reasoning
+ * that a rear tail swinging in the vertical plane would bob like a lever where
+ * a swing about Y would sweep it side to side. The Euler-order half of that was
+ * right and verified — order is three.js's XYZ, `Rx·Ry·Rz`, so `y` applies
+ * before the backward pitch.
+ *
+ * **The conclusion was still wrong, because every slab of this tail is built
+ * along the group's own local +Y.** Rotating about Y therefore rotates the tail
+ * about an axis half a degree off its own length: a roll, not a wag. Measured
+ * on the real model over a full cycle:
+ *
+ * | axis | sweep | lateral tip travel |
+ * | --- | --- | --- |
+ * | `rotation.y` | 0.19° | 0.2 mm |
+ * | `rotation.z` | 20.63° | 140 mm (against 14 mm vertical) |
+ *
+ * So `z` gives exactly the side-to-side sweep that was wanted, and `y` gives
+ * nothing a human eye could resolve. The lesson is narrow and worth keeping:
+ * **an axis argument about a rotation means nothing until you know which way
+ * the geometry runs.** The rest pose was never in question — she trails
+ * backwards at 29.9° above horizontal either way.
+ *
+ * Non-zero at rest on purpose, and that is load-bearing beyond the styling: it
+ * is what keeps this a live test of the zero-speed invariant {@link TAIL_CANT}
+ * documents. A rest value of zero would make the multiply-only bug undetectable
+ * here all over again.
+ */
+const TAIL_ROLL = 0.06;
+
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;
+  /** Colourway. Defaults to {@link RIPIKA_PALETTE} — the yellow mouse. */
+  palette?: RipikaPalette;
+  /**
+   * Set `false` for a RiPika that will never change expression — the fountain
+   * statue is the only caller that does.
+   *
+   * Paints **one** face canvas rather than the five-expression set, and
+   * `setExpression` becomes a no-op. See `applyStaticBakedFace`: a statue that
+   * cannot blink has no use for four extra 512² textures, and the park's whole
+   * budget is forty of them.
+   */
+  expressions?: boolean;
 }
 
 export interface RipikaHandle extends CreatureHandle {
@@ -75,9 +218,10 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
   const head = new Group();
   head.name = 'ripikaHead';
 
-  const yellow = toonMaterial(ART.ripikaYellow);
-  const yellowDeep = toonMaterial(ART.ripikaYellowDeep);
-  const cocoa = toonMaterial(ART.ripikaTip);
+  const palette = options.palette ?? RIPIKA_PALETTE;
+  const yellow = toonMaterial(palette.yellow);
+  const yellowDeep = toonMaterial(palette.yellowDeep);
+  const cocoa = toonMaterial(palette.tip);
 
   const skullR = 0.315 * scale;
   const skull = blob(skullR, yellow, [1.06, 0.97, 1], 32);
@@ -127,8 +271,15 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
   // it — ART_DIRECTION.md §3. Same window, same paint options, so the face lands
   // where it always did; it just no longer floats 1.2% of a skull proud of the
   // head, and no longer needs the squash below copied from the skull's own.
-  const face = createBakedFace({
-    fill: ART.ripikaYellow,
+  //
+  // Every colour here comes from the palette, so a stone RiPika's face is
+  // *repainted in stone* rather than tinted or hidden. That distinction is the
+  // whole reason this is a palette and not a `traverse`-and-re-material pass:
+  // the face lives in the skull's own texture now, so re-materialling the skull
+  // would delete the face outright and leave a blank stone ball, and tinting it
+  // would leave a grey statue with tomato cheeks.
+  const faceOptions: BakedFaceOptions = {
+    fill: palette.yellow,
     spreadX: 1.85,
     spreadY: 1.85,
     tilt: 0.2,
@@ -140,12 +291,25 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
     mouth: 'cat',
     mouthW: 0.082,
     mouthDrop: 0.235,
-    nose: ART.ripikaTip,
-    blush: ART.ripikaCheek,
+    nose: palette.tip,
+    blush: palette.cheek,
     blushStyle: 'disc',
     blushR: 0.105,
-  });
-  face.applyTo(skull);
+  };
+
+  // The eyes, mouth and catchlights stay `ART.ink` and `ART.shine` whatever the
+  // palette says, and that is right for stone as well as for fur: carved
+  // features read as dark lines, the house dark is a warm plum, and a statue
+  // with two catchlights looks alive where one with dead flat eyes looks eerie.
+  let setExpression: (name: Expression) => void;
+  if (options.expressions === false) {
+    applyStaticBakedFace(skull, faceOptions);
+    setExpression = () => {};
+  } else {
+    const face = createBakedFace(faceOptions);
+    face.applyTo(skull);
+    setExpression = (name: Expression) => face.setExpression(name);
+  }
 
   if (options.space) {
     // The helmet used to clone the face patch's geometry. There is no face mesh
@@ -160,11 +324,7 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
     head.add(helmet);
   }
 
-  return {
-    group: head,
-    skullR,
-    setExpression: (name: Expression) => face.setExpression(name),
-  };
+  return { group: head, skullR, setExpression };
 }
 
 export function createRipika(options: RipikaOptions = {}): RipikaHandle {
@@ -173,11 +333,12 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   const body = new Group();
   root.add(body);
 
-  const yellow = toonMaterial(ART.ripikaYellow);
-  const yellowDeep = toonMaterial(ART.ripikaYellowDeep);
-  const belly = toonMaterial(ART.ripikaBelly);
-  const cocoa = toonMaterial(ART.ripikaTip);
-  const amber = toonMaterial(ART.ripikaBolt);
+  const palette = options.palette ?? RIPIKA_PALETTE;
+  const yellow = toonMaterial(palette.yellow);
+  const yellowDeep = toonMaterial(palette.yellowDeep);
+  const belly = toonMaterial(palette.belly);
+  const cocoa = toonMaterial(palette.tip);
+  const amber = toonMaterial(palette.bolt);
 
   const limbs = makeLimbs();
 
@@ -229,12 +390,19 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   }
 
   // --- tail: a soft zig-zag flash -------------------------------------------
-  // Mounted on the HIP, not the spine, and canted so the zig-zag fans across the
-  // screen. A tail tucked behind the body is invisible at every camera angle the
-  // game ever uses, and RiPika without its flash is just a yellow mouse.
+  // Mounted on the centre line at the back of the torso, and tipped back so the
+  // zig-zag trails behind her (see TAIL_CANT for the history — it used to hang
+  // off her left hip and fan out sideways).
+  //
+  // The mount moved with the rotation rather than after it, because the two are
+  // one change: swinging the tail 90° about the old hip position would have
+  // driven it straight through the torso it was pinned beside. -0.20 in z puts
+  // the root just inside the torso's back surface (radius 0.245, squashed to
+  // 0.94 in z, so the skin is at -0.230), which is what stops the first slab
+  // floating off the body.
   const tail = new Group();
-  tail.position.set(-0.25, 0.24, -0.02);
-  tail.rotation.set(0.08, 0.1, 1.05);
+  tail.position.set(0, 0.24, -0.2);
+  tail.rotation.set(-TAIL_CANT, TAIL_YAW, TAIL_ROLL);
   tail.scale.setScalar(1.15);
   body.add(tail);
 
@@ -278,7 +446,11 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
     setExpression: (name: Expression) => ripikaHead.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => {
       applyWalk(limbs, body, phase, speed, 0.7, 0.06);
-      tail.rotation.z = Math.sin(phase * Math.PI * 4) * 0.18 * speed;
+      // The swing is added to the rest pose, not multiplied over it. Writing
+      // this as `sin(...) * 0.18 * speed` alone made the whole expression zero
+      // at `speed = 0` and so *assigned away* the cant rather than returning to
+      // it — see {@link TAIL_CANT}.
+      tail.rotation.z = TAIL_ROLL + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
     },
   };
   return handle;

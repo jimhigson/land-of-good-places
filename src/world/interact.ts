@@ -170,43 +170,34 @@ export function standRadiusOf(zone: InteractZone): number {
 }
 
 /**
- * The E key, virtually — the run body of every action whose owner already
- * listens for `interact` with a proximity check of its own.
- *
- * Most of the park works that way: `Shopping`, `TreeClimbing`, `Building`,
- * `MiniGameHost` and `Flowers` each watch the player and each act on their own
- * `justPressed('interact')`, exactly as they did when a keyboard player walked
- * up and pressed the key. A chip that fires a virtual press therefore reaches
- * them through the one path that already existed, and there is still only ever
- * one place that decides what shopping, climbing or riding *does*.
- *
- * The hook is module-level, in the idiom `train/service.ts` already uses for
- * `setTrainService`, because the zone builders that need it — a list of object
- * literals derived from `building/layout.ts`, a flower's instance row — have no
- * `InputSystem` to hand and threading one through all of them to reach a single
- * closure would be five files of plumbing for nothing.
- */
-let interactPress: (() => void) | null = null;
-
-/** Wired once, by `Game`. */
-export function setInteractPress(press: (() => void) | null): void {
-  interactPress = press;
-}
-
-/**
- * The one-action list for a zone whose owner already handles the E key: "what
- * pressing E here does", named.
+ * The one-action list for a single-purpose zone: "what pressing E here does",
+ * named, and wired straight to the thing that does it.
  *
  * `id` is always `primary`, which is also what makes it the action E runs and
  * the one whose key hint the chip shows.
+ *
+ * ### `run` used to be a broadcast, and that was issue #122
+ *
+ * Until 5 August 2026 this built `run: () => interactPress?.()` — a module-level
+ * hook `Game` wired to `input.pressVirtual('interact')`. A chip therefore did
+ * not call the thing it named; it **shouted "somebody use something"** into the
+ * input system, and twelve systems each read that edge and each decided, from
+ * its own proximity radius, whether the press had been meant for it. Those radii
+ * disagreed with each other and with {@link standRadiusOf}, so at a station with
+ * a flower 1.2 m away the chip said "Get on" and E picked the flower.
+ *
+ * `run` is now a real closure onto one named thing. There is no longer any way
+ * for a press to reach a system that the selection was not pointing at — see
+ * `world/InteractRouter.ts`, and `InputSystem.takeInteractPress`, which is now
+ * the only reader of the key at all.
  */
-export function pressAction(label: string, glyph?: string): readonly ZoneAction[] {
+export function pressAction(label: string, run: () => void, glyph?: string): readonly ZoneAction[] {
   return [
     {
       id: PRIMARY_ACTION,
       label,
       ...(glyph === undefined ? {} : { glyph }),
-      run: () => interactPress?.(),
+      run,
     },
   ];
 }
@@ -215,22 +206,26 @@ export function pressAction(label: string, glyph?: string): readonly ZoneAction[
 export const PRIMARY_ACTION = 'primary';
 
 /**
- * The migration shortcut: a zone with exactly one action, named by {@link
- * zoneVerb}, which is the virtual E press.
+ * A zone with exactly one action, named by {@link zoneVerb} and doing `run`.
  *
  * Every zone the SELECTION RULE inherited was single-purpose — a shop shops, a
  * flower is picked, a tree is climbed — and each one already had a word for
  * itself in {@link DEFAULT_VERBS}. This is that word, with an exclamation mark
  * on it, wrapped as the zone's one chip. Boring on purpose: the interesting
  * zones (the train) spell their actions out by hand.
+ *
+ * `run` is second rather than last because it is the part that matters: a zone
+ * that names an action without saying what it does is the shape of bug this
+ * whole file was rewritten to make unwriteable (see {@link pressAction}).
  */
 export function pressZone(
   zone: Omit<InteractZone, 'actions'>,
+  run: () => void,
   glyph?: string,
   label?: string,
 ): InteractZone {
   const full = zone as InteractZone;
-  return { ...full, actions: () => pressAction(label ?? `${zoneVerb(full)}!`, glyph) };
+  return { ...full, actions: () => pressAction(label ?? `${zoneVerb(full)}!`, run, glyph) };
 }
 
 /**

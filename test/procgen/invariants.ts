@@ -1100,10 +1100,18 @@ const CAR_HALF_WIDTH = 0.75;
  * Things the Sky Cruiser is too low to fly over and must go *around*.
  *
  * The cruise floor is 6.2 m, which clears the trees, the garlands and the
- * train. It does not clear the castle or the big wheel, and those two are
- * therefore the only horizontal obstacles the loop actually has.
+ * train. It does not clear the big wheel, so the loop must go round it.
+ *
+ * **The castle used to be in this list and deliberately is not any more**
+ * (#113). The Sky Cruiser now flies *through* it, in one side wall and out the
+ * other, so measuring the loop against the castle's plot circle would fail the
+ * feature rather than test it — and that circle was never a description of the
+ * castle anyway: 19 m about a point 3.54 m from the building, which does not
+ * even contain its corner towers. Dropping it here loses nothing, because
+ * {@link skyCruiserFitsThroughTheCastle} replaces one crude circle with the
+ * real masonry and a swept car, which is a strictly stronger claim.
  */
-const TOO_TALL_TO_FLY_OVER = ['building', 'ferrisWheel'] as const;
+const TOO_TALL_TO_FLY_OVER = ['ferrisWheel'] as const;
 
 /**
  * **The Sky Cruiser goes round the castle and the big wheel, not through them.**
@@ -1668,6 +1676,43 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The Sky Cruiser fits through the castle it flies into.** (Issue #113.)
+ *
+ * The other cruiser invariants ask whether the loop *misses* things. This one
+ * exists because the loop now deliberately does not: it crosses two curtain
+ * walls, and the only thing standing between a child and a wall of stone is
+ * that the hole was cut in the right place, at the right height, wide enough,
+ * and clear of the towers at either end of the panel.
+ *
+ * It is measured twice over, on purpose, and the two are not redundant:
+ *
+ * - the geometric check says *why* — within one panel, this much masonry left
+ *   beside the tower, this wide against a car this wide, both openings sharing
+ *   a height because the run through the castle is level;
+ * - the swept check says *whether* — four rays along the car's own envelope,
+ *   fired at **every mesh under the castle's garden root**, naming what they
+ *   hit. It knows nothing about walls or towers, so a fixture added to the
+ *   castle later is covered from the day it appears.
+ *
+ * Both are the same functions the boot assert and `check:castle-window` run,
+ * so there is one definition of "does the ride fit" and it cannot drift.
+ *
+ * **An empty pass is a pass.** Nothing reserves the castle for the coaster: on
+ * a seed whose loop goes round it instead, no windows are cut, the castle is
+ * whole, and there is nothing to complain about. Asserting that a window always
+ * exists would be asserting that every park is the same park, which is the
+ * opposite of what the generator is for.
+ *
+ * Proven to have teeth rather than assumed to: shrinking the opening below the
+ * car's width, cutting it 3 m from where the route crosses, shoving it into a
+ * corner tower and raising it through the battlements each turn this red — and
+ * building the wall solid while still declaring the openings is what exposed
+ * that the swept check was measuring nothing at all, because a headless park
+ * never renders and every `matrixWorld` was still the identity.
+ */
+const skyCruiserFitsThroughTheCastle: Invariant = (facts) => facts.castlePass.complaints;
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1708,6 +1753,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide does not clip the castle towers',
     theGinormousSlideMissesTheCastleTowers,
   ],
+  ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
 ];
 
 /**

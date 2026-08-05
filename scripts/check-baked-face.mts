@@ -33,6 +33,7 @@ import '../scripts/headless-canvas.mjs';
 import { Mesh, Object3D, Raycaster, SphereGeometry, Vector3, type Material } from 'three';
 import { createKid, KID_FACE } from '../src/art/models/kid.ts';
 import { buildRipikaHead } from '../src/art/models/ripika.ts';
+import { createRipikaStatue } from '../src/art/models/ripikaStatue.ts';
 import { createMini } from '../src/art/models/mini.ts';
 import { createBiscuit } from '../src/art/models/biscuit.ts';
 import {
@@ -335,6 +336,25 @@ checkHead({
   skull: skullOf(biscuit.head, 'Biscuit'),
   window: { spreadX: 1.8, spreadY: 1.8, tilt: 0.12 },
   paint: { eyeY: 0.4, eyeGap: 0.46, mouth: 'none' },
+});
+
+// The fountain statue. Same head builder and same face window as RiPika above,
+// but it reaches them by the OTHER bake path — `applyStaticBakedFace`, the
+// one-canvas route for a face that never changes expression — so the remap it
+// does is genuinely separate code and needs its own ray cast.
+//
+// Checked as the whole assembled statue rather than a bare head, which also
+// buys the assertion that nothing the statue owns stands in front of its face:
+// it is posed with a raised arm and mounted on a plinth, and "a ray in at the
+// eye hits the skull first" is exactly the property that would catch a pose
+// putting a paw across the face.
+const statue = createRipikaStatue();
+checkHead({
+  label: 'RiPika statue',
+  root: statue.root,
+  skull: skullOf(statue.root, 'RiPika statue'),
+  window: { spreadX: 1.85, spreadY: 1.85, tilt: 0.2 },
+  paint: { eyeY: 0.44, eyeGap: 0.46, mouth: 'cat', mouthDrop: 0.235 },
 });
 
 // The crowd's prototype must KEEP its patch — see `KidOptions.facePatch`.

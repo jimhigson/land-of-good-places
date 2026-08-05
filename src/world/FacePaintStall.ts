@@ -251,6 +251,7 @@ export class FacePaintStall implements GameSystem {
           // rainbow when it is selected (see `world/highlight.ts`).
           highlight: highlightObject(this.group),
         },
+        () => this.requestPaint(),
         '🎨',
         'Paint!',
       ),
@@ -286,9 +287,23 @@ export class FacePaintStall implements GameSystem {
       return;
     }
 
-    if (inRange && !busy && input.justPressed('interact') && !this.player.riding) {
-      this.openPanel();
-    }
+    // The press itself is not read here any more. It arrives through this
+    // stall's own chip action (issue #122): a `Math.hypot(...) <= REACH` test
+    // sitting beside every other system's own proximity test, all racing for
+    // the same key, is exactly how a press landed on the wrong thing.
+  }
+
+  /**
+   * "Paint my face" — the run body of the stall's chip.
+   *
+   * The gates are re-checked rather than trusted from when the chip was drawn:
+   * a chip pressed from across the park walks her over first, and the painter
+   * may have picked up somebody else in the meantime.
+   */
+  private requestPaint(): void {
+    if (!this.player || !this.panel) return;
+    if (this.uiOpen || this.player.riding) return;
+    this.openPanel();
   }
 
   dispose(): void {

@@ -15,7 +15,8 @@ import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor } from './world';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
-import { setInteractPress, type InteractZone } from './world/interact';
+import type { InteractZone } from './world/interact';
+import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
@@ -393,6 +394,12 @@ export class Game {
     // fixed camera (design feedback #16) means one can now hide them
     // completely for as long as they stand there. See `world/FoliageFade.ts`.
     this.foliageFade = new FoliageFade(this.world.scenery, this.camera);
+    // Trees are not the only things in the way any more: at 4x the fountain
+    // statue (#121) hides a standing child over 32.8 m² of the plaza. It fades
+    // itself, so it registers as a plain occluder rather than needing the
+    // instanced-foliage stand-in machinery. Anything else tall enough to hide
+    // the player joins the same way — see `SightlineOccluder`.
+    this.foliageFade.addOccluder(this.world.fountain.statueOccluder);
     this.engine.scene.add(this.foliageFade.group);
     this.addSystem(this.foliageFade);
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
@@ -434,9 +441,49 @@ export class Game {
       flash: (zone) => this.highlights.flashZone(zone),
     });
     this.addSystem(this.selection);
-    // The E key, virtually — how a chip reaches whichever system owns the thing
-    // it names. See `world/interact.ts`'s `pressAction`.
-    setInteractPress(() => this.input.pressVirtual('interact'));
+
+    // GitHub issue #122: **a single E press routes to the zone the selection
+    // currently shows.** Registered immediately after `Selection` so the pick it
+    // dispatches to is this frame's, already settled — and it is the only thing
+    // in the game that reads the interact key at all (see
+    // `InputSystem.takeInteractPress`, and `world/InteractRouter.ts` for why the
+    // claims below are not a way back to the bug).
+    //
+    // Order is priority, most modal first.
+    this.addSystem(
+      new InteractRouter(
+        [
+          {
+            // The welcome panel is over everything, including itself.
+            name: 'whatsNew',
+            active: () => this.whatsNew.isOpen,
+            run: () => this.whatsNew.close(),
+          },
+          {
+            name: 'ferrisEndCard',
+            active: () => this.world.ferrisWheel.cardDismissable,
+            run: () => this.world.ferrisWheel.dismissCard(),
+          },
+          {
+            // Under her hand, and a far better affordance than any chip — see
+            // the panel's own wiring above.
+            name: 'liftPanel',
+            active: () => this.liftPanel.awaitingPress,
+            run: () => this.liftPanel.pressFocused(),
+          },
+          {
+            // Up a tree: `player.riding` is true, so nothing is selectable and
+            // there is no chip for this to disagree with. This is the
+            // double-fire hazard from #103, now impossible — climbing is a zone
+            // action, coming down is this, and the key has one reader.
+            name: 'treeDescend',
+            active: () => this.treeClimbing.playerPeeking,
+            run: () => this.treeClimbing.requestDescend(),
+          },
+        ] satisfies readonly InteractClaim[],
+        this.selection,
+      ),
+    );
 
     // The chips themselves, floating over the selected item.
     this.actionChips = new ActionChips(
@@ -559,6 +606,8 @@ export class Game {
     };
     // No stall may open while a ride has her — see `MiniGameHost.riding`.
     this.miniGames.riding = () => this.player.riding;
+    // Every booth's chip, wired to the framework that runs what is behind it.
+    this.world.stalls.onEnter = (stallId) => this.miniGames.enter(stallId);
     this.miniGames.boardRide = (stallId) => {
       if (stallId === 'railRacer') return this.world.railRace.requestBoard();
       if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
@@ -734,6 +783,9 @@ export class Game {
       flash: () => this.transitions.flash(),
       snapCamera: () => this.camera.snapTo(this.player.position),
       openStairMenu: (deck) => this.openStairMenu(deck),
+      // The building owns the shop geometry; `Shopping` owns the panel. This is
+      // the one place the two meet — see `Shopping.openShopById`.
+      openShop: (unitId) => this.shopping.openShopById(unitId),
       closeStairMenu: () => this.stairMenu.close(),
     };
   }
@@ -923,7 +975,6 @@ export class Game {
 
   dispose(): void {
     this.stop();
-    setInteractPress(null);
     this.saveSystem.dispose();
     for (const system of this.systems) system.dispose?.();
     this.miniGames.dispose();
@@ -961,7 +1012,8 @@ export class Game {
     // ever be open in the first moment of a session — before a shop or the
     // Cute-o-dex could plausibly be open too — but checking it first keeps
     // that a guarantee rather than an accident. Esc, E/Enter or B on a pad all
-    // say "got it"; there is no key-handling in `WhatsNew` itself, unlike
+    // say "got it" (E/Enter via `InteractRouter`); there is no key-handling in
+    // `WhatsNew` itself, unlike
     // `CuteODex`, because none of its keys need anything beyond the ordinary
     // action vocabulary already read here.
     //
@@ -970,11 +1022,10 @@ export class Game {
     // screen, Escape belongs to the book. Otherwise Escape would close the
     // panel *and* pause the park behind it.
     if (this.whatsNew.isOpen) {
-      if (
-        this.input.justPressed('menu') ||
-        this.input.justPressed('cancel') ||
-        this.input.justPressed('interact')
-      ) {
+      // Esc and B here; E/Enter arrives a few lines later, through
+      // `InteractRouter`'s first claim, because the interact key now has exactly
+      // one reader in the whole game (issue #122).
+      if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.whatsNew.close();
       }
     } else if (this.cuteODex.isOpen) {
@@ -1010,7 +1061,7 @@ export class Game {
 
     // Mini-games run on the loop's real delta, not the frame context's: the
     // context's is about to be zeroed by the very freeze they ask for.
-    this.miniGames.update(tick.dt, this.frameContext);
+    this.miniGames.update(tick.dt);
 
     const paused = gameStore.get().paused || this.miniGames.frozen;
     this.world.dayNight.setPaused(paused);

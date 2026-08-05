@@ -54,17 +54,28 @@ export interface BuildingZoneState {
   readonly doorstepY: number;
   /** "Come here, please." The lift's own summon — see `liftRide.ts`. */
   callLift(): void;
+  /** Show the Climb / Descend menu for `deck`'s stairwell. */
+  openStairs(deck: number): void;
+  /** Use the loo. Re-checks that she is actually in the room. */
+  useToilets(): void;
+  /** "Please come with me" / "never mind" — toggles the grown-up. */
+  askGrownUp(): void;
+  /** Open shop unit `unitId`'s purchase panel. */
+  openShop(unitId: string): void;
 }
 
 export function buildingInteractZones(state: BuildingZoneState): InteractZone[] {
   const zones: InteractZone[] = [];
+  /** One immutable action list per deck, built on first use. */
+  const stairsActions: (readonly ZoneAction[])[] = [];
 
   // Allocated once per call rather than once per deck: five decks share one
-  // stairwell chip and one lift chip, and an action list is immutable.
+  // lift chip, and an action list is immutable. The stairs cannot be shared any
+  // more — since issue #122 each deck's chip carries *which* stairwell it is,
+  // rather than firing an unaddressed press for `Building` to work out.
   const callAction: readonly ZoneAction[] = [
     { id: PRIMARY_ACTION, label: 'Call', glyph: '🛗', run: () => state.callLift() },
   ];
-  const stairsAction: readonly ZoneAction[] = pressAction('Climb!', '🪜');
 
   // The way in, out in the garden. A tap on the tower walks a child to the top
   // of the front steps, and stepping over the threshold does the rest.
@@ -100,9 +111,9 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
       actions: () => callAction,
     });
 
-    // Tapping the stairs walks you to the foot of the flight and then fires
-    // `interact`, which opens the Climb / Descend menu. The whole point is that
-    // the flights themselves are never walked by hand.
+    // Tapping the stairs walks you to the foot of the flight and then opens the
+    // Climb / Descend menu for it. The whole point is that the flights
+    // themselves are never walked by hand.
     zones.push({
       id: `stairs-${deck}`,
       label: 'Stairs',
@@ -123,7 +134,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         glyph: '🪜',
         accent: PALETTE.markerMint,
       },
-      actions: () => stairsAction,
+      actions: () => stairsActions[deck] ?? (stairsActions[deck] = pressAction('Climb!', () => state.openStairs(deck), '🪜')),
     });
   }
 
@@ -191,13 +202,14 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         // Off the board that used to hang over the door (`building/Toilets.ts`).
         sign: { title: 'Toilets', note: 'wash your hands!', glyph: '🚻', accent: PALETTE.markerMint },
       },
+      () => state.useToilets(),
       '🚽',
     ),
   );
 
-  // The seven shops. Tapping a counter walks you to the serving spot and then
-  // fires `interact` on arrival, which is the same thing the E key does when a
-  // keyboard player walks up — one shop-opening path, two ways in.
+  // The seven shops. Tapping a counter walks you to the serving spot and opens
+  // *that* counter on arrival — the chip names the unit, so the walk and the
+  // key press cannot end up at different tills (issue #122).
   for (const unit of SHOP_UNITS) {
     const [counterX, counterZ] = shopLocalToBuilding(unit, 0, 1.15);
     const [standX, standZ] = shopLocalToBuilding(unit, 0, SHOP_STAND_Z);
@@ -219,6 +231,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
           // builds them from the same tables the shop itself is built from.
           ...(SHOP_SIGNS[unit.id] === undefined ? {} : { sign: SHOP_SIGNS[unit.id] }),
         },
+        () => state.openShop(unit.id),
         '🛍️',
       ),
     );
@@ -246,6 +259,7 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
         standX: worldX(GROWN_UP_X),
         standZ: worldZ(GROWN_UP_Z + 1.4),
       },
+      () => state.askGrownUp(),
       '🧑',
     ),
   );

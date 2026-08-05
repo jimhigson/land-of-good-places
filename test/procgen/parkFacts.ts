@@ -110,6 +110,24 @@ export interface PathEdgeFact {
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /**
+   * The Sky Cruiser's pass through the castle (#113), measured by the *same*
+   * functions the boot assert and `check:castle-window` use.
+   *
+   * Measured here rather than in the invariant because those functions live in
+   * `src/` and read the castle's own placement, which is seed-dependent: a
+   * static import from the test file would pull in a second copy of the park at
+   * the default seed and quietly measure this seed's coaster against that one's
+   * castle. Everything in this suite goes through the dynamic imports below for
+   * exactly that reason.
+   *
+   * `windows` is empty on a seed whose loop went round the castle, which is a
+   * healthy park and not a skipped test.
+   */
+  readonly castlePass: {
+    readonly windows: readonly { readonly wall: string }[];
+    readonly complaints: readonly string[];
+  };
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
@@ -270,6 +288,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { CatmullRomCurve3 } = await import('three');
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
+  const { CASTLE_WINDOWS, checkCastleWindows, sweptCartHits } = await import(
+    '../../src/world/coaster/castleWindows.ts'
+  );
   const { JUMP_APEX_HEIGHT } = await import('../../src/entities/Player.ts');
   const { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } = await import(
     '../../src/world/entrance/layout.ts'
@@ -511,7 +532,16 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     return Math.hypot(endX - x, endZ - z) < 1.5;
   };
 
+  const castlePass = {
+    windows: CASTLE_WINDOWS,
+    complaints: [
+      ...checkCastleWindows(world.coaster.route, CASTLE_WINDOWS),
+      ...sweptCartHits(world.coaster.route, world.building.gardenRoot),
+    ],
+  };
+
   return {
+    castlePass,
     seed,
     world,
     walls,

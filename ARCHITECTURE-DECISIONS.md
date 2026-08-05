@@ -9,6 +9,97 @@ sources you actually read.
 
 ---
 
+## Decision 6 — Every park is its own park: nothing reserves space, and rides resolve collisions by backtracking
+
+**Date:** 5 August 2026 · **Status:** decided, first implemented by the Sky
+Cruiser's castle window (#113)
+**Sources read:** Jim's ruling of 5 August, in his words below; GAME_DESIGN.md;
+`src/world/rail/generate.ts` (header and search loop), `src/world/coaster/route.ts`,
+`src/world/parkManifest.ts`, `test/procgen/invariants.ts`, and issues #112, #113, #118.
+
+### The ruling
+
+> "this should use an old-skool proc gen kind of park — in future I'd like each
+> park to be unique, not featuring reserved space for certain things. The algo
+> to use for the rides is to backtrack and keep trying different track sections
+> on collisions, and only bail if backtracking fails for a very large number of
+> tries."
+
+Three things follow, and the third is the one that will bite whoever reads only
+the first two.
+
+### 1. Nothing reserves space — not for a ride, not for anything
+
+No system may claim a volume of the park that other systems must then avoid.
+Not as a quoted constant in a handoff note, and **not as an exported one
+either**: exporting a reserved box is still reserving. The alternative is always
+available and is what the generator is already built for — a system publishes
+what it *actually solved*, and everything else treats that as an obstacle like a
+tree or a wall.
+
+This was decided against a live proposal. The Sky Cruiser's castle pass was
+first designed as two openings at chosen positions with the route threaded
+through them, and a reserved corridor handed to the ginormous slide so it would
+keep out. That is the failure mode of #118 exactly: the slide was twelve
+hand-authored world coordinates that stopped agreeing with a castle that had
+moved, and eight of the twelve ended up inside the castle footprint. Numbers
+that must agree, with nothing checking that they do.
+
+### 2. Rides solve by generate-and-backtrack against real collisions
+
+`rail/generate.ts` already works this way: lay a piece, reject it if it hits
+something, try another, back up a joint when a joint runs out, restart from a
+different start pose when a whole attempt dies. Keep that. **Budgets should be
+generous** — bailing produces a park that will not start, which is worse than a
+slow one, so the ceiling wants to be far above what a successful solve costs
+(a successful Sky Cruiser solve is ~100 000 candidate pieces; the ceiling is
+some millions) and bounded by wall clock rather than by optimism.
+
+### 3. The solver is **plan-view only**, so it cannot backtrack on a vertical collision
+
+This is the part that is not obvious from the instruction, and rediscovering it
+costs a day.
+
+`rail/generate.ts` searches in 2D. Its header is explicit about why: every
+obstacle a rail ride dodges horizontally is a vertical cylinder, height is a
+separate pass the caller applies afterwards, and searching in 2D is what keeps
+the state space small enough to solve inside the module-load budget. The
+consequence is that **at the moment the search accepts or rejects a piece, that
+piece has no height yet.** "Backtrack on collisions" therefore cannot mean
+vertical collisions. There is nothing to collide.
+
+Measured, on 24 freely-solved Sky Cruiser loops against a castle described as
+real masonry: horizontally the search constrains itself beautifully — 20 of 24
+crossed a side wall and **every one of those crossings landed within 1.1 m of
+its panel's midpoint against a 4.07 m allowance**, because the solver must fit
+its own 3 m corridor through the passable band and the geometry forces the
+crossing to the middle. Vertically, over the same 24, **only one** crossed at a
+height where a window fits inside the wall; the rest ranged from 1.6 m to 10.2 m
+up an 8.8 m wall.
+
+**So a vertical requirement is expressed as a carve that responds to where the
+solver went, never as a constraint the solver is asked to honour.** The height
+profile is already carved to 1.1 m wherever the loop turned out to pass the
+station, because a platform is there; the castle pass is carved level wherever
+the loop turned out to run inside the castle, because a hole is there. Neither
+reserves anything: a loop that never passes the castle is carved nowhere, cuts
+no holes, and that park has an unbroken castle. That is decision 1 and decision
+3 agreeing rather than fighting.
+
+If a future ride genuinely needs a 3D search, that is a change to
+`rail/generate.ts` and a real piece of work — not something to assume is already
+there because the instruction said "backtrack on collisions".
+
+### What it costs
+
+Parks stop being predictable, and features stop being guaranteed. On a seed
+whose loop misses the castle there is no fly-through at all. That is the point
+of "each park is unique", but it means **every consumer must treat a generated
+feature as optional**, and every test must treat its absence as a pass rather
+than asserting the feature always exists.
+
+---
+
 ## Decision 4 — The park replan: a railway through the park, not a ring around it
 
 *(This is item **2.1** in ORDER-OF-WORK.md. It gates all of Wave 4.)*

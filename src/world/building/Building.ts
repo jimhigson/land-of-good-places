@@ -138,6 +138,8 @@ export interface InteriorControls {
   snapCamera(): void;
   /** Show the Climb / Descend menu for a deck. */
   openStairMenu(deck: number): void;
+  /** Open shop unit `unitId`'s purchase panel — `Shopping` owns it, not us. */
+  openShop(unitId: string): void;
   /** Take the stairs menu down again — the player has left, or is riding. */
   closeStairMenu(): void;
 }
@@ -232,7 +234,14 @@ export class Building implements GameSystem {
   private readonly shell = new BuildingShell('interior');
   private readonly facade = new BuildingShell('facade');
   /** The facade, the ginormous slide, and the grown-up while they ride it. */
-  private readonly gardenRoot = new Group();
+  /**
+   * The castle as it stands in the garden: the facade shell and the ginormous
+   * slide. Readable rather than private so the #113 invariant can sweep the
+   * Sky Cruiser's envelope against **every mesh actually in it**, instead of
+   * against a list of fixtures somebody wrote down and has to remember to keep
+   * up to date.
+   */
+  readonly gardenRoot = new Group();
 
   private readonly escalators: Escalators;
   private readonly lift: GlassLift;
@@ -430,6 +439,13 @@ export class Building implements GameSystem {
       // The lift's "Call" chip and the panel's big round button are the same
       // summon — see `liftRide.ts`'s `LiftPanelSource`.
       callLift: () => this.liftRide.call(),
+      openStairs: (deck) => this.openStairs(deck),
+      useToilets: () => this.useToilets(),
+      askGrownUp: () => this.askGrownUp(),
+      // Opening the purchase panel is `Shopping`'s, not the building's — the
+      // building owns the geometry and `Game` owns the join. See
+      // `InteriorControls.openShop`.
+      openShop: (unitId) => this.controls.openShop(unitId),
     });
   }
 
@@ -483,15 +499,10 @@ export class Building implements GameSystem {
   }
 
   update(context: FrameContext): void {
-    const { dt, elapsed, input } = context;
+    const { dt, elapsed } = context;
     this.elapsed = elapsed;
 
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
-
-    // Read once and dispatched to every claimant below, so the lift and the
-    // interior's own interact handling can never both react to the same
-    // press (see `handleInteractPress`'s "first claimant wins" doc comment).
-    const interactPressed = input.justPressed('interact');
 
     this.liftRide.update(dt);
     this.bubble.update(dt, elapsed);
@@ -508,7 +519,6 @@ export class Building implements GameSystem {
     if (this.ride) {
       this.advanceRide(dt, player);
     } else if (!this.changingSpace && !player.riding) {
-      this.handleInteractPress(player, interactPressed);
       this.handleTrampoline(player);
       this.handleEscalator(player, dt);
       this.checkRideTriggers(player);
@@ -813,38 +823,58 @@ export class Building implements GameSystem {
   }
 
   /**
-   * One interact press, shared out.
+   * The three things inside the building a press can do, one method each.
    *
-   * Each thing checks its own little patch of floor and the first to claim the
-   * press wins, which is the same rule the tap zones use — so pressing E and
-   * tapping a thing can never disagree about what you meant.
+   * These were one `handleInteractPress(player, pressed)` that read the key,
+   * measured three patches of floor and gave the press to the first claimant.
+   * That rule was sound *within* this file and useless outside it: five other
+   * systems were measuring their own patches of floor for the same key at the
+   * same time, which is GitHub issue #122. Each is now the run body of one
+   * zone's chip (`building/interactZones.ts`), so the thing that happens is the
+   * thing the child was shown.
+   *
+   * The gates that remain are not "is this press mine?" — the selection has
+   * already settled that. They are "is this still possible?", re-checked because
+   * a chip pressed from across the room walks her there first.
    */
-  private handleInteractPress(player: Player, pressed: boolean): void {
-    if (!pressed || !this.inside) return;
+  openStairs(deck: number): void {
+    if (!this.inside || this.ride || this.changingSpace) return;
+    const player = this.player;
+    if (!player || player.riding) return;
+    // The deck she is actually standing on, not the one the chip was drawn for:
+    // five decks share a stairwell shaft, so a stale chip must not open the
+    // menu for a floor she has since left.
+    const standing = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
+    this.controls.openStairMenu(standing ?? deck);
+  }
+
+  /**
+   * Inside the room, not near it. GAME_DESIGN.md, 27 July 2026: *"you do not use
+   * the toilet from the doorway"* — a radius round the stand spot reached back
+   * out into the corridor, which is precisely what the family objected to. The
+   * rectangle is the room, so this only lands once she is in.
+   *
+   * `TOILET_STAND` is a spot *inside* `TOILET_ROOM`, so a chip pressed from the
+   * corridor walks her in and then passes this; pressing it while standing in
+   * the doorway does not.
+   */
+  useToilets(): void {
+    if (!this.inside || this.ride || this.changingSpace) return;
+    const player = this.player;
+    if (!player || player.riding) return;
     const localX = player.position.x - INTERIOR_ORIGIN_X;
     const localZ = player.position.z - INTERIOR_ORIGIN_Z;
     const deck = this.surfaces.deckAt(player.position.x, player.position.z, player.position.y);
+    if (deck !== TOILET_DECK || !regionContains(TOILET_ROOM, localX, localZ)) return;
+    this.toilets.use();
+  }
 
-    if (deck !== null && near(localX, localZ, STAIR_STAND_X, STAIR_STAND_Z, 3.6)) {
-      this.controls.openStairMenu(deck);
-      return;
-    }
-
-    // Inside the room, not near it. GAME_DESIGN.md, 27 July 2026: *"you do not
-    // use the toilet from the doorway"* — a radius round the stand spot reached
-    // back out into the corridor, which is precisely what the family objected
-    // to. The rectangle is the room, so the press only lands once she is in.
-    if (deck === TOILET_DECK && regionContains(TOILET_ROOM, localX, localZ)) {
-      this.toilets.use();
-      return;
-    }
-
-    if (
-      Math.abs(player.position.y - BUILDING_BASE_Y - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.4 &&
-      near(localX, localZ, GROWN_UP_X, GROWN_UP_Z, 4)
-    ) {
-      this.grownUpComing = !this.grownUpComing;
-    }
+  /** "Come with me!" / "never mind" — the grown-up follows, or stops. */
+  askGrownUp(): void {
+    if (!this.inside || this.ride || this.changingSpace) return;
+    const player = this.player;
+    if (!player || player.riding) return;
+    this.grownUpComing = !this.grownUpComing;
   }
 
   /**

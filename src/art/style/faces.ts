@@ -756,6 +756,46 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
   };
 }
 
+/**
+ * A baked face for something that will **never change expression** — one canvas
+ * instead of the five-expression set.
+ *
+ * Same two steps as {@link createBakedFace}'s `applyTo` (remap the sphere's UVs
+ * onto the face window, then hand it an opaque face texture as its material),
+ * and deliberately so: this is not a second way of putting a face on a head, it
+ * is the same way with the expression set left off. It goes through
+ * `remapSphereFaceUv` and `paintFaceOnFill` — no mesh is created, no winding is
+ * decided here — so the trap that made the hood faces invisible has nothing to
+ * catch on.
+ *
+ * The fountain statue is the case this exists for. `createBakedFace` paints
+ * five 512² canvases so a character can blink and beam; a carved stone RiPika
+ * does neither, and four of those five would sit on the GPU for the life of the
+ * park to never be shown. The game's whole texture budget is "under 40 distinct
+ * canvas textures" (ART_DIRECTION §7), so four wasted ones is a tenth of it.
+ *
+ * Sets the same `bakedFace` flag {@link isBakedFaceMesh} and `check:baked-face`
+ * look for, so a static face is checked exactly like an animated one.
+ */
+export function applyStaticBakedFace(mesh: Mesh, options: BakedFaceOptions): MeshToonMaterial {
+  const { fill, spreadX = 1.7, spreadY = 1.7, tilt = 0.1, ...paint } = options;
+
+  if (isShared(mesh.geometry)) {
+    throw new Error(
+      'applyStaticBakedFace: refusing to remap a shared geometry. A cached head ' +
+        "geometry is worn by more than one character and its UVs are not this face's " +
+        'to rewrite — see sharedFace.ts.',
+    );
+  }
+  remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
+
+  const material = toonMaterial(0xffffff, { map: paintFaceOnFill(fill, paint) });
+  mesh.material = material;
+  (mesh.userData as Record<string, unknown>)[BAKED_FACE_FLAG] = true;
+  if (!mesh.name) mesh.name = 'bakedFace';
+  return material;
+}
+
 export interface FacePatch {
   readonly mesh: Mesh;
   readonly expressions: Record<Expression, CanvasTexture>;
