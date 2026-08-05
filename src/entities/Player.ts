@@ -94,6 +94,20 @@ const GRAVITY = 17;
 export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
 
 /**
+ * The waving arm, up a tree — see {@link Player.setClimbWave}.
+ *
+ * The same numbers the crowd waves with (`NpcCharacter.animate`), so one
+ * gesture reads across the whole park. Exported because `check:climb-wave`
+ * poses a real kid with them to measure how high the hand actually gets: that
+ * is what decides whether the wave clears the leaves, and it is not something
+ * this file can know on its own.
+ */
+export const CLIMB_WAVE_ARM_X = -2.45;
+export const CLIMB_WAVE_ARM_Z = -0.75;
+/** How far the hand wags either side of {@link CLIMB_WAVE_ARM_Z}. */
+export const WAVE_WAGGLE = 0.42;
+
+/**
  * How far ahead — in the direction actually being walked — the auto-hop
  * feature (design feedback #30e) looks for a wall it could jump. Small: this
  * only needs to fire a moment before contact, not give a long run-up, and a
@@ -748,9 +762,9 @@ export class Player implements GameSystem {
       // Same arm and the same waggle as the crowd's wave
       // (`NpcCharacter.animate`), so one gesture reads across the whole park.
       if (this.climbWave > 0) {
-        const waggle = Math.sin(context.elapsed * 11) * 0.42;
-        this.model.rightArm.rotation.x = lerp(-2.5, -2.45, this.climbWave);
-        this.model.rightArm.rotation.z = lerp(-0.5, -0.75 + waggle, this.climbWave);
+        const waggle = Math.sin(context.elapsed * 11) * WAVE_WAGGLE;
+        this.model.rightArm.rotation.x = lerp(-2.5, CLIMB_WAVE_ARM_X, this.climbWave);
+        this.model.rightArm.rotation.z = lerp(-0.5, CLIMB_WAVE_ARM_Z + waggle, this.climbWave);
       }
       return;
     }

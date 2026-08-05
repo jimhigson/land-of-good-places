@@ -510,6 +510,14 @@ const PLAYER_SCRAMBLE_DOWN_SECONDS = 0.4;
 /** How close (trunk edge to feet) counts as "near enough to climb". */
 const INTERACT_MARGIN = 2.4;
 
+/**
+ * How far outside the trunk the climber actually perches.
+ *
+ * Exported because it decides *where* on the canopy the head and the waving
+ * hand come out, which is what `check:climb-wave` has to sample.
+ */
+export const CLIMB_EDGE_GAP = 0.35;
+
 // ------------------------------------------------------------------- waving
 //
 // "After climbing a tree the player waves toward the camera every few seconds"
@@ -534,17 +542,22 @@ const WAVE_EASE_HALF_LIFE = 0.09;
  * **Not a flourish — the wave is invisible without it.** She peeks with her
  * head at `canopyTopY` and everything else buried, and her arm cannot reach
  * above her own head: the shoulder is 0.72 up a body whose head sits at 1.36
- * (`kid.ts`), and hand reach from the shoulder is 0.32 + a 0.135 hand. The
- * waving hand therefore tops out around 0.25 *below* the head — and the canopy
- * surface at the climbing spot (a trunk-radius or so off the axis of a
- * 2.05–2.5 m ellipsoid) is only about 0.17 below `canopyTopY`. So a raised arm
- * alone leaves the hand roughly 0.09 m inside the leaves, from every angle.
+ * (`kid.ts`). Measured on the real rig at the real wave angle, through the
+ * whole waggle, the waving hand tops out **0.303 m below her head** — so
+ * without a lift it sits 0.3 m under `canopyTopY`, while the canopy surface
+ * where she perches is only ~0.18 m below it. A raised arm alone leaves the
+ * hand roughly 0.12 m inside the leaves, from every approach bearing.
  *
- * Lifting the whole child by 0.3 clears the hand past the leaf surface with
- * ~0.2 m to spare on the smallest climbable canopy, and it is what a child
- * hauling herself up to be seen actually does. `check:climb-wave` measures it.
+ * Lifting the whole child by 0.3 brings the worst climbable tree in the
+ * canonical park to 0.176 m of clearance, and it is what a child hauling
+ * herself up to be seen actually does.
+ *
+ * **`npm run check:climb-wave` measures all of that against the real kid rig
+ * and the real generated park**, rather than trusting the arithmetic above —
+ * every number in it belongs to a different file and can move without anyone
+ * thinking about this one.
  */
-const WAVE_RISE = 0.3;
+export const WAVE_RISE = 0.3;
 
 /** Above this much wave, she has turned to the camera to do it. */
 const WAVE_TURN_THRESHOLD = 0.15;
@@ -596,7 +609,7 @@ function climbPose(
   peekFacing: number,
 ): ClimbPose {
   const approachAngle = Math.atan2(startX - tree.x, startZ - tree.z);
-  const edgeDistance = tree.trunkRadius + 0.35;
+  const edgeDistance = tree.trunkRadius + CLIMB_EDGE_GAP;
   const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
   const topY = tree.canopyTopY - headOffsetY;
