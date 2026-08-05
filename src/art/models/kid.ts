@@ -779,23 +779,16 @@ export function createKid(options: KidOptions = {}): KidHandle {
   jetpackAnchor.position.set(0, 0.56, -0.32);
   body.add(jetpackAnchor);
 
-  // Where a worn keychain hangs. A separate anchor from `backpackAnchor`, which
-  // is the bag's *mouth* — a charm hung there would sit on top of a peeking
-  // creature's head (`BackpackPeek`). Declared outside the `if` like the others,
-  // so a kid built with `backpack: false` still hands back a real (if
-  // unparented) `Group` rather than `undefined`.
+  // Where a worn keychain hangs. Comes from the bag's own rig, per shape, and
+  // moves when she switches bags — `backpacks.ts` owns the number because it
+  // owns the shapes (see `CHARM_HANGS`). A separate anchor from
+  // `backpackAnchor`, which is the bag's *mouth*: a charm hung there would
+  // dangle over a peeking creature's head (`BackpackPeek`).
   //
-  // NOTE: this offset was measured (28 July) against the single bag the model
-  // had then — 0.36 x 0.32 x 0.20 at (0, 0.56, -0.32). Backpacks became five
-  // authored shapes since (`art/models/backpacks.ts`), so it is only known good
-  // for a shape of about those dimensions. Hanging the charm off the bag's own
-  // rig, per shape, is the right long-term home for this number.
-  const keychainAnchor = new Group();
-  keychainAnchor.name = 'keychainAnchor';
-  if (backpackRig) {
-    keychainAnchor.position.set(0.17, 0.5, -0.3);
-    body.add(keychainAnchor);
-  }
+  // `backpack: false` (the pet-shop display kids) leaves this an unparented
+  // `Group` at the origin, exactly as `backpackAnchor` does — a real object to
+  // hand back rather than `undefined`, with nothing to hang off.
+  const keychainAnchor = backpackRig?.charmAnchor ?? new Group();
 
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
