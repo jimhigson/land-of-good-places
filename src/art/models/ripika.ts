@@ -44,8 +44,26 @@ export const RIPIKA_HEAD_SCALE = 1.32;
 const HEAD = RIPIKA_HEAD_SCALE;
 
 /**
- * The tail's resting cant, in radians — how far the zig-zag flash is rolled
- * over so it fans **across** the screen rather than hiding behind the body.
+ * The tail's resting pitch, in radians — how far the zig-zag flash is tipped
+ * **back** from vertical, so it trails behind her the way a tail does.
+ *
+ * Applied as `rotation.x = -TAIL_CANT`: negative pitches the tail towards −Z,
+ * and +Z is forward under the asset contract. At 1.05 rad it stands about 30°
+ * above horizontal, which keeps the flash clear of the body without turning it
+ * into a flagpole.
+ *
+ * **It used to be a roll (`rotation.z`), fanning the tail out sideways.** Jim
+ * looked at it in the park on 5 August 2026: "tail should extend behind, not to
+ * the side — rotate it 90º and relocate to match". Rotating alone would have
+ * swung the tail through the hip it was still pinned to, so the mount moved to
+ * the centre line at the back of the torso in the same change.
+ *
+ * The old sideways cant was defended in this file as the thing that stopped the
+ * tail "hiding behind the body at every camera angle the game ever uses". That
+ * worry does not survive contact with the actual camera: it looks **down** at
+ * 38°, so a tail trailing back and up projects *up the screen*, landing around
+ * shoulder height behind her rather than disappearing. Fanning it sideways was
+ * solving a problem an isometric camera does not have.
  *
  * This is a named constant because it was a literal in two places that had to
  * agree and silently did not. `setWalkPhase` ended with
@@ -70,6 +88,27 @@ const HEAD = RIPIKA_HEAD_SCALE;
  * rotation zero.
  */
 const TAIL_CANT = 1.05;
+
+/**
+ * The tail's resting yaw, and the value its wag swings around.
+ *
+ * The wag moved from `rotation.z` to `rotation.y` when the tail moved behind
+ * her, and that is a consequence of the new rest pose rather than a free
+ * choice: a tail trailing backwards that swings in the vertical plane bobs up
+ * and down like a lever, where the same swing about Y sweeps it side to side
+ * behind her, which is what a tail does.
+ *
+ * Euler order is three.js's default XYZ, i.e. the matrix is `Rx·Ry·Rz`, so the
+ * yaw is applied *before* the backward pitch — it sweeps the tail across the
+ * horizontal plane and the pitch then lays it back. That is the wag; the other
+ * order would cone it around instead.
+ *
+ * Non-zero at rest on purpose (ART_DIRECTION §4, "nothing is plumb") — and
+ * being non-zero is exactly what keeps it a live test of the zero-speed
+ * invariant that {@link TAIL_CANT} documents.
+ */
+const TAIL_YAW = 0.12;
+
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;
@@ -257,12 +296,19 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   }
 
   // --- tail: a soft zig-zag flash -------------------------------------------
-  // Mounted on the HIP, not the spine, and canted so the zig-zag fans across the
-  // screen. A tail tucked behind the body is invisible at every camera angle the
-  // game ever uses, and RiPika without its flash is just a yellow mouse.
+  // Mounted on the centre line at the back of the torso, and tipped back so the
+  // zig-zag trails behind her (see TAIL_CANT for the history — it used to hang
+  // off her left hip and fan out sideways).
+  //
+  // The mount moved with the rotation rather than after it, because the two are
+  // one change: swinging the tail 90° about the old hip position would have
+  // driven it straight through the torso it was pinned beside. -0.20 in z puts
+  // the root just inside the torso's back surface (radius 0.245, squashed to
+  // 0.94 in z, so the skin is at -0.230), which is what stops the first slab
+  // floating off the body.
   const tail = new Group();
-  tail.position.set(-0.25, 0.24, -0.02);
-  tail.rotation.set(0.08, 0.1, TAIL_CANT);
+  tail.position.set(0, 0.24, -0.2);
+  tail.rotation.set(-TAIL_CANT, TAIL_YAW, 0.06);
   tail.scale.setScalar(1.15);
   body.add(tail);
 
@@ -310,7 +356,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
       // this as `sin(...) * 0.18 * speed` alone made the whole expression zero
       // at `speed = 0` and so *assigned away* the cant rather than returning to
       // it — see {@link TAIL_CANT}.
-      tail.rotation.z = TAIL_CANT + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
+      tail.rotation.y = TAIL_YAW + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
     },
   };
   return handle;
