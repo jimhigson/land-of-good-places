@@ -50,6 +50,47 @@ camera sits at `(sin yaw, cos yaw)`) and drifts back to her peek facing after.
 That is a **scripted pose, not a control** — nothing here reads the stick, so
 the CONTROL RULE is untouched.
 
+## The QA failure, and the one-sign bug (5 Aug)
+
+QA failed the first attempt: the hand was **0% visible from the game camera on
+all four climbable trees**, blocked by **her own skull, hair and ear**, with
+*zero* foliage blockers. Her head read ~96% by the same method.
+
+The cause was one sign. The crowd waves with the arm swinging **inward**
+(`CLIMB_WAVE_ARM_Z` negative, from `NpcCharacter.animate`). On the ground that
+is fine — you see the whole child. Up a tree only her head is out of the leaves,
+so an inward hand lands squarely behind her own skull. Swinging it **out**
+(+1.25, swept not guessed) gives **76%** and 18 px of hand.
+
+**The old check stayed green through all of it**, because it measured the hand
+against the canopy ellipsoids only. Its 0.176 m of leaf clearance was correct
+and irrelevant: the hand cleared the leaves and then hid behind her head.
+
+> *"Clears the obstacle I thought of" is not visibility.*
+
+### The sentence to keep
+
+> **A check that re-implements a pose can pass a pose the game never renders,
+> which is precisely how the invisible wave shipped.**
+
+That is why `applyRidePose` now lives in `Player.ts` and is *called* by the
+check rather than copied into it. It is the duplicate-definition disease in its
+most dangerous form: the copy that agrees with itself while the game does
+something else.
+
+## The ceiling — anatomy, not tuning
+
+**~19 px of hand is all this rig can produce at play scale.** Her lateral reach
+is 0.38 (shoulder) + 0.455 (arm + hand) = 0.835 m from her centreline, against a
+skull of roughly 0.6 m radius — this kid is 59% head (ART_DIRECTION.md §4). Only
+~0.23 m of hand can ever clear her own silhouette: about four pixels wide at
+61 mm/px. Swinging further out makes it *worse*, not better — 10 px at z = 2.0,
+1 px at z = 2.3, as the hand rotates back behind her.
+
+**If a bigger gesture is ever needed, the lever is the body, not the arm.** The
+head is 474 px against the hand's 18. Moving the whole silhouette (a lean or
+sway) is roughly twenty-five times more screen area than anything the arm can do.
+
 ## `npm run check:climb-wave`
 
 New, and in `build`. It exists because the wave's visibility depends on four
@@ -87,6 +128,23 @@ and ends the ride. Reachability not established; it was free to make safe.
 - [x] `!tree` bail fix + this handoff — see final commit
 - [x] `npm run build` exit 0, with `check:climb-wave` inside it
 - [ ] PR — **hold**
+
+## What the check now enforces (two terms, both needed)
+
+1. **Un-occluded ≥ 50%** — raycast from the real orthographic game camera
+   against *every drawn mesh, her own body included*, over 12 bearings × 8
+   waggle phases. Threshold sits in the empty gap between the inward poses
+   (~0%) and the outward ones (51–80%).
+2. **Legible ≥ 12 px** — rasterises her at play scale (35 px figure) and counts
+   hand pixels. Shipped pose gives 18. *Un-occluded is not the same as seen*,
+   and skipping this is how the first version passed a wave nobody could see.
+
+Plus a **control**: the head, measured identically. If it ever drops below 50%
+the script reports *itself* broken rather than blaming the pose — a method that
+returns 0% for everything proves nothing.
+
+`--sweep` explores arm angles; `--picture` prints the ASCII render. Both go
+through the same measurement as the check, so they cannot disagree with it.
 
 ## Visual QA still needed (no browser)
 
