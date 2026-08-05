@@ -1,5 +1,5 @@
-import { GARDEN_PLAY_RADIUS } from '../../core/constants';
 import { TAU } from '../../core/mathUtils';
+import { PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
 import { RailRaceRoute, RIDE_SCALE } from './route';
@@ -14,6 +14,16 @@ import { RailRaceRoute, RIDE_SCALE } from './route';
 
 /** The booth that boards the ride. The id is a save key; it does not move. */
 const STATION_STALL_ID = 'stall.railRacer';
+
+/**
+ * How far inside the park's edge a rider must be set down, in metres.
+ *
+ * A distance from the **edge**, which is the thing that actually matters — a
+ * child stepping off wants ground under her and the boundary wall in front of
+ * her, not behind. Two metres is what the old `GARDEN_PLAY_RADIUS - 2` clamp
+ * meant back when subtracting from a radius was the same statement.
+ */
+const EXIT_INSIDE_EDGE = 2;
 
 export interface PlannedRailRace {
   /** Matches `PlannedCoaster.name` — `paths.ts` names the exit node with it. */
@@ -94,7 +104,15 @@ function planExit(): { exitX: number; exitZ: number } {
       const bearing = outward + offset;
       const x = stall.x + Math.cos(bearing) * distance;
       const z = stall.z + Math.sin(bearing) * distance;
-      if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2) continue;
+      // Keep the dismount a clear stride inside the park's own edge. This was
+      // `hypot(x, z) > GARDEN_PLAY_RADIUS - 2` — 56 m — which said the same
+      // thing only while the edge was a circle 58 m out on every bearing. The
+      // edge is a spline now, 59.7 m away at its pinch and 101.4 m at its
+      // bulge, so 56 m was simultaneously too tight (it refused perfectly good
+      // ground at the bulge) and, on a seed whose pinch came in further, would
+      // have been too slack. Its value never changed; its meaning did. Ask the
+      // edge instead.
+      if (PARK_BOUNDARY.distanceToEdge(x, z) < EXIT_INSIDE_EDGE) continue;
       if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) continue;
       if (clearOfPlots(x, z, 1.4)) return { exitX: x, exitZ: z };
     }

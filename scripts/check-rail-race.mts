@@ -314,12 +314,24 @@ say(
 );
 
 // The dismount has to be somewhere a person can stand.
-const exitRadius = Math.hypot(RAIL_RACE_PLAN.exitX, RAIL_RACE_PLAN.exitZ);
+//
+// Measured against the edge, not as a radius. This was `exitRadius < 56`, the
+// mirror of `plan.ts`'s own clamp, and both said "inside the walkable park"
+// only for as long as the park was a disc. The edge now runs 59.7–101.4 m out,
+// so 56 m rejected good ground on most bearings and was never a statement about
+// the pinch at all. Same correction as `railOutsetRange` in the procgen
+// invariants: a radius is only a claim about the edge while the edge is the
+// same distance away on every bearing.
+const exitInside = PARK_BOUNDARY.distanceToEdge(RAIL_RACE_PLAN.exitX, RAIL_RACE_PLAN.exitZ);
 say(
   `exit        (${RAIL_RACE_PLAN.exitX.toFixed(1)}, ${RAIL_RACE_PLAN.exitZ.toFixed(1)}) ` +
-    `r=${exitRadius.toFixed(1)}`,
+    `${exitInside.toFixed(1)} m inside the park edge`,
 );
-require(exitRadius < 56, 'the ride exit is outside the walkable park.');
+require(
+  exitInside > 1,
+  `the ride exit stands ${exitInside.toFixed(1)} m inside the park edge — a rider is set down on ` +
+    'or beyond the boundary rather than in the park.',
+);
 
 // --- does the camera build the picture it promises? --------------------------
 //
