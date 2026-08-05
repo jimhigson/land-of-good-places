@@ -52,6 +52,25 @@ export const RIM_END = 82;
 export const RIM_DROP = 17;
 
 /**
+ * The hilltop crest, restated as a distance **outside the park's edge** rather
+ * than as a radius from the origin.
+ *
+ * Once the boundary stopped being a circle (issue #115) a radius could no
+ * longer say where the ground falls away: the edge is 57 m out on one bearing
+ * and 110 m on another, so a single crest radius would cut through the park on
+ * one side while leaving a plain outside it on the other. These are the same
+ * two numbers as {@link RIM_START} and {@link RIM_END} were, measured from the
+ * masonry at `GARDEN_HALF_SIZE - 2` (60 m): the crest began 12 m outside the
+ * wall and finished 22 m outside it. The hill is unchanged; only what it is
+ * measured from has moved.
+ *
+ * `RIM_START`/`RIM_END` survive for the castle interior's own circular space
+ * and for anything still reasoning in radii.
+ */
+export const RIM_OUTSET_START = 12;
+export const RIM_OUTSET_END = 22;
+
+/**
  * Where the woodland that hides the terrain's cut edge begins.
  *
  * Was `GARDEN_HALF_SIZE + 1` — one metre outside the park, which was the right
