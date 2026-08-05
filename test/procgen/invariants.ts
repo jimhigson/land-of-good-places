@@ -22,6 +22,7 @@ import { InstancedMesh, Matrix4, Mesh, Vector3, type Object3D } from 'three';
 import {
   buildParkFacts,
   segmentDistance,
+  pointToSegment,
   alongRun,
   pairKey,
   type ParkFacts,
@@ -95,6 +96,27 @@ const MAX_DARK_RUN = 25;
  * ~330 m gap — this would have failed loudly, which is the point.)
  */
 const TRESTLE_GAP_TOLERANCE = 40;
+
+/**
+ * How close a ribbon has to come to count as having arrived somewhere.
+ *
+ * A child's full width — `2 x PLAYER_RADIUS`, the same derivation
+ * {@link WALKABLE_GAP} is built from — so "the paving reaches the counter"
+ * means a child standing at the counter is standing on the paving rather than
+ * out on the grass beside it. Not `paths.ts`'s own numbers: neither the 4 m it
+ * uses to decide a node is already served, nor any route width it happens to
+ * draw with.
+ *
+ * There is one deliberate overshoot in the generator and this clears it
+ * comfortably. A spur is carried a little *past* a doormat into the plot mouth,
+ * but that extension is structurally capped at 0.4 m: it is
+ * `min(2, l - edge - PAST_CLEARANCE)` where `l = edge + standOff`, which
+ * collapses to `min(2, 1.4 - 1)` for anything with a footprint. Meanwhile the
+ * bug this was written for — every stall's ribbon stopping short of its own
+ * counter, issue #114 — missed by 3.4 to 6.9 m on all five seeds, so there is
+ * no risk of the tolerance swallowing the thing it exists to catch.
+ */
+const ARRIVAL = 2 * PLAYER_RADIUS;
 
 // ------------------------------------------------------------------ the list
 
@@ -345,6 +367,118 @@ const railRaceExitFitsTheParty: Invariant = (facts) => {
     }
   }
   expect(problems, problems.join('\n')).toHaveLength(0);
+};
+
+/**
+ * **No paved ribbon stops anywhere but a destination.**
+ *
+ * REQUIREMENTS-2026-07-28 §5, the family's "paths to nowhere" ruling: the
+ * walking network derives from a graph of places to visit only, and no ribbon
+ * may terminate anywhere but a node. A spur has two ends and both are held to
+ * it — the far end must reach the node its edge names, and the near end must
+ * genuinely meet the rest of the paving rather than beginning in the grass a
+ * few metres off it.
+ *
+ * Measured on the **drawn** curve, which is the point. The ribbon is a
+ * Catmull-Rom swept through control points, and `paths.ts` chooses a spur's
+ * junction by walking the control *polygon* of the routes built so far — a
+ * polygon the drawn curve bows away from. Checking the control points would
+ * only restate the generator's intention; these are the metres of paving a
+ * child actually walks on.
+ *
+ * The backbone is exempt: it is a closed loop and has no ends.
+ */
+const noPathEndsNowhere: Invariant = (facts) => {
+  const nodes = new Map(facts.pathNodes.map((node) => [node.id, node]));
+  const strays: string[] = [];
+
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    const first = edge.points[0];
+    const last = edge.points[edge.points.length - 1];
+    if (!first || !last) {
+      strays.push(`${edge.name} is a paved edge that drew no ribbon at all`);
+      continue;
+    }
+
+    const ends = [
+      ['start', edge.from, first],
+      ['end', edge.to, last],
+    ] as const;
+
+    for (const [which, id, point] of ends) {
+      // `'ring'` is not a node: it is `paths.ts`'s name for the paved network
+      // itself. A spur branches off wherever paving already runs — the
+      // backbone or an earlier spur — so what has to be true of this end is
+      // that it really does land on some other paving.
+      if (id === 'ring') {
+        const gap = distanceToOtherPaving(facts, edge.name, point);
+        if (gap > ARRIVAL) {
+          strays.push(
+            `${edge.name}'s ${which} at ${fmt(point)} is ${gap.toFixed(2)} m from the ` +
+              `nearest other paving — it branches off nothing`,
+          );
+        }
+        continue;
+      }
+
+      const node = nodes.get(id);
+      if (!node) {
+        strays.push(`${edge.name}'s ${which} names '${id}', which is not a node in the graph`);
+        continue;
+      }
+      const gap = Math.max(
+        0,
+        Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach,
+      );
+      if (gap > ARRIVAL) {
+        strays.push(
+          `${edge.name}'s ${which} at ${fmt(point)} stops ${gap.toFixed(2)} m short of ` +
+            `'${node.id}' (${node.kind}) at ${fmt([node.x, node.z])} — a path to nowhere`,
+        );
+      }
+    }
+  }
+  expect(strays, strays.join('\n')).toHaveLength(0);
+};
+
+/**
+ * **Every place a child can be served is a node in the graph.**
+ *
+ * The other half of §5's ruling: the network derives from a graph of *real*
+ * destinations, and the entrance of every ride and building is one of them. So
+ * this asks the question the other way round from {@link noPathEndsNowhere} —
+ * not "does this ribbon end somewhere real?" but "does every real place have a
+ * node?".
+ *
+ * `facts.entrances` is built from the coordinates the **game** uses — the
+ * anchors' own entrances and `STALL_STANDS`, the same points the interact zones
+ * and the NPC waypoint graph are seeded from — so this compares the
+ * destinations the park actually has against the destinations the path network
+ * knows about, rather than comparing the generator to itself.
+ *
+ * The ferris wheel's ticket kiosk was missing from the graph entirely until
+ * issue #114: it is placed by relation to the wheel rather than by the layout
+ * solver, so the loop that built stall nodes by walking `PARK_LAYOUT`'s
+ * `stall.` entries never saw it, and it survived only by happening to stand
+ * near the wheel's own spur.
+ */
+const everyDestinationIsANode: Invariant = (facts) => {
+  const missing: string[] = [];
+  for (const entrance of facts.entrances) {
+    let best = Infinity;
+    for (const node of facts.pathNodes) {
+      const gap = Math.hypot(entrance.x - node.x, entrance.z - node.z) - node.reach;
+      if (gap < best) best = gap;
+    }
+    if (best > ARRIVAL) {
+      missing.push(
+        `${entrance.id} at ${fmt([entrance.x, entrance.z])} is ${best.toFixed(2)} m from the ` +
+          `nearest path-graph node — nothing in the network leads to it`,
+      );
+    }
+  }
+  expect(missing, missing.join('\n')).toHaveLength(0);
 };
 
 /** Every path is lit along its whole length. */
@@ -1041,6 +1175,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no tree grows into a wall', treesKeepOffWalls],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
+  ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every place a child can be served is a node in the path graph', everyDestinationIsANode],
   ['every ride exit is clear ground, reachable from the entrance', rideExitsAreUsable],
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
@@ -1122,6 +1258,36 @@ function standableNear(facts: ParkFacts, x: number, z: number): boolean {
     if (facts.isStandable(px, pz)) return true;
   }
   return false;
+}
+
+/**
+ * How far `point` is from the paved *surface* of every ribbon but `exclude`'s
+ * — zero once it is standing on one of them.
+ *
+ * The surface rather than the centre line: two ribbons have joined when their
+ * paving meets, which is what makes a junction something a child can walk
+ * through, and a 3.6 m backbone offers 1.8 m of that on either side.
+ */
+function distanceToOtherPaving(
+  facts: ParkFacts,
+  exclude: string,
+  point: readonly [number, number],
+): number {
+  let best = Infinity;
+  for (const edge of facts.pathEdges) {
+    if (edge.name === exclude) continue;
+    for (let i = 0; i < edge.points.length - 1; i += 1) {
+      const gap = pointToSegment(point, edge.points[i]!, edge.points[i + 1]!) - edge.halfWidth;
+      if (gap < best) best = gap;
+    }
+  }
+  // The plaza is paving too, and a disc rather than a ribbon.
+  for (const node of facts.pathNodes) {
+    if (node.reach <= 0) continue;
+    const gap = Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach;
+    if (gap < best) best = gap;
+  }
+  return Math.max(0, best);
 }
 
 function fmt(point: readonly [number, number]): string {
