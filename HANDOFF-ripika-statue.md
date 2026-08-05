@@ -540,3 +540,33 @@ asset contract: 95 assets check out, 35 of them creatures that stand still as bu
 Every baked face is on its own head, where it was painted.
 statue occlusion: hides 28.1 m² out to 12.7 m, all of it fades (45.0 m² fades a little early, which is fine).
 ```
+
+---
+
+# Review round — nits taken (`20b354a`)
+
+PR #200 **approved** with three doc-only nits, all in
+`check-statue-occlusion.mts`'s transcription of the world. None changed the
+verdict; taken anyway, because a check that models the world slightly wrong is
+one edit from modelling it very wrong and still reporting success.
+
+- `TO_CAMERA` was a hardcoded vector — right to five decimals the day it was
+  written, stale the moment anyone touches `CAMERA_PITCH_DEGREES`. Now derived
+  via `cameraOffset()` from `CAMERA_YAW_DEGREES` / `CAMERA_PITCH_DEGREES` /
+  `CAMERA_DISTANCE`.
+- Camera was 80 m back where the game uses 90. Now `CAMERA_DISTANCE`.
+- `STATUE_BASE_Y` was 2.445 (world Y, including the plaza's 0.275 m of terrain)
+  against a sample plane at y = 0 — floating the statue 27.5 cm above its own
+  samples. Now **2.17**, its height above the ground it stands over.
+
+**This does not contradict the check's "shares no code with what it tests"
+principle**, and the distinction matters if anyone revisits it: what changed is
+the *transcription of the world*, not the independence of the test. The FADED
+side still deliberately reimplements `FoliageFade`'s sightline maths rather than
+importing it. Sharing *camera constants* is the opposite case — there is one
+camera and the check should measure that one, not a copy that can drift.
+
+Result: 28.1 → **27.2 m² hidden, still 0 m² hidden-and-not-faded**, still exits
+1 at `SWEEP_R=1.2`. `BUILD_EXIT=0`.
+
+**Awaiting re-check.** Merge order unchanged: #199 then #200.
