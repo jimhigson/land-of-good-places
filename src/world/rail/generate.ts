@@ -95,8 +95,27 @@ interface RouteBriefBase {
    * station along the track until its platform is on clear ground.
    */
   readonly startPoses: readonly Pose2[];
-  /** Is a corridor of `radius` about (x, z) free of obstacles? Layout only. */
-  readonly clear: (x: number, z: number, radius: number) => boolean;
+  /**
+   * Is a corridor of `radius` about (x, z) free of obstacles? Layout only.
+   *
+   * `distanceAlong` is how many metres of track lie behind this point. Most
+   * rides ignore it — a tree is in the way wherever you meet it — and a plain
+   * three-argument predicate satisfies this type unchanged.
+   *
+   * It exists because a ride whose **height varies along its length** cannot
+   * otherwise say whether it is in the way of anything. The ginormous slide
+   * descends from the castle parapet to the ball pit and crosses the Sky
+   * Cruiser's loop on the way; height-blind, the only safe answer is "never go
+   * near the cruiser", and that answer makes the slide unsolvable — the gap
+   * between the castle's east wall and the cruiser is about 2 m, narrower than
+   * the chute. Knowing it is still 14 m up when it crosses turns an impossible
+   * route into an obvious one: it goes over the top.
+   *
+   * The search is still purely 2D. This hands the caller the one number it
+   * needs to answer a 3D question for itself, rather than teaching the search
+   * about height.
+   */
+  readonly clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean;
   readonly boundary: ParkBoundary;
   /** Half-width of track to keep clear of obstacles and the boundary. */
   readonly corridorRadius: number;
@@ -111,6 +130,19 @@ interface RouteBriefBase {
   readonly selfClearance: number;
   /** Tightest radius any piece may have, including the closer's. */
   readonly minRadius: number;
+  /**
+   * How far behind the finish the approach corridor sits. Defaults to
+   * {@link APPROACH_DISTANCE}, which is tuned for a loop the size of the Sky
+   * Cruiser's.
+   *
+   * Worth setting for a **short** route. The corridor is what the search steers
+   * at so it arrives lined up rather than merely near, and 38 m behind the
+   * finish is a sensible fraction of a 216 m loop but most of a 60 m slide —
+   * which leaves the head aimed at a point it passes long before it is ready to
+   * finish, and the biarcs home then need radii the ride has banned. Left
+   * unset, nothing changes.
+   */
+  readonly approachDistance?: number;
   readonly budgets: {
     /** Candidate pieces tried at one joint before backing up. */
     readonly perJoint: number;
@@ -333,9 +365,10 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
      * poses that are already nearly collinear — which is exactly the case a
      * biarc handles with a gentle radius.
      */
+    const approachDistance = brief.approachDistance ?? APPROACH_DISTANCE;
     const approach: Pose2 = {
-      x: finishPose.x - finishPose.hx * APPROACH_DISTANCE,
-      z: finishPose.z - finishPose.hz * APPROACH_DISTANCE,
+      x: finishPose.x - finishPose.hx * approachDistance,
+      z: finishPose.z - finishPose.hz * approachDistance,
       hx: finishPose.hx,
       hz: finishPose.hz,
     };
@@ -435,7 +468,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         const t = i / steps;
         cubicPoint(seg, t, point);
         const s = accumulated + seg.length * t;
-        if (!brief.clear(point.x, point.z, brief.corridorRadius)) {
+        if (!brief.clear(point.x, point.z, brief.corridorRadius, s)) {
           rejected.collision += 1;
           return null;
         }
