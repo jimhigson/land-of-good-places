@@ -1,4 +1,4 @@
-import { CylinderGeometry, Group, Mesh } from 'three';
+import { CylinderGeometry, Group, Mesh, type Material } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, disposeTree, inkTint, solid, toonMaterial } from '../style/materials';
 import type { AssetHandle } from '../style/asset';
@@ -136,7 +136,37 @@ const PLINTH_BASE_RADIUS = 1.15;
 export interface RipikaStatueHandle extends AssetHandle {
   /** The plinth alone, for anything that wants to light or decorate it. */
   readonly plinth: Group;
+  /**
+   * Turns the whole statue translucent so it stops hiding the player —
+   * `world/FoliageFade.ts` drives this. 1 is solid.
+   *
+   * Every material in the tree, outlines included. Leaving the inverted-hull
+   * outlines opaque while the body faded would leave a solid grey cartoon
+   * outline of a mouse hanging in the air, which is a worse artefact than the
+   * occlusion it is fixing.
+   */
+  setFade(alpha: number): void;
+  /** Half the statue's height — the occluder capsule's, in local metres. */
+  readonly halfHeight: number;
+  /** The occluder capsule's horizontal radius, in metres. */
+  readonly occluderRadius: number;
 }
+
+/**
+ * The occluder capsule's radius.
+ *
+ * Not the statue's true maximum reach (3.13 m at the raised arm, y 6–7) and not
+ * its slimmest (1.05 m at the ankles). A capsule is one radius, so this is the
+ * width of the **mass that actually hides a child** — plinth, legs, torso and
+ * head — with the outflung arm and tail treated as the thin decoration they
+ * are. Erring wide would fade the statue whenever anyone walked near the
+ * fountain; erring narrow would leave the child hidden, which is the bug.
+ *
+ * 2.4 m was chosen by measurement, not by eye: it is the smallest radius that
+ * takes the hidden-standing-ground area to zero. See the survey figures in
+ * HANDOFF-ripika-statue.md.
+ */
+const OCCLUDER_RADIUS = 2.4;
 
 /**
  * Builds the statue. Origin at the **base of the plinth**, centred on X and Z,
@@ -248,10 +278,50 @@ export function createRipikaStatue(): RipikaStatueHandle {
   ripika.head.rotation.z = 0.07;
   ripika.head.rotation.y = -0.12;
 
+  // Collected once, at build time, rather than by traversing on every fade
+  // step. `setFade` is called every frame while the player is behind the
+  // statue, and walking 40 meshes each time to rediscover the same 40
+  // materials would be the one genuinely hot thing this file does.
+  //
+  // Every material here is this statue's own — `toonMaterial` returns a fresh
+  // one per call and the stone palette is not shared with the live mouse — so
+  // mutating them cannot reach anything else in the park.
+  const materials: Material[] = [];
+  root.traverse((node) => {
+    const mesh = node as Partial<Mesh>;
+    const material = mesh.material;
+    if (!material || Array.isArray(material)) return;
+    materials.push(material);
+  });
+
   return {
     root,
     plinth,
     height: PLINTH_HEIGHT + FIGURE_HEIGHT,
+    halfHeight: (PLINTH_HEIGHT + FIGURE_HEIGHT) / 2,
+    occluderRadius: OCCLUDER_RADIUS,
+    setFade: (alpha: number) => {
+      const wantsTransparent = alpha < 1;
+      for (const material of materials) {
+        material.opacity = alpha;
+        if (material.transparent !== wantsTransparent) {
+          material.transparent = wantsTransparent;
+          // `depthWrite` goes with it. A translucent statue still writing depth
+          // occludes whatever is drawn after it — including the player it is
+          // getting out of the way for, which would defeat the entire point.
+          material.depthWrite = !wantsTransparent;
+          // Switching `transparent` changes the shader's defines, so three.js
+          // needs telling. Only on the edge, never per frame.
+          material.needsUpdate = true;
+        }
+      }
+      // `castShadow` is deliberately NOT touched. Two reasons, both learned by
+      // writing the wrong version first: the outline hulls are authored
+      // `castShadow = false` by `addOutline`, so a blanket restore would switch
+      // shadows ON for meshes that must never cast one; and a 19 m shadow
+      // blinking out as a child steps behind the statue is a worse artefact
+      // than the shadow. Shadow behaviour is a separate question from occlusion.
+    },
     dispose: () => disposeTree(root),
   };
 }

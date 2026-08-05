@@ -394,6 +394,12 @@ export class Game {
     // fixed camera (design feedback #16) means one can now hide them
     // completely for as long as they stand there. See `world/FoliageFade.ts`.
     this.foliageFade = new FoliageFade(this.world.scenery, this.camera);
+    // Trees are not the only things in the way any more: at 4x the fountain
+    // statue (#121) hides a standing child over 32.8 m² of the plaza. It fades
+    // itself, so it registers as a plain occluder rather than needing the
+    // instanced-foliage stand-in machinery. Anything else tall enough to hide
+    // the player joins the same way — see `SightlineOccluder`.
+    this.foliageFade.addOccluder(this.world.fountain.statueOccluder);
     this.engine.scene.add(this.foliageFade.group);
     this.addSystem(this.foliageFade);
     // The lift's control panel (GAME_DESIGN.md, "Riding the lift"): appears
