@@ -81,3 +81,38 @@ Openings 3.30 m and 3.27 m wide; sill 3.94 m, head 7.65 m in an 8.8 m wall, so a
 - `STEPS_PER_START` (1200) in `generate.ts` is the other cap and is **not**
   raised — it is shared with E3's slide work and raising it could move the
   cruiser's solved route.
+
+---
+
+## What happened after this branch (added at handover)
+
+This work is done and queued for QA. Three things came out of it that live
+elsewhere, so a replacement does not go looking for them here.
+
+- **`feat/cruiser-3d-clearance`** (worktree `.claude/worktrees/cruiser-clearance`,
+  commits 57c9233 + 5281d98, no PR). Generalises the castle's swept-car check to
+  the whole park: the Sky Cruiser measured against every mesh actually built,
+  replacing the hard-coded `['building', 'ferrisWheel']` that three separate
+  checks were all re-reading. Runs as `npm run measure:cruiser-clearance`. Its
+  own `HANDOFF-cruiser-clearance.md` carries the reasoning — read that, not this.
+
+- **Issue #198 — the Sky Cruiser flies through foliage on the station ramp.**
+  Found by that check, and **inherited, not caused here**: an A/B with the same
+  envelope numbers gives `origin/main` 3 strikes at a 216 m loop against this
+  branch's 2 at 185 m. Cause is narrow — `stationWindowIsClear` proves the ground
+  clear for ±6 m of the platform while the ramp is 26 m long, so ~20 m of it has
+  never been checked. **Not started**, by instruction.
+
+- **Issue #197 — `scripts/` is not typechecked** (42 files, including every
+  `check:*.mts` that gates the build). Opened citing #192, branch
+  `chore/typecheck-scripts` off `origin/main` with a baseline
+  `tsconfig.scripts.json`, essentially unstarted. Note #192 is on
+  `fix/typecheck-tests` and **has not landed on main**, and its own commit
+  message says `typecheck:test` was deliberately not wired into `build` yet.
+
+**Deliberately not done, and it would be wrong to just do it:** the
+`TOO_TALL_TO_FLY_OVER` comment in `test/procgen/invariants.ts` still claims the
+castle and the wheel are "the only horizontal obstacles the loop actually has",
+which is false. Retiring the list and wiring the real measurement in turns CI red
+on #198, which is not this change's bug. It wants sequencing behind the ramp fix
+— the same call #192 made with `typecheck:test`.
