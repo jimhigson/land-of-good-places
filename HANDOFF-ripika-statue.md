@@ -570,3 +570,60 @@ Result: 28.1 → **27.2 m² hidden, still 0 m² hidden-and-not-faded**, still ex
 1 at `SWEEP_R=1.2`. `BUILD_EXIT=0`.
 
 **Awaiting re-check.** Merge order unchanged: #199 then #200.
+
+---
+
+# Rebased onto `main` after #199 squash-merged (E8, 5 Aug 2026)
+
+#199 (`fix/ripika-tail-cant`) merged to `main` **squashed**. This branch was
+rebased onto `origin/main`; the force-push replaced `607f675`.
+
+## What the branch was actually carrying
+
+This branch was built on an **older tip of `fix/ripika-tail-cant`** than the one
+that merged. It contained the first four tail commits (`08fcd45`, `e277117`,
+`50abf68`, `d0d39c0`) but **not** the three that came after — including
+`b4bc6f5`, "The tail wag goes back on z", the wag-axis fix itself.
+
+So `origin/feat/ripika-fountain-statue:src/art/models/ripika.ts:433` still read
+
+```ts
+tail.rotation.y = TAIL_YAW + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
+```
+
+**Merging it would have silently reverted #199.** GitHub reported the PR
+MERGEABLE / CLEAN throughout: the squash means the old commits no longer exist
+under those hashes, so `git merge-base --is-ancestor` says no and nothing warns.
+
+## How it was rebased
+
+`git rebase --onto origin/main d0d39c0` — `d0d39c0` is the exact parent of the
+first statue commit (`d32d539`), so the four superseded tail commits drop out in
+favour of main's squashed version and only the 16 statue commits replay.
+
+**It replayed with zero conflicts.** That is not reassurance — a clean replay is
+exactly the shape a silent revert takes. Verified semantically instead, below.
+
+## Verification
+
+- `src/art/models/ripika.ts:453` now reads
+  `tail.rotation.z = TAIL_ROLL + Math.sin(phase * Math.PI * 4) * 0.18 * speed;`
+  — correct axis, **added** to `TAIL_ROLL`, not assigned. No `rotation.y =`
+  survives anywhere in the file.
+- `TAIL_CANT = 1.05` and `tail.rotation.set(-TAIL_CANT, TAIL_YAW, TAIL_ROLL)`
+  match `main` byte for byte; rest pose still 29.9° trailing backwards.
+- `git diff origin/main...HEAD -- src/art/models/ripika.ts` contains **no tail
+  hunks at all** — only `RipikaPalette`, `palette` and `expressions`. Absence
+  from the diff and presence in the file both checked; they are different claims.
+- `check:assets` ran main's strengthened non-vacuous version ("35 creatures stand
+  still as built, 21 also posed through `update()`") and passed — the earlier
+  green run on this PR predated it.
+- `BUILD_EXIT=0`. `PROCGEN_EXIT=0` (8 files, 112 tests).
+
+## Also changed
+
+PR base retargeted from `fix/ripika-tail-cant` to `main` — GitHub had not
+auto-retargeted it, so the PR was still proposing to merge into a branch that no
+longer leads anywhere.
+
+No statue behaviour was touched.
