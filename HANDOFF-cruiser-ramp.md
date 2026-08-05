@@ -285,3 +285,39 @@ of this.
 
 **Still filed elsewhere:** `fairy-lights` (the plaza ring, not tree wires) are
 struck on main's own route. Not caused by either branch; Overseer is filing it.
+
+## The pattern behind three of today's fixes: invert the dependency
+
+Three separate bugs today had the same shape, and the same wrong first answer
+("widen the check"). Worth naming once rather than rediscovering a fourth time.
+
+In each, a **pre-scene planner** consulted a list that could not contain the
+thing in its way, because the thing did not exist yet:
+
+| planner | consulted | what was actually in the way |
+| --- | --- | --- |
+| `stationWindowIsClear` | `PARK_LAYOUT` (12 plots) | a tree canopy and a bush (#198) |
+| `planExit` | `clearOfPlots` | a bush 1.2 m from a ride exit |
+| `TreeLights.spanIsClear` | paths, railway | the Sky Cruiser itself |
+
+**The fix is never to widen the planner's list**, because the planner runs
+before the thing exists and no amount of reach reaches backwards in time. It is
+to notice which way the dependency *can* point and put the rule there: the
+route, the exit and the ride are all pure pre-scene plans, so the **scatter is
+what gives way**. `Scenery.ts`'s own `onRailway` comment had already written
+this down for the train; it just had not been generalised.
+
+The tell is a check that "should obviously" have caught something and did not.
+Ask what existed when it ran, not how wide it looked.
+
+## Branch layout (5 Aug, after the Overseer's split ruling)
+
+Two branches, stacked, because they differ in kind:
+
+- **`feat/cruiser-ramp-clearance`** — issue #198, a **live bug on main**. The
+  ride flies through foliage today.
+- **`feat/cruiser-castle-always`** — the castle-crossing guarantee, a **new
+  capability** in a generator two rides share (Decision 7). Based on the above.
+
+Both are green on their own: #198 is build exit 0 / procgen 122, the guarantee
+build exit 0 / procgen 127.
