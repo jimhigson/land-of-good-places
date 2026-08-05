@@ -175,7 +175,14 @@ export class Building implements GameSystem {
   private readonly shell = new BuildingShell('interior');
   private readonly facade = new BuildingShell('facade');
   /** The facade, the ginormous slide, and the grown-up while they ride it. */
-  private readonly gardenRoot = new Group();
+  /**
+   * The castle as it stands in the garden: the facade shell and the ginormous
+   * slide. Readable rather than private so the #113 invariant can sweep the
+   * Sky Cruiser's envelope against **every mesh actually in it**, instead of
+   * against a list of fixtures somebody wrote down and has to remember to keep
+   * up to date.
+   */
+  readonly gardenRoot = new Group();
 
   private readonly escalators: Escalators;
   private readonly lift: GlassLift;
