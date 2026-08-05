@@ -9,6 +9,14 @@ import {
   Vector3,
 } from 'three';
 import { CoasterRoute, checkCoasterClearances, STATION_HEIGHT } from './route';
+import { CASTLE_WINDOWS, checkCastleWindows } from './castleWindows';
+import {
+  CART_BODY_HEIGHT,
+  CART_BODY_LENGTH,
+  CART_BODY_WIDTH,
+  CART_EYE_HEIGHT,
+  CART_SEAT_HEIGHT,
+} from './cart';
 import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
@@ -59,7 +67,10 @@ const MIN_SPEED = 4.2;
 const MAX_SPEED = 15;
 const STATION_SPEED = 2.6;
 const GRAVITY = 6.5; // gentler than earth; a cosy park has cosy physics
-const EYE = { x: 0, y: 0.95, z: 0 };
+// The eye within the seat. Written as the difference so that the two numbers
+// `cart.ts` publishes — where the seat is and where the eye ends up — cannot
+// disagree with where this actually puts the camera.
+const EYE = { x: 0, y: CART_EYE_HEIGHT - CART_SEAT_HEIGHT, z: 0 };
 
 export interface CoasterOptions {
   /**
@@ -123,6 +134,9 @@ export class Coaster implements GameSystem {
       return { y: p.y, distance: Math.hypot(p.x - x, p.z - z) };
     });
     for (const complaint of complaints) console.warn(`${options.plan.name}: ${complaint}`);
+    for (const complaint of checkCastleWindows(this.route, CASTLE_WINDOWS)) {
+      console.warn(`${options.plan.name}: ${complaint}`);
+    }
 
     this.buildTrack(collision);
 
@@ -138,7 +152,7 @@ export class Coaster implements GameSystem {
 
     // --- the cart ---------------------------------------------------------
     this.cart = new Group();
-    const body = toonBox(1.5, 0.7, 2.2, PALETTE.markerPink);
+    const body = toonBox(CART_BODY_WIDTH, CART_BODY_HEIGHT, CART_BODY_LENGTH, PALETTE.markerPink);
     body.position.y = 0.35;
     // The cart's own body casts — one more draw call, and it is the shadow the
     // eye actually follows round the loop. The nose does not: it is inside the
@@ -149,7 +163,7 @@ export class Coaster implements GameSystem {
     nose.position.set(0, 0.35, 1.3);
     this.cart.add(nose);
     this.cartMount = new Group();
-    this.cartMount.position.set(0, 0.6, 0);
+    this.cartMount.position.set(0, CART_SEAT_HEIGHT, 0);
     this.cart.add(this.cartMount);
 
     // The eye's own mount, turned half a turn — and the reason the ride used

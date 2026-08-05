@@ -31,6 +31,9 @@ export const CART_BODY_LENGTH = 2.2;
  */
 export const CART_EYE_HEIGHT = 1.55;
 
+/** The seat mount above the centre line; the eye sits `EYE.y` above this. */
+export const CART_SEAT_HEIGHT = 0.6;
+
 /** The ties hang this far below the centre line (`mid.y - 0.12`, 0.08 thick). */
 export const CART_TIE_DROP = 0.16;
 

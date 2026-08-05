@@ -1,6 +1,7 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
+import { CART_ENVELOPE } from './cart';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { circleBoundary } from '../rail/boundary';
@@ -91,17 +92,15 @@ const OUTER_RADIUS = 47;
 const CORRIDOR_RADIUS = 3;
 
 /**
- * Half a car, in metres — the body is `toonBox(1.5, …)` in `Coaster.ts`.
+ * Half a car, in metres — now read from `coaster/cart.ts` rather than restated.
  *
  * The width at which the ride stops missing something and starts hitting it,
  * and so the threshold the boot assert uses. Emphatically **not**
  * {@link CORRIDOR_RADIUS}: asserting the generator's own target would only
- * prove it can do arithmetic, and the canonical loop clears the castle by
- * 3.2 m against a 3 m corridor, so an assert set there would cry wolf at the
- * first retune. The same number, for the same reason, is what the procgen
- * invariant measures.
+ * prove it can do arithmetic, so an assert set there would cry wolf at the
+ * first retune.
  */
-const CAR_HALF_WIDTH = 0.75;
+const CAR_HALF_WIDTH = CART_ENVELOPE.halfWidth;
 
 /** How close the loop may come to an earlier part of itself. */
 const SELF_CLEARANCE = 5;
@@ -745,6 +744,26 @@ export function checkCoasterClearances(
       worst.set('the ferris wheel', Math.min(worst.get('the ferris wheel') ?? Infinity, gap));
     }
   }
+  // The two authored height features must not reach each other. The station is
+  // pinned to 1.1 m because a platform is there and the castle to window height
+  // because a hole is there, and neither can give: a station flat that gets
+  // dragged upwards is a deck riders step off into fresh air, and a castle flat
+  // dragged downwards is a hole cut through the courtyard floor.
+  if (route.castleSpan) {
+    const span = route.castleSpan;
+    const gap = Math.min(
+      outsideSpan(span, route.stationDistance, route.length),
+      outsideSpan(span, route.stationDistance + STATION_FLAT, route.length),
+      outsideSpan(span, route.stationDistance - STATION_FLAT + route.length, route.length),
+    );
+    if (gap < WINDOW_FLAT) {
+      complaints.push(
+        `the station platform is ${gap.toFixed(1)} m of track from the castle's level run — ` +
+          `they would deform each other, and ${WINDOW_FLAT} m is the least that keeps them apart`,
+      );
+    }
+  }
+
   for (const [what, gap] of worst) {
     if (gap < CAR_HALF_WIDTH) {
       complaints.push(
