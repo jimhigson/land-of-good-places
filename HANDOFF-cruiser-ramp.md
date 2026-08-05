@@ -6,8 +6,11 @@ on 5 Aug — see "Rebase" below, it matters.
 
 ## State
 
-Root cause established and **the issue's own suggested fix is wrong** (see next
-section). Implementation of the real fix in progress.
+**DONE and green.** `npm run build` exit 0, `npm run test:procgen` 122 passed.
+Rebased onto `origin/main` 6e7ae78. No PR raised (waiting on the Overseer).
+
+Five commits, `09500c3..4ebc963`. Strikes go **2/3/4/2/1 -> 0/0/0/0/0** across
+the five CI seeds.
 
 ## The finding that changes the fix
 
@@ -104,18 +107,48 @@ still exists in `invariants.ts`.
 `main` already has `type Invariant = (facts: ParkFacts) => readonly string[]`;
 write new invariants in the return form.
 
-## Still to do
+## What landed
 
-1. Implement `clearOfCruiser`, measure tree counts on all five seeds, raise the
-   scatter budget if needed.
-2. Name the wall meshes (or name strikes by nearest named ancestor) so a
-   complaint says `wooden-walls`, not `Mesh`.
-3. Wire `measure:cruiser-clearance` in as a real check + a procgen invariant.
-   **Only once it passes** — it is deliberately unwired today.
-4. **Then** retire `TOO_TALL_TO_FLY_OVER` (`invariants.ts`, now `['ferrisWheel']`)
-   and its false "the cruise floor clears the trees" comment, plus the same list
-   in `route.ts` (`tallObstacles`, the boot assert).
-5. Prove the new invariant red before trusting it, on all five seeds.
+1. `clearOfCruiser` in `Scenery.ts` — height-aware keep-out, called by the tree
+   scatter (after the kind is picked, so **no RNG draw moves**), the bush
+   scatter, and `runIsClear` for wall runs.
+2. Strikes are named by nearest named ancestor, so seed 5's unnamed wall reads
+   `wooden-walls / Mesh` rather than `Mesh`.
+3. `measure:cruiser-clearance` -> `check:cruiser-clearance`, wired into `build`.
+4. `TOO_TALL_TO_FLY_OVER` retired from `invariants.ts`, replaced by the swept
+   measurement. The false "cruise floor clears the trees" claim is corrected in
+   all three places it was stated.
+5. New invariant `the Sky Cruiser flies clear of the whole park`, **proven red**
+   on all five seeds against the pre-fix scatter, with real coordinates in the
+   messages (no NaN/Infinity). Test count 117 -> 122, the +5 confirming no seed
+   silently skips it.
+
+### The one thing a reviewer should push on
+
+**The tree budget is pinned between two failures with one tree of headroom.**
+Below 180 000 the anti-vacuity tree floor goes red on seed 5; at 210 000
+`check:park` goes red because the extra colliders wall in a waypoint at
+(-13.8, 15.6). Isolated properly rather than guessed — trees and walls use
+separate RNG streams, so disabling the wall keep-out left the stranding while
+reverting the budget alone cleared it.
+
+Two of the three trees seed 5 lost are **not** this branch's: the castle pass
+moves the cruiser's exit, `paths.ts` routes to that exit, and #196 lengthened
+every stall spur. Recovering those at source gives the headroom back.
+
+### Retired from the invariant, kept in the solver — deliberately
+
+`tallObstacles()` in `route.ts` survives, because it is an **input** to the
+plan-view search, which must be told where not to go before there is a route to
+measure. Replacing it with a measurement taken afterwards would let the loop
+grow through the big wheel and then complain about it. Its comment now says so.
+
+## PR #203 (the castle) — its CI red is fixed by this branch
+
+#203 fails `seed-5 > built the park it was asked for` at exactly 24 trees.
+Measured: `main` plants 26 on seed 5, #203 plants 24, this branch plants 25.
+So it is #203's regression and this branch already carries the remedy. Either
+merge #203 first and let this follow, or lift the budget bump into #203.
 
 ## Queued behind this (from the Overseer)
 
