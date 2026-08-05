@@ -32,6 +32,36 @@ export const ART = {
   ripikaCheekDark: 0xe8464a,
   ripikaBolt: 0xffb52e,
 
+  // --- carved grey stone (the fountain statue) ------------------------------
+  /**
+   * A five-step tonal ladder, and it is a ladder on purpose.
+   *
+   * The statue is RiPika built in stone rather than a second model of RiPika
+   * (see `models/ripikaStatue.ts`), so every one of its colours is a
+   * substitution for one of the yellow mouse's. If all of them collapsed to a
+   * single grey the cocoa ear tips, the cream tummy and the amber tail tip
+   * would vanish and the statue would read as an undifferentiated lump at
+   * gameplay distance — which is the exact failure the cream tummy exists to
+   * prevent on the live mouse (see `ripika.ts`'s design notes).
+   *
+   * So the steps are ordered by the **luminance of the colour each replaces**:
+   * belly (lightest) → yellow → yellowDeep/bolt → tip (darkest). The markings
+   * survive the trip to stone as tonal steps instead of hue changes.
+   *
+   * All five are warm plum-greys, never blue-greys: they have to sit next to
+   * PALETTE.ink without looking like they came from a different park. The
+   * darkest, `statueStoneDark`, is deliberately still well clear of ink —
+   * nothing in this game goes darker than that plum.
+   */
+  statueStoneLight: 0xe9e3df,
+  statueStone: 0xd0c8c7,
+  statueStoneMid: 0xb6adaf,
+  statueStoneDeep: 0x9b9297,
+  statueStoneDark: 0x7c7178,
+  /** The plinth, a shade duller than the figure so the figure is the subject. */
+  statuePlinth: 0xc4bcbd,
+  statuePlinthDark: 0xa79ea1,
+
   // --- Biscuit (teddy bear) -------------------------------------------------
   biscuitFur: 0xdca873,
   biscuitFurDark: 0xc28a58,

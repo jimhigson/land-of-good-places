@@ -6,7 +6,6 @@ import {
   MeshStandardMaterial,
   PointLight,
   RingGeometry,
-  SphereGeometry,
   TorusGeometry,
   Vector3,
 } from 'three';
@@ -14,6 +13,7 @@ import { PALETTE } from '../core/palette';
 import { pinkStoneTexture } from '../core/textures';
 import { ART } from '../art/style/artPalette';
 import { toonMaterial, inkTint } from '../art/style/materials';
+import { createRipikaStatue, type RipikaStatueHandle } from '../art/models/ripikaStatue';
 import {
   createWaterSplashEffects,
   playPlip,
@@ -102,6 +102,8 @@ export class Fountain implements GameSystem {
   private readonly waterMaterial: MeshStandardMaterial;
   private readonly jets: Mesh[] = [];
   private readonly glow: PointLight;
+  /** The grey-stone RiPika standing on the upper bowl — issue #121. */
+  private readonly statue: RipikaStatueHandle;
   private readonly splashEffects: WaterSplashEffects = createWaterSplashEffects();
 
   /** Set once by `attachPlayer`. Read from `update()` — see the class doc. */
@@ -191,14 +193,31 @@ export class Fountain implements GameSystem {
     bowlWater.position.y = 2.14;
     this.group.add(bowlWater);
 
-    const finial = new Mesh(new SphereGeometry(0.42, 16, 12), trimMaterial);
-    finial.position.y = 2.5;
-    finial.castShadow = true;
-    this.group.add(finial);
-
-    const spout = new Mesh(new SphereGeometry(0.26, 14, 10), this.waterMaterial);
-    spout.position.y = 2.86;
-    this.group.add(spout);
+    // --- the statue -------------------------------------------------------
+    // Family request (#121): a large grey-stone RiPika in the fountain's
+    // middle. It stands where the old stone finial and its little water spout
+    // used to be — both are gone, and the fountain reads better for it: a
+    // figure standing in a bowl that brims over into the six jets below is a
+    // fountain, where a ball with water bobbling out of the top was an
+    // ornament.
+    //
+    // Seated on the **surface of the bowl water** (`bowlWater` spans y 2.11 to
+    // 2.17), and the statue's origin is the base of its plinth, so this single
+    // number is the whole placement — no fudge factor, per the asset contract.
+    //
+    // Clearances, both measured rather than assumed:
+    //  - the six jets occupy y 0.80–2.10 at radius 1.22. The plinth starts
+    //    0.07 m above their tops and is 0.82 m at its widest, so nothing the
+    //    statue owns comes near them.
+    //  - the bowl water it stands on is a 1.2 m-radius disc, against the
+    //    plinth's 0.82 m footing — it sits comfortably inside its own puddle.
+    //
+    // No collider. The plinth base is 2.17 m up, well over the 1.4 m jump
+    // ceiling `Player.ts` documents, so a child cannot reach it to be blocked
+    // by it — and the central column below has never had one either.
+    this.statue = createRipikaStatue();
+    this.statue.root.position.y = 2.17;
+    this.group.add(this.statue.root);
 
     // --- falling water ----------------------------------------------------
     // Four thin tapered streams arcing from the upper bowl into the basin.
@@ -408,5 +427,6 @@ export class Fountain implements GameSystem {
     this.waterGeometry.dispose();
     this.waterMaterial.dispose();
     this.splashEffects.dispose();
+    this.statue.dispose?.();
   }
 }

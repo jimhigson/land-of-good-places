@@ -2,7 +2,13 @@ import { CylinderGeometry, Group, Mesh } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ART } from '../style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../style/materials';
-import { createBakedFace, facePatchGeometry, type Expression } from '../style/faces';
+import {
+  applyStaticBakedFace,
+  createBakedFace,
+  facePatchGeometry,
+  type BakedFaceOptions,
+  type Expression,
+} from '../style/faces';
 import { applyWalk, blob, makeLimbs, stub, type CreatureHandle } from '../style/asset';
 
 /**
@@ -94,6 +100,44 @@ const TAIL_CANT = 1.05;
  * ART_DIRECTION §4, "nothing is plumb". Static — nothing animates it.
  */
 const TAIL_YAW = 0.12;
+/**
+ * RiPika's six colours, as one swappable set.
+ *
+ * Exists so the fountain statue can be **this** mouse rendered in stone rather
+ * than a second mouse carved to look like it (`models/ripikaStatue.ts`). Two
+ * models of one character have to be kept in step by hand forever; one model
+ * with two colourways cannot drift, and a retune of RiPika's proportions
+ * reaches her statue for free.
+ *
+ * The fields are named for the live mouse's colours rather than for their role
+ * ("yellow", not "primary") on purpose — every number inside this file is
+ * written against RiPika, and renaming them to something colour-neutral would
+ * make the model harder to read to buy nothing.
+ */
+export interface RipikaPalette {
+  /** Skull, torso, ear shafts, arms — and the baked face's background fill. */
+  readonly yellow: number;
+  /** Cowlick tuft and thighs: one step down, so they read against the body. */
+  readonly yellowDeep: number;
+  /** Tummy and collar flash. The lightest step. */
+  readonly belly: number;
+  /** Ear tips, feet, paws, painted nose. The darkest step. */
+  readonly tip: number;
+  /** The tail's warm tip. */
+  readonly bolt: number;
+  /** The painted cheek discs. */
+  readonly cheek: number;
+}
+
+/** RiPika as she actually is: the electric yellow mouse. */
+export const RIPIKA_PALETTE: RipikaPalette = {
+  yellow: ART.ripikaYellow,
+  yellowDeep: ART.ripikaYellowDeep,
+  belly: ART.ripikaBelly,
+  tip: ART.ripikaTip,
+  bolt: ART.ripikaBolt,
+  cheek: ART.ripikaCheek,
+};
 
 /**
  * The tail's resting roll, and the value its **wag** swings around.
@@ -132,6 +176,18 @@ const TAIL_ROLL = 0.06;
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;
+  /** Colourway. Defaults to {@link RIPIKA_PALETTE} — the yellow mouse. */
+  palette?: RipikaPalette;
+  /**
+   * Set `false` for a RiPika that will never change expression — the fountain
+   * statue is the only caller that does.
+   *
+   * Paints **one** face canvas rather than the five-expression set, and
+   * `setExpression` becomes a no-op. See `applyStaticBakedFace`: a statue that
+   * cannot blink has no use for four extra 512² textures, and the park's whole
+   * budget is forty of them.
+   */
+  expressions?: boolean;
 }
 
 export interface RipikaHandle extends CreatureHandle {
@@ -162,9 +218,10 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
   const head = new Group();
   head.name = 'ripikaHead';
 
-  const yellow = toonMaterial(ART.ripikaYellow);
-  const yellowDeep = toonMaterial(ART.ripikaYellowDeep);
-  const cocoa = toonMaterial(ART.ripikaTip);
+  const palette = options.palette ?? RIPIKA_PALETTE;
+  const yellow = toonMaterial(palette.yellow);
+  const yellowDeep = toonMaterial(palette.yellowDeep);
+  const cocoa = toonMaterial(palette.tip);
 
   const skullR = 0.315 * scale;
   const skull = blob(skullR, yellow, [1.06, 0.97, 1], 32);
@@ -214,8 +271,15 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
   // it — ART_DIRECTION.md §3. Same window, same paint options, so the face lands
   // where it always did; it just no longer floats 1.2% of a skull proud of the
   // head, and no longer needs the squash below copied from the skull's own.
-  const face = createBakedFace({
-    fill: ART.ripikaYellow,
+  //
+  // Every colour here comes from the palette, so a stone RiPika's face is
+  // *repainted in stone* rather than tinted or hidden. That distinction is the
+  // whole reason this is a palette and not a `traverse`-and-re-material pass:
+  // the face lives in the skull's own texture now, so re-materialling the skull
+  // would delete the face outright and leave a blank stone ball, and tinting it
+  // would leave a grey statue with tomato cheeks.
+  const faceOptions: BakedFaceOptions = {
+    fill: palette.yellow,
     spreadX: 1.85,
     spreadY: 1.85,
     tilt: 0.2,
@@ -227,12 +291,25 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
     mouth: 'cat',
     mouthW: 0.082,
     mouthDrop: 0.235,
-    nose: ART.ripikaTip,
-    blush: ART.ripikaCheek,
+    nose: palette.tip,
+    blush: palette.cheek,
     blushStyle: 'disc',
     blushR: 0.105,
-  });
-  face.applyTo(skull);
+  };
+
+  // The eyes, mouth and catchlights stay `ART.ink` and `ART.shine` whatever the
+  // palette says, and that is right for stone as well as for fur: carved
+  // features read as dark lines, the house dark is a warm plum, and a statue
+  // with two catchlights looks alive where one with dead flat eyes looks eerie.
+  let setExpression: (name: Expression) => void;
+  if (options.expressions === false) {
+    applyStaticBakedFace(skull, faceOptions);
+    setExpression = () => {};
+  } else {
+    const face = createBakedFace(faceOptions);
+    face.applyTo(skull);
+    setExpression = (name: Expression) => face.setExpression(name);
+  }
 
   if (options.space) {
     // The helmet used to clone the face patch's geometry. There is no face mesh
@@ -247,11 +324,7 @@ export function buildRipikaHead(scale: number, options: RipikaOptions = {}): Rip
     head.add(helmet);
   }
 
-  return {
-    group: head,
-    skullR,
-    setExpression: (name: Expression) => face.setExpression(name),
-  };
+  return { group: head, skullR, setExpression };
 }
 
 export function createRipika(options: RipikaOptions = {}): RipikaHandle {
@@ -260,11 +333,12 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   const body = new Group();
   root.add(body);
 
-  const yellow = toonMaterial(ART.ripikaYellow);
-  const yellowDeep = toonMaterial(ART.ripikaYellowDeep);
-  const belly = toonMaterial(ART.ripikaBelly);
-  const cocoa = toonMaterial(ART.ripikaTip);
-  const amber = toonMaterial(ART.ripikaBolt);
+  const palette = options.palette ?? RIPIKA_PALETTE;
+  const yellow = toonMaterial(palette.yellow);
+  const yellowDeep = toonMaterial(palette.yellowDeep);
+  const belly = toonMaterial(palette.belly);
+  const cocoa = toonMaterial(palette.tip);
+  const amber = toonMaterial(palette.bolt);
 
   const limbs = makeLimbs();
 
