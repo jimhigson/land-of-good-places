@@ -466,10 +466,46 @@ export const RIVAL_SKILL: readonly number[] = [0.62, 0.72, 0.82];
  * - **Ahead**: a quicker ramp to a harder ceiling — a rival who gets in front
  *   sags back within a modest lead, which is the half of the mechanic that
  *   lets a child who is behind come back.
+ *
+ * ### 5 August 2026: the lap grew, so the ceiling moved — not the ramp
+ *
+ * Moving the ring onto the park's boundary took a lap from 411.5 m to 600.2 m.
+ * Rivals bonk on hazards spread round that lap, so they bonked 11.3 times a race
+ * and now bonk 17.4, and they finished proportionately further back: measured
+ * over 200 seeds against `origin/main`, the mean winning margin went 62.8 → 72.4
+ * m and the 99th centile 143.1 → 167.1.
+ *
+ * The obvious lever was {@link CATCHUP_BEHIND}, and it is the wrong one. Swept
+ * from 0.006 to 0.009 it hauls the *middle* of that distribution back and
+ * further (mean 72.4 → 53.6, p90 120.7 → 94.9) while leaving the **tail exactly
+ * where it was** — p99 wandered 167.1, 164.3, 171.0, 158.8 with no trend, and
+ * the count of races finishing more than 140 m clear stayed between 4 and 10 of
+ * 200. That is not noise, it is the shape of the band: past
+ * `SWING_BEHIND / CATCHUP_BEHIND` metres it is a **constant**, so a steeper ramp
+ * pulls the flat part *nearer* and can never reach a rival beyond it. Only the
+ * ceiling governs the rival who has fallen right off the back, and that rival is
+ * the one the "procession" complaint is about.
+ *
+ * There is a second reason to prefer the ceiling, and it is the better one. The
+ * ramp is the part a child can **see**: it is what a rival ten metres back gets,
+ * in the stretch of track the camera actually draws, and the whole point of
+ * making it gentle is that a mistake she just watched still costs real ground.
+ * The ceiling only engages past ~130 m — six times the width of the picture
+ * `railRace/camera.ts` builds — so a rival being towed at it is off screen
+ * entirely. Moving the ceiling is invisible; moving the ramp is not.
+ *
+ * So the ramp is untouched at 0.006 and the ceiling went 0.55 → 0.80, on the
+ * rule that the band should reach it at the same **fraction of a race** as
+ * before: `0.55 / 0.006` was 91.7 m of an 823 m race, 11.1% of it, and 11.1% of
+ * the new 1200 m race is 133.5 m, which wants `133.5 × 0.006 = 0.80`. That
+ * restores `origin/main`'s race rather than inventing a new one — measured over
+ * the same 200 seeds, mean 65.8 against its 62.8, median 64.2 against 62.9, p90
+ * 100.8 against 104.9, p99 148.8 against 143.1, and a sloppy player still wins
+ * 73 of 200 against its 70.
  */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
-const SWING_BEHIND = 0.55;
+const SWING_BEHIND = 0.8;
 const SWING_AHEAD = 0.32;
 
 /**
