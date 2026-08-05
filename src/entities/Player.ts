@@ -103,7 +103,27 @@ export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
  * this file can know on its own.
  */
 export const CLIMB_WAVE_ARM_X = -2.45;
-export const CLIMB_WAVE_ARM_Z = -0.75;
+/**
+ * The lateral swing, and the whole of what was wrong with the first attempt.
+ *
+ * The crowd waves with this **negative** (`NpcCharacter.animate`), which tucks
+ * the hand *inward*, across the body. On the ground that is fine — you see the
+ * whole child. Up a tree only her head is out of the leaves, and an inward
+ * hand lands squarely behind her own skull and hair: QA measured the wave 0%
+ * visible on all four climbable trees, blocked by her own head, with zero
+ * foliage in the way.
+ *
+ * Swinging it **out** instead puts the hand clear of her silhouette. Swept
+ * (`check:climb-wave --sweep`) rather than guessed: +1.25 is the peak across
+ * every lift angle, and the ±{@link WAVE_WAGGLE} wag keeps it inside 0.83–1.67,
+ * which stays visible throughout rather than flickering behind her head at one
+ * end of the wag.
+ *
+ * The lift ({@link CLIMB_WAVE_ARM_X}) is unchanged and still the crowd's, so
+ * the gesture remains recognisably the park's own wave — only its direction
+ * changed.
+ */
+export const CLIMB_WAVE_ARM_Z = 1.25;
 /** How far the hand wags either side of {@link CLIMB_WAVE_ARM_Z}. */
 export const WAVE_WAGGLE = 0.42;
 
