@@ -182,9 +182,47 @@ interface TallObstacle {
  * obstacle and a corridor stays a corridor. The sum is the same 22 m about the
  * castle it always was.
  */
+/**
+ * How far the RiPika statue's *tall* part reaches from the middle of the
+ * fountain, in metres.
+ *
+ * Measured on the built park rather than declared: every mesh under the
+ * fountain's own root whose bounds top out above the car's underside at cruise
+ * (6.04 m) reaches **3.47 m** from `PARK_LAYOUT.fountain`, and the statue's
+ * crown stands at 10.81 m.
+ *
+ * **Deliberately the statue and not the fountain's plot**, whose bounding
+ * radius is 10.5 m. The plaza is the park's social middle and the Sky Cruiser
+ * is *allowed* to fly over it — the basin and its rim are barely a metre tall.
+ * The only thing here it cannot fly over is the statue, so the only thing it
+ * has to go round is the statue. Routing the loop around the whole plot would
+ * be avoiding the wrong shape, and would over-constrain a solver that already
+ * gives up on some seeds.
+ *
+ * The corridor is supplied separately (see {@link CORRIDOR_RADIUS}), so this is
+ * the obstacle and not the obstacle-plus-clearance.
+ */
+const STATUE_TALL_RADIUS = 3.5;
+
 function tallObstacles(): TallObstacle[] {
   const wheel = placedEntry('ferrisWheel');
-  return [{ x: wheel.x, z: wheel.z, radius: wheel.boundingRadius }];
+  return [
+    { x: wheel.x, z: wheel.z, radius: wheel.boundingRadius },
+    // The RiPika statue in the fountain (#121/#200). It reaches 10.81 m against
+    // a 6.2 m cruise floor, so it is the same category as the big wheel: a thing
+    // the loop cannot fly over and must go round.
+    //
+    // It was missing here, and the omission was invisible until two branches
+    // met. The statue merged (#200) with no cruiser sweep to run, and the castle
+    // pass (#113) re-solved the loop from 216 m to 185 m; on the new route four
+    // of five seeds sent the car **through the statue's head**, at 8.84 m up.
+    // The ride is `camera: 'firstPerson'`, so that is a screen full of the
+    // inside of a stone head rather than a mesh brushing past unseen.
+    //
+    // Nothing kept the loop off the plaza at all before this, which is the
+    // actual hole; the statue merely made it visible.
+    { x: PARK_LAYOUT.fountain.x, z: PARK_LAYOUT.fountain.z, radius: STATUE_TALL_RADIUS },
+  ];
 }
 
 /**
