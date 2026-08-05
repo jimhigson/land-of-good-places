@@ -88,6 +88,23 @@ function crossSection(): readonly (readonly [number, number])[] {
   ];
 }
 
+/**
+ * What to call a mesh in a complaint.
+ *
+ * Its own name where it has one, otherwise the nearest named ancestor with the
+ * type appended. Most of the park's meshes are named, but the wall runs are not
+ * — seed 5's cruiser flew through one and the complaint read `passes through
+ * 'Mesh'`, which tells whoever has to fix it precisely nothing. Walking up to
+ * `wooden-walls / Mesh` costs one loop and names the thing.
+ */
+function describeObject(object: Object3D): string {
+  if (object.name) return object.name;
+  for (let node: Object3D | null = object.parent; node; node = node.parent) {
+    if (node.name) return `${node.name} / ${object.type}`;
+  }
+  return object.type;
+}
+
 /** Is `object` inside any of `roots`? */
 function isUnder(object: Object3D, roots: readonly Object3D[]): boolean {
   for (let node: Object3D | null = object; node; node = node.parent) {
@@ -215,7 +232,7 @@ export function thingsTheCruiserPasses(
     }
     if (best <= REPORT_WITHIN) {
       results.push({
-        name: object.name || object.type,
+        name: describeObject(object),
         clearance: best,
         along: bestAlong,
         topY: box.max.y,
@@ -283,7 +300,7 @@ export function cruiserStrikes(
       caster.far = span;
       const hit = caster.intersectObjects(targets, false)[0];
       if (!hit) continue;
-      const name = hit.object.name || hit.object.type;
+      const name = describeObject(hit.object);
       // One complaint per thing struck, not one per centimetre of striking it.
       if (struckAlready.has(name)) continue;
       struckAlready.add(name);
