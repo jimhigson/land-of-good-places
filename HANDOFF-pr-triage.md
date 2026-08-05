@@ -74,15 +74,38 @@ surviving value — is half right, and the half that matters is the other half.*
 `TRESTLE_SPACING` is still 12 — but that was never the defect, as the PR
 itself argued.
 
-## State / next
+## State — build-green, awaiting instructions
 
-- [x] #155 both commits landed, tsc green
-- [ ] #157 dropper-pairs fix (the one live piece) — in progress
-- [ ] `npm run build` + `npm run test:procgen` exit 0
-- [ ] close #157 with an explanatory comment; open issues for the perf nit and
-      anything else not carried
-- [ ] report to Overseer. **Do not merge.**
+- [x] #155 both commits cherry-picked, two conflicts resolved to main's APIs
+- [x] #157's one live piece landed: `8e1ebbf`, a dropper under each rail
+- [x] New invariant `droppersHangUnderRealRails` — **teeth verified** by
+      reverting the placement and watching it fail on all five seeds, both
+      rings, before trusting it. (It passed silently at first: `Invariant` is
+      `(facts) => void`, so a returned complaints array is discarded — it must
+      `expect(...)` internally. Worth knowing if you add one.)
+- [x] `npm run build` exit 0; `npm run test:procgen` exit 0, 90 tests, 5 seeds.
+      Both run unpiped — `$status` after a pipe in fish is the *last* command's.
+- [x] #157 **closed** with a full per-claim account; #190 opened for the one
+      uncarried item (`setSparking` re-uploads all 8 rail buffers every frame)
+- [x] #155 **left open on purpose** — its work is on this branch with no PR of
+      its own yet, so closing it would leave no open trace. Close it the moment
+      this branch merges.
+- [ ] No PR raised (engineer brief item 10). **Nothing merged.**
 
-Needs visual QA (no browser this session): whether `'frown'` reads as distinct
-from `'sad'`/`'surprised'` at gameplay distance, on both a rival and the
-player's own face; and that it clears on dismount.
+Note: this worktree needed its own `npm ci` (worktrees do not share
+`node_modules`). Dev server on 5315 was never started — no browser this session.
+
+## Needs visual QA
+
+1. Does `'frown'` read as distinct from `'sad'`/`'surprised'` at gameplay
+   distance? This is the one real judgement call in #155 and nothing but eyes
+   settles it. Check on a **rival** (bonk, and holding through a black
+   stretch) and on the **player's own face**, which the race never drove
+   before.
+2. Frown clears on dismount — `RailRace.arrive()` resets it; confirm no face
+   rides home frowning.
+3. Blink still visibly interrupts a held frown (guaranteed by construction via
+   `faceLife`, but worth one look).
+4. Do the paired droppers read as holding each rail, from the ground and from a
+   cart? Count doubles (~272 per ring on the walk-past ring), so also worth a
+   glance for visual noise/frame cost on a phone.
