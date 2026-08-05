@@ -1,5 +1,5 @@
 import { Rng, TAU } from '../core/mathUtils';
-import { GARDEN_PLAY_RADIUS } from '../core/constants';
+import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';
 
@@ -30,6 +30,8 @@ export interface ParkBoundary {
   distanceToEdge(x: number, z: number): number;
   /** Enclosed area in square metres — what "twice the park" is measured on. */
   readonly area: number;
+  /** Length once round the edge. What the boundary wall has to cover. */
+  readonly perimeter: number;
   /** Furthest the edge ever gets from the origin. Sizing terrain and meshes. */
   readonly maxRadius: number;
   /**
@@ -54,6 +56,7 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
     contains: (x, z) => Math.hypot(x - centreX, z - centreZ) <= radius,
     distanceToEdge: (x, z) => radius - Math.hypot(x - centreX, z - centreZ),
     area: Math.PI * radius * radius,
+    perimeter: TAU * radius,
     maxRadius: radius,
     extent: {
       minX: centreX - radius,
@@ -140,6 +143,13 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
   }
   const area = Math.abs(twiceArea) / 2;
   const maxRadius = radii.reduce((a, b) => Math.max(a, b), 0);
+
+  let perimeter = 0;
+  for (let i = 0; i < count; i += 1) {
+    const [ax, az] = points[i] as [number, number];
+    const [bx, bz] = points[(i + 1) % count] as [number, number];
+    perimeter += Math.hypot(bx - ax, bz - az);
+  }
 
   let minX = Infinity;
   let maxX = -Infinity;
@@ -231,6 +241,7 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     contains: (x, z) => Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)),
     distanceToEdge,
     area,
+    perimeter,
     maxRadius,
     extent,
     outline: () => points,
@@ -460,6 +471,126 @@ export const PARK_BOUNDARY: ParkBoundary = generateParkBoundary({
  * constant — the failure mode #114 was made of.
  */
 export const GARDEN_PLAY_BOUNDARY: ParkBoundary = circleBoundary(GARDEN_PLAY_RADIUS);
+
+/**
+ * Where the ground stops, now that the park's edge moves.
+ *
+ * The terrain mesh stays a plain polar disc, which is not the compromise it
+ * looks like: the park's *shape* comes from the rim falloff in `terrainHeight`,
+ * not from the outline of the mesh, so the disc only has to be big enough to
+ * contain the hill. Re-tessellating it to the boundary would buy nothing and
+ * cost the even vertex distribution the grass tiling depends on.
+ *
+ * Big enough means: past the furthest the edge ever reaches, plus the whole
+ * width of the crest, plus a little so the cut edge is below the horizon rather
+ * than level with it.
+ */
+/** Ground beyond the crest, so the cut edge sits below the horizon not level with it. */
+export const TERRAIN_APRON = RIM_OUTSET_END + 1.5;
+
+export const TERRAIN_EDGE_RADIUS = PARK_BOUNDARY.maxRadius + TERRAIN_APRON;
+
+/**
+ * Distance from the origin to the park's edge on a given bearing.
+ *
+ * Only meaningful because the boundary is star-shaped (see
+ * {@link profileBoundary}) — every ray from the centre crosses the edge exactly
+ * once, so "the radius on this bearing" is a well-defined thing. Anything that
+ * needs a *distance* rather than a radius should ask `distanceToEdge` instead;
+ * this is for the handful of places that scatter things polar-fashion and want
+ * the park's own reach on the bearing they picked.
+ */
+export function edgeRadiusAt(boundary: ParkBoundary, bearing: number): number {
+  const points = boundary.outline();
+  const count = points.length;
+  const t = ((bearing % TAU) + TAU) % TAU;
+  const scaled = (t / TAU) * count;
+  const i = Math.floor(scaled) % count;
+  const frac = scaled - Math.floor(scaled);
+  const [ax, az] = points[i] as readonly [number, number];
+  const [bx, bz] = points[(i + 1) % count] as readonly [number, number];
+  const a = Math.hypot(ax, az);
+  const b = Math.hypot(bx, bz);
+  return a + (b - a) * frac;
+}
+
+/**
+ * Where the ground stops, on a given bearing.
+ *
+ * The terrain disc follows the park's outline rather than being a circle around
+ * it, and that is not cosmetic. The apron between the edge and the cut has to be
+ * the *same width all the way round*: on a circular disc around a boundary
+ * running 57-110 m it would be 22 m at the widest bearing and 67 m at the
+ * narrowest, so the treeline that hides the cut would either stand miles out on
+ * a bare hillside or fail to reach the cut at all. Following the outline keeps
+ * the hill, the treeline and the cut edge in the same relationship on every
+ * bearing.
+ */
+export function terrainEdgeRadiusAt(bearing: number): number {
+  return edgeRadiusAt(PARK_BOUNDARY, bearing) + TERRAIN_APRON;
+}
+
+/** A point along the park's edge, with the way the edge runs there. */
+export interface EdgeStation {
+  readonly x: number;
+  readonly z: number;
+  /** Yaw putting a box's local X axis along the edge, for `Object3D.rotation.y`. */
+  readonly yaw: number;
+}
+
+/**
+ * Walks the edge at even spacing, by **arc length**.
+ *
+ * The wall used to be laid out by sweeping an angle at a constant radius, which
+ * is only even spacing while the radius is constant. On an outline running from
+ * 57 m to 110 m the same angular step is a 1.0 m block on one side of the park
+ * and a 1.9 m gap on the other — bonded masonry at the pinch, a picket fence at
+ * the bulge. Stepping along the curve instead keeps every block the same size
+ * and the same distance from its neighbour the whole way round.
+ *
+ * `offset` shifts the whole run along the edge, which is what staggers
+ * alternate courses into a proper bond.
+ */
+export function alongBoundary(
+  boundary: ParkBoundary,
+  spacing: number,
+  offset = 0,
+): EdgeStation[] {
+  const points = boundary.outline();
+  const count = points.length;
+
+  const cumulative: number[] = [0];
+  for (let i = 0; i < count; i += 1) {
+    const [ax, az] = points[i] as readonly [number, number];
+    const [bx, bz] = points[(i + 1) % count] as readonly [number, number];
+    cumulative.push((cumulative[i] as number) + Math.hypot(bx - ax, bz - az));
+  }
+  const perimeter = cumulative[count] as number;
+
+  const stations: EdgeStation[] = [];
+  const steps = Math.max(3, Math.round(perimeter / spacing));
+  let cursor = 0;
+  for (let step = 0; step < steps; step += 1) {
+    const target = (((step / steps) * perimeter + offset) % perimeter + perimeter) % perimeter;
+    while (cursor < count - 1 && (cumulative[cursor + 1] as number) < target) cursor += 1;
+    while (cursor > 0 && (cumulative[cursor] as number) > target) cursor -= 1;
+    const [ax, az] = points[cursor] as readonly [number, number];
+    const [bx, bz] = points[(cursor + 1) % count] as readonly [number, number];
+    const segment = (cumulative[cursor + 1] as number) - (cumulative[cursor] as number);
+    const t = segment > 1e-9 ? (target - (cumulative[cursor] as number)) / segment : 0;
+    const tangentX = bx - ax;
+    const tangentZ = bz - az;
+    stations.push({
+      x: ax + tangentX * t,
+      z: az + tangentZ * t,
+      // Yaw about Y takes local +X to (cos, -sin), so this points the block's
+      // long axis along the edge rather than across it — the difference between
+      // a wall and a ring of tombstones.
+      yaw: Math.atan2(-tangentZ, tangentX),
+    });
+  }
+  return stations;
+}
 
 /**
  * Smallest radius of curvature anywhere on a sampled polar profile.
