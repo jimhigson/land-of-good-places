@@ -354,3 +354,88 @@ the same fix. Separately, the Sky Cruiser wants an invariant measuring the
 
 Neither started. Height is Jim's call; the Sky Cruiser invariant may belong to
 whoever owns that ride.
+
+---
+
+# UPDATE — the statue now gets out of the way
+
+Approved by the Overseer: keep 4×, fix the occlusion. Done.
+
+## Widened to a category, not special-cased
+
+`FoliageFade` now has **two** kinds of occluder, split by *how a thing fades*:
+
+- **instanced foliage** — needs the existing stand-in pool, because an
+  `InstancedMesh` has no per-instance opacity. Untouched.
+- **`SightlineOccluder`** — anything owning its own meshes, which can just turn
+  its own materials down. Registers via `FoliageFade.addOccluder`, is handed an
+  alpha, and this file never learns what it is.
+
+Wired in `Game.ts`, not `Fountain.ts` — the fountain has no business knowing
+about the camera. `Fountain` just publishes `statueOccluder`.
+
+`SightlineOccluder` is an upright **capsule**, not a tree's sphere. One sphere
+round an 8.24 m statue needs ~4.4 m radius and would fade whenever anyone
+walked near the fountain. A tree is the degenerate case (`halfHeight` 0).
+
+## `check:statue-occlusion` — in the build, 0.25 s
+
+Grid-sweeps 985 m² at 0.25 m, raycasts a 2.12 m player's head/chest/waist along
+the camera axis into real geometry, and separately replicates the fade test.
+**HIDDEN AND NOT FADED must be zero.**
+
+Deliberately does **not** import the function under test — the HIDDEN side is a
+raycast, the FADED side is rewritten from `FoliageFade`'s constants. A proof
+that imported the thing it tests only proves it agrees with itself.
+
+**Verified to bite**: at `SWEEP_R=1.2` it exits 1 and names the ground.
+
+## Writing the proof found two bugs in the fade I had just committed
+
+Neither was visible by reading it.
+
+1. **Cheap reject too tight — 1.5 m² still vanished a child.** I had
+   `reach = NEAR_PLAYER_RADIUS + radius`, generalising the tree path by *girth*.
+   Girth is the wrong dimension: at a 38° camera, a point H above the player's
+   head hides them from ~1.28·H further away. Statue top is ~8.3 m over a
+   child's head ≈ 10.6 m reach, against the 11.4 m allowed; failures were all at
+   11.7–12.7 m. Now `+ 2 * halfHeight`.
+2. **`OCCLUDER_RADIUS` was nearly double what was needed.** I guessed 2.4.
+   Swept: `0.8→3.5 m² · 1.0→1.3 · 1.2→0.4 · 1.4→0 · 1.6→0 · 1.8→0`.
+   **1.4 is the true threshold; shipped 1.8** for ~29% headroom. Failure modes
+   are asymmetric — too small vanishes a child, too large fades slightly early,
+   which `SIGHTLINE_MARGIN` already does for every tree.
+
+**Result: 28.1 m² hidden → 0 m² hidden-and-not-faded.**
+
+## The two flowers and the name labels
+
+- **`flower:88` (−1.2, −0.7) and `flower:294` (−2.5, −1.0): resolved.** Probed
+  both: `fades=true` at each. They read as occluded from across the plaza
+  (they are ground-height), but the moment the player walks to them the statue
+  fades. The "Pick!" chip is DOM and was never occludable anyway.
+- **Name labels: resolved as a side effect, reasoned but not visually
+  confirmed.** `setFade` drops `depthWrite` with `transparent`, so a faded
+  statue stops writing depth and the sprites behind it draw. While the statue
+  is solid, a label behind it still clips — which is *correct* occlusion, not
+  the bug. **QA should confirm visually.** `NameLabel.ts`'s `depthTest: true`
+  was NOT changed — fixing it silently under a statue commit would have been
+  wrong, and it is not needed.
+
+## What I deliberately did NOT do
+
+`setFade` does not touch `castShadow`. I wrote that version first and it was
+wrong twice: `addOutline` authors its hulls `castShadow = false`, so a blanket
+restore switches shadows **on** for meshes that must never cast one; and a 19 m
+shadow blinking out as a child steps behind the statue is a worse artefact than
+the shadow. Shadow behaviour is a separate question.
+
+## Still open
+
+- **Sky Cruiser clearance** — assigned to the engineer who owns `route.ts`.
+  Track passes 4.78 m horizontally, min 3D distance **2.76 m** against
+  `CORRIDOR_RADIUS = 3`; rider's eye ~8.07 m, level with the statue's chest.
+  `invariants.ts:903-910`'s `['building', 'ferrisWheel']` comment is now false.
+  **If their invariant lands and measures the built scene, this statue may fail
+  it. That is the correct outcome.**
+- `TAIL_YAW` holds at 0.12 pending Jim.
