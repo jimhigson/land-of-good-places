@@ -94,6 +94,30 @@ const PROFILE_SAMPLES = 512;
  * back, and the whole point of it is to be gentle — so a radius per bearing is
  * not a limitation being smuggled in, it is an accurate description. It also
  * makes `contains` exact rather than a polygon test with a tolerance.
+ *
+ * ### The limit, and the ruling on it (5 August 2026)
+ *
+ * This is **star-shaped**: every ray from the centre crosses the edge exactly
+ * once. It gives bays and waists, but it can never express a crescent,
+ * horseshoe or kidney whose boundary wraps back past itself. Jim asked for a
+ * park that could take "any arbitrary curved shape", so whether that limit is
+ * one he would notice was a real question, and it was **measured rather than
+ * argued**: for a polar curve the signed curvature numerator
+ * `r^2 + 2r'^2 - r r''` goes negative exactly where the edge curves inward, and
+ * it does so across 23-28% of the perimeter on every seed, with an
+ * isoperimetric quotient of 0.84-0.88 against a circle's 1.000. The outlines
+ * were drawn and shown to him and he approved them as they are.
+ *
+ * So the star-shaped limit is **accepted, not merely tolerated**. Two reasons
+ * not to spend the generality: a general closed curve makes `distanceToEdge`
+ * substantially harder — it has already been wrong by 14.4 m once here, see
+ * below — and a horseshoe park is miserable to walk around as well as hostile
+ * to the layout solver and to every ride that must fit inside.
+ *
+ * If it is ever wanted anyway, the change stays contained: every consumer asks
+ * {@link ParkBoundary}, never a radius, so only this function and
+ * {@link generateParkBoundary} would be replaced. The gate pin survives either
+ * representation.
  */
 export function profileBoundary(radii: readonly number[]): ParkBoundary {
   const count = radii.length;

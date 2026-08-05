@@ -69,6 +69,48 @@ Gate hit exactly on every seed (`distanceToEdge(gate) = 0.000`).
 `GENTLE_CURVATURE_RADIUS` floor is 20 m, taken from the camera (~36 m of
 visible ground depth), not from the generator's own target.
 
+## Is `r(θ)` an "arbitrary curved shape"? Measured: yes — and SETTLED
+
+Jim reframed the issue (5 Aug): **the shape freedom is the deliverable, the size
+increase is only the means**. That raises a fair challenge — `r(θ)` is
+star-shaped, so every ray from the centre crosses the edge exactly once and it
+can never express a crescent, horseshoe or kidney.
+
+Measured rather than argued. For a polar curve the signed curvature numerator is
+`r² + 2r'² − r·r''`; where it goes negative the boundary genuinely curves
+*inward*. It does, on every seed:
+
+| seed | concave % of edge | circleness `4πA/P²` | max deviation |
+|---|---|---|---|
+| 20260728 | 27.7% | 0.849 | 26.6% |
+| 2 | 28.1% | 0.836 | 36.2% |
+| 5 | 23.4% | 0.875 | 26.3% |
+| 11 | 26.4% | 0.872 | 31.7% |
+| 18 | 23.4% | 0.867 | 26.2% |
+
+A perfect circle is 0% and 1.000. So between a quarter and a third of every
+park's edge is a real bay or waist. The outlines were drawn and put in front of
+Jim: <https://claude.ai/code/artifact/fdf33550-bbae-4fcc-af6b-7db2d3b5c191>
+
+**Ruling, 5 Aug: "Those shapes are all fine, thanks." Keep `r(θ)`. No
+representation change.** The star-shaped limit — no crescents, horseshoes or
+kidneys — is accepted, not merely tolerated. Do not reopen this without a new
+ruling; it is recorded in `boundary.ts`'s own doc comment too.
+
+The escape hatch stands if it is ever wanted: every consumer asks
+`distanceToEdge`, never a radius, so only `profileBoundary` and
+`generateParkBoundary` would be replaced, and the gate pin survives either
+representation.
+
+**Pattern worth reusing: when a judgement is visual, produce the visual.**
+Drawing the outlines got a decision in one round instead of three, and measuring
+concavity properly — signed curvature going negative, not eyeballing — is what
+made the answer trustworthy.
+
+**Base settled at 58** by the Overseer, and the shape framing agrees with the
+variety framing: freedom is bought with the gap between mean radius and the
+pinned gate, so 58 (gap 22 m, 23–28% concave) beats 52 (gap 13.5 m, tamer).
+
 ## Still to do — the consumers
 
 Hard boundaries, all must move to `distanceToEdge`:
