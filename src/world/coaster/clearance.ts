@@ -61,8 +61,28 @@ export interface PassedThing {
 /** How finely the loop is walked. Half a metre at 15 m/s is ample. */
 const SAMPLE_STEP = 0.5;
 
-/** Ray hop length. Short enough that nothing thin is stepped over. */
-const RAY_STEP = 0.2;
+/**
+ * Ray hop length, in metres.
+ *
+ * **Nothing is "stepped over" at any step size** — the segments tile the path
+ * end to end, each starting where the last finished, so there is no gap between
+ * them for a thin thing to hide in. What the step actually buys is *fidelity to
+ * the curve*: a segment is a chord, and a chord cuts the corner.
+ *
+ * That error is a sagitta, `L^2 / 8r`. The tightest turn the ride will ever make
+ * is `MIN_TURN_RADIUS` = 12 m, so a one-metre hop cuts the corner by **1 cm** at
+ * the worst bend in the park and less everywhere else — far inside the
+ * clearances being measured, and two orders of magnitude below the car's own
+ * 0.75 m half-width.
+ *
+ * It was 0.2 m, which cost 18 s of the sweep's 19 and put it out of reach of the
+ * procgen suite: at 0.2 m this is 7 400 rays, and 17 of the 52 targets sit near
+ * *every* step (a terrain mesh's bounding box has the whole loop inside it), so
+ * each ray pays a full triangle walk over several large meshes. One metre is
+ * 1 480 rays and 3.7 s, and it still catches both original strikes — verified,
+ * not assumed, by running it against the pre-fix `Scenery.ts`.
+ */
+const RAY_STEP = 1;
 
 /** Only objects whose bounds come within this of the envelope are reported. */
 const REPORT_WITHIN = 6;
@@ -266,6 +286,40 @@ export function cruiserStrikes(
   const targets = candidates(top, ignore).filter((object) =>
     worldBoxes(object).some((box) => loop.some((p) => box.distanceToPoint(p) <= reach)),
   );
+
+  /**
+   * Which targets are near enough to matter, per ray step.
+   *
+   * Filtering once against the *whole* loop is not enough: a bush beside the
+   * station stayed a target for all 926 steps of a 185 m loop, and every one of
+   * the 7 400 rays then paid to test it — and paid per *instance*, because
+   * three.js raycasts every instance of an `InstancedMesh`. That is what made
+   * this 24.6 s, against 84 ms for the box report beside it, which is far too
+   * slow to run on five seeds in the procgen suite.
+   *
+   * Indexed per step it is a handful of objects per ray. Deliberately generous:
+   * the reach covers the envelope's own corner-to-centre distance plus a whole
+   * ray step either way, because a ray spans from the previous step to this one
+   * and missing a target here would be a silent false pass — the expensive
+   * direction to be wrong.
+   */
+  const stepCount = Math.ceil(route.length / RAY_STEP) + 1;
+  const stepReach = Math.hypot(CART_ENVELOPE.halfWidth, Math.max(CART_ENVELOPE.above, CART_ENVELOPE.below)) + RAY_STEP * 2 + 1;
+  const stepPoints: Vector3[] = [];
+  for (let i = 0; i < stepCount; i += 1) {
+    stepPoints.push(route.pointAt((i * RAY_STEP) % route.length, new Vector3()));
+  }
+  const nearbyTargets: Object3D[][] = stepPoints.map(() => []);
+  for (const object of targets) {
+    for (const box of worldBoxes(object)) {
+      for (let i = 0; i < stepCount; i += 1) {
+        if (box.distanceToPoint(stepPoints[i]!) > stepReach) continue;
+        const cell = nearbyTargets[i]!;
+        if (cell[cell.length - 1] !== object) cell.push(object);
+      }
+    }
+  }
+
   const caster = new Raycaster();
   const section = crossSection();
   const point = new Vector3();
@@ -275,7 +329,8 @@ export function cruiserStrikes(
   const struckAlready = new Set<string>();
   const complaints: string[] = [];
 
-  for (let d = 0; d <= route.length; d += RAY_STEP) {
+  for (let step = 0; step < stepCount; step += 1) {
+    const d = step * RAY_STEP;
     route.pointAt(d % route.length, point);
     route.tangentAt(d % route.length, tangent);
     const flat = Math.hypot(tangent.x, tangent.z) || 1;
@@ -298,7 +353,9 @@ export function cruiserStrikes(
       caster.set(before, direction.normalize());
       caster.near = 0;
       caster.far = span;
-      const hit = caster.intersectObjects(targets, false)[0];
+      const nearby = nearbyTargets[step]!;
+      if (nearby.length === 0) continue;
+      const hit = caster.intersectObjects(nearby, false)[0];
       if (!hit) continue;
       const name = describeObject(hit.object);
       // One complaint per thing struck, not one per centimetre of striking it.
