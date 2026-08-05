@@ -3,7 +3,15 @@
 Branch `feat/slide-on-rail-generator`, worktree `.claude/worktrees/slide`, dev port **5312**.
 
 **Status: build green, procgen green, ready for QA. No PR raised (waiting on the
-Overseer).** `npm run build` exit 0; `npm run test:procgen` exit 0, 117 tests.
+Overseer).** `npm run build` exit 0; `npm run test:procgen` exit 0, 122 tests.
+
+Chute, exit node, first-person camera, grown-up, deep links and **supports** are
+all done. The only thing left is the parapet-gap change, whose plan is with the
+Overseer for approval (see the last section).
+
+QA URLs: `http://127.0.0.1:5312/slide` and `.../slide-with-grownup`, private
+window. Two links because the grown-up must be *invited* on the roof, so a
+single link would silently skip the "in front, lying down" half of §9.
 
 ## Root cause of #118 (measured, not inferred — do not lose this)
 
@@ -138,15 +146,58 @@ the cruiser ever fails to solve, the slide fails too — loudly.
 - **A plot's anchor is not the thing standing on it** — the facade is ~3.5 m off
   the `building` plot's position.
 
+## The supports (`slide/supports.ts`)
+
+Six legs per seed, 2.5 m to 14.6 m tall. Sparse on purpose: the ground under
+the chute is ground a child walks on, and a tidy row of posts is a fence.
+Closest pair across the seeds is 3.0 m centre to centre — 2.16 m between faces
+against a 1.24 m child — and that is asserted, not eyeballed.
+
+Two bugs found only by measuring, both worth remembering:
+
+- **It placed zero legs on every seed, silently.** The "don't pinch a plot
+  corridor" rule counted the castle and the ball pit, whose circles blanket the
+  whole ride: 37 viable spots rejected, nothing built, nothing said, all tests
+  green. Same overlapping-circle trap as the route, same fix.
+- **`check:park` caught a leg 19.11 m from the castle against its declared 19 m
+  `boundingRadius`, and it was right** — content past that radius is content
+  nobody routed around. Fixed by moving the legs to park level rather than by
+  touching the ratchet: this ride spans two plots, so its supports are the
+  park's, not the tower's. Note the check measures each lump's **centre**
+  distance, which is why the 95 m chute itself passes (its bounding-sphere
+  centre sits near the tower) while one small post out at the edge does not.
+
+## Two traps that make a test inert while looking green
+
+Both cost other engineers real time on 5 August; both would have defeated the
+negative-fixture proof silently.
+
+- **A static import of a seed-dependent module into `test/` pins every seed to
+  the default park.** `LGP_SEED` is read once at `parkManifest.ts` load, which
+  is why `buildParkFacts` sets the env var and only *then* imports dynamically.
+  The tell is the **pass** count looking wrong, not the fail count. Read things
+  off `ParkFacts`; `import type` is fine, it is erased.
+- **A `NaN` comparison makes an invariant incapable of failing.** `NaN < best`
+  is always false, so a running minimum stays `Infinity` and every threshold
+  test passes. `test/` is not typechecked, so nothing warns.
+
+Checked against this branch, with evidence rather than confidence: each of my
+two invariants appears exactly 5 times in a verbose run (one per seed); test
+count went 117 -> 122, exactly +5 for the new one; the red output carries real
+numbers throughout; and I ran the negative fixture against **seed 5** as well as
+the canonical seed, which is the specific thing a static import would break.
+
 ## Still open / not done
 
-- No deep link for the slide (`RIDE_DEEP_LINKS`), so QA has to walk to the roof.
-- The chute has **no supports** — it is a ~95 m elevated trough with nothing
-  holding it up. The old one had none either so this is not a regression, but at
-  this length it is far more visible. `railRace/track.ts`'s `trestleSpots` is
-  the pattern if the family wants legs.
-- The facade's parapet gap is still a fixed local x on the south wall. Making
-  the door position part of the search — cutting the hole where the route
-  actually needs it, the same ruling E4 got for the castle windows — is the
-  robust version of this and would remove the per-seed tightness that forced a
-  5 m turn radius.
+- **The parapet gap.** Still a fixed local x on the south wall. Plan is with the
+  Overseer: the search *already* chooses the door (`report.startPoseIndex` names
+  the start pose it took) so this is mostly a matter of not throwing that answer
+  away, plus moving four constants out of `layout.ts` so the dependency runs
+  `layout -> slide/plan -> Shell` and no cycle is created. The payoff is being
+  able to offer the whole wall as candidate positions, which should buy back the
+  turn radius I spent to make seed 5 solve (5 m today) and so lower the 0.79 g
+  worst bend. It visibly relocates a hole in the castle, so it likely needs
+  family screenshot approval.
+- **East-wall door** deliberately not proposed yet: the pit is east of the
+  castle so it is the natural face, but `Shell.ts` only cuts gaps in the south
+  wall at TOP_DECK. Argue for it on evidence after the south-wall version.
