@@ -103,7 +103,12 @@ export class Parade implements GameSystem {
     this.camera = camera;
     this.group.name = 'parade';
 
-    this.peek = new BackpackPeek(player.model.backpackAnchor);
+    // The anchor is a closure, not a captured `Group` — see `WornHat.ts`'s
+    // doc comment on the same pattern. It reads `player.model.backpackAnchor`
+    // fresh every time a peek actually begins, so the HUD's "Look" pill
+    // rebuilding `player.model` in place (`rebindPlayerModel`, below) never
+    // leaves it reaching into a disposed bag.
+    this.peek = new BackpackPeek(() => player.model.backpackAnchor);
 
     this.trail.reset(player.position.x, player.position.y, player.position.z);
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
@@ -112,6 +117,18 @@ export class Parade implements GameSystem {
   /** How many owned things are waiting their turn behind the visible eight. */
   get waitingCount(): number {
     return this.overflow;
+  }
+
+  /**
+   * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
+   * just been rebuilt, so whoever `peek` had reached into the old
+   * `backpackAnchor` for is gone with it. `peek` already reads the anchor
+   * live (see the constructor's own doc comment) and already tolerates a
+   * vanished handle (`BackpackPeek.clear`); it just needs telling, since it
+   * cannot otherwise know the mesh it was tracking has already been disposed.
+   */
+  rebindPlayerModel(): void {
+    this.peek.rebind();
   }
 
   update(context: FrameContext): void {

@@ -36,7 +36,9 @@ const POP_SECONDS = 0.3;
 export class WornJetpack implements GameSystem {
   readonly name = 'wornJetpack';
 
-  private readonly anchor: Group;
+  /** Read live, not captured once — see {@link rebind} and `WornHat`'s own
+   *  doc comment on the identical field. */
+  private readonly anchor: () => Group;
   private readonly unsubscribe: () => void;
   private readonly onWornChange: ((worn: boolean) => void) | null;
 
@@ -54,10 +56,25 @@ export class WornJetpack implements GameSystem {
    * model can put its own backpack away — see `art/models/backpacks.ts`'s
    * `setHidden`. Optional, for a wearer with no bag to move.
    */
-  constructor(anchor: Group, onWornChange?: (worn: boolean) => void) {
+  constructor(anchor: () => Group, onWornChange?: (worn: boolean) => void) {
     this.anchor = anchor;
     this.onWornChange = onWornChange ?? null;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+  }
+
+  /**
+   * The player's model was just rebuilt — see `WornHat.rebind`'s doc comment,
+   * including why `notifiedWorn` must be forgotten too. Here that matters even
+   * more than it does for the hat: `onWornChange` is what puts the model's own
+   * backpack away (`setJetpackWorn` → `backpacks.ts`'s `setHidden`), so
+   * skipping it leaves the freshly-built model wearing its bag *and* the jet
+   * pack — the two-things-on-one-back this class exists to prevent.
+   */
+  rebind(): void {
+    this.clear();
+    this.currentUid = null;
+    this.notifiedWorn = false;
+    this.sync(gameStore.get());
   }
 
   /** True while there is actually a jet pack on her back, this frame. */
@@ -117,13 +134,13 @@ export class WornJetpack implements GameSystem {
     // A pack that was firing when it was swapped must not light up the new one
     // on its first frame; `Player` writes the real value again this frame.
     handle.setThrust(0);
-    this.anchor.add(handle.root);
+    this.anchor().add(handle.root);
     this.handle = handle;
   }
 
   private clear(): void {
     if (!this.handle) return;
-    this.anchor.remove(this.handle.root);
+    this.anchor().remove(this.handle.root);
     disposeTree(this.handle.root);
     this.handle = null;
     this.thrust = 0;

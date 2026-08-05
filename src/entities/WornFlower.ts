@@ -26,17 +26,26 @@ const POP_SECONDS = 0.3;
 export class WornFlower implements GameSystem {
   readonly name = 'wornFlower';
 
-  private readonly anchor: Group;
+  /** Read live, not captured once — see {@link rebind}, `WornHat`'s own doc
+   *  comment on the identical field explains why. */
+  private readonly anchor: () => Group;
   private readonly unsubscribe: () => void;
 
   private mesh: Group | null = null;
   private currentUid: string | null = null;
   private pop = 1;
 
-  /** `anchor` is the character's `hairAnchor`. */
-  constructor(anchor: Group) {
+  /** `anchor` resolves to the character's current `hairAnchor`. */
+  constructor(anchor: () => Group) {
     this.anchor = anchor;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+  }
+
+  /** The player's model was just rebuilt — see `WornHat.rebind`'s doc comment. */
+  rebind(): void {
+    this.clear();
+    this.currentUid = null;
+    this.sync(gameStore.get());
   }
 
   update({ dt }: FrameContext): void {
@@ -66,13 +75,13 @@ export class WornFlower implements GameSystem {
     const mesh = buildHairFlower(owned.flowerColour);
     this.pop = 0;
     mesh.scale.setScalar(0.001);
-    this.anchor.add(mesh);
+    this.anchor().add(mesh);
     this.mesh = mesh;
   }
 
   private clear(): void {
     if (!this.mesh) return;
-    this.anchor.remove(this.mesh);
+    this.anchor().remove(this.mesh);
     disposeTree(this.mesh);
     this.mesh = null;
   }

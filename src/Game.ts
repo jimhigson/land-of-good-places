@@ -20,7 +20,7 @@ import type { InteriorControls } from './world/building';
 import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
-import { CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
+import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -31,9 +31,10 @@ import { MiniGameHost } from './minigames';
 import { createRideHud, type RideHud } from './minigames/ferrisWheel/hud';
 import { Shopping } from './Shopping';
 import { SaveSystem } from './SaveSystem';
-import { gameStore } from './state';
-import { markReopenCharacterCreator, type SavedPlace } from './state/save';
+import { gameStore, type CharacterCreationChoice } from './state';
+import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
+import { OverlayPause } from './core/overlayPause';
 
 /** Where a brand-new player starts: the plaza, just south of the fountain. */
 const DEFAULT_SPAWN = new Vector3(0, 0, 7);
@@ -117,9 +118,27 @@ export class Game {
   /** The ferris wheel's caption/shout/card layer. Only alive during a ride. */
   private ferrisHud: RideHud | null = null;
   private readonly ferrisHudHost: HTMLElement;
+  /**
+   * True while the "Look" pill's `CharacterCreation` is mounted over the park.
+   *
+   * The dialog has no close button — finishing the form is the only way out —
+   * so this is the whole of "is the creator up?", and both the pause
+   * ({@link syncLookPaused}) and Escape's ownership ({@link tick}) are derived
+   * from it rather than tracked separately.
+   */
+  private lookOpen = false;
+  /** Freezes the park while {@link lookOpen} — see `core/overlayPause.ts`. */
+  private readonly lookPause = new OverlayPause();
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
-  constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, options: GameOptions = {}) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    // Kept as a field (not just a constructor-local) for `applyLiveLook`,
+    // which needs somewhere to mount the "Look" pill's `CharacterCreation`
+    // overlay long after the constructor has returned.
+    private readonly uiRoot: HTMLElement,
+    options: GameOptions = {},
+  ) {
     this.engine = new Engine(canvas);
     this.camera = new IsoCamera();
     this.input = new InputSystem();
@@ -152,7 +171,14 @@ export class Game {
     // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
     // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
     // needs nothing from the rest of this constructor beyond the anchor.
-    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    //
+    // The anchor is a closure, not the `Group` itself — `WornFlower` (and
+    // every other system below built the same way) reads `player.model.X`
+    // fresh every time it draws, rather than caching a copy of it, so the
+    // HUD's "Look" pill rebuilding `player.model` in place (`applyLiveLook`)
+    // never leaves any of them pointing at an anchor that got disposed out
+    // from under them. See `WornHat.ts`'s own doc comment on the same field.
+    this.wornFlower = new WornFlower(() => this.player.model.hairAnchor);
     this.addSystem(this.wornFlower);
 
     // The hat chosen (or granted free) in the character creator — see
@@ -161,7 +187,7 @@ export class Game {
     // is what lets `WornHat` decline to draw a hat that Mohican's crest
     // cannot share the head with, without touching `wornHatUid` itself.
     this.wornHat = new WornHat(
-      this.player.model.hatAnchor,
+      () => this.player.model.hatAnchor,
       () => this.player.model.hairHidesHat,
       (worn) => this.player.model.setHatWorn(worn),
     );
@@ -174,7 +200,7 @@ export class Game {
     // Third of the three worn slots, and the same store-subscriber shape as the
     // two above; its `onWornChange` puts her own backpack away, because you
     // cannot strap two things to one back.
-    this.wornJetpack = new WornJetpack(this.player.model.jetpackAnchor, (worn) =>
+    this.wornJetpack = new WornJetpack(() => this.player.model.jetpackAnchor, (worn) =>
       this.player.model.setJetpackWorn(worn),
     );
     this.addSystem(this.wornJetpack);
@@ -723,22 +749,106 @@ export class Game {
   }
 
   /**
-   * "Look" pill in the HUD menu (`Hud.ts`). There is no "rebuild the live
-   * player model" path — `CharacterModel`'s kid is built once, in `Player`'s
-   * constructor, from whatever the store held at that moment — so getting
-   * back to the character creator means going back through `main.ts`'s
-   * `boot()` rather than mounting it over this running `Game`.
-   *
-   * `saveSystem.flush()` first, so nothing since the last five-second
-   * autosave tick is lost; then a same-tab flag (`markReopenCharacterCreator`,
-   * `state/save.ts`) so the next boot skips the welcome-back prompt and
-   * `startFresh`'s `clearSave()`, and goes straight back into the creator
-   * over this same save; then the reload itself.
+   * "Look" pill in the HUD menu (`Hud.ts`). Mounts `CharacterCreation`
+   * straight over this running `Game` — the park, the save, the session all
+   * stay exactly as they are; only `onComplete` (below, {@link
+   * applyLiveLook}) does anything, and only to the player's own model and
+   * name. This used to flush the save, set a same-tab flag and reload the
+   * whole page back through `main.ts`'s `boot()`, because there was no way
+   * to rebuild a live player model — see `Player.replaceModel`, which is
+   * what closed that gap.
    */
   private reopenCharacterCreator(): void {
-    this.saveSystem.flush();
-    markReopenCharacterCreator();
-    window.location.reload();
+    // Belt and braces: `Hud.setLookAvailable` already hides the pill while she
+    // is riding or climbing, so this should be unreachable — but the model
+    // rebuild genuinely cannot be made safe in those states, and that is worth
+    // more than one line of defence.
+    if (this.player.riding || this.treeClimbing.playerClimbing) return;
+    if (this.lookOpen) return;
+
+    // The pause itself is not taken here. {@link syncLookPaused} re-derives it
+    // from `lookOpen` every frame instead — see its doc comment for why a
+    // one-shot toggle here was wrong.
+    this.lookOpen = true;
+
+    new CharacterCreation(this.uiRoot, {
+      onComplete: (choice) => {
+        try {
+          this.applyLiveLook(choice);
+        } finally {
+          // Cleared last, so nothing in `applyLiveLook` runs against a park
+          // that has already started moving again — but cleared *unfailingly*,
+          // which is the point of the `finally`. `lookOpen` is the one
+          // un-derived value the whole derivation hangs off: if it stayed true
+          // because `applyLiveLook` threw, `syncLookPaused` would freeze the
+          // park for ever and `tick`'s Escape branch — guarded on
+          // `!this.lookOpen` — would leave no way to unfreeze it. The dialog
+          // disposes itself either way, so there would not even be anything on
+          // screen to explain why the park had stopped.
+          this.lookOpen = false;
+        }
+      },
+    });
+  }
+
+  /**
+   * Keeps the park's pause a mirror of {@link lookOpen}, re-derived every
+   * frame — see `core/overlayPause.ts`, which owns the reasoning and the one
+   * bug that made it necessary. Escape is *also* excluded in {@link tick}, but
+   * that is the courtesy; this is the fix.
+   */
+  private syncLookPaused(): void {
+    this.lookPause.sync(this.lookOpen);
+  }
+
+  /**
+   * What the "Look" pill's `CharacterCreation` overlay actually changes: the
+   * store (name plus every cosmetic field, exactly as a fresh character
+   * creation would), then the player's own model, name label, and every
+   * system that reads the player's own anchors *live* rather than caching
+   * them — see `WornHat.ts`'s doc comment on why they are built that way.
+   * None of those need reconstructing, only telling that the ground moved:
+   *
+   * - `wornFlower`/`wornHat`/`wornJetpack`, `shopping`'s own
+   *   `CarriedItem`/`EatenTreat` and `parade`'s own `BackpackPeek` all get
+   *   `.rebind()` — the model swap already left each one's own bookkeeping
+   *   pointing at a mesh that no longer exists, so each forgets it and
+   *   redraws from the current fact (worn hat, carried item, whatever) onto
+   *   wherever its anchor closure now resolves.
+   * - the face-paint stall's overlay is keyed off `player.model` by identity,
+   *   not an anchor, so simply calling `attachPlayer` again picks up the new
+   *   one — see `FacePaintStall.attachPlayer`'s own doc comment.
+   *
+   * This list was found by grepping `src/` for everything that reads
+   * `player.model.<anchor>` outside `Player` itself, and it is exhaustive.
+   */
+  private applyLiveLook(choice: CharacterCreationChoice): void {
+    // Riding and climbing are checked *again* here, not only when the pill was
+    // pressed: the two are separated by however long she spends choosing, and
+    // "she was on her feet when this opened" is not the same claim as "she is
+    // on her feet now". The park is frozen throughout (`syncLookPaused`) and
+    // the pill is hidden in both states, so this should be unreachable — it is
+    // here because the cost of being wrong is a model that a ride has already
+    // written state onto, which is exactly the class of bug this whole change
+    // set exists to close.
+    //
+    // Checked before `completeCharacterCreation` rather than after, so the
+    // operation stays all-or-nothing: bailing later would leave the store
+    // carrying a new look that the model on screen does not have.
+    if (this.player.riding || this.treeClimbing.playerClimbing) return;
+
+    gameStore.completeCharacterCreation(choice);
+    const playerState = gameStore.get().player;
+
+    this.player.replaceModel(playerState);
+    this.player.label.setName(playerState.name);
+
+    this.wornFlower.rebind();
+    this.wornHat.rebind();
+    this.wornJetpack.rebind();
+    this.shopping.rebindPlayerModel();
+    this.parade.rebindPlayerModel();
+    this.world.facePaintStall.attachPlayer(this.player);
   }
 
   /**
@@ -827,6 +937,14 @@ export class Game {
   private tick(tick: LoopTick): void {
     this.input.update();
 
+    // Changing her look rebuilds the player's model in place, which a ride or
+    // a climb is not prepared for — see `Hud.setLookAvailable`, which owns the
+    // reasoning. Cheap enough to re-assert every frame; the setter itself
+    // short-circuits when nothing changed.
+    this.hud.setLookAvailable(!this.player.riding && !this.treeClimbing.playerClimbing);
+    // Re-derived every frame, like the shop's and the face-paint stall's.
+    this.syncLookPaused();
+
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
     // The what's-new welcome takes priority over everything else. It can only
     // ever be open in the first moment of a session — before a shop or the
@@ -867,7 +985,14 @@ export class Game {
     } else if (
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
-      !this.world.facePaintStall.uiOpen
+      !this.world.facePaintStall.uiOpen &&
+      // The look overlay owns the screen the same way those two do. Without
+      // this, Escape — the one key anyone presses to back out of a modal —
+      // toggled the pause of the park *behind* the open dialog. `lookOpen`
+      // has no close path of its own, so Escape here is simply ignored;
+      // `syncLookPaused` would put the pause back a frame later anyway, but
+      // ignoring it outright means the park never flickers between the two.
+      !this.lookOpen
     ) {
       gameStore.setPaused(!gameStore.get().paused);
     }

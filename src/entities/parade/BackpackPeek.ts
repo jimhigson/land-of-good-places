@@ -73,7 +73,9 @@ const WAIT_RANGE = 7;
 type Phase = 'waiting' | 'rising' | 'looking' | 'ducking';
 
 export class BackpackPeek {
-  private readonly anchor: Group;
+  /** Read live, not captured once — see {@link rebind} and `WornHat.ts`'s
+   *  doc comment on the identical field. */
+  private readonly anchor: () => Group;
 
   /** Catalogue ids currently sitting in the bag. Refreshed by the parade. */
   private candidates: readonly string[] = [];
@@ -91,9 +93,22 @@ export class BackpackPeek {
   /** Seconds to sit still before the next peek. Re-rolled after every one. */
   private waitFor = 2.5;
 
-  /** `anchor` is the character's `backpackAnchor` — the mouth of the bag. */
-  constructor(anchor: Group) {
+  /** `anchor` resolves to the character's current `backpackAnchor` — the mouth of the bag. */
+  constructor(anchor: () => Group) {
     this.anchor = anchor;
+  }
+
+  /**
+   * The player's model was just rebuilt (`Game.applyLiveLook`). Whoever was
+   * out having a look — if anyone — was a child of the *old* `backpackAnchor`
+   * and was disposed along with it; `clear` already tolerates a handle that
+   * is gone (see its own call sites), so this just ends the peek cleanly and
+   * lets the ordinary wait/rise cycle pick a (possibly different) one later,
+   * onto whatever `anchor()` now resolves to.
+   */
+  rebind(): void {
+    this.clear();
+    this.advance('waiting');
   }
 
   /**
@@ -188,7 +203,7 @@ export class BackpackPeek {
     handle.root.scale.setScalar(PEEK_HEIGHT / Math.max(0.12, this.size));
     this.lean = Math.random() < 0.5 ? -LEAN : LEAN;
     handle.root.position.set(0, DOWN_Y, 0);
-    this.anchor.add(handle.root);
+    this.anchor().add(handle.root);
 
     this.handle = handle;
     this.creature = hasHead(handle) ? handle : null;
