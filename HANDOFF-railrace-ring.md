@@ -202,3 +202,112 @@ touches `parkLayout`, so worth agreeing before changing.
 `RIM_START` in `check-rail-race.mts` is gone, but `WALL_INNER_RADIUS`
 (`train/route.ts`, 59.55) and the railRace exit clamp (`plan.ts:97`,
 `GARDEN_PLAY_RADIUS - 2` = 56) are still stale-in-meaning.
+
+---
+
+# HANDOVER — 5 Aug, mid-camera-rig
+
+Handing over rather than starting the rig. Not a context estimate: my last three
+attempts at *this* problem went in as implement-then-measure rather than
+reason-then-implement, and the relaxation attempt had a consequence I should have
+predicted (smoothing a convex curve inward eats the clearance margin — it fell to
+0.12 m) and instead discovered by running it. That mode is wrong for replacing a
+rig model from scratch.
+
+**Everything below the line is decided. Do not re-litigate it — implement it.**
+
+## The Overseer's three rulings
+
+1. **Camera: change the rig — option (a).** Not (b) constraining the ring's
+   curvature, not (c) moving the 0.9 threshold. **Do not touch that threshold.**
+2. **Retune the procession in this commit**, using **`CATCHUP_BEHIND`**, not
+   `RIVAL_SKILL` — rubber-banding scales with lap length by construction, a skill
+   constant would need retuning again the next time the ring moves. **Target the
+   finish gap `origin/main` had before the ring moved**: measure it there first
+   and restore that number. Do not invent a new feel.
+3. **Move the booth; do not re-derive the invariant.** This is issue **#117** one
+   ride early. The mechanism already exists — `stall.skyCruiser` is governed by a
+   **`near:` relation** in the manifest rather than a band. Use that. **Rail race
+   booth only**; generalising to every stall stays #117's job.
+
+## The camera rig — read this before writing any of it
+
+`RaceCamera.solve` fits **inscribed-angle chord geometry**: it takes the chord
+from the rider to a point `AHEAD` along the track, stands square-on to *that
+chord*, and derives the stand-off as `L / tan(delta)`. The model assumes the
+track between the two points is close to a circular arc.
+
+### Four approaches measured. None green. Do not repeat them.
+
+| approach | result |
+|---|---|
+| solve once at `s = 0` (**what is committed**) | 2 camera FAILs, phone only |
+| solve at the tightest bend | 4 FAILs — wrong everywhere else |
+| solve per station (256) + lerp between them | **7 FAILs, incl. a new one: "looks BACK down the track"** |
+| relax the ring (Laplacian, 120 passes) | camera unchanged; clearance eaten to 0.12 m |
+
+**The third row is the load-bearing measurement, and it is why (b) and (c) are
+both wrong.** Interpolating between 256 per-station solves *increased* the
+failure count and introduced a failure mode none of the single solves had. That
+is only possible if the **model** is wrong rather than its parameterisation: a
+better-sampled wrong model is still wrong, and now inconsistently so between
+neighbours. Refitting the same chord geometry harder — more stations, smarter
+interpolation, a different choice of solve station — cannot work. It is an hour
+of rediscovery if you try.
+
+The fourth row is why (b) is self-defeating twice over: it did not even fix the
+camera, and it damaged the clearance the whole migration exists to establish.
+
+### The direction to take
+
+Build the rig from the **local frame** — the tangent and outward normal at the
+rider's own position, which `RingPath.sampleAt` already returns and which
+`place()` already uses to rebuild position. A frame is defined **pointwise**: it
+does not care what the track does between two stations, which is exactly the
+property the chord lacks.
+
+Concretely, the promise splits into a part that can hold exactly and a part that
+cannot:
+
+- **Rider at `riderNdc`** — a function of the stand-off and the aim's shift along
+  the tangent. Both are local, so this can hold *exactly at every station*.
+- **`AHEAD` at `aheadNdc`** — depends on where the track has gone by then, so it
+  cannot hold exactly on a variable-curvature ring. But `check:rail-race`'s
+  promise is **one-sided**: a window may never see *less* than promised, only
+  more. So solve this at the **tightest** station and every other station
+  over-delivers.
+
+Face the camera along the **negative local normal** (square-on to travel in plan,
+tilted down by `TILT`) rather than square-on to the chord. That is what should
+fix both current failures at once — they share a root cause: the phone rig looks
+28.9° down the track, which is also why riders cross at 0.876 instead of ≥ 0.9.
+
+`camera.ts:245` still holds `stand`/`look` as scalars in the `(out, along, rise)`
+local frame and `place()` rebuilds from them each frame, so the plumbing for a
+local-frame rig is already there — it is `solve` that needs replacing, not the
+class.
+
+## Still outstanding besides the rig
+
+- **`WALL_INNER_RADIUS`** — `src/world/train/route.ts`, 59.55. Stale in meaning.
+- **The exit clamp** — `src/world/railRace/plan.ts:97`,
+  `Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2` (56 m). Should ask
+  `PARK_BOUNDARY.distanceToEdge`, not a radius.
+- `railRaceStallStandsAtTheRim` fails on all five seeds until ruling 3 is done.
+
+## What is already done and should not be redone
+
+`ringPath.ts`, all 11 polar sites in `route.ts`, the arc-length phasing of
+`undulation` (**climb spread 0.0000 m** — verify you have not disturbed it), the
+invariant rewritten onto outset and green on all five seeds, `track.ts`,
+`inward` in `check-rail-race.mts`, and the two Garden constants. See commit
+bb51952.
+
+## The trap that will bite you in the test tree
+
+Do **not** static-import anything seed-dependent into `test/procgen/invariants.ts`.
+The seed reaches `parkManifest.ts` via `LGP_SEED`, read once at module load, so a
+static import pins every seed to the default park — the four sweep suites then
+*silently skip* and you get "1 failed, 18 passed, 76 skipped", where the number
+that looks wrong is the pass count. Reach it through `ParkFacts` instead; it
+already carries `boundary`, `masonryHalfWidth` and `wallCollisionHalf`.
