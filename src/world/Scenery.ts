@@ -15,7 +15,13 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { PLAYER_RADIUS, TERRAIN_RADIUS, TREELINE_INNER_RADIUS } from '../core/constants';
+import { PLAYER_RADIUS } from '../core/constants';
+import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
+
+/** How far inside the park's edge anything may be planted. Was `> 55` against a 60 m wall. */
+const PLANTABLE_MARGIN = 5;
+/** Where the screening woodland starts, beyond the edge. Was 71.5 against a 60 m wall. */
+const TREELINE_OUTSET_INNER = 11.5;
 import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
@@ -343,7 +349,10 @@ function buildFoliage(collision: CollisionWorld): {
   while (treeCount < targetTrees && attempts < 120000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 54;
+    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
+    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
+    // radius would crowd every tree into the middle of a park this shape.
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 2.6)) continue;
@@ -487,7 +496,7 @@ function buildFoliage(collision: CollisionWorld): {
   while (bushCount < 108 && attempts < 5200) {
     attempts += 1;
     const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 55;
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 1.6)) continue;
@@ -591,20 +600,26 @@ function buildTreeline(): Group {
   const trunks: InstanceItem[] = [];
   const canopies: InstanceItem[] = [];
 
-  const bandInner = TREELINE_INNER_RADIUS;
-  const bandOuter = TERRAIN_RADIUS - 1.5;
+  // The band is a distance *beyond the park's edge*, not a pair of radii. It
+  // has to sit the same way relative to the cut on every bearing, or it screens
+  // the terrain edge on one side of the park and stands out on bare hillside on
+  // the other. These are the old numbers restated: the treeline used to begin
+  // 11.5 m outside the masonry and finish 22 m outside it.
+  const bandInner = TREELINE_OUTSET_INNER;
+  const bandOuter = TERRAIN_APRON - 1.5;
   const colours = [PALETTE.leafDeep, PALETTE.leafMid, PALETTE.leafBlue, PALETTE.leafLight];
 
   for (let i = 0; i < 540; i += 1) {
     const angle = rng.range(0, TAU);
-    const distance = rng.range(bandInner, bandOuter);
+    const outset = rng.range(bandInner, bandOuter);
+    const distance = edgeRadiusAt(PARK_BOUNDARY, angle) + outset;
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     const ground = terrainHeight(x, z);
 
     // Slightly taller towards the rim so the band reads as depth, but kept low
     // enough that it screens the terrain edge without swallowing the sky.
-    const rimness = (distance - bandInner) / (bandOuter - bandInner);
+    const rimness = (outset - bandInner) / (bandOuter - bandInner);
     const height = rng.range(2.8, 4.0) + rimness * 1.1;
     const radius = rng.range(1.7, 2.6) + rimness * 0.5;
 
@@ -673,7 +688,9 @@ function facetted<T extends BufferGeometry>(geometry: T): T {
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
  * not on the railway. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
-  if (Math.hypot(x, z) > 55) return false;
+  // Five metres inside the park's own edge — the same margin the old `> 55`
+  // kept from the masonry at 60, now measured from an edge that moves.
+  if (PARK_BOUNDARY.distanceToEdge(x, z) < PLANTABLE_MARGIN) return false;
   if (isOnPath(x, z, clearance)) return false;
   // Keep the fountain plaza open — wherever the layout put it (Decision 5).
   if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;

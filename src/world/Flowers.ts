@@ -1,3 +1,4 @@
+import { edgeRadiusAt, PARK_BOUNDARY } from './boundary';
 import {
   Color,
   CylinderGeometry,
@@ -95,7 +96,8 @@ const PICK_RADIUS = 1.3;
 const WIGGLE_SECONDS = 0.4;
 
 /** Scatter radius, matching the old decorative flowers' footprint. */
-const SCATTER_RADIUS = 55;
+/** How far inside the park's edge flowers stop. Was `55` against a 60 m wall. */
+const FLOWER_MARGIN = 5;
 
 /**
  * Share of the meadow that grows up into a large, pickable flower. The other
@@ -520,7 +522,10 @@ export class Flowers implements GameSystem {
   private pickSpawnPoint(): { x: number; z: number } {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const angle = this.rng.range(0, TAU);
-      const distance = Math.sqrt(this.rng.unit()) * SCATTER_RADIUS;
+      // Scaled to the park's reach on this bearing rather than a fixed radius,
+      // which on a boundary running 57-110 m would leave the wide side bare.
+      const distance =
+        Math.sqrt(this.rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - FLOWER_MARGIN);
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
       if (isOnPath(x, z, 0.5)) continue;
