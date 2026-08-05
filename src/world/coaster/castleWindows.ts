@@ -93,43 +93,54 @@ const SLAB_STEP = 0.05;
  */
 export function openingsFor(route: CoasterRoute): WallOpening[] {
   if (!route.castleSpan) return [];
-  const found = new Map<SideWall, { minZ: number; maxZ: number; trackZ: number; trackY: number }>();
   const point = new Vector3();
   const { from, to } = route.castleSpan;
+  const openings: WallOpening[] = [];
+
+  // One opening per **crossing**, found by contiguity, not one per wall.
+  //
+  // Keying by wall was the first attempt and three of the five CI seeds caught
+  // it: a loop is perfectly entitled to duck into the courtyard and come back
+  // out of the side it came in, and merging those two crossings into a single
+  // opening produced one enormous slot spanning the gap between them — a
+  // missing wall rather than a window. Each pass through the 0.45 m slab is its
+  // own hole, and `segmentsMinusGaps` is happy to leave two gaps in one run.
+  let run: { wall: SideWall; minZ: number; maxZ: number; sumZ: number; sumY: number; n: number } | null = null;
+  const close = (): void => {
+    if (!run) return;
+    openings.push({
+      wall: run.wall,
+      minZ: run.minZ - WINDOW_HALF_WIDTH,
+      maxZ: run.maxZ + WINDOW_HALF_WIDTH,
+      trackZ: run.sumZ / run.n,
+      trackY: run.sumY / run.n,
+    });
+    run = null;
+  };
 
   for (let d = from; d <= to; d += SLAB_STEP) {
     route.pointAt(d, point);
     const { lx, lz } = toCastleLocal(point.x, point.z);
     const depth = Math.abs(lx);
-    if (depth < CASTLE_INNER_X || depth > CASTLE_OUTER_X) continue;
-    const wall: SideWall = lx > 0 ? 'east' : 'west';
-    const ly = point.y - BUILDING_BASE_Y;
-    const existing = found.get(wall);
-    if (!existing) {
-      found.set(wall, { minZ: lz, maxZ: lz, trackZ: lz, trackY: ly });
+    if (depth < CASTLE_INNER_X || depth > CASTLE_OUTER_X) {
+      close();
       continue;
     }
-    found.set(wall, {
-      minZ: Math.min(existing.minZ, lz),
-      maxZ: Math.max(existing.maxZ, lz),
-      // The centre of the slab is what the assert calls "where it went through".
-      trackZ: (existing.trackZ + lz) / 2,
-      trackY: (existing.trackY + ly) / 2,
-    });
+    const wall: SideWall = lx > 0 ? 'east' : 'west';
+    const ly = point.y - BUILDING_BASE_Y;
+    if (run && run.wall !== wall) close();
+    if (!run) {
+      run = { wall, minZ: lz, maxZ: lz, sumZ: lz, sumY: ly, n: 1 };
+      continue;
+    }
+    run.minZ = Math.min(run.minZ, lz);
+    run.maxZ = Math.max(run.maxZ, lz);
+    run.sumZ += lz;
+    run.sumY += ly;
+    run.n += 1;
   }
+  close();
 
-  const openings: WallOpening[] = [];
-  for (const [wall, span] of found) {
-    openings.push({
-      wall,
-      minZ: span.minZ - WINDOW_HALF_WIDTH,
-      maxZ: span.maxZ + WINDOW_HALF_WIDTH,
-      trackZ: span.trackZ,
-      trackY: span.trackY,
-    });
-  }
-  // Deterministic order, so the wall geometry is identical run to run.
-  openings.sort((a, b) => a.wall.localeCompare(b.wall));
   return openings;
 }
 
@@ -300,9 +311,13 @@ export function checkCastleWindows(
     return complaints;
   }
 
-  if (openings.length !== 2) {
+  // Every way in is also a way out, so the count is even and never zero. An
+  // odd count means a crossing was missed, which is the dangerous direction:
+  // a wall crossed with no hole cut in it.
+  if (openings.length === 0 || openings.length % 2 !== 0) {
     complaints.push(
-      `the loop enters the castle but cut ${openings.length} opening(s); a way in and a way out is 2`,
+      `the loop enters the castle but cut ${openings.length} opening(s) — every way in ` +
+        `is a way out, so this should be even and at least 2`,
     );
   }
 

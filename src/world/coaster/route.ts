@@ -223,11 +223,14 @@ const CASTLE_SPAN_PAD = 2;
  * **largest cyclic gap** between them, which is exact for the ordinary case of
  * one visit and degrades sanely to "the whole visit" if a loop ever managed two.
  */
-function castleSpanOf(plan: SolvedRailRoute): { from: number; to: number } | null {
+function spanInsideCastle(
+  sampleAt: (distance: number, into: Vec2) => void,
+  length: number,
+): { from: number; to: number } | null {
   const probe: Vec2 = { x: 0, z: 0 };
   const inside: number[] = [];
-  for (let d = 0; d < plan.length; d += 0.5) {
-    plan.pointAt(d, probe);
+  for (let d = 0; d < length; d += 0.5) {
+    sampleAt(d, probe);
     if (insideCastleFootprint(probe.x, probe.z, CASTLE_SPAN_PAD)) inside.push(d);
   }
   if (inside.length === 0) return null;
@@ -236,7 +239,7 @@ function castleSpanOf(plan: SolvedRailRoute): { from: number; to: number } | nul
   for (let i = 0; i < inside.length; i += 1) {
     const here = inside[i]!;
     const next = inside[(i + 1) % inside.length]!;
-    const gap = i === inside.length - 1 ? next + plan.length - here : next - here;
+    const gap = i === inside.length - 1 ? next + length - here : next - here;
     if (gap > widestGap) {
       widestGap = gap;
       gapAt = i;
@@ -244,7 +247,7 @@ function castleSpanOf(plan: SolvedRailRoute): { from: number; to: number } | nul
   }
   const from = inside[(gapAt + 1) % inside.length]!;
   const to = inside[gapAt]!;
-  return { from, to: to >= from ? to : to + plan.length };
+  return { from: from - 0.5, to: (to >= from ? to : to + length) + 0.5 };
 }
 
 /** Metres from `s` to the nearest end of a (possibly wrapping) span; 0 inside. */
@@ -534,8 +537,13 @@ export class CoasterRoute {
     // Level, not merely low: both openings then sit at the same height, the
     // masonry surround is a plain rectangle rather than a swept slot, and the
     // cart flies straight at the window instead of arriving at it climbing.
-    const castleSpan = castleSpanOf(plan);
-    this.castleSpan = castleSpan;
+    // Measured on the **plan**, because the curve this carves does not exist
+    // yet. The public `castleSpan` below is re-measured on the finished curve:
+    // the two parameterisations are not the same length, and treating one as
+    // the other is a bug this had — plan metres ran ~1.5% short of curve metres,
+    // so the span stopped just before the second wall crossing and one of the
+    // two windows was silently never cut. Three of the five CI seeds caught it.
+    const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
     if (castleSpan) {
       const windowY = castleY(WINDOW_TRACK_Y);
       for (let i = 0; i < controls; i += 1) {
@@ -647,6 +655,16 @@ export class CoasterRoute {
     this.curve = curve;
     this.length = length;
     this.stationDistance = station;
+
+    // The span riders actually fly, in the metres every other consumer counts
+    // in: `openingsFor`, the swept-car assert and the station-overlap check all
+    // index the built curve, so this is measured on the built curve.
+    const built = new Vector3();
+    this.castleSpan = spanInsideCastle((d, into) => {
+      curve.getPointAt(this.wrap(d) / length, built);
+      into.x = built.x;
+      into.z = built.z;
+    }, length);
 
     let crest = 0;
     for (let d = 0; d < length; d += 1) {
