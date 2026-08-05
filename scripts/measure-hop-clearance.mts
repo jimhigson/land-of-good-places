@@ -27,6 +27,7 @@
  * **stuck** (never released at all: pinned against the face, landing and
  * auto-hopping forever). `MAX_AUTO_HOP_HEIGHT` is set from the *clean* column.
  */
+import { circleBoundary } from '../src/world/boundary.ts';
 import {
   CollisionWorld,
   MAX_AUTO_HOP_HEIGHT,
@@ -49,7 +50,7 @@ type Outcome = 'clean' | 'popped' | 'stuck';
 /** Walks a simulated player at one long wall lying along x at z = 0. */
 function attempt(o: Options): Outcome {
   const collision = new CollisionWorld();
-  collision.setPlayBounds(0, 0, 100000);
+  collision.setPlayBounds(circleBoundary(100000));
   collision.addWall(-5000, 0, 5000, 0, o.halfThickness, o.topHeight, true);
 
   const face = o.halfThickness + PLAYER_RADIUS;

@@ -3,6 +3,14 @@ import { GARDEN_PLAY_RADIUS } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';
 
+/** Axis-aligned extent of a boundary. */
+export interface BoundaryExtent {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
 /**
  * **The shape of the park.**
  *
@@ -24,6 +32,12 @@ export interface ParkBoundary {
   readonly area: number;
   /** Furthest the edge ever gets from the origin. Sizing terrain and meshes. */
   readonly maxRadius: number;
+  /**
+   * Axis-aligned extent of the edge, for anything that has to allocate a grid
+   * over the whole space — `NavGrid`'s lattice, chiefly. A radius is not enough
+   * once the shape is neither circular nor centred on the origin.
+   */
+  readonly extent: BoundaryExtent;
   /** The edge as a closed polygon, for anything that has to *draw* it. */
   outline(): readonly (readonly [number, number])[];
 }
@@ -35,17 +49,23 @@ export interface ParkBoundary {
  * Cruiser is handed a much smaller circle than the park's own because the train
  * owns the band outside it. A ride's boundary is not the park's boundary.
  */
-export function circleBoundary(radius: number): ParkBoundary {
+export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBoundary {
   return {
-    contains: (x, z) => Math.hypot(x, z) <= radius,
-    distanceToEdge: (x, z) => radius - Math.hypot(x, z),
+    contains: (x, z) => Math.hypot(x - centreX, z - centreZ) <= radius,
+    distanceToEdge: (x, z) => radius - Math.hypot(x - centreX, z - centreZ),
     area: Math.PI * radius * radius,
     maxRadius: radius,
+    extent: {
+      minX: centreX - radius,
+      maxX: centreX + radius,
+      minZ: centreZ - radius,
+      maxZ: centreZ + radius,
+    },
     outline: () => {
       const points: [number, number][] = [];
       for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
         const angle = (i / PROFILE_SAMPLES) * TAU;
-        points.push([Math.cos(angle) * radius, Math.sin(angle) * radius]);
+        points.push([centreX + Math.cos(angle) * radius, centreZ + Math.sin(angle) * radius]);
       }
       return points;
     },
@@ -96,6 +116,18 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
   }
   const area = Math.abs(twiceArea) / 2;
   const maxRadius = radii.reduce((a, b) => Math.max(a, b), 0);
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const [px, pz] of points) {
+    if (px < minX) minX = px;
+    if (px > maxX) maxX = px;
+    if (pz < minZ) minZ = pz;
+    if (pz > maxZ) maxZ = pz;
+  }
+  const extent: BoundaryExtent = { minX, maxX, minZ, maxZ };
 
   const radiusAt = (bearing: number): number => {
     // Linear interpolation between the two nearest samples. The profile is
@@ -176,6 +208,7 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     distanceToEdge,
     area,
     maxRadius,
+    extent,
     outline: () => points,
   };
 }
@@ -387,6 +420,22 @@ export const PARK_BOUNDARY: ParkBoundary = generateParkBoundary({
   gateBearing: ENTRANCE_ANGLE,
   gateRadius: ENTRANCE_WALL_RADIUS,
 });
+
+/**
+ * **The soft boundary the player is actually held inside today.**
+ *
+ * Still the old circle, deliberately, and this is the one line that changes
+ * when it stops being one. The clamp cannot move to {@link PARK_BOUNDARY} on
+ * its own: the terrain still ends at `TERRAIN_RADIUS` and the masonry is still
+ * a ring at `GARDEN_HALF_SIZE - 2`, so a player allowed out to the generated
+ * edge would walk through where the wall is not and off the side of the world.
+ * The shell migrates in one piece, and then this points at the real boundary.
+ *
+ * It exists at all so the clamp's default and the value `Building` restores on
+ * leaving the castle are the *same object* rather than two copies of one
+ * constant — the failure mode #114 was made of.
+ */
+export const GARDEN_PLAY_BOUNDARY: ParkBoundary = circleBoundary(GARDEN_PLAY_RADIUS);
 
 /**
  * Smallest radius of curvature anywhere on a sampled polar profile.
