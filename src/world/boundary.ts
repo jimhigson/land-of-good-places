@@ -1,5 +1,7 @@
-import { TAU } from '../core/mathUtils';
-import { Rng } from '../core/mathUtils';
+import { Rng, TAU } from '../core/mathUtils';
+import { GARDEN_PLAY_RADIUS } from '../core/constants';
+import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
+import { PARK_SEED } from './parkManifest';
 
 /**
  * **The shape of the park.**
@@ -348,6 +350,43 @@ export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary
   }
   return profileBoundary(best.radii);
 }
+
+/**
+ * How much bigger the generated park is than the circular one it replaces.
+ *
+ * REQUIREMENTS-2026-07-28 §6 asks for "about 2x current". *Current* has never
+ * been written down anywhere — the park's area was only ever implied by
+ * whichever circle you took as its edge — so this multiplies the honest one:
+ * `GARDEN_PLAY_RADIUS`, the soft wall the player is actually held inside.
+ *
+ * **This is deliberately one number.** Which circle "2x" is measured against
+ * changes the park a great deal and is a family decision, not an engineering
+ * one, and every candidate needs the same work underneath. Everything else
+ * derives from the boundary, so changing the answer is changing this line.
+ *
+ * It is not a free dial, though: the gap between the resulting mean radius and
+ * the pinned gate is what the outline has to swell to cover, and that swelling
+ * is where the difference between two seeds' parks comes from. A smaller
+ * multiplier is gentler on the outer shell and makes every park more alike.
+ */
+export const PARK_AREA_MULTIPLIER = 2;
+
+/** The circular park this one replaces — the area the multiplier multiplies. */
+export const CIRCULAR_PARK_AREA = Math.PI * GARDEN_PLAY_RADIUS * GARDEN_PLAY_RADIUS;
+
+/**
+ * **The park.** One per build, from `PARK_SEED`, exactly like the layout.
+ *
+ * Read the seed the same way everything else does, so `LGP_SEED=n` re-rolls the
+ * boundary along with the rest of the park and the invariant suite's five seeds
+ * genuinely get five different parks.
+ */
+export const PARK_BOUNDARY: ParkBoundary = generateParkBoundary({
+  seed: PARK_SEED,
+  targetArea: CIRCULAR_PARK_AREA * PARK_AREA_MULTIPLIER,
+  gateBearing: ENTRANCE_ANGLE,
+  gateRadius: ENTRANCE_WALL_RADIUS,
+});
 
 /**
  * Smallest radius of curvature anywhere on a sampled polar profile.
