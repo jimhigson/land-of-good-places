@@ -71,12 +71,47 @@ never part of the hazard.
 tree peek. `'jump'` is a different action with no chip, so it cannot disagree
 with one.
 
-## Status
+## Why the previous attempt did not fix it
 
-See git log on this branch. Build must pass (`npm run build`, check exit code).
+`HANDOFF-selection-rule.md` records: *"`selectRank`: stations +1, signs and
+flowers -1. QA found 'Pick!' beating 'Get on' because a flower had seeded on the
+platform."* That fixed which chip **shows** — and the family's report is from
+*after* it, with the chip correctly reading "Get on". It could not fix which
+handler **acts**, because dispatch was still an unaddressed broadcast. Selection
+and dispatch were two separate decisions; this change makes them one.
+
+That handoff's decision *"E is not consumed by `Selection` when the thing is in
+reach"* is deliberately **reversed** here — it was a workaround for the rival
+readers, and it goes away with them.
+
+## Status — build green, ready for QA
+
+- `npm run build` → **exit 0** (full check-script chain + `tsc` + `vite build`).
+- `npx vitest run` → **85 passed, 5 seed files**. No procgen files changed, so
+  no new invariant is owed. (`node_modules` was missing from both this worktree
+  and the shared checkout; `npm install` here, never there.)
+- Proof there is nothing left to race:
+  `grep -rn "justPressed('interact')" src/` → only doc comments describing what
+  was removed. `takeInteractPress` has exactly one call site,
+  `InteractRouter.ts:86`.
+- Dev server on **5311**, PID noted at start — kill only that PID.
 
 ## QA needs a human (I do not own the browser)
 
-Station "Get on" with a flower underfoot (**the reported bug**), flowers, tree
-climb + climb down, stalls, shops, toilets, stairs, grown-up, lift panel,
-ferris end card, face paint.
+Open in a **private/incognito window**. In rough priority:
+
+1. **The reported bug.** Stand on a platform with a flower within ~1.3 m, train
+   in, chip reads "Get on" → E must board, never pick.
+2. **Flowers.** Standing at one, E picks it. Standing at nothing, E does nothing.
+3. **Tree climb / un-climb** (the #103 hazard). One E climbs; it must not climb
+   and instantly drop. While peeking, E comes down — as do hop and walking off.
+4. **Stalls** — Ride!/Play!/Enter!, including the ride booths (rail racer, sky
+   cruiser, ferris) and a distant chip tap that walks then acts.
+5. **Ferris end card** — E dismisses it, and does **not** re-enter the booth.
+6. **Shops** — each counter opens its own till, from up close and walked-to.
+7. **Building** — stairs menu, toilets (must still refuse from the doorway),
+   grown-up toggle, lift "Call" chip and the lift panel's own E.
+8. **Face paint**, **what's-new panel** (E still dismisses it).
+
+Doormats: there is no doormat interact handler in this codebase — "doormat" is a
+procgen placement concept (a stall's stand point). Covered by (4).
