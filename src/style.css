@@ -4045,6 +4045,28 @@ kbd {
   gap: 0.375rem;
 }
 
+/* Landscape: side by side rather than stacked. `.shop-card`'s own height is
+   capped at `88vh` (see its own rule), which on a typical landscape phone is
+   short enough that two full-height buttons stacked on top of each other
+   eat a real fraction of the card — side by side costs one row instead of
+   two. `.welcome-keep` gets the larger share: it is still the safe answer
+   under the thumb, same as the portrait column, just wide rather than tall. */
+@media (orientation: landscape) {
+  .welcome-foot {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .welcome-keep {
+    flex: 1.6;
+  }
+
+  .welcome-restart {
+    flex: 1;
+    width: auto;
+  }
+}
+
 /* Deliberately not a `.shop-buy`: no fill, no shadow, no lift on press, and
    the smallest type the TEXT RULE allows. It should read as a way out rather
    than as the other half of a pair of buttons — a pair invites a coin-flip. */

@@ -77,7 +77,6 @@ export class ContinueOrRestart {
       '<span class="shop-glyph">🌈</span>' +
       '<div class="shop-titles">' +
       `<h2 class="shop-title">Welcome back, ${name}!</h2>` +
-      '<p class="shop-greeting">Your park is just how you left it.</p>' +
       '</div>' +
       '</div>' +
       `<div class="welcome-facts">${this.factsHtml()}</div>` +
@@ -85,7 +84,7 @@ export class ContinueOrRestart {
       '<button type="button" class="shop-buy welcome-keep">' +
       '<span class="emoji">▶️</span><span>Keep playing!</span>' +
       '</button>' +
-      '<button type="button" class="welcome-restart">Start a new game instead</button>' +
+      '<button type="button" class="welcome-restart">New game instead</button>' +
       '</div>';
 
     this.card.querySelector('.welcome-keep')?.addEventListener('click', () => this.keep());
