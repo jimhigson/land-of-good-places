@@ -239,6 +239,13 @@ export class TreeClimbing implements GameSystem {
   private updatePlayerClimb(context: FrameContext): void {
     const tree = this.playerTree;
     if (!tree) {
+      // Bailing out has to undo everything the climb did, not just the phase.
+      // Clearing the phase alone left her hidden (the body is only restored on
+      // a normal descent) *and* still `riding`, which is a player who cannot
+      // move and cannot be seen. Cheap to make safe, and impossible to notice
+      // in testing if it is ever reachable.
+      this.showPlayerBody();
+      if (this.player.riding) this.player.endRide(0, 0, 0);
       this.playerPhase = null;
       return;
     }
