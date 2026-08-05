@@ -107,6 +107,42 @@ export const CLIMB_WAVE_ARM_Z = -0.75;
 /** How far the hand wags either side of {@link CLIMB_WAVE_ARM_Z}. */
 export const WAVE_WAGGLE = 0.42;
 
+/** The limbs {@link applyRidePose} moves. `CharacterModel` satisfies this. */
+export interface RidePoseTarget {
+  readonly body: { rotation: { x: number } };
+  readonly leftArm: { rotation: { x: number; z: number } };
+  readonly rightArm: { rotation: { x: number; z: number } };
+  readonly leftLeg: { rotation: { x: number } };
+  readonly rightLeg: { rotation: { x: number } };
+}
+
+/**
+ * The pose worn on any ride — "holding on, delighted" — with the tree-climb
+ * wave blended over it.
+ *
+ * Extracted from `Player.update`'s riding branch so that
+ * `scripts/check-climb-wave.mts` can pose a kid **exactly** as the game does.
+ * It used to be inline, and a check that re-implements a pose is a check that
+ * can pass a pose the game never renders — which is the precise way the first
+ * version of this wave shipped invisible.
+ */
+export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed: number): void {
+  model.leftArm.rotation.x = -2.5;
+  model.rightArm.rotation.x = -2.5;
+  model.leftArm.rotation.z = 0.5;
+  model.rightArm.rotation.z = -0.5;
+  model.body.rotation.x = 0.3;
+  model.leftLeg.rotation.x = -0.7;
+  model.rightLeg.rotation.x = -0.55;
+  // Same arm and the same waggle as the crowd's wave (`NpcCharacter.animate`),
+  // so one gesture reads across the whole park.
+  if (climbWave > 0) {
+    const waggle = Math.sin(elapsed * 11) * WAVE_WAGGLE;
+    model.rightArm.rotation.x = lerp(-2.5, CLIMB_WAVE_ARM_X, climbWave);
+    model.rightArm.rotation.z = lerp(-0.5, CLIMB_WAVE_ARM_Z + waggle, climbWave);
+  }
+}
+
 /**
  * How far ahead — in the direction actually being walked — the auto-hop
  * feature (design feedback #30e) looks for a wall it could jump. Small: this
@@ -751,21 +787,7 @@ export class Player implements GameSystem {
       this.wornJetpack?.setThrust(0);
       this.gait = damp(this.gait, 0, 0.1, dt);
       this.animate(context, 0);
-      this.model.leftArm.rotation.x = -2.5;
-      this.model.rightArm.rotation.x = -2.5;
-      this.model.leftArm.rotation.z = 0.5;
-      this.model.rightArm.rotation.z = -0.5;
-      this.model.body.rotation.x = 0.3;
-      this.model.leftLeg.rotation.x = -0.7;
-      this.model.rightLeg.rotation.x = -0.55;
-      // The tree-climb wave, blended over the hold-on pose the ride just set.
-      // Same arm and the same waggle as the crowd's wave
-      // (`NpcCharacter.animate`), so one gesture reads across the whole park.
-      if (this.climbWave > 0) {
-        const waggle = Math.sin(context.elapsed * 11) * WAVE_WAGGLE;
-        this.model.rightArm.rotation.x = lerp(-2.5, CLIMB_WAVE_ARM_X, this.climbWave);
-        this.model.rightArm.rotation.z = lerp(-0.5, CLIMB_WAVE_ARM_Z + waggle, this.climbWave);
-      }
+      applyRidePose(this.model, this.climbWave, context.elapsed);
       return;
     }
 
