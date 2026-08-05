@@ -8,6 +8,7 @@ import {
   KEYBOARD_MOVE_BINDINGS,
   MOUSE_ACTION_BINDINGS,
   type GameAction,
+  type InteractFreeAction,
 } from './actions';
 
 /** A read-only snapshot of "what the player is asking for" this frame. */
@@ -207,8 +208,14 @@ export class InputSystem {
    *
    * The press is held for a couple of frames so that `justPressed` sees a clean
    * edge even if the finger was quicker than the frame.
+   *
+   * **Not `interact`** — that is the same exclusion {@link justPressed} makes,
+   * and it closes the last back door onto issue #122. A synthesised interact
+   * edge is *unaddressed*: it says "somebody use something", which is precisely
+   * the bug. An action chip runs its zone's own `run()` closure now
+   * (`world/interact.ts`), so it reaches one named thing and nothing else.
    */
-  pressVirtual(action: GameAction): void {
+  pressVirtual(action: InteractFreeAction): void {
     this.virtualPresses.set(action, VIRTUAL_PRESS_FRAMES);
   }
 
@@ -223,15 +230,14 @@ export class InputSystem {
    * several frames — the same way a real key or gamepad button already
    * reports "held" for as long as it is physically down. `pressVirtual`'s
    * two-frame pulse could only ever produce an edge, never a state, so it
-   * cannot stand in for a key here. `interact` still uses `pressVirtual`; it
-   * has no hold behaviour to represent.
+   * cannot stand in for a key here.
    *
    * The caller owns both ends. `ui/ScreenControls.ts` clears it on `pointerup`,
    * `pointercancel` *and* `pointerleave`, which is the same triple that already
    * clears the pressed styling — so a thumb sliding off the button stops the
    * climb exactly as it stops the glow.
    */
-  holdVirtual(action: GameAction, held: boolean): void {
+  holdVirtual(action: InteractFreeAction, held: boolean): void {
     if (held) this.virtualHolds.add(action);
     else this.virtualHolds.delete(action);
   }
@@ -278,13 +284,45 @@ export class InputSystem {
     return this.down.has(action);
   }
 
-  /** True only on the frame the action went down. */
-  justPressed(action: GameAction): boolean {
+  /**
+   * True only on the frame the action went down.
+   *
+   * **`interact` is deliberately not askable here** — see
+   * {@link takeInteractPress}. The exclusion is the whole of issue #122's fix:
+   * it is what makes "a handler acts on something other than the chip a child
+   * is looking at" a compile error rather than a thing to remember.
+   */
+  justPressed(action: InteractFreeAction): boolean {
     return this.pressed.has(action);
   }
 
+  /**
+   * The interact edge, taken once.
+   *
+   * Every other action may be read by anyone, any number of times, because
+   * every other action means the same thing wherever you are standing: `jump`
+   * hops, `menu` opens the menu. `interact` does not — it means *"use the thing
+   * I am looking at"*, and only `world/Selection.ts` knows what that is.
+   *
+   * So this is the one door, and `world/InteractRouter.ts` is the one caller.
+   * Reading it **consumes** it: a second caller in the same frame gets `false`.
+   * That is belt and braces on top of {@link justPressed}'s type excluding
+   * `interact` — the type stops the code being written, this stops it working
+   * if it ever is.
+   *
+   * The bug that earned all this (family QA, 28 July 2026): the chip over the
+   * platform said "Get on", and E picked a flower. Twelve systems each read
+   * this edge and each decided for itself, from its own radius, whether the
+   * press was meant for it.
+   */
+  takeInteractPress(): boolean {
+    if (!this.pressed.has('interact')) return false;
+    this.pressed.delete('interact');
+    return true;
+  }
+
   /** True only on the frame the action came back up. */
-  justReleased(action: GameAction): boolean {
+  justReleased(action: InteractFreeAction): boolean {
     return this.released.has(action);
   }
 

@@ -1,7 +1,6 @@
 import type { WebGLRenderer } from 'three';
 import type { Engine } from '../core/Engine';
 import type { InputSystem } from '../core/input';
-import type { FrameContext } from '../core/types';
 import { PALETTE } from '../core/palette';
 import { Transition } from './Transition';
 import { MiniGameOverlay } from './overlay';
@@ -31,8 +30,14 @@ import type { MiniGame, MiniGameInput, MiniGameResult } from './types';
  * zero.
  */
 
-/** How close you have to be standing to open a stall, in metres. */
-const REACH = 3.4;
+/**
+ * How close you have to be standing to open a stall, in metres.
+ *
+ * Only {@link MiniGameHost.riding}'s doc refers to it now: the press itself is
+ * routed by the selection, whose own `standRadiusOf` is what the chip is drawn
+ * from, so this is no longer a second opinion about who a press was meant for.
+ */
+export const STALL_REACH = 3.4;
 
 type Phase =
   /** Park is running, nothing to do. */
@@ -141,11 +146,15 @@ export class MiniGameHost {
    * Takes the loop's real `dt` rather than the frame context's, because the
    * context's is zeroed the moment {@link frozen} goes true — the park stopping
    * is precisely what a mini-game must not do.
+   *
+   * It takes *only* `dt` now. The frame context was here for `checkStalls`,
+   * which polled the interact key and swept every booth for one within its own
+   * reach; stalls are opened by name through {@link enter} since issue #122, so
+   * there is nothing left here that needs to know where the player is standing.
    */
-  update(dt: number, context: FrameContext): void {
+  update(dt: number): void {
     switch (this.phase) {
       case 'idle':
-        this.checkStalls(context);
         return;
 
       case 'in':
@@ -200,7 +209,6 @@ export class MiniGameHost {
 
   // -------------------------------------------------------------- internals
 
-  /** Standing next to a stall and pressing interact opens it. */
   /**
    * Booths that board world rides instead of opening a mini-game — Game
    * wires stall ids to the rides' `requestBoard`s. The 2D rail racer scene
@@ -215,7 +223,7 @@ export class MiniGameHost {
    * booth is *standing* there. That is true of the train and both coasters,
    * which carry her away down a track — and false of the ferris wheel, whose
    * rider never moves: `beginRide` freezes her, the gondola is what rises, and
-   * she stays on the wheel's own doormat, well inside REACH, for the whole
+   * she stays on the wheel's own doormat, well inside {@link STALL_REACH}, for the whole
    * ninety seconds. So a press of E mid-ride re-entered her own booth, dropped
    * the curtain over the running ride, found no mini-game behind it and wiped
    * back out. Worse, E is one of the two keys that dismisses the end card, so
@@ -223,17 +231,22 @@ export class MiniGameHost {
    */
   riding: (() => boolean) | null = null;
 
-  private checkStalls(context: FrameContext): void {
-    if (!context.input.justPressed('interact')) return;
+  /**
+   * Open this stall, or board the world ride behind it — the run body of the
+   * booth's own chip (`minigames/stalls.ts`).
+   *
+   * Named rather than searched. This replaced a `checkStalls` that read
+   * `justPressed('interact')` and then swept every stall for one within
+   * `REACH`, which is the shape of bug GitHub issue #122 is about: a radius of
+   * its own, disagreeing with the radius the chip was drawn from, racing every
+   * other system doing the same thing for the same key. `Selection` has already
+   * decided this booth is the selected thing before this runs.
+   */
+  enter(stallId: string): void {
     if (this.riding?.()) return;
-    const { x, z } = context.playerPosition;
-    for (const stall of this.stalls) {
-      if (Math.hypot(x - stall.standX, z - stall.standZ) <= REACH) {
-        if (this.boardRide?.(stall.definition.id)) return;
-        this.begin(stall);
-        return;
-      }
-    }
+    if (this.boardRide?.(stallId)) return;
+    const stall = this.stalls.find((candidate) => candidate.definition.id === stallId);
+    if (stall) this.begin(stall);
   }
 
   private begin(stall: StallInstance): void {
@@ -261,7 +274,7 @@ export class MiniGameHost {
     const factory = stall.definition.create;
     if (!factory) {
       // A ride-boarding stall with no mini-game behind it: boardRide should
-      // have taken it in checkStalls; ending up here means the wiring is
+      // have taken it in `enter`; ending up here means the wiring is
       // missing, and saying so beats a silent black curtain.
       console.warn(`stall '${stall.definition.id}' has no mini-game and no ride wiring`);
       this.finishLeaving();

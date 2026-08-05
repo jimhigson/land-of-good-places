@@ -21,9 +21,11 @@ import { terrainHeight } from './terrain';
  * scramble in reverse) — computed by the pure {@link climbPose} function at
  * the bottom of this file. What differs is who drives it:
  *
- * - The **player**'s phase timer lives here, directly, and is driven by the
- *   `interact` action (or a tap) to start and `interact`/`jump`/moving/a tap
- *   to end. Positioning reuses `Player.beginRide/setRidePose/endRide` — the
+ * - The **player**'s phase timer lives here, directly. It is started by the
+ *   tree's own chip action and ended by `jump`, by moving, by a tap, or by the
+ *   interact key arriving back through `world/InteractRouter.ts`'s
+ *   `playerPeeking` claim — this class reads the interact key nowhere at all
+ *   (issue #122). Positioning reuses `Player.beginRide/setRidePose/endRide` — the
  *   exact mechanism already used to hand the character to a slide — so
  *   normal movement, collision and tap-to-move all switch off for free while
  *   `player.riding` is true, and switch back on the moment `endRide` fires.
@@ -132,14 +134,46 @@ export class TreeClimbing implements GameSystem {
           pickRadius: tree.trunkRadius + 2.6,
           standX,
           standZ,
-          // The same margin `nearestClimbableTree` climbs within, measured from
-          // the trunk's surface rather than its centre — so the "Climb!" chip
-          // and the E key it names agree about how close is close enough.
+          // Measured from the trunk's surface rather than its centre, so a
+          // child standing anywhere she could plausibly reach the bark from is
+          // offered the chip. It is now the *only* distance in play: the E key
+          // runs this zone's own action, so there is no second margin for it to
+          // disagree with (issue #122).
           standRadius: tree.trunkRadius + INTERACT_MARGIN,
         },
+        // This tree, and no other. `Selection` has already established that it
+        // is the selected thing and that she is standing within `standRadius`
+        // of it, so there is no `nearestClimbableTree` search here to come to a
+        // different answer than the chip did (issue #122).
+        () => this.requestClimb(tree),
         '🌳',
       );
     });
+  }
+
+  /**
+   * "Climb this one" — the run body of a tree's own chip.
+   *
+   * Re-checks the gates rather than trusting them from when the chip was drawn:
+   * a chip pressed from across the park walks her over first, and in those few
+   * seconds she may have been put on a slide or already be up something else.
+   */
+  private requestClimb(tree: ClimbableTreeSeed): void {
+    if (this.playerPhase !== null) return;
+    if (this.player.riding) return;
+    this.beginPlayerClimb(tree);
+  }
+
+  /**
+   * True while she is up a tree and looking around — the one moment when a
+   * press means "come down".
+   *
+   * Read by `world/InteractRouter.ts` as a claim. It is exclusive by
+   * construction: `player.riding` is true throughout, so no zone is selectable
+   * and there is no chip for a press to disagree with.
+   */
+  get playerPeeking(): boolean {
+    return this.playerPhase === 'peek';
   }
 
   /** A tap landed anywhere while the player is up a tree: that means "come down". */
@@ -153,35 +187,22 @@ export class TreeClimbing implements GameSystem {
 
     if (this.playerPhase !== null) {
       this.updatePlayerClimb(context);
-      return;
     }
 
-    // No prompt of its own any more: the SELECTION RULE's "Climb!" chip over the
-    // tree is what says a tree can be climbed, and it is the same one system
-    // that offers everything else in the park (`world/Selection.ts`). This still
-    // owns the press itself, exactly as it always did.
-    const tree = this.nearestClimbableTree(context.playerPosition.x, context.playerPosition.z);
-    if (!tree) return;
-
-    if (context.input.justPressed('interact') && !this.player.riding) {
-      this.beginPlayerClimb(tree);
-    }
+    // Climbing is *started* by the tree's own chip action and nothing else —
+    // see `interactZones` above. This used to search for the nearest climbable
+    // tree and read `justPressed('interact')` itself, which is exactly the
+    // pattern issue #122 removed: a second proximity test, with its own margin,
+    // racing every other system's second proximity test for the same key.
+    //
+    // It is also the end of the double-fire hazard noted on #103. Climb and
+    // un-climb were two independent readers of one global edge, kept apart only
+    // by the order the systems happen to run in and by `Selection` refusing to
+    // act in reach. Climb is a zone action now, un-climb is a router claim, and
+    // the key itself has exactly one reader.
   }
 
   // ============================================================== player
-
-  private nearestClimbableTree(x: number, z: number): ClimbableTreeSeed | null {
-    let best: ClimbableTreeSeed | null = null;
-    let bestMargin = INTERACT_MARGIN;
-    for (const tree of this.trees) {
-      const margin = Math.hypot(tree.x - x, tree.z - z) - tree.trunkRadius;
-      if (margin < bestMargin) {
-        best = tree;
-        bestMargin = margin;
-      }
-    }
-    return best;
-  }
 
   private beginPlayerClimb(tree: ClimbableTreeSeed): void {
     this.playerTree = tree;
@@ -253,8 +274,13 @@ export class TreeClimbing implements GameSystem {
       this.player.model.setExpression('happy');
       this.hud.setPrompt(descendPrompt());
 
-      const wantsDown =
-        input.justPressed('interact') || input.justPressed('jump') || input.moveAmount > 0.22;
+      // The interact key is *not* read here — `world/InteractRouter.ts` holds
+      // the only reader in the game and routes it back through
+      // {@link requestDescend} via the `playerPeeking` claim. Hopping and
+      // walking off still work from here, because `jump` and the stick mean the
+      // same thing wherever she is standing and so can never be aimed at the
+      // wrong thing.
+      const wantsDown = input.justPressed('jump') || input.moveAmount > 0.22;
       if (wantsDown) this.beginPlayerDescend();
       return;
     }
