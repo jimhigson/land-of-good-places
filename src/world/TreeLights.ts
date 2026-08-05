@@ -22,6 +22,8 @@ import { clamp01, lerp, Rng, smoothstep } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
 import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
+import { COASTER_PLANS } from './coaster/plan';
+import { CART_ENVELOPE } from './coaster/cart';
 import type { FoliageOccluder } from './Scenery';
 import type { TrainRoute } from './train';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -645,9 +647,47 @@ function spanIsClear(
     const x = lerp(from.x, to.x, t);
     const z = lerp(from.z, to.z, t);
     if (isOnPath(x, z, PATH_CLEARANCE)) return false;
+    if (crossesTheCruiser(x, z, lerp(from.y, to.y, t))) return false;
   }
 
   return true;
+}
+
+/**
+ * Clearance kept between a wire and the Sky Cruiser's car, in metres.
+ *
+ * Half a car plus the wire's own tube and a little either side. Small on
+ * purpose: this is a "does not touch" rule like the ride's own clearance check,
+ * not a generous band. See `coaster/clearance.ts`.
+ */
+const CRUISER_WIRE_GAP = CART_ENVELOPE.halfWidth + 0.5;
+
+/**
+ * Would a wire tied at `tieY` and passing over (x, z) meet the Sky Cruiser?
+ *
+ * The trees at either end are already kept out of the ride's way
+ * (`clearOfCruiser` in `Scenery.ts`, #198) — but **a wire between two trees
+ * that are each clear can still span the gap between them**, and on seed 5 one
+ * did: `tree-light-wires` struck the car 181 m along the loop, 3 m up, on the
+ * station approach where the ride is down at boarding height. Keeping the posts
+ * clear was never going to be enough, because the thing in the way is the span,
+ * not its ends.
+ *
+ * Vertically honest rather than a plan-view veto: a wire is only in the way
+ * where the car actually passes through its height. Everywhere else the ride is
+ * at cruise, several metres over the tallest tree a wire can be tied to, and
+ * refusing those pairs would thin the garlands for nothing.
+ *
+ * The wire hangs *below* its chord, by up to {@link MAX_SAG}, so the band
+ * checked runs from the tie down to the deepest it could sag.
+ */
+function crossesTheCruiser(x: number, z: number, tieY: number): boolean {
+  const route = COASTER_PLANS.cruiser.route;
+  const near = route.nearestPoint(x, z);
+  if (Math.hypot(near.x - x, near.z - z) > CRUISER_WIRE_GAP) return false;
+  const carLow = near.y - CART_ENVELOPE.below;
+  const carHigh = near.y + CART_ENVELOPE.above;
+  return tieY - MAX_SAG <= carHigh && tieY >= carLow;
 }
 
 /**

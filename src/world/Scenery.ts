@@ -31,6 +31,7 @@ import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
+import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
 
 /**
@@ -289,6 +290,55 @@ const TREE_REACH: Record<TreeKind, number> = {
   blossom: 3.55,
 };
 
+/**
+ * How high each kind of tree can reach above its own ground, in metres.
+ *
+ * {@link TREE_REACH}'s vertical twin, reserved the same way and for the same
+ * reason: a candidate is refused for the height it *could* take rather than the
+ * height it happens to roll, because {@link clearOfCruiser} is asked before the
+ * tree is rolled in detail. Ceilings, from the same literals the scatter below
+ * draws from — trunk `rng.range(2.3, 3.7)`, so 3.7 of trunk in every case, plus:
+ *
+ * - `pine` — the top cone sits at most `1.5 * 2/3 - 0.6` above the trunk and is
+ *   at most `2.2` tall on a `ConeGeometry(1, 1)`, so half of it clears the
+ *   centre. Ceiling 3.7 + 1.36, rounded to 5.2.
+ * - `stack` — the third blob rides `2 * radius * 0.92` up and adds its own
+ *   radius on an `IcosahedronGeometry(1, …)`, which spans ±1. Ceiling 6.6.
+ * - `lollipop` / `blossom` — a ball of up to 2.5 centred `radius * 0.42` above
+ *   the trunk and standing `radius * 1.0` above that: `2.5 * 1.42` = 3.55, so
+ *   7.25. These are the tallest thing on the lawn as well as the widest, and
+ *   they are the reason this is a table rather than one number.
+ *
+ * The measured tallest canopy in the canonical park is 6.68 m, which sits
+ * between the `stack` and `lollipop` ceilings exactly as it should.
+ */
+const TREE_TOP: Record<TreeKind, number> = {
+  pine: 5.2,
+  stack: 6.6,
+  lollipop: 7.25,
+  blossom: 7.25,
+};
+
+/**
+ * A bush clump's reach and height ceilings.
+ *
+ * Blobs roll `rng.range(0.7, 1.3)` and are nudged up to `0.85` off centre, so
+ * 2.15 across; each stands `radius * (0.72 + 0.9)` tall, so 2.11 up. The tallest
+ * measured in the canonical park is 2.07 m.
+ */
+const BUSH_REACH = 2.15;
+const BUSH_TOP = 2.15;
+
+/**
+ * The tallest a wall run stands, in metres.
+ *
+ * Wooden hiding walls roll from `[0.8, 0.95, 1.5, 1.8, 2.1, 2.6]` and the stone
+ * runs top out at 0.95, so 2.6 covers both. A wall is short enough that it only
+ * ever meets the ride right at the station — which is exactly where seed 5 flew
+ * through one.
+ */
+const WALL_TOP = 2.6;
+
 function buildFoliage(collision: CollisionWorld): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
@@ -361,6 +411,17 @@ function buildFoliage(collision: CollisionWorld): {
   // rule worth keeping: the extra attempts are load time a child waits through.
   // The honest fix for the shortfall is still a scatter that does not
   // rejection-sample a tight lawn at all, which is a bigger job than this one.
+  //
+  // `clearOfCruiser` below then costs **one more tree on seed 5** — 26 becomes
+  // 25 — which still clears the floor but leaves only one tree of slack. That
+  // is thin, and the slack is not this refusal's to give back: two of seed 5's
+  // three lost trees are the castle-and-#196 knock-on above. Note also that
+  // 210 000 is *not* available as headroom here even though it is on the castle
+  // branch alone: this scatter arranges differently and strands a waypoint at
+  // (-13.8, 15.6), which `check:park` refuses with no allowance. Isolated
+  // rather than guessed — trees and walls use separate RNG streams, and
+  // disabling the wall keep-out left the stranding in place while reverting the
+  // budget alone cleared it.
   while (treeCount < targetTrees && attempts < 180000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
@@ -375,6 +436,11 @@ function buildFoliage(collision: CollisionWorld): {
     // The walls are decided before any of this runs, so a tree that would grow
     // into one is simply refused the spot. See `clearOfWalls`/`TREE_WALL_GAP`.
     if (!clearOfWalls(x, z, reach)) continue;
+    // ...and so is the Sky Cruiser's loop, which dips to boarding height beside
+    // its station and would otherwise fly straight through this canopy (#198).
+    // Asked here rather than in `isPlantable` because it wants the kind, which
+    // is already picked above — so no RNG draw moves to make room for it.
+    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) continue;
     planted.push({ x, z, reach });
     const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
@@ -512,6 +578,7 @@ function buildFoliage(collision: CollisionWorld): {
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 1.6)) continue;
+    if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
 
     // Bushes come in clumps of two or three overlapping blobs.
     const blobs = rng.int(2, 3);
@@ -757,6 +824,122 @@ function onRailway(x: number, z: number, clearance: number): boolean {
 }
 const railProbe = new Vector3();
 
+/**
+ * **Where the Sky Cruiser flies too low for this plant to stand under it.**
+ *
+ * Issue #198: the ride flew through a tree canopy and a bush beside its station
+ * on every one of the five CI seeds, and through a wooden wall run on seed 5.
+ *
+ * The dependency has to point this way round, and not because it is tidier —
+ * because the other way is impossible. `COASTER_PLANS` is a module-load
+ * constant (`coaster/plan.ts`), so the loop is fully solved before `new World()`
+ * runs, while the scatter below happens inside that constructor. **At the moment
+ * the route solves, not one tree exists to avoid.** That is the same inversion
+ * {@link onRailway} describes for the train, for the same reason, and it is why
+ * the fix #198 originally proposed — widening the solver's station window —
+ * could not have worked: `groundClearOfPlots` reads `PARK_LAYOUT`, which holds
+ * twelve plots and no foliage whatsoever. The bush the canonical seed struck
+ * was 3.5 m from the platform, already inside the window that was there.
+ *
+ * ### Why it asks the plant's own height instead of keeping a flat corridor
+ *
+ * The cruise floor's comment used to claim 6.2 m "clears the trees". Measured,
+ * a canopy reaches **6.68 m** above its own ground and the car's underside at
+ * cruise is 6.04 m, so a tall tree under the cruise line is a strike waiting for
+ * a seed to place one. But a flat keep-out sized for the tallest possible tree
+ * would then apply along most of the loop and take a wide swathe out of a lawn
+ * that is already tight enough that the scatter runs out of attempts before it
+ * runs out of targets.
+ *
+ * So the test is the real one: is the car's underside, anywhere it passes near
+ * enough, **below this plant's own top**. A bush lives happily under track a
+ * lollipop tree cannot, which is both true and cheap.
+ *
+ * Thresholds come from the ride ({@link CART_ENVELOPE} in `coaster/cart.ts`),
+ * never from the generator's `CORRIDOR_RADIUS` — asserting a solver's own target
+ * proves only that it can do arithmetic.
+ */
+interface CruiserSample {
+  readonly x: number;
+  readonly z: number;
+  /** World height of the underside of the car's envelope here. */
+  readonly underY: number;
+}
+
+/**
+ * Grid cell for {@link cruiserGrid}, in metres.
+ *
+ * Comfortably wider than the widest question anything asks of it (a lollipop's
+ * 3.55 m reach plus the car's 0.75 m half-width), so a lookup never has to walk
+ * more than a 2x2 block of cells.
+ */
+const CRUISER_CELL = 8;
+
+let cachedCruiserGrid: Map<string, CruiserSample[]> | null = null;
+
+/**
+ * The loop, once, bucketed by ground position.
+ *
+ * Memoised like {@link wallPlan}: every candidate plant asks the same question
+ * of the same solved route. Sampled at half-metre steps, so nothing thin is
+ * stepped over — the same spacing `coaster/clearance.ts` sweeps its rays at.
+ *
+ * Bucketed rather than kept as one list because this is asked a *lot*: the tree
+ * scatter alone rejection-samples a quarter of a million candidates, and
+ * scanning all ~370 samples for each of them doubled the headless park build
+ * from 0.9 s to 1.8 s. Against the grid it is four cells and a handful of
+ * distances.
+ */
+function cruiserGrid(): Map<string, CruiserSample[]> {
+  if (cachedCruiserGrid) return cachedCruiserGrid;
+  const route = COASTER_PLANS.cruiser.route;
+  const grid = new Map<string, CruiserSample[]>();
+  const point = new Vector3();
+  for (let d = 0; d < route.length; d += 0.5) {
+    route.pointAt(d, point);
+    const sample: CruiserSample = {
+      x: point.x,
+      z: point.z,
+      underY: point.y - CART_ENVELOPE.below,
+    };
+    const key = `${Math.floor(sample.x / CRUISER_CELL)},${Math.floor(sample.z / CRUISER_CELL)}`;
+    const cell = grid.get(key);
+    if (cell) cell.push(sample);
+    else grid.set(key, [sample]);
+  }
+  cachedCruiserGrid = grid;
+  return grid;
+}
+
+/**
+ * Is there room here for something `reach` wide and `topY` tall, clear of the
+ * Sky Cruiser?
+ *
+ * `topY` is metres above this spot's own ground, so it is compared against the
+ * car in world height — the track and the plant stand on different terrain.
+ */
+function clearOfCruiser(x: number, z: number, reach: number, topY: number): boolean {
+  const plantTop = terrainHeight(x, z) + topY;
+  const needed = reach + CART_ENVELOPE.halfWidth;
+  const grid = cruiserGrid();
+  const minCellX = Math.floor((x - needed) / CRUISER_CELL);
+  const maxCellX = Math.floor((x + needed) / CRUISER_CELL);
+  const minCellZ = Math.floor((z - needed) / CRUISER_CELL);
+  const maxCellZ = Math.floor((z + needed) / CRUISER_CELL);
+  for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+      const cell = grid.get(`${cellX},${cellZ}`);
+      if (!cell) continue;
+      for (const sample of cell) {
+        // The car is over the top of this plant here, so it may stand under it.
+        if (sample.underY >= plantTop) continue;
+        if (Math.hypot(sample.x - x, sample.z - z) < needed) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function insideAnyAnchor(x: number, z: number, margin: number): boolean {
   // Every placed entry, not just the five big anchors: the stalls and their
   // stand points are in the layout too, and a maze wall built beside a booth
@@ -792,6 +975,11 @@ function runIsClear(x1: number, z1: number, x2: number, z2: number): boolean {
     const z = z1 + (z2 - z1) * t;
     if (!isPlantable(x, z, 3.2)) return false;
     if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+    // Seed 5 built a hiding wall across the cruiser's station approach and the
+    // ride flew through it (#198). Safe to ask here, unlike `clearOfWalls`:
+    // the coaster is solved at module load and knows nothing of this file.
+    // The wider of the two kinds: this gate serves both generators.
+    if (!clearOfCruiser(x, z, WALL_HALF_WIDTH.stone, WALL_TOP)) return false;
   }
   return true;
 }

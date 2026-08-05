@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:glasses-fit && npm run check:hood-face && npm run check:baked-face && npm run check:character-parity && npm run check:hair && npm run check:crowd && npm run check:ride-camera && npm run check:orientation && npm run check:sky-view && npm run check:space-night && npm run check:waypoints && npm run check:park && npm run check:jitter && npm run check:rail-race && npm run check:cart-shape && npm run check:tie-frame && npm run check:cruiser-solves && npm run check:cruiser-turn-radius && npm run check:castle-window && npm run check:backpack-peek && npm run check:statue-occlusion && vite build",
+    "build": "npm run check:text && npm run check:shop-spacing && npm run check:gondola-sightline && npm run check:hop-clearance && tsc --noEmit && npm run check:brevity && npm run check:assets && npm run check:hat-fit && npm run check:glasses-fit && npm run check:hood-face && npm run check:baked-face && npm run check:character-parity && npm run check:hair && npm run check:crowd && npm run check:ride-camera && npm run check:orientation && npm run check:sky-view && npm run check:space-night && npm run check:waypoints && npm run check:park && npm run check:jitter && npm run check:rail-race && npm run check:cart-shape && npm run check:tie-frame && npm run check:cruiser-solves && npm run check:cruiser-turn-radius && npm run check:cruiser-clearance && npm run check:castle-window && npm run check:backpack-peek && npm run check:statue-occlusion && vite build",
     "check:text": "node scripts/check-text-sizes.mjs",
     "check:brevity": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/check-copy-brevity.mts",
     "check:hat-fit": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hat-fit.mts",
@@ -31,6 +31,7 @@
     "check:cart-shape": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cart-shape.mts",
     "check:backpack-peek": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-backpack-peek.mts",
     "measure:solver-budget": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-solver-budget.mts",
+    "check:cruiser-clearance": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cruiser-clearance.mts",
     "measure:rail-radii": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-rail-radii.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
     "check:gondola-sightline": "node scripts/checkGondolaSightline.mjs",

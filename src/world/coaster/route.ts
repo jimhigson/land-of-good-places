@@ -175,12 +175,28 @@ interface TallObstacle {
 }
 
 /**
- * The two things the coaster cannot fly over.
+ * What the plan-view search must route *around*, as circles on the ground.
+ *
+ * **This is an input to the generator, not a claim about the ride**, and the
+ * difference is the whole reason it survives while the identically-shaped list
+ * in `test/procgen/invariants.ts` was retired (#198). The solver has to be told
+ * where not to go *before* there is a route to measure; a swept measurement can
+ * only ever be taken afterwards. So the two are not alternatives, and replacing
+ * this with one would simply let the loop grow through the big wheel and then
+ * complain about it.
+ *
+ * What it must **not** be read as is a list of everything in the coaster's way.
+ * The comment here used to say the 6.2 m cruise floor "clears the trees, the
+ * garlands and the train", so that the wheel and the castle were "the only
+ * horizontal obstacles the loop actually has". That was false: a canopy reaches
+ * 6.68 m against a 6.04 m underside at cruise, and the profile dips far below
+ * cruise at the station and at the castle anyway. Whether the built ride hits
+ * anything is now measured against the built park by `coaster/clearance.ts`,
+ * run by `check:cruiser-clearance` and by the procgen suite on every seed.
  *
  * Unlike the old code, the track's own width is *not* baked in here — the
  * generator is told the corridor radius separately, so an obstacle stays an
- * obstacle and a corridor stays a corridor. The sum is the same 22 m about the
- * castle it always was.
+ * obstacle and a corridor stays a corridor.
  */
 /**
  * How far the RiPika statue's *tall* part reaches from the middle of the
@@ -764,9 +780,19 @@ export class CoasterRoute {
 
 /**
  * Boot assert (the claim-versus-fact rule): cruise really clears, the station
- * segment really is low and on clear ground, the loop really goes round the
- * castle and the ferris wheel rather than through them, and everywhere the
- * coaster passes over the train there is 5.5 m of air.
+ * segment really is low, the loop really goes round the ferris wheel rather
+ * than through it, and everywhere the coaster passes over the train there is
+ * 5.5 m of air.
+ *
+ * **What it deliberately does not claim is that the ride misses everything.**
+ * It measures the finished curve against a handful of named things, which is
+ * all a check cheap enough to run at boot can do. The exhaustive question —
+ * does the car's envelope touch any real geometry anywhere in the park — is
+ * answered by `coaster/clearance.ts`, which sweeps eight rays along the whole
+ * loop and takes seconds rather than milliseconds, so it runs in the build
+ * (`check:cruiser-clearance`) and on every seed in the procgen suite instead.
+ * Reading this function as the complete answer is exactly the mistake that let
+ * the ride fly through a tree canopy for weeks with a green build (#198).
  *
  * Reports; the caller decides what to do about it. Never adjusts.
  *

@@ -128,6 +128,20 @@ export interface ParkFacts {
     readonly windows: readonly { readonly wall: string }[];
     readonly complaints: readonly string[];
   };
+  /**
+   * Everything the Sky Cruiser's car actually strikes, swept along the whole
+   * loop against the whole park (#198).
+   *
+   * Measured here, with the same dynamic import every other seed-dependent
+   * thing in this file uses: a static import would pull in a second copy of the
+   * park at the default seed, and the four sweep seeds would then quietly
+   * measure the canonical park instead of their own.
+   *
+   * **Empty is the healthy answer.** This is the same `cruiserStrikes` the
+   * `check:cruiser-clearance` build gate runs, so there is one definition of
+   * "does the ride hit anything" and it cannot drift between them.
+   */
+  readonly cruiserStrikes: readonly string[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
@@ -202,6 +216,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { CASTLE_WINDOWS, checkCastleWindows, sweptCartHits } = await import(
     '../../src/world/coaster/castleWindows.ts'
   );
+  const { cruiserStrikes } = await import('../../src/world/coaster/clearance.ts');
   const { JUMP_APEX_HEIGHT } = await import('../../src/entities/Player.ts');
   const { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } = await import(
     '../../src/world/entrance/layout.ts'
@@ -373,6 +388,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   return {
     castlePass,
+    cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     seed,
     world,
     walls,
