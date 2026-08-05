@@ -244,7 +244,8 @@ export class Building implements GameSystem {
   private readonly grownUp = new GrownUp();
   private readonly toilets: Toilets;
   private readonly helterSkelter: SlideRide;
-  private readonly ginormousSlide: SlideRide;
+  /** The ginormous slide itself, so `test/procgen` can measure what was built. */
+  readonly ginormousSlide: SlideRide;
   private readonly stairRide: StairRide;
   /** The building's own fixed lights — on indoors, off outside and on the roof. */
   private readonly interiorLighting = new InteriorLighting();

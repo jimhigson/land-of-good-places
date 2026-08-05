@@ -108,6 +108,7 @@ const MAX_DARK_RUN = 25;
 const TRESTLE_GAP_TOLERANCE = 40;
 
 /**
+/**
  * How close a ribbon has to come to count as having arrived somewhere.
  *
  * A child's full width — `2 x PLAYER_RADIUS`, the same derivation
@@ -127,6 +128,16 @@ const TRESTLE_GAP_TOLERANCE = 40;
  * no risk of the tolerance swallowing the thing it exists to catch.
  */
 const ARRIVAL = 2 * PLAYER_RADIUS;
+
+/**
+ * How much of the chute is allowed to be inside the castle's footprint.
+ *
+ * The slide leaves through a gap in the roof parapet, so its first stretch is
+ * *in* the doorway by design. Long enough to cover the mouth and the wall it
+ * comes through, short enough that the return leg of #118's curve — which came
+ * back and stopped dead in the middle of the tower — could never hide in it.
+ */
+const DOORWAY_GRACE = 6;
 
 // ------------------------------------------------------------------ the list
 
@@ -153,6 +164,7 @@ const ARRIVAL = 2 * PLAYER_RADIUS;
  * path, walked by people who have never opened this file before.
  */
 type Invariant = (facts: ParkFacts) => readonly string[];
+
 
 /**
  * Every wall run keeps clear of every other one.
@@ -1207,6 +1219,151 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
 /**
  * The suite. **Add an invariant by adding a line here.**
  */
+/**
+ * Half-width of the ginormous slide's chute, as built.
+ *
+ * `SlideRide`'s cross-section reaches ±0.95 m and its hand-rails sit at ±1.0 m
+ * with a 0.11 m tube, so the thing a child rides in is 2.22 m across. Taken
+ * from that geometry rather than from the route generator's corridor half-width,
+ * which is the generator's own target and so would prove only that it can do
+ * arithmetic.
+ *
+ * `PLAYER_RADIUS` is deliberately **not** added on top, unlike everywhere else
+ * in this file. A rider on a slide is *inside* the trough, held by the rails —
+ * the child's own width is already contained by the number above, and adding it
+ * again would be double-counting a body that cannot stick out.
+ */
+const CHUTE_HALF_WIDTH = 1.11;
+
+/**
+ * The most the chute may climb between two samples, in metres.
+ *
+ * Not a tolerance for "roughly downhill": a slide is a thing you go down
+ * because gravity does it, and a stretch that rises is a stretch a child stops
+ * on. The figure is not zero only because the chute is a Catmull-Rom spline
+ * through sampled points, which may overshoot by fractions of a millimetre
+ * between them; a millimetre is four hundred times smaller than the 0.41 m
+ * profile depth a rider sits in, so nothing at this scale is a slope.
+ */
+const SLIDE_MAY_RISE = 0.001;
+
+/**
+ * **The ginormous slide is one a child can actually ride down and walk away
+ * from.** This is #118, stated as something the park proves on every seed.
+ *
+ * The bug was not subtle and neither is this: the slide's twelve hand-authored
+ * coordinates were absolute, the castle's position is per-seed, and eight of
+ * the twelve ended up inside the tower — the last of them behind a solid wall,
+ * where a six-year-old was left with no way out. Every clause below would have
+ * failed on that curve, which is the point.
+ *
+ * Measured off `facts.slideChute`, which is the built chute pushed out through
+ * the scene graph into world space, against the built plots — never against
+ * `slide/plan.ts`, which is the thing under test.
+ */
+const theGinormousSlideIsRideable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const first = chute[0];
+  const last = chute[chute.length - 1];
+
+  if (chute.length < 2 || !first || !last) {
+    complaints.push('the ginormous slide has no chute at all');
+    return complaints;
+  }
+
+  // --- 1. it goes down, all the way down ------------------------------------
+  let worstRise = 0;
+  let worstRiseAt: readonly [number, number, number] = first;
+  for (let i = 1; i < chute.length; i += 1) {
+    const before = chute[i - 1];
+    const here = chute[i];
+    if (!before || !here) continue;
+    const rise = here[1] - before[1];
+    if (rise > worstRise) {
+      worstRise = rise;
+      worstRiseAt = here;
+    }
+  }
+  if (worstRise > SLIDE_MAY_RISE) {
+    complaints.push(
+      `the ginormous slide climbs ${worstRise.toFixed(3)} m at ` +
+        `(${worstRiseAt[0].toFixed(1)}, ${worstRiseAt[1].toFixed(1)}, ${worstRiseAt[2].toFixed(1)}) ` +
+        '— a slide that goes uphill is one a child stops on',
+    );
+  }
+
+  // --- 2. it finishes in the ball pit ---------------------------------------
+  //
+  // Where it ends is the whole of #118, so it is asserted against the built
+  // pit's own position rather than against anything the slide's plan believes.
+  const pit = facts.plots.find((plot) => plot.id === 'ballPit');
+  if (!pit) complaints.push('there is no ball pit for the ginormous slide to land in');
+  else {
+    const missed = Math.hypot(last[0] - pit.x, last[2] - pit.z);
+    // BALL_PIT_RADIUS is 6; the plot's bounding radius is larger than the pit
+    // itself, so the pit's own radius is what "lands in the balls" means.
+    if (missed > 6) {
+      complaints.push(
+        `the ginormous slide ends ${missed.toFixed(1)} m from the middle of the ball pit ` +
+          `at ${fmt([last[0], last[2]])} — it should end in the balls`,
+      );
+    }
+  }
+
+  // --- 3. it is not inside the castle ---------------------------------------
+  //
+  // The exact failure of #118. The chute starts *in* the parapet doorway by
+  // design, so the first few metres of it are allowed to be within the
+  // footprint and nothing after that is.
+  const castle = facts.castleFootprint;
+  {
+    let insideAfterDoor: readonly [number, number, number] | null = null;
+    let travelled = 0;
+    for (let i = 1; i < chute.length; i += 1) {
+      const before = chute[i - 1];
+      const here = chute[i];
+      if (!before || !here) continue;
+      travelled += Math.hypot(here[0] - before[0], here[2] - before[2]);
+      if (travelled < DOORWAY_GRACE) continue;
+      if (
+        Math.abs(here[0] - castle.x) < castle.halfX &&
+        Math.abs(here[2] - castle.z) < castle.halfZ
+      ) {
+        insideAfterDoor = here;
+        break;
+      }
+    }
+    if (insideAfterDoor) {
+      complaints.push(
+        `the ginormous slide runs back inside the castle at ` +
+          `${fmt([insideAfterDoor[0], insideAfterDoor[2]])} — this is #118, where a ` +
+          'child finished the ride sealed inside the tower',
+      );
+    }
+  }
+
+  // --- 4. it clears every plot it is not deliberately joining ---------------
+  //
+  // At the width of the thing a child rides in, plus the child's own radius.
+  for (const plot of facts.plots) {
+    if (plot.id === 'building' || plot.id === 'ballPit') continue;
+    for (const point of chute) {
+      const gap = Math.hypot(point[0] - plot.x, point[2] - plot.z);
+      if (gap < plot.boundingRadius + CHUTE_HALF_WIDTH) {
+        complaints.push(
+          `the ginormous slide passes ${gap.toFixed(1)} m from the middle of ` +
+            `${plot.id} (radius ${plot.boundingRadius.toFixed(1)}) at ` +
+            `${fmt([point[0], point[2]])}`,
+        );
+        break;
+      }
+    }
+  }
+
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1230,6 +1387,11 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
   ['the Sky Cruiser goes round the castle and the big wheel', skyCruiserClearsTheTallThings],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
+  [
+    'the ginormous slide goes downhill all the way, lands in the ball pit, ' +
+      'and never runs back inside the castle',
+    theGinormousSlideIsRideable,
+  ],
 ];
 
 /**

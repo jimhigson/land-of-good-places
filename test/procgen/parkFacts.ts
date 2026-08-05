@@ -122,6 +122,30 @@ export interface ParkFacts {
   /** Its paved edges, each with the ribbon that was drawn for it. */
   readonly pathEdges: readonly PathEdgeFact[];
   /**
+   * The ginormous slide's chute, in **world space**, sampled along what was
+   * actually built — not the plan it was built from.
+   *
+   * Read through the scene graph rather than by adding the building's origin
+   * back on by hand, so a slide parented to the wrong thing shows up here as a
+   * slide in the wrong place, which is the class of bug #118 turned out to be.
+   */
+  readonly slideChute: readonly (readonly [number, number, number])[];
+  /**
+   * The castle facade's own footprint rectangle.
+   *
+   * Emphatically **not** the `building` plot's position: the facade is nudged
+   * off its plot anchor by `BUILDING_CENTRE_NUDGE`, about 3.5 m, so the two
+   * centres are metres apart. Measuring the tower at its plot's anchor puts the
+   * walls in the wrong place and duly accuses an innocent slide of flying
+   * through them — which is exactly what the first draft of this did.
+   */
+  readonly castleFootprint: {
+    readonly x: number;
+    readonly z: number;
+    readonly halfX: number;
+    readonly halfZ: number;
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -211,6 +235,39 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     z: entry.z,
     boundingRadius: entry.boundingRadius,
   }));
+
+  // The ginormous slide's chute, sampled off the built curve and pushed out
+  // through the scene graph into world space.
+  //
+  // `updateMatrixWorld(true)` is called deliberately and is not a formality: a
+  // headless park is never rendered, so nothing has otherwise composed a single
+  // world matrix and every one of them is still the identity. Sampling without
+  // this yields the chute's *local* coordinates while looking exactly like
+  // world ones, and every clearance test built on them would quietly pass.
+  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } = await import(
+    '../../src/world/building/layout.ts'
+  );
+  const { BUILDING_HALF_X, BUILDING_HALF_Z } = await import('../../src/core/constants.ts');
+  const castleFootprint = {
+    x: BUILDING_CENTRE_X,
+    z: BUILDING_CENTRE_Z,
+    halfX: BUILDING_HALF_X,
+    halfZ: BUILDING_HALF_Z,
+  };
+
+  const slide = world.building.ginormousSlide;
+  slide.group.updateMatrixWorld(true);
+  if (slide.group.parent) slide.group.parent.updateMatrixWorld(true);
+  const slideChute: (readonly [number, number, number])[] = [];
+  {
+    const probe = new Vector3();
+    const steps = Math.max(96, Math.round(slide.length / 0.4));
+    for (let i = 0; i <= steps; i += 1) {
+      slide.pointAt(i / steps, probe);
+      slide.group.localToWorld(probe);
+      slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
 
   const nearPairs = new Set<string>();
   for (const entry of PARK_MANIFEST) {
@@ -353,6 +410,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     exits,
     pathNodes,
     pathEdges,
+    slideChute,
+    castleFootprint,
     reachableFromEntrance,
     routes,
     nearPairs,
