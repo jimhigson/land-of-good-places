@@ -253,8 +253,16 @@ export class Selection implements GameSystem {
    */
   handleInteractPress(): void {
     if (this.deps.blocked()) {
-      // A panel is up. The press that opened it was aimed at whatever was
-      // selected the moment before, so that is what confirms.
+      // A panel already had the screen when this press arrived, so there is
+      // nothing in the park to run. Flashing whatever was selected last is the
+      // gentlest possible "not now" — and it is once, because the flash clears
+      // it.
+      //
+      // This used to be the *ordinary* path for opening a shop or a stall: the
+      // owning system ran earlier in the frame, opened its panel, and by the
+      // time the selection was consulted the screen was already blocked. Now
+      // the panel is opened from here, so `commit` does the activation flash
+      // itself and this is only the leftover case.
       if (this.lastSelected) this.deps.flash(this.lastSelected);
       this.lastSelected = null;
       return;

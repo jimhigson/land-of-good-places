@@ -243,6 +243,11 @@ export class MiniGameHost {
    * decided this booth is the selected thing before this runs.
    */
   enter(stallId: string): void {
+    // Same gate {@link open} has. A chip pressed from across the park runs on
+    // arrival, and she may by then have been through a stall and be walking out
+    // under the opening half of the curtain — `frozen` is already false there,
+    // so the selection would happily commit into a phase that is not idle.
+    if (this.phase !== 'idle') return;
     if (this.riding?.()) return;
     if (this.boardRide?.(stallId)) return;
     const stall = this.stalls.find((candidate) => candidate.definition.id === stallId);
