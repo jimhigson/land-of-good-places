@@ -311,3 +311,81 @@ static import pins every seed to the default park — the four sweep suites then
 *silently skip* and you get "1 failed, 18 passed, 76 skipped", where the number
 that looks wrong is the pass count. Reach it through `ParkFacts` instead; it
 already carries `boundary`, `masonryHalfWidth` and `wallCollisionHalf`.
+
+---
+
+# E9-ring, 5 Aug — camera and procession done; booth and two constants left
+
+Worktree `.claude/worktrees/e9-ring` (`npm ci` run inside it). Reference
+checkout of `origin/main` at `.claude/worktrees/e9-mainref` with a symlinked
+`node_modules`, for before/after measurement — **delete both when done**.
+Port 5328 reserved; no dev server started.
+
+## Done
+
+**1. The camera rig — `e9dda79`.** Rebuilt on the local frame as ruled. Both
+camera FAILs gone. `check:rail-race` reports the phone at **22.0°** down the
+track and left-to-right **0.927** (was 28.9° / 0.876 against a 0.9 floor).
+
+Three findings worth keeping:
+
+- **`dot(screenRight, travel)` is exactly `cos(swing)`.** The two failures were
+  one number. `leastInward` is the same quantity again.
+- **The 28.9° was never a chord artefact.** It is
+  `atan(-riderNdc · sec TILT · tanH)` — what *any* rig standing straight out
+  from a hard-left rider must swing — and it matched the measured 28.9/12.4 on
+  phone/monitor to 0.5% before a line was written. The chord model was still
+  wrong (it is why per-station + lerp exploded), but it was not the cause of
+  this. So the fix is a cap, `MAX_SWING = 22°`, with the rider's remaining
+  leftward placing made up by **standing further down the track**.
+- **The ring is genuinely concave in places** — 100 of 512 stations, tightest
+  concave radius ~20 m. On those the chord rotates the *other* side of the
+  tangent, which is precisely how the per-station experiment produced "looks
+  BACK down the track". Recorded so nobody re-derives it.
+
+The solve is now two closed forms, no bisection: `B = D(g c N² − s)/(c + g s)`
+places the rider exactly at every station, and `D` per station is one division,
+taken at the station that demands the most so everywhere else over-delivers.
+
+**Cost, for QA to put in front of the family:** a phone in portrait now renders
+**18.6 px/m**, was 27.6 (floor 15; the "too zoomed out" report was 10.4). Two
+thirds of that is the swing cap; one third is honouring AHEAD at the concave
+notches instead of at one lucky station. Monitor is unchanged (12.5°, 40 px/m).
+
+**2. The procession — `a24abf0`.** Changed **`SWING_BEHIND` 0.55 → 0.80**, and
+deliberately **not** `CATCHUP_BEHIND`. The measurement that decided it:
+sweeping `CATCHUP_BEHIND` 0.006→0.009 moves the mean margin 72.4→53.6 and p90
+120.7→94.9 but leaves p99 at 167/164/171/159 — **no trend**. Past
+`SWING_BEHIND / CATCHUP_BEHIND` metres the band is a constant, so a steeper
+ramp pulls the flat part *nearer* and can never reach the tail, and the tail is
+what "procession" means. The ramp is also the only part a child can see (a
+rival 10 m back, inside the ~21 m picture); the ceiling engages past ~130 m,
+off screen.
+
+0.80 comes from a rule, not a fit: the band should saturate at the same
+fraction of a race as before — 91.7 m of 823 m = 11.1%, and 11.1% of 1200 m is
+133.5 m, so `133.5 × 0.006 = 0.80`.
+
+## The measuring trap that nearly caught me, worth inheriting
+
+**`max` over the checker's 24 seeds is a coin flip.** My first `CATCHUP_BEHIND`
+sweep read 124.4, 153.9, 88.5, 153.9 at 0.007/0.008/0.009/0.011 — non-monotone,
+because a race is chaotic and the max of 24 draws reshuffles on any change.
+Tuning to it is fitting to noise. Re-measured over **200 seeds** and the mean,
+p50 and p90 are stable and monotone, which is what I tuned on.
+
+The same probe turned up something the fleet should know: **`origin/main`
+itself exceeds the `< 140 m` assertion on 3 of 200 seeds** (max 148.7). It
+passes today because of which 24 seeds the checker happens to use. I have not
+touched the assertion — restoring `main`'s race is what was asked, and buying
+check margin by making the race tighter than it has ever been would be
+inventing a new feel. Flagged for the Overseer as a separate decision.
+
+## Left
+
+3. Move the rail race booth via a `near:` relation (`stall.skyCruiser` is the
+   precedent). Rail race booth only — #117 owns generalising.
+4. `WALL_INNER_RADIUS` (59.55, `train/route.ts`) and the exit clamp
+   (56, `railRace/plan.ts:97`) still mean "the edge" from when it was a circle.
+
+`check:rail-race` green (fairness still **0.0000 m**, all four lanes 12.57 m).
