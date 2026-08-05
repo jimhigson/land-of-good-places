@@ -34,6 +34,7 @@ import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
 import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
+import { OverlayPause } from './core/overlayPause';
 
 /** Where a brand-new player starts: the plaza, just south of the fountain. */
 const DEFAULT_SPAWN = new Vector3(0, 0, 7);
@@ -126,8 +127,8 @@ export class Game {
    * from it rather than tracked separately.
    */
   private lookOpen = false;
-  /** True when the look overlay is the reason the park is paused. */
-  private lookPausedByUs = false;
+  /** Freezes the park while {@link lookOpen} — see `core/overlayPause.ts`. */
+  private readonly lookPause = new OverlayPause();
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   constructor(
@@ -772,51 +773,32 @@ export class Game {
 
     new CharacterCreation(this.uiRoot, {
       onComplete: (choice) => {
-        this.applyLiveLook(choice);
-        // Cleared last: `syncLookPaused` unfreezes the park on the next frame
-        // off the back of this, so nothing above it can run against a park
-        // that has already started moving again.
-        this.lookOpen = false;
+        try {
+          this.applyLiveLook(choice);
+        } finally {
+          // Cleared last, so nothing in `applyLiveLook` runs against a park
+          // that has already started moving again — but cleared *unfailingly*,
+          // which is the point of the `finally`. `lookOpen` is the one
+          // un-derived value the whole derivation hangs off: if it stayed true
+          // because `applyLiveLook` threw, `syncLookPaused` would freeze the
+          // park for ever and `tick`'s Escape branch — guarded on
+          // `!this.lookOpen` — would leave no way to unfreeze it. The dialog
+          // disposes itself either way, so there would not even be anything on
+          // screen to explain why the park had stopped.
+          this.lookOpen = false;
+        }
       },
     });
   }
 
   /**
-   * Keeps the park's pause state a mirror of {@link lookOpen}, checked fresh
-   * every frame — deliberately the same shape as `Shopping.syncPaused` and
-   * `FacePaintStall.syncPaused` rather than a sixth variation on it.
-   *
-   * This started life as a `setPaused(true)` when the creator opened and a
-   * restore when it completed, which was wrong in a way that is worth
-   * recording, because it is not obvious from reading it: the creator is not
-   * in {@link tick}'s "who owns Escape" chain and has no close button of its
-   * own, so Escape fell through to the ordinary pause toggle and *unpaused the
-   * park behind the open dialog*. From there she could walk away, or board a
-   * ride, while the creator was still up — and in `/view`, where the park is
-   * deliberately frozen, the captured "was already paused" then meant
-   * completion never re-froze it.
-   *
-   * Re-deriving fixes that at the root rather than patching the one key that
-   * exposed it: however the pause flag got flipped — Escape, a debug camera, a
-   * future key nobody has added yet — this reconciles it on the very next
-   * frame, so the toggle simply cannot win while the dialog is open. Escape is
-   * *also* excluded in `tick` now, but that is the courtesy, not the fix.
-   *
-   * Only ever unpauses what it paused itself, exactly as its two siblings do,
-   * so finishing in `/view` leaves that park frozen.
+   * Keeps the park's pause a mirror of {@link lookOpen}, re-derived every
+   * frame — see `core/overlayPause.ts`, which owns the reasoning and the one
+   * bug that made it necessary. Escape is *also* excluded in {@link tick}, but
+   * that is the courtesy; this is the fix.
    */
   private syncLookPaused(): void {
-    if (this.lookOpen) {
-      if (!gameStore.get().paused) {
-        this.lookPausedByUs = true;
-        gameStore.setPaused(true);
-      }
-      return;
-    }
-    if (this.lookPausedByUs) {
-      this.lookPausedByUs = false;
-      gameStore.setPaused(false);
-    }
+    this.lookPause.sync(this.lookOpen);
   }
 
   /**

@@ -85,6 +85,38 @@ in place. **Do not merge; a different agent reviews this.**
   bound key). Single-fires — the form handler `preventDefault`s and `submit()`
   is idempotent behind its `closed` flag — but it is new behaviour.
 
+## A claim I got wrong, and the habit that caused it
+
+I reported all three tests in `test/store/live-look.test.ts` as verified
+failing against the pre-fix code. **Two do. The third exercises the `else`
+branch (`setWornHat(null)`), which was already correct, so it passes either
+way** — a third review caught it. My own terminal output had said
+`2 failed | 1 passed` and I wrote "all three" anyway.
+
+The habit worth copying is the one that *did* work elsewhere: run the suite
+against the reverted code, then read the number back off the screen and quote
+that, rather than the number you expected. Every "verified failing" claim in
+this branch has since been re-run that way, and the counts below are the ones
+actually printed.
+
+## The riding/climbing re-check is right, but "unreachable" is too strong
+
+`applyLiveLook` re-checks riding and climbing, and the check is correctly
+placed (before the store write, so it is all-or-nothing). But the comment
+calling it unreachable overstates the case **for keyboard**:
+`TreeClimbing.ts` and `MiniGameHost.ts` both consume
+`justPressed('interact')` with no paused guard, and `justPressed` does not
+care that `dt` is zero. So `E`/`F`/`Enter` with focus on a creator swatch
+button — buttons are deliberately outside #189's text-entry guard — can start
+a climb behind the open modal, and "Done" then silently discards everything
+she chose.
+
+Not fixed here, on the Overseer's instruction: it is pre-existing in kind, the
+creator autofocuses the name input so focus is not normally on a swatch, and
+another engineer's #122 work makes this class impossible by construction — it
+may simply evaporate when that lands. Recorded so it is not re-discovered from
+scratch.
+
 ## Pause: use the re-derived shape, not a sixth variant
 
 There are already several `pausedByUs`-shaped implementations in the tree

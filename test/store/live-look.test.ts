@@ -87,6 +87,14 @@ describe('completeCharacterCreation, run more than once (the "Look" pill)', () =
     expect(dexEntryFor(HAT_A)?.placement, 'the old hat is no longer worn').not.toBe('worn');
   });
 
+  /**
+   * A **guard, not a regression test** — worth being explicit, because I first
+   * reported all three of these as failing against the pre-fix code and they
+   * do not. This one exercises the `else` branch, which already went through
+   * `setWornHat(null)` before any of these changes, so it passes either way.
+   * It earns its place by pinning the behaviour against future edits to
+   * `completeCharacterCreation`; it proves nothing about the fixes above it.
+   */
   it('takes the hat off when an exclusive hair style leaves no hat chosen', () => {
     gameStore.completeCharacterCreation(choiceWith(HAT_A));
     expect(gameStore.get().wornHatUid).not.toBeNull();
