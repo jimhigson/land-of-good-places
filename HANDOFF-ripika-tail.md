@@ -160,3 +160,20 @@ Commit before running a destructive test, or revert with a targeted `sed`.
 statue shows the authored rest pose and this changes its silhouette.
 **This branch merges first.** See HANDOFF-ripika-statue.md for the silhouette
 measurement and the `TAIL_YAW` knob if Jim wants some of the read back.
+
+---
+
+# Dev server: NOT running (standing instruction, 5 Aug)
+
+Jim: *"don't keep servers open for me, just be ready to start them when I ask."*
+Supersedes the "port 5318 with PIDs" note above — those PIDs are dead.
+
+```
+cd /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/ripika-tail && npx vite --port 5318 --strictPort
+```
+
+Then: find RiPika, **stand still and watch her** — the tail should stay tipped
+back trailing its zig-zag behind her, not hang limp and straight down.
+
+**PR: https://github.com/jimhigson/land-of-good-places/pull/199.** Merges first;
+`feat/ripika-fountain-statue` (PR #200) is stacked on this and merges after.
