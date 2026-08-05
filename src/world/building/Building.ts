@@ -1,5 +1,6 @@
+import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
-import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
@@ -482,7 +483,9 @@ export class Building implements GameSystem {
     if (!player) return;
     this.inside = true;
     this.interiorRoot.visible = true;
-    this.collision.setPlayBounds(INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS);
+    this.collision.setPlayBounds(
+      circleBoundary(INTERIOR_PLAY_RADIUS, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z),
+    );
     // Well clear of the south wall, facing north into the room.
     //
     // Not on the threshold, which is the obvious place and the wrong one: the
@@ -514,7 +517,7 @@ export class Building implements GameSystem {
   private exitToGarden(): void {
     this.inside = false;
     this.interiorRoot.visible = false;
-    this.collision.setPlayBounds(0, 0, GARDEN_PLAY_RADIUS);
+    this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
   }
 
   // ---------------------------------------------------------------- cutaway

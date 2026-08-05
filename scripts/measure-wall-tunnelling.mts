@@ -53,6 +53,7 @@
  * auto-hop fires and the flight is part of the run; there a crossing *in the
  * air* is the feature working and a crossing *on foot* is the bug.
  */
+import { circleBoundary } from '../src/world/boundary.ts';
 import { Vector3 } from 'three';
 import { clearsTop, CollisionWorld, MAX_DEPENETRATION_SPEED } from '../src/world/Collision.ts';
 import {
@@ -223,7 +224,7 @@ interface Run {
 
 function run(testCase: Case, dt: number, sprint: boolean, phase: number, substepping: boolean): Run {
   const collision = new CollisionWorld();
-  collision.setPlayBounds(0, 0, 100000);
+  collision.setPlayBounds(circleBoundary(100000));
   testCase.build(collision);
 
   const player = new SimPlayer(collision, {
@@ -326,7 +327,7 @@ function sweep(cases: readonly Case[], substepping: boolean): Summary {
 function divergence(testCase: Case, dt: number, sprint: boolean, phase: number): number {
   const worlds = [false, true].map((substepping) => {
     const collision = new CollisionWorld();
-    collision.setPlayBounds(0, 0, 100000);
+    collision.setPlayBounds(circleBoundary(100000));
     testCase.build(collision);
     const player = new SimPlayer(collision, {
       substepping,

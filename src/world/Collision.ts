@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { GARDEN_PLAY_RADIUS } from '../core/constants';
+import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
 
 /**
  * Deliberately simple solid-object handling.
@@ -299,9 +299,7 @@ export class CollisionWorld {
    * the front door drops a child outside their own park boundary and the
    * resolver drags them back across half a kilometre of nothing.
    */
-  private boundsX = 0;
-  private boundsZ = 0;
-  private boundsRadius = GARDEN_PLAY_RADIUS;
+  private bounds: ParkBoundary = GARDEN_PLAY_BOUNDARY;
 
   /**
    * Bumped whenever the set of solid things changes.
@@ -320,24 +318,21 @@ export class CollisionWorld {
     return this.revisionCounter;
   }
 
-  /** Recentres the soft boundary. Used on every change of space. */
-  setPlayBounds(centreX: number, centreZ: number, radius: number): void {
-    this.boundsX = centreX;
-    this.boundsZ = centreZ;
-    this.boundsRadius = radius;
+  /**
+   * Swaps the soft boundary. Used on every change of space.
+   *
+   * A whole {@link ParkBoundary} rather than a centre and a radius, because the
+   * garden's edge stopped being a circle (issue #115) while the castle
+   * interior's genuinely still is one — `circleBoundary` says so exactly, and
+   * both then answer the same question the same way.
+   */
+  setPlayBounds(boundary: ParkBoundary): void {
+    this.bounds = boundary;
   }
 
-  /** Where the soft boundary is, for anything that has to map the space inside it. */
-  get playBoundsX(): number {
-    return this.boundsX;
-  }
-
-  get playBoundsZ(): number {
-    return this.boundsZ;
-  }
-
-  get playBoundsRadius(): number {
-    return this.boundsRadius;
+  /** The soft boundary, for anything that has to map the space inside it. */
+  get playBounds(): ParkBoundary {
+    return this.bounds;
   }
 
   addCircle(x: number, z: number, radius: number, topHeight = Infinity, autoHoppable = false): void {
@@ -706,17 +701,30 @@ export class CollisionWorld {
 
       // Soft boundary — you can never walk out of the park, nor off the edge of
       // the building's own space.
-      const offsetX = position.x - this.boundsX;
-      const offsetZ = position.z - this.boundsZ;
-      const fromCentre = Math.hypot(offsetX, offsetZ);
-      const limit = this.boundsRadius - radius;
-      if (fromCentre > limit) {
-        const scale = limit / fromCentre;
-        applyCorrection(
-          this.boundsX + offsetX * scale - position.x,
-          this.boundsZ + offsetZ * scale - position.z,
-        );
-        moved = true;
+      //
+      // Pushed along the boundary's own gradient rather than straight at a
+      // centre, because the park's edge is no longer a circle and "towards the
+      // middle" is not the way out of it. The gradient of a signed distance
+      // field points at the nearest edge, so stepping *up* it by the shortfall
+      // lands exactly on the clearance line, whatever shape that line is. The
+      // four extra queries only happen when the walker is actually within her
+      // own radius of the edge, which is rare — everywhere else this is the one
+      // `distanceToEdge` call it always was.
+      const edgeGap = this.bounds.distanceToEdge(position.x, position.z);
+      if (edgeGap < radius) {
+        const e = 0.25;
+        const gradientX =
+          this.bounds.distanceToEdge(position.x + e, position.z) -
+          this.bounds.distanceToEdge(position.x - e, position.z);
+        const gradientZ =
+          this.bounds.distanceToEdge(position.x, position.z + e) -
+          this.bounds.distanceToEdge(position.x, position.z - e);
+        const length = Math.hypot(gradientX, gradientZ);
+        if (length > 1e-9) {
+          const step = radius - edgeGap;
+          applyCorrection((gradientX / length) * step, (gradientZ / length) * step);
+          moved = true;
+        }
       }
 
       if (!moved) break;
