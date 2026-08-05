@@ -9,7 +9,34 @@ checkout's `node_modules`.
 Spec: `REQUIREMENTS-2026-07-28.md` §7. Family ruling, 28 July: paths cross the
 railway on hump-back or wooden bridges, never level crossings.
 
-## Base — stacked on TWO unlanded branches
+## Base — now plain `origin/main` (rebased 5 Aug, after #196)
+
+PR #196 merged, putting `fix/paths-to-nowhere` **and** the returned-complaints
+`Invariant` contract on `main` together. Both legs of the old stack are gone,
+so this branch was rebased onto `origin/main` and is now **six commits, four
+files**: `ARCHITECTURE-DECISIONS.md`, `HANDOFF-railway-bridges.md`,
+`scripts/check-park.mts`, `src/world/train/trainModel.ts`.
+
+**Rebasing was not optional, and the reason is worth knowing.** #196 squash-merged
+`04d50f6` ("Review fixes: correct the facePaint attribution, close the
+stand-point hole…"), which this branch's base (`0608fbf`) predates. Left alone,
+merging this branch would have **reverted** those fixes — `stalls.ts` back to
+recomputing its own stand point from `STALL_STAND_DISTANCE` instead of reading
+`STALL_STANDS_BY_ID` (the exact split issue #114 exists to close), plus the
+corrected face-paint attribution in `paths.ts`. A stale base is a silent revert,
+and a squash merge is what hides it: `git merge-base --is-ancestor 0608fbf
+origin/main` says **NO**, so nothing warns you.
+
+After the rebase those three files no longer appear in the diff at all, which is
+the check that it worked.
+
+Contrary to a mid-flight warning: **`main` is already fully consistent with the
+new contract.** `type Invariant = (facts) => readonly string[]`, the runner
+asserts on the return value, and both #114 invariants `return` their complaints —
+the only `expect(` calls left are the runner and the sanity block. There is no
+outstanding migration and `invariants.ts` is byte-identical to main here.
+
+## Historical: the base this branch started on
 
 Neither is on `origin/main`; both are local-only, each 2 commits ahead, and
 **neither contains the other**:
