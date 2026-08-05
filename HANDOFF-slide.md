@@ -187,6 +187,68 @@ count went 117 -> 122, exactly +5 for the new one; the red output carries real
 numbers throughout; and I ran the negative fixture against **seed 5** as well as
 the canonical seed, which is the specific thing a static import would break.
 
+## Measured: widening the door does NOT buy back turn radius
+
+Do not re-propose this without reading the numbers. It was my plan, the Overseer
+approved it, and measuring killed it.
+
+- **The solver picks the gap's centre on all five seeds** (offset 0.00 m). It
+  succeeds from the *first* start pose offered, so the 5 positions x 17 headings
+  are almost never explored. The door was never the binding constraint.
+- **Widening it makes things worse**: 0/5 seeds at r=9, 10, 11 with a wide door
+  against 4/5-5/5 narrow. A wide door means ~11,000 (start, end) attempts against
+  a 700 restart budget, so the search burns its allowance near the centre and
+  never reaches the wide positions. More freedom, less searching.
+
+**The real lever is the restart budget.** The failures were budget-limited, not
+geometry-limited. Door completely unchanged, budget raised:
+
+| setting | worst g | tightest | solve time |
+|---|---|---|---|
+| r=5, restarts 700 *(shipped)* | 0.79 | 5.48 m | ~4 s |
+| r=8, restarts 1500 | 0.52 | 8.29 m | 7-42 s |
+| r=11, restarts 1500 | 0.39 | 11.04 m | 7-45 s |
+
+Two catches. Solve time is per park build — game boot *and* every test seed — and
+45 s is both bad for a waiting child and close to the 120 s `beforeAll` timeout
+that has already tripped once under CPU contention. And **r=12+ is unsolvable on
+every seed**, a hard geometric wall, so r=11 sits at the cliff edge, which is
+brittle with E4 about to move the Sky Cruiser through the castle. r=8 keeps real
+margin.
+
+The honest fix is to make the search *faster* rather than the budget bigger —
+the time goes on failed start poses, so better ordering beats more attempts.
+That is generator work, not slide work. `npm run measure:slide-comfort`-style
+evidence via `scripts/measure-slide-comfort.mts`.
+
+## A module cycle is caught, but NOT by the typechecker
+
+Worth knowing before trusting a green `tsc`. Deliberately adding
+`building/layout.ts -> slide/plan.ts` (a cycle, since the plan needs
+`BUILDING_CENTRE_*` and `deckY` from layout):
+
+- `npx tsc --noEmit` -> **exit 0, clean**
+- `npm run build` -> **exit 1**, `ReferenceError: Cannot access 'TOP_DECK'
+  before initialization`
+
+So the guard is runtime module-init, not compile time. The safe direction is
+`building/layout.ts -> slide/plan.ts -> Shell.ts`; layout imports only palette,
+parkLayout, constants and terrain, so nothing there reaches back.
+
+## There is no interior-to-facade scale
+
+`BUILDING_HALF_X` is 12 against `INTERIOR_HALF_X` 30, and the authored door
+pairs (interior 17.5-22.5, facade 7.4-11.6) fit neither that 2.5x nor equal
+fractions of their walls. `Shell.ts` calls the two "disconnected worlds" and it
+is right — the interior is not the facade scaled, so the 0.84 that fits those
+two pairs is a coincidence of authoring, not a relation.
+
+The correct single owner is therefore **not a mapping**: the interior parapet
+gap should be *centred on the boarding pad*, which is the only relation that is
+actually true — you walk out through the gap you are standing at.
+`GIANT_SLIDE_ENTRY_X` and the gap were two numbers that both had to be 20, kept
+in step by hand and by nothing else.
+
 ## Still open / not done
 
 - **The parapet gap.** Still a fixed local x on the south wall. Plan is with the
