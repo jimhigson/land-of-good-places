@@ -51,8 +51,10 @@ the search at the decision point. Nothing else changes.** Specifically:
    means the weight is too weak and the search is solving routes only to throw
    them away.
 4. **The backstop cannot fail a park.** If every start pose is exhausted without
-   a satisfying route, the best one found is returned anyway, with
-   `SolveReport.satisfied` false. A park with no coaster in it is far worse than
+   a satisfying route, **the first route that solved** is returned anyway, with
+   `SolveReport.satisfied` false. The first rather than the best: the search has
+   no ordering over whole routes to call one better, and inventing one here
+   would be a second, unexamined notion of quality beside the per-piece score. A park with no coaster in it is far worse than
    a park whose coaster missed the castle, and the procgen invariant is the loud
    way to hear about it.
 5. **Absent is byte-identical.** A brief that declares no influences scores

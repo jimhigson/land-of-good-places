@@ -172,9 +172,12 @@ export interface RouteBrief {
    * and cannot be phrased as one.
    *
    * **It cannot make a park fail.** If every start pose is exhausted and none
-   * satisfied this, the best route found is returned anyway with
+   * satisfied this, **the first route that solved** is returned anyway with
    * {@link SolveReport.satisfied} false, because a park with no coaster in it
-   * is far worse than a park whose coaster missed the castle. The count is
+   * is far worse than a park whose coaster missed the castle. The first rather
+   * than the best on purpose: the search has no ordering over whole routes to
+   * call one better, and inventing one here would be a second, unexamined
+   * notion of quality sitting beside `scoreOf`. The count is
    * reported so it can be seen rather than guessed at: if this rejects often,
    * the weighting wants tuning; if it never rejects, the weighting is doing the
    * work and this is the belt beside the braces.
@@ -222,8 +225,8 @@ export interface SolveReport {
    * Did the route handed back actually satisfy {@link RouteBrief.satisfies}?
    *
    * False means every start pose was exhausted without one that did, and the
-   * best available was returned rather than failing the park. Always true when
-   * no `satisfies` was given.
+   * first route that solved was returned rather than failing the park. Always
+   * true when no `satisfies` was given.
    */
   readonly satisfied: boolean;
 }
@@ -329,12 +332,16 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   let candidatesTried = 0;
   let satisfyRejects = 0;
   /**
-   * The best route found that solved but did not satisfy the brief.
+   * Builds the **first** route that solved but did not satisfy the brief.
    *
-   * Kept so exhausting the search can hand *something* back. See
-   * {@link RouteBrief.satisfies}.
+   * Kept as a thunk rather than a finished route so that exhausting the search
+   * can hand *something* back whose report carries the **final** counts. Built
+   * eagerly, it froze `satisfyRejects` at 1 — the value at the moment of the
+   * first rejection — and under-reported in exactly the case the number exists
+   * to describe: how much work the backstop is doing. The pieces are copied
+   * because `chosen` is unwound by backtracking after this point.
    */
-  let fallback: SolvedRailRoute | null = null;
+  let makeFallback: (() => SolvedRailRoute) | null = null;
   let backtracks = 0;
   let closerAttempts = 0;
   let restarts = 0;
@@ -762,7 +769,27 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         const candidate = buildRoute(chosen, brief.closed, reportFor(true));
         if (!brief.satisfies(candidate)) {
           satisfyRejects += 1;
-          if (!fallback) fallback = buildRoute(chosen, brief.closed, reportFor(false));
+          if (!makeFallback) {
+            const kept = [...chosen];
+            const keptIndex = startIndex;
+            const keptLength = accumulated;
+            makeFallback = (): SolvedRailRoute =>
+              buildRoute(kept, brief.closed, {
+                startPoseCount: brief.startPoses.length,
+                startPoseIndex: keptIndex,
+                segmentCount: kept.length,
+                candidatesTried,
+                backtracks,
+                restarts,
+                closerAttempts,
+                length: keptLength,
+                minRadius: Math.min(...kept.map((seg) => minCurvatureRadius(seg))),
+                elapsedMs: Date.now() - started,
+                rejected: { ...rejected },
+                satisfyRejects,
+                satisfied: false,
+              });
+          }
           continue;
         }
         return candidate;
@@ -774,7 +801,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   // Every start pose solved a route and every one failed `satisfies`. The park
   // still gets its ride; the report says the requirement went unmet, and the
   // caller decides whether that is worth complaining about.
-  if (fallback) return fallback;
+  if (makeFallback) return makeFallback();
 
   const report: SolveReport = {
     startPoseCount: brief.startPoses.length,
