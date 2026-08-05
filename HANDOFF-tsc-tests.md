@@ -81,3 +81,18 @@ would surface an unknown number of new errors. Worth its own issue.
 - [x] `typecheck:test` wired into `build`, proved to bite
 - [x] build exit 0, procgen 85/85
 - [ ] PR (not raised — Overseer's call; merges after `chore/invariant-return-complaints`)
+
+---
+
+# Dev server: NOT running (standing instruction, 5 Aug)
+
+Jim: *"don't keep servers open for me, just be ready to start them when I ask."*
+This branch never needed one — it is a build-time typecheck change with no
+visual surface — but if you want the app off it:
+
+```
+cd /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/tsc-tests && npx vite --port 5323 --strictPort
+```
+
+No PR yet. Merges after `chore/invariant-return-complaints`, which it is
+rebased on.
