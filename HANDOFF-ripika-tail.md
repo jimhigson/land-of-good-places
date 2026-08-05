@@ -111,3 +111,52 @@ literal — trivial, but worth knowing rather than discovering.
 - [x] `npm run build` exit 0, `test:procgen` 85/85
 - [ ] visual QA
 - [ ] PR (not raised — Overseer's call)
+
+---
+
+# UPDATE — 5 Aug, after Jim's review
+
+**Jim saw the fix on 5318: "tail should extend behind, not to the side —
+rotate it 90º and relocate to match, and is good."** The zero-speed fix itself
+was accepted; what he rejected was the *authored direction* of the rest pose.
+
+## What changed (same branch, one more commit)
+
+- **Relocated as well as rotated**, because rotating alone cannot work. The tail
+  hung off her left hip at x −0.25 *precisely because* it fanned sideways from
+  there; swinging it 90° about that pivot drives it through the torso. Mount
+  moved to the centre line at the back: **z −0.20**, just inside the torso skin
+  at −0.230 (radius 0.245 squashed to 0.94 in z).
+- Cant moved from a **roll** (`rotation.z`) to a **backward pitch**
+  (`rotation.x = -TAIL_CANT`); negative because +Z is forward.
+- Wag moved **z → y** with it. That follows from the pose, not taste: a rear
+  tail swinging in the vertical plane bobs like a lever; about Y it sweeps side
+  to side. Euler order is XYZ (`Rx·Ry·Rz`) so the yaw applies *before* the
+  pitch — the other order would cone it.
+- `TAIL_YAW = 0.12` is the new rest value the wag is added to. Non-zero on
+  purpose: a zero rest pose would make the multiply-only bug undetectable here
+  again.
+
+## The old comment was wrong, and worth knowing why
+
+This file defended the sideways cant as stopping the tail "hiding behind the
+body at every camera angle the game ever uses". The camera looks **down** at
+38°, so a tail trailing back and up projects **up the screen**. Fanning it
+sideways was solving a problem an isometric camera does not have — presumably
+why it looked wrong to the person who actually plays the game.
+
+## Invariant re-proved, not assumed
+
+Green across all 35 creatures with the new rest pose; reintroducing the
+multiply-only form still fails 4 subjects.
+
+**Process note:** the first time I ran that red-test I reverted it with
+`git checkout src/art/models/ripika.ts` and lost my uncommitted edits with it.
+Commit before running a destructive test, or revert with a targeted `sed`.
+
+## Consequence for the statue branch
+
+`feat/ripika-fountain-statue` is **rebased onto this branch**, because the
+statue shows the authored rest pose and this changes its silhouette.
+**This branch merges first.** See HANDOFF-ripika-statue.md for the silhouette
+measurement and the `TAIL_YAW` knob if Jim wants some of the read back.
