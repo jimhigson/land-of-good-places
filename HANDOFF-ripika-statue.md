@@ -1,0 +1,221 @@
+# HANDOFF — ripika-statue (E5-statue)
+
+Branch `feat/ripika-fountain-statue`, worktree `.claude/worktrees/ripika-statue`,
+dev server port **5314**. Issue **#121** — large grey-stone RiPika statue in the
+fountain's middle. Browser NOT owned; build-verified only.
+
+**Status: build green (exit 0), ready for QA. No PR raised (per brief).**
+
+---
+
+## The decision that shaped everything
+
+**The statue is not a model of RiPika. It is RiPika, built in a stone
+colourway.** `createRipika()` now takes a `RipikaPalette`; the statue passes a
+stone one.
+
+A hand-authored statue would be a second RiPika, and a second RiPika has to be
+kept in step with the first by hand forever — retune her head, change her ears,
+repaint her face, and the statue silently becomes a statue of a mouse the park
+no longer contains. Same failure class as the hood faces and the sky dome.
+
+The brief called this "the most art-heavy item in the wave" and told me to
+queue the Blender artist. I pushed back and the Overseer agreed after checking:
+ART_DIRECTION.md:329 makes primitive composition *preferred*, not merely
+default, and the Blender exemption at :334 is scoped to organic continuous
+forms with hair as the paradigm case. A statue of an already-primitive-built
+mouse is not that. **The artist was released from this item.**
+
+---
+
+## The research handoff you were given is WRONG on its key point
+
+`HANDOFF-flowers-stars.md` says: *"The painted face is the one mesh whose
+material has a `map`. Hide/dispose it and carve features as geometry instead."*
+
+**That was true when written and is not true now.** The 31 July baked-face
+rework moved RiPika's face into the **skull's own material and UV map**
+(`ripika.ts`, `face.applyTo(skull)`). There is no separate face mesh.
+
+Consequences if you follow the old note:
+- you cannot hide the face — hiding it hides the skull;
+- re-materialling the skull to grey **deletes the face entirely**, leaving a
+  blank stone ball with remapped UVs pointing at nothing.
+
+The Overseer has posted this correction onto issue #121 so it outlives us.
+
+**The right answer** — and the one CLAUDE.md's own rule already demands — is to
+**repaint the face in stone**, in the surface's own UV texture. Every face
+colour now comes from the palette (`fill`, `nose`, `blush`), so a stone RiPika
+gets a stone face. Not tinted (that leaves tomato cheeks), not hidden.
+
+### The BackSide/`addOutline` trap never arises
+
+The old note warns about hitting `addOutline`'s inverted-hull `BackSide` shells
+when re-materialling. **That danger only exists if you build a yellow mouse and
+then walk the tree recolouring it.** Building in stone from the start means
+`addOutline` reads each mesh's own stone colour as it goes and ink-tints it
+correctly. There is no second pass, so there is nothing to fall out of sync.
+This is why the palette approach is not just tidier but structurally safer.
+
+---
+
+## Two live traps found on the way
+
+1. **`ART.blush` pink tongue.** The `happy` expression's `bigSmile` mouth fills
+   a tongue with `ART.blush` (`faces.ts:259`). **A stone statue must never use
+   it.** The statue uses the neutral `cat` mouth, which strokes in ink only.
+
+2. **`setWalkPhase` flattens RiPika's tail.** `ripika.ts`'s
+   `setWalkPhase` ends with `tail.rotation.z = sin(...) * 0.18 * speed`, which
+   at `speed = 0` sets the tail's rotation to **0** — destroying the authored
+   `1.05` rad cant set at build time. That cant is deliberate and documented
+   ("a tail tucked behind the body is invisible at every camera angle the game
+   ever uses, and RiPika without its flash is just a yellow mouse").
+
+   So every RiPika in the park loses her tail flash the moment she stands
+   still. **This looks like a live bug in the shipped mouse, not just my
+   problem.** Fix is one line — `tail.rotation.z = 1.05 + sin(...)`— but I left
+   it alone: fixing live animation inside a statue PR muddies the review.
+   Reported to the Overseer for assignment. The statue sidesteps it by not
+   calling `setWalkPhase` at all (a fresh `createRipika` is already neutral).
+
+---
+
+## What was built
+
+| File | Change |
+| --- | --- |
+| `src/art/models/ripikaStatue.ts` | **new** — `createRipikaStatue()`, the whole statue |
+| `src/art/models/ripika.ts` | `RipikaPalette` + `RIPIKA_PALETTE`; `palette` and `expressions` options |
+| `src/art/style/faces.ts` | **new** `applyStaticBakedFace()` — one-canvas baked face |
+| `src/art/style/artPalette.ts` | `ART.statueStone` + its four tonal steps |
+| `src/world/Fountain.ts` | statue replaces the finial + spout; disposed in `dispose()` |
+| `scripts/check-baked-face.mts` | statue registered (the list is hardcoded — no auto-discovery) |
+| `art/samples/main.ts` | off-lineup exhibit, `?only=statue` |
+
+### The stone colour: `ART.statueStone` = **`0xd3cacb`**
+
+One named colour, with four tonal steps derived from it — not seven greys.
+Full reasoning is in the comment at the definition; the short version:
+
+- **Not neutral, on purpose.** A neutral grey next to `PALETTE.stonePink`
+  (0xffc2d8) reads as a hole punched in the picture — nothing else in this park
+  is desaturated, so a desaturated object looks like missing texture rather than
+  stone. R 211 / G 202 / B 203: a nine-point red lift carries the park's warmth,
+  and blue one point over green tips it to the faintest **rose** rather than
+  cream. It reads unmistakably grey, while belonging to a park whose masonry is
+  pink.
+- **Light, not dark**, checked against §6's authoring light. The toon ramp's
+  darkest band is ~68% perceived, so starting dark leaves the shaded side muddy;
+  and at night the statue's only real light is the fountain's cyan `PointLight`
+  *below* it, which a light stone takes as pale carved rock and a dark stone
+  swallows.
+- The plinth reuses `statueStoneMid`/`statueStoneDeep` rather than its own pair.
+  Same rock, cut into blocks — one fewer place to acquire a second, slightly
+  different stone.
+
+### Why the stone is a ladder, not one flat grey
+
+`ART.statueStone*` is ordered by **the luminance of the colour each step
+replaces** (belly → yellow → yellowDeep/bolt → tip). The cocoa ear tips, cream
+tummy and amber tail tip survive the trip to stone as tonal steps. Collapse
+them to one grey and the statue reads as a lump at play distance — the exact
+failure the cream tummy exists to prevent on the live mouse. All five are warm
+plum-greys, never blue-greys, and the darkest stays well clear of `PALETTE.ink`.
+
+### Why `applyStaticBakedFace` exists
+
+`createBakedFace` paints **five** 512² canvases so a character can blink and
+beam. A statue does neither, and four unused textures is a tenth of the park's
+entire budget ("under 40 distinct canvas textures", ART_DIRECTION §7). It is
+the same two steps as `createBakedFace.applyTo` (`remapSphereFaceUv` +
+`paintFaceOnFill`) with the expression set left off — not a second way of
+putting a face on a head. It sets the same `bakedFace` flag, so it is checked
+identically.
+
+### Numbers (all measured against the fountain, not assumed)
+
+- Plinth base sits on the **bowl water surface, y 2.17** (`bowlWater` spans
+  2.11–2.17). Statue origin is the plinth base, so that one number is the whole
+  placement — no fudge factor.
+- Plinth 0.36 m tall, three dressed courses, widest radius **0.82 m** against
+  the bowl water's 1.2 m disc.
+- Figure **1.70 m** ear-tips, scale derived from `ripika.height` at runtime so a
+  retune of RiPika cannot make the statue drift.
+- Total handle height **2.06 m** → tops out near **y 4.23** world, level with
+  the fairy poles. Taller starts occluding the plaza ring from the iso camera.
+- Six jets occupy y 0.80–2.10 at r 1.22. Plinth starts 0.07 m above them and
+  0.40 m inboard. **Clear.**
+- **No collider.** Plinth base is 2.17 m up, well over `Player.ts`'s documented
+  1.4 m jump ceiling. The central column below has never had one either.
+
+### Pose
+
+Right arm raised mid-wave (`rotation.z = 1.3`), head tipped 0.07 towards it and
+turned −0.12 off dead-ahead. The asymmetric silhouette is what decides whether a
+six-year-old recognises her from across the plaza, and ART_DIRECTION §4 wants
+nothing plumb. **Not** `setWalkPhase(0, 0)` — see trap 2 above.
+
+---
+
+## Verification done
+
+- `npm run build` → **exit 0** (full 26-check gauntlet + vite build). Not piped.
+- `npm run check:baked-face` → statue passes the ray cast: skull hit first at
+  both eyes and the mouth, back of head on the plain border. This also proves
+  the raised arm does not occlude the face.
+- **No procgen change**, so no invariant is owed: the statue is a fixed child of
+  `Fountain`, `test/procgen/invariants.ts` has zero fountain references, and
+  `check-park.mts:834` explicitly exempts the fountain from the reserved-plot
+  rule.
+- Nothing outside `Fountain.ts` referenced the finial or spout (both were
+  unnamed locals) — verified by survey before removing them.
+
+### Environment gap, pre-existing
+
+`npm run test:procgen` fails with `vitest: command not found` — **vitest is in
+`devDependencies` but not installed** in `/Users/jim/dev/landOfGoodPlaces/node_modules`.
+The worktree has no `node_modules` of its own and resolves up to the shared
+checkout's. Not caused by this branch; CI installs deps properly so it will run
+there. I installed into my own worktree to verify rather than touching the
+shared checkout.
+
+---
+
+## What QA should look at (port 5314, private window)
+
+The statue is **in the middle of the central plaza fountain**, standing on the
+upper bowl of water where the stone ball used to be.
+
+1. **Day.** Walk up to the fountain. She should read as RiPika instantly —
+   yellow mouse silhouette, ears, tail flash, one arm waving — but in warm grey
+   stone. Cheeks are grey discs, **not** tomato red. Face is present and
+   painted, not a blank ball.
+2. **Silhouette at play distance.** The real test: stand back across the plaza.
+   Still recognisably RiPika?
+3. **Night.** The fountain's existing `PointLight` sits at y 1.2, below her, so
+   she should be gently **uplit in the water's cyan** — no new light was added.
+   Check she reads after dark and the uplight looks deliberate.
+4. **Jets.** Six water jets still arc from the bowl to the basin. Nothing should
+   clip or pass through the plinth.
+5. **Wade in and jump.** Wading, splashes and the jumpable rim are untouched;
+   confirm the statue is not reachable or blocking.
+6. **Walk a full circle.** The tail flash and the raised arm should stay legible
+   from every angle; nothing pops or z-fights against the bowl water.
+7. `art-samples.html?only=statue`, ideally beside `?only=ripika`.
+
+---
+
+## State
+
+- [x] stone palette ladder
+- [x] `RipikaPalette` plumbed through `createRipika` / `buildRipikaHead`
+- [x] `applyStaticBakedFace` one-canvas path
+- [x] statue asset, plinth, pose
+- [x] fountain placement, finial + spout removed, disposal wired
+- [x] `check:baked-face` + art gallery registered
+- [x] `npm run build` exit 0
+- [ ] visual QA (not owned — dev server left running on 5314)
+- [ ] PR (deliberately not raised; Overseer's call)
+- [ ] **separate issue**: RiPika's tail cant flattened by `setWalkPhase`

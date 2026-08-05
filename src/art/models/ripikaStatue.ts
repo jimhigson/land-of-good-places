@@ -109,9 +109,13 @@ export function createRipikaStatue(): RipikaStatueHandle {
   plinth.name = 'statuePlinth';
   root.add(plinth);
 
-  const plinthStone = toonMaterial(ART.statuePlinth);
-  const plinthStoneDark = toonMaterial(ART.statuePlinthDark);
-  const plinthInk = inkTint(ART.statuePlinthDark);
+  // The plinth takes two steps from the figure's own ladder rather than a
+  // dedicated pair of greys. Same rock, cut into blocks instead of a mouse —
+  // which is both what a real plinth is and one fewer place for the park to
+  // acquire a second, slightly different stone.
+  const plinthStone = toonMaterial(ART.statueStoneMid);
+  const plinthStoneDark = toonMaterial(ART.statueStoneDeep);
+  const plinthInk = inkTint(ART.statueStoneDeep);
 
   const course = (
     topR: number,
