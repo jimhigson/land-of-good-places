@@ -1,5 +1,47 @@
 # HANDOFF — keychain shop
 
+> ## RESUMED 5 August 2026 — read this box first
+>
+> Branch is now **`feat/keychain-shop-finish`**, worktree
+> `.claude/worktrees/keychain-resume`, **rebased onto current `origin/main`
+> (a68ed54)**. Port 5315. `npm run build` exit 0.
+>
+> **Which branch was right.** The work existed on two divergent branches.
+> `keychain-shop` (the one issue #119 named) had only the charms and this
+> handoff. **`keychain-finish` was the fuller one** — charms, handoff, the
+> additive `keychainAnchor`, and the WIP state commit `3cafe5c` — and was *not*
+> a descendant of the other. Resumed from `keychain-finish`; issue #119 has
+> been corrected.
+>
+> **The rebase was cheap, and worth doing.** 214 commits of drift, but the work
+> is only ~510 lines and mostly one new file. Seven conflict hunks, every one an
+> additive-vs-additive "both sides added a sibling" — no semantic fights. The
+> WIP commit rebased to exactly the four type errors its own message predicted
+> and introduced none.
+>
+> **The drift helped.** Main has since landed `wornJetpackUid`, which is a
+> closer twin of what a keychain needs than `wornHatUid` ever was: a new
+> `InventoryKind`, its own `worn*Uid`, a `setWorn*`, a `wearableSlot` arm, an
+> `owns(...)` hydrate pass. **Mirror `jetpack`, not `hat`.** Decision 3 below
+> still stands; only its template got better.
+>
+> **Done since resuming:** the whole state layer (handoff step 2) — `save.ts`,
+> `hydrate`, `createInitialState`, `refreshPlacement`'s `isWorn`,
+> `wearableSlot`. Steps 1 (anchor) and the charms were already committed.
+>
+> **STALE DECISION — needs a ruling before step 4.** Gotcha "the backpack
+> already exists" below described *one* bag, 0.36 x 0.32 x 0.20 at
+> (0, 0.56, -0.32), and `keychainAnchor` was measured against it at
+> `(0.17, 0.5, -0.3)`. Since then **#131 landed five authored backpack shapes**
+> (`art/models/backpacks.ts`, `buildBackpacks`, `BackpackPart`,
+> `setBackpackKind`). That offset is now only known-good for a bag of roughly
+> the old dimensions, and is unverified on the other four. The right home for
+> the number is the bag's own rig, per shape, rather than a constant in
+> `kid.ts` — flagged to the Overseer, not yet acted on. The rebase keeps the
+> old offset and gates it on `backpackRig` existing.
+>
+> **Remaining:** steps 3–7 below, unchanged and still accurate.
+
 Branch `keychain-shop`, worktree `.claude/worktrees/keychain-shop`, off
 `origin/main` (55b9b4f, the SELECTION RULE PR #100).
 
