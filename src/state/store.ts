@@ -903,6 +903,7 @@ class GameStore {
     if (!owns(next.wornHatUid, 'hat')) next.wornHatUid = null;
     if (!owns(next.wornFlowerUid, 'flower')) next.wornFlowerUid = null;
     if (!owns(next.wornJetpackUid, 'jetpack')) next.wornJetpackUid = null;
+    if (!owns(next.wornKeychainUid, 'keychain')) next.wornKeychainUid = null;
 
     // The Cute-o-dex's `placement` is derived from what is owned, so a save
     // written mid-change can never leave the book disagreeing with the bag.
@@ -931,7 +932,8 @@ class GameStore {
     const isWorn = (item: InventoryItem): boolean =>
       item.uid === this.state.wornHatUid ||
       item.uid === this.state.wornFlowerUid ||
-      item.uid === this.state.wornJetpackUid;
+      item.uid === this.state.wornJetpackUid ||
+      item.uid === this.state.wornKeychainUid;
     if (copies.some((item) => item.uid === this.state.carriedUid)) entry.placement = 'carried';
     else if (copies.some(isWorn)) entry.placement = 'worn';
     else if (copies.some((item) => item.paradeable && !item.stowed)) entry.placement = 'parade';
@@ -990,6 +992,7 @@ function createInitialState(): GameState {
     wornFlowerUid: null,
     wornHatUid: null,
     wornJetpackUid: null,
+    wornKeychainUid: null,
     paused: false,
     debugOverlay: false,
   };
