@@ -31,6 +31,7 @@
     "check:cart-shape": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cart-shape.mts",
     "check:backpack-peek": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-backpack-peek.mts",
     "measure:solver-budget": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-solver-budget.mts",
+    "measure:cruiser-clearance": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-cruiser-clearance.mts",
     "measure:rail-radii": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-rail-radii.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
     "check:gondola-sightline": "node scripts/checkGondolaSightline.mjs",
