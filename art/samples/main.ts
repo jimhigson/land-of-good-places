@@ -181,10 +181,10 @@ const woodwall: Exhibit = {
   plinthR: 0,
 };
 
-// Off the lineup for the same reason as the wall: at 2.06 m on its own plinth
-// the statue stands half a metre over Eleri and would tower across the front
-// row. ?only=statue — and it is worth looking at beside ?only=ripika, since
-// whether it reads as RiPika at play distance is the whole question.
+// Off the lineup for the same reason as the wall, only more so: at 8.24 m the
+// statue is four times Eleri's height and would dwarf the entire front row.
+// ?only=statue — worth looking at beside ?only=ripika, since whether it still
+// reads as RiPika is the whole question.
 const statue: Exhibit = {
   key: 'statue',
   label: 'RiPika statue',
@@ -195,9 +195,22 @@ const statue: Exhibit = {
   plinthR: 0,
 };
 
-const shown = only
-  ? [...exhibits, woodwall, statue].filter((e) => e.key === only)
-  : exhibits;
+/**
+ * Every exhibit there is — the lineup plus the off-lineup ones.
+ *
+ * **One list, because three of them disagreed.** `?only=` was resolved against
+ * `[...exhibits, woodwall, statue]` in one place and `[...exhibits, woodwall]`
+ * in the two that size the camera, so adding the statue to the first list alone
+ * gave `?only=statue` an exhibit that rendered but was framed for a 1.4 m
+ * fallback — an extreme close-up of the bottom of an 8.24 m statue, which reads
+ * as a broken model rather than a mis-framed one. Caught in QA, after the URL
+ * had been recommended and written into a PR.
+ *
+ * A new off-lineup exhibit now needs adding here and nowhere else.
+ */
+const allExhibits: readonly Exhibit[] = [...exhibits, woodwall, statue];
+
+const shown = only ? allExhibits.filter((e) => e.key === only) : exhibits;
 if (shown.length === 0) shown.push(...exhibits);
 
 const turntables: Group[] = [];
@@ -284,13 +297,13 @@ function layoutCamera(): void {
  * generous headroom for its name pill, so no close-up ever crops an ear.
  */
 function focusHeight(k: string): number {
-  const target = [...exhibits, woodwall].find((e) => e.key === k);
+  const target = allExhibits.find((e) => e.key === k);
   const h = target?.handle.height ?? 1.4;
   return h * 1.62 + 0.75;
 }
 
 if (only) {
-  const target = [...exhibits, woodwall].find((e) => e.key === only);
+  const target = allExhibits.find((e) => e.key === only);
   const h = target?.handle.height ?? 1.4;
   focus.y = h * 0.56 + 0.18;
 }
