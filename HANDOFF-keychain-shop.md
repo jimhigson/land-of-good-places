@@ -29,18 +29,39 @@
 > `hydrate`, `createInitialState`, `refreshPlacement`'s `isWorn`,
 > `wearableSlot`. Steps 1 (anchor) and the charms were already committed.
 >
-> **STALE DECISION — needs a ruling before step 4.** Gotcha "the backpack
-> already exists" below described *one* bag, 0.36 x 0.32 x 0.20 at
-> (0, 0.56, -0.32), and `keychainAnchor` was measured against it at
-> `(0.17, 0.5, -0.3)`. Since then **#131 landed five authored backpack shapes**
-> (`art/models/backpacks.ts`, `buildBackpacks`, `BackpackPart`,
-> `setBackpackKind`). That offset is now only known-good for a bag of roughly
-> the old dimensions, and is unverified on the other four. The right home for
-> the number is the bag's own rig, per shape, rather than a constant in
-> `kid.ts` — flagged to the Overseer, not yet acted on. The rebase keeps the
-> old offset and gates it on `backpackRig` existing.
+> ### Two decisions below are SUPERSEDED — do not follow them
 >
-> **Remaining:** steps 3–7 below, unchanged and still accurate.
+> **1. Decision 3's template.** Mirror **`wornJetpackUid`**, not `wornHatUid`.
+> Main landed a jet pack after this handoff was written, and it is a complete,
+> shipped instance of exactly this pattern: new `InventoryKind`, its own
+> `worn*Uid`, a `setWorn*`, a `wearableSlot` arm, an `owns(...)` pass in
+> `hydrate`. The *decision* still stands; only its template got better.
+>
+> **2. The "backpack already exists" gotcha is dead.** It described *one* bag
+> and gave `keychainAnchor` a single constant `(0.17, 0.5, -0.3)` in `kid.ts`.
+> **#131 landed five authored shapes** (`backpacks.ts`). **Done and ruled on:**
+> the charm now hangs off `BackpackRig.charmAnchor`, a `CHARM_HANGS` row per
+> shape sitting beside the `MOUTHS` table that already worked that way, moved
+> by `setKind` so it follows the bag she switches to. `kid.ts` holds no
+> geometry number of its own any more.
+>
+> **Measuring all five caught a real bug.** Four bags take a charm at their low
+> outer corner (0.015–0.042 m off real geometry). The **heart does not** — it
+> tapers to a point where the others have a corner, so the same rule put its
+> anchor **0.122 m outside its own surface**, a charm dangling in mid-air. Four
+> of five looked perfect, which is the shape of bug that passes review. Hence
+> **`npm run check:charm-hang`**, a permanent ratchet: it builds every bag and
+> asserts the anchor is within 0.08 m of a real vertex. Proven red before being
+> trusted. Add a sixth bag shape and it will tell you.
+>
+> **Also done since resuming:** the catalogue entries (step 3) —
+> `check:brevity` clean with no new `KNOWN_LONG`, `check:assets` 95 → 100 with
+> no new `KNOWN_DRIFT`.
+>
+> **Remaining:** steps 4–7 below. Step 6's manifest entry re-rolls the park, so
+> it wants `check:park` plus a **procgen invariant** for the stall's placement —
+> write it in the new `Invariant = (facts) => readonly string[]` form
+> (`chore/invariant-return-complaints`, now on origin) and prove it red.
 
 Branch `keychain-shop`, worktree `.claude/worktrees/keychain-shop`, off
 `origin/main` (55b9b4f, the SELECTION RULE PR #100).
