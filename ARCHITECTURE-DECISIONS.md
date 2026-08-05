@@ -31,8 +31,9 @@ answers with the deck's height where it covers.
 **`NavGrid` remains a single-layer 2D lattice.** This is worth stating flatly
 because it is the thing most likely to be misremembered: we are *not* making the
 nav grid multi-layer. We are letting a deck declare a walkable surface above the
-ground, and widening the height test `NavGrid` already applies to colliders so
-that the fence beneath a deck stops blocking the cells above it.
+ground, and exempting the cells it covers from collider stamping — see the
+correction below for why it is the deck that grants the exemption and not the
+collider's own height that earns it.
 
 ### Why, and what was rejected
 
@@ -62,10 +63,8 @@ Three seams have to widen, none of them new mechanisms:
 1. **The fence.** Its collision walls are `topHeight = Infinity`,
    `autoHoppable = false` on purpose — "the fence is a rule, not a hurdle" — so
    `NavGrid` stamps them blocked at every height, including the deck's own cells
-   above them. `Collision.forEachWall` already passes `topHeight` to its visitor
-   and `NavGrid` already skips colliders on a height test; today only the
-   auto-hop test uses it. §7 requires the fence stay *continuous beneath* the
-   bridge, so it cannot simply be gapped as level crossings did.
+   above them. §7 requires the fence stay *continuous beneath* the bridge, so it
+   cannot simply be gapped as level crossings did.
 2. **`poiGraph.lineIsClear`** is purely 2D (`collision.resolve(probe, 0.7)`, Y
    ignored), so nodes either side of a bridge get no edge and NPCs cannot cross
    — and an edge could form spuriously between a deck node and the ground under
@@ -75,6 +74,43 @@ Three seams have to widen, none of them new mechanisms:
    `poiGraph` or `paths.ts` must know about the deck has to be a **plan**
    computed at module load, as `TRAIN_PLAN` and `RAIL_RACE_PLAN` are — not a
    scene object.
+
+### Correction, same day: the seam is the deck, not the collider's top
+
+The paragraph above originally went on to say that `Collision.forEachWall`
+already passes `topHeight` to its visitor and `NavGrid` already skips colliders
+on a height test, so widening *that* test was the way in. **It is not, and the
+reason matters enough to record rather than quietly amend.**
+
+Comparing a collider's top against the walking surface requires the fence to
+declare a finite `topHeight`. `Collision.resolve`'s `clearance` is *"how high
+the mover's feet currently are above their own local ground — 0 while walking,
+positive mid-jump"*, and a collider stops pushing back once
+`clearsTop(topHeight, clearance)`. The visible fence is 0.95 m of post; a child's
+`JUMP_APEX_HEIGHT` is ≈ 1.28 m. So the moment the fence's top became a real
+number, **a child could jump the railway fence** — destroying Decision 4 §6's
+"keeping feet off the track", which is a safety rule about the one moving,
+solid thing in the park. The `Infinity` is load-bearing, not laziness.
+
+So the mechanism is the other way round: **a cell a bridge deck `covers(x, z)`
+is exempt from collider stamping**, because the deck is above whatever is
+beneath it. Nothing is lost by the single-layer lattice letting the deck win
+those cells, and this is the argument that makes Decision 6 safe: *what is under
+a bridge is the fenced rail corridor, which is already not walkable*. The 2D
+lattice is only forced to choose between two surfaces where one of them was
+never available anyway.
+
+This also settles the `poiGraph` question rather than leaving it open. It gets
+**the same treatment for the same reason** — a height-aware seam expressed
+through the deck's own `covers(x, z)`, not a parallel structure and not a
+collider-top test, which is unavailable to it for exactly the fence reason
+above. A `lineIsClear` sample standing on the deck ignores what is under the
+deck; one that is not, does not.
+
+The load-bearing constraint to carry forward: **nothing may give the rail fence
+a finite `topHeight`.** Any future "make collision height-aware" work has to
+exempt it explicitly, or it silently re-opens a hole in the one fence that is
+protecting a child from a moving train.
 
 ### What it unblocks
 
