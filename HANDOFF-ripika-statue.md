@@ -461,3 +461,82 @@ for the gallery view.
 **PR: https://github.com/jimhigson/land-of-good-places/pull/200** — stacked on
 #199 (`fix/ripika-tail-cant`), so it must merge **after** it. GitHub retargets
 it to `main` automatically when #199 lands.
+
+---
+
+# QA round — one fix, three findings recorded but NOT actioned
+
+QA passed the statue on substance and pulled the baked face texture out of the
+running scene: 512², **zero tomato-red pixels**, max saturation 0.29, cheeks
+soft grey discs, face fully painted in the head's own UV. Both stale-handoff
+failure modes confirmed absent by measurement, not by eye. Jets clear by
+0.216 m with zero jet vertices inside the plinth; unreachable (hop apex 2.228 m
+vs plinth base 2.425 m); no z-fighting; 36 draw calls; console clean.
+
+## FIXED — `?only=statue` framed the wrong thing
+
+It rendered the statue but sized the camera from a 1.4 m fallback: an extreme
+close-up of the bottom of an 8.24 m model, which reads as a **broken asset**.
+
+Cause: **three lists that had to agree and did not.** `?only=` resolved against
+`[...exhibits, woodwall, statue]` in one place and `[...exhibits, woodwall]` in
+the two that size the camera. Silent, because `find` returning undefined falls
+back to 1.4 m rather than erroring.
+
+Fixed with one `allExhibits` used everywhere — a new off-lineup exhibit now
+needs adding in exactly one place. I had recommended that URL and written it
+into PR #200 without opening it. **Check a URL before recommending it.**
+
+## RECORDED, DECLINED BY JIM — the 45° yaw
+
+**Do not "fix" this. It was considered, measured, implemented, and reverted on
+Jim's explicit instruction.** He approved the statue, it was taken back to him
+twice, and he closed it: *"the statue is fine like I said already."*
+
+The finding was real. Assets are authored facing +Z (ART_DIRECTION §7), which is
+due south, while this game's camera has exactly **one** bearing — 45° SE at 38°
+elevation (`CAMERA_YAW_DEGREES`, `CAMERA_PITCH_DEGREES`). So the statue is
+permanently 45° off-axis and seen from above: **one eye visible, the raised arm
+hidden behind the body.** QA A/B'd `rotation.y = π/4` and both eyes and the
+raised paw become legible.
+
+It was declined anyway, and that is correct: Jim is the one who has to like
+looking at it, and his call outranks an A/B. **It is one number** —
+`this.statue.root.rotation.y` in `Fountain.ts` — and trivially revisitable if
+the family ever asks.
+
+One implementation note if it is ever revived: the yaw must be a **shared
+exported constant**, not a literal in `Fountain.ts`, because
+`check:statue-occlusion` builds the statue itself and a check that measures a
+differently-turned model measures something that does not exist. That was not
+theoretical — at π/4 the hidden area measured 28.9 m² against 28.1 m² at the
+default yaw.
+
+## RECORDED, not actionable — the ears carry the read, not the face
+
+At play distance she is **104 px tall with a 31 px head**. Nobody reads the
+expression; they read the **silhouette** — ears, raised arm, tail.
+
+Keep this in mind before "improving" the face at the expense of the outline.
+It is why the five-step stone ladder exists (it is what keeps the ear tips and
+tail tip distinct in outline) and why the raised arm matters more than the
+cheeks.
+
+## RECORDED, pre-existing, NOT mine
+
+**The park train's ground-level rails cut across the statue's face in the
+isometric projection at the default view.** Not caused by this work. Flagged in
+PR #200 as known-not-fixed so a reviewer does not think it was missed — it is
+exactly where Jim will look.
+
+## Verification (read off the terminal, not from expectation)
+
+```
+BUILD_EXIT=0
+PROCGEN_EXIT=0
+ Test Files  5 passed (5)
+      Tests  85 passed (85)
+asset contract: 95 assets check out, 35 of them creatures that stand still as built
+Every baked face is on its own head, where it was painted.
+statue occlusion: hides 28.1 m² out to 12.7 m, all of it fades (45.0 m² fades a little early, which is fine).
+```
