@@ -15,6 +15,7 @@ import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
+import { STALL_STANDS } from '../minigames/stallPlacement';
 
 /**
  * The winding path network.
@@ -365,11 +366,33 @@ function buildGraph(): PathGraph {
       anchor.id === 'building' ? 2.8 : 2.6,
     );
   }
-  // Every stall booth is a node too — the sky cruiser's sits in the castle's
-  // west pocket, a 30 m walk from the nearest path before its spur existed.
-  for (const entry of PARK_LAYOUT.entries.values()) {
-    if (!entry.id.startsWith('stall.')) continue;
-    spur(entry.id, 'stall', entry.entranceX, entry.entranceZ, entry.x, entry.z, 2.6);
+  // Every stall counter is a node too — the sky cruiser's booth sits in the
+  // castle's west pocket, a 30 m walk from the nearest path before its spur
+  // existed.
+  //
+  // The node is the **stand point**, not the plot's doormat. A booth has two
+  // candidate points and they lie on different bearings: `PlacedEntry`'s
+  // entrance sits 1.4 m off the plot edge along the line toward the park
+  // middle, while `STALL_STANDS` sits in front of the counter, which is the
+  // side a child is actually served from — and the point `minigames/stalls.ts`
+  // registers its interact zone at, `npc/poiGraph.ts` seeds a waypoint at and
+  // `LampPosts.ts` keeps clear. Routing to the doormat instead left every
+  // stall's ribbon stopping 3.4–6.9 m short of its own counter, on all five
+  // test seeds: the "paths to nowhere" the family reported (issue #114). The
+  // ribbon is only half the width of that gap, so what you saw in the park was
+  // paving that simply stopped in the grass beside a booth.
+  //
+  // Driving the loop off `STALL_STANDS` rather than off the `stall.` entries in
+  // `PARK_LAYOUT` also picks up the two booths that have no layout entry to
+  // iterate: the ferris kiosk, placed by relation to the wheel's own entrance
+  // (`stallPlacement.ts`'s `ferrisKiosk`), which had no node at all; and the
+  // face-paint stall, which `world/FacePaintStall.ts` builds for itself.
+  //
+  // A counter is a destination in itself, like a ride exit, so `toward` equals
+  // the node and there is no past-the-doormat extension: walking past a
+  // counter walks into the booth.
+  for (const stand of STALL_STANDS) {
+    spur(`stall.${stand.id}`, 'stall', stand.x, stand.z, stand.x, stand.z, 2.6);
   }
   // And the train stations — plannable at all only because `train/plan.ts`
   // solves the railway before any path is drawn. The stand is the node, but
