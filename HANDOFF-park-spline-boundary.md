@@ -11,9 +11,20 @@ Spec: `REQUIREMENTS-2026-07-28.md` §6. Rulings that bind this work:
 
 ## Done
 
-`src/world/boundary.ts` (committed). Generates a gentle closed outline per
-seed, of a target area, passing exactly through the gate. Nothing consumes it
-yet.
+- `src/world/boundary.ts` — generates a gentle closed outline per seed, of a
+  target area, passing exactly through the gate. `PARK_BOUNDARY` is the one per
+  build, from `PARK_SEED`.
+- **The player clamp and the nav lattice both ask the boundary now**, not a
+  radius. `setPlayBounds` takes a `ParkBoundary`; the castle interior passes
+  `circleBoundary`, which genuinely is one. Deliberately behaviour-identical —
+  the garden still gets `GARDEN_PLAY_BOUNDARY`, the old circle, because the
+  clamp cannot move alone (see below).
+
+**`GARDEN_PLAY_BOUNDARY` is the one line that switches the garden onto the
+generated outline**, and it must change in the same commit as the terrain, the
+rim and the wall. On its own it would let a player walk out to 110 m, through
+where the masonry is not and off the side of a terrain disc that still ends at
+83.5 m. The shell migrates in one piece.
 
 ## The two findings that matter
 
@@ -30,10 +41,10 @@ pinned point on an otherwise free curve.
 honest play area (`GARDEN_PLAY_RADIUS` 58, 10,568 m²) needs mean radius ~82 m,
 which is outside the Rail Race outer ring (70.2), `TREELINE_INNER_RADIUS`
 (71.5), `RIM_START` (72), and level with `TERRAIN_RADIUS` (83.5). The crest and
-treeline were only *just* moved out on 2 Aug to clear those rings. **The base
-for "2x" is with Jim** — but every candidate base needs the same structural
-work, so the factor is left as one tunable and the outer shell derives from the
-boundary. Changing the answer is then one constant, not a rewrite.
+treeline were only *just* moved out on 2 Aug to clear those rings. **Base
+settled at 58** (see the ruling below); the factor stays a single tunable
+(`PARK_AREA_MULTIPLIER`) and the outer shell derives from the boundary, so
+revisiting it is one constant rather than a rewrite.
 
 ## Three things the generator got wrong first
 
