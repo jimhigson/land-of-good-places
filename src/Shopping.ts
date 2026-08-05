@@ -135,18 +135,25 @@ export class Shopping implements GameSystem {
       return;
     }
 
-    // No "Press E to shop" prompt of its own any more: GAME_DESIGN.md's
-    // SELECTION RULE puts a "Shop!" chip over the counter instead, from the one
-    // system that offers every action in the park (`world/Selection.ts`). The
-    // press itself is still handled here, exactly as it always was — the chip
-    // fires the same virtual E.
-    const stand = this.world.building.shops.shopAt(
-      this.player.position.x,
-      this.player.position.y,
-      this.player.position.z,
-    );
+    // No "Press E to shop" prompt, and no press handling either. GAME_DESIGN.md's
+    // SELECTION RULE puts a "Shop!" chip over the counter, and since issue #122
+    // that chip runs {@link openShopById} directly. This used to call
+    // `shops.shopAt(...)` and read `justPressed('interact')` — one more
+    // proximity test with its own idea of "close enough", racing every other
+    // one in the park for the same key.
+  }
 
-    if (stand && input.justPressed('interact') && !this.player.riding) this.openShop(stand);
+  /**
+   * Open shop unit `unitId`'s panel — the run body of its counter's chip,
+   * wired through `InteriorControls.openShop`.
+   *
+   * Named rather than searched: the chip says which counter it is over, so
+   * there is no lookup by position that could answer differently.
+   */
+  openShopById(unitId: string): void {
+    if (this.uiOpen || this.player.riding) return;
+    const stand = this.world.building.shops.stands.find((candidate) => candidate.id === unitId);
+    if (stand) this.openShop(stand);
   }
 
   dispose(): void {

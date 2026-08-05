@@ -591,8 +591,14 @@ export class ParkTrain implements GameSystem, TrainService {
   }
 
   /**
-   * "Let me off." The interact key or a hop — accelerators for the "Get off"
-   * chip, for a player whose hands are already on the keyboard.
+   * "Let me off." A hop — the accelerator for the "Get off" chip, for a player
+   * whose hands are already on the keyboard.
+   *
+   * The interact key is deliberately *not* read here. It arrives through the
+   * platform zone's own "Get off" action instead (see {@link stationActions},
+   * and `selectableWhileRiding`), which is what makes E mean exactly what the
+   * chip in front of her says — GitHub issue #122. `jump` stays because it has
+   * no chip and means the same thing everywhere.
    *
    * **Walking is no longer a way off**, and that is the point of the SELECTION
    * RULE: a child who turned to look at the park found herself standing on the
@@ -601,8 +607,7 @@ export class ParkTrain implements GameSystem, TrainService {
    * with a finger — which is what the movement clause was really there for.
    */
   private wantsOff(context: FrameContext, _lookDragging: boolean): boolean {
-    const { input } = context;
-    return input.justPressed('interact') || input.justPressed('jump');
+    return context.input.justPressed('jump');
   }
 
   private alight(player: Player): void {

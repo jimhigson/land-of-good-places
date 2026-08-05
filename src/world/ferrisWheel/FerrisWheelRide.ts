@@ -473,11 +473,34 @@ export class FerrisWheelRide implements GameSystem {
 
     if (this.cardTime >= 0) {
       this.cardTime += dt;
-      const pressed = context.input.justPressed('interact') || context.input.justPressed('jump');
+      // `interact` is not read here — `world/InteractRouter.ts` holds the only
+      // reader in the game and routes it back through {@link dismissCard} via
+      // the `cardDismissable` claim. `jump` is still read directly: it means
+      // the same thing wherever she is standing, so it cannot be aimed at the
+      // wrong thing.
+      const pressed = context.input.justPressed('jump');
       if (this.cardTime > CARD_LOCKOUT && (pressed || this.cardTime > CARD_TIMEOUT)) {
         this.leave();
       }
     }
+  }
+
+  /**
+   * True while the end card is up and past its lockout — so a press means
+   * "yes, take me back" and nothing else.
+   *
+   * Exclusive by construction: the card is a full-screen thing over a ride that
+   * already owns the player, so there is no chip it could disagree with. Read by
+   * `world/InteractRouter.ts`.
+   */
+  get cardDismissable(): boolean {
+    return this.cardTime >= 0 && this.cardTime > CARD_LOCKOUT;
+  }
+
+  /** "Yes, take me back" — the end card's own press. */
+  dismissCard(): void {
+    if (!this.cardDismissable) return;
+    this.leave();
   }
 
   /**

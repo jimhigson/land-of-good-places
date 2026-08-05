@@ -200,15 +200,13 @@ export class Selection implements GameSystem {
   }
 
   update(context: FrameContext): void {
-    const activated = context.input.justPressed('interact');
-
     if (this.deps.blocked()) {
-      // The press that used the thing is the press that opened the panel over
-      // it, so this frame is where a shop or a stall gets its confirmation.
-      if (activated && this.lastSelected) this.deps.flash(this.lastSelected);
-      this.lastSelected = null;
       this.pending = null;
       this.clear();
+      // `lastSelected` deliberately survives: the press that used the thing is
+      // the press that opened the panel over it, and `handleInteractPress` —
+      // which runs after this, from `InteractRouter` — is where that press gets
+      // its confirmation flash.
       return;
     }
 
@@ -225,8 +223,6 @@ export class Selection implements GameSystem {
     this.lastSelected = chosen;
 
     this.setPointerCursor(hovered !== null);
-
-    if (activated) this.onInteractKey();
   }
 
   dispose(): void {
@@ -234,32 +230,51 @@ export class Selection implements GameSystem {
     this.bounds.clear();
   }
 
-  // -------------------------------------------------------------- internals
-
   /**
    * The E key, and the SELECTION RULE's "press the key ... to do it".
    *
-   * Two cases, and the split is what keeps a press from happening twice:
+   * Called by `world/InteractRouter.ts` and nowhere else, after this frame's
+   * {@link update} has settled what is selected — so the action that runs is,
+   * by construction, the one whose chip is on screen. That is the whole of
+   * GitHub issue #122: *"E must act on exactly the item the chip shows."*
    *
-   * - **Standing at it.** The system that owns the zone — `Shopping`,
-   *   `TreeClimbing`, `Building`, `MiniGameHost`, `Flowers`, the train — is
-   *   already watching for this very press with its own proximity check, and
-   *   has already acted on it this frame. Nothing to run; just flash.
-   * - **Selected from afar.** No owner will have looked twice at a press from
-   *   over there, so this is ours: walk over and run the primary action on
-   *   arrival, exactly as tapping its chip would.
+   * {@link commit} does the rest of the rule — standing at it, it runs now;
+   * selected from across the park, she walks there and it runs on arrival.
+   *
+   * ### Why this used to refuse to run an in-reach action
+   *
+   * It flashed and returned instead, because the system that owned the zone was
+   * *also* watching this press with a proximity check of its own and had already
+   * acted on it. Running it here as well would have fired twice — and on a tree
+   * that meant climbing and instantly un-climbing, the double-fire hazard noted
+   * on #103. Those rival readers are gone (`InputSystem.takeInteractPress` is
+   * the only reader of the key now), so there is nothing left to double-fire
+   * with, and the special case that worked around them goes with them.
    */
-  private onInteractKey(): void {
-    const zone = this.current;
-    if (!zone) return;
-    if (this.withinReach(zone)) {
-      this.deps.flash(zone);
+  handleInteractPress(): void {
+    if (this.deps.blocked()) {
+      // A panel already had the screen when this press arrived, so there is
+      // nothing in the park to run. Flashing whatever was selected last is the
+      // gentlest possible "not now" — and it is once, because the flash clears
+      // it.
+      //
+      // This used to be the *ordinary* path for opening a shop or a stall: the
+      // owning system ran earlier in the frame, opened its panel, and by the
+      // time the selection was consulted the screen was already blocked. Now
+      // the panel is opened from here, so `commit` does the activation flash
+      // itself and this is only the leftover case.
+      if (this.lastSelected) this.deps.flash(this.lastSelected);
+      this.lastSelected = null;
       return;
     }
+
+    if (!this.current) return;
     const primary =
       this.currentActions.find((action) => action.id === PRIMARY_ACTION) ?? this.currentActions[0];
     if (primary) this.commit(primary);
   }
+
+  // -------------------------------------------------------------- internals
 
   /** Runs a walked-to action once the walk lands, and gives up when it plainly has not. */
   private advancePending(dt: number): void {

@@ -194,6 +194,17 @@ export class MiniGameStalls implements GameSystem {
 
   private readonly props: StallProp[] = [];
 
+  /**
+   * "Open this booth" — wired by `Game` to `MiniGameHost.enter`, which either
+   * boards the world ride behind the booth or drops the curtain on its
+   * mini-game.
+   *
+   * A settable hook rather than a constructor argument, in the same idiom as
+   * `MiniGameHost.boardRide` and `.riding`: the stalls are built with the world,
+   * long before the mini-game framework that runs them exists.
+   */
+  onEnter: ((stallId: string) => void) | null = null;
+
   constructor(collision: CollisionWorld) {
     this.group.name = 'stalls';
 
@@ -236,10 +247,12 @@ export class MiniGameStalls implements GameSystem {
   /**
    * Tap targets, one per stall (see `world/interact.ts`).
    *
-   * One action each — "Ride!", "Play!", "Enter!" — and it is the virtual E
-   * press, so pressing the chip reaches `MiniGameHost`'s own proximity-and-press
-   * watch exactly as walking up and pressing the key always did. The keyboard
-   * and touch paths still meet before anything game-specific happens.
+   * One action each — "Ride!", "Play!", "Enter!" — and it names this booth by
+   * id. `MiniGameHost` used to find the booth itself, by sweeping every stall
+   * for one within its own `REACH`; that second opinion about who a press was
+   * meant for is what GitHub issue #122 removed. The keyboard and touch paths
+   * still meet in one place — `Selection.commit` — before anything
+   * game-specific happens.
    *
    * The `sign` is the booth's own board, which the booth no longer carries: the
    * family's 28 July 2026 ruling took the painted signs out of the park, so the
@@ -271,6 +284,7 @@ export class MiniGameStalls implements GameSystem {
           // instance, in order.
           highlight: highlightObject(stall.booth),
         },
+        () => this.onEnter?.(stall.definition.id),
         stall.definition.glyph,
       ),
     );

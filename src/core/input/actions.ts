@@ -33,6 +33,24 @@ export type GameAction =
   | 'duck'
   | 'boost';
 
+/**
+ * Every action *except* `interact` — the type `InputSystem.justPressed` takes.
+ *
+ * `interact` is bound, read and delivered exactly like the others; what is
+ * different is that it is the only one whose meaning depends on **where the
+ * player is standing**. `jump` hops wherever you are. `interact` means "use the
+ * thing the chip is showing me", and only `world/Selection.ts` knows what that
+ * is, so only `world/InteractRouter.ts` may read it
+ * ({@link InputSystem.takeInteractPress}).
+ *
+ * Subtracting it here is what turns GitHub issue #122's rule — *"E must act on
+ * exactly the item the chip shows"* — from a convention into a compile error.
+ * Before this, twelve systems each read the interact edge and each decided from
+ * its own proximity radius whether the press was theirs; a flower 1.2 m away
+ * stole the press from the station chip a child was actually looking at.
+ */
+export type InteractFreeAction = Exclude<GameAction, 'interact'>;
+
 export const GAME_ACTIONS: readonly GameAction[] = [
   'interact',
   'jump',

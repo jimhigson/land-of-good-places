@@ -92,7 +92,33 @@ export class LiftPanel implements GameSystem {
     container.append(this.root);
   }
 
-  update(context: FrameContext): void {
+  /**
+   * True while the panel is under her hand and waiting to be pressed.
+   *
+   * `world/InteractRouter.ts` reads this as a claim. It is exclusive rather than
+   * a proximity test: the panel is either showing a pressable face or it is
+   * not, and while it is, the lift is the thing she is using.
+   */
+  get awaitingPress(): boolean {
+    if (this.isBlocked()) return false;
+    const mode = this.lift.panelState()?.mode;
+    return mode === 'call' || mode === 'floors';
+  }
+
+  /**
+   * E — the game's "use this" key — works the panel too, so a keyboard or
+   * controller player never has to reach for the mouse. It presses the button
+   * rather than calling the seam directly, so the rainbow activation flash and
+   * the chime come along exactly as they do for a finger.
+   */
+  pressFocused(): void {
+    const state = this.isBlocked() ? null : this.lift.panelState();
+    if (!state) return;
+    if (state.mode === 'call') this.callButton.click();
+    else if (state.mode === 'floors') this.focusedFloor()?.click();
+  }
+
+  update(_context: FrameContext): void {
     const state = this.isBlocked() ? null : this.lift.panelState();
 
     if (!state) {
@@ -101,15 +127,6 @@ export class LiftPanel implements GameSystem {
         this.root.dataset.show = 'false';
       }
       return;
-    }
-
-    // E — the game's "use this" key — works the panel too, so a keyboard or
-    // controller player never has to reach for the mouse. It presses the
-    // button rather than calling the seam directly, so the rainbow activation
-    // flash and the chime come along exactly as they do for a finger.
-    if (context.input.justPressed('interact')) {
-      if (state.mode === 'call') this.callButton.click();
-      else if (state.mode === 'floors') this.focusedFloor()?.click();
     }
 
     if (state.indicator !== this.indicatorText) {
