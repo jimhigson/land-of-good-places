@@ -57,12 +57,40 @@ in place. **Do not merge; a different agent reviews this.**
 
 ## Not done / left for the Overseer
 
-- Ordering nit from the review (finding 5) is **not** fixed:
-  `applyLiveLook` still calls `completeCharacterCreation` (which notifies, so
-  subscribers sync against the *old* model) before `replaceModel`. End state
-  is correct — every `rebind()` repairs it — but it builds a hat, throws it
-  away, and double-disposes it. Deliberately left: it is cosmetic, and moving
-  the notify would be a wider change than this task asked for.
+- Ordering nit from the review (finding 5) is **not** fixed, and **my original
+  explanation of it here was wrong** — corrected so nobody is reassured by the
+  wrong mechanism. I claimed `completeCharacterCreation`'s `notify()` made
+  subscribers sync against the old model, building a hat that was then thrown
+  away. It does not: `notify()` **coalesces onto a microtask**
+  (`queueMicrotask`, `store.ts`), so no subscriber runs synchronously and no
+  hat is ever built and discarded.
+
+  What actually happens is smaller: `disposeTree(old.root)` frees the hat mesh
+  along with the model, and then `rebind()`'s `clear()` disposes that same mesh
+  a second time. three.js `dispose` is idempotent, so this is genuinely
+  harmless — it is untidy, not a leak and not a correctness bug. Still left
+  alone deliberately; the point of writing it down is that "double dispose"
+  sounds alarming and is not.
 - No browser QA — I do not own the shared Chrome profile. Needs a human/QA
   pass on: typing a name with w/a/s/d/space/backspace in the Look overlay, the
   jet pack + backpack overlap, and the pill disappearing on a ride.
+- **Escape over the open creator is code-read, not observed.** Second review
+  found that the creator was missing from `Game.tick`'s "who owns Escape"
+  chain, so Escape unpaused the park behind the dialog. Fixed by re-deriving
+  the pause (`syncLookPaused`) instead of toggling it at the call site, plus
+  excluding `lookOpen` in that chain. The re-derivation is what actually makes
+  it safe: even if some *other* path flips the pause flag, the next frame puts
+  it back. QA should still watch it run.
+- Enter now submits the creator form (it used to be swallowed with every other
+  bound key). Single-fires — the form handler `preventDefault`s and `submit()`
+  is idempotent behind its `closed` flag — but it is new behaviour.
+
+## Pause: use the re-derived shape, not a sixth variant
+
+There are already several `pausedByUs`-shaped implementations in the tree
+(`Shopping.syncPaused`, `FacePaintStall.syncPaused`, `CuteODex`, `ParkMap`).
+The **re-derived** ones are the good shape and `Hud.ts`'s own comment points
+at `Shopping.syncPaused` as the model: mirror the pause off "is my UI open?"
+every frame, and only ever unpause what you paused yourself. Do not add a
+one-shot `setPaused(true)` on open with a restore on close — that is what this
+branch did first, and Escape walked straight through it.

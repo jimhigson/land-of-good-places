@@ -117,6 +117,17 @@ export class Game {
   /** The ferris wheel's caption/shout/card layer. Only alive during a ride. */
   private ferrisHud: RideHud | null = null;
   private readonly ferrisHudHost: HTMLElement;
+  /**
+   * True while the "Look" pill's `CharacterCreation` is mounted over the park.
+   *
+   * The dialog has no close button — finishing the form is the only way out —
+   * so this is the whole of "is the creator up?", and both the pause
+   * ({@link syncLookPaused}) and Escape's ownership ({@link tick}) are derived
+   * from it rather than tracked separately.
+   */
+  private lookOpen = false;
+  /** True when the look overlay is the reason the park is paused. */
+  private lookPausedByUs = false;
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   constructor(
@@ -752,20 +763,60 @@ export class Game {
     // rebuild genuinely cannot be made safe in those states, and that is worth
     // more than one line of defence.
     if (this.player.riding || this.treeClimbing.playerClimbing) return;
+    if (this.lookOpen) return;
 
-    // The park keeps running behind this overlay otherwise, and every key the
-    // creator does not consume still reaches the game: she would wander off,
-    // or fall, while typing her name. Restored rather than simply cleared, so
-    // a park that was *already* frozen (the `/view` debug camera) stays frozen.
-    const wasPaused = gameStore.get().paused;
-    gameStore.setPaused(true);
+    // The pause itself is not taken here. {@link syncLookPaused} re-derives it
+    // from `lookOpen` every frame instead — see its doc comment for why a
+    // one-shot toggle here was wrong.
+    this.lookOpen = true;
 
     new CharacterCreation(this.uiRoot, {
       onComplete: (choice) => {
         this.applyLiveLook(choice);
-        if (!wasPaused) gameStore.setPaused(false);
+        // Cleared last: `syncLookPaused` unfreezes the park on the next frame
+        // off the back of this, so nothing above it can run against a park
+        // that has already started moving again.
+        this.lookOpen = false;
       },
     });
+  }
+
+  /**
+   * Keeps the park's pause state a mirror of {@link lookOpen}, checked fresh
+   * every frame — deliberately the same shape as `Shopping.syncPaused` and
+   * `FacePaintStall.syncPaused` rather than a sixth variation on it.
+   *
+   * This started life as a `setPaused(true)` when the creator opened and a
+   * restore when it completed, which was wrong in a way that is worth
+   * recording, because it is not obvious from reading it: the creator is not
+   * in {@link tick}'s "who owns Escape" chain and has no close button of its
+   * own, so Escape fell through to the ordinary pause toggle and *unpaused the
+   * park behind the open dialog*. From there she could walk away, or board a
+   * ride, while the creator was still up — and in `/view`, where the park is
+   * deliberately frozen, the captured "was already paused" then meant
+   * completion never re-froze it.
+   *
+   * Re-deriving fixes that at the root rather than patching the one key that
+   * exposed it: however the pause flag got flipped — Escape, a debug camera, a
+   * future key nobody has added yet — this reconciles it on the very next
+   * frame, so the toggle simply cannot win while the dialog is open. Escape is
+   * *also* excluded in `tick` now, but that is the courtesy, not the fix.
+   *
+   * Only ever unpauses what it paused itself, exactly as its two siblings do,
+   * so finishing in `/view` leaves that park frozen.
+   */
+  private syncLookPaused(): void {
+    if (this.lookOpen) {
+      if (!gameStore.get().paused) {
+        this.lookPausedByUs = true;
+        gameStore.setPaused(true);
+      }
+      return;
+    }
+    if (this.lookPausedByUs) {
+      this.lookPausedByUs = false;
+      gameStore.setPaused(false);
+    }
   }
 
   /**
@@ -790,6 +841,20 @@ export class Game {
    * `player.model.<anchor>` outside `Player` itself, and it is exhaustive.
    */
   private applyLiveLook(choice: CharacterCreationChoice): void {
+    // Riding and climbing are checked *again* here, not only when the pill was
+    // pressed: the two are separated by however long she spends choosing, and
+    // "she was on her feet when this opened" is not the same claim as "she is
+    // on her feet now". The park is frozen throughout (`syncLookPaused`) and
+    // the pill is hidden in both states, so this should be unreachable — it is
+    // here because the cost of being wrong is a model that a ride has already
+    // written state onto, which is exactly the class of bug this whole change
+    // set exists to close.
+    //
+    // Checked before `completeCharacterCreation` rather than after, so the
+    // operation stays all-or-nothing: bailing later would leave the store
+    // carrying a new look that the model on screen does not have.
+    if (this.player.riding || this.treeClimbing.playerClimbing) return;
+
     gameStore.completeCharacterCreation(choice);
     const playerState = gameStore.get().player;
 
@@ -895,6 +960,8 @@ export class Game {
     // reasoning. Cheap enough to re-assert every frame; the setter itself
     // short-circuits when nothing changed.
     this.hud.setLookAvailable(!this.player.riding && !this.treeClimbing.playerClimbing);
+    // Re-derived every frame, like the shop's and the face-paint stall's.
+    this.syncLookPaused();
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
     // The what's-new welcome takes priority over everything else. It can only
@@ -936,7 +1003,14 @@ export class Game {
     } else if (
       this.input.justPressed('menu') &&
       !this.shopping.uiOpen &&
-      !this.world.facePaintStall.uiOpen
+      !this.world.facePaintStall.uiOpen &&
+      // The look overlay owns the screen the same way those two do. Without
+      // this, Escape — the one key anyone presses to back out of a modal —
+      // toggled the pause of the park *behind* the open dialog. `lookOpen`
+      // has no close path of its own, so Escape here is simply ignored;
+      // `syncLookPaused` would put the pause back a frame later anyway, but
+      // ignoring it outright means the park never flickers between the two.
+      !this.lookOpen
     ) {
       gameStore.setPaused(!gameStore.get().paused);
     }

@@ -296,7 +296,13 @@ class GameStore {
 
     if (choice.hat) {
       const hatItem = this.grantFreeOnce(choice.hat, true);
-      this.state.wornHatUid = hatItem.uid;
+      // Through `setWornHat`, not a bare `wornHatUid = ...` write: that is what
+      // keeps the Cute-o-dex's `placement` bookkeeping (`refreshPlacement`) in
+      // step, for the hat coming off as well as the one going on. The bare
+      // write was survivable only while changing your look reloaded the page,
+      // because the reload laundered the whole store through `hydrate` on the
+      // way back in; live, the stale placement simply stays stale.
+      this.setWornHat(hatItem.uid);
     } else {
       this.setWornHat(null);
     }
