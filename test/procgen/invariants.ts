@@ -965,6 +965,51 @@ function railOutsetRange(
 }
 
 /**
+ * The horizontal radius of each individual rail of one ring — one number per
+ * swept tube, so eight on a four-lane ring.
+ *
+ * {@link railRadiusRange}'s min/max is the right shape for "is the whole ring
+ * outside the wall", and the wrong shape for "is this post under a rail": a
+ * dropper standing on the lane's centre line, holding up nothing, is still
+ * comfortably inside the range. This keeps the rails apart so a post can be
+ * matched to one.
+ *
+ * The mean of a tube's vertices is its centre line: the radial ring of
+ * vertices at each step is symmetric about it, so the tube's own thickness
+ * cancels out rather than biasing the answer.
+ */
+function railRadii(ring: BuiltRing): readonly number[] {
+  const radii: number[] = [];
+  ring.group.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+    if (!child.name.startsWith('railRace:rail-')) return;
+    const position = child.geometry.getAttribute('position');
+    if (!position) return;
+    let sum = 0;
+    for (let i = 0; i < position.count; i += 1) {
+      sum += Math.hypot(position.getX(i), position.getZ(i));
+    }
+    if (position.count > 0) radii.push(sum / position.count);
+  });
+  return radii;
+}
+
+/**
+ * How far a dropper may stand from the nearest rail and still be holding it up.
+ *
+ * Taken from the built structure rather than from the placer: the rail tube is
+ * 0.075 m at park scale, which `RIDE_SCALE` (2.5) takes to 0.1875 m on the
+ * race ring, and a dropper post is 0.08 m. Past their sum, ~0.27 m, the post
+ * and the rail no longer intersect at any point — the post is visibly holding
+ * up fresh air, which is the entire complaint. 0.25 m sits just inside that.
+ *
+ * For scale: the defect this guards against — one dropper per lane on the
+ * lane's *centre line* rather than one under each rail — puts every post half
+ * a gauge out, 0.78 m on the race ring, three times this tolerance.
+ */
+const DROPPER_RAIL_TOLERANCE = 0.25;
+
+/**
  * **Both Rail Race rings are built outside the park, at their own real size,
  * and only the one you can walk up to is solid.**
  *
@@ -1737,6 +1782,87 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **Every dropper hangs under a rail it is actually holding up.**
+ *
+ * A trestle is a leg on the ground, a cross-beam over it, and the short posts
+ * — droppers — from that beam up to the track. The family's report on 1 August
+ * 2026 was that the supports "don't look real"; PR #157 found half the reason
+ * (the ring flew on four legs, since fixed by `trestleSpots`' nudge search) and
+ * a second half that was never landed: there was one dropper per lane, on the
+ * lane's **centre line**. That was invisible while `RAIL_GAUGE` was 0.62 m, and
+ * `RIDE_SCALE` took it to 1.55 m — a post three quarters of a metre in from
+ * either rail, holding up the gap between them.
+ *
+ * Measured, as this file's first commandment requires, off the built scene on
+ * both sides: the droppers from their own instance matrices, and the rails from
+ * their own swept vertices ({@link railRadii}) rather than from `route.pointAt`
+ * and a gauge constant, which is the rule the geometry was built from and would
+ * only prove the placer agrees with itself.
+ *
+ * Radius is the whole of the answer because these rings are circles centred on
+ * the origin — the same thing that lets the leg check sort by `atan2` — so a
+ * post's distance from the centre says exactly which rail, if any, is above it.
+ */
+const droppersHangUnderRealRails: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const matrix = new Matrix4();
+  const at = new Vector3();
+
+  for (const ring of builtRings(facts)) {
+    const radii = railRadii(ring);
+    const droppers = ring.group.getObjectByName('railRace:trestle-droppers');
+    if (!(droppers instanceof InstancedMesh)) {
+      complaints.push(`the ${ring.label} ring has no trestle droppers in the built scene to measure`);
+      continue;
+    }
+    if (radii.length === 0) {
+      complaints.push(`the ${ring.label} ring has no rails in the built scene to measure droppers against`);
+      continue;
+    }
+
+    let worst = 0;
+    let worstAt: readonly [number, number] = [0, 0];
+    for (let i = 0; i < droppers.count; i += 1) {
+      droppers.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      const radius = Math.hypot(at.x, at.z);
+      let nearest = Infinity;
+      for (const railRadius of radii) {
+        const gap = Math.abs(radius - railRadius);
+        if (gap < nearest) nearest = gap;
+      }
+      if (nearest > worst) {
+        worst = nearest;
+        worstAt = [at.x, at.z];
+      }
+    }
+    if (worst > DROPPER_RAIL_TOLERANCE) {
+      complaints.push(
+        `a dropper on the ${ring.label} ring at ${fmt(worstAt)} stands ${worst.toFixed(2)} m ` +
+          `from the nearest rail, over the ${DROPPER_RAIL_TOLERANCE} m tolerance — it is a post ` +
+          `holding up thin air`,
+      );
+    }
+
+    // Two per lane, one under each rail. A ring that quietly went back to one
+    // per lane would place every post correctly under *a* rail and pass the
+    // check above, so the count is its own claim.
+    const legs = ring.group.getObjectByName('railRace:trestle-legs');
+    if (legs instanceof InstancedMesh) {
+      const expected = legs.count * facts.world.railRace.laneCount * 2;
+      if (droppers.count !== expected) {
+        complaints.push(
+          `the ${ring.label} ring has ${droppers.count} droppers for ${legs.count} trestles and ` +
+            `${facts.world.railRace.laneCount} lanes — expected ${expected}, two per lane per ` +
+            `trestle so that each of a lane's two rails is carried`,
+        );
+      }
+    }
+  }
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1755,6 +1881,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
+  ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
   [
     'both Rail Race rings stand outside the park, built to their own size, ' +
       'and only the walk-past one is solid',

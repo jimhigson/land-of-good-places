@@ -557,8 +557,14 @@ export function buildRailRaceTrack(
   const droppers = new InstancedMesh(
     dropperGeometry,
     trestleMaterial,
-    Math.max(1, spots.length * LANE_COUNT),
+    // Two per lane, not one — see the placement loop below.
+    Math.max(1, spots.length * LANE_COUNT * 2),
   );
+  // Half the gauge of *this* ring, matching `sweptRails`' own convention
+  // (`sweptRail.ts` sweeps its pair at `side * gauge * 0.5` along the same
+  // outward axis `outwardAt` gives us), so a dropper lands under a rail rather
+  // than near one.
+  const dropperHalfGauge = railGauge * 0.5;
   let dropperIndex = 0;
   // Wide enough to carry the outer rail of the outer lane and the inner rail of
   // the inner lane, with a little overhang so the beam reads as holding them up.
@@ -582,14 +588,28 @@ export function buildRailRaceTrack(
     matrix.compose(position, rotation, scale);
     beams.setMatrixAt(index, matrix);
 
+    // One dropper under each *rail*, so two per lane — not one on the lane's
+    // centre line. `RAIL_GAUGE_AT_PARK_SCALE` is 0.62 m, which `RIDE_SCALE`
+    // (2.5) takes to 1.55 m on the race ring: a single centre post stands
+    // three quarters of a metre clear of either rail and visibly holds up
+    // nothing, which is what the family reported on 1 August as "the supports
+    // don't look real". Reported in PR #157; that PR's other half — the ring
+    // flying on four legs — was fixed separately by `trestleSpots`' nudge
+    // search, but this half was never landed.
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       route.pointAt(lane, spot.at, point);
       const length = point.y - beamY;
-      position.set(point.x, beamY + length / 2, point.z);
-      scale.set(ringSizeVsRace, length, ringSizeVsRace);
-      matrix.compose(position, rotation, scale);
-      droppers.setMatrixAt(dropperIndex, matrix);
-      dropperIndex += 1;
+      for (const side of [-1, 1] as const) {
+        position.set(
+          point.x + outward.x * side * dropperHalfGauge,
+          beamY + length / 2,
+          point.z + outward.z * side * dropperHalfGauge,
+        );
+        scale.set(ringSizeVsRace, length, ringSizeVsRace);
+        matrix.compose(position, rotation, scale);
+        droppers.setMatrixAt(dropperIndex, matrix);
+        dropperIndex += 1;
+      }
     }
 
     // A post is a thing a child can walk into — on the ring that is actually
