@@ -64,25 +64,53 @@ const STONE_PALETTE: RipikaPalette = {
 /**
  * How tall the carved figure is, ear tips included — plinth not counted.
  *
- * 1.70 m is a deliberate ceiling, not a round number. On the plinth, in the
- * fountain, this tops out around y 4.2 in world space, level with the fairy
- * poles. Taller and the statue starts occluding the plaza ring behind it from
- * the iso camera, which costs more than the extra grandeur buys.
+ * **6.80 m: four times the 1.70 m this was first built at.** Jim looked at the
+ * first version in the park on 5 August 2026 and said "far too small, make it
+ * 4x this size, otherwise is ok" — everything else about it passed, only the
+ * scale was wrong, and the issue title had asked for a *large* statue all
+ * along.
+ *
+ * The earlier note here claimed 1.70 m was a ceiling because anything taller
+ * would occlude the plaza ring from the iso camera. That reasoning was sound in
+ * the abstract and **wrong in practice**: the camera follows the player, so the
+ * statue only ever hides the far side of a plaza the player is already standing
+ * in, which is what a fountain centrepiece is supposed to do. A monument you
+ * cannot see over is the point of a monument. Judging that from geometry rather
+ * than from the park is what produced a statue a six-year-old could not pick
+ * out.
  */
-const FIGURE_HEIGHT = 1.7;
+const FIGURE_HEIGHT = 6.8;
 
-/** Plinth height. The figure's feet stand on top of it. */
-const PLINTH_HEIGHT = 0.36;
+/**
+ * Plinth height — also 4x, so the statue as a whole is the 4x that was asked
+ * for and the plinth keeps its proportion to the figure (~21%).
+ *
+ * The plinth could not simply be scaled 4x in *every* dimension; see
+ * {@link PLINTH_BASE_RADIUS}.
+ */
+const PLINTH_HEIGHT = 1.44;
 
 /**
  * The plinth's widest radius, at the bottom of its footing.
  *
- * Hard ceiling is 1.2 m: the fountain's upper bowl of water is a 1.2 m-radius
- * disc and the plinth stands **on** it (see `world/Fountain.ts`). 0.82 leaves
- * 0.38 m of margin, which is margin the statue does not need but the six jets
- * arcing out at radius 1.22 very much do.
+ * **This is the one dimension that could not go up 4x, and the constraint is
+ * hard.** The plinth stands on the fountain's upper bowl of water, which is a
+ * 1.2 m-radius disc (`world/Fountain.ts`). Four times the original 0.82 m would
+ * be 3.28 m — it would overhang the bowl entirely and hang in mid-air over the
+ * basin, nearly reaching the 4.2 m rim.
+ *
+ * So the plinth grows 4x in height and only ~1.4x in radius, and 1.15 m is what
+ * that leaves: as wide as the bowl can host, with 5 cm of margin.
+ *
+ * The happy accident is that this is almost exactly the width the figure needs
+ * anyway. At 4x, RiPika's feet span about 2.14 m across and her torso about
+ * 2.28 m, against this plinth's 2.30 m — so she stands squarely on it and the
+ * drum reads as the same width as the body above it. A plinth that had scaled
+ * 4x in radius would have been far too wide for the figure standing on it; the
+ * constraint pushed the proportion somewhere better than the naive scaling
+ * would have.
  */
-const PLINTH_BASE_RADIUS = 0.82;
+const PLINTH_BASE_RADIUS = 1.15;
 
 export interface RipikaStatueHandle extends AssetHandle {
   /** The plinth alone, for anything that wants to light or decorate it. */
@@ -130,17 +158,18 @@ export function createRipikaStatue(): RipikaStatueHandle {
     return mesh;
   };
 
-  const footing = course(0.74, PLINTH_BASE_RADIUS, 0.09, 0.045, plinthStoneDark);
-  const drum = course(0.62, 0.74, 0.21, 0.195, plinthStone);
-  course(0.7, 0.62, 0.06, 0.33, plinthStoneDark);
+  // The three courses are written as FRACTIONS of the plinth's overall height
+  // and base radius rather than as absolute metres, because those two grew by
+  // different factors when the statue was resized (4x tall, 1.4x wide — see
+  // PLINTH_BASE_RADIUS). Absolute numbers would have had to be re-derived by
+  // hand for each course, twice, and a single fat-fingered digit would have gone
+  // unnoticed. This way the plinth's shape is one thing and its size is another.
+  const r = (fraction: number): number => fraction * PLINTH_BASE_RADIUS;
+  const h = (fraction: number): number => fraction * PLINTH_HEIGHT;
 
-  // Outlines on the two courses that define the silhouette, not all three: the
-  // cap sits inside the footing's line from every angle the iso camera reaches,
-  // and outlining it too draws a stray line across the plinth's middle.
-  // Thickness 0.02 — the prop end of ART_DIRECTION §2's 0.016–0.022 band, since
-  // this is a big solid object rather than a small creature part.
-  addOutline(footing, 0.02, plinthInk);
-  addOutline(drum, 0.02, plinthInk);
+  const footing = course(r(0.902), r(1), h(0.25), h(0.125), plinthStoneDark);
+  const drum = course(r(0.756), r(0.902), h(0.583), h(0.542), plinthStone);
+  course(r(0.854), r(0.756), h(0.167), h(0.917), plinthStoneDark);
 
   // --- the figure -----------------------------------------------------------
   // Scaled on a wrapper group rather than on RiPika's own root, because the
@@ -157,8 +186,25 @@ export function createRipikaStatue(): RipikaStatueHandle {
   // Derived from the handle rather than written down, so if RiPika's height is
   // ever retuned the statue stays exactly FIGURE_HEIGHT tall instead of drifting
   // and pushing its own `height` — and the name label above it — out of true.
-  figure.scale.setScalar(FIGURE_HEIGHT / ripika.height);
+  const figureScale = FIGURE_HEIGHT / ripika.height;
+  figure.scale.setScalar(figureScale);
   figure.add(ripika.root);
+
+  // Outlines on the two courses that define the silhouette, not all three: the
+  // cap sits inside the footing's line from every angle the iso camera reaches,
+  // and outlining it too draws a stray line across the plinth's middle.
+  //
+  // Weight is taken from the FIGURE's, not from ART_DIRECTION §2's raw
+  // 0.016–0.022 band, and the difference matters at this size. RiPika's own
+  // parts are outlined at 0.014 in her local metres, and the wrapper group
+  // multiplies that by `figureScale` — so at 4x the figure's lines come out
+  // near 6.5 cm. A plinth still wearing a literal 0.02 would have looked like a
+  // pencil sketch bolted to the bottom of a woodcut. Matching the figure's is
+  // what makes the plinth and the mouse read as one carved object, and it stays
+  // matched automatically if the statue is ever resized again.
+  const plinthOutline = 0.014 * figureScale;
+  addOutline(footing, plinthOutline, plinthInk);
+  addOutline(drum, plinthOutline, plinthInk);
 
   // Pose. Deliberately NOT `setWalkPhase(0, 0)`: a freshly built RiPika is
   // already in the neutral stance (identity limbs, identity body), and
