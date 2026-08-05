@@ -148,8 +148,58 @@ that. Anything `NavGrid`, `poiGraph` or `paths.ts` must know about the deck has
 to be a **plan** computed at module load — the way `TRAIN_PLAN` and
 `RAIL_RACE_PLAN` are — not a scene object.
 
+## Sequencing: rebase AFTER the park reshape, not before
+
+`feat/park-spline-boundary` will land an **indivisible** `GARDEN_PLAY_BOUNDARY`
+commit — terrain rim, terrain mesh, boundary wall and clamp together — taking
+the walkable extent from 58 m to ~82 m mean, 110 m at its widest. The railway,
+the fence and every bridge live inside that.
+
+**Decided: land after it.** This diff splits cleanly:
+
+- *Shape-independent* — the deck exemption, deck geometry and ramps, the
+  `poiGraph` seam, `BRIDGE_RISE`, `LEVEL_CROSSING_REACH`, Decision 6.
+- *Shape-dependent* — removing the `atLevelCrossing` escape, re-recording
+  `rail.exclusion` (21) / `rail.walkable` (30), and the new invariant's
+  five-seed red proof.
+
+Bridge placement is 100% derived: crossings come from where paths meet rails,
+both from the boundary. When the extent grows, the railway moves, the crossings
+move, and **every bridge moves**. Nothing here survives the reshape as a
+constant — only the mechanism does. So proving invariant 2 against the old
+circle proves nothing that will still be true, which is precisely the
+"decorative on the night it is most needed" failure `check-park.mts`'s own
+header warns about.
+
+Build the mechanism now; measure the numbers after the rebase.
+
+### Where #115's NavGrid change actually is
+
+**Not** on `fix/paths-to-nowhere` — on **`feat/park-spline-boundary`**, commit
+c6254be. The two stacks are **disjoint** (neither contains the other; they share
+only `origin/main`). `fix/paths-to-nowhere` and this branch still have the old
+`setPlayBounds(centreX, centreZ, radius)`.
+
+`src/world/boundary.ts` is a **new** file, not a move — `src/world/rail/boundary.ts`
+still exists beside it, and they are different boundaries (the rail one is the
+smaller circle a rail ride is entitled to).
+
+**It does not conflict with the deck exemption.** c6254be changed NavGrid's
+*sizing* (`boundary.extent`) and the *soft-boundary* loop
+(`boundary.distanceToEdge(x, z) < walkerRadius`). The deck exemption belongs in
+the *collider stamping* loop (`forEachCircle`/`forEachWall`), which c6254be left
+byte-identical. Adjacent loops, same function, no overlap — so the rebase is a
+clean apply and there is no reason to fuse the stacks early.
+
 ## Status
 
-Base merged and green: `npx vitest run` → **95 passed, 5 files**. No bridge code
-written yet. Next: fix finding 3, then decide the deck representation
-(finding 1) before any geometry.
+Base merged and green: `npx vitest run` → **95 passed, 5 files**;
+`npm run build` exit 0; `check:park` green.
+
+Done: findings 1 and 2 (`LEVEL_CROSSING_REACH`, `BRIDGE_RISE` derived from
+`LOCO_TOP_Y`), Decision 6 recorded and then corrected. #124 verified as already
+fixed and closed by the Overseer.
+
+Next, in order: the deck plan + geometry (module-load, like `TRAIN_PLAN`), the
+`covers(x, z)` exemption in `NavGrid`'s stamping loop and in
+`poiGraph.lineIsClear`, then — after the reshape — finding 4 and the invariant.
