@@ -159,6 +159,24 @@ export const CASTLE_WINDOWS: readonly WallOpening[] = openingsFor(COASTER_PLANS.
  */
 export function sweptCartHits(route: CoasterRoute, castleRoot: Object3D): string[] {
   if (!route.castleSpan) return [];
+
+  // **Raycasting reads `matrixWorld`, and nothing has computed one yet.**
+  //
+  // three.js refreshes world matrices during `render`, and a headless park
+  // never renders — so every mesh here still sat at the identity, the rays
+  // passed through a castle that was nowhere near the coaster, and this
+  // reported a clean sweep no matter what was wrong. Found by building the
+  // wall deliberately solid while still declaring the openings: the arithmetic
+  // assert caught it and this one said "clear of every mesh in the castle".
+  // An assert nobody has watched fail is a decoration.
+  //
+  // Updated from the topmost ancestor rather than from `castleRoot`, because
+  // `updateMatrixWorld` composes with the parent's matrix and would otherwise
+  // faithfully compose with a stale one.
+  let root: Object3D = castleRoot;
+  while (root.parent) root = root.parent;
+  root.updateMatrixWorld(true);
+
   const caster = new Raycaster();
   const point = new Vector3();
   const tangent = new Vector3();
