@@ -281,3 +281,76 @@ the sideways version.** Shipped as Jim asked rather than quietly softened.
 One-line knob if he wants some read back without going sideways again:
 `TAIL_YAW` 0.12 → ~0.35 rad swings the tip ~0.93 m off-centre, still clearly
 "behind her". In `src/art/models/ripika.ts`.
+
+---
+
+# PLAZA SURVEY — 5 Aug. Read this before touching the height.
+
+Measured on the **built park** via `park-harness.mts`. Statue top is **y 10.68
+world** (I previously said 10.53 — I conflated fountain-local with world by
+`terrainHeight` 0.275).
+
+## I was wrong about occlusion. The camera is ORTHOGONAL.
+
+I justified the 4x height by arguing "the camera follows the player, so the
+statue only ever hides the far side of a plaza the player is already standing
+in". **False.** An orthographic projection has no parallax, so the occluded
+wedge is **fixed in world space** — moving the camera changes whether that patch
+is on screen, not *what* is hidden. The player can stand in it.
+
+- A 2.12 m player is **fully hidden within 10.60 m of the fountain centre**,
+  past the 9.4 m kerb — **32.8 m² of walkable ground** (x −3.0…5.0, z −0.2…7.8).
+  At 1.70 m it was 2.70 m, i.e. inside the basin, i.e. never.
+- **`FoliageFade` does not save us**: it accepts trees only
+  (`src/world/FoliageFade.ts:44-46`). Its own header cites design feedback #16,
+  "no more rotating round a tree that's in the way" — this is that complaint,
+  returning.
+- **Two pickable flowers permanently occluded**: `flower:88` (−1.2, −0.7),
+  `flower:294` (−2.5, −1.0).
+- **Name labels clip**: `src/ui/NameLabel.ts:60-73` leaves `depthTest` true.
+
+The comment in `ripikaStatue.ts` has been **corrected, not deleted** (commit
+`4e865a0`), because it is a tempting mistake.
+
+## Ring road survives by 0.58 m — coincidence, not margin
+
+Occluded wedge reaches 13.32 m; ring road's nearest approach is 13.90 m.
+**~5% more height and the road goes behind the statue.** Otherwise clean: 0 of
+14 routes occluded, all 11 doormats visible, all stalls/lamps/poles visible.
+Chips and signs are DOM, never occludable.
+
+## Sky Cruiser: the statue is now an obstacle nothing knows about
+
+Track crosses the plaza at y 7.06–7.33, **4.78 m** from the statue axis. The
+statue reaches 10.68 — it now stands **3.5 m above the track it used to sit
+2.5 m below**. Measured min 3D distance, track centre line to statue geometry:
+**2.76 m**, inside the generator's own `CORRIDOR_RADIUS = 3`. Passes
+`CAR_HALF_WIDTH = 0.75`, so nothing fails today.
+
+`test/procgen/invariants.ts:903-910` is now factually wrong:
+`TOO_TALL_TO_FLY_OVER = ['building', 'ferrisWheel']`, commented as "those two
+are therefore the only horizontal obstacles the loop actually has". The route
+solver (`src/world/coaster/route.ts:178-185`) and the boot assert
+(`route.ts:576-615`) share that hard-coded list. **Riders fly past the statue's
+chest and nothing measures it.**
+
+## Other measured effects
+
+- **Zoom**: at `CAMERA_ZOOM_MAX` 2.4 the statue is **122% of the frame** and
+  cannot fit on screen. 51% at zoom 1.
+- **Shadow**: **19.1 m at the game's own start time**, across the ring road.
+  Crosses the kerb whenever the sun is below 47.9° — most of the day. Shops
+  unreached (nearest stall 17.2 m).
+- Taller than the castle curtain wall (9.24) and battlements (10.29); only the
+  towers (17.15), ferris wheel (18.82) and Rail Race rings (18.30) beat it.
+
+## Recommendation (sent to the Overseer, NOT actioned)
+
+Keep 4x — Jim asked for it and it is right for a mascot — and **make the statue
+a `FoliageFade` occluder**. That fixes the only finding that actually hurts play
+without shrinking what he asked for, and the flowers and name labels fall out of
+the same fix. Separately, the Sky Cruiser wants an invariant measuring the
+**built scene's** bounding volume rather than a hard-coded id list.
+
+Neither started. Height is Jim's call; the Sky Cruiser invariant may belong to
+whoever owns that ride.
