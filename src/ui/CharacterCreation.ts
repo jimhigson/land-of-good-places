@@ -374,9 +374,9 @@ const HAT_EXCLUSIVE_HAIR_STYLES: ReadonlySet<HairStyle> = new Set<HairStyle>(['m
  * literal default is exactly the same answer either way.
  *
  * Not `null` whenever a character already exists — most obviously the HUD's
- * "Look" pill reopening this screen over a live save (`main.ts`'s
- * `reopenCharacterCreation`, which hydrates `gameStore` from that save
- * *before* building this screen), which is the exact path that used to reset
+ * "Look" pill reopening this screen over a live save (`Game`'s
+ * `reopenCharacterCreator`, which mounts this straight over the running park,
+ * store already populated), which is the exact path that used to reset
  * every field to a hardcoded default the moment she reopened it. `hatId`
  * resolves `wornHatUid` back to the catalogue id this screen actually wants
  * (or `null`, bare-headed, if nothing is worn — a real answer since the Hat

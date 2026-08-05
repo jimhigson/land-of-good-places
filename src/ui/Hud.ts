@@ -61,6 +61,8 @@ export class Hud {
   private menuOpen = false;
   private backpackHandler: (() => void) | null = null;
   private lookHandler: (() => void) | null = null;
+  /** See {@link setLookAvailable}. Starts true: she spawns on her own feet. */
+  private lookAvailable = true;
   private promptText: string | null = null;
   private hintOpen = false;
 
@@ -224,6 +226,29 @@ export class Hud {
   /** Who to tell when the "Look" pill is pressed. */
   setLookHandler(handler: () => void): void {
     this.lookHandler = handler;
+  }
+
+  /**
+   * Whether the "Look" pill is offered at all — hidden outright while she is
+   * on a ride or up a tree, the same way the money pill is hidden in normal
+   * mode rather than greyed out.
+   *
+   * Changing her look rebuilds the player's model in place
+   * (`Player.replaceModel`), and a ride or a climb has already written state
+   * onto the model she is *currently* wearing: `RailRace` scales it up on
+   * boarding, and `TreeClimbing` holds a list of the very body parts it hid to
+   * leave only her head showing through the leaves. A brand-new model has
+   * neither, so it would ride at the wrong size or pop its whole body out of
+   * the canopy. Offering the pill only when she is on her own two feet is far
+   * cheaper, and far harder to get wrong later, than teaching every ride to
+   * re-apply itself to a model that changed underneath it.
+   *
+   * Called every frame, so it short-circuits when nothing has changed.
+   */
+  setLookAvailable(available: boolean): void {
+    if (this.lookAvailable === available) return;
+    this.lookAvailable = available;
+    this.lookButton.style.display = available ? '' : 'none';
   }
 
   /**

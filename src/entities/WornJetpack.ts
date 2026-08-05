@@ -62,10 +62,18 @@ export class WornJetpack implements GameSystem {
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
   }
 
-  /** The player's model was just rebuilt — see `WornHat.rebind`'s doc comment. */
+  /**
+   * The player's model was just rebuilt — see `WornHat.rebind`'s doc comment,
+   * including why `notifiedWorn` must be forgotten too. Here that matters even
+   * more than it does for the hat: `onWornChange` is what puts the model's own
+   * backpack away (`setJetpackWorn` → `backpacks.ts`'s `setHidden`), so
+   * skipping it leaves the freshly-built model wearing its bag *and* the jet
+   * pack — the two-things-on-one-back this class exists to prevent.
+   */
   rebind(): void {
     this.clear();
     this.currentUid = null;
+    this.notifiedWorn = false;
     this.sync(gameStore.get());
   }
 

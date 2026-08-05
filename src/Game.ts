@@ -747,8 +747,24 @@ export class Game {
    * what closed that gap.
    */
   private reopenCharacterCreator(): void {
+    // Belt and braces: `Hud.setLookAvailable` already hides the pill while she
+    // is riding or climbing, so this should be unreachable — but the model
+    // rebuild genuinely cannot be made safe in those states, and that is worth
+    // more than one line of defence.
+    if (this.player.riding || this.treeClimbing.playerClimbing) return;
+
+    // The park keeps running behind this overlay otherwise, and every key the
+    // creator does not consume still reaches the game: she would wander off,
+    // or fall, while typing her name. Restored rather than simply cleared, so
+    // a park that was *already* frozen (the `/view` debug camera) stays frozen.
+    const wasPaused = gameStore.get().paused;
+    gameStore.setPaused(true);
+
     new CharacterCreation(this.uiRoot, {
-      onComplete: (choice) => this.applyLiveLook(choice),
+      onComplete: (choice) => {
+        this.applyLiveLook(choice);
+        if (!wasPaused) gameStore.setPaused(false);
+      },
     });
   }
 
@@ -873,6 +889,12 @@ export class Game {
 
   private tick(tick: LoopTick): void {
     this.input.update();
+
+    // Changing her look rebuilds the player's model in place, which a ride or
+    // a climb is not prepared for — see `Hud.setLookAvailable`, which owns the
+    // reasoning. Cheap enough to re-assert every frame; the setter itself
+    // short-circuits when nothing changed.
+    this.hud.setLookAvailable(!this.player.riding && !this.treeClimbing.playerClimbing);
 
     if (this.input.justPressed('debug')) gameStore.toggleDebugOverlay();
     // The what's-new welcome takes priority over everything else. It can only

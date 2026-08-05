@@ -272,8 +272,8 @@ class GameStore {
    * bare field write, so the Cute-o-dex's `placement` bookkeeping for it
    * (`refreshPlacement`) stays correct too. Taking it off unconditionally,
    * not "only if it was worn", matters for one specific path: `ui/Hud.ts`'s
-   * "Look" pill reopens this screen over an *existing* save (`main.ts`'s
-   * `reopenCharacterCreation`), which hydrates `wornHatUid` from that save
+   * "Look" pill reopens this screen over an *existing* save (`Game`'s
+   * `reopenCharacterCreator`), whose `wornHatUid` is already in this store
    * before this method ever runs — so a hat worn before she reopened the
    * creator needs exactly the same "take it off" call a brand-new character
    * (who never had one on) gets, which turns out to be free: `setWornHat`
@@ -295,14 +295,41 @@ class GameStore {
     this.state.player.glassesKind = choice.glassesKind;
 
     if (choice.hat) {
-      const hatItem = this.grantFree(choice.hat, true);
+      const hatItem = this.grantFreeOnce(choice.hat, true);
       this.state.wornHatUid = hatItem.uid;
     } else {
       this.setWornHat(null);
     }
-    this.grantFree(choice.pet, false);
+    this.grantFreeOnce(choice.pet, false);
 
     this.notify();
+  }
+
+  /**
+   * {@link grantFree}, but never twice for the same catalogue id.
+   *
+   * The "Look" pill reopens the character creator over an existing save and
+   * runs {@link completeCharacterCreation} again, so a plain `grantFree` filed
+   * a *fresh* hat and a *fresh* pet on every single visit — five taps of the
+   * pill, five identical pets trailing her round the park. Harmless-looking
+   * while changing your look meant a full page reload; not harmless now that
+   * it is one tap of a pill a six-year-old will press for fun.
+   *
+   * Matching on `id` rather than `uid` is the point: `uid` is per-*item* and a
+   * re-grant mints a new one every time, so it can never match. Reusing the
+   * item she already owns also keeps her Cute-o-dex `acquiredAt` honest — the
+   * day she first met that pet, not the last time she changed her hair.
+   */
+  private grantFreeOnce(spec: PurchaseSpec, worn: boolean): InventoryItem {
+    const existing = this.state.inventory.find((item) => item.id === spec.id);
+    if (!existing) return this.grantFree(spec, worn);
+    // A hat has to read as "in use" rather than "in the backpack", exactly as
+    // `grantFree` would have filed it. A pet is deliberately left alone: it
+    // may be stowed because she chose to put it away, and reopening the
+    // creator is not a reason to overrule that (same courtesy
+    // `ensureSomethingToParade` pays it).
+    if (worn) existing.stowed = false;
+    return existing;
   }
 
   setMode(mode: GameMode): void {

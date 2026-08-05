@@ -57,12 +57,11 @@ export class WornHat implements GameSystem {
    * `anchor` is the character's `hatAnchor`.
    *
    * `hairHidesHat` is read fresh every time `wornHatUid` changes (see
-   * {@link sync}) — a live check rather than a value captured once, on the
-   * off chance a future caller does change hairstyle on a live model,
-   * though today's real `Player` never does (it is built once, from
-   * whatever the save/creator wrote, and there is no live "change my hair"
-   * path — see `ui/Hud.ts`'s "Look" pill, which reloads the page instead of
-   * trying to be one).
+   * {@link sync}) — a live check rather than a value captured once. That is
+   * no longer the hypothetical it was written as: `ui/Hud.ts`'s "Look" pill
+   * changes hairstyle on a live model, by rebuilding it in place
+   * (`Player.replaceModel`), and {@link rebind} below is how this class is
+   * told about it.
    *
    * `onWornChange` is told whenever a hat mesh actually appears or
    * disappears — driven off `this.mesh`, so it already reads "nothing was
@@ -85,10 +84,19 @@ export class WornHat implements GameSystem {
    * notification would see the same uid it already has and do nothing (see
    * `sync`'s own early return) — forgetting `currentUid` first is what makes
    * the redraw happen anyway, onto whatever `anchor()` now resolves to.
+   *
+   * `notifiedWorn` has to be forgotten for the same reason, and it is easy to
+   * miss: `clear()` then `sync()` takes `this.mesh` null and non-null again
+   * inside this one call, so {@link update}'s edge detector never sees a
+   * change and `onWornChange` never fires. The *new* model would then never be
+   * told a hat is on it — and that call (`Player`'s `setHatWorn`) is what
+   * re-measures its height, so the name label and the balloons would go on
+   * using a bare-headed measurement.
    */
   rebind(): void {
     this.clear();
     this.currentUid = null;
+    this.notifiedWorn = false;
     this.sync(gameStore.get());
   }
 
