@@ -61,8 +61,8 @@ export class Shopping implements GameSystem {
   private readonly world: World;
   private readonly panel: ShopPanel;
   private readonly drawer: InventoryDrawer;
-  private carried: CarriedItem;
-  private eating: EatenTreat;
+  private readonly carried: CarriedItem;
+  private readonly eating: EatenTreat;
 
   private wasPausedByUs = false;
 
@@ -79,10 +79,15 @@ export class Shopping implements GameSystem {
       // `InventoryDrawer.useSelected`. Only the hands come through here.
       onCarry: (uid) => gameStore.setCarried(uid),
     });
-    this.carried = new CarriedItem(player.model.holdAnchor);
+    // The anchor is a closure, not a captured `Group` — see `WornHat.ts`'s
+    // doc comment on the same pattern. It reads `player.model.holdAnchor`
+    // fresh every time either of these actually draws something, so the HUD's
+    // "Look" pill rebuilding `player.model` in place never leaves them
+    // reaching into a disposed hand.
+    this.carried = new CarriedItem(() => player.model.holdAnchor);
     // The same hand: a treat is eaten out of it, and whatever she was already
     // holding steps aside for a couple of seconds — see `CarriedItem.setVisible`.
-    this.eating = new EatenTreat(player.model.holdAnchor);
+    this.eating = new EatenTreat(() => player.model.holdAnchor);
 
     hud.setBackpackHandler(() => this.toggleDrawer());
     window.addEventListener('keydown', this.onKeyDown);
@@ -95,17 +100,15 @@ export class Shopping implements GameSystem {
 
   /**
    * The HUD's "Look" pill, by way of `Game.applyLiveLook`: `player.model` has
-   * just been rebuilt from scratch, so `holdAnchor` is a new `Group` and
-   * whatever `carried`/`eating` had reached into the old one is gone with it.
-   * Rebuilding both here is exactly what the constructor did the first time —
-   * their own `gameStore` subscription redraws whatever is actually carried
-   * or being eaten right now onto the new hand the moment each is built.
+   * just been rebuilt, so whatever `carried`/`eating` had reached into the
+   * old `holdAnchor` is gone with it. Neither needs reconstructing — each
+   * already reads the anchor live (see the constructor's own doc comment) —
+   * they just need telling, since neither can tell on its own that the mesh
+   * it was tracking has already been disposed out from under it.
    */
   rebindPlayerModel(): void {
-    this.carried.dispose();
-    this.carried = new CarriedItem(this.player.model.holdAnchor);
-    this.eating.dispose();
-    this.eating = new EatenTreat(this.player.model.holdAnchor);
+    this.carried.rebind();
+    this.eating.rebind();
   }
 
   update(context: FrameContext): void {

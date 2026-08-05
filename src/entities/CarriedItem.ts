@@ -36,7 +36,9 @@ import { gameStore, type GameState } from '../state';
 const POP_SECONDS = 0.3;
 
 export class CarriedItem {
-  private readonly anchor: Group;
+  /** Read live, not captured once — see {@link rebind} and `WornHat`'s own
+   *  doc comment on the identical field. */
+  private readonly anchor: () => Group;
   private readonly unsubscribe: () => void;
 
   private handle: AssetHandle | null = null;
@@ -46,10 +48,17 @@ export class CarriedItem {
   /** See {@link setVisible} — kept here so a swap mid-munch stays hidden too. */
   private visible = true;
 
-  /** `anchor` is the character's `holdAnchor` — the right hand. */
-  constructor(anchor: Group) {
+  /** `anchor` resolves to the character's current `holdAnchor` — the right hand. */
+  constructor(anchor: () => Group) {
     this.anchor = anchor;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+  }
+
+  /** The player's model was just rebuilt — see `WornHat.rebind`'s doc comment. */
+  rebind(): void {
+    this.clear();
+    this.currentUid = null;
+    this.sync(gameStore.get());
   }
 
   /** The catalogue id in the player's hands, or null. */
@@ -116,14 +125,14 @@ export class CarriedItem {
     // it reads as being carried rather than balanced on a palm.
     handle.root.rotation.set(0.12, 0, 0);
     handle.root.visible = this.visible;
-    this.anchor.add(handle.root);
+    this.anchor().add(handle.root);
     this.handle = handle;
   }
 
   private clear(): void {
     const handle = this.handle;
     if (!handle) return;
-    this.anchor.remove(handle.root);
+    this.anchor().remove(handle.root);
     if (handle.dispose) handle.dispose();
     else disposeTree(handle.root);
     this.handle = null;

@@ -35,7 +35,13 @@ const POP_SECONDS = 0.3;
 export class WornHat implements GameSystem {
   readonly name = 'wornHat';
 
-  private readonly anchor: Group;
+  /**
+   * Read live, not captured once — see {@link rebind}. The HUD's "Look" pill
+   * rebuilds the player's own model in place (`Player.replaceModel`), so the
+   * `hatAnchor` this should be drawing into can change under it; a plain
+   * `Group` field would silently keep pointing at the disposed one.
+   */
+  private readonly anchor: () => Group;
   private readonly hairHidesHat: () => boolean;
   private readonly unsubscribe: () => void;
   private readonly onWornChange: ((worn: boolean) => void) | null;
@@ -65,11 +71,25 @@ export class WornHat implements GameSystem {
    * with no hair opinions (a display stand, a future NPC) needs no such
    * courtesy.
    */
-  constructor(anchor: Group, hairHidesHat: () => boolean, onWornChange?: (worn: boolean) => void) {
+  constructor(anchor: () => Group, hairHidesHat: () => boolean, onWornChange?: (worn: boolean) => void) {
     this.anchor = anchor;
     this.hairHidesHat = hairHidesHat;
     this.onWornChange = onWornChange ?? null;
     this.unsubscribe = gameStore.subscribe((state) => this.sync(state));
+  }
+
+  /**
+   * The player's own model was just rebuilt (`Game.applyLiveLook`) — whatever
+   * this was drawing lived on the *old* one and is already gone with it.
+   * `wornHatUid` itself has not necessarily changed, so an ordinary store
+   * notification would see the same uid it already has and do nothing (see
+   * `sync`'s own early return) — forgetting `currentUid` first is what makes
+   * the redraw happen anyway, onto whatever `anchor()` now resolves to.
+   */
+  rebind(): void {
+    this.clear();
+    this.currentUid = null;
+    this.sync(gameStore.get());
   }
 
   /**
@@ -131,7 +151,7 @@ export class WornHat implements GameSystem {
     const asset = catalogue.model();
     this.pop = 0;
     asset.root.scale.setScalar(0.001);
-    this.anchor.add(asset.root);
+    this.anchor().add(asset.root);
     this.mesh = asset.root;
     this.currentHeight = asset.height;
   }
@@ -139,7 +159,7 @@ export class WornHat implements GameSystem {
   private clear(): void {
     this.currentHeight = null;
     if (!this.mesh) return;
-    this.anchor.remove(this.mesh);
+    this.anchor().remove(this.mesh);
     disposeTree(this.mesh);
     this.mesh = null;
   }

@@ -89,15 +89,9 @@ export class Game {
   readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
   readonly parade: Parade;
-  /**
-   * Not `readonly` — see {@link applyLiveLook}, which disposes and rebuilds
-   * all three of these worn-item systems in place whenever the HUD's "Look"
-   * pill hands the player a new model, since each one was built pointing at
-   * an anchor Group that the old model owned and just got disposed with it.
-   */
-  wornFlower: WornFlower;
-  wornHat: WornHat;
-  wornJetpack: WornJetpack;
+  readonly wornFlower: WornFlower;
+  readonly wornHat: WornHat;
+  readonly wornJetpack: WornJetpack;
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
@@ -165,7 +159,14 @@ export class Game {
     // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
     // `entities/WornFlower.ts`). A store subscriber like `CarriedItem`, so it
     // needs nothing from the rest of this constructor beyond the anchor.
-    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
+    //
+    // The anchor is a closure, not the `Group` itself — `WornFlower` (and
+    // every other system below built the same way) reads `player.model.X`
+    // fresh every time it draws, rather than caching a copy of it, so the
+    // HUD's "Look" pill rebuilding `player.model` in place (`applyLiveLook`)
+    // never leaves any of them pointing at an anchor that got disposed out
+    // from under them. See `WornHat.ts`'s own doc comment on the same field.
+    this.wornFlower = new WornFlower(() => this.player.model.hairAnchor);
     this.addSystem(this.wornFlower);
 
     // The hat chosen (or granted free) in the character creator — see
@@ -174,7 +175,7 @@ export class Game {
     // is what lets `WornHat` decline to draw a hat that Mohican's crest
     // cannot share the head with, without touching `wornHatUid` itself.
     this.wornHat = new WornHat(
-      this.player.model.hatAnchor,
+      () => this.player.model.hatAnchor,
       () => this.player.model.hairHidesHat,
       (worn) => this.player.model.setHatWorn(worn),
     );
@@ -187,7 +188,7 @@ export class Game {
     // Third of the three worn slots, and the same store-subscriber shape as the
     // two above; its `onWornChange` puts her own backpack away, because you
     // cannot strap two things to one back.
-    this.wornJetpack = new WornJetpack(this.player.model.jetpackAnchor, (worn) =>
+    this.wornJetpack = new WornJetpack(() => this.player.model.jetpackAnchor, (worn) =>
       this.player.model.setJetpackWorn(worn),
     );
     this.addSystem(this.wornJetpack);
@@ -609,17 +610,6 @@ export class Game {
   }
 
   /**
-   * The other half of {@link addSystem} — needed only by {@link
-   * applyLiveLook}, which throws away and rebuilds `wornFlower`/`wornHat`/
-   * `wornJetpack` in place rather than leaving the disposed originals in the
-   * update loop doing nothing forever.
-   */
-  private removeSystem(system: GameSystem): void {
-    const index = this.systems.indexOf(system);
-    if (index >= 0) this.systems.splice(index, 1);
-  }
-
-  /**
    * Every interactable in the park this frame, built once and shared.
    *
    * Three systems want this list now — tap-to-move, the action button and the
@@ -765,26 +755,23 @@ export class Game {
   /**
    * What the "Look" pill's `CharacterCreation` overlay actually changes: the
    * store (name plus every cosmetic field, exactly as a fresh character
-   * creation would), the player's own model and name label, and every system
-   * that had reached into a piece of the *old* model at construction time and
-   * would otherwise be left pointing at a disposed `Group` forever. The list
-   * below is exhaustive — found by grepping `src/` for everything that reads
-   * `player.model.<anchor>` outside `Player` itself:
+   * creation would), then the player's own model, name label, and every
+   * system that reads the player's own anchors *live* rather than caching
+   * them — see `WornHat.ts`'s doc comment on why they are built that way.
+   * None of those need reconstructing, only telling that the ground moved:
    *
-   * - `wornFlower`/`wornHat`/`wornJetpack` — each is itself a `GameSystem`
-   *   built around one anchor, so each is disposed and rebuilt in place
-   *   (`removeSystem`/`addSystem`), not merely re-pointed.
-   * - `shopping`'s `CarriedItem`/`EatenTreat` and `parade`'s `BackpackPeek`
-   *   are private to their owners, which is why those two get a narrow
-   *   `rebindPlayerModel()` each instead of this method reaching in itself.
+   * - `wornFlower`/`wornHat`/`wornJetpack`, `shopping`'s own
+   *   `CarriedItem`/`EatenTreat` and `parade`'s own `BackpackPeek` all get
+   *   `.rebind()` — the model swap already left each one's own bookkeeping
+   *   pointing at a mesh that no longer exists, so each forgets it and
+   *   redraws from the current fact (worn hat, carried item, whatever) onto
+   *   wherever its anchor closure now resolves.
    * - the face-paint stall's overlay is keyed off `player.model` by identity,
    *   not an anchor, so simply calling `attachPlayer` again picks up the new
    *   one — see `FacePaintStall.attachPlayer`'s own doc comment.
    *
-   * Every one of these systems already redraws itself from `gameStore` the
-   * moment it is (re)built — that is what "worn/carried/held" already meant
-   * before this method existed — so nothing here has to say what hat she has
-   * on or what is in her hand; only where it now goes.
+   * This list was found by grepping `src/` for everything that reads
+   * `player.model.<anchor>` outside `Player` itself, and it is exhaustive.
    */
   private applyLiveLook(choice: CharacterCreationChoice): void {
     gameStore.completeCharacterCreation(choice);
@@ -793,29 +780,9 @@ export class Game {
     this.player.replaceModel(playerState);
     this.player.label.setName(playerState.name);
 
-    this.removeSystem(this.wornFlower);
-    this.wornFlower.dispose();
-    this.wornFlower = new WornFlower(this.player.model.hairAnchor);
-    this.addSystem(this.wornFlower);
-
-    this.removeSystem(this.wornHat);
-    this.wornHat.dispose();
-    this.wornHat = new WornHat(
-      this.player.model.hatAnchor,
-      () => this.player.model.hairHidesHat,
-      (worn) => this.player.model.setHatWorn(worn),
-    );
-    this.addSystem(this.wornHat);
-    this.player.wornHat = this.wornHat;
-
-    this.removeSystem(this.wornJetpack);
-    this.wornJetpack.dispose();
-    this.wornJetpack = new WornJetpack(this.player.model.jetpackAnchor, (worn) =>
-      this.player.model.setJetpackWorn(worn),
-    );
-    this.addSystem(this.wornJetpack);
-    this.player.wornJetpack = this.wornJetpack;
-
+    this.wornFlower.rebind();
+    this.wornHat.rebind();
+    this.wornJetpack.rebind();
     this.shopping.rebindPlayerModel();
     this.parade.rebindPlayerModel();
     this.world.facePaintStall.attachPlayer(this.player);

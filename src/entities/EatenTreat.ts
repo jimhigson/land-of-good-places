@@ -36,7 +36,9 @@ import { EAT_BITES, EAT_SECONDS, biteAt } from '../ui/chime';
  * things in the catalogue (eight) no matter how many are eaten.
  */
 export class EatenTreat {
-  private readonly anchor: Group;
+  /** Read live, not captured once — see {@link rebind} and `WornHat`'s own
+   *  doc comment on the identical field. */
+  private readonly anchor: () => Group;
 
   /** One retained model per catalogue id — see the class doc. */
   private readonly pool = new Map<string, AssetHandle>();
@@ -46,9 +48,29 @@ export class EatenTreat {
   private scale = 1;
   private time = 0;
 
-  /** `anchor` is the character's `holdAnchor` — the same hand a toy is held in. */
-  constructor(anchor: Group) {
+  /** `anchor` resolves to the character's current `holdAnchor` — the same hand a toy is held in. */
+  constructor(anchor: () => Group) {
     this.anchor = anchor;
+  }
+
+  /**
+   * The player's model was just rebuilt (`Game.applyLiveLook`) — unlike
+   * `WornHat`/`CarriedItem` this is not a store subscriber with a "redraw
+   * from the current fact" path to re-run; it is mid-*moment*, or it is
+   * nothing (see the class doc). If a bite was actually in progress its
+   * model was a child of the *old* `holdAnchor` and was disposed along with
+   * it, so it is dropped from the pool (reusing it would show a mesh whose
+   * geometry has already been freed) and the munch ends early rather than
+   * animating something that no longer exists. Every *idle* pooled model is
+   * untouched here — see the class doc's "pooled" note: nothing idle is
+   * ever parented to an anchor, so nothing about it can have gone stale.
+   */
+  rebind(): void {
+    const handle = this.handle;
+    if (!handle) return;
+    this.pool.delete(handle.root.name);
+    this.handle = null;
+    this.time = 0;
   }
 
   /** True while something is being eaten. `CarriedItem` steps aside for it. */
@@ -80,7 +102,7 @@ export class EatenTreat {
     handle.root.position.set(0, HELD_OUT.up, HELD_OUT.forward);
     handle.root.scale.setScalar(0.001);
     handle.root.visible = true;
-    this.anchor.add(handle.root);
+    this.anchor().add(handle.root);
 
     this.handle = handle;
     this.scale = item.heldScale;
@@ -142,7 +164,7 @@ export class EatenTreat {
   private put(): void {
     const handle = this.handle;
     if (!handle) return;
-    this.anchor.remove(handle.root);
+    this.anchor().remove(handle.root);
     handle.root.visible = false;
     handle.root.scale.setScalar(0.001);
     this.handle = null;
