@@ -439,3 +439,25 @@ the shadow. Shadow behaviour is a separate question.
   **If their invariant lands and measures the built scene, this statue may fail
   it. That is the correct outcome.**
 - `TAIL_YAW` holds at 0.12 pending Jim.
+
+---
+
+# Dev server: NOT running (standing instruction, 5 Aug)
+
+Jim: *"going forward, I won't be around quite a lot of the time so don't keep
+servers open for me, just be ready to start them when I ask."* This supersedes
+every earlier "keep 5314 alive" note in this file.
+
+**Build-verify, stop your server, write down how to restart it.** To bring this
+branch back up:
+
+```
+cd /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/ripika-statue && npx vite --port 5314 --strictPort
+```
+
+Then: the statue is in the middle of the plaza fountain. `art-samples.html?only=statue`
+for the gallery view.
+
+**PR: https://github.com/jimhigson/land-of-good-places/pull/200** — stacked on
+#199 (`fix/ripika-tail-cant`), so it must merge **after** it. GitHub retargets
+it to `main` automatically when #199 lands.
