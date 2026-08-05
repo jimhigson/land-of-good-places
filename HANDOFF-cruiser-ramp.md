@@ -332,3 +332,43 @@ backtracks and start-pose index — which is what the slide engineer needs.
 
 `build` exit 0, `test:procgen` **127 passed** (+5, the new invariant on five
 seeds). New invariant proven red: without the influence, seed 18 fails.
+
+## What review independently verified about the influence mechanism (#213)
+
+Worth keeping, because it is stronger evidence than the PR itself claimed:
+
+- **Byte-identity held under a harder test than I ran.** The reviewer stripped
+  the influences from the cruiser's brief and diffed all five seeds on *every*
+  report field **plus SHA-256 digests of the plan and built curves sampled every
+  metre**. That is the property that makes this safe to land next to the
+  in-flight ginormous slide, which shares `generate.ts`.
+- **Backstop rejects are exactly 0/0/0/1/1**, `satisfied: true` on all five.
+  Seed 18 goes `castleSpan: null` → `167..197`. Stripping the influences fails
+  procgen **precisely on seed 18** — the invariant has teeth and points at the
+  right seed.
+- The **backstop-cannot-fail-a-park** call was endorsed explicitly, with a
+  recommendation that nobody turn it into a throw. It is now stated in the code,
+  the PR body and Decision 7 so that survives.
+
+### PR numbering
+
+#212 was auto-closed by GitHub when its base branch was deleted on merging
+#211, and a PR whose base is gone can be neither reopened nor retargeted.
+**#213 is the live one** — same work rebased onto `main`, plus the two review
+fixes. #212 carries a comment pointing at it.
+
+## Follow-ups the review found on #211 (now on main) — not in either PR
+
+The Overseer is filing these. Recorded here so they are not rediscovered:
+
+1. **The "tightest 12" near-miss report is saturated** — all twelve rows read
+   0.00 m because deliberate pass-throughs (the castle window, the rails) are
+   included, so it cannot do the near-miss-radar job it was added for. Its
+   docstring's "the RiPika statue at 2.01 m is the tightest approach" is stale.
+2. **The 8-ray sweep leaves a 0.75 m residual lateral gap** — verified, a pole
+   at 0.4 m lateral is missed. A real improvement on the 1.5 m that corners
+   alone leave, but **not exhaustive**, and the docs should say so rather than
+   implying completeness.
+3. **A stale comment in the reassuring direction**: it claims seed 5 drops to
+   25 trees, but measured counts are 27/31/26/28/27 — **two** trees of headroom
+   on the worst seed, not one. Reassuring-direction staleness is the worse kind.
