@@ -445,6 +445,25 @@ export class Building implements GameSystem {
     return this.liftRide;
   }
 
+  /**
+   * Board the ginormous slide from wherever the player is standing.
+   *
+   * The `/slide` deep link, for QA and for developers. Normally you reach this
+   * ride by walking into the castle and climbing to the roof, which is right
+   * for a child and a real tax on anyone testing it dozens of times.
+   *
+   * Safe from anywhere: `startGiantSlide` changes space behind a closed iris
+   * and teleports the rider onto the top of the chute, so it does not care
+   * where they were when they asked.
+   */
+  requestBoardSlide(withGrownUp: boolean): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.ride || this.changingSpace) return false;
+    this.grownUpComing = withGrownUp;
+    this.startGiantSlide(player);
+    return true;
+  }
+
   /** The Climb / Descend menu was answered. */
   takeStairs(deck: number, direction: StairDirection): void {
     if (!this.player || this.player.riding || !this.inside) return;

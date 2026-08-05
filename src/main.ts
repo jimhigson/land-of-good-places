@@ -104,6 +104,12 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   '/rail-race': 'railRacer',
   '/sky-cruiser': 'skyCruiser',
   '/ferris': 'spaceFerrisWheel',
+  // The ginormous slide, whose entrance is on the castle roof — the one ride
+  // you otherwise have to climb a building to reach. The second link brings the
+  // grown-up along, so the "in front, lying down" half of it can be seen
+  // without walking up to invite them first.
+  '/slide': 'ginormousSlide',
+  '/slide-with-grownup': 'ginormousSlideWithGrownUp',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

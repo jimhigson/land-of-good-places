@@ -563,6 +563,13 @@ export class Game {
       if (stallId === 'railRacer') return this.world.railRace.requestBoard();
       if (stallId === 'skyCruiser') return this.world.coaster.requestBoard();
       if (stallId === 'spaceFerrisWheel') return this.world.ferrisWheel.requestBoard();
+      // The ginormous slide is not a stall — you reach it by climbing the
+      // castle — so these two ids exist only for its deep links, which is the
+      // difference between QA testing the ride and QA testing the stairs.
+      if (stallId === 'ginormousSlide') return this.world.building.requestBoardSlide(false);
+      if (stallId === 'ginormousSlideWithGrownUp') {
+        return this.world.building.requestBoardSlide(true);
+      }
       return false;
     };
 
