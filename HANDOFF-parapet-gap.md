@@ -4,7 +4,8 @@ Branch `feat/slide-parapet-gap`, based on `feat/slide-on-rail-generator` (E3's
 #118 work, not yet merged). Worktree `.claude/worktrees/parapet-gap`, dev port
 **5327** (not currently running — build-verified only).
 
-**Status: commit 1 landed and green. Commit 2 not started.**
+**Status: commit 1 landed and green. Commit 2 DROPPED by Overseer ruling —
+do not build it.**
 `npm run build` exit 0. `npm run test:procgen` exit 0, **127 tests** (122 + 5,
 one new invariant per seed).
 
@@ -153,23 +154,75 @@ anything next to it.
 The route is extremely sensitive to door position, which is exactly the argument
 for letting the search choose it.
 
-## Commit 2 — build it, measure it, DO NOT LAND IT
+## Commit 2 — measured, disproved, and dropped by ruling
 
-Widen `DOOR_OFFER_CENTRE` from one position to the whole south wall (offer a
-spread of centres, keep the existing ±0.85 across-fractions and 17 headings).
-Then re-measure the table above on all five seeds.
+**Do not build it.** The premise was false, and QA independently found the
+comfort problem it was meant to solve does not exist.
 
-Expectation: radius goes from ~5–6.5 m back toward 8–11 m and the worst bend
-gets gentler. Report to the Overseer with before/after and **stop** — it
-relocates a visible hole in the castle, so it is Jim's screenshot call.
+### The premise, and what the measurement showed
 
-Watch for: a door offered near a corner cutting a hole that runs off the end of
-the wall (clause 1 of the new invariant catches this); and `Shell.ts` only cuts
-south-wall gaps at `TOP_DECK`.
+The plan was: widen the offered door positions to the whole south wall, expect
+the tightest bend to go from ~5 m back toward 8–11 m. I swept the door across
+the full wall (facade-local x −10 … 9.9, 1 m steps) on all five seeds before
+building anything.
 
-**Out of scope, deliberately:** an **east**-wall door. Geometrically natural
-(the pit is east) but `Shell.ts` cuts gaps only in the south wall, so it is new
-masonry code. Land south, then argue east on evidence.
+**Door position does not buy turn radius.** The tightest bend is roughly flat
+noise in the 5–7 m band wherever the door is put, with occasional lucky spots
+that are not a trend:
+
+| seed | radius at today's door (9.5) | best over whole wall | worst |
+|---|---|---|---|
+| 20260728 | 6.17 m | 10.45 m (at 9.9) | 5.01 m (at 4) |
+| 2 | 6.08 m | 8.32 m (at −7) | 5.07 m (at 7) |
+| 11 | 5.91 m | 6.58 m (at 1, 2, 4) | 5.03 m (at −9) |
+| 18 | 6.50 m | 7.00 m (at −8) | 5.08 m (at −6) |
+
+**Root cause: the search returns the first route that satisfies its
+constraints, not the gentlest one.** With `MIN_TURN_RADIUS = 5` and a `wrap`
+vocabulary offering 5–12 m, it takes a 5 m bend the moment one fits. The door is
+not the dial; route *selection* is.
+
+A second finding compounds it: `restartLimit = min(budgets.restarts,
+attempts.length)` = 700, and an open route pairs every start with every end, so
+with 34 admissible landings only **~20 of the 85 offered poses are ever
+reached** — all of them at the centre position. Widening the door adds
+candidates the search never gets to. **Ordering, not budget, is the lever.**
+
+Getting a gentler ride would mean solving several doors and keeping the best by
+min-radius — real work, and at ~1.2 s per solve a serious boot-time cost. That
+is generator work, not slide work.
+
+### QA's verdict, which settles it
+
+QA rode it: the tightest bend is **not** a comfort problem.
+
+> "Neither exciting nor sickening, and that's the problem… for the first ~2.5 s
+> the trough walls fill almost the whole frame; you cannot tell you are 14.8 m
+> up. It reads as sliding down an enclosed tube."
+
+So the fault is the **enclosed opening view**, not lateral load. 0.79 g is not
+hurting anyone. Spending boot time to halve a load nobody minds would have been
+a bad trade even if the door had worked.
+
+**Overseer ruling: drop commit 2 entirely. Do not widen the door, do not raise
+the radius.** The follow-up (search speed / ordering) is filed as a separate
+issue.
+
+### Still out of scope
+
+An **east**-wall door. Geometrically natural (the pit is east) but `Shell.ts`
+cuts gaps only in the south wall at `TOP_DECK`, so it is new masonry code — and
+on this evidence it would not buy turn radius either.
+
+## Note on tooling overlap
+
+`scripts/measure-slide-comfort.mts` (added on the base branch while I was
+measuring) owns the comfort numbers. My `fingerprint-slide.mts` owns the
+byte-identity fingerprint only — I stripped its duplicate comfort block rather
+than ship two tools computing peak g two ways, which is the same one-owner
+principle commit 1 is about. The two agreed closely where they overlapped
+(canonical 6.20 vs 6.17 m; seed 5 5.48 vs 5.46 m), which is worth knowing: the
+measurement is robust to how it is sampled.
 
 ## Rebuilding my state in one command
 
