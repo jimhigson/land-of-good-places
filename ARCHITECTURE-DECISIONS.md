@@ -9,6 +9,88 @@ sources you actually read.
 
 ---
 
+## Decision 8 — A bridge is a `covers(x, z)` walkable surface; `NavGrid` stays 2D
+
+*(GitHub #116, REQUIREMENTS-2026-07-28.md §7. Unblocks check:park invariant 2.)*
+
+**Date:** 5 August 2026 · **Status:** decided, implementation in progress
+**Sources read:** `src/world/NavGrid.ts`, `src/world/building/surfaces.ts`
+(`WalkSurfaces`, `MovingPlatform`, `RampDefinition`), `src/world/building/layout.ts`,
+`src/world/train/{crossings,fence,route,track,trainModel}.ts`,
+`src/world/Collision.ts`, `src/entities/npc/poiGraph.ts`,
+`scripts/check-park.mts`, `test/procgen/{invariants,parkFacts}.ts`.
+
+### The ruling
+
+The family's ruling of 28 July is that paths cross the railway on **bridges,
+never level crossings**. A bridge registers itself as a walkable surface with an
+arbitrary **`covers(x, z)` predicate**, in the idiom `Bubble.covers`,
+`GlassLift.covers` and `Trampoline.covers` already use, and `WalkSurfaces`
+answers with the deck's height where it covers.
+
+**`NavGrid` remains a single-layer 2D lattice.** This is worth stating flatly
+because it is the thing most likely to be misremembered: we are *not* making the
+nav grid multi-layer. We are letting a deck declare a walkable surface above the
+ground, and widening the height test `NavGrid` already applies to colliders so
+that the fence beneath a deck stops blocking the cells above it.
+
+### Why, and what was rejected
+
+The crossing angle is whatever procgen chose — under the "every park unique,
+nothing reserves space" ruling we cannot assume it is axis-aligned. That single
+fact decides most of this.
+
+- **Chosen: `covers(x, z)`.** An arbitrary predicate expresses an obliquely
+  crossing deck. It is an existing, load-bearing pattern (`ShaftGuards.ts`
+  documents it), and `WalkSurfaces.addPlatform` is already public and already
+  used for the train's own platforms out in the garden.
+- **Rejected: `RampDefinition`.** Its footprint is an axis-aligned `RectRegion`,
+  which cannot describe a deck crossing at an angle. Its garden-space heights
+  are also measured relative to `BUILDING_CENTRE_X/Z` — the wrong origin for a
+  bridge out at r ≈ 40-55. It stays the right tool for the axis-aligned work
+  `Escalators` and `Building` use it for.
+- **Rejected: a second nav layer.** Every consumer of `NavGrid` would change,
+  for one feature. A foundational rewrite should be forced by several needs, not
+  adopted for the first — and nothing else in the park currently wants one.
+- **Rejected: raising the lattice's reference Y.** It is global. It would break
+  ground-level routing in order to fix bridge routing.
+
+### What it costs
+
+Three seams have to widen, none of them new mechanisms:
+
+1. **The fence.** Its collision walls are `topHeight = Infinity`,
+   `autoHoppable = false` on purpose — "the fence is a rule, not a hurdle" — so
+   `NavGrid` stamps them blocked at every height, including the deck's own cells
+   above them. `Collision.forEachWall` already passes `topHeight` to its visitor
+   and `NavGrid` already skips colliders on a height test; today only the
+   auto-hop test uses it. §7 requires the fence stay *continuous beneath* the
+   bridge, so it cannot simply be gapped as level crossings did.
+2. **`poiGraph.lineIsClear`** is purely 2D (`collision.resolve(probe, 0.7)`, Y
+   ignored), so nodes either side of a bridge get no edge and NPCs cannot cross
+   — and an edge could form spuriously between a deck node and the ground under
+   it.
+3. **Ordering.** `paths.ts` runs at module load, `computeCrossings` inside
+   `ParkTrain`'s constructor, `buildRailFence` after that. Anything `NavGrid`,
+   `poiGraph` or `paths.ts` must know about the deck has to be a **plan**
+   computed at module load, as `TRAIN_PLAN` and `RAIL_RACE_PLAN` are — not a
+   scene object.
+
+### What it unblocks
+
+`check:park` invariant 2 — *"no route crosses the railway except over a bridge
+deck"* — has been written but unusable since it landed, passing only via the
+`atLevelCrossing` escape. Bridges are what let the escape be removed and the
+invariant mean what it says.
+
+Two numbers were wrong and are fixed alongside: `BRIDGE_RISE` was a hand-picked
+`2` against a locomotive whose funnel tip is **2.42 m**, so a deck built to
+satisfy it would have decapitated the train; it is now derived from
+`trainModel.ts`'s exported `LOCO_TOP_Y`. And `LEVEL_CROSSING_REACH` was named in
+invariant 2's failure message but never defined — a `ReferenceError` that could
+only fire once a crossing was genuinely illegal, i.e. exactly when this work
+starts producing one.
+
 ## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
 
 **Date:** 5 August 2026 · **Status:** decided, first implemented by the Sky

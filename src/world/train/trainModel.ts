@@ -38,6 +38,31 @@ export const CAR_FLOOR_Y = 0.58;
 /** Where a passenger's feet go: the top of the bench. */
 export const SEAT_Y = CAR_FLOOR_Y + 0.42;
 
+/**
+ * The tallest point of the whole train — the funnel tip — above the top of the
+ * sleepers.
+ *
+ * **This is the number anything built over the railway has to clear**, and it is
+ * exported so that nothing has to guess it. `buildLocomotive` positions the
+ * funnel from it, so retuning the loco moves the clearance requirement with it
+ * rather than leaving a constant somewhere else quietly stale.
+ *
+ * ### The datum, which is easy to get wrong
+ *
+ * A car's root is placed at `route.pointAt(...)`, whose Y is `terrainHeight` —
+ * the loco's origin is the sleeper top, so **model-local Y is metres above the
+ * ground beside the track**. That makes this directly comparable with anything
+ * else measured from the terrain, and it is why `RAIL_HEIGHT` is *not* part of
+ * it: the rail head is 0.17 m of rail sitting on that same ground, not the datum
+ * the body is measured from.
+ *
+ * Watch for the naming trap next door: `check-park.mts`'s `crossesTrack` returns
+ * a field called `rail` that holds the **terrain** height under the centre line,
+ * not the rail head. It happens to be the right datum to compare this against —
+ * but only by luck of the name being wrong.
+ */
+export const LOCO_TOP_Y = CAR_FLOOR_Y + 1.84;
+
 /** Half the track gauge — where the wheels sit either side of the centre line. */
 const WHEEL_OFFSET = 0.55;
 
@@ -150,7 +175,7 @@ export function createLocomotive(): Locomotive {
   funnelRim.position.set(0, CAR_FLOOR_Y + 1.72, 1.25);
   root.add(funnelRim);
 
-  const funnelTip = new Vector3(0, CAR_FLOOR_Y + 1.84, 1.25);
+  const funnelTip = new Vector3(0, LOCO_TOP_Y, 1.25);
 
   // --- dome and whistle ----------------------------------------------------
   const dome = solidMesh(new SphereGeometry(0.22, 14, 10), trimMaterial);

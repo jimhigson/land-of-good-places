@@ -69,6 +69,7 @@ import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
+import { LOCO_TOP_Y } from '../src/world/train/trainModel.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -340,18 +341,42 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
 }
 
 /**
- * How far a walkable surface must stand above the rail head before a route
- * passing over it counts as a **bridge** rather than a level crossing.
+ * The depth of a bridge's own structure — deck planks plus the beams under
+ * them — between the surface a child walks on and the soffit a train passes
+ * beneath.
  *
- * Derived rather than declared: there are no bridges in the park today, so
- * nothing can be looked up. Two metres is comfortably more than the ground
- * wanders (the park's whole terrain range is about 1.4 m) and comfortably less
- * than any deck a train has to fit under, so it separates "the path happens to
- * be on a rise here" from "the path is over the top of the railway" without
- * knowing what a bridge is made of. When Decision 5's L3 emits real decks this
- * is the test they have to pass, and they will pass it by being bridges.
+ * The one number here that is a *claim* rather than a derivation, because the
+ * thing it describes is still being built (#116). It is stated separately, and
+ * named, so that it is obvious what to reconcile when the real deck lands
+ * rather than being buried inside a single fudged total.
  */
-const BRIDGE_RISE = 2;
+const BRIDGE_DECK_DEPTH = 0.35;
+
+/**
+ * How far a walkable surface must stand above the ground under the track before
+ * a route passing over it counts as a **bridge** rather than a level crossing.
+ *
+ * **Derived from the train, not chosen.** It used to be a flat `2`, honestly
+ * documented as picked "because there are no bridges in the park today, so
+ * nothing can be looked up" — comfortably more than the terrain wanders (~1.4 m
+ * across the whole park) and assumed comfortably less than any real deck.
+ *
+ * That assumption was wrong, and dangerously so: {@link LOCO_TOP_Y} is **2.42
+ * m**, so a deck built to satisfy the old constant would have taken the funnel
+ * clean off Puffing Percy. Reading it off `trainModel.ts` means retuning the
+ * loco moves this with it — the same reason `RAIL_OVER_RAIL` is derived rather
+ * than declared.
+ *
+ * ### The datum
+ *
+ * Both sides are measured from the **terrain under the track**. `crossesTrack`
+ * returns that as a field it calls `rail` (a misnomer — it is the ground, not
+ * the rail head), and a locomotive's origin is the sleeper top, which is placed
+ * at exactly that same terrain height. So `deck - hit.rail >= BRIDGE_RISE`
+ * compares like with like. `RAIL_HEIGHT` is deliberately absent: it is rail
+ * sitting *on* the datum, not part of it.
+ */
+const BRIDGE_RISE = LOCO_TOP_Y + BRIDGE_DECK_DEPTH;
 
 /**
  * How far *past* a level crossing's own fence gap a route may still meet the
