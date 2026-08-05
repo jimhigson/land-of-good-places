@@ -1,7 +1,9 @@
 import type { Object3D } from 'three';
-import { clamp01, lerp, smoothstep } from '../core/mathUtils';
+import { CAMERA_YAW_DEGREES } from '../core/constants';
+import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
 import type { FrameContext, GameSystem } from '../core/types';
+import type { CharacterModel } from '../entities/CharacterModel';
 import type { Player } from '../entities/Player';
 import type { NpcCharacter } from '../entities/npc/NpcCharacter';
 import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
@@ -68,6 +70,21 @@ export class TreeClimbing implements GameSystem {
   /** Which way she faces while peeking — captured at the top of the scramble. */
   private playerPeekFacing = 0;
   private playerHiddenParts: Object3D[] = [];
+  /**
+   * Which model {@link playerHiddenParts} was collected from.
+   *
+   * The parts are children of the player's model, and PR #188 makes that model
+   * swappable at runtime — so by the time the climb ends the refs may belong to
+   * a model that has already been thrown away. Restoring them would then be
+   * both useless and misleading. See {@link showPlayerBody}.
+   */
+  private playerHiddenModel: CharacterModel | null = null;
+  /** Seconds into the current wave cycle. Runs only during `peek`. */
+  private playerWaveClock = 0;
+  /** Eased 0..1 — 0 arms down, 1 arm up and waggling. */
+  private playerWaveAmount = 0;
+  /** The facing actually in use this frame, eased between peek and camera. */
+  private playerFacingNow = 0;
 
   // --- NPC state ---------------------------------------------------------
   /** Every part hidden while an avatar climbs — computed once, reused forever. */
@@ -238,6 +255,12 @@ export class TreeClimbing implements GameSystem {
         this.playerPhase = 'peek';
         this.playerTimer = 0;
         this.playerPeekFacing = pose.facing;
+        this.playerFacingNow = pose.facing;
+        // Wound so the first wave lands WAVE_FIRST_DELAY from here, rather than
+        // the instant she arrives — she gets a beat to look pleased with
+        // herself first.
+        this.playerWaveClock = WAVE_CYCLE_SECONDS - WAVE_FIRST_DELAY;
+        this.playerWaveAmount = 0;
         this.hidePlayerBody();
         this.player.model.setExpression('happy');
       }
@@ -265,7 +288,29 @@ export class TreeClimbing implements GameSystem {
         0,
         this.playerPeekFacing,
       );
-      this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
+      const wave = this.updatePlayerWave(dt);
+      // She turns to the camera to wave and drifts back to her peek facing
+      // afterwards. This is a *scripted pose*, not a control — the CONTROL RULE
+      // bans the stick rotating her, and nothing here reads the stick.
+      this.playerFacingNow = turnTowards(
+        this.playerFacingNow,
+        wave > WAVE_TURN_THRESHOLD ? CAMERA_FACING : this.playerPeekFacing,
+        PEEK_TURN_SPEED * dt,
+      );
+      // The hoist. Her arm cannot reach above her own head (shoulder 0.72 +
+      // reach 0.455 against a 1.36 head), so raising the arm alone leaves the
+      // hand inside the leaves — the whole child has to come up, which is what
+      // a child hauling herself up to be seen actually does. See WAVE_RISE.
+      this.player.setRidePose(
+        pose.x,
+        pose.y + WAVE_RISE * wave,
+        pose.z,
+        this.playerFacingNow,
+      );
+      // The arm pose itself belongs to `Player`: its riding branch rewrites both
+      // arms from scratch every frame (a ride's "holding on" pose), so an arm
+      // posed from out here would survive exactly one tick.
+      this.player.setClimbWave(wave);
       // Reasserted every frame rather than only on the transition: Player's
       // own blink cycle (`Player.animate`) calls `setExpression('neutral')`
       // whenever a blink ends, which would otherwise quietly erase the happy
@@ -297,12 +342,38 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
-  /** Hides every part of the model except the head — see the class doc. */
+  /**
+   * The wave cycle while peeking: a settle, a wave, a settle, repeat.
+   *
+   * The timing is the whole feature. Too often and it reads as a twitch; too
+   * rarely and she looks like she has forgotten she is up there. One wave per
+   * {@link WAVE_CYCLE_SECONDS} is roughly a child checking you are still
+   * watching — and the *first* one comes fast (see {@link WAVE_FIRST_DELAY}),
+   * because the whole point of climbing something is being seen to have done it.
+   */
+  private updatePlayerWave(dt: number): number {
+    this.playerWaveClock = (this.playerWaveClock + dt) % WAVE_CYCLE_SECONDS;
+    const waving = this.playerWaveClock < WAVE_DURATION_SECONDS;
+    this.playerWaveAmount = damp(this.playerWaveAmount, waving ? 1 : 0, WAVE_EASE_HALF_LIFE, dt);
+    return this.playerWaveAmount;
+  }
+
+  /**
+   * Hides every part of the model except the head — see the class doc — and
+   * except the **right arm**, which is the one she waves with.
+   *
+   * The arm has to stay drawn or there is nothing to see: her shoulder sits
+   * well inside the canopy, so what actually appears above the leaves is a hand
+   * and a bit of forearm next to a head, which is exactly the cartoon read we
+   * want. The shoulder staying buried is a feature, not a compromise.
+   */
   private hidePlayerBody(): void {
     const model = this.player.model;
     this.playerHiddenParts = [];
+    this.playerHiddenModel = model;
     for (const child of model.body.children) {
       if (child === model.head) continue;
+      if (child === model.rightArm) continue;
       if (!child.visible) continue;
       child.visible = false;
       this.playerHiddenParts.push(child);
@@ -310,8 +381,17 @@ export class TreeClimbing implements GameSystem {
   }
 
   private showPlayerBody(): void {
-    for (const child of this.playerHiddenParts) child.visible = true;
+    // If the model was swapped underneath us mid-climb (PR #188), these refs
+    // belong to a model that has already been discarded: restoring them would
+    // touch a dead tree, and the *new* model has never been hidden, so there is
+    // nothing to put right. Drop them and leave the live model alone.
+    if (this.playerHiddenModel === this.player.model) {
+      for (const child of this.playerHiddenParts) child.visible = true;
+    }
     this.playerHiddenParts = [];
+    this.playerHiddenModel = null;
+    this.playerWaveAmount = 0;
+    this.player.setClimbWave(0);
   }
 
   // ================================================================= NPCs
@@ -429,6 +509,58 @@ const PLAYER_SCRAMBLE_DOWN_SECONDS = 0.4;
 
 /** How close (trunk edge to feet) counts as "near enough to climb". */
 const INTERACT_MARGIN = 2.4;
+
+// ------------------------------------------------------------------- waving
+//
+// "After climbing a tree the player waves toward the camera every few seconds"
+// (issue #120, REQUIREMENTS-2026-07-28.md §11).
+//
+// One wave every {@link WAVE_CYCLE_SECONDS}, held for
+// {@link WAVE_DURATION_SECONDS}, so she is waving a bit under half the time she
+// is up there. Faster reads as a twitch; much slower and she seems to have
+// forgotten she climbed anything.
+
+/** How long from reaching the top to the first wave. Deliberately short. */
+const WAVE_FIRST_DELAY = 0.85;
+/** Wave, then settle, then wave again. */
+const WAVE_CYCLE_SECONDS = 4.4;
+const WAVE_DURATION_SECONDS = 1.7;
+/** Half-life of the eased 0..1 blend, so the arm swings up rather than snaps. */
+const WAVE_EASE_HALF_LIFE = 0.09;
+
+/**
+ * How far she hoists herself up to wave, in metres.
+ *
+ * **Not a flourish — the wave is invisible without it.** She peeks with her
+ * head at `canopyTopY` and everything else buried, and her arm cannot reach
+ * above her own head: the shoulder is 0.72 up a body whose head sits at 1.36
+ * (`kid.ts`), and hand reach from the shoulder is 0.32 + a 0.135 hand. The
+ * waving hand therefore tops out around 0.25 *below* the head — and the canopy
+ * surface at the climbing spot (a trunk-radius or so off the axis of a
+ * 2.05–2.5 m ellipsoid) is only about 0.17 below `canopyTopY`. So a raised arm
+ * alone leaves the hand roughly 0.09 m inside the leaves, from every angle.
+ *
+ * Lifting the whole child by 0.3 clears the hand past the leaf surface with
+ * ~0.2 m to spare on the smallest climbable canopy, and it is what a child
+ * hauling herself up to be seen actually does. `check:climb-wave` measures it.
+ */
+const WAVE_RISE = 0.3;
+
+/** Above this much wave, she has turned to the camera to do it. */
+const WAVE_TURN_THRESHOLD = 0.15;
+/** Radians per second she swings round to the camera and back. */
+const PEEK_TURN_SPEED = 2.6;
+
+/**
+ * The yaw that points her at the camera.
+ *
+ * `facingAngle`'s forward is `(sin, cos)` (`Player`), and `cameraOffset` puts
+ * the camera at `(sin yaw, cos yaw)` from its target (`core/cameraRig.ts`), so
+ * facing the camera is the camera's own yaw. This is a *scripted* turn, not a
+ * control — the CONTROL RULE bans the stick rotating her, and nothing here
+ * reads the stick.
+ */
+const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
 
 interface ClimbPose {
   readonly x: number;

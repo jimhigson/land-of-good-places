@@ -402,6 +402,8 @@ export class Player implements GameSystem {
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
+  /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
+  private climbWave = 0;
   /**
    * Seconds into the flower-picking flourish, or `-1` when there is none.
    *
@@ -692,8 +694,26 @@ export class Player implements GameSystem {
   }
 
   /** Gives the character back, optionally still moving. */
+  /**
+   * How much of the "waving from up a tree" pose to wear, 0 to 1.
+   *
+   * Written every frame by `world/TreeClimbing.ts` while she is peeking out of
+   * a canopy. It lives here, rather than TreeClimbing simply posing the arm
+   * itself, because the riding branch of {@link update} rewrites *both* arms
+   * from scratch every frame — a ride's "holding on" pose — so an arm posed
+   * from outside would survive exactly one tick before being overwritten.
+   *
+   * Same rule as `applyFlowerPick`: it is only ever *blended over* the pose
+   * `update` already wrote, and it cannot get stuck, because the next frame
+   * that does not set it goes straight back to the plain ride pose.
+   */
+  setClimbWave(amount: number): void {
+    this.climbWave = clamp01(amount);
+  }
+
   endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
     this.ridingFlag = false;
+    this.climbWave = 0;
     this.velocity.set(velocityX, 0, velocityZ);
     this.verticalVelocity = velocityY;
     this.airborne = true;
@@ -724,6 +744,14 @@ export class Player implements GameSystem {
       this.model.body.rotation.x = 0.3;
       this.model.leftLeg.rotation.x = -0.7;
       this.model.rightLeg.rotation.x = -0.55;
+      // The tree-climb wave, blended over the hold-on pose the ride just set.
+      // Same arm and the same waggle as the crowd's wave
+      // (`NpcCharacter.animate`), so one gesture reads across the whole park.
+      if (this.climbWave > 0) {
+        const waggle = Math.sin(context.elapsed * 11) * 0.42;
+        this.model.rightArm.rotation.x = lerp(-2.5, -2.45, this.climbWave);
+        this.model.rightArm.rotation.z = lerp(-0.5, -0.75 + waggle, this.climbWave);
+      }
       return;
     }
 
