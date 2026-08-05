@@ -42,6 +42,34 @@ export const RIPIKA_HEAD_SCALE = 1.32;
 
 /** Local shorthand for {@link RIPIKA_HEAD_SCALE}. */
 const HEAD = RIPIKA_HEAD_SCALE;
+
+/**
+ * The tail's resting cant, in radians — how far the zig-zag flash is rolled
+ * over so it fans **across** the screen rather than hiding behind the body.
+ *
+ * This is a named constant because it was a literal in two places that had to
+ * agree and silently did not. `setWalkPhase` ended with
+ *
+ * ```ts
+ * tail.rotation.z = Math.sin(...) * 0.18 * speed;   // the bug
+ * ```
+ *
+ * which is zero whenever `speed` is zero — so it did not return the tail to its
+ * rest pose, it **assigned the rest pose away**. Every RiPika in the park stood
+ * with a limp, straight-down tail the instant she stopped walking, which is
+ * exactly when a child is most likely to be standing still looking at her. The
+ * cant is not decoration: the tail is documented right where it is built as the
+ * thing without which she "is just a yellow mouse".
+ *
+ * The shape of the bug is worth remembering, because it is not specific to
+ * tails. **A per-frame `x = f(speed)` that multiplies the whole expression by
+ * an amplitude destroys any non-zero authored value of `x` when that amplitude
+ * reaches zero.** An animation offset must be *added* to the rest pose
+ * (`REST + swing`), or the rest pose has to be zero. `applyWalk` gets away with
+ * the multiply-only form purely because every limb it drives is authored at
+ * rotation zero.
+ */
+const TAIL_CANT = 1.05;
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
   space?: boolean;
@@ -234,7 +262,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   // game ever uses, and RiPika without its flash is just a yellow mouse.
   const tail = new Group();
   tail.position.set(-0.25, 0.24, -0.02);
-  tail.rotation.set(0.08, 0.1, 1.05);
+  tail.rotation.set(0.08, 0.1, TAIL_CANT);
   tail.scale.setScalar(1.15);
   body.add(tail);
 
@@ -278,7 +306,11 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
     setExpression: (name: Expression) => ripikaHead.setExpression(name),
     setWalkPhase: (phase: number, speed: number) => {
       applyWalk(limbs, body, phase, speed, 0.7, 0.06);
-      tail.rotation.z = Math.sin(phase * Math.PI * 4) * 0.18 * speed;
+      // The swing is added to the rest pose, not multiplied over it. Writing
+      // this as `sin(...) * 0.18 * speed` alone made the whole expression zero
+      // at `speed = 0` and so *assigned away* the cant rather than returning to
+      // it — see {@link TAIL_CANT}.
+      tail.rotation.z = TAIL_CANT + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
     },
   };
   return handle;
