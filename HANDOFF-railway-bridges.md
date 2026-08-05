@@ -99,9 +99,23 @@ Same problem for NPCs: `poiGraph`'s `lineIsClear` is purely 2D
 bridge get **no edge** — and an edge may form spuriously between a deck node and
 the ground beneath it.
 
-`Collision.forEachWall` already passes `topHeight` to its visitor and
-`NavGrid.ts:339` already skips colliders on a height test — but only the
-`autoHoppable && autoHopClears(...)` one. That is the seam to widen.
+**Do NOT widen the collider-top test to fix this** — I nearly did, and it is a
+trap. `Collision.forEachWall` does pass `topHeight` through, and `NavGrid` does
+already skip colliders on a height test, so it looks like the seam. But using it
+requires the fence to declare a finite `topHeight`, and
+`Collision.resolve`'s `clearance` is *feet height above local ground, positive
+mid-jump*. The fence is 0.95 m of post; `JUMP_APEX_HEIGHT` ≈ 1.28 m. Give the
+fence a real top and **a child can jump the railway fence** — Decision 4 §6's
+"keeping feet off the track" gone. The `Infinity` is load-bearing.
+
+The mechanism is the reverse: **a cell the deck `covers(x, z)` is exempt from
+stamping.** What makes that safe under a single-layer lattice is that the thing
+under a bridge is the fenced rail corridor, which is *already* not walkable — so
+the grid only chooses between two surfaces where one was never available.
+
+Same treatment for `poiGraph.lineIsClear`, for the same reason. Recorded as a
+correction in ARCHITECTURE-DECISIONS Decision 6, with the carry-forward
+constraint: **nothing may give the rail fence a finite `topHeight`.**
 
 ## Where the crossings are today
 
