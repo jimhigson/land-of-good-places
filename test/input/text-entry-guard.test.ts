@@ -61,9 +61,64 @@ describe('isTextEntryTarget', () => {
 
   it('leaves ordinary page elements to the game', () => {
     expect(isTextEntryTarget(new FakeNode('DIV'))).toBe(false);
-    expect(isTextEntryTarget(new FakeNode('BUTTON'))).toBe(false);
     expect(isTextEntryTarget(new FakeNode('CANVAS'))).toBe(false);
     expect(isTextEntryTarget(null)).toBe(false);
+  });
+
+  /**
+   * `BUTTON` is **deliberately** absent from the guarded set, and this is not
+   * an oversight to be tidied up later — see the `ActionChips` suite below for
+   * what breaks if someone adds it.
+   */
+  it('does not claim keystrokes for buttons', () => {
+    expect(isTextEntryTarget(new FakeNode('BUTTON'))).toBe(false);
+  });
+});
+
+/**
+ * The action chips (`ui/ActionChips.ts`) are real `<button>` elements, and
+ * `Enter` is bound to the `interact` action. A focused chip therefore has two
+ * possible routes to firing: the browser's own default activation for a
+ * button (which synthesises a `click`, and the chip's `click` listener calls
+ * `selection.commit`), and the game's `interact` action.
+ *
+ * Exactly one of them must win, and today it is the game action — because
+ * `preventDefault()` on the keydown cancels the native activation. That makes
+ * the `preventDefault` load-bearing rather than incidental, which is easy to
+ * miss when reading it as "stop the page scrolling".
+ *
+ * So the guard above must **not** treat a button as belonging to the DOM. If
+ * it did, the keydown would return early, nothing would be prevented and no
+ * game action would be queued: the chip's behaviour would change route on a
+ * change that was only ever meant to be about text fields. Pinned here so
+ * that "tidy up the guard by adding BUTTON" fails loudly.
+ *
+ * Kept separate from #122, which is a different question entirely: this is
+ * event→action (should a keystroke become a game action at all?), #122 is
+ * action→handler (does the action reach the zone the chip is showing?).
+ */
+describe('a focused action chip keeps Enter working (issue #189 boundary)', () => {
+  it('fires the interact action exactly once — not zero times, not twice', () => {
+    const chip = new FakeNode('BUTTON');
+    const system = new InputSystem();
+    system.attach(chip as unknown as Window);
+
+    const { prevented } = pressFrom(chip, 'Enter');
+
+    // Not zero: the game action is queued.
+    system.update();
+    expect(system.justPressed('interact'), 'Enter on a chip must still act').toBe(true);
+
+    // Not twice: `preventDefault` is what cancels the button's own native
+    // activation, so the chip cannot also fire through its `click` listener.
+    expect(prevented, 'native button activation must stay cancelled').toBe(true);
+
+    // And not again on the following frame while the key is still held —
+    // `justPressed` is an edge, so a held Enter must not repeat the action.
+    system.update();
+    expect(system.justPressed('interact'), 'a held Enter must not repeat').toBe(false);
+
+    system.detach(chip as unknown as Window);
   });
 });
 
