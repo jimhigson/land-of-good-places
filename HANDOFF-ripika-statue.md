@@ -183,6 +183,13 @@ shared checkout.
 
 ---
 
+## Dev server
+
+`npx vite --port 5314 --strictPort`, started from this worktree.
+**npx wrapper PID 3976, listening node PID 3995.** Kill only those two by PID —
+never `pkill -f vite`, which took out Jim's own long-running servers on 28 July.
+`lsof -nP -iTCP:5314 -sTCP:LISTEN` re-finds it if the PIDs go stale.
+
 ## What QA should look at (port 5314, private window)
 
 The statue is **in the middle of the central plaza fountain**, standing on the
