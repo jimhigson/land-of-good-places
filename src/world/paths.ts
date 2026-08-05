@@ -383,10 +383,19 @@ function buildGraph(): PathGraph {
   // paving that simply stopped in the grass beside a booth.
   //
   // Driving the loop off `STALL_STANDS` rather than off the `stall.` entries in
-  // `PARK_LAYOUT` also picks up the two booths that have no layout entry to
-  // iterate: the ferris kiosk, placed by relation to the wheel's own entrance
-  // (`stallPlacement.ts`'s `ferrisKiosk`), which had no node at all; and the
-  // face-paint stall, which `world/FacePaintStall.ts` builds for itself.
+  // `PARK_LAYOUT` also picks up the ferris kiosk, which is placed by relation
+  // to the wheel's own entrance (`stallPlacement.ts`'s `ferrisKiosk`) rather
+  // than by the layout solver. It has no `stall.` entry for that loop to find,
+  // so it had **no node at all** and survived only by standing near the wheel's
+  // own spur. It is the only booth that was missing outright.
+  //
+  // The face-paint stall is a different case worth not confusing with it: it
+  // does have a manifest entry (`parkManifest.ts`, `stall.facePaint`) and did
+  // have a node, at the doormat, 4.4 m from its counter — the same
+  // wrong-point bug as every other stall, not a missing one. What it lacked
+  // was a shared *stand*: `world/FacePaintStall.ts` computed its own from a
+  // private pair of constants, so its destination was a coordinate only it
+  // knew. That is why it now lives in `STALL_PLACEMENTS` too.
   //
   // A counter is a destination in itself, like a ride exit, so `toward` equals
   // the node and there is no past-the-doormat extension: walking past a

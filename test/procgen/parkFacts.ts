@@ -178,7 +178,6 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
-  const { STALL_STANDS } = await import('../../src/minigames/stallPlacement.ts');
   const { CatmullRomCurve3 } = await import('three');
   const { NavGrid, MAX_ROUTE_WAYPOINTS } = await import('../../src/world/NavGrid.ts');
   const { PLAYER_RADIUS } = await import('../../src/core/constants.ts');
@@ -218,13 +217,28 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     if (entry.near) nearPairs.add(pairKey(entry.id, entry.near.id));
   }
 
+  // Stall counters are read off the **built world's interact zones** — the
+  // coordinates the game actually sends a child to, computed by the booths
+  // themselves — rather than off `STALL_STANDS`.
+  //
+  // That distinction is the whole value of the fact, and it is measured, not
+  // assumed. `paths.ts` now builds its stall nodes *from* `STALL_STANDS`, so an
+  // invariant comparing the graph against that same table compares a source
+  // with itself. Injecting a booth into the built world that never reaches the
+  // table — the exact ferris-kiosk defect — the table-based form reported 19
+  // passed and saw nothing; this form fails with the booth named. The interact
+  // zones are also what `MiniGameStalls` and `FacePaintStall` each compute for
+  // themselves, so this polices those two against the table as well.
   const entrances: EntranceFact[] = [
     ...ANCHORS.map((anchor) => ({
       id: `anchor:${anchor.id}`,
       x: anchor.entrance[0],
       z: anchor.entrance[1],
     })),
-    ...STALL_STANDS.map((stand) => ({ id: `stall:${stand.id}`, x: stand.x, z: stand.z })),
+    ...world
+      .interactZones()
+      .filter((zone) => zone.id.startsWith('stall:'))
+      .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
 
   // The drawn ribbon, not the control points it was drawn from. `paths.ts`
