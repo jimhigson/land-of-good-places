@@ -71,13 +71,34 @@ const STONE_PALETTE: RipikaPalette = {
  * along.
  *
  * The earlier note here claimed 1.70 m was a ceiling because anything taller
- * would occlude the plaza ring from the iso camera. That reasoning was sound in
- * the abstract and **wrong in practice**: the camera follows the player, so the
- * statue only ever hides the far side of a plaza the player is already standing
- * in, which is what a fountain centrepiece is supposed to do. A monument you
- * cannot see over is the point of a monument. Judging that from geometry rather
- * than from the park is what produced a statue a six-year-old could not pick
- * out.
+ * would occlude the plaza ring. That was too cautious — the ring road's nearest
+ * approach is 13.90 m from the fountain axis and the statue's occluded ground
+ * wedge reaches 13.32 m, so the road stays visible. **By 0.58 m.** That is a
+ * coincidence, not a margin: roughly 5% more height and the ring road goes
+ * behind the statue.
+ *
+ * ## The cost, measured — do not raise this number without re-measuring
+ *
+ * When this was resized I justified it here by arguing that "the camera follows
+ * the player, so the statue only ever hides the far side of a plaza the player
+ * is already standing in". **That reasoning is wrong and the comment has been
+ * corrected rather than quietly deleted, because it is a tempting mistake.**
+ *
+ * The camera is **orthographic** (`CAMERA_IS_ORTHOGRAPHIC`). An orthographic
+ * projection has no parallax, so the occluded wedge is **fixed in world space**:
+ * moving the camera changes whether that patch is on screen, not *what* is
+ * hidden behind the statue. The player can therefore stand in it, and does.
+ *
+ * Surveyed on the built park at this height: a 2.12 m player is fully hidden
+ * anywhere within **10.60 m** of the fountain centre — past the 9.4 m plaza
+ * kerb — which is **32.8 m² of walkable ground**. At 1.70 m it was 2.70 m,
+ * i.e. inside the basin, i.e. never. Two pickable flowers (at (-1.2, -0.7) and
+ * (-2.5, -1.0)) are now permanently behind it.
+ *
+ * `FoliageFade` is the system that exists for exactly this ("no more rotating
+ * round a tree that's in the way", design feedback #16) and it only accepts
+ * trees, so the statue does not fade. If this height stays, that is the gap to
+ * close — not a smaller statue.
  */
 const FIGURE_HEIGHT = 6.8;
 
