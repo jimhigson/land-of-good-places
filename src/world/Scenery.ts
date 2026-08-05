@@ -336,11 +336,31 @@ function buildFoliage(collision: CollisionWorld): {
   // budget goes up to buy the trees back: 26 on the canonical seed and 26-30
   // across the sweep seeds, for about 400 ms of extra headless build.
   //
-  // 260 000 would recover 28, and it is deliberately not taken: it costs a
-  // further half-second of load for two trees nobody can count. The honest fix
-  // for the shortfall is a scatter that does not rejection-sample a tight lawn
-  // at all, which is a bigger job than this one.
-  while (treeCount < targetTrees && attempts < 120000) {
+  // Raised again to 180 000 for the castle pass (#113), and the reason is a
+  // knock-on rather than anything this branch plants: the Sky Cruiser now
+  // threads the castle, which moves its station exit, and `paths.ts` routes the
+  // walk network to that exit. #196 separately lengthened every stall spur. Two
+  // independently-green changes each took a bite out of the same lawn, and seed
+  // 5 came out at exactly 24 against a floor of `> 24`.
+  //
+  // The budget is bounded on *both* sides, and both bounds were measured. Below
+  // it the tree floor reds; at 150 000 `check:park` reds instead, because the
+  // scatter's arrangement at that density walls in a waypoint nothing can then
+  // walk to (`poi.stranded`, no allowance). Trees across the five CI seeds:
+  //
+  //   120 000 -> 29 / 29 / 24 / 27 / 26   tree floor red (seed 5 at 24)
+  //   150 000 -> 29 / 30 / 25 / 27 / 26   check:park red (waypoint walled in)
+  //   180 000 -> 29 / 30 / 26 / 28 / 27   both green
+  //   210 000 -> 31 / 31 / 28 / 30 / 29   both green, +0.3 s for trees nobody
+  //                                       counts — and red on the stacked #198
+  //                                       branch, whose scatter arranges
+  //                                       differently and strands a waypoint
+  //
+  // So this is the *smallest* budget at which both guards pass, which is the
+  // rule worth keeping: the extra attempts are load time a child waits through.
+  // The honest fix for the shortfall is still a scatter that does not
+  // rejection-sample a tight lawn at all, which is a bigger job than this one.
+  while (treeCount < targetTrees && attempts < 180000) {
     attempts += 1;
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
