@@ -226,10 +226,21 @@ export class FoliageFade implements GameSystem {
       const { occluder } = entry;
       const dx = occluder.x - playerPosition.x;
       const dz = occluder.z - playerPosition.z;
-      // The cheap reject has to allow for the occluder's own girth, unlike the
-      // tree path's flat 9 m: a statue 2.4 m across starts hiding the player
-      // from further away than a trunk does, purely by being fatter.
-      const reach = NEAR_PLAYER_RADIUS + occluder.radius;
+      // The cheap reject has to allow for the occluder's own size, and
+      // **height matters more than girth** — which is the one thing the tree
+      // path's flat 9 m gets away with only because trees are short.
+      //
+      // The camera looks down at 38°, so a point H above the player's head
+      // occludes them from about H/tan(38°) ≈ 1.28·H further away
+      // horizontally. The statue's top is ~8.3 m over a child's head, which is
+      // ~10.6 m of horizontal reach — nowhere near the 9 m a trunk needs.
+      //
+      // Measured, not reasoned: with a flat 9 m + radius this left 1.5 m² of
+      // ground where the child was still hidden and the statue never faded, at
+      // 11.7–12.7 m out. `2 * halfHeight` covers the 38° case with room to
+      // spare, and costs nothing — the reject still discards the whole park
+      // bar one object, and there is no pool to exhaust.
+      const reach = NEAR_PLAYER_RADIUS + occluder.radius + 2 * occluder.halfHeight;
       const nearPlayer = dx * dx + dz * dz < reach * reach;
 
       const wantsFade = nearPlayer && this.capsuleOnSightline(cameraPosition, playerPosition, occluder);

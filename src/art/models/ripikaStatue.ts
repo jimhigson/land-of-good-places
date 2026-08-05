@@ -162,11 +162,27 @@ export interface RipikaStatueHandle extends AssetHandle {
  * are. Erring wide would fade the statue whenever anyone walked near the
  * fountain; erring narrow would leave the child hidden, which is the bug.
  *
- * 2.4 m was chosen by measurement, not by eye: it is the smallest radius that
- * takes the hidden-standing-ground area to zero. See the survey figures in
- * HANDOFF-ripika-statue.md.
+ * **1.8 m, and the number was measured rather than judged.** Grid-sweeping
+ * 985 m² of standable plaza at 0.25 m, raycasting a 2.12 m player's head,
+ * chest and waist along the camera axis, the ground where the child is hidden
+ * *and the statue does not fade* is:
+ *
+ * ```
+ *   r=0.8 → 3.5 m²   r=1.0 → 1.3 m²   r=1.2 → 0.4 m²
+ *   r=1.4 → 0        r=1.6 → 0        r=1.8 → 0
+ * ```
+ *
+ * So 1.4 is the true threshold and 1.8 carries ~29% headroom. The margin is
+ * deliberate and the asymmetry is the reason: too small and a child vanishes,
+ * which is the bug; too large and the statue turns translucent slightly early,
+ * which is what `SIGHTLINE_MARGIN` already does on purpose for every tree in
+ * the park. My first guess here was 2.4 — nearly double what is needed — and
+ * the sweep is the only reason that is not what shipped.
+ *
+ * Re-run `scripts/_prove-fade.mts` (see HANDOFF-ripika-statue.md) if the
+ * statue's proportions ever change.
  */
-const OCCLUDER_RADIUS = 2.4;
+const OCCLUDER_RADIUS = 1.8;
 
 /**
  * Builds the statue. Origin at the **base of the plinth**, centred on X and Z,
