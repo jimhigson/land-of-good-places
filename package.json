@@ -51,7 +51,8 @@
     "sweep:seeds": "node --experimental-transform-types --import ./scripts/ts-extension-resolver-register.mjs scripts/sweep-park-seeds.mts",
     "test:procgen": "vitest run",
     "test:procgen:watch": "vitest",
-    "check:statue-occlusion": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-statue-occlusion.mts"
+    "check:statue-occlusion": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-statue-occlusion.mts",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "three": "^0.185.1"
