@@ -9,6 +9,76 @@ sources you actually read.
 
 ---
 
+## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
+
+**Date:** 5 August 2026 · **Status:** decided, first implemented by the Sky
+Cruiser's castle crossing · **Sources:** `rail/generate.ts`, `coaster/route.ts`,
+Decision 6 (which this is careful not to break), issue #113.
+
+### The problem
+
+The family asked that the Sky Cruiser **always** flies through the castle. It
+only usually did. Measured over 24 free solves, 20 crossed and 4 did not — and
+the four were not rejected for anything. They were perfectly good routes that
+closed before they got there.
+
+The cause is structural, not a bug: **the generator returns the first route that
+satisfies the brief, not the best one.** Nothing in the brief mentioned the
+castle, so the search took whatever fit first. A feature that depends on a route
+going somewhere therefore cannot be obtained by asking afterwards, however
+loudly — by the time there is a route to inspect, the choices that would have
+taken it there are long gone.
+
+### The decision
+
+**A ride may declare named, weighted `influences` on its route brief, which bias
+the search at the decision point. Nothing else changes.** Specifically:
+
+1. **The mechanism is general, not a castle hook.** `RouteInfluence` is `{ name,
+   x, z, radius, weight }` and the generator knows nothing about what it is being
+   pulled towards. The castle is its first caller, not its reason. Any ride can
+   say "I would like to pass near this".
+2. **It reserves nothing.** This is Decision 6 restated under pressure, and it is
+   the line most worth holding. No corridor is carved, no space is held, nothing
+   is moved aside. The influence changes which routes are *likely*, never which
+   are *possible* — and the castle's opening is still cut wherever the built
+   curve actually crosses, never the route bent to a hole cut first.
+3. **A weight makes an outcome likely; a `satisfies` predicate makes it
+   required.** The two are separate on purpose. A brief that needs the outcome
+   pairs them: the weighting does the work, and the backstop discards a solved
+   route that missed. Measured across the five CI seeds, the backstop fires
+   **twice** — which is the balance wanted. A backstop that fires constantly
+   means the weight is too weak and the search is solving routes only to throw
+   them away.
+4. **The backstop cannot fail a park.** If every start pose is exhausted without
+   a satisfying route, the best one found is returned anyway, with
+   `SolveReport.satisfied` false. A park with no coaster in it is far worse than
+   a park whose coaster missed the castle, and the procgen invariant is the loud
+   way to hear about it.
+5. **Absent is byte-identical.** A brief that declares no influences scores
+   exactly as it did before this existed and draws no extra randomness —
+   verified on all five CI seeds, matching length, piece count, candidates
+   tried, backtracks and start-pose index. This matters because `generate.ts` is
+   shared with the ginormous slide, and an opt-in capability must not reshape a
+   ride that never asked for it.
+
+### What it costs
+
+Solve time, on seeds where the pull and the closure fight each other: the
+canonical seed is unchanged at 16 ms, but seeds that now try more start poses
+run 230-690 ms. Still comfortably inside the module-load budget, and the cost
+lands on the seeds that need it.
+
+It also makes the loops *less* free than Decision 6's ideal — a weighted route
+is a slightly less surprising route. That is the trade the family asked for: a
+castle you always get to fly through beats a castle you sometimes do.
+
+### What it unblocks
+
+Any "the ride should go past X" ask, without another bespoke solver. The obvious
+next callers are a ride asked to swing near the plaza for the view, or two rides
+asked to run alongside each other for a stretch.
+
 ## Decision 6 — Every park is its own park: nothing reserves space, and rides resolve collisions by backtracking
 
 **Date:** 5 August 2026 · **Status:** decided, first implemented by the Sky

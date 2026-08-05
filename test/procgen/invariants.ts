@@ -1270,11 +1270,14 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
  * Both are the same functions the boot assert and `check:castle-window` run,
  * so there is one definition of "does the ride fit" and it cannot drift.
  *
- * **An empty pass is a pass.** Nothing reserves the castle for the coaster: on
- * a seed whose loop goes round it instead, no windows are cut, the castle is
- * whole, and there is nothing to complain about. Asserting that a window always
- * exists would be asserting that every park is the same park, which is the
- * opposite of what the generator is for.
+ * **This one still passes vacuously on a seed with no crossing** — it asks
+ * whether the windows that exist are right, not whether any exist. That the
+ * crossing *happens at all* is now a separate and much stronger claim, made by
+ * {@link skyCruiserAlwaysFliesThroughTheCastle} below. The two were one
+ * invariant for a while and the split matters: "the hole is in the right place"
+ * and "there is a hole" fail for completely different reasons, and reading one
+ * green as evidence of the other is exactly how a seed shipped an unbroken
+ * castle.
  *
  * Proven to have teeth rather than assumed to: shrinking the opening below the
  * car's width, cutting it 3 m from where the route crosses, shoving it into a
@@ -1284,6 +1287,47 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
  * never renders and every `matrixWorld` was still the identity.
  */
 const skyCruiserFitsThroughTheCastle: Invariant = (facts) => facts.castlePass.complaints;
+
+/**
+ * **Every park's Sky Cruiser flies through the castle, not round it.**
+ *
+ * The family asked for the ride to go *through* the building, and for a while
+ * it only usually did. The generator returns the **first** route that fits, not
+ * the best one, and nothing was asking it for a crossing — so on one CI seed in
+ * five the loop simply closed before it got there, and that child got an
+ * ordinary circuit and an unbroken castle. Nothing was broken; nothing had been
+ * requested.
+ *
+ * It is requested now, in two parts, and this invariant is what holds them to
+ * it. `coaster/route.ts` declares a {@link RouteInfluence} at the castle, which
+ * biases the choice *at the decision point* and does the actual work; and a
+ * `satisfies` backstop discards a solved route with no crossing. Measured
+ * across these five seeds, the backstop fires **twice** — the weighting is
+ * carrying the feature and the backstop is insurance, which is the balance
+ * wanted. If this ever goes red the honest first question is which of the two
+ * stopped working.
+ *
+ * **Deliberately measured on the built curve, not on the solver's report.**
+ * `route.castleSpan` is re-derived from the finished `CatmullRomCurve3`, which
+ * is a rebuild of the plan and not a copy of it — the plan runs about 1.5%
+ * short, and treating one as the other already silently cost a window once.
+ * Asking the report whether it was satisfied would be asking the generator to
+ * mark its own homework.
+ *
+ * **It does not assert that space was reserved, because none is** (Decision 6).
+ * The opening is still cut wherever the route actually crosses; this asserts
+ * the crossing happened, never that anything was held open for it.
+ */
+const skyCruiserAlwaysFliesThroughTheCastle: Invariant = (facts) => {
+  const route = facts.world.coaster.route;
+  if (route.castleSpan) return [];
+  return [
+    'the Sky Cruiser never enters the castle on this seed — the loop closed ' +
+      'without crossing it, so no windows were cut and the castle is whole. ' +
+      'The family asked that the ride always flies through it: check the ' +
+      "castle influence's weight and the `satisfies` backstop in coaster/route.ts",
+  ];
+};
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
@@ -1310,6 +1354,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
+  ['the Sky Cruiser always flies through the castle', skyCruiserAlwaysFliesThroughTheCastle],
 ];
 
 /**

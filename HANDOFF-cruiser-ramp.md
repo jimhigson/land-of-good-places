@@ -321,3 +321,14 @@ Two branches, stacked, because they differ in kind:
 
 Both are green on their own: #198 is build exit 0 / procgen 122, the guarantee
 build exit 0 / procgen 127.
+
+## Castle crossing guarantee — DONE (Decision 7)
+
+Weighted influences in `rail/generate.ts`, general and opt-in. All five CI seeds
+now cross (seed 18 previously did not). **The backstop fires twice in five
+seeds**, so the weighting carries the feature. Absent-by-default proven
+byte-identical on all five seeds — matching length, pieces, candidates,
+backtracks and start-pose index — which is what the slide engineer needs.
+
+`build` exit 0, `test:procgen` **127 passed** (+5, the new invariant on five
+seeds). New invariant proven red: without the influence, seed 18 fails.
