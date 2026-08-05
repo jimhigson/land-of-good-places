@@ -353,6 +353,27 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
  */
 const BRIDGE_RISE = 2;
 
+/**
+ * How far *past* a level crossing's own fence gap a route may still meet the
+ * rails and count as using that crossing.
+ *
+ * A stride's worth of slack, and it is needed because the two things being
+ * compared are measured differently: `halfGap` is the crossing's self-measured
+ * fence opening (`train/crossings.ts`), while the route is a nav-lattice
+ * polyline on a 0.5 m grid that can clip the corner of the opening without any
+ * of its vertices landing inside it.
+ *
+ * This constant is **named in the failure message and was never defined** —
+ * `scripts/` is outside `tsconfig.json`'s `include`, so nothing typechecked it,
+ * and the script runs under `node --experimental-transform-types`, which does
+ * not care either. The message only renders when a violation is found and the
+ * measured count has always been 0, so the `ReferenceError` sat here unfired:
+ * the first genuinely illegal crossing would have crashed the checker with a
+ * stack trace instead of reporting the finding. Found while starting #116,
+ * which is the change that finally makes invariant 2 capable of failing.
+ */
+const LEVEL_CROSSING_REACH = 2.5;
+
 // A route may meet the rail within a crossing's own (self-measured) fence
 // gap plus a stride — the crossings module publishes `halfGap` per crossing.
 
@@ -471,7 +492,8 @@ for (const target of targets) {
       const overBridge = deck - hit.rail >= BRIDGE_RISE;
       const atLevelCrossing = park.world.train.crossings.some(
         (crossing) =>
-          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) < crossing.halfGap + 2.5,
+          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) <
+          crossing.halfGap + LEVEL_CROSSING_REACH,
       );
       if (!overBridge && !atLevelCrossing) {
         crossings += 1;
