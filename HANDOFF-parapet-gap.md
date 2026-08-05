@@ -224,6 +224,64 @@ principle commit 1 is about. The two agreed closely where they overlapped
 (canonical 6.20 vs 6.17 m; seed 5 5.48 vs 5.46 m), which is worth knowing: the
 measurement is robust to how it is sampled.
 
+## CURRENT PRIORITY — the slide clips the castle towers (Jim, ridden)
+
+**Status: invariant committed and deliberately RED. `npm run test:procgen`
+exits 1. `npm run build` exits 0. The fix is not written yet.**
+
+### Root cause (measured, confirmed — not the hypothesis I was handed)
+
+`slide/plan.ts` exempts the castle and ball-pit plots from `clearOfPlots`
+(their circles overlap, so a ride joining them could never solve) and
+re-imposes the castle **as its footprint rectangle**. The towers stand at
+`(±outerX, ±outerZ)` — outside that rectangle by half a wall — and bulge
+2.05–2.45 m further out. So the exemption is as narrow as intended, but the
+thing re-imposed is not the castle.
+
+**The route wraps the castle the long way round** (out past the north-west
+corner to (-28.5, -32.2)), so it meets **all four** towers, not just the
+south-east one as hypothesised.
+
+| seed | result |
+|---|---|
+| 20260728 | 1.52 m inside `tower-bodies[0]` |
+| 2 | 1.14 m inside `tower-bodies[0]` |
+| 5 | 0.78 m inside `tower-bodies[1]` |
+| 18 | 1.09 m inside `tower-bodies[1]` |
+| 11 | clears by **0.043 m** |
+
+Four clip; the fifth misses by 43 mm. There is no margin anywhere.
+
+`npm run measure:slide-towers` (honours `LGP_SEED`) prints the worst gap and
+which tower, off the built scene.
+
+### Threshold — the one number not to get wrong
+
+`CHUTE_ENVELOPE` (in `SlideRide.ts`, derived from `PROFILE`: ±0.95 m across,
+−0.06…+0.86 up) is the **rider's own envelope**. `CORRIDOR_RADIUS` (1.45 m) is
+the wider margin the *search* steers by. Use the envelope for collision truth:
+the 0.5 m difference is exactly what separates seed 11's real 43 mm clearance
+from an apparent 0.46 m clip.
+
+### The fix, not yet written
+
+Make the chute's `clear` predicate know about the towers, so the search routes
+around them instead of being told about a rectangle they are not in. Towers are
+solids of revolution, so `distance to axis vs radius-at-height` is exact and
+cheap — no probe rays needed. Keep the two-plot exemption narrow; re-impose the
+castle as rectangle **plus** towers.
+
+Beware: `slide/supports.ts` legs may also foul towers — check after.
+
+### Queued behind it (Jim, second item)
+
+Make ~50/50 of the chute transparent so the floor below is visible — this is
+the fix for QA's "reads as an enclosed tube for the first 2.5 s, you cannot
+tell you are 14.8 m up". Weight the glass toward the opening; alternate in runs
+so it reads as designed, not noise. **Reuse the ferris wheel's existing glass
+(`gondola.ts`) — do not invent a second glass material.** Watch `MeshToonMaterial`
++ `FrontSide` culling, and measure draw calls/frame cost before and after.
+
 ## Rebuilding my state in one command
 
 ```
