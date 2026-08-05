@@ -1,5 +1,5 @@
 import { Rng, TAU, clamp } from '../../core/mathUtils';
-import type { ParkBoundary } from './boundary';
+import type { ParkBoundary } from '../boundary';
 import {
   type CubicSegment,
   type Pose2,

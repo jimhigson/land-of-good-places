@@ -3,7 +3,7 @@ import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary } from '../rail/boundary';
+import { circleBoundary } from '../boundary';
 import { type RouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 
