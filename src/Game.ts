@@ -482,6 +482,7 @@ export class Game {
       this.world.coaster.rideView?.resize(width, height);
       this.world.railRace.rideView?.resize(width, height);
       this.world.ferrisWheel.rideView?.resize(width, height);
+      this.world.building.rideView?.resize(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -503,6 +504,9 @@ export class Game {
       rideCamera(riding ? (this.world.train.rideView?.camera ?? null) : null);
     this.world.coaster.onRideChange = (riding) =>
       rideCamera(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
+    // The ginormous slide, ridden first person (REQUIREMENTS §9).
+    this.world.building.onRideChange = (riding) =>
+      rideCamera(riding ? (this.world.building.rideView?.camera ?? null) : null);
     this.world.railRace.onRideChange = (riding) =>
       rideCamera(
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,

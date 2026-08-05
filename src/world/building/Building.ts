@@ -1,6 +1,10 @@
 import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
-import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, PLAYER_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
+import { resolveDismount } from '../dismount';
+import { RideCamera } from '../../core/RideCamera';
+import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -69,8 +73,32 @@ import {
 } from './layout';
 
 const RIDER_LIFT = 0.06;
-/** How far behind you the grown-up rides, in metres of slide. */
-const GROWN_UP_TRAIL = 2.6;
+
+/**
+ * How far **ahead** of you the grown-up rides, in metres of slide.
+ *
+ * In front, not behind, and lying down — the family asked for it that way
+ * (REQUIREMENTS §9) and it is how two people actually go down a slide together:
+ * the grown-up goes first with the child tucked in behind. Lying down is what
+ * makes it work from a first-person seat, because a grown-up sitting upright
+ * 2.6 m ahead of a six-year-old's eyeline is a wall of back where the view
+ * should be.
+ */
+const GROWN_UP_LEAD = 2.6;
+
+/**
+ * The angle a grown-up lies back at, riding in front.
+ *
+ * A quarter turn about their own left-right axis, applied after the heading, so
+ * they end up on their back with their feet pointing the way they are going.
+ * `rotation.order` is set to `YXZ` on the model's root for exactly this: yaw
+ * first, then pitch in the yawed frame. In the default `XYZ` order the two
+ * compose the other way round and a grown-up lying down on a turn corkscrews.
+ */
+const GROWN_UP_RECLINE = -Math.PI / 2;
+
+/** Where a rider's eyes sit above the chute floor. */
+const EYE = { x: 0, y: 0.9, z: 0 } as const;
 
 /** Seconds after a change of space before another one may be triggered. */
 const SPACE_COOLDOWN = 0.9;
@@ -162,6 +190,38 @@ export class Building implements GameSystem {
   /** The fitted-out shops: stock, shopkeepers, and where you stand to buy. */
   readonly shops: Shops;
   readonly ballPit = new BallPit();
+
+  /**
+   * The first-person camera for the ginormous slide (REQUIREMENTS §9).
+   *
+   * `RideCamera` rather than a second look-around of its own: it is guarded by
+   * `npm run check:ride-camera`, and every other ride in the park already uses
+   * it, so the slide gets the same damping, the same pitch limits and the same
+   * portrait handling for free.
+   *
+   * Null until the ride is attached to a player, exactly like the coaster's.
+   */
+  rideView: RideCamera | null = null;
+
+  /** Told when the ginormous slide is boarded and left, so `Game` can swap camera. */
+  onRideChange: ((riding: boolean) => void) | null = null;
+
+  /** Follows the chute: position and heading. */
+  private readonly rideMount = new Group();
+
+  /** The frame clock, kept so the ride camera's idle sway can be driven. */
+  private elapsed = 0;
+
+  /**
+   * The eye, turned to face the way the ride is going.
+   *
+   * The park's models face +Z and a three.js camera looks down −Z, so something
+   * has to turn round. It lives here on the ride rather than inside
+   * `RideCamera`, which is the convention the coaster and the train already
+   * follow — the flip is a fact about how this park models things, not about
+   * how cameras work.
+   */
+  private readonly eyeMount = new Group();
 
   /**
    * The building's own space. Added straight to the scene rather than to the
@@ -284,6 +344,13 @@ export class Building implements GameSystem {
     this.ginormousSlide = buildGinormousSlide();
     this.gardenRoot.add(this.ginormousSlide.group);
 
+    // The rider's seat rides in the garden with the chute, so its mount hangs
+    // off the same group — the chute's points and the mount's position are then
+    // the same coordinates, and cannot drift apart.
+    this.eyeMount.rotation.y = Math.PI;
+    this.rideMount.add(this.eyeMount);
+    this.gardenRoot.add(this.rideMount);
+
     registerFacadeCollision(collision);
 
     const plot = anchorPlots.getGroup('building');
@@ -359,6 +426,10 @@ export class Building implements GameSystem {
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
     this.liftRide.attachPlayer(player);
     this.ballPit.attachPlayer(player);
+    // Slightly nose-down, like the coaster's: the interesting part of a slide
+    // is the chute falling away in front of you.
+    this.rideView = new RideCamera({ startPitch: -0.08 });
+    this.rideView.mountOn(this.eyeMount, EYE);
   }
 
   /**
@@ -381,6 +452,7 @@ export class Building implements GameSystem {
 
   update(context: FrameContext): void {
     const { dt, elapsed, input } = context;
+    this.elapsed = elapsed;
 
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
 
@@ -590,7 +662,12 @@ export class Building implements GameSystem {
         this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
         this.point.z + BUILDING_CENTRE_Z,
       );
+      // Lying down in front, so set the composition order before the first
+      // frame places them — see `GROWN_UP_RECLINE`.
+      this.grownUp.root.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
+      this.rideView?.board();
+      this.onRideChange?.(true);
     });
   }
 
@@ -606,7 +683,11 @@ export class Building implements GameSystem {
     const ride = this.ride;
     if (!ride) return;
 
-    ride.distance += SLIDE_SPEED * dt;
+    // The ginormous slide has its own speed. See `GIANT_SLIDE_SPEED`: the
+    // shared 12 m/s is 43 km/h, which is fine for the little helter-skelter
+    // watched from outside and much too fast for a ride taken through a
+    // six-year-old's own eyes round a bend that wraps a castle.
+    ride.distance += (ride.giant ? GIANT_SLIDE_SPEED : SLIDE_SPEED) * dt;
     const t = ride.distance / ride.slide.length;
 
     if (t >= 1) {
@@ -628,13 +709,26 @@ export class Building implements GameSystem {
       Math.atan2(this.tangent.x, this.tangent.z),
     );
 
+    // The seat the first-person camera hangs off, following the same curve the
+    // rider does, so what you see and where you are can never disagree.
+    if (ride.giant) {
+      ride.slide.pointAt(t, this.point);
+      this.rideMount.position.copy(this.point);
+      this.rideMount.position.y += RIDER_LIFT;
+      this.rideMount.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+      this.rideView?.update(dt, this.elapsed);
+    }
+
     if (ride.giant && this.grownUpComing) {
-      const trail = Math.max(0, ride.distance - GROWN_UP_TRAIL) / ride.slide.length;
-      ride.slide.pointAt(trail, this.point);
-      ride.slide.tangentAt(trail, this.tangent);
+      // In front, and lying down. Clamped to the end of the chute so the
+      // grown-up never runs off the far end while the child is still aboard.
+      const lead = Math.min(ride.slide.length, ride.distance + GROWN_UP_LEAD) / ride.slide.length;
+      ride.slide.pointAt(lead, this.point);
+      ride.slide.tangentAt(lead, this.tangent);
       this.grownUp.root.position.copy(this.point);
       this.grownUp.root.position.y += RIDER_LIFT;
       this.grownUp.root.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+      this.grownUp.root.rotation.x = GROWN_UP_RECLINE;
     }
   }
 
@@ -650,21 +744,38 @@ export class Building implements GameSystem {
       this.point.y + BUILDING_BASE_Y,
       this.point.z + originZ,
     );
-    player.setRidePose(
-      worldPosition.x,
-      worldPosition.y,
-      worldPosition.z,
-      Math.atan2(this.tangent.x, this.tangent.z),
-    );
-    player.endRide(this.tangent.x * 3.5, 1.2, this.tangent.z * 3.5);
-
     if (ride.giant) {
+      // **The fix for #118.** The slide used to put a rider down wherever its
+      // hand-authored curve happened to stop, which was inside the castle,
+      // behind a wall, with no way out. It now ends at a registered exit node
+      // (GAME_DESIGN.md's EXIT rule) — a node `paths.ts` gives the walk graph,
+      // so `check:park` can prove a child can be walked away from here — and
+      // `resolveDismount` is the runtime safety net that will not stand anyone
+      // in something solid even if that node is somehow occupied.
       this.ballPit.splash(worldPosition.x - BALL_PIT_X, worldPosition.z - BALL_PIT_Z, 1.15);
+      const spot = resolveDismount(this.collision, SLIDE_PLAN.exitX, SLIDE_PLAN.exitZ, PLAYER_RADIUS);
+      player.setRidePose(
+        spot.x,
+        terrainHeight(spot.x, spot.z),
+        spot.z,
+        Math.atan2(this.tangent.x, this.tangent.z),
+      );
+      player.endRide();
       this.grownUpComing = false;
       // Back up onto the roof, to wait for the next one.
       this.interiorRoot.add(this.grownUp.root);
+      this.grownUp.root.rotation.x = 0;
       this.placeGrownUp();
       this.spaceCooldown = SPACE_COOLDOWN;
+      this.onRideChange?.(false);
+    } else {
+      player.setRidePose(
+        worldPosition.x,
+        worldPosition.y,
+        worldPosition.z,
+        Math.atan2(this.tangent.x, this.tangent.z),
+      );
+      player.endRide(this.tangent.x * 3.5, 1.2, this.tangent.z * 3.5);
     }
     this.ride = null;
   }
@@ -812,29 +923,22 @@ function buildHelterSkelter(): SlideRide {
 }
 
 /**
- * The ginormous slide. Authored in world coordinates because the shape of it is
- * a fact about the park, not about the building, then shifted into facade space.
+ * The ginormous slide, built from its solved plan.
+ *
+ * This used to be twelve hand-authored absolute world coordinates, and #118 is
+ * what that cost: the castle's position is per-seed and those numbers were not,
+ * so eight of the twelve ended up inside the tower's own footprint — including
+ * the last one, which landed behind a solid wall segment and sealed a
+ * six-year-old inside with no way out.
+ *
+ * Now the shape comes from `slide/plan.ts`, solved from the park layout at
+ * module load. The only thing left here is the shift from world space into the
+ * facade's, which the garden group's own offset then cancels exactly.
  */
 function buildGinormousSlide(): SlideRide {
-  const b = BUILDING_BASE_Y;
-  const world: readonly (readonly [number, number, number])[] = [
-    [-19.0, b + 14.4, -24.5],
-    [-18.8, b + 13.3, -20.6],
-    [-17.4, b + 11.9, -17.2],
-    [-14.6, b + 10.5, -14.6],
-    [-11.0, b + 9.0, -12.2],
-    [-6.0, b + 7.2, -11.0],
-    [-1.6, b + 5.3, -14.4],
-    [-2.6, b + 3.5, -19.6],
-    [-7.6, b + 2.4, -22.4],
-    [-13.6, b + 1.5, -20.2],
-    [-15.6, 1.3, -16.4],
-    [-10.8, 0.05, -14.8],
-  ];
-
-  const points = world.map(
-    ([x, y, z]) =>
-      new Vector3(x - BUILDING_CENTRE_X, y - BUILDING_BASE_Y, z - BUILDING_CENTRE_Z),
+  const points = SLIDE_PLAN.points.map(
+    (p) =>
+      new Vector3(p.x - BUILDING_CENTRE_X, p.y - BUILDING_BASE_Y, p.z - BUILDING_CENTRE_Z),
   );
 
   return new SlideRide(points, {

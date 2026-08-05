@@ -55,7 +55,7 @@ import { terrainHeight } from '../terrain';
  */
 
 /** Half-width of chute to keep clear of things. The trough is ±0.95 m plus rails. */
-const CORRIDOR_RADIUS = 1.7;
+const CORRIDOR_RADIUS = 1.45;
 
 /**
  * Gentlest turn the chute may make.
@@ -73,7 +73,7 @@ const CORRIDOR_RADIUS = 1.7;
  * that has about 12.8 m of lateral room, so a 20 m minimum radius — tried
  * first — cannot physically fit, whatever else is or is not in the way.
  */
-const MIN_TURN_RADIUS = 6;
+const MIN_TURN_RADIUS = 5;
 
 /**
  * How close the chute may come to an earlier part of itself, in plan view.
