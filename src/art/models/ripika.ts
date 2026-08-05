@@ -90,24 +90,44 @@ const HEAD = RIPIKA_HEAD_SCALE;
 const TAIL_CANT = 1.05;
 
 /**
- * The tail's resting yaw, and the value its wag swings around.
- *
- * The wag moved from `rotation.z` to `rotation.y` when the tail moved behind
- * her, and that is a consequence of the new rest pose rather than a free
- * choice: a tail trailing backwards that swings in the vertical plane bobs up
- * and down like a lever, where the same swing about Y sweeps it side to side
- * behind her, which is what a tail does.
- *
- * Euler order is three.js's default XYZ, i.e. the matrix is `Rx·Ry·Rz`, so the
- * yaw is applied *before* the backward pitch — it sweeps the tail across the
- * horizontal plane and the pitch then lays it back. That is the wag; the other
- * order would cone it around instead.
- *
- * Non-zero at rest on purpose (ART_DIRECTION §4, "nothing is plumb") — and
- * being non-zero is exactly what keeps it a live test of the zero-speed
- * invariant that {@link TAIL_CANT} documents.
+ * A few degrees of yaw at rest, so the tail is not dead-square behind her.
+ * ART_DIRECTION §4, "nothing is plumb". Static — nothing animates it.
  */
 const TAIL_YAW = 0.12;
+
+/**
+ * The tail's resting roll, and the value its **wag** swings around.
+ *
+ * ## The wag is on `z`, and it took a review to get that right
+ *
+ * When the tail moved behind her I moved the wag from `z` to `y`, reasoning
+ * that a rear tail swinging in the vertical plane would bob like a lever where
+ * a swing about Y would sweep it side to side. The Euler-order half of that was
+ * right and verified — order is three.js's XYZ, `Rx·Ry·Rz`, so `y` applies
+ * before the backward pitch.
+ *
+ * **The conclusion was still wrong, because every slab of this tail is built
+ * along the group's own local +Y.** Rotating about Y therefore rotates the tail
+ * about an axis half a degree off its own length: a roll, not a wag. Measured
+ * on the real model over a full cycle:
+ *
+ * | axis | sweep | lateral tip travel |
+ * | --- | --- | --- |
+ * | `rotation.y` | 0.19° | 0.2 mm |
+ * | `rotation.z` | 20.63° | 140 mm (against 14 mm vertical) |
+ *
+ * So `z` gives exactly the side-to-side sweep that was wanted, and `y` gives
+ * nothing a human eye could resolve. The lesson is narrow and worth keeping:
+ * **an axis argument about a rotation means nothing until you know which way
+ * the geometry runs.** The rest pose was never in question — she trails
+ * backwards at 29.9° above horizontal either way.
+ *
+ * Non-zero at rest on purpose, and that is load-bearing beyond the styling: it
+ * is what keeps this a live test of the zero-speed invariant {@link TAIL_CANT}
+ * documents. A rest value of zero would make the multiply-only bug undetectable
+ * here all over again.
+ */
+const TAIL_ROLL = 0.06;
 
 export interface RipikaOptions {
   /** Adds the astronaut helmet for the space ferris wheel show. */
@@ -308,7 +328,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
   // floating off the body.
   const tail = new Group();
   tail.position.set(0, 0.24, -0.2);
-  tail.rotation.set(-TAIL_CANT, TAIL_YAW, 0.06);
+  tail.rotation.set(-TAIL_CANT, TAIL_YAW, TAIL_ROLL);
   tail.scale.setScalar(1.15);
   body.add(tail);
 
@@ -356,7 +376,7 @@ export function createRipika(options: RipikaOptions = {}): RipikaHandle {
       // this as `sin(...) * 0.18 * speed` alone made the whole expression zero
       // at `speed = 0` and so *assigned away* the cant rather than returning to
       // it — see {@link TAIL_CANT}.
-      tail.rotation.y = TAIL_YAW + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
+      tail.rotation.z = TAIL_ROLL + Math.sin(phase * Math.PI * 4) * 0.18 * speed;
     },
   };
   return handle;
