@@ -434,36 +434,83 @@ function poseOf(root: Object3D): PoseSample[] {
 const POSE_EPSILON = 1e-6;
 
 let posesChecked = 0;
+let updatesChecked = 0;
+
+const WALK_PHASES = [0, 0.17, 0.25, 0.5, 0.83, 0.99] as const;
+
+/**
+ * An arbitrary but FIXED moment, for creatures that animate in `update()`.
+ *
+ * Held constant across every call so an idle animation contributes exactly the
+ * same thing each time and any difference left over is attributable to the walk
+ * phase. `dt` is 0 alongside it, so no timer, scheduler or particle system
+ * advances and nothing is nondeterministic.
+ */
+const IDLE_ELAPSED = 3.7;
+
+/** Reports the first channel where two poses disagree. True if they matched. */
+function samePose(name: string, before: PoseSample[], after: PoseSample[], how: string): boolean {
+  for (let i = 0; i < before.length; i += 1) {
+    const a = before[i];
+    const b = after[i];
+    if (!a || !b) continue;
+    for (let c = 0; c < POSE_CHANNELS.length; c += 1) {
+      const x = a.values[c] ?? 0;
+      const y = b.values[c] ?? 0;
+      if (Math.abs(x - y) <= POSE_EPSILON) continue;
+      failures.push({
+        name,
+        problem:
+          `${how} moved '${a.path}' ${POSE_CHANNELS[c]} from ${x.toFixed(4)} to ` +
+          `${y.toFixed(4)}. At zero speed a walk cycle must move nothing — an animation ` +
+          `offset has to be ADDED to the rest pose (REST + swing), not assigned over it.`,
+      });
+      return false;
+    }
+  }
+  return true;
+}
 
 function checkRestPose(subject: Subject): void {
   const creature = subject.handle as Partial<CreatureHandle>;
   if (typeof creature.setWalkPhase !== 'function') return;
 
+  // Part 1 — `setWalkPhase` alone must not disturb the built pose.
   const rest = poseOf(subject.handle.root);
-  for (const phase of [0, 0.17, 0.25, 0.5, 0.83, 0.99]) {
+  for (const phase of WALK_PHASES) {
     creature.setWalkPhase(phase, 0);
-    const now = poseOf(subject.handle.root);
-    for (let i = 0; i < rest.length; i += 1) {
-      const before = rest[i];
-      const after = now[i];
-      if (!before || !after) continue;
-      for (let c = 0; c < POSE_CHANNELS.length; c += 1) {
-        const a = before.values[c] ?? 0;
-        const b = after.values[c] ?? 0;
-        if (Math.abs(a - b) <= POSE_EPSILON) continue;
-        failures.push({
-          name: subject.name,
-          problem:
-            `setWalkPhase(${phase}, 0) moved '${before.path}' ${POSE_CHANNELS[c]} ` +
-            `from ${a.toFixed(4)} to ${b.toFixed(4)}. At zero speed a walk cycle must ` +
-            `leave the model exactly as built — an animation offset has to be ADDED to ` +
-            `the rest pose (REST + swing), not assigned over it.`,
-        });
-        return; // one report per creature is enough to act on
-      }
+    if (!samePose(subject.name, rest, poseOf(subject.handle.root), `setWalkPhase(${phase}, 0)`)) {
+      return; // one report per creature is enough to act on
     }
   }
   posesChecked += 1;
+
+  // Part 2 — creatures that pose themselves in `update()` instead.
+  //
+  // Without this, `pet.puff` passed **vacuously**: its `setWalkPhase` only
+  // records the phase and speed, and the walk-bob is applied in `update()`,
+  // which Part 1 never calls. It moved nothing because nothing had asked it to,
+  // and a subject that cannot fail should not be counted as passing.
+  //
+  // The comparison here is between phases rather than against the built pose,
+  // and that is not a softening — it is the strongest statement that is *true*
+  // of such a creature. The puff breathes: `update()` legitimately squashes it
+  // on `elapsed` whether it is walking or not, so requiring the built pose back
+  // would fail a model that is behaving correctly. Holding `elapsed` fixed
+  // freezes that idle contribution, leaving walk phase as the only thing that
+  // varies — so anything that moves, moves because of the walk cycle.
+  const update = subject.handle.update;
+  if (typeof update !== 'function') return;
+
+  update.call(subject.handle, 0, IDLE_ELAPSED);
+  const idle = poseOf(subject.handle.root);
+  for (const phase of WALK_PHASES) {
+    creature.setWalkPhase(phase, 0);
+    update.call(subject.handle, 0, IDLE_ELAPSED);
+    const how = `setWalkPhase(${phase}, 0) then update()`;
+    if (!samePose(subject.name, idle, poseOf(subject.handle.root), how)) return;
+  }
+  updatesChecked += 1;
 }
 
 const subjects = collect();
@@ -491,7 +538,8 @@ if (failures.length > 0) {
 
 const summary =
   `asset contract: ${subjects.length} assets check out` +
-  `, ${posesChecked} of them creatures that stand still as built`;
+  `, ${posesChecked} of them creatures that stand still as built` +
+  ` (${updatesChecked} also posed through update())`;
 if (drifting === 0) {
   console.log(`${summary}.`);
 } else {
