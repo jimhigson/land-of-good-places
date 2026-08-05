@@ -457,20 +457,21 @@ export const PARK_BOUNDARY: ParkBoundary = generateParkBoundary({
 });
 
 /**
- * **The soft boundary the player is actually held inside today.**
+ * **The soft boundary the player is held inside.**
  *
- * Still the old circle, deliberately, and this is the one line that changes
- * when it stops being one. The clamp cannot move to {@link PARK_BOUNDARY} on
- * its own: the terrain still ends at `TERRAIN_RADIUS` and the masonry is still
- * a ring at `GARDEN_HALF_SIZE - 2`, so a player allowed out to the generated
- * edge would walk through where the wall is not and off the side of the world.
- * The shell migrates in one piece, and then this points at the real boundary.
+ * This is now the generated park. It could only move here once the whole shell
+ * moved with it — the hill is measured out from this edge, the masonry walks
+ * it, the terrain disc follows it and the treeline sits in a band beyond it.
+ * Switching it alone, at any earlier point, would have let a child walk out to
+ * 110 m through where the wall was not and off the side of a terrain disc that
+ * still stopped at 83.5 m.
  *
- * It exists at all so the clamp's default and the value `Building` restores on
- * leaving the castle are the *same object* rather than two copies of one
- * constant — the failure mode #114 was made of.
+ * It stays a named constant rather than `PARK_BOUNDARY` inlined at both sites,
+ * so the clamp's default and the value `Building` restores on leaving the
+ * castle are the *same object* rather than two copies of one idea — the failure
+ * mode #114 was made of.
  */
-export const GARDEN_PLAY_BOUNDARY: ParkBoundary = circleBoundary(GARDEN_PLAY_RADIUS);
+export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
 
 /**
  * Where the ground stops, now that the park's edge moves.
