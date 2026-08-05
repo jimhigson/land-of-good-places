@@ -58,10 +58,27 @@
 > `check:brevity` clean with no new `KNOWN_LONG`, `check:assets` 95 → 100 with
 > no new `KNOWN_DRIFT`.
 >
-> **Remaining:** steps 4–7 below. Step 6's manifest entry re-rolls the park, so
-> it wants `check:park` plus a **procgen invariant** for the stall's placement —
-> write it in the new `Invariant = (facts) => readonly string[]` form
-> (`chore/invariant-return-complaints`, now on origin) and prove it red.
+> **Step 4 is done too** — `entities/WornKeychain.ts` (pivot + two-sine sway),
+> registered, constructed in `Game.ts`, and `Parade.stowedIds` fixed so a worn
+> charm does not also peek out of the bag it hangs on. `check:backpack-peek`
+> goes 34 → 39 items, all bag-sized.
+>
+> **Remaining: steps 5, 6, 7.**
+>
+> **Before landing step 6, message the Overseer and wait.** The manifest entry
+> plus `LAYOUT_VERSION` bump re-rolls the whole park, which moves the ground
+> under every other in-flight branch that measures park geometry. The Overseer
+> wants to warn those engineers *first*, so they do not meet it as a mystery
+> test failure. It also wants `check:park` plus a **procgen invariant** for the
+> stall's placement — write that in the new
+> `Invariant = (facts) => readonly string[]` form
+> (`chore/invariant-return-complaints`, on origin) and prove it red.
+>
+> One thing noticed and deliberately **not** fixed: `Parade.stowedIds` skips
+> `wornHatUid`/`wornFlowerUid`/`wornKeychainUid` but **not** `wornJetpackUid`.
+> A worn pack hides the bag (`setHidden`) yet `backpackAnchor` deliberately does
+> not move, so a pack may still be peek-eligible from a hidden bag. Pre-existing,
+> possibly intended, flagged to the Overseer rather than changed here.
 
 Branch `keychain-shop`, worktree `.claude/worktrees/keychain-shop`, off
 `origin/main` (55b9b4f, the SELECTION RULE PR #100).
