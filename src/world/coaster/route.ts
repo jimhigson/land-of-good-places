@@ -463,7 +463,19 @@ export class CoasterRoute {
       corridorRadius: CORRIDOR_RADIUS,
       selfClearance: SELF_CLEARANCE,
       minRadius: PLAN_TURN_RADIUS,
-      budgets: { perJoint: 16, restarts: 200 },
+      // Enough that the cap is never the thing that gives up (Decision 6:
+      // "only bail if backtracking fails for a very large number of tries").
+      //
+      // `stationPoses` offers 210 candidates on the canonical seed and the
+      // search takes index 0, so at 200 this abandoned the last ten for no
+      // reason — and the reason it can afford not to is measured, not hoped:
+      // `npm run measure:solver-budget` times a deliberately unsolvable brief
+      // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
+      // about 0.1 ms each. A successful solve stops at the first start pose
+      // that works, so this costs nothing on a park that works; the whole cost
+      // lands on one that does not, and a park that bails is far worse than a
+      // park that took a fifth of a second longer to decide it could not.
+      budgets: { perJoint: 16, restarts: 2000 },
     };
     const plan = solveRailRoute(brief);
     this.plan = plan;
