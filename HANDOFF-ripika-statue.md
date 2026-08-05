@@ -226,3 +226,58 @@ upper bowl of water where the stone ball used to be.
 - [ ] visual QA (not owned — dev server left running on 5314)
 - [ ] PR (deliberately not raised; Overseer's call)
 - [ ] **separate issue**: RiPika's tail cant flattened by `setWalkPhase`
+
+---
+
+# UPDATE — 5 Aug, after Jim's review
+
+**Jim saw v1 on 5314: "far too small, make it 4x this size, otherwise is ok."**
+Everything else passed — stone colour, face, silhouette, placement. Only scale.
+
+## What changed
+
+- Figure **1.70 → 6.80 m**, plinth **0.36 → 1.44 m**, total **8.24 m**,
+  topping out at world **y 10.53**.
+- **The plinth could not scale 4x in radius.** It stands on the bowl's 1.2 m
+  water disc; 4x of 0.82 m is 3.28 m, which overhangs into mid-air. So it is
+  4x tall and ~1.4x wide, capped at `PLINTH_BASE_RADIUS = 1.15`.
+  That turns out to be what the figure wants anyway — her feet span ~2.14 m and
+  torso ~2.28 m against the plinth's 2.30 m. A true 4x plinth would have been
+  far too wide.
+- Courses are now **fractions** of `PLINTH_HEIGHT`/`PLINTH_BASE_RADIUS`, because
+  the two grew by different factors.
+- Plinth outline weight now derives from `figureScale` (`0.014 * figureScale`,
+  ≈6.5 cm at 4x). A literal 0.02 would have looked like a pencil line bolted to
+  a woodcut.
+
+## Measured clearances at 4x (all re-measured, none assumed)
+
+- Whole statue spans x ±2.48, z −3.23…+2.26 → greatest reach in plan **3.23 m**,
+  **inside the fountain's own 4.2 m rim**. It overhangs the basin, not the plaza.
+- **Jets unaffected at any scale**: statue base y 2.17, jets top out y 2.10. It
+  never reaches them vertically, so their radius stopped mattering.
+- Still no collider, still unreachable: base 2.17 m vs the 1.4 m jump ceiling.
+- **It is now taller than the castle walls (8.8 m).** Follows from 4x; right for
+  a mascot centrepiece, but a real skyline change Jim did not explicitly ask for.
+
+## THIS BRANCH IS NOW REBASED ONTO `fix/ripika-tail-cant`
+
+Not optional, and not incidental. The statue displays RiPika's **authored rest
+pose**, so the tail change alters its silhouette. Resizing against the old
+sideways tail would have had Jim approve a silhouette that then changed
+underneath him. The `ripika.ts` conflict (palette block vs tail constants) was
+purely additive and is already resolved — both sides kept.
+
+**So this branch cannot merge before the tail branch.**
+
+## Open visual question — flagged to the Overseer, not yet resolved
+
+At 4x the old tail stuck out **3.49 m sideways** and was the widest thing on the
+statue. The new rear tail projects, through the 38° iso camera, to screen height
+~4.5 (head ~6.6, feet ~1.1) but only **0.12 m off-centre horizontally** — i.e.
+almost directly behind the torso on screen. **It is a weaker silhouette cue than
+the sideways version.** Shipped as Jim asked rather than quietly softened.
+
+One-line knob if he wants some read back without going sideways again:
+`TAIL_YAW` 0.12 → ~0.35 rad swings the tip ~0.93 m off-centre, still clearly
+"behind her". In `src/art/models/ripika.ts`.
