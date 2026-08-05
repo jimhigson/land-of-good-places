@@ -32,6 +32,42 @@ export interface InputSnapshot {
  */
 const VIRTUAL_PRESS_FRAMES = 2;
 
+/** Tags that own their keystrokes outright — see {@link isTextEntryTarget}. */
+const TEXT_ENTRY_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+/**
+ * True when a keystroke belongs to something the player is *typing into*
+ * rather than to the park.
+ *
+ * This exists because {@link InputSystem} listens on `window` and stays
+ * attached for the whole session (`Game.start`/`stop`), so **every** DOM field
+ * rendered over the running game shares its keyboard. Without this guard the
+ * `preventDefault` below swallows the keystroke entirely: `w a s d e f i p`,
+ * `Space` and `Backspace` are all bound, so a child called Wren could not type
+ * her own name into the "Look" pill's character creator, and could not delete
+ * a character either. See issue #189 — the character creator was simply the
+ * first field to be shown over a live game, not the only one that will be
+ * (the keychain shop dialog is next).
+ *
+ * Fixed here rather than at the call site on purpose: one guard covers every
+ * dialog anyone mounts in future, whereas a fix in the "Look" pill would have
+ * protected only the "Look" pill.
+ *
+ * Duck-typed on `tagName`/`isContentEditable` rather than
+ * `instanceof HTMLInputElement`: `instanceof` is bound to one realm, so it
+ * answers "no" for a field inside an iframe — and a false "no" here is exactly
+ * the bug this guard exists to prevent. `SELECT` is included because its
+ * keyboard is arrows and `Space`; every `INPUT` is covered rather than just
+ * the text-ish ones, because a checkbox is toggled with `Space` and a range
+ * slider is driven with the arrow keys.
+ */
+export function isTextEntryTarget(target: EventTarget | null): boolean {
+  const element = target as { tagName?: unknown; isContentEditable?: unknown } | null;
+  if (!element) return false;
+  if (element.isContentEditable === true) return true;
+  return typeof element.tagName === 'string' && TEXT_ENTRY_TAGS.has(element.tagName);
+}
+
 /**
  * Merges keyboard, Gamepad API and on-screen touch input into one logical state.
  *
@@ -391,6 +427,10 @@ export class InputSystem {
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.repeat) return;
+    // She is typing, not playing — see {@link isTextEntryTarget}. Bail before
+    // both the `preventDefault` (which would eat the character) and the
+    // `heldKeys.add` (which would walk her off while she types).
+    if (isTextEntryTarget(event.target)) return;
     if (KEYBOARD_MOVE_BINDINGS[event.code] || KEYBOARD_ACTION_BINDINGS[event.code]) {
       // Stop the page scrolling / F3 opening browser search while playing.
       event.preventDefault();
@@ -399,6 +439,12 @@ export class InputSystem {
     this.lastDeviceUsed = 'keyboard';
   };
 
+  /**
+   * Deliberately **not** guarded by {@link isTextEntryTarget}, unlike
+   * {@link onKeyDown}: this only ever *releases* a key, which is always safe.
+   * Guarding it would strand a key that was held while walking and then
+   * released after a text field took focus — she would keep running forever.
+   */
   private readonly onKeyUp = (event: KeyboardEvent): void => {
     this.heldKeys.delete(event.code);
   };
