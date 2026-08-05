@@ -1567,6 +1567,107 @@ const theGinormousSlideLeavesThroughItsDoor: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The ginormous slide does not go through the castle's corner towers.**
+ *
+ * Jim rode it and found it clipping through them; this is that, stated as
+ * something the park proves on every seed. It fails the build, which is what he
+ * asked for.
+ *
+ * ### Why nothing caught it
+ *
+ * `slide/plan.ts` cannot use the standard `clearOfPlots` predicate — the
+ * castle's plot circle and the ball pit's overlap, so no point between the two
+ * satisfies it, and a ride whose whole job is joining them would never solve.
+ * It therefore exempts exactly those two plots and re-imposes the castle
+ * "precisely, as its actual footprint rectangle".
+ *
+ * A footprint rectangle does not contain the towers. They stand at
+ * `(±outerX, ±outerZ)` — *outside* the rectangle by half a wall thickness — and
+ * bulge 2.05–2.45 m further out again. So the exemption was narrow and
+ * deliberate exactly as intended, and the thing re-imposed in its place was
+ * still missing the one solid the chute passes closest to. Measured on the
+ * canonical seed the chute ran **2.02 m inside a tower body**, 87 consecutive
+ * samples buried, while every existing invariant stayed green.
+ *
+ * ### What it measures
+ *
+ * The built chute against the built towers — both read out of the scene graph,
+ * neither taken from the plan. The threshold is the **rider's own envelope**
+ * (`CHUTE_ENVELOPE`, derived from the trough's cross-section) rather than
+ * `CORRIDOR_RADIUS`, which is the wider margin the generator steers by: a
+ * collision test owes the truth about where the trough physically is, not about
+ * where the search preferred to keep it.
+ *
+ * A tower is a solid of revolution, so testing the centre line against
+ * `towerRadius + halfWidth` is exact — it is a swept disc in closed form, and
+ * strictly better here than firing a ring of probe rays and hoping the gaps
+ * between them are small enough to catch a thin obstacle.
+ */
+const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const towers = facts.castleTowers;
+  const envelope = facts.chuteEnvelope;
+
+  if (towers.length === 0) {
+    complaints.push(
+      'no castle towers were found in the built park, so this invariant is ' +
+        'measuring nothing — the tower meshes have been renamed or removed',
+    );
+    return complaints;
+  }
+  if (chute.length < 2) {
+    complaints.push('the ginormous slide has no chute to check against the towers');
+    return complaints;
+  }
+
+  let worstGap = Infinity;
+  let worstTower = '';
+  let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
+  let buried = 0;
+
+  for (const point of chute) {
+    const [px, py, pz] = point;
+    for (const tower of towers) {
+      // The chute occupies a band around its centre line, so it fouls the
+      // tower's height range if either edge of that band is inside it.
+      if (py + envelope.above < tower.bottomY) continue;
+      if (py - envelope.below > tower.topY) continue;
+
+      // Radius where the two actually meet in height, so a cone is measured at
+      // the height the chute passes it rather than at its widest.
+      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
+      const span = tower.topY - tower.bottomY;
+      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
+      const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
+
+      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
+      if (gap < worstGap) {
+        worstGap = gap;
+        worstTower = tower.name;
+        worstAt = point;
+      }
+      if (gap < 0) buried += 1;
+    }
+  }
+
+  // `worstGap` stays Infinity only if the chute never shares a height with any
+  // tower, which is a clean pass rather than a missing measurement — but it must
+  // never reach a message, because Infinity and NaN compare false against every
+  // threshold and would make this look green while testing nothing.
+  if (Number.isFinite(worstGap) && worstGap < 0) {
+    complaints.push(
+      `the ginormous slide passes ${(-worstGap).toFixed(2)} m inside ${worstTower} at ` +
+        `(${worstAt[0].toFixed(2)}, ${worstAt[1].toFixed(2)}, ${worstAt[2].toFixed(2)}) ` +
+        `— ${buried} of ${chute.length} sampled points are inside a tower, and a child ` +
+        'rides through solid masonry',
+    );
+  }
+
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1602,6 +1703,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'the ginormous slide leaves the castle through the hole cut for it',
     theGinormousSlideLeavesThroughItsDoor,
+  ],
+  [
+    'the ginormous slide does not clip the castle towers',
+    theGinormousSlideMissesTheCastleTowers,
   ],
 ];
 

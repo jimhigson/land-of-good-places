@@ -22,6 +22,23 @@ const PROFILE: readonly (readonly [number, number])[] = [
   [0.95, 0.86],
 ];
 
+/**
+ * The space the chute itself occupies around its centre line.
+ *
+ * **Derived from {@link PROFILE}, never restated.** This is what a rider is
+ * actually inside, so it is the threshold a clearance check should use — as
+ * opposed to `slide/plan.ts`'s `CORRIDOR_RADIUS` (1.45 m), which is the wider
+ * margin the *generator* steers by and includes room it does not physically
+ * fill. Measuring a collision against the generator's target rather than the
+ * built trough would report a clip half a metre before there is one, and the
+ * temptation would then be to loosen the wrong number.
+ */
+export const CHUTE_ENVELOPE = {
+  halfWidth: Math.max(...PROFILE.map(([across]) => Math.abs(across))),
+  above: Math.max(...PROFILE.map(([, up]) => up)),
+  below: -Math.min(...PROFILE.map(([, up]) => up)),
+} as const;
+
 const SEGMENTS_PER_METRE = 2.2;
 const UP = new Vector3(0, 1, 0);
 

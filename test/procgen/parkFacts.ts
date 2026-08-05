@@ -178,6 +178,39 @@ export interface ParkFacts {
     readonly corridorRadius: number;
   };
   /**
+   * The castle's four corner towers, as the solids of revolution they were
+   * actually built as, in **world space**.
+   *
+   * These are the piece of the castle a footprint rectangle does not contain:
+   * they stand at `(±outerX, ±outerZ)` — outside the rectangle — and bulge a
+   * further ~2.45 m past it. `slide/plan.ts` re-imposes the castle as that
+   * rectangle, so the towers were the one solid nothing checked, which is
+   * exactly where Jim found the slide clipping through.
+   *
+   * Read per instance via `getMatrixAt`: `Box3.setFromObject` on an
+   * `InstancedMesh` returns the union of every instance — a single park-sized
+   * box that any test passes trivially.
+   *
+   * Bodies and roofs only. The masts and finials above them start at 15.24 m,
+   * higher than the chute's own 14.84 m start, and are a 0.09 m pole and a
+   * 0.26 m ball — decoration rather than mass.
+   */
+  readonly castleTowers: readonly {
+    readonly name: string;
+    readonly x: number;
+    readonly z: number;
+    readonly bottomY: number;
+    readonly topY: number;
+    readonly radiusBottom: number;
+    readonly radiusTop: number;
+  }[];
+  /** The space the built chute occupies around its centre line. */
+  readonly chuteEnvelope: {
+    readonly halfWidth: number;
+    readonly above: number;
+    readonly below: number;
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -229,7 +262,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     );
   }
 
-  const { world, buildMs, sample } = buildHeadlessPark();
+  const { world, scene, buildMs, sample } = buildHeadlessPark();
 
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
@@ -293,6 +326,46 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     maxX: SLIDE_PLAN.facadeDoorMaxX,
     corridorRadius: CORRIDOR_RADIUS,
   };
+
+  // Every world matrix must be composed before a single one is read: a headless
+  // park is never rendered, so they are all still the identity otherwise, and a
+  // clearance check built on them passes for free.
+  scene.updateMatrixWorld(true);
+
+  const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
+  const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
+  const castleTowers: {
+    name: string; x: number; z: number;
+    bottomY: number; topY: number; radiusBottom: number; radiusTop: number;
+  }[] = [];
+  scene.traverse((object) => {
+    if (!(object instanceof InstancedMeshClass)) return;
+    if (!/^tower-(bodies|roofs)$/.test(object.name)) return;
+    const params = object.geometry.parameters as {
+      radiusTop?: number; radiusBottom?: number; radius?: number; height: number;
+    };
+    // A cone reports `radius` (its base) and tapers to a point; a cylinder
+    // reports both ends. Read whichever the built geometry carries.
+    const radiusBottom = params.radiusBottom ?? params.radius ?? 0;
+    const radiusTop = params.radiusTop ?? 0;
+    const local = new Matrix4();
+    const composed = new Matrix4();
+    const centre = new Vector3();
+    for (let i = 0; i < object.count; i += 1) {
+      object.getMatrixAt(i, local);
+      composed.multiplyMatrices(object.matrixWorld, local);
+      centre.setFromMatrixPosition(composed);
+      castleTowers.push({
+        name: `${object.name}[${i}]`,
+        x: centre.x,
+        z: centre.z,
+        bottomY: centre.y - params.height / 2,
+        topY: centre.y + params.height / 2,
+        radiusBottom,
+        radiusTop,
+      });
+    }
+  });
 
   const slide = world.building.ginormousSlide;
   slide.group.updateMatrixWorld(true);
@@ -451,6 +524,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathEdges,
     slideChute,
     slideDoor,
+    castleTowers,
+    chuteEnvelope: CHUTE_ENVELOPE,
     slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,

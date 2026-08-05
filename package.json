@@ -31,6 +31,7 @@
     "check:backpack-peek": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-backpack-peek.mts",
     "measure:rail-radii": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-rail-radii.mts",
     "measure:cruiser-fingerprint": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-cruiser.mts",
+    "measure:slide-towers": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-towers.mts",
     "measure:slide-fingerprint": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-slide.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
     "check:gondola-sightline": "node scripts/checkGondolaSightline.mjs",
