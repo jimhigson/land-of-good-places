@@ -86,10 +86,21 @@ readers, and it goes away with them.
 
 ## Status — build green, ready for QA
 
-- `npm run build` → **exit 0** (full check-script chain + `tsc` + `vite build`).
-- `npx vitest run` → **85 passed, 5 seed files**. No procgen files changed, so
-  no new invariant is owed. (`node_modules` was missing from both this worktree
-  and the shared checkout; `npm install` here, never there.)
+- **`npm ci` in this worktree first** (see the trap below), then
+  `npm run build` → **exit 0** (full check-script chain + `tsc` + `vite build`),
+  `npx vitest run` → **85 passed, 5 seed files**. No procgen files changed, so
+  no new invariant is owed.
+
+### The `node_modules` trap — re-verify after `npm ci`, not before
+
+A worktree lives at `.claude/worktrees/<name>` *inside* the shared repo, so with
+no `node_modules` of its own Node walks up and silently resolves into **the
+shared checkout's**. No error — it just builds against a tree that is not yours.
+This worktree started with none, so the first green build here was bogus. Fixed
+with `npm ci` in the worktree (never in the shared checkout) and everything
+above re-run against it. `vitest` is *not* installed in the shared checkout at
+all, which is the tell: if `npm run test:procgen` says `vitest: command not
+found`, you are borrowing someone else's dependency tree.
 - Proof there is nothing left to race:
   `grep -rn "justPressed('interact')" src/` → only doc comments describing what
   was removed. `takeInteractPress` has exactly one call site,
@@ -115,3 +126,30 @@ Open in a **private/incognito window**. In rough priority:
 
 Doormats: there is no doormat interact handler in this codebase — "doormat" is a
 procgen placement concept (a stall's stand point). Covered by (4).
+
+## Ruling on issue #189 (unguarded window `keydown`) — keep it separate
+
+#189: `InputSystem.onKeyDown` is a window listener with no `event.target` guard
+that `preventDefault()`s every bound key code. Verified; it is real. It is **not**
+the same bug as #122 and should **not** be folded into this branch:
+
+- **Different layers.** #189 is *event → action*: should a keystroke become a
+  game action at all when a DOM element is the intended consumer? #122 is
+  *action → handler*: given an `interact` action, which thing in the park acts.
+- **Neither fix substitutes for the other.** With perfect routing, typing an "e"
+  into a text field still mints an `interact` action and this router faithfully
+  delivers it — wrong, and #189's to fix. With a perfect target guard, a genuine
+  E press in the park still has to reach the shown selection — #122's to fix.
+- This change *reduces* #189's severity for `interact`: a stray E while a panel
+  is open now reaches `Selection`'s blocked branch (one flash, no-op) instead of
+  a legacy proximity handler that could open something.
+
+**One place they touch, for whoever takes #189.** `Enter` is bound to `interact`
+(`actions.ts:79`) and action chips are real DOM `<button>`s. On a focused chip,
+`preventDefault()` on keydown cancels the button's default Enter activation, so
+the DOM click does *not* fire and only the game action does — which commits the
+**primary** action, not the focused one. Harmless today (every zone offers a
+single action), latent the moment a zone offers two. A `target` guard that skips
+keys while a chip has focus would need to let the button's own activation
+through, or the chip stops responding to Enter entirely. Worth a QA line, not a
+blocker.
