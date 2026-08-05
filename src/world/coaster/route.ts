@@ -6,6 +6,14 @@ import { terrainHeight } from '../terrain';
 import { circleBoundary } from '../rail/boundary';
 import { type RouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
+import {
+  WINDOW_HALF_WIDTH,
+  WINDOW_TRACK_Y,
+  castleClear,
+  castleY,
+  crossingBand,
+  insideCastleFootprint,
+} from '../building/cruiserWindow';
 
 /**
  * The coaster's track — grown, not authored (Decision 4 C4 on Decision 5's
@@ -176,12 +184,77 @@ interface TallObstacle {
  * castle it always was.
  */
 function tallObstacles(): TallObstacle[] {
-  const castle = placedEntry('building');
   const wheel = placedEntry('ferrisWheel');
-  return [
-    { x: castle.x, z: castle.z, radius: castle.boundingRadius },
-    { x: wheel.x, z: wheel.z, radius: wheel.boundingRadius },
-  ];
+  return [{ x: wheel.x, z: wheel.z, radius: wheel.boundingRadius }];
+}
+
+/**
+ * How far from the middle of a side wall panel a crossing may land.
+ *
+ * See `building/cruiserWindow.ts`: derived from the tower's own bite out of the
+ * panel, the masonry that has to survive beside the opening, and the opening's
+ * width — which is itself the car's width plus clearance. Nothing here is a
+ * chosen position.
+ */
+const CROSSING_BAND = crossingBand(WINDOW_HALF_WIDTH);
+
+/** Metres of level flight held either side of the castle before the hills resume. */
+const WINDOW_FLAT = 5;
+
+/**
+ * Metres the profile takes to blend from window height back to the hills.
+ *
+ * Shorter than the station's 26 m ramp on purpose: the station ramp has to be
+ * gentle because riders are boarding at walking pace, whereas this is mid-ride
+ * at cruise and a brisker rise and fall *is* the moment — the loop drops to
+ * thread the window and climbs away again.
+ */
+const WINDOW_RAMP = 16;
+
+/** How far outside the castle's footprint the level run starts and ends. */
+const CASTLE_SPAN_PAD = 2;
+
+/**
+ * The stretch of the solved plan that runs inside the castle, in metres along.
+ *
+ * `to` may exceed the loop's length, meaning the stretch wraps through the
+ * loop's start — which it is perfectly entitled to do, and getting that wrong
+ * would silently carve the wrong half of the ride. Found by taking every
+ * sample that lands inside the footprint and keeping the complement of the
+ * **largest cyclic gap** between them, which is exact for the ordinary case of
+ * one visit and degrades sanely to "the whole visit" if a loop ever managed two.
+ */
+function castleSpanOf(plan: SolvedRailRoute): { from: number; to: number } | null {
+  const probe: Vec2 = { x: 0, z: 0 };
+  const inside: number[] = [];
+  for (let d = 0; d < plan.length; d += 0.5) {
+    plan.pointAt(d, probe);
+    if (insideCastleFootprint(probe.x, probe.z, CASTLE_SPAN_PAD)) inside.push(d);
+  }
+  if (inside.length === 0) return null;
+  let widestGap = -Infinity;
+  let gapAt = 0;
+  for (let i = 0; i < inside.length; i += 1) {
+    const here = inside[i]!;
+    const next = inside[(i + 1) % inside.length]!;
+    const gap = i === inside.length - 1 ? next + plan.length - here : next - here;
+    if (gap > widestGap) {
+      widestGap = gap;
+      gapAt = i;
+    }
+  }
+  const from = inside[(gapAt + 1) % inside.length]!;
+  const to = inside[gapAt]!;
+  return { from, to: to >= from ? to : to + plan.length };
+}
+
+/** Metres from `s` to the nearest end of a (possibly wrapping) span; 0 inside. */
+function outsideSpan(span: { from: number; to: number }, s: number, length: number): number {
+  const shifted = s < span.from ? s + length : s;
+  if (shifted >= span.from && shifted <= span.to) return 0;
+  const before = span.from - s < 0 ? span.from - s + length : span.from - s;
+  const after = shifted - span.to;
+  return Math.min(Math.abs(before), Math.abs(after));
 }
 
 /** Is the ground at (x, z) free of every plot? Layout only, no scene. */
@@ -341,6 +414,18 @@ export class CoasterRoute {
   readonly crestY: number;
   /** The solved plan-view centre line, kept for diagnostics and the asserts. */
   readonly plan: SolvedRailRoute;
+  /**
+   * The stretch of the loop that runs inside the castle, in metres along, or
+   * `null` on a seed whose loop went round it instead.
+   *
+   * **Null is a normal park, not a failure.** Nothing places the loop at the
+   * castle; if the search never went that way there is no level run, no window
+   * and no hole in the wall, and that park simply has an unbroken castle. Every
+   * consumer of this — the wall builder, the boot assert, the invariant — has
+   * to treat it as optional, or the first seed that misses would fail a build
+   * for doing exactly what it is allowed to do.
+   */
+  readonly castleSpan: { readonly from: number; readonly to: number } | null;
 
   private readonly scratch = new Vector3();
 
@@ -356,6 +441,7 @@ export class CoasterRoute {
       for (const tall of obstacles) {
         if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
       }
+      if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
       if (other) {
         const nearest = other.nearestPoint(x, z);
         if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
@@ -429,6 +515,44 @@ export class CoasterRoute {
       }
     }
 
+    // The castle window carve (issue #113). Applied **after** the station's,
+    // and that order is load-bearing rather than incidental.
+    //
+    // The cruiser's booth is placed 21-26 m from the castle, so the station and
+    // the castle are always near neighbours, and the station's 26 m ramp
+    // reaches the castle on most seeds. Carving the castle first and letting
+    // the station ramp run over it was tried and measured: **one crossing came
+    // out pinned at window height and the other at 2-4 m**, halfway down the
+    // ramp — an opening that would have been cut through the courtyard floor.
+    // The flat run through the masonry is the one part of the profile that
+    // cannot be blended with anything, because a hole was cut to fit it, so it
+    // is applied last and wins outright.
+    //
+    // What the station keeps is its own flat: the two flats overlapping would
+    // tilt the boarding deck, so `checkCoasterClearances` complains if they come
+    // within reach of each other rather than letting either quietly deform.
+    //
+    // Level, not merely low: both openings then sit at the same height, the
+    // masonry surround is a plain rectangle rather than a swept slot, and the
+    // cart flies straight at the window instead of arriving at it climbing.
+    const castleSpan = castleSpanOf(plan);
+    this.castleSpan = castleSpan;
+    if (castleSpan) {
+      const windowY = castleY(WINDOW_TRACK_Y);
+      for (let i = 0; i < controls; i += 1) {
+        const s = (i / controls) * plan.length;
+        const away = outsideSpan(castleSpan, s, plan.length);
+        const spot = flat[i]!;
+        const wanted = windowY - terrainHeight(spot.x, spot.z);
+        if (away < WINDOW_FLAT) heights[i] = wanted;
+        else if (away < WINDOW_FLAT + WINDOW_RAMP) {
+          const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
+          const eased = t * t * (3 - 2 * t);
+          heights[i] = wanted + (heights[i]! - wanted) * eased;
+        }
+      }
+    }
+
     const makeCurve = (): CatmullRomCurve3 => {
       const points: Vector3[] = [];
       for (let i = 0; i < controls; i += 1) {
@@ -494,8 +618,19 @@ export class CoasterRoute {
       // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
       // is fair game: steepening the ramp's tail is exactly how a sag just past
       // the window gets fixed.
+      // A control carrying the level run through the castle is not liftable
+      // either, and for a sharper reason than the station's: lifting it would
+      // raise the track *inside a hole cut to fit it*, which is the one place
+      // in the park where gaining height is how you hit something rather than
+      // how you miss it. The ramp's outer two-thirds stay liftable, exactly as
+      // the station's do, so a sag just past the castle can still be repaired.
+      const holdsWindow = (index: number): boolean =>
+        castleSpan !== null &&
+        outsideSpan(castleSpan, (index / controls) * plan.length, plan.length) <
+          WINDOW_FLAT + WINDOW_RAMP * 0.35;
       const liftable = (index: number): boolean =>
-        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65;
+        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65 &&
+        !holdsWindow(index);
       for (const [control, lift] of lifts) {
         if (liftable(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
         for (const side of [-1, 1]) {
@@ -607,8 +742,7 @@ export function checkCoasterClearances(
     for (let i = 0; i < obstacles.length; i += 1) {
       const tall = obstacles[i]!;
       const gap = Math.hypot(point.x - tall.x, point.z - tall.z) - tall.radius;
-      const key = i === 0 ? 'the castle' : 'the ferris wheel';
-      worst.set(key, Math.min(worst.get(key) ?? Infinity, gap));
+      worst.set('the ferris wheel', Math.min(worst.get('the ferris wheel') ?? Infinity, gap));
     }
   }
   for (const [what, gap] of worst) {
