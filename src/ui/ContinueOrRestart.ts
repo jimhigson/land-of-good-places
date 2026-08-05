@@ -95,7 +95,11 @@ export class ContinueOrRestart {
   }
 
   /**
-   * What continuing keeps, as four little pictures.
+   * What continuing keeps, as a few little pictures.
+   *
+   * Her name is not one of them — `showChoice`'s own header already says
+   * "Welcome back, {name}!", so a repeat here as the first tile was just the
+   * same word twice before you had read anything else on the card.
    *
    * Read straight off the save rather than the store: the store is not
    * hydrated yet at this point and must not be, because pressing "start
@@ -103,9 +107,7 @@ export class ContinueOrRestart {
    */
   private factsHtml(): string {
     const game = this.save.game;
-    const facts: { glyph: string; text: string }[] = [
-      { glyph: '🙂', text: escapeHtml(this.playerName()) },
-    ];
+    const facts: { glyph: string; text: string }[] = [];
 
     const hat = game.inventory?.find((item) => item.uid === game.wornHatUid);
     if (hat) facts.push({ glyph: hat.icon, text: escapeHtml(hat.displayName) });

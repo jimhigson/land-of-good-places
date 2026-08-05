@@ -4004,7 +4004,11 @@ kbd {
   overflow-y: auto;
   scrollbar-gutter: stable both-edges;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Three, not two: dropping the name tile (it just repeated the header —
+     see `ContinueOrRestart.factsHtml`'s own doc comment) left at most three
+     of these — hat, cute things, day — which now fit in a single row
+     instead of wrapping to a cramped, partly-scrolled second one. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
   padding: 0.75rem;
   -webkit-overflow-scrolling: touch;
