@@ -1,7 +1,13 @@
 import './headless-canvas.mjs';
 import { Raycaster, Vector3, type Mesh, type Object3D } from 'three';
 import { createRipikaStatue } from '../src/art/models/ripikaStatue.ts';
-import { PLAYER_RADIUS } from '../src/core/constants.ts';
+import {
+  CAMERA_DISTANCE,
+  CAMERA_PITCH_DEGREES,
+  CAMERA_YAW_DEGREES,
+  PLAYER_RADIUS,
+} from '../src/core/constants.ts';
+import { cameraOffset } from '../src/core/cameraRig.ts';
 
 /**
  * **Can the fountain statue still hide the child?**
@@ -44,11 +50,31 @@ import { PLAYER_RADIUS } from '../src/core/constants.ts';
  * build for no change in the answer. The statue sits on the fountain's bowl
  * water, which is level by construction whatever the seed does with the
  * fountain, so a flat sample plane is the honest model here.
+ *
+ * 2.17 is the statue's height **above the ground it stands over**, which is
+ * what matters when the sample plane is y = 0. An earlier draft used 2.445 —
+ * the world Y including the plaza's 0.275 m of terrain — which floated the
+ * statue 27.5 cm too high above its own samples. It did not change the verdict,
+ * but a check should model the world it claims to be measuring.
  */
-const STATUE_BASE_Y = 2.445; // canonical seed: terrain 0.275 + bowl water 2.17
+const STATUE_BASE_Y = 2.17;
 
-/** `src/core/cameraRig.ts` — the eye offset. Orthographic, so this is constant. */
-const TO_CAMERA = new Vector3(50.15, 55.41, 50.15).normalize();
+/**
+ * The direction from anywhere in the world towards the camera.
+ *
+ * **Derived from the rig, not transcribed from it.** A hardcoded vector was
+ * right to five decimal places on the day it was written and would have gone
+ * quietly stale the first time anyone touched `CAMERA_PITCH_DEGREES` — and a
+ * check measuring the wrong camera is worse than no check, because it reports
+ * success. Orthographic, so the direction is the same everywhere and this is a
+ * constant rather than a per-sample computation.
+ */
+const eye = cameraOffset(
+  (CAMERA_YAW_DEGREES * Math.PI) / 180,
+  (CAMERA_PITCH_DEGREES * Math.PI) / 180,
+  CAMERA_DISTANCE,
+);
+const TO_CAMERA = new Vector3(eye.x, eye.y, eye.z).normalize();
 
 /** The player kid, ART_DIRECTION §4. */
 const PLAYER_HEIGHT = 2.12;
@@ -110,7 +136,7 @@ function wouldFade(feet: Vector3): boolean {
   const dz = occluder.z - feet.z;
   const reach = NEAR_PLAYER_RADIUS + occluder.radius + 2 * occluder.halfHeight;
   if (dx * dx + dz * dz >= reach * reach) return false;
-  const cam = feet.clone().addScaledVector(TO_CAMERA, 80);
+  const cam = feet.clone().addScaledVector(TO_CAMERA, CAMERA_DISTANCE);
   for (let i = 0; i < CAPSULE_SAMPLES; i += 1) {
     const f = (i / (CAPSULE_SAMPLES - 1)) * 2 - 1;
     const y = occluder.centreY + f * occluder.halfHeight;
