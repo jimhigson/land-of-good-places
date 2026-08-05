@@ -33,7 +33,7 @@ import {
   type HazardLayout,
   type RaceLevel,
 } from './hazards';
-import { LANE_COUNT, NOMINAL_RADIUS, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './route';
+import { LANE_COUNT, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './route';
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
@@ -911,7 +911,7 @@ function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean
 
 /**
  * How far `trestleSpots` will nudge a candidate before giving up on it — along
- * the route (metres of arc) and across it (metres off `NOMINAL_RADIUS`).
+ * the route (metres of arc) and across it (metres off the centre line).
  * Kept well inside half of `TRESTLE_SPACING` (12 m) so two neighbouring
  * slots' searches can never land on the same ground.
  *
@@ -1022,12 +1022,16 @@ function searchForClearGround(
   radialNudges: readonly number[],
 ): { at: number; x: number; z: number } | null {
   for (const dr of radialNudges) {
-    const radius = NOMINAL_RADIUS + dr;
     for (const da of arcNudges) {
       const at = route.wrap(route.startDistance + atArch0 + da);
-      const theta = route.angleAt(at);
-      const x = Math.cos(theta) * radius;
-      const z = Math.sin(theta) * radius;
+      // Nudged along the centre line's own outward normal, not out from the
+      // origin. On a ring that follows the park's edge the two differ wherever
+      // the boundary's radius is changing, and a radial nudge would drift the
+      // candidate sideways along the track as well as outward — searching a
+      // different place from the one it reports.
+      const sample = route.path.sampleAt(at);
+      const x = sample.x + sample.normalX * dr;
+      const z = sample.z + sample.normalZ * dr;
       if (groundIsClear(x, z, collision)) return { at, x, z };
     }
   }
@@ -1042,7 +1046,7 @@ function searchForClearGround(
  * has to clear the train's corridor as well as the walking network.
  *
  * **A rigid, one-shot candidate grid found almost nowhere to stand.** The first
- * version of this function tried exactly one point per slot — `NOMINAL_RADIUS`
+ * version of this function tried exactly one point per slot — the centre line
  * at the slot's own arc position — and gave up outright if that one point was
  * blocked. Measured against the real, built park (1 August 2026): **1 of 28**
  * candidates survived. The ride's own docs already say it "runs through a band
@@ -1143,11 +1147,8 @@ function buildArch(
 
   const at = route.startDistance;
   const outward = route.outwardAt(at, new Vector3());
-  const centre = new Vector3(
-    Math.cos(route.angleAt(at)) * NOMINAL_RADIUS,
-    0,
-    Math.sin(route.angleAt(at)) * NOMINAL_RADIUS,
-  );
+  const archSample = route.path.sampleAt(at);
+  const centre = new Vector3(archSample.x, 0, archSample.z);
   const yaw = Math.atan2(outward.x, outward.z);
   // Wide enough to clear this ring's own lanes, with the same overhang either
   // side. The vertical clearances are *not* scaled: a park-scale child riding

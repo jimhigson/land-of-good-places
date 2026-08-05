@@ -194,14 +194,20 @@ const FOLLOW = 0.12;
  */
 const FOLLOW_LAG = FOLLOW / Math.LN2;
 
+
 /**
- * The rider's own lane radius, on the ring this camera was given. The framing
- * promises are about the rider, so they are measured there — and read off the
- * route rather than a module constant, because there are two rings of
- * different widths and only one of them is ever raced on.
+ * The rider's own lane offset from the ring's centre line, on the ring this
+ * camera was given. The framing promises are about the rider, so they are
+ * measured there — and read off the route rather than a module constant,
+ * because there are two rings of different widths and only one of them is ever
+ * raced on.
+ *
+ * Was `riderRadius`. A radius placed the rider only while the ring was a circle
+ * about the origin; it now follows the park's edge, so the rider's position has
+ * to come from the path itself and this is the lateral part of it.
  */
-function riderRadius(route: RailRaceRoute): number {
-  return route.laneRadii[PLAYER_LANE] ?? route.nominalRadius;
+function riderOffset(route: RailRaceRoute): number {
+  return route.laneOffsets[PLAYER_LANE] ?? 0;
 }
 
 /**
@@ -279,23 +285,24 @@ export class RaceCamera {
 
   /** The rider's lane at arc distance `s`, at the level the lanes undulate about. */
   private ringPoint(s: number, into: Vector3): Vector3 {
-    const theta = this.route.angleAt(s);
-    const radius = riderRadius(this.route);
+    const sample = this.route.path.sampleAt(s);
+    const offset = riderOffset(this.route);
     return into.set(
-      Math.cos(theta) * radius,
+      sample.x + sample.normalX * offset,
       this.route.base + 0.6 + RIDER_RIDE_HEIGHT,
-      Math.sin(theta) * radius,
+      sample.z + sample.normalZ * offset,
     );
   }
 
   private place(): void {
     const s = this.anchor;
     this.ringPoint(s, this.rider);
-    const theta = this.route.angleAt(s);
-    this.out.set(Math.cos(theta), 0, Math.sin(theta));
-    // The clockwise horizontal tangent at that bearing — see RailRaceRoute.angleAt,
-    // whose dθ/ds is −1/NOMINAL_RADIUS.
-    this.along.set(Math.sin(theta), 0, -Math.cos(theta));
+    // Both taken from the path's own frame. These used to be rebuilt here from
+    // the bearing — a second, independent copy of the ring's geometry that only
+    // agreed with `route.ts` for as long as both described the same circle.
+    const sample = this.route.path.sampleAt(s);
+    this.out.set(sample.normalX, 0, sample.normalZ);
+    this.along.set(sample.tangentX, 0, sample.tangentZ);
 
     this.camera.position
       .copy(this.rider)
@@ -328,7 +335,11 @@ export class RaceCamera {
       RIDER_SCREEN_X_PORTRAIT,
       RIDER_SCREEN_X_LANDSCAPE,
     );
-    this.solve(tanH, 2 * riderX - 1, 2 * AHEAD_SCREEN_X - 1);
+    // Solved once, at station 0. **This is known not to hold everywhere** on a
+    // ring that follows the park's edge — see `solved`'s doc for the three
+    // alternatives measured and what each cost. Left as the best of them
+    // pending a design decision on the rig itself.
+    this.solve(0, tanH, 2 * riderX - 1, 2 * AHEAD_SCREEN_X - 1);
   }
 
   /**
@@ -372,12 +383,12 @@ export class RaceCamera {
    * cheap, exact, and needs no second formula to be kept in step with the first.
    * It runs once per resize, not per frame.
    */
-  private solve(tanH: number, riderNdc: number, aheadNdc: number): void {
-    const rider = this.ringPoint(0, new Vector3());
-    const ahead = this.ringPoint(AHEAD, new Vector3());
-    const theta = this.route.angleAt(0);
-    const out = new Vector3(Math.cos(theta), 0, Math.sin(theta));
-    const along = new Vector3(Math.sin(theta), 0, -Math.cos(theta));
+  private solve(station: number, tanH: number, riderNdc: number, aheadNdc: number): void {
+    const rider = this.ringPoint(station, new Vector3());
+    const ahead = this.ringPoint(station + AHEAD, new Vector3());
+    const frame = this.route.path.sampleAt(station);
+    const out = new Vector3(frame.normalX, 0, frame.normalZ);
+    const along = new Vector3(frame.tangentX, 0, frame.tangentZ);
 
     // The chord, and the horizontal direction square-on to it on the outside.
     const chord = new Vector3(ahead.x - rider.x, 0, ahead.z - rider.z);

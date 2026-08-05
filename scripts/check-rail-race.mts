@@ -67,7 +67,12 @@
 
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
-import { RIM_START, TERRAIN_RADIUS } from '../src/core/constants.ts';
+import { PLAYER_RADIUS, RIM_OUTSET_START } from '../src/core/constants.ts';
+import { PARK_BOUNDARY } from '../src/world/boundary.ts';
+import {
+  BOUNDARY_MASONRY_HALF_WIDTH,
+  BOUNDARY_WALL_COLLISION_HALF,
+} from '../src/world/Garden.ts';
 import { TAU } from '../src/core/mathUtils.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
@@ -76,7 +81,7 @@ import { RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
 import {
   BASE_HEIGHT,
   LANE_COUNT,
-  NOMINAL_RADIUS,
+  NOMINAL_OUTSET,
   PLAYER_LANE,
   RIDE_SCALE,
   UNDULATION_REACH,
@@ -103,11 +108,14 @@ const require = (ok: boolean, complaint: string): void => {
 // what differs is lane spread, and that is checked on its own at the bottom.
 const route = RAIL_RACE_PLAN.raceRing;
 const walkPast = RAIL_RACE_PLAN.walkPastRing;
-const LANE_RADII = route.laneRadii;
+const LANE_OFFSETS = route.laneOffsets;
 const SAMPLES = 1400;
 
-say(`loop        ${route.length.toFixed(1)} m at r=${NOMINAL_RADIUS} m, ${LANE_COUNT} lanes`);
-say(`lane radii  ${LANE_RADII.map((r) => r.toFixed(1)).join('  ')} m`);
+say(
+  `loop        ${route.length.toFixed(1)} m at ${NOMINAL_OUTSET} m outside the park edge, ` +
+    `${LANE_COUNT} lanes`,
+);
+say(`lane offsets ${LANE_OFFSETS.map((r) => r.toFixed(1)).join('  ')} m from centre line`);
 say(`race        ${RACE_LAPS} laps = ${(route.length * RACE_LAPS).toFixed(0)} m`);
 
 // --- every lane is exactly as hard as every other ----------------------------
@@ -215,7 +223,8 @@ require(
 );
 
 // The entrance gate: the ring crosses the corridor a child walks in through.
-const gateDistance = route.wrap(ENTRANCE_ANGLE * NOMINAL_RADIUS);
+// A search, not `bearing * R`: the ring is not a circle any more.
+const gateDistance = route.wrap(route.path.distanceAtBearing(ENTRANCE_ANGLE));
 let lowestOverGate = Infinity;
 for (let lane = 0; lane < LANE_COUNT; lane += 1) {
   for (let d = -12; d <= 12; d += 0.5) {
@@ -237,27 +246,50 @@ const rings = [
   { name: 'race     ', route, half: (RAIL_GAUGE_AT_PARK_SCALE * route.scale) / 2 },
   { name: 'walk-past', route: walkPast, half: (RAIL_GAUGE_AT_PARK_SCALE * walkPast.scale) / 2 },
 ];
+// Measured as **outset** — metres outside the park's own edge — not as a radius.
+// A radius only says where the ride is relative to the park while the park is a
+// circle; the edge now runs 59.7 m at the pinch and 101.4 m at the bulge, so
+// `r = 65.5` meant "outside" on one bearing and "35 m inside, with the masonry
+// between the rails" on another. Sampled round the ring rather than computed
+// from the lane offsets, because the curve's own bending widens its true
+// perpendicular reach slightly beyond the nominal half-span.
+const CLEAR_OF_MASONRY = Math.max(
+  BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS,
+  BOUNDARY_MASONRY_HALF_WIDTH,
+);
 for (const ring of rings) {
-  const innermost = Math.min(...ring.route.laneRadii) - ring.half;
-  const outermost = Math.max(...ring.route.laneRadii) + ring.half;
+  let innermost = Infinity;
+  let outermost = -Infinity;
+  const steps = 720;
+  for (let i = 0; i < steps; i += 1) {
+    const d = (i / steps) * ring.route.length;
+    const sample = ring.route.path.sampleAt(d);
+    for (const lane of [0, LANE_COUNT - 1]) {
+      const lateral = ring.route.laneOffsets[lane] ?? 0;
+      for (const edge of [lateral - ring.half, lateral + ring.half]) {
+        const outset = -PARK_BOUNDARY.distanceToEdge(
+          sample.x + sample.normalX * edge,
+          sample.z + sample.normalZ * edge,
+        );
+        if (outset < innermost) innermost = outset;
+        if (outset > outermost) outermost = outset;
+      }
+    }
+  }
   require(
-    innermost > ENTRANCE_WALL_RADIUS,
-    `the ${ring.name.trim()} ring's inner rail at r=${innermost.toFixed(2)} is inside the ` +
-      `boundary wall at r=${ENTRANCE_WALL_RADIUS} — both rings belong outside the park.`,
+    innermost > CLEAR_OF_MASONRY,
+    `the ${ring.name.trim()} ring's inner rail comes ${innermost.toFixed(2)} m outside the park ` +
+      `edge, inside the ${CLEAR_OF_MASONRY.toFixed(2)} m the masonry and a child need.`,
   );
   require(
-    outermost < TERRAIN_RADIUS - 4,
-    `the ${ring.name.trim()} ring's outer rail at r=${outermost.toFixed(2)} runs off the edge ` +
-      `of the terrain disc at r=${TERRAIN_RADIUS}.`,
-  );
-  require(
-    outermost < RIM_START,
-    `the ${ring.name.trim()} ring's outer rail at r=${outermost.toFixed(2)} is out past the ` +
-      `hilltop crest at r=${RIM_START}, where its trestles would stand on the falling rim.`,
+    outermost < RIM_OUTSET_START,
+    `the ${ring.name.trim()} ring's outer rail runs ${outermost.toFixed(2)} m outside the park ` +
+      `edge, past the ${RIM_OUTSET_START} m crest where its trestles would stand on falling rim.`,
   );
   say(
-    `rim         ${ring.name} ring rails r=${innermost.toFixed(1)}-${outermost.toFixed(1)}, ` +
-      `outside the wall at r=${ENTRANCE_WALL_RADIUS}, inside the crest at r=${RIM_START}`,
+    `rim         ${ring.name} ring rails ${innermost.toFixed(1)}-${outermost.toFixed(1)} m ` +
+      `outside the edge, clear of masonry at ${CLEAR_OF_MASONRY.toFixed(2)}, inside the crest ` +
+      `at ${RIM_OUTSET_START}`,
   );
 }
 
@@ -332,7 +364,7 @@ require(exitRadius < 56, 'the ride exit is outside the walkable park.');
 // that puts an explicit swing dial back on the rig.
 
 const rig = new RaceCamera(route);
-const RIDER_RADIUS = LANE_RADII[PLAYER_LANE]!;
+const RIDER_OFFSET = LANE_OFFSETS[PLAYER_LANE]!;
 const probe = new Vector3();
 
 /**
@@ -347,11 +379,11 @@ const probe = new Vector3();
  * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
  */
 const onLane = (s: number, into: Vector3): Vector3 => {
-  const t = route.angleAt(s);
+  const sample = route.path.sampleAt(s);
   return into.set(
-    Math.cos(t) * RIDER_RADIUS,
+    sample.x + sample.normalX * RIDER_OFFSET,
     route.base + 0.6 + RIDER_RIDE_HEIGHT,
-    Math.sin(t) * RIDER_RADIUS,
+    sample.z + sample.normalZ * RIDER_OFFSET,
   );
 };
 
@@ -547,7 +579,13 @@ function sweep(width: number, height: number): Pose {
     route.tangentAt(PLAYER_LANE, at, travelAtRider);
     travelAtRider.y = 0;
     travelAtRider.normalize();
-    inward.set(-point.x, 0, -point.z).normalize();
+    // "Into the park" is the reverse of the ring's own outward normal, not the
+    // direction of the origin. Those were the same vector while the ring was a
+    // circle centred there; on a ring that follows a spline edge they are not,
+    // and pointing at the origin would call a perfectly good side view "not
+    // looking into the park" wherever the boundary bulges.
+    const frame = route.path.sampleAt(at);
+    inward.set(-frame.normalX, 0, -frame.normalZ).normalize();
 
     const angled = flat.dot(travelAtRider);
     worst.mostAngled = Math.max(worst.mostAngled, angled);
@@ -560,8 +598,10 @@ function sweep(width: number, height: number): Pose {
     const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
     worst.leastRightward = Math.min(worst.leastRightward, right.dot(travelAtRider));
 
-    const standsAt = Math.hypot(camera.position.x, camera.position.z);
-    worst.outsideRing &&= standsAt > Math.hypot(point.x, point.z);
+    // Outset, not radius: "is the rig outside the park?" is a question about the
+    // edge, and the edge is 41 m further out on some bearings than others.
+    const standsAt = -PARK_BOUNDARY.distanceToEdge(camera.position.x, camera.position.z);
+    worst.outsideRing &&= standsAt > -PARK_BOUNDARY.distanceToEdge(point.x, point.z);
     worst.closestToPark = Math.min(worst.closestToPark, standsAt);
   }
   return worst;
@@ -580,7 +620,7 @@ for (const shape of POSES) {
       `into the park ≥ ${p.leastInward.toFixed(3)}   ` +
       `left-to-right ≥ ${p.leastRightward.toFixed(3)}   ` +
       `tilt ${((p.mostPitch * 180) / Math.PI).toFixed(1)}° down   ` +
-      `stands r≥${p.closestToPark.toFixed(0)}`,
+      `stands ≥${p.closestToPark.toFixed(0)} m outside the edge`,
   );
 
   // Deliberately angled forward, and bounded at both ends. A rig that had been
@@ -619,10 +659,9 @@ for (const shape of POSES) {
   // not come in so far that it is standing in the park among the trees and the
   // boundary wall it is meant to be looking over.
   require(
-    p.closestToPark > ENTRANCE_WALL_RADIUS,
-    `in a ${shape.name} window the rig stands at r=${p.closestToPark.toFixed(1)}, inside the ` +
-      `boundary wall at r=${ENTRANCE_WALL_RADIUS}, where the park's own scenery is between it ` +
-      'and the race.',
+    p.closestToPark > 0,
+    `in a ${shape.name} window the rig stands ${p.closestToPark.toFixed(1)} m inside the park ` +
+      "edge, where the park's own scenery is between it and the race.",
   );
   // Enough tilt to stack the four lanes into four rows of the picture, not so
   // much that the storybook side view turns into a plan view.
@@ -873,7 +912,7 @@ say('');
 say(`player rides lane ${PLAYER_LANE} (outermost, nearest the camera)`);
 say(`undulation reach ±${UNDULATION_REACH.toFixed(2)} m about a base of ${BASE_HEIGHT} m`);
 say(`start/finish arch at s=${route.startDistance.toFixed(1)} m (bearing of the booth)`);
-say(`one lap is ${(TAU * NOMINAL_RADIUS).toFixed(1)} m`);
+say(`one lap is ${route.length.toFixed(1)} m`);
 
 if (problems.length > 0) {
   console.error('');
