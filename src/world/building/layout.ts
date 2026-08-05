@@ -237,19 +237,19 @@ export const ENTRANCE_MAX_X = 4;
 export const LIFT_DOOR_MIN_Z = 3.5;
 export const LIFT_DOOR_MAX_Z = 6.5;
 
-/** The gap in the roof parapet the ginormous slide leaves through. */
-export const SLIDE_DOOR_MIN_X = 17.5;
-export const SLIDE_DOOR_MAX_X = 22.5;
-
 /**
- * The matching hole in the facade's top storey, out in the garden.
+ * The gaps the ginormous slide leaves through — in the roof parapet inside, and
+ * in the facade's top storey out in the garden — **live on `SLIDE_PLAN`**, not
+ * here. See `world/slide/plan.ts`.
  *
- * The slide is a garden object: it hangs off the tower everyone can see from the
- * fountain, whatever is going on in the building's own space. Without this it
- * would appear to grow straight out of a painted wall.
+ * They were four hand-written coordinates in this file, and the search that
+ * decides where the chute actually leaves the tower had no say in them: it
+ * reported the door it chose and the masonry cut the hole somewhere else
+ * regardless. Deriving the hole from the solved route is what stops the two
+ * disagreeing, and the direction of the dependency is the reason they cannot
+ * live here — this file is imported *by* the plan (for `BUILDING_CENTRE_*` and
+ * `deckY`), so it must never import back from it.
  */
-export const FACADE_SLIDE_DOOR_MIN_X = 7.4;
-export const FACADE_SLIDE_DOOR_MAX_X = 11.6;
 
 // -------------------------------------------------------- glass lift shaft
 
@@ -476,11 +476,12 @@ export const HELTER_SEMI_X = 1.7;
 export const HELTER_SEMI_Z = 2.1;
 
 /**
- * Where you step on to ride the ginormous slide — out on the roof terrace now,
- * under the open sky, which is where the family wanted it.
+ * Where you step on to ride the ginormous slide is `SLIDE_PLAN.entryX/entryZ`.
+ *
+ * It moved out with the parapet gap it stands in front of, and for the same
+ * reason: the boarding pad and the gap had to hold the same x, and did so only
+ * because someone typed 20 in both places.
  */
-export const GIANT_SLIDE_ENTRY_X = 20;
-export const GIANT_SLIDE_ENTRY_Z = 13;
 /** The cuddly grown-up waits here, ready to be asked along. */
 export const GROWN_UP_X = 15.2;
 export const GROWN_UP_Z = 14;

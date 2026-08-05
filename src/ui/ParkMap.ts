@@ -10,11 +10,10 @@ import { PLAZA, ROUTES, type RouteDefinition } from '../world/paths';
 import { STALLS } from '../minigames';
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
+import { SLIDE_PLAN } from '../world/slide/plan';
 import {
   BUBBLE_X,
   BUBBLE_Z,
-  GIANT_SLIDE_ENTRY_X,
-  GIANT_SLIDE_ENTRY_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_DECK,
@@ -125,8 +124,8 @@ const FLOOR_FEATURES: readonly FloorFeature[] = (() => {
     { x: HELTER_ENTRY_X, z: HELTER_ENTRY_Z, glyph: '🌀', label: 'Helter-skelter', decks: [HELTER_DECK] },
     { x: TOILET_STAND_X, z: TOILET_STAND_Z, glyph: '🚻', label: 'Toilets', decks: [TOILET_DECK] },
     {
-      x: GIANT_SLIDE_ENTRY_X,
-      z: GIANT_SLIDE_ENTRY_Z,
+      x: SLIDE_PLAN.entryX,
+      z: SLIDE_PLAN.entryZ,
       glyph: '🎢',
       label: 'Ginormous slide',
       decks: [TOP_DECK],

@@ -159,6 +159,25 @@ export interface ParkFacts {
     readonly halfZ: number;
   };
   /**
+   * The hole cut in the facade's south wall for the ginormous slide, in
+   * **facade-local x**, alongside the half-width of the chute meant to go
+   * through it.
+   *
+   * Read off `SLIDE_PLAN` — which is now the one place the hole is decided, and
+   * the same value `Shell.ts` cuts the masonry with — rather than off the old
+   * hand-written constants in `building/layout.ts`, which the search that
+   * chooses the door had no say in.
+   *
+   * Imported dynamically with everything else here: `SLIDE_PLAN` solves at
+   * module load against `PARK_SEED`, so a static import at the top of the test
+   * tree would pin every seed's door to the default park's.
+   */
+  readonly slideDoor: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly corridorRadius: number;
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -266,6 +285,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     z: BUILDING_CENTRE_Z,
     halfX: BUILDING_HALF_X,
     halfZ: BUILDING_HALF_Z,
+  };
+
+  const { SLIDE_PLAN, CORRIDOR_RADIUS } = await import('../../src/world/slide/plan.ts');
+  const slideDoor = {
+    minX: SLIDE_PLAN.facadeDoorMinX,
+    maxX: SLIDE_PLAN.facadeDoorMaxX,
+    corridorRadius: CORRIDOR_RADIUS,
   };
 
   const slide = world.building.ginormousSlide;
@@ -424,6 +450,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathNodes,
     pathEdges,
     slideChute,
+    slideDoor,
     slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,

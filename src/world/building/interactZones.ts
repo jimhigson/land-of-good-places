@@ -1,11 +1,10 @@
 import { PRIMARY_ACTION, pressAction, pressZone, type InteractZone, type ZoneAction } from '../interact';
 import { PALETTE } from '../../core/palette';
+import { SLIDE_PLAN } from '../slide/plan';
 import {
   BUBBLE_RADIUS,
   BUBBLE_X,
   BUBBLE_Z,
-  GIANT_SLIDE_ENTRY_X,
-  GIANT_SLIDE_ENTRY_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_DECK,
@@ -166,12 +165,12 @@ export function buildingInteractZones(state: BuildingZoneState): InteractZone[] 
   zones.push({
     id: 'giantSlide',
     label: 'Ginormous slide',
-    x: worldX(GIANT_SLIDE_ENTRY_X),
+    x: worldX(SLIDE_PLAN.entryX),
     y: deckY(TOP_DECK),
-    z: worldZ(GIANT_SLIDE_ENTRY_Z),
+    z: worldZ(SLIDE_PLAN.entryZ),
     pickRadius: 2.4,
-    standX: worldX(GIANT_SLIDE_ENTRY_X),
-    standZ: worldZ(GIANT_SLIDE_ENTRY_Z),
+    standX: worldX(SLIDE_PLAN.entryX),
+    standZ: worldZ(SLIDE_PLAN.entryZ),
   });
 
   // Tapping the loo walks her *in* and then presses — `TOILET_STAND` is now a

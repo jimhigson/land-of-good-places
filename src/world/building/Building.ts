@@ -42,8 +42,6 @@ import {
   BUILDING_BASE_Y,
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
-  GIANT_SLIDE_ENTRY_X,
-  GIANT_SLIDE_ENTRY_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_CENTRE_X,
@@ -663,7 +661,7 @@ export class Building implements GameSystem {
     }
 
     if (
-      near(localX, localZ, GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, 1.9) &&
+      near(localX, localZ, SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, 1.9) &&
       Math.abs(localY - TOP_DECK * BUILDING_FLOOR_HEIGHT) < 1.4
     ) {
       this.startGiantSlide(player);
@@ -1012,7 +1010,7 @@ function addRideEntrances(floorGroups: readonly Group[]): void {
 
   const topFloor = floorGroups[TOP_DECK];
   if (topFloor) {
-    topFloor.add(entrancePad(GIANT_SLIDE_ENTRY_X, GIANT_SLIDE_ENTRY_Z, PALETTE.slideChute));
+    topFloor.add(entrancePad(SLIDE_PLAN.entryX, SLIDE_PLAN.entryZ, PALETTE.slideChute));
   }
 }
 

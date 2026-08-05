@@ -46,8 +46,6 @@ import {
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
   ENTRANCE_RAMP,
-  FACADE_SLIDE_DOOR_MAX_X,
-  FACADE_SLIDE_DOOR_MIN_X,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -56,10 +54,9 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
-  SLIDE_DOOR_MAX_X,
-  SLIDE_DOOR_MIN_X,
   TOP_DECK,
 } from './layout';
+import { SLIDE_PLAN } from '../slide/plan';
 
 /** Decoration that takes light but is not worth a slot in the shadow pass. */
 function receiveOnly(mesh: Mesh): Mesh {
@@ -121,7 +118,7 @@ function planFor(kind: ShellKind): ShellPlan {
         doorMinX: ENTRANCE_MIN_X,
         doorMaxX: ENTRANCE_MAX_X,
         holes: false,
-        slideGap: [FACADE_SLIDE_DOOR_MIN_X, FACADE_SLIDE_DOOR_MAX_X],
+        slideGap: [SLIDE_PLAN.facadeDoorMinX, SLIDE_PLAN.facadeDoorMaxX],
       };
 }
 
@@ -461,7 +458,7 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   // where you step out of the lift.
   const shapes: Shape[] = [];
   shapes.push(planRect(-ox, ox, -oz, -oz + 0.6));
-  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_DOOR_MIN_X, SLIDE_DOOR_MAX_X]])) {
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
     shapes.push(planRect(start, end, oz - 0.6, oz));
   }
   shapes.push(planRect(-ox, -ox + 0.6, -oz + 0.6, oz - 0.6));

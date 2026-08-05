@@ -6,8 +6,6 @@ import {
   BUILDING_BASE_Y,
   BUILDING_CENTRE_X,
   BUILDING_CENTRE_Z,
-  FACADE_SLIDE_DOOR_MAX_X,
-  FACADE_SLIDE_DOOR_MIN_X,
   TOP_DECK,
   deckY,
 } from '../building/layout';
@@ -54,8 +52,14 @@ import { terrainHeight } from '../terrain';
  * ride put you down" is the exact question #118 was the answer going wrong.
  */
 
-/** Half-width of chute to keep clear of things. The trough is ±0.95 m plus rails. */
-const CORRIDOR_RADIUS = 1.45;
+/**
+ * Half-width of chute to keep clear of things. The trough is ±0.95 m plus rails.
+ *
+ * Exported because the hole in the wall is derived from it (see
+ * {@link SLIDE_DOOR_HALF_WIDTH}) and `test/procgen/invariants.ts` asks whether
+ * the chute that was built actually fits through the hole that was cut.
+ */
+export const CORRIDOR_RADIUS = 1.45;
 
 /**
  * Gentlest turn the chute may make.
@@ -213,6 +217,62 @@ const WALL_STANDOFF = CORRIDOR_RADIUS + 0.6;
 /** How far back through the parapet gap the chute's mouth is carried. */
 const DOOR_STUB = 2.6;
 
+/**
+ * Masonry left either side of the chute where it passes through the wall.
+ *
+ * The hole has to be wider than the thing going through it, or the trough
+ * scrapes its own doorway. This is that margin, and it is the only authored
+ * number in the door's width.
+ */
+const DOOR_SHOULDER = 0.65;
+
+/**
+ * Half the width of the hole the chute leaves the tower through.
+ *
+ * **Derived from what has to fit through it, never authored.** The chute
+ * occupies {@link CORRIDOR_RADIUS} either side of its centre line, so the gap
+ * is that plus a {@link DOOR_SHOULDER} of masonry. Before this the hole was two
+ * hand-written coordinates in `building/layout.ts` that happened to agree with
+ * the chute's width, and nothing anywhere checked that they still did — widen
+ * the chute and the hole would simply have stayed where it was.
+ */
+export const SLIDE_DOOR_HALF_WIDTH = CORRIDOR_RADIUS + DOOR_SHOULDER;
+
+/**
+ * Where along the facade's south wall the door is offered, facade-local.
+ *
+ * One position, which every candidate start pose is measured from. This is the
+ * constant that pins the slide's exit to a single spot on the wall and so
+ * forces the route to contort to reach it — widening it to the whole wall is a
+ * separate, visible change, because it relocates a hole in the castle.
+ */
+const DOOR_OFFER_CENTRE = 9.5;
+
+/**
+ * Where a child stands on the **interior** roof terrace to board, and how wide
+ * the gap in the interior parapet beside them is.
+ *
+ * Interior-local, and deliberately a different frame from the facade's: the
+ * interior is a far larger space than the castle you see from the garden
+ * (`Shell.ts` calls them "disconnected worlds") and the chute itself is a
+ * garden object hung off the facade, so there is no scale that maps one gap
+ * onto the other. What *is* real is that the gap in the parapet is the one you
+ * walk out through, so it is centred on the boarding pad rather than stated
+ * separately — those were two numbers that had to be 20 at the same time, kept
+ * in step by hand and by nothing else.
+ */
+const ROOF_ENTRY_X = 20;
+const ROOF_ENTRY_Z = 13;
+
+/**
+ * Half the gap in the interior roof parapet.
+ *
+ * Wide enough to walk out through without brushing the masonry: a child is
+ * `PLAYER_RADIUS` at the waist, and this leaves better than three of her
+ * side by side, which is what makes it read as a way out rather than a slot.
+ */
+const ROOF_DOOR_HALF_WIDTH = 2.5;
+
 /** Metres between the points handed to the chute's curve. */
 const POINT_SPACING = 1.6;
 
@@ -358,17 +418,17 @@ const SLIDE_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
 /**
  * Where the chute may leave the tower, best first.
  *
- * Derived from the facade's own slide door rather than stated: the gap in the
- * parapet is `FACADE_SLIDE_DOOR_MIN_X … MAX_X` on the south wall, so the chute
- * leaves from within that gap, pointing out of it. A spread of headings is
- * offered because the door constrains *where* the slide starts, not which way
- * it then sweeps, and the search needs somewhere to go when the first choice
- * dead-ends.
+ * The gap in the parapet is no longer read from `building/layout.ts` — it is
+ * the other way round now. These poses say where the chute may leave, the
+ * search picks one, and the hole in the masonry is cut wherever that turned out
+ * to be. A spread of headings is offered because the door constrains *where*
+ * the slide starts, not which way it then sweeps, and the search needs
+ * somewhere to go when the first choice dead-ends.
  */
 function doorPoses(): Pose2[] {
   const poses: Pose2[] = [];
-  const centreLocal = (FACADE_SLIDE_DOOR_MIN_X + FACADE_SLIDE_DOOR_MAX_X) / 2;
-  const halfGap = (FACADE_SLIDE_DOOR_MAX_X - FACADE_SLIDE_DOOR_MIN_X) / 2;
+  const centreLocal = DOOR_OFFER_CENTRE;
+  const halfGap = SLIDE_DOOR_HALF_WIDTH;
   // Straight out of the door first, then progressively more angled, alternating
   // sides so neither direction is systematically preferred.
   // Out to ±72°: the door fixes where the chute leaves the tower, not which way
@@ -594,6 +654,23 @@ export interface PlannedSlide {
   /** Height at the top of the chute, and at its mouth over the pit. */
   readonly startY: number;
   readonly endY: number;
+  /**
+   * The hole cut in the facade's top storey, in facade-local x.
+   *
+   * **Measured off the solved route, not off the offered poses.** The search
+   * already chose which door position it left by; this reads that answer back
+   * out of where the chute actually starts, so the masonry cannot disagree with
+   * the ride. Previously the search made this choice and `building/layout.ts`
+   * ignored it, cutting the hole at a fixed spot whatever the route did.
+   */
+  readonly facadeDoorMinX: number;
+  readonly facadeDoorMaxX: number;
+  /** The gap in the interior roof parapet you walk out through, interior-local. */
+  readonly roofDoorMinX: number;
+  readonly roofDoorMaxX: number;
+  /** Where a child stands on the interior roof terrace to board, interior-local. */
+  readonly entryX: number;
+  readonly entryZ: number;
 }
 
 /**
@@ -660,6 +737,15 @@ function planSlide(): PlannedSlide {
   const points = chutePoints(route);
   assertClearsCruiser(points);
   const { exitX, exitZ } = planExit();
+
+  // Where the chute actually left the wall, read back off the solved route.
+  // Asking the route rather than re-deriving the pose is the whole point: there
+  // is then one answer to "where is the door", and the masonry and the ride are
+  // both reading it rather than each holding their own copy.
+  const mouth = { x: 0, z: 0 };
+  route.pointAt(0, mouth);
+  const doorLocalX = mouth.x - BUILDING_CENTRE_X;
+
   return {
     name: 'ginormousSlide',
     route,
@@ -668,6 +754,12 @@ function planSlide(): PlannedSlide {
     exitZ,
     startY: START_Y,
     endY: END_Y,
+    facadeDoorMinX: doorLocalX - SLIDE_DOOR_HALF_WIDTH,
+    facadeDoorMaxX: doorLocalX + SLIDE_DOOR_HALF_WIDTH,
+    roofDoorMinX: ROOF_ENTRY_X - ROOF_DOOR_HALF_WIDTH,
+    roofDoorMaxX: ROOF_ENTRY_X + ROOF_DOOR_HALF_WIDTH,
+    entryX: ROOF_ENTRY_X,
+    entryZ: ROOF_ENTRY_Z,
   };
 }
 
