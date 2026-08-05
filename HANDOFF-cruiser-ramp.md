@@ -247,3 +247,41 @@ all five seeds.
 `fairy-lights` are struck on main's route. They are not part of the `Scenery`
 scatter, so the #198 keep-out does not cover them. Not currently failing on
 #203's route, but it will need an owner.
+
+## RESOLVED — the statue, and two bugs it flushed out
+
+Fixed in **#203** on the Overseer's ruling (the PR that creates the collision
+fixes it), commit `c988368`. #203 green standalone: build exit 0, procgen
+117/117. This branch restacked on it: build exit 0, procgen **122/122**.
+
+1. **Statue.** Added to `tallObstacles()` — the input list, not a measurement.
+   Radius is the *statue* (3.47 m measured: every mesh under the fountain root
+   topping above the car's underside at cruise), **not** the fountain's 10.5 m
+   plot: the ride is allowed to fly over the plaza, just not through the statue.
+   Now a **2.83 m miss**, reported, failing nothing.
+2. **Ride exit (older bug, exposed by the re-solve).** `planExit` searches with
+   `clearOfPlots`, which knows twelve plots and nothing about the scatter, so
+   seed 2's exit landed 1.2 m from a bush — ground `rideExitsAreUsable`
+   correctly refused. #198's category error one level along. Fixed on the
+   scatter side (`onRideExit` in `Scenery.ts`), because `planExit` runs before
+   any foliage exists while the scatter can trivially see the exit.
+3. **Fairy-light wires (this branch).** Keeping the *trees* clear was not
+   enough — a wire between two clear trees still spans the gap, and seed 5's
+   struck the car 3 m up on the station approach. Added as a rule in
+   `spanIsClear`, vertically honest so it only refuses wires where the car
+   really passes through their height.
+
+**Verified on all five seeds:** no statue strike; castle windows still cut, two
+openings each on canonical/2/5/11 at 3.21-3.42 m, sill 3.94, head 7.65.
+
+**Seed 18 now routes around the castle** instead of through it — a legitimate
+pass (`castleSpan` null, castle intact) but a reduction from 5/5 to 4/5, and a
+direct argument for the queued work making the crossing a solve requirement.
+
+**Tree lights:** `main` builds 0 tree-light bulbs on canonical *and* seed 5, so
+the wire rule costs nothing against main. They are absent in this park
+configuration generally (canopies below `MIN_POST_RADIUS`), which predates all
+of this.
+
+**Still filed elsewhere:** `fairy-lights` (the plaza ring, not tree wires) are
+struck on main's own route. Not caused by either branch; Overseer is filing it.
