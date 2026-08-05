@@ -202,3 +202,48 @@ here only because the scatter at that density strands a waypoint. Fixing *that*
 - **#197** — typecheck `scripts/`. Try `@types/node` with `"types": []` first:
   module declarations resolve while globals stay out. #192 rejected
   `"types": ["node"]`, which is a different thing.
+
+## BLOCKING (5 Aug, late): #203's route flies through the RiPika statue's head
+
+Found by this branch's own sweep, immediately after restacking onto the #203
+that is rebased on the main which took **#200 (the statue)**.
+
+```
+the Sky Cruiser's car passes through 'bakedFace'        at 123.0 m, world (6.94, 7.13, 7.42)
+the Sky Cruiser's car passes through 'ripikaHead / Mesh' at 123.0 m, world (6.54, 8.84, 7.62)
+```
+
+Fails on **four of five seeds** (canonical, 5, 11, 18) — seed 2's loop happens
+to miss.
+
+**It is #203's route, not inherited.** Ran the identical sweep against plain
+`origin/main` (copying in only `clearance.ts` and the dependency-free
+`cart.ts`, which cannot move the route): main strikes bushes, tree-canopies and
+`fairy-lights` — **and not the statue**. Main's loop is 216 m; #203's is 185 m
+and threads the castle, and that loop goes through the statue.
+
+Neither author could have seen it: #203 predates #200's merge, and #200 had no
+cruiser sweep to run.
+
+**Why it matters:** the Sky Cruiser is `camera: 'firstPerson'`, so this is not
+a mesh brushing past out of sight — the screen fills with the inside of a giant
+stone head. Same failure `cart.ts` describes for the castle lintel.
+
+**Not to be confused with the 2.01 m near miss** that is deliberately allowed.
+That is a *miss*. This is an intersection.
+
+**Proposed fix:** the statue belongs in `tallObstacles()` in `coaster/route.ts`
+— the one hard-coded list deliberately kept, precisely because it is the
+*input* telling the plan-view search where not to go. It reaches **10.6 m**
+against a 6.2 m cruise floor, so it is exactly "a thing the loop cannot fly
+over and must go around", the same category as the ferris wheel. It is built by
+`Fountain.ts` at `PLAZA` and nothing currently keeps the loop off the plaza at
+all.
+
+Cost: re-solves the loop, so the castle span and windows need re-verifying on
+all five seeds.
+
+**Also newly visible on main and not yet handled by `clearOfCruiser`:**
+`fairy-lights` are struck on main's route. They are not part of the `Scenery`
+scatter, so the #198 keep-out does not cover them. Not currently failing on
+#203's route, but it will need an owner.
