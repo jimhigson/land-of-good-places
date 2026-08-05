@@ -21,6 +21,7 @@ import { ART } from '../../src/art/style/artPalette';
 import { toonMaterial } from '../../src/art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../src/art/style/asset';
 import { createRipika } from '../../src/art/models/ripika';
+import { createRipikaStatue } from '../../src/art/models/ripikaStatue';
 import { createBiscuit } from '../../src/art/models/biscuit';
 import { createKid } from '../../src/art/models/kid';
 import { createMini } from '../../src/art/models/mini';
@@ -180,8 +181,22 @@ const woodwall: Exhibit = {
   plinthR: 0,
 };
 
+// Off the lineup for the same reason as the wall: at 2.06 m on its own plinth
+// the statue stands half a metre over Eleri and would tower across the front
+// row. ?only=statue — and it is worth looking at beside ?only=ripika, since
+// whether it reads as RiPika at play distance is the whole question.
+const statue: Exhibit = {
+  key: 'statue',
+  label: 'RiPika statue',
+  handle: createRipikaStatue(),
+  x: 0,
+  z: 0,
+  plinth: ART.stagePlinthB,
+  plinthR: 0,
+};
+
 const shown = only
-  ? [...exhibits, woodwall].filter((e) => e.key === only)
+  ? [...exhibits, woodwall, statue].filter((e) => e.key === only)
   : exhibits;
 if (shown.length === 0) shown.push(...exhibits);
 
