@@ -411,59 +411,88 @@ inventing a new feel. Flagged for the Overseer as a separate decision.
 is **90/95**, failing only `railRaceStallStandsAtTheRim` on all five seeds — the
 state this branch was inherited in.
 
-I built the fix and then reverted it, because it cannot be made green. **The
-working code is saved as a patch at
-`scratchpad/atrim.patch` (see the worktree note above); it is 177 lines and
-applies cleanly to `12d5d4d`'s parent tree.** What it does:
+I built the fix, proved it cannot be made green, and reverted it. **The working
+code is preserved on branch `feat/railrace-booth-at-rim` (`fe565b8`), based on
+`c880393`** — cherry-pick it, do not rewrite it. What it does:
 
 - `ManifestEntry` gains `atRim?: boolean` — a relation to the *boundary*, in the
   same spirit as `near` being a relation to another plot. A band cannot express
-  "at the rim" any more: a band is a radius, and the edge is a per-seed spline.
-- `parkLayout.ts` gains `rimPositions()`, which ranks candidate spots by
-  `distanceToEdge` ascending and lets the existing constraint check take the
-  first that works. It **draws no random numbers**, exactly as a pin does, so
-  every other plot lands precisely where it did — the park is not re-rolled.
+  "at the rim" any more: a band is a radius, the edge is a per-seed spline.
+- `parkLayout.ts` gains `rimPositions()`, ranking candidates by `distanceToEdge`
+  ascending and letting the existing constraint check take the first that works.
+  It **draws no random numbers**, exactly as a pin does, so no other plot moves.
 
-With it, `test:procgen` is **95/95 on all five seeds**. But `check:park` then
-reports three regressions: `poi.stranded 2` (new), `rail.exclusion 36` (recorded
-21), `rail.walkable 44` (recorded 30).
+With it `test:procgen` is **95/95 on all five seeds**, and `check:park` then
+reports `poi.stranded 2`, `rail.exclusion 36` (recorded 21), `rail.walkable 44`
+(recorded 30).
 
-### Why it is a conflict and not a tuning problem
+### It is a conflict, and this is exhaustive rather than a sample
 
-- Bearing 20°, where the booth was pinned, is the canonical seed's **bulge** —
-  the edge stands 98 m out there. The invariant needs the booth within ~34 m of
-  the ring, which at that bearing needs radius ~64. `PLOT_EXTENT_LIMIT` is 52.
-  **No radius at the historic bearing can ever satisfy the invariant.**
-- Swept the rim reach over 44.5–48.6 in 0.5 m steps. Every value ≥ 45 puts the
-  booth on the south rim, passes procgen 95/95, and produces the *identical*
-  check:park regressions — 36 and 44, not moving by a single point as the booth
-  slides from 271.5° to 267°. 44.5 moves it to bearing 9° and breaks procgen on
-  two seeds instead. **The two checks pull in opposite directions across the
-  whole feasible range.**
-- The regressions are **collateral through Scenery's single shared RNG stream**,
-  the mechanism this very manifest entry's comment already documents. The first
-  rail gap is at (55.7, 0.0) — east side, nowhere near the booth. The booth's
-  spur length shifts the stream, garden walls land elsewhere, and the train's
-  flanking changes. It is not proximity, and no booth radius fixes it.
-- The old pin is a **hand-tuned local optimum** found by PR #159's own sweep.
-  Even a small move (bearing 20°/41 → bearing 9°/44.5) costs two regressions.
+Bearing 20°, where the booth was pinned, is the canonical seed's **bulge** — the
+edge is 98 m out there, the invariant needs the booth within ~34 m of the ring,
+which needs radius ~64, and `PLOT_EXTENT_LIMIT` is 52. **No radius at the
+historic bearing can ever satisfy the invariant.**
 
-### What I would want decided before anyone spends more on it
+The feasible region can be bounded exactly: `waterFight` is solved 3rd of 12,
+*before* the booth, so it never moves, and its **34.012 m** gap to the ring is a
+complete ceiling on the booth's. Combined with the solver's own constraints that
+leaves four clusters, all at radius ≥ 44.6 — east (bearings 3.5–12°), north
+(103–104°), south (266–288°), and 308°. **All 344 positions in them were tested
+against both checks. 344 rim-PASS, 0 clean.**
 
-Three options, none of which I should pick alone:
+### The single universal blocker, and it is one waypoint
 
-(a) Land `atrim.patch` and treat the `check:park` regressions as the next piece
-    of work — they are real (2 waypoints nobody can walk to), so this means the
-    branch is not green.
-(b) Decouple Scenery's RNG from path lengths so booth moves stop having
-    action-at-a-distance. That is the actual root cause and it is somebody's
-    whole task, not a line in this one.
-(c) Re-derive `railRaceStallStandsAtTheRim`. I was explicitly told not to, and I
-    have not — but it is worth knowing *why* it now bites: with the ring 60–108 m
-    out and plots capped at 52 m, "the booth is the closest plot to the rails" is
-    no longer a statement about the booth being *at* the rim. It is a statement
-    about plot ordering, and it forces the booth to the park's pinch, which is
-    the one place the path network cannot absorb it.
+`poi.stranded` was ≥ 1 in **every one of the 344**, and it has no RATCHET
+allowance, so it must be exactly 0. The rail invariants are **not** the
+obstacle: 54 positions returned them to their recorded values exactly (21 m
+unflanked, 30 standable), and 15 of those had `poi.stranded 1` as their *only*
+regression. Best near-miss — booth at **(45.856, 5.630)**, bearing 7°, r 46.2:
+
+```
+rail: 359 m of loop, 21 m unflanked, 30/359 centre-line points standable
+check:park: 1 invariant regression(s):  poi.stranded: 1
+```
+
+The stranded waypoint is **always the same one**: `(20.9, 20.2)`, the
+ferris-wheel ticket kiosk's stand (`STALL_STANDS.spaceFerrisWheel`), which sits
+inside `ferrisWheel`'s bounding radius by design and is reachable only via its
+own spur.
+
+**Mechanism** (read from the code and correlated, not isolated experimentally):
+`paths.ts:403` grows a spur to every `STALL_STANDS` entry in
+`Object.entries(STALL_PLACEMENTS)` order, and **`railRacer` is first**; each spur
+branches "from wherever the *network* comes nearest" (`paths.ts:313`). Move the
+booth to the rim and its spur is long, joins the network first, and every later
+spur branches somewhere else — the ferris kiosk's ends up in a pocket. This is
+the same action-at-a-distance the manifest's own comment already documents for
+PR #159, in a new place.
+
+The threshold is **radial, not rim-specific**. On the booth's own historic
+bearing: r41–r45 clean, r46 and beyond strand the kiosk. Inside the rim-PASS
+clusters the two bands do not overlap at all — on bearing 7° every radius below
+45.5 is blocked by waterFight's corridor, and 45.5 upward strands the kiosk.
+
+### What needs deciding — I should not pick this alone
+
+1. **Fix the spur-ordering fragility in `paths.ts`** so a booth move stops
+   reshaping where unrelated spurs branch. This is the actual root cause, it is
+   somebody's whole task, and it would unblock the east cluster. Note it is
+   necessary but **not sufficient**: `atRim` ranks by closeness to the edge and
+   so picks the *south* (24.1 m inside) over the east (29.6 m), and the south
+   regresses the rail invariants too. A rule that lands on the east would have to
+   prefer a spot that is further from the rim, for reasons the manifest cannot
+   express — so this needs the paths fix first, then a re-measure.
+2. **Land `fe565b8` and treat the `check:park` regressions as the next job.**
+   They are real — two waypoints nobody can walk to — so the branch is not green.
+3. **Re-derive `railRaceStallStandsAtTheRim`.** I was told not to and I have not.
+   But it is worth knowing *why* it now bites: with the ring 60–108 m out and
+   plots capped at 52 m, "the booth is the closest plot to the rails" is no
+   longer a statement about the booth being *at* the rim at all. It is a
+   statement about plot ordering, and it forces the booth to the park's pinch —
+   the one place the path network cannot absorb it.
+
+Raw per-position verdicts are in the session scratchpad (`full-results.json`,
+`sweep-results.json`).
 
 `check:rail-race` green (fairness still **0.0000 m**, all four lanes 12.57 m).
 `npm run build` exits 0.
