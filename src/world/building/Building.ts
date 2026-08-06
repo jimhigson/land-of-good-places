@@ -36,6 +36,7 @@ import { dressDeck } from './dressing';
 import type { InteractZone } from '../interact';
 import { softMaterial } from './parts';
 import {
+  BALL_PIT_RADIUS,
   BALL_PIT_X,
   BALL_PIT_Z,
   BUILDING_BASE_Y,
@@ -989,12 +990,11 @@ export class Building implements GameSystem {
       // `check:park` proves she can walk away from (GAME_DESIGN.md's EXIT
       // rule). She climbs out of the pit onto it. It is simply no longer the
       // place the ride drops her.
-      const spot = slideLandingSpot(
-        worldPosition.x,
-        worldPosition.z,
-        this.tangent.x,
-        this.tangent.z,
-      );
+      const spot = slideLandingSpot(worldPosition.x, worldPosition.z, this.tangent.x, this.tangent.z, {
+        x: BALL_PIT_X,
+        z: BALL_PIT_Z,
+        radius: BALL_PIT_RADIUS,
+      });
       // The scooped pit floor, from the same sampler her own feet use all the
       // rest of the time — not `terrainHeight`, which is a pure function of the
       // hills and does not know the pit has been dug out of them.

@@ -39,6 +39,11 @@ import {
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
+// Safe to import statically: `slide/landing.ts` deliberately reaches nothing
+// seeded — see the note on `PitCircle`. It takes the pit as an argument for
+// exactly this reason, so importing it here cannot fix the park's seed before
+// the harness sets `LGP_SEED`.
+import { LANDING_DROP, riderClearanceFromChute } from '../../src/world/slide/landing.ts';
 import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
 
 /**
@@ -1858,6 +1863,134 @@ const theSlideRiderSitsOnTheChute: Invariant = (facts) => {
 };
 
 /**
+ * How tall a child is, standing, in metres.
+ *
+ * ART_DIRECTION.md §4: the player kid is 2.12 m after the cartoon pass. Stated
+ * here rather than imported for the reason {@link CHUTE_HALF_WIDTH} is — and
+ * `scripts/check-statue-occlusion.mts` states the same number for the same
+ * reason, which is the other place in this repo that asks "can she be seen
+ * through something".
+ *
+ * Unlike {@link CHUTE_HALF_WIDTH}, `PLAYER_RADIUS` **is** added on top wherever
+ * this is used: a rider on the chute is contained by the trough, but a child
+ * standing in the ball pit is a free body next to a structure, and her shoulder
+ * is as able to be inside the chute as her nose.
+ */
+const RIDER_HEIGHT = 2.12;
+
+/**
+ * **A child finishes the ginormous slide in the balls, and not inside the
+ * chute she has just come out of.**
+ *
+ * Jim, having ridden it on 5 August 2026: *"at the bottom of the slide, at the
+ * end of the ride, the player appears clipped into the slide, not in the ball
+ * pit like they should"*. Both halves were true and both had one cause — the
+ * dismount was computed by `planExit()`, which fans bearings out from the pit
+ * and has never been told where the chute is (see `slide/landing.ts`).
+ *
+ * This is the guard that stops it coming back, and it is deliberately written
+ * as the **two** things Jim said rather than one: in the pit, *and* clear of
+ * the chute. Either alone passes for the wrong reason. A landing far out on
+ * the grass is clear of the chute; a landing dead under the mouth is inside the
+ * pit.
+ *
+ * ### Why this measures a column and not a point
+ *
+ * `finishRide` hands her back `LANDING_DROP` above the balls and lets gravity
+ * close the gap, so there is no single height at which she exists. The
+ * clearance is taken over the whole column she occupies between being handed
+ * back and coming to rest — feet on the balls at the bottom, head at the top of
+ * the drop — which is conservative in the only direction that matters.
+ *
+ * Thresholds come from the built trough (`CHUTE_ENVELOPE`, via
+ * `riderClearanceFromChute`) and never from `slide/plan.ts`'s `CORRIDOR_RADIUS`,
+ * which is the wider margin the *generator* steers by: measuring against the
+ * generator's own target would report a clip half a metre before there is one,
+ * and the temptation would then be to loosen the wrong number.
+ */
+const theSlideRiderLandsInTheBalls: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const landing = facts.slideLanding;
+  const chute = facts.slideChute;
+
+  // Anti-vacuity, in the tradition of `castleMasonryTopY`'s guard: every clause
+  // below is a comparison, and a comparison against a missing measurement is a
+  // pass that measured nothing.
+  if (chute.length === 0) {
+    return ['the ginormous slide has no chute, so where it lands cannot be measured'];
+  }
+  if (
+    !Number.isFinite(landing.x) ||
+    !Number.isFinite(landing.z) ||
+    !Number.isFinite(landing.groundY) ||
+    !Number.isFinite(landing.pitRadius)
+  ) {
+    return [
+      'the ginormous slide’s landing could not be measured — ' +
+        `spot (${landing.x}, ${landing.z}), ground ${landing.groundY}, ` +
+        `pit radius ${landing.pitRadius}`,
+    ];
+  }
+
+  // 1. She is in the balls — all of her, not just her centre line.
+  const fromPitCentre = Math.hypot(landing.x - landing.pitX, landing.z - landing.pitZ);
+  if (fromPitCentre + PLAYER_RADIUS > landing.pitRadius) {
+    complaints.push(
+      `the ginormous slide puts a child down ${fromPitCentre.toFixed(2)} m from the ball ` +
+        `pit’s centre, and she is ${PLAYER_RADIUS} m wide, so she overhangs a pit of ` +
+        `radius ${landing.pitRadius} m by ` +
+        `${(fromPitCentre + PLAYER_RADIUS - landing.pitRadius).toFixed(2)} m — ` +
+        'the ride is supposed to land her in the balls',
+    );
+  }
+
+  // 2. And she is not inside the thing she just came out of. Measured against
+  //    every sample of the built chute, not only its last one: the route wraps
+  //    the castle and an earlier stretch passing over the pit would clip her
+  //    just as thoroughly as the mouth does.
+  let worstGap = Infinity;
+  let worstAt = -1;
+  for (let i = 0; i < chute.length; i += 1) {
+    const [cx, cy, cz] = chute[i]!;
+    const gap = riderClearanceFromChute(
+      landing.x,
+      landing.groundY,
+      landing.z,
+      // The whole column: the drop she is handed back at, plus her own height.
+      LANDING_DROP + RIDER_HEIGHT,
+      cx,
+      cy,
+      cz,
+    );
+    if (gap < worstGap) {
+      worstGap = gap;
+      worstAt = i;
+    }
+  }
+
+  if (!Number.isFinite(worstGap)) {
+    // Cannot happen with a non-empty chute, and says so rather than passing if
+    // it somehow does. Opposite polarity to `theSlideDoesNotClipTheTowers`'s
+    // `Infinity`, where "never came near one" is a genuine pass; here every
+    // sample is compared, so an infinity means no comparison happened.
+    return ['the ginormous slide’s landing was never compared against the chute'];
+  }
+
+  if (worstGap < 0) {
+    const [cx, cy, cz] = chute[worstAt]!;
+    complaints.push(
+      `the ginormous slide leaves a child ${(-worstGap).toFixed(2)} m inside its own chute ` +
+        `where it stops: she is put down at (${landing.x.toFixed(2)}, ${landing.z.toFixed(2)}) ` +
+        `standing on ${landing.groundY.toFixed(2)} m, and the chute runs through ` +
+        `(${cx.toFixed(2)}, ${cy.toFixed(2)}, ${cz.toFixed(2)}) — ` +
+        `${((worstAt / (chute.length - 1)) * 100).toFixed(0)}% along the ride`,
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * Air that must separate the ginormous slide from the Sky Cruiser, in metres.
  *
  * Decision 4's rail-over-rail figure. Stated here rather than imported from
@@ -2022,6 +2155,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theGinormousSlideMissesTheCastleTowers,
   ],
   ['a child boarding the ginormous slide is put down on the chute', theSlideRiderSitsOnTheChute],
+  [
+    'a child finishing the ginormous slide lands in the balls, clear of the chute',
+    theSlideRiderLandsInTheBalls,
+  ],
   ['the ginormous slide keeps its air from the Sky Cruiser', theSlideKeepsItsAirFromTheCruiser],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
   ['the Sky Cruiser always flies through the castle', skyCruiserAlwaysFliesThroughTheCastle],

@@ -257,6 +257,30 @@ export interface ParkFacts {
     readonly world: readonly (readonly [number, number, number])[];
   };
   /**
+   * **Where the ginormous slide actually puts a child down, and the pit that is
+   * supposed to catch her.**
+   *
+   * Produced by calling the game's own `slideLandingSpot` on the **built**
+   * chute's mouth and world tangent, then sampling the **built** walk surface
+   * under the answer — so this is the runtime result reproduced, not a
+   * paraphrase of it. The same tactic `railRaceExitFitsTheParty` uses when it
+   * calls the real `resolveDismount` rather than modelling one.
+   *
+   * `groundY` comes from `WalkSurfaces.sample`, the sampler her own feet use,
+   * and not from `terrainHeight`: the pit is scooped out of the hills and
+   * `terrainHeight` is deliberately a pure function of the hills. A landing
+   * measured against the wrong one of those two is out by `BALL_PIT_DEPTH`,
+   * which is most of the headroom this is checking for.
+   */
+  readonly slideLanding: {
+    readonly x: number;
+    readonly z: number;
+    readonly groundY: number;
+    readonly pitX: number;
+    readonly pitZ: number;
+    readonly pitRadius: number;
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -448,6 +472,38 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // The landing, reproduced exactly as `Building.finishRide` computes it: the
+  // built chute's mouth, the built chute's world tangent there, through the
+  // game's own `slideLandingSpot`. Dynamic imports for the usual reason — a
+  // static one of anything reaching `parkManifest` fixes the seed before the
+  // harness has set `LGP_SEED`.
+  const { slideLandingSpot } = await import('../../src/world/slide/landing.ts');
+  // Dynamic because *this* one is seeded — `layout.ts` resolves a placement out
+  // of the manifest at module load. `slide/landing.ts` above is not, on purpose.
+  const { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } = await import(
+    '../../src/world/building/layout.ts'
+  );
+  const slideLanding = (() => {
+    const mouth = slide.pointAt(1, new Vector3());
+    slide.group.localToWorld(mouth);
+    const heading = slide.tangentAt(1, new Vector3());
+    slide.group.updateMatrixWorld(true);
+    heading.transformDirection(slide.group.matrixWorld);
+    const spot = slideLandingSpot(mouth.x, mouth.z, heading.x, heading.z, {
+      x: BALL_PIT_X,
+      z: BALL_PIT_Z,
+      radius: BALL_PIT_RADIUS,
+    });
+    return {
+      x: spot.x,
+      z: spot.z,
+      groundY: world.building.surfaces.sample(spot.x, spot.z, mouth.y),
+      pitX: BALL_PIT_X,
+      pitZ: BALL_PIT_Z,
+      pitRadius: BALL_PIT_RADIUS,
+    };
+  })();
+
   const nearPairs = new Set<string>();
   for (const entry of PARK_MANIFEST) {
     if (entry.near) nearPairs.add(pairKey(entry.id, entry.near.id));
@@ -601,6 +657,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathEdges,
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
+    slideLanding,
     castleMasonryTopY,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,

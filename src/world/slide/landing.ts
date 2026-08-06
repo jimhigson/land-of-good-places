@@ -1,7 +1,3 @@
-import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
-import { PLAYER_RADIUS } from '../../core/constants';
-import { CHUTE_ENVELOPE } from '../building/SlideRide';
-
 /**
  * **Where the ginormous slide puts a child down: in the balls.**
  *
@@ -48,6 +44,29 @@ import { CHUTE_ENVELOPE } from '../building/SlideRide';
  * the node is the first place she can stand. What changed is that it is no
  * longer where the ride *drops* her.
  */
+
+import { PLAYER_RADIUS } from '../../core/constants';
+import { CHUTE_ENVELOPE } from '../building/SlideRide';
+
+/**
+ * Where the balls are, as an argument rather than an import.
+ *
+ * **This module deliberately reaches nothing seeded.** `BALL_PIT_X/Z` come from
+ * `building/layout.ts`, which resolves a placement out of `parkManifest.ts` at
+ * module load — so importing them here would mean `test/procgen/invariants.ts`
+ * could not `import` this file without fixing the park's seed before the
+ * harness has set `LGP_SEED`. That trap has cost this repo a whole suite going
+ * quietly *skipped* rather than red, more than once.
+ *
+ * Taking the pit as a parameter also means this file needs no edit at all when
+ * the pit stops being pinned and starts following the slide (#229): the one
+ * thing it wants to know is where the balls ended up.
+ */
+export interface PitCircle {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
 
 /**
  * How far past the mouth she carries on, in metres.
@@ -105,16 +124,15 @@ export function slideLandingSpot(
   mouthZ: number,
   headingX: number,
   headingZ: number,
+  pit: PitCircle,
 ): LandingSpot {
   const run = Math.hypot(headingX, headingZ);
   // A mouth pointing straight down has no opinion about which way to carry on.
   // Aim at the middle of the pit instead of dividing by zero.
   const [unitX, unitZ] =
-    run > 1e-6
-      ? [headingX / run, headingZ / run]
-      : unitTowards(mouthX, mouthZ, BALL_PIT_X, BALL_PIT_Z);
+    run > 1e-6 ? [headingX / run, headingZ / run] : unitTowards(mouthX, mouthZ, pit.x, pit.z);
 
-  return clampToPit(mouthX + unitX * LANDING_RUN_ON, mouthZ + unitZ * LANDING_RUN_ON);
+  return clampToPit(mouthX + unitX * LANDING_RUN_ON, mouthZ + unitZ * LANDING_RUN_ON, pit);
 }
 
 /**
@@ -124,13 +142,13 @@ export function slideLandingSpot(
  * the mouth she is trying to get clear of — the one direction this must never
  * move her.
  */
-function clampToPit(x: number, z: number): LandingSpot {
-  const dx = x - BALL_PIT_X;
-  const dz = z - BALL_PIT_Z;
+function clampToPit(x: number, z: number, pit: PitCircle): LandingSpot {
+  const dx = x - pit.x;
+  const dz = z - pit.z;
   const distance = Math.hypot(dx, dz);
-  const limit = BALL_PIT_RADIUS - PIT_MARGIN;
+  const limit = pit.radius - PIT_MARGIN;
   if (distance <= limit || distance < 1e-6) return { x, z };
-  return { x: BALL_PIT_X + (dx / distance) * limit, z: BALL_PIT_Z + (dz / distance) * limit };
+  return { x: pit.x + (dx / distance) * limit, z: pit.z + (dz / distance) * limit };
 }
 
 function unitTowards(fromX: number, fromZ: number, toX: number, toZ: number): [number, number] {
