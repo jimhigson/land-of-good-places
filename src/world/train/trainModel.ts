@@ -16,6 +16,7 @@ import { PALETTE } from '../../core/palette';
 import { createFacePatch, type FacePatch } from '../../art/style/faces';
 import { toonMaterial } from '../../art/style/materials';
 import { RAIL_HEIGHT } from './track';
+import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /**
  * Puffing Percy and her three open carriages.
@@ -32,11 +33,11 @@ import { RAIL_HEIGHT } from './track';
  * of them.
  */
 
-/** Height of a carriage floor above the sleepers. */
-export const CAR_FLOOR_Y = 0.58;
-
-/** Where a passenger's feet go: the top of the bench. */
-export const SEAT_Y = CAR_FLOOR_Y + 0.42;
+// The vertical dimensions live in their own leaf module — see
+// `trainDimensions.ts` for why (issue #226: three floats that callers should be
+// able to read without loading this file's whole module graph). Re-exported so
+// every existing importer of `trainModel.ts` keeps working unchanged.
+export { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /** Half the track gauge — where the wheels sit either side of the centre line. */
 const WHEEL_OFFSET = 0.55;
@@ -150,7 +151,7 @@ export function createLocomotive(): Locomotive {
   funnelRim.position.set(0, CAR_FLOOR_Y + 1.72, 1.25);
   root.add(funnelRim);
 
-  const funnelTip = new Vector3(0, CAR_FLOOR_Y + 1.84, 1.25);
+  const funnelTip = new Vector3(0, LOCO_BODY_TOP_Y, 1.25);
 
   // --- dome and whistle ----------------------------------------------------
   const dome = solidMesh(new SphereGeometry(0.22, 14, 10), trimMaterial);

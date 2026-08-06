@@ -83,6 +83,31 @@ export const KID_HEAD_HEIGHT = 1.36;
 export const KID_HEIGHT = 2.12;
 
 /**
+ * The height of the **tallest child the park can produce**, in metres — every
+ * hair style crossed with every hat, measured with {@link visibleTop} on real
+ * models.
+ *
+ * `KID_HEIGHT` is the *default* style and is nowhere near this: the measured
+ * spread runs 2.087 (bob, short, bowl…) to 2.490 bare-headed (mohican's crest),
+ * and a party hat takes it to **2.968** — 0.85 m more than `KID_HEIGHT`. Hats
+ * dominate hair, and they count, because children wear them on rides:
+ * `WornHat` and `NpcSystem.buildIndividualAvatar` both parent the hat model
+ * into `hatAnchor` at its own natural scale.
+ *
+ * **Why this exists rather than being everybody's own guess:** anything sizing
+ * a space a child has to fit through needs the worst case, not the typical one.
+ * `train/clearance.ts` is the first caller — a bridge over the railway derived
+ * from `KID_HEIGHT` would clear the average child and hit the tall ones.
+ *
+ * **It cannot go stale.** `test/procgen/invariants.ts`'s "the clearance over the
+ * railway covers the train and everyone riding it" re-measures the full
+ * hair × hat cross product from real models on every seed and fails if any
+ * built child is taller than this. Add a taller hat and that goes red rather
+ * than a bridge quietly getting too low.
+ */
+export const TALLEST_CHILD_HEIGHT = 2.97;
+
+/**
  * How far the head is tipped back, in radians (≈ 10°).
  *
  * The game camera looks down at 38°. A head this big, sitting level, presents
