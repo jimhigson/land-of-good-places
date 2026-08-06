@@ -174,3 +174,44 @@ count read, not colour. Never piped through head/tail.
 
 `scripts/probe-slide-length.mts`, `scripts/probe-wall-crossing.mts` — probes,
 not part of the PR. Recreate from this file's numbers if needed.
+
+
+## Review round 3 (Overseer) — DONE. PR approved.
+
+- Fixed the dangling `{@link theSlideDoesNotClipTheTowers}` (real symbol:
+  `theGinormousSlideMissesTheCastleTowers`), and took the reviewer's sharper
+  reason for the opposite polarity: the towers invariant guards its own vacuity
+  *separately* at `invariants.ts:1692` (`towers.length === 0`), which is what
+  leaves `Infinity` there with only the genuine-pass reading. One number here,
+  so one check does both jobs. Commit `51ba319`.
+
+### #229 round 3 — headline holds, my explanation does not
+
+**Holdout seeds 3, 7, 13, 29, 47 (never looked at before): 5 of 5 improve.**
+Worst 9.94 -> 3.73 s, total 25.25 -> 10.86 s. Across all ten seeds now measured,
+**10 of 10 improve**, total 59.37 -> 27.23 s. Attempts-to-solution (the
+ordering-independent unit) roughly halves: 179 -> 77 across all ten, and the
+holdouts agree with the originals (79 vs 75) rather than regressing.
+
+Noticed on the way: **seed 47's baseline ride is 74.75 m against the 75 m cap**
+-- a fresh seed within 0.25 m of tripping the guard Fix 1 added.
+
+**Length is an input, not an output.** `CLOSE_AFTER 0.68` / `CLOSE_ONLY_AFTER
+1.45` x desiredLength 60 clamp closure into 40.8-87 m. No distance->length model
+could have worked; my controlled sweep was measuring the clamp. The 3x key
+reduces to "prefer landings near 20 m" -- an accidental proxy, never a model.
+
+**"Near landings are genuinely easier" is FALSE.** Holding landings-per-band at
+N=8 (360 attempts, under the 700 budget, so no door starvation) seed 5's *far*
+band R=38 is its easiest by far (44 attempts, 2.28 s) while R=18/26/30/34 fail
+outright. The reviewer's confound was real and my mechanism was wrong.
+
+The confound cannot be fully removed by subsampling either: circumference 2*pi*r
+means R=18 holds only 9 landings total, so N<=8, at which point success turns on
+whether one workable landing survived the subsample.
+
+**Current hypothesis (stated as one, untested): it is diversity, not distance.**
+Ascending distance walks many distinct sites early; with anti-diagonal ordering
+covering doors early too, the first 700 attempts span a more diverse slice of
+(door x landing). Whoever implements this must NOT write "near landings are
+easier" in a comment -- that is the claim I would have shipped, and it is false.
