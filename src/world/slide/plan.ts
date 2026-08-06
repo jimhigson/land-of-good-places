@@ -126,6 +126,28 @@ const DESIRED_LENGTH = 60;
 const MAX_LENGTH = 92;
 
 /**
+ * The longest route that is still the ride we asked for, in metres.
+ *
+ * {@link MAX_LENGTH} is the per-piece hard stop: a sample further along than
+ * that is not a legal place to be, so the search backs up. This is the softer
+ * one, asked of a finished route, and it exists because the search now keeps
+ * looking until a route is *safe* rather than taking what it is given. Safety
+ * and length pull in opposite directions — a longer route is higher everywhere,
+ * so it clears the coaster more easily — and with nothing pushing back the
+ * search was answering "is it safe?" with 83-87 m rides on a brief that asked
+ * for 60.
+ *
+ * The drop is fixed at 13.75 m, so length is gradient: at 87 m the canonical
+ * seed's chute also ran too flat and too far to stand on legs. Both complaints
+ * have the same cure, which is why this is one number rather than two.
+ *
+ * Kept above {@link DESIRED_LENGTH} by a wide margin on purpose. An open route
+ * overshoots what it is asked for — see {@link DESIRED_LENGTH} — so a ceiling
+ * near 60 would reject nearly everything and put the boot time straight back.
+ */
+const MAX_RIDEABLE_LENGTH = 75;
+
+/**
  * How far behind the pit the search lines itself up, in metres.
  *
  * The generator's own default is 38 m, which is a reasonable fraction of the
@@ -1004,7 +1026,8 @@ function planSlide(): PlannedSlide {
     clear: (x, z, radius, distanceAlong) =>
       chuteMayPass(x, z, radius, distanceAlong, DESIRED_LENGTH),
     satisfies: (candidate) =>
-      candidate.length <= 75 && heightSensitiveComplaint(chutePoints(candidate)) === null,
+      candidate.length <= MAX_RIDEABLE_LENGTH &&
+      heightSensitiveComplaint(chutePoints(candidate)) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
     selfClearance: SELF_CLEARANCE,

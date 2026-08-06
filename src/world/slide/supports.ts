@@ -41,8 +41,22 @@ import { cruiserCrossesColumn, insideCastle } from './plan';
 /** The two plots this ride spans. See the pinch test in {@link planSlideLegs}. */
 const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
 
-/** Metres of chute between attempted legs. Generous on purpose — see above. */
-const LEG_SPACING = 13;
+/**
+ * Metres of chute between attempted legs.
+ *
+ * This is how often a leg is *tried*, not how often one is built — most
+ * candidates are rejected, so the two numbers are far apart. It was 13, which
+ * on a 77 m chute is five attempts, and on seed 5 the paved network took three
+ * of them: `PATH_CLEARANCE` forbids a post within 2.8 m of a path, and this
+ * chute runs alongside one for most of its length. Two legs under 77 m of
+ * elevated trough reads as floating, and `test/procgen/invariants.ts` said so.
+ *
+ * Trying more places does not build more legs where there is no room for them —
+ * every rejection below still applies, and the crowding test keeps whatever is
+ * placed at least a child's width apart. It only stops a chute going unsupported
+ * because the handful of spots it happened to ask about were all on the path.
+ */
+const LEG_SPACING = 9;
 
 /**
  * How far along the chute a leg may be nudged to find clear ground.
