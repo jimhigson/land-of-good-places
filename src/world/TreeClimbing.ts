@@ -1,13 +1,10 @@
-import type { Object3D } from 'three';
 import { CAMERA_YAW_DEGREES } from '../core/constants';
 import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
 import { KID_HEIGHT } from '../art/models/kid';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
-import type { NpcCharacter } from '../entities/npc/NpcCharacter';
 import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
-import type { KidAvatar } from '../entities/npc/kidCrowd';
 import type { NpcSystem } from '../entities/npc';
 import type { Hud } from '../ui/Hud';
 import { pressZone, type InteractZone } from './interact';
@@ -37,40 +34,40 @@ import { terrainHeight } from './terrain';
  *   pose, via the small `beginClimb/setClimbPose/endClimb` trio added to
  *   `NpcCharacter` for exactly this.
  *
- * **The player is drawn whole; NPCs are still head-only.** The two differ on
- * purpose, and the history is worth keeping because the reasoning failed in an
- * instructive way.
+ * **Everybody who climbs is drawn whole — the player and every NPC alike.**
+ * Jim, 6 August: *"make nobody ever just a head."*
  *
- * Originally *both* were hidden below the neck: rather than trust the
+ * The history is worth keeping, because the reasoning failed in an instructive
+ * way. Originally *everyone* was hidden below the neck: rather than trust the
  * isometric camera to see a body occluded by a canopy blob from every one of
  * its four snap angles, the body was switched off for the duration and the
  * head positioned at the canopy top. What that actually relied on — nobody
  * wrote it down, which is the whole problem — was the **canopy being wide
- * enough to hide the absence of a body**. It was not hiding her torso; it was
- * hiding the hole where her torso would have been. Widen the set of climbable
- * trees (thinner canopies qualify) or raise her out of the leaves
- * ({@link CLIMB_PEEK_LIFT}, now 1.2 m) and the hole stops being covered: what
- * you see is a head and a hand floating over a tree. Jim, 6 August, on seeing
- * exactly that: *"why do they no longer have a body?"*
+ * enough to hide the absence of a body**. It was not hiding a torso; it was
+ * hiding the hole where the torso would have been. Widen the set of climbable
+ * trees so thinner canopies qualify, or raise the climber out of the leaves
+ * ({@link CLIMB_PEEK_LIFT}), and the hole stops being covered: what you see is
+ * a head and a hand floating over a tree. Jim, on seeing exactly that:
+ * *"why do they no longer have a body?"*
  *
- * His ruling was to draw all of her — *"just include the whole body, no other
- * change needed"* — and on the legs that then hang out past the canopy and the
- * trunk, *"legs poking out is fine when climbing a tree, that's natural"*.
+ * The ruling was to draw all of her — *"just include the whole body, no other
+ * change needed"* — and, on the legs that then hang out past the canopy and
+ * the trunk, *"legs poking out is fine when climbing a tree, that's natural"*.
  * That is the look: a child sitting up a tree with her legs dangling, not a
- * disembodied head. So the player's hiding is gone outright, along with the
- * `.visible` bookkeeping and its model-swap guard.
+ * disembodied head. The player got it first; **that left ~31 NPC climbers as
+ * floating heads, and his *"they"* had been plural all along**, so they now
+ * get the same treatment.
  *
- * **NPCs keep the old treatment**, deliberately and only because nobody has
- * asked otherwise — they have no wave and no raised arm, so what a passer-by
- * sees of a climbing NPC is different from what she sees of herself. Their
- * path is also mechanically different: drawn through `InstancedCrowd`, a
- * proxy's `.visible` is not what `commit()` reads — only
- * `CrowdMember.shown[partIndex]` is — so the equivalent is finding every part
- * whose prototype mesh is *not* a descendant of the head joint and zeroing
- * those indices for the duration (cached per avatar, since the rig shape is
- * identical for the whole crowd). If a floating NPC head ever reads as wrong
- * for the same reason hers did, this is the paragraph that says why it was
- * left alone rather than overlooked.
+ * It cost nothing to give it to them, which is worth stating because the
+ * instanced path looks like it might be the reason they were left out. It is
+ * not: an NPC is drawn through `InstancedCrowd`, where a proxy's `.visible` is
+ * not what `commit()` reads — only `CrowdMember.shown[partIndex]` is — and
+ * that array is built `.fill(1)`. Drawing a whole child is therefore the
+ * *default*, and hiding one was the work: a cached list of part indices, a
+ * `Uint8Array` copy of every climber's flags to restore afterwards, and a
+ * separate `.visible` ledger for the one pinned kid built as a real
+ * `CharacterModel`. All three are now deleted, so this is less code and less
+ * per-climb allocation than before, on every one of those climbers.
  *
  * **The tree's collider is untouched.** Nothing here adds or removes a
  * collision shape; the trunk stays exactly as solid as it always was for
@@ -99,19 +96,13 @@ export class TreeClimbing implements GameSystem {
   private playerFacingNow = 0;
 
   // --- NPC state ---------------------------------------------------------
-  /** Every part hidden while an avatar climbs — computed once, reused forever. */
-  private readonly npcHideParts = new WeakMap<KidAvatar, readonly number[]>();
-  /** What each part's `shown` flag was before climbing, so it restores exactly. */
-  private readonly npcShownBackup = new Map<NpcCharacter, Uint8Array>();
-  /**
-   * The player-style `.visible` toggle's own bookkeeping, for a pinned kid
-   * built as a one-off `CharacterModel` rather than an instanced `KidAvatar`
-   * — see `hideNpcBody`'s doc comment for why it needs a different mechanism
-   * from the crowd's `shown` array entirely. This is the last user of the
-   * `.visible`-toggle approach: the player's copy of it was deleted when she
-   * started being drawn whole (see the class doc).
-   */
-  private readonly npcHiddenVisibleParts = new Map<NpcCharacter, Object3D[]>();
+  //
+  // There is none. A climbing NPC is simply posed, exactly like the player:
+  // nothing is switched off, so nothing has to be remembered and put back. The
+  // three maps that used to live here — a cached list of part indices, a
+  // `Uint8Array` copy of every climber's `shown` flags, and a parallel
+  // `.visible` ledger for the one pinned kid built as a real `CharacterModel`
+  // — all existed only to undo the hiding. See the class doc.
 
   constructor(
     private readonly player: Player,
@@ -432,10 +423,8 @@ export class TreeClimbing implements GameSystem {
 
       if (shouldClimb && !isClimbing) {
         character.beginClimb();
-        this.hideNpcBody(character);
       } else if (!shouldClimb && isClimbing) {
         character.endClimb();
-        this.showNpcBody(character);
         continue;
       }
 
@@ -467,64 +456,6 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
-  /**
-   * Hides everything but the head, whichever of the two shapes `avatar` is —
-   * see the class doc's "Body hidden, head out" section. An instanced
-   * `KidAvatar` (has `member`) goes through `member.shown`, same as always;
-   * a pinned kid's one-off `CharacterModel`-backed avatar (no `member`,
-   * real scene-graph meshes) gets exactly the player's own `.visible`
-   * toggle, because it *is* the player's own kind of model.
-   */
-  private hideNpcBody(character: NpcCharacter): void {
-    const { avatar } = character;
-    const member = avatar.member;
-    if (member) {
-      const parts = this.hidePartsFor(avatar as KidAvatar);
-      this.npcShownBackup.set(character, Uint8Array.from(member.shown));
-      for (const index of parts) member.shown[index] = 0;
-      return;
-    }
-
-    const hidden: Object3D[] = [];
-    for (const child of avatar.rig.body.children) {
-      if (child === avatar.rig.head) continue;
-      if (!child.visible) continue;
-      child.visible = false;
-      hidden.push(child);
-    }
-    this.npcHiddenVisibleParts.set(character, hidden);
-  }
-
-  private showNpcBody(character: NpcCharacter): void {
-    const member = character.avatar.member;
-    if (member) {
-      const backup = this.npcShownBackup.get(character);
-      if (!backup) return;
-      member.shown.set(backup);
-      this.npcShownBackup.delete(character);
-      return;
-    }
-
-    const hidden = this.npcHiddenVisibleParts.get(character);
-    if (!hidden) return;
-    for (const child of hidden) child.visible = true;
-    this.npcHiddenVisibleParts.delete(character);
-  }
-
-  /** Every part index that is not the head or one of its own parts. Cached. */
-  private hidePartsFor(avatar: KidAvatar): readonly number[] {
-    const cached = this.npcHideParts.get(avatar);
-    if (cached) return cached;
-
-    const head = avatar.rig.head;
-    const indices: number[] = [];
-    avatar.member.proxies.forEach((proxy, index) => {
-      if (proxy !== head && !isDescendantOf(proxy, head)) indices.push(index);
-    });
-
-    this.npcHideParts.set(avatar, indices);
-    return indices;
-  }
 }
 
 // -------------------------------------------------------------------- pose
@@ -733,15 +664,6 @@ function climbPose(
     y: lerp(climbingUp ? groundY : topY, climbingUp ? topY : groundY, eased),
     facing: approachAngle + Math.PI,
   };
-}
-
-function isDescendantOf(node: Object3D, ancestor: Object3D): boolean {
-  let current: Object3D | null = node.parent;
-  while (current) {
-    if (current === ancestor) return true;
-    current = current.parent;
-  }
-  return false;
 }
 
 function descendPrompt(): string {

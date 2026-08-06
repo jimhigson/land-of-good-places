@@ -18,10 +18,12 @@
  * and this is *height*.
  *
  * The two cases are meant to diverge and will keep diverging: the player's lift
- * is bought by her wave — a raised arm that has to clear the leaves — while an
- * NPC has no wave and no arm drawn at all, so any lift they get is pure
- * elevation with nothing under it. That is a shared-code/different-intent split,
- * which wants a check rather than a convention.
+ * is bought by her wave — a raised arm that has to clear the leaves — and an NPC
+ * has no wave to buy one with, so any lift they get is elevation they have no
+ * use for. (Both are drawn as whole children since Jim's *"make nobody ever
+ * just a head"*; it is the *wave* that differs now, not the body.) That is a
+ * shared-code/different-intent split, which wants a check rather than a
+ * convention.
  *
  * ## What it measures
  *
@@ -42,7 +44,7 @@
  * question per check, and neither of the two can quietly stop asking its own.
  */
 import './headless-canvas.mjs';
-import { Vector3 } from 'three';
+import { Object3D, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
@@ -65,6 +67,27 @@ const verbose = process.argv.includes('--verbose');
 const mutateArg = process.argv.indexOf('--mutate');
 const MUTATION = mutateArg > 0 ? Number(process.argv[mutateArg + 1]) : 0;
 
+/**
+ * `--hide-body` re-creates the retired head-only climb for NPCs.
+ *
+ * The mutation that proves the body guard at the bottom can fail, kept as a
+ * flag so the next person re-proves it in one command rather than reinstating
+ * `hideNpcBody` by hand and hoping they take it out again. It is the deleted
+ * method, verbatim: every part whose prototype is not the head or one of its
+ * descendants gets its `shown` flag cleared.
+ */
+const hideBodyMutation = process.argv.includes('--hide-body');
+
+/** True if `node` is `ancestor` or hangs off it. */
+function isAtOrUnder(node: Object3D, ancestor: Object3D): boolean {
+  let current: Object3D | null = node;
+  while (current) {
+    if (current === ancestor) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 // --------------------------------------------------------------- the band
 //
 // Both bounds come off the canopy that was actually built, and both are
@@ -85,19 +108,26 @@ const MUTATION = mutateArg > 0 ? Number(process.argv[mutateArg + 1]) : 0;
  * geometry. Run `--mutate <metres>` to reproduce all of it:
  *
  * ```
- *   shipped            0.073 - 0.173
- *   +0.5 m to NPCs     0.195 - 0.304
- *   +1.0 m             0.305 - 0.434
- *   +1.2 m             0.348 - 0.486   <- the player's real lift, if it leaked
- *   +5.0 m             1.157 - 1.475   <- the mutation #224 was found with
+ *   shipped           -0.049 - 0.015
+ *   +0.5 m to NPCs     0.075 - 0.173
+ *   +1.0 m             0.183 - 0.332
+ *   +1.2 m             0.226 - 0.395   <- the player's real lift, if it leaked
+ *   +5.0 m             1.047 - 1.609   <- the mutation #224 was found with
  * ```
  *
- * Nothing lands between **0.173** and **0.304**, so 0.25 cannot be reached by
- * ordinary retuning of a park whose trees change size every generation, and
- * cannot be survived by a lift leaking to NPCs — not even a half-metre one,
- * which is well under half of what the player currently gets.
+ * **This was 0.25 and is now 0.08, a tightening**, because the shipped
+ * population moved down when the hop term was taken out of a climb
+ * (`NpcCharacter.animate` — it was lifting every climber 0.30–0.67 m). Against
+ * the old baseline a half-metre leak scored 0.195–0.304 and only just failed;
+ * against this one it scores 0.075–0.173 and would have **passed** at 0.25. A
+ * threshold left where it was would have quietly stopped catching the very bug
+ * it was written for.
+ *
+ * Nothing lands between **0.015** and **0.075**. 0.08 clears the shipped worst
+ * by 5x, so a park whose trees regenerate a little differently will not trip it,
+ * and still fails a half-metre leak by more than 2x.
  */
-const MAX_ABOVE_CANOPY = 0.25;
+const MAX_ABOVE_CANOPY = 0.08;
 
 /**
  * And how far *into* the leaves a head may sink before it is not peeking.
@@ -105,9 +135,11 @@ const MAX_ABOVE_CANOPY = 0.25;
  * Same units. Zero would demand the head clear the topmost leaf outright, which
  * is stricter than the game needs — a head half-buried in foliage still reads
  * as a child in a tree — but sink it far below the top and there is nothing to
- * see at all. The worst real climber today sits 0.073 *above* the leaves, so
- * there is a great deal of room before this fires; it is here to catch a perch
- * that stops clearing the canopy at all, not to police the current spread.
+ * see at all. The lowest real climber today sits 0.049 *below* the topmost leaf
+ * — the head joint is roughly level with the canopy top, which is where
+ * `climbPose` has always aimed it — so there is a great deal of room before
+ * this fires. It is here to catch a perch that stops clearing the canopy at
+ * all, not to police the current spread.
  */
 const MIN_ABOVE_CANOPY = -0.25;
 
@@ -163,6 +195,51 @@ function canopyBandOf(tree: ClimbableTreeSeed): { top: number; bottom: number } 
 }
 
 /**
+ * **How far below the head an NPC climber is actually drawn**, in metres.
+ *
+ * The NPC half of the body guard. `check:climb-wave` measures the *player's*
+ * body in pixels from the play camera; this is the same question asked of the
+ * crowd, and it needs asking separately because they are drawn by a completely
+ * different mechanism — a check that passed for her while ~31 NPCs were still
+ * floating heads is precisely the shape this PR keeps rediscovering.
+ *
+ * Measured off what is actually **drawn**, not off the rig: for an instanced
+ * `KidAvatar` a proxy is only rendered when `CrowdMember.shown[i]` is set (the
+ * proxy's own `.visible` is not what `commit()` reads), so hidden parts are
+ * excluded here exactly as they are excluded from the frame. For the one pinned
+ * kid built as a real `CharacterModel`, `.visible` is the truth instead.
+ *
+ * Returns the drop from the head joint to the lowest drawn part. Head-only
+ * gives ~0; a whole child gives most of {@link NpcAvatar.headBaseY}.
+ */
+function drawnDropBelowHead(character: NpcCharacter, headY: number): number {
+  const { avatar } = character;
+  const member = avatar.member;
+  const scratch = new Vector3();
+  let lowest = headY;
+
+  if (member) {
+    member.proxies.forEach((proxy, index) => {
+      if (!member.shown[index]) return;
+      lowest = Math.min(lowest, proxy.getWorldPosition(scratch).y);
+    });
+  } else {
+    avatar.rig.root.traverse((node) => {
+      let current: typeof node | null = node;
+      while (current) {
+        if (!current.visible) return;
+        current = current.parent;
+      }
+      lowest = Math.min(lowest, node.getWorldPosition(scratch).y);
+    });
+  }
+  return headY - lowest;
+}
+
+/** Set by {@link perchHeadY}, so the body measurement rides along with it. */
+let lastDrawnDrop = 0;
+
+/**
  * Puts `character` up `tree` for real and returns where its head ends up.
  *
  * The climb *decision* is forced — the getters `TreeClimbing` reads are shadowed
@@ -215,6 +292,20 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
   const rig = character.avatar.rig;
   rig.root.updateMatrixWorld(true);
   const headY = rig.head.getWorldPosition(new Vector3()).y;
+  if (hideBodyMutation) {
+    const member = character.avatar.member;
+    const head = character.avatar.rig.head;
+    if (member) {
+      member.proxies.forEach((proxy, index) => {
+        if (!isAtOrUnder(proxy, head)) member.shown[index] = 0;
+      });
+    } else {
+      for (const child of character.avatar.rig.body.children) {
+        if (child !== head) child.visible = false;
+      }
+    }
+  }
+  lastDrawnDrop = drawnDropBelowHead(character, headY);
 
   // Put the child back on the ground so the next tree starts clean.
   for (const name of ['climbing', 'climbTree', 'climbGroundSpot', 'climbPhase', 'climbProgress']) {
@@ -231,6 +322,8 @@ interface Row {
   canopyHeight: number;
   clearance: number;
   fraction: number;
+  /** How far below the head this climber is actually drawn, in metres. */
+  drawnDrop: number;
 }
 
 const rows: Row[] = [];
@@ -246,7 +339,13 @@ for (const [index, tree] of trees.entries()) {
     if (!character) continue;
     const headY = perchHeadY(character, tree, (b / BEARINGS) * Math.PI * 2);
     const clearance = headY - band.top;
-    rows.push({ index, canopyHeight, clearance, fraction: clearance / canopyHeight });
+    rows.push({
+      index,
+      canopyHeight,
+      clearance,
+      fraction: clearance / canopyHeight,
+      drawnDrop: lastDrawnDrop,
+    });
   }
 }
 
@@ -318,6 +417,50 @@ if (lowest.fraction < MIN_ABOVE_CANOPY) {
       `the leaves of tree ${lowest.index} (${lowest.fraction.toFixed(3)} of its canopy height, ` +
       `needs at least ${MIN_ABOVE_CANOPY}).\n` +
       'It is buried in the foliage rather than peeking out of it, so the climb is invisible.',
+  );
+  process.exit(1);
+}
+
+// ------------------------------------------------------ is anybody home?
+//
+// Jim, 6 August: *"make nobody ever just a head."* The player's half of this is
+// measured in pixels by `check:climb-wave`; this is the crowd's, and it has to
+// be asked separately because they are drawn by an entirely different mechanism
+// — a guard that passed for her while ~31 NPCs were still floating heads is the
+// exact shape this PR keeps rediscovering.
+
+/**
+ * How far below the head a climbing NPC must actually be drawn, in metres.
+ *
+ * A whole child measures most of `headBaseY` — the head joint sits about 1.36 m
+ * up a kid scaled 0.86–1.04, and the lowest drawn part is a shoe. Head-only
+ * measures **~0**: the only drawn parts are the head and its own children, all
+ * within a skull's radius of the joint.
+ *
+ * 0.9 sits far below every real reading and far above that zero. It is in metres
+ * rather than a fraction of the child because what it is really asking is
+ * "is there a body here", and the answer does not scale.
+ */
+const REQUIRED_DRAWN_DROP = 0.9;
+
+const worstDrawn = rows.reduce((a, b) => (b.drawnDrop < a.drawnDrop ? b : a));
+
+console.log(
+  `  drawn: a climbing NPC is drawn ${worstDrawn.drawnDrop.toFixed(2)} m below the head at the ` +
+    `worst of ${rows.length} climbs (needs ${REQUIRED_DRAWN_DROP} m)` +
+    `${hideBodyMutation ? ' — MUTATED: bodies re-hidden' : ''}.`,
+);
+
+if (worstDrawn.drawnDrop < REQUIRED_DRAWN_DROP) {
+  console.error(
+    `\ncheck:npc-perch FAILED (body) — a climbing NPC is drawn only ` +
+      `${worstDrawn.drawnDrop.toFixed(2)} m below its own head at tree ${worstDrawn.index} ` +
+      `(needs ${REQUIRED_DRAWN_DROP} m).\n` +
+      'It is a floating head. Jim ruled on 6 August that nobody up a tree is ever just a head,\n' +
+      'and `TreeClimbing` is meant to pose a climbing NPC without switching anything off.\n' +
+      'Note the trap if you go looking: for an instanced crowd child, a proxy\'s own `.visible` is\n' +
+      'NOT what `commit()` reads — only `CrowdMember.shown[partIndex]` is, so a part can look\n' +
+      'visible in a debugger and be absent from the frame.',
   );
   process.exit(1);
 }

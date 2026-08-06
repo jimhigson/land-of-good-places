@@ -293,10 +293,10 @@ export class Scenery {
  * **How big the ball at the top of a tree must be for a child to climb it.**
  *
  * Taken from the head that has to come out of it, not from the range the
- * scatter happens to roll. A climbing child is hidden outright except for her
- * head and her waving arm (`world/TreeClimbing.ts`), and that head is a
- * deliberately enormous cartoon one — `SKULL_RADIUS`, 0.66 m. The canopy is
- * asked to be **twice** it, so she reads as coming *out of* foliage rather than
+ * scatter happens to roll. A climbing child sits down in the canopy with her
+ * head clear of it (`world/TreeClimbing.ts`), and that head is a deliberately
+ * enormous cartoon one — `SKULL_RADIUS`, 0.66 m. The ball she comes out of is
+ * asked to be **twice** it, so she reads as emerging *from* foliage rather than
  * balancing on top of a pea.
  *
  * Expressed against `SKULL_RADIUS` rather than as the 1.32 it currently works
@@ -304,11 +304,29 @@ export class Scenery {
  * and a smaller ball would do; grow it and this must follow. It is the same
  * rule ART-AGENT-NOTES §2 keeps asking for — one owner, everybody else asks.
  *
- * Against the ranges actually rolled below, this admits **every lollipop and
- * every blossom** (main ball 1.75–2.5) and refuses **every stack** (its top
- * blob narrows to 0.90–1.15) and every pine (cones, not balls) — which is the
- * same set the old hand-written kind list was reaching for, minus the blossom
- * it excluded on taste and the 2.05 bar that had no owner.
+ * ## What it actually admits, measured
+ *
+ * Every `lollipop` and every `blossom` — their main ball rolls 1.75–2.5, always
+ * clear. No `pine`, which has cones and no ball for {@link noteBall} to record.
+ * And, **contrary to what this comment claimed until it was checked, some
+ * `stack` trees**: 4 / 3 / 3 / 5 / 3 of them across the five CI seeds.
+ *
+ * The reason is that a stack's three layers roll their radii *independently* —
+ * `rng.range(1.6, 2.05) * (1 - i * 0.22)`, so layer 0 spans 1.600–2.050,
+ * layer 1 spans **1.248–1.599** and layer 2 spans 0.896–1.148 — and each
+ * layer's height offset is scaled by **its own** radius. A fat layer 1 under a
+ * thin layer 2 therefore tops the tree. Measured on the built park, the topmost
+ * ball of every climbable stack is layer 1, radius 1.381–1.593: layer 1's range
+ * straddles this 1.32 bar, which is exactly why a few stacks qualify and most
+ * do not. Layer 0 never tops out on any of them.
+ *
+ * **The geometry is right, and only the old comment was wrong**: those climbers
+ * still sit on a ball of at least 1.32 with nothing above it, which is all this
+ * constant asks, and `check:climb-wave` passes on those trees like any other.
+ * The old wording was written from the *intent* of the kind list it replaced
+ * rather than from what the arithmetic does — which is the same fault as the
+ * `2.05` bar this rule supersedes, and the reason `climbableTrees` is asked of
+ * the finished tree a few hundred lines below instead of guessed at per kind.
  */
 const CLIMBABLE_MIN_CANOPY_RADIUS = 2 * SKULL_RADIUS;
 
