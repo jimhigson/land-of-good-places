@@ -103,7 +103,7 @@ const BOOST_GAIN_PER_PRESS = 0.22;
  * touched here, so this cannot be quietly cancelled by the band the way the
  * shared constant was.
  */
-export const PLAYER_BOOST_ADVANTAGE = 1.2;
+export const PLAYER_BOOST_ADVANTAGE = 1.5;
 
 /**
  * How fast {@link Rider.boost} bleeds away when nothing is topping it up,
@@ -175,7 +175,7 @@ const HILL_PULL = 9.8;
 
 /** You never stop and you never quite fly. */
 const MIN_SPEED = 3.4;
-const MAX_SPEED = 33;
+const MAX_SPEED = 40;
 
 /**
  * How long a bonk's wobble lasts — and, crucially, **thrust is dead for the
@@ -461,7 +461,7 @@ function zoneIsHere(rider: Rider, hazards: HazardSchedule, lead: number, trail: 
  * missing (unbeatable) or missing constantly (a joke). See that script's own
  * "the field" section for the live numbers.
  */
-export const RIVAL_SKILL: readonly number[] = [0.62, 0.72, 0.82];
+export const RIVAL_SKILL: readonly number[] = [0.52, 0.60, 0.68];
 
 /**
  * How hard the rivals rubber-band, and **why a low `skill` alone was never
@@ -538,7 +538,7 @@ export const RIVAL_SKILL: readonly number[] = [0.62, 0.72, 0.82];
  */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
-const SWING_BEHIND = 1.0;
+const SWING_BEHIND = 0.12;
 const SWING_AHEAD = 0.32;
 
 /**

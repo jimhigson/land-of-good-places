@@ -233,3 +233,73 @@ moves when the bonk fires by 1.9 m and I have had no browser all round.
 
 **Ride at level 3** or there will be no bars. `/rail-race` deep link; use a
 private window.
+
+---
+
+## Stopped mid-task, 6 August — where this stands
+
+Jim stopped the agent to save tokens. **The difficulty change was made but not
+committed**; it is committed now, unreviewed and unmeasured, in the commit
+that carries this note. Everything below it on the list is untouched.
+
+### What Jim said, verbatim — this is the spec, do not re-derive it
+
+> *"it's just too hard ffs, you go too slow and the computer goes too fast,
+> that's what too hard means in a race, quit arguing with me about that"*
+
+> *"you win a race by going fast, you go slow means race too hard"*
+
+The Overseer had sent the agent off investigating bonk penalties and hazard
+density. **That was wrong.** Jim had already given the answer: player faster,
+rivals slower. Do not open that investigation again.
+
+### The four levers, changed but NOT measured
+
+| constant | was | now |
+| --- | --- | --- |
+| `PLAYER_BOOST_ADVANTAGE` | 1.2 | **1.5** |
+| `MAX_SPEED` | 33 | **40** |
+| `RIVAL_SKILL` | 0.62 / 0.72 / 0.82 | **0.52 / 0.60 / 0.68** |
+| `SWING_BEHIND` | 1.0 | **0.12** |
+
+`SWING_BEHIND` is the rubber band that speeds rivals up when she is ahead —
+nearly off now, deliberately: a child who gets a lead should keep it.
+
+**Nobody has ridden or simulated this.** Confirm the sloppy profile wins
+comfortably and by a wide margin. The only guard rail is that she must still
+be able to lose if she does badly; short of that, err well on the easy side.
+
+Note from the earlier round, still true: **win count is seed noise** (12/12/15
+across three boost settings). Mean margin is the signal.
+
+### Still to do, none started
+
+1. **Camera jerk** — diagnose before damping. Prime suspects: #216 made the
+   ring a spline with radius varying by 40 m, and the rig reads the track's
+   **pointwise** frame; and sampled-points-versus-the-segment-between-them,
+   which already produced 0.42 m of quantisation in this PR's dropper check.
+   Any damping added must be frame-rate independent (half-life in seconds).
+2. **Camera distance scales with speed** — further back when faster, eased.
+3. **Boost rock** — torso rocks forward while boosting; there is not enough
+   visual feedback today.
+4. **Win celebration** — camera holds on her a few seconds while she jumps in
+   the cart, **legs visible for it**.
+5. **Leg-visibility guards** — legs off racing, on for the win, on when she
+   leaves. Derived from ride state every frame, never a stashed list.
+6. **4-frame skull clip recheck** at the new higher speeds. It happens on the
+   approach, before the bonk folds her. Only a ~1.9 m contact lead removes it;
+   not shipped, needs eyes first.
+
+**`body.rotation.x` will shortly have four claimants** — seated pose, duck
+fold, boost rock, win jump — and `Player.animate()` rewrites it every frame,
+stamping over anything set from outside. Compose them under one owner. Test
+**boosting while ducking**; a child will hold boost under a bar.
+
+### Untracked scratch files
+
+`scratch-field.mts` and `scratch-haz.mts` are the agent's measurement scripts,
+left untracked on purpose. Useful for re-running the field simulation.
+
+### Do not hand Jim a URL until the whole list is done
+
+His explicit instruction. He does not want it stage by stage any more.
