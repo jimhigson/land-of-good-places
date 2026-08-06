@@ -122,11 +122,36 @@ afternoon). A private window has guaranteed-empty storage regardless of that
 history — it is the only actually reliable answer, cheaper than any amount of
 cache-clearing forensics.
 
+**Hand over the URL of the thing itself, never just the root.** If the feature
+has a deep link, give `http://localhost:<port>/rail-race`, not
+`http://localhost:<port>/` with a paragraph explaining where to walk. Jim asked
+for this on 6 August after being sent bare roots for the slide, the Rail Race
+and the trees in a row: a root URL makes him find the feature before he can
+judge it, on a park that is different on every seed, and that cost is paid
+again on every single round of feedback.
+
+So, in order of preference:
+
+- **A ride deep link** — `/rail-race`, `/slide`, `/sky-cruiser`, `/ferris`
+  (the list below).
+- **`/view?camPos=...&camDir=...`** for anything that is not a ride: a
+  building, a statue, the boundary, a bit of scenery. It puts the camera on
+  the thing, and it works on any seed.
+- **Only then a bare root**, and if you are giving one, say so — "no deep link
+  for this yet, walk out of the castle and turn left" — rather than leaving it
+  to be discovered.
+
+**If the feature you are asking about has no deep link, that is usually one
+line to add** in `RIDE_DEEP_LINKS`, and worth adding rather than writing
+directions. Say plainly which URL shows which thing when several are in
+flight at once, because they will be on several ports.
+
 **Deep links for reaching a ride under test without walking there:**
 `/rail-race`, `/sky-cruiser` and `/ferris` skip straight past the welcome-back
 prompt and board that ride the instant the park (or a freshly created
 character, on a save-less profile) exists — see `RIDE_DEEP_LINKS` in
-`main.ts`. Add a ride by adding one line there. It maps to a stall id and
+`main.ts`. `/slide` joins them when the ginormous slide lands. Add a ride by
+adding one line there. It maps to a stall id and
 works for **both** kinds of ride: a world ride that `Game.ts` wired into
 `MiniGameHost.boardRide`, and a stall with a curtain mini-game behind it
 (`/ferris` today), because `launchGame` tries the ride and falls back to
