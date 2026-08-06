@@ -1095,28 +1095,48 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
  * bulge, so a plot's gap to the ring became a fact about which *way* it lies,
  * not about how far out it stands.
  *
- * The booth is pinned at bearing 20°, which is the canonical seed's **bulge**,
- * and `PLOT_EXTENT_LIMIT` (52) caps it at r = 48.6 there. Measured on this
- * branch across the five seeds this suite runs: the booth sits 43.1 m from the
- * ring against `waterFight`'s 34.0 m (canonical), and 50.2 m against
- * `ferrisWheel`'s 33.3 m (seed 18). `waterFight` is solved *before* the booth,
- * so its gap is a ceiling the booth cannot get under at any legal radius on
- * that bearing — and the rivals it loses to are mostly anchors (`ferrisWheel`,
- * `dodgems`, `building`, `ballPit`) that the layout solver re-places on every
- * seed. The 344 legal positions that *do* satisfy the claim were enumerated
- * rather than sampled; every one of them breaks `check:park` instead.
+ * The booth is pinned at bearing 20°, and measured across the five seeds this
+ * suite runs it sits 43.1 m from the ring against `waterFight`'s 34.0 m
+ * (canonical) and 50.2 m against `ferrisWheel`'s 33.3 m (seed 18). It failed on
+ * five of five, so this is not one unlucky seed and CLAUDE.md's "swap the seed"
+ * remedy has nothing to swap to.
  *
- * So this is not a threshold wanting a nudge, and not one unlucky seed — it
- * failed on five of five. It is structural: **a fixed pin cannot satisfy a
- * relational invariant when the ring and its rivals both move per seed and the
- * pin does not.** The claim is therefore not weakened here, it is **handed to
- * issue #117** ("Ride stalls must adjoin their rides in the generated layout"),
- * which places a stall *by relation to its ride* and so satisfies it by
- * construction on every seed rather than by a lucky pin. (#117 is itself
- * waiting on the scenery RNG decoupling in #222: moving the booth lengthens its
- * path spur, and the single shared scatter stream then drops a garden wall
- * across an unrelated kiosk's waypoint — the cascade `parkManifest.ts` already
- * documents.)
+ * ### The reason is what it *costs* to satisfy it, not that it cannot be
+ *
+ * Be careful with two tempting explanations. **Both are false, and both were
+ * written here before being checked:**
+ *
+ *  - *"The rivals move per seed."* They do not. **11 of the 12 plots are
+ *    identical to three decimal places on all five seeds**, including every
+ *    anchor — `ferrisWheel`, `dodgems`, `building`, `ballPit`. Only
+ *    `stall.skyCruiser` moves at all (by up to 3.9 m) and it is never the
+ *    binding rival. What re-rolls per seed is the **boundary and the ring**:
+ *    the edge runs 58.4–110.4 m and the lap 591.9–604.5 m. The gaps move
+ *    because the ring moves, not because the plots do.
+ *  - *"A fixed pin cannot satisfy a relational claim."* It can. Enumerating the
+ *    legal disc (r ≤ 48.6) at 0.1° × 0.25 m finds **49,384 positions that
+ *    satisfy the rim claim**, best margin −19.2 m. (A coarser independent sweep
+ *    at 0.5° × 0.5 m finds 9,867 — the same density.) There is no shortage of
+ *    winning pins.
+ *
+ * **What is true is that every winning pin breaks the park.** Four positions
+ * from the cleanest part of that region — bearings 265/270/275/280 at r = 48.5,
+ * clear of every plot and 170–180° round from the gate — were built and checked.
+ * **All four fail `check:park`:** `poi.stranded` 1–2 where this branch has 0,
+ * `rail.exclusion` 36 m against a recorded 21, `rail.walkable` 44 against 30.
+ * An earlier exhaustive sweep of the east cluster found the same thing from the
+ * other side: 344 rim-passing positions, none of them clean.
+ *
+ * And one of the stranded waypoints is **(20.9, 20.2)** — the ferris wheel
+ * kiosk's own stand, which #233 shows sits 2.39 m *inside* that ride's exclusion
+ * disc and so strands the moment anything reshapes the path network. The booth
+ * cannot be pinned to the rim without paying that, which is why the claim is
+ * **handed to issue #117** ("Ride stalls must adjoin their rides in the
+ * generated layout"): placing the stall *by relation to its ride* is what gets
+ * it near the rails without a pin that wrecks the network. (#117 waits on #222's
+ * scenery RNG decoupling in turn — moving the booth lengthens its path spur, and
+ * the single shared scatter stream then drops a garden wall across an unrelated
+ * waypoint, the cascade `parkManifest.ts` already documents.)
  *
  * ### What it still claims, and why that half stays here
  *

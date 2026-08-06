@@ -77,7 +77,7 @@ import { TAU } from '../src/core/mathUtils.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from '../src/world/entrance/layout.ts';
-import { RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
+import { EXIT_INSIDE_EDGE, RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
 import {
   BASE_HEIGHT,
   LANE_COUNT,
@@ -327,10 +327,26 @@ say(
   `exit        (${RAIL_RACE_PLAN.exitX.toFixed(1)}, ${RAIL_RACE_PLAN.exitZ.toFixed(1)}) ` +
     `${exitInside.toFixed(1)} m inside the park edge`,
 );
+// `EXIT_INSIDE_EDGE` is imported from the planner, not restated here. This
+// assertion previously hand-typed `> 1` against a planner that clamps at 2, so
+// it could pass a plan that broke the rule it exists to enforce.
+//
+// What it actually guards is the planner's **fallback**: when no candidate spot
+// is clear, `planExit` hands back the nearest try *without* applying the clamp,
+// on the stated reasoning that a loud check is better than no exit. That is the
+// path this catches.
+//
+// Note what single ownership does and does not buy. Mutating the constant no
+// longer proves the check live — planner and checker move together, which is
+// the whole point — and on today's seeds the exit stands 37.9 m inside the edge
+// against a 2 m floor, so nothing can make this fire. It becomes load-bearing
+// exactly when the booth moves to the rim (#117), which is when the fallback
+// starts being reachable.
 require(
-  exitInside > 1,
-  `the ride exit stands ${exitInside.toFixed(1)} m inside the park edge — a rider is set down on ` +
-    'or beyond the boundary rather than in the park.',
+  exitInside >= EXIT_INSIDE_EDGE,
+  `the ride exit stands ${exitInside.toFixed(1)} m inside the park edge, short of the ` +
+    `${EXIT_INSIDE_EDGE} m the planner clamps to — a rider is set down on or beyond the ` +
+    'boundary rather than in the park.',
 );
 
 // --- does the camera build the picture it promises? --------------------------

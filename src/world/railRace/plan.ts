@@ -22,8 +22,15 @@ const STATION_STALL_ID = 'stall.railRacer';
  * child stepping off wants ground under her and the boundary wall in front of
  * her, not behind. Two metres is what the old `GARDEN_PLAY_RADIUS - 2` clamp
  * meant back when subtracting from a radius was the same statement.
+ *
+ * **Exported so `check:rail-race` can verify the clamp against this number
+ * rather than a second copy of it.** It was unexported, and the checker's
+ * "mirror" had already drifted to a hand-typed `> 1` — so the check could pass
+ * on a plan that broke the planner's own rule, which is the entire failure it
+ * exists to catch. Same number declared twice is this week's most-repeated bug;
+ * one owner, one import.
  */
-const EXIT_INSIDE_EDGE = 2;
+export const EXIT_INSIDE_EDGE = 2;
 
 export interface PlannedRailRace {
   /** Matches `PlannedCoaster.name` — `paths.ts` names the exit node with it. */

@@ -26,46 +26,42 @@ export const GARDEN_PLAY_RADIUS = 58;
 export const TERRAIN_RADIUS = 83.5;
 
 /**
- * The hilltop crest. Between RIM_START and RIM_END the ground falls away by
- * RIM_DROP metres, which is steeper than the camera pitch — so the slope hides
- * itself and the horizon appears just past the crest.
+ * How far the ground falls away across the hilltop crest, in metres.
  *
- * **The crest moved out on 2 August 2026, from 61 m to 72 m**, and the terrain
- * disc with it (72 m to 83.5 m). The Rail Race's two rings now circle the park
- * *outside* the boundary masonry at 60 m rather than flying over the crowded
- * band inside it, and the wider of the two is 9.35 m across, reaching 70.2 m.
- * The old crest started 11 m inside that: the ring's trestles would have had to
- * stand on a 60° hillside on legs half again as long as the ones they replace,
- * and the treeline (which used to run 63–70.5 m) would have grown straight
- * through the track.
+ * Steeper than the camera pitch, so the slope hides itself and the horizon
+ * appears just past the crest. Where that fall happens is
+ * {@link RIM_OUTSET_START} to {@link RIM_OUTSET_END}.
  *
- * So the hilltop keeps an apron outside the wall wide enough to stand the ride
- * on. `smoothstep(72, 82)` over the same 17 m drop is the same 60°-ish slope as
- * before — steeper than the camera's 38° pitch, so it still hides itself — and
- * the treeline (see {@link TREELINE_INNER_RADIUS}) moved out past the rings to
- * go on screening the cut edge. What actually changes on screen is that the
- * ground beyond the wall now runs on to a coaster instead of stopping at a
- * horizon a metre past the masonry.
+ * **The crest moved out on 2 August 2026**, and the terrain disc with it (72 m
+ * to 83.5 m). The Rail Race's two rings circle the park *outside* the boundary
+ * masonry rather than flying over the crowded band inside it. The old crest
+ * started 11 m inside the wider ring: its trestles would have had to stand on a
+ * 60° hillside on legs half again as long as the ones they replace, and the
+ * treeline (which used to run 63–70.5 m) would have grown straight through the
+ * track. So the hilltop keeps an apron outside the wall wide enough to stand
+ * the ride on, and the treeline (see {@link TREELINE_INNER_RADIUS}) moved out
+ * past the rings to go on screening the cut edge. What changes on screen is
+ * that the ground beyond the wall now runs on to a coaster instead of stopping
+ * at a horizon a metre past the masonry.
  */
-export const RIM_START = 72;
-export const RIM_END = 82;
 export const RIM_DROP = 17;
 
 /**
- * The hilltop crest, restated as a distance **outside the park's edge** rather
- * than as a radius from the origin.
+ * The hilltop crest, as a distance **outside the park's edge** rather than as a
+ * radius from the origin.
  *
  * Once the boundary stopped being a circle (issue #115) a radius could no
- * longer say where the ground falls away: the edge is 57 m out on one bearing
+ * longer say where the ground falls away: the edge is 58 m out on one bearing
  * and 110 m on another, so a single crest radius would cut through the park on
- * one side while leaving a plain outside it on the other. These are the same
- * two numbers as {@link RIM_START} and {@link RIM_END} were, measured from the
- * masonry at `GARDEN_HALF_SIZE - 2` (60 m): the crest began 12 m outside the
- * wall and finished 22 m outside it. The hill is unchanged; only what it is
- * measured from has moved.
+ * one side while leaving a plain outside it on the other.
  *
- * `RIM_START`/`RIM_END` survive for the castle interior's own circular space
- * and for anything still reasoning in radii.
+ * These are the crest's old radii (72 m and 82 m) re-measured from the masonry
+ * at `GARDEN_HALF_SIZE - 2` (60 m): it began 12 m outside the wall and finished
+ * 22 m outside it. The hill is unchanged; only what it is measured from moved.
+ * The radius forms were deleted rather than kept — they had no consumers left,
+ * and a constant kept "in case" is one a reader has to prove is dead before
+ * touching anything near it. (The note that they survived for the castle
+ * interior was simply wrong: the interior uses {@link INTERIOR_PLAY_RADIUS}.)
  */
 export const RIM_OUTSET_START = 12;
 export const RIM_OUTSET_END = 22;
