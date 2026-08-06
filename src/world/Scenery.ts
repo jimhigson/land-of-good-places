@@ -631,12 +631,33 @@ function buildFoliage(collision: CollisionWorld): {
   // change here to leave things over there alone are genuinely incompatible
   // aims, and locality is the one that unblocks moving a booth (#216, #117).
   //
-  // 1050 was measured, not guessed: acceptance runs near 11%, and this is the
-  // budget at which the canonical seed lands on **exactly the 108 clumps it
-  // had before**, so the shipped park keeps its density. The sweep seeds come
-  // out at 86 (seed 2), 103, 106 and 102 — thinner on seed 2 than before but
-  // nowhere near bare, and honest about how much lawn that seed leaves free.
-  const BUSH_BUDGET = 1050;
+  // **The budget is set by the worst seed, not by the canonical one.** That
+  // distinction was got wrong once and is the whole reason this paragraph is
+  // here. The first value tried, 1050, was tuned until the canonical seed
+  // landed on exactly the 108 clumps it had before — which looked like a
+  // perfect no-change result and hid the fact that seed 2 came out at 86, a
+  // fifth of its ground cover gone. A single seed standing in for five will
+  // always flatter whichever seed it is.
+  //
+  // Every seed used to get 108, because the old fill-to-N loop had 4-5x the
+  // candidates it needed on all of them. So the bar is: **no seed plants fewer
+  // than the 108 it used to.** Measured across the five CI seeds:
+  //
+  //   budget   canonical   s2    s5   s11   s18   worst
+  //     1050        108    86   103   106   102      86   <- seed 2 stripped
+  //     1200        131   105   118   119   116     105   <- still under
+  //     1300        138   118   126   129   127     118
+  //     1400        149   128   137   142   140     128   <- chosen
+  //     1500        164   138   151   157   151     138
+  //
+  // 1400 is the first value with real headroom over the 108 floor on the
+  // *worst* seed (128, so 20 clumps of slack) rather than merely clearing it,
+  // which matters because the count moves whenever the geometry does — a park
+  // change that paves more lawn takes a bite out of every seed at once.
+  //
+  // Locality is unaffected by the number: candidate k is evaluated if and only
+  // if k < budget, whatever the budget is.
+  const BUSH_BUDGET = 1400;
   while (attempts < BUSH_BUDGET) {
     attempts += 1;
     const rng = candidateRng(BUSH_SALT, attempts);

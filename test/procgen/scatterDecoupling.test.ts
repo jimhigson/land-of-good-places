@@ -143,7 +143,7 @@ describe('scenery scatter is decoupled from the paths', () => {
   it('measured a real park on both sides', () => {
     for (const park of [baseline, bowed]) {
       expect(park.trees.count).toBeGreaterThan(24);
-      expect(park.bushes.count).toBeGreaterThan(60);
+      expect(park.bushes.count).toBeGreaterThan(107);
       expect(park.walls.count).toBeGreaterThan(0);
     }
   });

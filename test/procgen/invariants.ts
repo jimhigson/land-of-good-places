@@ -1442,10 +1442,14 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // fill-until-N loop; it is now whatever a fixed budget of candidates
       // passes, which is the price of the scatter being local (see
       // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
-      // now happen quietly, so it gets a guard. Measured across the five CI
-      // seeds at 108 / 86 / 103 / 106 / 102; 60 sits well under the lowest
-      // while still catching a scatter that has collapsed.
-      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(60);
+      // now happen quietly, so it gets a guard.
+      //
+      // Measured across the five CI seeds at 149 / 128 / 137 / 142 / 140. The
+      // floor is 108 because that is exactly what every seed used to plant, so
+      // it reads as "no seed is worse off than before the scatter was made
+      // local" rather than as an arbitrary round number — and the worst seed
+      // still clears it by 20.
+      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
