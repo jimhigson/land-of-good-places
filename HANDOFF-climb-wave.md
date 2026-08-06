@@ -164,6 +164,59 @@ camera-facing side nearly removes the strongest cue. The fix is to choose the
 perch on the camera-facing side of the trunk rather than by approach, which
 changes where the scramble goes and so wants QA eyes; not attempted here.
 
+## Round 3 QA — FAILED. Awaiting Jim's ruling; do not start a fourth attempt.
+
+The rock was **verified**: 22.7 px of head travel at 1280×800, identical at
+every settled bearing on all four trees. QA froze the world (`timeScale = 0`)
+and advanced only the pose clock by half a rock period, so two frames differed
+by exactly one thing — a cleaner method than the one in this script.
+
+**But a rocking head is not a wave.** QA: *"a girl's head popping out of a bush
+and swaying happily — genuinely quite cute, just not a wave."*
+
+**The hand is worse than this handoff previously said.** Measured as pixels
+changed when the arm is deleted, whole screen rather than a crop:
+
+- **0 px on the entire screen** at bearings 225°/270°/315°, on **every** tree
+- **15 of 32** tree×bearing combinations show no arm at all
+- best case ~13–20 px with no forearm and no separation from the head; ~4 CSS px
+  on phone
+
+The figures printed by `--motion` (7/19/15/0 at four cardinal bearings) sampled
+too few bearings and used a crop rather than the whole screen. **Both errors
+flattered the feature.** Trust QA's numbers over this script's.
+
+**The blocker has changed since round 1.** Hiding her head now reveals nothing:
+it is **the canopy** in front of the hand, not her own skull. Round 1's fix
+(swing the arm out) was correct and is not the current problem.
+
+**The finding that decides it: the turn and the hand are anti-correlated.** She
+is camera-facing for only 0.67 s of the 2.38 s wave at the worst approach. Where
+the arm shows (90°/135°) she is still spinning; where she settles facing you
+(225°/270°/315°) the arm is gone. Only 180° gives both, and there the hand is a
+bead.
+
+**Direction (QA, endorsed by the Overseer): the lever is height, not amplitude.**
+Her hand tops out 0.303 m below her head, essentially level with `canopyTopY`,
+so canopy bulk sits in front of it from the far bearings. Raising
+`CLIMB_WAVE_LEAN` only makes the wobble worse.
+
+### Options put to Jim (his call, not an agent's)
+
+1. **Perch her on the camera-facing side of the trunk** rather than by approach.
+   Kills the anti-correlation, removes the long turn, lifts the arm clear —
+   addresses both failures. Changes where a child ends up sitting after a climb.
+2. **Perch her higher** (raise the peek so the hand clears `canopyTopY`). Same
+   "height" lever, smaller behavioural change, she still sits where she climbed
+   — but her head floats further above the leaves, so it may stop reading as
+   *peeking out of* a bush.
+3. **Ship what exists and drop the wave.** The turn + rock is, in QA's own
+   words, genuinely quite cute. Close #120 as partially delivered and stop
+   spending rounds on a gesture this rig struggles to show.
+
+Nothing functional regressed across any round: 11/11 this pass, console clean,
+build exit 0, day and night identical, touch build correct.
+
 ## What the check now enforces (three terms)
 
 1. **Un-occluded ≥ 50%** — raycast from the real orthographic game camera
