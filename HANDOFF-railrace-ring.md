@@ -496,3 +496,72 @@ Raw per-position verdicts are in the session scratchpad (`full-results.json`,
 
 `check:rail-race` green (fairness still **0.0000 m**, all four lanes 12.57 m).
 `npm run build` exits 0.
+
+---
+
+# UPDATE — the booth blocker is Scenery's RNG, not the path network
+
+The Overseer ruled (a): fix the first-fit spur selection in `paths.ts`. Done and
+kept — **`265ecf6`**. `nearestNetworkPoint` committed to the closest junction in
+a straight line and never asked what the resulting walk was like; it is now
+`bestBranchPoint`, which offers each route's nearest point as a *candidate*,
+routes each to the destination around the real plots, and takes the **shortest
+actual walk**. Baseline `check:park` is unchanged by it (70/70 waypoints, 5
+recorded deviations, same first gap at (49.3, 0.0)).
+
+**It does not unblock the booth, and the measurement says why.** Pinning the
+booth at the sweep's best east spot (45.856, 5.630) with best-fit in place:
+
+```
+rail: 359 m of loop, 21 m unflanked, 30/359 centre-line points standable   <- both AT RECORDED
+check:park: 1 invariant regression(s):   poi.stranded: 1
+waypoint (20.9, 20.2) is in a pocket of the 'garden' graph nobody can walk to
+```
+
+The rail invariants are **exactly at their recorded values**. The ferris kiosk is
+*still* stranded. So the kiosk was never stranded by which junction its spur
+branches from — best-fit cannot help, and neither could re-ordering (which was
+tried first and simply stranded the rail-race booth and its own ride exit
+instead: whichever spur is grown while the network is wrong *for it* suffers).
+
+The real coupling is the one `parkManifest.ts`'s own comment already records:
+
+> a band of bearings ... happened to shift **Scenery's single shared RNG
+> stream** (this spur is now ~2.5x longer, which changes how much ground counts
+> as "on path" early in that stream) into placing a **garden wall across the
+> ferris wheel kiosk's own line of sight** — a waypoint with no relation to this
+> stall, stranded as pure collateral.
+
+**Any path-length change reshuffles every scatter in the park.** That is the
+blocker, it is a third instance of the same family of faults, and it is somebody's
+whole task: give each scatter its own stream seeded by something stable, so
+moving one booth cannot move a wall thirty metres away.
+
+## What is on the branch, and what is not
+
+`build`, `check:rail-race` and `check:park` all exit 0. `test:procgen` is
+**90/95**, failing only `railRaceStallStandsAtTheRim` on all five seeds — which
+is *correct*: the booth genuinely is not at the rim, and it cannot be moved there
+until the Scenery coupling is fixed.
+
+The booth work is preserved on **`feat/railrace-booth-at-rim` (`fe565b8`)** and
+is one cherry-pick from being live. With it, procgen goes 95/95 and `check:park`
+reports `poi.stranded 2`, `rail.exclusion 36/21`, `rail.walkable 44/30`. It was
+deliberately NOT included: two waypoints nobody can walk to is the #114 bug class
+re-opened, which the Overseer ruled out explicitly.
+
+## QA must look at this, it is not just a number that passes
+
+**The phone renders 18.6 px/m, down from 27.6.** The floor is 15 and the
+family's "too zoomed out" complaint was at 10.4, so it passes — but it is a real,
+visible change on the device a child is most likely to be holding, and two thirds
+of it is the swing cap the side-view rule forces. Somebody should look at a phone
+before this is called done.
+
+## Known, not fixed, deliberately
+
+`origin/main` itself exceeds `check:rail-race`'s `< 140 m` procession assertion on
+**3 of 200 seeds** (max 148.7). It passes today because of which 24 seeds the
+checker happens to use. Not touched — restoring `main`'s race is what was asked,
+and buying check margin by making the race tighter than it has ever been would be
+inventing a new feel.
