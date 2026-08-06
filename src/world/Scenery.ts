@@ -616,9 +616,28 @@ function buildFoliage(collision: CollisionWorld): {
   const bushClumps: PlacedBush[] = [];
   /** Radius of the collider a clump registers, and so the ground it occupies. */
   const BUSH_COLLIDER = 0.85;
-  let bushCount = 0;
   attempts = 0;
-  while (bushCount < 108 && attempts < 5200) {
+  // **A fixed budget, and no target count — the two are not compatible.**
+  //
+  // This loop used to run `while (bushCount < 108 && attempts < 5200)`, and a
+  // "keep going until you have 108" loop is a coupling all of its own, quite
+  // separate from the shared-generator one. Refuse one clump because a path
+  // grew under it and the loop simply runs one attempt longer, admitting a
+  // candidate at the tail that was never in the park before. Measured on this
+  // branch before the change: bowing one spur by 2 m refused 4 clumps near the
+  // bow and conjured 4 unrelated ones at the far end of the sequence.
+  //
+  // So the count is now whatever passes. Wanting *exactly* N and wanting a
+  // change here to leave things over there alone are genuinely incompatible
+  // aims, and locality is the one that unblocks moving a booth (#216, #117).
+  //
+  // 1050 was measured, not guessed: acceptance runs near 11%, and this is the
+  // budget at which the canonical seed lands on **exactly the 108 clumps it
+  // had before**, so the shipped park keeps its density. The sweep seeds come
+  // out at 86 (seed 2), 103, 106 and 102 — thinner on seed 2 than before but
+  // nowhere near bare, and honest about how much lawn that seed leaves free.
+  const BUSH_BUDGET = 1050;
+  while (attempts < BUSH_BUDGET) {
     attempts += 1;
     const rng = candidateRng(BUSH_SALT, attempts);
     const angle = rng.range(0, TAU);
@@ -650,7 +669,6 @@ function buildFoliage(collision: CollisionWorld): {
     }
     collision.addCircle(x, z, BUSH_COLLIDER);
     bushClumps.push({ x, z, radius: BUSH_COLLIDER });
-    bushCount += 1;
   }
 
   // Flowers used to be scattered here too, as static decoration. They are now

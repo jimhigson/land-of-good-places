@@ -38,6 +38,71 @@ export interface RouteDefinition {
   readonly closed: boolean;
 }
 
+/**
+ * **Test hook: re-route one named spur, so its paving covers different lawn.**
+ *
+ * `LGP_SPUR_STRETCH=2 npm run test:procgen` builds a park in which the rail
+ * race stall's spur alone takes a two-metre detour, and nothing else differs
+ * at all. `LGP_SPUR_STRETCH_ID` picks a different spur. Both are zero/default —
+ * and so the park is exactly the shipped one — unless the variables are set.
+ * Node-only, read once at module load, exactly like `parkManifest.ts`'s
+ * `LGP_SEED`: Vite ships no `process`, so neither can reach a player.
+ *
+ * The name says "stretch" and the detour does add paving between the two fixed
+ * endpoints, but do not read the number as a length: bowing this spur also
+ * changes where *later* spurs find their nearest branch point, so the park's
+ * total paved metres can come out either side of the baseline (at 2 m it drops,
+ * 329.51 -> 324.45). What it reliably changes is **which lawn is paved**, and
+ * that is the input the scatter actually reacts to.
+ *
+ * It exists because "a longer path must not move distant scenery" is otherwise
+ * an unprovable claim. That property was broken for months and nothing noticed,
+ * because measuring it needs **two parks differing in exactly one way**, which
+ * no ordinary input provides. `test/procgen/scatterDecoupling.test.ts` builds
+ * both and compares digests of the real scatter; without this hook it would
+ * have to model a park instead, and a check against a model only ever proves
+ * the model.
+ *
+ * One spur rather than all of them, deliberately: the property worth proving is
+ * *locality* — that a change here leaves scenery over there alone — and
+ * perturbing every spur at once would disturb the whole lawn and prove nothing
+ * about distance. It also mirrors the real case, a single booth being moved.
+ *
+ * ### It bows the spur sideways, and that shape was chosen the hard way
+ *
+ * Both endpoints stay exactly where they were; the ribbon takes a detour
+ * between them. So the *only* thing that differs between the two parks is how
+ * much lawn is paved and where — not the booth, not its doormat, not the plot.
+ *
+ * The first attempt instead carried the ribbon a few metres further *back* from
+ * its branch point. That is also "a longer spur", it moved the paved-metres
+ * total by exactly the amount asked for, and it was **worthless as a test**: the
+ * branch point sits on the existing network, so the extra paving landed on
+ * ground that was already paved, `isOnPath` answered the same everywhere, and
+ * not one candidate changed. Measured on `origin/main` — which still has the
+ * bug — at 1, 2, 3, 4, 6, 8, 10, 14, 18 and 24 m, the scatter digest never
+ * budged once. A perturbation that cannot break the broken version cannot
+ * validate the fixed one.
+ */
+const SPUR_STRETCH = numberFromEnv('LGP_SPUR_STRETCH');
+const SPUR_STRETCH_ID = stringFromEnv('LGP_SPUR_STRETCH_ID') ?? 'stall.railRacer';
+
+function stringFromEnv(name: string): string | null {
+  try {
+    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
+    return nodeProcess?.env?.[name] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function numberFromEnv(name: string): number {
+  const raw = stringFromEnv(name);
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 /** Fountain plaza — wherever the layout put it. Paths converge here. */
 export const PLAZA = {
   x: PARK_LAYOUT.fountain.x,
@@ -341,6 +406,22 @@ function buildGraph(): PathGraph {
       l > 1e-6 && pastReach > 1e-6
         ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
         : []; // no "past the doormat" when the node is its own destination
+    // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
+    // that proves a longer spur leaves distant scenery where it was.
+    const routed = [...routeAround(start, [ex, ez])];
+    if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
+      const head = routed[0] as readonly [number, number];
+      const tail = routed[routed.length - 1] as readonly [number, number];
+      const runX = tail[0] - head[0];
+      const runZ = tail[1] - head[1];
+      const runLength = Math.hypot(runX, runZ);
+      if (runLength > 1e-6) {
+        routed.splice(1, 0, [
+          (head[0] + tail[0]) / 2 + (-runZ / runLength) * SPUR_STRETCH,
+          (head[1] + tail[1]) / 2 + (runX / runLength) * SPUR_STRETCH,
+        ]);
+      }
+    }
     edges.push({
       from: 'ring',
       to: id,
@@ -349,7 +430,7 @@ function buildGraph(): PathGraph {
         name: `spur-${id}`,
         width,
         closed: false,
-        points: [...routeAround(start, [ex, ez]), ...past],
+        points: [...routed, ...past],
       },
     });
   };
