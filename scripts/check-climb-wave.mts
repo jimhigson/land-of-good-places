@@ -52,7 +52,7 @@ import './headless-canvas.mjs';
 import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT } from '../src/art/models/kid.ts';
-import { applyRidePose, CLIMB_WAVE_ARM_X } from '../src/entities/Player.ts';
+import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
 import { CLIMB_EDGE_GAP, WAVE_RISE } from '../src/world/TreeClimbing.ts';
 import {
   CAMERA_DISTANCE,
@@ -243,20 +243,25 @@ function poseKidAt(
   bearing: number,
   elapsed: number,
   armOverride: { x: number; z: number } | null,
+  /** 0 = resting peek (no hoist, peek facing), 1 = full wave. */
+  wave = 1,
 ): ReturnType<typeof createKid> {
   const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
   const kid = createKid();
-  applyRidePose({ body: kid.body, ...kid.limbs }, 1, elapsed);
+  applyRidePose({ body: kid.body, ...kid.limbs }, wave, elapsed);
   if (armOverride) {
     kid.limbs.rightArm.rotation.x = armOverride.x;
     kid.limbs.rightArm.rotation.z = armOverride.z;
   }
   kid.root.position.set(
     tree.x + Math.sin(bearing) * perch,
-    tree.canopyTopY - KID_HEAD_HEIGHT + WAVE_RISE,
+    tree.canopyTopY - KID_HEAD_HEIGHT + WAVE_RISE * wave,
     tree.z + Math.cos(bearing) * perch,
   );
-  kid.root.rotation.y = CAMERA_FACING;
+  // At rest she holds the facing she arrived with (facing away from the trunk);
+  // the wave turns her to camera. Both are part of what the eye sees change.
+  const peekFacing = bearing + Math.PI;
+  kid.root.rotation.y = wave > 0.5 ? CAMERA_FACING : peekFacing;
   // Exactly what `TreeClimbing.hidePlayerBody` leaves drawn.
   for (const child of kid.body.children) {
     if (child === kid.head) continue;
@@ -353,24 +358,46 @@ interface Picture {
   rows: string[];
   handPixels: number;
   headPixels: number;
+  /** Screen-space bounds of her body (head + arm), in raster pixels. */
+  bodyTop: number;
+  bodyBottom: number;
+  bodyCentroidY: number;
+  bodyCentroidX: number;
 }
 
-/** Ray-traced ASCII of one tree's climber at play scale. */
+/**
+ * Ray-traced ASCII of one tree's climber at play scale.
+ *
+ * `anchor` fixes the raster window in the WORLD. Centring on her own head
+ * (the default) is right for judging the pose; centring on the tree is what
+ * measures whether she visibly moves **against the scenery**, which is the
+ * only motion the eye can see — see `--motion`.
+ */
 function rasterise(
   tree: (typeof trees)[number],
   index: number,
   override: { x: number; z: number } | null,
+  wave = 1,
+  anchor: 'head' | 'tree' = 'head',
+  bearing = Math.PI * 0.25,
+  elapsed = 0,
 ): Picture {
   const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
   const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
-  const kid = poseKidAt(tree, Math.PI * 0.25, 0, override);
+  const kid = poseKidAt(tree, bearing, elapsed, override, wave);
   const arm = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const head = new Set(collectMeshes(kid.head, new Group()));
   const all = [...collectMeshes(kid.root, new Group()), ...foliage];
 
   const centre = new Vector3();
-  kid.head.getWorldPosition(centre);
+  if (anchor === 'head') {
+    kid.head.getWorldPosition(centre);
+  } else {
+    // World-anchored on the tree top: the window does not move with her, so
+    // any shift of her silhouette here is real motion against the scenery.
+    centre.set(tree.x, tree.canopyTopY, tree.z);
+  }
 
   const halfW = 30;
   const halfH = 22;
@@ -378,6 +405,11 @@ function rasterise(
   raycaster.far = RAY_BACKOFF * 2;
   let handPixels = 0;
   let headPixels = 0;
+  let bodyTop = Number.NaN;
+  let bodyBottom = Number.NaN;
+  let sumY = 0;
+  let sumX = 0;
+  let bodyCount = 0;
   const rows: string[] = [];
   for (let py = halfH; py >= -halfH; py -= 1) {
     let row = '';
@@ -392,10 +424,20 @@ function rasterise(
         row += ' ';
         continue;
       }
-      if (arm.has(hit.object as Mesh)) {
+      const isArm = arm.has(hit.object as Mesh);
+      const isHead = head.has(hit.object as Mesh);
+      if (isArm || isHead) {
+        // Her silhouette, for the screen-space motion measurement.
+        if (Number.isNaN(bodyTop)) bodyTop = py;
+        bodyBottom = py;
+        sumY += py;
+        sumX += px;
+        bodyCount += 1;
+      }
+      if (isArm) {
         row += 'H';
         handPixels += 1;
-      } else if (head.has(hit.object as Mesh)) {
+      } else if (isHead) {
         row += '#';
         headPixels += 1;
       } else if ((hit.object.name || '').startsWith('foliage')) {
@@ -406,7 +448,15 @@ function rasterise(
     }
     rows.push(row);
   }
-  return { rows, handPixels, headPixels };
+  return {
+    rows,
+    handPixels,
+    headPixels,
+    bodyTop,
+    bodyBottom,
+    bodyCentroidY: bodyCount === 0 ? Number.NaN : sumY / bodyCount,
+    bodyCentroidX: bodyCount === 0 ? Number.NaN : sumX / bodyCount,
+  };
 }
 
 /**
@@ -427,6 +477,82 @@ function rasterise(
  * does not trip it, and far above the **zero** the broken pose scored.
  */
 const REQUIRED_HAND_PIXELS = 12;
+
+/**
+ * How far her silhouette must travel side to side, in pixels at play scale,
+ * at the WORST approach bearing.
+ *
+ * Measured, not chosen from geometry: `CLIMB_WAVE_LEAN` produces 6.7-7.3 px at
+ * every bearing. 5 keeps a margin for tuning while failing loudly if the rock
+ * is removed or replaced with a translation the camera can eat.
+ *
+ * This is the *worst* bearing, deliberately. The hand is measured at its best
+ * one, and that is a weakness: hand visibility ranges 0-19 px across the four
+ * approaches, so on one side of some trees the arm cannot be seen at all. The
+ * rock is what makes the wave legible regardless.
+ */
+const REQUIRED_ROCK_PIXELS = 5;
+
+// -------------------------------------------------------------------- motion
+//
+// `--motion` answers the question QA's third pass raised and nothing here could
+// previously see: **does she visibly move against the scenery?**
+//
+// She really does rise 0.31 m in the world. QA measured her ending each wave
+// ~7 px LOWER on screen. Two reasons, and both are invisible from world space:
+//
+//  1. The camera follows `player.position` (`Game.ts` -> `IsoCamera.update`,
+//     `focus.y` damped at CAMERA_FOLLOW_HALF_LIFE * 2), so it climbs with her
+//     and eats most of the hoist.
+//  2. Turning to camera swings her off-axis mass (her head is tipped back
+//     inside `crown`), and under an isometric projection horizontal motion has
+//     a screen-Y component.
+//
+// So this rasterises her WORLD-ANCHORED on the tree, at rest and mid-wave, and
+// compares where her silhouette actually lands. A world-space number is not
+// evidence of anything the eye can see.
+if (process.argv.includes('--motion')) {
+  console.log(
+    `screen-space motion at play scale (${(UNITS_PER_PIXEL * 1000).toFixed(0)} mm/px), ` +
+      'her silhouette measured against a tree-anchored window:',
+  );
+  console.log('  tree  bearing   top rest->wave   centroid dY   centroid dX   hand px');
+  for (const [index, tree] of trees.entries()) {
+    for (const b of [0, 1, 2, 3]) {
+      const bearing = (b / 4) * Math.PI * 2;
+      const rest = rasterise(tree, index, null, 0, 'tree', bearing);
+      const wave = rasterise(tree, index, null, 1, 'tree', bearing);
+      const dTop = wave.bodyTop - rest.bodyTop;
+      const dY = wave.bodyCentroidY - rest.bodyCentroidY;
+      const dX = wave.bodyCentroidX - rest.bodyCentroidX;
+      // The rock: how far her silhouette actually travels across one rock
+      // cycle, in pixels, at full wave. This is the number that matters —
+      // world-space motion is what turned out not to reach the screen.
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      const ROCK_STEPS = 8;
+      for (let r = 0; r < ROCK_STEPS; r += 1) {
+        const t = (r / ROCK_STEPS) * ((Math.PI * 2) / 5.5);
+        const frame = rasterise(tree, index, null, 1, 'tree', bearing, t);
+        minX = Math.min(minX, frame.bodyCentroidX);
+        maxX = Math.max(maxX, frame.bodyCentroidX);
+        minY = Math.min(minY, frame.bodyCentroidY);
+        maxY = Math.max(maxY, frame.bodyCentroidY);
+      }
+      console.log(
+        `  ${String(index).padStart(4)}  ${((bearing * 180) / Math.PI).toFixed(0).padStart(7)}   ` +
+          `${rest.bodyTop} -> ${wave.bodyTop} (${dTop >= 0 ? '+' : ''}${dTop})`.padStart(15) +
+          `   ${dY >= 0 ? '+' : ''}${dY.toFixed(1)}`.padStart(14) +
+          `   ${dX >= 0 ? '+' : ''}${dX.toFixed(1)}`.padStart(14) +
+          `   ${wave.handPixels}`.padStart(8) +
+          `   rock ${(maxX - minX).toFixed(1)}x${(maxY - minY).toFixed(1)}px`,
+      );
+    }
+  }
+  process.exit(0);
+}
 
 if (process.argv.includes('--picture')) {
   // `--arm-x`/`--arm-z` draw a pose the game does not hold, for comparing
@@ -528,6 +654,49 @@ if (picture.handPixels < REQUIRED_HAND_PIXELS) {
       'Note the ceiling: ~19 px is all this rig can produce, because her arm reaches 0.835 m from\n' +
       'her centreline against a skull of roughly 0.6 m radius. If more is needed, the lever is not\n' +
       'the arm — it is moving the whole body, which is 474 px.',
+  );
+  process.exit(1);
+}
+
+// --------------------------------------------------------------- the rock
+//
+// The motion that actually reaches the screen, and the only cue that does not
+// depend on which side she climbed. Measured in pixels at play scale, against a
+// world-anchored window, because QA's third pass proved world-space motion is
+// no evidence at all: her 0.31 m hoist nets about −3 px on half the approaches,
+// the follow camera having eaten it.
+const ROCK_STEPS = 8;
+let worstRock = Infinity;
+const handByBearing: number[] = [];
+for (const bearing of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (let r = 0; r < ROCK_STEPS; r += 1) {
+    const t = (r / ROCK_STEPS) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
+    const frame = rasterise(firstTree, 0, null, 1, 'tree', bearing, t);
+    minX = Math.min(minX, frame.bodyCentroidX);
+    maxX = Math.max(maxX, frame.bodyCentroidX);
+  }
+  worstRock = Math.min(worstRock, maxX - minX);
+  handByBearing.push(rasterise(firstTree, 0, null, 1, 'tree', bearing).handPixels);
+}
+
+console.log(
+  `  rock: silhouette travels ${worstRock.toFixed(1)} px side to side at the WORST approach ` +
+    `bearing (needs ${REQUIRED_ROCK_PIXELS}).`,
+);
+console.log(
+  `  hand by approach bearing (0/90/180/270): ${handByBearing.join(' / ')} px — ` +
+    'the arm is approach-dependent; the rock is not.',
+);
+
+if (worstRock < REQUIRED_ROCK_PIXELS) {
+  console.error(
+    `\ncheck:climb-wave FAILED (motion) — her silhouette only travels ${worstRock.toFixed(1)} px ` +
+      `at the worst approach (needs ${REQUIRED_ROCK_PIXELS}).\n` +
+      'The rock is the only cue that survives every approach and the follow camera. Do not try to\n' +
+      'replace it with a translation: the camera tracks `player.position` and cancels those — that\n' +
+      'is exactly what happened to the 0.3 m hoist, which nets about -3 px on half the bearings.',
   );
   process.exit(1);
 }

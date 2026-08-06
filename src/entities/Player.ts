@@ -127,9 +127,34 @@ export const CLIMB_WAVE_ARM_Z = 1.25;
 /** How far the hand wags either side of {@link CLIMB_WAVE_ARM_Z}. */
 export const WAVE_WAGGLE = 0.42;
 
+/**
+ * How far she rocks side to side while waving, in radians.
+ *
+ * **This is the part of the wave you can actually see**, and it is a rotation
+ * for a measured reason. QA's third pass found the 0.3 m hoist contributes
+ * *nothing* on screen and in fact nets negative: the follow camera tracks
+ * `player.position` (`Game.ts` -> `IsoCamera.update`, `focus.y` damped) and
+ * climbs with her, eating most of it, while turning to camera swings her
+ * off-axis head under an isometric projection — measured, she ends some waves
+ * ~3 px *lower* against the scenery than she started.
+ *
+ * A camera that follows position can cancel a translation. It cannot cancel a
+ * rotation. Rocking `body` swings her head *and* her waving arm together —
+ * and her head is ~25x the screen area of her hand, so this moves far more
+ * pixels than the arm ever can.
+ *
+ * Amplitude chosen by measuring screen-space excursion at play scale
+ * (`check:climb-wave --motion`), not from world-space geometry, because
+ * world-space motion is exactly what turned out not to reach the screen.
+ */
+export const CLIMB_WAVE_LEAN = 0.16;
+
+/** Rock rate, rad/s. Half the hand's wag, so the body sways under a faster wave. */
+export const CLIMB_WAVE_LEAN_RATE = 5.5;
+
 /** The limbs {@link applyRidePose} moves. `CharacterModel` satisfies this. */
 export interface RidePoseTarget {
-  readonly body: { rotation: { x: number } };
+  readonly body: { rotation: { x: number; z: number } };
   readonly leftArm: { rotation: { x: number; z: number } };
   readonly rightArm: { rotation: { x: number; z: number } };
   readonly leftLeg: { rotation: { x: number } };
@@ -152,6 +177,7 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
   model.leftArm.rotation.z = 0.5;
   model.rightArm.rotation.z = -0.5;
   model.body.rotation.x = 0.3;
+  model.body.rotation.z = 0;
   model.leftLeg.rotation.x = -0.7;
   model.rightLeg.rotation.x = -0.55;
   // Same arm and the same waggle as the crowd's wave (`NpcCharacter.animate`),
@@ -160,6 +186,9 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
     const waggle = Math.sin(elapsed * 11) * WAVE_WAGGLE;
     model.rightArm.rotation.x = lerp(-2.5, CLIMB_WAVE_ARM_X, climbWave);
     model.rightArm.rotation.z = lerp(-0.5, CLIMB_WAVE_ARM_Z + waggle, climbWave);
+    // The rock. See CLIMB_WAVE_LEAN — this, not the hoist, is the motion that
+    // reaches the screen, because the follow camera cannot cancel a rotation.
+    model.body.rotation.z = Math.sin(elapsed * CLIMB_WAVE_LEAN_RATE) * CLIMB_WAVE_LEAN * climbWave;
   }
 }
 
