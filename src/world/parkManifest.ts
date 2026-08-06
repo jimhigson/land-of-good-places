@@ -68,6 +68,25 @@ export interface ManifestEntry {
    */
   readonly near?: { readonly id: string; readonly min: number; readonly max: number };
   /**
+   * Stand as close to the **park's own edge** as {@link PLOT_EXTENT_LIMIT} and
+   * the neighbours allow — a relation to the boundary, in the same spirit as
+   * {@link near} being a relation to another plot rather than a band.
+   *
+   * A band cannot express this any more. A band is a radius from the middle,
+   * and a radius only says where the edge is while the edge is the same
+   * distance away on every bearing. The park's is a spline: 59.7 m at its pinch
+   * and 101.4 m at its bulge on the canonical seed, and **re-rolled per seed**,
+   * so a fixed radius (or a fixed pin) that sits at the rim on one seed sits in
+   * the middle of the lawn on the next. The solver resolves this against the
+   * boundary it actually built — see `parkLayout.ts`'s `rimPositions`.
+   *
+   * Used by `stall.railRacer` alone: the rail-race booth is the one plot with a
+   * standing invariant that it is nearer the race rails than any other
+   * (`railRaceStallStandsAtTheRim`). Generalising it to every stall is issue
+   * #117's job, not this field's.
+   */
+  readonly atRim?: boolean;
+  /**
    * Placement priority: lower places earlier. Default is by size (largest
    * first, which packs reliably). The fountain overrides this to place
    * FIRST: it is the park's middle, and everything else arranges around it —
@@ -153,17 +172,32 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   //
   // stall.railRacer stands at the park's rim (1 August 2026), close to the
-  // rail-race loop it boards: `railRace/route.ts` flies that ring at a
-  // constant 53.5 m nominal radius all the way round, so what "close to the
-  // rails" means for a booth is *radial* distance from the middle, not
-  // bearing — the arch that carries a rider out to the ring already tracks
-  // whatever bearing the booth stands at (`route.ts`'s `startDistance`).
+  // rail-race loop it boards. The arch that carries a rider out to the ring
+  // already tracks whatever bearing the booth stands at (`route.ts`'s
+  // `startDistance`), so the booth chooses the bearing and the ride follows.
   //
-  // 41 m keeps the plot's own edge (41 + 3.4 = 44.4) a solid margin short of
-  // the train's 48 m inner edge, so the rail loop is untouched by this move.
-  // An earlier attempt (PR #159) tried moving this pin, found `check:park`
-  // failing with stranded `poiGraph` waypoints at every rim position it
-  // swept, and concluded the move was blocked. It was not the rim itself
+  // **It was a pin, at [38.5, 14.0] — bearing 20°, radius 41 — until 5 August
+  // 2026.** That was right while `railRace/route.ts` flew the ring at a
+  // constant nominal radius: with the rim the same distance out on every
+  // bearing, "close to the rails" was a *radial* distance from the middle and
+  // one pair of numbers could express it.
+  //
+  // The ring now follows the park's edge, and the edge is a spline that is
+  // re-rolled per seed. Bearing 20° turned out to be the canonical seed's
+  // **bulge** — the edge stands 98 m out there — so the booth sat 40.5 m
+  // inside it and five other plots were nearer the rails than the booth that
+  // boards them. `railRaceStallStandsAtTheRim` failed on all five seeds, and
+  // was right to. No pin can fix that: the bearing that is the pinch on one
+  // seed is the bulge on another. So the entry asks for the rim by relation
+  // ({@link ManifestEntry.atRim}) and the solver resolves it against the
+  // boundary it built. That costs nothing elsewhere in the park — a rim scan
+  // draws no random numbers, exactly as a pin drew none, so every other plot
+  // lands precisely where it did before.
+  //
+  // The history below is why the *rim itself* is reachable at all, and still
+  // applies. An earlier attempt (PR #159) tried moving this pin, found
+  // `check:park` failing with stranded `poiGraph` waypoints at every rim
+  // position it swept, and concluded the move was blocked. It was not the rim
   // that was unreachable — two separate, fixable bugs were:
   //
   // 1. `paths.ts`'s spur `past` extension always overshot 2 m towards the
@@ -191,10 +225,11 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   //    clean on every invariant, with headroom either side.
   {
     id: 'stall.railRacer',
-    pin: [38.527397452222246, 14.022825876352417],
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 42 },
+    // The band is now only a floor and a backstop; `atRim` is what places it.
+    band: { min: 13, max: 46 },
+    atRim: true,
   },
   {
     id: 'stall.spookyHouse',
