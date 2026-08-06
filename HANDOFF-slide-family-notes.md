@@ -12,14 +12,40 @@ Worktree: `.claude/worktrees/e-slide-family-notes`. My dev server port: **5412**
 | # | Item | State |
 |---|---|---|
 | 1 | Landing: clipped into the slide, not in the pit | **done**, invariant + mutation proof |
-| 2 | Chase cam instead of first person | **done**, wants Jim's eyes |
+| 2 | Chase cam instead of first person | **done** + the 26.65 m rider bug it exposed |
 | 3 | Half the chute see-through (#228) | **done**, wants Jim's eyes |
-| 4 | Start attached to the castle roof | **done**, wants Jim's eyes |
+| 4 | Start attached to the castle roof | **done**, moved to 1.225 m from the edge |
 | 5 | Ball pit follows the slide (#229) | **NOT DONE** — measured blocker, posted on #229 |
 | 6 | Balls scatter when she lands | **done**, wants Jim's eyes |
 
 Baseline was 157 passed / 0 skipped. Now **167 passed / 0 skipped** (two new
-invariants × 5 seeds). `npm run build` exit 0.
+invariants × 5 seeds). `npm run build` exit 0, and it now also runs
+`npm run check:slide-rider`.
+
+### The big one: the rider was 26.65 m off the chute
+
+Jim: *"in the chase cam it seems the player is still not drawn"*. **Not a
+visibility bug.** `advanceRide` placed the rider at `pointAt(t)` +
+`BUILDING_CENTRE_X/Z` + `BUILDING_BASE_Y`; `rideMount`, which the camera hangs
+off, copied `pointAt(t)` straight through. The mount was right — the chute is
+built from `SLIDE_PLAN.points`, already world coordinates, onto a `parkRoot`
+whose world offset measures exactly (0,0,0).
+
+Chute ends (8.86, 1.09, -28.46), 2.00 m from the pit. The rider was put at
+(-6.48, 1.53, -50.25) — 26.04 m from the pit. Invisible for months because
+first person hid her model and the camera followed the mount.
+
+Fixed with one owner, `Building.ridePointToWorld`. The helter-skelter really
+does need an offset (authored around the interior origin), so the frame is a
+property of the ride.
+
+**Guard: `npm run check:slide-rider`.** Drives the real ride with a real
+`Player` and asserts every frame that she is drawn, is inside the built trough,
+and is where the seat is. A *script*, not a procgen invariant, because the park
+is built without a Player and because recomputing her position from the chute
+would agree with the chute and pass while the game disagreed with both — it has
+to observe, not recompute. Proved red both ways (re-hide: "not drawn for 686 of
+686 frames"; restore the offset: "rode 26.65 m off the chute").
 
 ## Findings worth keeping
 
