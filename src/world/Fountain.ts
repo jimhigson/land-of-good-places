@@ -236,6 +236,13 @@ export class Fountain implements GameSystem {
     // rather than growing a second one here. Published as a plain occluder;
     // `Game.ts` hands it to `FoliageFade`.
     //
+    // Now that the statue turns, the patch it hides changes shape through the
+    // cycle and the capsule had to be widened to cover the paw's whole swept
+    // circle rather than one pose's silhouette — see `OCCLUDER_RADIUS`, which
+    // went 1.8 → 2.5 for it. Nothing here changes: the capsule is a body of
+    // revolution, so it is the same shape at every angle and this occluder is
+    // as static as it ever was.
+    //
     // World space, because the fade test works against the camera and the
     // player. `this.centre` is the fountain's own world position and the statue
     // stands 2.17 m above it on the bowl water.

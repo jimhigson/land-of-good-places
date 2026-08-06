@@ -203,34 +203,75 @@ export interface RipikaStatueHandle extends AssetHandle {
 /**
  * The occluder capsule's radius.
  *
- * Not the statue's true maximum reach (3.13 m at the raised arm, y 6–7) and not
- * its slimmest (1.05 m at the ankles). A capsule is one radius, so this is the
- * width of the **mass that actually hides a child** — plinth, legs, torso and
- * head — with the outflung arm and tail treated as the thin decoration they
- * are. Erring wide would fade the statue whenever anyone walked near the
- * fountain; erring narrow would leave the child hidden, which is the bug.
+ * A capsule is one radius, so this has to be the width of the **mass that
+ * actually hides a child**. Erring wide fades the statue whenever anyone walks
+ * near the fountain; erring narrow leaves the child hidden, which is the bug.
  *
- * **1.8 m, and the number was measured rather than judged.** Grid-sweeping
- * 985 m² of standable plaza at 0.25 m, raycasting a 2.12 m player's head,
- * chest and waist along the camera axis, the ground where the child is hidden
- * *and the statue does not fade* is:
+ * **2.5 m — raised from 1.8 on 5 August 2026, when the statue started turning.**
+ * That change is not cosmetic and the old number was genuinely unsafe once it
+ * shipped, so the reasoning behind both values is kept.
+ *
+ * ## Why a rotating statue needs a wider capsule than a still one
+ *
+ * At a fixed pose, the outflung arm and the tail could be written off as thin
+ * decoration: they reach 3.13 m at the raised paw (y 6–7), but only in *one*
+ * direction, and that direction happened not to matter. Spin the statue and
+ * that stops being true — the paw sweeps a 3.13 m circle, so every bearing now
+ * sees the full reach at some point in the turn. The capsule is a body of
+ * revolution and cannot describe a pose, so it has to describe the **swept**
+ * shape.
+ *
+ * That gives a prediction before any measurement: `FoliageFade` tests against
+ * `radius + SIGHTLINE_MARGIN`, and `SIGHTLINE_MARGIN` is `PLAYER_RADIUS + 0.35`
+ * = 0.97 m, so covering a 3.13 m sweep wants `3.13 − 0.97 = 2.16 m`.
+ *
+ * ## What was measured
+ *
+ * `scripts/check-statue-occlusion.mts` grid-sweeps 985 m² of standable plaza at
+ * 0.25 m, raycasting a 2.12 m player's head, chest and waist along the camera
+ * axis, at poses spanning one full revolution. Ground where the child is hidden
+ * *and the statue does not fade*, with `SWEEP_R`:
  *
  * ```
- *   r=0.8 → 3.5 m²   r=1.0 → 1.3 m²   r=1.2 → 0.4 m²
- *   r=1.4 → 0        r=1.6 → 0        r=1.8 → 0
+ *   still (one pose)   r=1.2 → 0.4 m²   r=1.4 → 0        r=1.8 → 0
+ *   turning            r=1.8 → 0.9 m²   r=2.05 → 0.1 m²  r=2.10 → 0
  * ```
  *
- * So 1.4 is the true threshold and 1.8 carries ~29% headroom. The margin is
- * deliberate and the asymmetry is the reason: too small and a child vanishes,
- * which is the bug; too large and the statue turns translucent slightly early,
- * which is what `SIGHTLINE_MARGIN` already does on purpose for every tree in
- * the park. My first guess here was 2.4 — nearly double what is needed — and
- * the sweep is the only reason that is not what shipped.
+ * So **rotation moved the true threshold from 1.4 m to 2.10 m**, and at the
+ * shipped 1.8 the turning statue hid a child over 0.9 m² of plaza, about 7 m
+ * out, at 9 of 24 poses. The measured 2.10 lands just under the 2.16 the
+ * geometry predicts — the paw is thin and high, so it clips the child's outline
+ * a little before it covers it — which is the reassuring kind of agreement.
  *
- * Re-run `scripts/_prove-fade.mts` (see HANDOFF-ripika-statue.md) if the
- * statue's proportions ever change.
+ * That threshold is solid: re-measured at 24, 48, 96 and 180 poses (down to 2°
+ * steps) it is 2.10 every time, so it is not an artefact of how finely the turn
+ * is sampled.
+ *
+ * ## Why 2.5 and not 2.10 or 2.7
+ *
+ * 2.5 is ~19% over the threshold and clears the 2.16 the swept geometry asks
+ * for outright. Headroom is not free — it is monotone in ghosting, with the
+ * ground where the statue fades but the child was not really hidden going
+ * 54.5 m² at 2.10 → **68.6 m² at 2.5** → 76.1 m² at 2.7 — and the fade is a
+ * binary target (`MIN_ALPHA` 0.26), not a gentle ramp, so that area is really
+ * see-through rather than slightly hazy.
+ *
+ * The old 1.8 carried ~29% over its threshold, and matching that ratio would
+ * mean 2.7. Less is taken here deliberately, because the measurement behind 2.10
+ * is a much tighter one than the measurement behind 1.4: that was a single pose
+ * in 0.2 m radius steps, and the fragility of measuring one pose is exactly what
+ * produced this bug. This is 180 poses in 0.05 m steps.
+ *
+ * **The rotation does not make the fade flicker**, which is worth writing down
+ * because it is the first thing to suspect. The fade decision is taken against
+ * this capsule alone, and a capsule about the vertical axis is the same shape at
+ * every angle — so turning the statue cannot change the decision. The fade still
+ * only reacts to the player moving, exactly as before.
+ *
+ * Re-run `npm run check:statue-occlusion` (with `SWEEP_R`, and `SWEEP_POSES` if
+ * you doubt the sampling) if the statue's proportions or its rate ever change.
  */
-const OCCLUDER_RADIUS = 1.8;
+const OCCLUDER_RADIUS = 2.5;
 
 /**
  * Builds the statue. Origin at the **base of the plinth**, centred on X and Z,
