@@ -1038,19 +1038,41 @@ if (worstAim > ALLOWED_ROCK_SWING_DEGREES) {
  */
 const REQUIRED_BODY_PIXELS = 40;
 
+/**
+ * How many trees the body check rasterises.
+ *
+ * Not all of them, and the reason is cost: rasterising is ~2 700 rays a frame
+ * and #216 took the park from 8 climbable trees to 43, which would put this one
+ * check near two minutes of every build. A spread of {@link BODY_TREES}, evenly
+ * spaced through the list so different canopy sizes are covered, is enough —
+ * because what this guards is **global**. Nothing hides the body on one tree
+ * and not another: `TreeClimbing` either draws her or it does not. The per-tree
+ * variation is only how much canopy eats, and four approaches on each of these
+ * samples that adequately.
+ */
+const BODY_TREES = 6;
+
 const bodyByTree: { index: number; bearing: number; pixels: number }[] = [];
-for (const [index, tree] of trees.entries()) {
+for (let t = 0; t < Math.min(BODY_TREES, trees.length); t += 1) {
+  const index = Math.floor((t * trees.length) / Math.min(BODY_TREES, trees.length));
+  const tree = trees[index];
+  if (!tree) continue;
   for (let b = 0; b < 4; b += 1) {
     const bearing = (b / 4) * Math.PI * 2;
     const shot = rasterise(tree, index, null, 1, 'head', bearing, 0, null, hideBodyMutation);
     bodyByTree.push({ index, bearing, pixels: shot.bodyPixels });
   }
 }
+if (bodyByTree.length === 0) {
+  console.error('check:climb-wave FAILED (body) — no tree was sampled, so nothing was measured.');
+  process.exit(1);
+}
 const worstBody = bodyByTree.reduce((a, b) => (b.pixels < a.pixels ? b : a));
 
 console.log(
   `  body: ${worstBody.pixels} px of her below the neck at the WORST of ` +
-    `${trees.length} trees x 4 approaches (needs ${REQUIRED_BODY_PIXELS})` +
+    `${Math.min(BODY_TREES, trees.length)} of ${trees.length} trees x 4 approaches ` +
+    `(needs ${REQUIRED_BODY_PIXELS})` +
     `${hideBodyMutation ? ' — MUTATED: body re-hidden' : ''}.`,
 );
 
