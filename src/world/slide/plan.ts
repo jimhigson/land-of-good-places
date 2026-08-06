@@ -595,7 +595,11 @@ function doorPoses(): Pose2[] {
     const z = SOUTH_WALL_Z + WALL_STANDOFF;
     for (const yaw of yaws) {
       // Heading is +Z (out of the south face), rotated by `yaw`.
-      poses.push({ x, z, hx: Math.sin(yaw), hz: Math.cos(yaw) });
+      const pose: Pose2 = { x, z, hx: Math.sin(yaw), hz: Math.cos(yaw) };
+      // An offer whose hole would run off the end of the wall is not an offer.
+      // See {@link doorFitsTheWall}: how wide the opening has to be depends on
+      // how angled the exit is, so this cannot be decided by spacing alone.
+      if (doorFitsTheWall(pose)) poses.push(pose);
     }
   }
   return poses;
@@ -755,12 +759,49 @@ function doorCrossing(route: SolvedRailRoute): { localX: number; halfWidth: numb
   const tangent = { x: 0, z: 0 };
   route.pointAt(0, at);
   route.tangentAt(0, tangent);
-  const headingZ = Math.max(tangent.z, MIN_DOOR_HEADING_Z);
+  return crossingOf(at.x, tangent.x, tangent.z);
+}
+
+/**
+ * {@link doorCrossing}, as arithmetic on a pose rather than on a solved route.
+ *
+ * Split out so the poses that are *offered* and the hole that is finally *cut*
+ * cannot disagree. They did: `doorPoses` spaced its offers by
+ * {@link SLIDE_DOOR_HALF_WIDTH}, the 2.10 m a square-on chute needs, while the
+ * hole an angled exit actually gets is `CORRIDOR_RADIUS / headingZ +
+ * DOOR_SHOULDER`, which grows without bound as the exit turns along the wall.
+ * At 18° off the normal that is 2.18 m, and the outermost offer plus that ran
+ * to facade-local 12.34 against a wall ending at 12.00 — a hole with its far
+ * edge past the corner of the building, leaving a notch in the masonry. Seed 5
+ * did exactly that.
+ *
+ * Two numbers describing one opening, kept in step by hand and by nothing else,
+ * is the same shape of bug commit 1 removed from `layout.ts`. Now there is one
+ * formula, and {@link doorFitsTheWall} asks it.
+ */
+function crossingOf(
+  startX: number,
+  tangentX: number,
+  tangentZ: number,
+): { localX: number; halfWidth: number } {
+  const headingZ = Math.max(tangentZ, MIN_DOOR_HEADING_Z);
   const back = WALL_STANDOFF / headingZ;
   return {
-    localX: at.x - tangent.x * back - BUILDING_CENTRE_X,
+    localX: startX - tangentX * back - BUILDING_CENTRE_X,
     halfWidth: CORRIDOR_RADIUS / headingZ + DOOR_SHOULDER,
   };
+}
+
+/**
+ * Would the hole this pose implies fit inside the south wall?
+ *
+ * The wall runs facade-local ±{@link BUILDING_HALF_X}. A hole that runs past
+ * either end is not a doorway, it is a missing corner — and it is cheaper to
+ * decline the pose than to solve a whole route through it and throw that away.
+ */
+function doorFitsTheWall(pose: Pose2): boolean {
+  const { localX, halfWidth } = crossingOf(pose.x, pose.hx, pose.hz);
+  return localX - halfWidth >= -BUILDING_HALF_X && localX + halfWidth <= BUILDING_HALF_X;
 }
 
 /**
@@ -962,7 +1003,8 @@ function planSlide(): PlannedSlide {
     // general area; `satisfies` below is what actually decides.
     clear: (x, z, radius, distanceAlong) =>
       chuteMayPass(x, z, radius, distanceAlong, DESIRED_LENGTH),
-    satisfies: (candidate) => heightSensitiveComplaint(chutePoints(candidate)) === null,
+    satisfies: (candidate) =>
+      candidate.length <= 75 && heightSensitiveComplaint(chutePoints(candidate)) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
     selfClearance: SELF_CLEARANCE,
