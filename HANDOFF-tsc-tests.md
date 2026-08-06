@@ -3,10 +3,21 @@
 Branch `fix/typecheck-tests`, worktree `.claude/worktrees/tsc-tests` (own
 `npm ci`). Issue **#192** — `tsc --noEmit` never typechecked `test/`.
 
-**Status: done. `npm run build` exit 0, `test:procgen` 85/85. No PR.**
+**Status: done, PR raised. `npm run build` exit 0, `test:procgen` green.**
 
-**Rebased onto `origin/chore/invariant-return-complaints`** per the Overseer's
-ordering ruling — that branch lands first. Rebase was clean (no shared files).
+## Base changed: now straight onto `main` (E11, 5 Aug)
+
+It used to be rebased onto `origin/chore/invariant-return-complaints` per an
+earlier ordering ruling. **That branch is dead** — its content reached `main`
+inside PR #196, and what remained on it had gone stale enough that replaying it
+would have reverted five later merges (#196, #203, #211, #213). See
+`HANDOFF-e11-prs.md` on `chore/invariant-return-complaints` for the measurement.
+
+So this branch was rebased with `git rebase --onto origin/main e3de651`, which
+**drops** the two invariant commits and keeps only the four that are actually
+about #192. `HANDOFF-invariant-type.md` correctly disappears from the diff; the
+only `invariants.ts` change left is the `builtRings` fix, +28/-4 against main,
+with all 21 of main's invariants intact.
 
 ## What was done
 
@@ -66,21 +77,46 @@ Injected a deliberate type error into `test/procgen/invariants.ts` and confirmed
 `npm run build` **fails with exit 2**, naming it. Before this branch that error
 was invisible. A check nobody has watched fail is not a check.
 
-## Not done — `scripts/` is still uncovered
+## Not done — `scripts/` is still uncovered (issue #197)
 
-`scripts/` holds **45 files**, including every `check:*.mts` that gates the
-build, and none are typechecked except the few the tests reach transitively
-(`park-harness.mts` and its imports, which this branch does now cover). That is
-the same bug as #192 with a bigger surface. **Deliberately out of scope** — it
-would surface an unknown number of new errors. Worth its own issue.
+`scripts/` holds **49 files, 37 of them `.mts`**, and the 31 `check:*` scripts
+that gate the build live there. None are typechecked except the few the tests
+reach transitively (`park-harness.mts` and its imports, which this branch does
+cover — and which is exactly where one of the five errors below was found).
+That is the same bug as #192 with a bigger surface. **Deliberately out of
+scope**, tracked as **#197**.
+
+(Counted 5 Aug: #197's title says 42 and an earlier draft of this file said 45.
+Neither matched. The numbers above are `ls`.)
+
+## Five more errors found when rebasing onto current main (E11, 5 Aug)
+
+Rebasing turned `typecheck:test` **red**, on five errors that had landed on
+`main` since this branch was cut. That is the gate working before it has even
+merged — every one was invisible to `main`'s own build.
+
+| Where | What |
+| --- | --- |
+| `scripts/park-harness.mts` | `InteriorControls` gained `openShop`; the inert stub never got it |
+| `test/input/text-entry-guard.test.ts` (x2) | called `justPressed('interact')`, which #122 made a type error on purpose |
+| `test/store/live-look.test.ts` (x2) | `backpackKind: 'classic'` / `shoeKind: 'trainer'` — neither is in its union since #131 |
+
+The interact one is the interesting one. #122 excluded `interact` from
+`justPressed`'s parameter type so that reading it anywhere but
+`InteractRouter` is a compile error; this test predates that and compiled only
+because nothing checked `test/`. Switched to `takeInteractPress()`, the
+sanctioned door — which *consumes* the edge, so the test now genuinely asserts
+the "exactly once" its own name claims.
 
 ## State
 
 - [x] `tsconfig.test.json`, no Node types reaching `src/`
 - [x] `builtRings` fixed by narrowing
 - [x] `typecheck:test` wired into `build`, proved to bite
-- [x] build exit 0, procgen 85/85
-- [ ] PR (not raised — Overseer's call; merges after `chore/invariant-return-complaints`)
+- [x] build exit 0, procgen 127/127 (was 85/85 — main has grown)
+- [x] five later errors on main fixed, found by the gate itself
+- [x] rebased straight onto `origin/main`; merge-base == main's tip
+- [x] PR raised
 
 ---
 
@@ -94,5 +130,5 @@ visual surface — but if you want the app off it:
 cd /Users/jim/dev/landOfGoodPlaces/.claude/worktrees/tsc-tests && npx vite --port 5323 --strictPort
 ```
 
-No PR yet. Merges after `chore/invariant-return-complaints`, which it is
-rebased on.
+PR is up. It no longer waits on `chore/invariant-return-complaints` — that
+branch is redundant and should be deleted unmerged, not landed first.
