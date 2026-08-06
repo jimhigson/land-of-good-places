@@ -178,29 +178,37 @@ Landed since round 3:
 **Counts moved:** the bar is now **156 passed / 9 files / 0 skipped**, not 137 —
 `main` brought new tests, and +5 of the rise is the rainbow invariant.
 
-## STILL TO DO — the crouch
+## Round 5 (6 Aug): the crouch — DONE
 
-Ducking and the bonk knock-down are **still a rigid translation** of the whole
-child, which clips through the cart. That is Jim's outstanding note.
+`src/world/railRace/duckPose.ts` is the whole of it. `root` never moves; `body`
+sinks (`DUCK_HIP_DROP`), the waist folds 45°, the chin tucks, the arms come in,
+and a light 12% squash supports it. Player drives it through
+`Player.railRaceDuck` (set in `poseRider`, applied at the end of
+`Player.animate`, before `model.update` so the ponytail follows); rivals get
+`poseDuck` directly after `kid.update`. The bonk knock-down uses the same pose.
 
-The rig diagnosis (round 3, above) says this needs **no 3D artist**: bend
-`body.rotation.x` with the feet planted (the flower pick already does 45°), plus
-a `body.scale.y` squash (the walk cycle already does this every frame), plus the
-existing head tuck — `root` never moves, so nothing slides through the cart
-floor. A 45° bend and a 10% squash reproduce today's 0.5 drop as a pose.
+Duck depth **1.49 m** at ride scale, against 1.25 for the old translation.
+`DUCK_CLEARANCE` re-derived: clears by 0.74, strikes by 0.74.
 
-Two things to get right when doing it:
+**The one thing to understand before touching it:** a 45° waist bend lowers the
+top of her head by only **0.077 m**, because a big round head tipped forward
+brings its back up as fast as it brings the crown down; a chin tuck *alone*
+RAISES it 0.263 m. The clearance comes from the hip drop and the squash. Do not
+"simplify" this to a bigger bend — it will look identical and clear nothing.
 
-1. **Re-derive `RIDER_HEAD_TOP_AT_PARK_SCALE`'s ducked counterpart from the new
-   pose**, and with it `DUCK_CLEARANCE_AT_PARK_SCALE`. Do not let a second
-   height constant appear — that constant is now the single owner and the
-   rainbow depends on it too.
-2. **Check whether the 4-frame skull clip disappears.** A real crouch may remove
-   it outright, which would be better than the 1.9 m contact lead I deliberately
-   did not ship.
-3. Guard it: assert the mesh does not intersect the cart and that the head
-   clears the bar *in the posed state*; prove red by putting the translation
-   back.
+**No modelling needed here, and the reason does not generalise:** it works only
+because the cart hides the legs (there is no knee, so the feet sink with the
+hips). Any crouch in the open still cannot be expressed — the ask would be a
+pelvis Group plus a knee node, both plain Groups, zero skinning.
+
+## STILL OPEN — the 4-frame skull clip
+
+Re-measured after the crouch: **still 4 frames.** It cannot be fixed by a
+deeper duck, because it happens while she is still *upright*, on the approach,
+before the bonk that folds her. Only the ~1.9 m contact lead removes it —
+subtract it inside `planHazards` when building `barCrossings` so `stepRider`,
+`barIsHere` and the strategies all see one number. Deliberately not shipped: it
+moves when the bonk fires by 1.9 m and I have had no browser all round.
 
 ## Checks
 
