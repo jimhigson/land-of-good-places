@@ -74,10 +74,68 @@ import {
  */
 
 /**
+ * **A place a ride asks its route to be drawn towards.**
+ *
+ * The generator returns the **first satisfying route, not the best one** — it
+ * takes whatever fits first, because nothing was ever asking for more. Measured
+ * over 24 free solves of the Sky Cruiser, 20 crossed the castle and 4 did not;
+ * the four were not rejected for anything, they simply closed before they got
+ * there. So a feature that depends on the route going somewhere cannot be had
+ * by asking afterwards. It has to be worth something *at the decision point*.
+ *
+ * That is what this is: a named, weighted nudge applied where the search picks
+ * between candidate pieces. It is **not** a castle hook — the castle is merely
+ * its first caller. Any ride can declare that it would like to pass near
+ * something, and the mechanism knows nothing about what the something is.
+ *
+ * ### What it deliberately does not do
+ *
+ * **It reserves nothing.** No corridor is carved, no space is held, and no
+ * other thing is moved out of the way. It changes which routes are *likely*,
+ * never which are *possible*, so a park where the pull cannot be satisfied
+ * still solves — it just solves without it. Decision 6 in
+ * `ARCHITECTURE-DECISIONS.md` is the rule this is careful not to break: the
+ * castle's opening is cut wherever the route actually crosses, and the route is
+ * never bent to a hole that was cut first.
+ *
+ * **It does not guarantee anything either.** A weight makes an outcome likely.
+ * When a ride needs the outcome rather than the tendency, it pairs this with
+ * {@link RouteBrief.satisfies}, which is the backstop that can actually say no.
+ */
+export interface RouteInfluence {
+  /** Names it in the solve report, so a pull that never lands can be seen. */
+  readonly name: string;
+  readonly x: number;
+  readonly z: number;
+  /**
+   * Metres within which the route counts as having arrived.
+   *
+   * Once any laid track is this close, the pull switches off — otherwise a
+   * satisfied influence goes on tugging and the loop orbits the thing it has
+   * already visited.
+   */
+  readonly radius: number;
+  /**
+   * How hard it pulls, as a multiplier on metres-of-detour.
+   *
+   * The score this competes in is metres, and carries `rng.unit() * 12` of
+   * seeded jitter to keep loops from all coming out the same shape. So a weight
+   * of about **0.25** makes a 30 m pull worth roughly what the jitter is worth,
+   * which biases the choice; much above that and the pull stops being a bias
+   * and starts being a beeline, which is both duller to ride and harder to
+   * close into a loop.
+   */
+  readonly weight: number;
+}
+
+/**
  * Everything common to a closed ride and an open one.
  *
  * Split out only so `closed` can discriminate the two below; every field here
- * means exactly what it did when there was one brief type.
+ * means exactly what it did when there was one brief type. {@link RouteInfluence}
+ * and {@link RouteBriefBase.satisfies} live here rather than on one half because
+ * neither has anything to do with whether a route comes back to where it began:
+ * an open route can want to pass near something exactly as a loop can.
  */
 interface RouteBriefBase {
   /** Usually `PARK_SEED ^ someRideSalt`. */
@@ -149,6 +207,37 @@ interface RouteBriefBase {
     /** Attempts tried before giving up entirely. */
     readonly restarts: number;
   };
+  /**
+   * Places this route would like to pass near. Absent means no bias at all —
+   * and absent is **byte-identical** to before this existed, because the pull
+   * a ride does not ask for contributes exactly zero and draws no randomness.
+   */
+  readonly influences?: readonly RouteInfluence[];
+  /**
+   * **The backstop: is a solved route actually acceptable?**
+   *
+   * {@link RouteInfluence} makes an outcome likely; this is what makes it
+   * required. A route that solves but fails here is thrown away and the search
+   * moves to the next start pose, exactly as a dead end would.
+   *
+   * Kept separate from `clear` on purpose. `clear` is asked about a *piece*,
+   * thousands of times, and can only see a point; this is asked about a
+   * *finished route*, a handful of times, and can measure the whole thing. A
+   * property like "passes through the castle" is not a fact about any one piece
+   * and cannot be phrased as one.
+   *
+   * **It cannot make a park fail.** If every start pose is exhausted and none
+   * satisfied this, **the first route that solved** is returned anyway with
+   * {@link SolveReport.satisfied} false, because a park with no coaster in it
+   * is far worse than a park whose coaster missed the castle. The first rather
+   * than the best on purpose: the search has no ordering over whole routes to
+   * call one better, and inventing one here would be a second, unexamined
+   * notion of quality sitting beside `scoreOf`. The count is
+   * reported so it can be seen rather than guessed at: if this rejects often,
+   * the weighting wants tuning; if it never rejects, the weighting is doing the
+   * work and this is the belt beside the braces.
+   */
+  readonly satisfies?: (route: SolvedRailRoute) => boolean;
 }
 
 /** A ride that comes back to where it started: the Sky Cruiser, the train. */
@@ -184,7 +273,22 @@ export type RouteBrief = ClosedRouteBrief | OpenRouteBrief;
 
 /** What the search did, for the diagnostic on failure and the report on success. */
 export interface SolveReport {
-  /** How many start poses the brief offered. Zero is its own kind of failure. */
+  /**
+   * How many things the outermost level of the search had to try. Zero is its
+   * own kind of failure — a brief that could never have worked.
+   *
+   * **Attempts, not start poses**, and for an open route those differ. A loop's
+   * attempt is a start pose, so the two coincide and the name still reads true.
+   * An open route pairs every start with every end, and an attempt is one
+   * *pairing*: 85 starts against 29 landings is 2465 attempts, not 85.
+   *
+   * {@link startPoseIndex} indexes that same flat list, which is why this must
+   * be counted the same way. Set it from `brief.startPoses.length` and the two
+   * fields silently begin describing different lists — no type error, no failing
+   * test, just a report that is wrong. Recovering which door was actually chosen
+   * means `floor(startPoseIndex / endPoses.length)`, and that arithmetic is only
+   * checkable if the denominator here is the flat count.
+   */
   readonly startPoseCount: number;
   readonly startPoseIndex: number;
   readonly segmentCount: number;
@@ -209,6 +313,23 @@ export interface SolveReport {
     readonly selfClearance: number;
     readonly curvature: number;
   };
+  /**
+   * Whole solved routes thrown away by {@link RouteBrief.satisfies}.
+   *
+   * The number worth watching. Zero means the weighting is carrying the feature
+   * and the backstop is only insurance; a large number means the search is
+   * repeatedly solving routes it then has to discard, and the influence wants
+   * strengthening rather than the backstop working harder.
+   */
+  readonly satisfyRejects: number;
+  /**
+   * Did the route handed back actually satisfy {@link RouteBrief.satisfies}?
+   *
+   * False means every start pose was exhausted without one that did, and the
+   * first route that solved was returned rather than failing the park. Always
+   * true when no `satisfies` was given.
+   */
+  readonly satisfied: boolean;
 }
 
 /** A solved centre line: piecewise cubics, parameterised by arc length. */
@@ -293,6 +414,9 @@ const APPROACH_DISTANCE = 38;
 const ALIGN_RANGE = 26;
 
 /** Legal pieces shortlisted and ranked at each joint before one is taken. */
+/** Shared empty list, so an unweighted brief allocates nothing per joint. */
+const EMPTY_INFLUENCES: readonly RouteInfluence[] = [];
+
 const CANDIDATES_PER_JOINT = 16;
 
 interface Sample {
@@ -307,6 +431,18 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   const rng = new Rng(brief.seed);
 
   let candidatesTried = 0;
+  let satisfyRejects = 0;
+  /**
+   * Builds the **first** route that solved but did not satisfy the brief.
+   *
+   * Kept as a thunk rather than a finished route so that exhausting the search
+   * can hand *something* back whose report carries the **final** counts. Built
+   * eagerly, it froze `satisfyRejects` at 1 — the value at the moment of the
+   * first rejection — and under-reported in exactly the case the number exists
+   * to describe: how much work the backstop is doing. The pieces are copied
+   * because `chosen` is unwound by backtracking after this point.
+   */
+  let makeFallback: (() => SolvedRailRoute) | null = null;
   let backtracks = 0;
   let closerAttempts = 0;
   let restarts = 0;
@@ -594,9 +730,56 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
      * that the score is pure seeded jitter, which is what keeps the loop an
      * interesting shape instead of the shortest legal path to the corridor.
      */
-    const scoreOf = (seg: CubicSegment): number => {
+    /**
+     * Which influences the route has **not** reached yet.
+     *
+     * Measured against the track actually laid, so backtracking cannot leave a
+     * pull switched off for a visit that has since been undone. Worked out once
+     * per joint rather than once per candidate: sixteen candidates all get the
+     * same answer, and the answer only changes when a piece is accepted.
+     */
+    const stillWanted = (): readonly RouteInfluence[] => {
+      const wanted = brief.influences;
+      if (!wanted || wanted.length === 0) return EMPTY_INFLUENCES;
+      return wanted.filter((influence) => {
+        for (const s of laid) {
+          if (Math.hypot(s.x - influence.x, s.z - influence.z) <= influence.radius) return false;
+        }
+        return true;
+      });
+    };
+
+    /**
+     * The detour this piece's end still leaves to every unreached influence.
+     *
+     * Zero when a ride declared none, which is what keeps an unweighted brief
+     * scoring exactly as it did before influences existed — adding zero to a
+     * float changes nothing, and no randomness is drawn on this path.
+     */
+    const pullOf = (seg: CubicSegment, wanted: readonly RouteInfluence[]): number => {
+      if (wanted.length === 0) return 0;
+      const end = endPose(seg);
+      let pull = 0;
+      for (const influence of wanted) {
+        const gap = Math.hypot(influence.x - end.x, influence.z - end.z) - influence.radius;
+        if (gap > 0) pull += gap * influence.weight;
+      }
+      return pull;
+    };
+
+    const scoreOf = (seg: CubicSegment, wanted: readonly RouteInfluence[]): number => {
       const jitter = rng.unit() * 12;
-      if (accumulated / brief.desiredLength <= BIAS_FROM) return jitter;
+      const pull = pullOf(seg, wanted);
+      // No `!brief.closed` here, and that is not an oversight of the #213 merge.
+      // Before open routes were first class this read `!brief.closed || …`,
+      // which sent an open route down the jitter-only path *always*: it never
+      // scored against the approach corridor, because it had no corridor to
+      // score against. #118 gave it one, aimed at its chosen end pose, and the
+      // whole point is that an open route now steers for its finish exactly as
+      // a loop steers for its start. Restoring the guard would silently switch
+      // that steering back off — the route would still solve, so nothing would
+      // fail, it would just stop aiming.
+      if (accumulated / brief.desiredLength <= BIAS_FROM) return jitter + pull;
       const end = endPose(seg);
       const dx = approach.x - end.x;
       const dz = approach.z - end.z;
@@ -614,7 +797,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       );
       // A radian of misalignment is worth about 26 m of distance: arriving
       // pointing the right way matters roughly as much as arriving at all.
-      return range + headingError * 26 + jitter;
+      return range + headingError * 26 + jitter + pull;
     };
 
     // --- the search ------------------------------------------------------
@@ -657,13 +840,14 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       // considered list rather than rolling dice again.
       if (!options[depth]) {
         const head = headPose();
+        const wanted = stillWanted();
         const shortlist: { seg: CubicSegment; samples: Sample[]; score: number }[] = [];
         for (let i = 0; i < CANDIDATES_PER_JOINT; i += 1) {
           candidatesTried += 1;
           const kind = pickKind(brief, rng, head, approach, accumulated);
           const seg = kind.make(head, rng);
           const produced = validate(seg, false);
-          if (produced) shortlist.push({ seg, samples: produced, score: scoreOf(seg) });
+          if (produced) shortlist.push({ seg, samples: produced, score: scoreOf(seg, wanted) });
         }
         shortlist.sort((p, q) => p.score - q.score);
         options[depth] = shortlist;
@@ -699,7 +883,11 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     }
 
     if (solved) {
-      const report: SolveReport = {
+      // `attempts.length`, never `brief.startPoses.length`. See the field's own
+      // doc on {@link SolveReport.startPoseCount}: `startPoseIndex` indexes the
+      // flat attempt list, so counting the other list makes the two describe
+      // different things and nothing anywhere would complain.
+      const reportFor = (satisfied: boolean): SolveReport => ({
         startPoseCount: attempts.length,
         startPoseIndex: startIndex,
         segmentCount: chosen.length,
@@ -711,10 +899,51 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         minRadius: Math.min(...chosen.map((s) => minCurvatureRadius(s))),
         elapsedMs: Date.now() - started,
         rejected: { ...rejected },
-      };
-      return buildRoute(chosen, brief.closed, report);
+        satisfyRejects,
+        satisfied,
+      });
+
+      // The backstop. A route that solves but does not meet what the ride
+      // actually asked for is put aside — not thrown away entirely, because a
+      // park with no coaster is far worse than one whose coaster missed, and
+      // the alternative to keeping it is `RailRouteUnsolvable`.
+      if (brief.satisfies) {
+        const candidate = buildRoute(chosen, brief.closed, reportFor(true));
+        if (!brief.satisfies(candidate)) {
+          satisfyRejects += 1;
+          if (!makeFallback) {
+            const kept = [...chosen];
+            const keptIndex = startIndex;
+            const keptLength = accumulated;
+            makeFallback = (): SolvedRailRoute =>
+              buildRoute(kept, brief.closed, {
+                startPoseCount: attempts.length,
+                startPoseIndex: keptIndex,
+                segmentCount: kept.length,
+                candidatesTried,
+                backtracks,
+                restarts,
+                closerAttempts,
+                length: keptLength,
+                minRadius: Math.min(...kept.map((seg) => minCurvatureRadius(seg))),
+                elapsedMs: Date.now() - started,
+                rejected: { ...rejected },
+                satisfyRejects,
+                satisfied: false,
+              });
+          }
+          continue;
+        }
+        return candidate;
+      }
+      return buildRoute(chosen, brief.closed, reportFor(true));
     }
   }
+
+  // Every start pose solved a route and every one failed `satisfies`. The park
+  // still gets its ride; the report says the requirement went unmet, and the
+  // caller decides whether that is worth complaining about.
+  if (makeFallback) return makeFallback();
 
   const report: SolveReport = {
     startPoseCount: attempts.length,
@@ -728,6 +957,8 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     minRadius: 0,
     elapsedMs: Date.now() - started,
     rejected: { ...rejected },
+    satisfyRejects,
+    satisfied: false,
   };
   // Which level ran out matters more than the fact that one did: no start poses
   // at all is a brief that could never have worked, and says to go and look at

@@ -894,17 +894,8 @@ export interface PlannedSlide {
   readonly entryZ: number;
 }
 
-/**
- * How many metres the solved length may differ from the length its own
- * clearance test assumed before it is worth solving again.
- *
- * A metre and a half of arc moves the height profile by under 15 cm anywhere on
- * it, which is a tenth of the air being kept from the cruiser.
- */
-const LENGTH_SETTLED = 1.5;
-
-/** Passes allowed for the length to settle. It has always taken two. */
-const MAX_PASSES = 5;
+/** Passes allowed before the slide gives up and says why. */
+const MAX_PASSES = 6;
 
 /**
  * Solves the chute, then checks the answer against the thing it actually built.
@@ -912,21 +903,52 @@ const MAX_PASSES = 5;
  * There is a circularity here worth naming: how high the chute is at a point
  * depends on how far along it that point is *as a fraction of the whole*, and
  * the whole is not known until the route is solved — yet the height is needed
- * during the solve, to know whether the chute clears the Sky Cruiser. So the
- * length is a fixed point: solve with the best estimate, and if the answer
- * disagrees with the estimate, solve again with the answer. It settles in two
- * passes because each solve is a small perturbation of the last.
+ * during the solve, to know whether the chute clears the Sky Cruiser and the
+ * castle's towers. So the search runs on an assumed length, and the answer may
+ * disagree with the assumption.
  *
- * A fixed point that has converged is still only an argument, so it is not
- * trusted: {@link assertClearsCruiser} then measures the **built** curve, in
- * three dimensions, against the cruiser's own built curve. If the ride that was
- * actually produced is not clear, this throws at module load rather than
- * shipping a slide that flies through a roller coaster.
+ * ### What is retried, and what is accepted
+ *
+ * **The test is whether the chute that was built is safe, not whether the
+ * length came out where it was guessed.** Those are not the same question, and
+ * using the second as a proxy for the first was wrong in both directions.
+ *
+ * It was wrong permissively, which is the one that shipped a bug: this loop used
+ * to fall out of its pass limit and hand back whatever the last pass produced.
+ * That route's clearance had been checked against a *different* length's height
+ * profile, so every height the search tested was wrong. On seed 11 the search
+ * verified an 86 m ride and built a 64.4 m one, putting the chute 1.15 m inside
+ * the Sky Cruiser's air at a spot the search had checked and passed — at a
+ * height the chute never reached. Nothing was wrong with the search; it was
+ * answering a question about a different ride.
+ *
+ * And it was wrong restrictively, which is what made it look like it needed
+ * fixing with more passes. Length agreement is far stricter than safety: a route
+ * that solves *longer* than assumed is higher everywhere than the search
+ * believed, so it clears by more, and rejecting it for drifting cost a whole
+ * extra solve for nothing. The length map is not a contraction — it has no
+ * attractive fixed point, and measured undamped on seed 11 it wandered the full
+ * 50–92 m range for 28 passes before landing near one by coincidence. Waiting
+ * for that coincidence is what made game boot a multiple of one solve.
+ *
+ * So each pass measures the chute it actually built, in three dimensions,
+ * against the two things whose test depended on the height it guessed. If they
+ * hold, the route is used however far its length drifted. If they do not, the
+ * solved length is a better guess than the one that produced it, so it becomes
+ * the next assumption.
+ *
+ * If no pass produces a safe chute, this throws, naming every attempt. It never
+ * returns an unverified one. `the ginormous slide keeps its air from the Sky
+ * Cruiser` in `test/procgen/invariants.ts` asks the same question of every seed,
+ * so a regression shows up as a red test rather than as a park that will not
+ * boot.
  */
 function planSlide(): PlannedSlide {
   const boundary = circleBoundary(GARDEN_PLAY_RADIUS);
   let nominalLength = DESIRED_LENGTH;
   let route = null as SolvedRailRoute | null;
+  let points = null as Vector3[] | null;
+  const tried: string[] = [];
 
   for (let pass = 0; pass < MAX_PASSES; pass += 1) {
     const assumed = nominalLength;
@@ -949,14 +971,31 @@ function planSlide(): PlannedSlide {
       approachDistance: APPROACH_DISTANCE,
       budgets: { perJoint: 16, restarts: 700 },
     };
-    route = solveRailRoute(brief);
-    if (Math.abs(route.length - assumed) <= LENGTH_SETTLED) break;
-    nominalLength = route.length;
+    const solved = solveRailRoute(brief);
+    // Built at the route's own length, which is what the game will draw, and
+    // then measured. Not the length the search assumed — checking the guess
+    // against itself is how a wrong ride passed its own inspection.
+    const built = chutePoints(solved);
+    const complaint = heightSensitiveComplaint(built);
+    tried.push(
+      `assumed ${assumed.toFixed(1)} solved ${solved.length.toFixed(1)}: ` +
+        (complaint ?? 'clear'),
+    );
+    if (!complaint) {
+      route = solved;
+      points = built;
+      break;
+    }
+    nominalLength = solved.length;
   }
-  if (!route) throw new Error('the ginormous slide did not solve');
+  if (!route || !points) {
+    throw new Error(
+      `the ginormous slide never solved to a chute that clears what it has to clear. ` +
+        `${MAX_PASSES} passes, each measured on the chute it actually built: ` +
+        `${tried.join(' | ')}.`,
+    );
+  }
 
-  const points = chutePoints(route);
-  assertClearsCruiser(points);
   const { exitX, exitZ } = planExit();
 
   // Where the chute actually goes through the wall, read back off the solved
@@ -984,11 +1023,25 @@ function planSlide(): PlannedSlide {
 }
 
 /**
- * The boot assert: the chute that was built keeps its air from the coaster that
- * was built. Measured in 3D off both finished curves, so it cannot be fooled by
- * the estimate the search ran on.
+ * **Everything about the built chute whose answer depended on the height the
+ * search had to guess**, measured on the chute that was actually built.
+ *
+ * Returns a description of the first thing wrong, or null if the chute is good.
+ * `planSlide` uses it as its acceptance test, so a chute is only ever used once
+ * it has been measured at the height it will be drawn at rather than the height
+ * the search assumed it would be.
+ *
+ * Two constraints qualify, and only two: both `clearsCruiser` and `clearsTowers`
+ * take the height as an argument, so both were answered against the estimate.
+ * Everything else the search checks — the castle rectangle, the park's other
+ * plots, the boundary, the chute against itself — is decided in plan view and
+ * cannot have been changed by the length coming out somewhere else.
+ *
+ * Measured in 3D off the finished curves, so it cannot be fooled by the estimate
+ * the search ran on. The Sky Cruiser check uses the exact `nearestPoint` rather
+ * than the sampled polyline the search uses for speed.
  */
-function assertClearsCruiser(points: readonly Vector3[]): void {
+function heightSensitiveComplaint(points: readonly Vector3[]): string | null {
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;
@@ -1005,12 +1058,22 @@ function assertClearsCruiser(points: readonly Vector3[]): void {
     }
   }
   if (worstAt && worst < CRUISER_AIR) {
-    throw new Error(
-      `the ginormous slide fouls the Sky Cruiser: only ${worst.toFixed(2)} m of air ` +
-        `at (${worstAt.x.toFixed(1)}, ${worstAt.y.toFixed(1)}, ${worstAt.z.toFixed(1)}), ` +
-        `against ${CRUISER_AIR} m required.`,
+    return (
+      `fouls the Sky Cruiser, only ${worst.toFixed(2)} m of air ` +
+      `at (${worstAt.x.toFixed(1)}, ${worstAt.y.toFixed(1)}, ${worstAt.z.toFixed(1)}) ` +
+      `against ${CRUISER_AIR} m required`
     );
   }
+
+  for (const point of points) {
+    if (clearsTowers(point.x, point.z, point.y, CORRIDOR_RADIUS)) continue;
+    return (
+      `runs into a castle tower at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
+      `${point.z.toFixed(1)}), which needs ${CORRIDOR_RADIUS} m of clearance`
+    );
+  }
+
+  return null;
 }
 
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
