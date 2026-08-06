@@ -17,7 +17,7 @@ import {
 } from 'three';
 import { PLAYER_RADIUS, TERRAIN_RADIUS, TREELINE_INNER_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
-import { Rng, TAU } from '../core/mathUtils';
+import { Rng, TAU, candidateRng } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
 import { PARK_SEED } from './parkManifest';
@@ -210,6 +210,25 @@ export interface PlacedWallRun {
   readonly halfWidth: number;
 }
 
+/**
+ * One planted bush clump — where it stands and how far it spreads.
+ *
+ * Published for exactly the reason {@link PlacedWallRun} is: the scatter had no
+ * observable output at all for bushes, so nothing in the test suite could see
+ * one move. That is not a hypothetical gap — bushes shared a generator with the
+ * trees, so every tree gained or lost anywhere in the park silently re-rolled
+ * all 108 clumps, and no check could have noticed.
+ *
+ * The clump, not its individual blobs: the blobs are a rendering detail, while
+ * the clump is the thing that occupies ground and takes a collider.
+ */
+export interface PlacedBush {
+  readonly x: number;
+  readonly z: number;
+  /** Radius of the collider the clump registers. */
+  readonly radius: number;
+}
+
 export class Scenery {
   readonly group = new Group();
   /** Every wall run standing in the park. See {@link PlacedWallRun}. */
@@ -218,6 +237,8 @@ export class Scenery {
   readonly climbableTrees: readonly ClimbableTreeSeed[];
   /** Every tree big enough to hide the player. See {@link FoliageOccluder}. */
   readonly foliageOccluders: readonly FoliageOccluder[];
+  /** Every bush clump standing in the park. See {@link PlacedBush}. */
+  readonly bushes: readonly PlacedBush[];
   private readonly hideableInstances: readonly (readonly HideableInstance[])[];
 
   constructor(collision: CollisionWorld) {
@@ -226,6 +247,7 @@ export class Scenery {
     this.group.add(foliage.group);
     this.climbableTrees = foliage.climbableTrees;
     this.foliageOccluders = foliage.occluders;
+    this.bushes = foliage.bushes;
     this.hideableInstances = foliage.hideableInstances;
     this.group.add(buildTreeline());
     // Collected as they are built, from the already-trimmed `wallPlan`, so
@@ -339,16 +361,33 @@ const BUSH_TOP = 2.15;
  */
 const WALL_TOP = 2.6;
 
+/**
+ * One salt per scattered subsystem, so no two of them share a draw counter.
+ *
+ * Each is combined with the candidate's own index by {@link candidateRng} —
+ * read the note there for why a rejection sampler must never draw from one
+ * long-lived generator. The short version: trees and bushes used to share a
+ * single `new Rng(0xc0ffee)`, with the bush loop running second, so one tree
+ * gained or lost anywhere re-rolled all 108 bush clumps.
+ *
+ * They are xor'd with {@link PARK_SEED} the way the wall salts always have
+ * been. Without that the foliage draw sequence was *identical* on all five CI
+ * seeds — the sweep only ever varied which candidates the geometry refused, so
+ * five seeds were really one scatter measured five times.
+ */
+const TREE_SALT = 0xc0ffee ^ PARK_SEED;
+const BUSH_SALT = 0xb115e5 ^ PARK_SEED;
+const MAZE_SALT = 0x77a115 ^ PARK_SEED;
+
 function buildFoliage(collision: CollisionWorld): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
   occluders: FoliageOccluder[];
+  bushes: PlacedBush[];
   hideableInstances: HideableInstance[][];
 } {
   const group = new Group();
   group.name = 'foliage';
-
-  const rng = new Rng(0xc0ffee);
 
   const trunks: InstanceItem[] = [];
   const roundCanopies: InstanceItem[] = [];
@@ -424,6 +463,10 @@ function buildFoliage(collision: CollisionWorld): {
   // budget alone cleared it.
   while (treeCount < targetTrees && attempts < 180000) {
     attempts += 1;
+    // This candidate's own stream. Everything below draws from it and nothing
+    // else, so what this attempt proposes depends on `attempts` and the seed —
+    // never on how many earlier candidates happened to be accepted.
+    const rng = candidateRng(TREE_SALT, attempts);
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 54;
     const x = Math.cos(angle) * distance;
@@ -569,10 +612,15 @@ function buildFoliage(collision: CollisionWorld): {
   }
 
   // --- bushes --------------------------------------------------------------
+  /** Where each clump stands, published as {@link PlacedBush}. */
+  const bushClumps: PlacedBush[] = [];
+  /** Radius of the collider a clump registers, and so the ground it occupies. */
+  const BUSH_COLLIDER = 0.85;
   let bushCount = 0;
   attempts = 0;
   while (bushCount < 108 && attempts < 5200) {
     attempts += 1;
+    const rng = candidateRng(BUSH_SALT, attempts);
     const angle = rng.range(0, TAU);
     const distance = Math.sqrt(rng.unit()) * 55;
     const x = Math.cos(angle) * distance;
@@ -600,7 +648,8 @@ function buildFoliage(collision: CollisionWorld): {
         shade: rng.range(0.9, 1.1),
       });
     }
-    collision.addCircle(x, z, 0.85);
+    collision.addCircle(x, z, BUSH_COLLIDER);
+    bushClumps.push({ x, z, radius: BUSH_COLLIDER });
     bushCount += 1;
   }
 
@@ -653,7 +702,7 @@ function buildFoliage(collision: CollisionWorld): {
     }),
   );
 
-  return { group, climbableTrees, occluders, hideableInstances };
+  return { group, climbableTrees, occluders, bushes: bushClumps, hideableInstances };
 }
 
 /**
@@ -1076,7 +1125,6 @@ function clearOfWalls(x: number, z: number, reach: number): boolean {
 const MAZE_PIECE_GAP = 7;
 
 function generateWallMaze(placed: WallRun[]): WallRun[] {
-  const rng = new Rng(0x77a115 ^ PARK_SEED);
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
   const heights = [0.8, 0.95, 1.5, 1.8, 2.1, 2.6];
@@ -1086,6 +1134,10 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
   let piece = 0;
   while (runs.length < 10 && attempts < 4000) {
     attempts += 1;
+    // Per-candidate stream: this loop bailed out after 2, 6 or 8 draws
+    // depending on which test refused it, which is precisely how a longer path
+    // spur used to relocate a garden wall onto an unrelated kiosk's doorstep.
+    const rng = candidateRng(MAZE_SALT, attempts);
     const angle = rng.range(0, Math.PI * 2);
     const radius = Math.sqrt(rng.range(13 * 13, 42 * 42));
     const cx = Math.cos(angle) * radius;
