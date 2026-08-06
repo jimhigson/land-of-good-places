@@ -63,10 +63,34 @@ end; see `HANDOFF-railrace-ring.md`. Confirmed again from this rebase's own run:
 | 11 | 50.0 m | `ferrisWheel` 33.6 m |
 | 18 | 50.2 m | `ferrisWheel` 33.3 m |
 
-The rivals are mostly **anchors** — `ferrisWheel`, `dodgems`, `building`,
-`ballPit` — which the layout solver re-places every seed. That is the whole
-argument: **a fixed pin cannot satisfy a relational invariant when the ring and
-its rivals move per seed and the pin does not.**
+### The reason — corrected on 5 Aug after review, and this matters
+
+I first wrote that the rivals are anchors "the layout solver re-places every
+seed", and that "a fixed pin cannot satisfy a relational invariant". **Both are
+false.** The Overseer's reviewer caught it; I then measured it myself:
+
+- **11 of the 12 plots are identical to three decimal places on all five
+  seeds**, including every anchor named. Only `stall.skyCruiser` moves at all
+  (by up to 3.9 m) and it is never the binding rival. What re-rolls per seed is
+  the **boundary and the ring** — edge 58.4–110.4 m, lap 591.9–604.5 m. The gaps
+  above move because the *ring* moves.
+- **A pin can satisfy it.** Enumerating the legal disc (r ≤ 48.6) at
+  0.1° × 0.25 m finds **49,384 winning positions**, best margin −19.2 m; my own
+  coarser 0.5° × 0.5 m sweep found 9,867 at the same density.
+
+**The true reason is what a winning pin costs.** Four positions from the
+cleanest part of that region (bearings 265/270/275/280 at r = 48.5) were built:
+**all four fail `check:park`** — `poi.stranded` 1–2 against 0 on this branch,
+`rail.exclusion` 36 against a recorded 21, `rail.walkable` 44 against 30. One
+stranded waypoint is (20.9, 20.2), the ferris kiosk stand filed as #233.
+
+So: the booth cannot be pinned to the rim **without breaking the park**. That is
+what the docstring says now.
+
+**The lesson worth carrying:** I wrote a confident structural-sounding reason
+without measuring it, and it was wrong in a way that would have sent whoever
+picks up #117 hunting a non-existent problem. Measure the claim you are about to
+write into a docstring, especially when it sounds like a law.
 
 ### What was done
 
@@ -86,17 +110,41 @@ The kept half is not filler — those are the two properties *this* PR can break
 deleting the whole invariant would have lost real coverage.
 
 This is not "weakening an assertion to make a seed pass": there is no good seed
-to swap to (5 of 5 fail), and the dropped claim is not about the booth being at
-the rim any more — with the ring at 60–108 m and plots capped at
-`PLOT_EXTENT_LIMIT` 52, it is a statement about global plot *ordering*.
+to swap to (5 of 5 fail), and satisfying the dropped claim by pin demonstrably
+breaks `check:park`.
 
 Also removed in the same commit: the `ENTRANCE_WALL_RADIUS` import this branch
 made dead, and a stale doc bullet on `railRaceRingsStandOutsideThePark` that
 still described the old radius check instead of the outset one.
 
+## 2b. Two constants given one owner (5 Aug, review follow-up)
+
+- **`EXIT_INSIDE_EDGE` is exported** from `railRace/plan.ts` and imported by
+  `check:rail-race`, which had drifted to a hand-typed `> 1` against a planner
+  clamping at 2 — so the check could pass a plan that broke the rule it exists
+  to enforce. Note what single ownership does *not* buy: mutating the constant
+  no longer proves the check live, because planner and checker move together
+  (verified — setting it to 50 just re-solved the exit to 50.2 m and passed).
+  What it guards is the planner's **unclamped fallback**, which today's seeds
+  cannot reach (exit 37.9 m vs a 2 m floor) and #117 will.
+- **`RIM_START` / `RIM_END` deleted** — zero consumers repo-wide, and the
+  "survive for the castle interior" rationale was false: the interior uses
+  `INTERIOR_PLAY_RADIUS`, and neither name appears in `src/world/building/`.
+  `RIM_DROP` and `RIM_OUTSET_*` are live and stay.
+
+## Two traps that cost me time — inherit these
+
 **Do not run `npx prettier` in this repo.** Prettier is not a dependency and
 there is no config, so it reformats whole files to its own 80-col defaults. Cost
 me one revert; the file was restored and the edits redone by hand.
+
+**The session scratchpad is NOT private between agents.** I wrote a PR body to
+`<scratchpad>/pr-body.md`, another agent later wrote *their* PR body to the same
+path, and I then read it back and pushed **PR #220's description onto PR #216**.
+Caught and restored within a minute, and #220 was unaffected — but it could as
+easily have gone the other way. Use a filename nobody else would pick
+(`pr216-body.md` in a subdirectory of your own), and re-read what you are about
+to push before pushing it.
 
 ## 3. Spin-offs
 
@@ -126,7 +174,14 @@ invariant actually executes with a verbose run on the canonical seed.
 
 ## Not done, deliberately
 
-Not merged — Jim merges. QA still owes the phone check: **18.6 px/m in portrait,
-down from 27.6** (floor 15, the family's "too zoomed out" complaint was 10.4).
-That is a real visible change on a child's device and a number passing is not the
-same as it looking right.
+Not merged — Jim merges. QA still owes the phone check, and **the worst case is
+not the phone**: a phone at 390×844 renders 18.6 px/m (down from 27.6), but a
+**sliver viewport at 320×900 measures 15.2 px/m against a floor of 15** — almost
+no margin. The family's "too zoomed out" complaint was 10.4, so both pass, but a
+number passing is not the same as it looking right on a child's device. Look at a
+narrow phone, not just a typical one.
+
+Two things the reviewer found that are **not this PR's** and the Overseer is
+filing separately: `ParkMap.ts` still draws the park as concentric circles, and
+`Scenery.isPlantable` now plants trees out to 100.7 m with no tree-vs-railway
+invariant.
