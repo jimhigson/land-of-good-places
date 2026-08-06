@@ -75,6 +75,34 @@ statue genuinely turns and returns after one period. **Both branches proved red*
 by temporarily breaking the asset: rotation disabled → "does not appear to turn";
 rate ≠ declared period → "did not bring the statue back". Both exit 1.
 
+## Review follow-up (post-approval): shared fade constants
+
+Reviewer found the FADED side hand-copied four constants `FoliageFade.ts` did
+not export — `SIGHTLINE_MARGIN`, `MAX_LINE_T`, `NEAR_PLAYER_RADIUS`,
+`CAPSULE_SAMPLES`. All matched, but widening the real fade would have left the
+check measuring the old one and **reporting success**: the same fail-open hazard
+the rotation precondition exists to prevent, from the other side of the test.
+Independence of the *algorithm* is what makes the check worth having; copying
+the *parameters* was just duplication.
+
+They now live in **`src/world/foliageFadeTuning.ts`**, imported by both. The
+sightline maths in the check stays re-derived.
+
+**They are not simply exported from `FoliageFade.ts`, and cannot be.** Tried it
+first: the check scripts run under `--experimental-strip-types`, which is
+strip-only and rejects TypeScript parameter properties. `FoliageFade`'s
+constructor uses them (`private readonly scenery: Scenery`), so importing
+*anything* from that file throws `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` before a
+constant arrives. Extracting the tuning was much smaller than rewriting a working
+constructor to suit a test runner. That is recorded in the new module's header,
+along with a note asking the next person not to fold it back in.
+
+Proved live, not assumed: narrowing `SIGHTLINE_MARGIN` in the tuning module
+flips the check to failing (0.9 m², 9 of 24 poses). Under the old copies it would
+have gone on passing. Restored; numbers identical to before the change
+(25.8–29.0 m², worst at 120°, 68.6 m² early), confirming the imports match the
+copies exactly.
+
 ## Verifications
 
 - `npm run build` → **exit 0**. `npm run test:procgen` → **exit 0**.

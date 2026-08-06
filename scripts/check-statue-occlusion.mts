@@ -5,8 +5,13 @@ import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
   CAMERA_YAW_DEGREES,
-  PLAYER_RADIUS,
 } from '../src/core/constants.ts';
+import {
+  CAPSULE_SAMPLES,
+  MAX_LINE_T,
+  NEAR_PLAYER_RADIUS,
+  SIGHTLINE_MARGIN,
+} from '../src/world/foliageFadeTuning.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 
 /**
@@ -24,8 +29,12 @@ import { cameraOffset } from '../src/core/cameraRig.ts';
  *  - **HIDDEN** — a real raycast from the player's head, chest and waist along
  *    the camera's view axis into the statue's actual meshes. The camera is
  *    orthographic, so that axis is a constant and this is exact.
- *  - **FADED** — a replica of `FoliageFade`'s capsule sightline test, written
- *    from its constants.
+ *  - **FADED** — a replica of `FoliageFade`'s capsule sightline test, with the
+ *    maths re-derived here but its four tuning numbers imported from
+ *    `world/foliageFadeTuning.ts`. The split is deliberate: two independent
+ *    derivations catch a mistake one shared helper never would, while a
+ *    *copied* constant catches nothing and goes stale silently. That module's
+ *    header has the full argument.
  *
  * The number that matters is **HIDDEN AND NOT FADED**, and it must be zero.
  * Anything above zero is ground where a six-year-old walks behind the statue
@@ -107,11 +116,13 @@ const TO_CAMERA = new Vector3(eye.x, eye.y, eye.z).normalize();
 /** The player kid, ART_DIRECTION §4. */
 const PLAYER_HEIGHT = 2.12;
 
-// Mirrored from `world/FoliageFade.ts`.
-const SIGHTLINE_MARGIN = PLAYER_RADIUS + 0.35;
-const MAX_LINE_T = 0.985;
-const NEAR_PLAYER_RADIUS = 9;
-const CAPSULE_SAMPLES = 9;
+// The sightline maths below is re-derived from `world/FoliageFade.ts` rather
+// than called into it — see this file's header for why two independent
+// derivations are the point. Its four tuning numbers are **imported** from
+// `world/foliageFadeTuning.ts`, not copied: independence of the algorithm is
+// what makes this check worth having, whereas a copied parameter is duplication
+// that fails silently. Widen `SIGHTLINE_MARGIN` over there with a copy of it
+// here and this check would keep measuring the old fade and reporting success.
 
 /** Fountain rim — you cannot stand inside it, so those samples are not ground. */
 const RIM_RADIUS = 4.2;
