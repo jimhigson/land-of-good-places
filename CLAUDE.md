@@ -56,6 +56,34 @@ assertion to make a seed pass — swap the seed and write down why.
 is not optional. It complements `check:park`, which owns whether the park
 *works*; this owns whether its furniture is *placed sanely*.
 
+## A check can pass without checking anything
+
+Most of what cost us 5 August 2026 was one disease in different organs: **an
+assertion reporting success about something it is not describing.** So: break
+every check deliberately and watch it go red before you trust it green, and read
+the failure message — it should carry real numbers, not `NaN` or `Infinity`.
+
+- **A squash merge silently reverts branches that predate it.**
+  `merge-base --is-ancestor` says *no* — the commits no longer exist under those
+  hashes — so nothing warns you, and it shows up only as unexplained files in
+  `git diff --stat origin/main..HEAD`. Five live branches carried a latent
+  revert of #114. Dropping out of `git diff --name-only origin/main...HEAD`
+  clears you only for files you never touched; for files you did touch, check
+  your hunks are yours **and** that the other side's work is still in the file.
+  **A rebase with no conflicts is not reassurance — that is the exact shape of a
+  silent revert.**
+- **A skipped test is not a passing test.** A static import of a seed-dependent
+  module into `test/` loads `parkManifest.ts` before the seed is set and pins
+  every seed to the default park: one failure and **76 silent skips**, where the
+  tell was the *pass* count, not the fail count. Read facts from `ParkFacts` —
+  `import type` is erased and safe.
+- **Green can mean incapable of failing.** A helper wanting a `Vector3` was
+  handed `[number, number]`; `.x` on a tuple is `undefined`, the arithmetic is
+  `NaN`, and `NaN < x` is always false — so the running minimum stayed
+  `Infinity` and the threshold never fired.
+- **Quote the count off the screen, never the one you expected.** "All three
+  tests fail" was reported while the terminal said `2 failed | 1 passed`.
+
 ## The browser
 
 The chrome-devtools MCP uses a **single shared Chrome profile** — only one
@@ -190,6 +218,17 @@ every build (`vite.config.ts`'s `versionFilePlugin`, straight into `dist/`,
 never a tracked file) from the current commit; the poll is only a *trigger*
 for the existing `onNeedRefresh` → `UpdateGate` flow, not a second update
 path — pressing "Take me there!" still does exactly what it always did.
+
+## Two definitions of one thing, kept in step by hand
+
+The most common bug in this repo by a distance — six instances in one day: two
+stand points on a booth, two `ParkBoundary` types, a hand-copied `GATE_RADIUS`
+whose comment asserted it matched, a face patch tracking a surface it had left,
+a backpack rule four of five shapes obeyed, three disagreeing exhibit lists.
+
+**One owner; everyone else asks.** A comment promising that two numbers agree is
+not a mechanism, and the copy is always found wrong by a child rather than by a
+check. The next section is the worked example.
 
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
