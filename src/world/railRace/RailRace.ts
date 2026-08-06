@@ -1,6 +1,6 @@
 import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { Rng, angleDelta, clamp } from '../../core/mathUtils';
+import { Rng } from '../../core/mathUtils';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -13,7 +13,7 @@ import { terrainHeight } from '../terrain';
 import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
-import { RaceCamera } from './camera';
+import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
@@ -133,43 +133,9 @@ const BOB_DROP = 0.12;
 /** `Rider.boost` above which a rival's cart pose reads as "actively mashing". */
 const PRESSING_POSE_THRESHOLD = 0.15;
 
-/**
- * **How far a rider turns towards the camera so her face can be seen at all.**
- *
- * Jim, riding it on 5 August 2026: *"we can't see the face because the player
- * needs to face towards the camera so you can see their expression."* He is
- * right, and it is the whole of PR #223: a frowning face nobody can ever look
- * at is a feature that does not exist. `camera.ts`'s rig stands square-on to
- * the chord it frames, which measures — headlessly, at every window shape and
- * every point on the ring, because a ring is the same shape everywhere —
- * **81.1° off the rider's own forward**. So she was in near-perfect profile,
- * with her far eye behind the limb of her head and her near eye at a grazing
- * angle.
- *
- * Turning her the whole 81.1° would point her face straight down the lens and
- * her shoulders straight out of the cart. This turns **60° of it**, which puts
- * the face within ~21° of the lens — inside the cone where both eyes read (the
- * eyes sit ±21.4° off the face's own axis, `KID_FACE`) — and leaves a
- * three-quarter view rather than a mugshot. She still, plainly, races
- * forwards.
- *
- * Split, and *why it is split*: `ferrisWheel/gondola.ts` has already settled
- * this exact question for a seated figure — *"the whole toy turns, not its
- * neck"* — and this kid has no neck to turn (the head pivot sits inside the
- * top of the torso, `art/models/kid.ts`), so a big yaw on its own is a skull
- * revolving inside a jumper. Most of the turn is therefore the body's, and the
- * head adds the rest: {@link FACE_TURN_HEAD_SHARE} of 60° is 25°, comfortably
- * inside the 20°–35.5° band of head yaws the park already uses elsewhere
- * (the shopkeeper's idle, the backpack pet's peek).
- *
- * Nothing here touches steering — GAME_DESIGN.md's CONTROL rule is about what
- * a *button* does, and this is a pose. The cart, the rails and the direction
- * she travels are all exactly as they were.
- */
-const FACE_TURN_MAX = (60 * Math.PI) / 180;
+/** Nobody is racing, so nobody turns — see `faceTurn`. */
+const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
 
-/** Of {@link FACE_TURN_MAX}, the share the head contributes rather than the body. */
-const FACE_TURN_HEAD_SHARE = 0.42;
 
 /**
  * **A bonk shoves you down into the cart**, and this is how much of
@@ -859,13 +825,10 @@ export class RailRace implements GameSystem {
    * turning them towards a race camera nobody is looking through would leave
    * three children riding round the park permanently facing sideways.
    */
-  private faceTurn(cartYaw: number, at: Vector3): number {
+  private faceTurn(cartYaw: number, at: Vector3): FaceTurn {
     const view = this.rideView;
-    if (!view || this.activeRing !== this.raceRing) return 0;
-    const dx = view.camera.position.x - at.x;
-    const dz = view.camera.position.z - at.z;
-    if (dx === 0 && dz === 0) return 0;
-    return clamp(angleDelta(cartYaw, Math.atan2(dx, dz)), -FACE_TURN_MAX, FACE_TURN_MAX);
+    if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;
+    return faceTurnTowardsCamera(cartYaw, at, view.camera.position);
   }
 
   private placeCarts(): void {
@@ -942,9 +905,8 @@ export class RailRace implements GameSystem {
       // use in profile than the player's is. `kid.root` is a child of the cart
       // group, so this local yaw simply adds to the cart's own.
       const turn = this.faceTurn(cart.group.rotation.y, cart.group.position);
-      const headTurn = turn * FACE_TURN_HEAD_SHARE;
-      kid.root.rotation.y = turn - headTurn;
-      kid.head.rotation.y = headTurn;
+      kid.root.rotation.y = turn.body;
+      kid.head.rotation.y = turn.head;
       if (cart.rider.finished) {
         // Arms up, cheering.
         const flap = Math.sin(elapsed * 11) * 0.3;
@@ -1028,13 +990,12 @@ export class RailRace implements GameSystem {
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
     // and is set below because `setRidePose` only owns the root.
     const turn = this.faceTurn(cart.rotation.y, cart.position);
-    const headTurn = turn * FACE_TURN_HEAD_SHARE;
-    this.player.model.head.rotation.y = headTurn;
+    this.player.model.head.rotation.y = turn.head;
     this.player.setRidePose(
       cart.position.x + wobble,
       cart.position.y + SEAT_HEIGHT * rideScale - duckDrop,
       cart.position.z,
-      cart.rotation.y + (turn - headTurn),
+      cart.rotation.y + turn.body,
       // Rivals get this for free — `kid.root` is a child of the same group
       // `placeCarts()` pitches — but the player's own model is positioned
       // independently every frame, so it never inherited the cart's tilt on

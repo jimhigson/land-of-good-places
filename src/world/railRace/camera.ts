@@ -1,5 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { damp } from '../../core/mathUtils';
+import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
 
 /**
@@ -277,6 +277,101 @@ function riderOffset(route: RailRaceRoute): number {
 export const RIDER_RIDE_HEIGHT = 1.9;
 
 const UP = new Vector3(0, 1, 0);
+
+/**
+ * **How far a rider turns towards this camera so her face can be seen at all.**
+ *
+ * Jim, riding it on 5 August 2026: *"we can't see the face because the player
+ * needs to face towards the camera so you can see their expression."* He is
+ * right, and it is the whole of PR #223: a frowning face nobody can ever look
+ * at is a feature that does not exist.
+ *
+ * The rig above stands square-on to the chord it frames, which measures
+ * **81.1° off the rider's own forward** — identically at every window shape and
+ * every point on the ring, because a ring is the same shape everywhere and
+ * {@link RaceCamera.solve} only ever changes how *far* out it stands, never the
+ * bearing. So she was in near-perfect profile: measured by projecting her real
+ * eyes through this real rig, one of them sat at a facing of −0.25 on a monitor
+ * and −0.35 on a phone — round the back of her head, not drawn at all — while
+ * the other grazed at 0.48, and both landed on the same screen x.
+ *
+ * Turning the whole 81.1° would point her face straight down the lens and her
+ * shoulders straight out of the cart. This turns **50° of it**, which leaves a
+ * three-quarter view rather than a mugshot, and she still plainly races
+ * forwards.
+ *
+ * **50 and not more, because on a phone the two pull against each other.** She
+ * is framed hard left in portrait (`RIDER_SCREEN_X_PORTRAIT`, a documented
+ * floor), and turning her swings an eye — 0.6 m off the skull's centre, 1.5 m
+ * once `RIDE_SCALE` has had it — further towards that edge. Swept with
+ * `check:rail-race`'s own measurement, worst case anywhere on the ring, as
+ * (how squarely the worse eye faces the lens) / (how far it stays inside the
+ * picture, in NDC):
+ *
+ * ```
+ *          monitor          phone
+ *   0°     -0.272 / 0.227   -0.371 / 0.268   ← one eye behind the head
+ *  40°      0.392 / 0.238    0.279 / 0.116
+ *  50°      0.546 / 0.241    0.437 / 0.061   ← here
+ *  60°      0.685 / 0.244    0.003 of margin left
+ * ```
+ *
+ * A monitor would happily take 60°; a phone runs out of picture. One number
+ * serves both, so it is set where the phone still has real room.
+ *
+ * Nothing here touches steering. GAME_DESIGN.md's CONTROL rule governs what a
+ * *button* does; this is a pose, and the cart, the rails and the direction she
+ * travels are all exactly as they were.
+ */
+export const FACE_TURN_MAX = (50 * Math.PI) / 180;
+
+/**
+ * Of {@link FACE_TURN_MAX}, the share the **head** contributes rather than the
+ * body — so 21° of head on top of 29° of shoulder.
+ *
+ * Split, rather than all neck, because `ferrisWheel/gondola.ts` has already
+ * settled this exact question for a seated figure — *"the whole toy turns, not
+ * its neck"* — and this kid has no neck to turn: `art/models/kid.ts` puts the
+ * head pivot *inside* the top of the torso ("what hides the neck"), so a large
+ * yaw on its own is a skull revolving inside a jumper. 21° also keeps the head
+ * inside the 20°–35.5° band of head yaws the park already uses elsewhere (the
+ * shopkeeper's idle, the backpack pet's peek); nothing in the game had ever
+ * yawed a person's head further.
+ */
+export const FACE_TURN_HEAD_SHARE = 0.42;
+
+/** A rider's turn towards the camera, split between the two things that turn. */
+export interface FaceTurn {
+  /** Radians to add to the cart's own yaw, for the rider's root. */
+  readonly body: number;
+  /** Radians of `head.rotation.y` on top of that. */
+  readonly head: number;
+}
+
+const NO_TURN: FaceTurn = { body: 0, head: 0 };
+
+/**
+ * How far a rider facing `cartYaw` at `at` should come round towards a camera
+ * standing at `cameraAt` — see {@link FACE_TURN_MAX}.
+ *
+ * Takes the camera's **live** position rather than a bearing written down
+ * somewhere: this rig has already been re-solved twice on family feedback, and
+ * a second constant elsewhere saying "the camera is over there" is exactly the
+ * kind of copy that goes quietly stale the next time it moves.
+ *
+ * Pure, and exported, so `scripts/check-rail-race.mts` can pose a real kid with
+ * the very function the ride poses her with and then measure whether her eyes
+ * are actually visible — rather than re-deriving the turn and proving only that
+ * arithmetic agrees with itself.
+ */
+export function faceTurnTowardsCamera(cartYaw: number, at: Vector3, cameraAt: Vector3): FaceTurn {
+  const dx = cameraAt.x - at.x;
+  const dz = cameraAt.z - at.z;
+  if (dx === 0 && dz === 0) return NO_TURN;
+  const turn = clamp(angleDelta(cartYaw, Math.atan2(dx, dz)), -FACE_TURN_MAX, FACE_TURN_MAX);
+  const head = turn * FACE_TURN_HEAD_SHARE;
+  return { body: turn - head, head };
+}
 
 /** Linear ramp from `a` to `b` as `t` runs from `lo` to `hi`, flat outside. */
 function ramp(t: number, lo: number, hi: number, a: number, b: number): number {

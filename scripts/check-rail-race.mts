@@ -94,7 +94,16 @@ import {
   simulateRailRace,
   type Strategy,
 } from '../src/world/railRace/simulate.ts';
-import { AHEAD, RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
+import {
+  AHEAD,
+  FACE_TURN_MAX,
+  RaceCamera,
+  RIDER_RIDE_HEIGHT,
+  faceTurnTowardsCamera,
+} from '../src/world/railRace/camera.ts';
+import { SEAT_HEIGHT } from '../src/world/railRace/cart.ts';
+import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
+import { Group } from 'three';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -700,6 +709,147 @@ for (const shape of POSES) {
       'becomes a map.',
   );
 }
+
+// --- can you actually SEE her face? ------------------------------------------
+//
+// PR #223 gave the riders a frowning expression for a bonk. It was invisible in
+// normal play, and every check passed anyway, because "the frown state was set"
+// is not the same claim as "somebody can see a frown" — the face was pointing
+// 81° away from the lens. Jim, riding it on 5 August 2026: *"we can't see the
+// face because the player needs to face towards the camera so you can see their
+// expression."*
+//
+// So this asserts **visibility**, and does it the only way that cannot be
+// fooled: it builds a real kid, poses her with `faceTurnTowardsCamera` — the
+// very function the ride poses her with, not a copy of it — and then asks each
+// of her two eyes two questions off the real projection matrix.
+//
+//   1. Is this eye on the near side of her head at all? Every eye sits on the
+//      skull's own surface (the face is baked into its UVs, ART_DIRECTION §3),
+//      so the outward normal there dotted with the direction to the camera is
+//      exactly "is this bit of face turned towards the lens or round the back".
+//      Zero or less means the eye is behind the silhouette and is not drawn.
+//   2. Does it land on screen?
+//
+// Measured before the turn existed, for the record: the far eye sat at −0.254
+// on a monitor and −0.348 on a phone — genuinely not rendered — while the near
+// one grazed at 0.48/0.39 and *both* projected to the same screen x, which is
+// what a profile looks like in numbers.
+
+say('');
+
+/**
+ * How square-on the *worse* of the two eyes must sit to the lens to read as an
+ * eye. Zero is the hard floor — at zero it is behind the silhouette and simply
+ * is not rendered — so this is a real margin over "technically drawn".
+ */
+const EYE_FACING_MIN = 0.35;
+
+/**
+ * ...and how far inside the picture it must stay, in NDC. Small, because a
+ * phone in portrait frames her hard left on purpose (`RIDER_SCREEN_X_PORTRAIT`)
+ * and there is genuinely not much room out there — but not zero, or "just
+ * barely on screen" would pass and the next tweak to the framing would push her
+ * face off the edge with nothing complaining.
+ */
+const EYE_MARGIN_MIN = 0.03;
+
+interface FaceView {
+  readonly worstFacing: number;
+  readonly worstOnScreen: number;
+  readonly eyeSpread: number;
+  readonly turn: number;
+}
+
+function faceView(width: number, height: number): FaceView {
+  rig.resize(width, height);
+  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
+  const root = new Group();
+  root.add(kid.root);
+  const crown = kid.hatAnchor.parent;
+  if (!crown) throw new Error('check-rail-race: the kid rig has no crown under its hat anchor');
+
+  let worstFacing = 1;
+  let worstOnScreen = 1;
+  let eyeSpread = 1;
+  let turn = 0;
+  const eye = new Vector3();
+  const normal = new Vector3();
+  const toCamera = new Vector3();
+  const skull = new Vector3();
+
+  for (let i = 0; i < 48; i += 1) {
+    const travelled = (i / 48) * route.length;
+    rig.reset(travelled);
+    const at = route.wrap(route.startDistance + travelled);
+    const point = route.pointAt(PLAYER_LANE, at, new Vector3());
+    const tangent = route.tangentAt(PLAYER_LANE, at, new Vector3());
+    const cartYaw = Math.atan2(tangent.x, tangent.z);
+
+    // Exactly `RailRace.poseRider`'s pose: the cart's yaw plus the body's share
+    // of the turn on the root, the head's share on the head.
+    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position);
+    turn = facing.body + facing.head;
+    root.position.set(point.x, point.y + SEAT_HEIGHT * route.scale, point.z);
+    root.rotation.y = cartYaw + facing.body;
+    root.scale.setScalar(route.scale);
+    kid.head.rotation.y = facing.head;
+    root.updateMatrixWorld(true);
+
+    crown.getWorldPosition(skull);
+    const screenX: number[] = [];
+    for (const side of [-1, 1] as const) {
+      crown.localToWorld(eye.copy(kidEyeCentre(side)));
+      normal.subVectors(eye, skull).normalize();
+      toCamera.subVectors(rig.camera.position, eye).normalize();
+      worstFacing = Math.min(worstFacing, normal.dot(toCamera));
+      const ndc = eye.clone().project(rig.camera);
+      worstOnScreen = Math.min(worstOnScreen, 1 - Math.max(Math.abs(ndc.x), Math.abs(ndc.y)));
+      screenX.push(ndc.x);
+    }
+    eyeSpread = Math.min(eyeSpread, Math.abs((screenX[0] ?? 0) - (screenX[1] ?? 0)));
+  }
+  kid.dispose?.();
+  return { worstFacing, worstOnScreen, eyeSpread, turn };
+}
+
+for (const shape of POSES) {
+  const view = faceView(shape.w, shape.h);
+  say(
+    `face ${shape.name.padEnd(9)} turned ${((view.turn * 180) / Math.PI).toFixed(1)}°   ` +
+      `worst eye facing ${view.worstFacing.toFixed(3)}   ` +
+      `on screen by ${view.worstOnScreen.toFixed(3)}   ` +
+      `eyes ${view.eyeSpread.toFixed(3)} apart across the picture`,
+  );
+
+  require(
+    view.worstFacing > EYE_FACING_MIN,
+    `in a ${shape.name} window one of the rider's eyes is only ${view.worstFacing.toFixed(3)} ` +
+      `turned towards the lens (needs > ${EYE_FACING_MIN}); at 0 it is round the back of her ` +
+      'head and not drawn at all, and an expression nobody can see is not a feature. See ' +
+      'FACE_TURN_MAX in railRace/camera.ts.',
+  );
+  require(
+    view.worstOnScreen > EYE_MARGIN_MIN,
+    `in a ${shape.name} window one of the rider's eyes is only ` +
+      `${view.worstOnScreen.toFixed(3)} inside the edge of the picture (needs > ` +
+      `${EYE_MARGIN_MIN}). She is framed by RIDER_SCREEN_X and turning her pushes her face ` +
+      'towards that edge — see the sweep table on FACE_TURN_MAX.',
+  );
+  // A profile puts both eyes on the same pixel column. Any real turn separates
+  // them, and the separation is the plainest possible statement that we are
+  // looking at a face rather than at the side of a head.
+  require(
+    view.eyeSpread > 0.01,
+    `in a ${shape.name} window the rider's two eyes land ${view.eyeSpread.toFixed(4)} apart ` +
+      'across the picture — they are stacked, which is what a face in profile looks like.',
+  );
+}
+require(
+  FACE_TURN_MAX > 0,
+  'FACE_TURN_MAX is zero, so nobody turns towards the camera and every face in the race is ' +
+    'in profile again.',
+);
 
 // --- is it still a game? -----------------------------------------------------
 //
