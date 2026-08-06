@@ -54,9 +54,17 @@
 > asserts the anchor is within 0.08 m of a real vertex. Proven red before being
 > trusted. Add a sixth bag shape and it will tell you.
 >
-> **Also done since resuming:** the catalogue entries (step 3) —
-> `check:brevity` clean with no new `KNOWN_LONG`, `check:assets` 95 → 100 with
-> no new `KNOWN_DRIFT`.
+> **Step 3 (catalogue entries) is written but DEFERRED — see issue #225.**
+> It was split back out of PR #221 on 6 August. Adding the five `keychain.*`
+> entries to `SHOP_ITEMS` takes `CuteODex`'s `CATALOGUE` from 34 to 39 while
+> `SECTIONS` has no `keychain` row, so five entries can never be displayed and,
+> with no stall, never collected — `complete = found === total` goes
+> permanently false and **a child who had already filled her Cute-o-dex loses
+> the ⭐ prize button**. The commit is preserved on branch
+> `keychain-catalogue-deferred`; cherry-pick its tip when the stall lands.
+> It was verified good on its own terms first (`check:brevity` clean with no new
+> `KNOWN_LONG`, `check:assets` 95 → 100 with no new `KNOWN_DRIFT`) — the problem
+> is purely that it must not arrive before the charms are obtainable.
 >
 > **Step 4 is done too** — `entities/WornKeychain.ts` (pivot + two-sine sway),
 > registered, constructed in `Game.ts`, and `Parade.stowedIds` fixed so a worn
