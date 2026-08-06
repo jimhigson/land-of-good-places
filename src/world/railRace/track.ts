@@ -1,4 +1,5 @@
 import {
+  TorusGeometry,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -16,6 +17,7 @@ import { PALETTE } from '../../core/palette';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../paths';
@@ -27,6 +29,7 @@ import {
   ALERT_RANGE,
   BARS_FROM_LEVEL,
   DUCK_CLEARANCE_AT_PARK_SCALE,
+  RIDER_HEAD_TOP_AT_PARK_SCALE,
   TRESTLE_SPACING,
   trestleGridIndex,
   ZONES_FROM_LEVEL,
@@ -76,6 +79,21 @@ export const RAIL_GAUGE = RAIL_GAUGE_AT_PARK_SCALE * RIDE_SCALE;
  */
 const RAIL_TUBULAR_PER_METRE = 1.2;
 const RAIL_RADIAL_SEGMENTS = 6;
+
+/**
+ * Room over a standing rider's head for the finish rainbow to clear her by, in
+ * metres. Not a clearance in its own right — {@link RIDER_HEAD_TOP_AT_PARK_SCALE}
+ * owns how tall she is; this is only the gap on top of it, so that raising her
+ * raises the arch rather than eating this.
+ */
+const ARCH_HEADROOM = 1.2;
+
+/**
+ * How far past the outermost lane's centre the finish rainbow must still be at
+ * full height, in metres — a rider is not a line, and a semicircle is at its
+ * lowest exactly where the outermost lane runs.
+ */
+const ARCH_SHOULDER_ROOM = 2.4;
 
 /** How far a duck bar reaches either side of its lane's centre, at park scale. */
 const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
@@ -1190,7 +1208,52 @@ function trestleSpots(
   return spots;
 }
 
-/** A striped arch over all four lanes, where the race starts and ends. */
+/**
+ * **The finish line: a huge rainbow arcing over all four tracks.**
+ *
+ * Jim, 6 August 2026: *"the finish line looks like an obstacle. Make it more
+ * like a huge rainbow that arcs over all 4 tracks."* He is right twice over.
+ *
+ * **Why it read as an obstacle.** This ride's hazards *are* bars across the
+ * track — the duck bars. A finish line that is also a straight beam across the
+ * track is, to a child who has just been taught to duck under exactly that
+ * shape, the same object: she flinches at the line she is meant to enjoy
+ * crossing. An arch fixes that by *shape*, not by colour — you pass through a
+ * gateway and you hit a bar — which is why this is a real semicircle springing
+ * from beside the rails rather than a low hoop or a straight top with rounded
+ * corners, both of which would fail for the same reason the beam did.
+ *
+ * **And it was an obstacle, literally.** The old beam sat at
+ * `base + UNDULATION_REACH + 2.2`, an invented 2.2 m of clearance, while a
+ * standing rider's head reaches {@link RIDER_HEAD_TOP_AT_PARK_SCALE} × 2.5 =
+ * 7.67 m over the rail. It passed straight through every rider, every lap, and
+ * the chequered flags hung *below* it hung lower still. Exactly the defect
+ * found in the duck bars the day before, in a second place, for the same
+ * reason: a height somebody wrote down instead of deriving.
+ *
+ * So nothing here invents a height. The radius is *solved* from the two things
+ * that actually have to be true, and the apex falls out of them:
+ *
+ * ```
+ * R = hypot(halfWidth, clearHeight)
+ * ```
+ *
+ * — the smallest semicircle that is still `clearHeight` above the rails
+ * directly over the *outermost* lane (the tightest point, since a semicircle
+ * is lowest at its feet), where `clearHeight` comes from
+ * {@link RIDER_HEAD_TOP_AT_PARK_SCALE} plus {@link ARCH_HEADROOM}. Raise a
+ * rider's height and the rainbow grows; it cannot fall out of step.
+ *
+ * Six bands in `ART.rainbow`, the park's own rainbow, inner band first — the
+ * same array the hop ring and the rainbow cheeks use, so this belongs to the
+ * one visual language GAME_DESIGN.md's HIGHLIGHT rule established rather than
+ * being a second, differently-coloured rainbow.
+ *
+ * **Nothing here is solid.** `solid()` in this park only sets shadow flags, and
+ * colliders are registered for trestle legs alone — but it is worth saying out
+ * loud, because the whole complaint was that the finish behaved like something
+ * you could hit.
+ */
 function buildArch(
   route: RailRaceRoute,
   ringSizeVsRace: number,
@@ -1199,74 +1262,48 @@ function buildArch(
   const group = new Group();
   group.name = 'railRace:arch';
 
-  const accent = toonMaterial(PALETTE.markerMint);
-  const cream = toonMaterial(PALETTE.buildingWall);
-  const dark = toonMaterial(PALETTE.ink);
-  keep(accent);
-  keep(cream);
-  keep(dark);
-
   const at = route.startDistance;
   const outward = route.outwardAt(at, new Vector3());
   const archSample = route.path.sampleAt(at);
   const centre = new Vector3(archSample.x, 0, archSample.z);
   const yaw = Math.atan2(outward.x, outward.z);
-  // Wide enough to clear this ring's own lanes, with the same overhang either
-  // side. The vertical clearances are *not* scaled: a park-scale child riding
-  // the walk-past ring needs her head height under the beam just as much as a
-  // toy-scale one does on the race ring.
-  const span = route.laneSpan / 2 + 1.6 * ringSizeVsRace;
-  const beamY = route.base + UNDULATION_REACH + 2.2;
+
+  // The feet spring from just below the lowest rail, so the arch reads as
+  // growing out of the track rather than out of the ground far below it.
   const footY = route.base - UNDULATION_REACH - 1.4;
+  // The highest the rails ever get, which is the one a rider has least room
+  // over. Vertical clearances are deliberately *not* scaled by the ring: a
+  // park-scale child on the walk-past ring needs her head height under this
+  // just as much as a toy-scale one does on the race ring, and the race ring's
+  // riders are the taller of the two, so one absolute height serves both.
+  const clearHeight =
+    route.base + UNDULATION_REACH + RIDER_HEAD_TOP_AT_PARK_SCALE * RIDE_SCALE + ARCH_HEADROOM - footY;
+  // Half the width the arc must still be that high at: the outermost lane's
+  // centre, plus room for a rider who is not a line.
+  const halfWidth = route.laneSpan / 2 + ARCH_SHOULDER_ROOM;
+  const innerRadius = Math.hypot(halfWidth, clearHeight);
 
-  const legGeometry = new CylinderGeometry(
-    0.24 * ringSizeVsRace,
-    0.3 * ringSizeVsRace,
-    beamY - footY,
-    10,
-  );
-  keep(legGeometry);
-  for (const side of [-1, 1] as const) {
-    const leg = solid(new Mesh(legGeometry, cream));
-    leg.position.set(
-      centre.x + outward.x * side * span,
-      (beamY + footY) / 2,
-      centre.z + outward.z * side * span,
-    );
-    group.add(leg);
-    addOutline(leg, 0.024);
-  }
-
-  const beamGeometry = new BoxGeometry(
-    span * 2 + 0.6 * ringSizeVsRace,
-    0.55 * ringSizeVsRace,
-    0.55 * ringSizeVsRace,
-  );
-  keep(beamGeometry);
-  const beam = solid(new Mesh(beamGeometry, accent));
-  beam.position.set(centre.x, beamY, centre.z);
-  beam.rotation.y = yaw + Math.PI / 2;
-  group.add(beam);
-  addOutline(beam, 0.024);
-
-  // Chequered flags hanging off the beam: the finish line, unmistakably.
-  const flagGeometry = new BoxGeometry(
-    0.72 * ringSizeVsRace,
-    0.72 * ringSizeVsRace,
-    0.08 * ringSizeVsRace,
-  );
-  keep(flagGeometry);
-  const flags = 13;
-  for (let i = 0; i < flags; i += 1) {
-    const t = i / (flags - 1) - 0.5;
-    const flag = decal(new Mesh(flagGeometry, i % 2 === 0 ? cream : dark));
-    flag.position.set(
-      centre.x + outward.x * t * span * 2,
-      beamY - 0.66 * ringSizeVsRace,
-      centre.z + outward.z * t * span * 2,
-    );
-    flag.rotation.y = yaw + Math.PI / 2;
-    group.add(flag);
+  const band = 0.55 * ringSizeVsRace;
+  const tube = band * 0.5;
+  for (let i = 0; i < ART.rainbow.length; i += 1) {
+    const material = toonMaterial(ART.rainbow[i]!);
+    keep(material);
+    // A half torus: `TorusGeometry` sweeps from +X anticlockwise, so an arc of
+    // π is exactly the upper half, with its feet on the ground either side.
+    const geometry = new TorusGeometry(innerRadius + i * band, tube, 8, 96, Math.PI);
+    keep(geometry);
+    const arc = solid(new Mesh(geometry, material));
+    arc.position.set(centre.x, footY, centre.z);
+    // Stand it across the track, the same way the old beam was turned.
+    arc.rotation.y = yaw + Math.PI / 2;
+    arc.name = `railRace:finish-rainbow-${i}`;
+    // It is enormous and mostly sky; per-instance culling is not worth it.
+    arc.frustumCulled = false;
+    group.add(arc);
+    // Outlined like everything else solid in the park — the storybook ink line
+    // is what stops six bright bands reading as a gradient rather than as six
+    // painted stripes.
+    addOutline(arc, 0.02);
   }
 
   return group;

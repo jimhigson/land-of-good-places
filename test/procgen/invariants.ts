@@ -1388,6 +1388,60 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
  */
 const BAR_MEASUREMENT_SLACK = 0.05;
 
+/**
+ * **Every rider passes under the finish rainbow with room to spare.**
+ *
+ * Jim, 6 August 2026: *"the finish line looks like an obstacle."* It was one.
+ * The straight beam it replaced hung at an invented `base + UNDULATION_REACH +
+ * 2.2`, while a standing rider's head reaches 7.67 m over the rail — so the
+ * finish line passed through every rider, every lap, and the chequered flags
+ * below it hung lower still. Nothing noticed, because nothing was asked.
+ *
+ * "The arch exists" would have passed all along while it decapitated the
+ * winner, so this measures the built arc's **own vertices** — the lowest the
+ * rainbow gets directly over each lane, within a child's width either side —
+ * against a rider's real height at that lane. Both rings, every lane, every
+ * seed: the walk-past ring carries the ambient rivals and is the one a child
+ * standing in the park sees close up.
+ */
+const finishRainbowClearsEveryRider: Invariant = (facts) => {
+  const complaints: string[] = [];
+  if (facts.archClearance.length === 0) {
+    return ['the built scene has no finish rainbow over either Rail Race ring to measure'];
+  }
+  for (const lane of facts.archClearance) {
+    if (!Number.isFinite(lane.rainbowY)) {
+      complaints.push(
+        `the finish rainbow has no arc at all over lane ${lane.lane} of the ${lane.ring} ring — ` +
+          `a rider there passes the line under open sky, so the span does not reach all four ` +
+          `tracks`,
+      );
+      continue;
+    }
+    const headroom = lane.rainbowY - lane.crownY;
+    if (headroom < ARCH_MIN_HEADROOM) {
+      complaints.push(
+        `the finish rainbow leaves only ${headroom.toFixed(2)} m over a standing rider's head in ` +
+          `lane ${lane.lane} of the ${lane.ring} ring (needs ${ARCH_MIN_HEADROOM} m) — at zero it ` +
+          `is going through her, which is what the straight beam it replaced did. See ` +
+          `RIDER_HEAD_TOP_AT_PARK_SCALE in railRace/hazards.ts`,
+      );
+    }
+  }
+  return complaints;
+};
+
+/**
+ * The least headroom the finish rainbow may leave over a standing rider, in
+ * metres.
+ *
+ * Well under `track.ts`'s own `ARCH_HEADROOM`, on purpose: this is the point at
+ * which a family would see something wrong, not the target the builder aims
+ * for, so tuning the arch a little lower is allowed to pass and a rider's hair
+ * brushing it is not.
+ */
+const ARCH_MIN_HEADROOM = 0.5;
+
 const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
   const complaints: string[] = [];
   const bars = facts.duckBars;
@@ -2040,6 +2094,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
+  ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
   ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
   [
     'both Rail Race rings stand outside the park, built to their own size, ' +

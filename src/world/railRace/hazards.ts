@@ -88,6 +88,37 @@ import { RIDE_SCALE } from './route';
  * `track.ts` derives the duck bar posts' own length from this, so raising it
  * does not leave the bars floating above their supports — see `postStretch`.
  */
+/**
+ * **How tall a rider on this ride is: the top of a standing head above the rail
+ * head, at park scale.** Multiply by a ring's own `scale` for that ring.
+ *
+ * The single owner of "how much room does a rider need", and the reason this
+ * exists as a named constant at all: on 5 August 2026 the duck bars were found
+ * hanging *inside* riders' heads in both states, because the figure they had
+ * twice been set from — a live reading of 4.70 m ducked / 5.95 m standing — was
+ * 1.40 m wrong. Re-measured by composing the real transform chain (a real
+ * `createKid` parented into a real cart group at the ring's own scale,
+ * `updateMatrixWorld`, then read back): the crown reaches 7.35 m over the rail
+ * and the top of her head, hair and all, **7.67 m** — which at `RIDE_SCALE` is
+ * the 3.068 below. Hair, not crown, because hair is what a family watches pass
+ * through things.
+ *
+ * Everything that has to clear a rider derives from this and nothing invents a
+ * height of its own:
+ *
+ * - {@link DUCK_CLEARANCE_AT_PARK_SCALE} hangs a duck bar halfway between this
+ *   and the same head once ducked (`RailRace.ts`'s `DUCK_DROP`, 0.5 at park
+ *   scale), i.e. halfway between 3.068 and 2.568 — the 2.82 below.
+ * - `track.ts`'s finish rainbow arcs clear *over* it. That one was the point of
+ *   Jim's 6 August report: the old straight finish beam sat 2.2 m above the
+ *   rail against this 3.068, so it passed through every rider on the ride, and
+ *   a finish line you are hit by is not a finish line.
+ *
+ * `scripts/check-rail-race.mts` measures the real model against this rather
+ * than trusting it, which is what stops it going 1.40 m stale a second time.
+ */
+export const RIDER_HEAD_TOP_AT_PARK_SCALE = 3.068;
+
 export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.82;
 
 /**

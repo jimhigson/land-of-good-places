@@ -193,9 +193,29 @@ export interface DuckBarFact {
 const BAR_SPEED_SAMPLE = 0.6;
 
 
+/** One lane's headroom under the finish rainbow, on one ring. */
+export interface ArchClearanceFact {
+  readonly ring: string;
+  readonly lane: number;
+  /** Top of a standing rider's head at the arch, in world metres. */
+  readonly crownY: number;
+  /** The lowest the rainbow gets directly over that lane, in world metres. */
+  readonly rainbowY: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /**
+   * Headroom under the finish rainbow, per ring per lane — see
+   * {@link ArchClearanceFact}.
+   *
+   * Measured off the built arc's own vertices against a rider's real height,
+   * because the thing it replaced was not measured at all: the old straight
+   * finish beam used an invented 2.2 m of clearance and passed through every
+   * rider on the ride, every lap, with nothing complaining.
+   */
+  readonly archClearance: readonly ArchClearanceFact[];
   /**
    * Every duck bar on the race ring, with what the race does at it — see
    * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
@@ -520,7 +540,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // pulls in `railRace/plan.ts` at module scope, which reads the stall's own
   // placement out of `parkManifest.ts`, so a static import at the top of this
   // file would race this seed's rider against the default seed's ring.
-  const { InstancedMesh: Instanced, Matrix4, Vector3: Vec3 } = await import('three');
+  const { InstancedMesh: Instanced, Matrix4, Mesh, Vector3: Vec3 } = await import('three');
   const { createRider, scheduleForLevel, stepRider } = await import(
     '../../src/world/railRace/simulate.ts'
   );
@@ -656,7 +676,60 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // --- headroom under the finish rainbow -----------------------------------
+  const { RIDER_HEAD_TOP_AT_PARK_SCALE } = await import('../../src/world/railRace/hazards.ts');
+  const archClearance: ArchClearanceFact[] = [];
+  for (const [label, groupName, ringRoute] of [
+    ['race', 'railRace:race-ring', world.railRace.raceRoute],
+    ['walk-past', 'railRace:walk-past-ring', world.railRace.walkPastRoute],
+  ] as const) {
+    const group = world.railRace.group.getObjectByName(groupName);
+    if (!group) continue;
+    const start = ringRoute.startDistance;
+    const sample = ringRoute.path.sampleAt(start);
+    const outward = ringRoute.outwardAt(start, new Vec3());
+
+    // Every rainbow vertex, reduced to (across the track, height).
+    const band: { across: number; y: number }[] = [];
+    const vertex = new Vec3();
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      if (!child.name.startsWith('railRace:finish-rainbow')) return;
+      const position = child.geometry.getAttribute('position');
+      if (!position) return;
+      child.updateWorldMatrix(true, false);
+      for (let i = 0; i < position.count; i += 1) {
+        vertex
+          .set(position.getX(i), position.getY(i), position.getZ(i))
+          .applyMatrix4(child.matrixWorld);
+        band.push({
+          across: (vertex.x - sample.x) * outward.x + (vertex.z - sample.z) * outward.z,
+          y: vertex.y,
+        });
+      }
+    });
+    if (band.length === 0) continue;
+
+    for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
+      const laneAcross = ringRoute.laneOffsets[lane] ?? 0;
+      const rail = ringRoute.pointAt(lane, start, new Vec3());
+      let rainbowY = Infinity;
+      for (const point of band) {
+        // Directly over this lane, give or take the width of a child.
+        if (Math.abs(point.across - laneAcross) > 1) continue;
+        if (point.y < rainbowY) rainbowY = point.y;
+      }
+      archClearance.push({
+        ring: label,
+        lane,
+        crownY: rail.y + RIDER_HEAD_TOP_AT_PARK_SCALE * ringRoute.scale,
+        rainbowY,
+      });
+    }
+  }
+
   return {
+    archClearance,
     duckBars,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
