@@ -153,6 +153,55 @@ precedent literally buries the legs in the tub — but on open ground it would.
 The cheapest authentic crouch would be a pelvis Group between `root` and `body`
 plus a knee node splitting `leg-upper`; still zero skinning.
 
+## Round 4 (6 Aug): rebased, sad-only turn, rainbow finish
+
+Rebased onto `main` (#238, #216, #221). **#216 made the ring a boundary-following
+spline** and silently invalidated two of this PR's measurements — both fixed,
+both re-proved red. Detail is in the PR body and the commit messages; the short
+version is that `duckBarsSlowYouWhereTheyStand` was inverting arc length with a
+constant that no longer exists (`NaN`), and `droppersHangUnderRealRails` was
+comparing radii on a ring whose radius now varies by 40 m. **The droppers were
+fine; the test was broken.** Rewriting it took three goes and the two wrong ones
+both looked like results — see the commit for the shapes of those mistakes.
+
+Landed since round 3:
+
+- **Turn only when sad.** `riderIsSad()` is the one owner; the turn is scaled by
+  `Cart.sad`, its damped form. Guarded both ways.
+- **Finish line is a huge rainbow** — 6 bands, 20.4 m tall, 40.8 m span, apex
+  16.5 m over the outer rail. Radius *solved* from
+  `RIDER_HEAD_TOP_AT_PARK_SCALE`, which is now the single owner of rider height
+  (the duck-bar clearance is documented as derived from it). The old straight
+  beam sat 2.2 m over the rail against a 7.67 m head — it passed through every
+  rider, every lap.
+
+**Counts moved:** the bar is now **156 passed / 9 files / 0 skipped**, not 137 —
+`main` brought new tests, and +5 of the rise is the rainbow invariant.
+
+## STILL TO DO — the crouch
+
+Ducking and the bonk knock-down are **still a rigid translation** of the whole
+child, which clips through the cart. That is Jim's outstanding note.
+
+The rig diagnosis (round 3, above) says this needs **no 3D artist**: bend
+`body.rotation.x` with the feet planted (the flower pick already does 45°), plus
+a `body.scale.y` squash (the walk cycle already does this every frame), plus the
+existing head tuck — `root` never moves, so nothing slides through the cart
+floor. A 45° bend and a 10% squash reproduce today's 0.5 drop as a pose.
+
+Two things to get right when doing it:
+
+1. **Re-derive `RIDER_HEAD_TOP_AT_PARK_SCALE`'s ducked counterpart from the new
+   pose**, and with it `DUCK_CLEARANCE_AT_PARK_SCALE`. Do not let a second
+   height constant appear — that constant is now the single owner and the
+   rainbow depends on it too.
+2. **Check whether the 4-frame skull clip disappears.** A real crouch may remove
+   it outright, which would be better than the 1.9 m contact lead I deliberately
+   did not ship.
+3. Guard it: assert the mesh does not intersect the cart and that the head
+   clears the bar *in the posed state*; prove red by putting the translation
+   back.
+
 ## Checks
 
 - `npm run build` — **exit 0**, run directly, never piped.
