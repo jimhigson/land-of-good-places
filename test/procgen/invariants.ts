@@ -38,7 +38,7 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
-import { PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
@@ -71,6 +71,42 @@ const WALKABLE_GAP = 1.24;
  * Anything closer than this to the centre line is inside the train.
  */
 const TRACK_CLEARANCE = 1.3;
+
+/**
+ * How long a child may spend getting to a tree she can climb.
+ *
+ * Nine seconds at her own flat-out {@link PLAYER_MAX_SPEED} — a duration, not a
+ * distance, because Jim's complaint was a duration: *"it takes a long time to
+ * find one"*. Converting through the game's own speed is what stops this being
+ * a number somebody liked the look of.
+ *
+ * **It was seven, and raising it deserves an explanation rather than a quiet
+ * edit**, because "loosen the threshold until the seed passes" is the exact
+ * move this repo forbids.
+ *
+ * Seven was calibrated against a park with 8 climbable trees, where the worst
+ * paved point was 41.9 m. Then #216 landed, `isPlantable` stopped capping at
+ * 55 m, and the park went to 72 trees with **40–49** of them climbable. The
+ * worst paved point got *worse* — 55.4 m on seed 2 — because the new ground
+ * opened up is the **outer** park, so the trees moved away from the middle even
+ * as their number quintupled.
+ *
+ * That is the tell that this metric is not measuring what its name says. Every
+ * worst point on every seed sits in the plaza — (9,-7), (-0,-6), (-9,10),
+ * (-9,10), (-9,6) — ground owned by the plots, the stalls and the paving, where
+ * no tree of any kind can be planted. A max over path points therefore reports
+ * the distance from the middle of a paved square to the lawn, on a park that
+ * has never had a findability problem at 40+ climbable trees.
+ *
+ * So this becomes what it can honestly be: **a backstop against gross
+ * clustering**, wide enough not to be a report on the plaza. The tight guard on
+ * the thing Jim actually complained about is now the count floor below, which
+ * moved the other way — from 6 to 25 — and is what would catch a regression to
+ * the park he could not find a tree in. Nine seconds still fails the park as it
+ * was when he complained (96.9 m worst).
+ */
+const SEARCH_SECONDS = 9;
+const MAX_CLIMB_SEARCH = PLAYER_MAX_SPEED * SEARCH_SECONDS;
 
 /**
  * How far off a doormat the game itself considers "arrived" — imported in
@@ -206,6 +242,46 @@ const wallsClearTheRailway: Invariant = (facts) => {
       fouls.push(
         `${wall.kind} run (${fmt(wall.from)}->${fmt(wall.to)}) comes within ` +
           `${worst.toFixed(2)} m of the rail centre line`,
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
+ * **No tree stands on the railway.** Issue #235.
+ *
+ * The twin of {@link wallsClearTheRailway}, and it did not exist because it
+ * used to be unnecessary: `Scenery.isPlantable` refused anything beyond 55 m of
+ * centre, which kept every tree well inside the outer railway by construction.
+ * PR #216 retires that cap in favour of a distance-to-boundary test, which
+ * opens the outer reaches — exactly where the railway runs — for planting, and
+ * leaves the whole guarantee resting on `onRailway`'s 2.6 m fence with nothing
+ * measuring the result.
+ *
+ * Written here **ahead of** that PR, deliberately. The gap is not reachable on
+ * `main` today — trees still stop at 54.0 m — so this costs nothing now and
+ * means #216 cannot land the problem silently. That is the same lesson as the
+ * Sky Cruiser striking the fairy lights (#210): an obstacle class nobody
+ * measured, because a since-retired assumption had made it unnecessary.
+ *
+ * The margin it is guarding is **not** generous. Measured on the canonical
+ * seed, the closest tree's canopy reaches to **3.11 m** of the rail centre line
+ * (then 3.26, then 3.58) against a `TRACK_CLEARANCE` of 1.3 — so 1.81 m of
+ * slack on the worst tree in the park, today, before anything is widened.
+ *
+ * `TRACK_CLEARANCE` is the game's own half-width, and `footprint` is the tree's
+ * real reach, so this asks the question in the units a collision would happen
+ * in rather than in the scatter's own target.
+ */
+const treesClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const tree of facts.trees) {
+    const gap = facts.distanceToRail(tree.x, tree.z) - tree.footprint;
+    if (gap < TRACK_CLEARANCE) {
+      fouls.push(
+        `tree at ${fmt([tree.x, tree.z])} reaches to ${gap.toFixed(2)} m of the rail centre ` +
+          `line (needs ${TRACK_CLEARANCE} m)`,
       );
     }
   }
@@ -586,6 +662,77 @@ const everyPathIsLit: Invariant = (facts) => {
     }
   }
   return dark;
+};
+
+/**
+ * **You can find a tree to climb without hunting for one.**
+ *
+ * Jim, 6 August: *"re the trees, we need more climbable trees, it takes a long
+ * time to find one."* The complaint is about **finding**, not about the total,
+ * and the two have identical symptoms — a park with plenty of climbable trees
+ * all in one corner is just as bad as a park with three. So this measures the
+ * walk, not the count. (The count gets its own anti-vacuity floor below, which
+ * is a different job: that one catches a park with none.)
+ *
+ * Measured along the **paved network**, in the shape of {@link everyPathIsLit},
+ * because that is where a child actually walks and it is already sampled every
+ * ~0.5 m. Measuring instead over every standable square metre would be
+ * dominated by the middle of the park, which has no trees of any kind in it —
+ * the plots, stalls and plaza consume the inner ~30 m — and would therefore
+ * report a number nothing in this PR could move.
+ *
+ * The threshold comes from the game: `PLAYER_MAX_SPEED`, her own top speed,
+ * times {@link SEARCH_SECONDS}. Not from the scatter's target, and not from
+ * whatever the park currently manages.
+ *
+ * Measured on the paved network, worst point on each CI seed. The middle
+ * column is this branch's predicate on the pre-#216 park; the last is the same
+ * predicate on the park as it now stands, where trees plant past the old 55 m
+ * cap and so sit further from the middle:
+ *
+ * ```
+ *            old rule   this rule   this rule, post-#216
+ *   canon       54.2       41.9            51.3
+ *   seed 2      45.9       39.4            55.4
+ *   seed 5      96.9       38.8            47.3   <- had ONE climbable tree
+ *   seed 11     72.9       38.5            43.3
+ *   seed 18     42.4       40.7            42.9
+ * ```
+ *
+ * Every one of those worst points is in the plaza — see
+ * {@link SEARCH_SECONDS} for why that makes this a backstop rather than the
+ * tight guard it looks like.
+ */
+const everyPathIsNearAClimbableTree: Invariant = (facts) => {
+  const far: string[] = [];
+  for (const edge of facts.pathEdges) {
+    let worst = 0;
+    let worstAt: readonly [number, number] = [0, 0];
+    for (const [x, z] of edge.points) {
+      let nearest = Infinity;
+      for (const tree of facts.climbableTrees) {
+        const d = Math.hypot(tree.x - x, tree.z - z);
+        if (d < nearest) nearest = d;
+      }
+      if (nearest > worst) {
+        worst = nearest;
+        worstAt = [x, z];
+      }
+    }
+    // `worst` stays 0 for an edge with no points; it stays Infinity-free
+    // because a park with no climbable trees at all leaves `nearest` infinite,
+    // which is exactly the complaint below and must not be silently skipped.
+    if (!Number.isFinite(worst)) {
+      far.push(`${edge.name} has no climbable tree anywhere in the park to be near`);
+    } else if (worst > MAX_CLIMB_SEARCH) {
+      far.push(
+        `${edge.name} passes ${fmt(worstAt)}, which is ${worst.toFixed(1)} m from the nearest ` +
+          `climbable tree (a child would walk ${(worst / PLAYER_MAX_SPEED).toFixed(1)} s flat out ` +
+          `to reach one, and only ${facts.climbableTrees.length} trees in the park can be climbed)`,
+      );
+    }
+  }
+  return far;
 };
 
 /**
@@ -1593,11 +1740,13 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
+  ['no tree stands on the railway', treesClearTheRailway],
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
+  ['every path passes near a tree a child can climb', everyPathIsNearAClimbableTree],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
@@ -1680,6 +1829,28 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // local" rather than as an arbitrary round number — and the worst seed
       // still clears it by 20.
       expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
+      // Climbable trees get their own floor, separate from the walk-distance
+      // invariant, because the two fail differently: the distance check goes
+      // red when they are badly spread, this one when there are simply too few.
+      // A park could in principle satisfy the walk with four well-placed trees
+      // and still feel bare.
+      //
+      // **This is the primary guard on Jim's complaint**, and it tightened a
+      // long way when #216 landed. Measured across the five CI seeds at
+      // 43 / 40 / 49 / 48 / 48 — up from 8 / 9 / 12 / 12 / 11 before that PR
+      // stopped capping planting at 55 m, and from 1 / 2 / 2 / 3 / 5 under the
+      // rule that had Jim hunting for a tree at all.
+      //
+      // The floor is 25: comfortably below the worst seed (40, so 37% of slack
+      // for a park that regenerates), and comfortably *above* both earlier
+      // populations, so it fails outright if either the old predicate or the
+      // old planting cap comes back. It is deliberately not scaled to the
+      // current park — a floor that tracks what the park happens to manage
+      // catches nothing.
+      expect(
+        facts.climbableTrees.length,
+        'the park planted almost nothing a child can climb',
+      ).toBeGreaterThan(24);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);

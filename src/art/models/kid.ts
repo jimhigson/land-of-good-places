@@ -220,6 +220,30 @@ export function kidEyeCentre(side: -1 | 1): Vector3 {
   );
 }
 
+/**
+ * **How far above the horizon a level head is already looking**, in radians.
+ *
+ * The kid does not look straight ahead when her head joint is at zero: the
+ * skull is tipped back by {@link HEAD_TILT}, and the painted eyes sit a little
+ * above the skull's equator ({@link KID_FACE}), so her gaze leaves the face
+ * already climbing. Both terms are read from the numbers that put them there
+ * rather than restated, so retuning either moves this with it.
+ *
+ * Exported because aiming her face at something now needs it. The whole gaze
+ * is linear in the two joints above the eyes and nothing else:
+ *
+ * ```
+ * gaze elevation = KID_REST_GAZE_PITCH − body.rotation.x − head.rotation.x
+ * ```
+ *
+ * — verified against a really-built kid's own glasses anchor, to 4 decimal
+ * places at six different joint combinations, by `check:climb-wave`. That is
+ * what lets `Player.ts` solve for the head angle that points her at the camera
+ * instead of guessing a pitch that looks about right from one screenshot.
+ */
+export const KID_REST_GAZE_PITCH =
+  HEAD_TILT + Math.asin(kidEyeCentre(-1).add(kidEyeCentre(1)).multiplyScalar(0.5).normalize().y);
+
 /** One named swatch — a skin tone or an eye colour, ready to drop onto a button. */
 export interface ToneSwatch {
   readonly colour: number;

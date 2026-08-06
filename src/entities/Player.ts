@@ -1,5 +1,6 @@
 import { Group, Vector3 } from 'three';
 import {
+  CAMERA_PITCH_DEGREES,
   CAMERA_YAW_DEGREES,
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
@@ -17,6 +18,7 @@ import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
+import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
@@ -92,6 +94,178 @@ const GRAVITY = 17;
  * this one number.
  */
 export const JUMP_APEX_HEIGHT = (JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY);
+
+/**
+ * The waving arm, up a tree — see {@link Player.setClimbWave}.
+ *
+ * The same numbers the crowd waves with (`NpcCharacter.animate`), so one
+ * gesture reads across the whole park. Exported because `check:climb-wave`
+ * poses a real kid with them to measure how high the hand actually gets: that
+ * is what decides whether the wave clears the leaves, and it is not something
+ * this file can know on its own.
+ */
+export const CLIMB_WAVE_ARM_X = -2.45;
+/**
+ * The lateral swing, and the whole of what was wrong with the first attempt.
+ *
+ * The crowd waves with this **negative** (`NpcCharacter.animate`), which tucks
+ * the hand *inward*, across the body. On the ground that is fine — you see the
+ * whole child. Up a tree an inward hand lands squarely behind her own skull and
+ * hair: QA measured the wave 0% visible on every climbable tree, blocked by her
+ * own head, with zero foliage in the way.
+ *
+ * That was measured when only her head and waving arm were drawn up a tree.
+ * **The whole child is drawn now** (Jim, 6 August: *"just include the whole
+ * body"* — see `world/TreeClimbing.ts`), which gives the hand *more* to hide
+ * behind rather than less, so the outward swing matters at least as much as it
+ * did. `check:climb-wave` re-measures it on the real rig every build, so this
+ * paragraph is history rather than a live claim about what is on screen.
+ *
+ * Swinging it **out** instead puts the hand clear of her silhouette. Swept
+ * (`check:climb-wave --sweep`) rather than guessed: +1.25 is the peak across
+ * every lift angle, and the ±{@link WAVE_WAGGLE} wag keeps it inside 0.83–1.67,
+ * which stays visible throughout rather than flickering behind her head at one
+ * end of the wag.
+ *
+ * The lift ({@link CLIMB_WAVE_ARM_X}) is unchanged and still the crowd's, so
+ * the gesture remains recognisably the park's own wave — only its direction
+ * changed.
+ */
+export const CLIMB_WAVE_ARM_Z = 1.25;
+/** How far the hand wags either side of {@link CLIMB_WAVE_ARM_Z}. */
+export const WAVE_WAGGLE = 0.42;
+
+/**
+ * How far she rocks side to side while waving, in radians.
+ *
+ * **This is the part of the wave you can actually see**, and it is a rotation
+ * for a measured reason. QA's third pass found the 0.3 m hoist contributes
+ * *nothing* on screen and in fact nets negative: the follow camera tracks
+ * `player.position` (`Game.ts` -> `IsoCamera.update`, `focus.y` damped) and
+ * climbs with her, eating most of it, while turning to camera swings her
+ * off-axis head under an isometric projection — measured, she ends some waves
+ * ~3 px *lower* against the scenery than she started.
+ *
+ * A camera that follows position can cancel a translation. It cannot cancel a
+ * rotation. Rocking `body` swings her head *and* her waving arm together —
+ * and her head is ~25x the screen area of her hand, so this moves far more
+ * pixels than the arm ever can.
+ *
+ * Amplitude chosen by measuring screen-space excursion at play scale
+ * (`check:climb-wave --motion`), not from world-space geometry, because
+ * world-space motion is exactly what turned out not to reach the screen.
+ */
+export const CLIMB_WAVE_LEAN = 0.16;
+
+/** Rock rate, rad/s. Half the hand's wag, so the body sways under a faster wave. */
+export const CLIMB_WAVE_LEAN_RATE = 5.5;
+
+/**
+ * How far {@link applyRidePose} pitches the body forward — "holding on".
+ *
+ * Named rather than written inline because {@link CLIMB_WAVE_HEAD_PITCH} has to
+ * subtract it: the head hangs off the body, so where her face ends up pointing
+ * is this plus whatever the neck does. Two numbers that must agree, in one
+ * expression each.
+ */
+const RIDE_POSE_BODY_PITCH = 0.3;
+
+/**
+ * The neck angle that points her face **at the camera** while she waves.
+ *
+ * Jim, 5 August: *"the character should look slightly upwards too — straight
+ * towards the camera."* She was not. Measured on a really-built kid, mid-wave,
+ * her gaze left the face at **2.14° below** the horizon while the camera sat
+ * **38° above** her — she was waving at a point some 40° under the viewer's
+ * feet, which is exactly the "waving past you rather than at you" he saw.
+ *
+ * Solved, not tuned. Gaze is exactly linear in the two joints above the eyes
+ * (`KID_REST_GAZE_PITCH − body.rotation.x − head.rotation.x`, verified to 4
+ * decimal places by `check:climb-wave`), so the angle that lands the gaze on
+ * the camera falls straight out of rearranging that for `head.rotation.x`.
+ *
+ * **Derived from the camera, deliberately.** `CAMERA_PITCH_DEGREES` is the only
+ * thing that decides where the viewer is; pitch the park's camera tomorrow and
+ * her face follows it. A hard-coded angle here would be right for exactly one
+ * value of that constant and silently wrong for every other.
+ *
+ * The camera being **orthographic** is what makes one constant enough: every
+ * ray is parallel, so "the direction to the camera" is the same everywhere in
+ * the park and does not depend on which tree she climbed or how far away she is.
+ *
+ * It works out at **−40.1°**, and the reason that used to be free has since
+ * been retired. It was: `hidePlayerBody` left only her head and waving arm
+ * drawn, so the shoulders a neck angle would be read against were inside the
+ * leaves and nothing on screen could see it as a joint. **The whole child is
+ * drawn up a tree now** (Jim, 6 August), so those shoulders are on screen and
+ * the 40° *is* now a visible neck.
+ *
+ * Left at 40.1° deliberately, not by oversight: it is the angle that actually
+ * points her face at the camera, which is the thing Jim asked for and which
+ * `check:climb-wave` measures at 0.00° off. He asked for the body with *"no
+ * other change needed"*, and he has seen it in the game. If it ever reads as
+ * craning, the honest lever is to give some of the pitch back to the torso —
+ * `RIDE_POSE_BODY_PITCH` leans her forward 0.3 rad, and every radian taken out
+ * of that is a radian the neck no longer has to find — **not** to detune the
+ * aim, which would put her back to waving past the player.
+ */
+export const CLIMB_WAVE_HEAD_PITCH =
+  KID_REST_GAZE_PITCH - RIDE_POSE_BODY_PITCH - CAMERA_PITCH_DEGREES * DEG;
+
+/** The limbs {@link applyRidePose} moves. `CharacterModel` satisfies this. */
+export interface RidePoseTarget {
+  readonly body: { rotation: { x: number; z: number } };
+  readonly head: { rotation: { x: number } };
+  readonly leftArm: { rotation: { x: number; z: number } };
+  readonly rightArm: { rotation: { x: number; z: number } };
+  readonly leftLeg: { rotation: { x: number } };
+  readonly rightLeg: { rotation: { x: number } };
+}
+
+/**
+ * The pose worn on any ride — "holding on, delighted" — with the tree-climb
+ * wave blended over it.
+ *
+ * Extracted from `Player.update`'s riding branch so that
+ * `scripts/check-climb-wave.mts` can pose a kid **exactly** as the game does.
+ * It used to be inline, and a check that re-implements a pose is a check that
+ * can pass a pose the game never renders — which is the precise way the first
+ * version of this wave shipped invisible.
+ */
+export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed: number): void {
+  model.leftArm.rotation.x = -2.5;
+  model.rightArm.rotation.x = -2.5;
+  model.leftArm.rotation.z = 0.5;
+  model.rightArm.rotation.z = -0.5;
+  model.body.rotation.x = RIDE_POSE_BODY_PITCH;
+  // Zeroed for *every* ride, not only a climb, and deliberately: this function
+  // writes a complete pose rather than a patch, so nothing the walk cycle left
+  // behind can leak into it. `Player.animate` runs immediately before this and
+  // sets `body.rotation.z` from the gait; a rider who boarded mid-stride would
+  // otherwise keep a frozen sliver of that roll for as long as the ride lasted.
+  // The climb's own rock is written back over this a few lines down.
+  model.body.rotation.z = 0;
+  model.leftLeg.rotation.x = -0.7;
+  model.rightLeg.rotation.x = -0.55;
+  // Same arm and the same waggle as the crowd's wave (`NpcCharacter.animate`),
+  // so one gesture reads across the whole park.
+  if (climbWave > 0) {
+    const waggle = Math.sin(elapsed * 11) * WAVE_WAGGLE;
+    model.rightArm.rotation.x = lerp(-2.5, CLIMB_WAVE_ARM_X, climbWave);
+    model.rightArm.rotation.z = lerp(-0.5, CLIMB_WAVE_ARM_Z + waggle, climbWave);
+    // The rock. See CLIMB_WAVE_LEAN — this, not the hoist, is the motion that
+    // reaches the screen, because the follow camera cannot cancel a rotation.
+    model.body.rotation.z = Math.sin(elapsed * CLIMB_WAVE_LEAN_RATE) * CLIMB_WAVE_LEAN * climbWave;
+    // Chin up, at the camera. See CLIMB_WAVE_HEAD_PITCH — she was waving at the
+    // ground in front of the viewer before this.
+    //
+    // Added to whatever `Player.animate` just wrote rather than assigned over
+    // it, so her idle breathing still moves her head while she waves. That is
+    // safe against accumulating frame on frame precisely because `animate`
+    // *assigns* `head.rotation.x` afresh every single frame before this runs.
+    model.head.rotation.x += CLIMB_WAVE_HEAD_PITCH * climbWave;
+  }
+}
 
 /**
  * How far ahead — in the direction actually being walked — the auto-hop
@@ -402,6 +576,8 @@ export class Player implements GameSystem {
   /** Blinks, on the beat every face in the game shares. See `faceLife.ts`. */
   private readonly face: FaceLife;
   private ridingFlag = false;
+  /** 0..1 of the tree-climb wave. See {@link setClimbWave}. */
+  private climbWave = 0;
   /**
    * Seconds into the flower-picking flourish, or `-1` when there is none.
    *
@@ -691,9 +867,27 @@ export class Player implements GameSystem {
     this.group.rotation.x = pitch;
   }
 
+  /**
+   * How much of the "waving from up a tree" pose to wear, 0 to 1.
+   *
+   * Written every frame by `world/TreeClimbing.ts` while she is peeking out of
+   * a canopy. It lives here, rather than TreeClimbing simply posing the arm
+   * itself, because the riding branch of {@link update} rewrites *both* arms
+   * from scratch every frame — a ride's "holding on" pose — so an arm posed
+   * from outside would survive exactly one tick before being overwritten.
+   *
+   * Same rule as `applyFlowerPick`: it is only ever *blended over* the pose
+   * `update` already wrote, and it cannot get stuck, because the next frame
+   * that does not set it goes straight back to the plain ride pose.
+   */
+  setClimbWave(amount: number): void {
+    this.climbWave = clamp01(amount);
+  }
+
   /** Gives the character back, optionally still moving. */
   endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
     this.ridingFlag = false;
+    this.climbWave = 0;
     this.velocity.set(velocityX, 0, velocityZ);
     this.verticalVelocity = velocityY;
     this.airborne = true;
@@ -717,13 +911,7 @@ export class Player implements GameSystem {
       this.wornJetpack?.setThrust(0);
       this.gait = damp(this.gait, 0, 0.1, dt);
       this.animate(context, 0);
-      this.model.leftArm.rotation.x = -2.5;
-      this.model.rightArm.rotation.x = -2.5;
-      this.model.leftArm.rotation.z = 0.5;
-      this.model.rightArm.rotation.z = -0.5;
-      this.model.body.rotation.x = 0.3;
-      this.model.leftLeg.rotation.x = -0.7;
-      this.model.rightLeg.rotation.x = -0.55;
+      applyRidePose(this.model, this.climbWave, context.elapsed);
       return;
     }
 
