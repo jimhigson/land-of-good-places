@@ -4,6 +4,85 @@ Branch `tree-wave-tweak`, pushed to **`feat/climb-wave-and-npc-climb`** (PR #215
 Worktree `.claude/worktrees/tree-wave-tweak`. **Do not touch
 `.claude/worktrees/climb-wave`** — that is the Overseer's, serving the game to Jim.
 
+## Third ask, added 6 August: more climbable trees
+
+> *"re the trees, we need more climbable trees, it takes a long time to find one."*
+
+**Measured before changing anything, and it was both problems at once.** The
+park publishes 28 trees; **two** could be climbed. Across the five CI seeds:
+**2, 3, 1, 2, 5** — a whole park with a single climbable tree in it. The worst
+point on the paved network was **96.9 m** from one.
+
+Two causes:
+
+1. **The rule.** `kind === 'lollipop' && radius >= 2.05` threw away `blossom`,
+   which is *the same branch of the same function* and differs only in the
+   colour of the ball; the 2.05 bar then took two thirds of the survivors,
+   guarding "plenty of canopy to hide a body in" — a body `hidePlayerBody`
+   makes **invisible outright** rather than hiding in the canopy. Nothing left
+   for the margin to protect.
+2. **The scatter is biased against exactly the climbable kinds.** `TREE_REACH`
+   reserves 3.55 m for a lollipop against 2.05 for a stack, *before the radius
+   is rolled*, so the widest kind is refused most often: lollipop and blossom
+   are **62% of proposals and 25% of survivors**. **I did not touch this** —
+   fixing it means rolling the tree before testing its spacing, which moves
+   every tree in the park, and `Scenery`'s own comment already records that the
+   honest fix is a scatter that does not rejection-sample a tight lawn.
+
+**Fix: the predicate is now geometric** — climbable if the topmost canopy is a
+ball of at least `2 × SKULL_RADIUS`, taken from the head that has to come out of
+it. Admits every lollipop and blossom, refuses every stack (top blob narrows to
+0.90–1.15) and pine. **Draws no RNG, so it moves nothing**: same 28 trees, same
+positions, same digest.
+
+| seed | climbable | worst point on the paved network |
+|---|---|---|
+| canonical | 2 → **8** | 54.2 → **41.9 m** |
+| 2 | 3 → **9** | 45.9 → **39.4 m** |
+| 5 | 1 → **12** | 96.9 → **38.8 m** |
+| 11 | 2 → **12** | 72.9 → **38.5 m** |
+| 18 | 5 → **11** | 42.4 → **40.7 m** |
+
+**Three invariants added, all proved red first:**
+
+- `every path passes near a tree a child can climb` — measured along the paved
+  ribbon in `everyPathIsLit`'s shape, threshold `PLAYER_MAX_SPEED × 7 s` from
+  the game. Red with the old predicate: **8 failures across all five seed
+  files**.
+- A floor of `> 5` climbable trees, beside the existing tree/bush floors.
+- `no tree stands on the railway` — **issue #235**, written *ahead of* PR #216
+  (see below). Red when `onRailway` is deleted from `isPlantable`: five trees
+  foul, three with a **negative** gap (−1.28, −1.16, −0.13 m past the centre
+  line).
+
+`climbableTrees` is now a `ParkFact` too. It was readable by `TreeClimbing` and
+every wander driver and by **nothing that could measure it**, which is how two
+trees went unnoticed.
+
+### On #235 — its premise is not on `main`
+
+#235 says trees plant to 100.7 m with 66–70 of 72 beyond the old 55 m cap.
+**That is PR #216's branch, and #216 is still OPEN.** On `main`, `isPlantable`
+still has `if (Math.hypot(x, z) > 55) return false;`, trees stop at **54.0 m**,
+and there are **28** of them, not 72. I added the invariant anyway — it costs
+nothing now and means #216 cannot land the problem silently — but I did **not**
+do #235's other half (correcting three comments that claim the 55 m guarantee),
+because on `main` that guarantee is still true and the edit would collide with
+#216. **Recommend leaving #235 open** until #216 lands.
+
+Worth recording: the margin is thinner than it sounds. Canonical seed, closest
+tree canopy reaches **3.11 m** of the rail centre line (then 3.26, 3.58) against
+`TRACK_CLEARANCE` 1.3 — **1.81 m of slack** before anything is widened.
+
+### The ceiling, so nobody re-measures it
+
+Even if **every one of the 28 trees** were climbable, the median walk is 13.1 m
+and the max 35.3 m. The inner ~30 m of park has **no trees of any kind** — the
+plots, stalls and plaza own that ground — so that is the floor under any
+predicate change. Getting below it needs more trees, and the attempt budget is
+already at its measured ceiling (210 000 strands a waypoint and reds
+`check:park`).
+
 ## The ask (Jim, 6 August, after trying the wave)
 
 > *"the character should look slightly upwards too - straight towards the
@@ -114,11 +193,22 @@ check's band would then want re-measuring downward.
 
 ## Verification
 
-- `npm run build` — exit 0 (includes `check:crowd`, `check:npc-perch`,
-  `check:climb-wave`).
-- `npm run test:procgen` — exit 0, **127 tests passed across 8 files, 0
+- `npm run build` — **every step exit 0 except `typecheck:test`**, which fails
+  on `main` too and is not mine:
+  `test/procgen/scatterDecoupling.test.ts(1,30): error TS2307: Cannot find
+  module 'node:child_process'`. It has its own fix in flight; I ran the
+  remaining steps individually rather than assume my work broke something, and
+  `vite build` succeeds. **Do not be surprised by red CI for that one reason.**
+- `npm run test:procgen` — exit 0, **151 tests passed across 9 files, 0
   skipped** (read the count, not the colour — a seed-dependent module-load
-  failure shows up as *skipped*, not red).
+  failure shows up as *skipped*, not red). It was 141 before the tree work: +5
+  for the climbable-distance invariant and +5 for the railway one, one per seed
+  each, which is also how I know both actually run on all five seeds.
+- Merged `origin/main` rather than rebasing: 17 commits against a `package.json`
+  build chain that conflicts on nearly every one, on a branch already under
+  review. One resolution instead of up to seventeen, and no force-push over
+  commits a reviewer has read. Both sides verified present in the auto-merged
+  files afterwards, per CLAUDE.md's squash-merge warning.
 - `check:climb-wave --picture` — at play scale her head clears the leaves with
   the hand out to the side, 19 px of hand against 466 px of head.
 
