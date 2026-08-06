@@ -4,6 +4,63 @@ Branch `tree-wave-tweak`, pushed to **`feat/climb-wave-and-npc-climb`** (PR #215
 Worktree `.claude/worktrees/tree-wave-tweak`. **Do not touch
 `.claude/worktrees/climb-wave`** — that is the Overseer's, serving the game to Jim.
 
+## Sixth ask, 6 August: "make nobody ever just a head"
+
+NPC climbers are drawn whole now too. My "the two differ on purpose" class doc
+was a defensible reading of *"no other change needed"* and simply wrong — his
+*"why do **they** no longer have a body?"* was plural, and NPC tree-climbing is
+half of #120.
+
+**The instanced path is not a constraint** — the thing worth checking before
+assuming this was the same change. An NPC draws through `InstancedCrowd`, where
+a proxy's `.visible` is *not* what `commit()` reads (only
+`CrowdMember.shown[partIndex]` is), and that array is built **`.fill(1)`**.
+Drawing a whole child is the **default**; hiding one was the work. Deleted with
+it: a cached per-avatar part-index list, a `Uint8Array` copy of every climber's
+flags, and a separate `.visible` ledger for the one pinned `CharacterModel` kid.
+**Less code and less per-climb allocation than before**, on ~31 climbers.
+
+### The hop bug is fixed — it had to be
+
+`NpcCharacter.animate` scaled a knee-tuck by how far off the ground the child
+is: right for a hop, wrong for a climb where "off the ground" is the whole tree.
+`Player.update`'s riding branch has always passed a hop height of 0 into its own
+`animate`, so this is the crowd catching up with her.
+
+| climbing NPC head, vs topmost leaf | |
+|---|---|
+| before | **+0.26 … +0.65 m** — hovering bodily above the canopy |
+| after | **−0.15 … +0.05 m** — level with the leaves, where `climbPose` aims |
+
+### Guard, and a threshold the fix forced *tighter*
+
+New: **a climbing NPC must be drawn ≥ 0.9 m below its own head.** Measures
+1.08 m; `--hide-body` reinstates the deleted hiding and measures **0.05 m**,
+exit 1.
+
+`MAX_ABOVE_CANOPY` **0.25 → 0.08**, a tightening. The hop fix moved the shipped
+population down, so the old bar had quietly stopped catching what it was written
+for: a half-metre leak scored 0.195–0.304 against the old baseline and only just
+failed; against the new one it scores 0.075–0.173 and **would have passed at
+0.25**. Re-measured — shipped −0.049…0.015, +0.5 m 0.075…0.173 (now fails by
+2×), +1.2 m 0.226…0.395, +5 m 1.047…1.609.
+
+### `CLIMBABLE_MIN_CANOPY_RADIUS`'s comment was false
+
+It claimed the rule *"refuses every stack"*. It does not — **4/3/3/5/3** stacks
+are climbable across the five CI seeds. A stack's three layers roll radii
+independently and each layer's height offset uses **its own** radius, so a fat
+layer 1 (1.248–1.599, straddling the 1.32 bar) under a thin layer 2
+(0.896–1.148) tops the tree. Measured on the built park: the topmost ball of
+every climbable stack is layer 1, radius 1.381–1.593. **The geometry is right;
+only the comment was wrong** — this PR's own lesson pointed back at my writing.
+
+### Open for Jim
+
+NPCs now sit ~0.56 m lower than the player, who keeps `CLIMB_PEEK_LIFT`. That is
+deliberate and #224 guards it (the lift is hers, bought by her wave), but it is
+visible: an NPC's head is level with the leaves, hers is above them.
+
 ## Fifth ask, 6 August: "make them lower by about 30% of their height"
 
 **`CLIMB_PEEK_LIFT` 1.2 → 0.564**, written as `1.2 - 0.3 * KID_HEIGHT` so
