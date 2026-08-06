@@ -40,7 +40,8 @@ was already immune — fixed five draws per attempt, test last). Bushes moved to
 their own salt; foliage salts now xor `PARK_SEED`, which they never did, so the
 five CI seeds finally draw five different scatters instead of one.
 
-Bush loop now runs a fixed budget of 1050 with no target count.
+Bush loop now runs a fixed budget of **1400** with no target count — see the
+counts table below for why 1400 and not the 1050 first tried.
 
 ## Proof
 
@@ -96,11 +97,10 @@ What actually constrains it:
    the one working bearing (20 deg): r=42 PASS, r=44 PASS, r=46 and r=48 fail on
    `rail.exclusion`/`poi.stranded`, r=50 illegal. **Identical on both branches.**
 
-So #216 gets 3 m of extra reach (41 -> 44) from a one-line band change, and
-needs no RNG work at all. Whoever picks up #216/#117 should start at the
-waypoint at (20.9, 20.2) inside the ferris wheel's plot, and at
-`stallPlacement.ts`'s `ferrisKiosk`, which places that stand by relation to the
-wheel rather than through the solver.
+The conclusion stands: **#216 needs no RNG work at all.** The numbers in this
+section were taken on `main` and on this branch, where the ring is still in its
+old place. They were superseded by measuring on #216's own branch — see the
+next section, which is the one to act on.
 
 ## #216: how far the band change actually gets (measured on its own branch)
 
