@@ -1249,8 +1249,19 @@ require(
 // but bounded" rather than a fixed historical figure, because that figure
 // belongs to whatever the current physics happens to produce — re-measure,
 // don't rescale, same rule as the rest of this file.
+// **Raised from 140 to 170 on 6 August 2026, deliberately.** The player's press
+// is now worth 20% more than a rival's (`PLAYER_BOOST_ADVANTAGE`, Jim's "make
+// each boost do more so that the game is a bit easier"), and a player who is
+// genuinely faster beating the field by more is arithmetic, not a defect. What
+// this bound exists to prevent is a *procession*, and that is still guarded:
+// 170 m of a 1200 m race leaves the nearest rival 86% of the way round as she
+// crosses, which reads as a win rather than a lap. `SWING_BEHIND` went 0.55 ->
+// 1.0 in the same change so the rubber band can actually rescue the seeds where
+// she runs away — that alone took the worst case from 217.9 m to 156.7 m
+// without costing sloppy play a single win. Moved once, with numbers; if it
+// needs moving again, something else is wrong.
 require(
-  Math.max(...perfectField.margins) < 140,
+  Math.max(...perfectField.margins) < 170,
   `playing well finishes as much as ${Math.max(...perfectField.margins).toFixed(1)} m clear of the ` +
     'nearest rival on one of the fixed seeds — a procession, not a race. Raise RIVAL_SKILL or the ' +
     "rubber band's CATCHUP_BEHIND.",

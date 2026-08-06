@@ -24,6 +24,7 @@ import type { RaceLevel } from './hazards';
 import {
   HAZARD_LAYOUT,
   RACE_LAPS,
+  PLAYER_BOOST_ADVANTAGE,
   RIVAL_SKILL,
   createRider,
   rivalBand,
@@ -743,7 +744,15 @@ export class RailRace implements GameSystem {
         band = rivalBand(me.travelled - rider.travelled);
       }
 
-      const events = stepRider(this.activeRing.route, rider, this.activeSchedule, riderInput, dt, band);
+      const events = stepRider(
+        this.activeRing.route,
+        rider,
+        this.activeSchedule,
+        riderInput,
+        dt,
+        band,
+        cart.isPlayer ? PLAYER_BOOST_ADVANTAGE : 1,
+      );
 
       if (cart.isPlayer) {
         this.ducking = rider.ducking;

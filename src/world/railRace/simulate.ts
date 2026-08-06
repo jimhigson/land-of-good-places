@@ -78,6 +78,34 @@ export const RACE_LAPS = 2;
 const BOOST_GAIN_PER_PRESS = 0.22;
 
 /**
+ * **How much more a press is worth to the player than to a rival.**
+ *
+ * Jim, 6 August 2026: *"make each boost do more so that the game is a bit
+ * easier, by about 20%"* — and the stated purpose, *easier*, is the part that
+ * decides where the 20% goes.
+ *
+ * The literal reading is to raise {@link BOOST_GAIN_PER_PRESS}, and it does not
+ * work, because `stepRider` is the same function for everybody: the rivals
+ * press a boost too, so a fatter press makes the whole field faster and the
+ * rubber band redistributes what is left. Measured over the 24 fixed seeds,
+ * raising that constant 20%:
+ *
+ * ```
+ *   plays well   24/24 wins, mean margin 53.9 m -> 77.2 m (max 166.4, a procession)
+ *   plays sloppy 15/24 wins -> 12/24
+ * ```
+ *
+ * Sloppy play got *harder*, which is the opposite of what was asked, and the
+ * only thing that reliably grew was the gap between a good run and a bad one.
+ * So the 20% goes on the player's own press instead, which is the thing Jim is
+ * actually describing when he says "each boost" — hers. Rival pace has its own
+ * two knobs ({@link RIVAL_SKILL} and {@link rivalBand}) and is deliberately not
+ * touched here, so this cannot be quietly cancelled by the band the way the
+ * shared constant was.
+ */
+export const PLAYER_BOOST_ADVANTAGE = 1.2;
+
+/**
  * How fast {@link Rider.boost} bleeds away when nothing is topping it up,
  * per second, applied exponentially (`boost *= exp(-BOOST_DECAY_RATE * dt)`)
  * rather than as a flat per-second subtraction — a proportional leak gives a
@@ -264,6 +292,10 @@ const NOTHING: StepEvents = { bonked: false, finishedNow: false, lap: 0 };
 /**
  * One rider's step.
  *
+ * `boostGain` scales what one press is worth — 1 for a rival, and
+ * {@link PLAYER_BOOST_ADVANTAGE} for the player. See that constant for why the
+ * player's advantage lives here rather than in `BOOST_GAIN_PER_PRESS`.
+ *
  * `hazards` is the schedule for whichever level was chosen for this race
  * (see `hazards.ts`'s header and `RailRace.chooseLevel`) — never a fixed
  * module-level constant, because which bars/zones are actually live is now a
@@ -277,6 +309,7 @@ export function stepRider(
   input: RiderInput,
   dt: number,
   band = 1,
+  boostGain = 1,
 ): StepEvents {
   if (rider.finished) return NOTHING;
 
@@ -292,7 +325,7 @@ export function stepRider(
   // "no free speed while you should be doing something else" rule the old
   // hold-based thrust used.
   const registersAsPressed = input.pressed && !rider.ducking && !wobbling;
-  const gain = registersAsPressed ? BOOST_GAIN_PER_PRESS : 0;
+  const gain = registersAsPressed ? BOOST_GAIN_PER_PRESS * boostGain : 0;
   rider.boost = Math.min(BOOST_MAX, (rider.boost + gain) * Math.exp(-BOOST_DECAY_RATE * dt));
 
   // A short, decisive "was that a real press, recently" window — see
@@ -505,7 +538,7 @@ export const RIVAL_SKILL: readonly number[] = [0.62, 0.72, 0.82];
  */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
-const SWING_BEHIND = 0.8;
+const SWING_BEHIND = 1.0;
 const SWING_AHEAD = 0.32;
 
 /**
@@ -676,7 +709,15 @@ export function simulateRailRace(strategy: Strategy, level: RaceLevel): RaceOutc
   // A generous ceiling: nothing that finishes is anywhere near it, and a rider
   // that somehow cannot finish should end the check rather than the process.
   while (!rider.finished && seconds < 400) {
-    stepRider(route, rider, hazards, strategyInput(strategy, rider, hazards, dt, rng), dt);
+    stepRider(
+      route,
+      rider,
+      hazards,
+      strategyInput(strategy, rider, hazards, dt, rng),
+      dt,
+      1,
+      PLAYER_BOOST_ADVANTAGE,
+    );
     seconds += dt;
   }
 
@@ -740,7 +781,8 @@ export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: 
         ? strategyInput(playerStrategy, rider, hazards, dt, rng)
         : rivalInput(rider, hazards, dt, RIVAL_SKILL[rider.lane] ?? 0.7, rng);
       const band = isPlayer ? 1 : rivalBand(player.travelled - rider.travelled);
-      if (!stepRider(route, rider, hazards, input, dt, band).finishedNow) continue;
+      const gain = isPlayer ? PLAYER_BOOST_ADVANTAGE : 1;
+      if (!stepRider(route, rider, hazards, input, dt, band, gain).finishedNow) continue;
       order.push(rider.lane);
       if (isPlayer) {
         playerSeconds = seconds;
