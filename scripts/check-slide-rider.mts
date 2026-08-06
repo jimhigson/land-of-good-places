@@ -162,6 +162,60 @@ function isDescendantOf(node: unknown, part: unknown): boolean {
   return false;
 }
 
+/**
+ * **How much of her the chase camera can actually see, in pixels.**
+ *
+ * Jim, on the build where the raycast below reported every part "unobstructed":
+ * *"still can't see a body, maybe it is hidden behind the head anyway?"*. He was
+ * right and the raycast was answering the wrong question — it asked whether a
+ * ray reached the *centre* of each part, and a part whose centre is visible can
+ * still be four pixels of shoulder behind a skull. **Unoccluded is not the same
+ * as legible**, and only an area measurement can tell them apart.
+ *
+ * The geometry is against a camera sitting directly behind her: she lies on her
+ * back **feet first**, so her feet point down the slide and her head points back
+ * up it, straight into the lens. Her own head is between the camera and the rest
+ * of her by construction.
+ *
+ * So this shoots a grid of rays through the **live** ride camera — the real
+ * `PerspectiveCamera` from the running ride, via `setFromCamera`, so its fov,
+ * aspect and world matrix are the ones the game is using rather than a
+ * reconstruction — and counts which of her each pixel lands on. Borrowed from
+ * `check-climb-wave.mts`, which measures a climbing child the same way and for
+ * the same complaint.
+ */
+interface Shot {
+  readonly headPixels: number;
+  readonly bodyPixels: number;
+  readonly framePixels: number;
+}
+
+const SHOT_W = 240;
+const SHOT_H = 135;
+
+function shoot(
+  camera: never,
+  targets: readonly unknown[],
+  model: { root: unknown; head: unknown },
+): Shot {
+  const caster = new Raycaster();
+  let headPixels = 0;
+  let bodyPixels = 0;
+  for (let iy = 0; iy < SHOT_H; iy += 1) {
+    const ndcY = 1 - (2 * (iy + 0.5)) / SHOT_H;
+    for (let ix = 0; ix < SHOT_W; ix += 1) {
+      const ndcX = (2 * (ix + 0.5)) / SHOT_W - 1;
+      caster.setFromCamera({ x: ndcX, y: ndcY } as never, camera);
+      const hit = caster.intersectObjects(targets as never[], true)[0];
+      if (!hit) continue;
+      if (!isDescendantOf(hit.object, model.root)) continue;
+      if (isDescendantOf(hit.object, model.head)) headPixels += 1;
+      else bodyPixels += 1;
+    }
+  }
+  return { headPixels, bodyPixels, framePixels: SHOT_W * SHOT_H };
+}
+
 function bodyParts(model: {
   body: unknown;
   head: unknown;
@@ -197,8 +251,16 @@ let worstOffChuteAt = -1;
 let hiddenFrames = 0;
 const hiddenPartNames = new Set<string>();
 const occludedParts = new Set<string>();
+const shots: Shot[] = [];
 const raycaster = new Raycaster();
 const rideCameraObject = building.rideView?.camera ?? null;
+if (rideCameraObject) {
+  // Headless never calls `RideCamera.resize`, so the camera would keep whatever
+  // aspect it was constructed with. A phone is about 16:9 and so is the raster
+  // below, so this makes "what is in frame" mean what it means on the device.
+  (rideCameraObject as { aspect: number }).aspect = SHOT_W / SHOT_H;
+  (rideCameraObject as { updateProjectionMatrix(): void }).updateProjectionMatrix();
+}
 let worstSeatGap = 0;
 let uprightFrames = 0;
 let headForwardFrames = 0;
@@ -301,6 +363,23 @@ while (frames < MAX_FRAMES) {
     }
   }
 
+  // Sampled rather than every frame: 240x135 rays is a third of a million
+  // intersection tests, and the shot does not change materially between
+  // neighbouring frames.
+  if (rideCameraObject && ridingFrames % 120 === 0) {
+    // **From the scene root, not from the camera.** `updateMatrixWorld` composes
+    // an object's world matrix from its *parent's current* one and refreshes its
+    // descendants — it does not walk up. The camera hangs off `eyeMount` off
+    // `rideMount`, so updating the camera alone leaves it reading whatever those
+    // two happened to hold, and `setFromCamera` then shoots from a stale pose.
+    // This is why the first run of this measurement reported 0 px of her: not
+    // because she was invisible, but because the rays were fired from the wrong
+    // place. Exactly the "measured or reconstructed rather than live" trap.
+    scene.updateMatrixWorld(true);
+    const shot = shoot(rideCameraObject as never, [slide.group, player.model.root], player.model as never);
+    shots.push(shot);
+  }
+
   const seat = building.rideSeatWorldPosition(new Vector3());
   const seatGap = seat.distanceTo(player.position);
   if (seatGap > worstSeatGap) worstSeatGap = seatGap;
@@ -347,6 +426,21 @@ while (frames < MAX_FRAMES) {
   const headOff = distanceToChute(head);
   if (headOff > worstHeadOffChute) worstHeadOffChute = headOff;
 }
+
+console.log('  the shot, sampled down the ride (240x135 rays through the live ride camera):');
+for (const [i, shot] of shots.entries()) {
+  const pct = ((shot.bodyPixels / shot.framePixels) * 100).toFixed(2);
+  console.log(
+    `    sample ${String(i + 1).padStart(2)}  head ${String(shot.headPixels).padStart(5)} px   ` +
+      `body ${String(shot.bodyPixels).padStart(5)} px   ` +
+      `body is ${pct.padStart(5)}% of frame   ` +
+      `body/head ${(shot.bodyPixels / Math.max(1, shot.headPixels)).toFixed(2)}`,
+  );
+}
+const worstShot = shots.reduce(
+  (a, b) => (b.bodyPixels < a.bodyPixels ? b : a),
+  shots[0] ?? { headPixels: 0, bodyPixels: 0, framePixels: SHOT_W * SHOT_H },
+);
 
 const complaints: string[] = [];
 
