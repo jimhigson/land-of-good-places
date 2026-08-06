@@ -277,6 +277,9 @@ export class Building implements GameSystem {
   /** Follows the chute: position and heading. */
   private readonly rideMount = new Group();
 
+  /** Scratch for {@link ridePointToWorld}, so the ride allocates nothing per frame. */
+  private readonly riderPoint = new Vector3();
+
   /**
    * A landing that has been set up but not yet hit the balls.
    *
@@ -873,13 +876,13 @@ export class Building implements GameSystem {
       return;
     }
 
-    // The helter-skelter is inside and the ginormous slide is out in the park —
-    // each is authored around its own origin, so each is ridden around it too.
-    const originX = ride.giant ? BUILDING_CENTRE_X : INTERIOR_ORIGIN_X;
-    const originZ = ride.giant ? BUILDING_CENTRE_Z : INTERIOR_ORIGIN_Z;
-
     ride.slide.pointAt(t, this.point);
     ride.slide.tangentAt(t, this.tangent);
+    // The one owner for "where is this really?" — see `ridePointToWorld`. The
+    // rider and the seat the camera hangs off now read the same answer, which
+    // they did not before: the rider was 26.65 m off the chute for the whole
+    // ride, and only the fact that she was hidden kept it out of sight.
+    this.ridePointToWorld(ride, this.point, this.riderPoint);
     // **Pitched down the slope, not bolt upright.** `setRidePose`'s own
     // docstring warns about this: a ride that positions the player model
     // independently of any parent vehicle, and that drops, has to hand the
@@ -890,9 +893,9 @@ export class Building implements GameSystem {
     // the fix belongs with it.
     const pitch = ride.giant ? slopeOf(this.tangent) : 0;
     player.setRidePose(
-      this.point.x + originX,
-      this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
-      this.point.z + originZ,
+      this.riderPoint.x,
+      this.riderPoint.y + RIDER_LIFT,
+      this.riderPoint.z,
       Math.atan2(this.tangent.x, this.tangent.z),
       pitch,
     );
@@ -967,18 +970,69 @@ export class Building implements GameSystem {
     );
   }
 
-  private finishRide(ride: ActiveRide, player: Player): void {
-    const originX = ride.giant ? BUILDING_CENTRE_X : INTERIOR_ORIGIN_X;
-    const originZ = ride.giant ? BUILDING_CENTRE_Z : INTERIOR_ORIGIN_Z;
+  /**
+   * Where the ginormous slide's **seat** is — the mount the chase camera hangs
+   * off — in world space.
+   *
+   * Exposed for `npm run check:slide-rider`, which asserts that the seat and
+   * the rider are in the same place. They were not: the rider was 26.65 m away
+   * for the whole ride (see {@link ridePointToWorld}), and because the camera
+   * followed the seat and her model was hidden, nothing on screen disagreed.
+   * A check that recomputed either one would have missed it, so the check reads
+   * the real mount out of the real scene graph.
+   */
+  rideSeatWorldPosition(target: Vector3): Vector3 {
+    this.rideMount.updateMatrixWorld(true);
+    return target.setFromMatrixPosition(this.rideMount.matrixWorld);
+  }
 
+  /**
+   * **Where a point on a ride's curve actually is, in the world.**
+   *
+   * The one owner for a question two functions used to answer differently, and
+   * the bug that hid behind the disagreement is worth stating in full because
+   * it survived a first-person ride, a peer review and a procgen suite.
+   *
+   * `advanceRide` placed the **rider** at `pointAt(t) + (BUILDING_CENTRE_X,
+   * BUILDING_BASE_Y, BUILDING_CENTRE_Z)`, while `rideMount` — the **seat the
+   * camera hangs off** — copied `pointAt(t)` straight through. Only one of them
+   * can have been right, and it was the mount: the chute is built from
+   * `SLIDE_PLAN.points`, which are already world coordinates, and it is added to
+   * `parkRoot`, whose world offset is measured at exactly (0, 0, 0). Confirmed
+   * against the built park: the chute ends at (8.86, 1.09, −28.46), 2.00 m from
+   * the ball pit's centre, and the arithmetic above put the rider at (−6.48,
+   * 1.53, −50.25) — **26.65 m away, in mid-air, for the whole ride**.
+   *
+   * Nobody could see it. The camera was on the mount and therefore correct, and
+   * the rider's model was hidden because the ride was first person, so the one
+   * thing in the wrong place was the one thing not being drawn. `boardGiantSlide`
+   * had it right all along (`pointAt(0)` with nothing added, and a comment saying
+   * why), which is what made the two versions look like a considered difference
+   * rather than a mistake.
+   *
+   * Jim found it the moment the camera turned round: *"in the chase cam it seems
+   * the player is still not drawn"*. She was drawn. She was 26 m away.
+   *
+   * The helter-skelter genuinely does need an offset — it is authored around the
+   * interior's origin and ridden there — so the frame is a property of the ride,
+   * asked once, here.
+   */
+  private ridePointToWorld(ride: ActiveRide, point: Vector3, target: Vector3): Vector3 {
+    if (ride.giant) return target.copy(point);
+    return target.set(
+      point.x + INTERIOR_ORIGIN_X,
+      point.y + BUILDING_BASE_Y,
+      point.z + INTERIOR_ORIGIN_Z,
+    );
+  }
+
+  private finishRide(ride: ActiveRide, player: Player): void {
     ride.slide.pointAt(1, this.point);
     ride.slide.tangentAt(1, this.tangent);
 
-    const worldPosition = new Vector3(
-      this.point.x + originX,
-      this.point.y + BUILDING_BASE_Y,
-      this.point.z + originZ,
-    );
+    // Same one owner as `advanceRide`, so where the ride *ends* and where it
+    // was a frame earlier cannot be in different coordinate frames.
+    const worldPosition = this.ridePointToWorld(ride, this.point, new Vector3());
     if (ride.giant) {
       // **She lands in the balls** — see `slide/landing.ts` for why she used to
       // land inside the chute instead, and why an offset could not have fixed
