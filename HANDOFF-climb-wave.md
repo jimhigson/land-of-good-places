@@ -129,7 +129,42 @@ and ends the ride. Reachability not established; it was free to make safe.
 - [x] `npm run build` exit 0, with `check:climb-wave` inside it
 - [ ] PR — **hold**
 
-## What the check now enforces (two terms, both needed)
+## Round 3 — measure in SCREEN space, never world space
+
+QA called round 2 marginal: it read as *"she turns round and looks at you"*, not
+*"she waves"*. The finding that matters:
+
+**The 0.3 m hoist contributes nothing on screen, and nets negative.** `Game.ts`
+follows `player.position`; `IsoCamera.update` damps `focus.y` toward it. The
+camera climbs with her and eats the hoist, and turning to camera swings her
+off-axis head, which an isometric projection folds into screen-Y. Measured,
+world-anchored at play scale, her silhouette's centroid moves **−3.5 px at
+bearings 0°/90° and +1.7 px at 180°/270°** — a 0.31 m rise arriving as −3 px,
+sign-flipping by approach.
+
+> **A world-space number is not evidence of anything the eye can see.**
+> Measure against a world-anchored window at play scale (`--motion`).
+
+**The fix is a rotation, not a translation.** A camera that follows position can
+cancel a translation; it cannot cancel a rotation. `CLIMB_WAVE_LEAN` rocks
+`body`, swinging her head *and* arm — her head is ~25× the arm's screen area.
+Measured: **6.7–7.3 px of travel at every bearing** (~35 px at desktop).
+
+### The hand is approach-dependent; the rock is not
+
+Hand pixels by approach bearing (0/90/180/270): **7 / 19 / 15 / 0**. On one side
+the canopy hides the arm outright. The check had been reporting 76% because it
+takes the **best** bearing — the same error class as measuring only the obstacle
+you thought of. The spread is now printed every run, and the pass depends on the
+rock, which is bearing-independent.
+
+**Still open (QA's second finding, not fixed):** the *turn* cue is also
+approach-dependent — 45°–297° across the four sides, so climbing from the
+camera-facing side nearly removes the strongest cue. The fix is to choose the
+perch on the camera-facing side of the trunk rather than by approach, which
+changes where the scramble goes and so wants QA eyes; not attempted here.
+
+## What the check now enforces (three terms)
 
 1. **Un-occluded ≥ 50%** — raycast from the real orthographic game camera
    against *every drawn mesh, her own body included*, over 12 bearings × 8
