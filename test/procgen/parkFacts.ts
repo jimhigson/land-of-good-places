@@ -167,9 +167,31 @@ export interface DuckBarFact {
   readonly speedBefore: number;
   /** ...and leaving it. Equal to `speedBefore` means nothing happened at the bar. */
   readonly speedAt: number;
+  /**
+   * Her speed once she is {@link BAR_SPEED_SAMPLE} past the bar.
+   *
+   * The honest place to ask "has this bar cost her anything yet". Sampling
+   * exactly *at* `builtAt` is a frame too early: `builtAt` is measured off an
+   * instance matrix and can land a hair before the scheduled crossing, so a
+   * correct ride is still at full speed on that one frame. A sample just past
+   * the bar cannot be fooled that way, and is still nowhere near the 2.5 m of
+   * lateness the original defect had.
+   */
+  readonly speedAfter: number;
   /** How far she travels during that frame — the finest resolution available. */
   readonly frameTravel: number;
 }
+
+/**
+ * How far past a duck bar {@link DuckBarFact.speedAfter} is sampled, in metres.
+ *
+ * A shade over one frame's travel at the ride's top speed (33 m/s at 60 Hz is
+ * 0.55 m), so the sample is never taken before the crossing it is asking about
+ * — and a quarter of the 2.5 m by which the bonk used to land late, so a return
+ * of that defect still reads as full speed here.
+ */
+const BAR_SPEED_SAMPLE = 0.6;
+
 
 export interface ParkFacts {
   readonly seed: number;
@@ -503,11 +525,59 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     '../../src/world/railRace/simulate.ts'
   );
   const { BARS_FROM_LEVEL } = await import('../../src/world/railRace/hazards.ts');
-  const { NOMINAL_RADIUS, PLAYER_LANE: PLAYER } = await import(
-    '../../src/world/railRace/route.ts'
-  );
+  const { PLAYER_LANE: PLAYER } = await import('../../src/world/railRace/route.ts');
 
   const raceRoute = world.railRace.raceRoute;
+
+  /**
+   * Arc distance from the arch of the ring point nearest `(x, z)`.
+   *
+   * **Inverted against the path itself, not against a formula for it.** This
+   * used to invert `angleAt(s) = -s / NOMINAL_RADIUS` in closed form, which was
+   * exact while the ring was a circle and became meaningless the moment #216
+   * made it follow the park boundary — `NOMINAL_RADIUS` is not even exported
+   * any more, so the closed form silently produced `NaN` and every bar deduped
+   * to a single phantom. Walking `route.path`'s own samples works for whatever
+   * shape the ring is next, which is the point.
+   *
+   * The samples sit ~0.25 m apart, which is half the distance a rider covers in
+   * a frame — too coarse to compare against on its own — so the nearest one is
+   * refined by projecting onto the polyline either side of it. That lands well
+   * inside a centimetre.
+   */
+  const archRelative = (x: number, z: number): number => {
+    const samples = raceRoute.path.samples;
+    let nearest = 0;
+    let nearestD2 = Infinity;
+    for (let i = 0; i < samples.length; i += 1) {
+      const s = samples[i]!;
+      const d2 = (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z);
+      if (d2 < nearestD2) {
+        nearestD2 = d2;
+        nearest = i;
+      }
+    }
+    let bestAt = samples[nearest]!.at;
+    let bestD2 = nearestD2;
+    for (const step of [-1, 1]) {
+      const a = samples[nearest]!;
+      const b = samples[(nearest + step + samples.length) % samples.length]!;
+      const ex = b.x - a.x;
+      const ez = b.z - a.z;
+      const len2 = ex * ex + ez * ez;
+      if (len2 === 0) continue;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / len2));
+      const px = a.x + ex * t;
+      const pz = a.z + ez * t;
+      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        // `samples` are evenly spaced in arc length, so `t` interpolates it.
+        bestAt = raceRoute.wrap(a.at + step * t * (raceRoute.length / samples.length));
+      }
+    }
+    return raceRoute.wrap(bestAt - raceRoute.startDistance);
+  };
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
@@ -518,13 +588,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
-      // `angleAt(s) = -s / NOMINAL_RADIUS` (railRace/route.ts) inverts exactly,
-      // so this is the bar's real arc position, read off its own matrix rather
-      // than off the rule that placed it. All four lanes of one bar share it,
-      // hence the dedupe.
-      const arch = raceRoute.wrap(
-        raceRoute.wrap(-Math.atan2(at.z, at.x) * NOMINAL_RADIUS) - raceRoute.startDistance,
-      );
+      // The bar's real arc position, read off its own matrix rather than off
+      // the rule that placed it. All four lanes of one bar share it, hence the
+      // dedupe.
+      const arch = archRelative(at.x, at.z);
       const key = arch.toFixed(2);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -559,6 +626,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
             frameTravel: rider.travelled - before,
           });
         }
+        const sample = builtAt + BAR_SPEED_SAMPLE;
+        if (before <= sample && rider.travelled >= sample && row.speedAfter === undefined) {
+          Object.assign(row, { speedAfter: rider.speed });
+        }
       }
       steps += 1;
     }
@@ -579,6 +650,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         bonkAt,
         speedBefore: row?.speedBefore ?? 0,
         speedAt: row?.speedAt ?? 0,
+        speedAfter: row?.speedAfter ?? 0,
         frameTravel: row?.frameTravel ?? 0,
       });
     }

@@ -965,33 +965,105 @@ function railOutsetRange(
 }
 
 /**
- * The horizontal radius of each individual rail of one ring — one number per
- * swept tube, so eight on a four-lane ring.
+ * Every rail's true centre line, as segments in a 1 m lookup grid.
  *
- * {@link railRadiusRange}'s min/max is the right shape for "is the whole ring
- * outside the wall", and the wrong shape for "is this post under a rail": a
- * dropper standing on the lane's centre line, holding up nothing, is still
- * comfortably inside the range. This keeps the rails apart so a post can be
- * matched to one.
+ * **This used to be `railRadii`, and that was a circle-era test.** It averaged
+ * each rail mesh's vertices into a single *radius* and asked how far a
+ * dropper's own radius was from one of those — sound while the ring was a
+ * circle of fixed radius, and meaningless the moment #216 made it follow the
+ * park boundary. The edge runs 59.7 m at the pinch and 101.4 m at the bulge, so
+ * "the average radius of this rail" stopped describing anything: the check
+ * reported real numbers, in metres, about a quantity that no longer existed.
  *
- * The mean of a tube's vertices is its centre line: the radial ring of
- * vertices at each step is symmetric about it, so the tube's own thickness
- * cancels out rather than biasing the answer.
+ * Two things have to be right for the replacement to resolve a defect as small
+ * as {@link DROPPER_RAIL_TOLERANCE}, and both were got wrong on the way here:
+ *
+ * 1. **Centre lines, not skin.** The vertices are the swept *tube's* surface,
+ *    so the nearest one to a post sitting perfectly on the axis is a whole tube
+ *    radius away. `TubeGeometry` gives every vertex of one cross-section ring
+ *    the same `uv.x`, so grouping by it and averaging recovers the axis exactly
+ *    — and needs no constant from `track.ts`, which cannot be imported here
+ *    anyway (it reaches `parkManifest.ts`, and a static seed-dependent import
+ *    in `test/` is what once turned one failure into 76 silent skips).
+ * 2. **Segments, not points.** The rings sit ~0.83 m apart along the track, so
+ *    the nearest *vertex ring* can be 0.42 m from a perfectly-placed post —
+ *    noise larger than the 0.25 m defect being hunted. Measuring to the centre
+ *    line *between* the rings removes it: the first draft measured to points
+ *    and called half of a healthy ring broken, with a median sitting exactly on
+ *    the tolerance, which is what a resolution limit looks like when it is
+ *    mistaken for a result.
  */
-function railRadii(ring: BuiltRing): readonly number[] {
-  const radii: number[] = [];
+function railCentreLines(ring: BuiltRing): Map<string, [number, number, number, number][]> {
+  const grid = new Map<string, [number, number, number, number][]>();
+  const point = new Vector3();
+
+  const add = (key: string, segment: [number, number, number, number]): void => {
+    const cell = grid.get(key);
+    if (cell) cell.push(segment);
+    else grid.set(key, [segment]);
+  };
+
   ring.group.traverse((child) => {
     if (!(child instanceof Mesh)) return;
     if (!child.name.startsWith('railRace:rail-')) return;
     const position = child.geometry.getAttribute('position');
-    if (!position) return;
-    let sum = 0;
+    const uv = child.geometry.getAttribute('uv');
+    if (!position || !uv) return;
+    child.updateWorldMatrix(true, false);
+
+    // One entry per cross-section ring, keyed by the `uv.x` they share.
+    const rings = new Map<number, { x: number; z: number; n: number }>();
     for (let i = 0; i < position.count; i += 1) {
-      sum += Math.hypot(position.getX(i), position.getZ(i));
+      point.set(position.getX(i), 0, position.getZ(i)).applyMatrix4(child.matrixWorld);
+      const key = Math.round(uv.getX(i) * 1e6);
+      const entry = rings.get(key);
+      if (entry) {
+        entry.x += point.x;
+        entry.z += point.z;
+        entry.n += 1;
+      } else {
+        rings.set(key, { x: point.x, z: point.z, n: 1 });
+      }
     }
-    if (position.count > 0) radii.push(sum / position.count);
+
+    const centres = [...rings.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, e]) => [e.x / e.n, e.z / e.n] as const);
+
+    for (let i = 0; i < centres.length; i += 1) {
+      const a = centres[i]!;
+      const b = centres[(i + 1) % centres.length]!;
+      const segment: [number, number, number, number] = [a[0], a[1], b[0], b[1]];
+      // Both ends, so a lookup from either side of a segment finds it.
+      add(`${Math.floor(a[0])},${Math.floor(a[1])}`, segment);
+      add(`${Math.floor(b[0])},${Math.floor(b[1])}`, segment);
+    }
   });
-  return radii;
+  return grid;
+}
+
+/** Distance from `(x, z)` to the nearest rail centre line, searching outwards. */
+function nearestRail(
+  grid: Map<string, [number, number, number, number][]>,
+  x: number,
+  z: number,
+): number {
+  const cx = Math.floor(x);
+  const cz = Math.floor(z);
+  let nearest = Infinity;
+  for (let radius = 0; radius <= 40; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dz = -radius; dz <= radius; dz += 1) {
+        if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        for (const [ax, az, bx, bz] of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
+          const d = pointToSegment([x, z], [ax, az], [bx, bz]);
+          if (d < nearest) nearest = d;
+        }
+      }
+    }
+    if (nearest <= radius) return nearest;
+  }
+  return nearest;
 }
 
 /**
@@ -1305,6 +1377,17 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
  * in particular for why the two sides of the comparison have to come from
  * different places.
  */
+/**
+ * How much slop the *measurement* of a bar's built position is allowed, in
+ * metres — see {@link duckBarsSlowYouWhereTheyStand}'s use of it.
+ *
+ * `ParkFacts.duckBars` recovers a bar's arc position by walking the ring path's
+ * own samples and projecting onto the polyline between them, which lands well
+ * inside a centimetre but is not exact. Two orders of magnitude below the 2.00 m
+ * drift this invariant was written to catch.
+ */
+const BAR_MEASUREMENT_SLACK = 0.05;
+
 const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
   const complaints: string[] = [];
   const bars = facts.duckBars;
@@ -1322,8 +1405,13 @@ const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
       continue;
     }
     // One frame's travel, at the speed she is actually doing when she gets
-    // there. Below that there is nothing a 60 Hz game could have done sooner.
-    const slack = Math.max(bar.frameTravel, 0.01);
+    // there, plus the measurement's own resolution. Below one frame there is
+    // nothing a 60 Hz game could have done sooner; `BAR_MEASUREMENT_SLACK` is
+    // there because `builtAt` is *measured* off an instance matrix against a
+    // sampled path and is not exact to the millimetre — seed 5 sat 0.02 m over
+    // a bare frame, which is resolution, not lateness. Together they still
+    // catch the defect this exists for by a factor of forty.
+    const slack = Math.max(bar.frameTravel, 0.01) + BAR_MEASUREMENT_SLACK;
     const late = bar.bonkAt - bar.builtAt;
     if (Math.abs(late) > slack) {
       complaints.push(
@@ -1334,12 +1422,12 @@ const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
           `duck-bar loop in railRace/track.ts, and MANDATORY_RADIAL_NUDGES below it`,
       );
     }
-    if (bar.speedAt >= bar.speedBefore) {
+    if (bar.speedAfter >= bar.speedBefore) {
       complaints.push(
-        `reaching the duck bar at ${bar.builtAt.toFixed(2)} m from the arch, a rider who never ` +
-          `ducks is still doing ${bar.speedAt.toFixed(2)} m/s against ${bar.speedBefore.toFixed(2)} ` +
-          `going in — she has not been slowed by the time she is level with it, whatever happens ` +
-          `to her afterwards`,
+        `just past the duck bar at ${bar.builtAt.toFixed(2)} m from the arch, a rider who never ` +
+          `ducks is still doing ${bar.speedAfter.toFixed(2)} m/s against ` +
+          `${bar.speedBefore.toFixed(2)} going in — she has not been slowed by the time she is ` +
+          `level with it, whatever happens to her afterwards`,
       );
     }
   }
@@ -1871,7 +1959,7 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
  *
  * Measured, as this file's first commandment requires, off the built scene on
  * both sides: the droppers from their own instance matrices, and the rails from
- * their own swept vertices ({@link railRadii}) rather than from `route.pointAt`
+ * their own swept vertices ({@link railCentreLines}) rather than from `route.pointAt`
  * and a gauge constant, which is the rule the geometry was built from and would
  * only prove the placer agrees with itself.
  *
@@ -1885,13 +1973,13 @@ const droppersHangUnderRealRails: Invariant = (facts) => {
   const at = new Vector3();
 
   for (const ring of builtRings(facts)) {
-    const radii = railRadii(ring);
+    const rails = railCentreLines(ring);
     const droppers = ring.group.getObjectByName('railRace:trestle-droppers');
     if (!(droppers instanceof InstancedMesh)) {
       complaints.push(`the ${ring.label} ring has no trestle droppers in the built scene to measure`);
       continue;
     }
-    if (radii.length === 0) {
+    if (rails.size === 0) {
       complaints.push(`the ${ring.label} ring has no rails in the built scene to measure droppers against`);
       continue;
     }
@@ -1901,12 +1989,7 @@ const droppersHangUnderRealRails: Invariant = (facts) => {
     for (let i = 0; i < droppers.count; i += 1) {
       droppers.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
-      const radius = Math.hypot(at.x, at.z);
-      let nearest = Infinity;
-      for (const railRadius of radii) {
-        const gap = Math.abs(radius - railRadius);
-        if (gap < nearest) nearest = gap;
-      }
+      const nearest = nearestRail(rails, at.x, at.z);
       if (nearest > worst) {
         worst = nearest;
         worstAt = [at.x, at.z];
