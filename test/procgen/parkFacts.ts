@@ -43,6 +43,23 @@ export interface TreeFact {
   readonly footprint: number;
 }
 
+/**
+ * One bush clump, as planted.
+ *
+ * New in the RNG-decoupling work, and the reason it is new is worth keeping:
+ * the bush scatter had **no observable output at all**. `Scenery` published
+ * trees and walls but nothing for bushes, so no check in this suite could see a
+ * bush anywhere — which is how 108 clumps re-rolling on every tree gained or
+ * lost went unnoticed for as long as it did. A subsystem nothing can measure is
+ * a subsystem nothing can hold to a standard.
+ */
+export interface BushFact {
+  readonly x: number;
+  readonly z: number;
+  /** Radius of the collider the clump puts in the walker's way. */
+  readonly radius: number;
+}
+
 export interface PlotFact {
   readonly id: string;
   readonly x: number;
@@ -144,6 +161,8 @@ export interface ParkFacts {
   readonly cruiserStrikes: readonly string[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
+  /** Every bush clump standing in the park. See {@link BushFact}. */
+  readonly bushes: readonly BushFact[];
   readonly lamps: readonly (readonly [number, number])[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
@@ -240,6 +259,12 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
     return { x: tree.x, z: tree.z, footprint };
   });
+
+  const bushes: BushFact[] = world.scenery.bushes.map((bush) => ({
+    x: bush.x,
+    z: bush.z,
+    radius: bush.radius,
+  }));
 
   const plots: PlotFact[] = [...PARK_LAYOUT.entries.values()].map((entry) => ({
     id: entry.id,
@@ -393,6 +418,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     world,
     walls,
     trees,
+    bushes,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
