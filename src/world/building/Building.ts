@@ -75,6 +75,18 @@ import {
 const RIDER_LIFT = 0.06;
 
 /**
+ * Extra height for a rider lying on her back, in metres.
+ *
+ * `RIDER_LIFT` was set for a child *sitting* on the chute, whose contact with
+ * it is the soles of her shoes. Lying down she meets the trough along her whole
+ * back, and the model's origin is at her feet — so at the seated lift her back,
+ * and more to the point her **backpack**, sit inside the floor rather than on
+ * it. Worn things are where a reclining pose shows first, and a rucksack half
+ * through the slide is the obvious one.
+ */
+const RECLINED_LIFT = 0.18;
+
+/**
  * How far **ahead** of you the grown-up rides, in metres of slide.
  *
  * In front, not behind, and lying down — the family asked for it that way
@@ -106,13 +118,23 @@ const GROWN_UP_RECLINE = -Math.PI / 2;
  * round (`rotation.y = Math.PI`), exactly as the coaster's chase view does — so
  * **+Z here is behind the rider**, not in front.
  *
- * Higher and further back than the coaster's `{ y: 2.1, z: 3.4 }` because a
- * slide is a *trough*: the camera has to clear the chute's own side walls
+ * Further back than the coaster's `{ y: 2.1, z: 3.4 }` because a slide is a
+ * *trough*: the camera has to clear the chute's own side walls
  * (`CHUTE_ENVELOPE.above` is 0.86 m) and the hand-rails on top of them, or the
- * near wall swings through the lens on every bend. Tuned live down the whole
- * ride rather than picked on paper.
+ * near wall swings through the lens on every bend.
+ *
+ * **Lowered when she lay down** (6 August 2026). At 2.35 m this was framed for
+ * a rider sitting bolt upright, whose head was 1.36 m above the chute; lying on
+ * her back her head is about 0.5 m above it, so the old height looked down on a
+ * small figure at the bottom of the shot. Dropped by roughly the same amount
+ * her eye-line dropped, which keeps the framing she had. Pushed back a little
+ * too, because a reclining child is 1.33 m *longer* along the chute than a
+ * sitting one — at 4.1 m the camera sat only 2.77 m behind her head.
+ *
+ * **Reasoned, not seen** — there was no browser in either session that touched
+ * it. This is the first number to move if the shot is wrong.
  */
-const CHASE_EYE = { x: 0, y: 2.35, z: 4.1 } as const;
+const CHASE_EYE = { x: 0, y: 1.62, z: 4.35 } as const;
 
 /**
  * How steeply the chute is falling here, as a rotation about the rider's own
@@ -850,6 +872,17 @@ export class Building implements GameSystem {
       // signed off, in a PR that is not about the Rail Race.
       player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
+      // **On her back, feet first** (Jim, 6 August 2026) — the way a child
+      // actually goes down a slide, and the way the grown-up in front of her
+      // has ridden all along. The ride chooses the posture; `Player` owns what
+      // it looks like, because it rewrites the pose every frame.
+      //
+      // **After `startRide`, not before.** `startRide` calls `beginRide`, which
+      // resets the posture to `'seated'` so one ride cannot inherit another's —
+      // so setting it first is silently undone. Caught by `check:slide-rider`,
+      // which is the whole reason that check asserts her *body* rather than
+      // that a ride is running.
+      player.ridePosture = 'reclined';
       this.rideView?.board();
       this.onRideChange?.(true);
     });
@@ -897,7 +930,7 @@ export class Building implements GameSystem {
     const pitch = ride.giant ? slopeOf(this.tangent) : 0;
     player.setRidePose(
       this.riderPoint.x,
-      this.riderPoint.y + RIDER_LIFT,
+      this.riderPoint.y + (ride.giant ? RIDER_LIFT + RECLINED_LIFT : RIDER_LIFT),
       this.riderPoint.z,
       Math.atan2(this.tangent.x, this.tangent.z),
       pitch,

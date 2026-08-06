@@ -145,6 +145,11 @@ let worstOffChute = 0;
 let worstOffChuteAt = -1;
 let hiddenFrames = 0;
 let worstSeatGap = 0;
+let uprightFrames = 0;
+let headForwardFrames = 0;
+let worstHeadRise = 0;
+let worstAlong = -1;
+let worstHeadOffChute = 0;
 
 // The slide is ~65-75 m at 6.5 m/s, so 20 s is generous headroom for it to end.
 const MAX_FRAMES = 20 * 60;
@@ -152,16 +157,38 @@ const MAX_FRAMES = 20 * 60;
 // out of it sideways. Taken from the game, never from the generator's
 // `CORRIDOR_RADIUS`, which is the wider margin the search steers by.
 const ON_CHUTE = Math.hypot(CHUTE_ENVELOPE.halfWidth, CHUTE_ENVELOPE.above) + PLAYER_RADIUS;
+/**
+ * How far along the chute a reclining rider must point, as a dot product.
+ *
+ * Her body axis (feet to head) against the direction she is travelling. **−1**
+ * is flat on her back with her head straight back down the slide; **0** is
+ * sitting bolt upright out of it; positive would be head-first or face-down.
+ *
+ * Measured on the built rig rather than chosen: at `RIDE_RECLINE` this sits at
+ * about −0.97, and upright is around −0.2. −0.6 is far from both, so it tells
+ * lying down from sitting up without pinning the exact angle — which is Jim's
+ * to tune, and he will.
+ */
+const RECLINED_ALONG_CHUTE = -0.6;
 
 while (frames < MAX_FRAMES) {
-  building.update({
+  const context = {
     dt,
     elapsed,
     input: { justPressed: () => false, isDown: () => false } as never,
     playerPosition: player.position,
     cameraForward: new Vector3(0, 0, 1),
     frame: frames,
-  } as never);
+  } as never;
+  building.update(context);
+  // **The player is updated too, and that is not incidental.** Her riding pose
+  // is applied in `Player.update`, so a loop that only drove the building would
+  // leave her in her default standing pose and the recline clauses below would
+  // be measuring nothing. Caught by this check failing on its own first run
+  // with "sitting up for 686 of 686 frames" while the pose code was correct —
+  // the harness was the thing that was wrong, which is the same class of bug as
+  // the one it exists to catch.
+  player.update(context);
   elapsed += dt;
   frames += 1;
 
@@ -183,6 +210,48 @@ while (frames < MAX_FRAMES) {
   const seat = building.rideSeatWorldPosition(new Vector3());
   const seatGap = seat.distanceTo(player.position);
   if (seatGap > worstSeatGap) worstSeatGap = seatGap;
+
+  // **Is she actually lying down?** A check that only asked "is a ride running"
+  // would have been true for every frame of the months she rode this slide bolt
+  // upright, which is the bug Jim found by eye. So the question asked is about
+  // her body: which way does she point, from her feet to her head.
+  //
+  // Measured **against the chute, not against world vertical.** The first
+  // version of this compared her head's height to her feet's and went red on
+  // frames 406-409 — the steepest part of the ride — while the pose was
+  // perfectly correct. She lies along a slide that is itself tilted, so on a
+  // steep pitch her up-slope body axis genuinely rises in world Y. The
+  // threshold was not too tight; it was the wrong quantity. Raising it would
+  // have buried a real measurement under a fudge factor.
+  const head = player.model.head.getWorldPosition(new Vector3());
+
+  // The way she is travelling, reconstructed from the rotation the ride itself
+  // set (`YXZ`: yaw then slope), so this asks about the pose actually applied
+  // rather than re-sampling the curve and hoping the two agree.
+  const yaw = player.group.rotation.y;
+  const pitch = player.group.rotation.x;
+  const travel = new Vector3(
+    Math.sin(yaw) * Math.cos(pitch),
+    -Math.sin(pitch),
+    Math.cos(yaw) * Math.cos(pitch),
+  );
+  const bodyAxis = head.clone().sub(player.position);
+  const rise = bodyAxis.y;
+  if (rise > worstHeadRise) worstHeadRise = rise;
+  if (bodyAxis.lengthSq() < 1e-6) {
+    headForwardFrames += 1;
+  } else {
+    // -1 is lying flat with her head straight back down the slide; 0 is sitting
+    // bolt upright out of it. Reclined feet-first sits near -0.97.
+    const along = bodyAxis.normalize().dot(travel);
+    if (along > worstAlong) worstAlong = along;
+    if (along > RECLINED_ALONG_CHUTE) uprightFrames += 1;
+  }
+
+  // Her head is the far end of her, so it is the part that leaves the trough
+  // first if she is lying across the chute rather than along it.
+  const headOff = distanceToChute(head);
+  if (headOff > worstHeadOffChute) worstHeadOffChute = headOff;
 }
 
 const complaints: string[] = [];
@@ -206,6 +275,26 @@ if (worstOffChute > ON_CHUTE) {
       'slide, not on it',
   );
 }
+if (uprightFrames > 0) {
+  complaints.push(
+    `the child rode sitting up for ${uprightFrames} of ${ridingFrames} frames — her body ` +
+      `pointed ${worstAlong.toFixed(2)} along the chute at worst, against ` +
+      `${RECLINED_ALONG_CHUTE} required (-1 is flat on her back, 0 is bolt upright); ` +
+      'she is meant to be lying on her back, feet first',
+  );
+}
+if (headForwardFrames > 0) {
+  complaints.push(
+    `the child had no measurable body axis for ${headForwardFrames} of ${ridingFrames} ` +
+      'frames — her head and her feet were in the same place, so nothing was proved',
+  );
+}
+if (worstHeadOffChute > ON_CHUTE) {
+  complaints.push(
+    `the child's head reached ${worstHeadOffChute.toFixed(2)} m from the chute against ` +
+      `${ON_CHUTE.toFixed(2)} m of trough — she is lying across the slide, not along it`,
+  );
+}
 if (worstSeatGap > ON_CHUTE) {
   complaints.push(
     `the camera's seat and the child are ${worstSeatGap.toFixed(2)} m apart at worst — ` +
@@ -223,5 +312,8 @@ if (complaints.length > 0) {
 console.log(
   `check:slide-rider ok — ${ridingFrames} frames ridden, drawn throughout, ` +
     `worst ${worstOffChute.toFixed(2)} m off the chute (trough allows ${ON_CHUTE.toFixed(2)} m), ` +
-    `seat within ${worstSeatGap.toFixed(2)} m`,
+    `seat within ${worstSeatGap.toFixed(2)} m, ` +
+    `reclined throughout (body at most ${worstAlong.toFixed(2)} along the chute, ` +
+    `head at most ${worstHeadRise.toFixed(2)} m over her feet and ` +
+    `${worstHeadOffChute.toFixed(2)} m from the chute)`,
 );
