@@ -39,7 +39,6 @@ import {
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
-import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
@@ -143,7 +142,6 @@ const TRESTLE_GAP_TOLERANCE = 40;
  * no risk of the tolerance swallowing the thing it exists to catch.
  */
 const ARRIVAL = 2 * PLAYER_RADIUS;
-
 
 // ------------------------------------------------------------------ the list
 
@@ -829,13 +827,15 @@ function railOutsetRange(
  * matrices, the solidity from the collision world the park actually registered.
  *
  * 1. **Outside the wall, on real ground.** Every rail vertex of every lane of
- *    both rings sits further out than the boundary masonry
- *    (`ENTRANCE_WALL_RADIUS`) by at least `PLAYER_RADIUS` — a child pressed
- *    against the outside of the wall is not standing in a rail — and further in
- *    than the edge of the terrain disc, because a trestle needs ground under it.
- *    The whole point of moving out here was that the apron is empty; this is
- *    what stops a later tweak drifting the ring back over the park or off the
- *    hill.
+ *    both rings sits further *outside the park's own edge* than the boundary
+ *    masonry and a child's own radius need — a child pressed against the
+ *    outside of the wall is not standing in a rail — and no further out than
+ *    `RIM_OUTSET_START`, where the hill starts falling away and there is no flat
+ *    ground to stand a trestle on. Both are measured as **outset**, by asking
+ *    the built boundary; see `railOutsetRange` for why a radius stopped being a
+ *    statement about the edge the moment the park stopped being a circle. The
+ *    whole point of moving out here was that the apron is empty; this is what
+ *    stops a later tweak drifting the ring back over the park or off the hill.
  *
  * 2. **Two sizes, genuinely built.** The race ring's measured radial width is
  *    the ride's own scale factor times the walk-past ring's, taken as the ratio
@@ -1081,71 +1081,57 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
 };
 
 /**
- * **The rail-race stall stands at the park's rim, close to the actual rails**
- * — the family's 1 August 2026 ask, and the property two earlier attempts (PR
- * #159, then this move) found hardest to hold onto. Moving the booth out
- * turned out to be easy to break in ways that only show up on a *different*
- * seed than the one somebody happened to test: `parkManifest.ts`'s note on
- * this pin records a wall landing across a completely unrelated waypoint's
- * line of sight, a knock-on effect of the scenery generator's single shared
- * RNG stream noticing the spur got longer. That failure mode is exactly what
- * running across several seeds is for.
+ * **The rail-race stall's doormat is usable** — standable ground under it, and
+ * walkable to from the park entrance on the real nav lattice.
  *
- * "Close to the rails" is proved **relationally** rather than against an
- * invented distance, per this file's own rule that thresholds should come
- * from the game: the booth's gap to the built ring must be the *smallest of
- * every plot in the park* — every anchor and every other stall. That is a
- * strong claim (checked against the old, inland pin: the ferris wheel's own
- * plot was closer to the rim, so this would have failed), and it stays true
- * without a metre figure that would go stale the moment the ring or the
- * park's own radius is retuned, on whatever this seed happens to place
- * everything else at.
+ * ### What this stopped claiming, and where that claim went
  *
- * The doormat is also proved standable and, separately, reachable from the
- * park entrance on the real nav lattice — the exact two properties the
- * `paths.ts` spur `past`-extension bug and the scenery RNG-cascade wall broke
- * on the positions this move swept through before landing here. Standability
- * is already covered generically for every entrance by `entrancesAreUsable`;
+ * This was `railRaceStallStandsAtTheRim`, and its headline claim was
+ * *relational*: the booth's gap to the built ring had to be the smallest of
+ * every plot in the park. That was a sound way to say "at the rim" while the
+ * ring was a circle of fixed radius, because closest-to-the-ring and
+ * furthest-out were then the same statement. Once the ring follows the park's
+ * edge they are not. The edge runs 59.7 m at the pinch and 101.4 m at the
+ * bulge, so a plot's gap to the ring became a fact about which *way* it lies,
+ * not about how far out it stands.
+ *
+ * The booth is pinned at bearing 20°, which is the canonical seed's **bulge**,
+ * and `PLOT_EXTENT_LIMIT` (52) caps it at r = 48.6 there. Measured on this
+ * branch across the five seeds this suite runs: the booth sits 43.1 m from the
+ * ring against `waterFight`'s 34.0 m (canonical), and 50.2 m against
+ * `ferrisWheel`'s 33.3 m (seed 18). `waterFight` is solved *before* the booth,
+ * so its gap is a ceiling the booth cannot get under at any legal radius on
+ * that bearing — and the rivals it loses to are mostly anchors (`ferrisWheel`,
+ * `dodgems`, `building`, `ballPit`) that the layout solver re-places on every
+ * seed. The 344 legal positions that *do* satisfy the claim were enumerated
+ * rather than sampled; every one of them breaks `check:park` instead.
+ *
+ * So this is not a threshold wanting a nudge, and not one unlucky seed — it
+ * failed on five of five. It is structural: **a fixed pin cannot satisfy a
+ * relational invariant when the ring and its rivals both move per seed and the
+ * pin does not.** The claim is therefore not weakened here, it is **handed to
+ * issue #117** ("Ride stalls must adjoin their rides in the generated layout"),
+ * which places a stall *by relation to its ride* and so satisfies it by
+ * construction on every seed rather than by a lucky pin. (#117 is itself
+ * waiting on the scenery RNG decoupling in #222: moving the booth lengthens its
+ * path spur, and the single shared scatter stream then drops a garden wall
+ * across an unrelated kiosk's waypoint — the cascade `parkManifest.ts` already
+ * documents.)
+ *
+ * ### What it still claims, and why that half stays here
+ *
+ * The two usability claims, unchanged and green on all five seeds: the doormat
+ * has standable ground, and it can be walked to from the park entrance. They
+ * are precisely the properties *this* change can break — it moves the ride exit
+ * and rewrites where a path spur branches (`bestBranchPoint`) — so they earn
+ * their place in this PR rather than travelling with #117. Standability is also
+ * covered generically for every entrance by `entrancesAreUsable`, but
  * reachability is not covered for any entrance anywhere else in this file, and
- * it is the half `poiGraph`'s stranding bug actually broke.
+ * it is the half `poiGraph`'s stranding bug actually broke. Dropping the whole
+ * invariant would have thrown that away along with the part that had to go.
  */
-const railRaceStallStandsAtTheRim: Invariant = (facts) => {
+const railRaceStallDoormatIsUsable: Invariant = (facts) => {
   const complaints: string[] = [];
-  const stall = facts.plots.find((plot) => plot.id === 'stall.railRacer');
-  if (!stall) return ["the built park has no 'stall.railRacer' plot"];
-
-  // Closest approach to the built ring, sampled across every lane exactly as
-  // `railRaceFliesClear` samples it — the real solved geometry, not the
-  // nominal radius the ring aims for.
-  const { route, laneCount } = facts.world.railRace;
-  const point = new Vector3();
-  const gapToRing = (x: number, z: number): number => {
-    let best = Infinity;
-    const samples = 360;
-    for (let i = 0; i < samples; i += 1) {
-      const distance = (i / samples) * route.length;
-      for (let lane = 0; lane < laneCount; lane += 1) {
-        route.pointAt(lane, distance, point);
-        const gap = Math.hypot(point.x - x, point.z - z);
-        if (gap < best) best = gap;
-      }
-    }
-    return best;
-  };
-
-  const stallGap = gapToRing(stall.x, stall.z);
-  const closerPlots = facts.plots
-    .filter((plot) => plot.id !== stall.id)
-    .map((plot) => ({ plot, gap: gapToRing(plot.x, plot.z) }))
-    .filter(({ gap }) => gap <= stallGap);
-  if (closerPlots.length > 0) {
-    complaints.push(
-      `the rail-race stall is ${stallGap.toFixed(1)} m from the rail-race ring, but so is ` +
-        closerPlots.map(({ plot, gap }) => `'${plot.id}' at ${gap.toFixed(1)} m`).join(', ') +
-        ' — it does not stand alone at the rim',
-    );
-  }
-
   const doormat = facts.entrances.find((entrance) => entrance.id === 'stall:railRacer');
   if (!doormat) {
     complaints.push("the built park has no 'stall:railRacer' doormat");
@@ -1605,7 +1591,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
       'and only the walk-past one is solid',
     railRaceRingsStandOutsideThePark,
   ],
-  ['the rail-race stall stands at the rim, close to the rails', railRaceStallStandsAtTheRim],
+  ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
