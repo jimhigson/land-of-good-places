@@ -2,6 +2,7 @@ import type { Object3D } from 'three';
 import { CAMERA_YAW_DEGREES } from '../core/constants';
 import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
+import { KID_HEIGHT } from '../art/models/kid';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import type { NpcCharacter } from '../entities/npc/NpcCharacter';
@@ -544,24 +545,67 @@ const INTERACT_MARGIN = 2.4;
 export const CLIMB_EDGE_GAP = 0.35;
 
 /**
+ * How much of a child's height the seat came down once she had a body.
+ *
+ * **Jim, 6 August: "make them lower by about 30% of their height."** Said
+ * immediately after the whole body started being drawn, which is what makes
+ * "their height" a *child's* height rather than a tree's: with her body clear
+ * of the canopy she read as floating above the tree instead of sitting in it,
+ * and a third of a child is the amount of her he wanted back in the leaves.
+ *
+ * Taken from {@link KID_HEIGHT} rather than written as the 0.636 m it currently
+ * comes to, so resizing the character carries the seat with it.
+ *
+ * The alternative reading — 30% of the *tree* — was ruled out by measuring
+ * rather than by taste. The 43 climbable trees stand 4.69–6.79 m above their
+ * own ground, mean 5.79, so it would have meant dropping her **1.74 m**: a lift
+ * of −0.54 m, putting her head half a metre *under* the canopy top and burying
+ * the child, the wave and the face he had just asked to see. The two readings
+ * differ by 1.1 m and only one of them leaves anything on screen.
+ *
+ * The effect of the chosen one, against `canopyTopY`: her head goes +1.20 →
+ * **+0.56 m** and her feet −0.16 → **−0.80 m**, so where she used to sit with
+ * her whole body clear of the leaves she now has about 0.8 m of herself down
+ * in them. That is the "sitting in it rather than floating above it" he wanted.
+ */
+const CLIMB_SEAT_DROP = 0.3 * KID_HEIGHT;
+
+/**
  * How much higher she sits than the canopy top, in metres.
  *
  * **Jim's number, 5 August: "about 1 m higher and ship it."** Raised to 1.2 m
- * on 6 August after he tried it: *"another 20cm higher."*
+ * on 6 August after he tried it (*"another 20cm higher"*), then brought back
+ * down by {@link CLIMB_SEAT_DROP} the same day once she had a body to see.
  *
- * It is the fix for a specific, measured failure. Her waving hand tops out
- * 0.303 m below her head, which put it essentially level with `canopyTopY`, so
- * from the far bearings the bulk of the canopy sat in front of it: QA found the
- * arm contributed **zero pixels to the whole screen** at 225°, 270° and 315°,
- * on every tree — 15 of 32 tree×bearing combinations with no arm visible at
- * all. Lifting her clears the forearm outright instead of marginally.
+ * The 1.2 is kept as the term it was rather than folded into a single literal,
+ * because the drop is a correction *to* it and the history is the reason both
+ * numbers exist: the lift is the fix for a specific measured failure. Her
+ * waving hand tops out 0.303 m below her head, which put it essentially level
+ * with `canopyTopY`, so from the far bearings the bulk of the canopy sat in
+ * front of it — QA found the arm contributed **zero pixels to the whole
+ * screen** at 225°, 270° and 315°, on every tree.
+ *
+ * **So this constant is the one place the PR's two asks pull against each
+ * other**, and lowering her was a real risk to the wave that opened it.
+ *
+ * Measured after the drop rather than assumed. `check:climb-wave` reports the
+ * hand **100% un-occluded on all 43 climbable trees**, and 18 px at play scale
+ * — unchanged from the 1.2 m seat. The wave survives because it never needed
+ * the whole lift: her hand tops out 0.303 m below her head, so anything above
+ * about **0.31 m** keeps the hand clear of `canopyTopY`, and 0.564 still has
+ * 0.25 m of room. Below that the geometry puts the hand back among the leaves,
+ * and `check:climb-wave` is the arbiter — the 0.31 is where it *starts* being
+ * at risk, not a number that check reads.
+ *
+ * What the drop did cost is how much of her body you can see, which is the
+ * point of it: 60 px → 20 px at the worst approach. See `REQUIRED_BODY_PIXELS`.
  *
  * **This is the player's lift and nobody else's.** It reaches `climbPose` as an
  * argument from her three call sites; see that function's `lift` parameter for
  * why putting it back inside would be a regression, and `check:crowd`'s
  * NPC-perch assertion (issue #224) for what now catches it if anyone does.
  */
-export const CLIMB_PEEK_LIFT = 1.2;
+export const CLIMB_PEEK_LIFT = 1.2 - CLIMB_SEAT_DROP;
 
 // ------------------------------------------------------------------- waving
 //

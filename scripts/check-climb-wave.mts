@@ -1025,18 +1025,33 @@ if (worstAim > ALLOWED_ROCK_SWING_DEGREES) {
  * How much of her below the neck must reach the screen, in pixels at play scale.
  *
  * Not a fraction and not a ratio: the honest question is whether a child is
- * *there*, and one pixel of shoulder is not a child. Measured across every tree
- * and approach on the shipped pose, the worst is far above this; the pose that
- * shipped before 6 August measures **exactly 0**, on every tree, because
- * nothing below the neck was drawn at all.
+ * *there*, and one pixel of shoulder is not a child. The pose that shipped
+ * before 6 August measures **exactly 0**, on every tree and every approach,
+ * because nothing below the neck was drawn at all — `--hide-body` reproduces it.
  *
- * 40 is set well clear of zero and well below the worst real reading, so it
- * cannot be reached by a body that is merely partly behind leaves — legs
- * dangling out past the canopy is the look Jim asked for (*"legs poking out is
- * fine when climbing a tree, that's natural"*), and a canopy eating some of her
- * must not trip this.
+ * **This was 40, and it came down to 12 when Jim lowered the seat**, which is a
+ * loosening and so needs its reasoning in the open rather than a quiet edit.
+ * 40 was set below a worst reading of 60 px taken when she sat 1.2 m above the
+ * canopy with her whole body clear of it. He then asked her to sit *into* the
+ * tree (`CLIMB_SEAT_DROP`), and burying more of her is the entire point of that
+ * change, so the number this guards had to move with it.
+ *
+ * What it must not stop catching is a **floating head**, and the measured gap
+ * is still wide. Per approach, at the new seat:
+ *
+ * ```
+ *     0° / 90°    51-57 px      she is side-on, most of her clears the leaves
+ *   180° / 270°   20-23 px      canopy between her body and the camera
+ *   any, hidden    0 px         --hide-body
+ * ```
+ *
+ * The split is by **approach, not by tree** — every tree reads within 3 px of
+ * every other at the same bearing — so this is a property of the pose and the
+ * camera, not of which tree she picked. 12 sits below the worst real reading
+ * with 40% to spare and far above the zero it exists to catch; it would also
+ * still fail a regression that drew only her legs, or only her shoulders.
  */
-const REQUIRED_BODY_PIXELS = 40;
+const REQUIRED_BODY_PIXELS = 12;
 
 /**
  * How many trees the body check rasterises.
@@ -1068,6 +1083,16 @@ if (bodyByTree.length === 0) {
   process.exit(1);
 }
 const worstBody = bodyByTree.reduce((a, b) => (b.pixels < a.pixels ? b : a));
+
+if (verbose) {
+  console.log('\n  body pixels by tree x approach:');
+  for (const row of bodyByTree) {
+    console.log(
+      `    tree ${String(row.index).padStart(3)}  ` +
+        `${((row.bearing * 180) / Math.PI).toFixed(0).padStart(4)}°  ${String(row.pixels).padStart(4)} px`,
+    );
+  }
+}
 
 console.log(
   `  body: ${worstBody.pixels} px of her below the neck at the WORST of ` +
