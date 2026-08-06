@@ -89,8 +89,14 @@ import { RIDE_SCALE } from './route';
  * does not leave the bars floating above their supports — see `postStretch`.
  */
 /**
- * **How tall a rider on this ride is: the top of a standing head above the rail
+ * **How tall a rider on this ride is: the top of a SEATED head above the rail
  * head, at park scale.** Multiply by a ring's own `scale` for that ring.
+ *
+ * *Seated*, since 6 August 2026, because Jim asked the question nobody had:
+ * *"why does the character stand up in the cart anyway? can't they sit down?"*
+ * She stood in a race cart for months for no better reason than that
+ * `setRidePose` only ever owned the root and no seated pose had ever been
+ * written. Sitting her down took 0.71 m off this number at ride scale.
  *
  * The single owner of "how much room does a rider need", and the reason this
  * exists as a named constant at all: on 5 August 2026 the duck bars were found
@@ -102,6 +108,12 @@ import { RIDE_SCALE } from './route';
  * and the top of her head, hair and all, **7.67 m** — which at `RIDE_SCALE` is
  * the 3.068 below. Hair, not crown, because hair is what a family watches pass
  * through things.
+ *
+ * **This is the third time this number has moved in a day** — it was found
+ * 1.40 m wrong, re-derived for the crouch, and re-derived again for the seat —
+ * and each time everything downstream moved with it without being touched.
+ * That is the whole value of the chain: the duck bars and the finish rainbow
+ * are *consequences* of a rider's height, not opinions about it.
  *
  * Everything that has to clear a rider derives from this and nothing invents a
  * height of its own:
@@ -117,7 +129,7 @@ import { RIDE_SCALE } from './route';
  * `scripts/check-rail-race.mts` measures the real model against this rather
  * than trusting it, which is what stops it going 1.40 m stale a second time.
  */
-export const RIDER_HEAD_TOP_AT_PARK_SCALE = 3.068;
+export const RIDER_HEAD_TOP_AT_PARK_SCALE = 2.843;
 
 /**
  * ...and the top of the same head once she has **folded** — see
@@ -132,7 +144,7 @@ export const RIDER_HEAD_TOP_AT_PARK_SCALE = 3.068;
  * *from* moved, and a constant that survives by luck is exactly what this file
  * has already been burned by once.
  */
-export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.472;
+export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.263;
 
 /**
  * Half the duck-bar asset's own depth, at park scale — `duckbar.blend` measures

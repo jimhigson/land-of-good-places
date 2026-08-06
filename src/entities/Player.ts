@@ -20,7 +20,7 @@ import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
-import { poseDuck } from '../world/railRace/duckPose';
+import { poseRailRaceRider } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
@@ -614,15 +614,24 @@ export class Player implements GameSystem {
   railRaceFrown = false;
 
   /**
-   * How far the Rail Race is folding her, 0..1 — see `railRace/duckPose.ts`.
+   * `null` when she is not on the Rail Race; otherwise how far it is folding
+   * her, 0..1 — see `railRace/duckPose.ts`.
    *
    * A field rather than the ride posing her directly, for the same reason
    * {@link railRaceFrown} is one: `animate()` below rewrites `body.rotation.x`,
-   * `body.scale` and `head.rotation.x` every single frame, so anything the ride
-   * set from outside would be stamped over before it was ever drawn. Cleared in
-   * `RailRace.arrive()` along with the frown and the head turn.
+   * `body.position.y`, `body.scale`, `head.rotation.x` and both legs every
+   * single frame, so anything the ride set from outside would be stamped over
+   * before it was ever drawn.
+   *
+   * **`null` rather than 0** because being *aboard* is the state that matters:
+   * a rider is sat down for the whole ride, not only while ducking. Setting it
+   * back to `null` in `RailRace.arrive()` is all the restoring that is needed —
+   * `animate()`'s own walk pose owns every one of those transforms again from
+   * the very next frame, so there is no list of what-was-changed to lose track
+   * of. (`TreeClimbing.hidePlayerBody` kept such a list, got it wrong, and left
+   * her a floating head on every ride in the park until it was deleted today.)
    */
-  railRaceDuck = 0;
+  railRaceRide: number | null = null;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -1483,7 +1492,7 @@ export class Player implements GameSystem {
     // above has just finished writing `body.rotation.x`, `body.scale` and
     // `head.rotation.x`, which are the three things it needs to own outright
     // while she is ducking. See `railRace/duckPose.ts` and `railRaceDuck`.
-    if (this.railRaceDuck > 0) poseDuck(model, this.railRaceDuck);
+    if (this.railRaceRide !== null) poseRailRaceRider(model, this.railRaceRide);
 
     // Secondary motion the model owns: the swishy ponytail, if that is what
     // the child chose. Last, and deliberately so — it is pinned to the world

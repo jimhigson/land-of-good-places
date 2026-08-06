@@ -14,7 +14,7 @@ import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
-import { poseDuck } from './duckPose';
+import { poseRailRaceRider, setRiderLegsVisible } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
@@ -864,6 +864,19 @@ export class RailRace implements GameSystem {
    * turning them towards a race camera nobody is looking through would leave
    * three children riding round the park permanently facing sideways.
    */
+  /**
+   * **Whether riders' legs are drawn right now**, derived — never remembered.
+   *
+   * Off while the race is actually on, because a seated rider's legs sink below
+   * the cart's tub floor as she ducks and clip through it, which is what Jim
+   * reported. On for everything else, which includes the win celebration
+   * (`'finishing'`) where she bounces with her legs out, and the whole time she
+   * is idling on the walk-past ring in view of a child on foot.
+   */
+  private get legsShow(): boolean {
+    return this.phase !== 'countdown' && this.phase !== 'racing';
+  }
+
   private faceTurn(cartYaw: number, at: Vector3, sadness: number): FaceTurn {
     const view = this.rideView;
     if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;
@@ -949,7 +962,14 @@ export class RailRace implements GameSystem {
       const turn = this.faceTurn(cart.group.rotation.y, cart.group.position, cart.sad);
       kid.root.rotation.y = turn.body;
       kid.head.rotation.y = turn.head;
-      if (cart.rider.finished) {
+      // Seated, always — she is aboard a cart whether or not she is ducking.
+      // Applied before the arm chain below so that chain can still own the
+      // arms while she is upright; the fold takes them over when it happens.
+      poseRailRaceRider(kid, fold);
+      setRiderLegsVisible(kid, this.legsShow);
+      if (fold > 0) {
+        // Folded: `poseRailRaceRider` owns the whole pose, arms included.
+      } else if (cart.rider.finished) {
         // Arms up, cheering.
         const flap = Math.sin(elapsed * 11) * 0.3;
         limbs.rightArm.rotation.x = -2.5 + flap;
@@ -992,9 +1012,6 @@ export class RailRace implements GameSystem {
       // rider is in a black zone *and* still mashing (`sparkGuard > 0`), so
       // easing off clears the frown by itself, which is the lesson.
       kid.setExpression(riderIsSad(cart.rider) ? 'frown' : 'happy');
-      // Last, so it owns the body, head and arms outright for as long as it is
-      // holding a fold — the pose chain above is what she does when she is not.
-      if (fold > 0) poseDuck(kid, fold);
     }
   }
 
@@ -1024,7 +1041,8 @@ export class RailRace implements GameSystem {
     // her. Handed to `Player` as a number rather than posed here, because her
     // own animation rewrites the very transforms the fold needs — see
     // `Player.railRaceDuck` and `duckPose.ts`.
-    this.player.railRaceDuck = Math.max(
+    setRiderLegsVisible(this.player.model, this.legsShow);
+    this.player.railRaceRide = Math.max(
       this.ducking && this.phase === 'racing' ? 1 : 0,
       knockdown(rider.wobble),
     );
@@ -1065,8 +1083,13 @@ export class RailRace implements GameSystem {
       // the frown's own bug, one field along.
       this.player.model.head.rotation.y = 0;
       // ...and unfold her, or she walks the park permanently doubled over.
-      this.player.railRaceDuck = 0;
-      poseDuck(this.player.model, 0);
+      // Back on her feet: `Player.animate` owns every transform the ride was
+      // holding, from the very next frame, so this one line is the whole of
+      // the restore. Nothing is stashed, so nothing can be stranded.
+      this.player.railRaceRide = null;
+      // Unconditional, whatever happened during the race — see
+      // `setRiderLegsVisible` for the bug this shape exists to avoid.
+      setRiderLegsVisible(this.player.model, true);
       // The planned exit (`railRace/plan.ts`) — a clear patch beside the booth
       // — with the runtime safety net on top (see `world/dismount.ts`).
       const { x, z } = resolveDismount(

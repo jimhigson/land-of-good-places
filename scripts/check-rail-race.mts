@@ -101,14 +101,37 @@ import {
   RIDER_RIDE_HEIGHT,
   faceTurnTowardsCamera,
 } from '../src/world/railRace/camera.ts';
-import { SEAT_HEIGHT } from '../src/world/railRace/cart.ts';
+import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
-import { poseDuck } from '../src/world/railRace/duckPose.ts';
+import { poseRailRaceRider, setRiderLegsVisible } from '../src/world/railRace/duckPose.ts';
 import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
 import { PALETTE } from '../src/core/palette.ts';
-import { Box3, Group } from 'three';
+import { Box3, Group, Mesh, Object3D } from 'three';
+
+/**
+ * A bounding box over only the parts that are actually **drawn**.
+ *
+ * `Box3.setFromObject` includes hidden children, which is wrong for a ride that
+ * switches its riders' legs off (`RailRace.legsShow`): it would report clipping
+ * nobody can see, and could pass a torso that genuinely went through the floor
+ * because a hidden foot was lower still.
+ */
+function visibleBox(root: Object3D): Box3 {
+  const box = new Box3();
+  root.updateWorldMatrix(true, true);
+  root.traverse((child) => {
+    if (!child.visible) return;
+    let node: Object3D | null = child;
+    while (node && node !== root) {
+      if (!node.visible) return;
+      node = node.parent;
+    }
+    if (child instanceof Mesh) box.expandByObject(child);
+  });
+  return box;
+}
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -756,24 +779,30 @@ say('');
    * in metres over the rail head — **and her whole body's box**, because the
    * complaint that started this was not about her head at all.
    *
-   * `poseDuck` is the ride's own function, not a copy of it: a check that
+   * `poseRailRaceRider` is the ride's own function, not a copy of it: a check that
    * re-created the pose would prove only that two copies of the arithmetic
    * agree with each other while she folded through the floor in the game.
    */
   const pose = (fold: number): { headTop: number; body: Box3 } => {
     // Seat her **first**, then fold — this order is load-bearing. Posing first
-    // and seating afterwards would quietly undo any translation `poseDuck`
+    // and seating afterwards would quietly undo any translation `poseRailRaceRider`
     // performed, so the "root is still on the seat" assertion below would be
     // asserting the line above it rather than the thing it names. That is the
     // hollow-check disease this whole PR keeps running into.
     kid.root.position.y = SEAT_HEIGHT;
-    poseDuck(kid, fold);
+    poseRailRaceRider(kid, fold);
     cartGroup.updateMatrixWorld(true);
     return {
       headTop: new Box3().setFromObject(kid.head).max.y - railPoint.y,
-      body: new Box3().setFromObject(kid.root),
+      body: visibleBox(kid.root),
     };
   };
+
+  // Raced with the legs off, exactly as `RailRace.legsShow` has them — so what
+  // is measured below is what a family can actually see. Measuring hidden legs
+  // would fail the ride for clipping nobody will ever witness, and would miss
+  // a torso that really did go through the floor.
+  setRiderLegsVisible(kid, false);
 
   const uprightPose = pose(0);
   const duckedPose = pose(1);
@@ -815,22 +844,20 @@ say('');
   // did — so the floor is asserted separately from the bar.
   cartGroup.updateMatrixWorld(true);
   const cartBox = new Box3().setFromObject(rideCart.root);
+  // The tub's own floor, which `cart.ts` builds at the wheels' axle height so
+  // the hopper clears them — the real surface she would come through, not the
+  // bounding box's bottom (which is the underside of the wheels and would let a
+  // torso sink through the whole cart before complaining).
+  const tubFloor = cartBox.min.y + WHEEL_RADIUS * route.scale;
   say(
-    `ducked rider   soles at ${duckedPose.body.min.y.toFixed(2)} against a cart floor at ` +
-      `${cartBox.min.y.toFixed(2)} (${(duckedPose.body.min.y - cartBox.min.y).toFixed(2)} m inside it)`,
+    `ducked rider   lowest visible ${duckedPose.body.min.y.toFixed(2)} against a tub floor at ` +
+      `${tubFloor.toFixed(2)} (${(duckedPose.body.min.y - tubFloor).toFixed(2)} m clear)`,
   );
-  // She must stay up in the seating area rather than sinking into the
-  // undercarriage — so the bar is half a seat height above the cart's floor,
-  // not the floor itself. "Technically still inside the bounding box" is not
-  // the claim: the translation this replaced left her 0.60 m above that floor,
-  // sunk through the seat and into the wheels, and passed a bare floor test
-  // comfortably. A fold leaves 1.30 m.
-  const seatedFloor = cartBox.min.y + SEAT_HEIGHT * route.scale * 0.5;
   require(
-    duckedPose.body.min.y > seatedFloor,
+    duckedPose.body.min.y > tubFloor,
     `ducking puts the lowest part of the rider at ${duckedPose.body.min.y.toFixed(2)}, only ` +
-      `${(duckedPose.body.min.y - cartBox.min.y).toFixed(2)} m above the cart's floor — she has ` +
-      `sunk out of the seat and into the undercarriage. That is the whole of what "that's not ` +
+      `${(duckedPose.body.min.y - tubFloor).toFixed(2)} m above the cart's tub floor — she has ` +
+      `sunk out of the seat and through it. That is the whole of what "that's not ` +
       `what ducking means" was about: the fold must move \`body\`, never \`root\` — see ` +
       'railRace/duckPose.ts.',
   );

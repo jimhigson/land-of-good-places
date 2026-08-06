@@ -47,7 +47,7 @@ import type { CreatureLimbs } from '../../art/style/asset';
  */
 
 /** How far she folds at the waist, radians. Positive is forwards — measured. */
-export const DUCK_BEND = 0.78;
+export const DUCK_BEND = 0.70;
 
 /**
  * How much of her height the squash takes, 0..1 (`scale.y = 1 - this`).
@@ -66,7 +66,7 @@ export const DUCK_BEND = 0.78;
  * so the squash could come back down to a supporting effect. It is still twice
  * the walk cycle's, because a held pose can carry more than a passing one.
  */
-export const DUCK_SQUASH = 0.12;
+export const DUCK_SQUASH = 0.14;
 
 /**
  * **How far her hips sink, in her own pre-`RIDE_SCALE` metres — this is the
@@ -84,18 +84,86 @@ export const DUCK_SQUASH = 0.12;
  * so nothing ever leaves the cart. The dodgems settled this precedent already
  * by burying its riders' legs in the tub.
  *
- * **Worth being plain about the limit**, because it decides whether this rig
- * ever needs a modelling pass: this works *here* only because a cart hides the
- * legs. Nothing about it would survive a crouch in the open — a pelvis joint
- * and a knee would be needed for that, and neither exists.
+ * **Zero now that she starts seated.** It was 0.22 when the duck began from
+ * standing and had a long way to come down; from a seat her hips are already
+ * there, and sinking them further pushed her pelvis through the cart's tub
+ * floor. The fold does the work instead. Kept as a named constant rather than
+ * deleted because it is the thing to reach for if the seat is ever raised.
  */
-export const DUCK_HIP_DROP = 0.22;
+export const DUCK_HIP_DROP = 0;
 
 /** Chin tuck, radians, on top of whatever the bend already did to the head. */
 export const DUCK_HEAD_TUCK = 0.5;
 
 /** How far the arms pull in as she folds, radians. */
 const DUCK_ARM_TUCK = 1.15;
+
+/**
+ * **How far her hips drop to sit down**, in her own pre-`RIDE_SCALE` metres.
+ *
+ * Jim, 6 August 2026: *"why does the character stand up in the cart anyway?
+ * can't they sit down?"* Nobody had asked, and the answer was not that the rig
+ * could not: `setRidePose` only ever owned the **root**, so it put her in the
+ * cart and did nothing whatever to her limbs. She stood in a race cart for
+ * months because no seated pose had been written.
+ *
+ * The hip pivot sits 0.36 above `body`'s origin (`kid.ts`), so dropping `body`
+ * by that would put the joint exactly *on* the seat. This is a little less,
+ * because a bottom has volume: she sits **on** the seat rather than through it,
+ * and the six centimetres are what keeps her lowest visible part above the
+ * cart's tub floor when she folds. Read off the rig, then set by what the tub
+ * can actually take — `check:rail-race` asserts the second part.
+ */
+export const SIT_HIP_DROP = 0.30;
+
+/**
+ * How far the legs swing forward from the hip, radians — negative is forward.
+ *
+ * A soapbox racer's posture: legs out in front, knees towards the nose of the
+ * cart. Well inside the −1.25 rad the ferris wheel gondola already folds a
+ * seated child's legs to, so it asks nothing new of the rig.
+ *
+ * **This is the pose the missing knee shows up in**, and it is worth being
+ * plain rather than quietly picking an angle that hides it: with no knee the
+ * leg is one rigid piece from hip to shoe, so "sitting" can only ever be legs
+ * held out straight. That happens to suit a soapbox cart — a child really does
+ * sit in one with their legs stretched towards the front — which is why this
+ * reads correctly *here* and would not in a chair.
+ */
+export const SIT_LEG = -1.35;
+
+/** A little forward lean, so she reads as riding rather than lounging. */
+const SIT_LEAN = 0.16;
+
+/** Arms forward onto the cart's rail. */
+const SIT_ARM = -1.0;
+
+/**
+ * **Whether a rider's legs are drawn.**
+ *
+ * Jim: *"legs also clip through slightly on the race ride — just hide the legs
+ * entirely I think they're not visible anyway"*, and then, of the win
+ * celebration: *"this one will need legs showing"*. So it is three states in
+ * one ride — off while racing, on to celebrate, on again once she is out — and
+ * that is exactly the shape that must **not** be done with a remembered list.
+ *
+ * `TreeClimbing.hidePlayerBody` kept such a list, skipped children that were
+ * already hidden, and so recorded an empty restore set on its second call; she
+ * stayed a floating head on every ride in the park afterwards, including ones
+ * that had never heard of trees. It was deleted today. So this **asks** the
+ * ride state every frame and sets `visible` outright. Nothing is remembered,
+ * so nothing can be stranded: the worst a bug can do here is draw legs on the
+ * wrong frame, not permanently delete them.
+ *
+ * It stays scoped to this ride — `RailRace` is the only caller, and the legs
+ * are switched back on in `arrive()` whatever happened during the race.
+ */
+export function setRiderLegsVisible(target: Duckable, visible: boolean): void {
+  const leftLeg = target.limbs?.leftLeg ?? target.leftLeg;
+  const rightLeg = target.limbs?.rightLeg ?? target.rightLeg;
+  if (leftLeg) leftLeg.visible = visible;
+  if (rightLeg) rightLeg.visible = visible;
+}
 
 /**
  * Whatever it is that can duck: the player's `CharacterModel`, or a rival
@@ -112,29 +180,45 @@ export interface Duckable {
   readonly limbs?: CreatureLimbs | null;
   readonly leftArm?: Group;
   readonly rightArm?: Group;
+  readonly leftLeg?: Group;
+  readonly rightLeg?: Group;
 }
 
 /**
  * Folds `target` by `amount` (0 = upright, 1 = fully ducked).
  *
- * Safe to call every frame with 0 — that is the upright pose, written out in
- * full, so a rider who has just stopped ducking is actively put back rather
- * than left wherever the last frame happened to leave her.
+ * Safe to call every frame with 0 — that is the plain **seated** pose, written
+ * out in full, so a rider who has just stopped ducking is actively put back
+ * rather than left wherever the last frame happened to leave her. It is never
+ * the *standing* pose: a rider on this ride is sat down for as long as she is
+ * aboard, and `RailRace.arrive()` stops calling this at all when she gets off.
  */
-export function poseDuck(target: Duckable, amount: number): void {
+export function poseRailRaceRider(target: Duckable, amount: number): void {
   const fold = Math.max(0, Math.min(1, amount));
-  target.body.rotation.x = DUCK_BEND * fold;
-  target.body.position.y = -DUCK_HIP_DROP * fold;
+  // Seated first, then folded on top of it — she ducks *from* the seat, so the
+  // duck's own numbers are added to the seat's rather than replacing them.
+  target.body.rotation.x = SIT_LEAN + DUCK_BEND * fold;
+  target.body.position.y = -(SIT_HIP_DROP + DUCK_HIP_DROP * fold);
   const squash = 1 - DUCK_SQUASH * fold;
   // Widen as she flattens, the way every squash in this park does: a body that
   // only loses height reads as scaled, one that spreads reads as squashed.
   target.body.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
   target.head.rotation.x = DUCK_HEAD_TUCK * fold;
+
+  const leftLeg = target.limbs?.leftLeg ?? target.leftLeg;
+  const rightLeg = target.limbs?.rightLeg ?? target.rightLeg;
+  if (leftLeg && rightLeg) {
+    leftLeg.rotation.x = SIT_LEG;
+    rightLeg.rotation.x = SIT_LEG;
+  }
+
   const leftArm = target.limbs?.leftArm ?? target.leftArm;
   const rightArm = target.limbs?.rightArm ?? target.rightArm;
   if (leftArm && rightArm) {
-    leftArm.rotation.x = -DUCK_ARM_TUCK * fold;
-    rightArm.rotation.x = -DUCK_ARM_TUCK * fold;
+    // Hands on the rail when she is up, pulled in to her head when she folds.
+    const arm = SIT_ARM - (DUCK_ARM_TUCK + SIT_ARM) * fold;
+    leftArm.rotation.x = arm;
+    rightArm.rotation.x = arm;
     leftArm.rotation.z = 0.3 * fold;
     rightArm.rotation.z = -0.3 * fold;
   }
