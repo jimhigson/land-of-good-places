@@ -547,7 +547,8 @@ export const CLIMB_EDGE_GAP = 0.35;
 /**
  * How much higher she sits than the canopy top, in metres.
  *
- * **Jim's number, 5 August: "about 1 m higher and ship it."**
+ * **Jim's number, 5 August: "about 1 m higher and ship it."** Raised to 1.2 m
+ * on 6 August after he tried it: *"another 20cm higher."*
  *
  * It is the fix for a specific, measured failure. Her waving hand tops out
  * 0.303 m below her head, which put it essentially level with `canopyTopY`, so
@@ -555,8 +556,13 @@ export const CLIMB_EDGE_GAP = 0.35;
  * arm contributed **zero pixels to the whole screen** at 225°, 270° and 315°,
  * on every tree — 15 of 32 tree×bearing combinations with no arm visible at
  * all. Lifting her clears the forearm outright instead of marginally.
+ *
+ * **This is the player's lift and nobody else's.** It reaches `climbPose` as an
+ * argument from her three call sites; see that function's `lift` parameter for
+ * why putting it back inside would be a regression, and `check:crowd`'s
+ * NPC-perch assertion (issue #224) for what now catches it if anyone does.
  */
-export const CLIMB_PEEK_LIFT = 1;
+export const CLIMB_PEEK_LIFT = 1.2;
 
 // ------------------------------------------------------------------- waving
 //

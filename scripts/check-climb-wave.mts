@@ -268,7 +268,7 @@ function poseKidAt(
 ): ReturnType<typeof createKid> {
   const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
   const kid = createKid();
-  applyRidePose({ body: kid.body, ...kid.limbs }, wave, elapsed);
+  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, wave, elapsed);
   if (armOverride) {
     kid.limbs.rightArm.rotation.x = armOverride.x;
     kid.limbs.rightArm.rotation.z = armOverride.z;

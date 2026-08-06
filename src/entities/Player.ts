@@ -1,5 +1,6 @@
 import { Group, Vector3 } from 'three';
 import {
+  CAMERA_PITCH_DEGREES,
   CAMERA_YAW_DEGREES,
   PLAYER_ACCELERATION,
   PLAYER_BOB_CYCLES_PER_METRE,
@@ -17,6 +18,7 @@ import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
+import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
@@ -152,9 +154,52 @@ export const CLIMB_WAVE_LEAN = 0.16;
 /** Rock rate, rad/s. Half the hand's wag, so the body sways under a faster wave. */
 export const CLIMB_WAVE_LEAN_RATE = 5.5;
 
+/**
+ * How far {@link applyRidePose} pitches the body forward — "holding on".
+ *
+ * Named rather than written inline because {@link CLIMB_WAVE_HEAD_PITCH} has to
+ * subtract it: the head hangs off the body, so where her face ends up pointing
+ * is this plus whatever the neck does. Two numbers that must agree, in one
+ * expression each.
+ */
+const RIDE_POSE_BODY_PITCH = 0.3;
+
+/**
+ * The neck angle that points her face **at the camera** while she waves.
+ *
+ * Jim, 5 August: *"the character should look slightly upwards too — straight
+ * towards the camera."* She was not. Measured on a really-built kid, mid-wave,
+ * her gaze left the face at **2.14° below** the horizon while the camera sat
+ * **38° above** her — she was waving at a point some 40° under the viewer's
+ * feet, which is exactly the "waving past you rather than at you" he saw.
+ *
+ * Solved, not tuned. Gaze is exactly linear in the two joints above the eyes
+ * (`KID_REST_GAZE_PITCH − body.rotation.x − head.rotation.x`, verified to 4
+ * decimal places by `check:climb-wave`), so the angle that lands the gaze on
+ * the camera falls straight out of rearranging that for `head.rotation.x`.
+ *
+ * **Derived from the camera, deliberately.** `CAMERA_PITCH_DEGREES` is the only
+ * thing that decides where the viewer is; pitch the park's camera tomorrow and
+ * her face follows it. A hard-coded angle here would be right for exactly one
+ * value of that constant and silently wrong for every other.
+ *
+ * The camera being **orthographic** is what makes one constant enough: every
+ * ray is parallel, so "the direction to the camera" is the same everywhere in
+ * the park and does not depend on which tree she climbed or how far away she is.
+ *
+ * It works out at −40.1°, which sounds like a lot of neck until you remember
+ * that `TreeClimbing.hidePlayerBody` leaves **only her head and waving arm
+ * drawn** — the shoulders it would be measured against are inside the leaves.
+ * Nothing is on screen to read it as a joint angle; all that reaches the player
+ * is a face turned up at her.
+ */
+export const CLIMB_WAVE_HEAD_PITCH =
+  KID_REST_GAZE_PITCH - RIDE_POSE_BODY_PITCH - CAMERA_PITCH_DEGREES * DEG;
+
 /** The limbs {@link applyRidePose} moves. `CharacterModel` satisfies this. */
 export interface RidePoseTarget {
   readonly body: { rotation: { x: number; z: number } };
+  readonly head: { rotation: { x: number } };
   readonly leftArm: { rotation: { x: number; z: number } };
   readonly rightArm: { rotation: { x: number; z: number } };
   readonly leftLeg: { rotation: { x: number } };
@@ -176,7 +221,7 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
   model.rightArm.rotation.x = -2.5;
   model.leftArm.rotation.z = 0.5;
   model.rightArm.rotation.z = -0.5;
-  model.body.rotation.x = 0.3;
+  model.body.rotation.x = RIDE_POSE_BODY_PITCH;
   model.body.rotation.z = 0;
   model.leftLeg.rotation.x = -0.7;
   model.rightLeg.rotation.x = -0.55;
@@ -189,6 +234,14 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
     // The rock. See CLIMB_WAVE_LEAN — this, not the hoist, is the motion that
     // reaches the screen, because the follow camera cannot cancel a rotation.
     model.body.rotation.z = Math.sin(elapsed * CLIMB_WAVE_LEAN_RATE) * CLIMB_WAVE_LEAN * climbWave;
+    // Chin up, at the camera. See CLIMB_WAVE_HEAD_PITCH — she was waving at the
+    // ground in front of the viewer before this.
+    //
+    // Added to whatever `Player.animate` just wrote rather than assigned over
+    // it, so her idle breathing still moves her head while she waves. That is
+    // safe against accumulating frame on frame precisely because `animate`
+    // *assigns* `head.rotation.x` afresh every single frame before this runs.
+    model.head.rotation.x += CLIMB_WAVE_HEAD_PITCH * climbWave;
   }
 }
 
