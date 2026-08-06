@@ -1,12 +1,183 @@
-# HANDOFF — E7-parapet — the ginormous slide
+# HANDOFF — the ginormous slide (E7 → E10 → E12)
 
-Branch `feat/slide-parapet-gap`, based on `feat/slide-on-rail-generator` (E3's
-#118 work, not yet merged). Worktree `.claude/worktrees/parapet-gap`, dev port
-**5327** (not running — build-verified only).
+Branch `feat/slide-parapet-gap`. Worktree **`.claude/worktrees/e10-generator`**
+(not `parapet-gap` — E10 moved it), dev port **5341** if one is needed; not
+running, build-verified only.
 
-**Status: green and stopped.** `npm run build` exit 0 (including `check:park`,
-**unratcheted**). `npm run test:procgen` exit 0, **142 tests**. Tower clearance
-1.54–1.97 m on all five seeds. **No PR raised. Do not merge.**
+**Status (E12, 5 Aug): merged onto `main` and green.** `npm run build` exit 0
+(`check:park` included, **unratcheted**). `npm run test:procgen` exit 0,
+**157 tests**. Boot 3.65–16.42 s across the five seeds.
+
+---
+
+# E12's section — read this before the older material below
+
+Everything under "START HERE" and "HISTORY" is E7's and still accurate
+*except* where this section says otherwise. E7 wrote it before `origin/main`
+was merged, and the merge changed the problem.
+
+## The merge is done, and it was not textual
+
+`origin/main` at `ff17910` (#213) is merged (`aed7797`). E7's proposed
+resolution was right and was followed: keep E3's `ClosedRouteBrief |
+OpenRouteBrief` union, put main's `influences?` / `satisfies?` on
+`RouteBriefBase`, take main's `pullOf` / `stillWanted` scoring.
+
+Both traps E7 flagged were live and both are handled:
+
+- `SolveReport.startPoseCount` keeps **`attempts.length`**. Main's
+  `brief.startPoses.length` would have made it describe a different list from
+  `startPoseIndex` with no error and no failing test.
+- `pullOf` contributes **exactly 0**, not `NaN`, for a brief with no
+  influences, and draws no randomness on that path.
+
+One thing E7 could not have known, and it is the important one: **`scoreOf`
+must not regain main's `!brief.closed ||` guard.** On main that guard is
+correct, because there an open route has no approach corridor to score
+against. #118 gave it one, aimed at its chosen end pose. Putting the guard
+back switches that steering off and *nothing fails* — the route still solves,
+it just stops aiming. The merged code says so in a comment; leave it there.
+
+**The merge moved the Sky Cruiser.** #213 makes the cruiser always fly through
+the castle, and the cruiser is one of the things the chute has to keep its air
+from. A clean textual merge hid this completely: seed 11's park stopped
+building at module load, which showed up as 28 *skipped* tests rather than a
+red one. This is the "a clean merge is not reassurance" case, concretely.
+
+## Boot time: 35.1 s worst → 16.42 s worst. Still too slow.
+
+| seed | E7 recorded, pre-merge | now |
+|---|---|---|
+| 20260728 | 8.8 s | **3.65 s** |
+| 2 | 10.2 s | 4.02 s |
+| 5 | **35.1 s** | **16.42 s** |
+| 11 | 28.2 s | 6.93 s |
+| 18 | 12.8 s | 5.42 s |
+
+`npm run measure:slide-boot` (new, honours `LGP_SEED`) produces this. It times
+the module the game imports, **one process per seed** — a loop in one process
+times the first seed honestly and every seed after it at zero, because the park
+layout under the slide caches too.
+
+Ride length also came back where it belongs: 65–74 m against a brief asking for
+60, where the merge had it wandering out to 83–87 m.
+
+### What actually fixed it, and it was not what anyone expected
+
+**The length fixed-point loop could never converge.** The chute's height at a
+point is a fraction of the *whole* route's length, but height is needed
+*during* the search. That was chased with an outer loop — solve, compare
+lengths, feed the answer back, repeat — and the length map is not a
+contraction. It has no attractive fixed point: seed 11 wandered the full 50–92 m
+range for 28 passes, and seed 5 settled into a clean **two-cycle**, alternating
+92 m and 59 m forever with both ends fouling the coaster. Every lap was a
+complete search thrown away.
+
+It was wrong permissively too, and that shipped: the loop fell out of its pass
+limit and returned whatever the last pass built, whose clearance had been
+checked against a *different* length's height profile.
+
+The fix is `satisfies` — #213's own machinery, which is asked about a
+**finished route** and therefore knows that route's real length. A route that
+fails is set aside and the search moves to its next attempt. The backtracking
+now happens **inside one search** instead of by re-running the whole search on
+a different guess.
+
+Note the slide does **not** accept the generator's unsatisfied fallback the way
+the coaster does. A coaster that missed the castle is a disappointment; a slide
+through a roller coaster is not shippable. It throws and names the rejects.
+
+## Jim's reframing was tested directly and does not work. Do not retry it as specified.
+
+Jim's ruling was: *"Just put the ball pit wherever the slide lands, and
+backtrack if it doesn't fit."* The reasoning — with no fixed destination there
+is nothing to steer toward, so the first route that hits nothing is valid, and
+the search should collapse.
+
+**Measured, twice, and it gets worse rather than better.** I replaced
+`pitPoses()` (51 poses, all within 5 m of the pinned pit) with free landing
+poses spread over every piece of open ground in the park where a pit would fit
+— hundreds of them:
+
+| | pinned pit | free landings |
+|---|---|---|
+| 20260728 | 3.65 s | 14.99 s |
+| 2 | 4.02 s | 5.68 s |
+| 5 | 16.42 s | **never solved** |
+| 11 | 6.93 s | 27.61 s |
+| 18 | 5.42 s | **never solved** |
+
+(Run before the `satisfies` fix as well, in case the cruiser was the whole
+story. It was worse then: three seeds failed.)
+
+**Why the premise does not hold.** The generator has no notion of "finish
+anywhere". An attempt is a *(start, end) pose pairing*, and each attempt must
+arrive at one exact pose with one exact heading. So offering more landings does
+not make the target easier to hit — it makes the *list* longer while every
+individual attempt stays exactly as hard, and `restartLimit` (700) then samples
+a thin, arbitrary slice of a much bigger space. Freeing the destination would
+first require `rail/generate.ts` to be able to finish into a **region** rather
+than at a pose, which is a change to the shared generator that the coaster and
+train also use — not a change to `parkManifest.ts`.
+
+So `parkManifest.ts:147`'s pin is untouched, and the comment at `:143-144`
+explaining it is still true.
+
+## Also tried, also reverted: diagonal attempt ordering
+
+`attempts` is built **start-major**, so every landing for the most promising
+door is exhausted before the second door is tried at all. Both pose lists are
+ordered best-first, so pairing them along anti-diagonals (`i + j` ascending)
+looks obviously better. It is not: seeds 2 and 11 got much faster (4.02→1.38 s,
+6.93→3.42 s) and seed 5 and the canonical seed got much worse (16.42→31.64 s,
+3.65→9.87 s), for a worse total. Reverted. Worth knowing before someone spends
+an afternoon on it — the ordering is not obviously wrong, it is just not a win.
+
+## Two smaller fixes, both of which were real bugs
+
+**A door is not offered unless its hole fits in the wall.** Seed 5 cut a hole
+spanning facade-local 7.99…12.34 through a wall that ends at 12.00 — a notch
+in the corner of the castle. Two numbers were describing one opening:
+`doorPoses` spaced its offers by the 2.10 m a *square-on* chute needs, while
+the hole an *angled* exit gets is `CORRIDOR_RADIUS / headingZ + DOOR_SHOULDER`,
+which grows without bound as the exit turns along the wall. Spacing the offers
+differently could not have fixed it. Now `crossingOf` is the one owner and both
+sides ask it.
+
+**A long chute stands on legs even beside a path.** `LEG_SPACING` (13 m) is how
+often a leg is *tried*, not how often one is built. On a 77 m chute that is
+five attempts, and `PATH_CLEARANCE` forbids a post within 2.8 m of the paved
+network — these routes run alongside a path for most of their length.
+Instrumented on the canonical seed, **all 19 nudges at all 6 slots were
+rejected, the path taking the majority.** At 9 m the chute is asked about more
+places. Nothing was relaxed: every rejection still applies and the crowding
+test still keeps legs a child's width apart.
+
+## Where the remaining 16 s goes, and the next lever
+
+Seed 5 succeeds at attempt **323 of 1305**, having tried **2.9 M** candidate
+pieces with 179 k backtracks (`LGP_SEED=5 npm run measure:slide-fingerprint`).
+The cost is the search, not `satisfies`.
+
+That is #209/#213's problem exactly, and E7's item 1 below still stands: the
+generator returns the first route that fits, and has no ordering over whole
+routes that would let it prefer a *likely* pairing. Diagonal ordering was the
+obvious cheap answer and is disproved above. The honest next lever is either a
+region-finish for open routes, or scoring at the attempt level — both are
+`rail/generate.ts` work, and both want their own PR.
+
+## Still not started
+
+The transparent-chute work (Jim's second item, near the end of this file) — QA's
+"reads as an enclosed tube for the first 2.5 s". Untouched.
+
+---
+
+# E7's original handoff follows
+
+**Status at the time: green and stopped.** `npm run build` exit 0 (including
+`check:park`, **unratcheted**). `npm run test:procgen` exit 0, **142 tests**.
+Tower clearance 1.54–1.97 m on all five seeds.
 
 Handed over deliberately: the two things left are substantial and were not
 worth attempting on a nearly-spent budget.
