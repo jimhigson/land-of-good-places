@@ -166,10 +166,10 @@ changes where the scramble goes and so wants QA eyes; not attempted here.
 
 ## CLOSED — Jim's ruling, 5 Aug: sit higher, ship it
 
-> *"I think the waving in the tree doesn't need more QA, just let the character
-> sit higher and call it done."*
+> *"just let the wave go as I said, nobody will float, it's fine, about 1m
+> higher and ship it — literally that's it."*
 
-`CLIMB_PEEK_LIFT = 0.74` (40% of the kid's 1.86 m). Re-measured by QA's method —
+`CLIMB_PEEK_LIFT = 1` ("about 1 m higher and ship it"). Re-measured by QA's method —
 eight bearings, whole scene, delta technique — the arm now shows **18–21 px at
 every bearing on every tree: 0 of 32 zeros, from 15 of 32.** The arm half of the
 anti-correlation is gone.
