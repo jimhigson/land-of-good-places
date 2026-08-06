@@ -59,6 +59,25 @@ This also **answers** the QA question the reviewer raised ("may fly clear over
 the battlements") — it does, measurably, on every seed. What still needs eyes is
 whether a chute launching from above the battlements *looks* right.
 
+## Review round 2 (Overseer) — DONE
+
+- **BLOCKER fixed.** `castleMasonryTopY` seeded `-Infinity` with no match check
+  meant a mesh rename made `underside < -Infinity` false for every chute: the
+  invariant went green measuring nothing (reviewer broke the regex, got 28/28
+  green). A missing measurement is now a *complaint*. Re-proved by breaking the
+  same regex: red, 1 failed / 27 passed, naming the cause. Polarity is
+  deliberately opposite to the `Number.isFinite(worstGap)` guard at the towers
+  invariant, where Infinity is a genuine pass; both comments say so.
+- **4.55 m was the centre line, not the air.** Underside 13.73 m vs stone
+  10.29 m = **3.44 m**. Code was always right (it uses the underside); prose was
+  loose. Corrected everywhere.
+- `scoreOf` comment no longer says "nothing would fail" (seed 5's leg invariant
+  does fail); `doorPoses` symmetry claim corrected with measured 34 vs 8.
+- Deleted rather than documented: `facadeDoorChuteHalf` (zero readers) and
+  `ShellPlan.slideGap` (12 lines of comment, two unreachable readers).
+- Route byte-for-byte unmoved: canonical 68.7537 m attempt 199, seed 5
+  72.9703 m attempt 323, SHA256s unchanged.
+
 ## The measurement for #229 — report only, DONE, nothing committed
 
 Diagonal (anti-diagonal) attempt ordering **combined with** free landings.
@@ -102,6 +121,47 @@ Experiment shape (reconstruct from here; **not committed**):
   centres where `openGround` holds at the centre and 8 rim points at
   `BALL_PIT_RADIUS`, 4 headings each facing the middle, filtered by
   `approachIsClear`, sorted by `|3 * ride - DESIRED_LENGTH|`.
+
+### Round 2: the ordering key was the whole problem
+
+The Overseer asked for (a) the unmeasured free+start-major cell and (b) a line
+fit to calibrate the ordering. Both done, and they overturned the 3x key.
+
+**(a) Free landings + start-major does NOT work** — seed 5 fails to solve at all
+(best offer 91.13 m against the 75 m cap); the other four solve at 2.98 / 9.95 /
+7.32 / 1.15 s. Attempt indices show why: 9945 attempts against a 700 budget
+reaches only doors 0-2, and seed 5 needs a higher door. **So diagonal ordering
+is load-bearing** — the seed 5 regression cannot be dodged by dropping it.
+
+**(b) The line fit does not exist.** Observational pairs give slope **-0.80**,
+R^2 **0.368** — negative, because landing distance is *selected by the ordering
+under test*. A controlled sweep (canonical seed, landing radius forced to a +/-2 m
+annulus) confirms there is no usable relationship:
+
+| forced R | 18 | 22 | 26 | 30 | 34 | 38 |
+|---|---|---|---|---|---|---|
+| length | 66.2 | 63.5 | 66.8 | 59.2 | 74.7 | 47.0 |
+
+Non-monotonic, 47-75 m. **Length is essentially independent of landing distance**
+— the solver returns whatever piece chain fits. So "prefer landings at radius
+r*" was the wrong frame entirely. What actually varies with distance is
+**solvability and cost**: near landings solved in 0.7-1.0 s, far ones 2.7-4.5 s.
+
+**(c) So order by ascending distance, and drop the length model.** Every seed
+then beats baseline and the seed 5 regression disappears:
+
+| seed | baseline | free + diagonal + ascending distance |
+|---|---|---|
+| 20260728 | 3.43 s / 68.75 m | **0.75 s** / 64.95 m |
+| 2 | 3.54 s / 72.28 m | **1.05 s** / 72.78 m |
+| 5 | 15.40 s / 72.97 m | **11.80 s** / 60.41 m |
+| 11 | 6.64 s / 69.43 m | **1.81 s** / 61.77 m |
+| 18 | 5.11 s / 66.53 m | **0.96 s** / 62.46 m |
+
+Worst case **15.40 -> 11.80 s**, total **34.12 -> 16.37 s**, all lengths inside
+the cap. Caveat: every seed then lands at d ~ 18.4 m (vs 21.7-28.1 pinned), so
+the pit hugs the castle — a design call for Jim, and a minimum-distance floor is
+the obvious knob.
 
 Posted to #229.
 
