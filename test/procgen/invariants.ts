@@ -1713,6 +1713,69 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
  */
 const skyCruiserFitsThroughTheCastle: Invariant = (facts) => facts.castlePass.complaints;
 
+/**
+ * **A child boarding the ginormous slide is put down on the chute**, not a
+ * castle's width from it.
+ *
+ * The seat, the grown-up and the teleport all position themselves from
+ * `SlideRide.pointAt`, and all three are parented alongside the chute so those
+ * are the same coordinates. `Building.ts` says so in a comment; this is the
+ * part that checks it is still true.
+ *
+ * It exists because the chute had to move out of the castle's plot group and up
+ * to park level — a ride spanning two plots is the park's content, and
+ * `check:park` measures everything under an anchor against the radius that
+ * anchor promises. Moving the chute alone would have left three riders behind
+ * in the castle's frame, each of them floating about 26 m from the trough,
+ * while the slide itself still looked perfect from every angle. So they moved
+ * together, and this is the assertion that they still travel together.
+ *
+ * Comparing `pointAt` straight against `pointAt` pushed through the scene graph
+ * is the whole test: at park level the group is the identity and the two are
+ * the same number. It needs no knowledge of *which* group is correct, so it
+ * keeps working if the park is restructured again for some other reason.
+ */
+const theSlideRiderSitsOnTheChute: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const { local, world } = facts.slideRiderFrame;
+
+  if (local.length === 0 || local.length !== world.length) {
+    complaints.push(
+      `the ginormous slide's rider frame was sampled ${local.length} times locally ` +
+        `and ${world.length} times in world space — nothing can be concluded`,
+    );
+    return complaints;
+  }
+
+  let worst = 0;
+  let worstAt = 0;
+  for (let i = 0; i < local.length; i += 1) {
+    const a = local[i]!;
+    const b = world[i]!;
+    const drift = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    if (drift > worst) {
+      worst = drift;
+      worstAt = i;
+    }
+  }
+
+  // Millimetres, not zero: these are floating-point transforms of the same
+  // number, and the failure this guards against is metres wide.
+  if (worst > 0.001) {
+    const a = local[worstAt]!;
+    const b = world[worstAt]!;
+    complaints.push(
+      `the ginormous slide's riders would sit ${worst.toFixed(2)} m off the chute — ` +
+        `${(worstAt / (local.length - 1) * 100).toFixed(0)}% along, \`pointAt\` gives ` +
+        `(${a[0].toFixed(2)}, ${a[1].toFixed(2)}, ${a[2].toFixed(2)}) but the chute is ` +
+        `drawn at (${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)}) — the seat, ` +
+        'the grown-up and the boarding teleport all read the first of those',
+    );
+  }
+
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -1753,6 +1816,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide does not clip the castle towers',
     theGinormousSlideMissesTheCastleTowers,
   ],
+  ['a child boarding the ginormous slide is put down on the chute', theSlideRiderSitsOnTheChute],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
 ];
 

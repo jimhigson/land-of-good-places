@@ -3,7 +3,6 @@ import {
   BALL_PIT_RADIUS,
   BALL_PIT_X,
   BALL_PIT_Z,
-  BUILDING_BASE_Y,
   BUILDING_CENTRE_X,
   BUILDING_CENTRE_Z,
   CASTLE_TOWERS,
@@ -1017,9 +1016,9 @@ function assertClearsCruiser(points: readonly Vector3[]): void {
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
 export const SLIDE_PLAN: PlannedSlide = planSlide();
 
-/** Where the chute's points sit relative to the building's plot group. */
-export const SLIDE_GROUP_ORIGIN = {
-  x: BUILDING_CENTRE_X,
-  y: BUILDING_BASE_Y,
-  z: BUILDING_CENTRE_Z,
-} as const;
+/**
+ * The chute is built in **world space**, at park level, so there is no origin
+ * to offset it by. `SLIDE_GROUP_ORIGIN` used to live here and is gone with the
+ * reparent — it described a frame the slide no longer hangs in, and a constant
+ * describing the wrong frame is worse than none.
+ */

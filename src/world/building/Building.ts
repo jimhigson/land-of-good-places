@@ -242,6 +242,14 @@ export class Building implements GameSystem {
    * up to date.
    */
   readonly gardenRoot = new Group();
+  /**
+   * Park level — the same group the slide's legs stand in.
+   *
+   * The ginormous slide spans the castle *and* the ball pit, so it is not the
+   * castle's content and does not hang off the castle's plot. Everything that
+   * moves along the chute lives here with it; see the note where they are added.
+   */
+  private parkRoot!: Group;
 
   private readonly escalators: Escalators;
   private readonly lift: GlassLift;
@@ -353,8 +361,17 @@ export class Building implements GameSystem {
     // leaves the roof and lands in the ball pit on the grass, and both of those
     // are out here. Riding it from the roof terrace inside therefore *changes
     // space* — see `startGiantSlide`.
+    //
+    // At park level, not under the castle's plot, and for the reason the legs
+    // already were: `check:park` measures everything under an anchor's group
+    // against the `boundingRadius` that anchor declares, and this chute reaches
+    // 28.2 m from a castle that promises 19 m. It passed before only because
+    // its bounding-sphere *centre* happened to sit near the tower — luck that
+    // ran out the moment the route changed shape. A ride that spans two plots
+    // is the park's content, not the tower's.
+    this.parkRoot = anchorPlots.group;
     this.ginormousSlide = buildGinormousSlide();
-    this.gardenRoot.add(this.ginormousSlide.group);
+    this.parkRoot.add(this.ginormousSlide.group);
 
     // Something to stand it on. ~95 m of chute with nothing under it reads as
     // floating, and this park's things are meant to look built — see
@@ -366,12 +383,15 @@ export class Building implements GameSystem {
     // its legs stand in the park between them. See `buildSlideSupports`.
     anchorPlots.group.add(buildSlideSupports(this.slideLegs, collision));
 
-    // The rider's seat rides in the garden with the chute, so its mount hangs
-    // off the same group — the chute's points and the mount's position are then
-    // the same coordinates, and cannot drift apart.
+    // The rider's seat hangs off the **same group as the chute** — so the
+    // chute's points and the mount's position are the same coordinates and
+    // cannot drift apart. That pairing is the whole reason both moved to park
+    // level together rather than one of them: `pointAt` feeds the mount, the
+    // grown-up and the player teleport below, and any of them left behind in
+    // the castle's frame would sit a castle's-width off the chute.
     this.eyeMount.rotation.y = Math.PI;
     this.rideMount.add(this.eyeMount);
-    this.gardenRoot.add(this.rideMount);
+    this.parkRoot.add(this.rideMount);
 
     registerFacadeCollision(collision);
 
@@ -696,14 +716,11 @@ export class Building implements GameSystem {
       // here left an uninvited grown-up hanging in the sky beside the tower
       // for the whole descent, since `updateCutaway` used to show him
       // whenever any ride ran, invited or not.
-      if (this.grownUpComing) this.gardenRoot.add(this.grownUp.root);
+      if (this.grownUpComing) this.parkRoot.add(this.grownUp.root);
 
+      // The chute is in world coordinates now, so there is nothing to add back.
       this.ginormousSlide.pointAt(0, this.point);
-      player.teleportTo(
-        this.point.x + BUILDING_CENTRE_X,
-        this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
-        this.point.z + BUILDING_CENTRE_Z,
-      );
+      player.teleportTo(this.point.x, this.point.y + RIDER_LIFT, this.point.z);
       // Lying down in front, so set the composition order before the first
       // frame places them — see `GROWN_UP_RECLINE`.
       this.grownUp.root.rotation.order = 'YXZ';
@@ -998,10 +1015,11 @@ function buildHelterSkelter(): SlideRide {
  * facade's, which the garden group's own offset then cancels exactly.
  */
 function buildGinormousSlide(): SlideRide {
-  const points = SLIDE_PLAN.points.map(
-    (p) =>
-      new Vector3(p.x - BUILDING_CENTRE_X, p.y - BUILDING_BASE_Y, p.z - BUILDING_CENTRE_Z),
-  );
+  // Straight through in world space: the chute hangs at park level, whose group
+  // is the identity, so the plan's own coordinates are the ones to build with.
+  // Everything that travels along it — the seat, the grown-up, the teleport —
+  // reads `pointAt` and therefore reads world space too.
+  const points = SLIDE_PLAN.points.map((p) => new Vector3(p.x, p.y, p.z));
 
   return new SlideRide(points, {
     name: 'ginormous-slide',

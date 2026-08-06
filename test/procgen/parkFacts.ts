@@ -229,6 +229,23 @@ export interface ParkFacts {
     readonly below: number;
   };
   /**
+   * The chute sampled **without** the scene graph, beside the same points with
+   * it — `pointAt` as the ride itself reads it, and where that lands in the
+   * world.
+   *
+   * Everything that travels along the slide — the rider's seat, the grown-up,
+   * and the teleport that puts a child on it — positions itself from
+   * `pointAt` and is parented alongside the chute so that the two are the same
+   * coordinates. If the chute is ever reparented without converting its points,
+   * every one of those lands a castle's width away from the trough while the
+   * chute itself still looks perfect. These two lists are what makes that
+   * visible: at park level they are identical.
+   */
+  readonly slideRiderFrame: {
+    readonly local: readonly (readonly [number, number, number])[];
+    readonly world: readonly (readonly [number, number, number])[];
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -402,6 +419,18 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  const slideRiderLocal: (readonly [number, number, number])[] = [];
+  const slideRiderWorld: (readonly [number, number, number])[] = [];
+  {
+    const probe = new Vector3();
+    for (let i = 0; i <= 12; i += 1) {
+      slide.pointAt(i / 12, probe);
+      slideRiderLocal.push([probe.x, probe.y, probe.z]);
+      slide.group.localToWorld(probe);
+      slideRiderWorld.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
   const nearPairs = new Set<string>();
   for (const entry of PARK_MANIFEST) {
     if (entry.near) nearPairs.add(pairKey(entry.id, entry.near.id));
@@ -553,6 +582,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathNodes,
     pathEdges,
     slideChute,
+    slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideDoor,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,
