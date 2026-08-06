@@ -1025,9 +1025,7 @@ function planSlide(): PlannedSlide {
     // general area; `satisfies` below is what actually decides.
     clear: (x, z, radius, distanceAlong) =>
       chuteMayPass(x, z, radius, distanceAlong, DESIRED_LENGTH),
-    satisfies: (candidate) =>
-      candidate.length <= MAX_RIDEABLE_LENGTH &&
-      heightSensitiveComplaint(chutePoints(candidate)) === null,
+    satisfies: (candidate) => unrideableComplaint(candidate) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
     selfClearance: SELF_CLEARANCE,
@@ -1040,12 +1038,21 @@ function planSlide(): PlannedSlide {
   const points = chutePoints(route);
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
-  // trade; for a slide through a roller coaster it is not, so the one thing it
-  // could not check is checked here.
-  const complaint = heightSensitiveComplaint(points);
+  // trade; for a slide through a roller coaster it is not, so what the search
+  // was asked is asked again here, of the route it actually handed back.
+  //
+  // **The same function, deliberately.** This guard used to re-check only the
+  // height half of a two-clause `satisfies`, so a fallback route could come
+  // back over-length and be accepted: measured at **90.28 m against a 75 m
+  // cap** with `satisfied: false`. That is the identical shape of bug this
+  // whole rewrite exists to kill — a check reporting success about something
+  // it is not describing — and it arrived the identical way, by a second copy
+  // of a condition drifting from the first. There is now one owner and nothing
+  // to keep in step.
+  const complaint = unrideableComplaint(route);
   if (complaint) {
     throw new Error(
-      `the ginormous slide never solved to a chute that clears what it has to clear: ` +
+      `the ginormous slide never solved to a chute a child could ride: ` +
         `after ${route.report.satisfyRejects} rejected routes across ` +
         `${route.report.startPoseCount} attempts, the best on offer ${complaint}.`,
     );
@@ -1078,25 +1085,46 @@ function planSlide(): PlannedSlide {
 }
 
 /**
- * **Everything about the built chute whose answer depended on the height the
- * search had to guess**, measured on the chute that was actually built.
+ * **Is this a slide worth building?** The single owner of that question.
  *
- * Returns a description of the first thing wrong, or null if the chute is good.
- * `planSlide` uses it as its acceptance test, so a chute is only ever used once
- * it has been measured at the height it will be drawn at rather than the height
- * the search assumed it would be.
+ * Returns a description of the first thing wrong, or null if the route is good.
+ * Both the search's {@link RouteBrief.satisfies} and `planSlide`'s post-solve
+ * guard ask *this function* — which is the whole point of it existing. They used
+ * to hold two different copies of the condition: `satisfies` tested length **and**
+ * height, the guard re-tested height alone. So when the generator's unsatisfied
+ * fallback fired, an over-length route walked straight past the guard —
+ * reproduced at **90.28 m against a 75 m cap**, `satisfied: false`, no throw.
  *
- * Two constraints qualify, and only two: both `clearsCruiser` and `clearsTowers`
- * take the height as an argument, so both were answered against the estimate.
- * Everything else the search checks — the castle rectangle, the park's other
- * plots, the boundary, the chute against itself — is decided in plan view and
- * cannot have been changed by the length coming out somewhere else.
+ * A second copy of a rule is a second place for it to rot. One function, asked
+ * twice, cannot disagree with itself.
+ *
+ * ### Why these three, and no others
+ *
+ * **Length** is not height-sensitive, but it is the other half of what makes a
+ * ride rideable rather than a lazy river, and it is checked here so that the
+ * answer has one home. See {@link MAX_RIDEABLE_LENGTH}.
+ *
+ * **Cruiser air** and **tower clearance** qualify because both `clearsCruiser`
+ * and `clearsTowers` take the height as an argument, so during the search both
+ * were answered against an *estimated* length. Everything else the search checks
+ * — the castle rectangle, the park's other plots, the boundary, the chute
+ * against itself — is decided in plan view and cannot have been changed by the
+ * length coming out somewhere else.
  *
  * Measured in 3D off the finished curves, so it cannot be fooled by the estimate
  * the search ran on. The Sky Cruiser check uses the exact `nearestPoint` rather
  * than the sampled polyline the search uses for speed.
  */
-function heightSensitiveComplaint(points: readonly Vector3[]): string | null {
+function unrideableComplaint(route: SolvedRailRoute): string | null {
+  if (route.length > MAX_RIDEABLE_LENGTH) {
+    return (
+      `is ${route.length.toFixed(2)} m long against a ${MAX_RIDEABLE_LENGTH} m ` +
+      `ceiling — at that length the drop of ${(START_Y - END_Y).toFixed(2)} m is ` +
+      'spread so thin the ride is a lazy river a child stops halfway down'
+    );
+  }
+
+  const points = chutePoints(route);
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;
