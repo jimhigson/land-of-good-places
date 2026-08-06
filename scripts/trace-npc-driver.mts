@@ -38,6 +38,20 @@
  * answer. {@link runWedge} is that question, asserted rather than hashed:
  * ARCHITECTURE-REVIEW C1 was a bug whose entire symptom was a feature quietly
  * doing *nothing*, and nothing hashes beautifully.
+ *
+ * ## What this trace cannot see, and where that now lives
+ *
+ * Everything here is a **decision**. There is no park, no scene graph and no
+ * character with a body — the climbable trees a few lines down are two made-up
+ * literals, deliberately, so the trace does not move every time somebody plants
+ * a bush. So the hash is completely blind to *where a climbing child physically
+ * ends up*: issue #224 found that raising every NPC climber by five metres left
+ * it reading `639ad23c`, unchanged.
+ *
+ * `scripts/check-npc-perch.mts` owns that question, and `npm run check:crowd`
+ * runs it straight after this. Keeping them apart is the point rather than an
+ * accident — this one must stay cheap and park-independent to be worth
+ * comparing across revisions, and a geometric assertion needs the real park.
  */
 
 import { spawnSync } from 'node:child_process';
