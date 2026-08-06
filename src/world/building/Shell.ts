@@ -104,21 +104,14 @@ interface ShellPlan {
   readonly doorMinX: number;
   readonly doorMaxX: number;
   readonly holes: boolean;
-  /**
-   * Where the ginormous slide leaves the top storey, if it leaves one at all.
-   *
-   * **Dead as of the castle rewrite, and deliberately left that way.** Both
-   * readers below (`wallShapes`, `buildWindows`) are interior-only builders, and
-   * the interior always passes `null`; the facade, which is the only plan that
-   * sets a span, early-returns into `buildCastle` and never reaches either.
-   *
-   * Wiring it up would be wrong, not merely unnecessary. The slide crosses this
-   * wall plane 4.55 m *above* the crenellations on every seed, so a gap cut here
-   * would notch masonry the ride flies clean over. See
-   * `PlannedSlide.facadeDoorMinX` for the measurements.
-   */
-  readonly slideGap: readonly [number, number] | null;
 }
+// There was a `slideGap` here, for a hole in the top storey's south wall that
+// the ginormous slide would leave through. It was dead — its only readers were
+// interior-only builders that the facade's `buildCastle` early-return never
+// reaches, while the interior always passed `null` — and it was dead for a
+// good reason: the slide crosses that wall plane *above* the castle, clearing
+// the crenellations by 3.44 m under its own floor. Deleted rather than
+// documented; `theGinormousSlideLeavesOverTheBattlements` holds the air open.
 
 function planFor(kind: ShellKind): ShellPlan {
   return kind === 'interior'
@@ -130,8 +123,6 @@ function planFor(kind: ShellKind): ShellPlan {
         doorMinX: INTERIOR_DOOR_MIN_X,
         doorMaxX: INTERIOR_DOOR_MAX_X,
         holes: true,
-        // The roof has no walls; its gap is cut in the parapet instead.
-        slideGap: null,
       }
     : {
         halfX: BUILDING_HALF_X,
@@ -140,7 +131,6 @@ function planFor(kind: ShellKind): ShellPlan {
         doorMinX: ENTRANCE_MIN_X,
         doorMaxX: ENTRANCE_MAX_X,
         holes: false,
-        slideGap: [SLIDE_PLAN.facadeDoorMinX, SLIDE_PLAN.facadeDoorMaxX],
       };
 }
 
@@ -252,7 +242,6 @@ function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   // South face: the front door downstairs.
   const southGaps: [number, number][] = [];
   if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
-  if (deck === TOP_DECK && plan.slideGap) southGaps.push([...plan.slideGap]);
   for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
     shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
   }
@@ -364,7 +353,6 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
 
   const southGaps: [number, number][] = [];
   if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
-  if (deck === TOP_DECK && plan.slideGap) southGaps.push([...plan.slideGap]);
 
   for (const x of spread(plan.halfX, 3.4)) {
     slots.push({ x, z: -oz - outward, yaw: 0 });

@@ -604,7 +604,17 @@ function doorPoses(): Pose2[] {
   const centreLocal = DOOR_OFFER_CENTRE;
   const halfGap = SLIDE_DOOR_HALF_WIDTH;
   // Straight out of the door first, then progressively more angled, alternating
-  // sides so neither direction is systematically preferred.
+  // sides so the *offers* are generated even-handedly.
+  //
+  // **What survives is not even-handed, and that is correct.** This comment used
+  // to claim neither direction was systematically preferred, which
+  // `doorFitsTheWall` made false: of the 45 offers that survive out of 85,
+  // measured, **34 have positive yaw against 8 negative** (plus 3 straight), and
+  // the widest surviving negative is −36° against +72° the other way. The filter
+  // is right to do it — `DOOR_OFFER_CENTRE` (9.5) sits only 2.5 m from a wall
+  // ending at 12, so turning that way runs the opening off the end of the face —
+  // but the asymmetry is the filter's, not this loop's, and the search inherits
+  // it. Worth knowing before reading anything into which way the chute sweeps.
   // Out to ±72°: the door fixes where the chute leaves the tower, not which way
   // it sweeps once it is out, and the wrap around the corner wants to start
   // turning almost immediately.
@@ -931,42 +941,19 @@ export interface PlannedSlide {
   readonly endY: number;
   /**
    * Where the chute crosses the facade's south wall plane, in facade-local x,
-   * as a span the width of the chute.
+   * as a span the width of the chute. **Diagnostic only — this cuts nothing.**
    *
-   * **Measured off the solved route, not off the offered poses.** The search
-   * already chose which door position it left by; this reads that answer back
-   * out of where the chute actually starts.
-   *
-   * ### It cuts nothing. Read this before trusting it
-   *
-   * The name is a leftover and so is the intent. These feed
-   * `ShellPlan.slideGap`, whose only two readers live in `wallShapes` and
-   * `buildWindows` — and neither is reachable: `BuildingShell` early-returns
-   * into `buildCastle` for the facade, which cuts the front entrance only,
-   * while the interior shell that *does* reach those builders passes
-   * `slideGap: null`. The castle rewrite orphaned both.
-   *
-   * **And no hole is wanted.** Measured on all five seeds: the chute crosses
-   * this plane at y 14.84, and the castle's tallest stone — the crenellations —
-   * tops out at y 10.29. The slide leaves 4.55 m *above* the battlements, so a
-   * gap cut in the curtain wall would be a notch in masonry the ride passes
-   * clean over. `theGinormousSlideLeavesOverTheBattlements` in
-   * `test/procgen/invariants.ts` is what holds that 4.55 m open.
-   *
-   * So these stay as a diagnostic — `measure:slide-fingerprint` prints them, and
-   * they are a fair record of where the ride leaves — and nothing should start
-   * treating them as a description of the building.
+   * Measured off the solved route rather than the offered poses, so it is a fair
+   * record of where the ride leaves, and `measure:slide-fingerprint` prints it
+   * to prove the route has not moved. But it is not a description of the
+   * building: the slide crosses this plane *above* the castle, clearing the
+   * battlements by 3.44 m under its own floor, so there is no opening in the
+   * masonry and none is wanted. The `ShellPlan.slideGap` field these used to
+   * feed was dead on both readers and has been deleted.
+   * `theGinormousSlideLeavesOverTheBattlements` is what holds that air open.
    */
   readonly facadeDoorMinX: number;
   readonly facadeDoorMaxX: number;
-  /**
-   * The chute's own half-width **measured along the wall** at that crossing.
-   *
-   * Wider than `CORRIDOR_RADIUS` whenever the chute leaves at an angle, because
-   * the slice through the wall plane is then a slanted one. Diagnostic only,
-   * for the same reason as the two fields above.
-   */
-  readonly facadeDoorChuteHalf: number;
   /** The gap in the interior roof parapet you walk out through, interior-local. */
   readonly roofDoorMinX: number;
   readonly roofDoorMaxX: number;
@@ -1094,7 +1081,6 @@ function planSlide(): PlannedSlide {
     endY: END_Y,
     facadeDoorMinX: crossing.localX - crossing.halfWidth,
     facadeDoorMaxX: crossing.localX + crossing.halfWidth,
-    facadeDoorChuteHalf: crossing.halfWidth - DOOR_SHOULDER,
     roofDoorMinX: ROOF_ENTRY_X - ROOF_DOOR_HALF_WIDTH,
     roofDoorMaxX: ROOF_ENTRY_X + ROOF_DOOR_HALF_WIDTH,
     entryX: ROOF_ENTRY_X,

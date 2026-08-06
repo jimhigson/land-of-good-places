@@ -776,9 +776,16 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       // scored against the approach corridor, because it had no corridor to
       // score against. #118 gave it one, aimed at its chosen end pose, and the
       // whole point is that an open route now steers for its finish exactly as
-      // a loop steers for its start. Restoring the guard would silently switch
-      // that steering back off — the route would still solve, so nothing would
-      // fail, it would just stop aiming.
+      // a loop steers for its start. Restoring the guard switches that steering
+      // back off: the route still solves, it just stops aiming.
+      //
+      // **Do not "restore" it.** This comment used to say nothing would fail,
+      // which was an invitation to try — and was wrong. Measured in review: with
+      // the guard back, `the ginormous slide stands on legs a child can walk
+      // between` fails on seed 5, because the unaimed route reshapes and stands
+      // on 0 legs where 3 are wanted. But that is one seed catching it by luck,
+      // not a guard rail: the other four stay green, so a change made here that
+      // looks fine on the canonical seed is exactly how this gets switched off.
       if (accumulated / brief.desiredLength <= BIAS_FROM) return jitter + pull;
       const end = endPose(seg);
       const dx = approach.x - end.x;

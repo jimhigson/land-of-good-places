@@ -1525,9 +1525,15 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  *
  * The chute crosses the south wall plane at **y 14.84** on every one of the
  * five seeds, and the tallest stone — the crenellations — tops out at
- * **y 10.29**. It clears the battlements by **4.55 m**. So the honest guarantee
- * is not "it goes through the hole" but "it goes over the top, and there is air
- * under it", and that is what is asserted here.
+ * **y 10.29**. What matters is the chute's *underside*, at 14.84 − 1.11 =
+ * **13.73 m**, so the air a rider actually has under them is **3.44 m** — not
+ * the 4.55 m the centre line clears by, which is the number this was first
+ * written up with. (Corrected in review. Two numbers describing one gap is the
+ * exact habit this branch has now been bitten by twice; the code below was
+ * always right, only the prose was loose.)
+ *
+ * So the honest guarantee is not "it goes through the hole" but "it goes over
+ * the top, and there is air under it", and that is what is asserted here.
  *
  * That is a guarantee worth holding: it is what keeps a child from riding down
  * inside a wall. It fails the moment anyone lowers `START_Y`, raises
@@ -1604,6 +1610,29 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // masonry, or the ride passes through the battlements.
   const underside = crossing.y - CHUTE_HALF_WIDTH;
   const stone = facts.castleMasonryTopY;
+
+  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopY`
+  // is a max seeded with `-Infinity` over meshes picked out by name, so if the
+  // castle is ever renamed out from under it the fact arrives as `-Infinity` and
+  // `underside < -Infinity` is false for *every conceivable chute* — this
+  // invariant would go quietly green while measuring nothing at all. Caught in
+  // review by breaking the name pattern: the canonical suite stayed 28/28 green.
+  //
+  // Note the polarity is the opposite of {@link theSlideDoesNotClipTheTowers}'s
+  // `Number.isFinite(worstGap)` guard, which is the same defence pointed the
+  // other way: there, `Infinity` means the chute never came near a tower, which
+  // is a genuine pass. Here, `-Infinity` means the castle was never found, which
+  // can only mean the test has been disarmed.
+  if (!Number.isFinite(stone)) {
+    complaints.push(
+      'no castle stonework was found in the built park at all, so the check that ' +
+        'keeps the ginormous slide out of the battlements measured nothing. Either ' +
+        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopY` ' +
+        'looks for have changed and this invariant has been silently switched off',
+    );
+    return complaints;
+  }
+
   if (underside < stone) {
     complaints.push(
       `the ginormous slide crosses the castle's south wall at world ` +
