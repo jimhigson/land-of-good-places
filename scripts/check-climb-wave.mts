@@ -51,7 +51,7 @@
 import './headless-canvas.mjs';
 import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
-import { createKid, KID_HEAD_HEIGHT } from '../src/art/models/kid.ts';
+import { createKid, KID_HEAD_HEIGHT, KID_REST_GAZE_PITCH } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
 import { CLIMB_EDGE_GAP, CLIMB_PEEK_LIFT, WAVE_RISE } from '../src/world/TreeClimbing.ts';
 import {
@@ -824,6 +824,148 @@ if (worstRock < REQUIRED_ROCK_PIXELS) {
       'The rock is the only cue that survives every approach and the follow camera. Do not try to\n' +
       'replace it with a translation: the camera tracks `player.position` and cancels those — that\n' +
       'is exactly what happened to the 0.3 m hoist, which nets about -3 px on half the bearings.',
+  );
+  process.exit(1);
+}
+
+// ------------------------------------------------------------------- the aim
+//
+// **Is she looking at you?** Jim's 6 August note — "the character should look
+// slightly upwards too, straight towards the camera" — describes a bug this
+// script could not see. Every measurement above is about the *silhouette*: how
+// much hand clears the leaves, how far it travels. A face aimed 40° under the
+// viewer's feet moves exactly the same pixels as one aimed at him, so the whole
+// of the rest of this file passes either way. That is the same shape of hole as
+// issue #224, and it gets the same treatment: measure the thing itself.
+//
+// The gaze is measured off the built rig — the direction from the skull's centre
+// out through the bridge of the nose, which is where `glassesAnchor` sits, at
+// the painted eyes' own height — never re-derived from the angles that posed it.
+
+/** Where the camera is, as a direction from her. Orthographic, so it is constant. */
+const TO_CAMERA = new Vector3(offset.x, offset.y, offset.z).normalize();
+
+/** The direction the painted eyes actually point, for a kid posed and placed. */
+function gazeOf(kid: ReturnType<typeof createKid>): Vector3 {
+  const crown = kid.glassesAnchor.parent;
+  if (!crown) {
+    console.error('check:climb-wave FAILED (aim) — the glasses anchor has no parent to measure the skull centre from.');
+    process.exit(1);
+  }
+  kid.root.updateMatrixWorld(true);
+  const bridge = kid.glassesAnchor.getWorldPosition(new Vector3());
+  const skull = crown.getWorldPosition(new Vector3());
+  return bridge.sub(skull).normalize();
+}
+
+/** A kid mid-wave, facing the camera, with the rock frozen at `elapsed`. */
+function wavingKid(elapsed: number, headPitchOverride: number | null = null) {
+  const kid = createKid();
+  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, 1, elapsed);
+  if (headPitchOverride !== null) kid.head.rotation.x = headPitchOverride;
+  kid.root.rotation.y = CAMERA_FACING;
+  return kid;
+}
+
+const degreesOff = (gaze: Vector3) => (Math.acos(Math.min(1, gaze.dot(TO_CAMERA))) / DEG);
+
+// First, the claim `Player.ts` solves the head angle from, and `kid.ts`'s
+// KID_REST_GAZE_PITCH doc comment states outright: gaze elevation is exactly
+// `KID_REST_GAZE_PITCH - body.rotation.x - head.rotation.x`. If that ever stops
+// being true — a neck joint added, the crown re-parented, HEAD_TILT moved onto
+// a different group — the solved angle silently stops pointing at the camera
+// while every number in this file still looks healthy. So check the model, not
+// just its answer.
+let worstModelError = 0;
+for (const [bodyPitch, headPitch] of [
+  [0, 0],
+  [0.3, 0],
+  [0.3, -0.7],
+  [0, -0.5],
+  [0.5, 0.2],
+  [-0.2, -0.9],
+] as const) {
+  const kid = createKid();
+  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, 0, 0);
+  kid.body.rotation.x = bodyPitch;
+  kid.head.rotation.x = headPitch;
+  kid.root.rotation.y = CAMERA_FACING;
+  const predicted = KID_REST_GAZE_PITCH - bodyPitch - headPitch;
+  const actual = Math.asin(gazeOf(kid).y);
+  worstModelError = Math.max(worstModelError, Math.abs(predicted - actual) / DEG);
+}
+
+if (worstModelError > 0.01) {
+  console.error(
+    `\ncheck:climb-wave FAILED (aim model) — gaze is no longer ` +
+      `KID_REST_GAZE_PITCH - body.rotation.x - head.rotation.x; it is off by up to ` +
+      `${worstModelError.toFixed(3)}°.\n` +
+      'Player.ts solves CLIMB_WAVE_HEAD_PITCH by rearranging exactly that expression, so it is now\n' +
+      'aiming her somewhere other than where it believes. Re-derive it against whatever the rig does\n' +
+      'now — do not simply widen this tolerance.',
+  );
+  process.exit(1);
+}
+
+// Then the aim itself, across the rock. She passes dead through the camera
+// twice a cycle and leans off it in between; both are wanted, so both are
+// measured — the best says she is genuinely aimed at you, the worst says the
+// rock never throws her wildly off.
+let bestAim = Infinity;
+let worstAim = 0;
+for (let r = 0; r < 16; r += 1) {
+  const elapsed = (r / 16) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
+  const off = degreesOff(gazeOf(wavingKid(elapsed)));
+  bestAim = Math.min(bestAim, off);
+  worstAim = Math.max(worstAim, off);
+}
+
+/**
+ * How near dead-on she must get at the rock's crossing.
+ *
+ * She measures 0.00° — the angle is solved, not tuned, so anything but ~0 means
+ * the derivation is broken rather than the pose being slightly off. 1.5° is
+ * loose enough to survive floating point and a nudge to the rig, and nowhere
+ * near loose enough to pass the 40.14° she scored before this existed.
+ */
+const REQUIRED_AIM_DEGREES = 1.5;
+
+/**
+ * And how far the rock may then swing her off it.
+ *
+ * `CLIMB_WAVE_LEAN` is 0.16 rad, which works out at 7.52° of gaze at the
+ * extremes. 12 leaves room to retune the rock by half again before this
+ * complains, while still failing if the head is aimed by something that drifts.
+ */
+const ALLOWED_ROCK_SWING_DEGREES = 12;
+
+const wasOff = degreesOff(gazeOf(wavingKid(0, 0)));
+console.log(
+  `  aim: her gaze passes ${bestAim.toFixed(2)}° from the camera at the rock's crossing ` +
+    `(needs ${REQUIRED_AIM_DEGREES}°), and never more than ${worstAim.toFixed(2)}° off it ` +
+    `(allowed ${ALLOWED_ROCK_SWING_DEGREES}°). With no head pitch at all it would be ` +
+    `${wasOff.toFixed(2)}°.`,
+);
+
+if (bestAim > REQUIRED_AIM_DEGREES) {
+  console.error(
+    `\ncheck:climb-wave FAILED (aim) — she never looks closer than ${bestAim.toFixed(2)}° to the ` +
+      `camera while waving (needs ${REQUIRED_AIM_DEGREES}°).\n` +
+      'She is waving past the player rather than at him — the exact thing Jim asked to be fixed on\n' +
+      '6 August, when it measured 40.14° low. CLIMB_WAVE_HEAD_PITCH in Player.ts is what aims her;\n' +
+      'it is solved from CAMERA_PITCH_DEGREES and KID_REST_GAZE_PITCH, so suspect those before the\n' +
+      'pose. Note that the sign matters and is not obvious: NEGATIVE head.rotation.x looks UP.',
+  );
+  process.exit(1);
+}
+
+if (worstAim > ALLOWED_ROCK_SWING_DEGREES) {
+  console.error(
+    `\ncheck:climb-wave FAILED (aim) — the rock swings her gaze up to ${worstAim.toFixed(2)}° off the ` +
+      `camera (allowed ${ALLOWED_ROCK_SWING_DEGREES}°).\n` +
+      'She passes through the camera but lurches away from it either side. If CLIMB_WAVE_LEAN grew,\n' +
+      'that is the cause, and it is a judgement call whether the bigger rock or the steadier gaze\n' +
+      'matters more — but it should be a decision, not a surprise.',
   );
   process.exit(1);
 }
