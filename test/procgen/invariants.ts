@@ -1618,11 +1618,18 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // invariant would go quietly green while measuring nothing at all. Caught in
   // review by breaking the name pattern: the canonical suite stayed 28/28 green.
   //
-  // Note the polarity is the opposite of {@link theSlideDoesNotClipTheTowers}'s
-  // `Number.isFinite(worstGap)` guard, which is the same defence pointed the
-  // other way: there, `Infinity` means the chute never came near a tower, which
-  // is a genuine pass. Here, `-Infinity` means the castle was never found, which
-  // can only mean the test has been disarmed.
+  // Note the polarity is the opposite of
+  // {@link theGinormousSlideMissesTheCastleTowers}'s `Number.isFinite(worstGap)`
+  // guard, and the reason is worth having, because the two look contradictory
+  // side by side. That invariant can read `Infinity` as a *genuine pass* — the
+  // chute simply never came near a tower — **only because it has already ruled
+  // out the disarmed case separately**, with its own `towers.length === 0`
+  // complaint. Two possible meanings, two checks.
+  //
+  // Here there is only one number to guard, so one check does both jobs: an
+  // unmatched name and a missing castle are the same failure and read the same
+  // way. Neither guard should be "made consistent" with the other by removing
+  // it — they are opposite for that reason, not by accident.
   if (!Number.isFinite(stone)) {
     complaints.push(
       'no castle stonework was found in the built park at all, so the check that ' +
