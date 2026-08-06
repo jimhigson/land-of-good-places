@@ -44,7 +44,7 @@
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
-import { TreeClimbing } from '../src/world/TreeClimbing.ts';
+import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
 import type { NpcCharacter } from '../src/entities/npc/NpcCharacter.ts';
 import type { ClimbableTreeSeed, FoliageOccluder } from '../src/world/Scenery.ts';
@@ -274,6 +274,28 @@ console.log(
   `  In metres: ${lowest.clearance.toFixed(2)} m to ${highest.clearance.toFixed(2)} m, against ` +
     `canopies ${Math.min(...rows.map((r) => r.canopyHeight)).toFixed(2)}-` +
     `${Math.max(...rows.map((r) => r.canopyHeight)).toFixed(2)} m tall.`,
+);
+
+// The contrast, printed and never asserted on. The whole of #224 is that these
+// two numbers are *meant* to differ — she is bought her height by a raised arm
+// that has to clear the leaves, and an NPC has no arm drawn at all — so showing
+// them side by side is what makes the parameter's existence legible to whoever
+// reads this output next. Her perch is `canopyTopY + CLIMB_PEEK_LIFT`: unlike a
+// climbing NPC she picks up no hop term, because `Player.update`'s riding branch
+// passes a hop height of 0 into `animate`.
+const playerRows = trees.map((tree, index) => {
+  const band = canopyBandOf(tree);
+  const canopyHeight = band ? band.top - band.bottom : 1;
+  const clearance = band ? tree.canopyTopY + CLIMB_PEEK_LIFT - band.top : 0;
+  return { index, clearance, fraction: clearance / canopyHeight };
+});
+const playerLow = Math.min(...playerRows.map((r) => r.fraction));
+const playerHigh = Math.max(...playerRows.map((r) => r.fraction));
+console.log(
+  `  For contrast, the PLAYER sits ${playerLow.toFixed(3)} to ${playerHigh.toFixed(3)} up there ` +
+    `(${Math.min(...playerRows.map((r) => r.clearance)).toFixed(2)}-` +
+    `${Math.max(...playerRows.map((r) => r.clearance)).toFixed(2)} m), on CLIMB_PEEK_LIFT ` +
+    `${CLIMB_PEEK_LIFT} m. Not asserted here — she is allowed to, and that is the whole point.`,
 );
 
 if (highest.fraction > MAX_ABOVE_CANOPY) {
