@@ -106,6 +106,8 @@ import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
 import { poseDuck } from '../src/world/railRace/duckPose.ts';
 import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
+import { createCart } from '../src/world/railRace/cart.ts';
+import { PALETTE } from '../src/core/palette.ts';
 import { Box3, Group } from 'three';
 
 const problems: string[] = [];
@@ -743,6 +745,9 @@ say('');
   const cartGroup = new Group();
   cartGroup.position.copy(railPoint);
   cartGroup.scale.setScalar(route.scale);
+  // A real cart, because the complaint was about her going through *it*.
+  const rideCart = createCart(PALETTE.markerPink);
+  cartGroup.add(rideCart.root);
   const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
   cartGroup.add(kid.root);
 
@@ -756,11 +761,13 @@ say('');
    * agree with each other while she folded through the floor in the game.
    */
   const pose = (fold: number): { headTop: number; body: Box3 } => {
-    poseDuck(kid, fold);
-    // The root never moves. That is the entire fix, so the check holds it
-    // still: if a future edit reaches for a translation again, the clearance
-    // it buys will not show up here.
+    // Seat her **first**, then fold — this order is load-bearing. Posing first
+    // and seating afterwards would quietly undo any translation `poseDuck`
+    // performed, so the "root is still on the seat" assertion below would be
+    // asserting the line above it rather than the thing it names. That is the
+    // hollow-check disease this whole PR keeps running into.
     kid.root.position.y = SEAT_HEIGHT;
+    poseDuck(kid, fold);
     cartGroup.updateMatrixWorld(true);
     return {
       headTop: new Box3().setFromObject(kid.head).max.y - railPoint.y,
@@ -799,6 +806,42 @@ say('');
       `bar's underside is at ${barUnderside.toFixed(2)} m — she passes under it without ducking, ` +
       'so there is nothing to duck for. See DUCK_CLEARANCE_AT_PARK_SCALE.',
   );
+  // --- and does she stay inside the cart while she does it? -----------------
+  //
+  // The half of Jim's complaint that was never about the bar: *"ducking still
+  // just lowers the player and clips them through the car."* A check that the
+  // duck clears the bar would pass happily while her feet hung out of the
+  // bottom of the cart, which is exactly what the translation this replaced
+  // did — so the floor is asserted separately from the bar.
+  cartGroup.updateMatrixWorld(true);
+  const cartBox = new Box3().setFromObject(rideCart.root);
+  say(
+    `ducked rider   soles at ${duckedPose.body.min.y.toFixed(2)} against a cart floor at ` +
+      `${cartBox.min.y.toFixed(2)} (${(duckedPose.body.min.y - cartBox.min.y).toFixed(2)} m inside it)`,
+  );
+  // She must stay up in the seating area rather than sinking into the
+  // undercarriage — so the bar is half a seat height above the cart's floor,
+  // not the floor itself. "Technically still inside the bounding box" is not
+  // the claim: the translation this replaced left her 0.60 m above that floor,
+  // sunk through the seat and into the wheels, and passed a bare floor test
+  // comfortably. A fold leaves 1.30 m.
+  const seatedFloor = cartBox.min.y + SEAT_HEIGHT * route.scale * 0.5;
+  require(
+    duckedPose.body.min.y > seatedFloor,
+    `ducking puts the lowest part of the rider at ${duckedPose.body.min.y.toFixed(2)}, only ` +
+      `${(duckedPose.body.min.y - cartBox.min.y).toFixed(2)} m above the cart's floor — she has ` +
+      `sunk out of the seat and into the undercarriage. That is the whole of what "that's not ` +
+      `what ducking means" was about: the fold must move \`body\`, never \`root\` — see ` +
+      'railRace/duckPose.ts.',
+  );
+  // ...and the fold must be a fold. A pose that got its clearance by sliding
+  // the whole child down would leave the root somewhere other than the seat.
+  require(
+    Math.abs(kid.root.position.y - SEAT_HEIGHT) < 1e-6,
+    `the duck pose moved the rider's root to ${kid.root.position.y.toFixed(3)} instead of leaving ` +
+      `it on the seat at ${SEAT_HEIGHT} — that is a translation, not a duck.`,
+  );
+
   kid.dispose?.();
 }
 

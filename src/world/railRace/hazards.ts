@@ -124,15 +124,15 @@ export const RIDER_HEAD_TOP_AT_PARK_SCALE = 3.068;
  * `railRace/duckPose.ts`. Measured the same way, off the real posed model.
  *
  * Was a translation of the whole child (`DUCK_DROP`, 0.5), which Jim rejected
- * twice: *"that's not what ducking means."* The fold that replaced it is
- * slightly *deeper* than the translation it removed — 1.32 m at ride scale
- * against 1.25 — because a held squash compresses her about her own feet where
- * a drop just moved her. So the duck bars did not have to be re-tuned to keep
- * working; they were re-derived anyway, because the number they are derived
- * *from* changed and a constant that survives by luck is the thing this file
+ * twice: *"that's not what ducking means."* The crouch that replaced it is
+ * **deeper** than the translation it removed — **1.49 m** at ride scale against
+ * 1.25 — because sinking the hips and folding the waist buys more than sliding
+ * the whole child down ever did. So the bars did not *have* to be re-tuned to
+ * keep working; they were re-derived anyway, because the number they derive
+ * *from* moved, and a constant that survives by luck is exactly what this file
  * has already been burned by once.
  */
-export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.54;
+export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.472;
 
 /**
  * Half the duck-bar asset's own depth, at park scale — `duckbar.blend` measures

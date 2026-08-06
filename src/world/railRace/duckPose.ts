@@ -22,12 +22,15 @@ import type { CreatureLimbs } from '../../art/style/asset';
  *   flower pick already bends by, with the same reasoning: the legs hang off
  *   `body` in this rig, so bending it keeps **the feet planted** where lowering
  *   it would take them through the floor.
- * - {@link DUCK_SQUASH} compresses her. This is the part that actually gains
- *   the clearance, and it is doing more of that work than you would expect —
- *   see its own comment. `body` scales about its own origin, which sits at her
- *   feet, so a squash brings her head down while leaving her feet exactly where
- *   they were. It is the same squash-and-stretch the shared walk cycle already
- *   applies to every character in the park (`art/style/asset.ts`), just held.
+ * - {@link DUCK_HIP_DROP} sinks her hips into the cart. This is the crouch, and
+ *   the part that actually gains the clearance — `body`, never `root`, so she
+ *   folds down *within* the cart instead of sliding out through the bottom of
+ *   it. See its own comment for why that is the whole distinction Jim was
+ *   drawing, and for the one thing it depends on.
+ * - {@link DUCK_SQUASH} compresses her a little on top. `body` scales about its
+ *   own origin, so this costs nothing in feet position; it is the same
+ *   squash-and-stretch the shared walk cycle already applies to every character
+ *   in the park (`art/style/asset.ts`), just held and a bit deeper.
  * - {@link DUCK_HEAD_TUCK} tucks her chin in, and the arms come in with it, so
  *   she reads as making herself small rather than merely being short.
  *
@@ -49,16 +52,44 @@ export const DUCK_BEND = 0.78;
 /**
  * How much of her height the squash takes, 0..1 (`scale.y = 1 - this`).
  *
- * **This is doing more work than the bend, and that is not obvious.** A folded
- * body ought to be the thing that gets her under a bar, and for a normally
- * proportioned figure it would be. This is a cartoon child whose head is 3.74 m
- * across at ride scale, and tipping a big round head forward brings the *back*
- * of the skull up almost exactly as fast as it brings the crown down: measured
- * on the real model, a 45° bend on its own lowers the top of her head by
- * **0.077 m** out of 2.109. So the bend is worth having for how it reads and is
- * worth nearly nothing for clearance, and the squash has to find the rest.
+ * Deliberately **small**, and it took two goes to get there. A cartoon child's
+ * head is 3.74 m across at ride scale, and tipping a big round head forward
+ * brings the *back* of the skull up almost as fast as it brings the crown down:
+ * measured on the real model, the 45° bend on its own lowers the top of her
+ * head by **0.077 m** out of 2.109. So the bend reads beautifully and buys
+ * almost no clearance.
+ *
+ * The first version of this file answered that by squashing her 22%, which got
+ * her under the bar and looked like a child being *compressed* rather than one
+ * ducking — 88% of the height came from scaling her. {@link DUCK_HIP_DROP} is
+ * what fixed it: dropping the hips buys more clearance than that squash did,
+ * so the squash could come back down to a supporting effect. It is still twice
+ * the walk cycle's, because a held pose can carry more than a passing one.
  */
-export const DUCK_SQUASH = 0.22;
+export const DUCK_SQUASH = 0.12;
+
+/**
+ * **How far her hips sink, in her own pre-`RIDE_SCALE` metres — this is the
+ * crouch.**
+ *
+ * `body`, not `root`, and the distinction is the whole of Jim's complaint.
+ * Moving `root` moved the entire child, feet included, down **through the
+ * cart's floor and out of the bottom of it** — a lift descending. Moving `body`
+ * leaves `root` pinned to the seat and sinks her hips *within* the cart, which
+ * is what a person does when they duck. Her feet come down with the hips,
+ * because this rig hangs the legs off `body` and **has no knee** to fold them
+ * at — but they come down into the hollow of the tub, where the legs already
+ * live and where the cart's own sides (which rise to 1.44 against a seat at
+ * 0.958) hide them. Measured: the soles land at 0.541 against a tub floor at 0,
+ * so nothing ever leaves the cart. The dodgems settled this precedent already
+ * by burying its riders' legs in the tub.
+ *
+ * **Worth being plain about the limit**, because it decides whether this rig
+ * ever needs a modelling pass: this works *here* only because a cart hides the
+ * legs. Nothing about it would survive a crouch in the open — a pelvis joint
+ * and a knee would be needed for that, and neither exists.
+ */
+export const DUCK_HIP_DROP = 0.22;
 
 /** Chin tuck, radians, on top of whatever the bend already did to the head. */
 export const DUCK_HEAD_TUCK = 0.5;
@@ -93,6 +124,7 @@ export interface Duckable {
 export function poseDuck(target: Duckable, amount: number): void {
   const fold = Math.max(0, Math.min(1, amount));
   target.body.rotation.x = DUCK_BEND * fold;
+  target.body.position.y = -DUCK_HIP_DROP * fold;
   const squash = 1 - DUCK_SQUASH * fold;
   // Widen as she flattens, the way every squash in this park does: a body that
   // only loses height reads as scaled, one that spreads reads as squashed.
