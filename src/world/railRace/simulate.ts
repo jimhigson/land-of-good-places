@@ -177,9 +177,15 @@ export const HAZARD_LAYOUT: HazardLayout = planHazards(RAIL_RACE_PLAN.route.leng
  * Called once when `RailRace.chooseLevel` fires, and once more at
  * construction for the calm, hazard-free level-1 default the ring and the
  * idling rivals sit in between races.
+ *
+ * `builtBars` is the ring's own `RailRaceTrack.barDistances` — where the bars
+ * really ended up, which is not always where `planHazards` asked for them. Pass
+ * it whenever there *is* a built ring; the headless checkers have none, so they
+ * race the planned positions, which is correct for them (they measure balance,
+ * not whether the scene agrees with the sums). See `planHazards`.
  */
-export function scheduleForLevel(level: RaceLevel): HazardSchedule {
-  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level);
+export function scheduleForLevel(level: RaceLevel, builtBars?: readonly number[]): HazardSchedule {
+  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level, builtBars);
 }
 
 /** The finish line, in metres travelled. */

@@ -244,6 +244,17 @@ function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<
  * a given level's schedule actually includes them is decided afterwards, see
  * this file's own header.
  *
+ * **`builtBars` — the built ring's answer, when there is one.** `lap` is always
+ * the *planned* layout, because `track.ts` builds its geometry from that and
+ * looks each bar's supporting trestle up by its planned grid index. But the bar
+ * that gets stood up can end a couple of metres from where it was asked for,
+ * because its support moved to find clear ground, and until 5 August 2026
+ * nothing told the physics. So a caller holding a real ring passes that ring's
+ * `RailRaceTrack.barDistances` and the *crossings* — the list `stepRider`
+ * actually bonks you against — are built from those instead. Same list shape,
+ * same per-lap repeat, same sort; only the source of the numbers changes, from
+ * what was asked for to what is there.
+ *
  * Seeded from a fixed constant rather than the park seed: this course is meant
  * to be *learnable*. A child who knows the sparky stretch before the ferris
  * wheel is a child who is enjoying the game, and re-rolling the layout every
@@ -251,7 +262,12 @@ function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<
  * *where* a bar or a zone sits, is deliberately the same whichever level is
  * chosen — level only ever adds or removes whole hazards, never moves one.
  */
-export function planHazards(loopLength: number, laps: number, level: RaceLevel): HazardSchedule {
+export function planHazards(
+  loopLength: number,
+  laps: number,
+  level: RaceLevel,
+  builtBars?: readonly number[],
+): HazardSchedule {
   const rng = new Rng(0x9a11ce);
   const bars: DuckBar[] = [];
   const zones: SparkZone[] = [];
@@ -295,7 +311,12 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
       }
     }
     if (includeBars) {
-      for (const bar of bars) barCrossings.push(base + bar.at);
+      // `builtBars` — the positions `track.ts` actually stood the bars at — wins
+      // over `bars` whenever a built ring handed us any. See {@link planHazards}'s
+      // own `builtBars` note: the two disagreed by 2 m on every bar of the
+      // canonical seed, which is a rider flying clean through a bar and only
+      // then losing her speed.
+      for (const at of builtBars ?? bars.map((bar) => bar.at)) barCrossings.push(base + at);
     }
   }
   barCrossings.sort((a, b) => a - b);

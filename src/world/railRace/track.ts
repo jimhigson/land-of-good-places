@@ -94,6 +94,20 @@ const BEAM_DROP = 0.45;
 export interface RailRaceTrack {
   readonly group: Group;
   /**
+   * **Where this ring's duck bars actually stand**, in metres from the arch,
+   * ascending — the fact the race must be scored against, not the `DuckBar.at`
+   * the schedule *asked* for.
+   *
+   * A bar renders over its supporting trestle, and that trestle may have been
+   * nudged along the loop to find clear ground; the physics never learnt about
+   * the nudge, so on the canonical seed every bar stood 2.00 m before the point
+   * that bonked you and a rider sailed through the bar, losing her speed a
+   * cart's length later. `RailRace.chooseLevel` now builds its crossings from
+   * this, so the two cannot drift again. Bars whose slot found no support are
+   * absent — they have no geometry, so they must not bonk anybody either.
+   */
+  readonly barDistances: readonly number[];
+  /**
    * Drives the warning lamps.
    *
    * `lapOffset` is how far round the current lap the player is; `safe` is
@@ -449,6 +463,30 @@ export function buildRailRaceTrack(
   // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
   // `barSlots[b]` holds the instance ids of that bar across all four lanes.
   const barSlots: number[][] = [];
+  /**
+   * **Where each bar's geometry actually ended up**, arch-relative, in
+   * `layout.bars` order — the fact, as against `DuckBar.at`'s claim.
+   *
+   * These two used to be allowed to disagree, and did: a bar renders at
+   * `spot.at`, its support's collision-nudged position, while `simulate.ts`
+   * fired the bonk at the *unnudged* `bar.at` it was scheduled on. On the
+   * canonical seed every one of the seven bars carried a −2.00 m arc nudge, so
+   * a rider flew through the bar and lost her speed 2.5 m later — Jim's
+   * "they slow down only after passing through it", 5 August 2026.
+   * `MANDATORY_RADIAL_NUDGES`' own doc comment argued an arc nudge "costs
+   * nothing" because bar and leg move together; that is true of bar-versus-leg
+   * and says nothing about bar-versus-physics, which is what it broke.
+   *
+   * So the built position is published and `RailRace.chooseLevel` schedules the
+   * crossings from it (`simulate.ts`'s `scheduleForLevel`), the same direction
+   * `test/procgen/parkFacts.ts` states as this park's rule: *a number an author
+   * writes down is a claim; a number derived from the built object is a fact*.
+   * Index-aligned with `layout.bars` (and so with `barSlots`), `null` where a
+   * slot found no support at all and the bar's geometry was dropped —
+   * an invisible bar must not bonk anybody either, so those are filtered out
+   * of what the handle publishes rather than defaulted back to `bar.at`.
+   */
+  const barDistances: (number | null)[] = [];
   // Every post belongs to one lane's own bar — coloured to match, the same
   // `LANE_COLOURS` entry as that lane's rails/cart/trestle, so a post reads as
   // "this lane's post" at a glance instead of every post in the ring looking
@@ -469,6 +507,7 @@ export function buildRailRaceTrack(
     const spot = spotByIndex.get(index);
     if (!spot) {
       barSlots.push(slots);
+      barDistances.push(null);
       continue;
     }
     // `spot.at` is already the wrapped, real route coordinate the matched
@@ -477,6 +516,9 @@ export function buildRailRaceTrack(
     // support does, including the support's own small collision-avoidance
     // nudge, rather than merely close to it.
     const at = spot.at;
+    // Back into the arch-relative frame `DuckBar.at`, `setAlerts` and
+    // `simulate.ts`'s schedule all speak — see `barDistances`.
+    barDistances.push(route.wrap(at - route.startDistance));
     route.outwardAt(at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
@@ -644,13 +686,23 @@ export function buildRailRaceTrack(
   return {
     group,
 
+    // Only the bars that really got built, ascending — see `barDistances`.
+    barDistances: barDistances
+      .filter((at): at is number => at !== null)
+      .sort((a, b) => a - b),
+
     setAlerts(lapOffset: number, safe: boolean, elapsed: number): void {
       const colour = sleeves.instanceColor;
       if (!colour) return;
-      layout.bars.forEach((bar, index) => {
+      layout.bars.forEach((_bar, index) => {
+        // Off the bar's **built** position, not the `bar.at` it was scheduled
+        // on — see `barDistances`. The lamp on a bar has to swell as that bar
+        // arrives, and the bar is where it was actually put.
+        const builtAt = barDistances[index];
+        if (builtAt === null || builtAt === undefined) return;
         // How close the player is to this bar, going forwards. Bars behind are
         // calm; the one coming up swells and colours.
-        let ahead = bar.at - lapOffset;
+        let ahead = builtAt - lapOffset;
         if (ahead < -6) ahead += route.length;
         const closeness = ahead < 0 ? 0 : clamp01(1 - ahead / ALERT_RANGE);
         tint.copy(CALM).lerp(safe ? SAFE : WARN, closeness);
