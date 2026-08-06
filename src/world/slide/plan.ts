@@ -6,8 +6,10 @@ import {
   BUILDING_BASE_Y,
   BUILDING_CENTRE_X,
   BUILDING_CENTRE_Z,
+  CASTLE_TOWERS,
   TOP_DECK,
   deckY,
+  distanceOutsideTower,
 } from '../building/layout';
 import {
   BUILDING_HALF_X,
@@ -214,8 +216,17 @@ const SLIDE_DROP = START_Y - END_Y;
  */
 const WALL_STANDOFF = CORRIDOR_RADIUS + 0.6;
 
-/** How far back through the parapet gap the chute's mouth is carried. */
-const DOOR_STUB = 2.6;
+/**
+ * How far *past* the wall plane the chute's mouth is carried, in metres.
+ *
+ * A depth rather than a length, because the two are only the same when the
+ * chute leaves square-on. A fixed 2.6 m stub measured **along the tangent**
+ * covers 2.6·cos θ of southward progress, so once the exit angle passes about
+ * 38° it no longer reaches the wall at all and the chute begins in mid-air
+ * outside the castle — which is exactly what seed 5 started doing the moment
+ * the towers pushed the search onto steeper exits.
+ */
+const DOOR_INSET = 0.55;
 
 /**
  * Masonry left either side of the chute where it passes through the wall.
@@ -273,8 +284,18 @@ const ROOF_ENTRY_Z = 13;
  */
 const ROOF_DOOR_HALF_WIDTH = 2.5;
 
-/** Metres between the points handed to the chute's curve. */
-const POINT_SPACING = 1.6;
+/**
+ * Metres between the points handed to the chute's curve.
+ *
+ * 0.9 rather than 1.6 because the curve is a Catmull-Rom **through** these
+ * points, and a smoothstep sampled too coarsely is not reproduced by one. At
+ * 1.6 m the spline overshot the lip-to-drop junction by 2.5 mm *upwards* — a
+ * slide that briefly goes uphill, which is the one thing {@link heightAt} is
+ * written to make impossible. Sampling finely enough to represent the height
+ * function is the fix; widening `SLIDE_MAY_RISE` to accept the overshoot would
+ * have been changing the test to match the artefact.
+ */
+const POINT_SPACING = 0.9;
 
 const SOUTH_WALL_Z = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
 
@@ -296,6 +317,45 @@ const SOUTH_WALL_Z = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
 const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
 
 
+/**
+ * Does a chute of `radius`, passing (x, z) at height `y`, clear every corner
+ * tower?
+ *
+ * **The fix for the bug Jim found by riding it.** {@link insideCastle} keeps
+ * the chute out of the facade's footprint *rectangle*, which is a far more
+ * precise re-imposition than the bounding circle this ride has to exempt — and
+ * it does not contain the towers. They stand at `(±outerX, ±outerZ)`, outside
+ * that rectangle by half a wall, and bulge 2.05–2.45 m further out again, so
+ * the one solid the chute passes closest to was the one nothing checked. The
+ * exemption was never the bug; what stood in for the castle was.
+ *
+ * Height matters and is used: the roof cone tapers to nothing, so a chute
+ * leaving the parapet at 14.84 m may pass far closer to a tower's tip than it
+ * ever could to its body. Testing against the widest the tower ever gets would
+ * forbid routes that are perfectly clear.
+ */
+function clearsTowers(x: number, z: number, y: number, radius: number): boolean {
+  for (const tower of CASTLE_TOWERS) {
+    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
+  }
+  return true;
+}
+
+/**
+ * The same question at ground level, for the landing run-in and the exit.
+ *
+ * Those are chosen in plan view with no height to hand, and they sit on the
+ * ground, where a tower is at its widest. Taking the widest radius of each
+ * solid is therefore both correct and the conservative direction to err in.
+ */
+function clearsTowersOnTheGround(x: number, z: number, radius: number): boolean {
+  for (const tower of CASTLE_TOWERS) {
+    const widest = Math.max(tower.radiusBottom, tower.radiusTop);
+    if (Math.hypot(x - tower.x, z - tower.z) < widest + radius) return false;
+  }
+  return true;
+}
+
 /** Is (x, z) inside the facade's own footprint, padded by `radius`? */
 export function insideCastle(x: number, z: number, radius: number): boolean {
   return (
@@ -314,12 +374,34 @@ export function insideCastle(x: number, z: number, radius: number): boolean {
  * scanning plain numbers is the same curve read the same way, just not read
  * again for every question asked about it.
  */
+const CRUISER_SAMPLE_SPACING = 1.5;
+
+/**
+ * Residual padding for the difference between the cruiser's spline and the
+ * polyline {@link CRUISER_LINE} stands in for.
+ *
+ * The scan below measures distance to the **segments** between samples, not to
+ * the samples themselves, so the only error left is the spline's sagitta across
+ * one 1.5 m chord — `h²/8r`, which is 28 mm on a 10 m bend and smaller on
+ * anything gentler. 50 mm covers it with room to spare.
+ *
+ * Measuring to points rather than segments is what caused the trouble here:
+ * `assertClearsCruiser` uses the exact `nearestPoint`, so a scan that could be
+ * up to half a spacing optimistic reported clear air where the boot assert
+ * found a foul, and seed 5 stopped solving the moment the towers pushed its
+ * route into that gap. The fix is to measure the right thing, not to pad the
+ * wrong thing — an earlier attempt inflated the exclusion zone by half a
+ * spacing instead, which made every seed's search 15 to 40 times slower and
+ * still left seed 11 unsolvable.
+ */
+const CRUISER_SAGITTA = 0.05;
+
 const CRUISER_LINE: readonly { readonly x: number; readonly y: number; readonly z: number }[] =
   (() => {
     const route = COASTER_PLANS.cruiser.route;
     const samples: { x: number; y: number; z: number }[] = [];
     const probe = new Vector3();
-    for (let d = 0; d < route.length; d += 1.5) {
+    for (let d = 0; d < route.length; d += CRUISER_SAMPLE_SPACING) {
       route.pointAt(d, probe);
       samples.push({ x: probe.x, y: probe.y, z: probe.z });
     }
@@ -352,13 +434,81 @@ export function cruiserCrossesColumn(
   return false;
 }
 
+/**
+ * A uniform grid over the cruiser's segments, so a clearance query looks at the
+ * two or three that could possibly be near instead of all 144.
+ *
+ * The search asks about clearance for every sample of every candidate piece —
+ * millions of times — and the scan is by far the most expensive thing it does:
+ * measured, disabling it took a seed-5 solve from 53.8 s to 1.6 s. Adding the
+ * towers as obstacles made the search work harder, which multiplied that cost
+ * straight through into **game boot**, where `SLIDE_PLAN` solves at module load.
+ * A 45-second freeze before a six-year-old can play is not a trade worth making
+ * for correct geometry when both are available.
+ *
+ * Each segment is filed into every cell its bounding box touches **after being
+ * grown by `reach`**, so any segment within `reach` of a query point is
+ * guaranteed to be in that point's own cell. One lookup, no neighbour walk, and
+ * no chance of missing a segment that a 3×3 scan of undersized cells would.
+ */
+const CRUISER_CELL = 4;
+
+function cruiserCellKey(x: number, z: number): number {
+  // Packed into one integer rather than a string: this is the hottest lookup in
+  // the solve, and building a `${cx},${cz}` key per query allocates millions of
+  // short-lived strings for no benefit.
+  const cx = Math.floor(x / CRUISER_CELL);
+  const cz = Math.floor(z / CRUISER_CELL);
+  return (cx + 4096) * 8192 + (cz + 4096);
+}
+
+const CRUISER_GRID: ReadonlyMap<number, readonly number[]> = (() => {
+  const grid = new Map<number, number[]>();
+  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
+  const count = CRUISER_LINE.length;
+  for (let i = 0; i < count; i += 1) {
+    const a = CRUISER_LINE[i]!;
+    const b = CRUISER_LINE[(i + 1) % count]!;
+    const minX = Math.min(a.x, b.x) - reach;
+    const maxX = Math.max(a.x, b.x) + reach;
+    const minZ = Math.min(a.z, b.z) - reach;
+    const maxZ = Math.max(a.z, b.z) + reach;
+    for (let cx = Math.floor(minX / CRUISER_CELL); cx <= Math.floor(maxX / CRUISER_CELL); cx += 1) {
+      for (let cz = Math.floor(minZ / CRUISER_CELL); cz <= Math.floor(maxZ / CRUISER_CELL); cz += 1) {
+        const key = (cx + 4096) * 8192 + (cz + 4096);
+        const bucket = grid.get(key);
+        if (bucket) bucket.push(i);
+        else grid.set(key, [i]);
+      }
+    }
+  }
+  return grid;
+})();
+
 /** Does a point at (x, y, z) keep {@link CRUISER_AIR} from the Sky Cruiser? */
 function clearsCruiser(x: number, y: number, z: number): boolean {
-  for (const point of CRUISER_LINE) {
-    const dx = point.x - x;
-    const dz = point.z - z;
-    if (dx * dx + dz * dz > CRUISER_OVERLAP * CRUISER_OVERLAP) continue;
-    if (Math.abs(point.y - y) < CRUISER_AIR) return false;
+  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
+  const reach2 = reach * reach;
+  const air = CRUISER_AIR + CRUISER_SAGITTA;
+  const nearby = CRUISER_GRID.get(cruiserCellKey(x, z));
+  if (!nearby) return true;
+  const count = CRUISER_LINE.length;
+  for (const i of nearby) {
+    const a = CRUISER_LINE[i]!;
+    // The cruiser is a closed loop, so the last sample joins back to the first.
+    // Leaving that segment out puts a 1.5 m blind spot in the ride's own air.
+    const b = CRUISER_LINE[(i + 1) % count]!;
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const len2 = abx * abx + abz * abz;
+    let t = len2 <= 1e-12 ? 0 : ((x - a.x) * abx + (z - a.z) * abz) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = a.x + abx * t - x;
+    const dz = a.z + abz * t - z;
+    if (dx * dx + dz * dz > reach2) continue;
+    // Height interpolated to the same place along the segment, so a climbing
+    // stretch is not read at the height of whichever end happened to be sampled.
+    if (Math.abs(a.y + (b.y - a.y) * t - y) < air) return false;
   }
   return true;
 }
@@ -383,6 +533,9 @@ function chuteMayPass(
   // trimming afterwards makes the search back up and find a tidier way round.
   if (distanceAlong > MAX_LENGTH) return false;
   if (insideCastle(x, z, radius)) return false;
+  const height = heightAtArc(distanceAlong, nominalLength);
+  // The castle is a rectangle *plus* four towers. Neither alone is the castle.
+  if (!clearsTowers(x, z, height, radius)) return false;
   {
     for (const [id, entry] of PARK_LAYOUT.entries) {
       if (JOINED_PLOTS.has(id)) continue;
@@ -396,7 +549,7 @@ function chuteMayPass(
   // the top of it; forbidding the crossing outright would leave about 2 m
   // between the castle's east wall and the cruiser to thread a 3.4 m chute
   // through, which is no route at all.
-  return clearsCruiser(x, heightAtArc(distanceAlong, nominalLength), z);
+  return clearsCruiser(x, height, z);
 }
 
 /**
@@ -532,6 +685,7 @@ function approachIsClear(mouth: Pose2): boolean {
 /** Clear of the castle, of every plot but the two being joined, and in bounds. */
 function openGround(x: number, z: number): boolean {
   if (insideCastle(x, z, CORRIDOR_RADIUS)) return false;
+  if (!clearsTowersOnTheGround(x, z, CORRIDOR_RADIUS)) return false;
   if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - CORRIDOR_RADIUS) return false;
   for (const [id, entry] of PARK_LAYOUT.entries) {
     if (JOINED_PLOTS.has(id)) continue;
@@ -569,6 +723,48 @@ function heightAtArc(distanceAlong: number, totalLength: number): number {
 }
 
 /**
+ * The shallowest southward heading a door is allowed to have.
+ *
+ * Below this the chute is running almost along the wall rather than out of it,
+ * and both numbers derived from the crossing — how long the stub must be, and
+ * how wide the hole has to be cut — go to infinity as the heading turns
+ * parallel. Clamping keeps them finite; the pose itself is rejected elsewhere.
+ */
+const MIN_DOOR_HEADING_Z = 0.25;
+
+/** How long a stub must be, along a tangent whose z-component is `headingZ`. */
+function doorStubLength(headingZ: number): number {
+  return (WALL_STANDOFF + DOOR_INSET) / Math.max(headingZ, MIN_DOOR_HEADING_Z);
+}
+
+/**
+ * Where the chute's centre crosses the facade's south wall, and how wide the
+ * hole there has to be — facade-local.
+ *
+ * **Not the route's start point.** That sits {@link WALL_STANDOFF} metres
+ * *outside* the wall, so on any angled exit it is displaced sideways from where
+ * the chute actually goes through, and a hole cut there leaves one edge of the
+ * trough buried in masonry. Measured: on the canonical seed the two were 0.67 m
+ * apart, enough to overhang the opening.
+ *
+ * The width follows from the same angle. A chute of half-width `w` crossing a
+ * plane at θ off the normal needs `w / cos θ` of opening along the wall — the
+ * hole is a slanted slice through it, not a square one.
+ */
+function doorCrossing(route: SolvedRailRoute): { localX: number; halfWidth: number } {
+  const at = { x: 0, z: 0 };
+  const tangent = { x: 0, z: 0 };
+  route.pointAt(0, at);
+  route.tangentAt(0, tangent);
+  const headingZ = Math.max(tangent.z, MIN_DOOR_HEADING_Z);
+  const back = WALL_STANDOFF / headingZ;
+  return {
+    localX: at.x - tangent.x * back - BUILDING_CENTRE_X,
+    halfWidth: CORRIDOR_RADIUS / headingZ + DOOR_SHOULDER,
+  };
+}
+
+/**
  * The chute's centre line in world space, from the parapet gap to the pit.
  *
  * The first point is carried back through the door along the start tangent so
@@ -585,9 +781,26 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const startX = flat.x;
   const startZ = flat.z;
   route.tangentAt(0, flat);
-  points.push(
-    new Vector3(startX - flat.x * DOOR_STUB, START_Y, startZ - flat.z * DOOR_STUB),
-  );
+  // Extend backwards far enough along the route's own heading to land
+  // DOOR_INSET past the wall, however steeply it leaves. Still collinear with
+  // the start tangent, so the chute cannot kink at the join.
+  const stub = doorStubLength(flat.z);
+  // Subdivided at the same {@link POINT_SPACING} as the rest of the chute, not
+  // emitted as one long jump back to the wall.
+  //
+  // The curve through these points is a Catmull-Rom, and its tangent at a point
+  // is set by that point's neighbours. A single stub leaves the second point
+  // with one neighbour 2.6 m behind and the next 1.6 m ahead, and the resulting
+  // asymmetric tangent makes the curve sag and recover across the flat lip —
+  // a rise of about a millimetre, on a stretch whose design height is a
+  // constant. Uniform spacing removes the asymmetry, so the lip comes out as
+  // flat as `heightAt` says it is instead of needing an allowance for not
+  // being. Measured: it is what took seed 18 back under `SLIDE_MAY_RISE`.
+  const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
+  for (let i = stubSteps; i >= 1; i -= 1) {
+    const back = (stub * i) / stubSteps;
+    points.push(new Vector3(startX - flat.x * back, START_Y, startZ - flat.z * back));
+  }
 
   const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
   for (let i = 0; i <= steps; i += 1) {
@@ -665,6 +878,15 @@ export interface PlannedSlide {
    */
   readonly facadeDoorMinX: number;
   readonly facadeDoorMaxX: number;
+  /**
+   * The chute's own half-width **measured along the wall** at the crossing.
+   *
+   * Wider than `CORRIDOR_RADIUS` whenever the chute leaves at an angle, because
+   * the hole is then a slanted slice through the masonry. Exported so a
+   * clearance check asks the same question the cut answered rather than
+   * re-deriving it from a right angle that is not there.
+   */
+  readonly facadeDoorChuteHalf: number;
   /** The gap in the interior roof parapet you walk out through, interior-local. */
   readonly roofDoorMinX: number;
   readonly roofDoorMaxX: number;
@@ -738,13 +960,11 @@ function planSlide(): PlannedSlide {
   assertClearsCruiser(points);
   const { exitX, exitZ } = planExit();
 
-  // Where the chute actually left the wall, read back off the solved route.
-  // Asking the route rather than re-deriving the pose is the whole point: there
-  // is then one answer to "where is the door", and the masonry and the ride are
-  // both reading it rather than each holding their own copy.
-  const mouth = { x: 0, z: 0 };
-  route.pointAt(0, mouth);
-  const doorLocalX = mouth.x - BUILDING_CENTRE_X;
+  // Where the chute actually goes through the wall, read back off the solved
+  // route. Asking the route rather than re-deriving the pose is the whole
+  // point: there is then one answer to "where is the door", and the masonry and
+  // the ride are both reading it rather than each holding their own copy.
+  const crossing = doorCrossing(route);
 
   return {
     name: 'ginormousSlide',
@@ -754,8 +974,9 @@ function planSlide(): PlannedSlide {
     exitZ,
     startY: START_Y,
     endY: END_Y,
-    facadeDoorMinX: doorLocalX - SLIDE_DOOR_HALF_WIDTH,
-    facadeDoorMaxX: doorLocalX + SLIDE_DOOR_HALF_WIDTH,
+    facadeDoorMinX: crossing.localX - crossing.halfWidth,
+    facadeDoorMaxX: crossing.localX + crossing.halfWidth,
+    facadeDoorChuteHalf: crossing.halfWidth - DOOR_SHOULDER,
     roofDoorMinX: ROOF_ENTRY_X - ROOF_DOOR_HALF_WIDTH,
     roofDoorMaxX: ROOF_ENTRY_X + ROOF_DOOR_HALF_WIDTH,
     entryX: ROOF_ENTRY_X,

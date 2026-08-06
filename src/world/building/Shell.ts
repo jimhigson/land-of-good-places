@@ -60,6 +60,11 @@ import {
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
   TOP_DECK,
+  TOWER_BASE_FLARE,
+  TOWER_HEIGHT,
+  TOWER_RADIUS,
+  TOWER_ROOF_HEIGHT,
+  TOWER_ROOF_OVERHANG,
 } from './layout';
 import { SLIDE_PLAN } from '../slide/plan';
 
@@ -606,9 +611,10 @@ const CASTLE_MERLON_DEPTH = 0.5;
 const CASTLE_MERLON_HEIGHT = 1.05;
 const CASTLE_MERLON_PITCH = 1.7;
 
-const TOWER_RADIUS = 2.05;
-const TOWER_HEIGHT = 10.6;
-const TOWER_ROOF_HEIGHT = 4.2;
+// TOWER_RADIUS, TOWER_HEIGHT, TOWER_ROOF_HEIGHT, TOWER_ROOF_OVERHANG and
+// TOWER_BASE_FLARE now live in `layout.ts`. `slide/plan.ts` has to route the
+// ginormous slide around these solids and cannot import this file — this file
+// imports the plan, so it would be a cycle. See `CASTLE_TOWERS` there.
 
 const DOOR_CENTRE_X = (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2;
 const DOOR_ARCH_RADIUS = (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4;
@@ -953,7 +959,7 @@ function buildCornerTowers(plan: ShellPlan): Group {
   ];
 
   const bodies = new InstancedMesh(
-    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * 1.08, TOWER_HEIGHT, 16),
+    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * TOWER_BASE_FLARE, TOWER_HEIGHT, 16),
     softMaterial(PALETTE.buildingWall, 0.78),
     corners.length,
   );
@@ -964,7 +970,7 @@ function buildCornerTowers(plan: ShellPlan): Group {
   // A true cone (16 segments), unlike the roof pavilion's four-sided pyramid —
   // this one is meant to read as a proper witch's-hat tower roof up close.
   const roofs = new InstancedMesh(
-    new ConeGeometry(TOWER_RADIUS + 0.4, TOWER_ROOF_HEIGHT, 16),
+    new ConeGeometry(TOWER_RADIUS + TOWER_ROOF_OVERHANG, TOWER_ROOF_HEIGHT, 16),
     softMaterial(PALETTE.buildingRoofDeep, 0.72),
     corners.length,
   );

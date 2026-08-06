@@ -2,6 +2,7 @@ import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
 import type { CollisionWorld } from '../Collision';
+import { PLAYER_RADIUS } from '../../core/constants';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToPath } from '../paths';
 import { terrainHeight } from '../terrain';
@@ -51,7 +52,9 @@ const LEG_SPACING = 13;
  * `isClearCircle`. A leg has no reason to be at an exact multiple of anything,
  * so letting it slide along the chute costs nothing and saves most of them.
  */
-const NUDGES: readonly number[] = [0, 2, -2, 4, -4, 6, -6, 8.5, -8.5];
+const NUDGES: readonly number[] = [
+  0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8.5, -8.5, 10, -10,
+];
 
 /**
  * Shortest leg worth building, in metres.
@@ -71,6 +74,18 @@ const POST_COLLISION_RADIUS = 0.42;
 
 /** Clear ground a leg needs around it before it may stand there. */
 const GROUND_CLEARANCE = 1.0;
+
+/**
+ * The narrowest gap a child can actually walk through, and so the least room
+ * two legs may leave between their feet.
+ *
+ * `PLAYER_RADIUS` is 0.62 and `NavGrid` fattens every collider by it before
+ * deciding a cell is walkable, so anything tighter than twice that is not a gap
+ * at all — it is a wall with a slot in it. Taken from the player rather than
+ * from a spacing the planner aims for, which is the difference between proving
+ * a child fits and proving the planner did its arithmetic.
+ */
+const WALKABLE_GAP = 2 * PLAYER_RADIUS;
 
 /** How far a leg keeps off the paved network. The coaster's pylon figure. */
 const PATH_CLEARANCE = 2.8;
@@ -149,6 +164,20 @@ export function planSlideLegs(
           Math.hypot(point.x - entry.x, point.z - entry.z) < entry.boundingRadius + 2.4,
       );
       if (pinches) continue;
+      // Not too close to a leg already placed.
+      //
+      // Slots are spaced along **arc length**, which is not the same as being
+      // spaced apart on the ground: this chute wraps a castle, so two slots a
+      // third of the ride apart can stand almost on the same spot. Nothing
+      // checked that, and on seed 5 two legs ended up overlapping by 0.11 m —
+      // a single fat post where a child should have been able to walk between
+      // two, which the procgen invariant caught only after the towers changed
+      // the route enough to expose it.
+      const crowds = legs.some(
+        (placed) =>
+          Math.hypot(point.x - placed.x, point.z - placed.z) < 2 * FOOT_RADIUS + WALKABLE_GAP,
+      );
+      if (crowds) continue;
       legs.push({ x: point.x, z: point.z, ground, top: point.y });
       break;
     }

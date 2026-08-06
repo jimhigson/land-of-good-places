@@ -341,11 +341,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     halfZ: BUILDING_HALF_Z,
   };
 
-  const { SLIDE_PLAN, CORRIDOR_RADIUS } = await import('../../src/world/slide/plan.ts');
+  const { SLIDE_PLAN } = await import('../../src/world/slide/plan.ts');
   const slideDoor = {
     minX: SLIDE_PLAN.facadeDoorMinX,
     maxX: SLIDE_PLAN.facadeDoorMaxX,
-    corridorRadius: CORRIDOR_RADIUS,
+    corridorRadius: SLIDE_PLAN.facadeDoorChuteHalf,
   };
 
   // Every world matrix must be composed before a single one is read: a headless
