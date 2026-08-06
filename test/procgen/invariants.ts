@@ -697,9 +697,31 @@ function builtRings(facts: ParkFacts): readonly BuiltRing[] {
       ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
       ['race', 'railRace:race-ring', railRace.raceRoute.scale],
     ] as const
-  )
-    .map(([label, name, scale]) => ({ label, group: railRace.group.getObjectByName(name), scale }))
-    .filter((ring): ring is BuiltRing => ring.group !== undefined);
+  ).flatMap(([label, name, scale]) => {
+    // `flatMap` with a narrowing `if`, rather than `.map(...).filter(guard)`.
+    //
+    // The filter form was two type errors, and they were not cosmetic — this
+    // file was never typechecked until `tsconfig.test.json` existed (#192), so
+    // they sat on main unnoticed. `.map` produced `group: Object3D | undefined`,
+    // and the guard claimed `ring is BuiltRing`, which TypeScript rejected
+    // outright (TS2677): `BuiltRing.label` is `string`, but the mapped element's
+    // is the literal union `'walk-past' | 'race'`, so the predicate's type was
+    // not assignable to the parameter it was narrowing. The `readonly
+    // BuiltRing[]` return then failed too, because nothing had actually narrowed
+    // `group`.
+    //
+    // A predicate would have silenced both, but a predicate is an *assertion* —
+    // the compiler takes it on trust, which is what let the mismatch hide in the
+    // first place. Here the `if` narrows `group` for real and the object literal
+    // is checked against `BuiltRing` by ordinary inference. Nothing is asserted,
+    // so nothing can be asserted wrongly.
+    //
+    // Behaviour is identical: a ring whose group is missing is still dropped,
+    // which is deliberate — see this function's doc. The callers count the rings
+    // they get back, and that count going wrong is the alarm.
+    const group = railRace.group.getObjectByName(name);
+    return group ? [{ label, group, scale }] : [];
+  });
 }
 
 /**

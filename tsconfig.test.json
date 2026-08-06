@@ -1,0 +1,30 @@
+{
+  // The typecheck for `test/` — a SECOND project rather than more `include`
+  // entries on the first one, so that `test/`'s needs cannot quietly change the
+  // rules `src/` is checked under.
+  //
+  // Note what is NOT here: `"types": ["node"]`. That was the obvious way to give
+  // `parkFacts.ts` its `process`, and it is wrong — `types` is per-project, this
+  // project pulls in most of `src/` transitively (the tests import the park), and
+  // Node does not merely add globals but **redeclares DOM ones with different
+  // types**. It broke three already-correct browser files on `setTimeout` alone.
+  // The single global the tests really use is declared in `test/node-env.d.ts`
+  // instead; the full reasoning is written up there.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The tests and `scripts/*.mts` import with explicit `.ts`/`.mts`
+    // extensions, because they are run by Node directly rather than bundled —
+    // see `scripts/ts-extension-resolver-register.mjs`. Safe here because the
+    // inherited `noEmit` is what this flag requires: nothing is emitted, so
+    // there is no output whose import paths could be left pointing at
+    // TypeScript that no longer exists by runtime.
+    "allowImportingTsExtensions": true
+  },
+
+  // `scripts/` is deliberately NOT listed. What the tests actually reach —
+  // `park-harness.mts` and its imports — is pulled in transitively and checked
+  // anyway, which is the part that can break a procgen run. Listing all 45
+  // scripts would be a much larger change than this issue, and is worth its own
+  // one; see HANDOFF-tsc-tests.md.
+  "include": ["test", "vitest.config.ts"]
+}
