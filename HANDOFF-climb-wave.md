@@ -164,7 +164,26 @@ camera-facing side nearly removes the strongest cue. The fix is to choose the
 perch on the camera-facing side of the trunk rather than by approach, which
 changes where the scramble goes and so wants QA eyes; not attempted here.
 
-## Round 3 QA — FAILED. Awaiting Jim's ruling; do not start a fourth attempt.
+## CLOSED — Jim's ruling, 5 Aug: sit higher, ship it
+
+> *"I think the waving in the tree doesn't need more QA, just let the character
+> sit higher and call it done."*
+
+`CLIMB_PEEK_LIFT = 0.74` (40% of the kid's 1.86 m). Re-measured by QA's method —
+eight bearings, whole scene, delta technique — the arm now shows **18–21 px at
+every bearing on every tree: 0 of 32 zeros, from 15 of 32.** The arm half of the
+anti-correlation is gone.
+
+**Peeking read preserved** (the risk flagged before doing it): at play scale the
+canopy still meets her at about chin level with ~6 px of head clear above it.
+She reads as sitting *in* the tree from the chest up, not floating above it —
+better than before, when only the crown of her head showed as a bump.
+
+**Known, not fixed:** the *turn* is still approach-dependent (0.49 s
+camera-facing out of a 1.7 s wave at bearing 45°, against the full 1.70 s at
+225°). The lift does not address it. Not opened.
+
+## Round 3 QA — FAILED (history; superseded by the ruling above)
 
 The rock was **verified**: 22.7 px of head travel at 1280×800, identical at
 every settled bearing on all four trees. QA froze the world (`timeScale = 0`)
