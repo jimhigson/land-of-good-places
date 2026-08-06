@@ -399,11 +399,21 @@ function stowedIds(state: GameState, visible: readonly InventoryItem[]): string[
   for (const item of state.inventory) {
     if (outside.has(item.uid)) continue;
     if (item.uid === state.carriedUid) continue;
-    // A hat on your head and a flower in your hair are not in the bag. Without
-    // this the same hat is drawn twice — once at `hatAnchor`, once peeking out
-    // of the backpack behind it — which is easy to hit now that the drawer can
-    // put any hat on (`ui/InventoryDrawer.ts`).
-    if (item.uid === state.wornHatUid || item.uid === state.wornFlowerUid) continue;
+    // A hat on your head, a flower in your hair and a keychain on your bag are
+    // not in the bag. Without this the same thing is drawn twice — once where
+    // it is worn, once peeking out of the backpack behind it — which is easy to
+    // hit now that the drawer can put any hat on (`ui/InventoryDrawer.ts`).
+    //
+    // The keychain is the worst of the three to get wrong, because it hangs off
+    // the bag itself: the charm and its own copy climbing out of the mouth
+    // above it would be a hand's width apart.
+    if (
+      item.uid === state.wornHatUid ||
+      item.uid === state.wornFlowerUid ||
+      item.uid === state.wornKeychainUid
+    ) {
+      continue;
+    }
     ids.add(item.id);
   }
   return [...ids];

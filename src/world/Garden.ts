@@ -1,3 +1,4 @@
+import { alongBoundary, PARK_BOUNDARY, TERRAIN_EDGE_RADIUS, type EdgeStation } from './boundary';
 import {
   BoxGeometry,
   BufferAttribute,
@@ -13,7 +14,6 @@ import {
   Vector3,
 } from 'three';
 import {
-  GARDEN_HALF_SIZE,
   TERRAIN_RADIUS,
   TERRAIN_HEIGHT_SCALE,
   TERRAIN_SEGMENTS,
@@ -32,6 +32,35 @@ import type { CollisionWorld } from './Collision';
  * Everything here is static — built once, never updated — so it is a plain
  * builder rather than a GameSystem.
  */
+/**
+ * Half the width the boundary masonry occupies about the park's outline, in
+ * metres — the pillar caps, which are the widest part of it.
+ *
+ * Exported because anything asking "is this thing clear of the park wall?" has
+ * to measure against the *widest* stone, not the collision half-width (0.45)
+ * that only the physics sees. A rail passing 0.5 m outside the outline would
+ * clear the collider and still be driven straight through a pillar cap.
+ *
+ * Exported rather than copied, deliberately. This session alone has produced
+ * four bugs of the form "the same number declared twice, then diverging" —
+ * two stall stand points (#114), two `ParkBoundary` types, two `circleBoundary`
+ * functions, and a `BRIDGE_RISE` that no longer matched the locomotive it was
+ * supposed to clear. A number that describes built geometry belongs to the
+ * module that builds it.
+ */
+export const BOUNDARY_MASONRY_HALF_WIDTH = 0.86;
+
+/**
+ * Half-thickness of the boundary wall as **collision** sees it — what a child
+ * is actually stopped by, as opposed to the stone she can see.
+ *
+ * Narrower than {@link BOUNDARY_MASONRY_HALF_WIDTH} because the pillar caps
+ * bulge past the run of blocks and nothing needs to collide with a decorative
+ * bulge. Both numbers are real and they answer different questions: "could a
+ * child be standing here?" is this one, "is there stone here?" is that one.
+ */
+export const BOUNDARY_WALL_COLLISION_HALF = 0.45;
+
 export class Garden {
   readonly group = new Group();
 
@@ -73,7 +102,7 @@ function buildTerrain(): Mesh {
 
   for (let ring = 0; ring <= rings; ring += 1) {
     // Squared distribution puts more detail where the player actually walks.
-    const radius = Math.pow(ring / rings, 1.35) * TERRAIN_RADIUS;
+    const radius = Math.pow(ring / rings, 1.35) * TERRAIN_EDGE_RADIUS;
     for (let segment = 0; segment <= segments; segment += 1) {
       const index = ring * (segments + 1) + segment;
       const angle = (segment / segments) * Math.PI * 2;
@@ -143,10 +172,19 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const group = new Group();
   group.name = 'boundary-wall';
 
-  const radius = GARDEN_HALF_SIZE - 2;
+  // Laid out along the park's own edge. Every number below that used to be an
+  // angle is now a distance walked round the outline, because on a boundary
+  // running from 57 m to 110 m an even angular step is not an even spacing:
+  // it would bond the masonry at the pinch and stretch it into a picket fence
+  // at the bulge.
   const blockWidth = 1.7;
-  const blockCount = Math.round((Math.PI * 2 * radius) / blockWidth);
   const courses = 2;
+  const courseStations = [
+    alongBoundary(PARK_BOUNDARY, blockWidth),
+    // Half a block along the edge, which is what makes alternate courses bond.
+    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2),
+  ];
+  const blockCount = courseStations[0]!.length;
   const courseHeight = 0.62;
 
   const blockGeometry = new BoxGeometry(blockWidth * 0.96, courseHeight, 0.7);
@@ -170,18 +208,16 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
 
   let index = 0;
   for (let course = 0; course < courses; course += 1) {
-    // Half-block offset on alternate courses gives a proper bonded look.
-    const angleOffset = course % 2 === 0 ? 0 : Math.PI / blockCount;
+    const stations = courseStations[course % courseStations.length] as EdgeStation[];
     for (let i = 0; i < blockCount; i += 1) {
-      const angle = (i / blockCount) * Math.PI * 2 + angleOffset;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
+      const station = stations[i % stations.length] as EdgeStation;
+      const { x, z } = station;
       const y = terrainHeight(x, z) + courseHeight * (course + 0.5);
       positionVector.set(x, y, z);
-      // The box's long axis is X, and it must lie along the *tangent* of the
-      // ring. Rotating by -angle alone points it radially, which turns the wall
-      // into a ring of separate tombstones — hence the extra quarter turn.
-      quaternion.setFromAxisAngle(UP, -(angle + Math.PI / 2));
+      // The box's long axis is X and must lie *along* the edge. `alongBoundary`
+      // hands back the yaw that does it; pointing it across instead turns the
+      // wall into a ring of separate tombstones.
+      quaternion.setFromAxisAngle(UP, station.yaw);
       matrix.compose(positionVector, quaternion, scale);
       blocks.setMatrixAt(index, matrix);
       // Gentle per-block colour jitter so the ring isn't a flat pink band.
@@ -207,7 +243,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   pillars.castShadow = true;
   pillars.receiveShadow = true;
 
-  const capGeometry = new SphereGeometry(0.86, 14, 10);
+  const capGeometry = new SphereGeometry(BOUNDARY_MASONRY_HALF_WIDTH, 14, 10);
   const capMaterial = new MeshStandardMaterial({
     color: PALETTE.stonePinkLight,
     roughness: 0.6,
@@ -216,14 +252,14 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const caps = new InstancedMesh(capGeometry, capMaterial, pillarCount);
   caps.castShadow = true;
 
+  const pillarStations = alongBoundary(PARK_BOUNDARY, PARK_BOUNDARY.perimeter / pillarCount);
   for (let i = 0; i < pillarCount; i += 1) {
-    const angle = (i / pillarCount) * Math.PI * 2;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const station = pillarStations[i % pillarStations.length] as EdgeStation;
+    const { x, z } = station;
     const ground = terrainHeight(x, z);
 
     positionVector.set(x, ground + 1.05, z);
-    quaternion.setFromAxisAngle(UP, -(angle + Math.PI / 2));
+    quaternion.setFromAxisAngle(UP, station.yaw);
     matrix.compose(positionVector, quaternion, scale);
     pillars.setMatrixAt(i, matrix);
 
@@ -235,18 +271,14 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   caps.instanceMatrix.needsUpdate = true;
   group.add(pillars, caps);
 
-  // The wall is solid: approximate the ring with a many-sided polygon.
-  const collisionSegments = 64;
-  for (let i = 0; i < collisionSegments; i += 1) {
-    const a = (i / collisionSegments) * Math.PI * 2;
-    const b = ((i + 1) / collisionSegments) * Math.PI * 2;
-    collision.addWall(
-      Math.cos(a) * radius,
-      Math.sin(a) * radius,
-      Math.cos(b) * radius,
-      Math.sin(b) * radius,
-      0.45,
-    );
+  // The wall is solid. The collision polygon walks the same outline the blocks
+  // do, at a coarser step — one segment per ~2 m of edge, so the chord never
+  // bows further from the drawn masonry than the masonry is thick.
+  const collisionStations = alongBoundary(PARK_BOUNDARY, 2);
+  for (let i = 0; i < collisionStations.length; i += 1) {
+    const a = collisionStations[i] as EdgeStation;
+    const b = collisionStations[(i + 1) % collisionStations.length] as EdgeStation;
+    collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
   }
 
   return group;

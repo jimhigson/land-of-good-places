@@ -211,7 +211,7 @@ function routeAround(
         // blocker would splice the same escape point forever (measured:
         // seven copies of one point). Only the *far* endpoint can be inside
         // a blocker: starts are junction points, kept outside every circle
-        // by `nearestNetworkPoint`.
+        // by `bestBranchPoint`.
         if (Math.hypot(blocker.x - b[0], blocker.z - b[1]) < blocker.radius) continue;
         const t = Math.max(0, Math.min(length, (blocker.x - a[0]) * dx + (blocker.z - a[1]) * dz));
         const cx = a[0] + dx * t;
@@ -379,7 +379,7 @@ function buildGraph(): PathGraph {
     // as good a trunk as the ring. Starting from the nearest ring vertex sent
     // the west station's spur on a 45 m wander from (-8.7, 5) around three
     // booths; from the sky cruiser's spur it is a 21 m walk.
-    const start = nearestNetworkPoint(network(), ringPoints, ex, ez);
+    const start = bestBranchPoint(network(), ringPoints, ex, ez);
     const l = Math.hypot(towardX - ex, towardZ - ez);
     // `past` used to walk a flat 2 m towards the destination regardless of
     // how far the doormat actually stands from the plot's own edge. For a
@@ -492,7 +492,7 @@ function buildGraph(): PathGraph {
   for (const station of TRAIN_PLAN.stations) {
     const id = `station-${station.index}`;
     nodes.push({ id, kind: 'station', x: station.standX, z: station.standZ });
-    const start = nearestNetworkPoint(network(), ringPoints, station.approachX, station.approachZ);
+    const start = bestBranchPoint(network(), ringPoints, station.approachX, station.approachZ);
     edges.push({
       from: 'ring',
       to: id,
@@ -533,42 +533,124 @@ function buildGraph(): PathGraph {
   return { nodes, edges, ring };
 }
 
-/** The closest point on any segment of the routes built so far — where a new
- * spur branches off. Falls back to the nearest ring vertex if the network is
- * somehow empty. */
-function nearestNetworkPoint(
+/** The closest point on one route to `(x, z)`, or null if it has none usable. */
+function nearestPointOnRoute(
+  route: RouteDefinition,
+  x: number,
+  z: number,
+): readonly [number, number] | null {
+  let best: readonly [number, number] | null = null;
+  let bestDistance = Infinity;
+  const points = route.points;
+  const count = route.closed ? points.length : points.length - 1;
+  for (let i = 0; i < count; i += 1) {
+    const [ax, az] = points[i] as readonly [number, number];
+    const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSq = dx * dx + dz * dz;
+    const t =
+      lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    // Never branch from inside a plot's blocker circle: every spur's last
+    // couple of metres run into a plot mouth, and a junction there routes
+    // the new spur straight through the booth it belongs to.
+    if (BLOCKERS.some((b) => Math.hypot(px - b.x, pz - b.z) < b.radius)) continue;
+    const distance = Math.hypot(x - px, z - pz);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = [px, pz];
+    }
+  }
+  return best;
+}
+
+/** How far a walk along this polyline actually is. */
+function polylineLength(points: readonly (readonly [number, number])[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const [ax, az] = points[i - 1] as readonly [number, number];
+    const [bx, bz] = points[i] as readonly [number, number];
+    total += Math.hypot(bx - ax, bz - az);
+  }
+  return total;
+}
+
+/**
+ * Where a new spur should branch off the network — **the junction that gives
+ * the shortest walk**, not the junction that is nearest.
+ *
+ * ### The fault this replaces
+ *
+ * This used to be `nearestNetworkPoint`: the closest point on any paved route,
+ * full stop. That is *first-fit* — it commits to whichever junction happens to
+ * be nearest in a straight line and never asks what the resulting walk is like.
+ * It is the same fault the rail route solver had (return the first satisfying
+ * route rather than the best) and the castle crossing had (four solves that
+ * closed before reaching it), and it fails the same way: an arbitrary early
+ * choice silently constrains everything after it.
+ *
+ * The straight-line distance to a junction is not the thing anybody cares
+ * about. A junction 6 m away whose run to the destination has to squeeze round
+ * two plots is a worse place to start than one 9 m away with a clear line — and
+ * worse in the way that matters, because the ribbon that snakes round the back
+ * of a plot is what leaves a destination's own waypoint in a pocket nothing
+ * else can reach.
+ *
+ * ### What it cost, on 5 August 2026
+ *
+ * `STALL_STANDS` is iterated in `STALL_PLACEMENTS` order, which puts the
+ * **rail-race booth first**. Move that booth out to the park's rim — which its
+ * `atRim` relation does, because the ride it boards now follows the park's edge
+ * — and its long spur is laid down before anything else. The **ferris-wheel
+ * kiosk**, which has nothing to do with the rail race, then found that spur
+ * nearest, branched off it, and ended up in a pocket its own stand could not be
+ * walked out of. `check:park` reported one stranded waypoint at (20.9, 20.2)
+ * and nothing else. Measured exhaustively: **all 344** positions the rail-race
+ * booth could legally take stranded that same one waypoint.
+ *
+ * Growing the spurs in a different order does not fix it — it only moves it.
+ * Nearest-destination-first was tried and simply stranded the rail-race booth
+ * and its own ride exit instead, because whichever spur is grown while the
+ * network is wrong *for it* is the one that suffers. The order was never the
+ * disease; choosing a junction without looking at where it leads was.
+ *
+ * ### Best-fit
+ *
+ * So every route offers its own nearest point as a **candidate**, each candidate
+ * is routed to the destination around the real plots, and the one with the
+ * shortest actual walk wins. Branching off an earlier spur is still very much
+ * allowed — it is what saves the west station a 45 m wander — but now it has to
+ * *earn* it by being a better walk, rather than winning on proximity alone.
+ *
+ * Ties keep the earlier route, so the network stays deterministic.
+ */
+function bestBranchPoint(
   routes: readonly RouteDefinition[],
   ringPoints: readonly (readonly [number, number])[],
   x: number,
   z: number,
 ): readonly [number, number] {
-  let best: readonly [number, number] | null = null;
-  let bestDistance = Infinity;
+  const candidates: (readonly [number, number])[] = [];
   for (const route of routes) {
-    const points = route.points;
-    const count = route.closed ? points.length : points.length - 1;
-    for (let i = 0; i < count; i += 1) {
-      const [ax, az] = points[i] as readonly [number, number];
-      const [bx, bz] = points[(i + 1) % points.length] as readonly [number, number];
-      const dx = bx - ax;
-      const dz = bz - az;
-      const lengthSq = dx * dx + dz * dz;
-      const t =
-        lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
-      const px = ax + dx * t;
-      const pz = az + dz * t;
-      // Never branch from inside a plot's blocker circle: every spur's last
-      // couple of metres run into a plot mouth, and a junction there routes
-      // the new spur straight through the booth it belongs to.
-      if (BLOCKERS.some((b) => Math.hypot(px - b.x, pz - b.z) < b.radius)) continue;
-      const distance = Math.hypot(x - px, z - pz);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = [px, pz];
-      }
+    const point = nearestPointOnRoute(route, x, z);
+    if (point) candidates.push(point);
+  }
+  // The ring is always a legal place to start from, and it is the fallback if
+  // no paved route offered a junction outside every plot.
+  candidates.push(nearestRingPoint(ringPoints, x, z));
+
+  let best = candidates[candidates.length - 1] as readonly [number, number];
+  let shortest = Infinity;
+  for (const candidate of candidates) {
+    const walk = polylineLength(routeAround(candidate, [x, z]));
+    if (walk < shortest - 1e-9) {
+      shortest = walk;
+      best = candidate;
     }
   }
-  return best ?? nearestRingPoint(ringPoints, x, z);
+  return best;
 }
 
 /** Min distance from (x, z) to any segment of the routes built so far. */

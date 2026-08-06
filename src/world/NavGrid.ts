@@ -1,3 +1,4 @@
+import type { ParkBoundary } from './boundary';
 import { BUILDING_FLOOR_HEIGHT, BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import { autoHopClears, type CollisionWorld } from './Collision';
@@ -181,9 +182,7 @@ export class NavGrid {
   private pointZ = new Float32Array(0);
 
   private built = false;
-  private builtCentreX = 0;
-  private builtCentreZ = 0;
-  private builtRadius = 0;
+  private builtBoundary: ParkBoundary | null = null;
   private builtY = 0;
   private builtRevision = -1;
 
@@ -266,33 +265,30 @@ export class NavGrid {
    * space the walker is in. Returns false if there is no usable lattice at all.
    */
   private ensureLattice(sample: GroundSampler, referenceY: number): boolean {
-    const centreX = this.collision.playBoundsX;
-    const centreZ = this.collision.playBoundsZ;
-    const radius = this.collision.playBoundsRadius;
+    const boundary = this.collision.playBounds;
 
     if (
       this.built &&
       this.builtRevision === this.collision.revision &&
-      this.builtCentreX === centreX &&
-      this.builtCentreZ === centreZ &&
-      this.builtRadius === radius &&
+      this.builtBoundary === boundary &&
       Math.abs(referenceY - this.builtY) <= REBUILD_HEIGHT
     ) {
       return true;
     }
 
-    this.rebuild(centreX, centreZ, radius, sample, referenceY);
+    this.rebuild(boundary, sample, referenceY);
     return this.built;
   }
 
-  private rebuild(
-    centreX: number,
-    centreZ: number,
-    radius: number,
-    sample: GroundSampler,
-    referenceY: number,
-  ): void {
-    const side = Math.ceil(((radius + MARGIN) * 2) / CELL);
+  private rebuild(boundary: ParkBoundary, sample: GroundSampler, referenceY: number): void {
+    // Sized and centred on the boundary's own extent rather than on a radius
+    // about a centre: the park's edge is neither circular nor, for the castle
+    // interior, centred on the origin.
+    const { minX, maxX, minZ, maxZ } = boundary.extent;
+    const centreX = (minX + maxX) / 2;
+    const centreZ = (minZ + maxZ) / 2;
+    const reach = Math.max(maxX - minX, maxZ - minZ) / 2;
+    const side = Math.ceil(((reach + MARGIN) * 2) / CELL);
     if (side <= 0) {
       this.built = false;
       return;
@@ -321,15 +317,15 @@ export class NavGrid {
 
     // The soft boundary first: everything the resolver would push her back
     // inside of is simply not part of the map.
-    const limit = radius - this.walkerRadius;
-    const limitSquared = limit * limit;
+    // Asked of the boundary itself, so the lattice and `CollisionWorld`'s
+    // clamp cannot disagree about where the park ends. If they ever do,
+    // tap-to-move routes to somewhere walking refuses to go.
     for (let cz = 0; cz < side; cz += 1) {
       const z = this.originZ + cz * CELL;
-      const dz = z - centreZ;
       const row = cz * side;
       for (let cx = 0; cx < side; cx += 1) {
-        const dx = this.originX + cx * CELL - centreX;
-        if (dx * dx + dz * dz > limitSquared) this.blocked[row + cx] = 1;
+        const x = this.originX + cx * CELL;
+        if (boundary.distanceToEdge(x, z) < this.walkerRadius) this.blocked[row + cx] = 1;
       }
     }
 
@@ -357,9 +353,7 @@ export class NavGrid {
     }
 
     this.built = true;
-    this.builtCentreX = centreX;
-    this.builtCentreZ = centreZ;
-    this.builtRadius = radius;
+    this.builtBoundary = boundary;
     this.builtY = referenceY;
     this.builtRevision = this.collision.revision;
   }

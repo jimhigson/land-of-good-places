@@ -1,5 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import { BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_HALF_SIZE } from '../../core/constants';
+import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
+import { PARK_BOUNDARY } from '../boundary';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -28,7 +29,14 @@ import { terrainHeight } from '../terrain';
  * | the building | 27.1 – 56.6 | 208° – 247° |
  * | ferris wheel plot | 30.1 – 52.1 | 303° – 334° |
  * | ball pit | 11.1 – 23.9 | 214° – 264° |
- * | boundary wall (inner face) | 59.55 | everywhere |
+ * | boundary wall (inner face) | 59.2 at its closest | see below |
+ *
+ * The wall is no longer the same distance out on every bearing — the park's edge
+ * is a spline, 59.7 m at its pinch and 101.4 m at its bulge, re-rolled per seed.
+ * The row above is its **closest** approach, because that is the only figure a
+ * single outer clamp can safely be built from; see {@link WALL_INNER_RADIUS}.
+ * Everywhere else the wall is further away than the table suggests, which only
+ * ever gives the loop more room than it asks for.
  *
  * Going round the *inside* is impossible: on the south-west bearings the ball
  * pit ends at 23.9 and the building starts at 27.1, and the corridor between
@@ -104,8 +112,37 @@ export const TRACK_PLOT_CLEARANCE = 4.2;
  */
 const NOMINAL_RADIUS = 56.2;
 
-/** Inner face of the pink boundary wall (see `Garden.buildBoundaryWall`). */
-const WALL_INNER_RADIUS = GARDEN_HALF_SIZE - 2 - 0.45;
+/**
+ * Inner face of the pink boundary wall at its **closest approach** to the middle
+ * (see `Garden.buildBoundaryWall`), which is what the loop's outer clamp needs:
+ * a single radius that is safe on every bearing.
+ *
+ * Was `GARDEN_HALF_SIZE - 2 - 0.45`. That arithmetic gave 59.55, and it was
+ * right — but by coincidence rather than by construction. `GARDEN_HALF_SIZE - 2`
+ * is 60, and 60 is where the boundary generator *pins* the edge at the entrance
+ * gate, which is also the closest the edge ever comes to the middle. Two
+ * unrelated numbers that happened to agree while the park was a disc.
+ *
+ * They no longer have any reason to. The edge is a spline now, re-rolled per
+ * seed, running 59.7 m at its pinch and 101.4 m at its bulge; `GARDEN_HALF_SIZE`
+ * is the old square garden's half width and has nothing to say about it. So ask
+ * the boundary that was actually built. On a seed whose pinch comes in tighter
+ * than the gate, this follows it; the old expression would not have.
+ *
+ * Deliberately the **minimum** and not a per-bearing clamp. Loosening it to
+ * `edgeRadiusAt(bearing)` would let the loop drift out towards the bulge, which
+ * buys nothing — {@link NOMINAL_RADIUS} is 56.2 and the plots only ever push the
+ * loop to about 53.5, so this bound does not bind today — while moving a train
+ * that four `check:park` invariants are measured against. A bound that is never
+ * reached should be the safe one.
+ *
+ * (The 0.45 is `Garden.ts`'s `BOUNDARY_WALL_COLLISION_HALF`, restated rather
+ * than imported: `Garden -> paths -> train/plan -> train/route` is a real import
+ * cycle. Worth giving that constant a home both modules can reach — see the
+ * handoff — but not worth doing from inside this change.)
+ */
+const WALL_INNER_RADIUS =
+  Math.min(...PARK_BOUNDARY.outline().map(([x, z]) => Math.hypot(x, z))) - 0.45;
 
 /** Relaxation: passes, smoothing weight, and the pull towards the target. */
 const RELAX_PASSES = 700;
