@@ -255,7 +255,16 @@ export class TreeClimbing implements GameSystem {
 
     if (this.playerPhase === 'up') {
       const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_UP_SECONDS);
-      const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'up', t, 0);
+      const pose = climbPose(
+        tree,
+        this.playerStartX,
+        this.playerStartZ,
+        headOffset,
+        'up',
+        t,
+        0,
+        CLIMB_PEEK_LIFT,
+      );
       this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
       this.hud.setPrompt(null);
       if (t >= 1) {
@@ -294,6 +303,7 @@ export class TreeClimbing implements GameSystem {
         'peek',
         0,
         this.playerPeekFacing,
+        CLIMB_PEEK_LIFT,
       );
       const wave = this.updatePlayerWave(dt);
       // She turns to the camera to wave and drifts back to her peek facing
@@ -339,7 +349,16 @@ export class TreeClimbing implements GameSystem {
 
     // 'down'
     const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_DOWN_SECONDS);
-    const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'down', t, 0);
+    const pose = climbPose(
+      tree,
+      this.playerStartX,
+      this.playerStartZ,
+      headOffset,
+      'down',
+      t,
+      0,
+      CLIMB_PEEK_LIFT,
+    );
     this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
     this.hud.setPrompt(null);
     if (t >= 1) {
@@ -558,25 +577,25 @@ const WAVE_DURATION_SECONDS = 1.7;
 const WAVE_EASE_HALF_LIFE = 0.09;
 
 /**
- * How far she hoists herself up to wave, in metres.
+ * A small pop as she hoists herself up to wave, in metres. **Decorative.**
  *
- * **Not a flourish — the wave is invisible without it.** She peeks with her
- * head at `canopyTopY` and everything else buried, and her arm cannot reach
- * above her own head: the shoulder is 0.72 up a body whose head sits at 1.36
- * (`kid.ts`). Measured on the real rig at the real wave angle, through the
- * whole waggle, the waving hand tops out **0.303 m below her head** — so
- * without a lift it sits 0.3 m under `canopyTopY`, while the canopy surface
- * where she perches is only ~0.18 m below it. A raised arm alone leaves the
- * hand roughly 0.12 m inside the leaves, from every approach bearing.
+ * This used to claim the wave was invisible without it, and that was true when
+ * written: she peeked with her head at `canopyTopY`, and since her arm cannot
+ * reach above her own head — shoulder 0.72 on a body whose head sits at 1.36
+ * (`kid.ts`), hand topping out 0.303 m below it — a raised arm alone stayed
+ * buried in the leaves.
  *
- * Lifting the whole child by 0.3 brings the worst climbable tree in the
- * canonical park to 0.176 m of clearance, and it is what a child hauling
- * herself up to be seen actually does.
+ * {@link CLIMB_PEEK_LIFT} does that job now, and does it far better. Set this
+ * to 0 and `check:climb-wave` passes with **identical** numbers (18 px of
+ * hand, 7.0 px of rock): it no longer moves anything the check gates on.
  *
- * **`npm run check:climb-wave` measures all of that against the real kid rig
- * and the real generated park**, rather than trusting the arithmetic above —
- * every number in it belongs to a different file and can move without anyone
- * thinking about this one.
+ * It survives only as a little vertical pop at the start of each wave, which
+ * QA liked the look of. Keep or delete on taste — but do not restore the claim
+ * that it is load-bearing, and do not add a *new* number here expecting it to
+ * buy visibility. The camera follows `player.position` and damps toward it, so
+ * it eats vertical translation; that is why the wave's readable motion is a
+ * rotation ({@link CLIMB_WAVE_LEAN}) and its clearance is a static perch
+ * height, neither of which the camera can cancel.
  */
 export const WAVE_RISE = 0.3;
 
@@ -628,12 +647,26 @@ function climbPose(
   phase: ClimbPhase,
   progress: number,
   peekFacing: number,
+  /**
+   * How far above the canopy top this climber perches — **the player's own
+   * lift, and hers alone**. Defaults to 0, so NPCs are unaffected.
+   *
+   * A parameter rather than a constant read inside here, because this function
+   * is shared: `updateNpcClimbs` calls it too. Adding the lift inside it raised
+   * every NPC climber by the same metre, and they get none of what the metre
+   * buys — their body-hide leaves no arm drawn and they have no wave — so it
+   * was pure elevation: a head floating above the canopy with nothing under it.
+   * Jim ruled on *her* height, and dismissed the floating worry because she has
+   * a wave to justify it. That reasoning does not carry to a character with no
+   * wave at all.
+   */
+  lift = 0,
 ): ClimbPose {
   const approachAngle = Math.atan2(startX - tree.x, startZ - tree.z);
   const edgeDistance = tree.trunkRadius + CLIMB_EDGE_GAP;
   const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
-  const topY = tree.canopyTopY - headOffsetY + CLIMB_PEEK_LIFT;
+  const topY = tree.canopyTopY - headOffsetY + lift;
 
   if (phase === 'peek') return { x: edgeX, y: topY, z: edgeZ, facing: peekFacing };
 

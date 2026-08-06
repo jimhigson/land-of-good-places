@@ -53,7 +53,7 @@ the CONTROL RULE is untouched.
 ## The QA failure, and the one-sign bug (5 Aug)
 
 QA failed the first attempt: the hand was **0% visible from the game camera on
-all four climbable trees**, blocked by **her own skull, hair and ear**, with
+every climbable tree**, blocked by **her own skull, hair and ear**, with
 *zero* foliage blockers. Her head read ~96% by the same method.
 
 The cause was one sign. The crowd waves with the arm swinging **inward**
@@ -186,7 +186,7 @@ camera-facing out of a 1.7 s wave at bearing 45°, against the full 1.70 s at
 ## Round 3 QA — FAILED (history; superseded by the ruling above)
 
 The rock was **verified**: 22.7 px of head travel at 1280×800, identical at
-every settled bearing on all four trees. QA froze the world (`timeScale = 0`)
+every settled bearing on every tree. QA froze the world (`timeScale = 0`)
 and advanced only the pose clock by half a rock period, so two frames differed
 by exactly one thing — a cleaner method than the one in this script.
 

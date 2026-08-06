@@ -15,7 +15,7 @@
  * It measured the hand against the **canopy ellipsoids only** — does the hand
  * clear the leaves — and passed with 0.176 m to spare. That measurement was
  * correct and completely irrelevant. QA then found the hand **0% visible on all
- * four climbable trees**, with *zero* foliage blockers: the hand cleared the
+ * every climbable tree**, with *zero* foliage blockers: the hand cleared the
  * leaves and then hid behind **her own skull, hair and ear**, because the raised
  * right hand lands almost exactly behind her head on the camera's bearing. Her
  * head, measured the same way, reads ~96% visible.

@@ -110,7 +110,7 @@ export const CLIMB_WAVE_ARM_X = -2.45;
  * the hand *inward*, across the body. On the ground that is fine — you see the
  * whole child. Up a tree only her head is out of the leaves, and an inward
  * hand lands squarely behind her own skull and hair: QA measured the wave 0%
- * visible on all four climbable trees, blocked by her own head, with zero
+ * visible on every climbable tree, blocked by her own head, with zero
  * foliage in the way.
  *
  * Swinging it **out** instead puts the hand clear of her silhouette. Swept
