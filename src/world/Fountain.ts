@@ -356,6 +356,16 @@ export class Fountain implements GameSystem {
     this.splashEffects.update(dt);
     this.updateWading(dt);
 
+    // The statue turns on its plinth (Jim, 5 Aug). One line, because the asset
+    // owns the behaviour and the rate — see `STATUE_TURN_SECONDS`. Nothing here
+    // knows which node moves or how fast, which is the point: the same handle
+    // would spin identically in `/art-samples.html` or in a check script.
+    //
+    // Not gated on `dt > 0`. `Game.ts` zeroes `dt` under pause but deliberately
+    // keeps `elapsed` advancing so idle animation carries on behind the pause
+    // screen, and the ripples below already rely on exactly that.
+    this.statue.update(dt, elapsed);
+
     // Ripples: two crossing waves plus a radial ring travelling outwards.
     const positions = this.waterGeometry.getAttribute('position') as BufferAttribute;
     const array = positions.array as Float32Array;
