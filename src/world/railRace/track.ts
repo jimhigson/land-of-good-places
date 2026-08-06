@@ -417,6 +417,33 @@ export function buildRailRaceTrack(
   // `disposables`: see `dispose()`'s own note.
   const postGeometry = duckBarAssetGeometry('post');
   const barGeometry = duckBarAssetGeometry('bar');
+  /**
+   * **How much the posts have to be stretched to reach the bar they hold up.**
+   *
+   * The post is authored 4.70 m tall, and 4.70 is exactly the (mistaken) crown
+   * height `DUCK_CLEARANCE_AT_PARK_SCALE`'s old value was derived from — so
+   * the post only ever reached its bar by coincidence of the two having been
+   * sized against the same wrong number on the same day. Correcting the
+   * clearance would have left every bar in the ring floating three quarters of
+   * a metre above its own posts.
+   *
+   * So the reach is *derived* from the clearance rather than left to agree with
+   * it: measured off the asset's own bounding box, never a written-down 4.70,
+   * and applied on Y alone. A vertical post made taller is the one case where
+   * stretching an authored asset costs nothing — nothing about its shape reads
+   * differently, unlike the bar, which keeps its authored proportions exactly.
+   */
+  postGeometry.computeBoundingBox();
+  const postBox = postGeometry.boundingBox;
+  const postHeight = postBox ? postBox.max.y - postBox.min.y : 1;
+  /** Where the foot of a post sits above the rail head. */
+  const postFootY = 0.15 * ringScale;
+  const postStretch = (duckClearance - postFootY) / (postHeight * ringSizeVsRace);
+  const postScale = new Vector3(
+    ringSizeVsRace,
+    ringSizeVsRace * postStretch,
+    ringSizeVsRace,
+  );
   // The bar itself is the warning light. Lamps on the posts were legible at a
   // standstill and invisible at fourteen metres a second; a stripe of amber
   // right where the thing you must duck under is cannot be missed. A sleeve
@@ -471,11 +498,6 @@ export function buildRailRaceTrack(
       barSlots.push(slots);
       continue;
     }
-    // `spot.at` is already the wrapped, real route coordinate the matched
-    // trestle actually stands at — not re-derived from `bar.at` (which is
-    // arch-relative, per `hazards.ts`) — so the bar sits exactly where its
-    // support does, including the support's own small collision-avoidance
-    // nudge, rather than merely close to it.
     // **The bar hangs at the position it is scored at, full stop.**
     //
     // This used to be `spot.at` — its supporting trestle's position, including
@@ -506,10 +528,10 @@ export function buildRailRaceTrack(
       for (const side of [-1, 1] as const) {
         position.set(
           point.x + outward.x * side * barHalfSpan,
-          point.y + (duckClearance + 0.3 * ringScale) / 2 - 0.15 * ringScale,
+          point.y + postFootY + (postHeight * postStretch) / 2,
           point.z + outward.z * side * barHalfSpan,
         );
-        matrix.compose(position, rotation, assetScale);
+        matrix.compose(position, rotation, postScale);
         posts.setMatrixAt(postIndex, matrix);
         posts.setColorAt(postIndex, postLaneColour);
         postIndex += 1;

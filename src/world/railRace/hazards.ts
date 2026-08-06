@@ -54,31 +54,41 @@ import { RIDE_SCALE } from './route';
  * purely visual clearance (bonking is decided by button state at the moment
  * of crossing, not an actual pose/collision test, see the header above).
  *
- * **2.1, not 1.5.** A previous pass (1 August 2026) set this to 1.5,
- * documented as "measured live... setting the bar roughly halfway between
- * [her ducking and standing head heights]." Re-measured live against the
- * actual running dev build (1 August 2026, same day, during the duck-bar
- * asset work — see `HANDOFF-duck-bar-blender-asset.md`): querying
- * `window.game.world.railRace` and `window.game.player.model.hatAnchor`'s
- * real world position directly (not recomputing the pose formula and
- * checking it against itself — the exact tautology
- * `ART-AGENT-NOTES.md` §6 warns a parity check can quietly become), her
- * crown sits **4.70 m above the rail even while off the button** (the
- * *better* of her two states). The old 1.5 was still nearly a metre below
- * that — she passed through every bar whichever way she was holding, not
- * "occasionally clipped", which is exactly Jim's report ("even while
- * ducking the character clearly goes through them overlapping by a lot").
+ * **2.82, and the two numbers before it were both measured wrong.**
  *
- * `DUCK_DROP` (`RailRace.ts`) is a fixed vertical translate, not a pose
- * change, so her head-to-root distance is the same in both states; her
- * standing head height is the same 4.70 m plus `DUCK_DROP * RIDE_SCALE`
- * (1.25 m) = 5.95 m. 2.1 sits roughly halfway between the two measured
- * figures (4.70 m and 5.95 m) — the same "halfway between the two real
- * states" rule the previous pass intended, just re-grounded in what the
- * running game actually measures rather than a formula re-derived from the
- * same code that produces the pose.
+ * 1.5, then 2.1 (1 August 2026), both documented as "roughly halfway between
+ * her ducking and standing head heights" and both derived from a live reading
+ * of `hatAnchor`'s world position that recorded her crown at **4.70 m** over
+ * the rail ducked and 5.95 m standing.
+ *
+ * Those figures are wrong by 1.40 m. Re-measured 5 August 2026 by composing the
+ * real transform chain — a real `createKid` parented into a real cart group at
+ * the ring's own scale, `updateMatrixWorld`, then read back — her crown is at
+ * **6.10 m** ducked and **7.35 m** standing, and the top of her head, hair and
+ * all, reaches **6.42 m** ducked and **7.67 m** standing. (Whatever the 1
+ * August reading actually caught, it was not a rider on this ring at this
+ * scale.) Against a bar hanging at 2.1 × 2.5 = 5.25 m, that means the bar sat
+ * *inside her head in both states*: Jim, riding it, *"their head just passes
+ * through the bonkers like a ghost which looks very bad"*.
+ *
+ * The rule is the one both earlier passes intended — halfway between the two
+ * real states — finally applied to real numbers, and measured against her head
+ * **top** rather than the bare crown, because hair is what a family sees pass
+ * through a bar. Halfway between 6.42 and 7.67 is 7.04 m, which is
+ * `2.82 × RIDE_SCALE`. A ducked rider now clears the bar's underside by about a
+ * quarter of a metre and a standing one meets it across the top of her head,
+ * which is what a duck bar is for.
+ *
+ * **This is no longer a comment anybody has to trust.**
+ * `scripts/check-rail-race.mts` builds the real kid, poses her in both states
+ * the way `RailRace.ts` does, and asserts the separation — so the next time
+ * anything about her height, the seat, the ring's scale or this number moves,
+ * the build says so instead of a family finding out on the ride.
+ *
+ * `track.ts` derives the duck bar posts' own length from this, so raising it
+ * does not leave the bars floating above their supports — see `postStretch`.
  */
-export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.1;
+export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.82;
 
 /**
  * The clearance on the ring a child actually races on. A ring builds its own

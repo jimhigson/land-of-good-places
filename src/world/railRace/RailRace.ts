@@ -118,8 +118,12 @@ const RIVALS: readonly {
 /**
  * How far `poseRider()` drops the player when she is off the button, in this
  * ride's own pre-`RIDE_SCALE` metres — see the comment where it is used.
+ *
+ * Exported so `scripts/check-rail-race.mts` can pose a real kid in both states
+ * and measure her head against a real duck bar with the ride's own number,
+ * rather than a copy of it that could drift.
  */
-const DUCK_DROP = 0.5;
+export const DUCK_DROP = 0.5;
 
 /**
  * How far the seat dips on the per-press pump/pedal bob, same pre-`RIDE_SCALE`
@@ -145,19 +149,23 @@ const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
  * bonkers like a ghost which looks very bad"*. He is right, and the reason is
  * that a duck bar has no collider of any kind — a bonk is decided by button
  * state at the crossing (`hazards.ts`'s header says so outright), and nothing
- * anywhere compared the bar's height to a head's. Measured on the canonical
- * seed: the bar hangs at y=16.27 on the player's lane and a standing crown
- * reaches y≈16.97, so **0.70 m of child was inside the bar** with nothing
- * reacting.
+ * anywhere compared the bar's height to a head's.
  *
- * Rather than grow a collider for a hazard that is deliberately decided by
- * input, the answer is to make the response *physical*: the bar knocks her
- * down into the seat, exactly as far as ducking would have. That is the one
- * drop already measured to clear a bar (`hazards.ts`'s `DUCK_CLEARANCE`: a
- * ducked crown sits 4.70 m over the rail against the bar's 5.25 m), so it
- * needs no second number of its own, and the bar sweeps over her instead of
- * through her. Being knocked into the same place ducking would have put you is
- * also the joke: duck yourself, or the bar will do it for you.
+ * That had **two** causes, and this is only the second of them. The first was
+ * that the bar was hung far too low to begin with: at the old clearance its
+ * underside sat 1.54 m *below* the top of a ducked head, so it went through her
+ * whichever way she played the moment — fixed in `hazards.ts`, where
+ * `DUCK_CLEARANCE_AT_PARK_SCALE` is now derived from head heights that are
+ * actually right.
+ *
+ * What is left after that is the moment of the bonk itself. Rather than grow a
+ * collider for a hazard that is deliberately decided by input, the response
+ * becomes *physical*: the bar knocks her down into the seat, exactly as far as
+ * ducking would have. That is the drop the clearance is now sized against — a
+ * ducked head top clears the bar's underside by 0.26 m — so it needs no second
+ * number of its own, and the bar sweeps over her instead of through her. Being
+ * knocked into the same place ducking would have put you is also the joke: duck
+ * yourself, or the bar will do it for you.
  *
  * Full drop while the wobble is fresh, easing back up as it fades — down for
  * about 0.7 s of {@link WOBBLE_SECONDS}' 1.3, so it reads as a shove and a

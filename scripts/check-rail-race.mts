@@ -102,8 +102,11 @@ import {
   faceTurnTowardsCamera,
 } from '../src/world/railRace/camera.ts';
 import { SEAT_HEIGHT } from '../src/world/railRace/cart.ts';
+import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
+import { DUCK_DROP } from '../src/world/railRace/RailRace.ts';
+import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
-import { Group } from 'three';
+import { Box3, Group } from 'three';
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -708,6 +711,78 @@ for (const shape of POSES) {
       'down; it needs a little, to separate the four lanes, and not a lot, or the side view ' +
       'becomes a map.',
   );
+}
+
+// --- does a duck bar actually clear a ducked head, and meet a standing one? --
+//
+// Jim, 5 August 2026: *"their head just passes through the bonkers like a ghost
+// which looks very bad"*. A duck bar has no collider — a bonk is decided by
+// button state at the crossing — so nothing in the game ever compared a bar's
+// height to a head's, and `DUCK_CLEARANCE_AT_PARK_SCALE` had been set twice
+// from a live reading that turns out to be 1.40 m out. The bar sat inside her
+// head in *both* states, so ducking looked exactly as wrong as not ducking.
+//
+// Measured by composing the real transform chain rather than re-doing the sum:
+// a real kid, parented into a real cart group at the ring's own scale, world
+// matrices updated, and her head's bounding box read back — hair and all,
+// because hair is what a family watches pass through a bar.
+
+say('');
+{
+  const barGeometry = duckBarAssetGeometry('bar');
+  barGeometry.computeBoundingBox();
+  const barHalfDepth = barGeometry.boundingBox
+    ? -barGeometry.boundingBox.min.y
+    : 0;
+
+  const railPoint = route.pointAt(
+    PLAYER_LANE,
+    route.wrap(route.startDistance),
+    new Vector3(),
+  );
+  const cartGroup = new Group();
+  cartGroup.position.copy(railPoint);
+  cartGroup.scale.setScalar(route.scale);
+  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
+  cartGroup.add(kid.root);
+
+  /** Top of her head, hair included, in metres over the rail head. */
+  const headTop = (drop: number): number => {
+    kid.root.position.y = SEAT_HEIGHT - drop;
+    cartGroup.updateMatrixWorld(true);
+    return new Box3().setFromObject(kid.head).max.y - railPoint.y;
+  };
+
+  const standing = headTop(0);
+  const ducked = headTop(DUCK_DROP);
+  const barUnderside = DUCK_CLEARANCE_AT_PARK_SCALE * route.scale - barHalfDepth;
+
+  say(
+    `duck bar   underside ${barUnderside.toFixed(2)} m over the rail   ` +
+      `head top ${ducked.toFixed(2)} ducked / ${standing.toFixed(2)} standing   ` +
+      `clears by ${(barUnderside - ducked).toFixed(2)}, strikes by ` +
+      `${(standing - barUnderside).toFixed(2)}`,
+  );
+
+  // Ducking has to work. This is the half that was broken: at the old 2.1 the
+  // underside sat at 4.88 m against a ducked head top of 6.42, so a bar went
+  // through her whichever way she played it.
+  require(
+    ducked < barUnderside,
+    `a ducked rider's head reaches ${ducked.toFixed(2)} m over the rail and the duck bar's ` +
+      `underside is at ${barUnderside.toFixed(2)} m — the bar passes through her head even when ` +
+      'she does the one thing the ride asks of her. See DUCK_CLEARANCE_AT_PARK_SCALE.',
+  );
+  // ...and not ducking has to be worth avoiding, or the bar is decoration and
+  // the whole mechanic is untaught. Raising the clearance until everything
+  // clears would "fix" the complaint above and quietly delete the game.
+  require(
+    standing > barUnderside,
+    `a standing rider's head only reaches ${standing.toFixed(2)} m over the rail and the duck ` +
+      `bar's underside is at ${barUnderside.toFixed(2)} m — she passes under it without ducking, ` +
+      'so there is nothing to duck for. See DUCK_CLEARANCE_AT_PARK_SCALE.',
+  );
+  kid.dispose?.();
 }
 
 // --- can you actually SEE her face? ------------------------------------------
