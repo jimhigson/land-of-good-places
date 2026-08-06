@@ -53,7 +53,7 @@ import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } fr
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
-import { CLIMB_EDGE_GAP, WAVE_RISE } from '../src/world/TreeClimbing.ts';
+import { CLIMB_EDGE_GAP, CLIMB_PEEK_LIFT, WAVE_RISE } from '../src/world/TreeClimbing.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -165,13 +165,32 @@ function measureVisibility(
   return { visible: samples.length === 0 ? 0 : seen / samples.length, blockedBy };
 }
 
+/**
+ * True if `node` or any ancestor up to `root` is hidden.
+ *
+ * `TreeClimbing.hidePlayerBody` hides the **pivot groups**, not the meshes
+ * inside them, and three.js visibility cascades down through ancestors at draw
+ * time. A mesh's own `.visible` is therefore still `true` on a body that is not
+ * drawn — so checking only the mesh drew her hidden torso into these pictures,
+ * and very nearly had me judging a picture the game never renders.
+ */
+function hiddenByAncestor(node: Mesh, root: Group): boolean {
+  let current: Mesh['parent'] = node;
+  while (current) {
+    if (!current.visible) return true;
+    if (current === root) return false;
+    current = current.parent;
+  }
+  return false;
+}
+
 /** Every drawn mesh under `root`, skipping anything inside `exclude`. */
 function collectMeshes(root: Group, exclude: Group): Mesh[] {
   const out: Mesh[] = [];
   root.updateMatrixWorld(true);
   root.traverse((object) => {
     const mesh = object as Mesh;
-    if (!mesh.isMesh || !mesh.visible) return;
+    if (!mesh.isMesh || hiddenByAncestor(mesh, root)) return;
     let node: Mesh['parent'] = mesh;
     while (node) {
       if (node === exclude) return;
@@ -245,6 +264,7 @@ function poseKidAt(
   armOverride: { x: number; z: number } | null,
   /** 0 = resting peek (no hoist, peek facing), 1 = full wave. */
   wave = 1,
+  liftOverride: number | null = null,
 ): ReturnType<typeof createKid> {
   const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
   const kid = createKid();
@@ -255,7 +275,7 @@ function poseKidAt(
   }
   kid.root.position.set(
     tree.x + Math.sin(bearing) * perch,
-    tree.canopyTopY - KID_HEAD_HEIGHT + WAVE_RISE * wave,
+    tree.canopyTopY - KID_HEAD_HEIGHT + (liftOverride ?? CLIMB_PEEK_LIFT) + WAVE_RISE * wave,
     tree.z + Math.cos(bearing) * perch,
   );
   // At rest she holds the facing she arrived with (facing away from the trunk);
@@ -381,11 +401,12 @@ function rasterise(
   anchor: 'head' | 'tree' = 'head',
   bearing = Math.PI * 0.25,
   elapsed = 0,
+  liftOverride: number | null = null,
 ): Picture {
   const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
   const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
-  const kid = poseKidAt(tree, bearing, elapsed, override, wave);
+  const kid = poseKidAt(tree, bearing, elapsed, override, wave, liftOverride);
   const arm = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const head = new Set(collectMeshes(kid.head, new Group()));
   const all = [...collectMeshes(kid.root, new Group()), ...foliage];
@@ -493,6 +514,110 @@ const REQUIRED_HAND_PIXELS = 12;
  */
 const REQUIRED_ROCK_PIXELS = 5;
 
+// ---------------------------------------------------------------------- arm8
+//
+// **QA's method, not mine.** Twice now a measurement written here has flattered
+// the outcome it was checking — the canopy-only clearance in round 1, and a
+// four-bearing crop in round 3 that printed 7/19/15/0 when the honest figure
+// was zero arm across three contiguous bearings on every tree. So this adopts
+// QA's technique wholesale:
+//
+//  - **eight bearings**, not four;
+//  - **whole visible scene**, not a crop framed on her head;
+//  - **the delta method** — render twice, differing by exactly one thing (the
+//    arm present or deleted), and count the pixels that change. That measures
+//    what the arm actually contributes to the picture, rather than trusting
+//    this script's own idea of which mesh owns a pixel.
+//
+// The pose clock is frozen and set explicitly, so the two frames of a pair can
+// differ by nothing else.
+
+/** Pixels the arm contributes to the whole scene, by QA's delta method. */
+function armDeltaPixels(
+  tree: (typeof trees)[number],
+  index: number,
+  bearing: number,
+  elapsed: number,
+): number {
+  const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
+  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
+  const foliage = foliageFor(index, tree);
+  const kid = poseKidAt(tree, bearing, elapsed, null, 1);
+  const armMeshes = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
+  const withArm = [...collectMeshes(kid.root, new Group()), ...foliage];
+  const withoutArm = withArm.filter((mesh) => !armMeshes.has(mesh));
+
+  // Generous, world-anchored, and centred between her head and the canopy top —
+  // wide enough that an arm appearing anywhere around her is inside it. This is
+  // the "whole screen, not a crop" part.
+  const centre = new Vector3(tree.x, tree.canopyTopY + CLIMB_PEEK_LIFT * 0.5, tree.z);
+  const half = 44;
+  const raycaster = new Raycaster();
+  raycaster.far = RAY_BACKOFF * 2;
+  let changed = 0;
+  for (let py = -half; py <= half; py += 1) {
+    for (let px = -half; px <= half; px += 1) {
+      const point = centre
+        .clone()
+        .addScaledVector(right, px * UNITS_PER_PIXEL)
+        .addScaledVector(up, py * UNITS_PER_PIXEL);
+      const origin = point.clone().addScaledVector(VIEW_DIR, -RAY_BACKOFF);
+      raycaster.set(origin, VIEW_DIR);
+      const a = raycaster.intersectObjects(withArm, false)[0];
+      raycaster.set(origin, VIEW_DIR);
+      const b = raycaster.intersectObjects(withoutArm, false)[0];
+      const aKey = a ? `${a.object.id}:${a.distance.toFixed(3)}` : '-';
+      const bKey = b ? `${b.object.id}:${b.distance.toFixed(3)}` : '-';
+      if (aKey !== bKey) changed += 1;
+    }
+  }
+  return changed;
+}
+
+if (process.argv.includes('--arm8')) {
+  console.log(
+    `arm contribution by QA's delta method (8 bearings, whole scene, ` +
+      `${(UNITS_PER_PIXEL * 1000).toFixed(0)} mm/px), lift ${CLIMB_PEEK_LIFT} m:`,
+  );
+  console.log('  tree    0    45    90   135   180   225   270   315   | zero-bearings');
+  let totalZero = 0;
+  let totalCombos = 0;
+  for (const [index, tree] of trees.entries()) {
+    const cells: number[] = [];
+    for (let b = 0; b < 8; b += 1) {
+      const bearing = (b / 8) * Math.PI * 2;
+      // Frozen pose clock, half a rock period in, so the rock is at an extreme
+      // rather than at its neutral crossing.
+      const elapsed = Math.PI / CLIMB_WAVE_LEAN_RATE;
+      cells.push(armDeltaPixels(tree, index, bearing, elapsed));
+    }
+    const zeros = cells.filter((n) => n === 0).length;
+    totalZero += zeros;
+    totalCombos += cells.length;
+    console.log(
+      `  ${String(index).padStart(4)}  ${cells.map((n) => String(n).padStart(4)).join('  ')}   | ${zeros}`,
+    );
+  }
+  console.log(`  ${totalZero} of ${totalCombos} tree x bearing combinations show no arm.`);
+
+  // Turn timing: how much of the wave she actually spends facing the camera.
+  console.log('\nturn timing (PEEK_TURN_SPEED 2.6 rad/s, wave held 1.7 s):');
+  console.log('  bearing   turn angle   turn time   camera-facing for');
+  for (let b = 0; b < 8; b += 1) {
+    const bearing = (b / 8) * Math.PI * 2;
+    const peekFacing = bearing + Math.PI;
+    let delta = Math.abs(((CAMERA_FACING - peekFacing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    const turnTime = delta / 2.6;
+    const facing = Math.max(0, 1.7 - turnTime);
+    console.log(
+      `  ${((bearing * 180) / Math.PI).toFixed(0).padStart(7)}   ` +
+        `${((delta * 180) / Math.PI).toFixed(0).padStart(10)}°   ${turnTime.toFixed(2).padStart(9)}s   ` +
+        `${facing.toFixed(2).padStart(17)}s`,
+    );
+  }
+  process.exit(0);
+}
+
 // -------------------------------------------------------------------- motion
 //
 // `--motion` answers the question QA's third pass raised and nothing here could
@@ -566,7 +691,9 @@ if (process.argv.includes('--picture')) {
 
   const tree = trees[0];
   if (!tree) process.exit(1);
-  const picture = rasterise(tree, 0, override);
+  const liftArg = process.argv.indexOf('--lift');
+  const liftOverride = liftArg > 0 ? Number(process.argv[liftArg + 1]) : null;
+  const picture = rasterise(tree, 0, override, 1, 'tree', Math.PI * 0.25, 0, liftOverride);
   console.log(
     `\nTree 0 at play scale (kid = ${FIGURE_PX}px tall, ` +
       `${(UNITS_PER_PIXEL * 1000).toFixed(0)} mm/px)` +

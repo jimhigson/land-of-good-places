@@ -525,6 +525,27 @@ const INTERACT_MARGIN = 2.4;
  */
 export const CLIMB_EDGE_GAP = 0.35;
 
+/**
+ * How much higher she sits than the canopy top, in metres.
+ *
+ * **Jim's number, 5 August: "needs to sit higher in the tree by about 40% of
+ * the character's height."** The kid is 1.86 m (ART_DIRECTION.md §7's units
+ * table), so 40% is 0.74. Taken as the target rather than solved for a
+ * clearance figure — he has looked at it and that is the amount he wants.
+ *
+ * It is the fix for a specific, measured failure. Her waving hand tops out
+ * 0.303 m below her head, which put it essentially level with `canopyTopY`, so
+ * from the far bearings the bulk of the canopy sat in front of it: QA found the
+ * arm contributed **zero pixels to the whole screen** at 225°, 270° and 315°,
+ * on every tree — 15 of 32 tree×bearing combinations with no arm visible at
+ * all. Lifting her clears the forearm outright instead of marginally.
+ *
+ * Note for anyone recomputing this: ART_DIRECTION.md gives the kid's height in
+ * two places and they disagree — §7's units table says 1.86 m, while §4's
+ * cartoon-pass table says 2.12 m. 0.74 follows the 1.86.
+ */
+export const CLIMB_PEEK_LIFT = 0.74;
+
 // ------------------------------------------------------------------- waving
 //
 // "After climbing a tree the player waves toward the camera every few seconds"
@@ -619,7 +640,7 @@ function climbPose(
   const edgeDistance = tree.trunkRadius + CLIMB_EDGE_GAP;
   const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
-  const topY = tree.canopyTopY - headOffsetY;
+  const topY = tree.canopyTopY - headOffsetY + CLIMB_PEEK_LIFT;
 
   if (phase === 'peek') return { x: edgeX, y: topY, z: edgeZ, facing: peekFacing };
 
