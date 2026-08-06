@@ -137,19 +137,39 @@ tip — zero margin for Percy, and a quarter to three quarters of a metre *insid
 the children behind her.
 
 So the derivation now lives in `src/world/train/clearance.ts`, which is its one
-owner, and takes the worst of the locomotive body, a standing NPC and a seated
-player, plus headroom. Two consequences worth carrying forward:
+owner, and takes the worst of the locomotive body (2.42 m), a standing NPC rider
+(3.55 m) and the player **standing on the bench** (3.97 m), plus headroom —
+giving `BRIDGE_RISE` **4.72 m**. Nobody on this train is seated; that is the
+whole finding, and it is why the word does not appear in the derivation.
+
+Two consequences worth carrying forward:
 
 - **A child's height is `TALLEST_CHILD_HEIGHT` (2.97 m), not `KID_HEIGHT`
   (2.12 m).** Children ride wearing whatever hat they chose, and hats — not hair
   — dominate: a party hat adds 0.85 m over the default style. Anything else
   sizing a space a child must fit through wants the same constant.
-- **The single biggest lever on how tall a bridge has to be is that the player
-  stands up.** Her feet are 0.42 m higher than a standing NPC's and she is not
-  folded, which is what takes the requirement to 3.97 m before headroom. If
-  #116 finds the resulting deck too high to ramp up to comfortably, the honest
-  fix is to give riders a seated pose — a deliberate design change — and never
-  to shave the constant.
+- **Making the ride shorter is a question about everyone aboard, not just the
+  player — and it must be settled before #116 builds any deck.** See below.
+
+### If 4.72 m is too tall to ramp up to, the lever is a pose change — and it is bigger than it looks
+
+The obvious move is to sit the player down, since her feet are 0.42 m higher
+than a standing NPC's. **That alone buys only 0.42 m**: the moment she folds,
+the standing NPC rider at `CAR_FLOOR_Y + 2.97 = 3.55 m` becomes binding and the
+rise drops just **4.72 → 4.30**.
+
+Getting the full saving needs the **NPCs to sit too** — and `carryPassengers`
+stands them on purpose: *"a standing child holding on reads better than a
+walking one sitting down."* So the question for the family is not *"should the
+player sit"* but **"should everyone on the train sit"**, which reverses a
+deliberate art choice on a ride that is mostly seen from outside.
+
+**Decide it before #116 builds deck geometry.** Ramp length, gradient and
+footprint all derive from the rise, so a pose change afterwards invalidates
+every deck already placed — exactly the rework ORDER-OF-WORK.md exists to
+prevent. The constant itself is safe either way, because every term is imported
+and the invariant re-measures; it is the geometry built on top that is expensive
+to redo. **Never shave the constant to avoid the conversation.**
 
 ## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
 

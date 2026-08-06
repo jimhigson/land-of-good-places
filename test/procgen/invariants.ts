@@ -44,11 +44,16 @@ import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
 import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
-// `train/trainDimensions.ts` and `train/clearance.ts`, never `train/trainModel.ts`:
-// that one reaches `parkManifest`, which reads `LGP_SEED` at module load, so a
-// static import of it here would fix the seed before `buildParkFacts` sets it —
-// the same hazard `railRaceFliesClear` avoids by going through the built world.
-// Both files below are deliberately free of that (issue #226).
+// `train/trainDimensions.ts` and `train/clearance.ts` rather than
+// `train/trainModel.ts` — issue #226: the numbers belong somewhere a test can
+// read them without loading three.js and the track builder. Checked rather than
+// assumed (5 August 2026): `trainModel.ts` does **not** reach `parkManifest` at
+// runtime — `track.ts` imports `TrainRoute` with `import type`, which is erased
+// — so importing it here would not actually fix the seed early, and review
+// proved that by pointing this import back at it and watching 132 still pass.
+// The leaf module is defence against that chain becoming real, not a fix for a
+// live bug. `railRaceFliesClear`'s "reached through the built world, never
+// imported" note below is about `railRace/plan.ts`, which genuinely does.
 import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 

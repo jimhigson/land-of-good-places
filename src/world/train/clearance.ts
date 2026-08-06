@@ -1,8 +1,8 @@
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
-// `./trainDimensions`, deliberately not `./trainModel` — see that module's own
-// note. `trainModel.ts` reaches `parkManifest`, which reads `LGP_SEED` at load,
-// and `test/procgen/` has to import this file statically without fixing the
-// seed too early. Issue #226.
+// `./trainDimensions`, deliberately not `./trainModel` — issue #226's shape:
+// three floats should not drag three.js, the textures and `./track` in behind
+// them for `check-park.mts` and `test/procgen/`. See that module's own note,
+// including what this is *not* defending against.
 import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /**

@@ -369,7 +369,8 @@ const BRIDGE_DECK_DEPTH = 0.35;
  * funnel.
  *
  * So it now reads `TRAIN_CLEARANCE_Y` from `train/clearance.ts`, which owns the
- * whole derivation — loco body, standing NPC, seated player, headroom — and is
+ * whole derivation — loco body, standing NPC, the player standing on the bench,
+ * headroom — and is
  * the only place any of those numbers live. Retuning the loco, moving the bench
  * or adding a taller hat all move this.
  *

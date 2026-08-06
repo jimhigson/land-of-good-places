@@ -5,18 +5,41 @@
  * ## Why these live apart from `trainModel.ts`
  *
  * They used to be declared there, next to the meshes built from them, which is
- * where you would naturally look for them. The problem is what `trainModel.ts`
- * drags in behind it: it imports `./track`, which imports `./route`, which
- * reaches `world/parkManifest.ts` — and **`parkManifest` reads `LGP_SEED` once,
- * at module load**. So a consumer that wants a single number ends up loading the
- * park layout, and any consumer that has to *set* the seed first (every file in
- * `test/procgen/`, whose whole suite depends on a fresh seed per fork) cannot
- * import it statically at all without silently fixing the seed too early.
+ * where you would naturally look for them. Moving them out keeps the numbers
+ * reachable from anywhere without dragging `trainModel.ts`'s module graph along
+ * — it pulls in three.js, the palette, the textures and `./track`, for callers
+ * (`check-park.mts`, `test/procgen/`) that want three floats.
  *
- * That is issue #226's shape — a shared *number* trapped inside a module with
- * heavyweight load behaviour — and the established fix is this one: extract the
- * numbers into their own leaf module and have both sides import it, rather than
- * hand-copying them and letting the two drift.
+ * That is issue #226's shape — a shared *number* sitting in a module with much
+ * heavier load behaviour than the number needs — and the established remedy is
+ * this one: extract the numbers into their own leaf module and have both sides
+ * import it, rather than hand-copying them and letting the two drift.
+ *
+ * ### What this is *not* defending against — checked, 5 August 2026
+ *
+ * An earlier version of this comment claimed `trainModel.ts` reaches
+ * `world/parkManifest.ts` (via `./track` → `./route` → the layout), and that
+ * `parkManifest` reading `LGP_SEED` **at module load** therefore made a static
+ * import from `test/procgen/` actively dangerous. **That was wrong, and it is
+ * worth saying so rather than leaving a plausible-sounding hazard in place.**
+ * `track.ts` imports `TrainRoute` with `import type`, which TypeScript erases,
+ * so the chain does not exist at runtime. Two independent checks:
+ *
+ * - Importing `trainModel.ts`, *then* setting `LGP_SEED`, *then* importing
+ *   `parkManifest` gives the late seed — so nothing was fixed early.
+ * - Review pointed the invariant suite's import back at `trainModel.ts` on
+ *   purpose: 132 passed, nothing skipped.
+ *
+ * And had it been real, it would not have been silent: `buildParkFacts`
+ * asserts `PARK_SEED === seed`, so a fork building the wrong park fails loudly
+ * (*"asked for seed 2 but the park built with 20260728"*) rather than quietly
+ * measuring the canonical park five times.
+ *
+ * So this separation is **defence against a plausible import path, not a
+ * demonstrated one** — one `import type` becoming a value import restores the
+ * whole chain, and nothing would warn. That is a good enough reason to keep a
+ * leaf module, and not a good enough reason to have claimed a bug that was not
+ * there.
  *
  * `trainModel.ts` re-exports all three, so nothing that already imported them
  * from there had to change.

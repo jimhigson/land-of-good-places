@@ -34,9 +34,9 @@ import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
  */
 
 // The vertical dimensions live in their own leaf module — see
-// `trainDimensions.ts` for why (issue #226: this file reaches `parkManifest`,
-// which reads `LGP_SEED` at load). Re-exported so every existing importer of
-// `trainModel.ts` keeps working unchanged.
+// `trainDimensions.ts` for why (issue #226: three floats that callers should be
+// able to read without loading this file's whole module graph). Re-exported so
+// every existing importer of `trainModel.ts` keeps working unchanged.
 export { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /** Half the track gauge — where the wheels sit either side of the centre line. */
