@@ -103,7 +103,7 @@ import {
 } from '../src/world/railRace/camera.ts';
 import { SEAT_HEIGHT } from '../src/world/railRace/cart.ts';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
-import { DUCK_DROP } from '../src/world/railRace/RailRace.ts';
+import { poseDuck } from '../src/world/railRace/duckPose.ts';
 import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { Box3, Group } from 'three';
@@ -746,15 +746,32 @@ say('');
   const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
   cartGroup.add(kid.root);
 
-  /** Top of her head, hair included, in metres over the rail head. */
-  const headTop = (drop: number): number => {
-    kid.root.position.y = SEAT_HEIGHT - drop;
+  /**
+   * Poses her folded by `fold` and returns the top of her head, hair included,
+   * in metres over the rail head — **and her whole body's box**, because the
+   * complaint that started this was not about her head at all.
+   *
+   * `poseDuck` is the ride's own function, not a copy of it: a check that
+   * re-created the pose would prove only that two copies of the arithmetic
+   * agree with each other while she folded through the floor in the game.
+   */
+  const pose = (fold: number): { headTop: number; body: Box3 } => {
+    poseDuck(kid, fold);
+    // The root never moves. That is the entire fix, so the check holds it
+    // still: if a future edit reaches for a translation again, the clearance
+    // it buys will not show up here.
+    kid.root.position.y = SEAT_HEIGHT;
     cartGroup.updateMatrixWorld(true);
-    return new Box3().setFromObject(kid.head).max.y - railPoint.y;
+    return {
+      headTop: new Box3().setFromObject(kid.head).max.y - railPoint.y,
+      body: new Box3().setFromObject(kid.root),
+    };
   };
 
-  const standing = headTop(0);
-  const ducked = headTop(DUCK_DROP);
+  const uprightPose = pose(0);
+  const duckedPose = pose(1);
+  const standing = uprightPose.headTop;
+  const ducked = duckedPose.headTop;
   const barUnderside = DUCK_CLEARANCE_AT_PARK_SCALE * route.scale - barHalfDepth;
 
   say(

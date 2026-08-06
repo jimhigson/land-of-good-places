@@ -14,6 +14,7 @@ import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
+import { poseDuck } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
@@ -935,16 +936,12 @@ export class RailRace implements GameSystem {
       // The pump/pedal bob: a quick dip on every fresh press, springing back
       // up between them (`Rider.bob`, see `simulate.ts`'s header) — the seat
       // itself moves, on top of whatever pose the arms are holding.
-      // A rival's own duck, and the shove a bar gives one who forgot. Both were
-      // missing: a ducking rival tucked its arms and tipped its head but never
-      // actually went *down*, so a rival's head passed through a bar whichever
-      // way it played the moment — and a rival is the one a watching child
-      // learns the rule from. `kid.root` is a child of the cart group, which
-      // already carries the ring's scale, so this is in the same pre-scale
-      // metres `SEAT_HEIGHT` and `BOB_DROP` are.
-      const drop =
-        Math.max(cart.rider.ducking ? 1 : 0, knockdown(cart.rider.wobble)) * DUCK_DROP;
-      kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP - drop;
+      // A rival's own duck, and the shove a bar gives one who forgot — both as
+      // a **fold**, never a drop. `kid.root` stays at the seat; see
+      // `duckPose.ts`. A rival is the one a watching child learns the rule
+      // from, so a rival who ducks has to look like she is ducking.
+      const fold = Math.max(cart.rider.ducking ? 1 : 0, knockdown(cart.rider.wobble));
+      kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP;
       // Rivals turn towards the camera too — see `FACE_TURN_MAX`. A rival's
       // face is the one a watching child reads the rule off, so it is no more
       // use in profile than the player's is. `kid.root` is a child of the cart
@@ -995,6 +992,9 @@ export class RailRace implements GameSystem {
       // rider is in a black zone *and* still mashing (`sparkGuard > 0`), so
       // easing off clears the frown by itself, which is the lesson.
       kid.setExpression(riderIsSad(cart.rider) ? 'frown' : 'happy');
+      // Last, so it owns the body, head and arms outright for as long as it is
+      // holding a fold — the pose chain above is what she does when she is not.
+      if (fold > 0) poseDuck(kid, fold);
     }
   }
 
@@ -1020,16 +1020,14 @@ export class RailRace implements GameSystem {
     // one exists, and it is the same rule every other size in this file now
     // follows.
     const rideScale = this.activeRing.route.scale;
-    // Whichever is lower: the duck she chose, or the one the bar just gave her.
-    // See `knockdown` — without the second of these the bar passes straight
-    // through her head and nothing about the moment reads as a collision.
-    const duckDrop =
-      Math.max(
-        this.ducking && this.phase === 'racing' ? 1 : 0,
-        knockdown(rider.wobble),
-      ) *
-      DUCK_DROP *
-      rideScale;
+    // Whichever is deeper: the duck she chose, or the one the bar just gave
+    // her. Handed to `Player` as a number rather than posed here, because her
+    // own animation rewrites the very transforms the fold needs — see
+    // `Player.railRaceDuck` and `duckPose.ts`.
+    this.player.railRaceDuck = Math.max(
+      this.ducking && this.phase === 'racing' ? 1 : 0,
+      knockdown(rider.wobble),
+    );
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     // Round towards the camera far enough for her face to be worth painting —
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
@@ -1038,7 +1036,7 @@ export class RailRace implements GameSystem {
     this.player.model.head.rotation.y = turn.head;
     this.player.setRidePose(
       cart.position.x + wobble,
-      cart.position.y + SEAT_HEIGHT * rideScale - duckDrop,
+      cart.position.y + SEAT_HEIGHT * rideScale,
       cart.position.z,
       cart.rotation.y + turn.body,
       // Rivals get this for free — `kid.root` is a child of the same group
@@ -1066,6 +1064,9 @@ export class RailRace implements GameSystem {
       // for the rest of the session with her head cricked to one side. Exactly
       // the frown's own bug, one field along.
       this.player.model.head.rotation.y = 0;
+      // ...and unfold her, or she walks the park permanently doubled over.
+      this.player.railRaceDuck = 0;
+      poseDuck(this.player.model, 0);
       // The planned exit (`railRace/plan.ts`) — a clear patch beside the booth
       // — with the runtime safety net on top (see `world/dismount.ts`).
       const { x, z } = resolveDismount(

@@ -119,7 +119,36 @@ import { RIDE_SCALE } from './route';
  */
 export const RIDER_HEAD_TOP_AT_PARK_SCALE = 3.068;
 
-export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.82;
+/**
+ * ...and the top of the same head once she has **folded** — see
+ * `railRace/duckPose.ts`. Measured the same way, off the real posed model.
+ *
+ * Was a translation of the whole child (`DUCK_DROP`, 0.5), which Jim rejected
+ * twice: *"that's not what ducking means."* The fold that replaced it is
+ * slightly *deeper* than the translation it removed — 1.32 m at ride scale
+ * against 1.25 — because a held squash compresses her about her own feet where
+ * a drop just moved her. So the duck bars did not have to be re-tuned to keep
+ * working; they were re-derived anyway, because the number they are derived
+ * *from* changed and a constant that survives by luck is the thing this file
+ * has already been burned by once.
+ */
+export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.54;
+
+/**
+ * Half the duck-bar asset's own depth, at park scale — `duckbar.blend` measures
+ * 0.75 m tall about its centre, and a ring hangs it by that centre.
+ */
+const DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE = 0.15;
+
+/**
+ * Where a duck bar's **underside** wants to be: halfway between a standing head
+ * and a ducked one, so ducking clears it by as much as standing meets it.
+ */
+const DUCK_BAR_UNDERSIDE_AT_PARK_SCALE =
+  (RIDER_HEAD_TOP_AT_PARK_SCALE + RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE) / 2;
+
+export const DUCK_CLEARANCE_AT_PARK_SCALE =
+  DUCK_BAR_UNDERSIDE_AT_PARK_SCALE + DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE;
 
 /**
  * The clearance on the ring a child actually races on. A ring builds its own

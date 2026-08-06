@@ -20,6 +20,7 @@ import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
+import { poseDuck } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
@@ -611,6 +612,17 @@ export class Player implements GameSystem {
    * holding through a sparking black stretch. See `RailRace.driveRiders`.
    */
   railRaceFrown = false;
+
+  /**
+   * How far the Rail Race is folding her, 0..1 — see `railRace/duckPose.ts`.
+   *
+   * A field rather than the ride posing her directly, for the same reason
+   * {@link railRaceFrown} is one: `animate()` below rewrites `body.rotation.x`,
+   * `body.scale` and `head.rotation.x` every single frame, so anything the ride
+   * set from outside would be stamped over before it was ever drawn. Cleared in
+   * `RailRace.arrive()` along with the frown and the head turn.
+   */
+  railRaceDuck = 0;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -1403,6 +1415,7 @@ export class Player implements GameSystem {
 
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;
+    // Applied at the very end of this method — see `railRaceDuck`.
     const gait = this.gait;
     const phase = this.walkPhase;
 
@@ -1466,10 +1479,17 @@ export class Player implements GameSystem {
       this.railRaceFrown ? 'frown' : this.waterHappy || this.smelling ? 'happy' : 'neutral',
     );
 
+    // The Rail Race's duck, folded in last of all the *poses* — everything
+    // above has just finished writing `body.rotation.x`, `body.scale` and
+    // `head.rotation.x`, which are the three things it needs to own outright
+    // while she is ducking. See `railRace/duckPose.ts` and `railRaceDuck`.
+    if (this.railRaceDuck > 0) poseDuck(model, this.railRaceDuck);
+
     // Secondary motion the model owns: the swishy ponytail, if that is what
     // the child chose. Last, and deliberately so — it is pinned to the world
     // position of an anchor on the head, and the head's pose for this frame
-    // was only just written above. See `CharacterModel.update`.
+    // was only just written above (the duck included). See
+    // `CharacterModel.update`.
     model.update(dt);
 
     // The name label counter-rotates so it never tips with the character.
