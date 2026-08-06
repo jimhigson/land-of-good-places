@@ -69,6 +69,7 @@ import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
+import { TRAIN_CLEARANCE_Y } from '../src/world/train/clearance.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -340,18 +341,70 @@ const trackY = new Float64Array(TRACK_SAMPLES + 1);
 }
 
 /**
- * How far a walkable surface must stand above the rail head before a route
- * passing over it counts as a **bridge** rather than a level crossing.
+ * The depth of a bridge's own structure — deck planks plus the beams under
+ * them — between the surface a child walks on and the soffit a train passes
+ * beneath.
  *
- * Derived rather than declared: there are no bridges in the park today, so
- * nothing can be looked up. Two metres is comfortably more than the ground
- * wanders (the park's whole terrain range is about 1.4 m) and comfortably less
- * than any deck a train has to fit under, so it separates "the path happens to
- * be on a rise here" from "the path is over the top of the railway" without
- * knowing what a bridge is made of. When Decision 5's L3 emits real decks this
- * is the test they have to pass, and they will pass it by being bridges.
+ * The one number here that is a *claim* rather than a derivation, because the
+ * thing it describes is still being built (#116). It is stated separately, and
+ * named, so that it is obvious what to reconcile when the real deck lands
+ * rather than being buried inside a single fudged total.
  */
-const BRIDGE_RISE = 2;
+const BRIDGE_DECK_DEPTH = 0.35;
+
+/**
+ * How far a walkable surface must stand above the ground under the track before
+ * a route passing over it counts as a **bridge** rather than a level crossing.
+ *
+ * **Derived from the train, not chosen.** It used to be a flat `2`, honestly
+ * documented as picked "because there are no bridges in the park today, so
+ * nothing can be looked up" — comfortably more than the terrain wanders (~1.4 m
+ * across the whole park) and assumed comfortably less than any real deck.
+ *
+ * That assumption was wrong, and dangerously so. It was then made *less* wrong
+ * and still dangerous: deriving it from the locomotive's funnel gave 2.77, which
+ * puts a soffit at exactly the funnel tip — **zero** margin for Percy, and a
+ * standing child rider's head 0.28 m inside the deck and the player's 0.70 m
+ * inside it, because the train carries passengers and they are taller than the
+ * funnel.
+ *
+ * So it now reads `TRAIN_CLEARANCE_Y` from `train/clearance.ts`, which owns the
+ * whole derivation — loco body, standing NPC, the player standing on the bench,
+ * headroom — and is
+ * the only place any of those numbers live. Retuning the loco, moving the bench
+ * or adding a taller hat all move this.
+ *
+ * ### The datum
+ *
+ * Both sides are measured from the **terrain under the track**. `crossesTrack`
+ * returns that as a field it calls `rail` (a misnomer — it is the ground, not
+ * the rail head), and a locomotive's origin is the sleeper top, which is placed
+ * at exactly that same terrain height. So `deck - hit.rail >= BRIDGE_RISE`
+ * compares like with like. `RAIL_HEIGHT` is deliberately absent: it is rail
+ * sitting *on* the datum, not part of it.
+ */
+const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
+
+/**
+ * How far *past* a level crossing's own fence gap a route may still meet the
+ * rails and count as using that crossing.
+ *
+ * A stride's worth of slack, and it is needed because the two things being
+ * compared are measured differently: `halfGap` is the crossing's self-measured
+ * fence opening (`train/crossings.ts`), while the route is a nav-lattice
+ * polyline on a 0.5 m grid that can clip the corner of the opening without any
+ * of its vertices landing inside it.
+ *
+ * This constant is **named in the failure message and was never defined** —
+ * `scripts/` is outside `tsconfig.json`'s `include`, so nothing typechecked it,
+ * and the script runs under `node --experimental-transform-types`, which does
+ * not care either. The message only renders when a violation is found and the
+ * measured count has always been 0, so the `ReferenceError` sat here unfired:
+ * the first genuinely illegal crossing would have crashed the checker with a
+ * stack trace instead of reporting the finding. Found while starting #116,
+ * which is the change that finally makes invariant 2 capable of failing.
+ */
+const LEVEL_CROSSING_REACH = 2.5;
 
 // A route may meet the rail within a crossing's own (self-measured) fence
 // gap plus a stride — the crossings module publishes `halfGap` per crossing.
@@ -471,7 +524,8 @@ for (const target of targets) {
       const overBridge = deck - hit.rail >= BRIDGE_RISE;
       const atLevelCrossing = park.world.train.crossings.some(
         (crossing) =>
-          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) < crossing.halfGap + 2.5,
+          Math.hypot(crossing.x - hit.x, crossing.z - hit.z) <
+          crossing.halfGap + LEVEL_CROSSING_REACH,
       );
       if (!overBridge && !atLevelCrossing) {
         crossings += 1;

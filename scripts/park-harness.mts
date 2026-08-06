@@ -52,6 +52,7 @@ function inertInteriorControls(): InteriorControls {
     flash: refuse('flash'),
     snapCamera: refuse('snapCamera'),
     openStairMenu: refuse('openStairMenu'),
+    openShop: refuse('openShop'),
     closeStairMenu: refuse('closeStairMenu'),
   };
 }

@@ -236,6 +236,13 @@ export class Fountain implements GameSystem {
     // rather than growing a second one here. Published as a plain occluder;
     // `Game.ts` hands it to `FoliageFade`.
     //
+    // Now that the statue turns, the patch it hides changes shape through the
+    // cycle and the capsule had to be widened to cover the paw's whole swept
+    // circle rather than one pose's silhouette — see `OCCLUDER_RADIUS`, which
+    // went 1.8 → 2.5 for it. Nothing here changes: the capsule is a body of
+    // revolution, so it is the same shape at every angle and this occluder is
+    // as static as it ever was.
+    //
     // World space, because the fade test works against the camera and the
     // player. `this.centre` is the fountain's own world position and the statue
     // stands 2.17 m above it on the bowl water.
@@ -355,6 +362,16 @@ export class Fountain implements GameSystem {
   update({ dt, elapsed }: FrameContext): void {
     this.splashEffects.update(dt);
     this.updateWading(dt);
+
+    // The statue turns on its plinth (Jim, 5 Aug). One line, because the asset
+    // owns the behaviour and the rate — see `STATUE_TURN_SECONDS`. Nothing here
+    // knows which node moves or how fast, which is the point: the same handle
+    // would spin identically in `/art-samples.html` or in a check script.
+    //
+    // Not gated on `dt > 0`. `Game.ts` zeroes `dt` under pause but deliberately
+    // keeps `elapsed` advancing so idle animation carries on behind the pause
+    // screen, and the ripples below already rely on exactly that.
+    this.statue.update(dt, elapsed);
 
     // Ripples: two crossing waves plus a radial ring travelling outwards.
     const positions = this.waterGeometry.getAttribute('position') as BufferAttribute;

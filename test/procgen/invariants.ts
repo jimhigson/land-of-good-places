@@ -40,6 +40,22 @@ import {
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
 import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
+import { visibleTop } from '../../src/art/style/measure.ts';
+import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
+import { HAIR_STYLES } from '../../src/art/models/hair.ts';
+import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
+// `train/trainDimensions.ts` and `train/clearance.ts` rather than
+// `train/trainModel.ts` — issue #226: the numbers belong somewhere a test can
+// read them without loading three.js and the track builder. Checked rather than
+// assumed (5 August 2026): `trainModel.ts` does **not** reach `parkManifest` at
+// runtime — `track.ts` imports `TrainRoute` with `import type`, which is erased
+// — so importing it here would not actually fix the seed early, and review
+// proved that by pointing this import back at it and watching 132 still pass.
+// The leaf module is defence against that chain becoming real, not a fix for a
+// live bug. `railRaceFliesClear`'s "reached through the built world, never
+// imported" note below is about `railRace/plan.ts`, which genuinely does.
+import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
+import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -230,6 +246,41 @@ const entrancesAreUsable: Invariant = (facts) => {
     );
   }
   return blocked;
+};
+
+/**
+ * No bush clump stands on the paving, or inside a plot.
+ *
+ * A bush is a solid collider a child has to walk round, so one sitting on a
+ * path narrows it, and one inside a booth's plot is furniture in a room it does
+ * not belong to. Held to the clump's **own collider radius** — the thing that
+ * actually gets in the way — against the paved *surface*, not the centre line,
+ * so the number comes from the built park rather than from the generator's
+ * `isPlantable` clearance. Re-deriving that clearance here would only prove the
+ * scatter agrees with itself.
+ *
+ * There was no bush invariant before this one, and nothing to write it against:
+ * bushes had no observable output at all until {@link BushFact}. That is the
+ * gap that let a fill-to-108 loop quietly re-roll every clump in the park each
+ * time a path moved — see `Scenery.ts`'s `BUSH_BUDGET`.
+ */
+const bushesStandOnOpenGround: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const bush of facts.bushes) {
+    const where = `bush at (${bush.x.toFixed(1)}, ${bush.z.toFixed(1)})`;
+    const paving = distanceToOtherPaving(facts, '', [bush.x, bush.z]);
+    if (paving < bush.radius) {
+      fouls.push(
+        `${where} overlaps the paving by ${(bush.radius - paving).toFixed(2)} m ` +
+          `— a child walking the path has to go round it`,
+      );
+    }
+    for (const plot of facts.plots) {
+      const gap = Math.hypot(bush.x - plot.x, bush.z - plot.z) - plot.boundingRadius - bush.radius;
+      if (gap < 0) fouls.push(`${where} stands ${(-gap).toFixed(2)} m inside ${plot.id}'s plot`);
+    }
+  }
+  return fouls;
 };
 
 /** No two trees grow through each other. */
@@ -697,9 +748,31 @@ function builtRings(facts: ParkFacts): readonly BuiltRing[] {
       ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
       ['race', 'railRace:race-ring', railRace.raceRoute.scale],
     ] as const
-  )
-    .map(([label, name, scale]) => ({ label, group: railRace.group.getObjectByName(name), scale }))
-    .filter((ring): ring is BuiltRing => ring.group !== undefined);
+  ).flatMap(([label, name, scale]) => {
+    // `flatMap` with a narrowing `if`, rather than `.map(...).filter(guard)`.
+    //
+    // The filter form was two type errors, and they were not cosmetic — this
+    // file was never typechecked until `tsconfig.test.json` existed (#192), so
+    // they sat on main unnoticed. `.map` produced `group: Object3D | undefined`,
+    // and the guard claimed `ring is BuiltRing`, which TypeScript rejected
+    // outright (TS2677): `BuiltRing.label` is `string`, but the mapped element's
+    // is the literal union `'walk-past' | 'race'`, so the predicate's type was
+    // not assignable to the parameter it was narrowing. The `readonly
+    // BuiltRing[]` return then failed too, because nothing had actually narrowed
+    // `group`.
+    //
+    // A predicate would have silenced both, but a predicate is an *assertion* —
+    // the compiler takes it on trust, which is what let the mismatch hide in the
+    // first place. Here the `if` narrows `group` for real and the object literal
+    // is checked against `BuiltRing` by ordinary inference. Nothing is asserted,
+    // so nothing can be asserted wrongly.
+    //
+    // Behaviour is identical: a ring whose group is missing is still dropped,
+    // which is deliberate — see this function's doc. The callers count the rings
+    // they get back, and that count going wrong is the alarm.
+    const group = railRace.group.getObjectByName(name);
+    return group ? [{ label, group, scale }] : [];
+  });
 }
 
 /**
@@ -1329,12 +1402,163 @@ const skyCruiserAlwaysFliesThroughTheCastle: Invariant = (facts) => {
   ];
 };
 
+/**
+ * The tallest child the park can build, measured once per fork.
+ *
+ * Every hair style crossed with every hat, on **real models**, attached the way
+ * `WornHat` and `NpcSystem.buildIndividualAvatar` attach them — `hatAnchor.add`
+ * at the hat's own natural scale, which is also exactly what the shop
+ * catalogue's `model()` hands over. Styles that hide a hat (`hairHidesHat` —
+ * mohican's crest) are measured bare, because that is what they render as.
+ *
+ * Lazy rather than at module load, because `createKid` wants the headless
+ * canvas shim and that arrives with `buildParkFacts`. ~0.5 s per fork.
+ */
+let tallestChildMeasured: { height: number; what: string } | null = null;
+
+function measureTallestChild(): { height: number; what: string } {
+  if (tallestChildMeasured) return tallestChildMeasured;
+  let height = 0;
+  let what = '';
+  for (const style of HAIR_STYLES) {
+    const bare = createKid({ hairStyle: style });
+    const bareTop = visibleTop(bare.root);
+    if (bareTop > height) {
+      height = bareTop;
+      what = `${style}, bare-headed`;
+    }
+    if (bare.hairHidesHat) continue;
+    for (const kind of HAT_KINDS) {
+      const kid = createKid({ hairStyle: style });
+      kid.hatAnchor.add(createHat(kind).root);
+      kid.setHatWorn(true);
+      const top = visibleTop(kid.root);
+      if (top > height) {
+        height = top;
+        what = `${style} hair + ${kind} hat`;
+      }
+    }
+  }
+  tallestChildMeasured = { height, what };
+  return tallestChildMeasured;
+}
+
+/**
+ * **Nothing built over the railway may touch the train — or anyone riding it.**
+ *
+ * This exists because the constant that was *supposed* to mean that did not.
+ * `trainModel.ts` exported `LOCO_TOP_Y`, documented as "the tallest point of the
+ * whole train" and "the number anything built over the railway has to clear",
+ * and it was the funnel tip — **the locomotive's bodywork, on a train that
+ * carries passengers who are taller than the funnel.** A bridge deck derived
+ * from it put its soffit at exactly 2.42 m: zero margin for Puffing Percy, and
+ * between a quarter and three quarters of a metre *inside* the children behind
+ * her. The whole point of PR #220 was to stop clearance being a claim, so the
+ * claim now gets measured.
+ *
+ * Three measurements, all off things that were actually built:
+ *
+ * 1. **The locomotive's real bodywork**, `visibleTop` on the built car groups
+ *    found by name in `world.train.group` — not recomputed from the constants
+ *    that positioned them. `LOCO_BODY_TOP_Y` has to cover what is really there.
+ *    (The station canopies live in that same group and are deliberately skipped:
+ *    they stand beside the line, they do not travel it.)
+ * 2. **The tallest child the park can build**, hair × hats, real models — see
+ *    {@link measureTallestChild}. `TALLEST_CHILD_HEIGHT` has to cover it, so
+ *    adding a taller hat turns this red instead of quietly lowering a bridge.
+ * 3. **Where riders actually are.** `ParkTrain.carryPassengers` stands NPCs on
+ *    the carriage floor (`CAR_FLOOR_Y`) and `Player.setRidePose` applies no
+ *    seated fold, so the player's feet are on the bench (`SEAT_Y`) and she rides
+ *    at full height. The clearance has to cover the worst of the three.
+ *
+ * Then `TRAIN_CLEARANCE_Y` — the published number, from `train/clearance.ts` —
+ * is checked against that measured worst case. This is `railRaceFliesClear`'s
+ * pattern exactly: measure the built thing, compare it against the number the
+ * game publishes, and never against the arithmetic that produced it.
+ *
+ * **Seed-independent by construction**, and kept here rather than in
+ * `check:park` on purpose: it costs nothing extra to run on five seeds, and it
+ * is the file CLAUDE.md sends anyone changing procgen to. When #116 lands a real
+ * deck, the deck's own surfaces get measured against `TRAIN_CLEARANCE_Y` here
+ * too — the constant this guards is the one they will be built from.
+ */
+const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
+  const complaints: string[] = [];
+
+  // --- 1. the built locomotive and carriages -------------------------------
+  let builtBodyTop = 0;
+  let builtBodyWhat = '';
+  for (const child of facts.world.train.group.children) {
+    const name = child.name;
+    if (name !== 'train-locomotive' && !name.startsWith('train-carriage')) continue;
+    const top = visibleTop(child);
+    if (top > builtBodyTop) {
+      builtBodyTop = top;
+      builtBodyWhat = name;
+    }
+  }
+  if (builtBodyWhat === '') {
+    complaints.push(
+      'no locomotive or carriage in the built train group to measure — the car ' +
+        'names in trainModel.ts have changed and this invariant is measuring nothing',
+    );
+    return complaints;
+  }
+  if (builtBodyTop > LOCO_BODY_TOP_Y) {
+    complaints.push(
+      `LOCO_BODY_TOP_Y is ${LOCO_BODY_TOP_Y.toFixed(2)} m but the built ` +
+        `${builtBodyWhat} reaches ${builtBodyTop.toFixed(2)} m — the constant no ` +
+        'longer covers the bodywork it is meant to describe',
+    );
+  }
+
+  // --- 2. the tallest child the park can build -----------------------------
+  const child = measureTallestChild();
+  if (child.height > TALLEST_CHILD_HEIGHT) {
+    complaints.push(
+      `TALLEST_CHILD_HEIGHT is ${TALLEST_CHILD_HEIGHT.toFixed(2)} m but a real ` +
+        `${child.what} measures ${child.height.toFixed(3)} m — raise the constant ` +
+        'in kid.ts, because train/clearance.ts sizes a bridge from it',
+    );
+  }
+
+  // --- 3. does the published clearance cover all of that? -------------------
+  //
+  // Measured child, not the constant, so a stale constant cannot hide a real
+  // rider: this stays honest even if the complaint above is the one that fires.
+  const riderTop = Math.max(CAR_FLOOR_Y, SEAT_Y) + child.height;
+  const sweptTop = Math.max(builtBodyTop, riderTop);
+  if (TRAIN_CLEARANCE_Y < sweptTop) {
+    const intrusion = sweptTop - TRAIN_CLEARANCE_Y;
+    complaints.push(
+      `TRAIN_CLEARANCE_Y is ${TRAIN_CLEARANCE_Y.toFixed(2)} m but the train sweeps ` +
+        `to ${sweptTop.toFixed(2)} m — anything built to that clearance sits ` +
+        `${intrusion.toFixed(2)} m inside it. Worst: ` +
+        `built ${builtBodyWhat} ${builtBodyTop.toFixed(2)}, standing NPC rider ` +
+        `${(CAR_FLOOR_Y + child.height).toFixed(2)}, player on the bench ` +
+        `${(SEAT_Y + child.height).toFixed(2)} (${child.what})`,
+    );
+  } else if (TRAIN_CLEARANCE_Y - sweptTop < RIDER_HEADROOM) {
+    // Not "is the arithmetic right" — the swept top here is *measured*, so this
+    // catches the geometry growing into headroom that the constants still think
+    // is there.
+    complaints.push(
+      `only ${(TRAIN_CLEARANCE_Y - sweptTop).toFixed(2)} m of measured headroom ` +
+        `over the train, against the ${RIDER_HEADROOM.toFixed(2)} m ` +
+        'train/clearance.ts believes it is leaving',
+    );
+  }
+
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
+  ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
@@ -1355,6 +1579,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
   ['the Sky Cruiser always flies through the castle', skyCruiserAlwaysFliesThroughTheCastle],
+  [
+    'the clearance over the railway covers the train and everyone riding it',
+    railwayClearanceCoversTheTrainAndItsRiders,
+  ],
 ];
 
 /**
@@ -1401,6 +1629,19 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // An anti-vacuity guard, not a placement threshold — the "thresholds come
       // from the game" rule above is about the latter.
       expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(24);
+      // Bushes get a floor for the same reason, and they need one more than
+      // they used to. The clump count was pinned at exactly 108 by a
+      // fill-until-N loop; it is now whatever a fixed budget of candidates
+      // passes, which is the price of the scatter being local (see
+      // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
+      // now happen quietly, so it gets a guard.
+      //
+      // Measured across the five CI seeds at 149 / 128 / 137 / 142 / 140. The
+      // floor is 108 because that is exactly what every seed used to plant, so
+      // it reads as "no seed is worse off than before the scatter was made
+      // local" rather than as an arbitrary round number — and the worst seed
+      // still clears it by 20.
+      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);

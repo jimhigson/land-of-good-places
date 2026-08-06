@@ -118,3 +118,50 @@ export class Rng {
     return items[Math.floor(this.next() * items.length)] as T;
   }
 }
+
+/**
+ * A stream of its very own for candidate `index` of a rejection sampler.
+ *
+ * ### The bug this exists to make impossible
+ *
+ * A rejection sampler that draws from one long-lived {@link Rng} consumes a
+ * *different number of draws* depending on whether a candidate was accepted.
+ * `Scenery`'s tree scatter is the worst case: a rejected candidate costs 2-3
+ * draws, an accepted one 10-20. So the moment anything upstream flips one
+ * candidate from accepted to rejected, every later object on that stream
+ * shifts — the sampler is still deterministic, but it is now deterministic
+ * about a different park.
+ *
+ * That is not a theoretical hazard. Lengthening one stall's path spur by a few
+ * metres paves a little more ground, `isOnPath` refuses one tree that used to
+ * fit, and a garden wall lands across the *ferris wheel kiosk's* line of sight
+ * on the far side of the park, stranding its waypoint. The two have nothing to
+ * do with each other except a shared draw counter. It cost an engineer a sweep
+ * of all 344 legal booth positions — every one of which stranded the same
+ * waypoint — before the mechanism was identified. See `parkManifest.ts`.
+ *
+ * ### What this fixes, and what it does not
+ *
+ * Seeding per candidate makes candidate *k*'s proposal a pure function of *k*
+ * and the seed, so **rejecting candidate *k-1* cannot move candidate *k***.
+ * Distant scenery stops caring how long a path is.
+ *
+ * It does **not** make the scatter immune to geometry, and it should not:
+ * a candidate whose footprint now overlaps the path is still refused — it
+ * disappears rather than relocating — and a candidate that used to clash with
+ * a now-refused neighbour may newly appear, at its own index-fixed spot. The
+ * guarantee is *locality*: a change here cannot move scenery over there.
+ *
+ * Note that `generateStoneRuns` has always been immune, by accident rather
+ * than design — it draws a fixed five values per attempt and tests last. That
+ * is the shape this helper generalises.
+ *
+ * `index` is multiplied by the 32-bit golden-ratio constant before it reaches
+ * the seed, so that neighbouring indices land far apart in seed space rather
+ * than relying on mulberry32's finaliser alone to decorrelate `n` from `n + 1`.
+ * Consecutive candidates supply a scatter's angle *and* radius, so a
+ * correlation between them would show up as trees in visible stripes.
+ */
+export function candidateRng(salt: number, index: number): Rng {
+  return new Rng((salt ^ Math.imul(index + 1, 0x9e3779b1)) >>> 0);
+}

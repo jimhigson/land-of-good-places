@@ -106,8 +106,16 @@ describe('a focused action chip keeps Enter working (issue #189 boundary)', () =
     const { prevented } = pressFrom(chip, 'Enter');
 
     // Not zero: the game action is queued.
+    //
+    // Read through `takeInteractPress()` rather than `justPressed('interact')`.
+    // Issue #122 excluded `interact` from `justPressed`'s parameter type on
+    // purpose, so the old line here is now a compile error — it only survived
+    // because nothing typechecked `test/` until #192. The door this test wants
+    // is the one the game itself uses, and it is stricter: reading *consumes*
+    // the edge, so this also proves there is exactly one press to take.
     system.update();
-    expect(system.justPressed('interact'), 'Enter on a chip must still act').toBe(true);
+    expect(system.takeInteractPress(), 'Enter on a chip must still act').toBe(true);
+    expect(system.takeInteractPress(), 'the interact edge is taken once only').toBe(false);
 
     // Not twice: `preventDefault` is what cancels the button's own native
     // activation, so the chip cannot also fire through its `click` listener.
@@ -116,7 +124,7 @@ describe('a focused action chip keeps Enter working (issue #189 boundary)', () =
     // And not again on the following frame while the key is still held —
     // `justPressed` is an edge, so a held Enter must not repeat the action.
     system.update();
-    expect(system.justPressed('interact'), 'a held Enter must not repeat').toBe(false);
+    expect(system.takeInteractPress(), 'a held Enter must not repeat').toBe(false);
 
     system.detach(chip as unknown as Window);
   });
