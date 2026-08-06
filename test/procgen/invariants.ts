@@ -232,6 +232,46 @@ const wallsClearTheRailway: Invariant = (facts) => {
 };
 
 /**
+ * **No tree stands on the railway.** Issue #235.
+ *
+ * The twin of {@link wallsClearTheRailway}, and it did not exist because it
+ * used to be unnecessary: `Scenery.isPlantable` refused anything beyond 55 m of
+ * centre, which kept every tree well inside the outer railway by construction.
+ * PR #216 retires that cap in favour of a distance-to-boundary test, which
+ * opens the outer reaches — exactly where the railway runs — for planting, and
+ * leaves the whole guarantee resting on `onRailway`'s 2.6 m fence with nothing
+ * measuring the result.
+ *
+ * Written here **ahead of** that PR, deliberately. The gap is not reachable on
+ * `main` today — trees still stop at 54.0 m — so this costs nothing now and
+ * means #216 cannot land the problem silently. That is the same lesson as the
+ * Sky Cruiser striking the fairy lights (#210): an obstacle class nobody
+ * measured, because a since-retired assumption had made it unnecessary.
+ *
+ * The margin it is guarding is **not** generous. Measured on the canonical
+ * seed, the closest tree's canopy reaches to **3.11 m** of the rail centre line
+ * (then 3.26, then 3.58) against a `TRACK_CLEARANCE` of 1.3 — so 1.81 m of
+ * slack on the worst tree in the park, today, before anything is widened.
+ *
+ * `TRACK_CLEARANCE` is the game's own half-width, and `footprint` is the tree's
+ * real reach, so this asks the question in the units a collision would happen
+ * in rather than in the scatter's own target.
+ */
+const treesClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const tree of facts.trees) {
+    const gap = facts.distanceToRail(tree.x, tree.z) - tree.footprint;
+    if (gap < TRACK_CLEARANCE) {
+      fouls.push(
+        `tree at ${fmt([tree.x, tree.z])} reaches to ${gap.toFixed(2)} m of the rail centre ` +
+          `line (needs ${TRACK_CLEARANCE} m)`,
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
  * No two plots overlap.
  *
  * Pairs the manifest deliberately relates with `near` are exempt — that field
@@ -1637,6 +1677,7 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
+  ['no tree stands on the railway', treesClearTheRailway],
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
