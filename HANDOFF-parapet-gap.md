@@ -224,54 +224,90 @@ principle commit 1 is about. The two agreed closely where they overlapped
 (canonical 6.20 vs 6.17 m; seed 5 5.48 vs 5.46 m), which is worth knowing: the
 measurement is robust to how it is sampled.
 
-## CURRENT PRIORITY — the slide clips the castle towers (Jim, ridden)
+## Towers: FIXED, but TWO THINGS BLOCK THE MERGE
 
-**Status: invariant committed and deliberately RED. `npm run test:procgen`
-exits 1. `npm run build` exits 0. The fix is not written yet.**
+**`npm run test:procgen` exit 0, 137 tests. `npm run build` exit 1 — see (A).**
 
-### Root cause (measured, confirmed — not the hypothesis I was handed)
+### The fix
 
-`slide/plan.ts` exempts the castle and ball-pit plots from `clearOfPlots`
-(their circles overlap, so a ride joining them could never solve) and
-re-imposes the castle **as its footprint rectangle**. The towers stand at
-`(±outerX, ±outerZ)` — outside that rectangle by half a wall — and bulge
-2.05–2.45 m further out. So the exemption is as narrow as intended, but the
-thing re-imposed is not the castle.
+`slide/plan.ts` re-imposes the castle as rectangle **plus** towers; the
+two-plot exemption is untouched. `CASTLE_TOWERS` lives in `layout.ts` because
+`Shell.ts` imports the plan and could not own it without a cycle.
 
-**The route wraps the castle the long way round** (out past the north-west
-corner to (-28.5, -32.2)), so it meets **all four** towers, not just the
-south-east one as hypothesised.
+| seed | before | after |
+|---|---|---|
+| 20260728 | 1.52 m inside | **1.97 m clear** |
+| 2 | 1.14 m inside | 1.54 m clear |
+| 5 | 0.78 m inside | 1.97 m clear |
+| 18 | 1.09 m inside | 1.79 m clear |
+| 11 | 0.043 m clear | 1.79 m clear |
 
-| seed | result |
+Worst margin 1.54 m. Seed 11's 43 mm of luck is gone.
+
+Four further real bugs the invariants exposed, all fixed at source rather than
+by moving a threshold: the hole was cut where the route *starts* rather than
+where the chute *crosses* the wall (0.67 m out on angled exits); the door stub
+stopped reaching the wall past ~38°; two legs overlapped by 0.11 m because
+slots are spaced by arc length, not on the ground; and a 2.5 mm spline
+overshoot at the lip, fixed by sampling at 0.9 m instead of 1.6 m.
+
+### (A) BLOCKER — `check:park` fails, and do not silence it
+
+```
+'building' declares a bounding radius of 19 m but has built out to 28.2 m
+anchor.reach:building: 9.2, recorded at 0 — it has got worse
+```
+
+The chute hangs off `gardenRoot`, which is under the `building` anchor's plot
+group, so `check:park` measures it against the castle's 19 m. It passed before
+only because its bounding-sphere *centre* happened to sit near the tower; the
+new route moved that centre out. **It was always fragile, not newly wrong.**
+
+The principled fix, and the precedent is in this same ride: the legs were moved
+to park level because "this ride spans two plots, so its supports are the
+park's, not the tower's". The chute spans the same two plots.
+
+**Why I did not just do it:** `Building.ts` deliberately parents the rider's
+`eyeMount`/`rideMount` to the *same group* as the chute, so "the chute's points
+and the mount's position are the same coordinates, and cannot drift apart".
+Moving the chute means moving the mount in the same change, or recreating
+exactly the class of bug this repo keeps hitting. That is a real piece of work,
+not a one-liner, and I would not start it with no budget to verify it.
+`SLIDE_GROUP_ORIGIN` in `plan.ts` is a dead export and can go with it.
+
+**Do NOT add this to RATCHET** — `check:park` says so itself.
+
+### (B) BLOCKER — boot time
+
+`SLIDE_PLAN` solves at module load. Adding the towers made the search much
+harder:
+
+| seed | solve (was ~1.2 s incl. node startup) |
 |---|---|
-| 20260728 | 1.52 m inside `tower-bodies[0]` |
-| 2 | 1.14 m inside `tower-bodies[0]` |
-| 5 | 0.78 m inside `tower-bodies[1]` |
-| 18 | 1.09 m inside `tower-bodies[1]` |
-| 11 | clears by **0.043 m** |
+| 20260728 | 9.4 s |
+| 2 | 10.7 s |
+| 5 | 35.3 s |
+| 11 | 28.4 s |
+| 18 | 12.8 s |
 
-Four clip; the fifth misses by 43 mm. There is no margin anywhere.
+A 35 s freeze before a six-year-old can play is not shippable. Measured facts:
 
-`npm run measure:slide-towers` (honours `LGP_SEED`) prints the worst gap and
-which tower, off the built scene.
+- The cruiser check is not the cost. Disabling it took seed 5 from 53.8 s to
+  1.6 s, but that removes a *constraint*, not just work — the search then
+  solved immediately. Misleading A/B; do not repeat it.
+- A spatial grid over the cruiser segments is in (identical results, ~1.3x).
+  Not enough on its own.
+- The door is not a clean lever either: canonical solves in 3 s at door x=0 but
+  seed 5 still takes 21 s, and some positions fail outright.
+- The real cause is that the search explores 1–2.3M candidate pieces. Seed 5
+  went from 944 candidates to 2.34M when the towers appeared, because the fixed
+  door at local x 9.5 sits right beside the south-east tower — the door span
+  7.4…11.6 overlaps that tower's footprint (10.03…14.4) outright.
 
-### Threshold — the one number not to get wrong
-
-`CHUTE_ENVELOPE` (in `SlideRide.ts`, derived from `PROFILE`: ±0.95 m across,
-−0.06…+0.86 up) is the **rider's own envelope**. `CORRIDOR_RADIUS` (1.45 m) is
-the wider margin the *search* steers by. Use the envelope for collision truth:
-the 0.5 m difference is exactly what separates seed 11's real 43 mm clearance
-from an apparent 0.46 m clip.
-
-### The fix, not yet written
-
-Make the chute's `clear` predicate know about the towers, so the search routes
-around them instead of being told about a rectangle they are not in. Towers are
-solids of revolution, so `distance to axis vs radius-at-height` is exact and
-cheap — no probe rays needed. Keep the two-plot exemption narrow; re-impose the
-castle as rectangle **plus** towers.
-
-Beware: `slide/supports.ts` legs may also foul towers — check after.
+Likely fixes, in the order I would try them: **issue #209's "prefer gentler
+pieces / better ordering"** (the search takes the first satisfying route, so
+ordering is the whole game); then door freedom, which is Jim's screenshot call;
+then caching the solved plan, which trades away procgen purity.
 
 ### Queued behind it (Jim, second item)
 
