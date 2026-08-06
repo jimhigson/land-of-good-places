@@ -1,5 +1,5 @@
 import { PARK_SEED } from '../src/world/parkManifest';
-import { circleBoundary } from '../src/world/rail/boundary';
+import { circleBoundary } from '../src/world/boundary';
 import { RailRouteUnsolvable, solveRailRoute, ringStartPoses } from '../src/world/rail/generate';
 import { turnVocabulary } from '../src/world/rail/segments';
 

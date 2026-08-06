@@ -15,9 +15,15 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { PLAYER_RADIUS, TERRAIN_RADIUS, TREELINE_INNER_RADIUS } from '../core/constants';
+import { PLAYER_RADIUS } from '../core/constants';
+import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
+
+/** How far inside the park's edge anything may be planted. Was `> 55` against a 60 m wall. */
+const PLANTABLE_MARGIN = 5;
+/** Where the screening woodland starts, beyond the edge. Was 71.5 against a 60 m wall. */
+const TREELINE_OUTSET_INNER = 11.5;
 import { PALETTE } from '../core/palette';
-import { Rng, TAU } from '../core/mathUtils';
+import { Rng, TAU, candidateRng } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
 import { PARK_SEED } from './parkManifest';
@@ -210,6 +216,25 @@ export interface PlacedWallRun {
   readonly halfWidth: number;
 }
 
+/**
+ * One planted bush clump — where it stands and how far it spreads.
+ *
+ * Published for exactly the reason {@link PlacedWallRun} is: the scatter had no
+ * observable output at all for bushes, so nothing in the test suite could see
+ * one move. That is not a hypothetical gap — bushes shared a generator with the
+ * trees, so every tree gained or lost anywhere in the park silently re-rolled
+ * all 108 clumps, and no check could have noticed.
+ *
+ * The clump, not its individual blobs: the blobs are a rendering detail, while
+ * the clump is the thing that occupies ground and takes a collider.
+ */
+export interface PlacedBush {
+  readonly x: number;
+  readonly z: number;
+  /** Radius of the collider the clump registers. */
+  readonly radius: number;
+}
+
 export class Scenery {
   readonly group = new Group();
   /** Every wall run standing in the park. See {@link PlacedWallRun}. */
@@ -218,6 +243,8 @@ export class Scenery {
   readonly climbableTrees: readonly ClimbableTreeSeed[];
   /** Every tree big enough to hide the player. See {@link FoliageOccluder}. */
   readonly foliageOccluders: readonly FoliageOccluder[];
+  /** Every bush clump standing in the park. See {@link PlacedBush}. */
+  readonly bushes: readonly PlacedBush[];
   private readonly hideableInstances: readonly (readonly HideableInstance[])[];
 
   constructor(collision: CollisionWorld) {
@@ -226,6 +253,7 @@ export class Scenery {
     this.group.add(foliage.group);
     this.climbableTrees = foliage.climbableTrees;
     this.foliageOccluders = foliage.occluders;
+    this.bushes = foliage.bushes;
     this.hideableInstances = foliage.hideableInstances;
     this.group.add(buildTreeline());
     // Collected as they are built, from the already-trimmed `wallPlan`, so
@@ -339,16 +367,33 @@ const BUSH_TOP = 2.15;
  */
 const WALL_TOP = 2.6;
 
+/**
+ * One salt per scattered subsystem, so no two of them share a draw counter.
+ *
+ * Each is combined with the candidate's own index by {@link candidateRng} —
+ * read the note there for why a rejection sampler must never draw from one
+ * long-lived generator. The short version: trees and bushes used to share a
+ * single `new Rng(0xc0ffee)`, with the bush loop running second, so one tree
+ * gained or lost anywhere re-rolled all 108 bush clumps.
+ *
+ * They are xor'd with {@link PARK_SEED} the way the wall salts always have
+ * been. Without that the foliage draw sequence was *identical* on all five CI
+ * seeds — the sweep only ever varied which candidates the geometry refused, so
+ * five seeds were really one scatter measured five times.
+ */
+const TREE_SALT = 0xc0ffee ^ PARK_SEED;
+const BUSH_SALT = 0xb115e5 ^ PARK_SEED;
+const MAZE_SALT = 0x77a115 ^ PARK_SEED;
+
 function buildFoliage(collision: CollisionWorld): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
   occluders: FoliageOccluder[];
+  bushes: PlacedBush[];
   hideableInstances: HideableInstance[][];
 } {
   const group = new Group();
   group.name = 'foliage';
-
-  const rng = new Rng(0xc0ffee);
 
   const trunks: InstanceItem[] = [];
   const roundCanopies: InstanceItem[] = [];
@@ -424,8 +469,15 @@ function buildFoliage(collision: CollisionWorld): {
   // budget alone cleared it.
   while (treeCount < targetTrees && attempts < 180000) {
     attempts += 1;
+    // This candidate's own stream. Everything below draws from it and nothing
+    // else, so what this attempt proposes depends on `attempts` and the seed —
+    // never on how many earlier candidates happened to be accepted.
+    const rng = candidateRng(TREE_SALT, attempts);
     const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 54;
+    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
+    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
+    // radius would crowd every tree into the middle of a park this shape.
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 2.6)) continue;
@@ -569,12 +621,57 @@ function buildFoliage(collision: CollisionWorld): {
   }
 
   // --- bushes --------------------------------------------------------------
-  let bushCount = 0;
+  /** Where each clump stands, published as {@link PlacedBush}. */
+  const bushClumps: PlacedBush[] = [];
+  /** Radius of the collider a clump registers, and so the ground it occupies. */
+  const BUSH_COLLIDER = 0.85;
   attempts = 0;
-  while (bushCount < 108 && attempts < 5200) {
+  // **A fixed budget, and no target count — the two are not compatible.**
+  //
+  // This loop used to run `while (bushCount < 108 && attempts < 5200)`, and a
+  // "keep going until you have 108" loop is a coupling all of its own, quite
+  // separate from the shared-generator one. Refuse one clump because a path
+  // grew under it and the loop simply runs one attempt longer, admitting a
+  // candidate at the tail that was never in the park before. Measured on this
+  // branch before the change: bowing one spur by 2 m refused 4 clumps near the
+  // bow and conjured 4 unrelated ones at the far end of the sequence.
+  //
+  // So the count is now whatever passes. Wanting *exactly* N and wanting a
+  // change here to leave things over there alone are genuinely incompatible
+  // aims, and locality is the one that unblocks moving a booth (#216, #117).
+  //
+  // **The budget is set by the worst seed, not by the canonical one.** That
+  // distinction was got wrong once and is the whole reason this paragraph is
+  // here. The first value tried, 1050, was tuned until the canonical seed
+  // landed on exactly the 108 clumps it had before — which looked like a
+  // perfect no-change result and hid the fact that seed 2 came out at 86, a
+  // fifth of its ground cover gone. A single seed standing in for five will
+  // always flatter whichever seed it is.
+  //
+  // Every seed used to get 108, because the old fill-to-N loop had 4-5x the
+  // candidates it needed on all of them. So the bar is: **no seed plants fewer
+  // than the 108 it used to.** Measured across the five CI seeds:
+  //
+  //   budget   canonical   s2    s5   s11   s18   worst
+  //     1050        108    86   103   106   102      86   <- seed 2 stripped
+  //     1200        131   105   118   119   116     105   <- still under
+  //     1300        138   118   126   129   127     118
+  //     1400        149   128   137   142   140     128   <- chosen
+  //     1500        164   138   151   157   151     138
+  //
+  // 1400 is the first value with real headroom over the 108 floor on the
+  // *worst* seed (128, so 20 clumps of slack) rather than merely clearing it,
+  // which matters because the count moves whenever the geometry does — a park
+  // change that paves more lawn takes a bite out of every seed at once.
+  //
+  // Locality is unaffected by the number: candidate k is evaluated if and only
+  // if k < budget, whatever the budget is.
+  const BUSH_BUDGET = 1400;
+  while (attempts < BUSH_BUDGET) {
     attempts += 1;
+    const rng = candidateRng(BUSH_SALT, attempts);
     const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * 55;
+    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 1.6)) continue;
@@ -600,8 +697,8 @@ function buildFoliage(collision: CollisionWorld): {
         shade: rng.range(0.9, 1.1),
       });
     }
-    collision.addCircle(x, z, 0.85);
-    bushCount += 1;
+    collision.addCircle(x, z, BUSH_COLLIDER);
+    bushClumps.push({ x, z, radius: BUSH_COLLIDER });
   }
 
   // Flowers used to be scattered here too, as static decoration. They are now
@@ -653,7 +750,7 @@ function buildFoliage(collision: CollisionWorld): {
     }),
   );
 
-  return { group, climbableTrees, occluders, hideableInstances };
+  return { group, climbableTrees, occluders, bushes: bushClumps, hideableInstances };
 }
 
 /**
@@ -679,20 +776,26 @@ function buildTreeline(): Group {
   const trunks: InstanceItem[] = [];
   const canopies: InstanceItem[] = [];
 
-  const bandInner = TREELINE_INNER_RADIUS;
-  const bandOuter = TERRAIN_RADIUS - 1.5;
+  // The band is a distance *beyond the park's edge*, not a pair of radii. It
+  // has to sit the same way relative to the cut on every bearing, or it screens
+  // the terrain edge on one side of the park and stands out on bare hillside on
+  // the other. These are the old numbers restated: the treeline used to begin
+  // 11.5 m outside the masonry and finish 22 m outside it.
+  const bandInner = TREELINE_OUTSET_INNER;
+  const bandOuter = TERRAIN_APRON - 1.5;
   const colours = [PALETTE.leafDeep, PALETTE.leafMid, PALETTE.leafBlue, PALETTE.leafLight];
 
   for (let i = 0; i < 540; i += 1) {
     const angle = rng.range(0, TAU);
-    const distance = rng.range(bandInner, bandOuter);
+    const outset = rng.range(bandInner, bandOuter);
+    const distance = edgeRadiusAt(PARK_BOUNDARY, angle) + outset;
     const x = Math.cos(angle) * distance;
     const z = Math.sin(angle) * distance;
     const ground = terrainHeight(x, z);
 
     // Slightly taller towards the rim so the band reads as depth, but kept low
     // enough that it screens the terrain edge without swallowing the sky.
-    const rimness = (distance - bandInner) / (bandOuter - bandInner);
+    const rimness = (outset - bandInner) / (bandOuter - bandInner);
     const height = rng.range(2.8, 4.0) + rimness * 1.1;
     const radius = rng.range(1.7, 2.6) + rimness * 0.5;
 
@@ -796,7 +899,9 @@ function onRideExit(x: number, z: number, clearance: number): boolean {
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
  * not on the railway, not where a ride sets a child down. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
-  if (Math.hypot(x, z) > 55) return false;
+  // Five metres inside the park's own edge — the same margin the old `> 55`
+  // kept from the masonry at 60, now measured from an edge that moves.
+  if (PARK_BOUNDARY.distanceToEdge(x, z) < PLANTABLE_MARGIN) return false;
   if (isOnPath(x, z, clearance)) return false;
   // Keep the fountain plaza open — wherever the layout put it (Decision 5).
   if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
@@ -1076,7 +1181,6 @@ function clearOfWalls(x: number, z: number, reach: number): boolean {
 const MAZE_PIECE_GAP = 7;
 
 function generateWallMaze(placed: WallRun[]): WallRun[] {
-  const rng = new Rng(0x77a115 ^ PARK_SEED);
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
   const heights = [0.8, 0.95, 1.5, 1.8, 2.1, 2.6];
@@ -1086,6 +1190,10 @@ function generateWallMaze(placed: WallRun[]): WallRun[] {
   let piece = 0;
   while (runs.length < 10 && attempts < 4000) {
     attempts += 1;
+    // Per-candidate stream: this loop bailed out after 2, 6 or 8 draws
+    // depending on which test refused it, which is precisely how a longer path
+    // spur used to relocate a garden wall onto an unrelated kiosk's doorstep.
+    const rng = candidateRng(MAZE_SALT, attempts);
     const angle = rng.range(0, Math.PI * 2);
     const radius = Math.sqrt(rng.range(13 * 13, 42 * 42));
     const cx = Math.cos(angle) * radius;

@@ -83,6 +83,31 @@ export const KID_HEAD_HEIGHT = 1.36;
 export const KID_HEIGHT = 2.12;
 
 /**
+ * The height of the **tallest child the park can produce**, in metres — every
+ * hair style crossed with every hat, measured with {@link visibleTop} on real
+ * models.
+ *
+ * `KID_HEIGHT` is the *default* style and is nowhere near this: the measured
+ * spread runs 2.087 (bob, short, bowl…) to 2.490 bare-headed (mohican's crest),
+ * and a party hat takes it to **2.968** — 0.85 m more than `KID_HEIGHT`. Hats
+ * dominate hair, and they count, because children wear them on rides:
+ * `WornHat` and `NpcSystem.buildIndividualAvatar` both parent the hat model
+ * into `hatAnchor` at its own natural scale.
+ *
+ * **Why this exists rather than being everybody's own guess:** anything sizing
+ * a space a child has to fit through needs the worst case, not the typical one.
+ * `train/clearance.ts` is the first caller — a bridge over the railway derived
+ * from `KID_HEIGHT` would clear the average child and hit the tall ones.
+ *
+ * **It cannot go stale.** `test/procgen/invariants.ts`'s "the clearance over the
+ * railway covers the train and everyone riding it" re-measures the full
+ * hair × hat cross product from real models on every seed and fails if any
+ * built child is taller than this. Add a taller hat and that goes red rather
+ * than a bridge quietly getting too low.
+ */
+export const TALLEST_CHILD_HEIGHT = 2.97;
+
+/**
  * How far the head is tipped back, in radians (≈ 10°).
  *
  * The game camera looks down at 38°. A head this big, sitting level, presents
@@ -428,6 +453,12 @@ export interface KidHandle extends CreatureHandle {
    */
   readonly backpackParts: readonly BackpackPart[];
   /**
+   * Where a worn keychain hangs — low on the bag's side, clear of
+   * {@link backpackAnchor} (the bag's *mouth*, used by a peeking creature's
+   * head) so the two never overlap. See `entities/WornKeychain.ts`.
+   */
+  readonly keychainAnchor: Group;
+  /**
    * Every hair mesh built, each tagged with the styles that show it.
    *
    * Exposed as typed objects rather than found by name, so the NPC crowd can
@@ -748,6 +779,17 @@ export function createKid(options: KidOptions = {}): KidHandle {
   jetpackAnchor.position.set(0, 0.56, -0.32);
   body.add(jetpackAnchor);
 
+  // Where a worn keychain hangs. Comes from the bag's own rig, per shape, and
+  // moves when she switches bags — `backpacks.ts` owns the number because it
+  // owns the shapes (see `CHARM_HANGS`). A separate anchor from
+  // `backpackAnchor`, which is the bag's *mouth*: a charm hung there would
+  // dangle over a peeking creature's head (`BackpackPeek`).
+  //
+  // `backpack: false` (the pet-shop display kids) leaves this an unparented
+  // `Group` at the origin, exactly as `backpackAnchor` does — a real object to
+  // hand back rather than `undefined`, with nothing to hang off.
+  const keychainAnchor = backpackRig?.charmAnchor ?? new Group();
+
   // --- head --------------------------------------------------------------------
   // Everything below is authored at `× HEAD`. The pivot came *down* from 1.34 to
   // 1.36 rather than up by half the extra radius, because the head is meant to
@@ -891,6 +933,7 @@ export function createKid(options: KidOptions = {}): KidHandle {
     jetpackAnchor,
     glassesAnchor,
     backpackParts: backpackRig?.parts ?? [],
+    keychainAnchor,
     hairParts: hairRig.parts,
     get hairHidesHat() {
       return hairRig.hidesHat;

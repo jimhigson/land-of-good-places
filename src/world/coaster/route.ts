@@ -4,7 +4,7 @@ import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary } from '../rail/boundary';
+import { circleBoundary } from '../boundary';
 import {
   type RouteBrief,
   type RouteInfluence,

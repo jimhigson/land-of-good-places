@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
-import { RIM_DROP, RIM_END, RIM_START, TERRAIN_HEIGHT_SCALE } from '../core/constants';
+import { RIM_DROP, RIM_OUTSET_END, RIM_OUTSET_START, TERRAIN_HEIGHT_SCALE } from '../core/constants';
 import { smoothstep } from '../core/mathUtils';
+import { PARK_BOUNDARY } from './boundary';
 
 /**
  * The shape of the ground, as a pure function.
@@ -25,8 +26,14 @@ export function terrainHeight(x: number, z: number): number {
   // than the camera's 38° pitch, so everything past the crest is hidden and the
   // horizon appears just above the wall. Without it an endless flat plane fills
   // the screen and the whole day/night cycle goes unseen.
-  const radius = Math.hypot(x, z);
-  return base - smoothstep(RIM_START, RIM_END, radius) * RIM_DROP;
+  // Measured outward from the park's own edge, not from the origin. The
+  // boundary is 57 m out on one bearing and 110 m on another, so a crest at a
+  // fixed radius would slice through the park on one side and leave a plain
+  // outside it on the other. `distanceToEdge` is positive inside, so negating
+  // it gives metres *beyond* the edge, and the hill is the same hill wherever
+  // you walk out of the park.
+  const beyondEdge = -PARK_BOUNDARY.distanceToEdge(x, z);
+  return base - smoothstep(RIM_OUTSET_START, RIM_OUTSET_END, beyondEdge) * RIM_DROP;
 }
 
 /** Surface normal at a point, from finite differences. */

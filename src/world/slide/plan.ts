@@ -21,7 +21,7 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
-import { circleBoundary } from '../rail/boundary';
+import { circleBoundary } from '../boundary';
 import { type OpenRouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { terrainHeight } from '../terrain';
