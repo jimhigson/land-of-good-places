@@ -38,7 +38,7 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
-import { PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
+import { PLAYER_MAX_SPEED, PLAYER_RADIUS, TERRAIN_RADIUS } from '../../src/core/constants.ts';
 import { ENTRANCE_WALL_RADIUS } from '../../src/world/entrance/layout.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
@@ -72,6 +72,24 @@ const WALKABLE_GAP = 1.24;
  * Anything closer than this to the centre line is inside the train.
  */
 const TRACK_CLEARANCE = 1.3;
+
+/**
+ * How long a child may spend getting to a tree she can climb.
+ *
+ * Seven seconds at her own flat-out {@link PLAYER_MAX_SPEED} — a duration, not
+ * a distance, because Jim's complaint was a duration: *"it takes a long time to
+ * find one"*. Converting through the game's own speed is what stops this being
+ * a number somebody liked the look of.
+ *
+ * It is generous on purpose. She has to *see* the tree before she walks to it,
+ * so this is a floor under the experience rather than a description of it, and
+ * the honest ceiling is set by something this PR cannot move: the inner ~30 m
+ * of park has no trees of any kind, its ground being spoken for by the plots,
+ * the stalls and the plaza. Seven seconds clears the worst point on all five
+ * seeds by 19% while still failing three of the five as the park stood before.
+ */
+const SEARCH_SECONDS = 7;
+const MAX_CLIMB_SEARCH = PLAYER_MAX_SPEED * SEARCH_SECONDS;
 
 /**
  * How far off a doormat the game itself considers "arrived" — imported in
@@ -587,6 +605,70 @@ const everyPathIsLit: Invariant = (facts) => {
     }
   }
   return dark;
+};
+
+/**
+ * **You can find a tree to climb without hunting for one.**
+ *
+ * Jim, 6 August: *"re the trees, we need more climbable trees, it takes a long
+ * time to find one."* The complaint is about **finding**, not about the total,
+ * and the two have identical symptoms — a park with plenty of climbable trees
+ * all in one corner is just as bad as a park with three. So this measures the
+ * walk, not the count. (The count gets its own anti-vacuity floor below, which
+ * is a different job: that one catches a park with none.)
+ *
+ * Measured along the **paved network**, in the shape of {@link everyPathIsLit},
+ * because that is where a child actually walks and it is already sampled every
+ * ~0.5 m. Measuring instead over every standable square metre would be
+ * dominated by the middle of the park, which has no trees of any kind in it —
+ * the plots, stalls and plaza consume the inner ~30 m — and would therefore
+ * report a number nothing in this PR could move.
+ *
+ * The threshold comes from the game: `PLAYER_MAX_SPEED`, her own top speed,
+ * times {@link SEARCH_SECONDS}. Not from the scatter's target, and not from
+ * whatever the park currently manages.
+ *
+ * Measured on the paved network, worst point on each CI seed:
+ *
+ * ```
+ *            before   after
+ *   canon     54.2     41.9
+ *   seed 2    45.9     39.4
+ *   seed 5    96.9     38.8   <- the park with ONE climbable tree in it
+ *   seed 11   72.9     38.5
+ *   seed 18   42.4     40.7
+ * ```
+ */
+const everyPathIsNearAClimbableTree: Invariant = (facts) => {
+  const far: string[] = [];
+  for (const edge of facts.pathEdges) {
+    let worst = 0;
+    let worstAt: readonly [number, number] = [0, 0];
+    for (const [x, z] of edge.points) {
+      let nearest = Infinity;
+      for (const tree of facts.climbableTrees) {
+        const d = Math.hypot(tree.x - x, tree.z - z);
+        if (d < nearest) nearest = d;
+      }
+      if (nearest > worst) {
+        worst = nearest;
+        worstAt = [x, z];
+      }
+    }
+    // `worst` stays 0 for an edge with no points; it stays Infinity-free
+    // because a park with no climbable trees at all leaves `nearest` infinite,
+    // which is exactly the complaint below and must not be silently skipped.
+    if (!Number.isFinite(worst)) {
+      far.push(`${edge.name} has no climbable tree anywhere in the park to be near`);
+    } else if (worst > MAX_CLIMB_SEARCH) {
+      far.push(
+        `${edge.name} passes ${fmt(worstAt)}, which is ${worst.toFixed(1)} m from the nearest ` +
+          `climbable tree (a child would walk ${(worst / PLAYER_MAX_SPEED).toFixed(1)} s flat out ` +
+          `to reach one, and only ${facts.climbableTrees.length} trees in the park can be climbed)`,
+      );
+    }
+  }
+  return far;
 };
 
 /**
@@ -1560,6 +1642,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
   ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
+  ['every path passes near a tree a child can climb', everyPathIsNearAClimbableTree],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
@@ -1642,6 +1725,21 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // local" rather than as an arbitrary round number — and the worst seed
       // still clears it by 20.
       expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(107);
+      // Climbable trees get their own floor, separate from the walk-distance
+      // invariant, because the two fail differently: the distance check goes
+      // red when they are badly spread, this one when there are simply too few.
+      // A park could in principle satisfy the walk with four well-placed trees
+      // and still feel bare.
+      //
+      // Measured across the five CI seeds at 8 / 9 / 12 / 12 / 11. The floor is
+      // 6 because that is roughly double the *old* rule's best seed (which
+      // managed 1, 2, 2, 3 and 5) — so it reads as "no seed is back where it
+      // was when Jim could not find a tree", and the worst seed still clears it
+      // by two. An anti-vacuity guard, not a placement threshold.
+      expect(
+        facts.climbableTrees.length,
+        'the park planted almost nothing a child can climb',
+      ).toBeGreaterThan(5);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);

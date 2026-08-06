@@ -20,6 +20,7 @@ import { PALETTE } from '../core/palette';
 import { Rng, TAU, candidateRng } from '../core/mathUtils';
 import { pinkStoneTexture, woodTexture } from '../core/textures';
 import { toonMaterial } from '../art/style/materials';
+import { SKULL_RADIUS } from '../art/models/kid';
 import { PARK_SEED } from './parkManifest';
 import { PARK_LAYOUT } from './parkLayout';
 import {
@@ -282,8 +283,28 @@ export class Scenery {
 
 // ------------------------------------------------------------------ foliage
 
-/** Canopy radius (of the 1.75–2.5 range rolled below) worth climbing. */
-const CLIMBABLE_MIN_RADIUS = 2.05;
+/**
+ * **How big the ball at the top of a tree must be for a child to climb it.**
+ *
+ * Taken from the head that has to come out of it, not from the range the
+ * scatter happens to roll. A climbing child is hidden outright except for her
+ * head and her waving arm (`world/TreeClimbing.ts`), and that head is a
+ * deliberately enormous cartoon one — `SKULL_RADIUS`, 0.66 m. The canopy is
+ * asked to be **twice** it, so she reads as coming *out of* foliage rather than
+ * balancing on top of a pea.
+ *
+ * Expressed against `SKULL_RADIUS` rather than as the 1.32 it currently works
+ * out at, because the two are only meaningful together: shrink the kid's head
+ * and a smaller ball would do; grow it and this must follow. It is the same
+ * rule ART-AGENT-NOTES §2 keeps asking for — one owner, everybody else asks.
+ *
+ * Against the ranges actually rolled below, this admits **every lollipop and
+ * every blossom** (main ball 1.75–2.5) and refuses **every stack** (its top
+ * blob narrows to 0.90–1.15) and every pine (cones, not balls) — which is the
+ * same set the old hand-written kind list was reaching for, minus the blossom
+ * it excluded on taste and the 2.05 bar that had no owner.
+ */
+const CLIMBABLE_MIN_CANOPY_RADIUS = 2 * SKULL_RADIUS;
 
 /**
  * How far each kind of tree can possibly reach sideways from its trunk.
@@ -499,6 +520,18 @@ function buildFoliage(collision: CollisionWorld): {
     const parts: FoliagePart[] = [];
     let wideRadius = 0;
     let wideCentreY = y + height;
+    // The highest *ball* on this tree, and how big it is — what decides whether
+    // a child can climb it. Tracked here, across all three canopy branches,
+    // rather than asked inside one of them: see `climbableTrees` below.
+    let topBallTopY = -Infinity;
+    let topBallRadius = 0;
+    const noteBall = (centreY: number, radius: number, halfHeight: number): void => {
+      const top = centreY + halfHeight;
+      if (top > topBallTopY) {
+        topBallTopY = top;
+        topBallRadius = radius;
+      }
+    };
 
     const trunkColour = rng.chance(0.4) ? PALETTE.barkDark : PALETTE.bark;
     const trunkShade = rng.range(0.92, 1.08);
@@ -551,6 +584,7 @@ function buildFoliage(collision: CollisionWorld): {
           wideRadius = radius;
           wideCentreY = canopyItem.position.y;
         }
+        noteBall(canopyItem.position.y, radius, canopyItem.scale.y);
         roundCanopies.push(canopyItem);
       }
     } else {
@@ -571,19 +605,8 @@ function buildFoliage(collision: CollisionWorld): {
       parts.push({ ...canopyItem, kind: 'round' });
       wideRadius = radius;
       wideCentreY = canopyCentreY;
+      noteBall(canopyCentreY, radius, canopyItem.scale.y);
       roundCanopies.push(canopyItem);
-      // Climbable: a plain lollipop with plenty of canopy to hide a body in.
-      // Blossom trees are excluded — a face poking out of cherry-blossom
-      // fluff reads oddly, and the stacked/pine kinds have no one big canopy
-      // to disappear into.
-      if (kind === 'lollipop' && radius >= CLIMBABLE_MIN_RADIUS) {
-        climbableTrees.push({
-          x,
-          z,
-          canopyTopY: canopyCentreY + radius * canopyVScale,
-          trunkRadius: 0.55 * lean,
-        });
-      }
       if (rng.chance(0.55)) {
         const small = radius * rng.range(0.5, 0.72);
         const offset = rng.range(0, TAU);
@@ -600,8 +623,39 @@ function buildFoliage(collision: CollisionWorld): {
         };
         refs.push({ kind: 'round', index: roundCanopies.length });
         parts.push({ ...smallItem, kind: 'round' });
+        noteBall(smallItem.position.y, small, smallItem.scale.y);
         roundCanopies.push(smallItem);
       }
+    }
+
+    // **Climbable: any tree whose topmost canopy is a ball big enough to come
+    // out of.** Asked here, of the finished tree, rather than inside one
+    // branch of the three above — which is how the old rule
+    // (`kind === 'lollipop' && radius >= 2.05`) came to be answering a
+    // question about *kinds* when the thing that matters is *geometry*. A new
+    // tree kind now inherits the right answer instead of silently inheriting
+    // "no".
+    //
+    // Jim, 6 August: *"we need more climbable trees, it takes a long time to
+    // find one."* He was right, and the measured park was worse than it
+    // sounds: **2 climbable trees on the canonical seed, and 1, 2, 2, 3 and 5
+    // across the five CI seeds** — a whole park with a single climbable tree
+    // in it. Half the median walk to the nearest one, and the far corners of
+    // the park had none within 68 m.
+    //
+    // The old rule cost trees twice over. The kind test threw away `blossom`,
+    // which is *the same branch of this very function* as `lollipop` and
+    // differs from it only in the colour of the ball; and the 2.05 bar then
+    // took two thirds of what survived, guarding "plenty of canopy to hide a
+    // body in" — a body that `TreeClimbing.hidePlayerBody` does not hide in
+    // the canopy at all, but makes **invisible outright**. There was nothing
+    // left for the margin to protect.
+    //
+    // What is actually required is that her *head* reads as coming out of
+    // foliage rather than balancing on a pea, so the bar is set against the
+    // head — see {@link CLIMBABLE_MIN_CANOPY_RADIUS}.
+    if (topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS) {
+      climbableTrees.push({ x, z, canopyTopY: topBallTopY, trunkRadius: 0.55 * lean });
     }
 
     occluders.push({ x, z, centreY: wideCentreY, radius: wideRadius, parts });
