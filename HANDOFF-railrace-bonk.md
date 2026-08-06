@@ -114,6 +114,45 @@ browser this session** to check it does not read as "she slows before the bar".
 It wants eyes first. The artifact it would remove is ~3× smaller than what was
 reported.
 
+## Round 3 (6 Aug): the rig question — ANSWERED, no artist needed
+
+Jim: *"ducking doesn't mean the whole character moving down and clipping through
+the car; same for when bonking head - the mesh should properly deform; get the
+3d artist to make an articulating model in blender if that's the problem"*
+
+**Split the question in two, because the two halves have opposite answers.**
+
+**A crouch as a rigid-part POSE: the rig can already do it. No artist needed.**
+The precedent is exact — `Player.ts:1140-1158`, the flower pick, bends
+`model.body.rotation.x` by up to **−0.78 rad (45°)** with the comment *"Bending
+at the waist, with the feet planted"*. `body` is a real Group between `root` and
+`head` (head at local y 1.36), it is already non-uniformly scaled every frame by
+`applyWalk` (`asset.ts:93-97`), and legs already reach **−1.25 rad** for sitting
+in the ferris wheel gondola. The house idiom is stated outright: layer a
+hand-written pose on top of `applyWalk`, additively, rewritten each frame.
+
+Arithmetic: a 45° body bend puts the head pivot at 1.36·cos45° = 0.96, a drop of
+**0.40**; a further 10% squash reaches **0.49** — i.e. it reproduces today's
+`DUCK_DROP = 0.5` *as a pose*, with `root` never moving, which is precisely what
+stops her sliding through the cart floor.
+
+**A DEFORMING (skinned) mesh: impossible today, and the pipeline forbids it.**
+Zero hits repo-wide for `SkinnedMesh`/`Skeleton`/`Bone`/`skinIndex`. There is no
+`GLTFLoader`; the hand-written reader `art/style/glb.ts` documents "no skins" and
+would throw. All three Blender exporters pass `export_skins=False`
+(`kid_roundtrip.py:73`, `cart_export.py:44`, `duckbar_export.py:52`). The kid is
+14 flat rigid parts (`KID_BODY_PARTS`). Commissioning a skinned rig would mean
+replacing `glb.ts` with a real loader, changing `check:character-parity`, and
+reworking `InstancedCrowd` — a pipeline project, not an asset.
+
+**Structural caveat if a *fully* naturalistic crouch is ever wanted:** the hip
+pivots are children of `body` (local y 0.36) and **there is no knee**. So a
+body-only bend takes the feet with it, and a hip-only fold swings a rigid
+leg+shoe stick and lifts the shoes. In a cart neither matters — the dodgems
+precedent literally buries the legs in the tub — but on open ground it would.
+The cheapest authentic crouch would be a pelvis Group between `root` and `body`
+plus a knee node splitting `leg-upper`; still zero skinning.
+
 ## Checks
 
 - `npm run build` — **exit 0**, run directly, never piped.
