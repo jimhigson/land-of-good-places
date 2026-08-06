@@ -894,105 +894,95 @@ export interface PlannedSlide {
   readonly entryZ: number;
 }
 
-/** Passes allowed before the slide gives up and says why. */
-const MAX_PASSES = 6;
-
 /**
- * Solves the chute, then checks the answer against the thing it actually built.
+ * Solves the chute, and lets the search itself throw out any route whose
+ * **built** height is unsafe.
  *
- * There is a circularity here worth naming: how high the chute is at a point
- * depends on how far along it that point is *as a fraction of the whole*, and
- * the whole is not known until the route is solved — yet the height is needed
- * during the solve, to know whether the chute clears the Sky Cruiser and the
- * castle's towers. So the search runs on an assumed length, and the answer may
- * disagree with the assumption.
+ * ### The circularity, and why it is no longer paid for with whole solves
  *
- * ### What is retried, and what is accepted
+ * How high the chute is at a point depends on how far along it that point is
+ * *as a fraction of the whole*, and the whole is not known until the route is
+ * solved — yet the height is needed **during** the solve, to know whether the
+ * chute clears the Sky Cruiser and the castle's towers. So the per-piece test
+ * necessarily runs on an assumed length, and the answer may disagree with the
+ * assumption.
  *
- * **The test is whether the chute that was built is safe, not whether the
- * length came out where it was guessed.** Those are not the same question, and
- * using the second as a proxy for the first was wrong in both directions.
+ * This used to be chased with an outer loop: solve, compare, feed the solved
+ * length back in as the next assumption, repeat. **That loop could not
+ * converge, because the length map is not a contraction.** It has no attractive
+ * fixed point: measured on seed 11 it wandered the full 50–92 m range for 28
+ * passes, and on seed 5 it settled into a clean two-cycle, alternating 92 m and
+ * 59 m forever with both ends fouling the coaster. Every lap was a complete
+ * search thrown away, which is what made game boot a multiple of one solve
+ * rather than one solve.
  *
- * It was wrong permissively, which is the one that shipped a bug: this loop used
- * to fall out of its pass limit and hand back whatever the last pass produced.
- * That route's clearance had been checked against a *different* length's height
- * profile, so every height the search tested was wrong. On seed 11 the search
- * verified an 86 m ride and built a 64.4 m one, putting the chute 1.15 m inside
- * the Sky Cruiser's air at a spot the search had checked and passed — at a
- * height the chute never reached. Nothing was wrong with the search; it was
- * answering a question about a different ride.
+ * It was wrong in the other direction too, and that is the one that shipped a
+ * bug. The loop fell out of its pass limit and handed back whatever the last
+ * pass produced, whose clearance had been checked against a *different*
+ * length's height profile. On seed 11 the search verified an 86 m ride and
+ * built a 64.4 m one, putting the chute 1.15 m inside the Sky Cruiser's air at
+ * a spot the search had checked and passed — at a height the chute never
+ * reached. Nothing was wrong with the search; it was answering a question about
+ * a different ride.
  *
- * And it was wrong restrictively, which is what made it look like it needed
- * fixing with more passes. Length agreement is far stricter than safety: a route
- * that solves *longer* than assumed is higher everywhere than the search
- * believed, so it clears by more, and rejecting it for drifting cost a whole
- * extra solve for nothing. The length map is not a contraction — it has no
- * attractive fixed point, and measured undamped on seed 11 it wandered the full
- * 50–92 m range for 28 passes before landing near one by coincidence. Waiting
- * for that coincidence is what made game boot a multiple of one solve.
+ * ### What replaces it
  *
- * So each pass measures the chute it actually built, in three dimensions,
- * against the two things whose test depended on the height it guessed. If they
- * hold, the route is used however far its length drifted. If they do not, the
- * solved length is a better guess than the one that produced it, so it becomes
- * the next assumption.
+ * `satisfies` — #213's machinery, which exists for exactly this shape of
+ * question. It is asked about a **finished route**, so it knows that route's own
+ * length and can build the real chute and measure it in three dimensions. There
+ * is no assumption left to be wrong about.
  *
- * If no pass produces a safe chute, this throws, naming every attempt. It never
- * returns an unverified one. `the ginormous slide keeps its air from the Sky
- * Cruiser` in `test/procgen/invariants.ts` asks the same question of every seed,
- * so a regression shows up as a red test rather than as a park that will not
- * boot.
+ * A route that fails it is set aside and the search moves to its next attempt,
+ * the same as a dead end. So the backtracking happens **inside one search**,
+ * over the candidates it was already going to generate, instead of by running
+ * the whole search again from the top on a different guess. The assumed length
+ * handed to `chuteMayPass` is now only a cheap prefilter, and it is allowed to
+ * be approximate precisely because it is no longer the thing being trusted.
+ *
+ * A slide that flies through a roller coaster is not something to ship anyway,
+ * so unlike the Sky Cruiser this ride does not accept the unsatisfied fallback:
+ * if every attempt was unsafe, this throws and says what was wrong with the one
+ * it got. `the ginormous slide keeps its air from the Sky Cruiser` in
+ * `test/procgen/invariants.ts` asks the same question of every seed, so a
+ * regression shows up as a red test rather than as a park that will not boot.
  */
 function planSlide(): PlannedSlide {
   const boundary = circleBoundary(GARDEN_PLAY_RADIUS);
-  let nominalLength = DESIRED_LENGTH;
-  let route = null as SolvedRailRoute | null;
-  let points = null as Vector3[] | null;
-  const tried: string[] = [];
-
-  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
-    const assumed = nominalLength;
-    const brief: OpenRouteBrief = {
-      // A stream of its own, so the slide's shape cannot shift because some
-      // other ride changed how many random draws it takes.
-      seed: PARK_SEED ^ 0x511de,
-      vocabulary: SLIDE_VOCABULARY,
-      desiredLength: DESIRED_LENGTH,
-      closed: false,
-      startPoses: doorPoses(),
-      endPoses: pitPoses(),
-      clear: (x, z, radius, distanceAlong) =>
-        chuteMayPass(x, z, radius, distanceAlong, assumed),
-      boundary,
-      corridorRadius: CORRIDOR_RADIUS,
-      selfClearance: SELF_CLEARANCE,
-      minRadius: MIN_TURN_RADIUS,
-      // The default 38 m is most of this ride. See `RouteBrief.approachDistance`.
-      approachDistance: APPROACH_DISTANCE,
-      budgets: { perJoint: 16, restarts: 700 },
-    };
-    const solved = solveRailRoute(brief);
-    // Built at the route's own length, which is what the game will draw, and
-    // then measured. Not the length the search assumed — checking the guess
-    // against itself is how a wrong ride passed its own inspection.
-    const built = chutePoints(solved);
-    const complaint = heightSensitiveComplaint(built);
-    tried.push(
-      `assumed ${assumed.toFixed(1)} solved ${solved.length.toFixed(1)}: ` +
-        (complaint ?? 'clear'),
-    );
-    if (!complaint) {
-      route = solved;
-      points = built;
-      break;
-    }
-    nominalLength = solved.length;
-  }
-  if (!route || !points) {
+  const brief: OpenRouteBrief = {
+    // A stream of its own, so the slide's shape cannot shift because some
+    // other ride changed how many random draws it takes.
+    seed: PARK_SEED ^ 0x511de,
+    vocabulary: SLIDE_VOCABULARY,
+    desiredLength: DESIRED_LENGTH,
+    closed: false,
+    startPoses: doorPoses(),
+    endPoses: pitPoses(),
+    // The cheap per-piece prefilter, on the length the ride asks for. Exact
+    // enough to keep the search away from the castle and out of the coaster's
+    // general area; `satisfies` below is what actually decides.
+    clear: (x, z, radius, distanceAlong) =>
+      chuteMayPass(x, z, radius, distanceAlong, DESIRED_LENGTH),
+    satisfies: (candidate) => heightSensitiveComplaint(chutePoints(candidate)) === null,
+    boundary,
+    corridorRadius: CORRIDOR_RADIUS,
+    selfClearance: SELF_CLEARANCE,
+    minRadius: MIN_TURN_RADIUS,
+    // The default 38 m is most of this ride. See `RouteBrief.approachDistance`.
+    approachDistance: APPROACH_DISTANCE,
+    budgets: { perJoint: 16, restarts: 700 },
+  };
+  const route = solveRailRoute(brief);
+  const points = chutePoints(route);
+  // `satisfies` cannot fail a park on its own — the generator hands back the
+  // first route that solved if none satisfied. For a coaster that is the right
+  // trade; for a slide through a roller coaster it is not, so the one thing it
+  // could not check is checked here.
+  const complaint = heightSensitiveComplaint(points);
+  if (complaint) {
     throw new Error(
-      `the ginormous slide never solved to a chute that clears what it has to clear. ` +
-        `${MAX_PASSES} passes, each measured on the chute it actually built: ` +
-        `${tried.join(' | ')}.`,
+      `the ginormous slide never solved to a chute that clears what it has to clear: ` +
+        `after ${route.report.satisfyRejects} rejected routes across ` +
+        `${route.report.startPoseCount} attempts, the best on offer ${complaint}.`,
     );
   }
 

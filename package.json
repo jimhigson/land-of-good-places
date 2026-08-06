@@ -37,6 +37,7 @@
     "measure:slide-comfort": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-comfort.mts",
     "measure:slide-towers": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-towers.mts",
     "measure:slide-fingerprint": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-slide.mts",
+    "measure:slide-boot": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-boot.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
     "check:gondola-sightline": "node scripts/checkGondolaSightline.mjs",
     "check:hop-clearance": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-hop-clearance.mts",
