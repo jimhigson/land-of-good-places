@@ -1,18 +1,148 @@
-# HANDOFF — E7-parapet — the ginormous slide's parapet gap
+# HANDOFF — E7-parapet — the ginormous slide
 
 Branch `feat/slide-parapet-gap`, based on `feat/slide-on-rail-generator` (E3's
 #118 work, not yet merged). Worktree `.claude/worktrees/parapet-gap`, dev port
-**5327** (not currently running — build-verified only).
+**5327** (not running — build-verified only).
 
-**Status: commit 1 landed and green. Commit 2 DROPPED by Overseer ruling —
-do not build it.**
-`npm run build` exit 0. `npm run test:procgen` exit 0, **127 tests** (122 + 5,
-one new invariant per seed).
+**Status: green and stopped.** `npm run build` exit 0 (including `check:park`,
+**unratcheted**). `npm run test:procgen` exit 0, **142 tests**. Tower clearance
+1.54–1.97 m on all five seeds. **No PR raised. Do not merge.**
 
-**Do not raise a PR. Do not merge.** Commit 2 is explicitly a screenshot call
-for Jim — it visibly relocates the hole in the castle's south face.
+Handed over deliberately: the two things left are substantial and were not
+worth attempting on a nearly-spent budget.
+
+**Also still queued:** the transparent-chute work Jim asked for (make ~50/50 of
+the chute glass so a rider can see the ground 14.8 m below). Deliberately not
+started until boot time is fixed — details near the end of this file.
+
+**Tools this branch adds**, all honouring `LGP_SEED`:
+
+| command | what it answers |
+|---|---|
+| `npm run measure:slide-towers` | worst gap to any tower, and which one |
+| `npm run measure:slide-fingerprint` | SHA256 of route + chute, door span, solve report |
+| `npm run measure:slide-comfort` | tightest bend, lateral g, where on the ride |
 
 ---
+
+# START HERE — the four things that must not be re-derived
+
+## 1. #209 and #213 are the same problem. Do not solve it twice.
+
+**The generator returns the first *satisfying* route, not the best one.**
+
+I reached that from the slide: `MIN_TURN_RADIUS` is 5 against a `wrap`
+vocabulary offering 5–12 m, so the search takes a 5 m bend the instant one
+fits, and no amount of offering it better doors changes that. It is filed as
+**#209**.
+
+**#213 states the same thing in its own doc comment, reached independently from
+the coaster side** — 24 free solves of the Sky Cruiser, 20 crossed the castle
+and 4 did not, and *the four were not rejected for anything, they simply closed
+before they got there*. #213's answer was `RouteInfluence`: a weighted nudge
+applied **at the decision point**, because a preference that is not worth
+something where candidates are compared cannot be had by asking afterwards.
+
+That is the mechanism #209 needs. Whoever picks up either one should read the
+other first: **they are one problem with one fix**, and the fix already exists
+in half-built form on `main`.
+
+## 2. The `main` merge — analysis done, execution not started
+
+`origin/main` is `ff17910` (#213). I merged `05f3a4b` (#203) fine. **#213
+conflicts structurally in `src/world/rail/generate.ts`** and I aborted rather
+than botch it — `git merge origin/main`, one conflicted file, three hunks.
+
+The divergence:
+
+| | this branch (E3, #118) | `origin/main` (#213) |
+|---|---|---|
+| brief type | `RouteBriefBase` → `ClosedRouteBrief \| OpenRouteBrief` union, `export type RouteBrief = …` | single `export interface RouteBrief`, `closed: boolean` |
+| new fields | `endPoses` on the open half | `influences?: RouteInfluence[]`, `satisfies?: (route) => boolean` |
+| scoring | `if (accumulated / brief.desiredLength <= BIAS_FROM) return jitter;` | `const pull = pullOf(seg, wanted); if (!brief.closed \|\| accumulated / brief.desiredLength <= BIAS_FROM) return jitter + pull;` |
+| report | `const report: SolveReport = { startPoseCount: attempts.length, … }` | `const reportFor = (satisfied: boolean): SolveReport => ({ startPoseCount: brief.startPoses.length, … })` |
+
+**Proposed resolution — keep the union, take main's behaviour:**
+
+1. Keep `RouteBriefBase` / `ClosedRouteBrief` / `OpenRouteBrief` / the exported
+   union. The slide needs `endPoses`, and the union is what makes `closed`
+   discriminate.
+2. Add main's `influences?` and `satisfies?` to **`RouteBriefBase`**, so both
+   halves get them. Keep main's `RouteInfluence` interface verbatim — its doc
+   comment is the best statement of item 1 above and should survive.
+3. Take main's scoring line unchanged. Note it already handles `!brief.closed`,
+   so open routes get the pull applied throughout rather than only after
+   `BIAS_FROM`.
+4. Take main's `reportFor` and the `satisfies` plumbing.
+
+**The one real trap, and it is not visible in the diff.** Main's report says
+`startPoseCount: brief.startPoses.length`. On this branch that is **wrong for
+open routes**: E3 flattened the search into `attempts`, a list of every
+(start × end) *pairing*, and `report.startPoseIndex` indexes **that flat list**.
+So the door actually chosen is `floor(startPoseIndex / endPoses.length)` — the
+divisor is the number of admissible landings, 34 on the seeds I measured, not 1.
+If you take `brief.startPoses.length` wholesale, `startPoseIndex` and
+`startPoseCount` start describing different lists and anything reading them
+silently lies. `scripts/fingerprint-slide.mts` prints both; use it to check.
+Keep `attempts.length` for the open case.
+
+Also verify `pullOf(seg, wanted)` is safe when `brief.influences` is undefined
+(the slide passes none) — it must contribute exactly zero, not `NaN`.
+
+## 3. Boot time — still open, and the two hypotheses that are already dead
+
+`SLIDE_PLAN` solves at module load, so this is **game boot**. Adding the towers
+as obstacles took it from ~1.2 s to 9–35 s. A 35-second freeze before a
+six-year-old can play is not shippable.
+
+**Dead hypothesis 1 — moving the door.** The door at facade-local 9.5 does
+overlap the south-east tower's footprint (span 7.4–11.6 against the tower's
+10.011–14.439), and clearing it requires `DOOR_OFFER_CENTRE ≤ 6.776`. It does
+not help. Pure solve times:
+
+| seed | door 9.5 (overlaps tower) | door 6.7 (clear of it) |
+|---|---|---|
+| 20260728 | 8.8 s | **31.0 s** |
+| 2 | 10.2 s | 19.7 s |
+| 5 | **35.1 s** | 19.4 s |
+| 11 | 28.2 s | 5.2 s |
+| 18 | 12.8 s | 4.9 s |
+| total | 95.1 s | 80.1 s |
+
+Worst-seed boot — what a child waits — goes 35.1 → 31.0 s, and the **canonical
+seed gets 3.5× worse**. Door 5.0 makes seed 2 unsolvable. Relocating reshuffles
+*which* seeds are slow; it makes none of them fast. (This is the second time the
+door has been measured and found not to be the lever; the first was for turn
+radius, before towers were obstacles.)
+
+**Dead hypothesis 2 — the cruiser clearance scan is the bottleneck.** Disabling
+`clearsCruiser` takes seed 5 from 53.8 s to 1.6 s, which looks conclusive and is
+**misleading**: it removes a *constraint*, not work, and the search then solves
+almost immediately. **Do not repeat that A/B.** A spatial grid over the cruiser
+segments is already in (byte-identical results, ~1.3×) and was not enough.
+
+The real cause is that towers made the constraint set harder *everywhere*: seed
+5 went from 944 candidate pieces to 2.34 M. The remaining candidate is item 1 —
+better ordering / preferring good pieces at the decision point.
+
+## 4. The tower clearance is closed-form on purpose. Do not unify it.
+
+`distanceOutsideTower` in `building/layout.ts` compares distance-to-axis against
+radius-at-height. A tower is a solid of revolution, so that is a **swept disc in
+closed form: exact, with no gaps between probes.**
+
+There are two ray-based tools on `main` and neither should replace it:
+`coaster/castleWindows.ts`'s `sweptCartHits` (four rays) and
+`coaster/clearance.ts` (eight rays, from #211 `6cdb272`). They exist because the
+Sky Cruiser's window must be checked against **arbitrary meshes**, where there
+is no formula and rays are the only option — and they pay for it with gaps
+between rays that a thin obstacle can pass clean through. For a cylinder, rays
+would be strictly *less* accurate. The comment in the code says so; leave it
+there.
+
+---
+
+# HISTORY — how the branch got here
 
 ## The job in one line
 
@@ -224,7 +354,7 @@ principle commit 1 is about. The two agreed closely where they overlapped
 (canonical 6.20 vs 6.17 m; seed 5 5.48 vs 5.46 m), which is worth knowing: the
 measurement is robust to how it is sampled.
 
-## Towers: FIXED, but TWO THINGS BLOCK THE MERGE
+## Towers: the bug Jim found by riding it, and its fix
 
 **`npm run test:procgen` exit 0, 137 tests. `npm run build` exit 1 — see (A).**
 
@@ -271,59 +401,7 @@ compares `pointAt` against `pointAt` pushed through the scene graph. Same number
 at park level; a castle's width apart if the frames ever part. Proved red first:
 5 failures, one per seed, real numbers, no NaN. **142 tests** (137 + 5).
 
-### (B) STILL OPEN — boot time. The door is NOT the lever, measured twice.
-
-The tower-overlap hypothesis was reasonable and is **disconfirmed**. Relocating
-the door clear of the tower footprint (`DOOR_OFFER_CENTRE` must be ≤ 6.776 for
-the corridor to clear 10.011–14.439) does not buy boot time back:
-
-| seed | door 9.5 (overlaps tower) | door 6.7 (clear of it) |
-|---|---|---|
-| 20260728 | 8.8 s | **31.0 s** |
-| 2 | 10.2 s | 19.7 s |
-| 5 | **35.1 s** | 19.4 s |
-| 11 | 28.2 s | 5.2 s |
-| 18 | 12.8 s | 4.9 s |
-| total | 95.1 s | 80.1 s |
-
-Worst-seed boot — what a child actually waits — barely moves, 35.1 s → 31.0 s,
-and the **canonical seed gets 3.5× worse**. Door 5.0 makes seed 2 unsolvable.
-Moving the door reshuffles which seeds are slow; it does not make them fast.
-
-So the cost is not the door overlapping a tower. It is that towers made the
-constraint set harder *everywhere* — the search explores 1–2.3M candidate
-pieces where it used to explore hundreds. Pure solve times above; the spatial
-grid over the cruiser segments is already in (identical results, ~1.3×).
-
-**Do not repeat this A/B:** disabling the cruiser check takes seed 5 from 53.8 s
-to 1.6 s, but that removes a *constraint*, not work — the search then solves
-immediately. It looks like the cruiser scan is the bottleneck. It is not.
-
-Remaining candidate: **#209's ordering work** — the search returns the first
-satisfying route, so which candidates it tries first is the whole game. That is
-generator work, not slide work.
-
-### ALSO OPEN — main has moved to #213 and the merge is not trivial
-
-`origin/main` is now `ff17910` (#213, weighted route influences). I merged
-`05f3a4b` (#203) successfully; **#213 conflicts structurally in
-`src/world/rail/generate.ts`** and I aborted rather than botch it:
-
-- this branch (E3) split `RouteBrief` into `RouteBriefBase` →
-  `ClosedRouteBrief | OpenRouteBrief`, for open routes with `endPoses`;
-- #213 kept a single `RouteBrief` and added `RouteInfluence` (weighted pulls)
-  plus `satisfies`, and changed both the scoring hook and `SolveReport`.
-
-Resolution is "keep the union, add `influences?`/`satisfies?` to the base, take
-main's scoring and report" — coherent but not mechanical, and it deserves its
-own pass by someone with budget to verify the generator. Note #213's own doc
-states the generator "returns the first satisfying route, not the best one",
-which is the same finding as #209 — worth reconciling.
-
-`src/world/coaster/clearance.ts` **is** on main, from **#211** (`6cdb272`), not
-#203. It is the eight-ray tool; `castleWindows.ts`'s `sweptCartHits` is the
-four-ray one. Neither is used here, deliberately: a tower is a solid of
-revolution and the closed form is exact.
+*(Boot time and the `main` merge are covered at the top of this file.)*
 
 ### Queued behind it (Jim, second item)
 

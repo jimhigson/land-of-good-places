@@ -33,6 +33,7 @@
     "measure:solver-budget": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-solver-budget.mts",
     "measure:rail-radii": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-rail-radii.mts",
     "measure:cruiser-fingerprint": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-cruiser.mts",
+    "measure:slide-comfort": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-comfort.mts",
     "measure:slide-towers": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-slide-towers.mts",
     "measure:slide-fingerprint": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-slide.mts",
     "check:shop-spacing": "node scripts/checkShopSpacing.mjs",
