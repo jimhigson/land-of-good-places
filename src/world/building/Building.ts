@@ -1,11 +1,10 @@
 import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
-import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, PLAYER_RADIUS, SLIDE_SPEED } from '../../core/constants';
+import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, GARDEN_PLAY_RADIUS, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
+import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
-import { resolveDismount } from '../dismount';
 import { RideCamera } from '../../core/RideCamera';
-import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -96,11 +95,64 @@ const GROWN_UP_LEAD = 2.6;
  */
 const GROWN_UP_RECLINE = -Math.PI / 2;
 
-/** Where a rider's eyes sit above the chute floor. */
-const EYE = { x: 0, y: 0.9, z: 0 } as const;
+/**
+ * Where the chase camera sits relative to the seat — up and **behind**.
+ *
+ * Jim's note after riding it, 5 August 2026: *"I'd like this to now be a chase
+ * cam instead, not first person, so just behind the player"*. The offsets are
+ * written in camera terms because `eyeMount` is turned to face the camera's way
+ * round (`rotation.y = Math.PI`), exactly as the coaster's chase view does — so
+ * **+Z here is behind the rider**, not in front.
+ *
+ * Higher and further back than the coaster's `{ y: 2.1, z: 3.4 }` because a
+ * slide is a *trough*: the camera has to clear the chute's own side walls
+ * (`CHUTE_ENVELOPE.above` is 0.86 m) and the hand-rails on top of them, or the
+ * near wall swings through the lens on every bend. Tuned live down the whole
+ * ride rather than picked on paper.
+ */
+const CHASE_EYE = { x: 0, y: 2.35, z: 4.1 } as const;
+
+/**
+ * How steeply the chute is falling here, as a rotation about the rider's own
+ * left-right axis.
+ *
+ * Derived from the unit tangent the ride is *already* using to face her, so
+ * there is no second description of the chute's slope that could drift from the
+ * first. Under a `YXZ` composition the model's forward (+Z) maps to
+ * `(0, -sin θ, cos θ)` once yaw has been applied, so matching the tangent's
+ * rise against its horizontal run is exactly `atan2(-y, |xz|)` — positive is
+ * nose-down, which is the way a slide goes.
+ *
+ * Taking `atan2` of the run rather than `asin` of the rise keeps it honest if a
+ * tangent ever arrives un-normalised; `SlideRide.tangentAt` normalises today,
+ * and this does not have to care whether it still does tomorrow.
+ */
+function slopeOf(tangent: Vector3): number {
+  return Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
+}
 
 /** Seconds after a change of space before another one may be triggered. */
 const SPACE_COOLDOWN = 0.9;
+
+/**
+ * How hard the balls are thrown when a rider lands in them.
+ *
+ * Multiplies `BallPit.splash`'s own `SPLASH_OUT_STRENGTH`/`SPLASH_UP_STRENGTH`,
+ * so it stays one number describing "harder than walking in" rather than a
+ * second set of physics constants beside the pit's. Was 1.15, fired from the
+ * chute's mouth before she got there; she arrives at `GIANT_SLIDE_SPEED` and
+ * this is the shot the ride exists for.
+ */
+const LANDING_SPLASH = 1.9;
+
+/**
+ * How long the landing watcher will wait for a touchdown before giving up.
+ *
+ * A dead-man's handle. `LANDING_DROP` is 0.85 m, which is about 0.4 s of fall,
+ * so anything approaching this means the touchdown test never became true and
+ * the scatter should fire once and stop rather than stay armed.
+ */
+const SPLASH_PATIENCE = 2;
 
 interface ActiveRide {
   readonly slide: SlideRide;
@@ -193,7 +245,7 @@ export class Building implements GameSystem {
   readonly ballPit = new BallPit();
 
   /**
-   * The first-person camera for the ginormous slide (REQUIREMENTS §9).
+   * The chase camera for the ginormous slide (REQUIREMENTS §9).
    *
    * `RideCamera` rather than a second look-around of its own: it is guarded by
    * `npm run check:ride-camera`, and every other ride in the park already uses
@@ -204,11 +256,43 @@ export class Building implements GameSystem {
    */
   rideView: RideCamera | null = null;
 
+  /**
+   * True: the ginormous slide is ridden **chase**, so her model stays on screen.
+   *
+   * Named and typed to match `Coaster.playerStaysVisible` and
+   * `RailRace.playerStaysVisible`, because `Game.ts` reads exactly this field
+   * off each ride to decide whether to hide her — one question, asked the same
+   * way of every ride, rather than a special case per ride.
+   *
+   * **This is what makes her ride pose load-bearing.** For as long as the slide
+   * was first person nothing on this ride was ever seen, so nobody noticed it
+   * never passed a pitch to `setRidePose` — see {@link advanceRide}.
+   */
+  readonly playerStaysVisible = true;
+
   /** Told when the ginormous slide is boarded and left, so `Game` can swap camera. */
   onRideChange: ((riding: boolean) => void) | null = null;
 
   /** Follows the chute: position and heading. */
   private readonly rideMount = new Group();
+
+  /**
+   * A landing that has been set up but not yet hit the balls.
+   *
+   * Jim, 5 August 2026: *"when the player lands in it via chase cam we should
+   * see the balls scatter"*. The scatter therefore has to happen on the frame
+   * she **touches** them. Splashing at `finishRide` — which is what the code did
+   * before, and from the chute's mouth rather than from where she lands — fires
+   * it a few frames early and a couple of metres short, so the balls have
+   * already finished moving by the time she arrives and it reads as the pit
+   * twitching on its own rather than as her landing in it.
+   *
+   * `waited` is a dead-man's handle, not a timer: nothing here should ever take
+   * {@link SPLASH_PATIENCE}, and if the touchdown is somehow never detected the
+   * scatter should still happen once and then stop, rather than being armed
+   * forever waiting for a frame that is not coming.
+   */
+  private pendingSplash: { x: number; z: number; waited: number } | null = null;
 
   /** The frame clock, kept so the ride camera's idle sway can be driven. */
   private elapsed = 0;
@@ -390,6 +474,13 @@ export class Building implements GameSystem {
     // grown-up and the player teleport below, and any of them left behind in
     // the castle's frame would sit a castle's-width off the chute.
     this.eyeMount.rotation.y = Math.PI;
+    // Yaw first, then pitch in the yawed frame. The mount now leans with the
+    // chute as well as turning with it (see `advanceRide`), and in the default
+    // `XYZ` order those two compose the other way round: the pitch would be
+    // taken about the *world* X axis, so it would read as nose-down only while
+    // the ride happened to be heading north, and as a barrel roll a quarter of
+    // the way round the castle. Exactly the trap `GROWN_UP_RECLINE` documents.
+    this.rideMount.rotation.order = 'YXZ';
     this.rideMount.add(this.eyeMount);
     this.parkRoot.add(this.rideMount);
 
@@ -475,10 +566,24 @@ export class Building implements GameSystem {
     player.groundSampler = (x, z, y) => this.surfaces.sample(x, z, y);
     this.liftRide.attachPlayer(player);
     this.ballPit.attachPlayer(player);
-    // Slightly nose-down, like the coaster's: the interesting part of a slide
-    // is the chute falling away in front of you.
-    this.rideView = new RideCamera({ startPitch: -0.08 });
-    this.rideView.mountOn(this.eyeMount, EYE);
+    // **Chase, not first person** (Jim, 5 August 2026). Same shared camera,
+    // mounted behind and above the seat, looking along the chute with only a
+    // little look-around — the point of this view is watching *her* go down the
+    // slide, not steering the eye.
+    //
+    // `sensorLook: false` is not a preference, it is Jim's rule of 3 August:
+    // tilt-to-look belongs to first-person rides and to nothing else. A
+    // third-person camera that swings when the handset does is a camera that
+    // has come loose. Its yaw stays clamped for the same reason — the ride is
+    // ahead of you. These are the coaster's chase settings, deliberately not
+    // re-derived (`Coaster.attachPlayer`).
+    this.rideView = new RideCamera({
+      yawLimit: 0.55,
+      startPitch: -0.14,
+      fov: 60,
+      sensorLook: false,
+    });
+    this.rideView.mountOn(this.eyeMount, CHASE_EYE);
   }
 
   /**
@@ -535,6 +640,11 @@ export class Building implements GameSystem {
     if (!player) return;
 
     this.stairRide.update(dt);
+
+    // Unconditionally, not inside the branch below: the whole point is that it
+    // runs on the frames just *after* a ride, and it must not be skipped
+    // because the iris happens still to be closing.
+    this.settleIntoTheBalls(player, dt);
 
     if (this.ride) {
       this.advanceRide(dt, player);
@@ -724,6 +834,14 @@ export class Building implements GameSystem {
       // Lying down in front, so set the composition order before the first
       // frame places them — see `GROWN_UP_RECLINE`.
       this.grownUp.root.rotation.order = 'YXZ';
+      // And the same for the child, who is pitched down the slope now that the
+      // chase camera means you can see her. Set here and put back in
+      // `finishRide` rather than left on permanently: with a pitch of zero the
+      // two orders are identical, so no other ride can tell the difference —
+      // but the Rail Race *does* pass a non-zero pitch, and quietly changing
+      // the frame it composes in would alter a ride the family has already
+      // signed off, in a PR that is not about the Rail Race.
+      player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
       this.rideView?.board();
       this.onRideChange?.(true);
@@ -761,20 +879,37 @@ export class Building implements GameSystem {
 
     ride.slide.pointAt(t, this.point);
     ride.slide.tangentAt(t, this.tangent);
+    // **Pitched down the slope, not bolt upright.** `setRidePose`'s own
+    // docstring warns about this: a ride that positions the player model
+    // independently of any parent vehicle, and that drops, has to hand the
+    // slope over explicitly or she stays vertical while the chute visibly falls
+    // away under her. This ride has always failed that test and it never
+    // showed, because until 5 August nobody could see her — the camera was
+    // inside her head. Turning on the chase view is what made it visible, so
+    // the fix belongs with it.
+    const pitch = ride.giant ? slopeOf(this.tangent) : 0;
     player.setRidePose(
       this.point.x + originX,
       this.point.y + BUILDING_BASE_Y + RIDER_LIFT,
       this.point.z + originZ,
       Math.atan2(this.tangent.x, this.tangent.z),
+      pitch,
     );
 
-    // The seat the first-person camera hangs off, following the same curve the
-    // rider does, so what you see and where you are can never disagree.
+    // The seat the chase camera hangs off, following the same curve the rider
+    // does, so what you see and where you are can never disagree.
     if (ride.giant) {
       ride.slide.pointAt(t, this.point);
       this.rideMount.position.copy(this.point);
       this.rideMount.position.y += RIDER_LIFT;
       this.rideMount.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+      // The mount leans with the chute so the camera rides *in the tube's own
+      // frame*. Left level (as it was for first person, where it did not
+      // matter) a camera 4.1 m behind sits 1.4 m off the chute floor on a 20°
+      // pitch, and the trough's uphill side wall swings through the lens.
+      // `rotation.order` is `YXZ` — set in the constructor, for the same reason
+      // `GROWN_UP_RECLINE` needs it: yaw first, then pitch in the yawed frame.
+      this.rideMount.rotation.x = slopeOf(this.tangent);
       this.rideView?.update(dt, this.elapsed);
     }
 
@@ -791,6 +926,46 @@ export class Building implements GameSystem {
     }
   }
 
+  /**
+   * **The balls scatter when she lands in them.**
+   *
+   * Watches the frames after the ginormous slide hands her back and fires
+   * `BallPit.splash` on the one where she reaches the balls — see
+   * {@link pendingSplash} for why it is not fired at `finishRide`.
+   *
+   * Touchdown is "she is no longer airborne, or she is at/below the ball
+   * surface". The second clause is not belt-and-braces: `LANDING_DROP` is short
+   * and the pit floor is scooped, so on a slow frame she can cross the whole
+   * drop within one step and arrive already resting, having never been observed
+   * airborne at all.
+   *
+   * The strength is above the walk-in splash the pit already does for a child
+   * wading in (`BallPit.splash`'s default 1) because this is an arrival, not a
+   * step — she comes out of the chute at {@link GIANT_SLIDE_SPEED} and the shot
+   * is the whole payoff for the ride. It is still one impulse into the existing
+   * simulation, not a second effect bolted beside it: the pit already knows how
+   * to be disturbed, and `ballPhysics.ts` settles it back down on its own.
+   */
+  private settleIntoTheBalls(player: Player, dt: number): void {
+    const pending = this.pendingSplash;
+    if (!pending) return;
+
+    pending.waited += dt;
+    const ballsY = this.surfaces.sample(pending.x, pending.z, player.position.y);
+    const landed = !player.isAirborne || player.position.y <= ballsY + 0.05;
+    if (!landed && pending.waited < SPLASH_PATIENCE) return;
+
+    this.pendingSplash = null;
+    // Centred on where she actually is, not on where the plan said she would
+    // be: if anything has moved her in the meantime, the balls should burst
+    // away from the child, which is the thing a six-year-old is watching.
+    this.ballPit.splash(
+      player.position.x - BALL_PIT_X,
+      player.position.z - BALL_PIT_Z,
+      LANDING_SPLASH,
+    );
+  }
+
   private finishRide(ride: ActiveRide, player: Player): void {
     const originX = ride.giant ? BUILDING_CENTRE_X : INTERIOR_ORIGIN_X;
     const originZ = ride.giant ? BUILDING_CENTRE_Z : INTERIOR_ORIGIN_Z;
@@ -804,22 +979,42 @@ export class Building implements GameSystem {
       this.point.z + originZ,
     );
     if (ride.giant) {
-      // **The fix for #118.** The slide used to put a rider down wherever its
-      // hand-authored curve happened to stop, which was inside the castle,
-      // behind a wall, with no way out. It now ends at a registered exit node
-      // (GAME_DESIGN.md's EXIT rule) — a node `paths.ts` gives the walk graph,
-      // so `check:park` can prove a child can be walked away from here — and
-      // `resolveDismount` is the runtime safety net that will not stand anyone
-      // in something solid even if that node is somehow occupied.
-      this.ballPit.splash(worldPosition.x - BALL_PIT_X, worldPosition.z - BALL_PIT_Z, 1.15);
-      const spot = resolveDismount(this.collision, SLIDE_PLAN.exitX, SLIDE_PLAN.exitZ, PLAYER_RADIUS);
+      // **She lands in the balls** — see `slide/landing.ts` for why she used to
+      // land inside the chute instead, and why an offset could not have fixed
+      // it. Carried on past the mouth along the heading she is already
+      // travelling, so there is one description of where the ride ends rather
+      // than two fanned off the same bearing with nothing keeping them level.
+      //
+      // The exit node is untouched and still means what it meant: it is what
+      // `check:park` proves she can walk away from (GAME_DESIGN.md's EXIT
+      // rule). She climbs out of the pit onto it. It is simply no longer the
+      // place the ride drops her.
+      const spot = slideLandingSpot(
+        worldPosition.x,
+        worldPosition.z,
+        this.tangent.x,
+        this.tangent.z,
+      );
+      // The scooped pit floor, from the same sampler her own feet use all the
+      // rest of the time — not `terrainHeight`, which is a pure function of the
+      // hills and does not know the pit has been dug out of them.
+      const ballsY = this.surfaces.sample(spot.x, spot.z, worldPosition.y);
       player.setRidePose(
         spot.x,
-        terrainHeight(spot.x, spot.z),
+        ballsY + LANDING_DROP,
         spot.z,
         Math.atan2(this.tangent.x, this.tangent.z),
       );
-      player.endRide();
+      // Back to the default composition order now the slope no longer applies
+      // (see `startGiantSlide`), and level: she arrives feet first.
+      player.group.rotation.order = 'XYZ';
+      player.group.rotation.x = 0;
+      // Handed back still moving, so the last thing the slide does is deliver
+      // her rather than switch off. Gravity closes the {@link LANDING_DROP}.
+      player.endRide(this.tangent.x * 1.4, -0.6, this.tangent.z * 1.4);
+      // The balls scatter when she *hits* them, not now — `update` watches for
+      // the touchdown. See {@link pendingSplash}.
+      this.pendingSplash = { x: spot.x, z: spot.z, waited: 0 };
       this.grownUpComing = false;
       // Back up onto the roof, to wait for the next one.
       this.interiorRoot.add(this.grownUp.root);

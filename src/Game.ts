@@ -551,9 +551,16 @@ export class Game {
       rideCamera(riding ? (this.world.train.rideView?.camera ?? null) : null);
     this.world.coaster.onRideChange = (riding) =>
       rideCamera(riding ? (this.world.coaster.rideView?.camera ?? null) : null);
-    // The ginormous slide, ridden first person (REQUIREMENTS §9).
+    // The ginormous slide, ridden **chase** since 5 August 2026 (REQUIREMENTS
+    // §9) — so, like the Rail Race, it passes `playerStaysVisible` and she is
+    // not hidden. Reading the flag off the ride rather than writing `true` here
+    // is what keeps the camera and the visibility one decision: a ride that
+    // ever goes back to first person changes one field, not two files.
     this.world.building.onRideChange = (riding) =>
-      rideCamera(riding ? (this.world.building.rideView?.camera ?? null) : null);
+      rideCamera(
+        riding ? (this.world.building.rideView?.camera ?? null) : null,
+        this.world.building.playerStaysVisible,
+      );
     this.world.railRace.onRideChange = (riding) =>
       rideCamera(
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,
