@@ -176,3 +176,33 @@ the train's 39.20 m floor — a pit centre no further out than ~32 m.
 - Read the test **count**, not the colour. A seed-dependent module-load failure
   shows up as skipped.
 - Never pipe `npm run build` through `head`/`tail`.
+
+
+## Round 4: the floating head, and the guard that could not see it
+
+`check:slide-rider` reported **686/686 green while Jim was looking at a floating
+head**. It asked `drawn(player.group)` — which walks *upwards*, so it answered
+"is her hierarchy visible", not "is she". **Proved hollow**: with her limbs
+hidden in product code the old check still printed "drawn throughout", exit 0.
+
+Now asserts all six body parts individually, plus a **raycast from the chase
+camera** to each against the chute *and her own model*. Two plausible
+hypotheses — the trough's 0.86 m wall occluding her, and her own head occluding
+her body because she lies feet-first toward the camera — were both **disproved**
+by that raycast. Worth knowing; both looked right on paper.
+
+**Cause: `TreeClimbing.hidePlayerBody`, now deleted.** Only thing in the game
+that hid part of her, and it hid her *permanently*: it cleared
+`playerHiddenParts` then skipped already-hidden children, so a second call
+without an intervening show recorded nothing and the restore put nothing back —
+a floating head everywhere afterwards, including rides that never heard of
+trees. Matches `feat/climb-wave-and-npc-climb`, which deleted the same pair for
+the tree complaint. **NPC climb-hiding deliberately left alone.**
+
+Camera measured (eye 2.62 m above her, 3.7 m behind, all parts unobstructed) and
+**not** moved.
+
+**Three faults on this ride now share one shape**: a check about a *container*
+passing while the thing itself was wrong — rider 26.65 m off the chute, pose
+never exercised because the harness never called `Player.update`, visibility
+asked of the wrong object. Assert the thing, not its wrapper.
