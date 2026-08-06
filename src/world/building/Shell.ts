@@ -67,6 +67,7 @@ import {
   TOWER_ROOF_OVERHANG,
 } from './layout';
 import { SLIDE_PLAN } from '../slide/plan';
+import { CHUTE_ENVELOPE, SlideRide } from './SlideRide';
 
 /** Decoration that takes light but is not worth a slot in the shadow pass. */
 function receiveOnly(mesh: Mesh): Mesh {
@@ -521,7 +522,77 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   bobble.position.set(ROOF_PAVILION_X, 8.5, ROOF_PAVILION_Z);
   roof.add(bobble);
 
+  roof.add(buildSlideMouth(plan));
+
   roof.add(buildRoofPlanters(plan));
+}
+
+/**
+ * **The top of the ginormous slide, joined to the edge of the roof.**
+ *
+ * Jim, having ridden it on 5 August 2026: *"getting on the slide should look
+ * like the start of the slide attached to the edge of the roof, not just a
+ * circle to walk onto"*. It was exactly a circle to walk onto — an
+ * `entrancePad` cylinder at `SLIDE_PLAN.entryX/entryZ` and, nine metres further
+ * south, an unexplained notch in the parapet. Nothing joined the two, so
+ * boarding read as standing on a marker and being teleported.
+ *
+ * ### Why the answer is not "move the chute's start"
+ *
+ * The obvious reading of Jim's note is that the garden chute should begin lower,
+ * at the battlements rather than 3.44 m over them. It should not, and
+ * `theGinormousSlideLeavesOverTheBattlements` is the reason: that air is what
+ * keeps the ride out of the masonry, it is measured on every seed, and lowering
+ * `START_Y` to meet the stonework is the one change that invariant exists to
+ * refuse.
+ *
+ * The thing Jim is *looking at* when he boards is not the garden chute at all.
+ * The roof he steps off is the **interior's** roof — `Shell.ts` calls the two
+ * "disconnected worlds", and the launch is deliberately a change of space (see
+ * `Building.startGiantSlide`). So the fix belongs on the side he can see: give
+ * the interior terrace the slide's own top, running from the boarding pad out
+ * through the gap in the parapet and tipping over the edge. The ride then reads
+ * as one continuous thing — you get into the top of a slide and it takes you
+ * away — without moving a single metre of the garden chute or touching the air
+ * the invariant holds open.
+ *
+ * ### One owner for the gap
+ *
+ * The mouth is centred on `SLIDE_PLAN.roofDoorMinX/MaxX` — the **same** numbers
+ * that cut the notch in the parapet a few lines above — rather than on
+ * `entryX`, which is where they both come from. Two things that must line up
+ * read one source, so the mouth cannot end up beside its own doorway.
+ */
+function buildSlideMouth(plan: ShellPlan): Group {
+  const oz = outerZ(plan);
+  const x = (SLIDE_PLAN.roofDoorMinX + SLIDE_PLAN.roofDoorMaxX) / 2;
+  // Just south of the boarding pad, so the pad still reads as the marked spot
+  // you stand on and the chute reads as the thing you step down into. Starting
+  // it *on* the pad hides the pad under the trough floor and takes the "press
+  // here" cue away with it.
+  const startZ = SLIDE_PLAN.entryZ + 0.9;
+
+  // The trough floor sits `CHUTE_ENVELOPE.below` under the centre line, so a
+  // centre line at this height puts the floor just on the terrace deck rather
+  // than sunk into it or hovering over it.
+  const deck = CHUTE_ENVELOPE.below + 0.14;
+
+  const mouth = new SlideRide(
+    [
+      // A flat lip you step into…
+      new Vector3(x, deck, startZ),
+      new Vector3(x, deck, startZ + 2.2),
+      // …then it tips, goes out through the parapet gap…
+      new Vector3(x, deck - 0.35, oz - 1.1),
+      new Vector3(x, deck - 1.5, oz + 0.8),
+      // …and falls away over the edge, which is what makes it read as attached
+      // to the roof rather than sitting on it.
+      new Vector3(x, deck - 3.6, oz + 2.4),
+      new Vector3(x, deck - 6.4, oz + 3.6),
+    ],
+    { name: 'slide-roof-mouth' },
+  );
+  return mouth.group;
 }
 
 /** A ring of pastel planters so the terrace is not a blank field from above. */
