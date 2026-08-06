@@ -726,3 +726,309 @@ sightline check does.
 codebase has been bitten four times tonight by a claim nobody re-derived.
 An unrun script is exactly that — a measurement frozen at the moment someone
 last happened to run it.*
+
+---
+
+## Review 8 — the merged fleet's park, as a system (5 August 2026)
+
+Scope: **what is now on `main`** (`ff17910`) after the 4–5 August run, reviewed
+as a system rather than PR by PR. Method: measured, not read — every hollowness
+claim below was **proven by breaking the thing the check guards and watching it
+stay green**, in a clean worktree of `origin/main` with `npm ci`. Claims I
+could not test are marked as such.
+
+### Fixed since Review 7 (28 July, 01:40) — and it is a lot
+
+- **Decision 5 landed end to end.** `parkManifest.ts` → `parkLayout.ts` (L1
+  solver) → solved train, coaster and rail-race plans → `check:park` in the
+  build → `test/procgen/invariants.ts` (21 invariants × 5 seeds) blocking
+  merges in CI. The generated park is real, seeded, and machine-checked.
+- **Review 7's F7 is closed**: `checkShopSpacing`, `checkGondolaSightline` and
+  `measure-hop-clearance` are wired into `build` (but see below — wiring them
+  in did not give two of them a failure path).
+- **Review 1/2's S3/C4 build-order break is fixed** — `FacePaintStall` is
+  constructed before `NpcSystem` (`World.ts:161–167`), with the comment
+  corrected rather than deleted.
+- **Wave 3 happened**: `wanderDriver`'s bolted blocks are now
+  `src/entities/npc/activities/` (`activity.ts`, `errand.ts`, `trainTrip.ts`,
+  `treeClimb.ts`, `facePaintVisit.ts`, `chatToPlayer.ts`, `budget.ts`).
+- **The invariants suite has institutionalised the failure lessons**: the
+  `Invariant` type returns complaints so a hollow assert is a compile shape
+  error; each seed file asserts the seed it actually got back (the fix for the
+  silent-76-test skip); anti-vacuity floors (trees > 24, lamps/plots/exits
+  > 0) guard against a park that passes by being empty; thresholds come from
+  the game, not the generator; the doctrine "prove it can fail" is written at
+  the top of the file. This is the best checking code in the repo.
+- **The headless matrixWorld trap is fixed where it bit** —
+  `coaster/clearance.ts:147–152` climbs to the topmost ancestor and refreshes
+  before raycasting, and documents the bug it closes. (A latent edge remains:
+  if the coaster group were ever built detached, `cruiserStrikes` would sweep
+  zero targets and report a clear park. A `targets.length === 0` guard is one
+  line.)
+- **Two `ParkBoundary` types / two `circleBoundary`s → one of each**
+  (`rail/boundary.ts`). **Two stall stand points → one**
+  (`stallPlacement.ts:49`). **`BRIDGE_RISE`** is now derived and documented as
+  having no counterpart (`check-park.mts:354`).
+- **The dev-mode service worker is off by default** — the class of "my edits
+  vanished" hours is closed at the root.
+
+### 1. The rail generator — one coherent thing, but the three-rides story is not true on `main`
+
+`rail/generate.ts` is genuinely one thing: brief in, curve out, pure,
+synchronous, exhaustively documented, with `RouteInfluence` (Decision 7) and
+the `satisfies` backstop cleanly separated. Its **only consumer is the Sky
+Cruiser** (`coaster/route.ts`). The Rail Race deliberately does not use it —
+its plan shape is the park perimeter by the family's 31 July brief, height
+only — and the ginormous slide is still **twelve hand-authored world
+coordinates** in `Building.ts` (`buildGinormousSlide`), the exact #118 failure
+mode Decision 6 §1 describes as the thing that was fixed. Issues #118 and #229
+(open) are the honest state.
+
+**Decision 7 §5 states "generate.ts is shared with the ginormous slide." That
+is false on `main`** — the byte-identical-when-unweighted guarantee it argues
+from is real and verified across the CI seeds, but the slide sharing it is
+aspiration written as fact, in the file that wins conflicts. Correct the
+sentence or land #118; do not leave it.
+
+**Plan-view-only solving is a sound boundary, with one silent chain behind
+it.** The 2D search + carve-responds-to-solve pattern (Decision 6 §3) is
+argued correctly and measured (20/24 crossings within 1.1 m of panel midpoint;
+1/24 at window height vertically — the vertical *cannot* be searched for).
+What keeps it sound is that vertical requirements stay *carves*, and carves
+are few. Today there are exactly two pinned-height features (station flat,
+castle window), both unliftable by the vertical repair loop, and their
+interaction is already delicate (the carve order comment in `route.ts` is
+load-bearing). The latent bug factory is not the 2D boundary itself but this
+chain: **the repair loop exhausts its 10 passes silently** (no complaint if
+deficit remains), → the boot assert that would notice can only
+`console.warn` (#208), → the invariant that can fail only catches physical
+*strikes* (`cruiserStrikes`), not a sagging cruise floor. A third
+pinned-height feature (the slide rebuild is the obvious candidate) could make
+repair unsatisfiable on some seed and nothing that can fail a build would say
+so. Two cheap closures: make residual deficit after pass 10 a complaint the
+procgen suite asserts, and resolve #208.
+
+Also noted: Decision 6 §2 says budgets should be "bounded by wall clock rather
+than by optimism" — `generate.ts`'s budgets are all counts (`perJoint`,
+`restarts`, `STEPS_PER_START`); no wall-clock bound exists. Doc ahead of code.
+
+### 2. Pattern sweep: checks that cannot fail — the build's green light is part theatre
+
+The procgen suite is healthy. The **older check scripts gating `npm run
+build` are not**, and I proved four hollow by experiment in this worktree:
+
+- **`check:hop-clearance` cannot fail, structurally.** It imports
+  `MAX_AUTO_HOP_HEIGHT` and `MEASURED_HOP_APEX`, prints a table, and contains
+  **zero comparisons against them and zero `process.exit`/`exitCode` sites**
+  (grep count: 0). It has been "wired into the build" (Review 7's ask) without
+  being given a failure path — it is a printout with a green tick. Bonus: its
+  `highest()` can return `NaN`, which would poison `worstClean` unnoticed —
+  the exact NaN flavour this fleet keeps finding.
+- **`check:shop-spacing` validates a hand-typed copy of the shop table against
+  itself.** Proven: moved `HAT_X` from −22.44 to −12.44 in
+  `building/layout.ts` — on top of the surprise-egg unit — and it printed
+  `PASS: no counter overlaps` with exit 0. It would also silently skip any
+  shop *added* to `SHOP_UNITS`. This is the S1 (P0) bug class from Review 1
+  with its guard pointing at a photograph of the park instead of the park.
+- **`check:statue-occlusion` measures its own copies of the four `FoliageFade`
+  constants.** Proven: narrowed the game's real `SIGHTLINE_MARGIN` by 0.9 m —
+  a change that genuinely alters which trees fade in play — and the check
+  printed the byte-identical result and passed. The `foliageFadeTuning.ts`
+  extraction that fixes this is on **unmerged PR #219**; on `main` the copies
+  are live. (#226 explains *why* the copies exist: the script runs under
+  `--experimental-strip-types`, which cannot import from a file whose
+  constructor uses parameter properties.)
+- **`check:tie-frame` compares `railFrameAt` with itself.** Its own output
+  says so: "worst deviation **0.0 mm** … epsilon 50 mm". `Coaster.ts` builds
+  tie matrices from `railFrameAt(route, d)`; the check recomputes
+  `railFrameAt(route, d)` and measures the float round-trip. It had teeth
+  against the pre-fix mutation bug it was written for; post-fix it can only
+  fail if three.js breaks.
+- **`check:baked-face`'s placement half measures a phantom.** It reads
+  `canvas.ops` — a property the no-op headless canvas **never records**
+  (single grep hit in the repo: the read itself) — so it compares zero points
+  and prints "all 6 designs land within **0.0000 mm**". The half that
+  raycasts real geometry is fine; the placement half is the successor of the
+  tautology its own doc-comment says it replaced.
+- **`check:gondola-sightline`**: same self-copy shape as shop-spacing,
+  including frozen per-model `top/width/depth` — the ears-regrow bug it cites
+  as its reason for existing would pass it today. (Not proven live; by
+  reading.)
+
+Supporting rot, all verified by reading: `scripts/` and `test/` are outside
+`tsc --noEmit` (#197/#192 — still open), and the proof it matters is that
+**`check-park.mts:485` references `LEVEL_CROSSING_REACH`, which is defined
+nowhere in the repo** — a latent `ReferenceError` sitting in the
+rail-crossing complaint branch, which is therefore also proof that branch has
+never once fired. `check:park`'s `rail.exclusion` invariant accepts **any**
+collider within 2.3 m as "the fence" (its own ratchet prose admits trestle
+legs once counted); the `poi.split` hard key exists in `HARD_KEYS` and **no
+code ever reports it**, so invariant 3's connected-component claim is not
+actually measured. `checkCoasterClearances` (cruise floor, coaster-over-train
+5.5 m, station/castle-flat separation) can only `console.warn` (#208), and in
+headless runs the harness swallows even that unless `--verbose`. Minor:
+its per-obstacle sweep files both obstacles under the key `'the ferris
+wheel'`, so a statue clip would be reported with the wrong name.
+
+**Verdict.** The new checking layer (invariants, `check:park`,
+`check:cruiser-clearance`, `check:castle-window`) is genuinely good and is
+where the lessons live. The build is also gated on four-plus scripts whose
+green means nothing, and a green light that cannot go red is worse than no
+light: #113 and #198 both shipped behind green builds for weeks. The
+correction is small and mechanical per script: give it the comparison and the
+exit code it is pretending to have, or demote it out of `build` so the green
+tick stops vouching for it.
+
+### 3. Pattern sweep: two definitions of one thing — three live drifts, and the trap still set
+
+**Drifted now:**
+
+- **`check:crowd` simulates the wrong child.** `trace-npc-driver.mts:63` has
+  `WALK_SPEED = 1.85`; `NpcCharacter.ts:39` ships `NPC_WALK_SPEED = 2.55`.
+  The build-gating trace runs 90 000 frames of leg-timeout and stuck
+  behaviour on a child 27% slower than the one in the game — timeouts and
+  stuck-detection are exactly the things walk speed changes. No comment marks
+  it as a copy. (Cause: strip-types again — `NpcCharacter` has constructor
+  parameter properties, so the import genuinely fails.)
+- **The trestle-count formula is copied with a clamp difference.**
+  `railRace/hazards.ts:183` clamps to ≥ 1; `railRace/track.ts:1088` does not
+  — and both carry comments swearing they are the same formula. They disagree
+  only for loops under 12 m, so it is latent, but the comments' guarantee is
+  false as written.
+- `spookyHouse/candyShower.ts:42`'s `FLOOR_Y = 0.02` "matches room.ts's floor
+  top" — it matches the *rug*; the floor top is 0.0. Two centimetres,
+  cosmetic, but the claim names the wrong object.
+
+**Same today, unguarded, worth one owner each:** `GATE_RADIUS`/`GATE_ANGLE`
+in `parkLayout.ts:81–82` (hand-copies of importable exports, comments
+asserting the match — no cycle prevents the import; this exact instance was
+on the fleet's found list and is still on `main`); `floorName` ×3
+(`liftRide.ts` exports it; `Game.ts` and `ParkMap.ts` re-type it);
+`CASTLE_WALL_HEIGHT` ×2 (`cruiserWindow.ts` admits "nothing asserts the two
+are equal"); `playerSim.mts` restating four `Player.ts` numbers with
+`AUTO_HOP_LOOKAHEAD` unguarded in both directions; `invariants.ts` re-typing
+`SHORTFALL_TOLERANCE` and `TRACK_CLEARANCE` that `check-park.mts` imports
+properly one directory over; the `MAX_SUBSTEPS` three-file derivation chain
+(`constants.ts` → `ballPhysics.ts` → `BallPit.ts`), hand-computed at every
+hop; `CuteODex.PARADEABLE` mirroring the store's rule as an untyped set; the
+four character-option unions duplicated `art/` ↔ `state/` with a guard that
+only fires in one direction.
+
+**The mechanical cause has an in-repo cure nobody has standardised.** #226 is
+right that strip-types is why constants get copied — but 13 of the 28 check
+scripts already run `--experimental-transform-types`, which compiles
+parameter properties fine. The five armed trap files (`Player.ts`,
+`FoliageFade.ts`, `TapNavigator.ts`, `NpcCharacter.ts`, `NavGrid.ts` — param
+properties *and* wanted constants) are only unreachable from the **strip**
+half. Standardise every `check:*` on transform-types and the trap disappears
+as a class; the tuning-module extraction (#219's pattern) then remains for
+genuine layering reasons, not as a workaround.
+
+### 4. `ParkBoundary` — one definition, one consumer, thirteen files of circle
+
+The duplicate types are consolidated and the interface is well-designed
+(signed distance, shape-agnostic). But it has exactly **one consumer** (the
+generator), while the park's circle-ness is broadcast through ~13 files as
+radius constants: `train/route.ts` bakes `WALL_INNER_RADIUS` in three places
+(the exact anti-pattern `boundary.ts`'s own header names), `Scenery`,
+`Garden`, `Collision` (play bounds), `railRace` (ring radii), `entrance`,
+`ParkMap`, `terrain`, and the invariants. Two coaster signatures also type
+their parameter as `ReturnType<typeof circleBoundary>` instead of
+`ParkBoundary`, quietly re-coupling to the circle. **Nothing on `main`
+regressed here — but when #115 (spline boundary, ~2× area) lands, it is a
+park-wide project, not a plug-in.** Anyone scoping it from `boundary.ts`'s
+optimistic header will under-estimate it by an order of magnitude.
+
+### 5. `parkManifest.ts` — the procgen park is frozen by its own pins
+
+Eleven of twelve entries are pinned, with 15-decimal coordinates that are
+pasted solver output (the 28 July family-approved park). Only
+`stall.skyCruiser` is actually solved. The stated reason is honest and real:
+*"without pins, any addition re-rolled the whole arrangement, which broke
+'adding an attraction is adding a line'."* The cause is structural: **one
+shared `Rng` stream threads through placement in solve order**, so any
+manifest edit shifts every draw after it. (The `MAX_TRIES` comment already
+speaks of "per-entry streams" — a fix that was evidently considered or
+partially made and is not in the code. `Scenery`'s single stream has the same
+disease — the manifest's own `stall.railRacer` note documents a garden wall
+moving because a *path spur got longer*.)
+
+Distance from Jim's stated direction: on `main`, "everything is procgen and
+every park unique" is true of the *machinery* and false of the *park* — it is
+an authored layout with a solver attached, and pins are the new hand-tuned
+coordinates. **Shortest honest path:** give each entry (and each scatter
+pass) its own stream keyed by id — `new Rng(hash(PARK_SEED, entry.id))` — so
+placement is stable under insertion and deletion by construction. Then the
+pins can come out (a deliberate, family-approved re-roll, per Decision 5),
+and "adding an attraction is adding a line" is true without freezing the
+park. Until the streams are per-entry, every new attraction will be pinned in
+self-defence and the manifest will quietly revert to `anchors.ts` with extra
+steps. The slide (#118/#229) belongs in the manifest as a solved entry the
+same way.
+
+### 6. Boot: generation at module load — keep the purity, budget the wall
+
+Measured in this worktree (M-series, Node, transform-types):
+
+| seed | L1 layout | train plan | coaster plan | full headless world |
+| --- | --- | --- | --- | --- |
+| canonical | 14 ms | 68 ms | 35 ms | 1.24 s |
+| 2 / 5 / 11 / 18 | ~13 ms | ~68 ms | 402 / 404 / 707 / 257 ms | ~1.2 s |
+
+Across seeds 1–20 the full plan chain (layout + train + coaster + rail race +
+paths) ranges 115 ms–1.49 s. **I could not reproduce the ~16 s worst-seed
+figure on any CI seed or seeds 1–20**; if it was observed it belongs to a
+wider sweep, a pathological seed, or a phone-class device (whose multiplier
+over this laptop is plausibly 5–10×, which would put the *world build*, not
+the solve, at 6–12 s). Mark that figure unverified until someone reproduces
+it with a seed number.
+
+Structurally: module-load solving is the right call *today* — it is what
+makes plans importable as plain objects, keeps the Node harness byte-identical
+with the browser, and the docs defend it well (`generate.ts` header). Its
+real costs are: it runs before first paint with no way to show progress; it
+compounds linearly as rides are added; and budget raises (the cruiser's
+`restarts: 2000` was a 10× raise) push worst-case cost up with no wall-clock
+cap anywhere (§1). Two proportionate moves, neither urgent: hold the line
+that per-ride solve stays in the tens-to-hundreds of ms and put a wall-clock
+budget in the brief (Decision 6 asks for exactly this); and if phone boot
+ever hurts, the canonical park is *one committed seed* — its solved layout
+can be baked at build time by the same code (`vite` already runs the solver
+in `check:park`) and verified byte-identical in CI, with the runtime solver
+kept for seed bumps. That is not a second definition of the park; it is the
+same generator, cached, with a machine check that the cache is honest.
+
+### 7. Docs vs code, and hygiene
+
+- **Decision 7 §5's slide-sharing claim is false** (§1 above) — the sharpest
+  doc-vs-code conflict because ARCHITECTURE-DECISIONS.md wins conflicts by
+  charter.
+- GAME_DESIGN §"TWO coasters" still calls the Rail Race "a second, separate
+  **solver-grown** coaster"; the shipped ride is deliberately a perimeter
+  ring (31 July family brief, quoted in `railRace/route.ts`). Add the dated
+  correction where the older paragraph stands.
+- ARCHITECTURE.md still opens with "the whole park is generated in code …
+  which is why it **boots instantly**" — 1.2 s of world build on a fast
+  laptop is not instant, and Review 2's stale-module-map complaint still
+  stands (the file still says "entities/ — currently just the Player").
+- **93 `HANDOFF-*.md` files are tracked on `main`'s root.** CLAUDE.md says
+  handoffs live on the task branch. They are now permanent repo furniture —
+  decide: a `handoffs/` directory, or delete on merge as policy.
+- `check:wall-tunnelling` runs in no CI path (`check:all` is not run by any
+  workflow) and has no failure path either — the P1 tunnelling bug it
+  measures is guarded by nothing that can go red.
+
+### Priorities
+
+1. **Give the theatre checks their teeth or take them out of `build`**
+   (§2: hop-clearance, shop-spacing, gondola-sightline, tie-frame,
+   baked-face placement) and land `tsc` over `scripts/` + `test/`
+   (#197/#192) — which would have caught `LEVEL_CROSSING_REACH` and the
+   invariants' own claimed-but-unenforced compile guard.
+2. **Fix `check:crowd`'s walk speed** (§3) and standardise `check:*` on
+   `--experimental-transform-types`, closing #226's trap as a class.
+3. **Per-entry RNG streams in `parkLayout`/`Scenery`** (§5), so the pins can
+   come out and Decision 5 means what it says.
+
+*Worktree used for all measurements has been removed; nothing in the shared
+checkout was touched.*
