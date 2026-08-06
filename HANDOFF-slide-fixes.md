@@ -215,3 +215,88 @@ Ascending distance walks many distinct sites early; with anti-diagonal ordering
 covering doors early too, the first 700 attempts span a more diverse slice of
 (door x landing). Whoever implements this must NOT write "near landings are
 easier" in a comment -- that is the claim I would have shipped, and it is false.
+
+---
+
+## Stopped mid-task, 6 August — where this stands
+
+Jim stopped the agent to save tokens. Everything is committed and pushed;
+nothing was lost. Branch tip `2eb9014`.
+
+### What is done and approved by Jim
+
+Landing bug (root-caused: `planExit` was never told where the chute is),
+reclined feet-first riding pose, boarding moved to **1.225 m** from the roof
+edge, half-see-through chute (#228), balls scattering on touchdown, the
+90.28 m over-cap acceptance, and the battlements invariant with its
+`Number.isFinite` guard. The floating-head bug is fixed — cause was
+`TreeClimbing.hidePlayerBody`, the game's only body-part hider, which could
+strand her permanently; deleted.
+
+### The one thing outstanding — the camera
+
+Jim's ruling, verbatim:
+
+> *"let's change the slide camera to alternate between a fixed camera aimed at
+> the character and a chase camera behind them, then I don't mind the body
+> being hidden because it will still be shown for the static camera"*
+
+**Nothing of this is built.** The branch tip is only the measurement commit
+that proved the problem.
+
+**The measurement that settles the design: head ~2500 px, body 0 px.** She
+lies feet-first on her back, so her head points back up the slide straight at
+a camera behind her — from directly behind, her head hides the rest of her by
+construction. That is not a bug to fix; Jim has accepted it, because the fixed
+camera carries the body.
+
+**So do not compromise the chase shot.** Leave it as the over-the-shoulder
+speed shot it is.
+
+**To build:**
+
+- **A fixed trackside camera** aimed at her, cutting with the chase camera.
+- **Take its positions from the solved route**, not pinned coordinates — this
+  is a procgen ride and the chute differs on every seed.
+- Several fixed cameras down the chute is likely better than one distant one:
+  she must be **big enough to see**, and the ride is ~68 m.
+- Judge the **rhythm** (how often it cuts, which it opens on) and whether it
+  **cuts or blends** — real on-ride videos hard-cut, and a blend across a big
+  spatial jump usually reads as a mistake. Decide and justify.
+
+**Guard it, pointing at the right shot:** `check:slide-rider` must assert her
+body reads **on the fixed camera**, and explicitly *not* on the chase, which
+is now allowed to show a head. A check demanding body pixels on both would
+fail correct behaviour. Also assert **every part of the ride is covered by
+some camera** — a gap where neither has her is the kind of thing nobody
+notices until a child rides it.
+
+### Do not touch
+
+`START_Y`, the 1.225 m roof-edge boarding, the recline pose, and the
+`Number.isFinite` guard on `theGinormousSlideLeavesOverTheBattlements`. All
+settled, all approved.
+
+### Also outstanding, separate PR
+
+Item 5 of Jim's original six — **the ball pit following the slide** — is
+stopped on a measured blocker written up on **#229**: `train/route.ts` keeps
+the railway clear of the pit and the train is solved *before* the slide, so a
+pit that follows the landing is a dependency cycle. Dropping that keep-out
+changes the train's route on all ten seeds and trips
+`RATCHET LOOSE: rail.walkable: recorded 30, now 29`. It needs its own PR.
+
+The ordering change that delivers it is measured and holds on **10 of 10
+seeds**, five of them fresh holdouts — but **whoever implements it must not
+write "near landings are easier" in a comment.** That claim was tested and
+disproved; document the key as chosen empirically, mechanism unconfirmed.
+
+### Do not hand Jim a URL until the camera work is done
+
+His explicit instruction — no more stage-by-stage.
+
+### Three faults on this ride shared one shape, worth remembering
+
+The rider 26.65 m off the chute, a pose the harness never exercised because it
+never called `Player.update`, and visibility asked of the wrapper instead of
+the thing. **Assert the thing, not its container.**
