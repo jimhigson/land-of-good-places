@@ -95,7 +95,7 @@ solid thing in the park. The `Infinity` is load-bearing, not laziness.
 So the mechanism is the other way round: **a cell a bridge deck `covers(x, z)`
 is exempt from collider stamping**, because the deck is above whatever is
 beneath it. Nothing is lost by the single-layer lattice letting the deck win
-those cells, and this is the argument that makes Decision 6 safe: *what is under
+those cells, and this is the argument that makes Decision 8 safe: *what is under
 a bridge is the fenced rail corridor, which is already not walkable*. The 2D
 lattice is only forced to choose between two surfaces where one of them was
 never available anyway.

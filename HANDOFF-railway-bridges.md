@@ -141,7 +141,7 @@ under a bridge is the fenced rail corridor, which is *already* not walkable — 
 the grid only chooses between two surfaces where one was never available.
 
 Same treatment for `poiGraph.lineIsClear`, for the same reason. Recorded as a
-correction in ARCHITECTURE-DECISIONS Decision 6, with the carry-forward
+correction in ARCHITECTURE-DECISIONS Decision 8, with the carry-forward
 constraint: **nothing may give the rail fence a finite `topHeight`.**
 
 ## Where the crossings are today
@@ -185,7 +185,7 @@ the fence and every bridge live inside that.
 **Decided: land after it.** This diff splits cleanly:
 
 - *Shape-independent* — the deck exemption, deck geometry and ramps, the
-  `poiGraph` seam, `BRIDGE_RISE`, `LEVEL_CROSSING_REACH`, Decision 6.
+  `poiGraph` seam, `BRIDGE_RISE`, `LEVEL_CROSSING_REACH`, Decision 8.
 - *Shape-dependent* — removing the `atLevelCrossing` escape, re-recording
   `rail.exclusion` (21) / `rail.walkable` (30), and the new invariant's
   five-seed red proof.
@@ -224,7 +224,7 @@ Base merged and green: `npx vitest run` → **95 passed, 5 files**;
 `npm run build` exit 0; `check:park` green.
 
 Done: findings 1 and 2 (`LEVEL_CROSSING_REACH`, `BRIDGE_RISE` derived from
-`LOCO_TOP_Y`), Decision 6 recorded and then corrected. #124 verified as already
+`LOCO_TOP_Y`), Decision 8 recorded and then corrected. #124 verified as already
 fixed and closed by the Overseer.
 
 Next, in order: the deck plan + geometry (module-load, like `TRAIN_PLAN`), the
