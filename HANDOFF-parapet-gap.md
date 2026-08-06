@@ -251,63 +251,79 @@ stopped reaching the wall past ~38°; two legs overlapped by 0.11 m because
 slots are spaced by arc length, not on the ground; and a 2.5 mm spline
 overshoot at the lip, fixed by sampling at 0.9 m instead of 1.6 m.
 
-### (A) BLOCKER — `check:park` fails, and do not silence it
+### (A) CLOSED — the slide moved to park level
 
-```
-'building' declares a bounding radius of 19 m but has built out to 28.2 m
-anchor.reach:building: 9.2, recorded at 0 — it has got worse
-```
+`npm run build` exit 0, `check:park` included and **not** ratcheted.
 
-The chute hangs off `gardenRoot`, which is under the `building` anchor's plot
-group, so `check:park` measures it against the castle's 19 m. It passed before
-only because its bounding-sphere *centre* happened to sit near the tower; the
-new route moved that centre out. **It was always fragile, not newly wrong.**
+Four things moved together, because `Building.ts` keeps them in one frame on
+purpose: the chute, the ride mount (+ eye mount), the grown-up, and the boarding
+teleport. All read `SlideRide.pointAt`. Moving the chute alone would have left
+the other three 26.65 m from the trough with the chute still looking perfect —
+that number is measured, not guessed: it is what the new invariant reports when
+the chute alone is put back under the castle's group.
 
-The principled fix, and the precedent is in this same ride: the legs were moved
-to park level because "this ride spans two plots, so its supports are the
-park's, not the tower's". The chute spans the same two plots.
+Points are built in world space now; park level is the identity.
+`SLIDE_GROUP_ORIGIN` is deleted rather than updated — it described the old
+frame, and a constant describing the wrong frame is worse than none.
 
-**Why I did not just do it:** `Building.ts` deliberately parents the rider's
-`eyeMount`/`rideMount` to the *same group* as the chute, so "the chute's points
-and the mount's position are the same coordinates, and cannot drift apart".
-Moving the chute means moving the mount in the same change, or recreating
-exactly the class of bug this repo keeps hitting. That is a real piece of work,
-not a one-liner, and I would not start it with no budget to verify it.
-`SLIDE_GROUP_ORIGIN` in `plan.ts` is a dead export and can go with it.
+New invariant `a child boarding the ginormous slide is put down on the chute`
+compares `pointAt` against `pointAt` pushed through the scene graph. Same number
+at park level; a castle's width apart if the frames ever part. Proved red first:
+5 failures, one per seed, real numbers, no NaN. **142 tests** (137 + 5).
 
-**Do NOT add this to RATCHET** — `check:park` says so itself.
+### (B) STILL OPEN — boot time. The door is NOT the lever, measured twice.
 
-### (B) BLOCKER — boot time
+The tower-overlap hypothesis was reasonable and is **disconfirmed**. Relocating
+the door clear of the tower footprint (`DOOR_OFFER_CENTRE` must be ≤ 6.776 for
+the corridor to clear 10.011–14.439) does not buy boot time back:
 
-`SLIDE_PLAN` solves at module load. Adding the towers made the search much
-harder:
+| seed | door 9.5 (overlaps tower) | door 6.7 (clear of it) |
+|---|---|---|
+| 20260728 | 8.8 s | **31.0 s** |
+| 2 | 10.2 s | 19.7 s |
+| 5 | **35.1 s** | 19.4 s |
+| 11 | 28.2 s | 5.2 s |
+| 18 | 12.8 s | 4.9 s |
+| total | 95.1 s | 80.1 s |
 
-| seed | solve (was ~1.2 s incl. node startup) |
-|---|---|
-| 20260728 | 9.4 s |
-| 2 | 10.7 s |
-| 5 | 35.3 s |
-| 11 | 28.4 s |
-| 18 | 12.8 s |
+Worst-seed boot — what a child actually waits — barely moves, 35.1 s → 31.0 s,
+and the **canonical seed gets 3.5× worse**. Door 5.0 makes seed 2 unsolvable.
+Moving the door reshuffles which seeds are slow; it does not make them fast.
 
-A 35 s freeze before a six-year-old can play is not shippable. Measured facts:
+So the cost is not the door overlapping a tower. It is that towers made the
+constraint set harder *everywhere* — the search explores 1–2.3M candidate
+pieces where it used to explore hundreds. Pure solve times above; the spatial
+grid over the cruiser segments is already in (identical results, ~1.3×).
 
-- The cruiser check is not the cost. Disabling it took seed 5 from 53.8 s to
-  1.6 s, but that removes a *constraint*, not just work — the search then
-  solved immediately. Misleading A/B; do not repeat it.
-- A spatial grid over the cruiser segments is in (identical results, ~1.3x).
-  Not enough on its own.
-- The door is not a clean lever either: canonical solves in 3 s at door x=0 but
-  seed 5 still takes 21 s, and some positions fail outright.
-- The real cause is that the search explores 1–2.3M candidate pieces. Seed 5
-  went from 944 candidates to 2.34M when the towers appeared, because the fixed
-  door at local x 9.5 sits right beside the south-east tower — the door span
-  7.4…11.6 overlaps that tower's footprint (10.03…14.4) outright.
+**Do not repeat this A/B:** disabling the cruiser check takes seed 5 from 53.8 s
+to 1.6 s, but that removes a *constraint*, not work — the search then solves
+immediately. It looks like the cruiser scan is the bottleneck. It is not.
 
-Likely fixes, in the order I would try them: **issue #209's "prefer gentler
-pieces / better ordering"** (the search takes the first satisfying route, so
-ordering is the whole game); then door freedom, which is Jim's screenshot call;
-then caching the solved plan, which trades away procgen purity.
+Remaining candidate: **#209's ordering work** — the search returns the first
+satisfying route, so which candidates it tries first is the whole game. That is
+generator work, not slide work.
+
+### ALSO OPEN — main has moved to #213 and the merge is not trivial
+
+`origin/main` is now `ff17910` (#213, weighted route influences). I merged
+`05f3a4b` (#203) successfully; **#213 conflicts structurally in
+`src/world/rail/generate.ts`** and I aborted rather than botch it:
+
+- this branch (E3) split `RouteBrief` into `RouteBriefBase` →
+  `ClosedRouteBrief | OpenRouteBrief`, for open routes with `endPoses`;
+- #213 kept a single `RouteBrief` and added `RouteInfluence` (weighted pulls)
+  plus `satisfies`, and changed both the scoring hook and `SolveReport`.
+
+Resolution is "keep the union, add `influences?`/`satisfies?` to the base, take
+main's scoring and report" — coherent but not mechanical, and it deserves its
+own pass by someone with budget to verify the generator. Note #213's own doc
+states the generator "returns the first satisfying route, not the best one",
+which is the same finding as #209 — worth reconciling.
+
+`src/world/coaster/clearance.ts` **is** on main, from **#211** (`6cdb272`), not
+#203. It is the eight-ray tool; `castleWindows.ts`'s `sweptCartHits` is the
+four-ray one. Neither is used here, deliberately: a tower is a solid of
+revolution and the closed form is exact.
 
 ### Queued behind it (Jim, second item)
 
