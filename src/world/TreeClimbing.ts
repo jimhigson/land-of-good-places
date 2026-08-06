@@ -3,7 +3,6 @@ import { CAMERA_YAW_DEGREES } from '../core/constants';
 import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { CharacterModel } from '../entities/CharacterModel';
 import type { Player } from '../entities/Player';
 import type { NpcCharacter } from '../entities/npc/NpcCharacter';
 import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
@@ -37,18 +36,40 @@ import { terrainHeight } from './terrain';
  *   pose, via the small `beginClimb/setClimbPose/endClimb` trio added to
  *   `NpcCharacter` for exactly this.
  *
- * **Body hidden, head out**: rather than trust the isometric camera to see a
- * body occluded by a canopy blob from every one of its four snap angles, the
- * body is simply hidden for the duration and the head positioned at the
- * canopy top. For the player that is a `Group.visible` toggle on everything
- * under `model.body` except `model.head` (three.js visibility only cascades
- * down through ancestors, so the head stays visible while its siblings don't
- * — no change needed to `CharacterModel`/`kid.ts`). For an NPC, drawn through
- * `InstancedCrowd`, a proxy's `.visible` is not what `commit()` reads —
- * only `CrowdMember.shown[partIndex]` is — so the equivalent is finding every
- * part whose prototype mesh is *not* a descendant of the head joint and
- * zeroing those indices for the duration (cached per avatar, since the rig
- * shape is identical for the whole crowd).
+ * **The player is drawn whole; NPCs are still head-only.** The two differ on
+ * purpose, and the history is worth keeping because the reasoning failed in an
+ * instructive way.
+ *
+ * Originally *both* were hidden below the neck: rather than trust the
+ * isometric camera to see a body occluded by a canopy blob from every one of
+ * its four snap angles, the body was switched off for the duration and the
+ * head positioned at the canopy top. What that actually relied on — nobody
+ * wrote it down, which is the whole problem — was the **canopy being wide
+ * enough to hide the absence of a body**. It was not hiding her torso; it was
+ * hiding the hole where her torso would have been. Widen the set of climbable
+ * trees (thinner canopies qualify) or raise her out of the leaves
+ * ({@link CLIMB_PEEK_LIFT}, now 1.2 m) and the hole stops being covered: what
+ * you see is a head and a hand floating over a tree. Jim, 6 August, on seeing
+ * exactly that: *"why do they no longer have a body?"*
+ *
+ * His ruling was to draw all of her — *"just include the whole body, no other
+ * change needed"* — and on the legs that then hang out past the canopy and the
+ * trunk, *"legs poking out is fine when climbing a tree, that's natural"*.
+ * That is the look: a child sitting up a tree with her legs dangling, not a
+ * disembodied head. So the player's hiding is gone outright, along with the
+ * `.visible` bookkeeping and its model-swap guard.
+ *
+ * **NPCs keep the old treatment**, deliberately and only because nobody has
+ * asked otherwise — they have no wave and no raised arm, so what a passer-by
+ * sees of a climbing NPC is different from what she sees of herself. Their
+ * path is also mechanically different: drawn through `InstancedCrowd`, a
+ * proxy's `.visible` is not what `commit()` reads — only
+ * `CrowdMember.shown[partIndex]` is — so the equivalent is finding every part
+ * whose prototype mesh is *not* a descendant of the head joint and zeroing
+ * those indices for the duration (cached per avatar, since the rig shape is
+ * identical for the whole crowd). If a floating NPC head ever reads as wrong
+ * for the same reason hers did, this is the paragraph that says why it was
+ * left alone rather than overlooked.
  *
  * **The tree's collider is untouched.** Nothing here adds or removes a
  * collision shape; the trunk stays exactly as solid as it always was for
@@ -69,16 +90,6 @@ export class TreeClimbing implements GameSystem {
   private playerStartZ = 0;
   /** Which way she faces while peeking — captured at the top of the scramble. */
   private playerPeekFacing = 0;
-  private playerHiddenParts: Object3D[] = [];
-  /**
-   * Which model {@link playerHiddenParts} was collected from.
-   *
-   * The parts are children of the player's model, and PR #188 makes that model
-   * swappable at runtime — so by the time the climb ends the refs may belong to
-   * a model that has already been thrown away. Restoring them would then be
-   * both useless and misleading. See {@link showPlayerBody}.
-   */
-  private playerHiddenModel: CharacterModel | null = null;
   /** Seconds into the current wave cycle. Runs only during `peek`. */
   private playerWaveClock = 0;
   /** Eased 0..1 — 0 arms down, 1 arm up and waggling. */
@@ -95,7 +106,9 @@ export class TreeClimbing implements GameSystem {
    * The player-style `.visible` toggle's own bookkeeping, for a pinned kid
    * built as a one-off `CharacterModel` rather than an instanced `KidAvatar`
    * — see `hideNpcBody`'s doc comment for why it needs a different mechanism
-   * from the crowd's `shown` array entirely. Mirrors {@link playerHiddenParts}.
+   * from the crowd's `shown` array entirely. This is the last user of the
+   * `.visible`-toggle approach: the player's copy of it was deleted when she
+   * started being drawn whole (see the class doc).
    */
   private readonly npcHiddenVisibleParts = new Map<NpcCharacter, Object3D[]>();
 
@@ -233,18 +246,19 @@ export class TreeClimbing implements GameSystem {
   private beginPlayerDescend(): void {
     this.playerPhase = 'down';
     this.playerTimer = 0;
-    this.showPlayerBody();
+    this.endPlayerWave();
   }
 
   private updatePlayerClimb(context: FrameContext): void {
     const tree = this.playerTree;
     if (!tree) {
       // Bailing out has to undo everything the climb did, not just the phase.
-      // Clearing the phase alone left her hidden (the body is only restored on
-      // a normal descent) *and* still `riding`, which is a player who cannot
-      // move and cannot be seen. Cheap to make safe, and impossible to notice
-      // in testing if it is ever reachable.
-      this.showPlayerBody();
+      // Clearing the phase alone left her still `riding` — a player who cannot
+      // move. (It used to leave her *invisible* too, the body being restored
+      // only on a normal descent; drawing the whole child has retired that
+      // half of the hazard outright.) Cheap to make safe, and impossible to
+      // notice in testing if it is ever reachable.
+      this.endPlayerWave();
       if (this.player.riding) this.player.endRide(0, 0, 0);
       this.playerPhase = null;
       return;
@@ -277,7 +291,6 @@ export class TreeClimbing implements GameSystem {
         // herself first.
         this.playerWaveClock = WAVE_CYCLE_SECONDS - WAVE_FIRST_DELAY;
         this.playerWaveAmount = 0;
-        this.hidePlayerBody();
         this.player.model.setExpression('happy');
       }
       return;
@@ -385,37 +398,23 @@ export class TreeClimbing implements GameSystem {
   }
 
   /**
-   * Hides every part of the model except the head — see the class doc — and
-   * except the **right arm**, which is the one she waves with.
+   * Puts the wave away. Called on every way out of a climb, normal or not.
    *
-   * The arm has to stay drawn or there is nothing to see: her shoulder sits
-   * well inside the canopy, so what actually appears above the leaves is a hand
-   * and a bit of forearm next to a head, which is exactly the cartoon read we
-   * want. The shoulder staying buried is a feature, not a compromise.
+   * This used to be `showPlayerBody`, and used to have a second job: restoring
+   * the `.visible` flags of every part `hidePlayerBody` had switched off. Both
+   * are gone — **the whole child is drawn up a tree now** (see the class doc),
+   * so there is nothing to restore and nothing that could be left hidden by a
+   * climb that ended in an unusual way.
+   *
+   * That deletion took the PR #188 model-swap guard with it, and it is worth
+   * recording *why* that is safe rather than just noting it went: the guard
+   * existed because the parts we had switched off might belong to a model
+   * already thrown away by the time the climb ended, so restoring them would
+   * touch a dead object. Nothing is switched off any more, so there is no
+   * second object to get out of step with — the hazard is gone rather than
+   * merely unhandled.
    */
-  private hidePlayerBody(): void {
-    const model = this.player.model;
-    this.playerHiddenParts = [];
-    this.playerHiddenModel = model;
-    for (const child of model.body.children) {
-      if (child === model.head) continue;
-      if (child === model.rightArm) continue;
-      if (!child.visible) continue;
-      child.visible = false;
-      this.playerHiddenParts.push(child);
-    }
-  }
-
-  private showPlayerBody(): void {
-    // If the model was swapped underneath us mid-climb (PR #188), these refs
-    // belong to a model that has already been discarded: restoring them would
-    // touch a dead tree, and the *new* model has never been hidden, so there is
-    // nothing to put right. Drop them and leave the live model alone.
-    if (this.playerHiddenModel === this.player.model) {
-      for (const child of this.playerHiddenParts) child.visible = true;
-    }
-    this.playerHiddenParts = [];
-    this.playerHiddenModel = null;
+  private endPlayerWave(): void {
     this.playerWaveAmount = 0;
     this.player.setClimbWave(0);
   }

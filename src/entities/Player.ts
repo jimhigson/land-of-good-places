@@ -110,10 +110,16 @@ export const CLIMB_WAVE_ARM_X = -2.45;
  *
  * The crowd waves with this **negative** (`NpcCharacter.animate`), which tucks
  * the hand *inward*, across the body. On the ground that is fine — you see the
- * whole child. Up a tree only her head is out of the leaves, and an inward
- * hand lands squarely behind her own skull and hair: QA measured the wave 0%
- * visible on every climbable tree, blocked by her own head, with zero
- * foliage in the way.
+ * whole child. Up a tree an inward hand lands squarely behind her own skull and
+ * hair: QA measured the wave 0% visible on every climbable tree, blocked by her
+ * own head, with zero foliage in the way.
+ *
+ * That was measured when only her head and waving arm were drawn up a tree.
+ * **The whole child is drawn now** (Jim, 6 August: *"just include the whole
+ * body"* — see `world/TreeClimbing.ts`), which gives the hand *more* to hide
+ * behind rather than less, so the outward swing matters at least as much as it
+ * did. `check:climb-wave` re-measures it on the real rig every build, so this
+ * paragraph is history rather than a live claim about what is on screen.
  *
  * Swinging it **out** instead puts the hand clear of her silhouette. Swept
  * (`check:climb-wave --sweep`) rather than guessed: +1.25 is the peak across
@@ -187,11 +193,21 @@ const RIDE_POSE_BODY_PITCH = 0.3;
  * ray is parallel, so "the direction to the camera" is the same everywhere in
  * the park and does not depend on which tree she climbed or how far away she is.
  *
- * It works out at −40.1°, which sounds like a lot of neck until you remember
- * that `TreeClimbing.hidePlayerBody` leaves **only her head and waving arm
- * drawn** — the shoulders it would be measured against are inside the leaves.
- * Nothing is on screen to read it as a joint angle; all that reaches the player
- * is a face turned up at her.
+ * It works out at **−40.1°**, and the reason that used to be free has since
+ * been retired. It was: `hidePlayerBody` left only her head and waving arm
+ * drawn, so the shoulders a neck angle would be read against were inside the
+ * leaves and nothing on screen could see it as a joint. **The whole child is
+ * drawn up a tree now** (Jim, 6 August), so those shoulders are on screen and
+ * the 40° *is* now a visible neck.
+ *
+ * Left at 40.1° deliberately, not by oversight: it is the angle that actually
+ * points her face at the camera, which is the thing Jim asked for and which
+ * `check:climb-wave` measures at 0.00° off. He asked for the body with *"no
+ * other change needed"*, and he has seen it in the game. If it ever reads as
+ * craning, the honest lever is to give some of the pitch back to the torso —
+ * `RIDE_POSE_BODY_PITCH` leans her forward 0.3 rad, and every radian taken out
+ * of that is a radian the neck no longer has to find — **not** to detune the
+ * aim, which would put her back to waving past the player.
  */
 export const CLIMB_WAVE_HEAD_PITCH =
   KID_REST_GAZE_PITCH - RIDE_POSE_BODY_PITCH - CAMERA_PITCH_DEGREES * DEG;

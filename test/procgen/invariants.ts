@@ -75,19 +75,37 @@ const TRACK_CLEARANCE = 1.3;
 /**
  * How long a child may spend getting to a tree she can climb.
  *
- * Seven seconds at her own flat-out {@link PLAYER_MAX_SPEED} — a duration, not
- * a distance, because Jim's complaint was a duration: *"it takes a long time to
+ * Nine seconds at her own flat-out {@link PLAYER_MAX_SPEED} — a duration, not a
+ * distance, because Jim's complaint was a duration: *"it takes a long time to
  * find one"*. Converting through the game's own speed is what stops this being
  * a number somebody liked the look of.
  *
- * It is generous on purpose. She has to *see* the tree before she walks to it,
- * so this is a floor under the experience rather than a description of it, and
- * the honest ceiling is set by something this PR cannot move: the inner ~30 m
- * of park has no trees of any kind, its ground being spoken for by the plots,
- * the stalls and the plaza. Seven seconds clears the worst point on all five
- * seeds by 19% while still failing three of the five as the park stood before.
+ * **It was seven, and raising it deserves an explanation rather than a quiet
+ * edit**, because "loosen the threshold until the seed passes" is the exact
+ * move this repo forbids.
+ *
+ * Seven was calibrated against a park with 8 climbable trees, where the worst
+ * paved point was 41.9 m. Then #216 landed, `isPlantable` stopped capping at
+ * 55 m, and the park went to 72 trees with **40–49** of them climbable. The
+ * worst paved point got *worse* — 55.4 m on seed 2 — because the new ground
+ * opened up is the **outer** park, so the trees moved away from the middle even
+ * as their number quintupled.
+ *
+ * That is the tell that this metric is not measuring what its name says. Every
+ * worst point on every seed sits in the plaza — (9,-7), (-0,-6), (-9,10),
+ * (-9,10), (-9,6) — ground owned by the plots, the stalls and the paving, where
+ * no tree of any kind can be planted. A max over path points therefore reports
+ * the distance from the middle of a paved square to the lawn, on a park that
+ * has never had a findability problem at 40+ climbable trees.
+ *
+ * So this becomes what it can honestly be: **a backstop against gross
+ * clustering**, wide enough not to be a report on the plaza. The tight guard on
+ * the thing Jim actually complained about is now the count floor below, which
+ * moved the other way — from 6 to 25 — and is what would catch a regression to
+ * the park he could not find a tree in. Nine seconds still fails the park as it
+ * was when he complained (96.9 m worst).
  */
-const SEARCH_SECONDS = 7;
+const SEARCH_SECONDS = 9;
 const MAX_CLIMB_SEARCH = PLAYER_MAX_SPEED * SEARCH_SECONDS;
 
 /**
@@ -667,16 +685,23 @@ const everyPathIsLit: Invariant = (facts) => {
  * times {@link SEARCH_SECONDS}. Not from the scatter's target, and not from
  * whatever the park currently manages.
  *
- * Measured on the paved network, worst point on each CI seed:
+ * Measured on the paved network, worst point on each CI seed. The middle
+ * column is this branch's predicate on the pre-#216 park; the last is the same
+ * predicate on the park as it now stands, where trees plant past the old 55 m
+ * cap and so sit further from the middle:
  *
  * ```
- *            before   after
- *   canon     54.2     41.9
- *   seed 2    45.9     39.4
- *   seed 5    96.9     38.8   <- the park with ONE climbable tree in it
- *   seed 11   72.9     38.5
- *   seed 18   42.4     40.7
+ *            old rule   this rule   this rule, post-#216
+ *   canon       54.2       41.9            51.3
+ *   seed 2      45.9       39.4            55.4
+ *   seed 5      96.9       38.8            47.3   <- had ONE climbable tree
+ *   seed 11     72.9       38.5            43.3
+ *   seed 18     42.4       40.7            42.9
  * ```
+ *
+ * Every one of those worst points is in the plaza — see
+ * {@link SEARCH_SECONDS} for why that makes this a backstop rather than the
+ * tight guard it looks like.
  */
 const everyPathIsNearAClimbableTree: Invariant = (facts) => {
   const far: string[] = [];
@@ -1810,15 +1835,22 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // A park could in principle satisfy the walk with four well-placed trees
       // and still feel bare.
       //
-      // Measured across the five CI seeds at 8 / 9 / 12 / 12 / 11. The floor is
-      // 6 because that is roughly double the *old* rule's best seed (which
-      // managed 1, 2, 2, 3 and 5) — so it reads as "no seed is back where it
-      // was when Jim could not find a tree", and the worst seed still clears it
-      // by two. An anti-vacuity guard, not a placement threshold.
+      // **This is the primary guard on Jim's complaint**, and it tightened a
+      // long way when #216 landed. Measured across the five CI seeds at
+      // 43 / 40 / 49 / 48 / 48 — up from 8 / 9 / 12 / 12 / 11 before that PR
+      // stopped capping planting at 55 m, and from 1 / 2 / 2 / 3 / 5 under the
+      // rule that had Jim hunting for a tree at all.
+      //
+      // The floor is 25: comfortably below the worst seed (40, so 37% of slack
+      // for a park that regenerates), and comfortably *above* both earlier
+      // populations, so it fails outright if either the old predicate or the
+      // old planting cap comes back. It is deliberately not scaled to the
+      // current park — a floor that tracks what the park happens to manage
+      // catches nothing.
       expect(
         facts.climbableTrees.length,
         'the park planted almost nothing a child can climb',
-      ).toBeGreaterThan(5);
+      ).toBeGreaterThan(24);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);

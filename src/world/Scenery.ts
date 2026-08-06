@@ -656,13 +656,22 @@ function buildFoliage(collision: CollisionWorld): {
     // which is *the same branch of this very function* as `lollipop` and
     // differs from it only in the colour of the ball; and the 2.05 bar then
     // took two thirds of what survived, guarding "plenty of canopy to hide a
-    // body in" — a body that `TreeClimbing.hidePlayerBody` does not hide in
-    // the canopy at all, but makes **invisible outright**. There was nothing
-    // left for the margin to protect.
+    // body in".
     //
-    // What is actually required is that her *head* reads as coming out of
-    // foliage rather than balancing on a pea, so the bar is set against the
-    // head — see {@link CLIMBABLE_MIN_CANOPY_RADIUS}.
+    // **That 2.05 was doing real work for a reason its own comment got wrong,
+    // and this is the cautionary tale of the whole change.** The body was
+    // hidden outright while climbing, so the canopy was not concealing her
+    // torso — it was concealing the *hole where her torso would have been*.
+    // Dropping the bar let thinner canopies qualify, the hole stopped being
+    // covered, and Jim asked why the children up trees no longer had a body.
+    // Disproving a comment is not the same as disproving the constant it sits
+    // above. The bar stays down only because he then chose the other fix:
+    // `TreeClimbing` now draws the **whole child**, so there is no hole left
+    // for a canopy to hide and nothing here has to be wide enough to hide one.
+    //
+    // What remains required is that her *head* reads as coming out of foliage
+    // rather than balancing on a pea, so the bar is set against the head —
+    // see {@link CLIMBABLE_MIN_CANOPY_RADIUS}.
     if (topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS) {
       climbableTrees.push({ x, z, canopyTopY: topBallTopY, trunkRadius: 0.55 * lean });
     }

@@ -6,9 +6,16 @@
  * ```
  *
  * Issue #120 asks that after climbing a tree the player waves toward the
- * camera. A climber peeks with her head at `canopyTopY` and everything else
- * hidden in the leaves (`world/TreeClimbing.ts`), so the waving hand has to get
- * somewhere the camera can actually see it.
+ * camera. She perches with her head above `canopyTopY` (`world/TreeClimbing.ts`),
+ * so the waving hand has to get somewhere the camera can actually see it.
+ *
+ * Since 6 August this file also answers a second question — **is there a child
+ * under that head?** She used to be drawn from the neck up, and the canopy was
+ * quietly relied on to cover the gap; widen the climbable-tree rule and raise
+ * her out of the leaves and the gap stops being covered. Jim: *"why do they no
+ * longer have a body?"* Every measurement here was blind to it, because a
+ * floating head occupies exactly the pixels a child in a tree does. See
+ * {@link REQUIRED_BODY_PIXELS}.
  *
  * ## What the first version of this check got wrong
  *
@@ -32,8 +39,9 @@
  * Poses a real kid through the game's own {@link applyRidePose} — not a
  * re-implementation of it, because a check that re-implements a pose is a check
  * that can pass a pose the game never renders — at the real peek position for
- * every real climbable tree, facing the camera as the wave makes her. Hides
- * exactly what `TreeClimbing.hidePlayerBody` hides. Then, for each
+ * every real climbable tree, facing the camera as the wave makes her — with
+ * **every part drawn**, which is what the game does since Jim asked for the
+ * whole body on 6 August. Then, for each
  * camera-facing vertex in the **top third of the arm** (the hand and upper
  * forearm — the part a wave is made of), casts a ray along the camera's view
  * direction and asks whether anything else is in front of it.
@@ -65,6 +73,15 @@ import { cameraOffset } from '../src/core/cameraRig.ts';
 import type { FoliageOccluder } from '../src/world/Scenery.ts';
 
 const verbose = process.argv.includes('--verbose');
+
+/**
+ * `--hide-body` re-creates the retired head-and-arm-only climb.
+ *
+ * The mutation that proves the body guard below can fail, kept as a flag so the
+ * next person can re-prove it in one command rather than editing
+ * `TreeClimbing.ts` and hoping they put it back.
+ */
+const hideBodyMutation = process.argv.includes('--hide-body');
 
 /**
  * How much of the top of the arm must be un-occluded.
@@ -168,11 +185,14 @@ function measureVisibility(
 /**
  * True if `node` or any ancestor up to `root` is hidden.
  *
- * `TreeClimbing.hidePlayerBody` hides the **pivot groups**, not the meshes
- * inside them, and three.js visibility cascades down through ancestors at draw
- * time. A mesh's own `.visible` is therefore still `true` on a body that is not
- * drawn — so checking only the mesh drew her hidden torso into these pictures,
- * and very nearly had me judging a picture the game never renders.
+ * Kept after the body stopped being hidden, because `--thin-canopy` still
+ * hides parts to prove the body guard can fail — and because the trap it
+ * records is worth keeping written down: hiding acts on the **pivot groups**,
+ * not the meshes inside them, and three.js visibility cascades down through
+ * ancestors at draw time. A mesh's own `.visible` is therefore still `true` on
+ * a body that is not drawn, so checking only the mesh drew a hidden torso into
+ * these pictures and very nearly had me judging a picture the game never
+ * renders.
  */
 function hiddenByAncestor(node: Mesh, root: Group): boolean {
   let current: Mesh['parent'] = node;
@@ -265,6 +285,8 @@ function poseKidAt(
   /** 0 = resting peek (no hoist, peek facing), 1 = full wave. */
   wave = 1,
   liftOverride: number | null = null,
+  /** Re-creates the retired head-and-arm-only climb, for `--thin-canopy`. */
+  hideBody = false,
 ): ReturnType<typeof createKid> {
   const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
   const kid = createKid();
@@ -282,11 +304,18 @@ function poseKidAt(
   // the wave turns her to camera. Both are part of what the eye sees change.
   const peekFacing = bearing + Math.PI;
   kid.root.rotation.y = wave > 0.5 ? CAMERA_FACING : peekFacing;
-  // Exactly what `TreeClimbing.hidePlayerBody` leaves drawn.
-  for (const child of kid.body.children) {
-    if (child === kid.head) continue;
-    if (child === kid.limbs.rightArm) continue;
-    child.visible = false;
+  // Nothing is hidden. `TreeClimbing` used to switch off everything but the
+  // head and the waving arm, and this loop matched it part for part; the whole
+  // child is drawn up a tree now, so hiding anything here would measure a pose
+  // the game never renders — the exact failure this file's header warns about.
+  // The `hideBody` argument exists only for `--thin-canopy`, which re-creates
+  // the old behaviour to prove the new guard can go red.
+  if (hideBody) {
+    for (const child of kid.body.children) {
+      if (child === kid.head) continue;
+      if (child === kid.limbs.rightArm) continue;
+      child.visible = false;
+    }
   }
   kid.root.updateMatrixWorld(true);
   return kid;
@@ -378,6 +407,11 @@ interface Picture {
   rows: string[];
   handPixels: number;
   headPixels: number;
+  /**
+   * Pixels of her that are neither head nor waving arm — torso, legs, far arm.
+   * **Zero on the pose that shipped before 6 August**, which is the point.
+   */
+  bodyPixels: number;
   /** Screen-space bounds of her body (head + arm), in raster pixels. */
   bodyTop: number;
   bodyBottom: number;
@@ -402,11 +436,12 @@ function rasterise(
   bearing = Math.PI * 0.25,
   elapsed = 0,
   liftOverride: number | null = null,
+  hideBody = false,
 ): Picture {
   const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
   const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
-  const kid = poseKidAt(tree, bearing, elapsed, override, wave, liftOverride);
+  const kid = poseKidAt(tree, bearing, elapsed, override, wave, liftOverride, hideBody);
   const arm = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const head = new Set(collectMeshes(kid.head, new Group()));
   const all = [...collectMeshes(kid.root, new Group()), ...foliage];
@@ -426,6 +461,7 @@ function rasterise(
   raycaster.far = RAY_BACKOFF * 2;
   let handPixels = 0;
   let headPixels = 0;
+  let bodyPixels = 0;
   let bodyTop = Number.NaN;
   let bodyBottom = Number.NaN;
   let sumY = 0;
@@ -465,6 +501,7 @@ function rasterise(
         row += '.';
       } else {
         row += '+';
+        bodyPixels += 1;
       }
     }
     rows.push(row);
@@ -473,6 +510,7 @@ function rasterise(
     rows,
     handPixels,
     headPixels,
+    bodyPixels,
     bodyTop,
     bodyBottom,
     bodyCentroidY: bodyCount === 0 ? Number.NaN : sumY / bodyCount,
@@ -966,6 +1004,67 @@ if (worstAim > ALLOWED_ROCK_SWING_DEGREES) {
       'She passes through the camera but lurches away from it either side. If CLIMB_WAVE_LEAN grew,\n' +
       'that is the cause, and it is a judgement call whether the bigger rock or the steadier gaze\n' +
       'matters more — but it should be a decision, not a surprise.',
+  );
+  process.exit(1);
+}
+
+// ------------------------------------------------------------------ the body
+//
+// **Is there a child under that head?**
+//
+// The mirror of the aim block above, and it exists for the same reason: every
+// other measurement in this file is about the head and the hand, and a head
+// with nothing under it occupies exactly the pixels a child in a tree does. So
+// the whole file passed, twice, through a version of the game where she was a
+// floating head and one arm — and Jim found it by looking, as he found the aim.
+//
+// Measured from the play camera on the real rig, at every climbable tree and
+// from four approaches, so a body hidden only on some bearing cannot hide here.
+
+/**
+ * How much of her below the neck must reach the screen, in pixels at play scale.
+ *
+ * Not a fraction and not a ratio: the honest question is whether a child is
+ * *there*, and one pixel of shoulder is not a child. Measured across every tree
+ * and approach on the shipped pose, the worst is far above this; the pose that
+ * shipped before 6 August measures **exactly 0**, on every tree, because
+ * nothing below the neck was drawn at all.
+ *
+ * 40 is set well clear of zero and well below the worst real reading, so it
+ * cannot be reached by a body that is merely partly behind leaves — legs
+ * dangling out past the canopy is the look Jim asked for (*"legs poking out is
+ * fine when climbing a tree, that's natural"*), and a canopy eating some of her
+ * must not trip this.
+ */
+const REQUIRED_BODY_PIXELS = 40;
+
+const bodyByTree: { index: number; bearing: number; pixels: number }[] = [];
+for (const [index, tree] of trees.entries()) {
+  for (let b = 0; b < 4; b += 1) {
+    const bearing = (b / 4) * Math.PI * 2;
+    const shot = rasterise(tree, index, null, 1, 'head', bearing, 0, null, hideBodyMutation);
+    bodyByTree.push({ index, bearing, pixels: shot.bodyPixels });
+  }
+}
+const worstBody = bodyByTree.reduce((a, b) => (b.pixels < a.pixels ? b : a));
+
+console.log(
+  `  body: ${worstBody.pixels} px of her below the neck at the WORST of ` +
+    `${trees.length} trees x 4 approaches (needs ${REQUIRED_BODY_PIXELS})` +
+    `${hideBodyMutation ? ' — MUTATED: body re-hidden' : ''}.`,
+);
+
+if (worstBody.pixels < REQUIRED_BODY_PIXELS) {
+  console.error(
+    `\ncheck:climb-wave FAILED (body) — only ${worstBody.pixels} px of her below the neck is on ` +
+      `screen at tree ${worstBody.index}, approach ${((worstBody.bearing * 180) / Math.PI).toFixed(0)}° ` +
+      `(needs ${REQUIRED_BODY_PIXELS}).\n` +
+      'She is a floating head. That is what Jim saw on 6 August, and the whole reason this check\n' +
+      'exists: every other number in this file is happy either way, because a head with nothing\n' +
+      'under it covers the same pixels as a child in a tree.\n' +
+      'The cause is almost certainly something switching parts off again in `TreeClimbing` — the\n' +
+      'player is meant to be drawn WHOLE up a tree. Note the trap: hiding acts on the pivot groups,\n' +
+      'so a mesh\'s own `.visible` still reads true on a body that is not drawn.',
   );
   process.exit(1);
 }
