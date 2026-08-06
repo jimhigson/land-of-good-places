@@ -238,6 +238,12 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
   model.leftArm.rotation.z = 0.5;
   model.rightArm.rotation.z = -0.5;
   model.body.rotation.x = RIDE_POSE_BODY_PITCH;
+  // Zeroed for *every* ride, not only a climb, and deliberately: this function
+  // writes a complete pose rather than a patch, so nothing the walk cycle left
+  // behind can leak into it. `Player.animate` runs immediately before this and
+  // sets `body.rotation.z` from the gait; a rider who boarded mid-stride would
+  // otherwise keep a frozen sliver of that roll for as long as the ride lasted.
+  // The climb's own rock is written back over this a few lines down.
   model.body.rotation.z = 0;
   model.leftLeg.rotation.x = -0.7;
   model.rightLeg.rotation.x = -0.55;
@@ -861,7 +867,6 @@ export class Player implements GameSystem {
     this.group.rotation.x = pitch;
   }
 
-  /** Gives the character back, optionally still moving. */
   /**
    * How much of the "waving from up a tree" pose to wear, 0 to 1.
    *
@@ -879,6 +884,7 @@ export class Player implements GameSystem {
     this.climbWave = clamp01(amount);
   }
 
+  /** Gives the character back, optionally still moving. */
   endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
     this.ridingFlag = false;
     this.climbWave = 0;
