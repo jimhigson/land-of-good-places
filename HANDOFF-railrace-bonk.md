@@ -1,96 +1,139 @@
 # HANDOFF — railrace-bonk (agent `e-railrace-bonk`)
 
-Working branch `e/railrace-bonk`, pushed to **`chore/rail-race-pr-triage`** (PR #223).
-`.claude/worktrees/pr-triage` belongs to another agent — never touch it.
-My worktree: `.claude/worktrees/railrace-bonk`.
+Work for PR **#223**, pushed to `chore/rail-race-pr-triage`. My working branch is
+`e/railrace-bonk` in `.claude/worktrees/railrace-bonk`; `.claude/worktrees/pr-triage`
+is another agent's and was never touched.
 
-Jim rode the Rail Race and reported three things. **Bars only exist at level 3**
-(`BARS_FROM_LEVEL = 3`) — any QA at level 1 or 2 will never see one.
+Jim rode the Rail Race and reported three things. **Duck bars only exist at
+level 3** (`BARS_FROM_LEVEL = 3`) — QA at level 1 or 2 will never see one.
 
-## The three items
+## The headline: 2 and 3 were NOT the same root cause. There were three.
 
-1. Rider faces away; the frown PR #223 adds is unobservable in normal play.
-2. Her head passes through the duck bars like a ghost.
-3. She slows down only *after* passing through the bar.
+### 1. The face pointed 81° away from the lens — FIXED, guarded
 
-## Findings so far — 2 and 3 are NOT the same root cause
+`camera.ts`'s rig stands square-on to the chord it frames, which measures
+**81.1° off the rider's forward**, identical at every window shape and every
+point on the ring. Measured by projecting her real eyes through the real rig:
+one eye sat at a facing of **−0.25** (monitor) / **−0.35** (phone) — round the
+back of her head, not drawn — and both eyes landed on the same screen x.
 
-### Item 3 — ROOT CAUSE FOUND AND MEASURED
+She now turns **50°** of the 81°: body 29°, head 21°. Split that way because
+`gondola.ts` already ruled on this for a seated figure (*"the whole toy turns,
+not its neck"*) and this kid has no neck — the head pivot is inside the torso.
+50° not 60° because on a phone she is framed hard left and turning her walks an
+eye towards that edge (60° left 0.003 of NDC margin; 50° leaves 0.061). The
+sweep table is in `FACE_TURN_MAX`'s doc comment.
 
-The duck-bar **geometry** is built at `spot.at` — the supporting trestle's
-collision-nudged arc position (`track.ts`'s duck-bar loop, `const at = spot.at`)
-— while `simulate.ts` fires the bonk at `bar.at`, the *un-nudged* scheduled
-position from `planHazards`. Nothing reconciles them.
+Guarded in `check:rail-race`: builds a real kid, poses her with
+`faceTurnTowardsCamera` (the ride's own function, moved into `camera.ts` so
+there is one copy), and asserts each eye is on the near side of the skull, on
+screen, and separated from its twin. **Proved red at `FACE_TURN_MAX = 0`.**
 
-`track.ts`'s `MANDATORY_RADIAL_NUDGES` doc comment states the opposite in prose:
+### 2. The bar was inside her head in BOTH states — FIXED, guarded, one residual
 
-> "An arc nudge shifts `at` for the leg and the bar identically ... **so it costs
-> nothing**: bar and leg stay exactly as coincident as they always were"
+Two causes, neither of them item 3's.
 
-It costs nothing to *bar-vs-leg* alignment. It costs the whole hazard its
-correctness, because the physics never learns about the nudge.
+**(a) The clearance was set from measurements that are 1.40 m wrong.**
+`DUCK_CLEARANCE_AT_PARK_SCALE` was set twice (1.5, then 2.1 on 1 August), both
+documented as "halfway between her ducking and standing head heights", both from
+a live reading of 4.70 m / 5.95 m over the rail. Re-measured by composing the
+real transform chain: crown **6.10 / 7.35**, head top (hair included) **6.42 /
+7.67**. Against a bar at 5.25 m the bar sat inside her head *whichever way she
+played it* — the underside 1.54 m below the top of a **ducked** head. That is
+why raising it to 2.1 never fixed Jim's 1 August report either.
 
-**Measured on the canonical seed (20260728), via a headless park build:**
+Now **2.82** — the same rule both earlier passes intended, on real numbers,
+measured to her head top because hair is what you watch pass through a bar. A
+ducked head clears by 0.26 m; a standing one meets it by 0.99 m.
 
-| bar | scheduled `at` | built `at` | offset |
-|-----|---------------:|-----------:|-------:|
-| 0 | 60.52 | 58.52 | **−2.000** |
-| 1 | 96.83 | 94.84 | −1.994 |
-| 2 | 169.46 | 167.46 | −2.002 |
-| 3 | 205.77 | 203.78 | −1.996 |
-| 4 | 290.50 | 288.50 | −2.009 |
-| 5 | 326.82 | 324.81 | −2.003 |
-| 6 | 363.13 | 361.13 | −1.997 |
+The duck-bar **posts** are authored 4.70 m tall — the very same wrong number,
+sized on the same day — so they only ever reached their bar by coincidence.
+Their length is now *derived* from the clearance (measured off the asset's
+bounding box, stretched on Y alone), or every bar would float 0.75 m above its
+own supports.
 
-7 of 7 bars, every one ~2 m **early**. A never-ducking rider at 32.4 m/s crosses
-the built bar 0 with speed *unchanged* and the bonk lands **2.52 m past it**.
-That is Jim's "slow down only after passing through it", exactly.
+**(b) There is no collider on a duck bar at all** — a bonk is decided by button
+state at the crossing, and nothing ever compared bar height to head height. So
+the response is now physical: **the bar knocks her down into the seat**, by
+exactly the drop the clearance is sized against, easing back as the wobble
+fades. Rivals too — and two things were missing there: a *ducking* rival tucked
+its arms but never actually went down, and a bonked one had no pose at all.
 
-(The arc-inversion used to measure this was round-tripped first: fed 60.52 →
-recovered 60.518, err 1.8 mm. The 2 m is real, not measurement error.)
+Guarded in `check:rail-race`, **proved red both ways**: at clearance 2.1 the
+ducked half fires ("clears by −1.54"), at 4.0 the standing half fires ("strikes
+by −1.96", i.e. a bar nothing ever hits is decoration and deletes the game).
 
-Every bar taking the *same* −2.00 m nudge is itself suspicious — see
-`searchForClearGround`, which searches at the module constant `NOMINAL_RADIUS`
-rather than the ring's own radius, so both rings search the same ground and the
-walk-past ring's solid trestles (built first) may be systematically blocking the
-race ring's slot. Not chased; the fix below makes it moot either way.
+### 3. The bonk fired 2.5 m past the bar — FIXED, guarded
 
-### Item 2 — a different cause: there is no collision volume at all
+The bar's geometry was drawn at `spot.at` — its supporting trestle's
+collision-nudged position — while `simulate.ts` bonked at the un-nudged
+`bar.at`. On the canonical seed **every one of the seven bars carried a −2.00 m
+arc nudge**. `track.ts`'s own comment argued an arc nudge "costs nothing"
+because bar and leg move together: true of bar-versus-leg, silent about
+bar-versus-physics.
 
-A bonk is a scalar test — `crossings[cursor] <= travelled && !ducking`. Nothing
-anywhere compares bar height to head height. `hazards.ts` says so outright:
-"a purely visual clearance (bonking is decided by button state at the moment of
-crossing, not an actual pose/collision test)". `track.ts:661` has a stale comment
-about "the thing you actually collide with" — no such thing exists.
+Measured, canonical seed, a rider who never ducks:
 
-Geometry, measured: rail top at bar 0 is y=11.02, `duckClearance` = 5.25 m, so the
-bar sits at y=16.27. `hazards.ts` records her crown at rail+4.70 ducked and
-rail+5.95 standing → **standing crown y≈16.97, i.e. 0.70 m above the bar centre**.
-So a standing rider's head is *inside* the bar and nothing reacts.
+| | crossing the built bar | bonk lands |
+|---|---|---|
+| before | 32.40 → 32.47 m/s (no reaction) | 2.52 m past it |
+| after | 32.40 → 11.36 m/s | 0.35 m, under one frame's 0.54 m |
 
-## The fix, as planned
+**Fixed by drawing the bar at `bar.at`**, the number it is scored at, so the two
+are one number by construction. (My *first* fix published the built position and
+scheduled from it — that worked, but left two numbers kept in step by a
+parameter, and the first invariant proved it: reverting `chooseLevel` left the
+suite **green**. A check that passed without checking anything, in the very PR
+about one. Hence the structural version.)
 
-- **3:** make the physics read the bar positions that were actually *built* —
-  `track.ts` reports each bar's real arch-relative distance, `RailRace` schedules
-  the crossings from those. Measured fact beats authored claim; this is the
-  repo's own `parkFacts.ts` philosophy. Offset becomes 0 by construction.
-- **2:** the bar must visibly *knock her down* rather than pass through her, and
-  the contact must be tested against the leading faces of head and bar, not
-  origin-vs-centre.
-- **1:** turn her towards the camera (head + a little shoulder), keeping the body
-  reading as riding forwards. The rig is side-on and solved (`camera.ts`), so
-  derive the turn from the live camera direction rather than a second constant.
+Guarded by a new procgen invariant, `duckBarsSlowYouWhereTheyStand`, across all
+five seeds. It compares two things from genuinely different places — the bar's
+own instance matrix in the built scene, against a rider driven by the real
+`stepRider` through the real `scheduleForLevel` — so neither side can satisfy
+the other. **Both halves proved red separately**: restoring `spot.at` gives
+2.52/2.08/2.36/2.39 m late against 0.44–0.54 m of frame travel; setting
+`BONK_SPEED_FACTOR = 1` leaves the position half green and fires the speed half
+on all seven bars.
 
-## Status
+## The one thing left, with numbers
 
-- [x] Diagnosis for 1, 2, 3 — measured, not assumed
-- [ ] Fixes
-- [ ] Invariants (frown *visibility*; bonk *timing*), each proved red by mutation
-- [ ] Build + test:procgen (bar: 132 passed / 0 skipped)
-- [ ] Ridden in the browser
+Her head is enormous (3.74 m tall at ride scale), so it reaches the bar before
+her *centre* does. Frame by frame through a bonk at 32.5 m/s, the bar is inside
+the top of her skull for **4 frames (67 ms)** — from 1.65 m before the bar to
+the bonk frame — and clears cleanly from then on.
 
-## Scratch
+The principled fix is to bonk at **first contact** rather than at the bar's
+centre: subtract a `BAR_CONTACT_LEAD` of ~1.9 m (head half-depth at the bar's
+height, ~1.46 m, plus the bar's own 0.43 m) inside `planHazards` when building
+`barCrossings`, so every consumer — `stepRider`, `barIsHere`, the strategies —
+sees one consistent number and the rival AI/balance do not shift relative to it.
 
-`scratch-bonk-probe.mts` at the worktree root is my measuring script (untracked;
-delete before finishing). Run:
-`node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scratch-bonk-probe.mts`
+**I did not do it**, deliberately: it moves when the bonk fires by 1.9 m
+immediately after a fix for the bonk firing in the wrong place, and I had **no
+browser this session** to check it does not read as "she slows before the bar".
+It wants eyes first. The artifact it would remove is ~3× smaller than what was
+reported.
+
+## Checks
+
+- `npm run build` — **exit 0**, run directly, never piped.
+- `npm run test:procgen` — **137 passed, 8 files, 0 skipped** (was 132; +5 is the
+  new invariant across five seeds).
+- `npm run check:rail-race` prints the new lines:
+  `duck bar underside 6.67 … clears by 0.26, strikes by 0.99` and
+  `face monitor turned −50.0° worst eye facing 0.546 …`.
+
+## Needs eyes (I had no browser — chrome MCP absent this session)
+
+1. **Does the 50° turn read as "racing forwards, glancing at you"** or as
+   sitting oddly in the cart? The one real judgement call here.
+2. **Does a bonk read as a bonk** — bar arrives, she snaps down, wobbles? And is
+   the 4-frame skull graze noticeable enough to want the contact lead above?
+3. **Do the bars look right 7.05 m over the rail** with stretched posts —
+   proportionate to a 5.3 m child, but it is a big change from 5.25.
+4. Rivals: same three questions, plus their new hands-over-head bonk pose.
+5. #223's own outstanding item: does `'frown'` read as distinct from
+   `'sad'`/`'surprised'` at gameplay distance — now that it can be seen at all.
+
+**Ride at level 3** or there will be no bars. `/rail-race` deep link; use a
+private window.
