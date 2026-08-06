@@ -272,6 +272,17 @@ export interface ParkFacts {
    * measured against the wrong one of those two is out by `BALL_PIT_DEPTH`,
    * which is most of the headroom this is checking for.
    */
+  /**
+   * How much of the built chute is see-through, and how much solid, as vertex
+   * counts off the two meshes actually in the scene (#228).
+   *
+   * A count rather than a flag: the failure worth catching is not "the feature
+   * was removed", which a reviewer would see, but "the feature is silently
+   * absent on one seed" — a chute shorter than a band period would build an
+   * empty see-through mesh and look, from every angle except that seed's, like
+   * a slide someone had simply decided to make opaque.
+   */
+  readonly slideChuteBands: { readonly solid: number; readonly clear: number };
   readonly slideLanding: {
     readonly x: number;
     readonly z: number;
@@ -472,6 +483,19 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // The two halves of the chute, off the built meshes rather than off the
+  // constants that decided them.
+  const slideChuteBands = (() => {
+    const count = (name: string): number => {
+      const mesh = slide.group.getObjectByName(name);
+      const attribute =
+        mesh && (mesh as { geometry?: { getAttribute(n: string): { count: number } | undefined } })
+          .geometry;
+      return attribute?.getAttribute('position')?.count ?? 0;
+    };
+    return { solid: count('ginormous-slide-chute'), clear: count('ginormous-slide-chute-clear') };
+  })();
+
   // The landing, reproduced exactly as `Building.finishRide` computes it: the
   // built chute's mouth, the built chute's world tangent there, through the
   // game's own `slideLandingSpot`. Dynamic imports for the usual reason — a
@@ -657,6 +681,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathEdges,
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
+    slideChuteBands,
     slideLanding,
     castleMasonryTopY,
     castleTowers,

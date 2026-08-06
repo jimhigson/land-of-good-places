@@ -1863,6 +1863,66 @@ const theSlideRiderSitsOnTheChute: Invariant = (facts) => {
 };
 
 /**
+ * **About half the ginormous slide's chute is see-through** (#228).
+ *
+ * Jim: *"the slide should have a mix of transparent and opaque sections to see
+ * the part through it"*, roughly 50/50.
+ *
+ * #228 asks whoever builds this to say plainly whether it needs an invariant,
+ * rather than leaving it unstated. It does, and this is why: the split is a
+ * function of the chute's **length**, and the chute's length is procedural. A
+ * ride that came out shorter than one band period on some future seed would
+ * build an empty see-through mesh and be uniformly opaque again — a feature
+ * silently absent on one seed, which is precisely the class of failure this
+ * suite exists to catch and the one a reviewer reading the diff cannot.
+ *
+ * What is **not** asserted here, because it is structural rather than
+ * measurable: that the two meshes tile the sweep exactly. `buildChute` is
+ * called with a predicate and its negation, so every quad lands in exactly one
+ * of the two by construction — there is no arithmetic that could leave a hole
+ * in the slide for a test to find. (Checked once by hand on a 61 m probe:
+ * 2520 + 2340 = 4860 vertices, exactly a full sweep.)
+ *
+ * The band is deliberately wide. This is an art decision Jim will tune by
+ * looking at it, and an invariant that pinned it to 0.5 would fail the moment
+ * he said "a bit more glass" — it is here to catch *absent*, not to police
+ * taste.
+ */
+const theChuteIsHalfSeeThrough: Invariant = (facts) => {
+  const { solid, clear } = facts.slideChuteBands;
+  const total = solid + clear;
+
+  if (total === 0) {
+    return ['the ginormous slide built no chute at all — neither mesh has any geometry'];
+  }
+  if (clear === 0) {
+    return [
+      'the ginormous slide is entirely opaque: its see-through mesh has no geometry, ' +
+        `against ${solid} vertices of solid chute — issue #228 asked for about half of it ` +
+        'to be see-through, and on this seed none of it is',
+    ];
+  }
+  if (solid === 0) {
+    return [
+      'the ginormous slide is entirely see-through: its solid mesh has no geometry, ' +
+        `against ${clear} vertices of clear chute — it is meant to be a mix`,
+    ];
+  }
+
+  const share = clear / total;
+  if (share < 0.35 || share > 0.65) {
+    return [
+      `the ginormous slide is ${(share * 100).toFixed(0)}% see-through ` +
+        `(${clear} clear vertices against ${solid} solid) — issue #228 asked for about ` +
+        'half and half, and this is far enough off that the pattern has stopped reading ' +
+        'as alternating',
+    ];
+  }
+
+  return [];
+};
+
+/**
  * How tall a child is, standing, in metres.
  *
  * ART_DIRECTION.md §4: the player kid is 2.12 m after the cartoon pass. Stated
@@ -2159,6 +2219,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'a child finishing the ginormous slide lands in the balls, clear of the chute',
     theSlideRiderLandsInTheBalls,
   ],
+  ['about half the ginormous slide’s chute is see-through', theChuteIsHalfSeeThrough],
   ['the ginormous slide keeps its air from the Sky Cruiser', theSlideKeepsItsAirFromTheCruiser],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
   ['the Sky Cruiser always flies through the castle', skyCruiserAlwaysFliesThroughTheCastle],
