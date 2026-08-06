@@ -59,11 +59,51 @@ This also **answers** the QA question the reviewer raised ("may fly clear over
 the battlements") — it does, measurably, on every seed. What still needs eyes is
 whether a chute launching from above the battlements *looks* right.
 
-## The measurement for #229 — report only, do not ship
+## The measurement for #229 — report only, DONE, nothing committed
 
-Diagonal attempt ordering **combined with** free landings, five seeds. The
-previous author measured diagonal ordering only against the pinned 29-pose pit.
-See the numbers posted to #229. Nothing from this experiment is committed.
+Diagonal (anti-diagonal) attempt ordering **combined with** free landings.
+**It works on 4 of 5 seeds**, and the rides come out better-shaped too.
+
+| seed | baseline (pinned, start-major) | diagonal + free landings |
+|---|---|---|
+| 20260728 | 3.50 s / 68.8 m | **0.60 s** / 61.3 m |
+| 2 | 3.69 s / 72.3 m | **0.84 s** / 65.7 m |
+| 5 | 15.75 s / 73.0 m | **31.12 s** / 66.2 m |
+| 11 | 6.73 s / 69.4 m | **1.72 s** / 63.6 m |
+| 18 | 5.18 s / 66.5 m | **0.96 s** / 60.4 m |
+
+Control — diagonal ordering with the pit still **pinned**, which reproduces the
+previous author's reverted experiment on this machine:
+
+| seed | reverted experiment (their number) | mine |
+|---|---|---|
+| 20260728 | 9.87 s | 9.65 s |
+| 5 | 31.64 s | 32.48 s |
+
+**Attribution:** seed 5's ~31 s appears with the pit pinned *and* free, so it is
+caused by **diagonal ordering**, not by freeing the landing. And the canonical
+seed goes 3.50 -> 9.65 s under diagonal-alone but 3.50 -> **0.60 s** under
+diagonal+free: the two changes are not the sum of their parts, and free landings
+*rescue* what diagonal ordering alone breaks. That is exactly the untested
+combination the reviewer predicted.
+
+**Caveat that matters.** The best-first ordering of the landing list dominates
+the result. My first attempt ranked landings by `|straight_line - 60|`; the chute
+wraps the tower so a route is ~3x the straight line (the pinned pit is 23.11 m
+out and yields 66-73 m of ride). With that wrong target, **4 of 5 seeds failed to
+solve at all** — canonical's best offer was 89.67 m against the 75 m cap.
+Retargeting to `|3 * straight_line - 60|` produced the table above. So "free
+landings" is not one experiment, it is a family of them, and the ordering
+heuristic is the variable.
+
+Experiment shape (reconstruct from here; **not committed**):
+- `generate.ts`: anti-diagonal pairing, `for d in 0..S+E-2, for i in ...` .
+- `plan.ts`: `freeLandingPoses()` — 4 m grid over `GARDEN_PLAY_RADIUS`, keep
+  centres where `openGround` holds at the centre and 8 rim points at
+  `BALL_PIT_RADIUS`, 4 headings each facing the middle, filtered by
+  `approachIsClear`, sorted by `|3 * ride - DESIRED_LENGTH|`.
+
+Posted to #229.
 
 ## Standards used
 
