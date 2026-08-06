@@ -134,6 +134,37 @@ const BOB_DROP = 0.12;
 const PRESSING_POSE_THRESHOLD = 0.15;
 
 /**
+ * **A bonk shoves you down into the cart**, and this is how much of
+ * {@link DUCK_DROP} it is worth at a given {@link Rider.wobble}.
+ *
+ * Jim, riding it on 5 August 2026: *"their head just passes through the
+ * bonkers like a ghost which looks very bad"*. He is right, and the reason is
+ * that a duck bar has no collider of any kind — a bonk is decided by button
+ * state at the crossing (`hazards.ts`'s header says so outright), and nothing
+ * anywhere compared the bar's height to a head's. Measured on the canonical
+ * seed: the bar hangs at y=16.27 on the player's lane and a standing crown
+ * reaches y≈16.97, so **0.70 m of child was inside the bar** with nothing
+ * reacting.
+ *
+ * Rather than grow a collider for a hazard that is deliberately decided by
+ * input, the answer is to make the response *physical*: the bar knocks her
+ * down into the seat, exactly as far as ducking would have. That is the one
+ * drop already measured to clear a bar (`hazards.ts`'s `DUCK_CLEARANCE`: a
+ * ducked crown sits 4.70 m over the rail against the bar's 5.25 m), so it
+ * needs no second number of its own, and the bar sweeps over her instead of
+ * through her. Being knocked into the same place ducking would have put you is
+ * also the joke: duck yourself, or the bar will do it for you.
+ *
+ * Full drop while the wobble is fresh, easing back up as it fades — down for
+ * about 0.7 s of {@link WOBBLE_SECONDS}' 1.3, so it reads as a shove and a
+ * recovery rather than a second, slower duck. The curve is the *only* thing
+ * timing this; there is no separate lockout to fall out of step with.
+ */
+function knockdown(wobble: number): number {
+  return Math.max(0, Math.min(1, (wobble - 0.45) / 0.3));
+}
+
+/**
  * What the race wants said on screen, for whoever is holding the DOM.
  *
  * `RailRace` lives in `World` and has no business knowing about `uiRoot`; the
@@ -834,16 +865,36 @@ export class RailRace implements GameSystem {
       // The pump/pedal bob: a quick dip on every fresh press, springing back
       // up between them (`Rider.bob`, see `simulate.ts`'s header) — the seat
       // itself moves, on top of whatever pose the arms are holding.
-      kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP;
+      // A rival's own duck, and the shove a bar gives one who forgot. Both were
+      // missing: a ducking rival tucked its arms and tipped its head but never
+      // actually went *down*, so a rival's head passed through a bar whichever
+      // way it played the moment — and a rival is the one a watching child
+      // learns the rule from. `kid.root` is a child of the cart group, which
+      // already carries the ring's scale, so this is in the same pre-scale
+      // metres `SEAT_HEIGHT` and `BOB_DROP` are.
+      const drop =
+        Math.max(cart.rider.ducking ? 1 : 0, knockdown(cart.rider.wobble)) * DUCK_DROP;
+      kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP - drop;
       if (cart.rider.finished) {
         // Arms up, cheering.
         const flap = Math.sin(elapsed * 11) * 0.3;
         limbs.rightArm.rotation.x = -2.5 + flap;
         limbs.leftArm.rotation.x = -2.5 - flap;
+      } else if (knockdown(cart.rider.wobble) > 0) {
+        // Just bonked: hands over the head, chin tucked. Reads as "ow" from
+        // the far side of the ring, which is where a child watching a rival
+        // miss a bar is standing.
+        limbs.rightArm.rotation.x = -2.2;
+        limbs.rightArm.rotation.z = -0.35;
+        limbs.leftArm.rotation.x = -2.2;
+        limbs.leftArm.rotation.z = 0.35;
+        kid.head.rotation.x = 0.7;
       } else if (cart.rider.ducking) {
         // Ducked: head down, arms tucked in.
         limbs.rightArm.rotation.x = -0.4;
+        limbs.rightArm.rotation.z = 0;
         limbs.leftArm.rotation.x = -0.4;
+        limbs.leftArm.rotation.z = 0;
         kid.head.rotation.x = 0.5;
       } else if (cart.rider.boost > PRESSING_POSE_THRESHOLD) {
         // Mashing: hands on the rail, leaning into it.
@@ -892,7 +943,16 @@ export class RailRace implements GameSystem {
     // one exists, and it is the same rule every other size in this file now
     // follows.
     const rideScale = this.activeRing.route.scale;
-    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * rideScale : 0;
+    // Whichever is lower: the duck she chose, or the one the bar just gave her.
+    // See `knockdown` — without the second of these the bar passes straight
+    // through her head and nothing about the moment reads as a collision.
+    const duckDrop =
+      Math.max(
+        this.ducking && this.phase === 'racing' ? 1 : 0,
+        knockdown(rider.wobble),
+      ) *
+      DUCK_DROP *
+      rideScale;
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     this.player.setRidePose(
       cart.position.x + wobble,
