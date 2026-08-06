@@ -191,24 +191,21 @@ export interface ParkFacts {
     readonly halfZ: number;
   };
   /**
-   * The hole cut in the facade's south wall for the ginormous slide, in
-   * **facade-local x**, alongside the half-width of the chute meant to go
-   * through it.
+   * The **top of the castle's stonework**, in world Y: the highest point of the
+   * curtain wall and the battlements standing on it.
    *
-   * Read off `SLIDE_PLAN` — which is now the one place the hole is decided, and
-   * the same value `Shell.ts` cuts the masonry with — rather than off the old
-   * hand-written constants in `building/layout.ts`, which the search that
-   * chooses the door had no say in.
+   * Measured off the built meshes' world bounding boxes, not off
+   * `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`. Only the Y component of an
+   * AABB is used, and for "how tall is the tallest stone" that component is
+   * exact — the box's x/z extent is a gross over-approximation of a hollow ring
+   * of wall and is deliberately not read.
    *
-   * Imported dynamically with everything else here: `SLIDE_PLAN` solves at
-   * module load against `PARK_SEED`, so a static import at the top of the test
-   * tree would pin every seed's door to the default park's.
+   * This replaced a `slideDoor` fact that reported where a hole in the south
+   * wall was *planned*. No such hole is ever cut (see
+   * `theGinormousSlideLeavesOverTheBattlements`), so the fact described nothing
+   * in the park and the invariant reading it could not fail.
    */
-  readonly slideDoor: {
-    readonly minX: number;
-    readonly maxX: number;
-    readonly corridorRadius: number;
-  };
+  readonly castleMasonryTopY: number;
   /**
    * The castle's four corner towers, as the solids of revolution they were
    * actually built as, in **world space**.
@@ -373,17 +370,22 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     halfZ: BUILDING_HALF_Z,
   };
 
-  const { SLIDE_PLAN } = await import('../../src/world/slide/plan.ts');
-  const slideDoor = {
-    minX: SLIDE_PLAN.facadeDoorMinX,
-    maxX: SLIDE_PLAN.facadeDoorMaxX,
-    corridorRadius: SLIDE_PLAN.facadeDoorChuteHalf,
-  };
-
   // Every world matrix must be composed before a single one is read: a headless
   // park is never rendered, so they are all still the identity otherwise, and a
   // clearance check built on them passes for free.
   scene.updateMatrixWorld(true);
+
+  // The top of the castle's stonework, read off the built meshes.
+  const { Box3 } = await import('three');
+  let castleMasonryTopY = -Infinity;
+  {
+    const box = new Box3();
+    scene.traverse((object) => {
+      if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
+      box.setFromObject(object);
+      if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
+    });
+  }
 
   const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
@@ -599,7 +601,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     pathEdges,
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
-    slideDoor,
+    castleMasonryTopY,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,
     slideLegs: world.building.slideLegs,

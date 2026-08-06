@@ -1500,74 +1500,76 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
 };
 
 /**
- * **The ginormous slide leaves the castle through the hole that was cut for
- * it.** Not through the wall beside it, and not out of thin air.
+ * **The ginormous slide leaves the castle over the top of the battlements**,
+ * with real air under it — not through the stone.
  *
- * This is the other half of #118. That bug's last point landed at facade-local
- * x 4.54 with the doorway at 7.4…11.6 — the chute finished *behind a solid wall
- * segment*, and every part in isolation looked right: the door constants were
- * sensible, the masonry cut exactly where they said, and the chute was a
- * perfectly good curve. What nothing checked was that the two were talking
- * about the same place.
+ * ### This used to claim something that was not true
  *
- * They cannot disagree by construction any more — `SLIDE_PLAN` derives the hole
- * from the solved start pose, and `Shell.ts` cuts it from that same value — but
- * "cannot disagree by construction" is exactly what was believed about the old
- * arrangement too. So it is measured: the built chute, pushed out through the
- * scene graph into world space, against the built castle's own footprint.
+ * It was called `theGinormousSlideLeavesThroughItsDoor`, and it asserted that
+ * the chute passed through a hole cut in the south curtain wall, citing
+ * `SLIDE_PLAN.facadeDoorMinX/MaxX` as the value both the plan and the masonry
+ * read. **No such hole is ever cut.** `SLIDE_PLAN`'s door numbers reach
+ * `ShellPlan.slideGap`, whose only two readers are inside `wallShapes` and
+ * `buildWindows` — and `BuildingShell` early-returns into `buildCastle` on the
+ * facade branch, which cuts the front entrance and nothing else, while the
+ * interior shell that *does* reach those builders sets `slideGap: null`. Both
+ * readers are unreachable, so the doorway existed only in the plan and in this
+ * test. Pre-existing rot, orphaned by the castle rewrite.
  *
- * It earns its keep the moment the door is allowed to move along the wall,
- * which is the next change queued behind it: a door offered too near a corner
- * cuts a hole that runs off the end of the south face, and clause 1 is what
- * says so out loud rather than leaving a notch in the castle for someone to
- * notice in a screenshot.
+ * The old clauses could not fail. One compared `SLIDE_PLAN`'s door span against
+ * `BUILDING_HALF_X` — both generator-side, and already guaranteed by
+ * `doorFitsTheWall`, which is rules against rules. The other compared the built
+ * chute against that same planned span, which is a number nothing builds from.
+ *
+ * ### What is true, measured
+ *
+ * The chute crosses the south wall plane at **y 14.84** on every one of the
+ * five seeds, and the tallest stone — the crenellations — tops out at
+ * **y 10.29**. It clears the battlements by **4.55 m**. So the honest guarantee
+ * is not "it goes through the hole" but "it goes over the top, and there is air
+ * under it", and that is what is asserted here.
+ *
+ * That is a guarantee worth holding: it is what keeps a child from riding down
+ * inside a wall. It fails the moment anyone lowers `START_Y`, raises
+ * `CASTLE_WALL_HEIGHT`, or gives the merlons another metre — none of which is
+ * far-fetched, and all of which currently pass unnoticed.
+ *
+ * Measured off the built chute pushed out through the scene graph into world
+ * space, against the built masonry's own world bounding boxes — never against
+ * `slide/plan.ts` or `CASTLE_WALL_HEIGHT`, which are the things under test.
  */
-const theGinormousSlideLeavesThroughItsDoor: Invariant = (facts) => {
+const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   const complaints: string[] = [];
   const castle = facts.castleFootprint;
-  const door = facts.slideDoor;
   const chute = facts.slideChute;
 
   const first = chute[0];
   const last = chute[chute.length - 1];
   if (chute.length < 2 || !first || !last) {
-    complaints.push('the ginormous slide has no chute, so it leaves through nothing');
+    complaints.push('the ginormous slide has no chute, so it leaves over nothing');
     return complaints;
   }
 
-  // --- 1. the hole is in the south wall, not off the end of it --------------
+  // --- 1. the chute starts over the castle, not in mid-air beyond it --------
   //
-  // Measured against the castle that was built rather than against
-  // `BUILDING_HALF_X`, so a facade that changes size takes its doorway with it.
-  if (door.minX < -castle.halfX || door.maxX > castle.halfX) {
-    complaints.push(
-      `the slide's doorway spans facade-local x ${door.minX.toFixed(2)}…${door.maxX.toFixed(2)} ` +
-        `but the south wall only runs ${(-castle.halfX).toFixed(2)}…${castle.halfX.toFixed(2)} ` +
-        '— the hole runs off the end of the wall, leaving a notch in the corner',
-    );
-  }
-
-  // --- 2. the chute starts inside the masonry -------------------------------
-  //
-  // The chute's first point is carried back through the doorway on purpose, so
-  // it emerges from the hole rather than beginning in mid-air a couple of
-  // metres off the wall. The castle's south face is +Z.
+  // In plan view. The mouth is carried back over the footprint on purpose, so
+  // the ride begins on the tower rather than floating off the south face. The
+  // castle's south face is +Z.
   const wallZ = castle.z + castle.halfZ;
   if (first[2] > wallZ) {
     complaints.push(
-      `the ginormous slide's mouth starts ${(first[2] - wallZ).toFixed(2)} m outside the ` +
+      `the ginormous slide's mouth starts ${(first[2] - wallZ).toFixed(2)} m beyond the ` +
         `castle's south wall (chute z ${first[2].toFixed(2)}, wall z ${wallZ.toFixed(2)}) ` +
-        '— it should start inside the doorway, so the chute comes out of the hole',
+        '— it should start back over the castle, so the ride begins on the tower',
     );
   }
 
-  // --- 3. where it crosses the wall, it is inside the hole ------------------
+  // --- 2. it does cross the south side, so there is something to measure ----
   //
-  // The clause that would have caught #118. Interpolates across the span that
-  // straddles the wall plane rather than taking the nearest sample: at 0.4 m
-  // spacing the nearest sample can sit a third of a metre to either side, which
-  // is half the shoulder being measured.
-  let crossX: number | null = null;
+  // Interpolates across the span that straddles the wall plane rather than
+  // taking the nearest sample: at 0.4 m spacing the nearest sample can sit a
+  // third of a metre to either side, which is most of the clearance measured.
+  let crossing: { x: number; y: number } | null = null;
   for (let i = 1; i < chute.length; i += 1) {
     const before = chute[i - 1];
     const here = chute[i];
@@ -1579,30 +1581,37 @@ const theGinormousSlideLeavesThroughItsDoor: Invariant = (facts) => {
     // against every threshold — which would make this clause incapable of
     // failing while still looking like a test.
     const t = Math.abs(span) < 1e-9 ? 0 : (wallZ - before[2]) / span;
-    crossX = before[0] + (here[0] - before[0]) * t;
+    crossing = {
+      x: before[0] + (here[0] - before[0]) * t,
+      y: before[1] + (here[1] - before[1]) * t,
+    };
     break;
   }
 
-  if (crossX === null) {
+  if (crossing === null) {
     complaints.push(
       `the ginormous slide never crosses its own south wall (wall z ${wallZ.toFixed(2)}, ` +
-        `chute runs z ${first[2].toFixed(2)}…${last[2].toFixed(2)}) — the chute does not ` +
-        'pass through the doorway at all',
+        `chute runs z ${first[2].toFixed(2)}…${last[2].toFixed(2)}) — it does not leave ` +
+        'the castle on the side it is built to leave on',
     );
-  } else {
-    const localX = crossX - castle.x;
-    const worst = Math.max(
-      door.minX - (localX - door.corridorRadius),
-      localX + door.corridorRadius - door.maxX,
+    return complaints;
+  }
+
+  // --- 3. and where it crosses, the stone is below it -----------------------
+  //
+  // The clause that carries the weight. The underside of the chute — its centre
+  // line less the half-envelope a rider sits in — must be above the highest
+  // masonry, or the ride passes through the battlements.
+  const underside = crossing.y - CHUTE_HALF_WIDTH;
+  const stone = facts.castleMasonryTopY;
+  if (underside < stone) {
+    complaints.push(
+      `the ginormous slide crosses the castle's south wall at world ` +
+        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}) — its underside is at ` +
+        `${underside.toFixed(2)} m and the stonework tops out at ${stone.toFixed(2)} m, so ` +
+        `the chute is ${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
+        'cuts a hole for it: `slideGap` reaches no geometry, so there is solid stone here',
     );
-    if (worst > 0) {
-      complaints.push(
-        `the ginormous slide passes through the castle's south wall at facade-local x ` +
-          `${localX.toFixed(2)} and is ${door.corridorRadius.toFixed(2)} m to each side, so ` +
-          `it overhangs the doorway (${door.minX.toFixed(2)}…${door.maxX.toFixed(2)}) by ` +
-          `${worst.toFixed(2)} m — that edge of the chute is buried in solid masonry`,
-      );
-    }
   }
 
   return complaints;
@@ -1969,8 +1978,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theGinormousSlideStandsOnSomething,
   ],
   [
-    'the ginormous slide leaves the castle through the hole cut for it',
-    theGinormousSlideLeavesThroughItsDoor,
+    'the ginormous slide leaves the castle over the top of the battlements',
+    theGinormousSlideLeavesOverTheBattlements,
   ],
   [
     'the ginormous slide does not clip the castle towers',

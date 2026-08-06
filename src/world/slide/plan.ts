@@ -930,23 +930,41 @@ export interface PlannedSlide {
   readonly startY: number;
   readonly endY: number;
   /**
-   * The hole cut in the facade's top storey, in facade-local x.
+   * Where the chute crosses the facade's south wall plane, in facade-local x,
+   * as a span the width of the chute.
    *
    * **Measured off the solved route, not off the offered poses.** The search
    * already chose which door position it left by; this reads that answer back
-   * out of where the chute actually starts, so the masonry cannot disagree with
-   * the ride. Previously the search made this choice and `building/layout.ts`
-   * ignored it, cutting the hole at a fixed spot whatever the route did.
+   * out of where the chute actually starts.
+   *
+   * ### It cuts nothing. Read this before trusting it
+   *
+   * The name is a leftover and so is the intent. These feed
+   * `ShellPlan.slideGap`, whose only two readers live in `wallShapes` and
+   * `buildWindows` — and neither is reachable: `BuildingShell` early-returns
+   * into `buildCastle` for the facade, which cuts the front entrance only,
+   * while the interior shell that *does* reach those builders passes
+   * `slideGap: null`. The castle rewrite orphaned both.
+   *
+   * **And no hole is wanted.** Measured on all five seeds: the chute crosses
+   * this plane at y 14.84, and the castle's tallest stone — the crenellations —
+   * tops out at y 10.29. The slide leaves 4.55 m *above* the battlements, so a
+   * gap cut in the curtain wall would be a notch in masonry the ride passes
+   * clean over. `theGinormousSlideLeavesOverTheBattlements` in
+   * `test/procgen/invariants.ts` is what holds that 4.55 m open.
+   *
+   * So these stay as a diagnostic — `measure:slide-fingerprint` prints them, and
+   * they are a fair record of where the ride leaves — and nothing should start
+   * treating them as a description of the building.
    */
   readonly facadeDoorMinX: number;
   readonly facadeDoorMaxX: number;
   /**
-   * The chute's own half-width **measured along the wall** at the crossing.
+   * The chute's own half-width **measured along the wall** at that crossing.
    *
    * Wider than `CORRIDOR_RADIUS` whenever the chute leaves at an angle, because
-   * the hole is then a slanted slice through the masonry. Exported so a
-   * clearance check asks the same question the cut answered rather than
-   * re-deriving it from a right angle that is not there.
+   * the slice through the wall plane is then a slanted one. Diagnostic only,
+   * for the same reason as the two fields above.
    */
   readonly facadeDoorChuteHalf: number;
   /** The gap in the interior roof parapet you walk out through, interior-local. */

@@ -104,7 +104,19 @@ interface ShellPlan {
   readonly doorMinX: number;
   readonly doorMaxX: number;
   readonly holes: boolean;
-  /** Where the ginormous slide leaves the top storey, if it leaves one at all. */
+  /**
+   * Where the ginormous slide leaves the top storey, if it leaves one at all.
+   *
+   * **Dead as of the castle rewrite, and deliberately left that way.** Both
+   * readers below (`wallShapes`, `buildWindows`) are interior-only builders, and
+   * the interior always passes `null`; the facade, which is the only plan that
+   * sets a span, early-returns into `buildCastle` and never reaches either.
+   *
+   * Wiring it up would be wrong, not merely unnecessary. The slide crosses this
+   * wall plane 4.55 m *above* the crenellations on every seed, so a gap cut here
+   * would notch masonry the ride flies clean over. See
+   * `PlannedSlide.facadeDoorMinX` for the measurements.
+   */
   readonly slideGap: readonly [number, number] | null;
 }
 
