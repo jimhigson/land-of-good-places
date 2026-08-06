@@ -59,15 +59,17 @@ registries) and asserts nothing beyond 30 m of the perturbed spur moved.
 
 ## Scatter counts (expected one-off reshuffle)
 
-Canonical seed: trees 27 -> 28, bushes 108 -> 108, walls 4 -> 4.
+All five seeds, before -> after. `BUSH_BUDGET` is 1400, set so the **worst**
+seed clears the 108 every seed used to plant, not so the canonical seed
+happens to match it (1050 did that and quietly stripped seed 2 to 86).
 
 | seed | trees | bushes | walls |
 |---|---|---|---|
-| 20260728 | 28 | 108 | 4 |
-| 2 | 28 | 86 | 4 |
-| 5 | 27 | 103 | 6 |
-| 11 | 30 | 106 | 5 |
-| 18 | 26 | 102 | 6 |
+| 20260728 | 27 -> 28 | 108 -> 149 | 4 -> 4 |
+| 2 | 30 -> 28 | 108 -> 128 | 3 -> 4 |
+| 5 | 26 -> 27 | 108 -> 137 | 5 -> 6 |
+| 11 | 28 -> 30 | 108 -> 142 | 5 -> 5 |
+| 18 | 26 -> 26 | 108 -> 140 | 6 -> 6 |
 
 ## IT DOES NOT FREE THE RAIL RACE BOOTH — read this before building on it
 
@@ -99,6 +101,57 @@ needs no RNG work at all. Whoever picks up #216/#117 should start at the
 waypoint at (20.9, 20.2) inside the ferris wheel's plot, and at
 `stallPlacement.ts`'s `ferrisKiosk`, which places that stand by relation to the
 wheel rather than through the solver.
+
+## #216: how far the band change actually gets (measured on its own branch)
+
+Measured on `feat/railrace-ring-boundary` itself, not on main. Baseline there:
+`check:park` clean, `railRaceStallStandsAtTheRim` red.
+
+The invariant is **relational**: the stall must be the *closest plot of all* to
+the built ring. It sits 43.1 m out while `waterFight` is 34.0 m, so it needs to
+come ~9 m closer — a change of **bearing**, not just radius. Bearing 20 (where
+it is pinned) never beats 34.0 m at any legal radius.
+
+Hard ceiling nobody had noted: `PLOT_EXTENT_LIMIT` 52 minus the stall's 3.4 m
+bounding radius caps it at **r = 48.6**, whatever the band says.
+
+Exhaustive enumeration of every position that satisfies the rim test and is
+legal: **372 spots**, in three clusters (bearings 4-12, 103-104, 266-288).
+What blocks the rest: gate corridor 3050, waterFight 2792, building 2337,
+dodgems 1929, ferrisWheel 1373, ballPit 187.
+
+Best combination found — band 42 -> 49, pin `[44.1660, 6.2071]` (bearing 8,
+r = 44.6), **plus** a fix to `ferrisKiosk()` pushing its stand outside the
+wheel's own bounding circle:
+
+- `railRaceStallStandsAtTheRim` **green** on the canonical seed (19/19)
+- the stranded waypoint (20.9, 20.2) **gone** — the ferris fix clears it
+- `rail.walkable` back within its recorded 30
+- residual: **`rail.exclusion` 22 vs recorded 21** — 1 m of a 362 m loop.
+  Identical at bearings 8, 9, 11 and 12, so it is not positional.
+
+**And the blocker that kills the whole approach: a fixed pin cannot satisfy a
+relational invariant across seeds.** The full sweep fails on **2 of 5 seeds**
+(seed 18: stall 40.7 m, but `ferrisWheel` 33.3 m). The ring and the rival plots
+move per seed while the pin does not.
+
+So #216 cannot be closed by a band change. What it actually needs is for the
+stall to be **placed by relation to the ring** (solver-side, like
+`ferrisKiosk`'s relation to the wheel) rather than pinned — then it is the
+closest plot on every seed by construction. Two further things fall out of the
+work regardless, both worth doing on their own:
+
+1. `ferrisKiosk()` returns a stand **2.3 m inside the ferris wheel's own
+   bounding radius** (`stallPlacement.ts`: 5 m tangentially from an entrance
+   that is itself inset). That is the latent cause of the (20.9, 20.2)
+   stranding, and pushing it clear fixes it.
+2. `railRaceStallStandsAtTheRim` and `rail.exclusion` are in mild tension: the
+   booth can only be closest to the ring by standing near the railway, which
+   interrupts its flanking walls.
+
+Nothing was pushed to `feat/railrace-ring-boundary` — it is not green, and the
+1 m `rail.exclusion` overrun would have meant re-recording a guard, which is
+not mine to do.
 
 ## What this PR is still worth
 
