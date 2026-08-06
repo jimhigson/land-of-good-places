@@ -127,9 +127,21 @@ const pathLabels = PATH_GRAPH.edges
   )
   .sort();
 
+/**
+ * The ribbon of the spur being perturbed, so a reader of this output can ask
+ * "how far from the change did this object sit?" — the question the whole
+ * decoupling check turns on. Emitted from both parks, and the test measures
+ * against the union: ground counts as "near the change" if either park paved
+ * it.
+ */
+const stretchedSpurName = `spur-${process.env['LGP_SPUR_STRETCH_ID'] ?? 'stall.railRacer'}`;
+const stretchedSpur =
+  PATH_GRAPH.edges.find((edge) => edge.route.name === stretchedSpurName)?.route.points ?? [];
+
 const summary = {
   seed: PARK_SEED,
   paths: { metres: Number(pathMetres.toFixed(3)), digest: digestOf(pathLabels) },
+  spur: { name: stretchedSpurName, points: stretchedSpur },
   spurStretch: Number(process.env['LGP_SPUR_STRETCH'] ?? 0),
   spurStretchId: process.env['LGP_SPUR_STRETCH_ID'] ?? 'stall.railRacer',
   buildMs: Math.round(buildMs),

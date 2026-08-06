@@ -232,6 +232,41 @@ const entrancesAreUsable: Invariant = (facts) => {
   return blocked;
 };
 
+/**
+ * No bush clump stands on the paving, or inside a plot.
+ *
+ * A bush is a solid collider a child has to walk round, so one sitting on a
+ * path narrows it, and one inside a booth's plot is furniture in a room it does
+ * not belong to. Held to the clump's **own collider radius** — the thing that
+ * actually gets in the way — against the paved *surface*, not the centre line,
+ * so the number comes from the built park rather than from the generator's
+ * `isPlantable` clearance. Re-deriving that clearance here would only prove the
+ * scatter agrees with itself.
+ *
+ * There was no bush invariant before this one, and nothing to write it against:
+ * bushes had no observable output at all until {@link BushFact}. That is the
+ * gap that let a fill-to-108 loop quietly re-roll every clump in the park each
+ * time a path moved — see `Scenery.ts`'s `BUSH_BUDGET`.
+ */
+const bushesStandOnOpenGround: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const bush of facts.bushes) {
+    const where = `bush at (${bush.x.toFixed(1)}, ${bush.z.toFixed(1)})`;
+    const paving = distanceToOtherPaving(facts, '', [bush.x, bush.z]);
+    if (paving < bush.radius) {
+      fouls.push(
+        `${where} overlaps the paving by ${(bush.radius - paving).toFixed(2)} m ` +
+          `— a child walking the path has to go round it`,
+      );
+    }
+    for (const plot of facts.plots) {
+      const gap = Math.hypot(bush.x - plot.x, bush.z - plot.z) - plot.boundingRadius - bush.radius;
+      if (gap < 0) fouls.push(`${where} stands ${(-gap).toFixed(2)} m inside ${plot.id}'s plot`);
+    }
+  }
+  return fouls;
+};
+
 /** No two trees grow through each other. */
 const treesDoNotInterpenetrate: Invariant = (facts) => {
   const overlaps: string[] = [];
@@ -1335,6 +1370,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two plots overlap', plotsDoNotOverlap],
   ['every entrance has standable ground', entrancesAreUsable],
   ['no two trees interpenetrate', treesDoNotInterpenetrate],
+  ['no bush stands on the paving or inside a plot', bushesStandOnOpenGround],
   ['no tree grows into a wall', treesKeepOffWalls],
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
@@ -1401,6 +1437,15 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // An anti-vacuity guard, not a placement threshold — the "thresholds come
       // from the game" rule above is about the latter.
       expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(24);
+      // Bushes get a floor for the same reason, and they need one more than
+      // they used to. The clump count was pinned at exactly 108 by a
+      // fill-until-N loop; it is now whatever a fixed budget of candidates
+      // passes, which is the price of the scatter being local (see
+      // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
+      // now happen quietly, so it gets a guard. Measured across the five CI
+      // seeds at 108 / 86 / 103 / 106 / 102; 60 sits well under the lowest
+      // while still catching a scatter that has collapsed.
+      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(60);
       expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
       expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
       expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
