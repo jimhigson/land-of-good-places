@@ -19,7 +19,7 @@ import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegm
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
-import type { HazardSchedule, RaceLevel } from './hazards';
+import type { RaceLevel } from './hazards';
 import {
   HAZARD_LAYOUT,
   RACE_LAPS,
@@ -502,30 +502,10 @@ export class RailRace implements GameSystem {
    * the countdown — the tail end of what `requestBoard` used to do in one go
    * before there was a choice to make first.
    */
-  /**
-   * **The schedule a race is actually scored against**, built from where the
-   * race ring's duck bars really stand rather than where `planHazards` asked
-   * for them — see `RailRaceTrack.barDistances` for the 2 m drift that made
-   * this necessary.
-   *
-   * Always the *race* ring, never `activeRing`: a race only ever happens on
-   * one of the two, and reading the ring she is standing beside would be a
-   * quietly different answer between races.
-   *
-   * Public because `test/procgen/invariants.ts` measures the duck bars in the
-   * built scene against exactly this, and the check is only worth anything if
-   * it is the **same line** the race itself runs. Take the argument away here
-   * and the invariant goes red, which is the entire point of it being one
-   * method rather than two call sites that agree today.
-   */
-  raceSchedule(level: RaceLevel): HazardSchedule {
-    return scheduleForLevel(level, this.raceRing.track.barDistances);
-  }
-
   chooseLevel(level: RaceLevel): boolean {
     if (this.phase !== 'levelSelect') return false;
     this.activeLevel = level;
-    this.activeSchedule = this.raceSchedule(level);
+    this.activeSchedule = scheduleForLevel(level);
     for (const ring of [this.walkPastRing, this.raceRing]) ring.track.setHazardLevel(level);
     this.onRaceMoment?.({ kind: 'levelSelect', shown: false });
     // Fired here, not in the countdown branch of `update()`: this is the one

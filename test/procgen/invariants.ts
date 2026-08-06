@@ -1273,6 +1273,81 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
 };
 
 /**
+ * **A duck bar slows you down where it stands, not a cart's length later.**
+ *
+ * Jim, riding it on 5 August 2026: *"their head just passes through the bonkers
+ * like a ghost... and then they slow down only after passing through it."*
+ *
+ * The cause was two positions for one bar. The geometry renders over the bar's
+ * supporting trestle, which `trestleSpots` may nudge along the loop to find
+ * clear ground; `simulate.ts` bonked at the *unnudged* distance the bar was
+ * planned for, and nothing reconciled them. `track.ts`'s own comment argued an
+ * arc nudge "costs nothing" because bar and leg move together — true of
+ * bar-versus-leg, and silent about bar-versus-physics. On the canonical seed
+ * every one of the seven bars carried a −2.00 m nudge.
+ *
+ * Both halves are asserted, because either alone would have passed while the
+ * bug was live:
+ *
+ * 1. **Where.** The bonk fires within one frame's travel of the bar's own
+ *    instance matrix. A tolerance in metres would have to be re-picked every
+ *    time the physics got faster; one frame of *her actual speed at that bar*
+ *    is the finest a 60 Hz game can do, so it is the honest bound.
+ * 2. **That she is actually slowed by then.** A crossing list that agreed with
+ *    the geometry but no longer cost anything would sail through (1). This
+ *    measures the speed either side of the frame she reaches the bar in, off
+ *    the same `stepRider` the browser runs.
+ *
+ * Fixed by drawing the bar at `bar.at` — the number it is scored at — instead
+ * of at its trestle's nudged one, so the two are the same by construction and
+ * not by two systems agreeing to keep in step. `ParkFacts.duckBars` does the
+ * measuring; see `DuckBarFact` for why it is gathered there and not here, and
+ * in particular for why the two sides of the comparison have to come from
+ * different places.
+ */
+const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const bars = facts.duckBars;
+
+  if (bars.length === 0) {
+    return ['the race ring has no duck bars in the built scene to measure'];
+  }
+
+  for (const bar of bars) {
+    if (bar.bonkAt === null) {
+      complaints.push(
+        `the duck bar at ${bar.builtAt.toFixed(2)} m from the arch never bonks anybody — it is ` +
+          `standing over the track as decoration`,
+      );
+      continue;
+    }
+    // One frame's travel, at the speed she is actually doing when she gets
+    // there. Below that there is nothing a 60 Hz game could have done sooner.
+    const slack = Math.max(bar.frameTravel, 0.01);
+    const late = bar.bonkAt - bar.builtAt;
+    if (Math.abs(late) > slack) {
+      complaints.push(
+        `the duck bar at ${bar.builtAt.toFixed(2)} m from the arch bonks at ` +
+          `${bar.bonkAt.toFixed(2)} m — ${late > 0 ? 'after' : 'before'} the bar by ` +
+          `${Math.abs(late).toFixed(2)} m, and she only covers ${slack.toFixed(2)} m in a frame. ` +
+          `A bar is meant to be drawn at exactly the DuckBar.at it is scored at — see the ` +
+          `duck-bar loop in railRace/track.ts, and MANDATORY_RADIAL_NUDGES below it`,
+      );
+    }
+    if (bar.speedAt >= bar.speedBefore) {
+      complaints.push(
+        `reaching the duck bar at ${bar.builtAt.toFixed(2)} m from the arch, a rider who never ` +
+          `ducks is still doing ${bar.speedAt.toFixed(2)} m/s against ${bar.speedBefore.toFixed(2)} ` +
+          `going in — she has not been slowed by the time she is level with it, whatever happens ` +
+          `to her afterwards`,
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
  * **The rail-race stall's doormat is usable** — standable ground under it, and
  * walkable to from the park entrance on the real nav lattice.
  *
@@ -1881,6 +1956,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Rail Race exit fits the whole party that arrives on it', railRaceExitFitsTheParty],
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
+  ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
   ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
   [
     'both Rail Race rings stand outside the park, built to their own size, ' +

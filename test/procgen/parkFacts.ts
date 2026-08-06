@@ -142,9 +142,44 @@ export interface PathEdgeFact {
   readonly points: readonly (readonly [number, number])[];
 }
 
+/**
+ * One duck bar on the race ring, and **what the race actually does at it.**
+ *
+ * Measured, never re-derived, and the two sides come from genuinely different
+ * places — which is the whole point. `builtAt` is read off the bar's own
+ * instance matrix **in the built scene**; `bonkAt`/`speedBefore`/`speedAt` come
+ * from driving `stepRider` — the very function the browser calls sixty times a
+ * second — against `scheduleForLevel`, the very call `RailRace.chooseLevel`
+ * makes. Neither can be quietly satisfied by the other.
+ *
+ * It exists because the two used to disagree and nothing noticed. A bar renders
+ * over its supporting trestle, which may have been nudged along the loop to
+ * find clear ground; the physics bonked at the *unnudged* position it was
+ * planned for. On the canonical seed that was 2.00 m on every bar, and Jim,
+ * riding it: *"they slow down only after passing through it"*.
+ */
+export interface DuckBarFact {
+  /** Metres from the arch, off the bar's own instance matrix. */
+  readonly builtAt: number;
+  /** Metres from the arch where the bonk actually fires, or null if it never does. */
+  readonly bonkAt: number | null;
+  /** Her speed entering the frame in which she first reaches `builtAt`. */
+  readonly speedBefore: number;
+  /** ...and leaving it. Equal to `speedBefore` means nothing happened at the bar. */
+  readonly speedAt: number;
+  /** How far she travels during that frame — the finest resolution available. */
+  readonly frameTravel: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /**
+   * Every duck bar on the race ring, with what the race does at it — see
+   * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
+   * schedules bars, and none in the built scene would itself be a bug.
+   */
+  readonly duckBars: readonly DuckBarFact[];
   /**
    * The Sky Cruiser's pass through the castle (#113), measured by the *same*
    * functions the boot assert and `check:castle-window` use.
@@ -457,7 +492,100 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     ],
   };
 
+  // --- what the race really does at each duck bar --------------------------
+  //
+  // Dynamically imported like everything else seed-dependent here: `simulate.ts`
+  // pulls in `railRace/plan.ts` at module scope, which reads the stall's own
+  // placement out of `parkManifest.ts`, so a static import at the top of this
+  // file would race this seed's rider against the default seed's ring.
+  const { InstancedMesh: Instanced, Matrix4, Vector3: Vec3 } = await import('three');
+  const { createRider, scheduleForLevel, stepRider } = await import(
+    '../../src/world/railRace/simulate.ts'
+  );
+  const { BARS_FROM_LEVEL } = await import('../../src/world/railRace/hazards.ts');
+  const { NOMINAL_RADIUS, PLAYER_LANE: PLAYER } = await import(
+    '../../src/world/railRace/route.ts'
+  );
+
+  const raceRoute = world.railRace.raceRoute;
+  const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
+  const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
+  const builtBarDistances: number[] = [];
+  if (barsMesh instanceof Instanced) {
+    const matrix = new Matrix4();
+    const at = new Vec3();
+    const seen = new Set<string>();
+    for (let i = 0; i < barsMesh.count; i += 1) {
+      barsMesh.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      // `angleAt(s) = -s / NOMINAL_RADIUS` (railRace/route.ts) inverts exactly,
+      // so this is the bar's real arc position, read off its own matrix rather
+      // than off the rule that placed it. All four lanes of one bar share it,
+      // hence the dedupe.
+      const arch = raceRoute.wrap(
+        raceRoute.wrap(-Math.atan2(at.z, at.x) * NOMINAL_RADIUS) - raceRoute.startDistance,
+      );
+      const key = arch.toFixed(2);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      builtBarDistances.push(arch);
+    }
+    builtBarDistances.sort((a, b) => a - b);
+  }
+
+  const duckBars: DuckBarFact[] = [];
+  if (builtBarDistances.length > 0) {
+    // A rider who mashes flat out and never ducks: the one who meets every bar.
+    // `scheduleForLevel` is the very call `RailRace.chooseLevel` makes, so this
+    // races the schedule the game races, not a second opinion about it.
+    const schedule = scheduleForLevel(BARS_FROM_LEVEL);
+    const rider = createRider(PLAYER);
+    const dt = 1 / 60;
+    const pending = new Map(
+      builtBarDistances.map((builtAt) => [builtAt, { builtAt } as { builtAt: number } & Partial<DuckBarFact>]),
+    );
+    const bonks: number[] = [];
+    let steps = 0;
+    while (rider.travelled < raceRoute.length && steps < 60 * 400) {
+      const before = rider.travelled;
+      const speedBefore = rider.speed;
+      const events = stepRider(raceRoute, rider, schedule, { pressed: true, ducking: false }, dt);
+      if (events.bonked) bonks.push(rider.travelled);
+      for (const [builtAt, row] of pending) {
+        if (before <= builtAt && rider.travelled >= builtAt && row.speedAt === undefined) {
+          Object.assign(row, {
+            speedBefore,
+            speedAt: rider.speed,
+            frameTravel: rider.travelled - before,
+          });
+        }
+      }
+      steps += 1;
+    }
+    for (const builtAt of builtBarDistances) {
+      const row = pending.get(builtAt);
+      // The bonk nearest this bar, whichever side of it it landed.
+      let bonkAt: number | null = null;
+      let nearest = Infinity;
+      for (const bonk of bonks) {
+        const d = Math.abs(bonk - builtAt);
+        if (d < nearest) {
+          nearest = d;
+          bonkAt = bonk;
+        }
+      }
+      duckBars.push({
+        builtAt,
+        bonkAt,
+        speedBefore: row?.speedBefore ?? 0,
+        speedAt: row?.speedAt ?? 0,
+        frameTravel: row?.frameTravel ?? 0,
+      });
+    }
+  }
+
   return {
+    duckBars,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     seed,
