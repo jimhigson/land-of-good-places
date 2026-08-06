@@ -4,6 +4,56 @@ Branch `tree-wave-tweak`, pushed to **`feat/climb-wave-and-npc-climb`** (PR #215
 Worktree `.claude/worktrees/tree-wave-tweak`. **Do not touch
 `.claude/worktrees/climb-wave`** — that is the Overseer's, serving the game to Jim.
 
+## Fifth ask, 6 August: "make them lower by about 30% of their height"
+
+**`CLIMB_PEEK_LIFT` 1.2 → 0.564**, written as `1.2 - 0.3 * KID_HEIGHT` so
+resizing the character carries the seat with it.
+
+**The reading was checked, not assumed**, because the two candidates differ by
+1.1 m. A *child's* height (2.12 m) gives a 0.636 m drop. The *tree's* height —
+the 43 climbable ones stand 4.69–6.79 m above their own ground, mean 5.79 —
+would have dropped her **1.74 m**, i.e. a lift of −0.54 m, putting her head half
+a metre *under* the canopy top and burying the child, the wave and the face he
+had just asked to see. Child's height it is; the context (he had just started
+seeing her body) agrees.
+
+Effect against `canopyTopY`: head **+1.20 → +0.56 m**, feet **−0.16 → −0.80 m**.
+She now has ~0.8 m of herself down in the leaves instead of standing clear.
+
+### The risk, and the answer: the wave survives
+
+This reverses the change the PR was opened for — the 1 m lift existed so her
+wave would clear the canopy. **Measured, not assumed: the hand is still 100%
+un-occluded on all 43 climbable trees, still 18 px at play scale.**
+
+It never needed the whole lift. Her hand tops out 0.303 m below her head, so
+anything above **~0.31 m** keeps it clear of `canopyTopY`; 0.564 leaves 0.25 m
+of room. Below ~0.31 the geometry puts it back in the leaves and
+`check:climb-wave` is what will say so.
+
+### What it did cost, and the one threshold I loosened
+
+The body guard read **60 px → 20 px**, so `REQUIRED_BODY_PIXELS` went **40 →
+12**. That is a loosening and it is documented as one: 40 was calibrated against
+a seat Jim has now deliberately lowered, and burying more of her is the point of
+the change.
+
+The measurement turned out **bimodal by approach, not by tree** — every tree
+within 3 px of every other at the same bearing, so it is a property of the pose
+and the camera:
+
+| approach | body pixels |
+|---|---|
+| 0° / 90° | 51–57 |
+| 180° / 270° | 20–23 |
+| any, `--hide-body` | **0** |
+
+12 sits 40% below the worst real reading and far above the zero it exists to
+catch. Re-proved red at the new threshold: 0 px, exit 1.
+
+**Nothing else changed** — not the tree predicate, canopy, gaze, or the −40.1°
+neck.
+
 ## Fourth ask, 6 August: "why do they no longer have a body?"
 
 **The lesson of the whole PR, and it is worth reading before touching anything
