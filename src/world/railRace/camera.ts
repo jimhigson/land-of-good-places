@@ -300,6 +300,15 @@ const UP = new Vector3(0, 1, 0);
  * three-quarter view rather than a mugshot, and she still plainly races
  * forwards.
  *
+ * **And only while she is sad.** Jim, 6 August 2026: *"they need turn their
+ * head to the camera only on sad expression, not all the time"* — which is the
+ * better feature, because the turn exists to make a bonk *readable* and turning
+ * permanently spends that readability on every ordinary moment of the race. She
+ * looks round at you **because** she is sad about it, and the rest of the time
+ * she watches where she is going. `sadness` is `RailRace`'s own eased
+ * `Cart.sad`, driven by `riderIsSad` and by nothing else, so the frown and the
+ * turn are one feature and cannot disagree about whether it is happening.
+ *
  * **50 and not more, because on a phone the two pull against each other.** She
  * is framed hard left in portrait (`RIDER_SCREEN_X_PORTRAIT`, a documented
  * floor), and turning her swings an eye — 0.6 m off the skull's centre, 1.5 m
@@ -362,13 +371,22 @@ const NO_TURN: FaceTurn = { body: 0, head: 0 };
  * Pure, and exported, so `scripts/check-rail-race.mts` can pose a real kid with
  * the very function the ride poses her with and then measure whether her eyes
  * are actually visible — rather than re-deriving the turn and proving only that
- * arithmetic agrees with itself.
+ * arithmetic agrees with itself. That check now runs it **both ways**: a check
+ * that only ever passed `sadness = 1` would go green while she stood turned
+ * towards the camera for the whole race, which is the bug Jim reported in the
+ * first place, inverted.
  */
-export function faceTurnTowardsCamera(cartYaw: number, at: Vector3, cameraAt: Vector3): FaceTurn {
+export function faceTurnTowardsCamera(
+  cartYaw: number,
+  at: Vector3,
+  cameraAt: Vector3,
+  sadness: number,
+): FaceTurn {
   const dx = cameraAt.x - at.x;
   const dz = cameraAt.z - at.z;
-  if (dx === 0 && dz === 0) return NO_TURN;
-  const turn = clamp(angleDelta(cartYaw, Math.atan2(dx, dz)), -FACE_TURN_MAX, FACE_TURN_MAX);
+  if (sadness <= 0 || (dx === 0 && dz === 0)) return NO_TURN;
+  const full = clamp(angleDelta(cartYaw, Math.atan2(dx, dz)), -FACE_TURN_MAX, FACE_TURN_MAX);
+  const turn = full * clamp(sadness, 0, 1);
   const head = turn * FACE_TURN_HEAD_SHARE;
   return { body: turn - head, head };
 }

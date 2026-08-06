@@ -836,7 +836,7 @@ interface FaceView {
   readonly turn: number;
 }
 
-function faceView(width: number, height: number): FaceView {
+function faceView(width: number, height: number, sadness: number): FaceView {
   rig.resize(width, height);
   const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
   const root = new Group();
@@ -863,7 +863,7 @@ function faceView(width: number, height: number): FaceView {
 
     // Exactly `RailRace.poseRider`'s pose: the cart's yaw plus the body's share
     // of the turn on the root, the head's share on the head.
-    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position);
+    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position, sadness);
     turn = facing.body + facing.head;
     root.position.set(point.x, point.y + SEAT_HEIGHT * route.scale, point.z);
     root.rotation.y = cartYaw + facing.body;
@@ -889,9 +889,10 @@ function faceView(width: number, height: number): FaceView {
 }
 
 for (const shape of POSES) {
-  const view = faceView(shape.w, shape.h);
+  // --- sad: she looks round at you, and the frown is worth having ------------
+  const view = faceView(shape.w, shape.h, 1);
   say(
-    `face ${shape.name.padEnd(9)} turned ${((view.turn * 180) / Math.PI).toFixed(1)}°   ` +
+    `face ${shape.name.padEnd(9)} sad: turned ${((view.turn * 180) / Math.PI).toFixed(1)}°   ` +
       `worst eye facing ${view.worstFacing.toFixed(3)}   ` +
       `on screen by ${view.worstOnScreen.toFixed(3)}   ` +
       `eyes ${view.eyeSpread.toFixed(3)} apart across the picture`,
@@ -918,6 +919,32 @@ for (const shape of POSES) {
     view.eyeSpread > 0.01,
     `in a ${shape.name} window the rider's two eyes land ${view.eyeSpread.toFixed(4)} apart ` +
       'across the picture — they are stacked, which is what a face in profile looks like.',
+  );
+
+  // --- and NOT sad: she watches where she is going ---------------------------
+  //
+  // The other half, and it is not optional. Jim asked for the turn *"only on
+  // sad expression, not all the time"*, and a check that only ever exercised
+  // the sad case would sail through while she rode the entire race with her
+  // head cricked round at the camera — which is the complaint that started all
+  // this, inverted. So the happy case is asserted just as hard: no turn at all,
+  // and a face genuinely back in profile, watching the track.
+  const calm = faceView(shape.w, shape.h, 0);
+  say(
+    `face ${shape.name.padEnd(9)} calm: turned ${((calm.turn * 180) / Math.PI).toFixed(1)}°   ` +
+      `eyes ${calm.eyeSpread.toFixed(4)} apart (stacked = facing down the track)`,
+  );
+  require(
+    calm.turn === 0,
+    `in a ${shape.name} window a rider who is not sad is still turned ` +
+      `${((calm.turn * 180) / Math.PI).toFixed(1)}° towards the camera. The turn is meant to be ` +
+      'part of the frown, not the resting pose — see FACE_TURN_MAX in railRace/camera.ts.',
+  );
+  require(
+    calm.eyeSpread < 0.01,
+    `in a ${shape.name} window a rider who is not sad has her eyes ${calm.eyeSpread.toFixed(4)} ` +
+      'apart across the picture, so she is angled towards the camera rather than watching the ' +
+      'track. Only a frown should turn her.',
   );
 }
 require(

@@ -1,6 +1,6 @@
 import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { Rng } from '../../core/mathUtils';
+import { Rng, damp } from '../../core/mathUtils';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -140,6 +140,43 @@ const PRESSING_POSE_THRESHOLD = 0.15;
 /** Nobody is racing, so nobody turns — see `faceTurn`. */
 const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
 
+/**
+ * **The one owner of "this rider is having a bad time."**
+ *
+ * Both the frowning face and the turn towards the camera read *this*, and
+ * nothing else. Jim, 5 August 2026: *"they need turn their head to the camera
+ * only on sad expression, not all the time"* — so the two are now one feature
+ * (she looks round at you **because** she is sad about it) and must not be
+ * able to disagree about whether it is happening.
+ *
+ * That is not a stylistic preference here. The rule used to be written out
+ * twice — once for the player's `railRaceFrown` and once for the rivals'
+ * `setExpression` — as two copies of the same literal expression, which is
+ * exactly the shape CLAUDE.md's most-repeated warning is about: two conditions
+ * that agree today and drift the day one is edited. One function now, read by
+ * every consumer.
+ *
+ * The two moments the family asked to be readable, unchanged: mid-wobble right
+ * after a bonk, and while actively powering over a sparking black stretch. No
+ * separate lockout timer is needed for the second — `simulate.ts` only sets
+ * `sparking` while a rider is in a black zone *and* still mashing, so easing
+ * off clears it by itself, which is the lesson.
+ */
+function riderIsSad(rider: Rider): boolean {
+  return rider.sparking || rider.wobble > 0.2;
+}
+
+/**
+ * Half-life of the turn towards the camera, in seconds.
+ *
+ * She *turns* to look at you as the frown lands and turns back as it clears; a
+ * hard cut on a frame boundary reads as a glitch rather than a glance. Short
+ * enough that the turn is plainly part of the bonk it belongs to — a bonk's
+ * wobble runs 1.3 s (`WOBBLE_SECONDS`), so at this half-life she is most of the
+ * way round well inside it.
+ */
+const SAD_TURN_HALF_LIFE = 0.12;
+
 
 /**
  * **A bonk shoves you down into the cart**, and this is how much of
@@ -243,6 +280,12 @@ interface Cart {
   readonly isPlayer: boolean;
   /** The child aboard. Null for the player's cart, and in a headless park. */
   readonly kid: KidHandle | null;
+  /**
+   * How far round towards the camera this rider currently is, 0..1 — the eased
+   * form of {@link riderIsSad}, and the *only* thing that scales the turn. See
+   * {@link SAD_TURN_HALF_LIFE}.
+   */
+  sad: number;
 }
 
 /**
@@ -443,13 +486,20 @@ export class RailRace implements GameSystem {
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid });
+      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0 });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
     const group = playerCart.root;
     this.group.add(group);
-    this.carts.push({ rider: createRider(PLAYER_LANE), group, cart: playerCart, isPlayer: true, kid: null });
+    this.carts.push({
+      rider: createRider(PLAYER_LANE),
+      group,
+      cart: playerCart,
+      isPlayer: true,
+      kid: null,
+      sad: 0,
+    });
   }
 
   /** Lazily, as the train does: the headless park has no player and no DOM. */
@@ -700,7 +750,7 @@ export class RailRace implements GameSystem {
         // but for her own face, which nothing in this file otherwise touches —
         // her cart carries no `kid`, only the live `Player` model riding it.
         // Cleared in `arrive()` so it can never outlive the ride.
-        if (this.player) this.player.railRaceFrown = rider.sparking || rider.wobble > 0.2;
+        if (this.player) this.player.railRaceFrown = riderIsSad(rider);
         if (events.bonked) {
           this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
           // Only the player's own bonk gets a message — a rival's bonk has no
@@ -813,10 +863,10 @@ export class RailRace implements GameSystem {
    * turning them towards a race camera nobody is looking through would leave
    * three children riding round the park permanently facing sideways.
    */
-  private faceTurn(cartYaw: number, at: Vector3): FaceTurn {
+  private faceTurn(cartYaw: number, at: Vector3, sadness: number): FaceTurn {
     const view = this.rideView;
     if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;
-    return faceTurnTowardsCamera(cartYaw, at, view.camera.position);
+    return faceTurnTowardsCamera(cartYaw, at, view.camera.position, sadness);
   }
 
   private placeCarts(): void {
@@ -870,6 +920,13 @@ export class RailRace implements GameSystem {
     // (which resets `travelled` to 0) resets the wheels too. See `cart.ts`.
     for (const cart of this.carts) cart.cart.spinWheels(cart.rider.travelled);
 
+    // Ease every rider's turn towards the camera, the player's included — her
+    // cart carries no `kid`, so this cannot live in the loop below. One eased
+    // number per cart, driven by `riderIsSad` and nothing else.
+    for (const cart of this.carts) {
+      cart.sad = damp(cart.sad, riderIsSad(cart.rider) ? 1 : 0, SAD_TURN_HALF_LIFE, dt);
+    }
+
     for (const cart of this.carts) {
       const kid = cart.kid;
       if (!kid) continue;
@@ -892,7 +949,7 @@ export class RailRace implements GameSystem {
       // face is the one a watching child reads the rule off, so it is no more
       // use in profile than the player's is. `kid.root` is a child of the cart
       // group, so this local yaw simply adds to the cart's own.
-      const turn = this.faceTurn(cart.group.rotation.y, cart.group.position);
+      const turn = this.faceTurn(cart.group.rotation.y, cart.group.position, cart.sad);
       kid.root.rotation.y = turn.body;
       kid.head.rotation.y = turn.head;
       if (cart.rider.finished) {
@@ -937,7 +994,7 @@ export class RailRace implements GameSystem {
       // needed for the second — `simulate.ts` only sets `sparking` while a
       // rider is in a black zone *and* still mashing (`sparkGuard > 0`), so
       // easing off clears the frown by itself, which is the lesson.
-      kid.setExpression(cart.rider.sparking || cart.rider.wobble > 0.2 ? 'frown' : 'happy');
+      kid.setExpression(riderIsSad(cart.rider) ? 'frown' : 'happy');
     }
   }
 
@@ -977,7 +1034,7 @@ export class RailRace implements GameSystem {
     // Round towards the camera far enough for her face to be worth painting —
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
     // and is set below because `setRidePose` only owns the root.
-    const turn = this.faceTurn(cart.rotation.y, cart.position);
+    const turn = this.faceTurn(cart.rotation.y, cart.position, this.me.sad);
     this.player.model.head.rotation.y = turn.head;
     this.player.setRidePose(
       cart.position.x + wobble,
@@ -1000,7 +1057,10 @@ export class RailRace implements GameSystem {
       // `driveRiders` (the only place that sets it) stops running the moment
       // `phase` leaves 'racing'/'finishing'.
       this.player.railRaceFrown = false;
-      // ...and the same for the turn towards the camera (`FACE_TURN_MAX`).
+      // ...and the same for the turn towards the camera (`FACE_TURN_MAX`). The
+      // eased `Cart.sad` that scales it is zeroed on every cart below, so
+      // nobody is left standing at the station facing sideways.
+      for (const cart of this.carts) cart.sad = 0;
       // Nothing else in the game ever writes `head.rotation.y`, so nothing
       // else would ever put it back: without this she walks around the park
       // for the rest of the session with her head cricked to one side. Exactly
