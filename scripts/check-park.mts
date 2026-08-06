@@ -69,7 +69,7 @@ import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
-import { LOCO_TOP_Y } from '../src/world/train/trainModel.ts';
+import { TRAIN_CLEARANCE_Y } from '../src/world/train/clearance.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -361,11 +361,17 @@ const BRIDGE_DECK_DEPTH = 0.35;
  * nothing can be looked up" — comfortably more than the terrain wanders (~1.4 m
  * across the whole park) and assumed comfortably less than any real deck.
  *
- * That assumption was wrong, and dangerously so: {@link LOCO_TOP_Y} is **2.42
- * m**, so a deck built to satisfy the old constant would have taken the funnel
- * clean off Puffing Percy. Reading it off `trainModel.ts` means retuning the
- * loco moves this with it — the same reason `RAIL_OVER_RAIL` is derived rather
- * than declared.
+ * That assumption was wrong, and dangerously so. It was then made *less* wrong
+ * and still dangerous: deriving it from the locomotive's funnel gave 2.77, which
+ * puts a soffit at exactly the funnel tip — **zero** margin for Percy, and a
+ * standing child rider's head 0.28 m inside the deck and the player's 0.70 m
+ * inside it, because the train carries passengers and they are taller than the
+ * funnel.
+ *
+ * So it now reads `TRAIN_CLEARANCE_Y` from `train/clearance.ts`, which owns the
+ * whole derivation — loco body, standing NPC, seated player, headroom — and is
+ * the only place any of those numbers live. Retuning the loco, moving the bench
+ * or adding a taller hat all move this.
  *
  * ### The datum
  *
@@ -376,7 +382,7 @@ const BRIDGE_DECK_DEPTH = 0.35;
  * compares like with like. `RAIL_HEIGHT` is deliberately absent: it is rail
  * sitting *on* the datum, not part of it.
  */
-const BRIDGE_RISE = LOCO_TOP_Y + BRIDGE_DECK_DEPTH;
+const BRIDGE_RISE = TRAIN_CLEARANCE_Y + BRIDGE_DECK_DEPTH;
 
 /**
  * How far *past* a level crossing's own fence gap a route may still meet the

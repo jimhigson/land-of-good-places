@@ -39,13 +39,26 @@ export const CAR_FLOOR_Y = 0.58;
 export const SEAT_Y = CAR_FLOOR_Y + 0.42;
 
 /**
- * The tallest point of the whole train — the funnel tip — above the top of the
- * sleepers.
+ * The top of the **locomotive's own bodywork** — the funnel tip — above the top
+ * of the sleepers. `buildLocomotive` positions the funnel from it, so retuning
+ * the loco moves this with it rather than leaving a constant quietly stale.
  *
- * **This is the number anything built over the railway has to clear**, and it is
- * exported so that nothing has to guess it. `buildLocomotive` positions the
- * funnel from it, so retuning the loco moves the clearance requirement with it
- * rather than leaving a constant somewhere else quietly stale.
+ * ### This is *not* the clearance anything built over the railway must meet
+ *
+ * It was called `LOCO_TOP_Y` and documented as "the tallest point of the whole
+ * train" and "the number anything built over the railway has to clear". It is
+ * neither, **because the train carries passengers and they are taller than the
+ * funnel** — `ParkTrain.carryPassengers` stands NPC riders on the carriage
+ * floor, and `Player.setRidePose` applies no seated fold, so the player rides
+ * bolt upright with her feet on the bench at {@link SEAT_Y}. A deck built to
+ * clear 2.42 m would pass over Percy and through the children behind her.
+ *
+ * The renaming is the fix as much as the arithmetic is: the old name is what
+ * invited a caller to treat a locomotive measurement as a whole-train one, and
+ * a deck derived from it would have been wrong in the one direction that hurts.
+ *
+ * **For the clearance, use `TRAIN_CLEARANCE_Y` from `train/clearance.ts`**,
+ * which derives it from this *and* from the riders.
  *
  * ### The datum, which is easy to get wrong
  *
@@ -61,7 +74,7 @@ export const SEAT_Y = CAR_FLOOR_Y + 0.42;
  * not the rail head. It happens to be the right datum to compare this against —
  * but only by luck of the name being wrong.
  */
-export const LOCO_TOP_Y = CAR_FLOOR_Y + 1.84;
+export const LOCO_BODY_TOP_Y = CAR_FLOOR_Y + 1.84;
 
 /** Half the track gauge — where the wheels sit either side of the centre line. */
 const WHEEL_OFFSET = 0.55;
@@ -175,7 +188,7 @@ export function createLocomotive(): Locomotive {
   funnelRim.position.set(0, CAR_FLOOR_Y + 1.72, 1.25);
   root.add(funnelRim);
 
-  const funnelTip = new Vector3(0, LOCO_TOP_Y, 1.25);
+  const funnelTip = new Vector3(0, LOCO_BODY_TOP_Y, 1.25);
 
   // --- dome and whistle ----------------------------------------------------
   const dome = solidMesh(new SphereGeometry(0.22, 14, 10), trimMaterial);

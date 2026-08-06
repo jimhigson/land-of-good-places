@@ -121,11 +121,35 @@ invariant mean what it says.
 
 Two numbers were wrong and are fixed alongside: `BRIDGE_RISE` was a hand-picked
 `2` against a locomotive whose funnel tip is **2.42 m**, so a deck built to
-satisfy it would have decapitated the train; it is now derived from
-`trainModel.ts`'s exported `LOCO_TOP_Y`. And `LEVEL_CROSSING_REACH` was named in
-invariant 2's failure message but never defined — a `ReferenceError` that could
-only fire once a crossing was genuinely illegal, i.e. exactly when this work
-starts producing one.
+satisfy it would have decapitated the train; and `LEVEL_CROSSING_REACH` was
+named in invariant 2's failure message but never defined — a `ReferenceError`
+that could only fire once a crossing was genuinely illegal, i.e. exactly when
+this work starts producing one.
+
+**The clearance is derived from the riders, not from the locomotive.** The first
+fix for `BRIDGE_RISE` read `trainModel.ts`'s `LOCO_TOP_Y`, which was documented
+as "the tallest point of the whole train". It was not: **the train carries
+passengers, and they are taller than the funnel.** `carryPassengers` deliberately
+*stands* NPC riders on the carriage floor, and `Player.setRidePose` applies no
+seated fold at all, so the player rides bolt upright with her feet on the bench.
+A deck satisfying the funnel-derived rise put its soffit at exactly the funnel
+tip — zero margin for Percy, and a quarter to three quarters of a metre *inside*
+the children behind her.
+
+So the derivation now lives in `src/world/train/clearance.ts`, which is its one
+owner, and takes the worst of the locomotive body, a standing NPC and a seated
+player, plus headroom. Two consequences worth carrying forward:
+
+- **A child's height is `TALLEST_CHILD_HEIGHT` (2.97 m), not `KID_HEIGHT`
+  (2.12 m).** Children ride wearing whatever hat they chose, and hats — not hair
+  — dominate: a party hat adds 0.85 m over the default style. Anything else
+  sizing a space a child must fit through wants the same constant.
+- **The single biggest lever on how tall a bridge has to be is that the player
+  stands up.** Her feet are 0.42 m higher than a standing NPC's and she is not
+  folded, which is what takes the requirement to 3.97 m before headroom. If
+  #116 finds the resulting deck too high to ramp up to comfortably, the honest
+  fix is to give riders a seated pose — a deliberate design change — and never
+  to shave the constant.
 
 ## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
 
