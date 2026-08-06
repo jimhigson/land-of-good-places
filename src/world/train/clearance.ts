@@ -1,5 +1,9 @@
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
-import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainModel';
+// `./trainDimensions`, deliberately not `./trainModel` — see that module's own
+// note. `trainModel.ts` reaches `parkManifest`, which reads `LGP_SEED` at load,
+// and `test/procgen/` has to import this file statically without fixing the
+// seed too early. Issue #226.
+import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from './trainDimensions';
 
 /**
  * **How much air anything built over the railway has to leave.**

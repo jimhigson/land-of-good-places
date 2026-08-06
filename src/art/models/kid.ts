@@ -99,8 +99,8 @@ export const KID_HEIGHT = 2.12;
  * `train/clearance.ts` is the first caller — a bridge over the railway derived
  * from `KID_HEIGHT` would clear the average child and hit the tall ones.
  *
- * **It cannot go stale.** `test/procgen/invariants.ts`'s "nothing built over
- * the railway can touch the train or its riders" re-measures the full
+ * **It cannot go stale.** `test/procgen/invariants.ts`'s "the clearance over the
+ * railway covers the train and everyone riding it" re-measures the full
  * hair × hat cross product from real models on every seed and fails if any
  * built child is taller than this. Add a taller hat and that goes red rather
  * than a bridge quietly getting too low.
