@@ -4,6 +4,74 @@ Branch `tree-wave-tweak`, pushed to **`feat/climb-wave-and-npc-climb`** (PR #215
 Worktree `.claude/worktrees/tree-wave-tweak`. **Do not touch
 `.claude/worktrees/climb-wave`** — that is the Overseer's, serving the game to Jim.
 
+## Fourth ask, 6 August: "why do they no longer have a body?"
+
+**The lesson of the whole PR, and it is worth reading before touching anything
+here: a guard whose stated reason is wrong can still be doing real work.**
+
+I removed the `radius >= 2.05` canopy bar having correctly shown that its stated
+reason — *"plenty of canopy to hide a body in"* — was false, because
+`hidePlayerBody` made the body invisible outright. The canopy was not hiding her
+torso. It was hiding **the hole where her torso would have been**. Thinner
+canopies qualifying, plus `CLIMB_PEEK_LIFT` at 1.2 m, uncovered that hole, and
+Jim got a head and a hand floating over a tree. **Disproving the comment is not
+the same as disproving the constant.**
+
+Jim's ruling: *"just include the whole body, no other change needed"*, and
+*"legs poking out is fine when climbing a tree, that's natural"*.
+
+**Done, literally.** `hidePlayerBody` is gone. The tree predicate is untouched —
+43/40/49/48/48 climbable trees stay. Lift, canopy, wave and gaze untouched.
+
+- `showPlayerBody` kept only its wave-reset job → renamed `endPlayerWave`. Its
+  PR #188 model-swap guard went with it, and the commit says why that is safe:
+  the guard existed because switched-off parts might belong to a discarded
+  model; nothing is switched off now, so the hazard is gone, not unhandled.
+- **NPCs deliberately keep the head-only treatment** — nobody asked, and they
+  have no wave. The class doc now says so, so it reads as a decision rather
+  than an oversight.
+- **Three stale comments corrected**, as instructed: `TreeClimbing`'s class doc
+  and its *"buried shoulder is a feature, not a compromise"*; `Player.ts`'s
+  claim that −40.1° of neck is free; `Scenery.ts`'s predicate rationale.
+- **`check-climb-wave` stopped hiding parts too.** It mirrored `hidePlayerBody`
+  part for part, so leaving it would have measured a pose the game never
+  renders — the exact failure its own header warns about.
+
+### New guard: is there a child under that head?
+
+At least **40 px** of her below the neck must reach the play camera, measured on
+the real rig, 6 trees × 4 approaches. **Measures 60 px; `--hide-body` measures
+0 px and exits 1.** Clean separation, and the flag means nobody has to hand-edit
+`TreeClimbing.ts` to re-prove it.
+
+### Two things I did NOT fix, both for Jim to rule on
+
+1. **The −40.1° neck is now visible.** It was justified *by* the body being
+   hidden — no shoulders on screen to read it against. There are now. Left at
+   40.1° because that is the angle that actually points her face at the camera
+   (0.00° off) and he said no other change; the comment in `Player.ts` records
+   it and names the honest lever if he dislikes it (give pitch back to
+   `RIDE_POSE_BODY_PITCH`, **not** detune the aim).
+2. **`check:climb-wave` now takes 89 s** (was 124 before I cut the body check to
+   6 trees). Cause is #216 taking climbable trees 8 → 43, which multiplies the
+   pre-existing hand-visibility sweep (trees × 12 bearings × 8 waggle phases).
+   I did not shrink that coverage to buy time back — it is the check that
+   caught the original invisible wave.
+
+### The distance invariant needed re-deriving after #216
+
+`SEARCH_SECONDS` 7 → 9, and **this is the one place I loosened something**, so
+it is documented at length in `invariants.ts` rather than slipped in. Seven was
+calibrated at 8 climbable trees / 41.9 m worst. #216 then quintupled the trees
+*and made the worst point worse* (55.4 m, seed 2) because the new ground is the
+**outer** park. Every worst point on every seed is in the plaza — (9,-7),
+(-0,-6), (-9,10), (-9,10), (-9,6) — where no tree can be planted at all, so a
+max over path points was reporting the size of the paving.
+
+**The compensating tightening is much larger**: the climbable-tree floor went
+`> 5` → `> 25`, against seeds measuring 40–49. Both still fire on the old
+predicate (20 trees, 68.3 m) — proved, not assumed.
+
 ## Third ask, added 6 August: more climbable trees
 
 > *"re the trees, we need more climbable trees, it takes a long time to find one."*
