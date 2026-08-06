@@ -1,7 +1,12 @@
 import { Group, Mesh, MeshToonMaterial, Vector3 } from 'three';
 import { damp } from '../core/mathUtils';
 import { toonMaterial } from '../art/style/materials';
-import { PLAYER_RADIUS } from '../core/constants';
+import {
+  CAPSULE_SAMPLES,
+  MAX_LINE_T,
+  NEAR_PLAYER_RADIUS,
+  SIGHTLINE_MARGIN,
+} from './foliageFadeTuning';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import { FOLIAGE_GEOMETRY, type FoliageOccluder, type Scenery } from './Scenery';
@@ -104,35 +109,11 @@ const MIN_ALPHA = 0.26;
 /** Seconds for the opacity to close half the remaining distance to its target. */
 const FADE_HALF_LIFE = 0.16;
 
-/**
- * Trees further than this from the player are never considered, however they
- * line up — the cheap reject that keeps this a distance test rather than a
- * real query. A tree that could hide the player is always close to them; one
- * lining up with the sightline from much further away is background scenery,
- * not something "in the way".
- */
-const NEAR_PLAYER_RADIUS = 9;
+// The four numbers tuning the sightline test live in `foliageFadeTuning.ts`, so
+// that `scripts/check-statue-occlusion.mts` can import the same definitions
+// instead of keeping copies that go stale silently. That module's header has the
+// full reasoning, including why they cannot simply be exported from this file.
 const NEAR_PLAYER_RADIUS_SQ = NEAR_PLAYER_RADIUS * NEAR_PLAYER_RADIUS;
-
-/**
- * Heights sampled up a {@link SightlineOccluder}'s axis. See
- * {@link FoliageFade.capsuleOnSightline} for why sampling is enough.
- */
-const CAPSULE_SAMPLES = 9;
-
-/**
- * How much slack the sightline test gives a tree's own bounding radius, in
- * metres — the player's own girth plus a little forgiveness so the fade
- * begins a touch before the tree is dead centre on the line, rather than
- * flickering right at the geometric edge of "in the way".
- */
-const SIGHTLINE_MARGIN = PLAYER_RADIUS + 0.35;
-
-/**
- * Never treat a tree at (or past) the player themselves as "in front of"
- * them — only the segment strictly between the camera and the player counts.
- */
-const MAX_LINE_T = 0.985;
 
 interface FadeSlot {
   /** Index into `Scenery.foliageOccluders`, or -1 while this slot is free. */

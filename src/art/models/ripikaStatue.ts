@@ -1,6 +1,7 @@
 import { CylinderGeometry, Group, Mesh, type Material } from 'three';
 import { ART } from '../style/artPalette';
 import { addOutline, disposeTree, inkTint, solid, toonMaterial } from '../style/materials';
+import { TAU } from '../style/bridge';
 import type { AssetHandle } from '../style/asset';
 import { createRipika, type RipikaPalette } from './ripika';
 
@@ -133,9 +134,56 @@ const PLINTH_HEIGHT = 1.44;
  */
 const PLINTH_BASE_RADIUS = 1.15;
 
+/**
+ * Seconds for one full revolution about the vertical axis.
+ *
+ * **Jim's number, 5 August 2026: "can we also make the pikachu statue slowly
+ * rotate? A rate of about once every 5 seconds should do."** It ships as asked.
+ * What follows is the measurement that says it is fast, recorded here rather
+ * than argued in a pull request nobody re-reads, so that whoever retunes it
+ * next has the comparison to hand.
+ *
+ * 5 s is **1.257 rad/s**, and the park already has an opinion about how fast a
+ * big thing turns. The Ferris wheel — the only other large rotating object here
+ * — runs at `TURN_SECONDS = 44` (`minigames/ferrisWheel/wheelProp.ts`) under a
+ * comment reading "Slow: this is scenery, not a ride". That is 0.143 rad/s, and
+ * a 7 m rim moving at **1.0 m/s**: below NPC walking pace, the slowest moving
+ * thing in the park bar the escalator.
+ *
+ * Sorting every `rotation.y = elapsed * K` in the repo puts them in three
+ * bands: celestial and background 0.01–0.25, tabletop props 0.6–3.4, sparkles
+ * 3–9. At 1.257 this statue lands in the **tabletop-prop** band, between the
+ * candy-floss fluff (1.4 rad/s on a 0.20 m spinner) and the tap marker's idle
+ * ring (1.1 rad/s on a 0.62 m ring). Those are objects you could pick up. This
+ * one is 8.24 m tall and reaches 3.13 m at the raised paw — so that paw sweeps
+ * at **3.93 m/s**, four times the Ferris wheel's rim, faster than an NPC walks
+ * (2.55) and a shade over parade top speed (4.2). Jim's own word for what he
+ * wanted was "slowly", and 72°/s is not that: the face turns from facing you to
+ * facing away in 2.5 seconds.
+ *
+ * **If it is ever retuned, ~15 s is the number to try.** That is 0.419 rad/s and
+ * puts the raised paw at 1.31 m/s — the Ferris wheel's rim speed, which is this
+ * park's established pace for "something large, moving gently". Slow enough to
+ * read as a monument, still fast enough that a six-year-old sees it turning
+ * within a couple of seconds of looking at it rather than having to stand and
+ * wait, which is why the suggestion is not the wheel's own 44 s.
+ *
+ * Exported because `scripts/check-statue-occlusion.mts` sweeps exactly one
+ * revolution and must keep doing so whatever this number becomes.
+ */
+export const STATUE_TURN_SECONDS = 5;
+
 export interface RipikaStatueHandle extends AssetHandle {
   /** The plinth alone, for anything that wants to light or decorate it. */
   readonly plinth: Group;
+  /**
+   * Turns the statue on its plinth. **Required here, not optional as on
+   * `AssetHandle`** — the caller (`world/Fountain.ts`) must drive it, and a
+   * handle that silently forgot to spin would be a bug nothing type-checks.
+   *
+   * Driven off `elapsed`, so `dt` is ignored — see the call site.
+   */
+  update(dt: number, elapsed: number): void;
   /**
    * Turns the whole statue translucent so it stops hiding the player —
    * `world/FoliageFade.ts` drives this. 1 is solid.
@@ -155,34 +203,75 @@ export interface RipikaStatueHandle extends AssetHandle {
 /**
  * The occluder capsule's radius.
  *
- * Not the statue's true maximum reach (3.13 m at the raised arm, y 6–7) and not
- * its slimmest (1.05 m at the ankles). A capsule is one radius, so this is the
- * width of the **mass that actually hides a child** — plinth, legs, torso and
- * head — with the outflung arm and tail treated as the thin decoration they
- * are. Erring wide would fade the statue whenever anyone walked near the
- * fountain; erring narrow would leave the child hidden, which is the bug.
+ * A capsule is one radius, so this has to be the width of the **mass that
+ * actually hides a child**. Erring wide fades the statue whenever anyone walks
+ * near the fountain; erring narrow leaves the child hidden, which is the bug.
  *
- * **1.8 m, and the number was measured rather than judged.** Grid-sweeping
- * 985 m² of standable plaza at 0.25 m, raycasting a 2.12 m player's head,
- * chest and waist along the camera axis, the ground where the child is hidden
- * *and the statue does not fade* is:
+ * **2.5 m — raised from 1.8 on 5 August 2026, when the statue started turning.**
+ * That change is not cosmetic and the old number was genuinely unsafe once it
+ * shipped, so the reasoning behind both values is kept.
+ *
+ * ## Why a rotating statue needs a wider capsule than a still one
+ *
+ * At a fixed pose, the outflung arm and the tail could be written off as thin
+ * decoration: they reach 3.13 m at the raised paw (y 6–7), but only in *one*
+ * direction, and that direction happened not to matter. Spin the statue and
+ * that stops being true — the paw sweeps a 3.13 m circle, so every bearing now
+ * sees the full reach at some point in the turn. The capsule is a body of
+ * revolution and cannot describe a pose, so it has to describe the **swept**
+ * shape.
+ *
+ * That gives a prediction before any measurement: `FoliageFade` tests against
+ * `radius + SIGHTLINE_MARGIN`, and `SIGHTLINE_MARGIN` is `PLAYER_RADIUS + 0.35`
+ * = 0.97 m, so covering a 3.13 m sweep wants `3.13 − 0.97 = 2.16 m`.
+ *
+ * ## What was measured
+ *
+ * `scripts/check-statue-occlusion.mts` grid-sweeps 985 m² of standable plaza at
+ * 0.25 m, raycasting a 2.12 m player's head, chest and waist along the camera
+ * axis, at poses spanning one full revolution. Ground where the child is hidden
+ * *and the statue does not fade*, with `SWEEP_R`:
  *
  * ```
- *   r=0.8 → 3.5 m²   r=1.0 → 1.3 m²   r=1.2 → 0.4 m²
- *   r=1.4 → 0        r=1.6 → 0        r=1.8 → 0
+ *   still (one pose)   r=1.2 → 0.4 m²   r=1.4 → 0        r=1.8 → 0
+ *   turning            r=1.8 → 0.9 m²   r=2.05 → 0.1 m²  r=2.10 → 0
  * ```
  *
- * So 1.4 is the true threshold and 1.8 carries ~29% headroom. The margin is
- * deliberate and the asymmetry is the reason: too small and a child vanishes,
- * which is the bug; too large and the statue turns translucent slightly early,
- * which is what `SIGHTLINE_MARGIN` already does on purpose for every tree in
- * the park. My first guess here was 2.4 — nearly double what is needed — and
- * the sweep is the only reason that is not what shipped.
+ * So **rotation moved the true threshold from 1.4 m to 2.10 m**, and at the
+ * shipped 1.8 the turning statue hid a child over 0.9 m² of plaza, about 7 m
+ * out, at 9 of 24 poses. The measured 2.10 lands just under the 2.16 the
+ * geometry predicts — the paw is thin and high, so it clips the child's outline
+ * a little before it covers it — which is the reassuring kind of agreement.
  *
- * Re-run `scripts/_prove-fade.mts` (see HANDOFF-ripika-statue.md) if the
- * statue's proportions ever change.
+ * That threshold is solid: re-measured at 24, 48, 96 and 180 poses (down to 2°
+ * steps) it is 2.10 every time, so it is not an artefact of how finely the turn
+ * is sampled.
+ *
+ * ## Why 2.5 and not 2.10 or 2.7
+ *
+ * 2.5 is ~19% over the threshold and clears the 2.16 the swept geometry asks
+ * for outright. Headroom is not free — it is monotone in ghosting, with the
+ * ground where the statue fades but the child was not really hidden going
+ * 54.5 m² at 2.10 → **68.6 m² at 2.5** → 76.1 m² at 2.7 — and the fade is a
+ * binary target (`MIN_ALPHA` 0.26), not a gentle ramp, so that area is really
+ * see-through rather than slightly hazy.
+ *
+ * The old 1.8 carried ~29% over its threshold, and matching that ratio would
+ * mean 2.7. Less is taken here deliberately, because the measurement behind 2.10
+ * is a much tighter one than the measurement behind 1.4: that was a single pose
+ * in 0.2 m radius steps, and the fragility of measuring one pose is exactly what
+ * produced this bug. This is 180 poses in 0.05 m steps.
+ *
+ * **The rotation does not make the fade flicker**, which is worth writing down
+ * because it is the first thing to suspect. The fade decision is taken against
+ * this capsule alone, and a capsule about the vertical axis is the same shape at
+ * every angle — so turning the statue cannot change the decision. The fade still
+ * only reacts to the player moving, exactly as before.
+ *
+ * Re-run `npm run check:statue-occlusion` (with `SWEEP_R`, and `SWEEP_POSES` if
+ * you doubt the sampling) if the statue's proportions or its rate ever change.
  */
-const OCCLUDER_RADIUS = 1.8;
+const OCCLUDER_RADIUS = 2.5;
 
 /**
  * Builds the statue. Origin at the **base of the plinth**, centred on X and Z,
@@ -193,6 +282,33 @@ export function createRipikaStatue(): RipikaStatueHandle {
   const root = new Group();
   root.name = 'prop.ripikaStatue';
 
+  // --- the turntable --------------------------------------------------------
+  // One group between the root and everything else, and it is the ONLY node
+  // this asset animates. Two decisions are baked in here, both of them the same
+  // decision the `figure` wrapper below already makes about scale.
+  //
+  // **Why not spin `root`.** The asset contract reserves the root's yaw for the
+  // *caller's* placement facing ("Forward is +Z ... rotate the root only"). An
+  // asset that stamps `root.rotation.y` every frame silently overwrites whatever
+  // angle its placer chose, and the placer has no way to notice. Spinning an
+  // inner group composes with the caller's yaw instead of fighting it.
+  //
+  // **Why the plinth is inside it too**, rather than a figure revolving on a
+  // stationary base. Visually it is a free choice — the plinth is three
+  // 28-segment cylinders, a body of revolution, so you cannot see which way
+  // round it is. What it buys is that there is exactly one moving node in the
+  // asset, so "does everything rotate together?" stops being something to verify
+  // and becomes something that cannot be otherwise. Two things that would
+  // otherwise need checking come along for free: `addOutline` parents its
+  // inverted hull to the mesh it outlines (`mesh.add(outline)`), so every
+  // outline is a descendant and moves with its own geometry; and since the
+  // 31 July rework RiPika's face is baked into the skull's own UV texture rather
+  // than a separate patch mesh, so there is no second surface that could lag
+  // behind. Nothing here is positioned by a formula tracking another node.
+  const turntable = new Group();
+  turntable.name = 'statueTurntable';
+  root.add(turntable);
+
   // --- plinth ---------------------------------------------------------------
   // Three dressed courses rather than one drum: a footing, the drum itself, and
   // a cap that flares back out into an overhanging lip for the feet to stand
@@ -202,7 +318,7 @@ export function createRipikaStatue(): RipikaStatueHandle {
   // it takes to read as dressed stone with a shadow line under the lip.
   const plinth = new Group();
   plinth.name = 'statuePlinth';
-  root.add(plinth);
+  turntable.add(plinth);
 
   // The plinth takes two steps from the figure's own ladder rather than a
   // dedicated pair of greys. Same rock, cut into blocks instead of a mouse —
@@ -247,7 +363,7 @@ export function createRipikaStatue(): RipikaStatueHandle {
   const figure = new Group();
   figure.name = 'statueFigure';
   figure.position.y = PLINTH_HEIGHT;
-  root.add(figure);
+  turntable.add(figure);
 
   const ripika = createRipika({ palette: STONE_PALETTE, expressions: false });
   // Derived from the handle rather than written down, so if RiPika's height is
@@ -316,6 +432,27 @@ export function createRipikaStatue(): RipikaStatueHandle {
     height: PLINTH_HEIGHT + FIGURE_HEIGHT,
     halfHeight: (PLINTH_HEIGHT + FIGURE_HEIGHT) / 2,
     occluderRadius: OCCLUDER_RADIUS,
+    // Absolute phase from `elapsed`, not an angle accumulated from `dt`, and the
+    // reasons run in that order of importance:
+    //
+    //  - `FrameContext.elapsed` is documented as the thing to "use for
+    //    continuous animation phases", and a constant-rate spin is exactly one.
+    //    `models/jetpack.ts` takes the same shape, `(_dt, elapsed)`.
+    //  - It is stateless. `x = f(t)` cannot drift, cannot double-step if the
+    //    hook is ever called twice in a frame, and needs no field to reset.
+    //  - The fountain this stands in already drives its ripples off `elapsed`,
+    //    so the statue and the water it stands on share one clock. That matters
+    //    at the pause screen: `Game.ts` zeroes `dt` when paused but keeps
+    //    `elapsed` running at real time on purpose, so "idle animations keep
+    //    breathing". Water rippling round a statue frozen mid-turn would read as
+    //    a bug in the one prop where both are visible at once.
+    //
+    // Not wrapped into [0, TAU): `elapsed` is seconds since load, so the angle
+    // stays far inside the range where a float's precision is irrelevant to a
+    // rotation, and three.js normalises it into the matrix anyway.
+    update: (_dt: number, elapsed: number) => {
+      turntable.rotation.y = (elapsed / STATUE_TURN_SECONDS) * TAU;
+    },
     setFade: (alpha: number) => {
       const wantsTransparent = alpha < 1;
       for (const material of materials) {
