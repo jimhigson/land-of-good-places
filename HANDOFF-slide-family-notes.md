@@ -18,9 +18,41 @@ Worktree: `.claude/worktrees/e-slide-family-notes`. My dev server port: **5412**
 | 5 | Ball pit follows the slide (#229) | **NOT DONE** — measured blocker, posted on #229 |
 | 6 | Balls scatter when she lands | **done**, wants Jim's eyes |
 
-Baseline was 157 passed / 0 skipped. Now **167 passed / 0 skipped** (two new
-invariants × 5 seeds). `npm run build` exit 0, and it now also runs
+**Count is now 181 passed / 0 skipped across 9 files** — was 167/8 before
+merging `origin/main` (#238, #216, #221), whose own 14 tests account for the
+whole rise. Both invariants this branch adds still run on all five seeds
+(verified by name, 5 each), and all 20 of main's invariants survive the merge
+(checked by diffing the registered names — CLAUDE.md's new "squash merge
+silently reverts branches" warning). `npm run build` exit 0, and now also runs
 `npm run check:slide-rider`.
+
+### Merged, not rebased
+
+42 commits on this branch, most of them another agent's reviewed PR #227 work.
+Force-pushing a rewrite of that was not worth it, and merging main in is this
+branch's own precedent. Three conflicts, all resolved by union rather than by
+picking a side: the build chain in `package.json`, the imports in
+`invariants.ts`, and `rail/boundary` -> `world/boundary` (#216 moved it).
+
+### The riding pose: she lies on her back now
+
+`Player.ridePosture: 'seated' | 'reclined'`. The **seated pose is untouched** —
+it is shared by the train, coaster, ferris wheel and Rail Race, all family-QA'd.
+
+Recline is on `model.root`, not `body`: **no knee in the rig** and the hips hang
+off `body`, so a waist bend folds her in half with her legs still standing.
+`RIDE_RECLINE = -1.35`, and **the sign was measured on the built rig** because
+the codebase reads both ways — at -1.35 her head is 1.33 m behind her feet and
+0.30 m above them.
+
+Two traps, both caught by the guard rather than by eye:
+
+- the check never called `player.update`, so the pose code was not exercised;
+- `ridePosture` was set *before* `startRide`, whose `beginRide` resets it.
+
+And the recline must be measured **against the chute, not world vertical** — the
+first version went red on the steepest frames while the pose was correct,
+because she lies along a slide that is itself tilted.
 
 ### The big one: the rider was 26.65 m off the chute
 
