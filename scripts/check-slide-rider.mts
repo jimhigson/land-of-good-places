@@ -59,6 +59,7 @@ const { Player } = await import('../src/entities/Player.ts');
 const { CHUTE_ENVELOPE } = await import('../src/world/building/SlideRide.ts');
 const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
+const { Raycaster, Box3 } = await import('three');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // **Not `park-harness`'s `inertInteriorControls`.** That one throws on every
@@ -129,6 +130,56 @@ function drawn(object: { visible: boolean; parent: unknown } | null): boolean {
   return true;
 }
 
+/**
+ * The parts that have to be on screen for her to read as a **child** rather
+ * than as a head.
+ *
+ * **This list is the whole point, and the first version of this check did not
+ * have it.** It asked `drawn(player.group)`, which walks *upwards* — group,
+ * then its parents — and so answers "is her hierarchy visible", not "is she".
+ * Every part of her can be switched off underneath a perfectly visible group,
+ * and the check goes on reporting 686/686 green while Jim looks at a floating
+ * head. It did exactly that.
+ *
+ * That is the same shape as the two faults already found on this ride — the
+ * rider 26.65 m off a chute behind a check that looked fine, and the pose never
+ * exercised because the harness did not drive `Player.update`. A guard that
+ * asks about a container instead of about the thing is not a guard.
+ *
+ * `TreeClimbing.hidePlayerBody` used to hide *every child of `model.body` except
+ * the head*, so the arms and legs were precisely what went missing. It has since
+ * been deleted outright — it was the only thing in the game that hid part of
+ * her, and it could hide her permanently — but this list stays, because the next
+ * such mechanism should be caught by a test rather than by Jim.
+ */
+/** Is `node` `part`, or somewhere underneath it? */
+function isDescendantOf(node: unknown, part: unknown): boolean {
+  let walk = node as { parent: unknown } | null;
+  while (walk) {
+    if (walk === part) return true;
+    walk = walk.parent as typeof walk;
+  }
+  return false;
+}
+
+function bodyParts(model: {
+  body: unknown;
+  head: unknown;
+  leftArm: unknown;
+  rightArm: unknown;
+  leftLeg: unknown;
+  rightLeg: unknown;
+}): readonly (readonly [string, unknown])[] {
+  return [
+    ['body', model.body],
+    ['head', model.head],
+    ['left arm', model.leftArm],
+    ['right arm', model.rightArm],
+    ['left leg', model.leftLeg],
+    ['right leg', model.rightLeg],
+  ];
+}
+
 const boarded = building.requestBoardSlide(false);
 if (!boarded) {
   console.error('check:slide-rider FAILED — could not board the ginormous slide at all');
@@ -144,6 +195,10 @@ let ridingFrames = 0;
 let worstOffChute = 0;
 let worstOffChuteAt = -1;
 let hiddenFrames = 0;
+const hiddenPartNames = new Set<string>();
+const occludedParts = new Set<string>();
+const raycaster = new Raycaster();
+const rideCameraObject = building.rideView?.camera ?? null;
 let worstSeatGap = 0;
 let uprightFrames = 0;
 let headForwardFrames = 0;
@@ -199,12 +254,51 @@ while (frames < MAX_FRAMES) {
 
   ridingFrames += 1;
 
-  if (!drawn(player.group as never)) hiddenFrames += 1;
+  // Her whole self, part by part — not just the group she hangs off.
+  for (const [name, part] of bodyParts(player.model as never)) {
+    if (!drawn(part as never)) {
+      hiddenFrames += 1;
+      hiddenPartNames.add(name);
+    }
+  }
 
   const off = distanceToChute(player.position);
   if (off > worstOffChute) {
     worstOffChute = off;
     worstOffChuteAt = ridingFrames;
+  }
+
+  // **Can the camera actually SEE her, or is the chute in the way?**
+  //
+  // Visibility flags were all true while Jim was looking at a floating head, so
+  // "is it visible" is the wrong question. She lies *inside* a trough whose
+  // walls are `CHUTE_ENVELOPE.above` (0.86 m) tall, and a chase camera that
+  // looks across the chute rather than down into it has that near wall between
+  // it and everything below her chin. This casts a ray from the camera at each
+  // body part and asks what it hits first — the same trick CLAUDE.md records
+  // for the hood faces, where a mesh that looked correct everywhere was never
+  // being drawn.
+  if (rideCameraObject && ridingFrames % 30 === 0) {
+    rideCameraObject.updateMatrixWorld(true);
+    const eye = rideCameraObject.getWorldPosition(new Vector3());
+    for (const [name, part] of bodyParts(player.model as never)) {
+      const target = (part as { getWorldPosition(v: Vector3): Vector3 }).getWorldPosition(
+        new Vector3(),
+      );
+      const toPart = target.clone().sub(eye);
+      const distance = toPart.length();
+      if (distance < 1e-4) continue;
+      raycaster.set(eye, toPart.normalize());
+      raycaster.far = distance - 0.05;
+      // Against the chute **and against her own model**. Self-occlusion is the
+      // one that bit: lying on her back feet-first puts her head nearest a
+      // camera sitting directly behind her, so her own skull is between the
+      // lens and the rest of her. Testing only the chute passed happily while
+      // Jim looked at a floating head.
+      const hits = raycaster.intersectObjects([slide.group, player.model.root], true);
+      const blocked = hits.some((hit) => !isDescendantOf(hit.object, part));
+      if (blocked) occludedParts.add(name);
+    }
   }
 
   const seat = building.rideSeatWorldPosition(new Vector3());
@@ -262,10 +356,11 @@ if (ridingFrames < 60) {
     `the ride only ran for ${ridingFrames} frames — nothing below was actually exercised`,
   );
 }
-if (hiddenFrames > 0) {
+if (hiddenPartNames.size > 0) {
   complaints.push(
-    `the child was not drawn for ${hiddenFrames} of ${ridingFrames} frames of the ride — ` +
-      'the chase camera is pointing at nothing',
+    `the child was missing her ${[...hiddenPartNames].sort().join(', ')} during the ride ` +
+      `(${hiddenFrames} part-frames hidden of ${ridingFrames} frames) — she is meant to go ` +
+      'down the slide as a whole child, not as a floating head',
   );
 }
 if (worstOffChute > ON_CHUTE) {
@@ -273,6 +368,14 @@ if (worstOffChute > ON_CHUTE) {
     `the child rode ${worstOffChute.toFixed(2)} m off the chute (frame ${worstOffChuteAt} of ` +
       `${ridingFrames}), against ${ON_CHUTE.toFixed(2)} m of trough — she is beside the ` +
       'slide, not on it',
+  );
+}
+if (occludedParts.size > 0) {
+  complaints.push(
+    `the chute hides the child's ${[...occludedParts].sort().join(', ')} from the chase ` +
+      'camera — every visibility flag is true, she is simply down inside the trough with ' +
+      'its near wall between her and the lens, which is what "just a head on the slide" ' +
+      'looks like',
   );
 }
 if (uprightFrames > 0) {

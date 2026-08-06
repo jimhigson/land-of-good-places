@@ -67,7 +67,6 @@ export class TreeClimbing implements GameSystem {
   private playerStartZ = 0;
   /** Which way she faces while peeking — captured at the top of the scramble. */
   private playerPeekFacing = 0;
-  private playerHiddenParts: Object3D[] = [];
 
   // --- NPC state ---------------------------------------------------------
   /** Every part hidden while an avatar climbs — computed once, reused forever. */
@@ -78,7 +77,13 @@ export class TreeClimbing implements GameSystem {
    * The player-style `.visible` toggle's own bookkeeping, for a pinned kid
    * built as a one-off `CharacterModel` rather than an instanced `KidAvatar`
    * — see `hideNpcBody`'s doc comment for why it needs a different mechanism
-   * from the crowd's `shown` array entirely. Mirrors {@link playerHiddenParts}.
+   * from the crowd's `shown` array entirely.
+   *
+   * The player once had a counterpart to this. It was deleted on 6 August 2026
+   * (see the note where it used to live): the family want to see the whole
+   * child. **The NPC side is deliberately untouched** — nobody has complained
+   * about an avatar peeking out of a canopy, and it is a different mechanism
+   * with different bookkeeping.
    */
   private readonly npcHiddenVisibleParts = new Map<NpcCharacter, Object3D[]>();
 
@@ -216,7 +221,6 @@ export class TreeClimbing implements GameSystem {
   private beginPlayerDescend(): void {
     this.playerPhase = 'down';
     this.playerTimer = 0;
-    this.showPlayerBody();
   }
 
   private updatePlayerClimb(context: FrameContext): void {
@@ -238,7 +242,6 @@ export class TreeClimbing implements GameSystem {
         this.playerPhase = 'peek';
         this.playerTimer = 0;
         this.playerPeekFacing = pose.facing;
-        this.hidePlayerBody();
         this.player.model.setExpression('happy');
       }
       return;
@@ -297,22 +300,25 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
-  /** Hides every part of the model except the head — see the class doc. */
-  private hidePlayerBody(): void {
-    const model = this.player.model;
-    this.playerHiddenParts = [];
-    for (const child of model.body.children) {
-      if (child === model.head) continue;
-      if (!child.visible) continue;
-      child.visible = false;
-      this.playerHiddenParts.push(child);
-    }
-  }
-
-  private showPlayerBody(): void {
-    for (const child of this.playerHiddenParts) child.visible = true;
-    this.playerHiddenParts = [];
-  }
+  // **`hidePlayerBody`/`showPlayerBody` deleted, 6 August 2026.** They hid every
+  // child of `model.body` except the head so that peeking out of a canopy showed
+  // a head in the leaves. The family's verdict on both the trees and the
+  // ginormous slide was the same — they want the whole child — and
+  // `feat/climb-wave-and-npc-climb` deleted this pair for the tree complaint
+  // before this branch deleted it for the slide one.
+  //
+  // It is deleted rather than fixed because it was **the only thing in the game
+  // that hid parts of her**, and it could hide her permanently. `hidePlayerBody`
+  // cleared `playerHiddenParts` and then skipped children that were already
+  // invisible, so a second call without an intervening `showPlayerBody` recorded
+  // an empty list and the restore put nothing back. From then on she was a
+  // floating head *everywhere* — including on rides that had never heard of
+  // trees, which is how it reached the slide.
+  //
+  // One owner, and now there is nothing to own: no ride, camera or activity
+  // hides part of her, so none of them needs a matching "show her again" call
+  // that can be missed. `scripts/check-slide-rider.mts` asserts every one of her
+  // six body parts is drawn for every frame of the ride.
 
   // ================================================================= NPCs
 
