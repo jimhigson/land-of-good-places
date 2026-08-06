@@ -566,11 +566,16 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
 function buildSlideMouth(plan: ShellPlan): Group {
   const oz = outerZ(plan);
   const x = (SLIDE_PLAN.roofDoorMinX + SLIDE_PLAN.roofDoorMaxX) / 2;
-  // Just south of the boarding pad, so the pad still reads as the marked spot
-  // you stand on and the chute reads as the thing you step down into. Starting
-  // it *on* the pad hides the pad under the trough floor and takes the "press
-  // here" cue away with it.
-  const startZ = SLIDE_PLAN.entryZ + 0.9;
+  // **Behind** the pad, not in front of it. Jim moved the boarding point to
+  // roughly a metre from the edge (`ROOF_ENTRY_INSET`), so there is no longer
+  // any roof left to put a chute on *south* of the pad — the lip has to come up
+  // to meet her from inboard and carry her straight out over the parapet.
+  //
+  // Far enough back that the pad still reads as the marked spot you stand on
+  // rather than being swallowed: the pad is 1.2 m in radius and the trough
+  // floor sits above it, so a lip starting under the pad's own centre would
+  // hide the "press here" cue completely.
+  const startZ = SLIDE_PLAN.entryZ - 1.6;
 
   // The trough floor sits `CHUTE_ENVELOPE.below` under the centre line, so a
   // centre line at this height puts the floor just on the terrace deck rather
@@ -579,16 +584,16 @@ function buildSlideMouth(plan: ShellPlan): Group {
 
   const mouth = new SlideRide(
     [
-      // A flat lip you step into…
+      // A flat lip you step into, level all the way to the parapet…
       new Vector3(x, deck, startZ),
-      new Vector3(x, deck, startZ + 2.2),
-      // …then it tips, goes out through the parapet gap…
-      new Vector3(x, deck - 0.35, oz - 1.1),
-      new Vector3(x, deck - 1.5, oz + 0.8),
+      new Vector3(x, deck, SLIDE_PLAN.entryZ),
+      new Vector3(x, deck, oz - 0.3),
+      // …then it tips as it leaves the gap in the parapet…
+      new Vector3(x, deck - 0.9, oz + 1.2),
       // …and falls away over the edge, which is what makes it read as attached
       // to the roof rather than sitting on it.
-      new Vector3(x, deck - 3.6, oz + 2.4),
-      new Vector3(x, deck - 6.4, oz + 3.6),
+      new Vector3(x, deck - 3.2, oz + 2.7),
+      new Vector3(x, deck - 6.2, oz + 3.9),
     ],
     { name: 'slide-roof-mouth' },
   );

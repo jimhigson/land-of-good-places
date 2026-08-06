@@ -14,6 +14,7 @@ import {
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
   GARDEN_PLAY_RADIUS,
+  INTERIOR_HALF_Z,
   PLAYER_RADIUS,
 } from '../../core/constants';
 import { TAU } from '../../core/mathUtils';
@@ -294,7 +295,30 @@ const DOOR_OFFER_CENTRE = 9.5;
  * in step by hand and by nothing else.
  */
 const ROOF_ENTRY_X = 20;
-const ROOF_ENTRY_Z = 13;
+
+/**
+ * How far in from the roof's south edge you stand to board, in metres.
+ *
+ * Jim, 6 August 2026: *"the entrance to the slide needs to be closer to the
+ * edge of the roof, like 1m from the edge of the roof, not coming several
+ * meters into the roof"*. It was at `z = 13` against a terrace edge at 22 —
+ * **9.2 m in**, so you crossed most of the roof to reach a marker, and the gap
+ * in the parapet was an unexplained notch somewhere off in front of you.
+ *
+ * Written as an inset from the edge rather than as a coordinate, because "1 m
+ * from the edge" is the thing Jim actually specified: if the interior is ever
+ * resized, a hard `21` silently becomes several metres in again, whereas this
+ * stays what he asked for. Taken as approximate — he said "like 1m", and the
+ * point is that it reads as being *at* the edge.
+ *
+ * **This is interior-local and cannot move the garden chute.** `START_Y` is
+ * `deckY(TOP_DECK)` and the ride's start pose comes from the facade's south
+ * wall via `doorPoses()`; neither reads this. That separation is what lets the
+ * boarding point go to the edge without touching the 3.44 m of air over the
+ * battlements that `theGinormousSlideLeavesOverTheBattlements` holds open.
+ */
+const ROOF_ENTRY_INSET = 1;
+const ROOF_ENTRY_Z = INTERIOR_HALF_Z - ROOF_ENTRY_INSET;
 
 /**
  * Half the gap in the interior roof parapet.
