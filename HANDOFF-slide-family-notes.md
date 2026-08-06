@@ -13,13 +13,13 @@ Worktree: `.claude/worktrees/e-slide-family-notes`. My dev server port: **5412**
 |---|---|---|
 | 1 | Landing: clipped into the slide, not in the pit | **done**, invariant + mutation proof |
 | 2 | Chase cam instead of first person | **done**, wants Jim's eyes |
-| 3 | Half the chute see-through (#228) | in progress |
-| 4 | Start attached to the castle roof | not started |
-| 5 | Ball pit follows the slide (#229) | not started — **see the blocker below** |
+| 3 | Half the chute see-through (#228) | **done**, wants Jim's eyes |
+| 4 | Start attached to the castle roof | **done**, wants Jim's eyes |
+| 5 | Ball pit follows the slide (#229) | **NOT DONE** — measured blocker, posted on #229 |
 | 6 | Balls scatter when she lands | **done**, wants Jim's eyes |
 
-Baseline was 157 passed / 0 skipped. Now **162 passed / 0 skipped** (one new
-invariant × 5 seeds). `npm run build` exit 0.
+Baseline was 157 passed / 0 skipped. Now **167 passed / 0 skipped** (two new
+invariants × 5 seeds). `npm run build` exit 0.
 
 ## Findings worth keeping
 
@@ -66,26 +66,38 @@ pass a non-zero pitch** and quietly changing its composition frame would alter a
 ride the family has signed off. (Latent: RailRace's own pitch is composed in
 `XYZ` and so is a roll away from north. Observed, not touched — not this PR.)
 
-### Item 5 blocker — a real one, and not in #229
+### Item 5 — attempted, measured, and deliberately stopped
 
-`src/world/train/route.ts:252` keeps the train clear of the ball pit, and the
-train is solved **before** the slide in the import graph:
+**Not delivered.** Full write-up posted as a comment on #229. Short version:
+
+`train/route.ts:252` keeps the railway clear of the ball pit, and the train is
+solved **before** the slide:
 
 ```
 slide/plan.ts -> coaster/plan.ts -> train/plan.ts -> train/route.ts
 ```
 
-So a pit that follows the slide cannot be something the train dodges — the
-relationship has to invert: **the slide's free landing must dodge the train.**
-#229 costs this nothing extra (the landing filter has to check open ground
-anyway) but it is not the "~10 lines" the issue describes, and `BALL_PIT_X/Z`
-currently live in `building/layout.ts`, which everything imports.
+A pit that follows the slide is a position that does not exist when the train
+solves — a dependency cycle, not a keep-out. So the relationship must invert:
+the slide's landing dodges the train.
 
-`building/layout.ts` imports only palette / parkLayout / core constants /
-terrain — **no path back to the slide** — so the inversion is feasible. Sketch:
-move `BALL_PIT_RADIUS`/`BALL_PIT_DEPTH` (plain authored constants) somewhere
-leaf, derive the pit centre from `SLIDE_PLAN`, and repoint the six consumers
-(`train/route.ts`, `BallPit.ts`, `surfaces.ts`, `Building.ts`, two scripts).
+I expected dropping the train's keep-out to be a no-op (nearest approach
+25.60 m against the 6.45 m needed; train radius floor 39.20 m on all ten seeds
+against a pit at r ~ 28.8). **It is not.** Removing it changes the solved route
+on all ten seeds — canonical 354.9544 -> 355.7980 m, every SHA differs —
+because the pit's circle was setting `lo(θ)` to ~39.4 on its bearings, which is
+what produces that 39.20 floor. And it fails the build:
+
+```
+RATCHET LOOSE: rail.walkable: recorded 30, now 29
+```
+
+That is a railway change plus a `check:park` ratchet edit. It belongs in its own
+PR, not bolted onto five ride-feel fixes that are re-entering review. Reverted;
+`train/route.ts` is untouched on this branch.
+
+Carry forward: `LANDING_MAX_RADIUS` should hold the pit's **outer edge** inside
+the train's 39.20 m floor — a pit centre no further out than ~32 m.
 
 ### Item 5 conditions (non-negotiable, from the review)
 
