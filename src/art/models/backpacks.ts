@@ -105,7 +105,22 @@ export interface BackpackRig {
    * bag would leave the peeker climbing out of the shape she used to wear.
    */
   readonly anchor: Group;
-  /** Shows one kind and hides the rest, and moves {@link anchor} to its mouth. */
+  /**
+   * Where a worn keychain clips on — the low outer corner of whatever bag is
+   * currently worn (see {@link CHARM_HANGS}).
+   *
+   * A second anchor rather than a reuse of {@link anchor}: that one is the
+   * bag's *mouth*, where a peeking creature's head comes out, and a charm hung
+   * there would dangle over that head. It **moves** on `setKind` for the same
+   * reason `anchor` does — `entities/WornKeychain.ts` holds the group it was
+   * handed for the lifetime of the character, so a charm must follow the bag
+   * the child switches to rather than stay clipped to the one she took off.
+   */
+  readonly charmAnchor: Group;
+  /**
+   * Shows one kind and hides the rest, and moves {@link anchor} to its mouth
+   * and {@link charmAnchor} to its charm corner.
+   */
   setKind(kind: BackpackKind): void;
   /**
    * Hides the bag altogether — straps and all — and puts it back.
@@ -139,6 +154,45 @@ const MOUTHS: Readonly<Record<BackpackKind, readonly [number, number]>> = {
   heart: [0.78, -0.3],
   ripikaHead: [0.84, -0.34],
   trillaHead: [0.82, -0.34],
+};
+
+/**
+ * Where a keychain clips on, per shape — the low outer corner of the bag's own
+ * mass, in `body` metres. `[x, y, z]`, mirrored to the other side by nothing:
+ * one charm, one side.
+ *
+ * **Measured off each built shape, not guessed**, and each one sits inside that
+ * bag's own body (excluding the straps, which reach forward to z ≈ -0.10 and
+ * would hang a charm off the child's shoulder). The bag bodies measure:
+ *
+ * ```
+ * satchel     x±0.196  y 0.384..0.736  z -0.436..-0.204
+ * bubble      x±0.215  y 0.377..0.783  z -0.525..-0.155
+ * heart       x±0.193  y 0.365..0.779  z -0.584..-0.076
+ * ripikaHead  x±0.215  y 0.423..0.945  z -0.563..-0.157
+ * trillaHead  x±0.212  y 0.405..0.867  z -0.586..-0.140
+ * ```
+ *
+ * This lives here, beside {@link MOUTHS} and beside the shapes themselves, for
+ * the reason the whole file exists: a single constant in `art/models/kid.ts`
+ * would be a second definition of geometry it cannot see. There was one — the
+ * keychain work of 28 July measured `(0.17, 0.5, -0.3)` against the single bag
+ * the model had then, and by the time five authored shapes landed it was too
+ * high for every one of them and too far forward for the deep ones. A sixth
+ * shape adds a row here; it cannot silently invalidate a number somewhere else.
+ */
+const CHARM_HANGS: Readonly<Record<BackpackKind, readonly [number, number, number]>> = {
+  satchel: [0.19, 0.43, -0.32],
+  bubble: [0.2, 0.43, -0.34],
+  // The odd one out, and measured rather than patterned: a heart tapers to a
+  // point at the bottom, so the low outer corner every other bag uses is 0.12 m
+  // outside its surface — a charm hanging in mid-air. Its widest lateral reach
+  // is also further back (z ≈ -0.48, not mid-depth), because the lobes bulge
+  // rearward. Hung on the lobe instead, half way up, where there is real
+  // geometry to clip to.
+  heart: [0.19, 0.56, -0.45],
+  ripikaHead: [0.2, 0.47, -0.36],
+  trillaHead: [0.2, 0.46, -0.36],
 };
 
 /** Centre of the bag mass on the back, shared by every shape. */
@@ -271,6 +325,10 @@ export function buildBackpacks(options: BackpackOptions): BackpackRig {
   anchor.name = 'backpackAnchor';
   body.add(anchor);
 
+  const charmAnchor = new Group();
+  charmAnchor.name = 'keychainAnchor';
+  body.add(charmAnchor);
+
   // The kind currently chosen, so `setHidden(false)` can put back exactly the
   // bag that was there rather than the one this rig was built with.
   let worn: BackpackKind = kind;
@@ -280,6 +338,8 @@ export function buildBackpacks(options: BackpackOptions): BackpackRig {
     for (const part of parts) part.mesh.visible = !hidden && part.kinds.includes(worn);
     const [y, z] = MOUTHS[worn];
     anchor.position.set(0, y, z);
+    const [charmX, charmY, charmZ] = CHARM_HANGS[worn];
+    charmAnchor.position.set(charmX, charmY, charmZ);
   };
 
   const setKind = (next: BackpackKind): void => {
@@ -292,7 +352,7 @@ export function buildBackpacks(options: BackpackOptions): BackpackRig {
   };
   apply();
 
-  return { parts, anchor, setKind, setHidden };
+  return { parts, anchor, charmAnchor, setKind, setHidden };
 }
 
 /**

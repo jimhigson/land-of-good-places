@@ -18,7 +18,16 @@ import { Selection } from './world/Selection';
 import type { InteractZone } from './world/interact';
 import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
-import { HeldBalloons, Parade, Player, TapNavigator, WornFlower, WornHat, WornJetpack } from './entities';
+import {
+  HeldBalloons,
+  Parade,
+  Player,
+  TapNavigator,
+  WornFlower,
+  WornHat,
+  WornJetpack,
+  WornKeychain,
+} from './entities';
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
@@ -94,6 +103,7 @@ export class Game {
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
   readonly wornJetpack: WornJetpack;
+  readonly wornKeychain: WornKeychain;
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
   readonly whatsNew: WhatsNew;
@@ -209,6 +219,13 @@ export class Game {
     // on her back — the same object the HUD's fly button asks, so a button that
     // is there and a flight that is allowed are one fact rather than two.
     this.player.wornJetpack = this.wornJetpack;
+
+    // The keychain dangling off her bag, if one has been collected — see
+    // `entities/WornKeychain.ts`. Fourth worn slot, same store-subscriber
+    // shape. No `onWornChange`: a charm displaces nothing, so unlike the jet
+    // pack it has nothing to ask the model to put away.
+    this.wornKeychain = new WornKeychain(this.player.model.keychainAnchor);
+    this.addSystem(this.wornKeychain);
 
     // The parade of cute things. Built here, before the tap handler, because a
     // tap has to be offered to the parade first — pressing your bunny means
