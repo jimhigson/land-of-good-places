@@ -1,11 +1,14 @@
 /**
- * Raw pointer handling for the canvas: taps, and pinch-to-zoom.
+ * Raw pointer and wheel handling for the canvas: taps, pinch-to-zoom, and the
+ * mouse wheel/trackpad-scroll zoom that drives the same camera call pinch does.
  *
  * The only file in the game allowed to look at `PointerEvent`. It turns the
  * mess of pointerdown/move/up bookkeeping into two clean signals — "the player
  * tapped *here*" and "the player pinched by *this much*" — and hands them to
  * whoever asked, which keeps gameplay code free of DOM events exactly as the
- * keyboard and gamepad are.
+ * keyboard and gamepad are. `WheelEvent` is a third signal in the same spirit,
+ * bolted on here rather than a file of its own because it is canvas-scoped
+ * input feeding the very same zoom the pinch signal feeds.
  *
  * Works with a mouse too, deliberately: click-to-walk is genuinely nicer than
  * WASD on a trackpad, and it means the whole touch path can be tested on a
@@ -47,6 +50,16 @@ export interface PointerControlsOptions {
    * the same units as `CAMERA_ZOOM_STEP`, so it can go straight to the camera.
    */
   onPinch(delta: number): void;
+  /**
+   * Fired for a mouse wheel notch or a trackpad two-finger scroll — the desktop
+   * equivalent of {@link onPinch}, and meant to be wired to the exact same
+   * `IsoCamera.nudgeZoom` call: this is a delta, not a target, and it carries no
+   * range of its own. `notches` is signed and normalised so that `1` is "one
+   * ordinary wheel click", regardless of whether the browser reported the raw
+   * event in pixels, lines or pages — positive zooms in, matching `onPinch`
+   * (spreading two fingers is also positive).
+   */
+  onWheelZoom(notches: number): void;
 }
 
 /** Longer than this and it was a considered press, not a tap. */
@@ -85,6 +98,51 @@ const PINCH_GAIN = 1.0;
 /** WebKit-only gesture events, swallowed so the page never zooms. */
 const SAFARI_GESTURES = ['gesturestart', 'gesturechange', 'gestureend'] as const;
 
+/**
+ * `WheelEvent.deltaY` arrives in one of three units — `DOM_DELTA_PIXEL`,
+ * `DOM_DELTA_LINE` or `DOM_DELTA_PAGE` — and the three differ by roughly two
+ * orders of magnitude, not by some fixed device factor: an ordinary mouse
+ * wheel typically reports pixel-mode deltas around 100 per notch (Chrome,
+ * Safari) or line-mode deltas around 3 per notch (Firefox on Windows); a
+ * trackpad's two-finger scroll always reports pixel mode, in a stream of much
+ * smaller deltas per event. A handler that reads `deltaY` raw feels right on
+ * whichever browser it was written against and flies or crawls on the others.
+ * Converting every mode to an estimated CSS-pixel distance first, then to a
+ * device-independent "notch count", is what keeps one wheel click the same
+ * size everywhere. `WHEEL_LINE_PIXELS` and `WHEEL_PAGE_PIXELS` are not
+ * measured against a specific mouse — they only need to put line- and
+ * page-mode events in the right ballpark relative to a pixel-mode notch.
+ *
+ * `WheelEvent.DOM_DELTA_LINE`/`DOM_DELTA_PAGE` are deliberately not read off
+ * the `WheelEvent` constructor: this file's wheel handling has to stay
+ * callable from a synthetic `Event` in tests, the same reasoning
+ * `isTextEntryTarget` gives for duck-typing over `instanceof`.
+ */
+const WHEEL_NOTCH_PIXELS = 100;
+const WHEEL_LINE_PIXELS = WHEEL_NOTCH_PIXELS / 3;
+const WHEEL_PAGE_PIXELS = WHEEL_NOTCH_PIXELS * 8;
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+
+/**
+ * Normalises a wheel/trackpad event to a signed "notch count" — see
+ * {@link WHEEL_NOTCH_PIXELS}. Positive means "zoom in": wheel-up (and a
+ * trackpad two-finger scroll up) is a *negative* `deltaY` by platform
+ * convention, on both a plain wheel and macOS's "natural" scrolling — the OS
+ * already folds that preference into the sign it hands the browser, so there
+ * is deliberately no separate case for it here. Guessing at "natural" from
+ * inside the page would be guessing at something the platform already solved.
+ */
+function wheelNotches(event: WheelEvent): number {
+  const pixels =
+    event.deltaMode === DOM_DELTA_LINE
+      ? event.deltaY * WHEEL_LINE_PIXELS
+      : event.deltaMode === DOM_DELTA_PAGE
+        ? event.deltaY * WHEEL_PAGE_PIXELS
+        : event.deltaY; // DOM_DELTA_PIXEL, and the sane fallback for anything else
+  return -pixels / WHEEL_NOTCH_PIXELS;
+}
+
 interface ActivePointer {
   x: number;
   y: number;
@@ -122,6 +180,15 @@ export class PointerControls {
     this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('dblclick', preventDefault);
     this.canvas.addEventListener('contextmenu', preventDefault);
+    // `{ passive: false }` is what makes `preventDefault()` inside `onWheel`
+    // actually stop the page/browser from scrolling or zooming — spelled out
+    // rather than relied on as a default, since that default is exactly the
+    // kind of thing a future browser change could quietly flip. Attached
+    // straight to the canvas, like every other listener here: an event only
+    // reaches this element if it actually landed on the canvas, which is what
+    // keeps the shop, the Cute-o-dex and character creation scrolling
+    // normally without this file needing to know they exist (see issue #189).
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
     // Safari on iOS still fires its own pinch and double-tap zoom gestures on
     // top of pointer events; without these the whole page scales instead of the
     // camera. They are not in the DOM typings, hence the EventTarget view.
@@ -140,6 +207,7 @@ export class PointerControls {
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('dblclick', preventDefault);
     this.canvas.removeEventListener('contextmenu', preventDefault);
+    this.canvas.removeEventListener('wheel', this.onWheel);
     for (const type of SAFARI_GESTURES) {
       (this.canvas as EventTarget).removeEventListener(type, preventDefault);
     }
@@ -228,6 +296,19 @@ export class PointerControls {
   private readonly onPointerCancel = (event: PointerEvent): void => {
     this.pointers.delete(event.pointerId);
     if (this.pointers.size < 2) this.pinchDistance = 0;
+  };
+
+  /**
+   * The desktop equivalent of {@link onPointerMove}'s pinch branch — a wheel
+   * notch or trackpad scroll, converted to a notch count and handed straight
+   * to {@link PointerControlsOptions.onWheelZoom}. `preventDefault` always
+   * fires (the page must never scroll or zoom under a wheel that landed on the
+   * canvas); it is the caller's own business, not this file's, whether a ride
+   * in progress means the notch should actually move the camera.
+   */
+  private readonly onWheel = (event: WheelEvent): void => {
+    event.preventDefault();
+    this.options.onWheelZoom(wheelNotches(event));
   };
 
   /** The mouse has gone: over the HUD, out of the window, or off the screen. */

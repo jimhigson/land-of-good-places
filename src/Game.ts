@@ -298,6 +298,25 @@ export class Game {
       // Pinching is the touch equivalent of the +/- keys, expressed in the same
       // units, so it lands in the camera's existing clamped zoom target.
       onPinch: (delta) => this.camera.nudgeZoom(delta * CAMERA_ZOOM_STEP * 6),
+      // The wheel is the mouse equivalent of pinch (issue #242): same call,
+      // same clamp, same damping — `nudgeZoom` is the one and only owner of
+      // "how far you may zoom" and neither gesture may restate it. One notch
+      // is defined as one keyboard `+`/`-` press's worth of zoom.
+      //
+      // Guarded on `cameraOverride` (unlike `onPinch`, which needs no such
+      // guard: a pinch takes a finger actually resting on the glass, so it
+      // essentially never fires while a ride has taken the camera over, and
+      // touch has no scroll-wheel equivalent riding could fight anyway). A
+      // mouse wheel sits right under a hand that is otherwise idle while
+      // enjoying a ride, so without this a stray notch would fight the ride's
+      // own camera the moment it next let go — the camera on screen wouldn't
+      // visibly jump (the ride renders through `cameraOverride`, not
+      // `this.camera.camera`), but `zoomTarget` would have drifted underneath
+      // it for when the ride hands the camera back.
+      onWheelZoom: (notches) => {
+        if (this.cameraOverride) return;
+        this.camera.nudgeZoom(notches * CAMERA_ZOOM_STEP);
+      },
       // The mouse half of the HIGHLIGHT RULE. Mouse-only, and `Selection` does
       // the picking on the next frame rather than here, so a mouse waggled
       // about cannot cost more than one ray a frame. `selection` is built
