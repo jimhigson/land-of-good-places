@@ -78,32 +78,68 @@ export const RACE_LAPS = 2;
 const BOOST_GAIN_PER_PRESS = 0.22;
 
 /**
+ * **The tap rate the game is actually tuned for.**
+ *
+ * What a six-year-old's thumb really sustains for a minute of racing — not what
+ * an adult can do in a burst. Every difficulty number below is sized against
+ * *this* rate, because the 6 August 2026 measurement showed the whole race is
+ * decided by tap rate and nothing in the build was measuring it. See
+ * {@link PLAYER_BOOST_ADVANTAGE}.
+ */
+export const CHILD_TAPS_PER_SECOND = 3;
+
+/**
  * **How much more a press is worth to the player than to a rival.**
  *
- * Jim, 6 August 2026: *"make each boost do more so that the game is a bit
- * easier, by about 20%"* — and the stated purpose, *easier*, is the part that
- * decides where the 20% goes.
+ * Jim, 6 August 2026: *"it's just too hard ffs, you go too slow and the
+ * computer goes too fast, that's what too hard means in a race"*.
  *
- * The literal reading is to raise {@link BOOST_GAIN_PER_PRESS}, and it does not
- * work, because `stepRider` is the same function for everybody: the rivals
- * press a boost too, so a fatter press makes the whole field faster and the
- * rubber band redistributes what is left. Measured over the 24 fixed seeds,
- * raising that constant 20%:
+ * ### Tap rate was the wall, and nothing was measuring it
+ *
+ * Every strategy in this file's own checker mashes at a flat 6 taps a second —
+ * `mashPerfect`, `mashSloppy` and `ducksNothing` alike, deliberately, so that
+ * {@link STRATEGY_MASH_RATE}'s table isolates *hazard judgement* from thumb
+ * speed. That is right for the invariant it guards and it left the game blind
+ * to the only variable that actually decides the race. Driving the real
+ * `stepRider` at a range of rates, with an irregular (jittered) tap stream,
+ * over the 24 fixed seeds at level 3:
  *
  * ```
- *   plays well   24/24 wins, mean margin 53.9 m -> 77.2 m (max 166.4, a procession)
- *   plays sloppy 15/24 wins -> 12/24
+ *   taps/s  bars ducked   wins   margin    her top speed
+ *   6.0     100%          24/24  +24.0 s   33.5 m/s
+ *   4.0      65%          21/24   +3.1 s   28.0 m/s
+ *   3.0      50%           1/24   -2.7 s   23.5 m/s   <- a child
+ *   2.0      30%           0/24  -29.4 s   18.0 m/s
  * ```
  *
- * Sloppy play got *harder*, which is the opposite of what was asked, and the
- * only thing that reliably grew was the gap between a good run and a bad one.
- * So the 20% goes on the player's own press instead, which is the thing Jim is
- * actually describing when he says "each boost" — hers. Rival pace has its own
- * two knobs ({@link RIVAL_SKILL} and {@link rivalBand}) and is deliberately not
- * touched here, so this cannot be quietly cancelled by the band the way the
- * shared constant was.
+ * A cliff between 4 and 3 taps a second, and a child is on the wrong side of
+ * it. The arithmetic says why: boost settles at `gain * rate / decay`, so at 3
+ * taps a second with the old 1.5 advantage she held 0.50 — while the rivals'
+ * own mash rate (`RIVAL_MASH_RATE_MIN + span * skill`) put them at 0.49–0.55.
+ * **She was slower than every rival before a single hazard was involved.**
+ * That is Jim's sentence, exactly, as a number.
+ *
+ * ### Why the advantage, and not {@link BOOST_GAIN_PER_PRESS}
+ *
+ * Unchanged from the round that introduced this constant: `stepRider` is the
+ * same function for everybody, so a fatter press makes the whole field faster
+ * and the rubber band redistributes what is left. Measured then, raising the
+ * shared constant 20% made *sloppy* play worse (15/24 wins -> 12/24) and only
+ * grew the gap between a good run and a bad one.
+ *
+ * ### Why 3.0, and why it costs the strong player nothing
+ *
+ * Sized so a child tapping {@link CHILD_TAPS_PER_SECOND} holds boost near its
+ * cap. The lever is self-limiting, which is the whole reason it is the right
+ * one: {@link BOOST_MAX} clamps boost at 1, and a 6-taps-a-second player is
+ * *already* at that clamp, so raising this number speeds up a slow tapper and
+ * does **nothing whatever** for a fast one. Measured, her top speed at 3 taps a
+ * second goes 23.5 -> 30.1 m/s while the 6-taps-a-second player stays at 33.5.
+ * It compresses the range between a child and an adult rather than scaling
+ * everybody up — the one shape of change that makes a race easier for the
+ * person who is losing it without making it duller for the person who is not.
  */
-export const PLAYER_BOOST_ADVANTAGE = 1.5;
+export const PLAYER_BOOST_ADVANTAGE = 3.0;
 
 /**
  * How fast {@link Rider.boost} bleeds away when nothing is topping it up,
@@ -460,8 +496,20 @@ function zoneIsHere(rider: Rider, hazards: HazardSchedule, lead: number, trail: 
  * handful of real, visible bar-misses per race rather than either never
  * missing (unbeatable) or missing constantly (a joke). See that script's own
  * "the field" section for the live numbers.
+ *
+ * ### 6 August 2026: lowered again, because skill *is* rival tap rate
+ *
+ * `skill` feeds the rivals' own mash rate directly
+ * (`RIVAL_MASH_RATE_MIN + span * skill`), so this constant is the other half of
+ * the sentence {@link PLAYER_BOOST_ADVANTAGE} answers — it is literally "how
+ * fast the computer goes". At 0.52/0.60/0.68 the rivals mashed at 4.4–5.0 taps
+ * a second, comfortably faster than the child this game is for, and no amount
+ * of help on her side reads as fair while the field is out-tapping her. Now
+ * 0.40/0.48/0.56, which puts them at 4.0–4.6 — still a real pace, still well
+ * inside the range where they bonk visibly and often, and now slower than she
+ * is rather than faster.
  */
-export const RIVAL_SKILL: readonly number[] = [0.52, 0.60, 0.68];
+export const RIVAL_SKILL: readonly number[] = [0.40, 0.48, 0.56];
 
 /**
  * How hard the rivals rubber-band, and **why a low `skill` alone was never
@@ -536,9 +584,29 @@ export const RIVAL_SKILL: readonly number[] = [0.52, 0.60, 0.68];
  * 100.8 against 104.9, p99 148.8 against 143.1, and a sloppy player still wins
  * 73 of 200 against its 70.
  */
+/**
+ * ### 6 August 2026: 1.0 -> 0.12 -> 0.40, and the middle number was measured
+ *
+ * An earlier pass this day took `SWING_BEHIND` to 0.12 on the reasoning that a
+ * child who gets a lead should keep it. The direction is right and 0.12 is too
+ * far: the ceiling engages at `SWING_BEHIND / CATCHUP_BEHIND` metres, so 0.12
+ * puts it at **20 m** — inside the picture `railRace/camera.ts` draws, which is
+ * the one part of this band a child can actually see, and the part the ramp was
+ * deliberately kept gentle for.
+ *
+ * 0.40 puts the ceiling at 67 m, three times the width of that picture, so it
+ * only ever touches a rival who is off screen. Measured over the 24 fixed
+ * seeds, the difference between 0.12 and 0.40 for the player is a margin of
+ * 10.9 s against 6.3 s — both a comfortable win on every seed — and what it
+ * buys is that **nobody gets lapped**: the strongest player's worst-case margin
+ * goes 640 m to 544 m against a lap of 600.2 m. That is not a tuning
+ * preference, it is the difference between three rivals still on the track as
+ * she crosses the line and three rivals a full lap back, and the win
+ * celebration needs them there.
+ */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
-const SWING_BEHIND = 0.12;
+const SWING_BEHIND = 0.4;
 const SWING_AHEAD = 0.32;
 
 /**
@@ -567,9 +635,14 @@ const RIVAL_MASH_RATE_MAX = 6.2;
  * instead (see {@link rivalInput}), not by making the underlying rhythm
  * ragged.
  */
-function tickMash(rider: Rider, rate: number, dt: number): boolean {
+function tickMash(rider: Rider, rate: number, dt: number, jitter = 0, rng?: Rng): boolean {
   if (rate <= 0) return false;
-  rider.mashPhase += rate * dt;
+  // `jitter` widens and narrows the gap between taps by up to ±100% of itself.
+  // A rival never uses it (their raggedness comes from missed bars instead);
+  // the child-paced strategies do, because "taps irregularly" is half of what
+  // Jim described and a metronome cannot represent it.
+  const wobble = jitter > 0 && rng !== undefined ? 1 + jitter * (rng.unit() * 2 - 1) : 1;
+  rider.mashPhase += rate * dt * wobble;
   if (rider.mashPhase < 1) return false;
   rider.mashPhase -= 1;
   return true;
@@ -610,8 +683,24 @@ export function rivalInput(
 
 // ----------------------------------------------------------- the headless race
 
-/** The five ways `scripts/check-rail-race.mts` plays the game. */
-export type Strategy = 'mashThroughEverything' | 'neverPress' | 'mashPerfect' | 'mashSloppy' | 'ducksNothing';
+/**
+ * The ways `scripts/check-rail-race.mts` plays the game.
+ *
+ * **Two families, and they measure different things.** The first five hold tap
+ * rate fixed at 6/s and vary only hazard judgement — they answer *"is letting
+ * go worth it?"*. The last two vary **tap rate**, which is the axis nothing
+ * measured until 6 August 2026 and the axis Jim's "you go too slow" complaint
+ * lives on; see {@link PLAYER_BOOST_ADVANTAGE} for the measurement that found
+ * a child losing 23 of 24 races while every check in the build was green.
+ */
+export type Strategy =
+  | 'mashThroughEverything'
+  | 'neverPress'
+  | 'mashPerfect'
+  | 'mashSloppy'
+  | 'ducksNothing'
+  | 'childPace'
+  | 'playsBadly';
 
 /**
  * Sustained tap rate for each strategy, taps a second, while nothing needs
@@ -631,7 +720,33 @@ const STRATEGY_MASH_RATE: Readonly<Record<Strategy, number>> = {
   mashPerfect: 6,
   mashSloppy: 6,
   ducksNothing: 6,
+  // The two child-paced strategies exist precisely to break the flat-6 rule
+  // above — for them the tap rate *is* the variable under test. See `Strategy`.
+  childPace: CHILD_TAPS_PER_SECOND,
+  playsBadly: 1.2,
 };
+
+/**
+ * How ragged each strategy's tap stream is — 0 is a metronome, 0.7 means the
+ * gap between taps varies by ±70%.
+ *
+ * Only the child-paced strategies are ragged. A real thumb is not a metronome,
+ * and it matters: an irregular stream at the same *mean* rate spends time below
+ * that rate, and {@link Rider.boost} decays while it waits.
+ */
+const STRATEGY_MASH_JITTER: Readonly<Record<Strategy, number>> = {
+  mashThroughEverything: 0,
+  neverPress: 0,
+  mashPerfect: 0,
+  mashSloppy: 0,
+  ducksNothing: 0,
+  childPace: 0.7,
+  playsBadly: 0.8,
+};
+
+/** Chance a child-paced strategy remembers to duck for any given bar. */
+const CHILD_DUCK_CHANCE = 0.5;
+const BADLY_DUCK_CHANCE = 0.1;
 
 /**
  * How far ahead of a black stretch a strategy that means to play it cleanly
@@ -652,7 +767,7 @@ function strategyInput(
   dt: number,
   rng: Rng,
 ): RiderInput {
-  const pressed = tickMash(rider, STRATEGY_MASH_RATE[strategy], dt);
+  const pressed = tickMash(rider, STRATEGY_MASH_RATE[strategy], dt, STRATEGY_MASH_JITTER[strategy], rng);
   switch (strategy) {
     case 'mashThroughEverything':
       // Never lets go for anything — the old game-breaking bug this file
@@ -680,6 +795,24 @@ function strategyInput(
       // duck-bar mechanic's entire contribution to the race, with the spark
       // drag subtracted out on both sides. See `scripts/check-rail-race.mts`.
       if (zoneIsHere(rider, hazards, SPARK_AVOID_LEAD, 0)) return { pressed: false, ducking: false };
+      return { pressed, ducking: false };
+    case 'childPace':
+      // **The player this game is actually for**: taps about three times a
+      // second, irregularly, remembers half the bars and is late off the gas
+      // for the black stretches. She must win, and win clearly — that is the
+      // whole of Jim's 6 August brief.
+      if (barIsHere(rider, hazards, dt, 0.05)) {
+        return { pressed: false, ducking: rng.chance(CHILD_DUCK_CHANCE) };
+      }
+      if (zoneIsHere(rider, hazards, -2.5, 0)) return { pressed: false, ducking: false };
+      return { pressed, ducking: false };
+    case 'playsBadly':
+      // The guard rail, and the only one Jim left standing: barely taps, ducks
+      // almost nothing, mashes straight through the black stretches. She must
+      // still be able to **lose**. Everything else errs to the easy side.
+      if (barIsHere(rider, hazards, dt, 0.05)) {
+        return { pressed: false, ducking: rng.chance(BADLY_DUCK_CHANCE) };
+      }
       return { pressed, ducking: false };
   }
 }

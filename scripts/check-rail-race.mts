@@ -90,6 +90,7 @@ import { RAIL_GAUGE_AT_PARK_SCALE } from '../src/world/railRace/track.ts';
 import {
   RACE_LAPS,
   RIVAL_SKILL,
+  CHILD_TAPS_PER_SECOND,
   simulateField,
   simulateRailRace,
   type Strategy,
@@ -1220,6 +1221,8 @@ function fieldSummary(strategy: Strategy): {
 
 const perfectField = fieldSummary('mashPerfect');
 const sloppyField = fieldSummary('mashSloppy');
+const childField = fieldSummary('childPace');
+const badlyField = fieldSummary('playsBadly');
 const perfectMeanMargin = perfectField.margins.reduce((a, b) => a + b, 0) / perfectField.margins.length;
 const perfectMeanBonks = perfectField.rivalBonks.reduce((a, b) => a + b, 0) / perfectField.rivalBonks.length;
 say(
@@ -1233,6 +1236,13 @@ say(
     `margin ${Math.min(...sloppyField.margins).toFixed(1)}–${Math.max(...sloppyField.margins).toFixed(1)} m ` +
     `(mean ${sloppyMeanMargin.toFixed(1)} m)`,
 );
+const childMeanMargin = childField.margins.reduce((a, b) => a + b, 0) / childField.margins.length;
+say(
+  `child pace vs field       ${childField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `margin ${Math.min(...childField.margins).toFixed(1)}–${Math.max(...childField.margins).toFixed(1)} m ` +
+    `(mean ${childMeanMargin.toFixed(1)} m)   ${CHILD_TAPS_PER_SECOND} taps/s, half the bars`,
+);
+say(`plays badly vs field      ${badlyField.wins}/${FIELD_SEEDS.length} wins   (must not be all of them)`);
 
 // She has to be able to win playing well — every seed, not just on average,
 // because an "on average" pass hides individual seeds where the rivals are
@@ -1245,32 +1255,63 @@ require(
     'are still beating a child who plays every hazard cleanly. Lower RIVAL_SKILL or raise the ' +
     "rubber band's SWING_BEHIND in simulate.ts.",
 );
-// ...but not a procession. A margin the checker itself thinns to "generous
-// but bounded" rather than a fixed historical figure, because that figure
-// belongs to whatever the current physics happens to produce — re-measure,
-// don't rescale, same rule as the rest of this file.
-// **Raised from 140 to 170 on 6 August 2026, deliberately.** The player's press
-// is now worth 20% more than a rival's (`PLAYER_BOOST_ADVANTAGE`, Jim's "make
-// each boost do more so that the game is a bit easier"), and a player who is
-// genuinely faster beating the field by more is arithmetic, not a defect. What
-// this bound exists to prevent is a *procession*, and that is still guarded:
-// 170 m of a 1200 m race leaves the nearest rival 86% of the way round as she
-// crosses, which reads as a win rather than a lap. `SWING_BEHIND` went 0.55 ->
-// 1.0 in the same change so the rubber band can actually rescue the seeds where
-// she runs away — that alone took the worst case from 217.9 m to 156.7 m
-// without costing sloppy play a single win. Moved once, with numbers; if it
-// needs moving again, something else is wrong.
+// ...and nobody gets lapped.
+//
+// **This bound was 170 m and had to be re-derived on 6 August 2026 — not
+// loosened to make a seed pass, but rebuilt, because the number it held was
+// arithmetically incompatible with the instruction the game is now tuned to.**
+// Jim: *"it's just too hard ffs, you go too slow and the computer goes too
+// fast."* Work the 170 backwards and it demands rivals cruising at 27.8 m/s,
+// which needs them mashing at 5.7 taps a second — a `RIVAL_SKILL` of ~0.86,
+// i.e. almost exactly the 0.62/0.72/0.82 the family had already rejected once
+// as "far too good". The old bound was held up by an aggressive rubber band
+// that towed a far-behind rival to *38.9 m/s*, faster than the player's own top
+// speed, so it came screaming back into shot: the very thing Jim is describing.
+// A bound that can only be met by reinstating the complaint is not a bound.
+//
+// So it is replaced by the one that is a real, physical fact about the race
+// rather than a tuning preference: **the nearest rival must not have been
+// lapped.** It is taken from the game's own geometry (`route.length`), in the
+// spirit of CLAUDE.md's rule about thresholds coming from the game rather than
+// from the generator's target, and it still fires loudly if the field ever
+// becomes scenery. It also protects something concrete — three rivals still on
+// the track when she crosses the line, which is what the win celebration needs
+// to hold a camera on.
 require(
-  Math.max(...perfectField.margins) < 170,
+  Math.max(...perfectField.margins) < route.length,
   `playing well finishes as much as ${Math.max(...perfectField.margins).toFixed(1)} m clear of the ` +
-    'nearest rival on one of the fixed seeds — a procession, not a race. Raise RIVAL_SKILL or the ' +
-    "rubber band's CATCHUP_BEHIND.",
+    `nearest rival, which laps them on a ${route.length.toFixed(1)} m lap — the rivals have become ` +
+    "scenery. Raise RIVAL_SKILL or the rubber band's SWING_BEHIND.",
 );
-// A sloppy player must not always win — losing sometimes is what makes
-// playing well worth doing — but must not be hopeless either.
+// **The assertion Jim's complaint needed, and the build did not have.**
+//
+// Every strategy above taps 6 times a second. A child does not, and that single
+// axis decided the whole race: measured at 3 taps/s with half the bars ducked,
+// she won *1 of 24 seeds* while `mashPerfect` and `mashSloppy` both read as
+// comfortable and every check in the build was green. Assert the player the
+// game is actually for, not a metronome. See `PLAYER_BOOST_ADVANTAGE`.
 require(
-  sloppyField.wins < FIELD_SEEDS.length,
-  'playing sloppily still wins every single seed — the rivals have nothing to teach a careless player.',
+  childField.wins >= FIELD_SEEDS.length - 2,
+  `a child tapping ${CHILD_TAPS_PER_SECOND}/s and ducking half the bars wins only ${childField.wins}/` +
+    `${FIELD_SEEDS.length} seeds — this is the "too hard" complaint, unfixed. Raise ` +
+    'PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
+);
+require(
+  childMeanMargin > 40,
+  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins by a mean of only ${childMeanMargin.toFixed(1)} m — ` +
+    'close enough to read as a photo finish every time rather than a win. Jim asked to err well on ' +
+    'the easy side.',
+);
+// The one guard rail Jim left standing: *"she must still be able to lose if she
+// plays badly"*. This replaces the old `sloppyField.wins < 24`, which asserted
+// the right idea about the wrong player — `mashSloppy` taps at 6/s, so it is
+// not a careless child, it is a metronome that forgets bars, and it now wins
+// every seed by design. `playsBadly` is the careless one: 1.2 taps/s, ducks a
+// tenth of the bars, mashes through every black stretch.
+require(
+  badlyField.wins < FIELD_SEEDS.length / 4,
+  `playing badly still wins ${badlyField.wins}/${FIELD_SEEDS.length} seeds — a race that cannot be ` +
+    'lost teaches nothing and is the one thing Jim ruled out. Raise RIVAL_SKILL.',
 );
 require(
   sloppyField.wins > 0,
