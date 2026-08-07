@@ -209,6 +209,18 @@ export function buildRailFence(
     const steps = Math.max(2, Math.ceil((STATION_GAP * 2) / STEP));
     for (let i = 0; i <= steps; i += 1) {
       const distance = route.wrap(station.distance - STATION_GAP + (STATION_GAP * 2 * i) / steps);
+      // A real level crossing can sit inside a platform's window (a path
+      // crossing the rail just past the boarding gap) — its passage stays
+      // open on both sides, so the far-side run breaks around it.
+      const inCrossing = crossings.some(
+        (crossing) =>
+          Math.abs(route.wrap(distance - crossing.railDistance + route.length / 2) - route.length / 2) <
+          crossing.halfGap,
+      );
+      if (inCrossing) {
+        previous = null;
+        continue;
+      }
       route.pointAt(distance, point);
       route.tangentAt(distance, tangent);
       const x = point.x + tangent.z * farSide * FENCE_OFFSET;

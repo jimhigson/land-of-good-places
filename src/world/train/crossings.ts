@@ -53,17 +53,25 @@ export function computeCrossings(
   stationDistances: readonly number[] = [],
 ): LevelCrossing[] {
   const point = new Vector3();
-  const touches: { railDistance: number; x: number; z: number }[] = [];
+  const tangent = new Vector3();
+  const touches: { railDistance: number; x: number; z: number; side: number; nearStation: boolean }[] = [];
 
   const consider = (x: number, z: number) => {
     const railDistance = route.distanceNear(x, z);
+    let nearStation = false;
     for (const station of stationDistances) {
       const along = Math.abs(route.wrap(railDistance - station + route.length / 2) - route.length / 2);
-      if (along < STATION_EXCLUSION) return;
+      if (along < STATION_EXCLUSION) nearStation = true;
     }
     route.pointAt(railDistance, point);
     if (Math.hypot(point.x - x, point.z - z) <= TOUCH_DISTANCE) {
-      touches.push({ railDistance, x: point.x, z: point.z });
+      route.tangentAt(railDistance, tangent);
+      // Which side of the rail this path sample lies on. A cluster whose
+      // touches sit on BOTH sides is a path genuinely crossing the railway;
+      // one whose touches all share a side is a path running up beside it —
+      // which is what a station's own spur does at the platform.
+      const side = Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1;
+      touches.push({ railDistance, x: point.x, z: point.z, side, nearStation });
     }
   };
 
@@ -84,6 +92,18 @@ export function computeCrossings(
   let cluster: typeof touches = [];
   const flush = () => {
     if (!cluster.length) return;
+    // A cluster in a station's exclusion zone is the platform's own spur —
+    // unless its touches lie on both sides of the rail, which no boarding
+    // approach does: that is a real crossing that happens to be near a
+    // platform, and suppressing it seals a paved route inside the fence
+    // (seed 2 stranded the rim stall's whole spur exactly that way).
+    const nearStation = cluster.some((touch) => touch.nearStation);
+    const bothSides =
+      cluster.some((touch) => touch.side > 0) && cluster.some((touch) => touch.side < 0);
+    if (nearStation && !bothSides) {
+      cluster = [];
+      return;
+    }
     const mid = cluster[Math.floor(cluster.length / 2)] as (typeof touches)[number];
     const first = cluster[0] as (typeof touches)[number];
     const last = cluster[cluster.length - 1] as (typeof touches)[number];

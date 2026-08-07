@@ -2,7 +2,7 @@ import { CatmullRomCurve3, Vector3 } from 'three';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
-import { PARK_LAYOUT, placedEntry } from '../parkLayout';
+import { clearOfFootprints, PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { circleBoundary, insetBoundary, PARK_BOUNDARY } from '../boundary';
 import {
@@ -12,7 +12,6 @@ import {
   solveRailRoute,
 } from '../rail/generate';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
-import { TRAIN_PLAN } from '../train/plan';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import {
   CASTLE_OUTER_X,
@@ -176,8 +175,6 @@ const DESIRED_LENGTH = 220;
  */
 export const RAIL_OVER_RAIL_AIR = 5.5;
 
-/** Scratch for train-proximity queries during the solve. */
-const trainProbe = new Vector3();
 
 /**
  * Roughly this far apart, in metres, along the loop.
@@ -585,18 +582,19 @@ export class CoasterRoute {
         const nearest = other.nearestPoint(x, z);
         if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
       }
-      // The station and its ramps are the one stretch the vertical repair may
-      // never lift (a half-lift tilts the boarding deck), so a train crossing
-      // there is unfixable: the loop would run at deck height straight over
-      // the rails. Keep the low window off the train horizontally instead.
-      // The train solves at module load before any coaster plan (this module
-      // imports `train/plan`), so the curve is real, not a reservation.
+      // The station and its ramps are the one stretch that flies LOW, and the
+      // vertical repair may never lift it (a half-lift tilts the boarding
+      // deck) — so while the track is below cruise height it must only ever
+      // be over open ground: no plot may sit under the ramp. Footprints, not
+      // bounding circles, because the near-relation deliberately parks this
+      // ride's booth beside the castle and the castle's 19 m circle would
+      // reject every pose the relation just arranged. This is what keeps the
+      // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
+      // dodges the published low corridor itself (train/route.ts), because
+      // it solves later and threads intervals — Decision 6's arrow: publish
+      // what you solved, the next system treats it as an obstacle.
       const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
-      if (nearStation) {
-        const railDistance = TRAIN_PLAN.route.distanceNear(x, z);
-        TRAIN_PLAN.route.pointAt(railDistance, trainProbe);
-        if (Math.hypot(trainProbe.x - x, trainProbe.z - z) < radius + 4) return false;
-      }
+      if (nearStation && !clearOfFootprints(x, z, radius + 0.6)) return false;
       return true;
     };
     const brief: RouteBrief = {
@@ -786,21 +784,6 @@ export class CoasterRoute {
         if (above < CRUISE_FLOOR) {
           const lift = CRUISE_FLOOR - above + 0.4;
           lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
-        }
-        // Decision 4's crossing rule: wherever the loop passes over the
-        // train, RAIL_OVER_RAIL_AIR of air. A deficit here is repaired the
-        // same way a cruise-floor sag is — lift the owning control — because
-        // with the plots spread across the park (issue #241) the train's own
-        // dips move per seed, and no fixed hill schedule can promise to be
-        // high at every place the two happen to meet.
-        const railDistance = TRAIN_PLAN.route.distanceNear(probe.x, probe.z);
-        TRAIN_PLAN.route.pointAt(railDistance, trainProbe);
-        if (Math.hypot(trainProbe.x - probe.x, trainProbe.z - probe.z) < 4) {
-          const air = probe.y - trainProbe.y;
-          if (air < RAIL_OVER_RAIL_AIR) {
-            const lift = RAIL_OVER_RAIL_AIR - air + 0.4;
-            lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
-          }
         }
       }
       // Never lift a control that owns boarding-flat or early-ramp track — a

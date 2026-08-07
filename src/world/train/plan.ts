@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { TrainRoute } from './route';
-import { PARK_LAYOUT } from '../parkLayout';
+import { COASTER_PLANS } from '../coaster/plan';
+import { terrainHeight } from '../terrain';
 import { PALETTE } from '../../core/palette';
 
 /**
@@ -77,12 +78,8 @@ const STATION_SEEDS = [
  * Exported so any other pure plan solved at module load — `coaster/plan.ts`,
  * the ferris wheel's exit point — can ask the same question of the same
  * layout, rather than each re-deriving it. */
-export function clearOfPlots(x: number, z: number, radius: number): boolean {
-  for (const entry of PARK_LAYOUT.entries.values()) {
-    if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
-  }
-  return true;
-}
+export { clearOfPlots } from '../parkLayout';
+import { clearOfPlots } from '../parkLayout';
 
 /** The waiting spot beside the platform at `distance` — same side math the
  * station builder uses: the park side, 2.15 m off the centre line. */
@@ -152,9 +149,16 @@ function clearStationDistance(route: TrainRoute, target: number): number {
       }
     }
 
+    // Not under the Sky Cruiser's station flat or ramps either: the cruiser
+    // solves before the train, its low corridor is real geometry, and a
+    // platform under a 1-to-5 m coaster rail collides in plain sight
+    // (seed 11 built exactly that before this term existed).
+    const cruiserLow = nearCruiserLowCorridor(standX, standZ, 8);
+
     const score =
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
+      (cruiserLow ? 400 : 0) +
       radialDot * 30 +
       radius * 0.35 +
       Math.abs(offset) * 0.2;
@@ -164,6 +168,18 @@ function clearStationDistance(route: TrainRoute, target: number): number {
     }
   }
   return best;
+}
+
+/** Is (x, z) within `reach` of anywhere the Sky Cruiser flies low? */
+function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
+  const cruiser = COASTER_PLANS.cruiser.route;
+  const probe = new Vector3();
+  for (let d = 0; d < cruiser.length; d += 3) {
+    cruiser.pointAt(d, probe);
+    if (probe.y - terrainHeight(probe.x, probe.z) >= 5.9) continue;
+    if (Math.hypot(probe.x - x, probe.z - z) < reach) return true;
+  }
+  return false;
 }
 
 function planStations(route: TrainRoute): readonly PlannedStation[] {

@@ -311,6 +311,39 @@ function validate(
  */
 export const PARK_LAYOUT: ParkLayout = solve();
 
+/** Clear of every plot's bounding circle by `radius`. Pure, for the plans
+ * solved at module load (train, coaster, ferris exit) — lives here so none
+ * of them has to import another ride's plan just to ask about the layout. */
+export function clearOfPlots(x: number, z: number, radius: number): boolean {
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
+  }
+  return true;
+}
+
+/**
+ * Clear of every plot's actual FOOTPRINT (rect or circle) by `margin`.
+ *
+ * The bounding circle overstates a rectangular plot's corners by metres —
+ * fine for spacing, wrong for a ride that deliberately flies close: the Sky
+ * Cruiser's station is placed beside the castle on purpose, and testing its
+ * low-altitude window against the castle's 19 m circle rejects every pose
+ * the near-relation just arranged. The footprint is what is really built.
+ */
+export function clearOfFootprints(x: number, z: number, margin: number): boolean {
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (entry.footprint.kind === 'circle') {
+      if (Math.hypot(x - entry.x, z - entry.z) < entry.footprint.radius + margin) return false;
+      continue;
+    }
+    const dx = Math.abs(x - entry.x) - entry.footprint.halfX;
+    const dz = Math.abs(z - entry.z) - entry.footprint.halfZ;
+    const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+    if ((dx <= 0 && dz <= 0) || outside < margin) return false;
+  }
+  return true;
+}
+
 /** Convenience: the placed entry, or a loud failure naming the id. */
 export function placedEntry(id: string): PlacedEntry {
   const entry = PARK_LAYOUT.entries.get(id);

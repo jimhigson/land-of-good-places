@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { CoasterRoute, type CoasterRouteOptions } from './route';
 import { placedEntry } from '../parkLayout';
-import { clearOfPlots } from '../train/plan';
+import { clearOfPlots } from '../parkLayout';
 
 /**
  * The coaster plan — the Sky Cruiser as *data*, solved at module load

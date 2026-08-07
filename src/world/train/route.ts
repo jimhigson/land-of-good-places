@@ -1,6 +1,8 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
+import { COASTER_PLANS } from '../coaster/plan';
+import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -153,6 +155,10 @@ interface CircleObstacle {
   readonly centreX: number;
   readonly centreZ: number;
   readonly radius: number;
+  /** Clearance the loop keeps from this obstacle. Plots get the full
+   * fence-plus-lane {@link TRACK_PLOT_CLEARANCE}; the Sky Cruiser's low
+   * corridor needs only the track kept out from under it. */
+  readonly clearance?: number;
 }
 
 /** The solved loop, and everything the train and the stations ask of it. */
@@ -287,6 +293,25 @@ function solveProfile(): Float64Array {
     circles.push({ centreX: entry.x, centreZ: entry.z, radius: entry.boundingRadius + 1.5 });
   }
 
+  // The Sky Cruiser's LOW corridor — its station flat and ramps, wherever
+  // this seed put them. The cruiser solves first and cannot know the train;
+  // the train solves second and treats what the cruiser actually built as
+  // ground truth (Decision 6: publish what you solved, the next system
+  // dodges it). Anywhere the cruiser's rail is too low for a train to pass
+  // under with Decision 4's {@link RAIL_OVER_RAIL_AIR} becomes a small
+  // no-go disc; at cruise height it is not an obstacle at all, and the
+  // crossing rule is satisfied by the cruise floor itself.
+  {
+    const cruiser = COASTER_PLANS.cruiser.route;
+    const probe = new Vector3();
+    const lowCeiling = RAIL_OVER_RAIL_AIR + 0.4; // railhead sits ~0.3 above terrain
+    for (let d = 0; d < cruiser.length; d += 2) {
+      cruiser.pointAt(d, probe);
+      if (probe.y - terrainHeight(probe.x, probe.z) >= lowCeiling) continue;
+      circles.push({ centreX: probe.x, centreZ: probe.z, radius: 1.6, clearance: 2.2 });
+    }
+  }
+
   // Per-bearing free intervals of radius (issue #241). The old bound-pair —
   // "outside the furthest obstacle exit, inside one wall radius" — assumed
   // every plot sits inside the loop and the wall is a circle. Neither is true
@@ -311,7 +336,8 @@ function solveProfile(): Float64Array {
     }
     for (const circle of circles) {
       const span = circleSpan(dirX, dirZ, circle);
-      if (span) blocked.push([span[0] - TRACK_PLOT_CLEARANCE, span[1] + TRACK_PLOT_CLEARANCE]);
+      const keep = circle.clearance ?? TRACK_PLOT_CLEARANCE;
+      if (span) blocked.push([span[0] - keep, span[1] + keep]);
     }
     free.push(freeIntervals(blocked, INNER_FLOOR, walls[i] as number));
   }
@@ -366,7 +392,7 @@ function solveProfile(): Float64Array {
       const angle = (i / BEARINGS) * Math.PI * 2;
       const dirX = Math.cos(angle);
       const dirZ = Math.sin(angle);
-      radius = repair(radius, dirX, dirZ, rects, circles, wall, free[i] as Interval[]);
+      radius = repair(radius, dirX, dirZ, rects, circles, free[i] as Interval[]);
 
       next[i] = snapToFree(free[i] as Interval[], radius);
     }
@@ -443,7 +469,6 @@ function repair(
   dirZ: number,
   rects: readonly RectObstacle[],
   circles: readonly CircleObstacle[],
-  wallRadius: number,
   free: readonly Interval[],
 ): number {
   let value = radius;
@@ -451,41 +476,34 @@ function repair(
     const x = dirX * value;
     const z = dirZ * value;
 
-    let worst = wallRadius - value;
-    let fromWall = true;
+    // The wall needs no attention here: every free interval is already
+    // capped at the per-bearing wall radius, and the caller snaps into one
+    // after each repair. This loop only fixes 2D corner deficits — an
+    // obstacle whose corner pokes into the corridor diagonally, which a
+    // purely radial clamp cannot see. Each obstacle demands its own
+    // clearance: plots the fence-and-lane figure, the cruiser's low
+    // corridor just enough to keep the track out from under it.
+    let deficit = 0;
     for (const rect of rects) {
-      const gap = rectDistance(x, z, rect);
-      if (gap < worst) {
-        worst = gap;
-        fromWall = false;
-      }
+      const d = TRACK_PLOT_CLEARANCE - rectDistance(x, z, rect);
+      if (d > deficit) deficit = d;
     }
     for (const circle of circles) {
-      const gap = Math.hypot(x - circle.centreX, z - circle.centreZ) - circle.radius;
-      if (gap < worst) {
-        worst = gap;
-        fromWall = false;
-      }
+      const keep = circle.clearance ?? TRACK_PLOT_CLEARANCE;
+      const d = keep - (Math.hypot(x - circle.centreX, z - circle.centreZ) - circle.radius);
+      if (d > deficit) deficit = d;
     }
+    if (deficit <= 0) break;
 
-    // Plots demand the big clearance (fence + walkable lane); the wall only
-    // the track's own.
-    const needed = fromWall ? TRACK_CLEARANCE : TRACK_PLOT_CLEARANCE;
-    if (worst >= needed) break;
-    if (fromWall) {
-      value -= needed - worst;
-      continue;
-    }
     // Too close to something's corner. The old rule pushed *outward* always,
     // which was right while every plot lived inside the loop; now a plot can
     // sit beyond it (issue #241), so try both ways and keep whichever lands
     // on free ground — nearest first, so the profile deforms minimally.
-    const push = needed - worst;
-    const outward = value + push;
-    const inward = value - push;
+    const outward = value + deficit;
+    const inward = value - deficit;
     const outFree = snapToFree(free, outward) === outward;
     const inFree = snapToFree(free, inward) === inward;
-    if (outFree && (!inFree || push <= 0 || outward - value <= value - inward)) value = outward;
+    if (outFree && (!inFree || outward - value <= value - inward)) value = outward;
     else if (inFree) value = inward;
     else value = outward;
   }
