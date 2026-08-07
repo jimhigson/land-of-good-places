@@ -596,16 +596,28 @@ export function createCatBus(): CatBusHandle {
   doorWindow.position.set(0.02, DOOR_HEIGHT * 0.68, DOOR_WIDTH / 2);
   doorGroup.add(doorWindow);
 
-  // A dark opening behind the door, so swinging it away actually reveals a
-  // doorway instead of a hole showing the sky through the cabin.
+  // A dark opening **behind** the door, so swinging it away reveals a doorway
+  // instead of a hole showing the sky through the cabin.
+  //
+  // **It used to be in front of it.** The x was `doorGroup.position.x - 0.12 *
+  // DETAIL` — 0.26 m *further out* than the door hinge, on a slab 1.09 m thick
+  // — so the closed door was buried inside a black box standing proud of the
+  // bodywork, and the bus had a featureless dark rectangle stuck to its flank
+  // whenever it was shut. Nobody had seen it because the park's camera is
+  // fixed and never looks at that side; the cat bus's journey orbits the bus,
+  // so it is on screen for a third of the ride.
+  //
+  // Half its own thickness *inwards* from the hinge puts it flush inside the
+  // wall, which is where "behind the door" always meant.
+  const DOORWAY_THICKNESS = 0.5 * DETAIL;
   const doorway = decal(
     new Mesh(
-      new RoundedBoxGeometry(0.5 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.1 * DETAIL),
+      new RoundedBoxGeometry(DOORWAY_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.1 * DETAIL),
       toonMaterial(new Color(PALETTE.ink).multiplyScalar(0.7).getHex()),
     ),
   );
   doorway.position.set(
-    doorGroup.position.x - 0.12 * DETAIL,
+    doorGroup.position.x + DOORWAY_THICKNESS / 2,
     BODY_BOTTOM_Y + DOOR_HEIGHT / 2,
     doorGroup.position.z + DOOR_WIDTH / 2,
   );

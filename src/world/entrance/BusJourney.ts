@@ -24,7 +24,7 @@ import { toonMaterial } from '../../art/style/materials';
 import { createKid, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
-import { createCatBus, CAT_BUS_SEAT_COUNT, type CatBusHandle } from './catBus';
+import { createCatBus, CAT_BUS_SEAT_COUNT, CAT_BUS_WIDTH, type CatBusHandle } from './catBus';
 import { createBusDriver, type BusDriver } from './busDriver';
 
 /**
@@ -86,8 +86,16 @@ const BUS_SPEED = 11;
 /** The lane, in metres — everything the ride will cross, plus room to see ahead. */
 const LANE_LENGTH = JOURNEY_SECONDS * BUS_SPEED + 220;
 
-/** Half-width of the tarmac. "Narrow": two buses would not pass. */
-const ROAD_HALF_WIDTH = 5.2;
+/**
+ * Half-width of the road — **derived from the bus, so "narrow" stays true.**
+ *
+ * *"A narrow lane"* is a relationship, not a number: the lane is narrow when
+ * the bus nearly fills it. A hand-picked 5.2 gave a carriageway 1.6 times the
+ * bus's width, which on screen read as a wide sandy road with a bus somewhere
+ * on it. A verge of about half a bus-width in total is a lane a bus only just
+ * belongs on, and it moves on its own if the bus is ever resized again.
+ */
+const ROAD_HALF_WIDTH = CAT_BUS_WIDTH / 2 + 1.25;
 
 /** Half-width of the grass verge the ground mesh covers either side. */
 const GROUND_HALF_WIDTH = 90;
@@ -111,9 +119,9 @@ const LANE_AHEAD = 120;
  */
 export function laneHeight(z: number): number {
   return (
-    Math.sin(z * 0.031) * 2.6 +
-    Math.sin(z * 0.0117 + 1.7) * 4.1 +
-    Math.sin(z * 0.0731 + 0.4) * 0.7
+    Math.sin(z * 0.0755) * 3.1 +
+    Math.sin(z * 0.0412 + 1.7) * 4.4 +
+    Math.sin(z * 0.0169 + 0.4) * 3.2
   );
 }
 
