@@ -69,7 +69,6 @@ import {
   forkPlan,
   LEGACY_LEG_FOOT_RADIUS,
   RAIL_GAUGE_AT_PARK_SCALE,
-  SLEEPER_SPACING,
 } from '../../src/world/railRace/trestleGeometry.ts';
 
 /**
@@ -3321,6 +3320,23 @@ const BRANCH_TOP_LANE_TOLERANCE = 0.4;
 const RING_TIGHTEST_BEND = 20;
 
 /**
+ * The spacing Jim asked for, in metres — **deliberately a literal, and
+ * deliberately not `SLEEPER_SPACING`.**
+ *
+ * Mutation-tested 7 August 2026, and it failed: written against the imported
+ * constant, this check doubled its own expectation the moment somebody doubled
+ * the constant, so `SLEEPER_SPACING = 2` passed cleanly. That is this repo's own
+ * "green can mean incapable of failing" in miniature — a check comparing the
+ * builder to itself.
+ *
+ * The claim being guarded is not "the code did what the constant said", which is
+ * a tautology. It is Jim's: "cross-bars like railway sleepers between the tracks
+ * at about 1m intervals". So the metre is written here, once, and a constant
+ * that walks away from it makes this go red.
+ */
+const ABOUT_A_METRE = 1;
+
+/**
  * **Every one of the four tracks has a branch under it, and the tree really does
  * fork twice at the angle it claims.**
  *
@@ -3485,11 +3501,11 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
     const byLane = railCentreLinesByLane(ring);
     const perLane = Math.floor(sleepers.count / lanes);
 
-    const expected = Math.floor(route.length / SLEEPER_SPACING);
+    const expected = Math.floor(route.length / ABOUT_A_METRE);
     if (perLane !== expected) {
       complaints.push(
         `the ${ring.label} ring lays ${perLane} sleepers along a ${route.length.toFixed(1)} m lane — ` +
-          `expected ${expected}, one every ${SLEEPER_SPACING} m`,
+          `expected ${expected}, one about every ${ABOUT_A_METRE} m`,
       );
     }
 
@@ -3539,7 +3555,7 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
       a.setFromMatrixPosition(matrix);
       sleepers.getMatrixAt(i, matrix);
       b.setFromMatrixPosition(matrix);
-      worstStep = Math.max(worstStep, Math.abs(a.distanceTo(b) - SLEEPER_SPACING));
+      worstStep = Math.max(worstStep, Math.abs(a.distanceTo(b) - ABOUT_A_METRE));
     }
     // **How far "about a metre" is allowed to stray, and why it is not tight.**
     //
@@ -3558,12 +3574,12 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
     // and that is what this does. A regression that mattered — sleepers at 2 m
     // because someone doubled the constant to save triangles — is a mile outside
     // it.
-    const spread = (SLEEPER_SPACING * (route.laneSpan / 2)) / RING_TIGHTEST_BEND;
+    const spread = (ABOUT_A_METRE * (route.laneSpan / 2)) / RING_TIGHTEST_BEND;
     const stepTolerance = spread + 0.05;
     if (worstStep > stepTolerance) {
       complaints.push(
         `sleepers on the ${ring.label} ring sit up to ${worstStep.toFixed(3)} m away from the ` +
-          `${SLEEPER_SPACING} m spacing they claim, over the ${stepTolerance.toFixed(3)} m a lane ` +
+          `${ABOUT_A_METRE} m Jim asked for, over the ${stepTolerance.toFixed(3)} m a lane ` +
           `${(route.laneSpan / 2).toFixed(2)} m off the centre line can pick up on this ring's ` +
           'tightest bend',
       );
