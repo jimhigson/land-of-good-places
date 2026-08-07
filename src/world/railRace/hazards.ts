@@ -289,19 +289,16 @@ const ZONE_MAX = 23;
  * wide, so two bars from the same event cannot touch even before
  * `usedTrestleIndices` guarantees they are on different slots entirely.
  *
- * **Symmetric about the event, and that is load-bearing rather than tidy.** The
- * first version of this was `[-1, 0, 1, 2]`, whose mean is +0.5 slots — so every
- * bar in the ring sat 6 m later than the cursor walk above had placed it. That
- * is a systematic shift of a *tuned* layout, and it measured: a competent
- * player's winning margin went 298.0 m to 304.9 m, over `check:rail-race`'s
- * 300.1 m half-lap bound, which exists so the field is still on screen at the
- * finish. Zero mean puts the event's own position back where the walk asked for
- * it and leaves the tuning alone.
+ * Symmetric about the event, and wide: 48 m is more than the 24 m gap between
+ * the closest pair of bar events, so consecutive events' bars interleave and the
+ * ring ends up evenly scattered rather than carrying ten clumps of four.
  *
- * **Deliberately not avoiding the spark zones.** Jim, 7 August 2026: "it is also
- * ok for them to be over the black tracks."
+ * **Bars may sit over the black stretches.** Jim, 7 August 2026: "it is also ok
+ * for them to be over the black tracks", and again, reversing an intermediate
+ * decision to avoid them: "yes they can be over the black bits". Nothing here
+ * tests against {@link SparkZone} — a bar goes wherever the grid puts it.
  */
-const BAR_LANE_OFFSETS: readonly number[] = [-1, 0, 1, 2];
+const BAR_LANE_OFFSETS: readonly number[] = [-2, -1, 1, 2];
 
 /**
  * The least a single lane's own consecutive bars may be apart, in trestle slots.
@@ -385,20 +382,6 @@ function snapToTrestleGrid(
    * which is exactly the tuned property this change was meant not to touch.
    */
   laneUsed?: Set<number>,
-  /**
-   * The spark stretches a bar should keep out of.
-   *
-   * **Not** because a bar over black rail is wrong — Jim explicitly allowed it
-   * ("it is also ok for them to be over the black tracks"), and this file's
-   * `BAR_LANE_OFFSETS` no longer avoids anything on its own account. It is
-   * because the old single-position walk *structurally* alternated bars and
-   * zones, so no bar had ever landed inside one, and the ride's difficulty was
-   * tuned on top of that accident. Letting bars fall into zones measured as a
-   * competent player's margin going 298.0 m to 332.2 m — past
-   * `check:rail-race`'s 300.1 m half-lap bound. Keeping the alternation keeps
-   * the tuning; the permission stands unused rather than unavailable.
-   */
-  zones?: readonly SparkZone[],
 ): number {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
@@ -407,17 +390,10 @@ function snapToTrestleGrid(
     const d = Math.abs(a - b) % count;
     return Math.min(d, count - d);
   };
-  // Half the bar's depth **along** the track — not its half-span, which is how
-  // far it reaches sideways across the lane and says nothing about which metres
-  // of rail it sits over. Owned three lines up, so it cannot drift.
-  const barReach = DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE * RIDE_SCALE;
-  const clearOfZones = (at: number): boolean =>
-    !zones || zones.every((zone) => at + barReach < zone.from || at - barReach > zone.to);
   const allowed = (index: number): boolean =>
     !usedIndices.has(index) &&
     (!window || (index >= window.min && index <= window.max)) &&
-    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS)) &&
-    clearOfZones((index / count) * loopLength);
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
     for (const candidate of candidates) {
@@ -511,7 +487,6 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
           usedTrestleIndices,
           barWindow,
           usedByLane[lane]!,
-          zones,
         ),
         lane,
       });

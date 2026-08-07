@@ -1997,36 +1997,22 @@ require(
     `nearest rival, which laps them on a ${route.length.toFixed(1)} m lap — the rivals have become ` +
     "scenery. Raise RIVAL_SKILL or the rubber band's SWING_BEHIND.",
 );
-// **The number Jim actually complained about on 7 August, which nothing bounded.**
+// A bound on a *competent* player's mean winning margin used to sit here, and
+// was **deleted on 7 August 2026 at Jim's instruction**: "I never signed off
+// that check as a requirement, if you want me to, tell me what it is, otherwise
+// delete it."
 //
-// Round 8 flagged it and deliberately did not act: *"a competent player now wins
-// by a mean of 461 m on a 1200 m race … that may be too easy … it is his call"*.
-// He rode it and it was: *"the game is now too easy"*. So the competent player
-// gets the same bound the child already had, for the same reason and off the
-// same geometry — **half a lap** — because the thing it protects is the same
-// thing: the camera holds on the winner for the whole celebration, and a field
-// half a ring back is round the far side and not in the picture at all.
+// It was added the same morning by the Overseer rather than asked for by the
+// family. It asserted the mean margin stayed under half a lap, on the theory
+// that a larger margin would leave no rival in frame for the winner's
+// celebration — a staging consequence **nobody had ever looked at**. It is gone
+// rather than loosened, deliberately: a guess about an unobserved problem is not
+// made better by a bigger number. The child-facing bound further down is a
+// different assertion and stays.
 //
-// `mashPerfect` is the closest profile to Jim himself: 6 taps/s, every hazard
-// played. It is the only one of the four that measures *his* race rather than
-// Eleri's, which is why his complaint landed on a build where every child-facing
-// guard was green.
-//
-// **This bound is tight on purpose — 298.0 m against 300.1 m, 0.7% of room — and
-// it must not be slid.** That is safe to ship because the sweep is fully
-// deterministic (24 fixed seeds, fixed dt, seeded RNG), so it cannot flake: the
-// only thing that moves this number is somebody changing the balance, which is
-// exactly when it should speak up. If it fires, the tuning has drifted back
-// towards the procession Jim rejected and the tuning is what to fix.
-const PROCESSION_MARGIN = route.length / 2;
-require(
-  perfectMeanMargin < PROCESSION_MARGIN,
-  `playing well wins by a mean of ${perfectMeanMargin.toFixed(1)} m on a ` +
-    `${(route.length * RACE_LAPS).toFixed(1)} m race — over the ${PROCESSION_MARGIN.toFixed(1)} m ` +
-    'half-lap bound, so the field is round the far side of the ring and out of shot for the whole ' +
-    'finish. This is the "the game is now too easy" complaint, unfixed. Raise RIVAL_SKILL or the ' +
-    "rubber band's SWING_BEHIND in simulate.ts.",
-);
+// `perfectMeanMargin` is still measured and still printed above, because the
+// number is worth seeing; nothing asserts on it.
+
 // **The assertion Jim's complaint needed, and the build did not have.**
 //
 // Every strategy above taps 6 times a second. A child does not, and that single
