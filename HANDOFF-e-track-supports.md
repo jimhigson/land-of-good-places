@@ -4,82 +4,90 @@ Branch `e/track-supports`, cut from `origin/chore/rail-race-pr-triage` (PR #223,
 which already reworked the droppers — do **not** rebase onto `main`).
 Worktree `.claude/worktrees/e-track-supports`. Dev port **5477**.
 
-Jim's spec: Rail Race supports become branching trees (2x base post, split at
-~30 degrees, split again to carry 4 tracks, one non-clashing colour); Sky
-Cruiser gets vertical supports of the same thickness; both rides get sleepers
-at ~1 m.
+**Status: all four pieces built, built green, and watched in the browser.**
+`npm run build` exit 0. `npm run test:procgen` 241 passed / 9 files / 0 skipped
+(was 221). Screenshots in
+`/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/68ade46a-c81d-46a8-8676-003ebeeaa648/scratchpad/shots/`.
 
-## Measured before touching anything (canonical seed)
+## What was asked, and what is built
 
-| thing | value |
-| --- | --- |
-| Rail Race lap | 600.2 m, **two** rings (walk-past scale 1, race scale 2.5) |
-| trestles | 50 per ring, 12 m spacing (`TRESTLE_SPACING`, hazards.ts:229) |
-| leg height | 6.15–7.11 m, mean 6.64; tops all at `beamY` = 6.60 |
-| race lane spacing | 2.750 m, half-span 4.125 m (`laneOffsets` +/-4.125, +/-1.375) |
-| walk-past lane spacing | 1.100 m, half-span 1.650 m |
-| **Sky Cruiser pylons** | **4, on a 217 m route** — this is the real defect |
-| whole scene | **2,367,240 triangles** (ARCHITECTURE.md quotes ~400k worst case) |
+1. **Rail Race trestles are branching trees.** Base post 0.52/0.68 m (2x the old
+   0.26/0.34), splitting into two branches and then four, one top under each
+   lane. One grey — `ART.statueStone`.
+2. **Sky Cruiser has vertical supports.** 16 pylons where there were **4**, same
+   thickness as the Rail Race base post, imported not copied.
+3. **Sleepers at 1 m on both rides.** Rail Race 2400 a ring; Sky Cruiser
+   `TIE_STEP` 1.4 -> 1, so 217 ties against 155.
+4. **Duck bars one per lane, spread round the lap, legs in the lane's colour.**
 
-## The Sky Cruiser's 4 pylons — root cause
+## Measured, canonical seed
 
-`Coaster.ts:398` rejects a candidate within `entry.boundingRadius + 2.4` of any
-`PARK_LAYOUT.entries` value. The comment says this exists to stop a post
-pinching "the 5 m gap between two plots", but `boundingRadius` is 19 m for the
-castle and 15 m for the dodgems, so it bans discs the cruiser **deliberately
-overflies**. Measured rejection over 38 candidates: corridor 28, onPath 11,
-notClear 9, tooLow 3. Culprits: dodgems 8, building 7, waterFight 6, ballPit 4,
-fountain 4.
+| | before | after |
+| --- | --- | --- |
+| Sky Cruiser pylons on 217 m | 4 | 16 |
+| Rail Race trestle foot radius | 0.34 m | 0.68 m |
+| dropper radius | 0.08 m | 0.124 m |
+| duck bars per lane per lap | 10 (all lanes at one point) | 10 (all different points) |
+| closest two bars | 0 m (stacked) | 12.00 m, vs 5.75 m bar width |
+| whole scene triangles | 2,367,240 | 2,443,968 (+3.2%) |
 
-**The slide already hit this and fixed it** — `slide/supports.ts:42`
-`JOINED_PLOTS = new Set(['building','ballPit'])`, with the note "37
-otherwise-perfect spots rejected, 0 legs built, a 95 m chute left floating and
-nothing said so". Same disease, different organ.
+Fork angle is solved per ring by `forkPlan`: walk-past **30.0°** exactly, race
+ring **41.6°**. 30° everywhere is geometrically impossible on the race ring —
+reaching four lane centres needs 4.125 m of sideways reach, which at 30° wants
+7.14 m of fork inside the 6.60 m between ground and tops, before any trunk. The
+floor, with a zero trunk, is 32.0°.
 
-Also noted: `slide/supports.ts:105` `PATH_CLEARANCE = 2.8` is commented "The
-coaster's pylon figure" — a hand-copied constant with no owner. Give it one.
+## Three rulings from Jim, all final
 
-## The 30 degree problem — a real geometric finding
+1. **Fairness is the equal bar count**, not equal positions. The pack breaking up
+   mid-race is accepted behaviour: *"so long as it is fair overall it doesn't
+   matter if some go faster or slower for small sections of the ride"*.
+2. **Bars may cross the black bits.** *"yes they can be over the black bits -
+   I'm reversing that decision, with no argument asked for"*.
+3. **The competent-player margin bound is deleted**, not raised: *"I never signed
+   off that check as a requirement... otherwise delete it"*. It was added the
+   same morning by the Overseer, guarded a staging consequence nobody had
+   observed, and `RIVAL_SKILL` was **not** touched. The child-facing bound below
+   it is a different assertion and stays.
 
-A double fork at 30 degrees from vertical needs
-`(1.5 * laneSpacing) / tan(30) = 4.125 / 0.5774 = 7.14 m` of fork height to
-reach the race ring's four lane centres. Only **6.6 m** exists between ground
-and `beamY`, and that is before any trunk. **30 degrees everywhere is
-impossible on the race ring.** Minimum achievable (zero trunk) is 32.0 degrees.
+With the shipped layout and `RIVAL_SKILL` untouched at 0.51/0.60/0.69: child
+pace at level 3 wins **17/24** against a baseline 11/24; levels 1 and 2 are
+unchanged to the metre at 24/24, means 41.2 m and 44.4 m.
 
-Resolution: target 30 degrees, keep a minimum trunk fraction, let the angle open
-only as far as the span forces. Walk-past ring gets exactly 30 degrees (its
-half-span is 1.65 m); race ring lands wider. Both angles are measured off the
-built instance matrices by the invariant, and reported to Jim.
+## Root causes found
 
-## Colour
+- **Sky Cruiser's 4 pylons.** `Coaster.buildTrack` rejected any candidate within
+  `entry.boundingRadius + 2.4` of a `PARK_LAYOUT` entry. That is 19 m for the
+  castle, 15 m for the dodgems — plots this ride exists to fly over. 28 of 38
+  candidates died to that test alone. `slide/supports.ts` hit the identical bug
+  two days earlier and fixed it with a hand-kept `JOINED_PLOTS`;
+  `coaster/pylons.ts` asks the route instead, so it cannot go stale.
+- **Duck bars intersected as arithmetic, not accident.** A bar reaches 2.875 m
+  either side of its lane centre; lanes are 2.750 m apart. Four at one arc
+  distance *had* to overlap, by 3.00 m.
+- **A check that could not fail.** The sleeper-spacing assertion compared the
+  built spacing to `SLEEPER_SPACING`, the constant the builder used, so
+  `SLEEPER_SPACING = 2` passed cleanly. Now asserts a literal metre.
+- **`duckBarsSlowYouWhereTheyStand` silently became wrong**, deduping bars by arc
+  position on the reasoning that "all four lanes of one bar share it". Extended
+  to work out each bar's real lane.
 
-`ART_DIRECTION.md` §5 forbids a neutral grey by name ("reads as a hole punched
-in the picture"). The sanctioned grey is the rose-leaning
-`ART.statueStone*` ladder (`src/art/style/artPalette.ts:96-104`), whose doc
-comment is the ruling. `src/world/Fountain.ts` already imports `ART`, so the
-import is precedented. Chosen: `ART.statueStone` (0xd3cacb) — clear of all four
-`LANE_COLOURS` (markerPink/Sky/Lemon/Mint) and light rather than dark, per that
-file's note that the toon ramp's darkest band goes muddy at night.
+## Mutations, all proved red
 
-## Names in the built scene (what invariants read)
+branch tops sent to one lane · post back to old thickness · fork ratio changed ·
+sleepers at 2 m · sleepers rolled by minimal rotation (#112) · bars restacked at
+a shared point · one lane starved of bars · cruiser's old plot keep-out restored.
 
-- `railRace:trestle-legs` — kept; 4 invariants read it. Now the **base post**.
-- `railRace:trestle-branches` — new, 6 per spot (2 lower, 4 upper).
-- `railRace:trestle-beams` — **removed**; grep proves nothing read it.
-- `railRace:sleepers` — new.
-- `skyCruiser:pylons` — the coaster's pylon mesh had **no name** at all.
-- `ties` — kept (name is a hard build gate in `scripts/check-tie-frame.mts`).
+## Notes for whoever is next
 
-## Status
-
-- [x] measured baseline, root-caused the 4 pylons
-- [ ] piece 1 Rail Race branching trestles
-- [ ] piece 2 sleepers both rides
-- [ ] piece 3 Sky Cruiser vertical supports
-- [ ] invariants + mutation proof
-- [ ] screenshots
-
-Scratch measurement scripts `scripts/measure-supports.mts` and
-`scripts/measure-pylon-rejects.mts` are **not** for committing to main; they are
-diagnostics. Delete or keep out of the PR.
+- `railRace/trestleGeometry.ts` is a **leaf module** — imports nothing. It exists
+  because `track.ts` reaches `parkLayout.ts`, and a static import of that into
+  `test/` fixes the park seed before the harness sets it (the 76-silent-skips
+  failure). Same answer as `train/trainDimensions.ts`.
+- `coaster/pylons.ts` exports `PATH_CLEARANCE`; `slide/supports.ts` still keeps
+  its own copy of 2.8 with a comment calling it "the coaster's pylon figure".
+  Worth pointing the slide at the owner — not done here, out of scope.
+- **Finish-shot question**: rivals *are* visible in frame near the finish rainbow
+  (`21-race-t144s.png`). Not a rigorous celebration-camera measurement; the
+  automated run finished 4th and the celebration passed between interval shots.
+  Informational only — Jim deleted the bound this was going to inform.
