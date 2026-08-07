@@ -49,6 +49,102 @@ import { PARK_BOUNDARY } from '../boundary';
 /** Samples around the ring. The boundary's own outline is 512; this refines it. */
 const SAMPLES = 2048;
 
+/**
+ * Half-width of the stencil each sample's tangent is estimated over, in metres.
+ *
+ * ### The jerky camera this exists to fix (6 August 2026)
+ *
+ * Tangents used to be read straight off the outline segment a resampled point
+ * happened to land in (`b.x - a.x` for that one segment). That makes the
+ * tangent — and so the normal, and so the whole frame — a **step function**:
+ * every sample inside one outline segment gets a bit-identical tangent, and it
+ * jumps at the boundary. Measured round the lap, that left **3511
+ * constant-tangent plateaus**, and because `railRace/camera.ts` stands its rig
+ * tens of metres out *along that normal*, every step was amplified into a
+ * visible lurch: the camera's speed ranged from **0.003 to 5.072 metres of
+ * camera per metre of rider**, with a median acceleration of 0.000 and a
+ * maximum of 81.4 — flat, flat, flat, jump, which is exactly what a step
+ * function looks like and exactly what it felt like to ride.
+ *
+ * A central difference over a fixed *arc-length* window fixes it at the source
+ * rather than damping the symptom downstream. It is also very nearly free in
+ * accuracy: on a circular arc a symmetric central difference gives the chord,
+ * whose direction **is** the true tangent at the midpoint, so the error is
+ * third-order and appears only where curvature itself changes. 2 m is far
+ * shorter than the ~40 m over which this ring's curvature actually varies
+ * (`railRace/camera.ts` measures that), and comfortably longer than the ~1.5 m
+ * longest outline segment, so it always spans several of them.
+ *
+ * Do not go back to the per-segment tangent to "keep the path faithful to the
+ * outline" — the *positions* are untouched and still sit exactly on the offset
+ * polygon. This changes only how the frame at those positions is estimated.
+ */
+const TANGENT_WINDOW = 2;
+
+/**
+ * The window the **camera's** frame is smoothed over, in metres — far longer
+ * than {@link TANGENT_WINDOW}, and for a different reason.
+ *
+ * ### Why the camera cannot use the geometry's frame
+ *
+ * `railRace/camera.ts` stands its rig about **27.5 m** out along the normal at
+ * the rider. The ring's tightest bend has a radius of about 20 m. A point held
+ * a fixed distance out along the normal of a curve traces an offset curve whose
+ * radius is `R - offset`, so wherever the ring bends towards the camera more
+ * tightly than the rig stands out, **that offset curve runs backwards**. It is
+ * not an approximation error and no amount of damping removes it.
+ *
+ * Measured on the built park by the `raceCameraNeverRunsBackwards` invariant,
+ * it happened on **every one of the five seeds** — worst forward progress
+ * −0.022, −0.055, −0.380, −0.410 and −0.318 metres of camera per metre of
+ * rider, on 2 to 65 probes of ~2400 a lap. So a few times a lap, on any park
+ * the generator makes, the picture lurches the wrong way while she is still
+ * going forwards.
+ *
+ * ### Why smoothing the frame is the fix, and what it costs
+ *
+ * The rig is expressed as offsets in the frame **at the rider**, and the rider
+ * sits at that frame's origin — so rotating the frame rotates the camera, its
+ * aim and its up together, rigidly, about the rider. The rider's position on
+ * screen is therefore *exactly* preserved however much the frame is smoothed,
+ * which is the one framing promise `solve` makes exactly. What smoothing does
+ * change is where the look-ahead point lands, and that promise is documented as
+ * one-sided and approximate already: a window may show more road than asked
+ * for, never less.
+ *
+ * So the camera follows the ring's *general drift* rather than its every
+ * wiggle, which is what a camera operator standing in a field would do, and the
+ * rails, lanes, sleepers and hazards all still use the faithful
+ * {@link TANGENT_WINDOW} frame.
+ *
+ * ### It is not free, and 10 sits between two walls that are both guarded
+ *
+ * The cost I did not expect, and `check:rail-race` caught: a smoothed frame is
+ * no longer square-on to the rider's *actual* direction of travel, and that
+ * drift adds straight onto the rig's swing. The rider's own screen position is
+ * still exact (she is the frame's origin), but how squarely she crosses the
+ * picture is not, and the side-scroller floor — `dot(screenRight, travel) > 0.9`
+ * — has only about 4° of budget over {@link MAX_SWING}'s 22°. Swept:
+ *
+ * ```
+ *    window   camera runs backwards   check:rail-race
+ *      6 m    200 of 12003 probes     passes
+ *      8 m     17                     passes
+ *     10 m      0                     passes            <- here
+ *     12 m      0                     FAILS  side-scroller 0.897
+ *     14 m      0                     FAILS  swing 27.3°, eye facing 0.348
+ *     24 m      0                     FAILS  four ways
+ * ```
+ *
+ * So this number has a wall on each side and roughly one step of room between
+ * them. **Both walls are checked** — reversal by the `raceCameraNeverRunsBackwards`
+ * procgen invariant across five seeds, drift by `check:rail-race` — so moving
+ * it in either direction fails loudly rather than quietly. If it ever needs
+ * more room, the lever is the ~27.5 m stand-off itself, which one awkward station
+ * sets for the whole ring in `RaceCamera.solve`.
+ */
+const CAMERA_GUIDE_WINDOW = 10;
+
 
 export interface RingSample {
   readonly x: number;
@@ -63,8 +159,43 @@ export interface RingSample {
   readonly at: number;
 }
 
+/**
+ * Fills in tangents by central difference over `window` metres of arc.
+ *
+ * One mechanism for both frames the ring publishes — the faithful one the
+ * geometry is built on and the smoothed one the camera follows — so there is no
+ * second copy of this arithmetic to fall out of step with the first.
+ */
+function addTangents(into: RingSample[], window: number, perimeter: number): void {
+  const span = Math.max(1, Math.round((window / perimeter) * SAMPLES));
+  // Read positions off a snapshot: writing tangents back into the same array is
+  // safe only because nothing here reads a tangent, but the snapshot makes that
+  // independent of the order the loop happens to run in.
+  const points = into.map((sample) => ({ x: sample.x, z: sample.z }));
+  for (let i = 0; i < SAMPLES; i += 1) {
+    const behind = points[(i - span + SAMPLES) % SAMPLES] as { x: number; z: number };
+    const ahead = points[(i + span) % SAMPLES] as { x: number; z: number };
+    const tx = ahead.x - behind.x;
+    const tz = ahead.z - behind.z;
+    const tl = Math.hypot(tx, tz) || 1;
+    const sample = into[i] as RingSample;
+    (sample as { tangentX: number }).tangentX = tx / tl;
+    (sample as { tangentZ: number }).tangentZ = tz / tl;
+  }
+}
+
+/** Turns each tangent a quarter turn to face away from the park. */
+function addNormals(into: RingSample[], outward: number): void {
+  for (const sample of into) {
+    (sample as { normalX: number }).normalX = sample.tangentZ * outward;
+    (sample as { normalZ: number }).normalZ = -sample.tangentX * outward;
+  }
+}
+
 export class RingPath {
   readonly samples: readonly RingSample[];
+  /** The camera's smoothed frame. Same positions — see {@link CAMERA_GUIDE_WINDOW}. */
+  private readonly guide: readonly RingSample[];
   /** One lap, in metres. */
   readonly length: number;
   /** +1 or -1: which turn of the tangent points away from the park. */
@@ -137,22 +268,25 @@ export class RingPath {
       const b = offset[(cursor + 1) % count] as { x: number; z: number };
       const segment = (cumulative[cursor + 1] as number) - (cumulative[cursor] as number);
       const t = segment > 1e-9 ? (target - (cumulative[cursor] as number)) / segment : 0;
-      const x = a.x + (b.x - a.x) * t;
-      const z = a.z + (b.z - a.z) * t;
-      const tx = b.x - a.x;
-      const tz = b.z - a.z;
-      const tl = Math.hypot(tx, tz) || 1;
       samples.push({
-        x,
-        z,
-        tangentX: tx / tl,
-        tangentZ: tz / tl,
-        // Filled in below, once the outward sense is known.
+        x: a.x + (b.x - a.x) * t,
+        z: a.z + (b.z - a.z) * t,
+        // Both filled in below: the tangent needs its neighbours, and the normal
+        // needs the tangent plus the outward sense.
+        tangentX: 0,
+        tangentZ: 0,
         normalX: 0,
         normalZ: 0,
         at: target,
       });
     }
+
+    // --- 4. tangents, by central difference over an arc-length window -------
+    //
+    // A second pass, because a tangent estimated from the outline segment a
+    // sample lands in is piecewise constant and made the camera lurch. See
+    // TANGENT_WINDOW.
+    addTangents(samples, TANGENT_WINDOW, perimeter);
 
     // Which way round is "out" follows from the winding, and the winding has
     // just been reversed — so rather than reason about it, ask the boundary
@@ -166,12 +300,17 @@ export class RingPath {
         ? 1
         : -1;
     this.normalSign = outward;
-    for (let i = 0; i < samples.length; i += 1) {
-      const sample = samples[i] as RingSample;
-      (sample as { normalX: number }).normalX = sample.tangentZ * outward;
-      (sample as { normalZ: number }).normalZ = -sample.tangentX * outward;
-    }
+    addNormals(samples, outward);
     this.samples = samples;
+
+    // --- 5. the camera's own, much more heavily smoothed frame --------------
+    //
+    // Same positions, same mechanism, longer window — see CAMERA_GUIDE_WINDOW
+    // for why the camera cannot use the frame above at all.
+    const guide = samples.map((sample) => ({ ...sample }));
+    addTangents(guide, CAMERA_GUIDE_WINDOW, perimeter);
+    addNormals(guide, outward);
+    this.guide = guide;
   }
 
   /** Brings any arc length into `[0, length)`. */
@@ -187,13 +326,35 @@ export class RingPath {
    * over a span far shorter than anything the ride draws with.
    */
   sampleAt(distance: number): RingSample {
+    return this.lookup(this.samples, distance);
+  }
+
+  /**
+   * The **camera's** frame at an arc length: the same point, on a frame
+   * smoothed over {@link CAMERA_GUIDE_WINDOW} rather than
+   * {@link TANGENT_WINDOW}.
+   *
+   * Only `railRace/camera.ts` should call this. Everything that draws or
+   * collides — rails, sleepers, droppers, lanes, duck bars — wants
+   * {@link sampleAt}, because those must sit exactly where the ring is, and
+   * this deliberately does not.
+   *
+   * The window was swept against the two things it trades off — how far the
+   * frame drifts from the true one, and whether the offset path the camera
+   * rides ever reverses. See the commit that introduced it for the table.
+   */
+  guideAt(distance: number): RingSample {
+    return this.lookup(this.guide, distance);
+  }
+
+  private lookup(table: readonly RingSample[], distance: number): RingSample {
     const wrapped = this.wrap(distance);
     const exact = (wrapped / this.length) * SAMPLES;
     const i = Math.floor(exact) % SAMPLES;
     const j = (i + 1) % SAMPLES;
     const t = exact - Math.floor(exact);
-    const a = this.samples[i] as RingSample;
-    const b = this.samples[j] as RingSample;
+    const a = table[i] as RingSample;
+    const b = table[j] as RingSample;
     const lerp = (u: number, v: number): number => u + (v - u) * t;
     // Tangent and normal are lerped and renormalised rather than slerped: over
     // 0.22 m of a curve whose tightest radius is 20 m the angle between

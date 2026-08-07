@@ -2075,6 +2075,57 @@ const droppersHangUnderRealRails: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * The camera has to keep going forwards while the rider does.
+ *
+ * Zero would mean "may stall but never reverse", which is the letter of the
+ * defect; this asks for a little more, because a camera that drops to a
+ * standstill for a few metres reads as a stutter even though it never technically
+ * goes backwards. 0.05 m of camera per metre of rider is far below anything
+ * deliberate — the rig normally tracks at about 1.3 — and far above the −0.318
+ * the pointwise frame produced.
+ */
+const CAMERA_MIN_FORWARD_PROGRESS = 0.05;
+
+/**
+ * **The camera must never slide backwards while the rider runs forwards.**
+ *
+ * Jim rode this and reported the camera as jerky. Two separate causes, both
+ * measured rather than guessed (6 August 2026):
+ *
+ * 1. The ring's tangents were read off whichever outline segment a resampled
+ *    point landed in, making the whole frame a **step function** — 3511
+ *    constant-tangent plateaus round one lap. The rig stands ~27.5 m out along
+ *    that frame's normal, so every step became a lurch: camera speed ranged
+ *    0.003–5.072 m per metre of rider, peak acceleration 81.4.
+ * 2. Worse and quite separate: with a ~27.5 m stand-off on a ring whose tightest
+ *    bend is ~20 m, the offset curve the camera rides **inverts**. It ran
+ *    backwards on 2.6% of every lap, at up to 0.318 m per metre.
+ *
+ * This guards (2), which is the one a child would name, and it guards it on the
+ * **built** ring of every seed — the shape of the boundary is what decides
+ * whether it happens at all, so the canonical seed alone is not evidence.
+ * `check:rail-race` guards the other side of the same trade (a frame smoothed
+ * far enough to fix this stops being square-on to the rider's travel and breaks
+ * the side-scroller rule), so the two together pin `CAMERA_GUIDE_WINDOW`
+ * between walls that are each about one step away.
+ */
+const raceCameraNeverRunsBackwards: Invariant = (facts) => {
+  const tracking = facts.cameraTracking;
+  if (tracking.probes === 0) {
+    return ['the race camera could not be walked round the built ring at all'];
+  }
+  if (tracking.leastForwardProgress >= CAMERA_MIN_FORWARD_PROGRESS) return [];
+  return [
+    `the race camera falls to ${tracking.leastForwardProgress.toFixed(3)} m of camera per metre of ` +
+      `rider at ${tracking.worstAt.toFixed(1)} m from the arch (${tracking.backwardsProbes} of ` +
+      `${tracking.probes} probes actually run backwards), under the ` +
+      `${CAMERA_MIN_FORWARD_PROGRESS} floor — with a ${tracking.standOff.toFixed(1)} m stand-off the ` +
+      `rig is riding an offset curve tighter than its own radius, so the picture lurches the wrong ` +
+      `way. Widen CAMERA_GUIDE_WINDOW in railRace/ringPath.ts`,
+  ];
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -2096,6 +2147,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
   ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
   ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
+  ['the Rail Race camera never runs backwards', raceCameraNeverRunsBackwards],
   [
     'both Rail Race rings stand outside the park, built to their own size, ' +
       'and only the walk-past one is solid',

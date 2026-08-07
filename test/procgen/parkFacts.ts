@@ -203,6 +203,37 @@ export interface ArchClearanceFact {
   readonly rainbowY: number;
 }
 
+/**
+ * How the race camera moves as a rider runs the built ring.
+ *
+ * **Measured by driving the real `RaceCamera`**, not by re-deriving where it
+ * ought to stand: the rig is reset to each arc distance in turn and its world
+ * position read off the camera object, which is the same object the renderer
+ * draws through.
+ *
+ * The defect this exists to catch is geometric and was found on 6 August 2026.
+ * The rig stands ~27.5 m out along the ring's normal; the ring's tightest bend
+ * has a radius near 20 m. A point held a fixed distance out along a curve's
+ * normal traces an offset curve of radius `R - offset`, so wherever the ring
+ * bends towards the camera tighter than the rig stands out, that offset curve
+ * **runs backwards** — the picture lurches the wrong way while the rider is
+ * still going forwards. It is not damping-shaped and no half-life hides it.
+ */
+export interface CameraTrackingFact {
+  /**
+   * The least the camera moves *along the rider's direction of travel*, in
+   * metres of camera per metre of rider. Negative means it went backwards.
+   */
+  readonly leastForwardProgress: number;
+  /** Arc distance at which that happened, metres from the arch. */
+  readonly worstAt: number;
+  /** How many probes of {@link probes} ran backwards at all. */
+  readonly backwardsProbes: number;
+  readonly probes: number;
+  /** Greatest horizontal distance from camera to rider, metres. */
+  readonly standOff: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -222,6 +253,11 @@ export interface ParkFacts {
    * schedules bars, and none in the built scene would itself be a bug.
    */
   readonly duckBars: readonly DuckBarFact[];
+  /**
+   * How smoothly the race camera actually tracks a rider round the built ring —
+   * see {@link CameraTrackingFact}.
+   */
+  readonly cameraTracking: CameraTrackingFact;
   /**
    * The Sky Cruiser's pass through the castle (#113), measured by the *same*
    * functions the boot assert and `check:castle-window` use.
@@ -676,6 +712,55 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // --- how smoothly the camera tracks a rider round this ring ---------------
+  //
+  // Drives the real rig. `reset` is the ride's own "snap to this rider" call and
+  // it runs the same private placement the per-frame `update` does, so this
+  // measures the camera the renderer draws through rather than a model of it.
+  const { RaceCamera } = await import('../../src/world/railRace/camera.ts');
+  const raceCamera = new RaceCamera(raceRoute);
+  raceCamera.resize(1600, 900);
+  // 0.25 m: the reversal is a sustained geometric effect spanning metres of
+  // track, so this resolves it comfortably without walking the ring 12000 times
+  // on each of five seeds.
+  const CAMERA_PROBE_STEP = 0.25;
+  const cameraProbes = Math.floor(raceRoute.length / CAMERA_PROBE_STEP);
+  const cameraAt: { x: number; z: number }[] = [];
+  let standOff = 0;
+  for (let i = 0; i < cameraProbes; i += 1) {
+    raceCamera.reset(i * CAMERA_PROBE_STEP);
+    cameraAt.push({ x: raceCamera.camera.position.x, z: raceCamera.camera.position.z });
+    const here = raceRoute.path.sampleAt(raceRoute.startDistance + i * CAMERA_PROBE_STEP);
+    standOff = Math.max(
+      standOff,
+      Math.hypot(here.x - raceCamera.camera.position.x, here.z - raceCamera.camera.position.z),
+    );
+  }
+  let leastForwardProgress = Infinity;
+  let worstAt = 0;
+  let backwardsProbes = 0;
+  for (let i = 0; i < cameraProbes; i += 1) {
+    const s = i * CAMERA_PROBE_STEP;
+    const here = raceRoute.path.sampleAt(raceRoute.startDistance + s);
+    const a = cameraAt[i]!;
+    const b = cameraAt[(i + 1) % cameraProbes]!;
+    // The camera's own motion, projected on the way the rider is going.
+    const forward =
+      ((b.x - a.x) * here.tangentX + (b.z - a.z) * here.tangentZ) / CAMERA_PROBE_STEP;
+    if (forward < 0) backwardsProbes += 1;
+    if (forward < leastForwardProgress) {
+      leastForwardProgress = forward;
+      worstAt = s;
+    }
+  }
+  const cameraTracking: CameraTrackingFact = {
+    leastForwardProgress: leastForwardProgress === Infinity ? 0 : leastForwardProgress,
+    worstAt,
+    backwardsProbes,
+    probes: cameraProbes,
+    standOff,
+  };
+
   // --- headroom under the finish rainbow -----------------------------------
   const { RIDER_HEAD_TOP_AT_PARK_SCALE } = await import('../../src/world/railRace/hazards.ts');
   const archClearance: ArchClearanceFact[] = [];
@@ -731,6 +816,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   return {
     archClearance,
     duckBars,
+    cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     seed,

@@ -453,7 +453,9 @@ export class RaceCamera {
     const table: { along: number; out: number }[] = [];
     for (let i = 0; i < LOOKAHEAD_STATIONS; i += 1) {
       const station = (i / LOOKAHEAD_STATIONS) * this.route.path.length;
-      const frame = this.route.path.sampleAt(station);
+      // The rig's own frame — the smoothed one, so `solve` decomposes the
+      // look-ahead in exactly the frame `place` will rebuild the rig against.
+      const frame = this.route.path.guideAt(station);
       this.ringPoint(station, rider);
       this.ringPoint(station + AHEAD, ahead);
       const dx = ahead.x - rider.x;
@@ -504,7 +506,13 @@ export class RaceCamera {
     // Both taken from the path's own frame. These used to be rebuilt here from
     // the bearing — a second, independent copy of the ring's geometry that only
     // agreed with `route.ts` for as long as both described the same circle.
-    const sample = this.route.path.sampleAt(s);
+    //
+    // The **guide** frame, not the geometry one: the rig stands far enough out
+    // along this normal that the ring's own tight bends would run it backwards.
+    // The rider still comes from `ringPoint`, which is exact, and the rider sits
+    // at the origin of this frame — so smoothing it rotates the whole rig about
+    // her and leaves her screen position untouched. See `CAMERA_GUIDE_WINDOW`.
+    const sample = this.route.path.guideAt(s);
     this.out.set(sample.normalX, 0, sample.normalZ);
     this.along.set(sample.tangentX, 0, sample.tangentZ);
 
