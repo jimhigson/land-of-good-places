@@ -68,6 +68,7 @@ import {
   createKid,
 } from '../src/art/models/kid.ts';
 import { NPC_WALK_SPEED } from '../src/entities/npc/NpcCharacter.ts';
+import { arrivalOwnsTheSpawn } from '../src/world/entrance/arrivalSpawn.ts';
 import { PARK_BOUNDARY, edgeRadiusAt } from '../src/world/boundary.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -685,6 +686,27 @@ const openingDistanceToSpawn = Math.hypot(
   openingPlayerPosition.x - ENTRANCE_PLAYER_X,
   openingPlayerPosition.z - ENTRANCE_PLAYER_Z,
 );
+// **The decision itself**, because the positional assertion below cannot reach
+// it. The bug lived in `Game`'s constructor, and `Game` builds a real
+// `WebGLRenderer` — so this file, which drives `World` directly, runs none of
+// it. Reinstating the exact bug left the positional check green, which makes
+// that check hollow on its own. `arrivalOwnsTheSpawn` exists so there is
+// something a test can actually hold.
+check(
+  arrivalOwnsTheSpawn(true, false) === true,
+  'a fresh game with the cat bus arriving does NOT let the arrival own where she starts — ' +
+    'Game will teleport her to the park edge after the bus has seated her, and the camera ' +
+    'snaps to the park and then scrolls out to the bus',
+);
+check(
+  arrivalOwnsTheSpawn(true, true) === false,
+  'a continued save is being overridden by the arrival — she should resume where she quit',
+);
+check(
+  arrivalOwnsTheSpawn(false, false) === false,
+  'with no arrival, something other than the spawn point is deciding where she starts',
+);
+
 check(
   openingDistanceToBus < openingDistanceToSpawn,
   `on the opening frame the player is ${openingDistanceToSpawn.toFixed(1)} m from her park spawn and ` +

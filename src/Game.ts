@@ -14,6 +14,7 @@ import {
 import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } from './world';
 import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
+import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import type { InteractZone } from './world/interact';
@@ -237,7 +238,7 @@ export class Game {
     //
     // Shortening the ease would not have fixed it. The camera was told the
     // truth about a position that was wrong.
-    if (this.world.entrance.arrival && !options.startPlace) {
+    if (arrivalOwnsTheSpawn(this.world.entrance.arrival !== null, options.startPlace != null)) {
       // She is aboard. Where she is, is the bus's business.
     } else if (spawn !== DEFAULT_SPAWN && options.startPlace) {
       this.player.teleportTo(spawn.x, spawn.y, spawn.z, options.startPlace.facing);
