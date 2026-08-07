@@ -45,6 +45,7 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
+  isInEntranceGateGap,
 } from '../../src/world/entrance/layout.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
@@ -2734,6 +2735,66 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
  * drives that), it is a test that a bus exists, has a body, has its driver and
  * its passengers, and is standing at the gate rather than at the origin.
  */
+/**
+ * **Is there actually a hole in the wall at the gate?**
+ *
+ * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
+ * entrance was written with **zero callers anywhere**, so the gate was a gate in
+ * name only: an arch stood over unbroken masonry, with an unbroken collision
+ * polygon behind it. `buildBoundaryWall`'s own comment said "the wall is solid",
+ * and it was. Jim found it the way it was always going to be found — by
+ * watching a bus drive through it.
+ *
+ * This measures the **built** wall: every block instance the boundary actually
+ * placed, against the opening the gate claims to have. A predicate saying "the
+ * walkers pass through the gate's angle" is not this, and does not catch it —
+ * that stays true whether or not there is any stone in the way, which is
+ * precisely how the first version of this guard passed with the gap closed
+ * again.
+ */
+const theGateIsAHoleInTheWall: Invariant = (facts) => {
+  const blocks: { x: number; z: number }[] = [];
+  const local = new Matrix4();
+  const composed = new Matrix4();
+  const centre = new Vector3();
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof InstancedMesh)) return;
+    if (!/^boundary-(blocks|pillars)?/.test(object.name) && object.name !== 'boundary-blocks') return;
+    for (let i = 0; i < object.count; i += 1) {
+      object.getMatrixAt(i, local);
+      composed.multiplyMatrices(object.matrixWorld, local);
+      centre.setFromMatrixPosition(composed);
+      blocks.push({ x: centre.x, z: centre.z });
+    }
+  });
+
+  if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
+
+  const fouls: string[] = [];
+  const inGap = blocks.filter((b) => isInEntranceGateGap(Math.atan2(b.z, b.x)));
+  if (inGap.length > 0) {
+    const worst = inGap[0];
+    fouls.push(
+      `${inGap.length} boundary wall blocks stand inside the gate opening, e.g. ` +
+        `${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
+    );
+  }
+
+  // And the hole is wide enough to walk through: the nearest stone either side
+  // of the gate centre must leave more than a child's width between them.
+  let nearest = Infinity;
+  for (const b of blocks) {
+    nearest = Math.min(nearest, Math.hypot(b.x - 0, b.z - ENTRANCE_GATE_Z));
+  }
+  if (nearest < PLAYER_RADIUS * 2) {
+    fouls.push(
+      `the closest wall block sits ${nearest.toFixed(2)} m from the middle of the gate — ` +
+        `a child of ${PLAYER_RADIUS} m cannot get through`,
+    );
+  }
+  return fouls;
+};
+
 const theCatBusIsInThePark: Invariant = (facts) => {
   const bus = facts.catBus;
   if (!bus) {
@@ -2966,6 +3027,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
+  ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',
     theEntranceIsClearEnoughToArriveAt,
