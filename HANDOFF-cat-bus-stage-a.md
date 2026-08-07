@@ -282,3 +282,100 @@ thing that sorts wrongly against the cabin interior. Check that first.
 
 1. The incremental park-generation architecture report (owed to the Overseer).
 2. Stage B.
+
+
+---
+
+# Round 3 (7 Aug) — Jim: "ok, better", plus four
+
+**Done and pushed: 1, 2, 4.** Children get off at their own moment, walk
+their own jittered route at their own pace, push each other apart rather than
+overlapping, and `NPC_COUNT` is derived from park area (12 -> **24**).
+`build` exit 0; `test:procgen` **11 files / 221 tests / 0 skipped**.
+
+**NOT done: 3 — the children becoming permanent park NPCs.** Investigated in
+full; findings below. This is a real restructure, not a bolt-on.
+
+## #3 is feasible, and the Overseer's instinct is right — the code proves it
+
+**`NpcSystem` has no public `add`/`spawn`/`remove`.** The population is built
+entirely in its constructor, and `KidCrowd(NPC_COUNT)` sizes a fixed-capacity
+`InstancedMesh`; `InstancedCrowd.spawn()` **throws** on
+`index >= this.capacity`. So eleven children arriving *later* is impossible
+without raising capacity up front — i.e. **they must be NPCs from birth**,
+which is exactly the "no conversion step" shape asked for.
+
+### The mechanism already exists, twice — use the climb one, not the train one
+
+| | `setCarriedPose` (train) | `beginClimb`/`setClimbPose`/`endClimb` (tree) |
+|---|---|---|
+| writes | x, z only | **x, y, z and facing** |
+| gravity / collision | y still damped to ground | **fully bypassed** |
+| exempt from `separate()` | **NO** | **YES** |
+| begin / end | implicit | explicit |
+
+`NpcCharacter.ts` branches on `climbingFlag` / `carriedFlag` before `move()`,
+and `move()` is the only thing that applies the soft park boundary — so a
+scripted NPC is free to be outside the wall, inside a moving bus, at any y.
+
+### The gotcha that will bite whoever does it
+
+`SEPARATION = NPC_RADIUS * 2` = **1.0 m**, and the bus's `SEAT_PITCH` is
+**1.0 m**. Fore-and-aft seat neighbours sit exactly on the threshold, and
+`separateFrom` bails only on `climbingFlag`. **A new `scripted` flag must be
+added to the separation guards too**, or the crowd shoves the passengers out
+through the sides of the bus.
+
+### Shape to build
+
+1. Eleven `PinnedKidSpec` entries in `PINNED_KIDS`, ported from
+   `disembarkingKids.ts`'s `VARIANTS` (they are already 12 hand-authored
+   looks). **Keep them inside the instanced envelope** — a `hat`, a
+   `petItemId`, or a hair style outside `CROWD_HAIR_STYLES` escalates that
+   child to a full `CharacterModel` at ~25 draw calls each.
+2. `beginScripted` / `setScriptedPose(x, y, z, facing)` / `endScripted` on
+   `NpcCharacter`, modelled on the climb flag, **exempt from separation**.
+3. A `BusArrival` activity (`hold: 'child'`, `busy: true`, first in
+   `WanderDriver`'s list) so nobody waves from a bus seat or gets poached by
+   the train.
+4. Drive it from **`World.update`, before `npcs.update`** — like
+   `train.carryPassengers` — not as a `Game` system. `TreeClimbing` is a
+   `Game` system and its climbers' instance matrices lag a frame; that is fine
+   up a tree and not fine at the gate.
+5. Hand back with `rejoinGraph(context, 'full')`. Note `WanderDriver`'s
+   constructor calls `chooseNext()` immediately, so a child held on a bus for
+   30 s otherwise wakes with a stale target across the park; `'full'` fixes
+   exactly that.
+6. Then `disembarkingKids.ts` goes away, and `ArrivalSequence` drives NPC
+   bodies instead of its own. Its header comment ("deliberately NOT the
+   `entities/npc` system") becomes wrong and should go with it.
+
+## The one real cost question — needs a decision
+
+Draw calls are **independent** of NPC count (instanced, one material). But
+**triangles scale linearly and nothing is frustum-culled**
+(`frustumCulled = false`). ARCHITECTURE.md budgets *"40 draw calls and ~310k
+triangles for twelve children and two pets"*, against a whole-scene worst case
+of *"~540 calls / 400k tris"*.
+
+**So 12 -> 24 children takes the crowd alone from ~310k to ~620k triangles,
+past the stated whole-scene worst case.** Those two numbers may simply be
+inconsistent in the doc, but they are the only budget written down.
+**Nothing in the repo measures NPC render cost** — `NpcSystem.drawCallCost`
+exists and has *no consumers anywhere*, despite its comment claiming it is in
+the debug overlay. The reusable harness is `buildHeadlessPark()`: traverse and
+count instances/triangles before and after.
+
+**24 is pushed and green, but unmeasured on a device.** If it is too much, the
+density constant is the one place to change it.
+
+## Stale comments spotted, not fixed
+
+`wanderDriver.ts:107` and `activities/activity.ts:54` both say *"there are
+eighteen children"*. Neither 12 nor 24 — they were already wrong.
+
+## Process lesson, paid for
+
+I ran a mutation-restore (`git checkout <file>`) against a file holding
+**uncommitted** work and destroyed the stagger/push-apart implementation, then
+had to rewrite it. **Commit before mutating.**
