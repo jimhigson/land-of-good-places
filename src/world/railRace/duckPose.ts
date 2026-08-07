@@ -177,6 +177,40 @@ export const BOOST_ROCK = 0.21;
  */
 export const CHEER_HOP = 0.55;
 
+/**
+ * **How far a bonk's wobble slides the rider sideways across the tub**, in world
+ * metres — and the reason it is a named number rather than the `0.08` it was.
+ *
+ * `RailRace.poseRider` places her at `cart.position.x + wobble` while the cart
+ * stays at `cart.position.x`. So this is not a pose at all: it is a displacement
+ * of the rider *relative to the seat she is sitting in*, applied after the pose
+ * pipeline has run.
+ *
+ * That distinction is the whole of Jim's 7 August report — *"after a head bonk
+ * the players hands clip through the cart"*. The arm-clearance check swept every
+ * pose the ride can make ({@link RiderPose} is three numbers each clamped to
+ * 0..1, so the set is finite and it is now enumerated rather than listed) and
+ * found a worst case of **0.057 m of clearance**, comfortably inside the tub. It
+ * could not have found this, because the sway is not one of those three numbers.
+ * At the old 0.08 m the arm went **0.023 m through** the tub wall on a fresh
+ * bonk.
+ *
+ * **0.04 m, not 0.08, and the cart is not touched.**
+ * `CART_WIDTH_AT_PARK_SCALE` is 1.10 and that is a measured ceiling — 1.12 fails
+ * `raceCameraNeverRunsBackwards` on seed 5, and the lane spacing derives from it
+ * — so the sway is what gives way. It keeps 0.017 m of margin against the
+ * 0.057 m the tightest pose leaves, and `check:rail-race` asserts that
+ * relationship against the **built** hopper rather than trusting this comment:
+ * change either number and the check re-does the subtraction.
+ *
+ * The shake reads the same. It is a fast `sin(wobble * 34)` tremor against a
+ * 2.75 m-wide cart, so halving its amplitude is a change of a few pixels, and
+ * the shove *down* into the seat (`RailRace.ts`'s `knockdown`) is what carries
+ * the feedback.
+ */
+export const BONK_SWAY = 0.04;
+
+
 /** How far she leans back as she throws her arms up. Negative of the sit lean. */
 const CHEER_LEAN = 0.34;
 

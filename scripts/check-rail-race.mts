@@ -111,6 +111,7 @@ import {
 import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
 import {
+  BONK_SWAY,
   poseRailRaceRider,
   setRiderLegsVisible,
   riderLegsShow,
@@ -1004,6 +1005,16 @@ say('');
    */
   const pose = (
     rider: { duck: number; pump: number; cheer: number },
+    /**
+     * Sideways slide of the rider **relative to the cart**, in world metres.
+     *
+     * `RailRace.poseRider` places her at `cart.position.x + wobble` while the
+     * cart itself stays at `cart.position.x`, so after a bonk she really does
+     * travel across the tub she is sitting in. It is not part of `RiderPose`,
+     * which is exactly why sweeping the pose cube alone said everything was
+     * fine while Jim watched her hands come through.
+     */
+    sway = 0,
   ): { headTop: number; headAt: Vector3; headDepth: number; body: Box3 } => {
     // Seat her **first**, then pose — this order is `poseRider`'s and it is
     // load-bearing. Posing first and seating afterwards would quietly undo any
@@ -1011,7 +1022,7 @@ say('');
     // assertion below would be asserting the line above it rather than the
     // thing it names. That is the hollow-check disease this whole PR keeps
     // running into.
-    player.setRidePose(railPoint.x, seatY, railPoint.z, 0, 0);
+    player.setRidePose(railPoint.x + sway, seatY, railPoint.z, 0, 0);
     player.railRaceRide = rider;
     player.update({
       dt: 1 / 60,
@@ -1298,14 +1309,40 @@ say('');
       const armReport: string[] = [];
       let worstThrough = -Infinity;
       let worstPose = '';
-      for (const state of [
-        { name: 'seated', rider: { duck: 0, pump: 0, cheer: 0 } },
-        { name: 'duck', rider: { duck: 1, pump: 0, cheer: 0 } },
-        { name: 'boost', rider: { duck: 0, pump: 1, cheer: 0 } },
-        { name: 'duck+boost', rider: { duck: 1, pump: 1, cheer: 0 } },
-        { name: 'celebration', rider: { duck: 0, pump: 0, cheer: cheerPeak } },
-      ]) {
-        pose(state.rider);
+      // **Every pose the ride can produce, swept — not a list of the ones
+      // somebody remembered.**
+      //
+      // `RiderPose` is exactly three numbers, each clamped to 0..1 by
+      // `poseRailRaceRider`, so the set of poses that exist *is* this cube and
+      // enumerating it is a finite job. The hand-written list this replaces held
+      // five named corners, and Jim's 7 August report — "after a head bonk the
+      // players hands clip through the cart" — landed between them: a bonk
+      // drives `duck` through `knockdown(wobble)`, which eases continuously from
+      // 1 back to 0 as the wobble decays, so the knock-down pose is every
+      // intermediate fold and not the `duck: 1` corner that was being checked.
+      const AXIS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+      const sweep: {
+        name: string;
+        rider: { duck: number; pump: number; cheer: number };
+        sway: number;
+      }[] = [];
+      for (const duck of AXIS) {
+        for (const pump of AXIS) {
+          for (const cheer of AXIS) {
+            for (const sway of [-BONK_SWAY, 0, BONK_SWAY]) {
+              sweep.push({
+                name:
+                  `duck ${duck.toFixed(1)} pump ${pump.toFixed(1)} cheer ${cheer.toFixed(1)} ` +
+                  `sway ${sway.toFixed(3)}`,
+                rider: { duck, pump, cheer },
+                sway,
+              });
+            }
+          }
+        }
+      }
+      for (const state of sweep) {
+        pose(state.rider, state.sway);
         let through = -Infinity;
         let beside = 0;
         for (const limb of [player.model.leftArm, player.model.rightArm]) {
@@ -1332,19 +1369,22 @@ say('');
           armReport.push(`${state.name} clear of the tub`);
           continue;
         }
-        armReport.push(`${state.name} ${(-through).toFixed(3)}`);
+        if (through > -Infinity) armReport.push(`${state.name} ${(-through).toFixed(3)}`);
         if (through > worstThrough) {
           worstThrough = through;
           worstPose = state.name;
         }
       }
-      say(`arms in the tub   ${armReport.join('   ')}   (metres of clearance)`);
+      say(`arms in the tub   worst of ${sweep.length} poses: ${worstPose} at ${(-worstThrough).toFixed(3)} m clearance`);
       require(
         worstThrough < 0,
-        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart in the ` +
-          `'${worstPose}' pose — this is Jim's 7 August report. The tub's width and shape are ` +
-          'authored in art/blend/cart.blend and stated by CART_WIDTH_AT_PARK_SCALE in ' +
-          'railRace/route.ts; widen the tub rather than moving her arm.',
+        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart at ` +
+          `'${worstPose}' — this is Jim's 7 August report. ` +
+          '**Do not widen the cart.** CART_WIDTH_AT_PARK_SCALE is 1.10 and that is a measured ' +
+          'ceiling, not a preference: 1.12 fails raceCameraNeverRunsBackwards on seed 5, and ' +
+          'lane spacing derives from it. Change what moves her instead — the pose ' +
+          '(railRace/duckPose.ts) or the bonk sway (BONK_SWAY in the same file), whichever the ' +
+          'name above points at.',
       );
     }
   }
