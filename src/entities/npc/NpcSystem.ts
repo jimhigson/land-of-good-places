@@ -401,6 +401,21 @@ export class NpcSystem implements GameSystem {
     // driver so it can decide, on its own, whether one is worth stopping at.
     // Empty by default so nothing here breaks if a caller has none to offer.
     climbableTrees: readonly ClimbableTreeSeed[] = [],
+    /**
+     * How many of these children ride in on the cat bus.
+     *
+     * **They are park NPCs from birth, not passengers converted into NPCs
+     * afterwards** — Jim's ruling, and the code leaves no alternative anyway:
+     * `KidCrowd` sizes a fixed-capacity `InstancedMesh` from `NPC_COUNT` and
+     * `InstancedCrowd.spawn()` throws the moment it is exhausted, so eleven
+     * children joining *later* is not a thing this system can do.
+     *
+     * So the arrival does not add anybody. It borrows the first
+     * {@link arrivingByBus} of the park's own cast for the first fifteen
+     * seconds of their lives. `NPC_COUNT` is unchanged and unchangeable by
+     * this: eleven of the twenty-four simply start the game sitting down.
+     */
+    private readonly arrivingByBus: number = 0,
   ) {
     this.group.name = 'npcs';
 
@@ -509,6 +524,7 @@ export class NpcSystem implements GameSystem {
         climbableTrees,
         climberBudget,
         chatBudget: this.chatBudget,
+        arrivesByBus: i < this.arrivingByBus,
       });
       this.wanderDrivers.push(driver);
 
@@ -768,8 +784,10 @@ export class NpcSystem implements GameSystem {
 
     for (const character of this.characters) {
       // A climbing child's (x, z) is the tree it is up, not somewhere it is
-      // standing — see `NpcCharacter.separateFrom`'s identical guard.
-      if (character.climbing) continue;
+      // standing — see `NpcCharacter.separateFrom`'s identical guard. A
+      // scripted one's is a bus seat, and this is the pass that would shove the
+      // player's own seatmate out through the bodywork beside her.
+      if (character.climbing || character.scripted) continue;
 
       const push = circleSeparation(
         character.position.x,

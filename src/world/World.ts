@@ -31,6 +31,7 @@ import { NpcSystem } from '../entities/npc';
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
 import { Entrance, type EntranceOptions } from './entrance/Entrance';
+import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
 
 export interface WorldOptions {
@@ -205,12 +206,26 @@ export class World implements GameSystem {
     // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
     // occasionally climb one — the actual climbing (posing, hiding the body)
     // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
+    //
+    // The last argument is the cat bus's eleven passengers. They are **park
+    // NPCs from birth** — not extra children, and not children converted into
+    // NPCs when the cutscene ends. `NPC_COUNT` is untouched: eleven of the
+    // park's own twenty-four simply begin the game sitting on a bus outside the
+    // gate. That is the only shape the code allows anyway, `KidCrowd` being a
+    // fixed-capacity `InstancedMesh` that throws rather than growing.
     this.npcs = new NpcSystem(
       this.collision,
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
+      this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
     );
+
+    // …and now that both exist, introduce them. `Entrance` is built before
+    // `NpcSystem` (the waypoint graph needs the finished collision world), so
+    // this cannot be a constructor argument in either direction — it is the
+    // same late-binding `attachPlayer` has always used.
+    this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
 
     // Everything the park *is*, as far as the scene is concerned. Kept as a
     // list rather than only spread into `scene.add` so {@link setParkVisible}
@@ -319,14 +334,23 @@ export class World implements GameSystem {
     this.ferrisWheel.update(context);
     this.train.carryPassengers(this.npcs.riders);
 
+    // The arrival runs **before** the children, for exactly the reason the
+    // train does: it writes the position of eleven of them, and their own
+    // update is what commits that to the crowd's instance buffer. After it,
+    // every passenger would be drawn a frame behind the bus they are sitting
+    // in — fine up a tree, very much not fine through a window.
+    this.entrance.update(context);
+
     this.npcs.update(context);
     this.stalls.update(context);
     this.facePaintStall.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
     // Last: the arrival moves the player, and everything above has already had
-    // its frame, so nothing overwrites where the sequence just put her.
-    this.entrance.update(context);
+    // its frame, so nothing overwrites where the sequence just put her. The
+    // pose itself was computed above, with the children's; this only re-asserts
+    // it, so the two can never disagree about where she is this frame.
+    this.entrance.reassertPlayerPose();
   }
 
   /**

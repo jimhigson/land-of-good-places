@@ -8,6 +8,7 @@ import type { PoiGraph } from './poiGraph';
 // only the wander core and the small amount of glue that runs them.
 import type { Activity, ActivityHold, ActivityHost, Rejoin } from './activities/activity';
 import { TreeClimb, type ClimbPhase, type ClimberBudget } from './activities/treeClimb';
+import { BusArrival } from './activities/busArrival';
 import { TrainTrip } from './activities/trainTrip';
 import { ChatToPlayer } from './activities/chatToPlayer';
 import { FacePaintVisit } from './activities/facePaintVisit';
@@ -92,6 +93,12 @@ export interface WanderOptions {
   readonly climberBudget?: ClimberBudget;
   /** Shared across every child, so standing still draws one or two chatters, not a mob. */
   readonly chatBudget?: ChatBudget;
+  /**
+   * This child rides in on the cat bus and is not to be steered until they are
+   * off it. Eleven of the park's own children start life aboard — see
+   * `activities/busArrival.ts`.
+   */
+  readonly arrivesByBus?: boolean;
 }
 
 export class WanderDriver implements CharacterDriver, ActivityHost {
@@ -110,6 +117,7 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   private readonly activities: readonly Activity[];
   private readonly climb: TreeClimb;
   private readonly train: TrainTrip;
+  private readonly bus: BusArrival;
   private readonly chat: ChatToPlayer;
   private readonly paint: FacePaintVisit;
 
@@ -147,6 +155,9 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     // initialised, because several of them draw from this child's seeded
     // stream and the order of those draws is behaviour, not detail.
     this.climb = new TreeClimb(this.rng, options.climbableTrees ?? [], options.climberBudget);
+    // Draws nothing from the seeded stream, so its position in this sequence is
+    // free — but it must exist before `activities` is assembled below.
+    this.bus = new BusArrival(options.arrivesByBus ?? false);
     // The trip draws nothing from the stream until the first time it wonders
     // about the train, so it can be built anywhere in here.
     this.train = new TrainTrip();
@@ -163,9 +174,13 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
     this.chat = new ChatToPlayer(this.rng, options.chatBudget);
 
     // The order the frame is offered in. Unchanged from the chain of `if`s
-    // this replaced: the climb pre-empts everything (see `ActivityHold`), then
-    // chat, then the train, then the paint stall.
-    this.activities = [this.climb, this.chat, this.train, this.paint];
+    // this replaced — the climb pre-empts everything (see `ActivityHold`), then
+    // chat, then the train, then the paint stall — except that the bus now
+    // comes first of all. It has to: a child on the bus has not arrived in the
+    // park yet, and every other activity here assumes a child who is standing
+    // in it. Being ahead of the climb is not a priority judgement so much as
+    // the observation that you cannot climb a tree from a moving vehicle.
+    this.activities = [this.bus, this.climb, this.chat, this.train, this.paint];
   }
 
   /** Where this child is heading, for debugging and for the pet to follow. */
@@ -199,6 +214,23 @@ export class WanderDriver implements CharacterDriver, ActivityHost {
   /** Where the child was standing when it started up — the base of the scramble. */
   get climbGroundSpot(): { readonly x: number; readonly z: number } {
     return this.climb.climbGroundSpot;
+  }
+
+  // The bus arrival's public surface, read and driven by
+  // `world/entrance/ArrivalSequence.ts`. Delegated for the same reason the
+  // climb's is: the owning system talks to the driver, never to the activity.
+
+  /** True while this child is still aboard the cat bus. */
+  get ridingBus(): boolean {
+    return this.bus.riding;
+  }
+
+  /**
+   * "You are off the bus." The child rejoins the waypoint graph on their next
+   * frame and walks into the park as an ordinary member of the crowd.
+   */
+  leaveBus(): void {
+    this.bus.disembark();
   }
 
   /**

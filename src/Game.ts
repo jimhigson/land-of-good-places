@@ -224,7 +224,22 @@ export class Game {
     // standing on a bridge, a deck or the fountain rim. Now that the building's
     // ground sampler is attached, put her back exactly where she was, facing
     // the way she was facing.
-    if (spawn !== DEFAULT_SPAWN && options.startPlace) {
+    //
+    // **Unless she is on the bus**, which is the one case where somebody has
+    // already put her somewhere on purpose. `world.attachPlayer` above runs
+    // `ArrivalSequence.attachPlayer`, which seats her in the cat bus out at the
+    // kerb; teleporting her to the spawn point immediately afterwards undid
+    // that, and then `camera.snapTo(this.player.position)` at the end of this
+    // constructor snapped the camera to the **park**, not to the bus. Frame one
+    // put her back in her seat and the camera spent the next half second gliding
+    // across the park to find her — Jim, 7 August: *"the camera starts in the
+    // middle of the park and then scrolls to the bus"*.
+    //
+    // Shortening the ease would not have fixed it. The camera was told the
+    // truth about a position that was wrong.
+    if (this.world.entrance.arrival && !options.startPlace) {
+      // She is aboard. Where she is, is the bus's business.
+    } else if (spawn !== DEFAULT_SPAWN && options.startPlace) {
       this.player.teleportTo(spawn.x, spawn.y, spawn.z, options.startPlace.facing);
     } else {
       // A fresh spawn faces into the park rather than back out through the gate
@@ -793,6 +808,11 @@ export class Game {
       }
     };
 
+    // **On the bus from the very first frame drawn**, not eased towards it.
+    // `player.position` is wherever she genuinely is by now — her seat, if the
+    // cat bus is bringing her in (see the spawn block above) — and `snapTo`
+    // skips the follow smoothing outright rather than shortening it, so there
+    // is no opening pan across a park she has not arrived at yet.
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));
   }

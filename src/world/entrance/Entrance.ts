@@ -15,6 +15,7 @@ import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
 import { buildPawPrint } from './catBus';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
+import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_STOP_Z,
@@ -187,6 +188,31 @@ export class Entrance implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.arrival?.attachPlayer(player);
+  }
+
+  /**
+   * The eleven children riding in, once `World` has built the crowd.
+   *
+   * These are ordinary park NPCs — the arrival borrows them, it does not own
+   * them and never disposes of them. When the sequence ends they carry on
+   * being exactly what they already were, which is the whole point of Jim's
+   * ruling: *"These are the park NPCs, and should continue as such when they
+   * are in the park."*
+   */
+  attachNpcs(children: readonly NpcCharacter[]): void {
+    this.arrival?.attachNpcs(children);
+  }
+
+  /**
+   * Re-applies the pose {@link update} already computed for the player.
+   *
+   * Called at the very end of `World.update` because several systems in
+   * between may nudge her, while {@link update} itself has to run *before* the
+   * crowd so its passengers reach the instance buffer on the right frame. One
+   * pose, computed once, applied at both points — never two.
+   */
+  reassertPlayerPose(): void {
+    this.arrival?.reassertPlayerPose();
   }
 
   /**

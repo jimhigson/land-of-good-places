@@ -35,8 +35,18 @@ import type { NpcAvatar } from './npcAvatar';
  * `buildIndividualAvatar`), and this class poses it exactly the same way.
  */
 
-/** Comfortable child walking pace. A full run is this times `RUN_INTENT`. */
-const NPC_WALK_SPEED = 2.55;
+/**
+ * Comfortable child walking pace. A full run is this times `RUN_INTENT`.
+ *
+ * **Exported since 7 August**, because it was not and the cat bus arrival
+ * therefore invented its own `KID_WALK_SPEED = 1.5`. Eleven children walked
+ * into the park at 46–75% of the pace of every other child in it, and Jim
+ * spotted it immediately: *"they walk unnaturally slowly into the park"*. This
+ * is the same disease as #232, where `check:crowd` hard-codes 1.85 against this
+ * shipping 2.55 — a second copy of a number nobody can see is wrong from the
+ * outside. Anything that walks a child anywhere reads this.
+ */
+export const NPC_WALK_SPEED = 2.55;
 
 const NPC_ACCELERATION = 18;
 const NPC_DECELERATION = 16;
@@ -90,6 +100,27 @@ export class NpcCharacter {
   // has to remember to send.
   private carriedFlag = false;
 
+  // --- being scripted (see world/entrance/ArrivalSequence.ts) --------------
+  // The third owner of a child's position, and deliberately modelled on
+  // `climbingFlag` rather than on `carriedFlag`. A scripted child is riding in
+  // a bus that is outside the park wall, sitting at a height nothing samples,
+  // facing where the script says — so like a climb and unlike a train ride it
+  // needs **x, y, z and facing**, no gravity, no collision, no soft park
+  // boundary, and **exemption from separation**.
+  //
+  // That last one is not a nicety. `SEPARATION` is 1.0 m and the bus's seats
+  // are 1.8 m apart, which sounds safe until you remember the crowd also
+  // separates from the *player*, and that a bus is a box the crowd knows
+  // nothing about: without the exemption the relaxation pass walks passengers
+  // out through the sides of the vehicle they are sitting in.
+  //
+  // Explicit begin/end, again like the climb: a child is aboard a bus for
+  // fifteen seconds across a phase change, and "a frame nobody claimed you is a
+  // frame you are back on your own feet" is the wrong rule for that.
+  private scriptedFlag = false;
+  /** Gait the script asked for, 0..1 — what makes scripted legs actually walk. */
+  private scriptedGait = 0;
+
   constructor(
     avatar: NpcAvatar,
     driver: CharacterDriver,
@@ -141,6 +172,62 @@ export class NpcCharacter {
   /** Gives the character back to the wander driver, standing wherever it now is. */
   endClimb(): void {
     this.climbingFlag = false;
+  }
+
+  /** True while a scripted sequence owns this character's pose outright. */
+  get scripted(): boolean {
+    return this.scriptedFlag;
+  }
+
+  /**
+   * Hands the character to a scripted sequence: gravity, collision, the park
+   * boundary and separation all stop applying until {@link endScripted}.
+   */
+  beginScripted(): void {
+    this.scriptedFlag = true;
+    this.velocity.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.airborne = false;
+    this.scriptedGait = 0;
+  }
+
+  /**
+   * Called every frame by whoever owns the script.
+   *
+   * `speed` is metres a second, and drives the walk cycle the same way `move()`
+   * does — distance travelled, not wall-clock — so a scripted child's legs
+   * match the ground under them exactly as a wandering child's do. Pass 0 for
+   * somebody sitting still on a bus seat.
+   */
+  setScriptedPose(x: number, y: number, z: number, facing: number, speed = 0): void {
+    // Off distance actually covered, not off the clock and not off the speed
+    // that was asked for — the same rule `move()` follows, and the reason a
+    // child shoved sideways by the push-apart still plants her feet properly.
+    const stepped = Math.hypot(x - this.position.x, z - this.position.z);
+    this.position.set(x, y, z);
+    this.previousPosition.copy(this.position);
+    this.facing = facing;
+    this.avatar.rig.root.position.copy(this.position);
+    this.avatar.rig.root.rotation.y = facing;
+    this.scriptedGait = clamp01(speed / NPC_WALK_SPEED);
+    this.walkPhase += stepped * PLAYER_BOB_CYCLES_PER_METRE * TAU;
+    if (this.walkPhase > TAU) this.walkPhase -= TAU;
+  }
+
+  /**
+   * Gives the character back to their own driver, standing where the script
+   * left them, walking at whatever pace the script last asked for.
+   */
+  endScripted(): void {
+    this.scriptedFlag = false;
+    // Not zeroed: she is mid-stride walking into the park, and dropping the
+    // velocity here is what would make her stop dead the instant the cutscene
+    // ends — a visible hitch exactly when the player takes over.
+    this.velocity.set(
+      Math.sin(this.facing) * NPC_WALK_SPEED * this.scriptedGait,
+      0,
+      Math.cos(this.facing) * NPC_WALK_SPEED * this.scriptedGait,
+    );
   }
 
   /** True while a ride is carrying this character instead of `move()` walking it. */
@@ -227,6 +314,12 @@ export class NpcCharacter {
     // same bargain with a different owner — see `setCarriedPose`.
     if (this.climbingFlag) {
       // TreeClimbing owns everything, including y.
+    } else if (this.scriptedFlag) {
+      // A scripted sequence owns everything, including y — see beginScripted.
+      // Unlike the carry, this is *not* cleared below: it is ended explicitly,
+      // because a bus ride spans phase changes and must not lapse on a frame
+      // its owner happens not to have written to.
+      this.gait = this.scriptedGait;
     } else if (this.carriedFlag) {
       this.rideAlong(dt);
     } else {
@@ -249,7 +342,12 @@ export class NpcCharacter {
     // A climbing character's (x, z) is the tree it is up, not somewhere it is
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
+    // A scripted child is exempt for the same reason and then some: theirs is a
+    // seat inside a vehicle the crowd cannot see, 1.8 m from the next seat and
+    // often outside the park wall entirely. Shoving them "apart" empties the
+    // bus through its own side panels.
     if (this.climbingFlag || other.climbingFlag) return;
+    if (this.scriptedFlag || other.scriptedFlag) return;
     const dx = other.position.x - this.position.x;
     const dz = other.position.z - this.position.z;
     const distanceSquared = dx * dx + dz * dz;
@@ -408,7 +506,11 @@ export class NpcCharacter {
     // fault. Drawing the whole body (`world/TreeClimbing.ts`, Jim's *"make
     // nobody ever just a head"*) makes it a child hovering bodily above the
     // canopy, which is why it is fixed now and was left alone before.
-    const hopHeight = this.climbingFlag ? 0 : Math.max(0, this.position.y - groundY);
+    // Scripted joins climbing here for the identical reason: a child sitting on
+    // a bus floor is 0.62 m above the terrain, which is not a hop, and reading
+    // it as one tucks her knees up on the seat.
+    const hopHeight =
+      this.climbingFlag || this.scriptedFlag ? 0 : Math.max(0, this.position.y - groundY);
 
     const bob = Math.abs(Math.sin(phase)) * PLAYER_BOB_HEIGHT * gait;
     const breathe = Math.sin(elapsed * 1.9 + this.walkPhase) * 0.014 * (1 - gait);
