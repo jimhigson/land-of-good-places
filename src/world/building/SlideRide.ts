@@ -76,8 +76,14 @@ const BAND_CLEAR_FRACTION = 0.5;
  * Low enough that the grass and the ball pit read clearly through it, high
  * enough that the section is still obviously *there* — a chute you cannot see
  * at all is a chute a six-year-old thinks has a gap in it.
+ *
+ * **0.36 failed that second half.** QA of #227 found that 0.36 amber over green
+ * grass is faint enough that the rider reads as floating, with no chute under
+ * her — the exact failure the paragraph above warns about. Not a culling bug:
+ * the material is `DoubleSide` with `depthWrite: false`, all correct. Jim's
+ * ruling, 7 August 2026, was to raise it to 0.6.
  */
-const CLEAR_OPACITY = 0.36;
+const CLEAR_OPACITY = 0.6;
 
 export interface SlideOptions {
   readonly name: string;
