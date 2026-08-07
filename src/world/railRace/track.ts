@@ -37,6 +37,16 @@ import {
   type RaceLevel,
 } from './hazards';
 import {
+  BRANCH_TAPER,
+  forkPlan,
+  POST_FOOT_RADIUS,
+  POST_TOP_RADIUS,
+  SLEEPER_ALONG_TRACK,
+  SLEEPER_OVERHANG,
+  SLEEPER_SPACING,
+  SLEEPER_THICKNESS,
+} from './trestleGeometry';
+import {
   LANE_COUNT,
   PLAYER_LANE,
   RIDE_SCALE,
@@ -102,7 +112,7 @@ const ARCH_HEADROOM = 1.2;
 const ARCH_SHOULDER_ROOM = 2.4;
 
 /** How far a duck bar reaches either side of its lane's centre, at park scale. */
-const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
+export const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
 
 /**
  * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
@@ -114,115 +124,6 @@ export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
 /** How far under the lowest a rail ever gets the trestle's four tops sit. */
 const BEAM_DROP = 0.45;
-
-/**
- * The base post's radii, at its top and at its foot.
- *
- * **Twice** the 0.26 / 0.34 a trestle leg used to be. Jim, 5 August 2026: "the
- * supports under the race track are far too thin and angular" — and
- * ART_DIRECTION §1 agrees on principle ("chunky rounded shapes, no sharp edges,
- * **no thin parts**"), which a 0.26 m pole holding up a ring nine metres in the
- * air was quietly failing.
- *
- * Exported so `test/procgen/invariants.ts` can measure the built post against
- * the number it was built from rather than hard-coding a second copy of it —
- * this repo's most common bug by a distance (CLAUDE.md, *two definitions of one
- * thing*).
- */
-export const POST_TOP_RADIUS = 0.52;
-export const POST_FOOT_RADIUS = 0.68;
-
-/**
- * How much slimmer each generation of branch is than the one it grew from.
- *
- * A tree that keeps its trunk's thickness all the way to the tips reads as
- * plumbing; one that tapers reads as grown. Two generations at 0.62 take the
- * 0.52 m trunk top to 0.32 m and then 0.20 m, which is still thicker at the tip
- * than the old leg's *foot* was.
- */
-const BRANCH_TAPER = 0.62;
-
-/**
- * The angle a branch wants to make with whatever it split from — Jim's "~30º",
- * twice over.
- *
- * **It does not always fit, and that is measured rather than assumed.** Reaching
- * the race ring's four lane centres means a total sideways reach of
- * `1.5 * laneSpacing` = 4.125 m, which at 30° needs `4.125 / tan(30°)` = 7.14 m
- * of fork. Only 6.60 m exists between the ground and {@link BEAM_DROP}'s tops,
- * and that is *before* leaving any base post at all — so 30° on the race ring is
- * not a tuning choice, it is geometrically impossible (the floor, with a zero
- * trunk, is 32.0°).
- *
- * So this is a *target*: {@link forkPlan} opens the angle only as far as the
- * ring's own span forces, and no further. The walk-past ring, whose half-span is
- * 1.65 m, gets exactly 30°. The race ring lands wider, and the invariant
- * measures and reports whatever it actually got rather than trusting this.
- */
-const BRANCH_ANGLE = Math.PI / 6;
-
-/**
- * How far apart the sleepers bridging a lane's two rails sit, in metres.
- *
- * Jim, 5 August 2026: "the sky ride and race should have cross-bars like
- * railway sleepers between the tracks at about 1m intervals". A metre of real
- * track, deliberately **not** scaled by `ringSizeVsRace` the way a sleeper's own
- * width is: "about 1 m" is a statement about the world, not about this ring, and
- * scaling it would put 6000 sleepers on the walk-past ring for scenery nobody
- * rides.
- *
- * Costed before building it, because nothing in this game is frustum-culled: a
- * 600.2 m lap at 1 m is 600 sleepers a lane, 2400 a ring, 4800 across both
- * rings, and a box is 12 triangles — 57,600 triangles, or 2.4% on a scene that
- * already draws 2.37 M. One `InstancedMesh` per ring, so it is one draw call
- * either way.
- */
-const SLEEPER_SPACING = 1;
-
-/**
- * A sleeper's own dimensions, authored at the race ring's size the way every
- * other bare number in this file is (see `ringSizeVsRace`).
- *
- * `OVERHANG` is how far it sticks out past the rail it carries on each side —
- * the detail that makes it read as a sleeper the rails are bolted to rather than
- * as a rung between them.
- */
-const SLEEPER_OVERHANG = 0.5;
-const SLEEPER_THICKNESS = 0.14;
-const SLEEPER_ALONG_TRACK = 0.42;
-
-/**
- * The least of the post's height that must stay unforked, as a fraction.
- *
- * Jim asked for "the base post", singular, before any splitting — so a tree
- * whose fork starts at the ground is not what was described however well it
- * reaches the lanes. This is what stops {@link forkPlan} spending the whole post
- * on branches when the span is wide.
- */
-const MIN_TRUNK_FRACTION = 0.3;
-
-/**
- * Where one trestle's trunk stops and its branches start, solved for this
- * post's own height and this ring's own lane spacing.
- *
- * Pure and exported so the invariant can ask the same question of a built
- * trestle without re-deriving the arithmetic — and so the "did it actually get
- * 30°?" answer has exactly one owner.
- */
-export function forkPlan(
-  postHeight: number,
-  laneSpacing: number,
-): { readonly fork: number; readonly lower: number; readonly upper: number; readonly angle: number } {
-  // The lower fork reaches a whole lane spacing sideways, the upper one half of
-  // it — so giving the lower twice the height makes both angles equal, whatever
-  // the total turns out to be. That is why one `angle` describes both.
-  const reach = 1.5 * laneSpacing;
-  const wanted = reach / Math.tan(BRANCH_ANGLE);
-  const affordable = postHeight * (1 - MIN_TRUNK_FRACTION);
-  const fork = Math.min(wanted, affordable);
-  const lower = (fork * 2) / 3;
-  return { fork, lower, upper: fork / 3, angle: Math.atan(laneSpacing / lower) };
-}
 
 export interface RailRaceTrack {
   readonly group: Group;

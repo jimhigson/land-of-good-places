@@ -19,7 +19,7 @@ import {
 } from './cart';
 import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
-import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/track';
+import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';

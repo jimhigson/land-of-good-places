@@ -3,7 +3,7 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToPath } from '../paths';
 import { terrainHeight } from '../terrain';
-import { POST_FOOT_RADIUS } from '../railRace/track';
+import { POST_FOOT_RADIUS } from '../railRace/trestleGeometry';
 import type { RailSampler } from '../rail/sweptRail';
 
 /**
