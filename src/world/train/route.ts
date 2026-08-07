@@ -8,6 +8,8 @@ import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
 import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
 import { terrainHeight } from '../terrain';
+import { cachedSolve } from '../../core/solveCache';
+import { PARK_SEED } from '../parkManifest';
 
 /**
  * Where the park train's track goes.
@@ -175,7 +177,20 @@ export class TrainRoute {
   private readonly scratch = new Vector3();
 
   constructor() {
-    const radii = solveProfile();
+    // The profile is a pure function of the seed's layout and boundary, so
+    // it caches with them (core/solveCache): a reload of a park already
+    // visited skips the 700-pass relaxation entirely.
+    const radii = cachedSolve(
+      'train-profile',
+      `${PARK_SEED}`,
+      () => [...solveProfile()],
+      (value) => value,
+      (raw) => {
+        const list = raw as number[];
+        if (!Array.isArray(list) || list.length !== BEARINGS) throw new Error('stale profile');
+        return list;
+      },
+    );
 
     const points: Vector3[] = [];
     for (let i = 0; i < BEARINGS; i += CONTROL_STRIDE) {

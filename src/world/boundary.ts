@@ -1,4 +1,5 @@
 import { Rng, TAU } from '../core/mathUtils';
+import { cachedSolve } from '../core/solveCache';
 import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';
@@ -389,6 +390,21 @@ export interface ParkBoundaryOptions {
  * circle after {@link ATTEMPTS} failures.
  */
 export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary {
+  const radii = cachedSolve(
+    'boundary',
+    `${options.seed}:${options.targetArea.toFixed(0)}:${options.gateBearing.toFixed(4)}:${options.gateRadius}`,
+    () => solveBoundaryRadii(options),
+    (value) => value,
+    (raw) => {
+      const list = raw as number[];
+      if (!Array.isArray(list) || list.length !== PROFILE_SAMPLES) throw new Error('stale profile');
+      return list;
+    },
+  );
+  return profileBoundary(radii);
+}
+
+function solveBoundaryRadii(options: ParkBoundaryOptions): number[] {
   const { seed, targetArea, gateBearing, gateRadius } = options;
   const rng = new Rng(seed);
   const areaOverPi = targetArea / Math.PI;
@@ -455,7 +471,7 @@ export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary
         `with the gate pinned at ${gateRadius} m may be geometrically impossible.`,
     );
   }
-  return profileBoundary(best.radii);
+  return best.radii;
 }
 
 /**

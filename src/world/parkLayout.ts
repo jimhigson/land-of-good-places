@@ -2,10 +2,12 @@ import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
 import {
   BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
+  LAYOUT_VERSION,
   PARK_MANIFEST,
   PARK_SEED,
   type ManifestEntry,
 } from './parkManifest';
+import { cachedSolve } from '../core/solveCache';
 import { PARK_BOUNDARY } from './boundary';
 import type { AnchorFootprint } from './anchors';
 
@@ -333,7 +335,29 @@ function validate(
  * The solved park. Import this; never re-run the solver — one canonical
  * layout per build is the whole point.
  */
-export const PARK_LAYOUT: ParkLayout = solve();
+export const PARK_LAYOUT: ParkLayout = cachedSolve(
+  'layout',
+  `${PARK_SEED}:${LAYOUT_VERSION}`,
+  solve,
+  (layout) => ({
+    seed: layout.seed,
+    fountain: layout.fountain,
+    entries: [...layout.entries.values()],
+  }),
+  (raw) => {
+    const packed = raw as {
+      seed: number;
+      fountain: ParkLayout['fountain'];
+      entries: PlacedEntry[];
+    };
+    if (packed.seed !== PARK_SEED) throw new Error('stale seed');
+    return {
+      seed: packed.seed,
+      fountain: packed.fountain,
+      entries: new Map(packed.entries.map((entry) => [entry.id, entry])),
+    };
+  },
+);
 
 /** Clear of every plot's bounding circle by `radius`. Pure, for the plans
  * solved at module load (train, coaster, ferris exit) — lives here so none
