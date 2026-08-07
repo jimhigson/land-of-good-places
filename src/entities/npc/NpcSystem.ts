@@ -2,7 +2,7 @@ import { Group, Object3D, Vector3 } from 'three';
 import { CIRCULAR_PARK_AREA, PARK_BOUNDARY } from '../../world/boundary';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
-import { KID_SKIN_TONES } from '../../art/models/kid';
+import { CHILD_FOOTPRINT, KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
 import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
@@ -22,7 +22,7 @@ import { NameLabel } from '../../ui/NameLabel';
 import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
-import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
+import { NpcCharacter } from './NpcCharacter';
 import type { NpcAvatar } from './npcAvatar';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
@@ -111,8 +111,23 @@ const PET_COUNT = 2;
 /** Fixed seed: the same children, in the same clothes, on every reload. */
 const NPC_SEED = 20260726;
 
-/** Closer than this and two children push each other apart. */
-const SEPARATION = NPC_RADIUS * 2;
+/**
+ * Closer than this and two children push each other apart.
+ *
+ * **A whole child wide, measured off the model** — not `NPC_RADIUS * 2`, which
+ * is what this was, and which is 1.0 m. `NPC_RADIUS` is the radius a child is
+ * resolved against *walls* with, and 0.5 m is right for that: it is roughly the
+ * girth of the torso, and a narrow collision circle is what lets two children
+ * pass on a path. It is nowhere near the radius a child *looks* like. A chibi
+ * rig is almost entirely head — {@link CHILD_FOOTPRINT} is 1.8 m — so children
+ * separated to exactly 1.0 m are standing with their skulls half a metre inside
+ * one another, everywhere in the park, all the time.
+ *
+ * Found while fixing the cat bus, where Jim could see it happening to eleven
+ * children at once; but it was never a bus bug, and raising it here fixes the
+ * same overlap wherever two children happen to meet.
+ */
+const SEPARATION = CHILD_FOOTPRINT;
 
 /**
  * Closer than this and a child pushes gently apart from the player instead of
@@ -120,7 +135,7 @@ const SEPARATION = NPC_RADIUS * 2;
  * Exactly the same combined-radii idea as {@link SEPARATION}, just with the
  * player's own girth on one side instead of a second child's.
  */
-const PLAYER_SEPARATION = NPC_RADIUS + PLAYER_RADIUS;
+const PLAYER_SEPARATION = CHILD_FOOTPRINT / 2 + PLAYER_RADIUS;
 
 /** Beyond this from the player, behaviour runs every other frame. */
 const FAR_DISTANCE = 34;

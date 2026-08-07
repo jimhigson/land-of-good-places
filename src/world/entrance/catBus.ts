@@ -325,7 +325,18 @@ export function createCatBus(): CatBusHandle {
 
   // The door's z span, needed here because the side wall must not grow a window
   // pillar across the doorway. Derived once and reused by the door below.
-  const doorZ = bodyCentreZ + cabinLength * 0.28;
+  //
+  // **Behind the middle, not ahead of it**, and that is a kerb constraint
+  // rather than a styling choice. `ArrivalSequence` parks the bus by working
+  // back from where its door has to be (dead in front of the gate), so a door
+  // ahead of centre puts the bus's *centre* that much further along the kerb in
+  // the direction it came from — and the safe run of kerb is not symmetrical,
+  // because the park boundary is a spline that bulges towards it on that side
+  // (#115). Measured, at this bus's 18.2 m length: a door 4.6 m ahead of centre
+  // leaves **2.9 m** of approach before the nose is inside the park; the same
+  // door 4.6 m behind centre leaves **11.6 m**. A rear door is also just what a
+  // coach has.
+  const doorZ = bodyCentreZ - cabinLength * 0.28;
 
   // --- the shell, built as bands so the windows are real holes ---------------
   // Under the windows: the full-width lower body, floor to sill.

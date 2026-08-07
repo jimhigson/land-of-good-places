@@ -113,11 +113,23 @@ export const ENTRANCE_BUS_DOOR_X = 0;
 /**
  * Where the bus comes in from, along the kerb. This is the frame Stage B hands
  * over on — see `ArrivalSequence`.
+ *
+ * **Both of these are bounded by a measurement, and the measurement moved.**
+ * Sizing the bus from a child that had actually been measured took it from
+ * 11 m to 18.2 m long, and the run of kerb an 18.2 m bus can stand on without
+ * any part of it being inside the park is `x` from **-23 to +7.5** at this
+ * kerb — not the ±28 an 11 m bus had. (`scripts/check-cat-bus.mts` measures the
+ * bus's own bounding box against `PARK_BOUNDARY` on every frame of the run and
+ * caught exactly this: *"the bus reached 1.48 m INSIDE the park boundary"*.)
+ *
+ * So these sit just inside that window, with the stop itself at x = -4.6 —
+ * see `catBus.ts`'s `doorZ` for why the door is behind the bus's centre, which
+ * is what buys the approach its 11.6 m.
  */
-export const ENTRANCE_BUS_ARRIVE_X = 12;
+export const ENTRANCE_BUS_ARRIVE_X = 7;
 
 /** Once the departing bus has rolled on this far, it is disposed. */
-export const ENTRANCE_BUS_VANISH_X = -28;
+export const ENTRANCE_BUS_VANISH_X = -22;
 
 /** Keeps the tree/bush scatter (`Scenery.ts`) off the stop and the gate plaza. */
 export const ENTRANCE_CLEAR_X = ENTRANCE_STOP_X;

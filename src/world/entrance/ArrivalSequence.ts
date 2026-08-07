@@ -231,6 +231,67 @@ interface WalkRoute {
   readonly to: Vector2Like;
 }
 
+/**
+ * A Bézier's length, and the map from *distance walked* back to its parameter.
+ *
+ * **A quadratic Bézier's parameter is not its arc length**, and treating it as
+ * one is a subtler version of the same mistake as budgeting the control
+ * polygon. Advancing `t` at a constant rate walks the curve at a speed that
+ * varies with how tightly it is bending: on these routes the first stride out
+ * of the doorway is taken at **1.3 m/s** and the last at well over 3, on a
+ * child who is supposed to walk at a constant 2.55.
+ *
+ * That is not a cosmetic wrongness. The slow part is exactly the part next to
+ * the door, so every child dawdles precisely where the next one is about to
+ * step down on top of them — measured, two children 0.49 m apart at the step,
+ * inside a 1.8 m body. Staggering their departures cannot fix a queue that
+ * slows down at its own exit.
+ *
+ * So the curve is sampled once, at construction, into a table of cumulative
+ * distances, and walking it is a lookup: *"I have walked 4.2 m; where is that?"*
+ * Constant speed, and the guard that asserts they walk at the park's pace is
+ * then asserting something true at every instant rather than on average.
+ */
+interface ArcTable {
+  /** Cumulative distance at each of {@link ARC_SAMPLES} + 1 evenly spaced `t`. */
+  readonly distances: readonly number[];
+  readonly total: number;
+}
+
+const ARC_SAMPLES = 48;
+
+function buildArcTable(a: Vector2Like, c: Vector2Like, b: Vector2Like): ArcTable {
+  const distances: number[] = [0];
+  let previous = a;
+  let total = 0;
+  for (let step = 1; step <= ARC_SAMPLES; step += 1) {
+    const point = bezier(a, c, b, step / ARC_SAMPLES);
+    total += Math.hypot(point.x - previous.x, point.z - previous.z);
+    distances.push(total);
+    previous = point;
+  }
+  return { distances, total };
+}
+
+/** The curve parameter at which this much of the curve has been walked. */
+function tAtDistance(table: ArcTable, distance: number): number {
+  if (distance <= 0) return 0;
+  if (distance >= table.total) return 1;
+  const { distances } = table;
+  let low = 0;
+  let high = distances.length - 1;
+  while (high - low > 1) {
+    const mid = (low + high) >> 1;
+    if (distances[mid]! <= distance) low = mid;
+    else high = mid;
+  }
+  const before = distances[low]!;
+  const after = distances[high]!;
+  const span = after - before;
+  const within = span > 1e-6 ? (distance - before) / span : 0;
+  return (low + within) / ARC_SAMPLES;
+}
+
 /** A quadratic Bézier — a rounded walk rather than two straight legs. */
 function bezier(a: Vector2Like, c: Vector2Like, b: Vector2Like, t: number): { x: number; z: number } {
   const u = 1 - t;
@@ -262,7 +323,7 @@ const NUDGE_DECAY = 1.2;
 /** One child's scripted walk out of the bus and into the park. */
 interface KidWalk {
   readonly route: WalkRoute;
-  readonly length: number;
+  readonly arc: ArcTable;
   readonly speed: number;
   /** Lateral correction from the push-apart, carried between frames. */
   nudgeX: number;
@@ -358,20 +419,30 @@ export class ArrivalSequence {
 
       const route: WalkRoute = {
         from: { x: drop.x + wobble(0.35), z: drop.z + wobble(0.25) },
-        // Tight: this is the point they funnel through, and the opening is only
-        // ~8.8 m wide. A fan wider than the gate walks them into the masonry
-        // either side of it, which the wall guard duly caught.
-        corner: { x: ENTRANCE_BUS_DOOR_X + across * 3.4 + wobble(0.4), z: ENTRANCE_GATE_Z },
+        // The point they funnel through. Two competing constraints, and the
+        // first version got the balance wrong in a way that showed:
+        //
+        // - The opening is only ~8.8 m wide, so a fan wider than the gate walks
+        //   them into the masonry either side of it.
+        // - But **the jitter must stay smaller than the spacing**, or adjacent
+        //   children's aim points swap over and their routes cross. At
+        //   `across * 3.4` the eleven corners were 0.34 m apart with a +/-0.4 m
+        //   wobble on top — so neighbours regularly changed places, and two of
+        //   them met in the middle at 0.54 m, well inside a 1.8 m child.
+        //
+        // 6 m of fan gives 0.6 m of spacing, comfortably more than the wobble,
+        // and still leaves the outermost child half a body inside the gate.
+        corner: { x: ENTRANCE_BUS_DOOR_X + across * 6.0 + wobble(0.2), z: ENTRANCE_GATE_Z },
         to: {
-          x: end.x + across * 24 + wobble(2.2),
+          // Same rule at the far end: 2.4 m of spacing, so the wobble cannot
+          // reorder them here either.
+          x: end.x + across * 24 + wobble(1.0),
           z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
         },
       };
       walks.push({
         route,
-        length:
-          Math.hypot(route.corner.x - route.from.x, route.corner.z - route.from.z) +
-          Math.hypot(route.to.x - route.corner.x, route.to.z - route.corner.z),
+        arc: buildArcTable(route.from, route.corner, route.to),
         // The park's own pace, varied by a tenth either way. It is **not** an
         // independent number any more: `KID_WALK_SPEED = 1.5` was 46-75% of
         // what every other child in the park walks at, and it showed.
@@ -746,10 +817,14 @@ export class ArrivalSequence {
       return;
     }
 
-    const progress = clamp01((moving * walk.speed) / Math.max(0.5, walk.length));
+    // Distance walked, mapped back onto the curve — so the pace on screen is
+    // the pace that was asked for, everywhere along it.
+    const walked = moving * walk.speed;
+    const progress = clamp01(walked / Math.max(0.5, walk.arc.total));
     const route = walk.route;
-    const here = bezier(route.from, route.corner, route.to, progress);
-    const ahead = bezier(route.from, route.corner, route.to, Math.min(1, progress + 0.05));
+    const at = tAtDistance(walk.arc, walked);
+    const here = bezier(route.from, route.corner, route.to, at);
+    const ahead = bezier(route.from, route.corner, route.to, Math.min(1, at + 0.05));
     const dx = ahead.x - here.x;
     const dz = ahead.z - here.z;
 

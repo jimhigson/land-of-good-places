@@ -342,12 +342,33 @@ export class NpcCharacter {
     // A climbing character's (x, z) is the tree it is up, not somewhere it is
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
-    // A scripted child is exempt for the same reason and then some: theirs is a
-    // seat inside a vehicle the crowd cannot see, 1.8 m from the next seat and
-    // often outside the park wall entirely. Shoving them "apart" empties the
-    // bus through its own side panels.
     if (this.climbingFlag || other.climbingFlag) return;
-    if (this.scriptedFlag || other.scriptedFlag) return;
+
+    // **A scripted child cannot be pushed, but must still push.**
+    //
+    // Exempting them outright was the first attempt and it left a real hole:
+    // the moment one bus passenger was handed back to their own driver, that
+    // now-free child and the still-scripted one behind them had *no* separation
+    // between them at all — the crowd skipped the pair because one was
+    // scripted, and the arrival's own push-apart skipped it because the other
+    // was released. Measured: two children 0.07 m apart, which is one child
+    // standing inside another.
+    //
+    // So the exemption is one-directional. Two scripted children are the bus's
+    // business (they are sitting 1.8 m apart in seats the crowd cannot see, and
+    // shoving them "apart" empties the vehicle through its own side panels).
+    // A scripted child and a free one is a real encounter, and the free one is
+    // the one who steps aside.
+    const bothScripted = this.scriptedFlag && other.scriptedFlag;
+    if (bothScripted) return;
+    if (this.scriptedFlag) {
+      pushAway(other, this, minimum);
+      return;
+    }
+    if (other.scriptedFlag) {
+      pushAway(this, other, minimum);
+      return;
+    }
     const dx = other.position.x - this.position.x;
     const dz = other.position.z - this.position.z;
     const distanceSquared = dx * dx + dz * dz;
@@ -553,6 +574,23 @@ export class NpcCharacter {
   private groundAt(x: number, z: number, y: number): number {
     return this.groundSampler ? this.groundSampler(x, z, y) : terrainHeight(x, z);
   }
+}
+
+/**
+ * Moves `mover` clear of `fixed`, all of the correction on the mover.
+ *
+ * The asymmetric half of {@link NpcCharacter.separateFrom}: used when one of
+ * the pair is under scripted control and so cannot be moved by anybody else.
+ */
+function pushAway(mover: NpcCharacter, fixed: NpcCharacter, minimum: number): void {
+  const dx = mover.position.x - fixed.position.x;
+  const dz = mover.position.z - fixed.position.z;
+  const distanceSquared = dx * dx + dz * dz;
+  if (distanceSquared >= minimum * minimum || distanceSquared < 1e-8) return;
+  const distance = Math.sqrt(distanceSquared);
+  const push = minimum - distance;
+  mover.position.x += (dx / distance) * push;
+  mover.position.z += (dz / distance) * push;
 }
 
 /** Moves `current` towards `target` by at most `maxDelta`, componentwise in XZ. */
