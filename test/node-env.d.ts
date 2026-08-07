@@ -79,3 +79,12 @@ declare module 'node:child_process' {
     },
   ): string;
 }
+
+/**
+ * The one bundle-time constant the tests reach transitively:
+ * `core/solveCache.ts` keys its localStorage cache on the game version
+ * (vite.config.ts's define). Node never has the define, so the cache module
+ * guards its read and falls back — this declaration only teaches the test
+ * project the name exists.
+ */
+declare const __APP_VERSION__: string;
