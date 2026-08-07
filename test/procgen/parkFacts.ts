@@ -303,6 +303,45 @@ export interface ParkFacts {
    * a slide someone had simply decided to make opaque.
    */
   readonly slideChuteBands: { readonly solid: number; readonly clear: number };
+  /**
+   * **Where the ginormous slide's trackside cameras ended up on this seed, and
+   * whether each can actually see the chute it was placed against.**
+   *
+   * `slide/cameras.ts` places them from the solved route, so on a procgen ride
+   * they land somewhere different on every seed — which is exactly why this is
+   * a fact rather than a constant somebody wrote down.
+   *
+   * **Not a copy of `check:slide-rider`, and the difference is the point.** That
+   * check rides the canonical seed with a real `Player` and asks whether the
+   * *rider* is visible and legible; this measures the *placement* on five seeds
+   * against a point on the chute, with no rider in the park at all. One
+   * observes a ride, the other measures where the cameras stand — different
+   * questions, so two measurements rather than one asked to cover both.
+   */
+  readonly slideCameras: readonly {
+    readonly beat: number;
+    readonly eye: readonly [number, number, number];
+    /** The point on the chute the eye was placed against. */
+    readonly covers: readonly [number, number, number];
+    /** The ground under the eye, so a camera buried in a hill is visible here. */
+    readonly groundY: number;
+    /** Sight-line samples across this beat, and how many were blocked. */
+    readonly blocked: number;
+    readonly samples: number;
+    /** How near and far the chute gets from this eye across its own beat. */
+    readonly nearest: number;
+    readonly farthest: number;
+  }[];
+  /**
+   * The shot plan as spans of the ride, in order — so "every part of the ride is
+   * covered by some camera" is measurable as arithmetic on the built plan rather
+   * than trusted to the loop that produced it.
+   */
+  readonly slideShotSpans: readonly {
+    readonly kind: string;
+    readonly from: number;
+    readonly to: number;
+  }[];
   readonly slideLanding: {
     readonly x: number;
     readonly z: number;
@@ -511,6 +550,87 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       slide.pointAt(i / steps, probe);
       slide.group.localToWorld(probe);
       slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The trackside cameras, and whether each can see the stretch of chute it was
+  // stood beside. Measured with rays against the **built** chute and the built
+  // castle, so a route that comes out a different shape on another seed cannot
+  // quietly leave a camera looking at the back of a tower.
+  const { Raycaster: RaycasterClass } = await import('three');
+  // Dynamic, like everything else seed-dependent here: a static import would
+  // pull in a second copy of the park at the default seed.
+  const { terrainHeight } = await import('../../src/world/terrain.ts');
+  const slideCameras: {
+    beat: number;
+    eye: readonly [number, number, number];
+    covers: readonly [number, number, number];
+    groundY: number;
+    blocked: number;
+    samples: number;
+    nearest: number;
+    farthest: number;
+  }[] = [];
+  const slideShotSpans = world.building.slideShots.shots.map((shot) => ({
+    kind: shot.kind,
+    from: shot.from,
+    to: shot.to,
+  }));
+  {
+    // Where a reclining rider's middle sits above the chute floor. Two numbers
+    // from `Building` (`RIDER_LIFT` + `RECLINED_LIFT`); a sight line to the
+    // trough floor itself would be a harder test than the game ever asks for.
+    const RIDER_ABOVE_FLOOR = 0.24;
+    const SAMPLES = 40;
+    const caster = new RaycasterClass();
+    const occluders = [slide.group, world.building.gardenRoot];
+    const eye = new Vector3();
+    const point = new Vector3();
+    const tangent = new Vector3();
+    const rider = new Vector3();
+    const toRider = new Vector3();
+    const up = new Vector3();
+    const right = new Vector3();
+
+    for (const [beat, shot] of world.building.slideShots.shots.entries()) {
+      if (shot.kind !== 'trackside' || !shot.eye || !shot.covers) continue;
+      eye.copy(shot.eye);
+      let blocked = 0;
+      let nearest = Infinity;
+      let farthest = 0;
+      for (let i = 0; i <= SAMPLES; i += 1) {
+        const t = shot.from + ((shot.to - shot.from) * i) / SAMPLES;
+        slide.pointAt(t, point);
+        slide.tangentAt(t, tangent);
+        // The chute's own frame, so "above the trough floor" leans with the
+        // chute the way the trough itself does.
+        right.crossVectors(tangent, new Vector3(0, 1, 0));
+        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+        right.normalize();
+        up.crossVectors(right, tangent).normalize();
+        rider.copy(point).addScaledVector(up, RIDER_ABOVE_FLOOR);
+
+        toRider.copy(rider).sub(eye);
+        const reach = toRider.length();
+        nearest = Math.min(nearest, reach);
+        farthest = Math.max(farthest, reach);
+        if (reach < 1e-4) continue;
+        caster.set(eye, toRider.normalize());
+        // Stop short of the rider, so grazing the chute floor she lies on is
+        // not counted as something standing in the way.
+        caster.far = reach - 0.12;
+        if (caster.intersectObjects(occluders, true).length > 0) blocked += 1;
+      }
+      slideCameras.push({
+        beat,
+        eye: [eye.x, eye.y, eye.z],
+        covers: [shot.covers.x, shot.covers.y, shot.covers.z],
+        groundY: terrainHeight(eye.x, eye.z),
+        blocked,
+        samples: SAMPLES + 1,
+        nearest,
+        farthest,
+      });
     }
   }
 
@@ -726,6 +846,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     slideChute,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,
+    slideCameras,
+    slideShotSpans,
     slideLanding,
     castleMasonryTopY,
     castleTowers,

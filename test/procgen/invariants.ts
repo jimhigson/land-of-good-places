@@ -1806,6 +1806,128 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * strictly better here than firing a ring of probe rays and hoping the gaps
  * between them are small enough to catch a thin obstacle.
  */
+/**
+ * **Every trackside camera on the ginormous slide can see the bit of ride it
+ * was stood beside, on every seed.**
+ *
+ * The slide cuts between a chase camera and three trackside ones
+ * (`slide/cameras.ts`, and Jim's ruling quoted there). Those three are placed
+ * from the **solved route**, so on a procgen ride they land somewhere different
+ * every time — and a camera that ends up looking at the back of a tower, buried
+ * in a hill, or too shallow to see over the chute's own hand-rail is a stretch
+ * of the ride where a child cannot see herself.
+ *
+ * `check:slide-rider` already rides the canonical seed with a real `Player` and
+ * measures her in pixels. This is the other four seeds, and it asks a different
+ * question: not *is the rider legible* but *is the camera anywhere sensible*.
+ * That split is deliberate — the pixel check is far too slow to run five times,
+ * and a placement fault shows up in geometry long before it needs a rider.
+ *
+ * Four clauses, and the first is the one the brief called for:
+ *
+ * 1. **Every part of the ride is covered by some camera.** Measured as
+ *    arithmetic on the built plan: the spans must start at 0, end at 1, and
+ *    meet exactly — no gap where the game has no shot, and no overlap where two
+ *    disagree about which is live.
+ * 2. **Nothing stands between a camera and the chute it covers**, sampled
+ *    across that camera's whole beat against the built chute and the built
+ *    castle. This is the clause the measured 50° elevation threshold exists for.
+ * 3. **No camera is underground.** A lens below the hills renders dirt.
+ * 4. **There is more than one shot.** A plan that collapsed to a single chase
+ *    beat would satisfy 1–3 vacuously while quietly undoing the whole feature.
+ */
+const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const spans = facts.slideShotSpans;
+  const cameras = facts.slideCameras;
+
+  // Anti-vacuity first, in the tradition of `castleMasonryTopY`'s guard: an
+  // empty plan must be a complaint, not a silent pass over nothing.
+  if (spans.length < 2) {
+    complaints.push(
+      `the ginormous slide's shot plan has ${spans.length} beat(s) — it is meant to cut ` +
+        'between a chase camera and trackside ones, and with fewer than two it cuts nowhere',
+    );
+    return complaints;
+  }
+  if (cameras.length === 0) {
+    complaints.push(
+      'the ginormous slide has no trackside cameras at all, so the chase camera — which ' +
+        'shows a rider lying feet-first as a floating head, by construction — is the only ' +
+        'view of the whole ride',
+    );
+    return complaints;
+  }
+
+  // 1. The beats tile the ride.
+  const first = spans[0];
+  const last = spans[spans.length - 1];
+  if (first && Math.abs(first.from) > 1e-9) {
+    complaints.push(
+      `the ginormous slide's first shot starts at ${first.from.toFixed(4)} of the way down ` +
+        'rather than at the top — the opening of the ride has no camera',
+    );
+  }
+  if (last && Math.abs(last.to - 1) > 1e-9) {
+    complaints.push(
+      `the ginormous slide's last shot ends at ${last.to.toFixed(4)} rather than at the ` +
+        'bottom — the end of the ride has no camera',
+    );
+  }
+  for (let i = 1; i < spans.length; i += 1) {
+    const previous = spans[i - 1];
+    const current = spans[i];
+    if (!previous || !current) continue;
+    const step = current.from - previous.to;
+    if (Math.abs(step) > 1e-9) {
+      complaints.push(
+        `beat ${i - 1} of the ginormous slide ends at ${previous.to.toFixed(4)} and beat ${i} ` +
+          `starts at ${current.from.toFixed(4)} — ${step > 0 ? 'a gap where no camera has ' +
+          'her' : 'an overlap where two shots each think they are live'}`,
+      );
+    }
+  }
+
+  // 2 and 3. Each camera can see its own beat, and is above the ground.
+  for (const camera of cameras) {
+    if (camera.samples === 0) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} was never sampled, so its sight line ` +
+          'proves nothing',
+      );
+      continue;
+    }
+    if (camera.blocked > 0) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat}, at (${camera.eye[0].toFixed(1)}, ` +
+          `${camera.eye[1].toFixed(1)}, ${camera.eye[2].toFixed(1)}), cannot see the chute ` +
+          `for ${camera.blocked} of ${camera.samples} samples across its own beat — the ` +
+          'chute or the castle is in the way. If it is the near hand-rail, the elevation ' +
+          'in `slide/cameras.ts` is too shallow: the sweep recorded there puts the ' +
+          'threshold at 50°',
+      );
+    }
+    // Clear of the grass by at least the chute's own half-width. Taken from the
+    // game's built profile rather than invented here, in the spirit of the rule
+    // about thresholds: it is a length this ride already has an opinion about,
+    // and it is comfortably more than a lens needs to be out of the dirt. The
+    // three cameras measure 20.0, 13.8 and 6.7 m on the canonical seed, so this
+    // fires on a camera that has genuinely gone into a hill rather than on one
+    // that is merely low.
+    const air = camera.eye[1] - camera.groundY;
+    const needed = facts.chuteEnvelope.halfWidth;
+    if (air < needed) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} sits ${air.toFixed(2)} m over the ` +
+          `ground against ${needed.toFixed(2)} m needed — it is in the hillside, and ` +
+          'renders dirt',
+      );
+    }
+  }
+
+  return complaints;
+};
+
 const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
   const complaints: string[] = [];
   const chute = facts.slideChute;
@@ -2475,6 +2597,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'the ginormous slide does not clip the castle towers',
     theGinormousSlideMissesTheCastleTowers,
+  ],
+  [
+    "the ginormous slide's cameras cover the whole ride and can see it",
+    theSlideTracksideCamerasCanSeeTheRide,
   ],
   ['a child boarding the ginormous slide is put down on the chute', theSlideRiderSitsOnTheChute],
   [
