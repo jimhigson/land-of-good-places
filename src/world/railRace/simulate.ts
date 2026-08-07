@@ -181,7 +181,7 @@ const SPARK_GUARD_SECONDS = 0.3;
  * press, in seconds. See {@link Rider.bob} — purely cosmetic, nothing in this
  * file reads it back.
  */
-const BOB_SECONDS = 0.22;
+export const BOB_SECONDS = 0.22;
 
 /**
  * Coasting drag: a linear part and a squared part, m/s².

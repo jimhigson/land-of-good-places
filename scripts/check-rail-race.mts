@@ -91,8 +91,13 @@ import {
   RACE_LAPS,
   RIVAL_SKILL,
   CHILD_TAPS_PER_SECOND,
+  PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
   simulateField,
   simulateRailRace,
+  createRider,
+  stepRider,
+  scheduleForLevel,
   type Strategy,
 } from '../src/world/railRace/simulate.ts';
 import {
@@ -104,7 +109,15 @@ import {
 } from '../src/world/railRace/camera.ts';
 import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
-import { poseRailRaceRider, setRiderLegsVisible } from '../src/world/railRace/duckPose.ts';
+import {
+  poseRailRaceRider,
+  setRiderLegsVisible,
+  riderLegsShow,
+  cheerAt,
+  SEATED,
+  RESULT_SECONDS,
+  type RidePhase,
+} from '../src/world/railRace/duckPose.ts';
 import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
@@ -882,14 +895,39 @@ say('');
   // "boost is active"/"she won" boolean that was set correctly while nothing on
   // screen moved a millimetre. So every one of these measures where her head
   // actually ends up, through the real pose function, in the real cart.
+  // **The celebration is driven by the curve the game actually runs.** Feeding a
+  // hand-picked `cheer: 1` in here would measure only that the pose *can* lift
+  // her — it would stay green with `cheerAt` returning 0 forever, which is the
+  // "she won, and nothing moved" bug in its purest form. And 1 is not even a
+  // number the ride produces: the fade means the curve peaks near 0.90.
+  //
+  // Sampled at 60 Hz across the whole result phase, so the peak below is the
+  // highest she is ever actually posed at, on the frame she is posed at it.
+  const CHEER_TICK = 1 / 60;
+  const cheerCurve: number[] = [];
+  for (let t = 0; t <= RESULT_SECONDS; t += CHEER_TICK) cheerCurve.push(cheerAt(t));
+  const cheerPeak = Math.max(...cheerCurve);
+  // A hop is a run of frames off the ground: `max(0, sin)` leaves her at exactly
+  // 0 between them, which is what makes it hopping rather than bobbing.
+  let hops = 0;
+  for (let i = 1; i < cheerCurve.length; i += 1) {
+    if (cheerCurve[i]! > 0 && cheerCurve[i - 1]! === 0) hops += 1;
+  }
+
   const pumpedPose = pose({ duck: 0, pump: 1, cheer: 0 });
-  const cheeringPose = pose({ duck: 0, pump: 0, cheer: 1 });
+  const cheeringPose = pose({ duck: 0, pump: 0, cheer: cheerPeak });
   const duckPumpPose = pose({ duck: 1, pump: 1, cheer: 0 });
 
   const rockThrow = pumpedPose.headAt.distanceTo(uprightPose.headAt);
+  const cheerLift = cheeringPose.headTop - uprightPose.headTop;
   say(
     `boost rock   head throws ${rockThrow.toFixed(2)} m on a pump   ` +
-      `win jump ${(cheeringPose.headTop - uprightPose.headTop).toFixed(2)} m of lift`,
+      `win jump ${cheerLift.toFixed(2)} m of lift`,
+  );
+  say(
+    `celebration  ${hops} hops, peaking at ${cheerPeak.toFixed(3)} of the jump, ` +
+      `settled by ${(cheerCurve.findLastIndex((v) => v > 0) * CHEER_TICK).toFixed(2)} s of ` +
+      `${RESULT_SECONDS} s on screen`,
   );
   // Jim asked for the boost to be *felt*. A rock nobody can see is the same
   // non-feature as a face nobody can look at.
@@ -898,11 +936,27 @@ say('');
     `a full pump moves the rider's head by only ${rockThrow.toFixed(3)} m — at the ~37 px/m this ` +
       'ride draws her at, that is not visual feedback. See BOOST_ROCK in railRace/duckPose.ts.',
   );
-  // The win jump has to leave the seat, upwards and visibly.
+  // The win jump has to leave the seat, upwards and visibly — **at the height
+  // the real curve reaches**, not at a 1 it never gets to.
   require(
-    cheeringPose.headTop - uprightPose.headTop > 0.3 * route.scale,
-    `winning lifts the rider only ${(cheeringPose.headTop - uprightPose.headTop).toFixed(3)} m — ` +
-      'she is meant to jump in the cart, and this would read as sitting still. See CHEER_HOP.',
+    cheerLift > 0.3 * route.scale,
+    `winning lifts the rider only ${cheerLift.toFixed(3)} m at the celebration's own peak of ` +
+      `${cheerPeak.toFixed(3)} — she is meant to jump in the cart, and this would read as sitting ` +
+      'still. See CHEER_HOP in duckPose.ts, and cheerAt for the curve that drives it.',
+  );
+  // Jumping, not hovering: she has to come down and go again.
+  require(
+    hops >= 2,
+    `the celebration is ${hops} hop(s) — Jim asked for her to jump while the camera holds, and ` +
+      'one long rise reads as being lifted. See cheerAt.',
+  );
+  // And it has to be over while the camera is still on her, so the last hop
+  // lands rather than being cut off in mid-air by the result card.
+  require(
+    cheerCurve[cheerCurve.length - 1] === 0,
+    `she is still ${cheerCurve[cheerCurve.length - 1]!.toFixed(3)} of the way through a jump when ` +
+      `the result card goes at ${RESULT_SECONDS} s — the last hop is cut off in the air. ` +
+      'See CHEER_SECONDS.',
   );
   // ...and she must still be *in* it, not launched through the seat.
   require(
@@ -937,6 +991,34 @@ say('');
       `through the cart's tub floor at ${tubFloor.toFixed(2)}.`,
   );
 
+  // **Boosting into the celebration**, which is the other pair that shares
+  // `body.rotation.x` — a pump throws the torso forward, the jump leans it back,
+  // so where they overlap they subtract and she straightens up out of her own
+  // celebration.
+  //
+  // They are kept apart not by a gate but by the clock, and this is the guard on
+  // that: `simulate.ts`'s spring is empty `BOB_SECONDS` after her last press,
+  // and the first hop of `cheerAt` does not peak until later, so by the time the
+  // jump is worth looking at the rock is already zero. A gate was tried instead
+  // and thrown away — being proportional it leaked 9.5% of the rock at the
+  // curve's own peak, i.e. it did not do the thing it was named for.
+  //
+  // This compares two numbers from genuinely different modules, so lengthening
+  // the spring or quickening the hop fires it.
+  const cheerPeakAt = cheerCurve.indexOf(cheerPeak) * CHEER_TICK;
+  say(
+    `spring vs jump   pump spring empty at ${BOB_SECONDS.toFixed(2)} s, jump peaks at ` +
+      `${cheerPeakAt.toFixed(2)} s`,
+  );
+  require(
+    BOB_SECONDS < cheerPeakAt,
+    `the pump spring is still unwinding (${BOB_SECONDS.toFixed(2)} s) when the victory jump peaks ` +
+      `at ${cheerPeakAt.toFixed(2)} s, so the boost rock is subtracting from the celebration lean ` +
+      'at the top of her jump and she straightens up instead of throwing her arms open. Either ' +
+      'shorten BOB_SECONDS, slow CHEER_HOP_SECONDS, or gate the pump on the cheer inside ' +
+      'poseRailRaceRider.',
+  );
+
   // --- the approach-frame skull graze, rechecked at the new speeds ----------
   //
   // Her head is enormous (a cartoon child at ride scale), so its *front* reaches
@@ -959,6 +1041,137 @@ say('');
     `skull graze   bar is inside her head for the last ${skullReach.toFixed(2)} m of the approach ` +
       `— ${frames.toFixed(1)} frames at a child's ${childRace.topSpeed.toFixed(1)} m/s top speed ` +
       `(fix: a BAR_CONTACT_LEAD in planHazards; not shipped, wants eyes)`,
+  );
+
+  // --- the legs: off racing, on to celebrate, on when she leaves -------------
+  //
+  // Jim asked for three states in one ride, and the rule is a **derivation from
+  // the phase**, never a remembered list — `TreeClimbing.hidePlayerBody` kept
+  // such a list, recorded an empty restore set on its second call, and left her
+  // a floating head on every other ride in the park until it was deleted.
+  //
+  // So this puts the real rule through the real setter for **every** phase the
+  // ride has, and reads the result back off the model — including the box, so a
+  // rule that set a flag nobody drew from would still be caught.
+  const PHASES: readonly RidePhase[] = [
+    'waiting',
+    'levelSelect',
+    'countdown',
+    'racing',
+    'finishing',
+  ];
+  const WANT_LEGS: Record<RidePhase, boolean> = {
+    waiting: true,
+    levelSelect: true,
+    countdown: false,
+    racing: false,
+    finishing: true,
+  };
+  poseRailRaceRider(kid, SEATED);
+  const legParts = [kid.limbs?.leftLeg ?? kid.leftLeg, kid.limbs?.rightLeg ?? kid.rightLeg];
+  require(
+    legParts.every((part) => part !== undefined && part !== null),
+    'the rider has no legs to show or hide, so everything below this line is vacuous.',
+  );
+  const legReport: string[] = [];
+  for (const phase of PHASES) {
+    setRiderLegsVisible(kid, riderLegsShow(phase));
+    cartGroup.updateMatrixWorld(true);
+    const drawn = legParts.every((part) => part?.visible === true);
+    const reach = visibleBox(kid.root).min.y;
+    legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
+    require(
+      drawn === WANT_LEGS[phase],
+      `in phase '${phase}' the rider's legs are ${drawn ? 'drawn' : 'hidden'} and they should be ` +
+        `${WANT_LEGS[phase] ? 'drawn' : 'hidden'} — off while racing because they clip through the ` +
+        'cart, on for the win because Jim asked to see her jump, on once she is off. See ' +
+        'riderLegsShow in duckPose.ts.',
+    );
+    // The flag has to reach the picture. A `visible` that no bounding box
+    // notices is a `visible` nothing renders from either.
+    require(
+      Number.isFinite(reach),
+      `phase '${phase}' leaves the rider with no drawable geometry at all (box min ${reach}).`,
+    );
+  }
+  const legsRacing = (() => {
+    setRiderLegsVisible(kid, riderLegsShow('racing'));
+    cartGroup.updateMatrixWorld(true);
+    return visibleBox(kid.root).min.y;
+  })();
+  const legsWinning = (() => {
+    setRiderLegsVisible(kid, riderLegsShow('finishing'));
+    cartGroup.updateMatrixWorld(true);
+    return visibleBox(kid.root).min.y;
+  })();
+  say(`legs         ${legReport.join('   ')}`);
+  say(
+    `             racing reaches down to ${legsRacing.toFixed(2)}, celebrating to ` +
+      `${legsWinning.toFixed(2)} (tub floor ${tubFloor.toFixed(2)})`,
+  );
+  // The two states must differ *in the drawn geometry*, or the rule is switching
+  // something that was never on screen — which is how a "hidden" leg goes on
+  // clipping through the cart in front of a six-year-old.
+  require(
+    legsWinning < legsRacing - 1e-6,
+    `hiding the legs changes nothing about what is drawn: racing reaches ${legsRacing.toFixed(3)} ` +
+      `and celebrating ${legsWinning.toFixed(3)}. The legs were never the lowest thing, so this ` +
+      'rule is not doing what it is documented to do.',
+  );
+
+  // --- the pump spring unwinds after the line --------------------------------
+  //
+  // `stepRider` returns early once a rider has finished, and the `bob` decay sat
+  // below that return — so `bob` froze at whatever the last racing frame held,
+  // which for a child mashing across the line is exactly 1, for the whole result
+  // phase. Nothing read it until the boost rock did; then the winner spent her
+  // victory jump thrown forward over the handlebars, and every finished rival
+  // sat locked at the bottom of its seat dip.
+  //
+  // Driven through the real stepper, with the button **still held** — a child
+  // does not stop tapping the instant she crosses the line, and a fix that only
+  // worked for a released button would not have covered the case that broke.
+  const springRider = createRider(0);
+  const springHazards = scheduleForLevel(3);
+  const dtSpring = 1 / 60;
+  let springSeconds = 0;
+  while (!springRider.finished && springSeconds < 400) {
+    stepRider(
+      route,
+      springRider,
+      springHazards,
+      { pressed: true, ducking: false },
+      dtSpring,
+      1,
+      PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
+    );
+    springSeconds += dtSpring;
+  }
+  const bobAtLine = springRider.bob;
+  // A full result phase of standing at the line, still mashing.
+  for (let t = 0; t < RESULT_SECONDS; t += dtSpring) {
+    stepRider(
+      route,
+      springRider,
+      springHazards,
+      { pressed: true, ducking: false },
+      dtSpring,
+      1,
+      PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
+    );
+  }
+  say(
+    `pump spring  ${bobAtLine.toFixed(2)} crossing the line, ${springRider.bob.toFixed(2)} after ` +
+      `${RESULT_SECONDS} s of celebrating (still holding the button)`,
+  );
+  require(
+    springRider.bob === 0,
+    `the pump spring is still wound to ${springRider.bob.toFixed(3)} ${RESULT_SECONDS} s after the ` +
+      'race ended, so the winner celebrates thrown forward on a pump that is long over (BOOST_ROCK) ' +
+      'and finished rivals sit stuck in their seat dip (BOB_DROP). The decay must run before ' +
+      "stepRider's `if (rider.finished)` return.",
   );
 
   kid.dispose?.();

@@ -19,6 +19,7 @@ import {
   setRiderLegsVisible,
   riderLegsShow,
   cheerAt,
+  RESULT_SECONDS,
   type RidePhase,
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
@@ -80,9 +81,6 @@ const COUNTDOWN_SECONDS = 3;
 
 /** How long a countdown digit (or "GO!") stays on screen. */
 const COUNT_HOLD = 0.9;
-
-/** How long the result card sits there before she is set down at the booth. */
-const RESULT_SECONDS = 5;
 
 /** Safety net: no race may run longer than this. Nobody has ever reached it. */
 const RACE_TIME_LIMIT = 180;

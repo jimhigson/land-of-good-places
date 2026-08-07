@@ -182,15 +182,27 @@ const CHEER_ARM = 2.5;
  */
 const CHEER_LEG = 0.95;
 
+/**
+ * **How long the result card sits there before she is set down at the booth**,
+ * seconds — which is also exactly how long the camera holds on her, because
+ * finishing freezes `Rider.travelled` and the rig settles where she stopped.
+ *
+ * Here rather than in `RailRace.ts` because {@link CHEER_SECONDS} has to fit
+ * inside it, and "two numbers kept in step by a comment promising they agree" is
+ * the single most common bug in this repo. One owner; `RailRace` imports it, and
+ * `check:rail-race` asserts the jump lands before it runs out.
+ */
+export const RESULT_SECONDS = 5;
+
 /** How long one celebration hop takes, seconds. */
 const CHEER_HOP_SECONDS = 0.62;
 
 /**
  * How long she keeps jumping for, seconds.
  *
- * Comfortably inside `RailRace`'s `RESULT_SECONDS` (5) so the bouncing stops and
- * she settles while the camera is still on her, rather than being cut off in
- * mid-air when the result card goes.
+ * Comfortably inside {@link RESULT_SECONDS} so the bouncing stops and she
+ * settles while the camera is still on her, rather than being cut off in mid-air
+ * when the result card goes. Guarded, not merely intended.
  */
 const CHEER_SECONDS = 3.2;
 
@@ -333,13 +345,21 @@ export function poseRailRaceRider(target: Duckable, pose: RiderPose): void {
   // throw her torso forward on a pump that bought her nothing, on top of a 40°
   // fold, and put her head through her own knees. One rule, stated once.
   //
-  // **And by the cheer**, which is the same rule for the other end of the ride:
-  // a pump throws the torso *forward* and the celebration leans it *back*, so
-  // the two subtract, and a winner mid-jump would straighten up instead of
-  // throwing her arms open. Gating here rather than at the call sites is the
-  // whole point of one owner — the four claimants are reconciled once, in the
-  // function that writes the property, so no caller can combine them wrongly.
-  const pump = clamp01(pose.pump) * (1 - fold) * (1 - cheer);
+  // **The cheer is deliberately NOT gated the same way**, and it is worth saying
+  // why, because gating it was tried first. A pump throws the torso forward and
+  // the celebration leans it back, so where they overlap they subtract — but
+  // they barely overlap: `simulate.ts`'s pump spring is empty `BOB_SECONDS`
+  // (0.22 s) after her last press, and the first hop of {@link cheerAt} does not
+  // peak until 0.31 s. By the time the jump is worth looking at, the rock is
+  // already zero on its own.
+  //
+  // A `(1 - cheer)` factor was written, and `check:rail-race` caught it claiming
+  // more than it delivered: the curve peaks at 0.905, so 9.5% of the rock
+  // survived a gate whose whole point was that none of it should. A leaky gate
+  // that reads as a rule is worse than no gate — it invites the next person to
+  // trust it. The overlap is instead guarded where it is actually decided, as a
+  // relationship between the spring and the curve; see `check:rail-race`.
+  const pump = clamp01(pose.pump) * (1 - fold);
 
   // Seated first, then everything else on top of it — she ducks, pumps and
   // cheers *from* the seat, so their numbers add to the seat's rather than
