@@ -616,6 +616,167 @@ require(
     'See MAX_V_FOV in railRace/camera.ts.',
 );
 
+// --- does it stand further back when she is going faster? --------------------
+//
+// Jim, 6 August 2026: the camera should pull back as she speeds up, showing more
+// track ahead, **eased not snapped**. Three separate claims live in that, and
+// each is asserted here against the real `RaceCamera`, driven frame by frame:
+//
+// 1. **It pulls back at all**, and by an amount worth the code.
+// 2. **The rider does not move on screen while it does.** This is the one that
+//    could quietly wreck the ride: `RIDER_SCREEN_X` is a promise the family
+//    signed off twice, and a zoom that walked her towards the edge would undo
+//    it. The rig is scaled about the rider, so this should be exact.
+// 3. **The easing is frame-rate independent**, i.e. a real half-life rather than
+//    a per-frame lerp. A per-frame lerp is the ordinary way to write this and it
+//    ties the camera's feel to the frame rate — the same ramp settles at a
+//    different place on a 240 Hz monitor than on a phone dropping frames. Asked
+//    for explicitly, so measured explicitly.
+//
+// All three drive `rig.update` with the same wall-clock ramp and differ only in
+// the step, so nothing here can agree with itself by construction.
+
+rig.resize(1280, 720);
+
+/** Drives the real rig at a constant speed for `seconds`, from a standstill. */
+function settle(speed: number, dt: number, seconds = 6): number {
+  rig.reset(0);
+  let travelled = 0;
+  for (let t = 0; t < seconds; t += dt) {
+    travelled += speed * dt;
+    rig.update(travelled, dt);
+  }
+  return travelled;
+}
+
+/** How far the lens ends up from the rider it is framing, in metres. */
+function standOff(travelled: number): number {
+  return rig.camera.position.distanceTo(onLane(route.startDistance + travelled, probe));
+}
+
+/** Where the rider sits across the picture, 0 at the left edge — her mark. */
+function riderMark(travelled: number): number {
+  return (onLane(route.startDistance + travelled, probe).project(rig.camera).x + 1) / 2;
+}
+
+const TICK = 1 / 60;
+const crawlRun = settle(2, TICK);
+const crawlStand = standOff(crawlRun);
+const crawlMark = riderMark(crawlRun);
+const racingRun = settle(32, TICK);
+const racingStand = standOff(racingRun);
+const racingMark = riderMark(racingRun);
+
+say('');
+say(
+  `zoom       stands ${crawlStand.toFixed(1)} m off at a crawl, ${racingStand.toFixed(1)} m at ` +
+    `racing speed (${((racingStand / crawlStand - 1) * 100).toFixed(1)}% further back)   ` +
+    `rider holds her mark at ${crawlMark.toFixed(4)} / ${racingMark.toFixed(4)} across`,
+);
+
+// 1. It has to actually pull back, and by enough to notice.
+require(
+  racingStand > crawlStand * 1.1,
+  `the camera stands ${racingStand.toFixed(2)} m off at racing speed against ` +
+    `${crawlStand.toFixed(2)} m at a crawl — under a tenth further back, which is not a zoom. See ` +
+    'SPEED_PULL_BACK in railRace/camera.ts.',
+);
+// ...and not so far that the ride turns into a map.
+require(
+  racingStand < crawlStand * 1.6,
+  `the camera pulls back to ${(racingStand / crawlStand).toFixed(2)}x its resting distance, which ` +
+    'is a different shot rather than the same shot with more road in it. See SPEED_PULL_BACK.',
+);
+
+// 2. **She holds her mark at every speed.** `RIDER_SCREEN_X` is a promise the
+//    family signed off twice, and a camera that walked her towards the edge as
+//    she sped up would undo it silently.
+//
+//    Measured end to end rather than as "the zoom contributes exactly zero",
+//    which is what this assertion said first and is a subtly different claim.
+//    The zoom really is a uniform scaling of the rig about the rider, so on its
+//    own it moves her not at all — but the **follower** does, a little: leading
+//    by `FOLLOW_LAG × speed` cancels the chase lag at every speed only to first
+//    order, leaving a residual that grows with speed. Watched at
+//    `SPEED_PULL_BACK = 0`, the drift is **0.0078** of the picture; with the
+//    pull-back switched on it is **0.0057**, i.e. the zoom slightly *improves*
+//    it. An assertion that blamed the zoom for the follower's residual would
+//    have been red on arrival for the wrong reason, and would have gone green
+//    again if someone deleted the lead-ahead.
+//
+//    So the bound is on what a child actually sees — under 2% of the picture
+//    across the entire speed range — and it catches a broken zoom easily,
+//    because scaling `stand` without `look` swings the aim and moves her by far
+//    more than that.
+const markDrift = Math.abs(racingMark - crawlMark);
+require(
+  markDrift < 0.02,
+  `the rider slides from ${crawlMark.toFixed(4)} to ${racingMark.toFixed(4)} across the picture ` +
+    `between a crawl and racing speed — ${(markDrift * 100).toFixed(1)}% of the width, and ` +
+    'RIDER_SCREEN_X is a promise the family signed off. Either the pull-back is not a uniform ' +
+    'scaling of the rig about the rider (it must scale `stand` and `look` by one factor, or the ' +
+    'aim swings), or FOLLOW_LAG has stopped cancelling the follower lag. See camera.ts.',
+);
+
+// 3. **Frame-rate independence**: the same wall clock at 30 Hz and at 240 Hz has
+//    to put the camera in the same place. A per-frame lerp — the ordinary way
+//    to write this — ties the camera's feel to the frame rate, so the ride
+//    behaves differently on a 240 Hz monitor than on a phone dropping frames.
+//
+//    **Sampled all the way along the ramp, not at one moment**, and that is not
+//    caution: watched at a single 1.2 s probe, a per-frame lerp of 0.05 was
+//    caught 1.768 m apart, but one of 0.2 slipped through at 0.028 m — a plain
+//    hand-tuned value, fast enough that both rates had already settled by the
+//    time the probe looked. The disagreement only exists *while the easing is
+//    easing*, so the probe has to be there for it. Taking the worst of a sweep
+//    catches a lerp of any speed: a slow one diverges late, a fast one early.
+//
+//    **The bound is not zero, and the reason is worth knowing before anyone
+//    tightens it.** `damp` is exact for a target that is standing still, but
+//    both followers here chase a target that is itself moving — the anchor
+//    chases a rider accelerating away, and the zoom chases a speed that is still
+//    settling — and stepping an exponential over a moving target carries an
+//    inherent first-order-in-`dt` error. That is a property of discrete time,
+//    not of a per-frame lerp, and it is most of what is left. Swept:
+//
+//    ```
+//      SPEED_PULL_BACK = 0 (no zoom at all)     0.071 m   <- the follower alone
+//      SPEED_PULL_BACK = 0.34 (shipping)        0.260 m   <- here
+//      SPEED_PULL_BACK = 1.5                    1.306 m
+//      per-frame lerp, 0.2 per frame            2.018 m   <- nearest failure
+//      per-frame lerp, 0.05 per frame           4.063 m
+//    ```
+//
+//    So 1.0 m: four times the shipping value, half the cheapest thing that is
+//    genuinely wrong. Tightening it towards 0.26 would be fitting the bound to
+//    today's `dt`s rather than to the fault it is looking for.
+const RAMP_PROBES = [0.1, 0.2, 0.3, 0.5, 0.8, 1.2];
+let worstRateGap = 0;
+let worstRateAt = 0;
+let worstSlow = 0;
+let worstFast = 0;
+for (const at of RAMP_PROBES) {
+  const slow = standOff(settle(32, 1 / 30, at));
+  const fast = standOff(settle(32, 1 / 240, at));
+  if (Math.abs(slow - fast) > worstRateGap) {
+    worstRateGap = Math.abs(slow - fast);
+    worstRateAt = at;
+    worstSlow = slow;
+    worstFast = fast;
+  }
+}
+say(
+  `           worst 30 Hz vs 240 Hz disagreement ${worstRateGap.toFixed(4)} m, ` +
+    `${worstRateAt.toFixed(1)} s into the ramp (${worstSlow.toFixed(3)} vs ${worstFast.toFixed(3)} m)`,
+);
+require(
+  worstRateGap < 1.0,
+  `${worstRateAt.toFixed(1)} s into the same acceleration the camera stands ${worstSlow.toFixed(3)} m ` +
+    `out at 30 Hz and ${worstFast.toFixed(3)} m at 240 Hz — ${worstRateGap.toFixed(3)} m apart, so ` +
+    'the easing is tied to the frame rate. Both the follower and the zoom must ease on a half-life ' +
+    'in seconds (see `damp`), never a per-frame lerp.',
+);
+
 // --- and is it pointed the right way, all the way round? ---------------------
 
 const forward = new Vector3();
