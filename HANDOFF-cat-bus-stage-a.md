@@ -106,13 +106,87 @@ point: **bus at `ENTRANCE_BUS_ARRIVE_Z` (z = 64), outside the gate, player
 aboard, door shut.** Stage A's first phase begins there, so Stage B attaches in
 front of it with no seam. Keep that boundary a named phase.
 
-## Status
+## Status — Stage A complete
 
 - [x] Read brief, docs, all six `src/world/entrance/` files, boot path
 - [x] Harness mapped; guard strategy decided (see above)
-- [ ] Arrival sequence written
-- [ ] Wired: `World` -> `Entrance` -> arrival; `DEFAULT_SPAWN` moved
-- [ ] `ENTRANCE_CLEAR_*` wired into `Scenery.ts` + invariant
-- [ ] Guard proved red by removing the wiring
-- [ ] Browser QA on own port, screenshots
-- [ ] PR raised referencing #245
+- [x] `ArrivalSequence.ts` written — the timeline nobody had written
+- [x] Wired: `World` -> `Entrance` -> arrival; `DEFAULT_SPAWN` moved to the gate
+- [x] `ENTRANCE_CLEAR_*` wired into `Scenery.ts` + invariant
+- [x] Guards proved red by mutation (five of them, below)
+- [x] `npm run build` exit 0; `npm run test:procgen` 10 files / 210 tests / 0 skipped
+- [ ] **Browser QA — NOT DONE, tooling unavailable. See below.**
+- [x] PR raised referencing #245
+
+## Measured results
+
+`npm run check:cat-bus` (new, in the `build` chain):
+
+```
+handed over at -1.60, 51.60 (ENTRANCE_PLAYER_X/Z, drift 0.0000 m)
+nobody walks through the parked bus — the route goes round its nose
+child 0 walked 3.77 m, finishing at 0.50, 50.40
+child 1 walked 6.14 m, finishing at -3.30, 50.90
+bus travelled 13.40 m, z 68.0 down to 54.6
+door swung to 2.05 rad while unloading, shut at both ends
+339 frames riding, 217 frames walking
+phases: rolling-in -> doors-opening -> kids-off -> stepping-down -> walking-in
+        -> departing over 12.4 s
+```
+
+She gets the controls at **9.2 s**; the bus departs behind her over the
+remaining 3.2 s.
+
+**The investigation's own smoking gun, re-run on this build's `dist/`:**
+`cat-bus` 0 -> 2, `chassis` 0 -> 1, `entrance-kid-` 0 -> 1, `arrivedByBus`
+12 -> 13. The code now actually ships.
+
+## Mutations proved red (all restored)
+
+1. Arrival built but never added to the scene -> **5/5 seeds red**, "no node
+   named `cat-bus` anywhere in the built scene".
+2. `onEntrancePlaza` removed from `Scenery.ts` -> **4/5 seeds red**.
+3. Door never opens -> `check:cat-bus` red.
+4. Hand-over moved to the plaza -> red, "44.63 m from ENTRANCE_PLAYER_X/Z".
+5. `readFlags` stops reading `arrivedByBus` -> 2 of 6 save tests red.
+
+**Two of my own checks were vacuous first and measurement caught it** — worth
+knowing, because the same trap is waiting in Stage B:
+
+- The keep-out invariant at a bare `PLAYER_RADIUS` passed on all five seeds
+  *with the keep-out removed*: the nearest bush to her spawn on the canonical
+  seed is 0.94 m, clear of her 0.62 m body. Re-derived at 1.5 m (0.62 body +
+  0.85 widest clump), matching `Scenery.ts`'s own ride-exit clearance.
+- "Widest the door ever swung" passed on a door that never opened, because
+  `depart` starts by closing it *from fully open* and so writes a swing of 1 on
+  its first frame. Now scoped to the phases where somebody is getting out.
+
+## BROWSER QA: NOT DONE — read this
+
+**No browser tooling exists in this session.** The chrome-devtools MCP is not
+present and the Claude-in-Chrome extension is not set up, so **nobody has
+watched this sequence with their eyes.** Dev server was started on **5418**
+(`--strictPort`) and killed by PID; ports 5200/5210/5410 untouched.
+
+Instead there is `/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/`
+`68ade46a-c81d-46a8-8676-003ebeeaa648/scratchpad/arrival-plan-view.svg.png` —
+a plan view plotted from the 748 real traced frames. It is **not a screenshot**.
+It confirms the geometry (the walk goes round the bus's nose, she lands on
+`ENTRANCE_PLAYER_X/Z`) and nothing about how it *looks*.
+
+**What still needs a human with a browser**, in priority order:
+
+1. **Does the camera behave while she is inside the bus?** `IsoCamera` follows
+   the player, and for the first ~3.8 s she is parented nowhere — posed inside
+   an opaque bus. The camera should track the bus in. Untested visually.
+2. **Is she visible at all during the ride?** The bus's windows use
+   `PALETTE.buildingWindow` with `MeshToonMaterial` and are **opaque**, so she
+   and the driver are probably not visible through them. Fine for Stage A;
+   **Stage B explicitly requires seeing them through the windows**, so this is
+   the first thing Stage B has to fix.
+3. **Does 9.2 s before control feel long?** It reads fine on paper. A
+   six-year-old is the only real judge.
+4. Do the sounds fire? WebAudio needs a gesture; character creation provides
+   one, but this is unverified.
+5. Does the door read as opening on the shelter side, and does walking round
+   the nose look deliberate rather than like a bug?

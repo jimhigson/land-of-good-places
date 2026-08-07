@@ -29,7 +29,9 @@
  * never moved, or if the door never opened.
  */
 import './headless-canvas.mjs';
-import { Object3D } from 'three';
+import { writeFileSync } from 'node:fs';
+import { Box3, Object3D } from 'three';
+import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   ArrivalSequence,
   ARRIVAL_DURATION,
@@ -138,6 +140,20 @@ check(busRoot !== null, 'no node named `cat-bus` under the arrival group');
 const doorHinge = busRoot ? findByName(busRoot, 'door-hinge') : null;
 check(doorHinge !== null, 'the cat bus has no `door-hinge` to swing');
 
+/**
+ * The bus's own footprint, measured off the built model while the door is still
+ * shut, so the swung-open door does not inflate it.
+ *
+ * Half-extents rather than a box, because the bus moves: the test below places
+ * this rectangle at wherever the bus is parked.
+ */
+const busBox = busRoot ? new Box3().setFromObject(busRoot) : null;
+const busHalfX = busBox ? (busBox.max.x - busBox.min.x) / 2 : 0;
+const busHalfZ = busBox ? (busBox.max.z - busBox.min.z) / 2 : 0;
+
+const kidRoots = [findByName(arrival.group, 'entrance-kid-0'), findByName(arrival.group, 'entrance-kid-1')];
+check(kidRoots.every((k) => k !== null), 'the two other children are not in the arrival group');
+
 const startZ = busRoot?.position.z ?? NaN;
 check(
   Math.abs(startZ - ENTRANCE_BUS_ARRIVE_Z) < 0.01,
@@ -164,6 +180,17 @@ let ridingWhileWalkingIn = true;
 let posesDuringWalkIn = 0;
 /** Where she was standing on the frame the controls were handed over. */
 let handoverAt: { x: number; z: number } | null = null;
+/** Anyone found walking through the bodywork. */
+const clipsThroughBus: string[] = [];
+/** The whole trace, for `--trace <path>` to write out and a human to plot. */
+const trace: {
+  t: number;
+  phase: ArrivalPhase;
+  bus: readonly [number, number] | null;
+  player: readonly [number, number] | null;
+  kids: readonly (readonly [number, number] | null)[];
+  door: number;
+}[] = [];
 
 let elapsed = 0;
 // A generous margin past the nominal length, so a sequence that overruns is
@@ -202,6 +229,56 @@ for (let i = 0; i < frames; i += 1) {
     const last = player.teleports[player.teleports.length - 1];
     if (last) handoverAt = { x: last.x, z: last.z };
   }
+
+  // Nobody may walk through the parked bus. The drop-off is on the curb side
+  // and the place gameplay starts is on the other side of the bus, so the walk
+  // in has to go round its nose — a route that is easy to get subtly wrong and
+  // invisible in a diff. Only tested while the bus is actually standing still
+  // at the stop, since that is the only time anybody is walking beside it.
+  const busHere = busRoot?.position;
+  if (busHere && Math.abs(busHere.z - ENTRANCE_BUS_STOP_Z) < 0.05) {
+    const walkers: { name: string; x: number; z: number }[] = [];
+    const lastPose = player.poses[player.poses.length - 1];
+    // The player is exempt while she is *stepping down*, and only then: she
+    // starts that phase sitting in the cabin and ends it on the curb, so she
+    // passes through the doorway on the way — and a bounding box has no
+    // doorway in it. Catching her there would be catching the check's own
+    // crudeness, not a bug. From the walk in onwards she must be clear of the
+    // bodywork, which is the case this is actually here to guard: the curb is
+    // on one side of the bus and the place gameplay starts is on the other.
+    if (lastPose && before === 'walking-in') {
+      walkers.push({ name: 'the player', x: lastPose.x, z: lastPose.z });
+    }
+    kidRoots.forEach((kid, index) => {
+      if (kid && kid.visible) walkers.push({ name: `child ${index}`, x: kid.position.x, z: kid.position.z });
+    });
+    for (const walker of walkers) {
+      const insideX = Math.abs(walker.x - busHere.x) < busHalfX - PLAYER_RADIUS * 0.5;
+      const insideZ = Math.abs(walker.z - busHere.z) < busHalfZ - PLAYER_RADIUS * 0.5;
+      if (insideX && insideZ) {
+        clipsThroughBus.push(
+          `${walker.name} is inside the parked bus at ${walker.x.toFixed(2)}, ${walker.z.toFixed(2)} ` +
+            `(bus centre ${busHere.x.toFixed(2)}, ${busHere.z.toFixed(2)}, ` +
+            `half-extents ${busHalfX.toFixed(2)} x ${busHalfZ.toFixed(2)})`,
+        );
+      }
+    }
+  }
+
+  trace.push({
+    t: +elapsed.toFixed(3),
+    phase: before,
+    bus: busRoot ? [+busRoot.position.x.toFixed(3), +busRoot.position.z.toFixed(3)] : null,
+    player: (() => {
+      const p = player.poses[player.poses.length - 1];
+      return p ? [+p.x.toFixed(3), +p.z.toFixed(3)] : null;
+    })(),
+    kids: kidRoots.map((k) =>
+      k && k.visible ? [+k.position.x.toFixed(3), +k.position.z.toFixed(3)] : null,
+    ),
+    door: doorHinge ? +Math.abs(doorHinge.rotation.y).toFixed(3) : 0,
+  });
+
   if (arrival.finished) break;
 }
 
@@ -263,6 +340,34 @@ if (handoverAt) {
   );
 }
 
+// Nobody walked through the bodywork on the way in.
+if (clipsThroughBus.length > 0) {
+  failures.push(
+    `${clipsThroughBus.length} frames with somebody inside the parked bus, e.g. ${clipsThroughBus[0]}`,
+  );
+} else {
+  notes.push('nobody walks through the parked bus — the route goes round its nose');
+}
+
+// The other children genuinely walk in, rather than appearing and standing
+// still — "alongside several other children" is half of what was asked for.
+kidRoots.forEach((kid, index) => {
+  const seen = trace.map((f) => f.kids[index]).filter((p): p is readonly [number, number] => !!p);
+  const first = seen[0];
+  const last = seen[seen.length - 1];
+  if (!first || !last) {
+    failures.push(`child ${index} was never visible at any point in the sequence`);
+    return;
+  }
+  const walked = Math.hypot(last[0] - first[0], last[1] - first[1]);
+  check(walked > 2, `child ${index} only moved ${walked.toFixed(2)} m — they barely got off the bus`);
+  check(
+    last[1] < ENTRANCE_BUS_STOP_Z,
+    `child ${index} finishes at z=${last[1].toFixed(2)}, no further into the park than the bus`,
+  );
+  notes.push(`child ${index} walked ${walked.toFixed(2)} m, finishing at ${last[0].toFixed(2)}, ${last[1].toFixed(2)}`);
+});
+
 // And the flag that stops it happening twice is set by the sequence itself.
 check(saveFlags.arrivedByBus, 'markArrived() never fired — the arrival would replay for ever');
 
@@ -283,6 +388,19 @@ notes.push(
 );
 
 // ------------------------------------------------------------------- report
+
+// `--trace <path>` dumps the whole run for a human to plot. Not part of the
+// check; it exists because this sequence has no deep link and nobody can watch
+// it without starting a brand-new game, so a plan view of the real numbers is
+// the cheapest way to look at the staging.
+const traceFlag = process.argv.indexOf('--trace');
+if (traceFlag !== -1) {
+  const path = process.argv[traceFlag + 1];
+  if (path) {
+    writeFileSync(path, JSON.stringify({ busHalfX, busHalfZ, frames: trace }, null, 1));
+    notes.push(`trace written to ${path} (${trace.length} frames)`);
+  }
+}
 
 for (const note of notes) console.log(`  ${note}`);
 if (failures.length > 0) {
