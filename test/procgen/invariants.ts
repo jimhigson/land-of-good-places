@@ -39,6 +39,13 @@ import {
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  ENTRANCE_BUS_ARRIVE_Z,
+  ENTRANCE_BUS_STOP_X,
+  ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_PLAYER_X,
+  ENTRANCE_PLAYER_Z,
+} from '../../src/world/entrance/layout.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
@@ -2703,6 +2710,125 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **Is the cat bus actually in the park?**
+ *
+ * This is the invariant the repo did not have, and its absence is the whole
+ * story of issue #245. The arrival merged on 26 July 2026 as PR #27 — six new
+ * files under `world/entrance/`, no `Game.ts`, no `main.ts`, no call site
+ * anywhere. `Entrance` was never constructed, `createCatBus` had no importers,
+ * and the identifier `cat-bus` did not appear in the shipped bundle at all.
+ * Two hundred tests and thirty-odd `check:*` scripts stayed green for twelve
+ * days, and all five of those files could have been deleted without a single
+ * one of them noticing. Jim found it the only way it could be found: *"I've
+ * never seen the cat bus, I don't think it works."*
+ *
+ * So this asks the one question none of them asked — **is the thing there?** —
+ * of the built scene graph, not of the code that was supposed to build it. It
+ * goes red if `World` stops constructing `Entrance`, if `Entrance` stops
+ * constructing the arrival, if the arrival stops adding the bus to a group that
+ * reaches the scene, or if the bus is built with no geometry on it.
+ *
+ * Thresholds are deliberately loose and physical: this is not a test of where
+ * the choreography puts the bus frame by frame (`scripts/check-cat-bus.mts`
+ * drives that), it is a test that a bus exists, has a body, has its driver and
+ * its passengers, and is standing at the gate rather than at the origin.
+ */
+const theCatBusIsInThePark: Invariant = (facts) => {
+  const bus = facts.catBus;
+  if (!bus) {
+    return [
+      'no node named `cat-bus` anywhere in the built scene — the arrival is not wired in. ' +
+        'This is exactly the state PR #27 shipped in and nothing caught for twelve days; ' +
+        'see `world/entrance/ArrivalSequence.ts`.',
+    ];
+  }
+
+  const fouls: string[] = [];
+  // A bus made of nothing would satisfy "a node called cat-bus exists".
+  if (bus.meshCount < 20) {
+    fouls.push(`the cat bus has only ${bus.meshCount} meshes on it — that is not a built bus`);
+  }
+  // Tall enough to be a bus a child could get into, short enough to be a bus.
+  if (!(bus.height > 1.5 && bus.height < 5)) {
+    fouls.push(`the cat bus measures ${bus.height.toFixed(2)} m tall, which is not bus-shaped`);
+  }
+  if (!bus.hasDriver) fouls.push('the cat bus has nobody driving it');
+  if (bus.kidCount !== 2) {
+    fouls.push(`expected 2 other children to arrive with her, found ${bus.kidCount}`);
+  }
+
+  // Standing at the gate, on the entrance axis, outside the wall — where the
+  // sequence starts. A bus left at the origin is in the middle of the ball pit.
+  const gateGap = Math.hypot(bus.x - ENTRANCE_BUS_STOP_X, bus.z - ENTRANCE_BUS_ARRIVE_Z);
+  if (gateGap > 1) {
+    fouls.push(
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, which is ${gateGap.toFixed(2)} m from the ` +
+        `gate approach ${fmt([ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_ARRIVE_Z])} it is supposed to ` +
+        'roll in from',
+    );
+  }
+  return fouls;
+};
+
+/**
+ * **Can the bus actually stop here, and can she actually walk in?**
+ *
+ * `entrance/layout.ts` has exported `ENTRANCE_CLEAR_X/Z/RADIUS` since the
+ * entrance was written, under a comment saying they keep the scatter off the
+ * stop and the gate plaza — and **nothing imported them**. The comment
+ * described an intention that no code implemented, so trees and bushes were
+ * free to grow in the road the bus parks in and on the ground she is set down
+ * on. `Scenery.ts` now asks them; this is what proves it kept asking.
+ *
+ * Measured against the **game's** numbers rather than the generator's target,
+ * per this file's rule 2: what has to be true is that a child of
+ * `PLAYER_RADIUS` can stand where the game spawns her and walk the route the
+ * arrival walks her along, not that the scatter respected some particular
+ * radius. The corridor sampled is the real one — from the bus's parked position
+ * up to where she is handed the controls.
+ */
+const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
+  const fouls: string[] = [];
+
+  // The route she is actually walked along, plus where she ends up standing.
+  const corridor: readonly (readonly [number, number])[] = [
+    [ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_STOP_Z],
+    [ENTRANCE_BUS_STOP_X, (ENTRANCE_BUS_STOP_Z + ENTRANCE_PLAYER_Z) / 2],
+    [ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z],
+  ];
+
+  const planted: readonly { x: number; z: number; footprint: number; what: string }[] = [
+    ...facts.trees.map((tree) => ({
+      x: tree.x,
+      z: tree.z,
+      footprint: tree.footprint,
+      what: 'tree',
+    })),
+    ...facts.bushes.map((bush) => ({
+      x: bush.x,
+      z: bush.z,
+      // A bush publishes the radius of the collider it puts in a walker's way,
+      // which is the same thing a tree's `footprint` is, under another name.
+      footprint: bush.radius,
+      what: 'bush',
+    })),
+  ];
+
+  for (const [x, z] of corridor) {
+    for (const thing of planted) {
+      const gap = Math.hypot(thing.x - x, thing.z - z) - thing.footprint;
+      if (gap < PLAYER_RADIUS) {
+        fouls.push(
+          `a ${thing.what} at ${fmt([thing.x, thing.z])} reaches to ${gap.toFixed(2)} m of ` +
+            `${fmt([x, z])} on the walk in from the bus — a child needs ${PLAYER_RADIUS} m`,
+        );
+      }
+    }
+  }
+  return fouls;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
@@ -2763,6 +2889,11 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'the clearance over the railway covers the train and everyone riding it',
     railwayClearanceCoversTheTrainAndItsRiders,
+  ],
+  ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
+  [
+    'the bus stop and the walk in from it are clear of trees and bushes',
+    theEntranceIsClearEnoughToArriveAt,
   ],
 ];
 

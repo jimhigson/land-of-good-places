@@ -249,6 +249,14 @@ export function applyRidePose(
   elapsed: number,
   posture: RidePosture = 'seated',
 ): void {
+  // A scripted walk wears **no** ride pose. `Player.animate` has just written a
+  // complete walk cycle from the gait, and the whole point of the posture is to
+  // keep it: overlaying "holding on, delighted" here would throw her arms back
+  // over her head while she strolls off a bus. Returning early rather than
+  // falling through to the seated branch is what stops that — a posture this
+  // function does not recognise would otherwise be silently posed as seated,
+  // which is exactly the class of bug the note above is about.
+  if (posture === 'walking') return;
   // `body.rotation.z` is zeroed on **both** paths, so read the note below once:
   // it flushes the roll `Player.animate` writes from the gait.
   if (posture === 'reclined') {
@@ -463,8 +471,19 @@ export const PARK_FLY_CEILING = 12;
  *
  * `world/building/Building.ts` is what writes it — see `Player.flyCeiling`.
  */
-/** How a rider holds herself: sitting up in a seat, or lying back on a slide. */
-export type RidePosture = 'seated' | 'reclined';
+/**
+ * How a rider holds herself: sitting up in a seat, lying back on a slide, or
+ * **on her own two feet, walking**, while something else decides where she goes.
+ *
+ * `'walking'` is not a ride in the ordinary sense — nothing is carrying her. It
+ * is for a scripted sequence that moves her through the world under its own
+ * choreography (the cat-bus arrival walks her off the bus and into the park)
+ * while she keeps the ordinary walk cycle she would have if she were driving
+ * herself. It borrows the *riding* machinery only for what riding already means
+ * here: input, collision and gravity stop applying, so a script can put her
+ * exactly where it wants her without fighting the movement code.
+ */
+export type RidePosture = 'seated' | 'reclined' | 'walking';
 
 /**
  * How far back a reclining rider lies, in radians about her own left-right axis.
@@ -667,8 +686,8 @@ export class Player implements GameSystem {
    *
    * Set by the ride, reset to `'seated'` on every `beginRide`/`endRide` so it
    * can never leak from one ride into the next. Only the ginormous slide asks
-   * for `'reclined'` — see {@link applyRidePose}, which owns what each posture
-   * means.
+   * for `'reclined'`, and only the cat-bus arrival asks for `'walking'` — see
+   * {@link applyRidePose}, which owns what each posture means.
    *
    * A flag on the rider rather than the ride reaching in and turning her parts:
    * `update` rewrites this pose every frame while riding, so anything set from
@@ -676,6 +695,12 @@ export class Player implements GameSystem {
    * ignored.
    */
   ridePosture: RidePosture = 'seated';
+  /**
+   * How fast a `'walking'` posture should *look* like it is going, in metres a
+   * second. Written by the sequence that is walking her; see
+   * {@link setScriptedWalk}.
+   */
+  private scriptedWalkSpeed = 0;
   /** Edge-detects "just cleared a wall" so the poof effect fires once, not every frame. */
   private wasClearingWall = false;
   /**
@@ -955,6 +980,7 @@ export class Player implements GameSystem {
     // Every ride is sat in until it says otherwise, so a ride that has never
     // heard of postures cannot inherit one from the ride before it.
     this.ridePosture = 'seated';
+    this.scriptedWalkSpeed = 0;
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
@@ -1003,11 +1029,26 @@ export class Player implements GameSystem {
     this.climbWave = clamp01(amount);
   }
 
+  /**
+   * How fast a `'walking'` posture should look like it is going, in metres a
+   * second — the same number her own movement would have had.
+   *
+   * Written every frame by whatever is walking her, alongside the
+   * {@link setRidePose} that actually moves her, so the stride matches the
+   * ground she is covering instead of being a rate somebody guessed. Ignored
+   * entirely under any other posture, and reset by {@link endRide}, so it
+   * cannot leak into the next thing she gets on.
+   */
+  setScriptedWalk(speed: number): void {
+    this.scriptedWalkSpeed = Math.max(0, speed);
+  }
+
   /** Gives the character back, optionally still moving. */
   endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
     this.ridingFlag = false;
     // Stand her back up before handing her over, or she walks away lying down.
     this.ridePosture = 'seated';
+    this.scriptedWalkSpeed = 0;
     this.model.root.rotation.x = 0;
     this.model.head.rotation.x = 0;
     this.climbWave = 0;
@@ -1030,8 +1071,22 @@ export class Player implements GameSystem {
     this.dust.update(dt);
 
     if (this.ridingFlag) {
-      // The ride positions us; all we do is hold a suitably delighted pose.
       this.wornJetpack?.setThrust(0);
+      if (this.ridePosture === 'walking') {
+        // A sequence is walking her rather than carrying her. Her *position*
+        // still arrives through `setRidePose`, like any ride; her *pose* is the
+        // ordinary walk cycle, driven through the very same `gait`/`walkPhase`
+        // pair her own movement writes below — the two lines are deliberately
+        // identical to the ones in the movement path, so the game has one walk
+        // and not a second copy of it that can drift out of step.
+        this.gait = damp(this.gait, clamp01(this.scriptedWalkSpeed / PLAYER_MAX_SPEED), 0.07, dt);
+        this.walkPhase += this.scriptedWalkSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
+        if (this.walkPhase > TAU) this.walkPhase -= TAU;
+        this.animate(context, 0);
+        applyRidePose(this.model, this.climbWave, context.elapsed, this.ridePosture);
+        return;
+      }
+      // The ride positions us; all we do is hold a suitably delighted pose.
       this.gait = damp(this.gait, 0, 0.1, dt);
       this.animate(context, 0);
       applyRidePose(this.model, this.climbWave, context.elapsed, this.ridePosture);

@@ -92,6 +92,28 @@ export interface EntranceFact {
   readonly z: number;
 }
 
+/**
+ * The cat bus, measured off the built scene graph rather than asked for.
+ *
+ * Every number here is read back from world matrices after
+ * `scene.updateMatrixWorld(true)`, so it describes a bus that is genuinely in
+ * the park at a genuine place — not one that a constructor returned.
+ */
+export interface CatBusFact {
+  /** Where the bus root actually sits, in world space. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** How many meshes hang off it. A bus with no geometry is not a bus. */
+  readonly meshCount: number;
+  /** Its world-space bounding box height, in metres. */
+  readonly height: number;
+  /** True if a driver was found seated in the cabin. */
+  readonly hasDriver: boolean;
+  /** How many disembarking children were found in the arrival's group. */
+  readonly kidCount: number;
+}
+
 /** One drawn path, sampled along its centre line. */
 export interface RouteFact {
   readonly name: string;
@@ -186,6 +208,24 @@ export interface ParkFacts {
   readonly lamps: readonly (readonly [number, number])[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
+  /**
+   * **The cat bus, as actually found in the built scene graph.** `null` if
+   * there is no node named `cat-bus` anywhere in it.
+   *
+   * Read by traversing the real `Scene` rather than by asking the entrance
+   * whether it made one, and that distinction is the entire point of this
+   * field. The arrival shipped in PR #27 on 26 July 2026 and never once ran:
+   * six new files, zero call sites, `Entrance` never constructed, and the
+   * string `cat-bus` absent from the shipped bundle altogether. Every check in
+   * the repo stayed green for twelve days because none of them looked at
+   * whether the thing was *there*.
+   *
+   * So this looks. If the wiring from `World` to `Entrance` to
+   * `ArrivalSequence` is broken anywhere along its length, or the bus is built
+   * but never added to a group that reaches the scene, this goes `null` and
+   * `theCatBusIsInThePark` fails.
+   */
+  readonly catBus: CatBusFact | null;
   readonly routes: readonly RouteFact[];
   readonly exits: readonly ExitFact[];
   /** The destination graph `paths.ts` grows the network from. */
@@ -532,6 +572,46 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     });
   }
 
+  // --- the cat bus -----------------------------------------------------------
+  // Found by walking the scene, not by asking `world.entrance` whether it built
+  // one. Asking the builder is how a feature stays green while being absent
+  // from the game; this is the check that would have caught PR #27 on the day
+  // it merged. See `ParkFacts.catBus`.
+  let catBus: CatBusFact | null = null;
+  {
+    let busRoot: import('three').Object3D | null = null;
+    scene.traverse((object) => {
+      if (object.name === 'cat-bus') busRoot = object;
+    });
+    if (busRoot) {
+      // Narrowed through a local: `scene.traverse`'s callback is not a closure
+      // TypeScript can follow, so `busRoot` is still `null`-typed out here.
+      const root = busRoot as import('three').Object3D;
+      const box = new Box3().setFromObject(root);
+      const where = new Vector3();
+      root.getWorldPosition(where);
+      let meshCount = 0;
+      let hasDriver = false;
+      root.traverse((object) => {
+        if ((object as { isMesh?: boolean }).isMesh) meshCount += 1;
+        if (object.name === 'entrance-kid-2') hasDriver = true;
+      });
+      let kidCount = 0;
+      scene.traverse((object) => {
+        if (/^entrance-kid-[01]$/.test(object.name)) kidCount += 1;
+      });
+      catBus = {
+        x: where.x,
+        y: where.y,
+        z: where.z,
+        meshCount,
+        height: Number.isFinite(box.max.y - box.min.y) ? box.max.y - box.min.y : 0,
+        hasDriver,
+        kidCount,
+      };
+    }
+  }
+
   const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
@@ -869,6 +949,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
+    catBus,
     exits,
     pathNodes,
     pathEdges,

@@ -60,6 +60,28 @@ export function buildPawPrint(material: ReturnType<typeof toonMaterial>): Group 
 export interface CatBusHandle {
   readonly root: Group;
   readonly height: number;
+  /**
+   * Where anyone riding inside is parented — a child of the chassis, so a
+   * passenger put in here travels with the bus for free rather than being
+   * re-positioned every frame by a formula that has to track it.
+   */
+  readonly cabin: Group;
+  /** Where the driver sits, at the wheel. A child of {@link cabin}. */
+  readonly driverSeat: Group;
+  /** Where a passenger sits, by the door. A child of {@link cabin}. */
+  readonly passengerSeat: Group;
+  /**
+   * Where somebody stepping out of the open door lands, **in the bus's own
+   * local space** (`x` across, `z` along, `y` is the ground).
+   *
+   * Exported because the bus is the only thing that knows where its own door
+   * is: `doorGroup`, the step and the doorway are all positioned from
+   * `BODY_WIDTH`/`cabinLength` in here, and none of those are exported. A
+   * sequence that re-derived the drop point from its own copy of those numbers
+   * would be a second definition of "where the door is", kept in step by hand —
+   * the repo's most common bug by a distance.
+   */
+  readonly doorDrop: { readonly x: number; readonly z: number };
   /** 0 = fully shut, 1 = fully open. Tweened by the arrival sequence. */
   setDoorOpen(amount01: number): void;
   /** Spins the wheels and gives the tail a gentle idle swish. */
@@ -277,6 +299,34 @@ export function createCatBus(): CatBusHandle {
   tailCursor.add(tailTip);
   addOutline(tailTip, 0.012);
 
+  // --- who is riding inside ---------------------------------------------------
+  // A child of the chassis, so anybody seated in here travels with the bus and
+  // nothing has to re-position them every frame.
+  const cabin = new Group();
+  cabin.name = 'cabin';
+  chassis.add(cabin);
+
+  // At the wheel: front of the cabin, on the far side from the door so the
+  // driver is not standing in the doorway everyone is climbing out of.
+  const driverSeat = new Group();
+  driverSeat.name = 'driver-seat';
+  driverSeat.position.set(BODY_WIDTH * 0.24, BODY_BOTTOM_Y + 0.34, faceZ - 1.0);
+  cabin.add(driverSeat);
+
+  // A passenger, by the door, so stepping down is a short move rather than a
+  // slide across the cabin.
+  const passengerSeat = new Group();
+  passengerSeat.name = 'passenger-seat';
+  passengerSeat.position.set(-BODY_WIDTH * 0.2, BODY_BOTTOM_Y + 0.34, doorGroup.position.z + 0.5);
+  cabin.add(passengerSeat);
+
+  // Straight out from the step, clear of the sill. Derived from the step's own
+  // position rather than restated, so moving the door moves this with it.
+  const doorDrop = {
+    x: step.position.x - 0.77,
+    z: step.position.z,
+  } as const;
+
   // --- height ----------------------------------------------------------------
   const height = BODY_BOTTOM_Y + BODY_HEIGHT + 0.05 + 0.56; // roof cap + ear tip
 
@@ -286,6 +336,10 @@ export function createCatBus(): CatBusHandle {
   return {
     root,
     height,
+    cabin,
+    driverSeat,
+    passengerSeat,
+    doorDrop,
 
     setDoorOpen(amount01: number): void {
       doorOpenAmount = clamp01(amount01);

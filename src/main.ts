@@ -23,9 +23,13 @@ import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
  * `gameStore.get().player` (name, hair colour and style, outfit colour) the
  * moment it builds the kid, so both the save and the character creator have to
  * have finished writing the store before that happens. It also guarantees both
- * finish before the cat-bus arrival sequence (`world/entrance/`), whenever
- * that gets wired up — nothing downstream of `new Game(...)` can run before
- * this does. The HUD's "Look" pill, which changes a look mid-session, does
+ * finish before the cat-bus arrival sequence (`world/entrance/`) — nothing
+ * downstream of `new Game(...)` can run before this does, so by the time the
+ * bus is built she is already the character the child just made, and she rides
+ * in as herself. (This comment said "whenever that gets wired up" from July
+ * until 7 August 2026, which is exactly how long the arrival sat in the tree
+ * as dead code — see `world/entrance/ArrivalSequence.ts`.) The HUD's "Look"
+ * pill, which changes a look mid-session, does
  * not run through here at all any more — see `Game.applyLiveLook`, which
  * rebuilds `Player`'s own model in place instead of coming back through boot.
  *
@@ -274,7 +278,19 @@ function launchGame(
   boardStallId?: string,
   debugView?: DebugViewParams,
 ): void {
-  const game = new Game(canvas, uiRoot, options);
+  // A ride deep link and `/view` are the only two things that skip the cat-bus
+  // arrival, and both for the same reason: the entire point of typing either
+  // URL is to be looking at the thing it names on the first frame, not sitting
+  // through an arrival first. Everything else leaves the decision to the save
+  // flag, so the arrival is what happens unless something says otherwise —
+  // forgetting to wire an opt-out shows up as a bus that should not be there,
+  // which somebody notices, rather than as no bus at all, which nobody did for
+  // twelve days. See `world/entrance/ArrivalSequence.ts`.
+  const gameOptions: GameOptions =
+    boardStallId !== undefined || debugView !== undefined
+      ? { ...options, arriveByBus: false }
+      : options;
+  const game = new Game(canvas, uiRoot, gameOptions);
   game.start();
 
   if (boardStallId) {

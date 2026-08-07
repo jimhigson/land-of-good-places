@@ -38,6 +38,11 @@ import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
+import {
+  ENTRANCE_CLEAR_RADIUS,
+  ENTRANCE_CLEAR_X,
+  ENTRANCE_CLEAR_Z,
+} from './entrance/layout';
 import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
 
@@ -977,8 +982,27 @@ function onRideExit(x: number, z: number, clearance: number): boolean {
   return Math.hypot(x - cruiser.exitX, z - cruiser.exitZ) < RIDE_EXIT_CLEAR + clearance;
 }
 
+/**
+ * Is this spot on the gate plaza or the bus stop?
+ *
+ * `entrance/layout.ts` has carried `ENTRANCE_CLEAR_X/Z/RADIUS` since the
+ * entrance was written, under a comment reading *"Keeps the tree/bush scatter
+ * (`Scenery.ts`) off the stop and the gate plaza"* — and **nothing had ever
+ * imported them**. The comment described an intention; no code implemented it,
+ * so trees and bushes were free to grow in the road the cat bus parks in and on
+ * the ground the player is set down on. A comment asserting that two things
+ * agree is not a mechanism, and this is that failure in its plainest form: the
+ * constants were right, they were simply never asked.
+ *
+ * Now they are, at the one choke point every scatter goes through.
+ */
+function onEntrancePlaza(x: number, z: number, clearance: number): boolean {
+  return Math.hypot(x - ENTRANCE_CLEAR_X, z - ENTRANCE_CLEAR_Z) < ENTRANCE_CLEAR_RADIUS + clearance;
+}
+
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
- * not on the railway, not where a ride sets a child down. */
+ * not on the railway, not where a ride sets a child down, not on the gate
+ * plaza the cat bus drives through. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
   // Five metres inside the park's own edge — the same margin the old `> 55`
   // kept from the masonry at 60, now measured from an edge that moves.
@@ -989,6 +1013,7 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
   if (insideAnyAnchor(x, z, clearance)) return false;
   if (onRailway(x, z, clearance)) return false;
   if (onRideExit(x, z, clearance)) return false;
+  if (onEntrancePlaza(x, z, clearance)) return false;
   return true;
 }
 

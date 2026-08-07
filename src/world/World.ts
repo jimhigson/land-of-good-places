@@ -30,7 +30,13 @@ import { NpcSystem } from '../entities/npc';
 // note). Not a mini-game, so it is wired in here rather than through
 // `minigames/`.
 import { FacePaintStall } from './FacePaintStall';
+import { Entrance, type EntranceOptions } from './entrance/Entrance';
 import { terrainHeight } from './terrain';
+
+export interface WorldOptions {
+  /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
+  readonly entrance?: EntranceOptions;
+}
 
 /**
  * The park itself: ground, scenery, fountain, lights, reserved plots and the
@@ -69,10 +75,18 @@ export class World implements GameSystem {
   readonly npcs: NpcSystem;
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
+  /** The park's front gate, its bus-stop shelter, and the cat bus arrival. */
+  readonly entrance: Entrance;
   /** Every group that makes up the park itself. See {@link setParkVisible}. */
   private readonly parkGroups: readonly Object3D[];
 
-  constructor(scene: Scene, sky: Sky, interiorControls: InteriorControls, camera: IsoCamera) {
+  constructor(
+    scene: Scene,
+    sky: Sky,
+    interiorControls: InteriorControls,
+    camera: IsoCamera,
+    options: WorldOptions = {},
+  ) {
     this.garden = new Garden(this.collision);
     this.scenery = new Scenery(this.collision);
     // Living, pickable flowers — no collision (you walk straight through
@@ -166,6 +180,20 @@ export class World implements GameSystem {
     // module-level target on its own next update regardless.
     this.facePaintStall = new FacePaintStall(this.collision);
 
+    // The front gate, its bus-stop shelter, and — for a player who has not
+    // arrived yet — the cat bus that brings her in. Built before the NPCs for
+    // the same reason the stall above is: it registers collision circles for
+    // the arch posts and the shelter, and the waypoint graph is validated
+    // against the *finished* collision world.
+    //
+    // This is where the arrival lives, and deliberately not in `Game`: `Game`
+    // builds a real `WebGLRenderer` and so cannot be constructed in a test,
+    // while `World` is built headlessly by `scripts/park-harness.mts` on every
+    // CI run. A cat bus hung off `Game` would be visible to no check at all,
+    // which is precisely how the original shipped dead and stayed dead for
+    // twelve days. See `entrance/ArrivalSequence.ts`.
+    this.entrance = new Entrance(this.collision, options.entrance ?? {});
+
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every
     // route is walked at build time and dropped if a wall or a tree is in the
@@ -205,6 +233,7 @@ export class World implements GameSystem {
       this.train.group,
       this.coaster.group,
       this.railRace.group,
+      this.entrance.group,
     ];
     // The building is bigger on the inside: its interior is its own place, six
     // hundred metres from the park rather than inside the plot the facade
@@ -295,6 +324,9 @@ export class World implements GameSystem {
     this.facePaintStall.update(context);
     this.flowers.update(context);
     this.dodgems.update(context);
+    // Last: the arrival moves the player, and everything above has already had
+    // its frame, so nothing overwrites where the sequence just put her.
+    this.entrance.update(context);
   }
 
   /**
@@ -354,6 +386,8 @@ export class World implements GameSystem {
         groundBeforeFountain ? groundBeforeFountain(x, z, y) : terrainHeight(x, z),
       );
     this.fountain.attachPlayer(player);
+    // Puts her aboard the cat bus, if one is bringing her in.
+    this.entrance.attachPlayer(player);
   }
 
   dispose(): void {

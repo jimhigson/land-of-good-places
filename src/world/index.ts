@@ -1,4 +1,4 @@
-export { World } from './World';
+export { World, type WorldOptions } from './World';
 export { Sky, skyViewFor, type SkyView } from './Sky';
 export { DayNight } from './DayNight';
 export { CollisionWorld } from './Collision';

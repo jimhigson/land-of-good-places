@@ -10,9 +10,11 @@ import { PALETTE } from '../../core/palette';
 import { pinkStoneTexture, woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { terrainHeight } from '../terrain';
-import type { GameSystem } from '../../core/types';
+import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
+import type { Player } from '../../entities/Player';
 import { buildPawPrint } from './catBus';
+import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_GATE_X,
@@ -20,6 +22,19 @@ import {
   ENTRANCE_STOP_X,
   ENTRANCE_STOP_Z,
 } from './layout';
+
+export interface EntranceOptions {
+  /**
+   * Whether the cat bus brings her in.
+   *
+   * **Defaults to {@link arrivalIsDue}** — i.e. to the arrival *happening* —
+   * so that forgetting to wire this up fails loud (a bus turns up when it
+   * should not) rather than silent (no bus, ever, and nobody notices for
+   * twelve days). Only a caller that positively knows better passes `false`:
+   * a ride deep link, or `/view`'s debug camera.
+   */
+  readonly arriveByBus?: boolean;
+}
 
 /**
  * The park entrance: a gated arch in the boundary wall, and a little bus stop
@@ -40,7 +55,17 @@ export class Entrance implements GameSystem {
   readonly name = 'entrance';
   readonly group = new Group();
 
-  constructor(collision: CollisionWorld) {
+  /**
+   * The cat bus arrival, or `null` if she has already arrived on this save.
+   *
+   * Built here rather than in `Game` on purpose — see `ArrivalSequence`'s own
+   * note. `Game` cannot be constructed in a test (it builds a real
+   * `WebGLRenderer`); `World`, and therefore this, can, which is what puts the
+   * bus inside reach of the invariant suite CI blocks the merge on.
+   */
+  readonly arrival: ArrivalSequence | null;
+
+  constructor(collision: CollisionWorld, options: EntranceOptions = {}) {
     this.group.name = 'entrance';
 
     const stoneMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(2, 1) });
@@ -138,16 +163,34 @@ export class Entrance implements GameSystem {
     pawB.rotation.x = -Math.PI / 2;
     pawB.scale.setScalar(2.1);
     this.group.add(pawB);
+
+    // --- the arrival ---------------------------------------------------------
+    // Built last, and added to this group, so the whole sequence lives under
+    // the gate it happens at and goes away with it.
+    const arriving = options.arriveByBus ?? arrivalIsDue();
+    this.arrival = arriving ? new ArrivalSequence() : null;
+    if (this.arrival) this.group.add(this.arrival.group);
   }
 
   /**
-   * Nothing moves here any more.
+   * The player, once `Game` has built her — reached through
+   * `World.attachPlayer`, same as every other system that needs her.
    *
-   * The arch used to sway its name board on a breeze. There is no board, and
-   * the stonework is stonework — but `Entrance` stays a {@link GameSystem}
-   * rather than being unregistered from the loop, because it is the park's
-   * front gate and the next thing anyone adds to it (a gate that swings, a
-   * lantern that comes on at dusk) will want a frame again.
+   * She is put aboard the bus the moment she exists, so there is never a frame
+   * in which she stands in the park watching her own bus arrive without her.
    */
-  update(): void {}
+  attachPlayer(player: Player): void {
+    this.arrival?.attachPlayer(player);
+  }
+
+  /**
+   * Drives the arrival, while there is one.
+   *
+   * The stonework is stonework and does not move; `Entrance` was already a
+   * {@link GameSystem} with an empty `update` against the day something here
+   * wanted a frame, and the cat bus is that day.
+   */
+  update(context: FrameContext): void {
+    this.arrival?.update(context);
+  }
 }
