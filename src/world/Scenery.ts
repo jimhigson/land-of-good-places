@@ -43,6 +43,7 @@ import {
   ENTRANCE_CLEAR_X,
   ENTRANCE_CLEAR_Z,
 } from './entrance/layout';
+import { hidesTheArrivingBus } from './entrance/arrivalSightline';
 import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
 
@@ -537,6 +538,14 @@ function buildFoliage(collision: CollisionWorld): {
     // Asked here rather than in `isPlantable` because it wants the kind, which
     // is already picked above — so no RNG draw moves to make room for it.
     if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) continue;
+    // ...and nor may it stand between the camera and the arriving cat bus. Asked
+    // here rather than in `isPlantable` for exactly the reason `clearOfCruiser`
+    // above is: it needs the tree's *height*, and the kind — which is what
+    // decides the height — has already been rolled. Asking earlier would mean
+    // guessing at the tallest tree the scatter can produce, and a keep-out sized
+    // for a tree that never grows there is the same disease as a 10 m disc sized
+    // for an 11 m bus. See `entrance/arrivalSightline.ts`.
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) continue;
     planted.push({ x, z, reach });
     const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
@@ -762,6 +771,7 @@ function buildFoliage(collision: CollisionWorld): {
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 1.6)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
 
     // Bushes come in clumps of two or three overlapping blobs.
     const blobs = rng.int(2, 3);
@@ -884,6 +894,23 @@ function buildTreeline(): Group {
     const rimness = (outset - bandInner) / (bandOuter - bandInner);
     const height = rng.range(2.8, 4.0) + rimness * 1.1;
     const radius = rng.range(1.7, 2.6) + rimness * 0.5;
+
+    // **The band starts 11.5 m outside the park, and the cat bus stops 9 m
+    // outside it.** So on the gate's bearing this woodland begins two and a half
+    // metres behind the kerb, squarely between the camera and the bus — and
+    // because it is scattered here rather than through `isPlantable`, it has
+    // never asked the entrance keep-out anything. That is what put trees across
+    // the lower-left of the bus in every captured frame from t = 3 to t = 6.
+    //
+    // Refused rather than moved: an outset nudged along the same bearing is
+    // still on the same bearing, and the whole point is to be off it. Every draw
+    // above happens first, so the RNG stream is untouched and the other 500-odd
+    // trees stand exactly where they always did.
+    //
+    // The canopy's own top, not the trunk's: `top = ground + height + radius *
+    // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
+    // from there at its tallest roll.
+    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5)) continue;
 
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),

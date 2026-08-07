@@ -189,6 +189,31 @@ const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS *
 export const CAT_BUS_LONGEST_WALK_TO_DOOR = CABIN_LENGTH_FROM_SEATS + BODY_WIDTH / 2;
 
 /**
+ * **How big the bus is, for anybody who has to leave room for it.**
+ *
+ * These were not exported, so everything outside this file that needed the
+ * bus's size had a copy of it — and every copy went stale the moment the seat
+ * plan was re-derived from a child who had actually been measured and the bus
+ * grew from 11 m to 18 m. `layout.ts` still carries the sentence *"an 18.2 m
+ * bus"* in a comment; `ENTRANCE_CLEAR_RADIUS` was 10 m, sized for the 11 m bus,
+ * and stayed 10 m. That is this repo's most expensive bug shape (CLAUDE.md,
+ * "Two definitions of one thing, kept in step by hand") in its plainest form:
+ * the derivation was right, it simply had no way to be asked.
+ *
+ * **These are the bodywork, not the silhouette, and the difference is real.**
+ * A `Box3` round the built model measures **6.45 x 5.38 x 18.16**; the bodywork
+ * is **5.28 x 5.21 x 15.83**. The tail curls 1.24 m off the back, the face and
+ * whiskers stand 1.09 m off the front, and the open door swings 1.17 m out to
+ * the side. Anything leaving room for the bus must leave room for *those*, so
+ * `arrivalSightline.ts` pads by a whole bus length rather than a half and
+ * `check:cat-bus` measures the built box against what it assumed — because a
+ * constant claiming to be the whole vehicle while describing only its box is
+ * how a 10 m keep-out came to be sized for an 11 m bus in the first place.
+ */
+export const CAT_BUS_LENGTH = BODY_LENGTH;
+export const CAT_BUS_WIDTH = BODY_WIDTH;
+
+/**
  * **Where the bodywork stops and the window opening starts.**
  *
  * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`
@@ -219,6 +244,16 @@ const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
  * at each of them, keeps the drawing's proportions.
  */
 const DETAIL = BODY_HEIGHT / 1.55;
+
+/**
+ * The top of the bus above its own origin — **ear tips included**, per
+ * ART_DIRECTION §7's asset contract, not the roof (which would crop a name
+ * label, and here would let a tree stand in front of the cat's ears).
+ * `createCatBus` returns exactly this as `CatBusHandle.height`; it is a module
+ * constant so that something deciding what may stand in front of the bus can
+ * ask before there is a bus to ask.
+ */
+export const CAT_BUS_TOP = BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -696,8 +731,10 @@ export function createCatBus(): CatBusHandle {
 
   // --- height ----------------------------------------------------------------
   // Measured to the **actual top**, ear tips included, per ART_DIRECTION §7's
-  // asset contract — not to the roof, which would crop a name label.
-  const height = BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
+  // asset contract — not to the roof, which would crop a name label. One
+  // definition, at module scope, because the arrival's sightline keep-out needs
+  // the same number before any bus exists.
+  const height = CAT_BUS_TOP;
 
   // Straight out from the step, clear of the sill. Derived from the step's own
   // position rather than restated, so moving the door moves this with it.

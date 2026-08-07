@@ -22,6 +22,16 @@ import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 
+/** One planted thing found standing in front of the arriving cat bus. */
+export interface HidingFact {
+  readonly x: number;
+  readonly z: number;
+  /** Its highest point, in world metres — what the grazing ray is cast from. */
+  readonly top: number;
+  /** Which `InstancedMesh` it came out of, so a failure names the population. */
+  readonly what: string;
+}
+
 /** A wall run flattened to what a clearance test needs. */
 export interface WallFact {
   readonly from: readonly [number, number];
@@ -241,6 +251,22 @@ export interface ParkFacts {
    * `theCatBusIsInThePark` fails.
    */
   readonly catBus: CatBusFact | null;
+  /**
+   * **Every planted thing standing between the camera and the arriving bus.**
+   *
+   * Gathered by walking the `foliage` and `treeline` groups' own
+   * `InstancedMesh`es in the built scene and reading **instance matrices** —
+   * not by re-running the scatter's own rules, and not from a list the
+   * generator kept. The distinction earned its keep twice on this feature
+   * already: a guard that asks the builder what it intended stays green while
+   * the park shows something else, and a crowd child's rig is a detached proxy
+   * so scene *attachment* proves nothing either. What reaches the screen is an
+   * instance matrix, so an instance matrix is what is measured.
+   *
+   * Empty is the healthy state. Each entry is a thing a child would see the bus
+   * from behind.
+   */
+  readonly hidingTheArrivingBus: readonly HidingFact[];
   readonly routes: readonly RouteFact[];
   readonly exits: readonly ExitFact[];
   /** The destination graph `paths.ts` grows the network from. */
@@ -726,6 +752,47 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   }
 
   const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
+
+  // --- what stands in front of the arriving bus ------------------------------
+  // Dynamically imported for the reason this file's header gives: a *static*
+  // import of anything under `src/world/` into `test/` reaches the seeded park
+  // manifest and loads it before the seed is set, which silently skips 156
+  // tests rather than failing one.
+  const { hidesTheArrivingBus } = await import('../../src/world/entrance/arrivalSightline.ts');
+  const hidingTheArrivingBus: HidingFact[] = [];
+  {
+    // Only the two groups the scatter owns. The boundary wall and the Rail
+    // Race's trestles also cross this corridor — 20 wall blocks and 40-odd
+    // trestle parts, measured — but neither is scenery and neither can be
+    // moved by refusing a spot, so sweeping them in here would make an
+    // assertion that can never go green and therefore never means anything.
+    // What this owns is *where things are planted*.
+    const roots: import('three').Object3D[] = [];
+    scene.traverse((object) => {
+      if (object.name === 'foliage' || object.name === 'treeline') roots.push(object);
+    });
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    const scale = new Vector3();
+    for (const root of roots) {
+      root.traverse((object) => {
+        if (!(object instanceof InstancedMeshClass)) return;
+        object.geometry.computeBoundingBox();
+        const bounds = object.geometry.boundingBox;
+        if (!bounds) return;
+        for (let index = 0; index < object.count; index += 1) {
+          object.getMatrixAt(index, matrix);
+          matrix.premultiply(object.matrixWorld);
+          at.setFromMatrixPosition(matrix);
+          scale.setFromMatrixScale(matrix);
+          const top = at.y + bounds.max.y * scale.y;
+          if (!hidesTheArrivingBus(at.x, at.z, top)) continue;
+          hidingTheArrivingBus.push({ x: at.x, z: at.z, top, what: object.name });
+        }
+      });
+    }
+  }
+
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
     name: string; x: number; z: number;
@@ -1063,6 +1130,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     plots,
     entrances,
     catBus,
+    hidingTheArrivingBus,
     exits,
     pathNodes,
     pathEdges,

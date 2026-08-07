@@ -3003,6 +3003,49 @@ const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
 };
 
 /**
+ * **You can see the bus she arrives on.**
+ *
+ * The first thing anyone ever sees of this game is a cat bus pulling up at a
+ * gate, and in the first run anyone captured its lower-left was behind trees
+ * from t = 3 to t = 6. The keep-out that was supposed to prevent that —
+ * `ENTRANCE_CLEAR_X/Z/RADIUS` — is a **10 m disc centred on (0, 56)**: a radius
+ * chosen for an 11 m bus that is now 18 m long, centred where the bus used to
+ * park before it moved outside the gate to z = 69. It has never covered the
+ * vehicle it is named after, before or after Stage A finally gave it a
+ * consumer. Both halves stale, in the one constant.
+ *
+ * And the trees actually in the shot were never subject to it anyway. They are
+ * `Scenery.ts`'s **treeline** — 540 trees in a band beginning 11.5 m outside a
+ * boundary that is 60 m on the gate's bearing, i.e. from z = 71.5, two and a
+ * half metres behind the kerb. `buildTreeline` does not go through
+ * `isPlantable`, so it asked nothing.
+ *
+ * This asserts the thing that actually matters — *is the bus visible* — rather
+ * than that some radius was respected, per this file's rule 1. The test is
+ * exact rather than a tuned distance because the park camera is **orthographic**
+ * and so occlusion depends only on its direction: see
+ * `entrance/arrivalSightline.ts` for the closed form, and note it takes the
+ * camera's angles from `core/constants` rather than restating them, per rule 2.
+ *
+ * **Scoped to what the scatter owns.** The boundary wall (20 blocks) and the
+ * Rail Race's trestles (40-odd parts) also cross this corridor, measured — but
+ * neither is scenery and neither can be moved by refusing a spot, so including
+ * them would make an assertion that can never be green, which is the same as no
+ * assertion at all.
+ */
+const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
+  if (facts.hidingTheArrivingBus.length === 0) return [];
+  const worst = [...facts.hidingTheArrivingBus].sort((a, b) => b.top - a.top).slice(0, 3);
+  return [
+    `${facts.hidingTheArrivingBus.length} planted thing(s) stand between the camera and the ` +
+      `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
+      worst
+        .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
  * Room to be set down by a vehicle and walk away from it, in metres.
  *
  * `PLAYER_RADIUS` (0.62) of body, plus the 0.85 m collider of the widest bush
@@ -3100,6 +3143,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the bus stop and the walk in from it are clear of trees and bushes',
     theEntranceIsClearEnoughToArriveAt,
   ],
+  ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
 ];
 
 /**
