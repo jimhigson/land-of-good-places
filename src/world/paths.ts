@@ -493,7 +493,10 @@ function buildGraph(): PathGraph {
   for (const station of TRAIN_PLAN.stations) {
     const id = `station-${station.index}`;
     nodes.push({ id, kind: 'station', x: station.standX, z: station.standZ });
-    const start = bestBranchPoint(network(), ringPoints, station.approachX, station.approachZ);
+    // Via the lead — past the platform's empty end, stepped into the park —
+    // so the incoming leg can arrive from any bearing without paving through
+    // the canopy posts on the furnished half (see `PlannedStation.leadX`).
+    const start = bestBranchPoint(network(), ringPoints, station.leadX, station.leadZ);
     edges.push({
       from: 'ring',
       to: id,
@@ -503,7 +506,8 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...routeAround(start, [station.approachX, station.approachZ]),
+          ...routeAround(start, [station.leadX, station.leadZ]),
+          [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
       },

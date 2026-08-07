@@ -28,8 +28,10 @@ import { terrainHeight } from '../terrain';
 const FENCE_OFFSET = 2.0;
 const STEP = 2.4;
 // A crossing's fence gap is its own `halfGap` — self-measured for obliquity.
-/** Fence gap half-length around a station, along the loop. */
-const STATION_GAP = 6.5;
+/** Fence gap half-length around a station, along the loop. Exported so
+ * `check:park` can subtract the *declared* open stretches and hold the rest
+ * of the loop to zero holes. */
+export const STATION_GAP = 6.5;
 
 interface StationSpan {
   readonly distance: number;
@@ -186,6 +188,38 @@ export function buildRailFence(
     }
     if (previousLeft && previousRight) cap(previousLeft, previousRight); // far cap
   }
+
+  // --- 3. the far rail of every platform stays fenced ----------------------
+  // A station's gap exists so a child can board from the platform — the
+  // *park* side. Open on both sides (as it first shipped), the gap was also
+  // the cheapest way ACROSS the railway, and the tap-to-move router found
+  // it: once issue #241 spread the plots to both sides of the loop, walks
+  // to anything beyond it cut straight over the rails at a platform
+  // (`check:park`'s route.crossesRail). Crossing belongs to level
+  // crossings; boarding belongs to platforms; so the platform's far side
+  // now carries the same fence as any closed stretch.
+  const stationRun = (station: StationSpan) => {
+    route.pointAt(station.distance, point);
+    route.tangentAt(station.distance, tangent);
+    // Same side math as `train/plan.ts`'s `stationStand`: the platform is on
+    // the park side (towards the origin); the fence goes opposite.
+    const parkIsRight = tangent.z * -point.x - tangent.x * -point.z >= 0;
+    const farSide = parkIsRight ? -1 : 1;
+    let previous: Post | null = null;
+    const steps = Math.max(2, Math.ceil((STATION_GAP * 2) / STEP));
+    for (let i = 0; i <= steps; i += 1) {
+      const distance = route.wrap(station.distance - STATION_GAP + (STATION_GAP * 2 * i) / steps);
+      route.pointAt(distance, point);
+      route.tangentAt(distance, tangent);
+      const x = point.x + tangent.z * farSide * FENCE_OFFSET;
+      const z = point.z - tangent.x * farSide * FENCE_OFFSET;
+      const post: Post = { x, z, y: terrainHeight(x, z) };
+      posts.push(post);
+      if (previous) link(previous, post);
+      previous = post;
+    }
+  };
+  for (const station of stations) stationRun(station);
 
   const postMaterial = toonMaterial(PALETTE.stonePink);
   const railMaterial = toonMaterial(PALETTE.stonePinkLight);

@@ -1,37 +1,48 @@
-import { Rng, TAU } from '../core/mathUtils';
+import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
 import {
+  BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
   PARK_MANIFEST,
   PARK_SEED,
-  PLOT_EXTENT_LIMIT,
   type ManifestEntry,
 } from './parkManifest';
+import { PARK_BOUNDARY } from './boundary';
 import type { AnchorFootprint } from './anchors';
 
 /**
  * The layout solver — L1 of Decision 5.
  *
  * Takes the manifest and the canonical seed; produces a placed park. Runs
- * once at module load (pure arithmetic, no three.js), so every consumer —
- * `anchors.ts`, `paths.ts`, the stalls, the fountain, the map — imports a
- * plain solved object exactly as they used to import authored constants.
+ * once at module load (pure arithmetic beyond the boundary's own polygon, no
+ * three.js), so every consumer — `anchors.ts`, `paths.ts`, the stalls, the
+ * fountain, the map — imports a plain solved object exactly as they used to
+ * import authored constants.
  *
- * **Placement is largest-first rejection sampling.** Each entry draws seeded
- * candidates in its band until one satisfies every constraint; largest-first
- * makes packing reliable (small stalls slot around big plots, never the
- * reverse). The draw sequence is fixed by the seed and the manifest order,
- * so the same inputs always build the same park — a save's positions stay
- * meaningful until PARK_SEED or the manifest deliberately changes.
+ * **Placement is largest-first rejection sampling with a spread preference**
+ * (issue #241). Each entry draws seeded candidates in its band, keeps every
+ * candidate that satisfies every constraint, and of those takes the one
+ * whose nearest neighbour is furthest away — so attractions spread across
+ * the park that actually exists instead of packing the first legal pocket.
+ * Two properties are load-bearing:
+ *
+ *  - **Every entry draws from a stream of its very own**,
+ *    `candidateRng(hash(id) ^ seed, restart)` — so editing the manifest
+ *    cannot move any *other* entry's candidates (the reason the old park
+ *    needed 15-decimal pins is gone). See `candidateRng`'s own doc for the
+ *    bug class this kills.
+ *  - **The limit is the boundary, not a circle.** A plot fits wherever the
+ *    spline says it fits, with {@link BOUNDARY_CLEARANCE} of lane kept to
+ *    the edge, asked per candidate — `PLOT_EXTENT_LIMIT = 52` capped the
+ *    park to the circle it replaced (issue #241).
  *
  * Constraints, all of which fail the *build* loudly rather than degrade:
- *  - plots stay inside {@link PLOT_EXTENT_LIMIT} (keeps the outer rail band
- *    and treeline clear by construction — see the manifest's note);
+ *  - plots fit inside the spline boundary with a walkable lane to the edge;
  *  - plots keep {@link CORRIDOR_GAP} of walkable ground between bounding
  *    circles, so a path can always be routed between neighbours;
  *  - nothing blocks the gate corridor: the entrance is the one pinned thing
  *    in the park, and a child must always be able to walk straight in;
  *  - `near` relations hold (the ball pit stays within the slide's reach of
- *    the building).
+ *    the building), and `nearEdge` bands hold against the real edge.
  */
 
 export interface PlacedEntry {
@@ -63,17 +74,27 @@ export interface ParkLayout {
 /** Walkable clearance kept between any two plots' bounding circles. */
 const CORRIDOR_GAP = 5;
 
-/** Candidate draws per entry before this whole-park attempt is abandoned.
- * 3000, not 400: with per-entry streams a restart is one greedy arrangement,
- * and the difference between "unsolvable in 240 restarts" and "solved at
- * 101" was giving a squeezed entry enough draws to find its sliver. */
+/** Candidate draws per entry before this whole-park attempt is abandoned. */
 const MAX_TRIES = 3000;
+
+/**
+ * How many *valid* candidates an entry collects before choosing between
+ * them. The choice is maximin — the candidate whose nearest already-placed
+ * neighbour is furthest — which is what "distribute things evenly" cashes
+ * out to without reserving an inch of space: a preference over legal spots,
+ * never a claim on ground (Decision 6). Twelve is enough that the winner is
+ * usually in a genuinely different pocket from the loser, and small enough
+ * that a squeezed entry (whose valid pockets are few) still places fast.
+ */
+const SPREAD_CHOICES = 12;
 
 /**
  * Whole-park restarts. Greedy placement can paint itself into a corner — an
  * unlucky big-plot arrangement leaves no sliver for a later relation — and
- * the cheap, deterministic cure is to re-roll the whole arrangement: the rng
- * stream continues, so restarts are as seeded as everything else.
+ * the cheap, deterministic cure is to re-roll the whole arrangement. Each
+ * restart re-seeds every entry's own stream with the restart index, so
+ * restart `r` is as deterministic as restart 0 and no entry ever inherits
+ * another's draws.
  */
 const PARK_RESTARTS = 240;
 
@@ -112,9 +133,8 @@ export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ
 }
 
 function solve(): ParkLayout {
-  const rng = new Rng(PARK_SEED);
   for (let restart = 0; restart < PARK_RESTARTS; restart += 1) {
-    const built = buildOnce(rng);
+    const built = buildOnce(restart);
     if (built) return built;
   }
   throw new Error(
@@ -123,14 +143,20 @@ function solve(): ParkLayout {
   );
 }
 
-function buildOnce(rng: Rng): ParkLayout | null {
+/** One candidate position, with the spread score it was chosen on. */
+interface Candidate {
+  readonly x: number;
+  readonly z: number;
+  /** Gap to the nearest placed plot's bounding circle, in metres. */
+  readonly spread: number;
+}
+
+function buildOnce(restart: number): ParkLayout | null {
   const placed: PlacedEntry[] = [];
   const byId = new Map<string, PlacedEntry>();
 
   // Largest first: the manifest is sorted here rather than trusting file
   // order, so adding an entry never changes packing feasibility by accident.
-  // Ties (and everything after them) keep manifest order, which is what
-  // pins the draw sequence to the seed.
   const order: ManifestEntry[] = [...PARK_MANIFEST].sort(
     (a, b) => (a.solveOrder ?? 50) - (b.solveOrder ?? 50) || b.boundingRadius - a.boundingRadius,
   );
@@ -144,53 +170,28 @@ function buildOnce(rng: Rng): ParkLayout | null {
       );
     }
 
-    let x = 0;
-    let z = 0;
-    let ok = false;
+    // This entry's own stream — a pure function of (seed, id, restart), so
+    // no other entry's fortunes can move this one's candidates.
+    const rng = candidateRng(hashString(entry.id) ^ PARK_SEED, restart);
 
-    for (let attempt = 0; attempt < MAX_TRIES && !ok; attempt += 1) {
-      if (entry.pin) {
-        [x, z] = entry.pin;
-      } else if (near && entry.near) {
-        // Draw around the relation target, then check the band too.
-        const angle = rng.range(0, TAU);
-        const distance = rng.range(entry.near.min, entry.near.max);
-        x = near.x + Math.cos(angle) * distance;
-        z = near.z + Math.sin(angle) * distance;
-      } else {
-        // Area-uniform draw inside the band annulus.
-        const angle = rng.range(0, TAU);
-        const r2min = entry.band.min * entry.band.min;
-        const r2max = entry.band.max * entry.band.max;
-        const radius = Math.sqrt(rng.range(r2min, r2max));
-        x = Math.cos(angle) * radius;
-        z = Math.sin(angle) * radius;
-      }
-
-      const centreDistance = Math.hypot(x, z);
-      ok =
-        centreDistance + entry.boundingRadius <= PLOT_EXTENT_LIMIT &&
-        centreDistance >= entry.band.min - 1e-6 &&
-        centreDistance <= entry.band.max + 1e-6 &&
-        !inGateCorridor(x, z, entry.boundingRadius) &&
-        placed.every((other) => {
-          // The near-target pair is deliberately close; its manifest min is
-          // the rule. Everyone else keeps a walkable corridor.
-          const isNearTarget = entry.near && other.id === entry.near.id;
-          const floor = isNearTarget
-            ? (entry.near as { min: number }).min
-            : entry.boundingRadius + other.boundingRadius + CORRIDOR_GAP;
-          return Math.hypot(x - other.x, z - other.z) >= floor;
-        });
-      if (entry.pin && !ok) {
-        throw new Error(
-          `park layout: pinned entry '${entry.id}' at [${x}, ${z}] violates a constraint — ` +
-            `a pin must still make a working park`,
-        );
-      }
+    const candidates: Candidate[] = [];
+    for (let attempt = 0; attempt < MAX_TRIES && candidates.length < SPREAD_CHOICES; attempt += 1) {
+      const drawn = drawCandidate(entry, near, rng);
+      const valid = validate(entry, near, drawn.x, drawn.z, placed);
+      if (valid === null) continue;
+      candidates.push({ x: drawn.x, z: drawn.z, spread: valid });
+      if (entry.pin) break; // a pin is one candidate, validated
     }
 
-    if (!ok) return null; // this arrangement dead-ended; the caller restarts
+    if (candidates.length === 0) return null; // dead end; the caller restarts
+
+    // Maximin: of the legal spots, the one furthest from its nearest
+    // neighbour. Ties keep draw order, which keeps the choice seeded.
+    let best = candidates[0] as Candidate;
+    for (const candidate of candidates) {
+      if (candidate.spread > best.spread) best = candidate;
+    }
+    const { x, z } = best;
 
     // Entrance: on the plot edge, facing the park middle (the plaza is
     // placed first among big plots in practice, but the middle is the
@@ -223,12 +224,85 @@ function buildOnce(rng: Rng): ParkLayout | null {
     throw new Error(`park layout: the manifest must contain a circular 'fountain'`);
   }
 
-
   return {
     seed: PARK_SEED,
     fountain: { x: fountain.x, z: fountain.z, radius: fountain.footprint.radius },
     entries: byId,
   };
+}
+
+/** One seeded draw for an entry: its pin, its relation ring, or its band. */
+function drawCandidate(
+  entry: ManifestEntry,
+  near: PlacedEntry | undefined,
+  rng: Rng,
+): { x: number; z: number } {
+  if (entry.pin) return { x: entry.pin[0], z: entry.pin[1] };
+  if (near && entry.near) {
+    // Draw around the relation target; the band still applies afterwards.
+    const angle = rng.range(0, TAU);
+    const distance = rng.range(entry.near.min, entry.near.max);
+    return { x: near.x + Math.cos(angle) * distance, z: near.z + Math.sin(angle) * distance };
+  }
+  // Area-uniform draw inside the band annulus, capped at the furthest the
+  // boundary ever reaches — beyond that a candidate cannot possibly fit, so
+  // drawing there only spends tries.
+  const angle = rng.range(0, TAU);
+  const max = Math.min(entry.band.max, PARK_BOUNDARY.maxRadius);
+  const r2min = entry.band.min * entry.band.min;
+  const r2max = max * max;
+  const radius = Math.sqrt(rng.range(r2min, Math.max(r2min, r2max)));
+  return { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
+}
+
+/**
+ * Every constraint on one candidate, or `null` if any fails. On success,
+ * returns the spread score (gap to the nearest placed plot) for maximin.
+ * A pinned entry that fails throws instead: a pin must still make a
+ * working park.
+ */
+function validate(
+  entry: ManifestEntry,
+  near: PlacedEntry | undefined,
+  x: number,
+  z: number,
+  placed: readonly PlacedEntry[],
+): number | null {
+  const fail = (reason: string): null => {
+    if (entry.pin) {
+      throw new Error(
+        `park layout: pinned entry '${entry.id}' at [${x}, ${z}] ${reason} — ` +
+          `a pin must still make a working park`,
+      );
+    }
+    return null;
+  };
+
+  const centreDistance = Math.hypot(x, z);
+  if (centreDistance < entry.band.min - 1e-6 || centreDistance > entry.band.max + 1e-6) {
+    return fail('leaves its band');
+  }
+
+  // The park's real edge, per bearing — the constraint that replaced the
+  // 52 m circle (issue #241).
+  const edgeGap = PARK_BOUNDARY.distanceToEdge(x, z) - entry.boundingRadius;
+  if (edgeGap < BOUNDARY_CLEARANCE) return fail('does not fit inside the boundary');
+  if (entry.nearEdge && (edgeGap < entry.nearEdge.min || edgeGap > entry.nearEdge.max)) {
+    return fail('misses its nearEdge band');
+  }
+
+  if (inGateCorridor(x, z, entry.boundingRadius)) return fail('blocks the gate corridor');
+
+  let spread = Infinity;
+  for (const other of placed) {
+    const gap = Math.hypot(x - other.x, z - other.z) - entry.boundingRadius - other.boundingRadius;
+    // The near-target pair is deliberately close; its manifest min is the
+    // rule. Everyone else keeps a walkable corridor.
+    const isNearTarget = near !== undefined && other.id === near.id;
+    if (!isNearTarget && gap < CORRIDOR_GAP) return fail(`crowds '${other.id}'`);
+    if (gap < spread) spread = gap;
+  }
+  return spread;
 }
 
 /**

@@ -109,8 +109,16 @@ interface NodeSeed {
   readonly interesting: boolean;
 }
 
-/** Metres between waypoints sampled along a path. Comfortably under {@link MAX_EDGE}. */
-const ROUTE_SPACING = 7;
+/** Metres between waypoints sampled along a path. Comfortably under {@link MAX_EDGE}.
+ *
+ * 4, down from 7 (issue #241): with plots spread to the rim, a station or
+ * doormat spur can run close beside the railway's exclusion fence, and a 7 m
+ * straight edge between two on-ribbon samples cuts enough of the ribbon's own
+ * bend to clip the fence's {@link CLEARANCE} — Bluebell Halt's whole spur end
+ * stranded exactly that way. At 4 m a straight edge stays within ~0.5 m of
+ * the paved curve, so an edge is only rejected when the *lane itself* is
+ * genuinely too tight, which is what the check is for. */
+const ROUTE_SPACING = 4;
 
 /** How many waypoints ring the fountain. Six is what the plaza has always had. */
 const PLAZA_RING_NODES = 6;

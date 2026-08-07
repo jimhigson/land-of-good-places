@@ -75,6 +75,45 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
   };
 }
 
+/**
+ * The same park, `inset` metres smaller all the way round.
+ *
+ * For the rides that solve *inside* the park — the ginormous slide and the
+ * Sky Cruiser hand their route search a territory, and until issue #241 that
+ * territory was a hand-sized circle (`GARDEN_PLAY_RADIUS`, `OUTER_RADIUS`)
+ * which quietly stopped meaning "the park" when the park became a spline:
+ * plots now spread to the real edge, and a ride whose start pose sits beyond
+ * its own territory circle rejects every candidate piece as out of bounds
+ * and cannot solve at all.
+ *
+ * Built by walking each bearing in from the true edge until the signed
+ * distance field reads `inset`, then wrapping those radii in
+ * {@link profileBoundary} — so the result is a full, honest `ParkBoundary`
+ * (area, perimeter, outline and all), not a wrapper that lies about
+ * everything but distance. The inset curve of a gentle star-shaped curve is
+ * still star-shaped while `inset` stays far below
+ * {@link GENTLE_CURVATURE_RADIUS}, which every caller's few metres does.
+ */
+export function insetBoundary(boundary: ParkBoundary, inset: number): ParkBoundary {
+  const radii: number[] = [];
+  for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
+    const angle = (i / PROFILE_SAMPLES) * TAU;
+    const dirX = Math.cos(angle);
+    const dirZ = Math.sin(angle);
+    let low = 0;
+    let high = edgeRadiusAt(boundary, angle);
+    // The signed distance shrinks towards the edge along the ray, so binary
+    // search finds where it crosses `inset` to well under geometry noise.
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (low + high) / 2;
+      if (boundary.distanceToEdge(dirX * mid, dirZ * mid) >= inset) low = mid;
+      else high = mid;
+    }
+    radii.push(low);
+  }
+  return profileBoundary(radii);
+}
+
 // --------------------------------------------------------------- the profile
 
 /**

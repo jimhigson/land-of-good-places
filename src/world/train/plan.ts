@@ -37,6 +37,17 @@ export interface PlannedStation {
    */
   readonly approachX: number;
   readonly approachZ: number;
+  /**
+   * Where the spur should arrive from the park: past the platform's empty
+   * end and stepped out into the park, so the incoming leg never cuts
+   * diagonally across the canopy posts on the furnished half. Added when
+   * issue #241 spread the plots: with stations landing on the loop's rim
+   * bulges, `bestBranchPoint` can sit at almost any bearing from the
+   * platform, and the straight leg it drew to the approach paved through the
+   * posts and stranded Bluebell Halt's waypoints.
+   */
+  readonly leadX: number;
+  readonly leadZ: number;
 }
 
 const STATION_SEEDS = [
@@ -99,21 +110,60 @@ export function stationStand(
  */
 function clearStationDistance(route: TrainRoute, target: number): number {
   const tangent = new Vector3();
-  for (let step = 0; step <= 48; step += 1) {
-    const offset = (step % 2 === 0 ? 1 : -1) * Math.ceil(step / 2);
+  const centre = new Vector3();
+
+  // Scored, not first-fit (issue #241). With the plots unpinned and the loop
+  // hugging a spline rim, the stretch nearest a seed bearing can be one
+  // where the track plunges RADIALLY between a dip and the rim — and a
+  // platform parallel to a radial run walls off its own approach: the spur
+  // has to run the fence line for its whole length, and Bluebell Halt's
+  // waypoints stranded in the pocket that made. So every candidate along a
+  // generous window is scored, and the score prefers exactly what Decision 4
+  // asked of stations in the first place:
+  //  - a TANGENTIAL stretch (platform across the park's view, approach open),
+  //  - an inward dip rather than the far rim (short spur, near the paths),
+  //  - open ground on the park side where the spur will actually arrive,
+  //  - and, mildly, nearness to the seed's bearing.
+  let best = target;
+  let bestScore = Infinity;
+  for (let offset = -60; offset <= 60; offset += 2) {
     const distance = target + offset;
     const { standX, standZ } = stationStand(route, distance);
     route.tangentAt(distance, tangent);
-    let clear = true;
+    route.pointAt(distance, centre);
+
+    let blocked = false;
     for (const along of [-2.6, 0, 2.6]) {
       if (!clearOfPlots(standX + tangent.x * along, standZ + tangent.z * along, 1.7)) {
-        clear = false;
+        blocked = true;
         break;
       }
     }
-    if (clear) return distance;
+    const radius = Math.hypot(centre.x, centre.z) || 1;
+    const radialDot = Math.abs((tangent.x * centre.x + tangent.z * centre.z) / radius);
+    const off = Math.hypot(standX - centre.x, standZ - centre.z) || 1;
+    const parkX = (standX - centre.x) / off;
+    const parkZ = (standZ - centre.z) / off;
+    let approachBlocked = false;
+    for (const reach of [4, 7]) {
+      if (!clearOfPlots(standX + parkX * reach, standZ + parkZ * reach, 2)) {
+        approachBlocked = true;
+        break;
+      }
+    }
+
+    const score =
+      (blocked ? 1000 : 0) +
+      (approachBlocked ? 120 : 0) +
+      radialDot * 30 +
+      radius * 0.35 +
+      Math.abs(offset) * 0.2;
+    if (score < bestScore) {
+      bestScore = score;
+      best = distance;
+    }
   }
-  return target;
+  return best;
 }
 
 function planStations(route: TrainRoute): readonly PlannedStation[] {
@@ -122,6 +172,11 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
     const distance = clearStationDistance(route, target);
     const { standX, standZ } = stationStand(route, distance);
     const tangent = route.tangentAt(distance, new Vector3());
+    // Away from the track, through the stand — the platform's park side.
+    const centre = route.pointAt(distance, new Vector3());
+    const off = Math.hypot(standX - centre.x, standZ - centre.z) || 1;
+    const parkX = (standX - centre.x) / off;
+    const parkZ = (standZ - centre.z) / off;
     return {
       index,
       name: seed.name,
@@ -133,6 +188,18 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
       standZ,
       approachX: standX + tangent.x * 3.5,
       approachZ: standZ + tangent.z * 3.5,
+      // Straight out into the park from the platform's centre. From here the
+      // remaining legs run lead -> approach -> stand entirely in the
+      // platform's furniture-free (+tangent) half-plane: in platform
+      // coordinates the lead is (along 0, park 6) and the approach
+      // (along 3.5, park 0), so the connecting segment never enters the
+      // negative-along half where the canopy posts stand — measured 2.8 m
+      // clear of the nearest post, against the graph's 0.7 m requirement. A
+      // lead past the platform's far END was tried first and made things
+      // worse: a spur arriving from anywhere in the park then had to sweep
+      // the whole frontage to get there, 0.3 m from the posts.
+      leadX: standX + parkX * 6,
+      leadZ: standZ + parkZ * 6,
     };
   });
 }

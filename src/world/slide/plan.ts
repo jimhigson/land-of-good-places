@@ -13,7 +13,6 @@ import {
 import {
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
-  GARDEN_PLAY_RADIUS,
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
 } from '../../core/constants';
@@ -21,7 +20,7 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
-import { circleBoundary } from '../boundary';
+import { PARK_BOUNDARY } from '../boundary';
 import { type OpenRouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { terrainHeight } from '../terrain';
@@ -745,7 +744,9 @@ function approachIsClear(mouth: Pose2): boolean {
 function openGround(x: number, z: number): boolean {
   if (insideCastle(x, z, CORRIDOR_RADIUS)) return false;
   if (!clearsTowersOnTheGround(x, z, CORRIDOR_RADIUS)) return false;
-  if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - CORRIDOR_RADIUS) return false;
+  // The park's real edge, per bearing — the 58 m circle this used to test
+  // stopped meaning "in bounds" when the park became a spline (issue #241).
+  if (PARK_BOUNDARY.distanceToEdge(x, z) < CORRIDOR_RADIUS) return false;
   for (const [id, entry] of PARK_LAYOUT.entries) {
     if (JOINED_PLOTS.has(id)) continue;
     if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + CORRIDOR_RADIUS) {
@@ -928,7 +929,7 @@ function planExit(): { exitX: number; exitZ: number } {
       const bearing = fromCastle + offset;
       const x = BALL_PIT_X + Math.cos(bearing) * distance;
       const z = BALL_PIT_Z + Math.sin(bearing) * distance;
-      if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2) continue;
+      if (PARK_BOUNDARY.distanceToEdge(x, z) < 2) continue;
       if (insideCastle(x, z, clearance)) continue;
       let blocked = false;
       for (const [id, entry] of PARK_LAYOUT.entries) {
@@ -1039,7 +1040,11 @@ export interface PlannedSlide {
  * regression shows up as a red test rather than as a park that will not boot.
  */
 function planSlide(): PlannedSlide {
-  const boundary = circleBoundary(GARDEN_PLAY_RADIUS);
+  // The slide's territory is the park itself. `generate.ts` rejects any piece
+  // whose corridor comes within `corridorRadius` of this boundary's edge, so
+  // handing over the real spline keeps the chute inside the park with the
+  // same clearance the old circle pretended to give (issue #241).
+  const boundary = PARK_BOUNDARY;
   const brief: OpenRouteBrief = {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.

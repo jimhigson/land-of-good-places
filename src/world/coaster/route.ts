@@ -4,7 +4,7 @@ import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary } from '../boundary';
+import { circleBoundary, insetBoundary, PARK_BOUNDARY } from '../boundary';
 import {
   type RouteBrief,
   type RouteInfluence,
@@ -12,6 +12,7 @@ import {
   solveRailRoute,
 } from '../rail/generate';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
+import { TRAIN_PLAN } from '../train/plan';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import {
   CASTLE_OUTER_X,
@@ -82,12 +83,20 @@ const STATION_RAMP = 26;
 /**
  * How far out the loop may reach.
  *
- * The train owns the 48-58 m band and the Rail Race rings the park at 53.5 m,
- * so the coaster's centre line stops well short of both. The generator keeps a
- * corridor's width inside this, so the track edge lands at about the 43 m the
- * old polar band clamped to.
+ * How far in from the park's edge the loop's territory stops.
+ *
+ * This was `OUTER_RADIUS = 47`, a circle that stood for "inside the train's
+ * band" while the park was a disc. The park is a spline now and the plots
+ * spread across all of it (issue #241) — the coaster's own station stall can
+ * legally stand past 47 m — so the territory is the park itself, inset far
+ * enough that the rim band stays substantially the train's: the train hugs
+ * the wall at about 3.35 m in, and this keeps the coaster's *corridor*
+ * (which the generator already holds a `corridorRadius` inside its boundary)
+ * from camping on the same ground. Crossings still happen and are legal —
+ * clearance between the two is vertical, ratcheted by `check:park` — this
+ * only keeps the coaster from *running along* the train's lane.
  */
-const OUTER_RADIUS = 47;
+const RIM_INSET = 6;
 
 /**
  * Half-width kept clear either side of the centre line while solving.
@@ -158,6 +167,17 @@ const PLAN_TURN_RADIUS = MIN_TURN_RADIUS + 1;
 
 /** Metres of track wanted. The old loop came out at 221 m; this holds that. */
 const DESIRED_LENGTH = 220;
+
+/**
+ * Air the coaster keeps above the train's railhead wherever their plan
+ * positions come within 4 m — Decision 4's clearance rule, generalised. One
+ * constant, shared by the vertical repair (which lifts to honour it) and the
+ * boot assert (which measures it), so they cannot drift apart.
+ */
+export const RAIL_OVER_RAIL_AIR = 5.5;
+
+/** Scratch for train-proximity queries during the solve. */
+const trainProbe = new Vector3();
 
 /**
  * Roughly this far apart, in metres, along the loop.
@@ -402,7 +422,7 @@ export interface CoasterRouteOptions {
   readonly salt: number;
   /** The stall whose booth is this ride's station. */
   readonly stationStallId: string;
-  /** How far out the loop may reach. Defaults to {@link OUTER_RADIUS}. */
+  /** Circular territory override. Defaults to the park inset {@link RIM_INSET}. */
   readonly outerRadius?: number;
   /** Metres of track wanted. Defaults to {@link DESIRED_LENGTH}. */
   readonly desiredLength?: number;
@@ -548,10 +568,15 @@ export class CoasterRoute {
     const stall = placedEntry(options.stationStallId);
     const obstacles = tallObstacles();
     const other = options.avoid ?? null;
-    const boundary = circleBoundary(options.outerRadius ?? OUTER_RADIUS);
+    const boundary =
+      options.outerRadius !== undefined
+        ? circleBoundary(options.outerRadius)
+        : insetBoundary(PARK_BOUNDARY, RIM_INSET);
 
     // --- horizontal: the generator solves the plan view --------------------
-    const clear = (x: number, z: number, radius: number): boolean => {
+    const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
+    const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
+    const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
       for (const tall of obstacles) {
         if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
       }
@@ -559,6 +584,18 @@ export class CoasterRoute {
       if (other) {
         const nearest = other.nearestPoint(x, z);
         if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
+      }
+      // The station and its ramps are the one stretch the vertical repair may
+      // never lift (a half-lift tilts the boarding deck), so a train crossing
+      // there is unfixable: the loop would run at deck height straight over
+      // the rails. Keep the low window off the train horizontally instead.
+      // The train solves at module load before any coaster plan (this module
+      // imports `train/plan`), so the curve is real, not a reservation.
+      const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
+      if (nearStation) {
+        const railDistance = TRAIN_PLAN.route.distanceNear(x, z);
+        TRAIN_PLAN.route.pointAt(railDistance, trainProbe);
+        if (Math.hypot(trainProbe.x - x, trainProbe.z - z) < radius + 4) return false;
       }
       return true;
     };
@@ -746,9 +783,25 @@ export class CoasterRoute {
         );
         if (toStation < STATION_FLAT + STATION_RAMP) continue;
         const above = probe.y - terrainHeight(probe.x, probe.z);
-        if (above >= CRUISE_FLOOR) continue;
-        const lift = CRUISE_FLOOR - above + 0.4;
-        lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+        if (above < CRUISE_FLOOR) {
+          const lift = CRUISE_FLOOR - above + 0.4;
+          lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+        }
+        // Decision 4's crossing rule: wherever the loop passes over the
+        // train, RAIL_OVER_RAIL_AIR of air. A deficit here is repaired the
+        // same way a cruise-floor sag is — lift the owning control — because
+        // with the plots spread across the park (issue #241) the train's own
+        // dips move per seed, and no fixed hill schedule can promise to be
+        // high at every place the two happen to meet.
+        const railDistance = TRAIN_PLAN.route.distanceNear(probe.x, probe.z);
+        TRAIN_PLAN.route.pointAt(railDistance, trainProbe);
+        if (Math.hypot(trainProbe.x - probe.x, trainProbe.z - probe.z) < 4) {
+          const air = probe.y - trainProbe.y;
+          if (air < RAIL_OVER_RAIL_AIR) {
+            const lift = RAIL_OVER_RAIL_AIR - air + 0.4;
+            lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+          }
+        }
       }
       // Never lift a control that owns boarding-flat or early-ramp track — a
       // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
@@ -887,9 +940,9 @@ export function checkCoasterClearances(
       );
     }
     const train = trainPointNear(point.x, point.z);
-    if (train.distance < 3 && point.y - train.y < 5.5) {
+    if (train.distance < 3 && point.y - train.y < RAIL_OVER_RAIL_AIR) {
       complaints.push(
-        `coaster crosses the train with ${(point.y - train.y).toFixed(1)} m of air at (${point.x.toFixed(0)}, ${point.z.toFixed(0)}) — Decision 4 wants 5.5`,
+        `coaster crosses the train with ${(point.y - train.y).toFixed(1)} m of air at (${point.x.toFixed(0)}, ${point.z.toFixed(0)}) — Decision 4 wants ${RAIL_OVER_RAIL_AIR}`,
       );
     }
     // The two things it cannot fly over. Recorded as a worst-case per obstacle
