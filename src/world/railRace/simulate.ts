@@ -347,7 +347,18 @@ export function stepRider(
   band = 1,
   boostGain = 1,
 ): StepEvents {
-  if (rider.finished) return NOTHING;
+  if (rider.finished) {
+    // **The pump spring keeps unwinding after the line.** Crossing it does not
+    // stop time, and a rider all but always crosses it mid-press — so returning
+    // here before the decay below froze `bob` at 1 for the whole result phase.
+    // Cosmetic, but not invisible: the winner spent her celebration jump
+    // thrown forward on a pump that ended five seconds ago (`BOOST_ROCK`), and
+    // every finished rival sat locked in the bottom of its seat dip
+    // (`BOB_DROP`). No press is counted — a finished rider is not pumping —
+    // so this only ever winds the spring down.
+    rider.bob = Math.max(0, rider.bob - dt / BOB_SECONDS);
+    return NOTHING;
+  }
 
   const wobbling = rider.wobble > WOBBLE_LOCKOUT;
   rider.ducking = input.ducking;

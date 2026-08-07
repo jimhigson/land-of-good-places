@@ -14,7 +14,13 @@ import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
-import { poseRailRaceRider, setRiderLegsVisible } from './duckPose';
+import {
+  poseRailRaceRider,
+  setRiderLegsVisible,
+  riderLegsShow,
+  cheerAt,
+  type RidePhase,
+} from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
@@ -77,18 +83,6 @@ const COUNT_HOLD = 0.9;
 
 /** How long the result card sits there before she is set down at the booth. */
 const RESULT_SECONDS = 5;
-
-/** How long one celebration hop takes, seconds — see `RailRace.cheer`. */
-const CHEER_HOP_SECONDS = 0.62;
-
-/**
- * How long she keeps jumping for, seconds.
- *
- * Comfortably inside {@link RESULT_SECONDS} so the bouncing stops and she
- * settles while the camera is still on her, rather than being cut off in the
- * air when the phase ends.
- */
-const CHEER_SECONDS = 3.2;
 
 /** Safety net: no race may run longer than this. Nobody has ever reached it. */
 const RACE_TIME_LIMIT = 180;
@@ -270,8 +264,12 @@ export type RaceMoment =
  * `levelSelect` sits between boarding and the countdown: everybody is at the
  * line, the ride view is up, but nothing moves until `chooseLevel` picks a
  * hazard composition and starts the clock.
+ *
+ * The list itself lives in `duckPose.ts`, beside {@link riderLegsShow} and
+ * {@link cheerAt}, the two rules derived from it — so there is one list, not a
+ * copy here and a copy the checks test against.
  */
-type Phase = 'waiting' | 'levelSelect' | 'countdown' | 'racing' | 'finishing';
+type Phase = RidePhase;
 
 /**
  * One racer, as the HUD needs them.
@@ -871,6 +869,39 @@ export class RailRace implements GameSystem {
   }
 
   /**
+   * **Whether riders' legs are drawn right now**, derived — never remembered.
+   *
+   * The rule itself is {@link riderLegsShow} in `duckPose.ts`, so `check:rail-race`
+   * can put it through every phase; this only supplies the phase.
+   */
+  private get legsShow(): boolean {
+    return riderLegsShow(this.phase);
+  }
+
+  /**
+   * **How far through a celebration jump she is, 0..1** — derived every frame
+   * from the ride's own state, never held in a timer of its own.
+   *
+   * Jim: the win wants the camera to hold on her for a few seconds while she
+   * *jumps in the cart*, with her legs showing. The hold was already there —
+   * finishing freezes `Rider.travelled` (`stepRider` returns early), so
+   * `RaceCamera` settles on her and {@link RESULT_SECONDS} keeps the phase
+   * alive for five seconds — and {@link legsShow} already turns the legs back
+   * on for `'finishing'`. What was missing was the jump.
+   *
+   * The curve is {@link cheerAt}, in `duckPose.ts`, so the check can drive the
+   * real one through the real pose. This decides only *whether* she is
+   * celebrating and how far in she is.
+   *
+   * Zero unless she actually won: fourth place gets confetti and a kind
+   * sentence (see this file's header), not a victory jump.
+   */
+  private get cheer(): number {
+    if (this.phase !== 'finishing' || this.me.rider.place !== 1) return 0;
+    return cheerAt(RESULT_SECONDS - this.resultTimer);
+  }
+
+  /**
    * How far a rider facing `cartYaw` at `at` should turn towards the race
    * camera — see {@link FACE_TURN_MAX}.
    *
@@ -885,46 +916,6 @@ export class RailRace implements GameSystem {
    * turning them towards a race camera nobody is looking through would leave
    * three children riding round the park permanently facing sideways.
    */
-  /**
-   * **Whether riders' legs are drawn right now**, derived — never remembered.
-   *
-   * Off while the race is actually on, because a seated rider's legs sink below
-   * the cart's tub floor as she ducks and clip through it, which is what Jim
-   * reported. On for everything else, which includes the win celebration
-   * (`'finishing'`) where she bounces with her legs out, and the whole time she
-   * is idling on the walk-past ring in view of a child on foot.
-   */
-  private get legsShow(): boolean {
-    return this.phase !== 'countdown' && this.phase !== 'racing';
-  }
-
-  /**
-   * **How far through a celebration jump she is, 0..1** — derived every frame
-   * from the ride's own state, never held in a timer of its own.
-   *
-   * Jim: the win wants the camera to hold on her for a few seconds while she
-   * *jumps in the cart*, with her legs showing. The hold was already there —
-   * finishing freezes `Rider.travelled`, so `RaceCamera` settles on her and
-   * {@link RESULT_SECONDS} keeps the phase alive for five seconds — and
-   * {@link legsShow} already turns the legs back on for `'finishing'`. What was
-   * missing was the jump.
-   *
-   * `max(0, sin)` gives a hop and then a pause before the next one, which is
-   * what jumping on the spot actually looks like; a plain sine is a bob. The
-   * fade means the last hop lands and she settles, rather than being cut off
-   * mid-air when the result card goes.
-   *
-   * Zero unless she actually won: fourth place gets confetti and a kind
-   * sentence (see this file's header), not a victory jump.
-   */
-  private get cheer(): number {
-    if (this.phase !== 'finishing' || this.me.rider.place !== 1) return 0;
-    const since = RESULT_SECONDS - this.resultTimer;
-    if (since < 0 || since >= CHEER_SECONDS) return 0;
-    const fade = 1 - since / CHEER_SECONDS;
-    return Math.max(0, Math.sin((since / CHEER_HOP_SECONDS) * Math.PI)) * fade;
-  }
-
   private faceTurn(cartYaw: number, at: Vector3, sadness: number): FaceTurn {
     const view = this.rideView;
     if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;

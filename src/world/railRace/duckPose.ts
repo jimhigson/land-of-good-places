@@ -182,6 +182,65 @@ const CHEER_ARM = 2.5;
  */
 const CHEER_LEG = 0.95;
 
+/** How long one celebration hop takes, seconds. */
+const CHEER_HOP_SECONDS = 0.62;
+
+/**
+ * How long she keeps jumping for, seconds.
+ *
+ * Comfortably inside `RailRace`'s `RESULT_SECONDS` (5) so the bouncing stops and
+ * she settles while the camera is still on her, rather than being cut off in
+ * mid-air when the result card goes.
+ */
+const CHEER_SECONDS = 3.2;
+
+/**
+ * **How far through the victory jump a winner is, 0..1**, `since` seconds after
+ * she crossed the line.
+ *
+ * A pure function of the clock, here rather than inside `RailRace`, for the
+ * reason this whole module exists: `check:rail-race` drives **this** curve
+ * through **the real {@link poseRailRaceRider}** and measures where her head
+ * actually ends up. A check that fed a hand-picked `cheer: 1` into the pose
+ * would prove the pose can lift her while saying nothing whatsoever about
+ * whether the ride ever asks it to — and "the flag was right, the screen was
+ * still" is the exact failure this PR has now hit five times. Note the curve
+ * never reaches 1 (it peaks near 0.90, fade included), so `cheer: 1` was not
+ * even a value the game produces.
+ *
+ * `max(0, sin)` gives a hop and then a pause before the next one, which is what
+ * jumping on the spot actually looks like; a plain sine is a bob. The linear
+ * fade means the last hop lands and she settles.
+ */
+export function cheerAt(since: number): number {
+  if (since < 0 || since >= CHEER_SECONDS) return 0;
+  const fade = 1 - since / CHEER_SECONDS;
+  return Math.max(0, Math.sin((since / CHEER_HOP_SECONDS) * Math.PI)) * fade;
+}
+
+/**
+ * The phases a Rail Race passes through. Lives here, beside the two rules that
+ * are derived from it ({@link riderLegsShow} and the celebration), so
+ * `RailRace.ts` and `check:rail-race` cannot end up with two lists that
+ * disagree about what a phase is called.
+ */
+export type RidePhase = 'waiting' | 'levelSelect' | 'countdown' | 'racing' | 'finishing';
+
+/**
+ * **Whether riders' legs are drawn in a given phase** — the rule itself, so it
+ * can be checked against every phase rather than only the one a test happens to
+ * put the ride in.
+ *
+ * Off while the race is actually on, because a seated rider's legs sink below
+ * the cart's tub floor as she ducks and clip through it, which is what Jim
+ * reported. On for everything else — which includes the win celebration
+ * (`'finishing'`), where he asked for them back, and the whole time rivals idle
+ * round the walk-past ring in view of a child on foot.
+ */
+export function riderLegsShow(phase: RidePhase): boolean {
+  return phase !== 'countdown' && phase !== 'racing';
+}
+
 /**
  * **Whether a rider's legs are drawn.**
  *
@@ -273,7 +332,14 @@ export function poseRailRaceRider(target: Duckable, pose: RiderPose): void {
   // raw press regardless, so without this the two would disagree: she would
   // throw her torso forward on a pump that bought her nothing, on top of a 40°
   // fold, and put her head through her own knees. One rule, stated once.
-  const pump = clamp01(pose.pump) * (1 - fold);
+  //
+  // **And by the cheer**, which is the same rule for the other end of the ride:
+  // a pump throws the torso *forward* and the celebration leans it *back*, so
+  // the two subtract, and a winner mid-jump would straighten up instead of
+  // throwing her arms open. Gating here rather than at the call sites is the
+  // whole point of one owner — the four claimants are reconciled once, in the
+  // function that writes the property, so no caller can combine them wrongly.
+  const pump = clamp01(pose.pump) * (1 - fold) * (1 - cheer);
 
   // Seated first, then everything else on top of it — she ducks, pumps and
   // cheers *from* the seat, so their numbers add to the seat's rather than
