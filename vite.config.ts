@@ -152,9 +152,31 @@ export default defineConfig({
       // that was a service worker minted (and then gone stale) many times an
       // hour for no reason a plain Vite dev server should have.
       //
-      // Testing the manifest/update-toast machinery itself is rare enough to
-      // be worth an explicit opt-in instead of the default every dev server
-      // paid for: `VITE_PWA_DEV=1 npm run dev`.
+      // **`npm run preview` is where the worker gets tested** — not a dev
+      // server with the flag below. `workbox.globPatterns` above precaches the
+      // *built* output, and in dev there is no built output: Vite serves
+      // unbundled ES modules straight out of `src/`. A dev worker therefore
+      // caches a different set of files by a different mechanism than the one
+      // that ships, so it can show the registration plumbing is wired up but
+      // never that the thing which actually reaches a phone is right.
+      // `vite preview` serves real `dist/` with the generated `sw.js`, the
+      // real precache manifest, and the real `clientsClaim`/`skipWaiting`
+      // waiting-worker behaviour the update toast leans on — subtle enough to
+      // deserve a truthful test rather than an approximate one. Measured
+      // 6 Aug 2026: `npm run dev` registers no worker and leaves `caches`
+      // empty, while `npm run preview` registers one and precaches the nine
+      // entries `dist/sw.js` lists.
+      //
+      // This flag is the **one owner** of that decision. `src/main.ts`'s
+      // `registerSW(...)` is deliberately left unguarded: with `enabled`
+      // false the plugin resolves `virtual:pwa-register` to a stub whose
+      // `registerSW` ignores its options and returns a no-op, so nothing
+      // reaches `onRegisterError` and nothing throws. Do not add a second
+      // `import.meta.env` check there to match this one — that is two places
+      // to keep in sync, and the config would stop being the answer.
+      //
+      // Kept for the rare case of exercising that registration plumbing
+      // itself under HMR: `VITE_PWA_DEV=1 npm run dev`.
       devOptions: {
         enabled: !!process.env.VITE_PWA_DEV,
         type: 'module',

@@ -209,16 +209,27 @@ everything else keeps moving underneath it.
 This is a PWA, but as of 1 August the dev-mode service worker is **off by
 default** (`vite.config.ts`'s `devOptions.enabled`) — a plain `npm run dev`
 no longer registers one at all, so a fresh port just shows the current files,
-like any other Vite project. Only `VITE_PWA_DEV=1 npm run dev` — testing the
-manifest/update-toast machinery itself — turns it back on, and only for that
-one run.
+like any other Vite project. Confirmed by measurement on 6 August: loading a
+dev server in a clean browser profile gives `getRegistrations().length === 0`
+and no caches, in a page where `isSecureContext` is `true` and a worker could
+therefore perfectly well have registered.
 
-If you deliberately ran with `VITE_PWA_DEV=1` (or you are testing the real
-production build via `vite preview`), the old trap still applies: a service
-worker precached from **another agent's dev server on a different port** can
-keep serving old JS to yours, so your code changes silently do not appear and
-a field you just added looks like it has vanished from your own class. In the
-page console:
+**`npm run preview` is where a worker is expected, and where you test one.**
+It serves the real `dist/` build with the real generated `sw.js` and precache
+manifest. A dev-mode worker never could test the shipped one: `globPatterns`
+precaches the *built* output, and dev has no built output to precache — so it
+cached a different set of files by a different mechanism than the one that
+reaches a phone. `VITE_PWA_DEV=1 npm run dev` still forces one on for the rare
+job of poking the registration plumbing under HMR, but do not mistake it for a
+test of what ships.
+
+**A worker already installed on that port from an earlier session is still
+live.** Turning the default off stops *new* ones being minted; it cannot
+unregister one some tab registered last week, before this change, or under
+`preview`, or from another agent's dev server on a port you have since
+reused. That one keeps serving old JS to you, so your code changes silently
+do not appear and a field you just added looks like it has vanished from your
+own class. The cure is unchanged — in the page console:
 
 ```js
 navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
