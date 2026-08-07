@@ -221,3 +221,64 @@ is built once from static circles and has no removal, so a moving collider is
 not a small change. Low risk — she is handed control beside a bus that is
 already leaving, so she has to chase it — but it is real, and a child might.
 Worth doing properly if Stage B gives the bus a longer on-screen life.
+
+
+---
+
+# Round 2 (7 Aug) — Jim's three faults from the first watched run
+
+All three fixed and pushed. `build` exit 0; `test:procgen` **11 files / 221
+tests / 0 skipped**.
+
+## Geometry facts, measured — do not re-derive these
+
+- Ground outside the gate on the gate axis is **flat only to z = 72**
+  (−0.13 m), then falls: −1.35 at 74, −14 at 80. Hilltop diorama.
+- **`PARK_BOUNDARY` is a spline pinned to 60 m at the gate bearing and bulging
+  to 92 m within 40 degrees** (#115). A straight kerb near the wall therefore
+  re-enters the park at both ends. Safe centre-x window for an 11 m bus:
+  **15 m at kerb z=64.5, 41 m at z=69**. Kerb is now `ENTRANCE_GATE_Z + 9`.
+- Practical parking band on the gate axis is also bounded above by the
+  **treeline** (`edgeRadiusAt + 11.5..22`, i.e. z 71.5–82, 540 trees).
+- Bus as built: **11.07 x 4.51 x 5.36 m**, 12 seats. Child 2.12,
+  child-in-a-hat `TALLEST_CHILD_HEIGHT` 2.97.
+- **ARCHITECTURE-DECISIONS §147: clearances use `TALLEST_CHILD_HEIGHT`, not
+  `KID_HEIGHT`.** I used the wrong one first; the bus is sized on the right one
+  now (`TALLEST_CHILD_HEIGHT + RIDER_HEADROOM`).
+
+## Decision taken without asking, and reversible
+
+**All eleven other children get off**, not two. A bus arriving at a park
+unloads, and it is the fullest answer to *"walks into the park alongside
+several other children"*. If that reads as a stampede, the fix is one number:
+slice fewer routes in `ArrivalSequence`'s `kidRoutes`.
+
+## A guard that could not fail — the lesson of this round
+
+Closing the gate gap again left `check:cat-bus` **green**. Its wall guard asked
+whether walkers cross inside the gate's *angle*, which is true whether or not
+there is stone in the way — a predicate about geometry, not a measurement of
+the built park. The wall is now measured in the invariant suite instead
+(`theGateIsAHoleInTheWall`), and goes red with *"11 boundary wall blocks stand
+inside the gate opening"*.
+
+Two more of my own measurement bugs surfaced the same way: the check tracked
+only 2 of 11 children, and read seated children's **local** coordinates as
+world ones (a 19 m walk reported as 49 m). **Anything parented into the bus
+must be read with `getWorldPosition`.**
+
+## Still unseen, and now longer
+
+No browser tooling in this session at any point. The arrival is now **~15 s**,
+controls at **~11.9 s**, because twelve walk in rather than two. That length is
+the single thing most worth a human judgement.
+
+Glazing is done, so Stage B's "children visible through the windows" should now
+be possible — but **nobody has confirmed the glass reads correctly**, and
+transparent `MeshToonMaterial` with `depthWrite: false` is exactly the sort of
+thing that sorts wrongly against the cabin interior. Check that first.
+
+## Next, in order
+
+1. The incremental park-generation architecture report (owed to the Overseer).
+2. Stage B.
