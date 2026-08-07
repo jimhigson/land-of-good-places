@@ -379,3 +379,106 @@ eighteen children"*. Neither 12 nor 24 — they were already wrong.
 I ran a mutation-restore (`git checkout <file>`) against a file holding
 **uncommitted** work and destroyed the stagger/push-apart implementation, then
 had to rewrite it. **Commit before mutating.**
+
+
+---
+
+# Round 4 (7 Aug) — `e-cat-bus-npcs`, six faults + the NPC restructure
+
+**No browser tooling in this session either** (no chrome-devtools MCP, no
+Claude-in-Chrome; the only MCP present is Blender). Driving headless Chromium
+via Playwright with a throwaway profile instead — see "Seeing it" below.
+
+## Root causes, all measured off the built objects, none guessed
+
+### 1. The children vanish — `ArrivalSequence.finish()` deletes them
+
+`finish()` calls `this.dispose()`, which calls `kid.dispose()` on all eleven and
+`removeFromParent()` on the group. They are one-off `createKid()` models owned
+by the cutscene, so when the cutscene ends they cease to exist. Nothing
+"hands them over" because there is nothing to hand them to.
+
+### 2. They walk at 1.17–1.92 m/s against the park's 2.55
+
+`KID_WALK_SPEED = 1.5` in `ArrivalSequence.ts`, times a per-child
+`0.78 + rng()*0.5`, so **1.17–1.92 m/s**. `NPC_WALK_SPEED` in
+`NpcCharacter.ts:39` is **2.55**. They walk at 46–75% of park pace — Jim's
+"unnaturally slowly" is exactly right, and it is a literal, not an emergent
+effect. Same disease as #232's hard-coded 1.85.
+
+### 3. The push-apart cannot work — it is overwritten every frame
+
+`update()` calls `advanceKid()` (which ends in `walkKid`) and *then*
+`pushApart()`. But `walkKid` does `kid.root.position.set(...)` from the Bézier
+**every frame**, so the previous frame's separation is discarded before it is
+ever seen. The relaxation writes a correction that the next frame throws away:
+**it is incapable of having an effect.** That is the "something downstream
+re-synchronises them" — it is upstream, and it is total.
+
+The stagger is also too small to save it. Routes fan the eleven `from` points
+over 6.2 m — **0.62 m apart** — and the `corner` points over 3.4 m —
+**0.34 m apart** — while a child is **1.53 m wide** (below). They are
+interpenetrating before they take a step.
+
+### 4. The bus is too small because nobody ever measured a child's width
+
+**A child's bounding box is 1.53 × 2.12 × 1.54 m.** The widest part is the
+**head**: `hair.shell.crop` 1.53 wide, `skull` 1.36 × 1.53. The torso is only
+0.73 m. `KID_HEAD_SCALE` is 1.5 — these are chibi proportions and the head is
+the whole footprint.
+
+The bus was derived from `SEAT_WIDTH = 0.92` and `SEAT_PITCH = 1.0`, **both
+hand-picked**, against a child assumed ~0.6 m across. Vertically the derivation
+was honest (`TALLEST_CHILD_HEIGHT + RIDER_HEADROOM`) and vertically it fits.
+Horizontally nothing was measured, because **`kid.ts` exports no width or
+footprint constant at all** — there was nothing to derive from.
+
+Measured, twelve children in the twelve built seats:
+
+```
+body shell interior: x -1.57..1.57  y 0.58..4.03  z -3.77..3.77
+every one of the 12 sticks out: 0.10-0.11 m through the side walls,
+                                0.24 m through the back
+worst seated child-to-child overlap: 0.52 m (rows are 1.0 m apart,
+                                     heads are 1.53 m deep)
+```
+
+So: **every child overlaps the child behind them by half a metre, and all
+twelve poke through the bodywork.** The existing check counted seats and
+occupancy and passed throughout.
+
+### 5. The windows are transparent and it changes nothing
+
+The glazing **did** land — `windowMaterial` is `transparent: true, opacity:
+0.34, depthWrite: false`, confirmed on the built material. Jim is still right.
+The bus body is **one closed opaque `RoundedBoxGeometry`**, and the window panes
+are decals stuck on its *outer surface* at `x = ±(BODY_WIDTH/2 + 0.02)`.
+**There is no opening cut in the wall behind them.** Looking through the glass
+you see the cream body shell 2 cm behind it. Measured: pane at x = -1.55, shell
+spans x = -1.57..1.57.
+
+Making the pane more transparent can never work. The wall needs real holes.
+
+### 6. The camera starts in the park because the boot order undoes the seating
+
+`Game.ts` constructor, in this order:
+
+1. `resolveSpawn()` -> `DEFAULT_SPAWN` = `(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z)`
+2. `world.attachPlayer(player)` -> `entrance.attachPlayer` ->
+   `ArrivalSequence.attachPlayer` -> `beginRide()` + `poseSeated()`
+   — she is now in the bus seat, ~17 m away at the kerb.
+3. **`Game.ts:234` `this.player.teleportTo(spawn.x, ..., spawn.z, ...)`** —
+   unconditional, and it drags her straight back to the park edge.
+4. `Game.ts:796` `this.camera.snapTo(this.player.position)` — snaps to the
+   **park edge**, because that is where step 3 left her.
+5. Frame 1: `ArrivalSequence.update` -> `poseSeated()` puts her back in the bus,
+   and the camera **damps** across the park to catch up.
+
+`IsoCamera.snapTo` already exists and already skips the smoothing. The bug is
+that it is handed the wrong position, by a `teleportTo` that should not run when
+the arrival owns the player.
+
+## Seeing it
+
+Headless Chromium via Playwright, own throwaway profile, dev server on **5421**
+(`--strictPort`, killed by PID). **5200 / 5210 / 5410 / 5412 are not ours.**
