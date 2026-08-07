@@ -546,10 +546,15 @@ export class Game {
       this.world.coaster.rideView?.resize(width, height);
       this.world.railRace.rideView?.resize(width, height);
       this.world.ferrisWheel.rideView?.resize(width, height);
-      this.world.building.rideView?.resize(width, height);
+      this.world.building.resizeRideCameras(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
+    // The slide's two cameras, fitted once at boot as well as on every resize.
+    // Its **trackside** camera is built in `Building`'s constructor rather than
+    // on boarding, so on a window that never resizes it would otherwise render
+    // the whole ride at the 1:1 aspect it was constructed with.
+    this.world.building.resizeRideCameras(window.innerWidth, window.innerHeight);
 
     // First person on the train (Decision 4 C2): boarding wipes into the
     // seat's RideCamera, alighting wipes back. The override is the third
@@ -573,11 +578,29 @@ export class Game {
     // not hidden. Reading the flag off the ride rather than writing `true` here
     // is what keeps the camera and the visibility one decision: a ride that
     // ever goes back to first person changes one field, not two files.
+    //
+    // **`rideCameraNow`, not `rideView.camera`.** Since 6 August the ride cuts
+    // between a chase camera and trackside ones, and which shot it opens on is
+    // the shot plan's business (`world/slide/cameras.ts`) — asking the ride
+    // keeps that one decision in one place, so changing the opening shot does
+    // not also mean editing this file.
     this.world.building.onRideChange = (riding) =>
       rideCamera(
-        riding ? (this.world.building.rideView?.camera ?? null) : null,
+        riding ? this.world.building.rideCameraNow : null,
         this.world.building.playerStaysVisible,
       );
+    // **Mid-ride, a hard cut** — no wipe, deliberately. A real on-ride video
+    // cuts between the cart cam and the trackside cameras, and an iris here
+    // would turn each of the ride's five edits into a blink. `slide/cameras.ts`
+    // sets out why a blend would be worse still.
+    this.world.building.onRideCameraCut = (camera) => {
+      // Only once a ride camera is actually what we are rendering with. The
+      // ride starts a frame or two before `onRideChange`'s wipe reaches its
+      // midpoint, and cutting into the ride before then would show through the
+      // closing iris while the player is still on the roof.
+      if (this.cameraOverride === null) return;
+      this.cameraOverride = camera;
+    };
     this.world.railRace.onRideChange = (riding) =>
       rideCamera(
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,

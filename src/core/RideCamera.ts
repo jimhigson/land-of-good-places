@@ -151,6 +151,32 @@ const FAR = 3200;
 const PORTRAIT_ASPECT_FLOOR = 0.62;
 const MAX_FOV = 96;
 
+/**
+ * Fit `camera` to a viewport, widening its field of view on a portrait phone.
+ *
+ * Exported because the ginormous slide's **trackside** camera
+ * (`world/slide/cameras.ts`) is a plain `PerspectiveCamera` — it is aimed at the
+ * rider rather than driven by a thumb, so it must not own a second
+ * {@link LookControl} reading the same input — and it still has to survive a
+ * portrait phone the same way every other ride camera does.
+ *
+ * One owner, because a hand-copied portrait rule is the single most common bug
+ * in this repo (CLAUDE.md, "Two definitions of one thing"): a comment promising
+ * the two agree is not a mechanism.
+ */
+export function fitCameraToViewport(
+  camera: PerspectiveCamera,
+  baseFov: number,
+  width: number,
+  height: number,
+): void {
+  camera.aspect = width / Math.max(1, height);
+  camera.fov =
+    camera.aspect < 1 ? baseFov / Math.max(PORTRAIT_ASPECT_FLOOR, camera.aspect) : baseFov;
+  camera.fov = Math.min(camera.fov, MAX_FOV);
+  camera.updateProjectionMatrix();
+}
+
 /** A point, without asking the caller to build a `Vector3` for it. */
 export interface EyeOffset {
   readonly x: number;
@@ -409,13 +435,7 @@ export class RideCamera {
   }
 
   resize(width: number, height: number): void {
-    this.camera.aspect = width / Math.max(1, height);
-    this.camera.fov =
-      this.camera.aspect < 1
-        ? this.baseFov / Math.max(PORTRAIT_ASPECT_FLOOR, this.camera.aspect)
-        : this.baseFov;
-    this.camera.fov = Math.min(this.camera.fov, MAX_FOV);
-    this.camera.updateProjectionMatrix();
+    fitCameraToViewport(this.camera, this.baseFov, width, height);
   }
 
   dispose(): void {

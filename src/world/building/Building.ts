@@ -1,10 +1,11 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { CylinderGeometry, Group, Mesh, Vector3 } from 'three';
+import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
+import { planSlideShots, SlideShotDirector } from '../slide/cameras';
 import { RideCamera } from '../../core/RideCamera';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
@@ -294,14 +295,60 @@ export class Building implements GameSystem {
    */
   readonly playerStaysVisible = true;
 
+  /**
+   * **The trackside cameras, and the cut between them and the chase.**
+   *
+   * Jim, 6 August 2026: *"let's change the slide camera to alternate between a
+   * fixed camera aimed at the character and a chase camera behind them, then I
+   * don't mind the body being hidden because it will still be shown for the
+   * static camera"*. `slide/cameras.ts` owns the whole of that decision — the
+   * rhythm, where an eye may stand, and why it is a hard cut.
+   *
+   * Built here in the constructor rather than in {@link attachPlayer}, unlike
+   * {@link rideView}: a camera bolted to the ground needs the *route*, which is
+   * solved, and nothing at all from the rider.
+   */
+  readonly slideShots: SlideShotDirector;
+
   /** Told when the ginormous slide is boarded and left, so `Game` can swap camera. */
   onRideChange: ((riding: boolean) => void) | null = null;
+
+  /**
+   * Told **mid-ride** when the shot changes, so `Game` can swap camera again.
+   *
+   * Separate from {@link onRideChange} because the two are different edits:
+   * boarding and alighting are behind an iris wipe (a change of place), and this
+   * is a **hard cut** between two views of the same moment, which is what an
+   * on-ride video does and what a wipe here would ruin. See `slide/cameras.ts`
+   * for why a blend is worse than either.
+   */
+  onRideCameraCut: ((camera: PerspectiveCamera) => void) | null = null;
+
+  /**
+   * The camera the slide should be watched through **right now**.
+   *
+   * `Game` asks this on boarding rather than reaching for `rideView.camera`,
+   * so the opening shot is decided in exactly one place — `slide/cameras.ts`'s
+   * shot plan — instead of being a fact about the plan that `Game` also has to
+   * know. Change which shot the ride opens on and nothing here moves.
+   */
+  get rideCameraNow(): PerspectiveCamera | null {
+    const shot = this.slideShots.liveShot;
+    if (!shot) return this.rideView?.camera ?? null;
+    return shot.kind === 'trackside' ? this.slideShots.camera : (this.rideView?.camera ?? null);
+  }
+
+  /** The last camera handed out, so a cut is fired on the frame the shot changes. */
+  private liveRideCamera: PerspectiveCamera | null = null;
 
   /** Follows the chute: position and heading. */
   private readonly rideMount = new Group();
 
   /** Scratch for {@link ridePointToWorld}, so the ride allocates nothing per frame. */
   private readonly riderPoint = new Vector3();
+
+  /** Scratch for the rider's head, which is what the trackside camera aims at. */
+  private readonly riderHead = new Vector3();
 
   /**
    * A landing that has been set up but not yet hit the balls.
@@ -484,6 +531,20 @@ export class Building implements GameSystem {
     this.ginormousSlide = buildGinormousSlide();
     this.parkRoot.add(this.ginormousSlide.group);
 
+    // The trackside cameras, stood beside the chute that was just built — so
+    // they are placed against the **solved route**, on whatever seed this is,
+    // and never against coordinates somebody wrote down once.
+    //
+    // **Deliberately not added to any group.** Its eye positions are world
+    // coordinates straight off the chute, and an unparented camera's local
+    // transform *is* its world transform — so there is no parent offset that has
+    // to be zero for the arithmetic to work, and nothing to fall out of step if
+    // one ever is not. three.js supports this directly: `WebGLRenderer.render`
+    // updates a camera with no parent itself.
+    this.slideShots = new SlideShotDirector(
+      planSlideShots(this.ginormousSlide, { x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z }),
+    );
+
     // Something to stand it on. ~95 m of chute with nothing under it reads as
     // floating, and this park's things are meant to look built — see
     // `slide/supports.ts` for why the legs are sparse rather than regular.
@@ -611,6 +672,20 @@ export class Building implements GameSystem {
       sensorLook: false,
     });
     this.rideView.mountOn(this.eyeMount, CHASE_EYE);
+  }
+
+  /**
+   * Fit **both** of the slide's cameras to the viewport.
+   *
+   * One call rather than two reachable fields, so a ride that grows a third
+   * camera does not need `Game` edited to keep it from going fish-eyed on a
+   * phone. The trackside camera is the reason this exists: it is a plain
+   * `PerspectiveCamera`, so it does not carry `RideCamera.resize` with it, and
+   * the portrait widening they share lives in `fitCameraToViewport`.
+   */
+  resizeRideCameras(width: number, height: number): void {
+    this.rideView?.resize(width, height);
+    this.slideShots.resize(width, height);
   }
 
   /**
@@ -884,6 +959,13 @@ export class Building implements GameSystem {
       // that a ride is running.
       player.ridePosture = 'reclined';
       this.rideView?.board();
+      // Back to before the cut, so this ride opens on its plan's first shot
+      // rather than inheriting whichever one the last ride ended on.
+      this.slideShots.reset();
+      this.liveRideCamera = null;
+      // **After the reset**, because `Game` answers this by asking
+      // {@link rideCameraNow}, and a stale live shot would hand it the camera
+      // the previous descent finished on.
       this.onRideChange?.(true);
     });
   }
@@ -950,7 +1032,12 @@ export class Building implements GameSystem {
       // `rotation.order` is `YXZ` — set in the constructor, for the same reason
       // `GROWN_UP_RECLINE` needs it: yaw first, then pitch in the yawed frame.
       this.rideMount.rotation.x = slopeOf(this.tangent);
+      // **The chase camera keeps running while a trackside shot is live.** It is
+      // the ride's own view and it has damping and idle sway with state in them;
+      // freezing it for two seconds and cutting back would hand over a view that
+      // had stopped following the chute.
       this.rideView?.update(dt, this.elapsed);
+      this.cutTheSlideShot(t, player);
     }
 
     if (ride.giant && this.grownUpComing) {
@@ -964,6 +1051,37 @@ export class Building implements GameSystem {
       this.grownUp.root.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
       this.grownUp.root.rotation.x = GROWN_UP_RECLINE;
     }
+  }
+
+  /**
+   * Point the trackside camera at her, and **cut** if the beat has changed.
+   *
+   * The aim is taken from her model's own two ends — her feet and her head — so
+   * nothing here restates how big she is. That matters more than it looks: her
+   * origin is at her feet and she is *lying down*, so aiming at the origin would
+   * frame her ankles with the rest of her trailing out of the top of the shot,
+   * and any constant written here to fix that would be a second definition of a
+   * child's length, kept in step with `CharacterModel` by hand. Character scale
+   * is a thing this project changes.
+   *
+   * `updateMatrixWorld` first, because {@link Player.setRidePose} writes the
+   * group's position and rotation and leaves the world matrices to the renderer.
+   * Reading her head without this aims the camera at where she was last frame —
+   * 0.11 m at {@link GIANT_SLIDE_SPEED}, invisible in the game, but in a
+   * headless check nothing renders at all and the aim would be at wherever she
+   * stood before boarding. The same idiom as {@link rideSeatWorldPosition}:
+   * measure the scene graph, having first made sure it is current.
+   */
+  private cutTheSlideShot(t: number, player: Player): void {
+    player.group.updateMatrixWorld(true);
+    player.model.head.getWorldPosition(this.riderHead);
+    const shot = this.slideShots.update(t, player.position, this.riderHead);
+
+    const camera =
+      shot.kind === 'trackside' ? this.slideShots.camera : (this.rideView?.camera ?? null);
+    if (!camera || camera === this.liveRideCamera) return;
+    this.liveRideCamera = camera;
+    this.onRideCameraCut?.(camera);
   }
 
   /**
@@ -1111,6 +1229,8 @@ export class Building implements GameSystem {
       this.grownUp.root.rotation.x = 0;
       this.placeGrownUp();
       this.spaceCooldown = SPACE_COOLDOWN;
+      this.slideShots.reset();
+      this.liveRideCamera = null;
       this.onRideChange?.(false);
     } else {
       player.setRidePose(
