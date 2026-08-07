@@ -18,14 +18,14 @@ import {
   CART_SEAT_HEIGHT,
 } from './cart';
 import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
+import { planCruiserPylons } from './pylons';
+import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/track';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
 import { terrainHeight } from '../terrain';
-import { distanceToPath } from '../paths';
-import { PARK_LAYOUT } from '../parkLayout';
 import type { CollisionWorld } from '../Collision';
 import { resolveDismount } from '../dismount';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -60,7 +60,17 @@ import type { ParkTrain } from '../train';
  * is built from, rather than a second guess at them that could drift.
  */
 export const RAIL_GAUGE = 1.1;
-export const TIE_STEP = 1.4;
+/**
+ * Metres between sleepers.
+ *
+ * Jim, 5 August 2026: "the sky ride and race should have cross-bars like
+ * railway sleepers between the tracks at about 1m intervals". It was 1.4.
+ *
+ * Costed before changing it: a 217 m loop at 1 m is 217 ties against 155, so
+ * +62 boxes and +744 triangles on a scene that already draws 2.37 M. It is one
+ * `InstancedMesh` either way, so the draw call count does not move at all.
+ */
+export const TIE_STEP = 1;
 
 const CHAIN_SPEED = 3.4;
 const MIN_SPEED = 4.2;
@@ -375,7 +385,6 @@ export class Coaster implements GameSystem {
       up: new Vector3(),
     };
 
-    const pylonSpots: { x: number; z: number; height: number }[] = [];
     for (let i = 0; i < segments; i += 1) {
       const d = i * step;
       railFrameAt(this.route, d, frame);
@@ -383,48 +392,39 @@ export class Coaster implements GameSystem {
       rotation.setFromRotationMatrix(basis);
       matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
       ties.setMatrixAt(i, matrix);
-
-      // A pylon roughly every 6 m, where the ground is genuinely clear —
-      // clear of *collision*, clear of the walking network, and clear of the
-      // corridors between plots. `isClearCircle` knows nothing about either:
-      // a 0.32 m post inflates past a lane's half-width in the nav lattice
-      // (one on a spur stranded the ball pit's own doormat), and one in the
-      // 5 m gap between two plots pinched it shut for strolling NPCs. The
-      // track shrugs off a missing pylon; the walk network cannot shrug off
-      // a misplaced one.
-      if (i % 4 === 2) {
-        const ground = terrainHeight(mid.x, mid.z);
-        const height = mid.y - ground;
-        const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
-          (entry) =>
-            Math.hypot(mid.x - entry.x, mid.z - entry.z) < entry.boundingRadius + 2.4,
-        );
-        if (
-          height > 1.4 &&
-          collision.isClearCircle(mid.x, mid.z, 1.0) &&
-          distanceToPath(mid.x, mid.z) > 2.8 &&
-          !pinchesCorridor
-        ) {
-          pylonSpots.push({ x: mid.x, z: mid.z, height });
-          collision.addCircle(mid.x, mid.z, 0.32);
-        }
-      }
     }
     ties.instanceMatrix.needsUpdate = true;
 
+    // Where the pylons stand is now `pylons.ts`'s job — a pure planner, the way
+    // `slide/supports.ts` splits `planSlideLegs` out of building the meshes, so
+    // `test/procgen/invariants.ts` can measure the choice. It also fixes the
+    // reason this ride had **four** supports on 217 m of track: see that file's
+    // header.
+    const pylonSpots = planCruiserPylons(this.route, (x, z, radius) =>
+      collision.isClearCircle(x, z, radius),
+    );
     const pylons = new InstancedMesh(
-      new CylinderGeometry(0.22, 0.3, 1, 8),
+      // Straight and vertical, and the **same thickness as the Rail Race's base
+      // post** — Jim, 5 August 2026: "the skyride also needs supports, same
+      // thickness as the rail ride but straight up vertical". Imported rather
+      // than copied, so "same as the rail ride" stays true when that changes.
+      new CylinderGeometry(POST_TOP_RADIUS, POST_FOOT_RADIUS, 1, 8),
       pylonMaterial,
       Math.max(1, pylonSpots.length),
     );
+    // Named so `test/procgen/invariants.ts` can find the real instance buffer.
+    // It had no name at all, which is why nothing had ever measured it.
+    pylons.name = 'skyCruiser:pylons';
     pylons.count = pylonSpots.length;
     const stretch = new Vector3();
     pylonSpots.forEach((spot, index) => {
-      const ground = terrainHeight(spot.x, spot.z);
-      position.set(spot.x, ground + spot.height / 2 - 0.15, spot.z);
+      position.set(spot.x, spot.ground + spot.height / 2 - 0.15, spot.z);
       stretch.set(1, spot.height, 1);
       matrix.compose(position, rotation.identity(), stretch);
       pylons.setMatrixAt(index, matrix);
+      // Registered here rather than inside the planner, so a pure function stays
+      // pure and the collision world gains a post exactly once.
+      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS);
     });
     pylons.instanceMatrix.needsUpdate = true;
     // The pylons cast too: they are what plants the track on the ground, and
