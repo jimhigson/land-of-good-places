@@ -13,9 +13,19 @@ Stage A only: bus rolls to the gate, door opens, player + other children hop
 off, gameplay starts at the park edge. **Stage B (the animated journey down a
 lane) is specified but NOT in scope** — see "Stage B seam" below.
 
-Jim, via the Overseer: **not skippable.** No skip button, no hold-to-skip, no
-"seen it before" shortcut. Appearance is editable in-game, so a child never
-restarts to change her hair — the arrival really is once per new character.
+**On skipping — the ruling changed mid-task, and the later one is Stage B's.**
+
+1. First: *not skippable.* Appearance is editable in-game, so a child never
+   restarts to change her hair — the arrival really is once per new character.
+2. Then, once the loading-screen idea landed: *"make it skippable only once the
+   park has generated."*
+
+**Stage A implements neither, and that is correct.** The skip is defined
+entirely in terms of generation progress, and in Stage A there is no generation
+running and nothing to skip *to* — the park is already built before the bus
+moves. The skip belongs with Stage B's generate-during-the-ride work, together
+with its two-way guard (not offered while incomplete, offered once done).
+**Do not add a skip to Stage A on the strength of ruling 2.**
 
 ## THE DECISION THAT MATTERS — where the arrival is constructed
 
