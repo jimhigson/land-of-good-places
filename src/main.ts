@@ -4,8 +4,9 @@ import { registerSW } from 'virtual:pwa-register';
 import { Game, type GameOptions } from './Game';
 import { Engine } from './core/Engine';
 import { Loop } from './core/Loop';
-import { BusJourney, JOURNEY_SECONDS } from './world/entrance/BusJourney';
+import { BusJourney } from './world/entrance/BusJourney';
 import { arrivalIsDue } from './world/entrance/ArrivalSequence';
+import { JourneyDirector } from './world/entrance/journeyDirector';
 import { JourneySkip } from './ui/JourneySkip';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
@@ -343,6 +344,7 @@ function rideInThenPlay(
     hairStyle: player.hairStyle,
   });
 
+  const director = new JourneyDirector();
   const skip = new JourneySkip();
   // Same spirit as `window.game` below: something to poke from a console, and
   // the only practical way to drive a capture. Headless WebGL runs the park at
@@ -352,10 +354,9 @@ function rideInThenPlay(
   if (import.meta.env.DEV) {
     (window as unknown as { journey: { ride: BusJourney; skipOffered: () => boolean } }).journey = {
       ride: journey,
-      skipOffered: () => skip.offered,
+      skipOffered: () => director.skipOffered,
     };
   }
-  let built = false;
   let done = false;
 
   const finish = (): void => {
@@ -368,35 +369,42 @@ function rideInThenPlay(
   };
 
   skip.onPress(() => {
-    // Only ever reachable once `built` is true — `JourneySkip` is not shown
-    // before then — but asserted rather than assumed, because "the button is
+    // Only ever reachable once the skip is offered — `JourneySkip` is not shown
+    // before then — but asked rather than assumed, because "the button is
     // hidden" and "the button does nothing" are two different guarantees and
     // only one of them survives a stray tap on a touchscreen.
-    if (!built) return;
+    if (!director.skipOffered) return;
     finish();
   });
 
   const loop = new Loop((tick) => {
-    journey.update(tick.dt);
+    director.advance(tick.dt);
+    // **The bus idles rather than lying.** Once the ride has run its course
+    // with no park behind it, the road stops moving and the bus waits at the
+    // kerb; `JourneyDirector.overrunning` is the one place that is decided.
+    journey.update(director.overrunning ? 0 : tick.dt);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
     journey.render(renderer, engine.width, engine.height);
 
-    // The park, on the frame after the first one drawn. `Game`'s constructor is
-    // synchronous, so this is a single hitch early in a twenty-second ride
-    // rather than a wait in front of a blank screen.
-    if (!built && tick.frame >= 2) {
-      built = true;
+    // The park, on the frame after the first one has been drawn. `Game`'s
+    // constructor is synchronous, so this is one hitch early in a twenty-second
+    // ride rather than a wait in front of a blank screen.
+    if (director.shouldBuildPark()) {
+      director.noteParkBuildStarted();
       // The park's HUD belongs to the park. `Game`'s constructor mounts the
       // whole of it, and without this the pills, the buttons and the backpack
       // would appear over a bus in a lane a mile from anywhere the controls
       // mean anything. Put back at hand-over, below.
       uiRoot.style.visibility = 'hidden';
       handOverGame = new Game(engine, uiRoot, options);
+      // **The completion signal, and there is only one.** A park object in
+      // hand — not a timer that hopes to match how long one takes to build.
+      director.noteParkReady();
       skip.show();
     }
 
-    if (journey.elapsed >= JOURNEY_SECONDS && built) finish();
+    if (director.readyToHandOver) finish();
   });
   // The splash goes the moment the ride is on screen, not when the park is.
   requestAnimationFrame(() => {

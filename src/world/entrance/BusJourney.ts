@@ -119,11 +119,26 @@ const LANE_AHEAD = 120;
  */
 export function laneHeight(z: number): number {
   return (
-    Math.sin(z * 0.0755) * 3.1 +
-    Math.sin(z * 0.0412 + 1.7) * 4.4 +
-    Math.sin(z * 0.0169 + 0.4) * 3.2
+    Math.sin(z * 0.0755) * 1.25 +
+    Math.sin(z * 0.0412 + 1.7) * 2.0 +
+    Math.sin(z * 0.0169 + 0.4) * 2.8
   );
 }
+
+/**
+ * The steepest the lane ever gets, as a gradient — `sum of amplitude x
+ * frequency`, which is the worst case of the derivative of the sum above.
+ *
+ * Exported because it is the number that decides whether this reads as a
+ * country lane or a rollercoaster, and it is not obvious from the amplitudes:
+ * shortening a wavelength makes a hill steeper without making it taller. The
+ * first tuning kept sensible-looking amplitudes (3.1 / 4.4 / 3.2) and shortened
+ * the wavelengths to make the hills visible, which took the worst gradient to
+ * **27 degrees** — the captured frames show a bus diving nose-first down what
+ * is plainly a ski slope. A real road tops out around 6.
+ */
+export const LANE_MAX_GRADIENT =
+  1.25 * 0.0755 + 2.0 * 0.0412 + 2.8 * 0.0169;
 
 /** Cross-slope, so the verges fall away and the lane sits in the land. */
 function groundHeight(x: number, z: number): number {
