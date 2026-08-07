@@ -290,7 +290,7 @@ function poseKidAt(
 ): ReturnType<typeof createKid> {
   const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
   const kid = createKid();
-  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, wave, elapsed);
+  applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, wave, elapsed);
   if (armOverride) {
     kid.limbs.rightArm.rotation.x = armOverride.x;
     kid.limbs.rightArm.rotation.z = armOverride.z;
@@ -899,7 +899,7 @@ function gazeOf(kid: ReturnType<typeof createKid>): Vector3 {
 /** A kid mid-wave, facing the camera, with the rock frozen at `elapsed`. */
 function wavingKid(elapsed: number, headPitchOverride: number | null = null) {
   const kid = createKid();
-  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, 1, elapsed);
+  applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, 1, elapsed);
   if (headPitchOverride !== null) kid.head.rotation.x = headPitchOverride;
   kid.root.rotation.y = CAMERA_FACING;
   return kid;
@@ -924,7 +924,7 @@ for (const [bodyPitch, headPitch] of [
   [-0.2, -0.9],
 ] as const) {
   const kid = createKid();
-  applyRidePose({ body: kid.body, head: kid.head, ...kid.limbs }, 0, 0);
+  applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, 0, 0);
   kid.body.rotation.x = bodyPitch;
   kid.head.rotation.x = headPitch;
   kid.root.rotation.y = CAMERA_FACING;

@@ -215,6 +215,8 @@ export const CLIMB_WAVE_HEAD_PITCH =
 
 /** The limbs {@link applyRidePose} moves. `CharacterModel` satisfies this. */
 export interface RidePoseTarget {
+  /** Turned as a whole to lie her down; see {@link applyRidePose}'s recline. */
+  readonly root: { rotation: { x: number } };
   readonly body: { rotation: { x: number; z: number } };
   readonly head: { rotation: { x: number } };
   readonly leftArm: { rotation: { x: number; z: number } };
@@ -225,13 +227,22 @@ export interface RidePoseTarget {
 
 /**
  * The pose worn on any ride — "holding on, delighted" — with the tree-climb
- * wave blended over it.
+ * wave blended over it, or **lying on her back** if that is what the ride asked
+ * for.
  *
  * Extracted from `Player.update`'s riding branch so that
  * `scripts/check-climb-wave.mts` can pose a kid **exactly** as the game does.
  * It used to be inline, and a check that re-implements a pose is a check that
  * can pass a pose the game never renders — which is the precise way the first
  * version of this wave shipped invisible.
+ *
+ * **Both postures live here, in one function, for that same reason.** The
+ * reclined pose arrived on the ginormous slide branch as a second private
+ * method on `Player`, which would have left `check:climb-wave` posing a kid
+ * through this function and `check:slide-rider` posing one through a different
+ * one — two definitions of "how a rider is posed", and the seated one already
+ * has a note above it about exactly that failure. A ride names its posture and
+ * this decides what that means.
  *
  * **Called from the end of {@link Player.animate}, not after it.** Extracting it
  * left the *call* in `update`, one line after `animate` returned, and that made
@@ -241,7 +252,22 @@ export interface RidePoseTarget {
  * drawn. The pose that runs last wins; this one must not be it. See the call
  * site for the full account.
  */
-export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed: number): void {
+export function applyRidePose(
+  model: RidePoseTarget,
+  climbWave: number,
+  elapsed: number,
+  posture: RidePosture = 'seated',
+): void {
+  // `body.rotation.z` is zeroed on **both** paths, so read the note below once:
+  // it flushes the roll `Player.animate` writes from the gait.
+  if (posture === 'reclined') {
+    applyReclinedRidePose(model);
+    return;
+  }
+  // Upright again, in case the last ride laid her down. The recline turns
+  // `root`, which nothing else in the seated pose touches, so without this she
+  // would board the ferris wheel still flat on her back.
+  model.root.rotation.x = 0;
   model.leftArm.rotation.x = -2.5;
   model.rightArm.rotation.x = -2.5;
   model.leftArm.rotation.z = 0.5;
@@ -274,6 +300,63 @@ export function applyRidePose(model: RidePoseTarget, climbWave: number, elapsed:
     // *assigns* `head.rotation.x` afresh every single frame before this runs.
     model.head.rotation.x += CLIMB_WAVE_HEAD_PITCH * climbWave;
   }
+}
+
+/**
+ * **On her back, feet first — the way a child actually goes down a slide.**
+ *
+ * Jim, having ridden the chase camera: *"the caracter just kind of stands up —
+ * I think they should lie on their back instead"*. She had been bolt upright
+ * the whole way down since the ride existed; first person hid it, and the chase
+ * camera is what finally showed it.
+ *
+ * A **pose, not a deformation**. The kid is fourteen flat rigid parts and there
+ * is no skinning anywhere in this pipeline — no `SkinnedMesh`, no `Bone`, and
+ * all three Blender exporters pass `export_skins=False` — so lying her down is a
+ * matter of turning groups that already exist, and needs no Blender work at all.
+ *
+ * The recline goes on `root` rather than on `body`, because there is **no knee
+ * in the rig** and the hips hang off `body`: bending at the waist would fold her
+ * in half and leave her legs standing up. Turning the whole model about its own
+ * origin — which is at her feet — swings her back and down while her feet stay
+ * put on the chute, which is exactly what lying on a slide looks like. It is the
+ * same thing `GROWN_UP_RECLINE` does to the grown-up riding in front of her.
+ *
+ * The sign was **measured on the real rig**, not reasoned about, because the
+ * codebase reads both ways: the flower pick and the run lean both take
+ * *negative* `rotation.x` as forward, while the grown-up's recline is negative
+ * too. Building a kid and asking where her head ended up settles it — at `-1.35`
+ * her head sits 1.33 m behind her feet and 0.30 m off the floor.
+ *
+ * **No climb wave here.** You cannot wave from up a tree while lying in a chute;
+ * the two states cannot co-occur, so blending one over the other would be
+ * writing a case that no game state can reach and no check can exercise.
+ */
+function applyReclinedRidePose(model: RidePoseTarget): void {
+  model.root.rotation.x = RIDE_RECLINE;
+  // Arms up. She is on her back going down a slide; this is the whole point of
+  // the shot. Less thrown back than the seated pose, which at -2.5 would put
+  // them straight out behind her head once the torso is down.
+  model.leftArm.rotation.x = -1.95;
+  model.rightArm.rotation.x = -1.9;
+  model.leftArm.rotation.z = 0.55;
+  model.rightArm.rotation.z = -0.48;
+  // A little curl, so she is not a plank: chest lifted off the trough.
+  model.body.rotation.x = -0.12;
+  // Zeroed for the same reason the seated pose zeroes it — `Player.animate`
+  // runs immediately before this and writes the gait's roll into it, so a rider
+  // who boarded mid-stride would otherwise keep a frozen sliver of that lean for
+  // the whole descent. This line came from merging #215, whose extraction of the
+  // seated pose is what made the omission visible.
+  model.body.rotation.z = 0;
+  // Nearly straight, and not quite matching — ART_DIRECTION.md's "nothing is
+  // plumb". A seated -0.7 here would stick her knees in the air.
+  model.leftLeg.rotation.x = -0.16;
+  model.rightLeg.rotation.x = -0.1;
+  // Chin towards her chest, which from flat on her back means looking **down the
+  // slide at her own feet** — the direction she is travelling. Without it she
+  // rides the whole way staring at the sky.
+  model.head.rotation.x = -0.45;
 }
 
 /**
@@ -389,6 +472,24 @@ export const PARK_FLY_CEILING = 12;
  *
  * `world/building/Building.ts` is what writes it — see `Player.flyCeiling`.
  */
+/** How a rider holds herself: sitting up in a seat, or lying back on a slide. */
+export type RidePosture = 'seated' | 'reclined';
+
+/**
+ * How far back a reclining rider lies, in radians about her own left-right axis.
+ *
+ * Negative is backwards — **measured on the built rig rather than reasoned
+ * about**, because this codebase reads both ways (the flower pick and the run
+ * lean both treat negative `rotation.x` as *forward*). Building a kid and asking
+ * where her head ends up settles it: at -1.35 the head sits 1.33 m behind the
+ * feet and 0.30 m above them.
+ *
+ * Not the grown-up's flat `-PI/2`. That puts the head at floor level, which for
+ * a child on a slide means riding the whole way looking at the sky with her face
+ * in the trough. This leaves her propped just enough to see where she is going.
+ */
+const RIDE_RECLINE = -1.35;
+
 export const INDOOR_FLY_CEILING = 1.2;
 
 /** Metres of soft approach to the ceiling, so it eases rather than clunks. */
@@ -569,6 +670,21 @@ export class Player implements GameSystem {
    * collision pass), which is well inside `JUMP_CLEARANCE_GRACE`.
    */
   private hopClearance = 0;
+
+  /**
+   * How she holds herself while a ride owns her.
+   *
+   * Set by the ride, reset to `'seated'` on every `beginRide`/`endRide` so it
+   * can never leak from one ride into the next. Only the ginormous slide asks
+   * for `'reclined'` — see {@link applyRidePose}, which owns what each posture
+   * means.
+   *
+   * A flag on the rider rather than the ride reaching in and turning her parts:
+   * `update` rewrites this pose every frame while riding, so anything set from
+   * outside would be overwritten within one frame and look like it had been
+   * ignored.
+   */
+  ridePosture: RidePosture = 'seated';
   /** Edge-detects "just cleared a wall" so the poof effect fires once, not every frame. */
   private wasClearingWall = false;
   /**
@@ -878,6 +994,9 @@ export class Player implements GameSystem {
   /** Hands the character to a ride: input, collision and gravity stop applying. */
   beginRide(): void {
     this.ridingFlag = true;
+    // Every ride is sat in until it says otherwise, so a ride that has never
+    // heard of postures cannot inherit one from the ride before it.
+    this.ridePosture = 'seated';
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
     this.airborne = false;
@@ -929,6 +1048,10 @@ export class Player implements GameSystem {
   /** Gives the character back, optionally still moving. */
   endRide(velocityX = 0, velocityY = 0, velocityZ = 0): void {
     this.ridingFlag = false;
+    // Stand her back up before handing her over, or she walks away lying down.
+    this.ridePosture = 'seated';
+    this.model.root.rotation.x = 0;
+    this.model.head.rotation.x = 0;
     this.climbWave = 0;
     this.velocity.set(velocityX, 0, velocityZ);
     this.verticalVelocity = velocityY;
@@ -1528,7 +1651,7 @@ export class Player implements GameSystem {
     // `check:rail-race` drives a real `Player` through this exact order and
     // compares what she ends up drawing against what the pose asked for, so a
     // writer added below here fails the build rather than the family.
-    if (this.ridingFlag) applyRidePose(model, this.climbWave, elapsed);
+    if (this.ridingFlag) applyRidePose(model, this.climbWave, elapsed, this.ridePosture);
 
     // The Rail Race's own pose, last of all — everything above has just
     // finished writing `body.rotation.x`, `body.scale` and `head.rotation.x`,

@@ -324,6 +324,183 @@ export interface ParkFacts {
   /** Its paved edges, each with the ribbon that was drawn for it. */
   readonly pathEdges: readonly PathEdgeFact[];
   /**
+   * The ginormous slide's chute, in **world space**, sampled along what was
+   * actually built — not the plan it was built from.
+   *
+   * Read through the scene graph rather than by adding the building's origin
+   * back on by hand, so a slide parented to the wrong thing shows up here as a
+   * slide in the wrong place, which is the class of bug #118 turned out to be.
+   */
+  readonly slideChute: readonly (readonly [number, number, number])[];
+  /**
+   * The castle facade's own footprint rectangle.
+   *
+   * Emphatically **not** the `building` plot's position: the facade is nudged
+   * off its plot anchor by `BUILDING_CENTRE_NUDGE`, about 3.5 m, so the two
+   * centres are metres apart. Measuring the tower at its plot's anchor puts the
+   * walls in the wrong place and duly accuses an innocent slide of flying
+   * through them — which is exactly what the first draft of this did.
+   */
+  /**
+   * Where the ginormous slide's legs stand, and how tall each one is.
+   *
+   * A support plan that quietly places *nothing* is the failure mode worth
+   * testing for here: it looks exactly like a healthy one from every angle
+   * except the park's.
+   */
+  readonly slideLegs: readonly {
+    readonly x: number;
+    readonly z: number;
+    readonly ground: number;
+    readonly top: number;
+  }[];
+  readonly castleFootprint: {
+    readonly x: number;
+    readonly z: number;
+    readonly halfX: number;
+    readonly halfZ: number;
+  };
+  /**
+   * The **top of the castle's stonework**, in world Y: the highest point of the
+   * curtain wall and the battlements standing on it.
+   *
+   * Measured off the built meshes' world bounding boxes, not off
+   * `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`. Only the Y component of an
+   * AABB is used, and for "how tall is the tallest stone" that component is
+   * exact — the box's x/z extent is a gross over-approximation of a hollow ring
+   * of wall and is deliberately not read.
+   *
+   * This replaced a `slideDoor` fact that reported where a hole in the south
+   * wall was *planned*. No such hole is ever cut (see
+   * `theGinormousSlideLeavesOverTheBattlements`), so the fact described nothing
+   * in the park and the invariant reading it could not fail.
+   */
+  readonly castleMasonryTopY: number;
+  /**
+   * The castle's four corner towers, as the solids of revolution they were
+   * actually built as, in **world space**.
+   *
+   * These are the piece of the castle a footprint rectangle does not contain:
+   * they stand at `(±outerX, ±outerZ)` — outside the rectangle — and bulge a
+   * further ~2.45 m past it. `slide/plan.ts` re-imposes the castle as that
+   * rectangle, so the towers were the one solid nothing checked, which is
+   * exactly where Jim found the slide clipping through.
+   *
+   * Read per instance via `getMatrixAt`: `Box3.setFromObject` on an
+   * `InstancedMesh` returns the union of every instance — a single park-sized
+   * box that any test passes trivially.
+   *
+   * Bodies and roofs only. The masts and finials above them start at 15.24 m,
+   * higher than the chute's own 14.84 m start, and are a 0.09 m pole and a
+   * 0.26 m ball — decoration rather than mass.
+   */
+  readonly castleTowers: readonly {
+    readonly name: string;
+    readonly x: number;
+    readonly z: number;
+    readonly bottomY: number;
+    readonly topY: number;
+    readonly radiusBottom: number;
+    readonly radiusTop: number;
+  }[];
+  /** The space the built chute occupies around its centre line. */
+  readonly chuteEnvelope: {
+    readonly halfWidth: number;
+    readonly above: number;
+    readonly below: number;
+  };
+  /**
+   * The chute sampled **without** the scene graph, beside the same points with
+   * it — `pointAt` as the ride itself reads it, and where that lands in the
+   * world.
+   *
+   * Everything that travels along the slide — the rider's seat, the grown-up,
+   * and the teleport that puts a child on it — positions itself from
+   * `pointAt` and is parented alongside the chute so that the two are the same
+   * coordinates. If the chute is ever reparented without converting its points,
+   * every one of those lands a castle's width away from the trough while the
+   * chute itself still looks perfect. These two lists are what makes that
+   * visible: at park level they are identical.
+   */
+  readonly slideRiderFrame: {
+    readonly local: readonly (readonly [number, number, number])[];
+    readonly world: readonly (readonly [number, number, number])[];
+  };
+  /**
+   * **Where the ginormous slide actually puts a child down, and the pit that is
+   * supposed to catch her.**
+   *
+   * Produced by calling the game's own `slideLandingSpot` on the **built**
+   * chute's mouth and world tangent, then sampling the **built** walk surface
+   * under the answer — so this is the runtime result reproduced, not a
+   * paraphrase of it. The same tactic `railRaceExitFitsTheParty` uses when it
+   * calls the real `resolveDismount` rather than modelling one.
+   *
+   * `groundY` comes from `WalkSurfaces.sample`, the sampler her own feet use,
+   * and not from `terrainHeight`: the pit is scooped out of the hills and
+   * `terrainHeight` is deliberately a pure function of the hills. A landing
+   * measured against the wrong one of those two is out by `BALL_PIT_DEPTH`,
+   * which is most of the headroom this is checking for.
+   */
+  /**
+   * How much of the built chute is see-through, and how much solid, as vertex
+   * counts off the two meshes actually in the scene (#228).
+   *
+   * A count rather than a flag: the failure worth catching is not "the feature
+   * was removed", which a reviewer would see, but "the feature is silently
+   * absent on one seed" — a chute shorter than a band period would build an
+   * empty see-through mesh and look, from every angle except that seed's, like
+   * a slide someone had simply decided to make opaque.
+   */
+  readonly slideChuteBands: { readonly solid: number; readonly clear: number };
+  /**
+   * **Where the ginormous slide's trackside cameras ended up on this seed, and
+   * whether each can actually see the chute it was placed against.**
+   *
+   * `slide/cameras.ts` places them from the solved route, so on a procgen ride
+   * they land somewhere different on every seed — which is exactly why this is
+   * a fact rather than a constant somebody wrote down.
+   *
+   * **Not a copy of `check:slide-rider`, and the difference is the point.** That
+   * check rides the canonical seed with a real `Player` and asks whether the
+   * *rider* is visible and legible; this measures the *placement* on five seeds
+   * against a point on the chute, with no rider in the park at all. One
+   * observes a ride, the other measures where the cameras stand — different
+   * questions, so two measurements rather than one asked to cover both.
+   */
+  readonly slideCameras: readonly {
+    readonly beat: number;
+    readonly eye: readonly [number, number, number];
+    /** The point on the chute the eye was placed against. */
+    readonly covers: readonly [number, number, number];
+    /** The ground under the eye, so a camera buried in a hill is visible here. */
+    readonly groundY: number;
+    /** Sight-line samples across this beat, and how many were blocked. */
+    readonly blocked: number;
+    readonly samples: number;
+    /** How near and far the chute gets from this eye across its own beat. */
+    readonly nearest: number;
+    readonly farthest: number;
+  }[];
+  /**
+   * The shot plan as spans of the ride, in order — so "every part of the ride is
+   * covered by some camera" is measurable as arithmetic on the built plan rather
+   * than trusted to the loop that produced it.
+   */
+  readonly slideShotSpans: readonly {
+    readonly kind: string;
+    readonly from: number;
+    readonly to: number;
+  }[];
+  readonly slideLanding: {
+    readonly x: number;
+    readonly z: number;
+    readonly groundY: number;
+    readonly pitX: number;
+    readonly pitZ: number;
+    readonly pitRadius: number;
+  };
+  /**
    * Pairs of plot ids the manifest deliberately puts close together, so the
    * overlap invariant can exempt exactly those and nothing else. See
    * `ManifestEntry.near` — "relations exist precisely to put things
@@ -389,7 +566,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     );
   }
 
-  const { world, buildMs, sample } = buildHeadlessPark();
+  const { world, scene, buildMs, sample } = buildHeadlessPark();
 
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
@@ -449,6 +626,229 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     z: entry.z,
     boundingRadius: entry.boundingRadius,
   }));
+
+  // The ginormous slide's chute, sampled off the built curve and pushed out
+  // through the scene graph into world space.
+  //
+  // `updateMatrixWorld(true)` is called deliberately and is not a formality: a
+  // headless park is never rendered, so nothing has otherwise composed a single
+  // world matrix and every one of them is still the identity. Sampling without
+  // this yields the chute's *local* coordinates while looking exactly like
+  // world ones, and every clearance test built on them would quietly pass.
+  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } = await import(
+    '../../src/world/building/layout.ts'
+  );
+  const { BUILDING_HALF_X, BUILDING_HALF_Z } = await import('../../src/core/constants.ts');
+  const castleFootprint = {
+    x: BUILDING_CENTRE_X,
+    z: BUILDING_CENTRE_Z,
+    halfX: BUILDING_HALF_X,
+    halfZ: BUILDING_HALF_Z,
+  };
+
+  // Every world matrix must be composed before a single one is read: a headless
+  // park is never rendered, so they are all still the identity otherwise, and a
+  // clearance check built on them passes for free.
+  scene.updateMatrixWorld(true);
+
+  // The top of the castle's stonework, read off the built meshes.
+  const { Box3 } = await import('three');
+  let castleMasonryTopY = -Infinity;
+  {
+    const box = new Box3();
+    scene.traverse((object) => {
+      if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
+      box.setFromObject(object);
+      if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
+    });
+  }
+
+  const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
+  const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
+  const castleTowers: {
+    name: string; x: number; z: number;
+    bottomY: number; topY: number; radiusBottom: number; radiusTop: number;
+  }[] = [];
+  scene.traverse((object) => {
+    if (!(object instanceof InstancedMeshClass)) return;
+    if (!/^tower-(bodies|roofs)$/.test(object.name)) return;
+    const params = object.geometry.parameters as {
+      radiusTop?: number; radiusBottom?: number; radius?: number; height: number;
+    };
+    // A cone reports `radius` (its base) and tapers to a point; a cylinder
+    // reports both ends. Read whichever the built geometry carries.
+    const radiusBottom = params.radiusBottom ?? params.radius ?? 0;
+    const radiusTop = params.radiusTop ?? 0;
+    const local = new Matrix4();
+    const composed = new Matrix4();
+    const centre = new Vector3();
+    for (let i = 0; i < object.count; i += 1) {
+      object.getMatrixAt(i, local);
+      composed.multiplyMatrices(object.matrixWorld, local);
+      centre.setFromMatrixPosition(composed);
+      castleTowers.push({
+        name: `${object.name}[${i}]`,
+        x: centre.x,
+        z: centre.z,
+        bottomY: centre.y - params.height / 2,
+        topY: centre.y + params.height / 2,
+        radiusBottom,
+        radiusTop,
+      });
+    }
+  });
+
+  const slide = world.building.ginormousSlide;
+  slide.group.updateMatrixWorld(true);
+  if (slide.group.parent) slide.group.parent.updateMatrixWorld(true);
+  const slideChute: (readonly [number, number, number])[] = [];
+  {
+    const probe = new Vector3();
+    const steps = Math.max(96, Math.round(slide.length / 0.4));
+    for (let i = 0; i <= steps; i += 1) {
+      slide.pointAt(i / steps, probe);
+      slide.group.localToWorld(probe);
+      slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The trackside cameras, and whether each can see the stretch of chute it was
+  // stood beside. Measured with rays against the **built** chute and the built
+  // castle, so a route that comes out a different shape on another seed cannot
+  // quietly leave a camera looking at the back of a tower.
+  const { Raycaster: RaycasterClass } = await import('three');
+  // Dynamic, like everything else seed-dependent here: a static import would
+  // pull in a second copy of the park at the default seed.
+  const { terrainHeight } = await import('../../src/world/terrain.ts');
+  const slideCameras: {
+    beat: number;
+    eye: readonly [number, number, number];
+    covers: readonly [number, number, number];
+    groundY: number;
+    blocked: number;
+    samples: number;
+    nearest: number;
+    farthest: number;
+  }[] = [];
+  const slideShotSpans = world.building.slideShots.shots.map((shot) => ({
+    kind: shot.kind,
+    from: shot.from,
+    to: shot.to,
+  }));
+  {
+    // Where a reclining rider's middle sits above the chute floor. Two numbers
+    // from `Building` (`RIDER_LIFT` + `RECLINED_LIFT`); a sight line to the
+    // trough floor itself would be a harder test than the game ever asks for.
+    const RIDER_ABOVE_FLOOR = 0.24;
+    const SAMPLES = 40;
+    const caster = new RaycasterClass();
+    const occluders = [slide.group, world.building.gardenRoot];
+    const eye = new Vector3();
+    const point = new Vector3();
+    const tangent = new Vector3();
+    const rider = new Vector3();
+    const toRider = new Vector3();
+    const up = new Vector3();
+    const right = new Vector3();
+
+    for (const [beat, shot] of world.building.slideShots.shots.entries()) {
+      if (shot.kind !== 'trackside' || !shot.eye || !shot.covers) continue;
+      eye.copy(shot.eye);
+      let blocked = 0;
+      let nearest = Infinity;
+      let farthest = 0;
+      for (let i = 0; i <= SAMPLES; i += 1) {
+        const t = shot.from + ((shot.to - shot.from) * i) / SAMPLES;
+        slide.pointAt(t, point);
+        slide.tangentAt(t, tangent);
+        // The chute's own frame, so "above the trough floor" leans with the
+        // chute the way the trough itself does.
+        right.crossVectors(tangent, new Vector3(0, 1, 0));
+        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+        right.normalize();
+        up.crossVectors(right, tangent).normalize();
+        rider.copy(point).addScaledVector(up, RIDER_ABOVE_FLOOR);
+
+        toRider.copy(rider).sub(eye);
+        const reach = toRider.length();
+        nearest = Math.min(nearest, reach);
+        farthest = Math.max(farthest, reach);
+        if (reach < 1e-4) continue;
+        caster.set(eye, toRider.normalize());
+        // Stop short of the rider, so grazing the chute floor she lies on is
+        // not counted as something standing in the way.
+        caster.far = reach - 0.12;
+        if (caster.intersectObjects(occluders, true).length > 0) blocked += 1;
+      }
+      slideCameras.push({
+        beat,
+        eye: [eye.x, eye.y, eye.z],
+        covers: [shot.covers.x, shot.covers.y, shot.covers.z],
+        groundY: terrainHeight(eye.x, eye.z),
+        blocked,
+        samples: SAMPLES + 1,
+        nearest,
+        farthest,
+      });
+    }
+  }
+
+  const slideRiderLocal: (readonly [number, number, number])[] = [];
+  const slideRiderWorld: (readonly [number, number, number])[] = [];
+  {
+    const probe = new Vector3();
+    for (let i = 0; i <= 12; i += 1) {
+      slide.pointAt(i / 12, probe);
+      slideRiderLocal.push([probe.x, probe.y, probe.z]);
+      slide.group.localToWorld(probe);
+      slideRiderWorld.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The two halves of the chute, off the built meshes rather than off the
+  // constants that decided them.
+  const slideChuteBands = (() => {
+    const count = (name: string): number => {
+      const mesh = slide.group.getObjectByName(name);
+      const attribute =
+        mesh && (mesh as { geometry?: { getAttribute(n: string): { count: number } | undefined } })
+          .geometry;
+      return attribute?.getAttribute('position')?.count ?? 0;
+    };
+    return { solid: count('ginormous-slide-chute'), clear: count('ginormous-slide-chute-clear') };
+  })();
+
+  // The landing, reproduced exactly as `Building.finishRide` computes it: the
+  // built chute's mouth, the built chute's world tangent there, through the
+  // game's own `slideLandingSpot`. Dynamic imports for the usual reason — a
+  // static one of anything reaching `parkManifest` fixes the seed before the
+  // harness has set `LGP_SEED`.
+  const { slideLandingSpot } = await import('../../src/world/slide/landing.ts');
+  // Dynamic because *this* one is seeded — `layout.ts` resolves a placement out
+  // of the manifest at module load. `slide/landing.ts` above is not, on purpose.
+  const { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } = await import(
+    '../../src/world/building/layout.ts'
+  );
+  const slideLanding = (() => {
+    const mouth = slide.pointAt(1, new Vector3());
+    slide.group.localToWorld(mouth);
+    const heading = slide.tangentAt(1, new Vector3());
+    slide.group.updateMatrixWorld(true);
+    heading.transformDirection(slide.group.matrixWorld);
+    const spot = slideLandingSpot(mouth.x, mouth.z, heading.x, heading.z, {
+      x: BALL_PIT_X,
+      z: BALL_PIT_Z,
+      radius: BALL_PIT_RADIUS,
+    });
+    return {
+      x: spot.x,
+      z: spot.z,
+      groundY: world.building.surfaces.sample(spot.x, spot.z, mouth.y),
+      pitX: BALL_PIT_X,
+      pitZ: BALL_PIT_Z,
+      pitRadius: BALL_PIT_RADIUS,
+    };
+  })();
 
   const nearPairs = new Set<string>();
   for (const entry of PARK_MANIFEST) {
@@ -594,7 +994,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // pulls in `railRace/plan.ts` at module scope, which reads the stall's own
   // placement out of `parkManifest.ts`, so a static import at the top of this
   // file would race this seed's rider against the default seed's ring.
-  const { InstancedMesh: Instanced, Matrix4, Mesh, Vector3: Vec3 } = await import('three');
+  // `Matrix4` is aliased because the castle-tower block above this one already
+  // holds that name in this same function scope. Aliased here rather than there
+  // so the rename stays inside the rail-race block that introduced the clash.
+  const { InstancedMesh: Instanced, Matrix4: Mat4, Mesh, Vector3: Vec3 } = await import('three');
   const { createRider, scheduleForLevel, stepRider } = await import(
     '../../src/world/railRace/simulate.ts'
   );
@@ -656,7 +1059,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
   if (barsMesh instanceof Instanced) {
-    const matrix = new Matrix4();
+    const matrix = new Mat4();
     const at = new Vec3();
     const seen = new Set<string>();
     for (let i = 0; i < barsMesh.count; i += 1) {
@@ -881,6 +1284,17 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     exits,
     pathNodes,
     pathEdges,
+    slideChute,
+    slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
+    slideChuteBands,
+    slideCameras,
+    slideShotSpans,
+    slideLanding,
+    castleMasonryTopY,
+    castleTowers,
+    chuteEnvelope: CHUTE_ENVELOPE,
+    slideLegs: world.building.slideLegs,
+    castleFootprint,
     reachableFromEntrance,
     routes,
     nearPairs,

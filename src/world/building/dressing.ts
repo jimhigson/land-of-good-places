@@ -12,12 +12,11 @@ import {
 import { INTERIOR_HALF_X, INTERIOR_HALF_Z } from '../../core/constants';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU } from '../../core/mathUtils';
+import { SLIDE_PLAN } from '../slide/plan';
 import { interiorMaterial, softMaterial } from './parts';
 import {
   deckIsSolid,
   regionContains,
-  GIANT_SLIDE_ENTRY_X,
-  GIANT_SLIDE_ENTRY_Z,
   GROWN_UP_X,
   GROWN_UP_Z,
   HELTER_DECK,
@@ -237,7 +236,7 @@ function keepOutsFor(deck: number): KeepOut[] {
     // grown-up who waits to come down it with you.
     blocked.push(
       { x: ROOF_PAVILION_X, z: ROOF_PAVILION_Z, radius: 8 },
-      { x: GIANT_SLIDE_ENTRY_X, z: GIANT_SLIDE_ENTRY_Z, radius: 5 },
+      { x: SLIDE_PLAN.entryX, z: SLIDE_PLAN.entryZ, radius: 5 },
       { x: GROWN_UP_X, z: GROWN_UP_Z, radius: 4 },
     );
   }
