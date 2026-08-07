@@ -574,3 +574,63 @@ and added two nobody had reported:
 Also visible and worth a decision: the **rail-race rainbow track passes
 directly over the bus stop**, cutting across almost every arrival frame, and
 foreground trees block the left half of the bus from t=3 to t=6.
+
+### Guards, and the mutation that proved each one red
+
+| # | Mutation | Went red with |
+|---|---|---|
+| 1 | `NpcSystem` stops committing the 11 passengers to the crowd buffer | *"3 of the 11 bus children have nothing drawn anywhere near them 30 s after the arrival"* |
+| 2 | walk speed back to the old `1.5` | *"the slowest arriving child walked at 1.47 m/s against the park's 2.55"* |
+| 3 | doorway gap to `0.1 s` | *"two children left the bus only 0.08 s apart… so they overlap in it"* |
+| 4 | `SEAT_PITCH` back to the hand-picked `1.0` | *"children in seats 8 and 10 overlap each other by 0.54 m"* |
+| 5 | close the bodywork back up behind the glass | *"12 of 12 cat bus windows have solid bodywork immediately behind the glass"* |
+| 6 | `arrivalOwnsTheSpawn` returns false | *"a fresh game with the cat bus arriving does NOT let the arrival own where she starts"* |
+
+**Two of my own guards were hollow first, and only mutation found them:**
+
+- *"the children are still present"* originally counted `npcs.all.length`, which
+  is an array — and an array is exactly what still had eleven entries in it on
+  the build where Jim watched children vanish. Removing them from the scene
+  graph left it green. A crowd child's rig is a **detached proxy** with no
+  parent, so scene attachment proves nothing either; what reaches the screen is
+  an **instance matrix**. The guard now gathers every instance translation in
+  the built scene and requires one near each child.
+- The camera guard could not fail. The bug lived in `Game`'s constructor, and
+  `Game` builds a real `WebGLRenderer`, so `check:cat-bus` — which drives
+  `World` directly — never runs a line of it. Reinstating the exact bug left it
+  green. The decision is now `src/world/entrance/arrivalSpawn.ts`, one pure
+  function, so there is something a check can hold.
+
+### Watched, end to end, in a browser
+
+Captured at `scratchpad/after-shots/a{0,1,2,4,6,9,12,…}.png`. Confirmed by eye:
+
+- **t=0 opens on the bus**, not the park. Fixed.
+- **You can see the children through the windows.** Clearly — bodies in pink,
+  purple, blue and tan along the glazed band. Fixed, and this is the thing the
+  earlier "glazing" work believed it had done.
+- **t=9 and t=12: the children walk in behind her, strung out, with their name
+  labels** — Ethan, Rumi, Cleo, Noor, Finn, Priya, Elowen. Visibly separated,
+  visibly park NPCs. Fixed.
+
+## Still open — read before reporting anything as finished
+
+1. **The opening framing is tight.** The camera is on the bus, but the bus is
+   18 m long and fills the frame with its cat face cropped off the top-left.
+   Zooming the camera out for the cutscene and restoring at hand-over is the
+   obvious fix; it was **not** attempted because it could not be re-verified in
+   the room left, and shipping an unverified camera change is the exact failure
+   this whole round was about.
+2. **The rail-race rainbow track passes directly over the bus stop** and cuts
+   across every arrival frame with five bright strands. It is the single
+   noisiest thing in the shot and it is not the bus's fault. Needs a ruling:
+   move the track, move the stop, or hide the track during the arrival.
+3. **Foreground trees block the lower-left of the bus** at t=0-6.
+   `ENTRANCE_CLEAR_RADIUS` is 10 m and the bus is now 18 m long, so the keep-out
+   no longer covers the vehicle it was sized for.
+4. **Stage B, the loading screen and the skip are NOT started.** Nothing in
+   this round touches them. The Stage B seam is unchanged and still valid: bus
+   at `ENTRANCE_BUS_ARRIVE_X` on the kerb, door shut, everyone aboard.
+5. **`NPC_COUNT` is still 24 and still unmeasured on a device.** Nothing here
+   measures NPC render cost; `drawCallCost` still has zero consumers. The
+   headless-Chromium route now makes measuring it cheap, and nobody has.
