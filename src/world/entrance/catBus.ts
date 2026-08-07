@@ -609,15 +609,23 @@ export function createCatBus(): CatBusHandle {
   //
   // Half its own thickness *inwards* from the hinge puts it flush inside the
   // wall, which is where "behind the door" always meant.
-  const DOORWAY_THICKNESS = 0.5 * DETAIL;
+  //
+  // And it is **`WALL_THICKNESS` deep, not `0.5 * DETAIL` (1.09 m)**, which is
+  // the second half of the same fix and was caught by `check:cat-bus` rather
+  // than by reading: a slab that thick, moved inboard, reaches a third of the
+  // way across the cabin and stands behind the two door-side windows — that
+  // check probes 0.45 m in from every pane and duly reported *"2 of 12 cat bus
+  // windows have solid bodywork immediately behind the glass"*. Filling the
+  // aperture in the wall is all this ever needed to do, so the wall's own
+  // thickness is what it is.
   const doorway = decal(
     new Mesh(
-      new RoundedBoxGeometry(DOORWAY_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.1 * DETAIL),
+      new RoundedBoxGeometry(WALL_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.05 * DETAIL),
       toonMaterial(new Color(PALETTE.ink).multiplyScalar(0.7).getHex()),
     ),
   );
   doorway.position.set(
-    doorGroup.position.x + DOORWAY_THICKNESS / 2,
+    doorGroup.position.x + WALL_THICKNESS / 2,
     BODY_BOTTOM_Y + DOOR_HEIGHT / 2,
     doorGroup.position.z + DOOR_WIDTH / 2,
   );
