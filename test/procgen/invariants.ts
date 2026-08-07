@@ -66,9 +66,12 @@ import { LANDING_DROP, riderClearanceFromChute } from '../../src/world/slide/lan
 // `LGP_SEED`. The leaf module imports nothing at all.
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
+  BEAM_DROP,
   forkPlan,
   LEGACY_LEG_FOOT_RADIUS,
   RAIL_GAUGE_AT_PARK_SCALE,
+  RAIL_RADIUS_AT_PARK_SCALE,
+  SLEEPER_THICKNESS,
 } from '../../src/world/railRace/trestleGeometry.ts';
 
 /**
@@ -3063,78 +3066,331 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
 };
 
 /**
- * **Every dropper hangs under a rail it is actually holding up.**
+ * The middle of a lane's track, **in three dimensions**, taken from the built
+ * rails.
  *
- * A trestle is a leg on the ground, a cross-beam over it, and the short posts
- * — droppers — from that beam up to the track. The family's report on 1 August
- * 2026 was that the supports "don't look real"; PR #157 found half the reason
- * (the ring flew on four legs, since fixed by `trestleSpots`' nudge search) and
- * a second half that was never landed: there was one dropper per lane, on the
- * lane's **centre line**. That was invisible while `RAIL_GAUGE` was 0.62 m, and
- * `RIDE_SCALE` took it to 1.55 m — a post three quarters of a metre in from
- * either rail, holding up the gap between them.
+ * {@link railCentreLines} and {@link railCentreLinesByLane} both flatten to the
+ * ground — `point.set(x, 0, z)` — and that is not a detail. **Every support
+ * check in this file was a plan-view measurement**, and in plan view a post that
+ * stops four metres under the track is indistinguishable from one welded to it.
+ * That is the whole reason the supports could be confirmed to exist, to be the
+ * right thickness, to fork at the right angle and to be spaced correctly, while
+ * not one of them reached the track — the fault Jim found by riding it on
+ * 7 August after the checks had all gone green.
  *
- * Measured, as this file's first commandment requires, off the built scene on
- * both sides: the droppers from their own instance matrices, and the rails from
- * their own swept vertices ({@link railCentreLines}) rather than from `route.pointAt`
- * and a gauge constant, which is the rule the geometry was built from and would
- * only prove the placer agrees with itself.
+ * So this keeps `y`, and it is the *middle* of the track rather than a rail:
+ * both rails of a lane are meshes named `railRace:rail-{lane}`, and averaging
+ * every vertex sharing a `uv.x` across both of them lands exactly halfway
+ * between them, at rail-centre height. That is "the middle of the track" as a
+ * measurement of the built geometry, not as a restatement of the rule that
+ * placed it — `route.pointAt` is the rule, and this file's first commandment is
+ * to measure what was built.
  *
- * Radius is the whole of the answer because these rings are circles centred on
- * the origin — the same thing that lets the leg check sort by `atan2` — so a
- * post's distance from the centre says exactly which rail, if any, is above it.
+ * Returned as **segments**, for the reason {@link railCentreLines} gives: the
+ * cross-section rings sit up to ~0.83 m apart along the track, so measuring to
+ * the nearest *vertex ring* would report up to 0.42 m of pure resolution noise
+ * on a perfectly-placed branch — larger than the tolerance being asserted.
  */
-const droppersHangUnderRealRails: Invariant = (facts) => {
-  const complaints: string[] = [];
-  const matrix = new Matrix4();
-  const at = new Vector3();
+function trackMiddleByLane(ring: BuiltRing): Map<number, Map<string, Segment3[]>> {
+  const byLane = new Map<number, Map<string, Segment3[]>>();
+  const point = new Vector3();
 
-  for (const ring of builtRings(facts)) {
-    const rails = railCentreLines(ring);
-    const droppers = ring.group.getObjectByName('railRace:trestle-droppers');
-    if (!(droppers instanceof InstancedMesh)) {
-      complaints.push(`the ${ring.label} ring has no trestle droppers in the built scene to measure`);
-      continue;
-    }
-    if (rails.size === 0) {
-      complaints.push(`the ${ring.label} ring has no rails in the built scene to measure droppers against`);
-      continue;
-    }
+  // lane -> uv.x key -> running sum, accumulated across *both* of the lane's
+  // rail meshes so the average is the midpoint between them.
+  const rings = new Map<number, Map<number, { x: number; y: number; z: number; n: number }>>();
 
-    let worst = 0;
-    let worstAt: readonly [number, number] = [0, 0];
-    for (let i = 0; i < droppers.count; i += 1) {
-      droppers.getMatrixAt(i, matrix);
-      at.setFromMatrixPosition(matrix);
-      const nearest = nearestRail(rails, at.x, at.z);
-      if (nearest > worst) {
-        worst = nearest;
-        worstAt = [at.x, at.z];
+  ring.group.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+    const match = /^railRace:rail-(\d+)$/.exec(child.name);
+    if (!match) return;
+    const lane = Number(match[1]);
+    const position = child.geometry.getAttribute('position');
+    const uv = child.geometry.getAttribute('uv');
+    if (!position || !uv) return;
+    child.updateWorldMatrix(true, false);
+
+    let laneRings = rings.get(lane);
+    if (!laneRings) {
+      laneRings = new Map();
+      rings.set(lane, laneRings);
+    }
+    for (let i = 0; i < position.count; i += 1) {
+      point.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(child.matrixWorld);
+      const key = Math.round(uv.getX(i) * 1e6);
+      const entry = laneRings.get(key);
+      if (entry) {
+        entry.x += point.x;
+        entry.y += point.y;
+        entry.z += point.z;
+        entry.n += 1;
+      } else {
+        laneRings.set(key, { x: point.x, y: point.y, z: point.z, n: 1 });
       }
     }
-    if (worst > DROPPER_RAIL_TOLERANCE) {
+  });
+
+  for (const [lane, laneRings] of rings) {
+    const centres = [...laneRings.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, e]) => [e.x / e.n, e.y / e.n, e.z / e.n] as const);
+    const grid = new Map<string, Segment3[]>();
+    byLane.set(lane, grid);
+    for (let i = 0; i < centres.length; i += 1) {
+      const a = centres[i]!;
+      const b = centres[(i + 1) % centres.length]!;
+      const segment: Segment3 = [a[0], a[1], a[2], b[0], b[1], b[2]];
+      for (const end of [a, b]) {
+        const key = `${Math.floor(end[0])},${Math.floor(end[2])}`;
+        const cell = grid.get(key);
+        if (cell) cell.push(segment);
+        else grid.set(key, [segment]);
+      }
+    }
+  }
+  return byLane;
+}
+
+/** `[ax, ay, az, bx, by, bz]` — a straight run of centre line in world space. */
+type Segment3 = [number, number, number, number, number, number];
+
+/** Shortest distance from a point to a segment, in full 3D. */
+function pointToSegment3(p: Vector3, s: Segment3): number {
+  const ax = s[0];
+  const ay = s[1];
+  const az = s[2];
+  const dx = s[3] - ax;
+  const dy = s[4] - ay;
+  const dz = s[5] - az;
+  const lengthSquared = dx * dx + dy * dy + dz * dz;
+  let t = 0;
+  if (lengthSquared > 1e-12) {
+    t = ((p.x - ax) * dx + (p.y - ay) * dy + (p.z - az) * dz) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+  }
+  return Math.hypot(p.x - (ax + t * dx), p.y - (ay + t * dy), p.z - (az + t * dz));
+}
+
+/**
+ * Nearest distance from `p` to any centre-line segment in `grid`, in 3D.
+ *
+ * The grid is keyed on ground position, so the search widens in x/z rings while
+ * the distance it returns is the true 3D one. It therefore cannot stop as soon
+ * as `nearest <= radius` the way the flat {@link nearestRail} does — a segment
+ * one cell away horizontally may still be the nearest in 3D once height is
+ * counted, and a support four metres below the track is exactly that case. It
+ * widens one full ring past the first hit instead.
+ */
+function nearestTrackMiddle(grid: Map<string, Segment3[]>, p: Vector3): number {
+  const cx = Math.floor(p.x);
+  const cz = Math.floor(p.z);
+  let nearest = Infinity;
+  let foundAt = -1;
+  for (let radius = 0; radius <= 40; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dz = -radius; dz <= radius; dz += 1) {
+        if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        for (const segment of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
+          const d = pointToSegment3(p, segment);
+          if (d < nearest) {
+            nearest = d;
+            if (foundAt < 0) foundAt = radius;
+          }
+        }
+      }
+    }
+    if (foundAt >= 0 && radius > foundAt) return nearest;
+  }
+  return nearest;
+}
+
+/**
+ * **Every support actually touches the thing it is holding up.**
+ *
+ * This replaces `droppersHangUnderRealRails`, and the replacement is the point.
+ *
+ * ## The fault this exists for
+ *
+ * Jim, 7 August 2026, having ridden it and approved it and then looked again:
+ *
+ * > *"actually the track supports don't even join to the track"*
+ *
+ * Measured on the canonical seed before anything was changed, a trestle's four
+ * upper branch tops finished **0.58 m to 4.30 m** below the middle of the lane
+ * above them, and the Sky Cruiser's pylon tops sat 0.131–0.152 m under a track
+ * whose ties reach only 0.16 m down — about a centimetre of contact at best and
+ * none at the far end of that range.
+ *
+ * ## Why nothing caught it, which is the part worth keeping
+ *
+ * There were four checks on these supports. They asserted the trestles exist,
+ * their thickness, their fork angles, their spacing, that a dropper stands under
+ * a rail, that the cruiser has enough pylons, and that a sleeper reaches both
+ * rails. **Every single one of them measured in plan view.**
+ * `railCentreLines` builds its geometry with `point.set(x, 0, z)`;
+ * `skyCruiserStandsOnItsOwnSupports` measured `Math.hypot(on.x - top.x, on.z -
+ * top.z)`. Flatten the world onto the ground and a post that stops four metres
+ * short is in precisely the right place. The checks were not weak, they were
+ * *about the wrong quantity*, and they were all about the wrong quantity in the
+ * same way — so agreement between them was worth nothing.
+ *
+ * So this one measures the **height** as well, against
+ * {@link trackMiddleByLane}, and it is deliberately the only support check that
+ * does. Anything asserting a support does its job has to go through here.
+ *
+ * ## The tolerance is the track's own structure, not a number picked to pass
+ *
+ * A support "reaches" if its tip is inside the band of real structure that hangs
+ * under the middle of the track: one rail radius plus half a sleeper's
+ * thickness, which is exactly how far `track.ts` drops a sleeper below the rail
+ * centre so the rail rests *on* it. Land within that and the tip is inside the
+ * sleeper the rails are bolted to. Both terms come from
+ * `railRace/trestleGeometry.ts`, scaled by the ring's own size, so this cannot
+ * drift from the geometry it is judging.
+ */
+const supportsMeetWhatTheyCarry: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const matrix = new Matrix4();
+
+  // --- 1. the Rail Race branches ---------------------------------------------
+  for (const ring of builtRings(facts)) {
+    const middles = trackMiddleByLane(ring);
+    if (middles.size === 0) {
       complaints.push(
-        `a dropper on the ${ring.label} ring at ${fmt(worstAt)} stands ${worst.toFixed(2)} m ` +
-          `from the nearest rail, over the ${DROPPER_RAIL_TOLERANCE} m tolerance — it is a post ` +
-          `holding up thin air`,
+        `the ${ring.label} ring has no rails in the built scene to measure its supports against`,
+      );
+      continue;
+    }
+    // The depth of structure under the middle of the track, on this ring.
+    const reachTolerance =
+      (RAIL_RADIUS_AT_PARK_SCALE + SLEEPER_THICKNESS / 2) * ring.scale;
+
+    const branches = ring.group.getObjectByName('railRace:trestle-branches-upper');
+    if (!(branches instanceof InstancedMesh)) {
+      complaints.push(
+        `the ${ring.label} ring has no upper trestle branches in the built scene to measure`,
+      );
+    } else if (branches.count === 0) {
+      complaints.push(`the ${ring.label} ring built no upper trestle branches at all`);
+    } else {
+      let worst = 0;
+      let worstAt = new Vector3();
+      for (let i = 0; i < branches.count; i += 1) {
+        branches.getMatrixAt(i, matrix);
+        // The top of a unit-height cylinder, which is where the branch ends.
+        const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+        let nearest = Infinity;
+        for (const grid of middles.values()) {
+          nearest = Math.min(nearest, nearestTrackMiddle(grid, top));
+        }
+        if (nearest > worst) {
+          worst = nearest;
+          worstAt = top.clone();
+        }
+      }
+      if (worst > reachTolerance) {
+        complaints.push(
+          `a trestle branch on the ${ring.label} ring ends at ` +
+            `${fmt([worstAt.x, worstAt.z])}, y ${worstAt.y.toFixed(2)} — ` +
+            `${worst.toFixed(2)} m from the middle of the nearest lane, over the ` +
+            `${reachTolerance.toFixed(2)} m the track's own structure reaches down. ` +
+            'It is holding up nothing.',
+        );
+      }
+    }
+
+    // Nothing above the branches. Jim, 7 August: "that vertical section of
+    // supports under the rail ride isn't needed" — the branch is the last piece.
+    // A mesh reappearing here is the old dropper curtain coming back.
+    const droppers = ring.group.getObjectByName('railRace:trestle-droppers');
+    if (droppers) {
+      complaints.push(
+        `the ${ring.label} ring still has a "railRace:trestle-droppers" mesh — the branches are ` +
+          'meant to run all the way to the track with no vertical section on top of them',
       );
     }
 
-    // Two per lane, one under each rail. A ring that quietly went back to one
-    // per lane would place every post correctly under *a* rail and pass the
-    // check above, so the count is its own claim.
-    const legs = ring.group.getObjectByName('railRace:trestle-legs');
-    if (legs instanceof InstancedMesh) {
-      const expected = legs.count * facts.world.railRace.laneCount * 2;
-      if (droppers.count !== expected) {
+    // --- 2. the sleepers are not floating either ------------------------------
+    //
+    // Same fault class, same blind spot: `railRaceSleepersBridgeBothRails`
+    // measures the reach *across* to both rails and does it in plan, so a whole
+    // ring of sleepers hovering a metre under the track would pass it.
+    const sleepers = ring.group.getObjectByName('railRace:sleepers');
+    if (sleepers instanceof InstancedMesh && sleepers.count > 0) {
+      let worstGap = -Infinity;
+      let worstAt = new Vector3();
+      // Every 17th, coprime with the per-lane block so the sample walks all four.
+      for (let i = 0; i < sleepers.count; i += 17) {
+        sleepers.getMatrixAt(i, matrix);
+        const centre = new Vector3().setFromMatrixPosition(matrix);
+        let nearest = Infinity;
+        for (const grid of middles.values()) {
+          nearest = Math.min(nearest, nearestTrackMiddle(grid, centre));
+        }
+        if (nearest > worstGap) {
+          worstGap = nearest;
+          worstAt = centre.clone();
+        }
+      }
+      if (worstGap > reachTolerance) {
         complaints.push(
-          `the ${ring.label} ring has ${droppers.count} droppers for ${legs.count} trestles and ` +
-            `${facts.world.railRace.laneCount} lanes — expected ${expected}, two per lane per ` +
-            `trestle so that each of a lane's two rails is carried`,
+          `a sleeper on the ${ring.label} ring sits ${worstGap.toFixed(2)} m from the middle of ` +
+            `the track at ${fmt([worstAt.x, worstAt.z])}, over the ${reachTolerance.toFixed(2)} m ` +
+            'the track\'s own structure reaches — it is floating, not bridging the rails',
         );
       }
     }
   }
+
+  // --- 3. the Sky Cruiser pylons ---------------------------------------------
+  //
+  // Straight and vertical, which is Jim's own spec for this ride and is not
+  // changed here — only whether the top of one arrives at the track.
+  const coaster = facts.world.coaster;
+  const pylons = coaster.group.getObjectByName('skyCruiser:pylons');
+  if (!(pylons instanceof InstancedMesh) || pylons.count === 0) {
+    complaints.push('the Sky Cruiser has no pylons in the built scene to measure');
+  } else {
+    // The ties hang 0.12 m under the centre line and are 0.08 m thick
+    // (`coaster/Coaster.ts`), so 0.16 m is how far the track's own structure
+    // reaches down — the same rule as the Rail Race, read off that ride.
+    const CRUISER_STRUCTURE_DEPTH = 0.16;
+    let worst = 0;
+    let worstAt = new Vector3();
+    const on = new Vector3();
+    // Walked in 3D rather than asked for the nearest point in plan.
+    //
+    // `route.nearestPoint(x, z)` is a **ground-plane** lookup, and this ride
+    // crosses over itself and dives through the castle — so on the canonical
+    // seed it answered with a stretch of track 0.89 m away in height that the
+    // pylon has nothing to do with, on a pylon whose own track is 0.02 m above
+    // it. Using it here would have been the same plan-view mistake this whole
+    // invariant exists to correct, one level up. Sampling the route finely and
+    // taking the true 3D minimum asks the question actually being asked: is the
+    // top of this post touching any part of the track at all?
+    const SAMPLES = 4000;
+    const step = coaster.route.length / SAMPLES;
+    for (let i = 0; i < pylons.count; i += 1) {
+      pylons.getMatrixAt(i, matrix);
+      const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+      let gap = Infinity;
+      for (let k = 0; k < SAMPLES; k += 1) {
+        coaster.route.pointAt(k * step, on);
+        gap = Math.min(gap, on.distanceTo(top));
+      }
+      if (gap > worst) {
+        worst = gap;
+        worstAt = top.clone();
+      }
+    }
+    if (worst > CRUISER_STRUCTURE_DEPTH) {
+      complaints.push(
+        `a Sky Cruiser pylon tops out at ${fmt([worstAt.x, worstAt.z])}, y ` +
+          `${worstAt.y.toFixed(2)} — ${worst.toFixed(2)} m from the middle of the track, over ` +
+          `the ${CRUISER_STRUCTURE_DEPTH} m its ties reach down. The track is not sitting on it.`,
+      );
+    }
+  }
+
   return complaints;
 };
 
@@ -3395,6 +3651,23 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       );
     }
 
+    // The plane `forkPlan` is solved against, rebuilt from the built route the
+    // same way `track.ts` does — the lowest any lane ever gets, less BEAM_DROP.
+    // Sampled off `route` rather than re-deriving `UNDULATION_REACH`, so it is
+    // the ring that was actually built that answers.
+    let lowestRailY = Infinity;
+    {
+      const probe = new Vector3();
+      const SAMPLES = 720;
+      for (let lane = 0; lane < lanes; lane += 1) {
+        for (let k = 0; k < SAMPLES; k += 1) {
+          route.pointAt(lane, (k / SAMPLES) * route.length, probe);
+          lowestRailY = Math.min(lowestRailY, probe.y);
+        }
+      }
+    }
+    const beamY = lowestRailY - BEAM_DROP;
+
     const byLane = railCentreLinesByLane(ring);
     if (byLane.size !== lanes) {
       complaints.push(
@@ -3437,31 +3710,58 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       }
 
       // Both forks, measured from the struts' own directions.
+      //
+      // **The solved angle is now a ceiling, not a target, and that is Jim's
+      // 7 August ruling rather than a relaxation.** Branches end at the middle
+      // of their own lane, and at one station the four lanes stand up to 4.38 m
+      // apart in height, so four branches off one fork *cannot* share an angle.
+      // `track.ts` measures each fork's drop from the **lowest** lane it
+      // carries, which gives the design its two testable halves:
+      //
+      // - the shallowest branch of each generation makes exactly the solved
+      //   angle — it is the one carrying the lower lane, whose drop is exactly
+      //   what `forkPlan` solved;
+      // - no branch is ever *wider* than that; a branch reaching a higher lane
+      //   is steeper.
+      //
+      // Those two halves are one assertion: the **widest** branch of each
+      // generation must *equal* the solved angle. Equality is what pins Jim's
+      // settled 30.0 deg and 41.6 deg in place — a ceiling alone would be
+      // satisfied by a tree whose branches all went vertical, which would lose
+      // the fork entirely.
+      //
+      // Note "widest" is the branch carrying the **lower** lane. `angleOf`
+      // measures from vertical, so a branch that has to climb further to a
+      // higher lane makes a *smaller* angle, not a larger one.
       const post = strutEnds(legs, trestle);
-      const anyTop = strutEnds(upper, trestle * lanes);
-      const postHeight = anyTop.top.y - post.foot.y;
-      const plan = forkPlan(postHeight, route.laneSpacing);
+      const plan = forkPlan(beamY - post.foot.y, route.laneSpacing);
       const angleOf = (mesh: InstancedMesh, index: number): number => {
         const { foot, top } = strutEnds(mesh, index);
         const span = top.clone().sub(foot);
         return Math.atan2(Math.hypot(span.x, span.z), span.y);
       };
-      for (const [mesh, index] of [
-        [lower, trestle * 2],
-        [lower, trestle * 2 + 1],
-        [upper, trestle * lanes],
-        [upper, trestle * lanes + lanes - 1],
-      ] as const) {
-        const error = Math.abs(angleOf(mesh, index) - plan.angle);
-        if (error > worstAngleError) {
-          worstAngleError = error;
-          worstAngleAt = `${mesh.name} #${index} on the ${ring.label} ring`;
-          reportedAngle = angleOf(mesh, index);
+      const generations = [
+        { name: 'lower', angles: [0, 1].map((k) => angleOf(lower, trestle * 2 + k)) },
+        {
+          name: 'upper',
+          angles: Array.from({ length: lanes }, (_u, k) => angleOf(upper, trestle * lanes + k)),
+        },
+      ];
+      for (const generation of generations) {
+        const widest = Math.max(...generation.angles);
+        const missed = Math.abs(widest - plan.angle);
+        if (missed > worstAngleError) {
+          worstAngleError = missed;
+          worstAngleAt =
+            `the widest ${generation.name} branch of trestle ${trestle} on the ` +
+            `${ring.label} ring`;
+          reportedAngle = widest;
         }
       }
     }
-    // Both generations must fork at the angle `forkPlan` solved for this post,
-    // which is also what makes them equal to each other.
+    // Each generation's widest branch must fork at the angle `forkPlan` solved
+    // for this post — see the note above on why it is the widest and not all of
+    // them.
     const ANGLE_TOLERANCE = (2 * Math.PI) / 180;
     if (worstAngleError > ANGLE_TOLERANCE) {
       complaints.push(
@@ -3808,7 +4108,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
   ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
   ['the Rail Race finish rainbow stands on the ground', finishRainbowStandsOnTheGround],
-  ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
+  ['every support meets the track it carries', supportsMeetWhatTheyCarry],
   [
     'every Rail Race trestle forks twice and carries all four tracks',
     railRaceTrestlesCarryEveryTrack,

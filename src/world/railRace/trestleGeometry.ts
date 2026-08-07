@@ -83,9 +83,9 @@ export const BRANCH_TAPER = 0.62;
  * design is {@link forkPlan}'s drop being measured **down from the lowest lane a
  * fork carries**, not from a plane and not from the pair's mean:
  *
- * - the shallower of the two branches gets exactly the solved drop, so it makes
- *   exactly the solved angle;
- * - the other one is *steeper*, never shallower, because its lane is higher.
+ * - the branch carrying the **lower** of the two lanes gets exactly the solved
+ *   drop, so it opens at exactly the solved angle;
+ * - the other one has further to climb, so it stands *more upright*, never wider.
  *
  * The solved angle therefore becomes the **widest the fork ever opens**, rather
  * than an angle it can miss in either direction. A branch reaching a higher lane
@@ -112,6 +112,26 @@ export const BRANCH_TAPER = 0.62;
  * measures and reports whatever it actually got rather than trusting this.
  */
 export const BRANCH_ANGLE = Math.PI / 6;
+
+/**
+ * How far under the lowest a rail ever gets the notional deck sits that
+ * {@link forkPlan} is **solved against**.
+ *
+ * Moved here from `track.ts` on 7 August. Nothing is built on this plane any
+ * more — the branches end at their own lane's middle — but `forkPlan` still
+ * needs one post height to solve an angle from, and taking the lowest the track
+ * ever gets is what keeps that angle exactly what Jim settled: 30.0 deg on the
+ * walk-past ring, 41.6 deg on the race ring.
+ *
+ * It lives in this leaf module rather than in `track.ts` because
+ * `test/procgen/invariants.ts` has to solve the *same* plan in order to say
+ * whether the built tree agrees with it. With the number private to `track.ts`
+ * the test had been re-deriving the post height from the built branch tops,
+ * which stopped meaning the same thing the moment those tops rose to meet the
+ * lanes — a second definition of one thing, in the file this repo keeps
+ * relearning that lesson in.
+ */
+export const BEAM_DROP = 0.2;
 
 /**
  * The least of the post's height that must stay unforked, as a fraction.
@@ -187,3 +207,15 @@ export const RAIL_GAUGE_AT_PARK_SCALE = 0.62;
 
 /** How far a duck bar reaches either side of its lane's centre, at park scale. */
 export const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
+
+/**
+ * The radius of one rail's swept tube, **at park scale**.
+ *
+ * Lifted out of `track.ts` on 7 August, where it was a bare `0.075` inside the
+ * sleeper arithmetic. `test/procgen/invariants.ts` needs it to say how deep the
+ * band of real structure under the middle of the track is — which is the
+ * tolerance for "a support reaches what it carries" — and copying the number
+ * into the test would be exactly the two-definitions-of-one-thing this repo
+ * keeps being bitten by. A ring's own rails are this times its `route.scale`.
+ */
+export const RAIL_RADIUS_AT_PARK_SCALE = 0.075;

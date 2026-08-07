@@ -38,11 +38,13 @@ import {
 } from './hazards';
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
+  BEAM_DROP,
   BRANCH_TAPER,
   forkPlan,
   POST_FOOT_RADIUS,
   POST_TOP_RADIUS,
   RAIL_GAUGE_AT_PARK_SCALE,
+  RAIL_RADIUS_AT_PARK_SCALE,
   SLEEPER_ALONG_TRACK,
   SLEEPER_OVERHANG,
   SLEEPER_SPACING,
@@ -116,23 +118,6 @@ const ARCH_SHOULDER_ROOM = 2.4;
 export const DUCKBAR_PARTS = ['post', 'bar'] as const;
 export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
-/**
- * The notional deck the fork plan is **solved against** — how far under the
- * lowest a rail ever gets it sits.
- *
- * Since 7 August this is no longer a plane anything is built on. The branches
- * end at their own lane's middle (`trestleGeometry.ts`'s note on that ruling),
- * so nothing is level any more. What survives is this height's *other* job:
- * `forkPlan` needs one post height to solve the fork angle from, and taking the
- * lowest the track ever gets is what keeps that angle **exactly** what it was
- * before the change — the walk-past ring's 30.0° and the race ring's 41.6°,
- * both of which Jim has settled and neither of which this work may move.
- *
- * It is deliberately the conservative choice: every real branch now rises to a
- * lane at or above this, so every trunk is at least as long as the plan assumed
- * and `MIN_TRUNK_FRACTION` is honoured with room to spare.
- */
-const BEAM_DROP = 0.2;
 
 export interface RailRaceTrack {
   readonly group: Group;
@@ -346,7 +331,7 @@ export function buildRailRaceTrack(
   // Sunk so the rail rests **on** the sleeper rather than through it: the rail's
   // own radius plus half the sleeper's thickness, both taken from the numbers
   // the two are actually built from, so neither can drift from the other.
-  const railRadius = 0.075 * ringSizeVsRace * RIDE_SCALE;
+  const railRadius = RAIL_RADIUS_AT_PARK_SCALE * ringSizeVsRace * RIDE_SCALE;
   const sleeperDrop = railRadius + (SLEEPER_THICKNESS * ringSizeVsRace) / 2;
 
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
