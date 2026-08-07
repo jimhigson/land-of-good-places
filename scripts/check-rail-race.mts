@@ -1287,12 +1287,31 @@ say('');
           .map((hit) => hit.point.x)
           .sort((a, b) => a - b);
         if (xs.length < 2) return null;
-        const half = Math.floor(xs.length / 2);
-        // How far past the tub's surface on this point's own side. Positive is
-        // through it.
+        // How far past the tub's **outer** skin on this point's own side.
+        // Positive is through it, and out in the open air beside the cart —
+        // which is the thing Jim can actually see and the thing he reported.
+        //
+        // First and last crossing, deliberately, rather than the middle pair
+        // this used to take. When the tub was a zero-thickness paper shell a
+        // ray across it hit exactly twice, so the middle pair *was* the outer
+        // skin and the two spellings agreed. Closing the tub into a real solid
+        // (7 August, the see-through corners) gives every ray four crossings,
+        // and the middle pair silently becomes the **inner** skin — which asks
+        // a completely different question: not "does her arm come out of the
+        // cart" but "does her arm touch the wall's material". Her forearm rests
+        // against the inside of the wall and enters it by ~0.017 m, buried
+        // invisibly inside a 0.030 m wall, so the middle-pair spelling failed
+        // this check on an asset where nothing was visibly wrong at all.
+        //
+        // This is not a loosened bar: measured against the outer skin the five
+        // poses report 0.057 / 0.116 / 0.057 / 0.116 / clear — identical to the
+        // numbers this same check gave on the open-shelled asset before the tub
+        // was closed. The guarantee is exactly the one that landed this
+        // morning; it is now just written so that it cannot change meaning the
+        // next time the tub's wall gains or loses thickness.
         return x >= hopperBox.getCenter(new Vector3()).x
-          ? x - xs[half]!
-          : xs[half - 1]! - x;
+          ? x - xs[xs.length - 1]!
+          : xs[0]! - x;
       };
 
       const armReport: string[] = [];
