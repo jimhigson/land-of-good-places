@@ -138,8 +138,18 @@ export const CHILD_TAPS_PER_SECOND = 3;
  * It compresses the range between a child and an adult rather than scaling
  * everybody up — the one shape of change that makes a race easier for the
  * person who is losing it without making it duller for the person who is not.
+ *
+ * ### 7 August 2026: 3.0 -> 2.1, halfway back
+ *
+ * Jim rode 3.0 and said *"the game is now too easy, so for halfway between old
+ * and new settings"*. This is the arithmetic midpoint of the value he called
+ * too hard (1.2) and the one he calls too easy (3.0), and the same halving was
+ * applied to the other three levers moved in the same pass — see
+ * {@link RIVAL_SKILL}, `MAX_SPEED` and `SWING_BEHIND`. Everything above about
+ * *why this is the right lever* is unchanged and still holds; only the size of
+ * the correction moved, because the size is the only thing he judged.
  */
-export const PLAYER_BOOST_ADVANTAGE = 3.0;
+export const PLAYER_BOOST_ADVANTAGE = 2.1;
 
 /**
  * How fast {@link Rider.boost} bleeds away when nothing is topping it up,
@@ -209,9 +219,17 @@ const SPARK_DRAG = 6;
  */
 const HILL_PULL = 9.8;
 
-/** You never stop and you never quite fly. */
+/**
+ * You never stop and you never quite fly.
+ *
+ * `MAX_SPEED` went 33 -> 40 in the "too hard" fix and **36.5 on 7 August 2026**,
+ * the midpoint, when Jim asked for halfway back. It is the weakest of the four
+ * levers by some distance — it is a ceiling, and only the strongest tappers ever
+ * reach it — so it is moved with the others for consistency rather than for
+ * effect. See {@link PLAYER_BOOST_ADVANTAGE} for the pass this belongs to.
+ */
 const MIN_SPEED = 3.4;
-const MAX_SPEED = 40;
+const MAX_SPEED = 36.5;
 
 /**
  * How long a bonk's wobble lasts — and, crucially, **thrust is dead for the
@@ -519,8 +537,23 @@ function zoneIsHere(rider: Rider, hazards: HazardSchedule, lead: number, trail: 
  * 0.40/0.48/0.56, which puts them at 4.0–4.6 — still a real pace, still well
  * inside the range where they bonk visibly and often, and now slower than she
  * is rather than faster.
+ *
+ * ### 7 August 2026: halfway back, to 0.51/0.60/0.69
+ *
+ * Jim, having ridden 0.40/0.48/0.56: *"the game is now too easy, so for halfway
+ * between old and new settings"*. The midpoint of 0.62/0.72/0.82 (what he called
+ * too hard) and 0.40/0.48/0.56 (too easy), lane by lane.
+ *
+ * Worth knowing, because it looks like a coincidence and is not quite one: this
+ * lands within 0.01 of the 0.52/0.60/0.68 an earlier pass on 6 August tried and
+ * rejected the same day. That pass was rejected for a *different* reason than
+ * the one being answered here — at the time the player's own boost advantage was
+ * still 1.5, so the rivals out-tapped her and no rival number could fix it. With
+ * the advantage now at 2.1 she settles ahead of them at a child's tap rate, so
+ * the same rival skill sits on the other side of the cliff described above. The
+ * measured field summary in `check:rail-race` is the evidence, not this note.
  */
-export const RIVAL_SKILL: readonly number[] = [0.40, 0.48, 0.56];
+export const RIVAL_SKILL: readonly number[] = [0.51, 0.60, 0.69];
 
 /**
  * How hard the rivals rubber-band, and **why a low `skill` alone was never
@@ -614,10 +647,21 @@ export const RIVAL_SKILL: readonly number[] = [0.40, 0.48, 0.56];
  * preference, it is the difference between three rivals still on the track as
  * she crosses the line and three rivals a full lap back, and the win
  * celebration needs them there.
+ *
+ * ### 7 August 2026: 0.40 -> 0.70, halfway back to the 1.0 it started at
+ *
+ * The midpoint of the four-lever halving Jim asked for; see
+ * {@link PLAYER_BOOST_ADVANTAGE}. The visibility argument above is what decides
+ * whether this is safe, and it survives comfortably: the ceiling engages at
+ * `SWING_BEHIND / CATCHUP_BEHIND` metres, which moves 67 m -> **117 m**, further
+ * *outside* the ~22 m picture the camera draws rather than into it. The ramp — the
+ * part a child can see — is still untouched at 0.006. And a stronger band can
+ * only compress the worst-case margin, so the "nobody gets lapped" bound this
+ * constant exists to hold gets more headroom, not less.
  */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
-const SWING_BEHIND = 0.4;
+const SWING_BEHIND = 0.7;
 const SWING_AHEAD = 0.32;
 
 /**

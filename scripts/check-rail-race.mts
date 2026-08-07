@@ -99,6 +99,7 @@ import {
   stepRider,
   scheduleForLevel,
   type Strategy,
+  type RaceLevel,
 } from '../src/world/railRace/simulate.ts';
 import {
   AHEAD,
@@ -1786,27 +1787,53 @@ const FIELD_SEEDS = [
   28657, 46368, 75025,
 ];
 
-function fieldSummary(strategy: Strategy): {
+/**
+ * **`marginMetres` is only meaningful on a win.** `simulateField` samples it as
+ * `RACE_DISTANCE - max(rival.travelled)` at the moment the *player* crosses, so
+ * when she loses a rival is already on the line and it reads ≈ −0.2 m whatever
+ * happened. A mean taken over seeds she lost is therefore diluted by zeros
+ * rather than by near-misses, and it is not a "how close was it" number.
+ *
+ * That is why the bounds below take their mean from a level she wins *every*
+ * seed of, and use win **count** for the level she does not.
+ */
+function fieldSummary(
+  strategy: Strategy,
+  level: RaceLevel = 3,
+): {
   wins: number;
   margins: number[];
   rivalBonks: number[];
+  meanMargin: number;
 } {
   const margins: number[] = [];
   const rivalBonks: number[] = [];
   let wins = 0;
   for (const seed of FIELD_SEEDS) {
-    const outcome = simulateField(strategy, 3, seed);
+    const outcome = simulateField(strategy, level, seed);
     if (outcome.playerPlace === 1) wins += 1;
     margins.push(outcome.marginMetres);
     rivalBonks.push(outcome.rivalBonks);
   }
-  return { wins, margins, rivalBonks };
+  return {
+    wins,
+    margins,
+    rivalBonks,
+    meanMargin: margins.reduce((a, b) => a + b, 0) / margins.length,
+  };
 }
 
 const perfectField = fieldSummary('mashPerfect');
 const sloppyField = fieldSummary('mashSloppy');
 const childField = fieldSummary('childPace');
 const badlyField = fieldSummary('playsBadly');
+// The same child, on the two levels she will actually pick. Level 3 is the only
+// one with duck bars at all (`BARS_FROM_LEVEL`), so it is hard mode by
+// construction and the other two are where "can a six-year-old win this?" is
+// really answered. Cheap: 24 more races each, and the whole field sweep is
+// about a second.
+const childEasyField = fieldSummary('childPace', 1);
+const childMidField = fieldSummary('childPace', 2);
 const perfectMeanMargin = perfectField.margins.reduce((a, b) => a + b, 0) / perfectField.margins.length;
 const perfectMeanBonks = perfectField.rivalBonks.reduce((a, b) => a + b, 0) / perfectField.rivalBonks.length;
 say(
@@ -1820,11 +1847,16 @@ say(
     `margin ${Math.min(...sloppyField.margins).toFixed(1)}–${Math.max(...sloppyField.margins).toFixed(1)} m ` +
     `(mean ${sloppyMeanMargin.toFixed(1)} m)`,
 );
-const childMeanMargin = childField.margins.reduce((a, b) => a + b, 0) / childField.margins.length;
+const childMeanMargin = childField.meanMargin;
 say(
   `child pace vs field       ${childField.wins}/${FIELD_SEEDS.length} wins   ` +
     `margin ${Math.min(...childField.margins).toFixed(1)}–${Math.max(...childField.margins).toFixed(1)} m ` +
     `(mean ${childMeanMargin.toFixed(1)} m)   ${CHILD_TAPS_PER_SECOND} taps/s, half the bars`,
+);
+say(
+  `child pace, level 1       ${childEasyField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `(mean ${childEasyField.meanMargin.toFixed(1)} m)        level 2   ` +
+    `${childMidField.wins}/${FIELD_SEEDS.length} wins   (mean ${childMidField.meanMargin.toFixed(1)} m)`,
 );
 say(`plays badly vs field      ${badlyField.wins}/${FIELD_SEEDS.length} wins   (must not be all of them)`);
 
@@ -1867,6 +1899,36 @@ require(
     `nearest rival, which laps them on a ${route.length.toFixed(1)} m lap — the rivals have become ` +
     "scenery. Raise RIVAL_SKILL or the rubber band's SWING_BEHIND.",
 );
+// **The number Jim actually complained about on 7 August, which nothing bounded.**
+//
+// Round 8 flagged it and deliberately did not act: *"a competent player now wins
+// by a mean of 461 m on a 1200 m race … that may be too easy … it is his call"*.
+// He rode it and it was: *"the game is now too easy"*. So the competent player
+// gets the same bound the child already had, for the same reason and off the
+// same geometry — **half a lap** — because the thing it protects is the same
+// thing: the camera holds on the winner for the whole celebration, and a field
+// half a ring back is round the far side and not in the picture at all.
+//
+// `mashPerfect` is the closest profile to Jim himself: 6 taps/s, every hazard
+// played. It is the only one of the four that measures *his* race rather than
+// Eleri's, which is why his complaint landed on a build where every child-facing
+// guard was green.
+//
+// **This bound is tight on purpose — 298.0 m against 300.1 m, 0.7% of room — and
+// it must not be slid.** That is safe to ship because the sweep is fully
+// deterministic (24 fixed seeds, fixed dt, seeded RNG), so it cannot flake: the
+// only thing that moves this number is somebody changing the balance, which is
+// exactly when it should speak up. If it fires, the tuning has drifted back
+// towards the procession Jim rejected and the tuning is what to fix.
+const PROCESSION_MARGIN = route.length / 2;
+require(
+  perfectMeanMargin < PROCESSION_MARGIN,
+  `playing well wins by a mean of ${perfectMeanMargin.toFixed(1)} m on a ` +
+    `${(route.length * RACE_LAPS).toFixed(1)} m race — over the ${PROCESSION_MARGIN.toFixed(1)} m ` +
+    'half-lap bound, so the field is round the far side of the ring and out of shot for the whole ' +
+    'finish. This is the "the game is now too easy" complaint, unfixed. Raise RIVAL_SKILL or the ' +
+    "rubber band's SWING_BEHIND in simulate.ts.",
+);
 // **The assertion Jim's complaint needed, and the build did not have.**
 //
 // Every strategy above taps 6 times a second. A child does not, and that single
@@ -1874,17 +1936,59 @@ require(
 // she won *1 of 24 seeds* while `mashPerfect` and `mashSloppy` both read as
 // comfortable and every check in the build was green. Assert the player the
 // game is actually for, not a metronome. See `PLAYER_BOOST_ADVANTAGE`.
+// **Re-derived on 7 August 2026, when Jim asked for the difficulty to go
+// halfway back — not slid down to fit the new numbers. Read this before
+// touching either bound.**
+//
+// It used to be one assertion at level 3: `childField.wins >= 22` with a mean
+// margin over 40 m. That encoded "a child wins essentially every race on the
+// hardest level", which was the right reading of the *previous* instruction
+// (*"it's just too hard ffs"*) and is arithmetically incompatible with the
+// current one. Halfway between a child who never wins and a child who always
+// wins is a child who wins about half, so a 22/24 bound makes "halfway"
+// impossible by construction — and a bound only satisfiable by ignoring the
+// instruction is not a bound, it is a veto.
+//
+// So the question was split by level, which is where it always belonged.
+// **Level 3 is the only level with duck bars at all** (`BARS_FROM_LEVEL`), so it
+// is hard mode by construction; levels 1 and 2 are where a six-year-old
+// actually plays. Measured across the three settings the family has ridden:
+//
+//   config                       child L1    child L2    child L3   competent L3
+//   old      (Jim: "too hard")     0/24        0/24        0/24        100.1 m
+//   halfway  (shipping)           24/24       24/24       11/24        298.0 m
+//   current  (Jim: "too easy")    24/24       24/24       24/24        461.2 m
+//
+// The old settings — the actual complaint — lose 0/24 at *every* level, so a
+// level-1 bound catches them just as loudly as the level-3 one did, and catches
+// them at 24/24 rather than 22/24. **This is a tighter assertion than the one it
+// replaces**, in the place that decides whether the game is playable at all.
 require(
-  childField.wins >= FIELD_SEEDS.length - 2,
-  `a child tapping ${CHILD_TAPS_PER_SECOND}/s and ducking half the bars wins only ${childField.wins}/` +
-    `${FIELD_SEEDS.length} seeds — this is the "too hard" complaint, unfixed. Raise ` +
-    'PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
+  childEasyField.wins === FIELD_SEEDS.length && childMidField.wins === FIELD_SEEDS.length,
+  `a child tapping ${CHILD_TAPS_PER_SECOND}/s wins ${childEasyField.wins}/${FIELD_SEEDS.length} at ` +
+    `level 1 and ${childMidField.wins}/${FIELD_SEEDS.length} at level 2 — she must win every seed on ` +
+    'the levels with no duck bars, or the game is the "too hard" complaint again on the settings a ' +
+    'six-year-old actually picks. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
 );
+// The mean is taken from level 1, and only from level 1, because that is the
+// one sweep she wins on every seed — see `fieldSummary`'s note. A mean over a
+// level she loses half of is diluted by ≈0 rather than by near-misses, so it
+// measures win *rate* while pretending to measure closeness.
 require(
-  childMeanMargin > 40,
-  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins by a mean of only ${childMeanMargin.toFixed(1)} m — ` +
-    'close enough to read as a photo finish every time rather than a win. Jim asked to err well on ' +
-    'the easy side.',
+  childEasyField.meanMargin > 20,
+  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins level 1 by a mean of only ` +
+    `${childEasyField.meanMargin.toFixed(1)} m — close enough to read as a photo finish every time ` +
+    'rather than a win, on the easiest setting in the game.',
+);
+// And level 3 must still be a *race* rather than a wall. A quarter of the seeds
+// is the floor: below that a child who picks hard mode is not losing a close
+// one, she is being told the level is not for her. Fires at the old settings
+// (0/24) — which is the failure this half of the guard exists for.
+require(
+  childField.wins >= FIELD_SEEDS.length / 4,
+  `a child tapping ${CHILD_TAPS_PER_SECOND}/s and ducking half the bars wins only ${childField.wins}/` +
+    `${FIELD_SEEDS.length} seeds at level 3 — hard mode is meant to be hard, not shut. Raise ` +
+    'PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
 );
 // ...and the other end of it, because after 6 August nothing guarded that end at
 // all. The floor above says a child's win must be *visible*; this says it must
