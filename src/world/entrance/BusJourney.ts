@@ -93,6 +93,14 @@ const ROAD_HALF_WIDTH = 5.2;
 const GROUND_HALF_WIDTH = 90;
 
 /**
+ * How much lane exists *behind* the bus's starting point.
+ *
+ * The camera orbits, so for a third of every turn it is looking back down the
+ * road the bus came in on. Without this there is nothing there.
+ */
+const LANE_AHEAD = 120;
+
+/**
  * The hills, as a function of distance down the lane.
  *
  * Two sines of incommensurable wavelength plus a long swell, so the ride never
@@ -308,11 +316,21 @@ export class BusJourney {
       segmentsZ,
     );
     geometry.rotateX(-Math.PI / 2);
+    // **Translated into world space before anything is displaced.** The first
+    // version left the plane at the origin, displaced its vertices by
+    // `groundHeight(x, localZ)`, and then moved the *mesh* 100 m down the lane
+    // — so the hills ended up a hundred metres out of step with the road, the
+    // hedges, the trees and the bus, every one of which reads the same function
+    // in world coordinates. The result was a bus sailing along ten metres above
+    // a flat green sheet with the road and the verges buried underneath it, and
+    // it read on screen as "the camera is too high", which it was not.
+    //
+    // Baking the offset into the geometry means there is only ever one z here,
+    // and it is the one everything else uses.
+    geometry.translate(0, 0, LANE_AHEAD - LANE_LENGTH / 2);
     const position = geometry.getAttribute('position') as BufferAttribute;
     for (let i = 0; i < position.count; i += 1) {
-      const x = position.getX(i);
-      const z = position.getZ(i);
-      position.setY(i, groundHeight(x, z));
+      position.setY(i, groundHeight(position.getX(i), position.getZ(i)));
     }
     position.needsUpdate = true;
     geometry.computeVertexNormals();
@@ -320,25 +338,21 @@ export class BusJourney {
     const ground = new Mesh(geometry, toonMaterial(PALETTE.grass));
     ground.name = 'journey-ground';
     ground.receiveShadow = true;
-    // Centred on the stretch the bus will cross: the plane runs from +half to
-    // −half in z, and the bus starts at 0 and drives towards −Z.
-    ground.position.z = -LANE_LENGTH / 2 + 120;
     this.lane.add(ground);
 
     // The tarmac, a narrow ribbon laid on the same hills a hand's breadth up so
     // it never z-fights the grass.
     const roadGeometry = new PlaneGeometry(ROAD_HALF_WIDTH * 2, LANE_LENGTH, 2, segmentsZ);
     roadGeometry.rotateX(-Math.PI / 2);
+    roadGeometry.translate(0, 0, LANE_AHEAD - LANE_LENGTH / 2);
     const roadPosition = roadGeometry.getAttribute('position') as BufferAttribute;
     for (let i = 0; i < roadPosition.count; i += 1) {
-      const z = roadPosition.getZ(i) + ground.position.z;
-      roadPosition.setY(i, laneHeight(z) + 0.06);
+      roadPosition.setY(i, laneHeight(roadPosition.getZ(i)) + 0.07);
     }
     roadPosition.needsUpdate = true;
     roadGeometry.computeVertexNormals();
-    const road = new Mesh(roadGeometry, toonMaterial(PALETTE.pathSandDark));
+    const road = new Mesh(roadGeometry, toonMaterial(PALETTE.pathSand));
     road.name = 'journey-road';
-    road.position.z = ground.position.z;
     road.receiveShadow = true;
     this.lane.add(road);
   }
@@ -372,7 +386,7 @@ export class BusJourney {
       // Clear of the tarmac, thinning outwards so the lane has a near edge and
       // a soft far one.
       const x = side * (ROAD_HALF_WIDTH + 2.6 + rng() * rng() * 62);
-      const z = -rng() * LANE_LENGTH + 110;
+      const z = LANE_AHEAD - rng() * LANE_LENGTH;
       const ground = groundHeight(x, z);
       const height = 3.4 + rng() * 4.2;
       const radius = 1.5 + rng() * 1.6;
@@ -406,7 +420,7 @@ export class BusJourney {
     for (let i = 0; i < HEDGE; i += 1) {
       const side = i % 2 === 0 ? 1 : -1;
       const along = (i / HEDGE) * LANE_LENGTH;
-      const z = 110 - along;
+      const z = LANE_AHEAD - along;
       const x = side * (ROAD_HALF_WIDTH + 0.9 + rng() * 0.5);
       const radius = 0.75 + rng() * 0.45;
       at.set(x, groundHeight(x, z) + radius * 0.55, z);

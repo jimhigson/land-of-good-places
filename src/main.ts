@@ -344,6 +344,17 @@ function rideInThenPlay(
   });
 
   const skip = new JourneySkip();
+  // Same spirit as `window.game` below: something to poke from a console, and
+  // the only practical way to drive a capture. Headless WebGL runs the park at
+  // one or two frames a second and `Loop` clamps `dt` to `MAX_FRAME_DELTA`, so
+  // ride time and wall-clock time are an order of magnitude apart — a capture
+  // script that sleeps is measuring the wrong clock.
+  if (import.meta.env.DEV) {
+    (window as unknown as { journey: { ride: BusJourney; skipOffered: () => boolean } }).journey = {
+      ride: journey,
+      skipOffered: () => skip.offered,
+    };
+  }
   let built = false;
   let done = false;
 
@@ -410,6 +421,18 @@ function finishLaunch(
   // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
   // park's, and the park is what is about to be on screen.
   uiRoot.style.visibility = '';
+
+  // **Nothing stands in front of the arrival.** `WhatsNew` opens itself from
+  // `Game`'s constructor when there is unseen content, and it pauses the park
+  // behind it — so the twenty-second ride handed over to a modal, with the bus
+  // frozen mid-roll behind it, which is what a capture of the first end-to-end
+  // run showed. It is doubly wrong for this player in particular: she made her
+  // character sixty seconds ago, so there is nothing that is *new* to her.
+  //
+  // A continued save has no arrival and still gets the panel, which is the case
+  // it was written for.
+  if (game.world.entrance.arrival) game.whatsNew.close();
+
   game.start();
 
   if (boardStallId) {

@@ -8,10 +8,14 @@ import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import { CHILD_FOOTPRINT } from '../../art/models/kid';
 import {
   createCatBus,
+  CAT_BUS_LENGTH,
   CAT_BUS_LONGEST_WALK_TO_DOOR,
   CAT_BUS_SEAT_COUNT,
+  CAT_BUS_TOP,
+  CAT_BUS_WIDTH,
   type CatBusHandle,
 } from './catBus';
+import { CAMERA_VIEW_HEIGHT } from '../../core/constants';
 import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { hasArrivedBefore, markArrived } from './arrivalFlag';
@@ -217,6 +221,46 @@ export const ARRIVAL_CONTROL_AT =
  * Derived from the bus's own seat count — the bus owns how many seats it has.
  */
 export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 1;
+
+/**
+ * **How far out the camera sits while the bus is the subject.**
+ *
+ * Jim's first watched run of Stage A opened on a bus that filled the frame with
+ * its own cat face cropped off the corner, and the previous round left it
+ * alone rather than ship a camera change it could not re-verify.
+ *
+ * The default framing is built around a child: `CAMERA_VIEW_HEIGHT` is 15 m,
+ * chosen so *"a 2.12 m kid fills about 14% of the height"*. The bus is
+ * **18.16 m** long. It was never going to fit.
+ *
+ * So this is derived rather than dialled in, from the bus's **bounding
+ * sphere** — which is the right measure precisely because it does not care
+ * which way round the bus is, and the camera swings all the way round it
+ * during the journey before this ever applies. The radius is half the body
+ * diagonal; the view's half-height at zoom `z` is `CAMERA_VIEW_HEIGHT / 2 / z`;
+ * asking the sphere to fit inside it with a little air gives the number below.
+ * A bus that grows re-derives it and stays in shot.
+ */
+const ARRIVAL_BUS_RADIUS = Math.hypot(CAT_BUS_LENGTH, CAT_BUS_WIDTH, CAT_BUS_TOP) / 2;
+const ARRIVAL_FRAMING_AIR = 1.15;
+export const ARRIVAL_CAMERA_ZOOM =
+  CAMERA_VIEW_HEIGHT / 2 / (ARRIVAL_BUS_RADIUS * ARRIVAL_FRAMING_AIR);
+
+/**
+ * The zoom the park camera should be holding, for a given arrival phase.
+ *
+ * A pure function in its own right, for the reason `arrivalSpawn.ts` exists:
+ * the caller is `Game.tick()`, `Game` cannot be constructed in a test, and a
+ * camera decision made inline in there is a camera decision no check can reach
+ * — which is exactly how the last camera bug on this feature stayed green.
+ *
+ * Back to 1 from `departing` onward. She has the controls by then, and the
+ * framing she plays in is the ordinary one; the damping in `IsoCamera.update`
+ * turns the change into a push-in rather than a jump.
+ */
+export function arrivalCameraZoom(phase: ArrivalPhase): number {
+  return phase === 'departing' || phase === 'done' ? 1 : ARRIVAL_CAMERA_ZOOM;
+}
 
 /** Is the arrival due for this player? One question, asked in one place. */
 export function arrivalIsDue(): boolean {

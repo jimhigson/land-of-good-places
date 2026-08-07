@@ -15,6 +15,7 @@ import type { FrameContext, GameSystem } from './core/types';
 import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } from './world';
 import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
+import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import type { InteractZone } from './world/interact';
@@ -1242,6 +1243,17 @@ export class Game {
     if (!paused) this.tapNavigator.update(this.frameContext);
 
     if (!paused) this.player.update(this.frameContext);
+
+    // The arrival's subject is an 18 m bus, and the default framing is sized
+    // around a 2.12 m child — so while the bus is what the shot is about, the
+    // camera sits further out. Re-asserted every frame rather than set once,
+    // because this method re-derives the world's state each frame and would
+    // otherwise overwrite it (CLAUDE.md's `/view` note is that trap biting
+    // somebody). The decision itself is `arrivalCameraZoom`, a pure function,
+    // so a check can hold it — `Game` builds a real `WebGLRenderer` and cannot
+    // be constructed in one.
+    const arrival = this.world.entrance.arrival;
+    if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
     // Straight after the camera moves and before the sky is drawn: the stars,
