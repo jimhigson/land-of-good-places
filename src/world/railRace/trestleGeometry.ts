@@ -120,3 +120,16 @@ export const SLEEPER_SPACING = 1;
 export const SLEEPER_OVERHANG = 0.5;
 export const SLEEPER_THICKNESS = 0.14;
 export const SLEEPER_ALONG_TRACK = 0.42;
+
+/**
+ * Rail centre-to-centre within one lane, **at park scale**. Narrow: it is a
+ * one-child cart.
+ *
+ * A ring builds its own rails at this times its own `route.scale`, so the two
+ * rings are two genuinely different structures rather than one geometry with a
+ * group transform on it. See `route.ts`'s header for why that matters.
+ */
+export const RAIL_GAUGE_AT_PARK_SCALE = 0.62;
+
+/** How far a duck bar reaches either side of its lane's centre, at park scale. */
+export const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;

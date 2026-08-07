@@ -37,15 +37,20 @@ import {
   type RaceLevel,
 } from './hazards';
 import {
+  BAR_HALF_SPAN_AT_PARK_SCALE,
   BRANCH_TAPER,
   forkPlan,
   POST_FOOT_RADIUS,
   POST_TOP_RADIUS,
+  RAIL_GAUGE_AT_PARK_SCALE,
   SLEEPER_ALONG_TRACK,
   SLEEPER_OVERHANG,
   SLEEPER_SPACING,
   SLEEPER_THICKNESS,
 } from './trestleGeometry';
+// Re-exported: these used to be defined here, and `cart.ts` and
+// `scripts/check-rail-race.mts` import them from this module.
+export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
 import {
   LANE_COUNT,
   PLAYER_LANE,
@@ -69,15 +74,6 @@ import {
  * `InstancedMesh`es is five draw calls, whatever the layout turns out to be.
  */
 
-/**
- * Rail centre-to-centre within one lane, **at park scale**. Narrow: it is a
- * one-child cart.
- *
- * A ring builds its own rails at this times its own `route.scale`, so the two
- * rings are two genuinely different structures rather than one geometry with a
- * group transform on it. See `route.ts`'s header for why that matters.
- */
-export const RAIL_GAUGE_AT_PARK_SCALE = 0.62;
 
 /**
  * The gauge on the ring a child actually races on — the number `cart.ts` builds
@@ -111,8 +107,6 @@ const ARCH_HEADROOM = 1.2;
  */
 const ARCH_SHOULDER_ROOM = 2.4;
 
-/** How far a duck bar reaches either side of its lane's centre, at park scale. */
-export const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
 
 /**
  * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
