@@ -51,8 +51,6 @@ import {
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
   ENTRANCE_RAMP,
-  FACADE_SLIDE_DOOR_MAX_X,
-  FACADE_SLIDE_DOOR_MIN_X,
   INTERIOR_DOOR_MAX_X,
   INTERIOR_DOOR_MIN_X,
   LIFT_DOOR_MAX_Z,
@@ -61,10 +59,15 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
-  SLIDE_DOOR_MAX_X,
-  SLIDE_DOOR_MIN_X,
   TOP_DECK,
+  TOWER_BASE_FLARE,
+  TOWER_HEIGHT,
+  TOWER_RADIUS,
+  TOWER_ROOF_HEIGHT,
+  TOWER_ROOF_OVERHANG,
 } from './layout';
+import { SLIDE_PLAN } from '../slide/plan';
+import { CHUTE_ENVELOPE, SlideRide } from './SlideRide';
 
 /** Decoration that takes light but is not worth a slot in the shadow pass. */
 function receiveOnly(mesh: Mesh): Mesh {
@@ -102,9 +105,14 @@ interface ShellPlan {
   readonly doorMinX: number;
   readonly doorMaxX: number;
   readonly holes: boolean;
-  /** Where the ginormous slide leaves the top storey, if it leaves one at all. */
-  readonly slideGap: readonly [number, number] | null;
 }
+// There was a `slideGap` here, for a hole in the top storey's south wall that
+// the ginormous slide would leave through. It was dead — its only readers were
+// interior-only builders that the facade's `buildCastle` early-return never
+// reaches, while the interior always passed `null` — and it was dead for a
+// good reason: the slide crosses that wall plane *above* the castle, clearing
+// the crenellations by 3.44 m under its own floor. Deleted rather than
+// documented; `theGinormousSlideLeavesOverTheBattlements` holds the air open.
 
 function planFor(kind: ShellKind): ShellPlan {
   return kind === 'interior'
@@ -116,8 +124,6 @@ function planFor(kind: ShellKind): ShellPlan {
         doorMinX: INTERIOR_DOOR_MIN_X,
         doorMaxX: INTERIOR_DOOR_MAX_X,
         holes: true,
-        // The roof has no walls; its gap is cut in the parapet instead.
-        slideGap: null,
       }
     : {
         halfX: BUILDING_HALF_X,
@@ -126,7 +132,6 @@ function planFor(kind: ShellKind): ShellPlan {
         doorMinX: ENTRANCE_MIN_X,
         doorMaxX: ENTRANCE_MAX_X,
         holes: false,
-        slideGap: [FACADE_SLIDE_DOOR_MIN_X, FACADE_SLIDE_DOOR_MAX_X],
       };
 }
 
@@ -238,7 +243,6 @@ function wallShapes(plan: ShellPlan, deck: number): Shape[] {
   // South face: the front door downstairs.
   const southGaps: [number, number][] = [];
   if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
-  if (deck === TOP_DECK && plan.slideGap) southGaps.push([...plan.slideGap]);
   for (const [start, end] of segmentsMinusGaps(-ox, ox, southGaps)) {
     shapes.push(planRect(start, end, plan.halfZ - HALF_WALL, oz));
   }
@@ -350,7 +354,6 @@ function buildWindows(plan: ShellPlan, deck: number): InstancedMesh[] {
 
   const southGaps: [number, number][] = [];
   if (deck === 0) southGaps.push([plan.doorMinX, plan.doorMaxX]);
-  if (deck === TOP_DECK && plan.slideGap) southGaps.push([...plan.slideGap]);
 
   for (const x of spread(plan.halfX, 3.4)) {
     slots.push({ x, z: -oz - outward, yaw: 0 });
@@ -466,7 +469,7 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   // where you step out of the lift.
   const shapes: Shape[] = [];
   shapes.push(planRect(-ox, ox, -oz, -oz + 0.6));
-  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_DOOR_MIN_X, SLIDE_DOOR_MAX_X]])) {
+  for (const [start, end] of segmentsMinusGaps(-ox, ox, [[SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX]])) {
     shapes.push(planRect(start, end, oz - 0.6, oz));
   }
   shapes.push(planRect(-ox, -ox + 0.6, -oz + 0.6, oz - 0.6));
@@ -519,7 +522,82 @@ function buildRoofTerrace(plan: ShellPlan, roof: Group): void {
   bobble.position.set(ROOF_PAVILION_X, 8.5, ROOF_PAVILION_Z);
   roof.add(bobble);
 
+  roof.add(buildSlideMouth(plan));
+
   roof.add(buildRoofPlanters(plan));
+}
+
+/**
+ * **The top of the ginormous slide, joined to the edge of the roof.**
+ *
+ * Jim, having ridden it on 5 August 2026: *"getting on the slide should look
+ * like the start of the slide attached to the edge of the roof, not just a
+ * circle to walk onto"*. It was exactly a circle to walk onto — an
+ * `entrancePad` cylinder at `SLIDE_PLAN.entryX/entryZ` and, nine metres further
+ * south, an unexplained notch in the parapet. Nothing joined the two, so
+ * boarding read as standing on a marker and being teleported.
+ *
+ * ### Why the answer is not "move the chute's start"
+ *
+ * The obvious reading of Jim's note is that the garden chute should begin lower,
+ * at the battlements rather than 3.44 m over them. It should not, and
+ * `theGinormousSlideLeavesOverTheBattlements` is the reason: that air is what
+ * keeps the ride out of the masonry, it is measured on every seed, and lowering
+ * `START_Y` to meet the stonework is the one change that invariant exists to
+ * refuse.
+ *
+ * The thing Jim is *looking at* when he boards is not the garden chute at all.
+ * The roof he steps off is the **interior's** roof — `Shell.ts` calls the two
+ * "disconnected worlds", and the launch is deliberately a change of space (see
+ * `Building.startGiantSlide`). So the fix belongs on the side he can see: give
+ * the interior terrace the slide's own top, running from the boarding pad out
+ * through the gap in the parapet and tipping over the edge. The ride then reads
+ * as one continuous thing — you get into the top of a slide and it takes you
+ * away — without moving a single metre of the garden chute or touching the air
+ * the invariant holds open.
+ *
+ * ### One owner for the gap
+ *
+ * The mouth is centred on `SLIDE_PLAN.roofDoorMinX/MaxX` — the **same** numbers
+ * that cut the notch in the parapet a few lines above — rather than on
+ * `entryX`, which is where they both come from. Two things that must line up
+ * read one source, so the mouth cannot end up beside its own doorway.
+ */
+function buildSlideMouth(plan: ShellPlan): Group {
+  const oz = outerZ(plan);
+  const x = (SLIDE_PLAN.roofDoorMinX + SLIDE_PLAN.roofDoorMaxX) / 2;
+  // **Behind** the pad, not in front of it. Jim moved the boarding point to
+  // roughly a metre from the edge (`ROOF_ENTRY_INSET`), so there is no longer
+  // any roof left to put a chute on *south* of the pad — the lip has to come up
+  // to meet her from inboard and carry her straight out over the parapet.
+  //
+  // Far enough back that the pad still reads as the marked spot you stand on
+  // rather than being swallowed: the pad is 1.2 m in radius and the trough
+  // floor sits above it, so a lip starting under the pad's own centre would
+  // hide the "press here" cue completely.
+  const startZ = SLIDE_PLAN.entryZ - 1.6;
+
+  // The trough floor sits `CHUTE_ENVELOPE.below` under the centre line, so a
+  // centre line at this height puts the floor just on the terrace deck rather
+  // than sunk into it or hovering over it.
+  const deck = CHUTE_ENVELOPE.below + 0.14;
+
+  const mouth = new SlideRide(
+    [
+      // A flat lip you step into, level all the way to the parapet…
+      new Vector3(x, deck, startZ),
+      new Vector3(x, deck, SLIDE_PLAN.entryZ),
+      new Vector3(x, deck, oz - 0.3),
+      // …then it tips as it leaves the gap in the parapet…
+      new Vector3(x, deck - 0.9, oz + 1.2),
+      // …and falls away over the edge, which is what makes it read as attached
+      // to the roof rather than sitting on it.
+      new Vector3(x, deck - 3.2, oz + 2.7),
+      new Vector3(x, deck - 6.2, oz + 3.9),
+    ],
+    { name: 'slide-roof-mouth' },
+  );
+  return mouth.group;
 }
 
 /** A ring of pastel planters so the terrace is not a blank field from above. */
@@ -609,9 +687,10 @@ const CASTLE_MERLON_DEPTH = 0.5;
 const CASTLE_MERLON_HEIGHT = 1.05;
 const CASTLE_MERLON_PITCH = 1.7;
 
-const TOWER_RADIUS = 2.05;
-const TOWER_HEIGHT = 10.6;
-const TOWER_ROOF_HEIGHT = 4.2;
+// TOWER_RADIUS, TOWER_HEIGHT, TOWER_ROOF_HEIGHT, TOWER_ROOF_OVERHANG and
+// TOWER_BASE_FLARE now live in `layout.ts`. `slide/plan.ts` has to route the
+// ginormous slide around these solids and cannot import this file — this file
+// imports the plan, so it would be a cycle. See `CASTLE_TOWERS` there.
 
 const DOOR_CENTRE_X = (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2;
 const DOOR_ARCH_RADIUS = (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4;
@@ -956,7 +1035,7 @@ function buildCornerTowers(plan: ShellPlan): Group {
   ];
 
   const bodies = new InstancedMesh(
-    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * 1.08, TOWER_HEIGHT, 16),
+    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * TOWER_BASE_FLARE, TOWER_HEIGHT, 16),
     softMaterial(PALETTE.buildingWall, 0.78),
     corners.length,
   );
@@ -967,7 +1046,7 @@ function buildCornerTowers(plan: ShellPlan): Group {
   // A true cone (16 segments), unlike the roof pavilion's four-sided pyramid —
   // this one is meant to read as a proper witch's-hat tower roof up close.
   const roofs = new InstancedMesh(
-    new ConeGeometry(TOWER_RADIUS + 0.4, TOWER_ROOF_HEIGHT, 16),
+    new ConeGeometry(TOWER_RADIUS + TOWER_ROOF_OVERHANG, TOWER_ROOF_HEIGHT, 16),
     softMaterial(PALETTE.buildingRoofDeep, 0.72),
     corners.length,
   );

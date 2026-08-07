@@ -14,6 +14,7 @@ import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
+import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 
@@ -517,7 +518,14 @@ function buildGraph(): PathGraph {
   // helper's `towardX/towardZ` equal to `(ex, ez)` is the same "no past-the-
   // doormat extension" case a station's own node would use if it needed one:
   // an exit is a destination in itself, not a doorway into a plot.
-  for (const plan of [COASTER_PLANS.cruiser, RAIL_RACE_PLAN]) {
+  //
+  // The ginormous slide is in this list for the reason the rule exists: it is
+  // the ride that did not have an exit, and #118 is what that cost — its
+  // hand-authored chute ended inside the castle, behind a wall, and a
+  // six-year-old who went down it was stuck there. Being in this loop is what
+  // makes "you can walk away from the bottom of the slide" a thing the park
+  // proves on every seed rather than a thing anyone remembered to check.
+  for (const plan of [COASTER_PLANS.cruiser, RAIL_RACE_PLAN, SLIDE_PLAN]) {
     spur(`exit-${plan.name}`, 'exit', plan.exitX, plan.exitZ, plan.exitX, plan.exitZ, 2.2);
   }
   spur(

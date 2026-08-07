@@ -23,6 +23,7 @@ import {
   BUILDING_HALF_Z,
   BUILDING_PLINTH,
   BUILDING_SLAB,
+  BUILDING_WALL_THICKNESS,
   INTERIOR_HALF_X,
   INTERIOR_HALF_Z,
   INTERIOR_ORIGIN_X,
@@ -237,19 +238,125 @@ export const ENTRANCE_MAX_X = 4;
 export const LIFT_DOOR_MIN_Z = 3.5;
 export const LIFT_DOOR_MAX_Z = 6.5;
 
-/** The gap in the roof parapet the ginormous slide leaves through. */
-export const SLIDE_DOOR_MIN_X = 17.5;
-export const SLIDE_DOOR_MAX_X = 22.5;
+// ------------------------------------------------------------ corner towers
 
 /**
- * The matching hole in the facade's top storey, out in the garden.
+ * The castle's four corner towers, as solids.
  *
- * The slide is a garden object: it hangs off the tower everyone can see from the
- * fountain, whatever is going on in the building's own space. Without this it
- * would appear to grow straight out of a painted wall.
+ * **They live here rather than in `Shell.ts` because two things need them and
+ * the dependency only runs one way.** `Shell.ts` builds them; `slide/plan.ts`
+ * has to route the ginormous slide around them. The plan already imports this
+ * file for `BUILDING_CENTRE_*` and `deckY`, and `Shell.ts` imports the plan, so
+ * `Shell.ts` cannot be the owner without making a cycle.
+ *
+ * That they were *only* in `Shell.ts` is precisely how the slide came to run
+ * through them. `slide/plan.ts` re-imposes the castle as its footprint
+ * rectangle — a good, precise substitute for a bounding circle, and one that
+ * does not contain these: the towers stand at `(±outerX, ±outerZ)`, outside the
+ * rectangle by half a wall thickness, and bulge 2.05–2.45 m further out again.
+ * Jim rode the slide through one. Measured on the canonical seed the chute ran
+ * 1.10 m inside a tower body while every invariant stayed green.
  */
-export const FACADE_SLIDE_DOOR_MIN_X = 7.4;
-export const FACADE_SLIDE_DOOR_MAX_X = 11.6;
+export const TOWER_RADIUS = 2.05;
+export const TOWER_HEIGHT = 10.6;
+export const TOWER_ROOF_HEIGHT = 4.2;
+/** How far the conical roof oversails the body it sits on. */
+export const TOWER_ROOF_OVERHANG = 0.4;
+/** How much wider the body is at its foot than at its top. */
+export const TOWER_BASE_FLARE = 1.08;
+
+/**
+ * A tower part as a solid of revolution: a vertical span with a radius that
+ * varies linearly from bottom to top. A cylinder and a cone are both this.
+ */
+export interface TowerSolid {
+  readonly name: string;
+  /** Axis position, in world space. */
+  readonly x: number;
+  readonly z: number;
+  readonly bottomY: number;
+  readonly topY: number;
+  readonly radiusBottom: number;
+  readonly radiusTop: number;
+}
+
+/** Where the four towers stand, facade-local. Outside the footprint rectangle. */
+const TOWER_HALF_X = BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2;
+const TOWER_HALF_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
+
+/**
+ * The towers in world space, body and roof, ready to be routed around.
+ *
+ * Derived from the same numbers `Shell.ts` composes its instance matrices from,
+ * so the solid a ride avoids and the mesh a child sees cannot drift apart.
+ */
+export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
+  const solids: TowerSolid[] = [];
+  const corners: readonly (readonly [number, number])[] = [
+    [-TOWER_HALF_X, -TOWER_HALF_Z],
+    [TOWER_HALF_X, -TOWER_HALF_Z],
+    [-TOWER_HALF_X, TOWER_HALF_Z],
+    [TOWER_HALF_X, TOWER_HALF_Z],
+  ];
+  corners.forEach(([localX, localZ], index) => {
+    const x = BUILDING_CENTRE_X + localX;
+    const z = BUILDING_CENTRE_Z + localZ;
+    solids.push({
+      name: `tower-body-${index}`,
+      x,
+      z,
+      bottomY: BUILDING_BASE_Y,
+      topY: BUILDING_BASE_Y + TOWER_HEIGHT,
+      radiusBottom: TOWER_RADIUS * TOWER_BASE_FLARE,
+      radiusTop: TOWER_RADIUS,
+    });
+    solids.push({
+      name: `tower-roof-${index}`,
+      x,
+      z,
+      bottomY: BUILDING_BASE_Y + TOWER_HEIGHT,
+      topY: BUILDING_BASE_Y + TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
+      radiusBottom: TOWER_RADIUS + TOWER_ROOF_OVERHANG,
+      radiusTop: 0,
+    });
+  });
+  return solids;
+})();
+
+/**
+ * Horizontal distance from a tower's surface at height `y`, or `Infinity` where
+ * `y` is outside the solid entirely.
+ *
+ * A tower is a solid of revolution, so this is exact: comparing the distance to
+ * the axis against the radius *at the height the chute actually passes* is a
+ * swept disc in closed form. It is deliberately **not** the ring-of-probe-rays
+ * approach `coaster/castleWindows.ts` uses — that exists because the Sky
+ * Cruiser's window has to be checked against arbitrary meshes, where there is
+ * no formula and rays are the only option, and it pays for that with gaps
+ * between the rays that a thin obstacle can slip through. Do not "unify" the
+ * two: for a cylinder, rays would be strictly less accurate than this.
+ */
+export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y: number): number {
+  if (y < tower.bottomY || y > tower.topY) return Infinity;
+  const span = tower.topY - tower.bottomY;
+  const t = span <= 1e-9 ? 0 : (y - tower.bottomY) / span;
+  const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
+  return Math.hypot(x - tower.x, z - tower.z) - radius;
+}
+
+/**
+ * The gaps the ginormous slide leaves through — in the roof parapet inside, and
+ * in the facade's top storey out in the garden — **live on `SLIDE_PLAN`**, not
+ * here. See `world/slide/plan.ts`.
+ *
+ * They were four hand-written coordinates in this file, and the search that
+ * decides where the chute actually leaves the tower had no say in them: it
+ * reported the door it chose and the masonry cut the hole somewhere else
+ * regardless. Deriving the hole from the solved route is what stops the two
+ * disagreeing, and the direction of the dependency is the reason they cannot
+ * live here — this file is imported *by* the plan (for `BUILDING_CENTRE_*` and
+ * `deckY`), so it must never import back from it.
+ */
 
 // -------------------------------------------------------- glass lift shaft
 
@@ -476,11 +583,12 @@ export const HELTER_SEMI_X = 1.7;
 export const HELTER_SEMI_Z = 2.1;
 
 /**
- * Where you step on to ride the ginormous slide — out on the roof terrace now,
- * under the open sky, which is where the family wanted it.
+ * Where you step on to ride the ginormous slide is `SLIDE_PLAN.entryX/entryZ`.
+ *
+ * It moved out with the parapet gap it stands in front of, and for the same
+ * reason: the boarding pad and the gap had to hold the same x, and did so only
+ * because someone typed 20 in both places.
  */
-export const GIANT_SLIDE_ENTRY_X = 20;
-export const GIANT_SLIDE_ENTRY_Z = 13;
 /** The cuddly grown-up waits here, ready to be asked along. */
 export const GROWN_UP_X = 15.2;
 export const GROWN_UP_Z = 14;

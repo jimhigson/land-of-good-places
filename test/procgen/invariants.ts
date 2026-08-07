@@ -55,6 +55,11 @@ import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // imported" note below is about `railRace/plan.ts`, which genuinely does.
 import { CAR_FLOOR_Y, LOCO_BODY_TOP_Y, SEAT_Y } from '../../src/world/train/trainDimensions.ts';
 import { RIDER_HEADROOM, TRAIN_CLEARANCE_Y } from '../../src/world/train/clearance.ts';
+// Safe to import statically: `slide/landing.ts` deliberately reaches nothing
+// seeded — see the note on `PitCircle`. It takes the pit as an argument for
+// exactly this reason, so importing it here cannot fix the park's seed before
+// the harness sets `LGP_SEED`.
+import { LANDING_DROP, riderClearanceFromChute } from '../../src/world/slide/landing.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -159,6 +164,7 @@ const MAX_DARK_RUN = 25;
 const TRESTLE_GAP_TOLERANCE = 40;
 
 /**
+/**
  * How close a ribbon has to come to count as having arrived somewhere.
  *
  * A child's full width — `2 x PLAYER_RADIUS`, the same derivation
@@ -178,6 +184,27 @@ const TRESTLE_GAP_TOLERANCE = 40;
  * no risk of the tolerance swallowing the thing it exists to catch.
  */
 const ARRIVAL = 2 * PLAYER_RADIUS;
+
+/**
+ * How much of the chute is allowed to be inside the castle's footprint.
+ *
+ * The slide leaves through a gap in the roof parapet, so its first stretch is
+ * *in* the doorway by design. Long enough to cover the mouth and the wall it
+ * comes through, short enough that the return leg of #118's curve — which came
+ * back and stopped dead in the middle of the tower — could never hide in it.
+ */
+const DOORWAY_GRACE = 6;
+
+/**
+ * The ginormous slide's legs, as built: `supports.ts`'s foot radius, and how
+ * far from the chute one may stand and still be holding it up.
+ *
+ * The reach is the arc nudge the placer is allowed (8.5 m) plus a little — a
+ * leg further from the chute than the placer could possibly have moved it is a
+ * leg attached to nothing.
+ */
+const SLIDE_LEG_RADIUS = 0.52;
+const SLIDE_LEG_REACH = 10;
 
 // ------------------------------------------------------------------ the list
 
@@ -204,6 +231,7 @@ const ARRIVAL = 2 * PLAYER_RADIUS;
  * path, walked by people who have never opened this file before.
  */
 type Invariant = (facts: ParkFacts) => readonly string[];
+
 
 /**
  * Every wall run keeps clear of every other one.
@@ -1507,6 +1535,611 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
  * The suite. **Add an invariant by adding a line here.**
  */
 /**
+ * Half-width of the ginormous slide's chute, as built.
+ *
+ * `SlideRide`'s cross-section reaches ±0.95 m and its hand-rails sit at ±1.0 m
+ * with a 0.11 m tube, so the thing a child rides in is 2.22 m across. Taken
+ * from that geometry rather than from the route generator's corridor half-width,
+ * which is the generator's own target and so would prove only that it can do
+ * arithmetic.
+ *
+ * `PLAYER_RADIUS` is deliberately **not** added on top, unlike everywhere else
+ * in this file. A rider on a slide is *inside* the trough, held by the rails —
+ * the child's own width is already contained by the number above, and adding it
+ * again would be double-counting a body that cannot stick out.
+ */
+const CHUTE_HALF_WIDTH = 1.11;
+
+/**
+ * The most the chute may climb between two samples, in metres.
+ *
+ * Not a tolerance for "roughly downhill": a slide is a thing you go down
+ * because gravity does it, and a stretch that rises is a stretch a child stops
+ * on. The figure is not zero only because the chute is a Catmull-Rom spline
+ * through sampled points, which may overshoot by fractions of a millimetre
+ * between them; a millimetre is four hundred times smaller than the 0.41 m
+ * profile depth a rider sits in, so nothing at this scale is a slope.
+ */
+const SLIDE_MAY_RISE = 0.001;
+
+/**
+ * **The ginormous slide is one a child can actually ride down and walk away
+ * from.** This is #118, stated as something the park proves on every seed.
+ *
+ * The bug was not subtle and neither is this: the slide's twelve hand-authored
+ * coordinates were absolute, the castle's position is per-seed, and eight of
+ * the twelve ended up inside the tower — the last of them behind a solid wall,
+ * where a six-year-old was left with no way out. Every clause below would have
+ * failed on that curve, which is the point.
+ *
+ * Measured off `facts.slideChute`, which is the built chute pushed out through
+ * the scene graph into world space, against the built plots — never against
+ * `slide/plan.ts`, which is the thing under test.
+ */
+const theGinormousSlideIsRideable: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const first = chute[0];
+  const last = chute[chute.length - 1];
+
+  if (chute.length < 2 || !first || !last) {
+    complaints.push('the ginormous slide has no chute at all');
+    return complaints;
+  }
+
+  // --- 1. it goes down, all the way down ------------------------------------
+  let worstRise = 0;
+  let worstRiseAt: readonly [number, number, number] = first;
+  for (let i = 1; i < chute.length; i += 1) {
+    const before = chute[i - 1];
+    const here = chute[i];
+    if (!before || !here) continue;
+    const rise = here[1] - before[1];
+    if (rise > worstRise) {
+      worstRise = rise;
+      worstRiseAt = here;
+    }
+  }
+  if (worstRise > SLIDE_MAY_RISE) {
+    complaints.push(
+      `the ginormous slide climbs ${worstRise.toFixed(3)} m at ` +
+        `(${worstRiseAt[0].toFixed(1)}, ${worstRiseAt[1].toFixed(1)}, ${worstRiseAt[2].toFixed(1)}) ` +
+        '— a slide that goes uphill is one a child stops on',
+    );
+  }
+
+  // --- 2. it finishes in the ball pit ---------------------------------------
+  //
+  // Where it ends is the whole of #118, so it is asserted against the built
+  // pit's own position rather than against anything the slide's plan believes.
+  const pit = facts.plots.find((plot) => plot.id === 'ballPit');
+  if (!pit) complaints.push('there is no ball pit for the ginormous slide to land in');
+  else {
+    const missed = Math.hypot(last[0] - pit.x, last[2] - pit.z);
+    // BALL_PIT_RADIUS is 6; the plot's bounding radius is larger than the pit
+    // itself, so the pit's own radius is what "lands in the balls" means.
+    if (missed > 6) {
+      complaints.push(
+        `the ginormous slide ends ${missed.toFixed(1)} m from the middle of the ball pit ` +
+          `at ${fmt([last[0], last[2]])} — it should end in the balls`,
+      );
+    }
+  }
+
+  // --- 3. it is not inside the castle ---------------------------------------
+  //
+  // The exact failure of #118. The chute starts *in* the parapet doorway by
+  // design, so the first few metres of it are allowed to be within the
+  // footprint and nothing after that is.
+  const castle = facts.castleFootprint;
+  {
+    let insideAfterDoor: readonly [number, number, number] | null = null;
+    let travelled = 0;
+    for (let i = 1; i < chute.length; i += 1) {
+      const before = chute[i - 1];
+      const here = chute[i];
+      if (!before || !here) continue;
+      travelled += Math.hypot(here[0] - before[0], here[2] - before[2]);
+      if (travelled < DOORWAY_GRACE) continue;
+      if (
+        Math.abs(here[0] - castle.x) < castle.halfX &&
+        Math.abs(here[2] - castle.z) < castle.halfZ
+      ) {
+        insideAfterDoor = here;
+        break;
+      }
+    }
+    if (insideAfterDoor) {
+      complaints.push(
+        `the ginormous slide runs back inside the castle at ` +
+          `${fmt([insideAfterDoor[0], insideAfterDoor[2]])} — this is #118, where a ` +
+          'child finished the ride sealed inside the tower',
+      );
+    }
+  }
+
+  // --- 4. it clears every plot it is not deliberately joining ---------------
+  //
+  // At the width of the thing a child rides in, plus the child's own radius.
+  for (const plot of facts.plots) {
+    if (plot.id === 'building' || plot.id === 'ballPit') continue;
+    for (const point of chute) {
+      const gap = Math.hypot(point[0] - plot.x, point[2] - plot.z);
+      if (gap < plot.boundingRadius + CHUTE_HALF_WIDTH) {
+        complaints.push(
+          `the ginormous slide passes ${gap.toFixed(1)} m from the middle of ` +
+            `${plot.id} (radius ${plot.boundingRadius.toFixed(1)}) at ` +
+            `${fmt([point[0], point[2]])}`,
+        );
+        break;
+      }
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * **The ginormous slide is standing on something, and you can walk between the
+ * legs.**
+ *
+ * Separate from the chute's own invariant because it fails differently. A
+ * support planner that places *nothing* looks healthy from every angle except
+ * the park's — the ride still works, the tests still pass, and a 95 m trough
+ * hangs in the air. That happened here: the "do not pinch a plot corridor"
+ * rule counted the castle and the ball pit, whose bounding circles cover this
+ * entire ride between them, and it rejected all 37 viable spots in silence.
+ *
+ * The second clause is the opposite failure. Legs a child cannot walk between
+ * turn the ground under the slide into a paddock, which is worse than no legs
+ * at all — so the gap between the nearest two is measured at the width a child
+ * actually is.
+ */
+const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const legs = facts.slideLegs;
+  const chute = facts.slideChute;
+
+  // --- 1. it is held up at all ----------------------------------------------
+  //
+  // Scaled to the ride: a leg roughly every 20 m of chute is sparse, and
+  // anything sparser than that is not "deliberately generous spacing", it is a
+  // planner that has quietly given up.
+  let chuteLength = 0;
+  for (let i = 1; i < chute.length; i += 1) {
+    const before = chute[i - 1];
+    const here = chute[i];
+    if (!before || !here) continue;
+    chuteLength += Math.hypot(here[0] - before[0], here[1] - before[1], here[2] - before[2]);
+  }
+  const wanted = Math.floor(chuteLength / 20);
+  if (legs.length < wanted) {
+    complaints.push(
+      `the ginormous slide is ${chuteLength.toFixed(0)} m long and stands on ` +
+        `${legs.length} legs — at least ${wanted} were expected, and a chute this ` +
+        'long with nothing under it reads as floating',
+    );
+  }
+
+  // --- 2. a child can walk between them -------------------------------------
+  for (let i = 0; i < legs.length; i += 1) {
+    for (let j = i + 1; j < legs.length; j += 1) {
+      const a = legs[i];
+      const b = legs[j];
+      if (!a || !b) continue;
+      const faces = Math.hypot(a.x - b.x, a.z - b.z) - 2 * SLIDE_LEG_RADIUS;
+      if (faces < WALKABLE_GAP) {
+        complaints.push(
+          `two of the ginormous slide's legs leave ${faces.toFixed(2)} m between their ` +
+            `faces at ${fmt([a.x, a.z])} and ${fmt([b.x, b.z])} — a child cannot get through`,
+        );
+      }
+    }
+  }
+
+  // --- 3. each one actually reaches its chute -------------------------------
+  //
+  // A leg is only support if it meets the thing it is supporting. Measured
+  // against the built chute rather than against what the planner believed.
+  for (const leg of legs) {
+    if (leg.top <= leg.ground) {
+      complaints.push(`a ginormous slide leg at ${fmt([leg.x, leg.z])} has no height at all`);
+      continue;
+    }
+    let nearest = Infinity;
+    for (const point of chute) {
+      const gap = Math.hypot(point[0] - leg.x, point[2] - leg.z);
+      if (gap < nearest) nearest = gap;
+    }
+    if (nearest > SLIDE_LEG_REACH) {
+      complaints.push(
+        `a ginormous slide leg at ${fmt([leg.x, leg.z])} is ${nearest.toFixed(1)} m from the ` +
+          'chute it is supposed to be holding up',
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
+ * **The ginormous slide leaves the castle over the top of the battlements**,
+ * with real air under it — not through the stone.
+ *
+ * ### This used to claim something that was not true
+ *
+ * It was called `theGinormousSlideLeavesThroughItsDoor`, and it asserted that
+ * the chute passed through a hole cut in the south curtain wall, citing
+ * `SLIDE_PLAN.facadeDoorMinX/MaxX` as the value both the plan and the masonry
+ * read. **No such hole is ever cut.** `SLIDE_PLAN`'s door numbers reach
+ * `ShellPlan.slideGap`, whose only two readers are inside `wallShapes` and
+ * `buildWindows` — and `BuildingShell` early-returns into `buildCastle` on the
+ * facade branch, which cuts the front entrance and nothing else, while the
+ * interior shell that *does* reach those builders sets `slideGap: null`. Both
+ * readers are unreachable, so the doorway existed only in the plan and in this
+ * test. Pre-existing rot, orphaned by the castle rewrite.
+ *
+ * The old clauses could not fail. One compared `SLIDE_PLAN`'s door span against
+ * `BUILDING_HALF_X` — both generator-side, and already guaranteed by
+ * `doorFitsTheWall`, which is rules against rules. The other compared the built
+ * chute against that same planned span, which is a number nothing builds from.
+ *
+ * ### What is true, measured
+ *
+ * The chute crosses the south wall plane at **y 14.84** on every one of the
+ * five seeds, and the tallest stone — the crenellations — tops out at
+ * **y 10.29**. What matters is the chute's *underside*, at 14.84 − 1.11 =
+ * **13.73 m**, so the air a rider actually has under them is **3.44 m** — not
+ * the 4.55 m the centre line clears by, which is the number this was first
+ * written up with. (Corrected in review. Two numbers describing one gap is the
+ * exact habit this branch has now been bitten by twice; the code below was
+ * always right, only the prose was loose.)
+ *
+ * So the honest guarantee is not "it goes through the hole" but "it goes over
+ * the top, and there is air under it", and that is what is asserted here.
+ *
+ * That is a guarantee worth holding: it is what keeps a child from riding down
+ * inside a wall. It fails the moment anyone lowers `START_Y`, raises
+ * `CASTLE_WALL_HEIGHT`, or gives the merlons another metre — none of which is
+ * far-fetched, and all of which currently pass unnoticed.
+ *
+ * Measured off the built chute pushed out through the scene graph into world
+ * space, against the built masonry's own world bounding boxes — never against
+ * `slide/plan.ts` or `CASTLE_WALL_HEIGHT`, which are the things under test.
+ */
+const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const castle = facts.castleFootprint;
+  const chute = facts.slideChute;
+
+  const first = chute[0];
+  const last = chute[chute.length - 1];
+  if (chute.length < 2 || !first || !last) {
+    complaints.push('the ginormous slide has no chute, so it leaves over nothing');
+    return complaints;
+  }
+
+  // --- 1. the chute starts over the castle, not in mid-air beyond it --------
+  //
+  // In plan view. The mouth is carried back over the footprint on purpose, so
+  // the ride begins on the tower rather than floating off the south face. The
+  // castle's south face is +Z.
+  const wallZ = castle.z + castle.halfZ;
+  if (first[2] > wallZ) {
+    complaints.push(
+      `the ginormous slide's mouth starts ${(first[2] - wallZ).toFixed(2)} m beyond the ` +
+        `castle's south wall (chute z ${first[2].toFixed(2)}, wall z ${wallZ.toFixed(2)}) ` +
+        '— it should start back over the castle, so the ride begins on the tower',
+    );
+  }
+
+  // --- 2. it does cross the south side, so there is something to measure ----
+  //
+  // Interpolates across the span that straddles the wall plane rather than
+  // taking the nearest sample: at 0.4 m spacing the nearest sample can sit a
+  // third of a metre to either side, which is most of the clearance measured.
+  let crossing: { x: number; y: number } | null = null;
+  for (let i = 1; i < chute.length; i += 1) {
+    const before = chute[i - 1];
+    const here = chute[i];
+    if (!before || !here) continue;
+    if (before[2] > wallZ || here[2] < wallZ) continue;
+    const span = here[2] - before[2];
+    // Guard the degenerate case: a chute running exactly along the wall plane
+    // would divide by zero and hand the message a NaN, and NaN compares false
+    // against every threshold — which would make this clause incapable of
+    // failing while still looking like a test.
+    const t = Math.abs(span) < 1e-9 ? 0 : (wallZ - before[2]) / span;
+    crossing = {
+      x: before[0] + (here[0] - before[0]) * t,
+      y: before[1] + (here[1] - before[1]) * t,
+    };
+    break;
+  }
+
+  if (crossing === null) {
+    complaints.push(
+      `the ginormous slide never crosses its own south wall (wall z ${wallZ.toFixed(2)}, ` +
+        `chute runs z ${first[2].toFixed(2)}…${last[2].toFixed(2)}) — it does not leave ` +
+        'the castle on the side it is built to leave on',
+    );
+    return complaints;
+  }
+
+  // --- 3. and where it crosses, the stone is below it -----------------------
+  //
+  // The clause that carries the weight. The underside of the chute — its centre
+  // line less the half-envelope a rider sits in — must be above the highest
+  // masonry, or the ride passes through the battlements.
+  const underside = crossing.y - CHUTE_HALF_WIDTH;
+  const stone = facts.castleMasonryTopY;
+
+  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopY`
+  // is a max seeded with `-Infinity` over meshes picked out by name, so if the
+  // castle is ever renamed out from under it the fact arrives as `-Infinity` and
+  // `underside < -Infinity` is false for *every conceivable chute* — this
+  // invariant would go quietly green while measuring nothing at all. Caught in
+  // review by breaking the name pattern: the canonical suite stayed 28/28 green.
+  //
+  // Note the polarity is the opposite of
+  // {@link theGinormousSlideMissesTheCastleTowers}'s `Number.isFinite(worstGap)`
+  // guard, and the reason is worth having, because the two look contradictory
+  // side by side. That invariant can read `Infinity` as a *genuine pass* — the
+  // chute simply never came near a tower — **only because it has already ruled
+  // out the disarmed case separately**, with its own `towers.length === 0`
+  // complaint. Two possible meanings, two checks.
+  //
+  // Here there is only one number to guard, so one check does both jobs: an
+  // unmatched name and a missing castle are the same failure and read the same
+  // way. Neither guard should be "made consistent" with the other by removing
+  // it — they are opposite for that reason, not by accident.
+  if (!Number.isFinite(stone)) {
+    complaints.push(
+      'no castle stonework was found in the built park at all, so the check that ' +
+        'keeps the ginormous slide out of the battlements measured nothing. Either ' +
+        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopY` ' +
+        'looks for have changed and this invariant has been silently switched off',
+    );
+    return complaints;
+  }
+
+  if (underside < stone) {
+    complaints.push(
+      `the ginormous slide crosses the castle's south wall at world ` +
+        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}) — its underside is at ` +
+        `${underside.toFixed(2)} m and the stonework tops out at ${stone.toFixed(2)} m, so ` +
+        `the chute is ${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
+        'cuts a hole for it: `slideGap` reaches no geometry, so there is solid stone here',
+    );
+  }
+
+  return complaints;
+};
+
+/**
+ * **The ginormous slide does not go through the castle's corner towers.**
+ *
+ * Jim rode it and found it clipping through them; this is that, stated as
+ * something the park proves on every seed. It fails the build, which is what he
+ * asked for.
+ *
+ * ### Why nothing caught it
+ *
+ * `slide/plan.ts` cannot use the standard `clearOfPlots` predicate — the
+ * castle's plot circle and the ball pit's overlap, so no point between the two
+ * satisfies it, and a ride whose whole job is joining them would never solve.
+ * It therefore exempts exactly those two plots and re-imposes the castle
+ * "precisely, as its actual footprint rectangle".
+ *
+ * A footprint rectangle does not contain the towers. They stand at
+ * `(±outerX, ±outerZ)` — *outside* the rectangle by half a wall thickness — and
+ * bulge 2.05–2.45 m further out again. So the exemption was narrow and
+ * deliberate exactly as intended, and the thing re-imposed in its place was
+ * still missing the one solid the chute passes closest to. Measured on the
+ * canonical seed the chute ran **2.02 m inside a tower body**, 87 consecutive
+ * samples buried, while every existing invariant stayed green.
+ *
+ * ### What it measures
+ *
+ * The built chute against the built towers — both read out of the scene graph,
+ * neither taken from the plan. The threshold is the **rider's own envelope**
+ * (`CHUTE_ENVELOPE`, derived from the trough's cross-section) rather than
+ * `CORRIDOR_RADIUS`, which is the wider margin the generator steers by: a
+ * collision test owes the truth about where the trough physically is, not about
+ * where the search preferred to keep it.
+ *
+ * A tower is a solid of revolution, so testing the centre line against
+ * `towerRadius + halfWidth` is exact — it is a swept disc in closed form, and
+ * strictly better here than firing a ring of probe rays and hoping the gaps
+ * between them are small enough to catch a thin obstacle.
+ */
+const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const towers = facts.castleTowers;
+  const envelope = facts.chuteEnvelope;
+
+  if (towers.length === 0) {
+    complaints.push(
+      'no castle towers were found in the built park, so this invariant is ' +
+        'measuring nothing — the tower meshes have been renamed or removed',
+    );
+    return complaints;
+  }
+  if (chute.length < 2) {
+    complaints.push('the ginormous slide has no chute to check against the towers');
+    return complaints;
+  }
+
+  let worstGap = Infinity;
+  let worstTower = '';
+  let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
+  let buried = 0;
+
+  for (const point of chute) {
+    const [px, py, pz] = point;
+    for (const tower of towers) {
+      // The chute occupies a band around its centre line, so it fouls the
+      // tower's height range if either edge of that band is inside it.
+      if (py + envelope.above < tower.bottomY) continue;
+      if (py - envelope.below > tower.topY) continue;
+
+      // Radius where the two actually meet in height, so a cone is measured at
+      // the height the chute passes it rather than at its widest.
+      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
+      const span = tower.topY - tower.bottomY;
+      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
+      const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
+
+      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
+      if (gap < worstGap) {
+        worstGap = gap;
+        worstTower = tower.name;
+        worstAt = point;
+      }
+      if (gap < 0) buried += 1;
+    }
+  }
+
+  // `worstGap` stays Infinity only if the chute never shares a height with any
+  // tower, which is a clean pass rather than a missing measurement — but it must
+  // never reach a message, because Infinity and NaN compare false against every
+  // threshold and would make this look green while testing nothing.
+  if (Number.isFinite(worstGap) && worstGap < 0) {
+    complaints.push(
+      `the ginormous slide passes ${(-worstGap).toFixed(2)} m inside ${worstTower} at ` +
+        `(${worstAt[0].toFixed(2)}, ${worstAt[1].toFixed(2)}, ${worstAt[2].toFixed(2)}) ` +
+        `— ${buried} of ${chute.length} sampled points are inside a tower, and a child ` +
+        'rides through solid masonry',
+    );
+  }
+
+  return complaints;
+};
+
+/**
+ * **Every trackside camera on the ginormous slide can see the bit of ride it
+ * was stood beside, on every seed.**
+ *
+ * The slide cuts between a chase camera and three trackside ones
+ * (`slide/cameras.ts`, and Jim's ruling quoted there). Those three are placed
+ * from the **solved route**, so on a procgen ride they land somewhere different
+ * every time — and a camera that ends up looking at the back of a tower, buried
+ * in a hill, or too shallow to see over the chute's own hand-rail is a stretch
+ * of the ride where a child cannot see herself.
+ *
+ * `check:slide-rider` already rides the canonical seed with a real `Player` and
+ * measures her in pixels. This is the other four seeds, and it asks a different
+ * question: not *is the rider legible* but *is the camera anywhere sensible*.
+ * That split is deliberate — the pixel check is far too slow to run five times,
+ * and a placement fault shows up in geometry long before it needs a rider.
+ *
+ * Four clauses, and the first is the one the brief called for:
+ *
+ * 1. **Every part of the ride is covered by some camera.** Measured as
+ *    arithmetic on the built plan: the spans must start at 0, end at 1, and
+ *    meet exactly — no gap where the game has no shot, and no overlap where two
+ *    disagree about which is live.
+ * 2. **Nothing stands between a camera and the chute it covers**, sampled
+ *    across that camera's whole beat against the built chute and the built
+ *    castle. This is the clause the measured 50° elevation threshold exists for.
+ * 3. **No camera is underground.** A lens below the hills renders dirt.
+ * 4. **There is more than one shot.** A plan that collapsed to a single chase
+ *    beat would satisfy 1–3 vacuously while quietly undoing the whole feature.
+ */
+const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const spans = facts.slideShotSpans;
+  const cameras = facts.slideCameras;
+
+  // Anti-vacuity first, in the tradition of `castleMasonryTopY`'s guard: an
+  // empty plan must be a complaint, not a silent pass over nothing.
+  if (spans.length < 2) {
+    complaints.push(
+      `the ginormous slide's shot plan has ${spans.length} beat(s) — it is meant to cut ` +
+        'between a chase camera and trackside ones, and with fewer than two it cuts nowhere',
+    );
+    return complaints;
+  }
+  if (cameras.length === 0) {
+    complaints.push(
+      'the ginormous slide has no trackside cameras at all, so the chase camera — which ' +
+        'shows a rider lying feet-first as a floating head, by construction — is the only ' +
+        'view of the whole ride',
+    );
+    return complaints;
+  }
+
+  // 1. The beats tile the ride.
+  const first = spans[0];
+  const last = spans[spans.length - 1];
+  if (first && Math.abs(first.from) > 1e-9) {
+    complaints.push(
+      `the ginormous slide's first shot starts at ${first.from.toFixed(4)} of the way down ` +
+        'rather than at the top — the opening of the ride has no camera',
+    );
+  }
+  if (last && Math.abs(last.to - 1) > 1e-9) {
+    complaints.push(
+      `the ginormous slide's last shot ends at ${last.to.toFixed(4)} rather than at the ` +
+        'bottom — the end of the ride has no camera',
+    );
+  }
+  for (let i = 1; i < spans.length; i += 1) {
+    const previous = spans[i - 1];
+    const current = spans[i];
+    if (!previous || !current) continue;
+    const step = current.from - previous.to;
+    if (Math.abs(step) > 1e-9) {
+      complaints.push(
+        `beat ${i - 1} of the ginormous slide ends at ${previous.to.toFixed(4)} and beat ${i} ` +
+          `starts at ${current.from.toFixed(4)} — ${step > 0 ? 'a gap where no camera has ' +
+          'her' : 'an overlap where two shots each think they are live'}`,
+      );
+    }
+  }
+
+  // 2 and 3. Each camera can see its own beat, and is above the ground.
+  for (const camera of cameras) {
+    if (camera.samples === 0) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} was never sampled, so its sight line ` +
+          'proves nothing',
+      );
+      continue;
+    }
+    if (camera.blocked > 0) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat}, at (${camera.eye[0].toFixed(1)}, ` +
+          `${camera.eye[1].toFixed(1)}, ${camera.eye[2].toFixed(1)}), cannot see the chute ` +
+          `for ${camera.blocked} of ${camera.samples} samples across its own beat — the ` +
+          'chute or the castle is in the way. If it is the near hand-rail, the elevation ' +
+          'in `slide/cameras.ts` is too shallow: the sweep recorded there puts the ' +
+          'threshold at 50°',
+      );
+    }
+    // Clear of the grass by at least the chute's own half-width. Taken from the
+    // game's built profile rather than invented here, in the spirit of the rule
+    // about thresholds: it is a length this ride already has an opinion about,
+    // and it is comfortably more than a lens needs to be out of the dirt. The
+    // three cameras measure 20.0, 13.8 and 6.7 m on the canonical seed, so this
+    // fires on a camera that has genuinely gone into a hill rather than on one
+    // that is merely low.
+    const air = camera.eye[1] - camera.groundY;
+    const needed = facts.chuteEnvelope.halfWidth;
+    if (air < needed) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} sits ${air.toFixed(2)} m over the ` +
+          `ground against ${needed.toFixed(2)} m needed — it is in the hillside, and ` +
+          'renders dirt',
+      );
+    }
+  }
+
+  return complaints;
+};
+
+/**
  * **The Sky Cruiser fits through the castle it flies into.** (Issue #113.)
  *
  * The other cruiser invariants ask whether the loop *misses* things. This one
@@ -1545,6 +2178,339 @@ const skyCruiserTurnsGently: Invariant = (facts) => {
  * never renders and every `matrixWorld` was still the identity.
  */
 const skyCruiserFitsThroughTheCastle: Invariant = (facts) => facts.castlePass.complaints;
+
+/**
+ * **A child boarding the ginormous slide is put down on the chute**, not a
+ * castle's width from it.
+ *
+ * The seat, the grown-up and the teleport all position themselves from
+ * `SlideRide.pointAt`, and all three are parented alongside the chute so those
+ * are the same coordinates. `Building.ts` says so in a comment; this is the
+ * part that checks it is still true.
+ *
+ * It exists because the chute had to move out of the castle's plot group and up
+ * to park level — a ride spanning two plots is the park's content, and
+ * `check:park` measures everything under an anchor against the radius that
+ * anchor promises. Moving the chute alone would have left three riders behind
+ * in the castle's frame, each of them floating about 26 m from the trough,
+ * while the slide itself still looked perfect from every angle. So they moved
+ * together, and this is the assertion that they still travel together.
+ *
+ * Comparing `pointAt` straight against `pointAt` pushed through the scene graph
+ * is the whole test: at park level the group is the identity and the two are
+ * the same number. It needs no knowledge of *which* group is correct, so it
+ * keeps working if the park is restructured again for some other reason.
+ */
+const theSlideRiderSitsOnTheChute: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const { local, world } = facts.slideRiderFrame;
+
+  if (local.length === 0 || local.length !== world.length) {
+    complaints.push(
+      `the ginormous slide's rider frame was sampled ${local.length} times locally ` +
+        `and ${world.length} times in world space — nothing can be concluded`,
+    );
+    return complaints;
+  }
+
+  let worst = 0;
+  let worstAt = 0;
+  for (let i = 0; i < local.length; i += 1) {
+    const a = local[i]!;
+    const b = world[i]!;
+    const drift = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    if (drift > worst) {
+      worst = drift;
+      worstAt = i;
+    }
+  }
+
+  // Millimetres, not zero: these are floating-point transforms of the same
+  // number, and the failure this guards against is metres wide.
+  if (worst > 0.001) {
+    const a = local[worstAt]!;
+    const b = world[worstAt]!;
+    complaints.push(
+      `the ginormous slide's riders would sit ${worst.toFixed(2)} m off the chute — ` +
+        `${(worstAt / (local.length - 1) * 100).toFixed(0)}% along, \`pointAt\` gives ` +
+        `(${a[0].toFixed(2)}, ${a[1].toFixed(2)}, ${a[2].toFixed(2)}) but the chute is ` +
+        `drawn at (${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)}) — the seat, ` +
+        'the grown-up and the boarding teleport all read the first of those',
+    );
+  }
+
+  return complaints;
+};
+
+/**
+ * **About half the ginormous slide's chute is see-through** (#228).
+ *
+ * Jim: *"the slide should have a mix of transparent and opaque sections to see
+ * the part through it"*, roughly 50/50.
+ *
+ * #228 asks whoever builds this to say plainly whether it needs an invariant,
+ * rather than leaving it unstated. It does, and this is why: the split is a
+ * function of the chute's **length**, and the chute's length is procedural. A
+ * ride that came out shorter than one band period on some future seed would
+ * build an empty see-through mesh and be uniformly opaque again — a feature
+ * silently absent on one seed, which is precisely the class of failure this
+ * suite exists to catch and the one a reviewer reading the diff cannot.
+ *
+ * What is **not** asserted here, because it is structural rather than
+ * measurable: that the two meshes tile the sweep exactly. `buildChute` is
+ * called with a predicate and its negation, so every quad lands in exactly one
+ * of the two by construction — there is no arithmetic that could leave a hole
+ * in the slide for a test to find. (Checked once by hand on a 61 m probe:
+ * 2520 + 2340 = 4860 vertices, exactly a full sweep.)
+ *
+ * The band is deliberately wide. This is an art decision Jim will tune by
+ * looking at it, and an invariant that pinned it to 0.5 would fail the moment
+ * he said "a bit more glass" — it is here to catch *absent*, not to police
+ * taste.
+ */
+const theChuteIsHalfSeeThrough: Invariant = (facts) => {
+  const { solid, clear } = facts.slideChuteBands;
+  const total = solid + clear;
+
+  if (total === 0) {
+    return ['the ginormous slide built no chute at all — neither mesh has any geometry'];
+  }
+  if (clear === 0) {
+    return [
+      'the ginormous slide is entirely opaque: its see-through mesh has no geometry, ' +
+        `against ${solid} vertices of solid chute — issue #228 asked for about half of it ` +
+        'to be see-through, and on this seed none of it is',
+    ];
+  }
+  if (solid === 0) {
+    return [
+      'the ginormous slide is entirely see-through: its solid mesh has no geometry, ' +
+        `against ${clear} vertices of clear chute — it is meant to be a mix`,
+    ];
+  }
+
+  const share = clear / total;
+  if (share < 0.35 || share > 0.65) {
+    return [
+      `the ginormous slide is ${(share * 100).toFixed(0)}% see-through ` +
+        `(${clear} clear vertices against ${solid} solid) — issue #228 asked for about ` +
+        'half and half, and this is far enough off that the pattern has stopped reading ' +
+        'as alternating',
+    ];
+  }
+
+  return [];
+};
+
+/**
+ * How tall a child is, standing, in metres.
+ *
+ * ART_DIRECTION.md §4: the player kid is 2.12 m after the cartoon pass. Stated
+ * here rather than imported for the reason {@link CHUTE_HALF_WIDTH} is — and
+ * `scripts/check-statue-occlusion.mts` states the same number for the same
+ * reason, which is the other place in this repo that asks "can she be seen
+ * through something".
+ *
+ * Unlike {@link CHUTE_HALF_WIDTH}, `PLAYER_RADIUS` **is** added on top wherever
+ * this is used: a rider on the chute is contained by the trough, but a child
+ * standing in the ball pit is a free body next to a structure, and her shoulder
+ * is as able to be inside the chute as her nose.
+ */
+const RIDER_HEIGHT = 2.12;
+
+/**
+ * **A child finishes the ginormous slide in the balls, and not inside the
+ * chute she has just come out of.**
+ *
+ * Jim, having ridden it on 5 August 2026: *"at the bottom of the slide, at the
+ * end of the ride, the player appears clipped into the slide, not in the ball
+ * pit like they should"*. Both halves were true and both had one cause — the
+ * dismount was computed by `planExit()`, which fans bearings out from the pit
+ * and has never been told where the chute is (see `slide/landing.ts`).
+ *
+ * This is the guard that stops it coming back, and it is deliberately written
+ * as the **two** things Jim said rather than one: in the pit, *and* clear of
+ * the chute. Either alone passes for the wrong reason. A landing far out on
+ * the grass is clear of the chute; a landing dead under the mouth is inside the
+ * pit.
+ *
+ * ### Why this measures a column and not a point
+ *
+ * `finishRide` hands her back `LANDING_DROP` above the balls and lets gravity
+ * close the gap, so there is no single height at which she exists. The
+ * clearance is taken over the whole column she occupies between being handed
+ * back and coming to rest — feet on the balls at the bottom, head at the top of
+ * the drop — which is conservative in the only direction that matters.
+ *
+ * Thresholds come from the built trough (`CHUTE_ENVELOPE`, via
+ * `riderClearanceFromChute`) and never from `slide/plan.ts`'s `CORRIDOR_RADIUS`,
+ * which is the wider margin the *generator* steers by: measuring against the
+ * generator's own target would report a clip half a metre before there is one,
+ * and the temptation would then be to loosen the wrong number.
+ */
+const theSlideRiderLandsInTheBalls: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const landing = facts.slideLanding;
+  const chute = facts.slideChute;
+
+  // Anti-vacuity, in the tradition of `castleMasonryTopY`'s guard: every clause
+  // below is a comparison, and a comparison against a missing measurement is a
+  // pass that measured nothing.
+  if (chute.length === 0) {
+    return ['the ginormous slide has no chute, so where it lands cannot be measured'];
+  }
+  if (
+    !Number.isFinite(landing.x) ||
+    !Number.isFinite(landing.z) ||
+    !Number.isFinite(landing.groundY) ||
+    !Number.isFinite(landing.pitRadius)
+  ) {
+    return [
+      'the ginormous slide’s landing could not be measured — ' +
+        `spot (${landing.x}, ${landing.z}), ground ${landing.groundY}, ` +
+        `pit radius ${landing.pitRadius}`,
+    ];
+  }
+
+  // 1. She is in the balls — all of her, not just her centre line.
+  const fromPitCentre = Math.hypot(landing.x - landing.pitX, landing.z - landing.pitZ);
+  if (fromPitCentre + PLAYER_RADIUS > landing.pitRadius) {
+    complaints.push(
+      `the ginormous slide puts a child down ${fromPitCentre.toFixed(2)} m from the ball ` +
+        `pit’s centre, and she is ${PLAYER_RADIUS} m wide, so she overhangs a pit of ` +
+        `radius ${landing.pitRadius} m by ` +
+        `${(fromPitCentre + PLAYER_RADIUS - landing.pitRadius).toFixed(2)} m — ` +
+        'the ride is supposed to land her in the balls',
+    );
+  }
+
+  // 2. And she is not inside the thing she just came out of. Measured against
+  //    every sample of the built chute, not only its last one: the route wraps
+  //    the castle and an earlier stretch passing over the pit would clip her
+  //    just as thoroughly as the mouth does.
+  let worstGap = Infinity;
+  let worstAt = -1;
+  for (let i = 0; i < chute.length; i += 1) {
+    const [cx, cy, cz] = chute[i]!;
+    const gap = riderClearanceFromChute(
+      landing.x,
+      landing.groundY,
+      landing.z,
+      // The whole column: the drop she is handed back at, plus her own height.
+      LANDING_DROP + RIDER_HEIGHT,
+      cx,
+      cy,
+      cz,
+    );
+    if (gap < worstGap) {
+      worstGap = gap;
+      worstAt = i;
+    }
+  }
+
+  if (!Number.isFinite(worstGap)) {
+    // Cannot happen with a non-empty chute, and says so rather than passing if
+    // it somehow does. Opposite polarity to `theSlideDoesNotClipTheTowers`'s
+    // `Infinity`, where "never came near one" is a genuine pass; here every
+    // sample is compared, so an infinity means no comparison happened.
+    return ['the ginormous slide’s landing was never compared against the chute'];
+  }
+
+  if (worstGap < 0) {
+    const [cx, cy, cz] = chute[worstAt]!;
+    complaints.push(
+      `the ginormous slide leaves a child ${(-worstGap).toFixed(2)} m inside its own chute ` +
+        `where it stops: she is put down at (${landing.x.toFixed(2)}, ${landing.z.toFixed(2)}) ` +
+        `standing on ${landing.groundY.toFixed(2)} m, and the chute runs through ` +
+        `(${cx.toFixed(2)}, ${cy.toFixed(2)}, ${cz.toFixed(2)}) — ` +
+        `${((worstAt / (chute.length - 1)) * 100).toFixed(0)}% along the ride`,
+    );
+  }
+
+  return complaints;
+};
+
+/**
+ * Air that must separate the ginormous slide from the Sky Cruiser, in metres.
+ *
+ * Decision 4's rail-over-rail figure. Stated here rather than imported from
+ * `slide/plan.ts` for the reason {@link CHUTE_HALF_WIDTH} is: importing the
+ * number the generator aimed at would prove only that it can reach its own
+ * target, and this file's job is to measure the park that was built.
+ */
+const CRUISER_AIR_REQUIRED = 5.5;
+
+/**
+ * Half-width of the Sky Cruiser's cart, as built: `CART_BODY_WIDTH` is 1.5 m.
+ *
+ * Stated rather than imported for the same reason as {@link CHUTE_HALF_WIDTH} —
+ * and unlike the chute's, this one is a *body* whose width is what sweeps past,
+ * so it is the right thing to add to the chute's half-width to ask whether two
+ * solids overlap rather than two centre lines.
+ */
+const CART_HALF_WIDTH = 0.75;
+
+/**
+ * **The ginormous slide keeps its air from the Sky Cruiser.**
+ *
+ * The chute crosses the cruiser's loop shortly after leaving the parapet and
+ * passes over the top of it — about 4 m of clearance is the whole reason the
+ * route is solvable at all, because at ground level there is roughly 2 m between
+ * the castle's east wall and the cruiser and the chute is 3.4 m wide.
+ *
+ * **This existed only as a throw at module load until 5 August 2026, which is
+ * why it is here now.** The slide's height at a point is a function of how far
+ * along it that point is *as a fraction of the whole*, and the whole is not
+ * known until the route is solved — so the search runs on an assumed length and
+ * `planSlide` iterates. That loop used to fall out of its pass limit and use the
+ * last route regardless, whose clearance had been checked against a different
+ * length's height profile. On seed 11, once #213 moved the cruiser, it built a
+ * 64.4 m ride from a search that had verified an 86 m one, and put the chute
+ * 1.15 m inside the cruiser's air at a spot the search had checked and passed.
+ *
+ * The failure mode is what matters here: it surfaced as the **whole park
+ * failing to construct**, because a module-load throw takes everything with it,
+ * and every other invariant for that seed reported "skipped" rather than
+ * "failed". A geometric fact about two rides belongs where a geometric fact
+ * about two rides is checked, on every seed, saying which two things are how
+ * close.
+ *
+ * Measured on the built chute against the built coaster curve — neither is the
+ * plan either of them was solved from.
+ */
+const theSlideKeepsItsAirFromTheCruiser: Invariant = (facts) => {
+  const chute = facts.slideChute;
+  if (chute.length === 0) return ['the ginormous slide has no chute to measure against the cruiser'];
+
+  const cruiser = facts.world.coaster.route;
+  let worst = Infinity;
+  let worstAt: readonly [number, number, number] | null = null;
+  let worstNear: { x: number; y: number; z: number } | null = null;
+
+  for (const point of chute) {
+    const near = cruiser.nearestPoint(point[0], point[2]);
+    // Only somewhere the two actually overlap in plan view can foul at all.
+    // Half the chute plus half the cart's envelope, so it is the solids being
+    // compared rather than two centre lines.
+    if (Math.hypot(near.x - point[0], near.z - point[2]) > CHUTE_HALF_WIDTH + CART_HALF_WIDTH) {
+      continue;
+    }
+    const vertical = Math.abs(near.y - point[1]);
+    if (vertical < worst) {
+      worst = vertical;
+      worstAt = point;
+      worstNear = { x: near.x, y: near.y, z: near.z };
+    }
+  }
+
+  if (!worstAt || !worstNear || worst >= CRUISER_AIR_REQUIRED) return [];
+  return [
+    `the ginormous slide passes ${worst.toFixed(2)} m from the Sky Cruiser, against ` +
+      `${CRUISER_AIR_REQUIRED} m required — chute at ${fmt([worstAt[0], worstAt[2]])} ` +
+      `y ${worstAt[1].toFixed(2)}, cruiser at ${fmt([worstNear.x, worstNear.z])} ` +
+      `y ${worstNear.y.toFixed(2)}`,
+  ];
+};
 
 /**
  * **Every park's Sky Cruiser flies through the castle, not round it.**
@@ -1764,6 +2730,34 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
   ['the Sky Cruiser built track turns as gently as it promises', skyCruiserTurnsGently],
+  [
+    'the ginormous slide goes downhill all the way, lands in the ball pit, ' +
+      'and never runs back inside the castle',
+    theGinormousSlideIsRideable,
+  ],
+  [
+    'the ginormous slide stands on legs a child can walk between',
+    theGinormousSlideStandsOnSomething,
+  ],
+  [
+    'the ginormous slide leaves the castle over the top of the battlements',
+    theGinormousSlideLeavesOverTheBattlements,
+  ],
+  [
+    'the ginormous slide does not clip the castle towers',
+    theGinormousSlideMissesTheCastleTowers,
+  ],
+  [
+    "the ginormous slide's cameras cover the whole ride and can see it",
+    theSlideTracksideCamerasCanSeeTheRide,
+  ],
+  ['a child boarding the ginormous slide is put down on the chute', theSlideRiderSitsOnTheChute],
+  [
+    'a child finishing the ginormous slide lands in the balls, clear of the chute',
+    theSlideRiderLandsInTheBalls,
+  ],
+  ['about half the ginormous slide’s chute is see-through', theChuteIsHalfSeeThrough],
+  ['the ginormous slide keeps its air from the Sky Cruiser', theSlideKeepsItsAirFromTheCruiser],
   ['the Sky Cruiser fits through the window it cut in the castle', skyCruiserFitsThroughTheCastle],
   ['the Sky Cruiser always flies through the castle', skyCruiserAlwaysFliesThroughTheCastle],
   [

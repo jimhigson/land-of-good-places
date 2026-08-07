@@ -54,6 +54,23 @@ import {
  * way. They are then validated exactly like any other piece, and rejected and
  * backtracked over exactly like any other piece. Landing on the start at a
  * matching tangent stops being a hope and becomes a structural property.
+ *
+ * ### Open routes are the same machine pointed somewhere else
+ *
+ * A ride that stops somewhere other than where it began — the ginormous slide,
+ * which starts at the castle roof and lands in the ball pit — is not a second
+ * algorithm. The only thing a loop does that an open route does not is choose
+ * its own destination: a loop's destination *is* its start. So an open brief
+ * supplies `endPoses`, and the approach corridor, the steering bias and the
+ * analytic finisher all aim at the chosen end pose instead of the start pose.
+ * Everything else — the vocabulary, the validation, the backtracking, the
+ * restart level — is untouched and shared.
+ *
+ * This matters beyond tidiness. The bug that prompted it (#118) was a slide
+ * that ended wherever its hand-authored coordinates ran out, which was inside
+ * the castle. Making the end pose a *required* input of an open brief means a
+ * route that stops somewhere useless is no longer something the search is able
+ * to return.
  */
 
 /**
@@ -111,16 +128,22 @@ export interface RouteInfluence {
   readonly weight: number;
 }
 
-/** The brief a caller hands in. Everything the search is allowed to know. */
-export interface RouteBrief {
+/**
+ * Everything common to a closed ride and an open one.
+ *
+ * Split out only so `closed` can discriminate the two below; every field here
+ * means exactly what it did when there was one brief type. {@link RouteInfluence}
+ * and {@link RouteBriefBase.satisfies} live here rather than on one half because
+ * neither has anything to do with whether a route comes back to where it began:
+ * an open route can want to pass near something exactly as a loop can.
+ */
+interface RouteBriefBase {
   /** Usually `PARK_SEED ^ someRideSalt`. */
   readonly seed: number;
   /** The pieces this ride may be built from. Encodes its minimum turn radius. */
   readonly vocabulary: readonly SegmentKind[];
-  /** Metres of track wanted. Closure is attempted from `closeAfter` of this. */
+  /** Metres of track wanted. Finishing is attempted from `CLOSE_AFTER` of this. */
   readonly desiredLength: number;
-  /** Does the route return to its start? */
-  readonly closed: boolean;
   /**
    * Where the route may begin, best first. This is the **outermost level of
    * the search**: when every route from one start pose fails, the next is
@@ -130,8 +153,27 @@ export interface RouteBrief {
    * station along the track until its platform is on clear ground.
    */
   readonly startPoses: readonly Pose2[];
-  /** Is a corridor of `radius` about (x, z) free of obstacles? Layout only. */
-  readonly clear: (x: number, z: number, radius: number) => boolean;
+  /**
+   * Is a corridor of `radius` about (x, z) free of obstacles? Layout only.
+   *
+   * `distanceAlong` is how many metres of track lie behind this point. Most
+   * rides ignore it — a tree is in the way wherever you meet it — and a plain
+   * three-argument predicate satisfies this type unchanged.
+   *
+   * It exists because a ride whose **height varies along its length** cannot
+   * otherwise say whether it is in the way of anything. The ginormous slide
+   * descends from the castle parapet to the ball pit and crosses the Sky
+   * Cruiser's loop on the way; height-blind, the only safe answer is "never go
+   * near the cruiser", and that answer makes the slide unsolvable — the gap
+   * between the castle's east wall and the cruiser is about 2 m, narrower than
+   * the chute. Knowing it is still 14 m up when it crosses turns an impossible
+   * route into an obvious one: it goes over the top.
+   *
+   * The search is still purely 2D. This hands the caller the one number it
+   * needs to answer a 3D question for itself, rather than teaching the search
+   * about height.
+   */
+  readonly clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean;
   readonly boundary: ParkBoundary;
   /** Half-width of track to keep clear of obstacles and the boundary. */
   readonly corridorRadius: number;
@@ -146,10 +188,23 @@ export interface RouteBrief {
   readonly selfClearance: number;
   /** Tightest radius any piece may have, including the closer's. */
   readonly minRadius: number;
+  /**
+   * How far behind the finish the approach corridor sits. Defaults to
+   * {@link APPROACH_DISTANCE}, which is tuned for a loop the size of the Sky
+   * Cruiser's.
+   *
+   * Worth setting for a **short** route. The corridor is what the search steers
+   * at so it arrives lined up rather than merely near, and 38 m behind the
+   * finish is a sensible fraction of a 216 m loop but most of a 60 m slide —
+   * which leaves the head aimed at a point it passes long before it is ready to
+   * finish, and the biarcs home then need radii the ride has banned. Left
+   * unset, nothing changes.
+   */
+  readonly approachDistance?: number;
   readonly budgets: {
     /** Candidate pieces tried at one joint before backing up. */
     readonly perJoint: number;
-    /** Start poses tried before giving up entirely. */
+    /** Attempts tried before giving up entirely. */
     readonly restarts: number;
   };
   /**
@@ -185,9 +240,55 @@ export interface RouteBrief {
   readonly satisfies?: (route: SolvedRailRoute) => boolean;
 }
 
+/** A ride that comes back to where it started: the Sky Cruiser, the train. */
+export interface ClosedRouteBrief extends RouteBriefBase {
+  readonly closed: true;
+}
+
+/**
+ * A ride that starts one place and stops somewhere else: the ginormous slide.
+ *
+ * `endPoses` is **required**, not optional, and that is the whole point. The
+ * bug this type exists to make unrepresentable (#118) was a slide that ran out
+ * wherever its hand-authored coordinates happened to stop — which turned out to
+ * be inside the castle, with a six-year-old stranded in it. An open route
+ * therefore cannot be *asked for* without saying where it is to end up, and the
+ * finisher lands on that pose at a matching tangent by the same analytic biarc
+ * that closes a loop. Where the ride puts you down stops being an emergent
+ * property of the search and becomes an input to it.
+ */
+export interface OpenRouteBrief extends RouteBriefBase {
+  readonly closed: false;
+  /**
+   * Where the route may end, best first. Paired with `startPoses` to form the
+   * outermost level of the search, so a ride whose landing spot has a little
+   * freedom (anywhere on the rim of the ball pit) can trade one end against the
+   * other rather than failing.
+   */
+  readonly endPoses: readonly Pose2[];
+}
+
+/** The brief a caller hands in. Everything the search is allowed to know. */
+export type RouteBrief = ClosedRouteBrief | OpenRouteBrief;
+
 /** What the search did, for the diagnostic on failure and the report on success. */
 export interface SolveReport {
-  /** How many start poses the brief offered. Zero is its own kind of failure. */
+  /**
+   * How many things the outermost level of the search had to try. Zero is its
+   * own kind of failure — a brief that could never have worked.
+   *
+   * **Attempts, not start poses**, and for an open route those differ. A loop's
+   * attempt is a start pose, so the two coincide and the name still reads true.
+   * An open route pairs every start with every end, and an attempt is one
+   * *pairing*: 85 starts against 29 landings is 2465 attempts, not 85.
+   *
+   * {@link startPoseIndex} indexes that same flat list, which is why this must
+   * be counted the same way. Set it from `brief.startPoses.length` and the two
+   * fields silently begin describing different lists — no type error, no failing
+   * test, just a report that is wrong. Recovering which door was actually chosen
+   * means `floor(startPoseIndex / endPoses.length)`, and that arithmetic is only
+   * checkable if the denominator here is the flat count.
+   */
   readonly startPoseCount: number;
   readonly startPoseIndex: number;
   readonly segmentCount: number;
@@ -347,19 +448,45 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   let restarts = 0;
   const rejected = { collision: 0, boundary: 0, selfClearance: 0, curvature: 0 };
 
-  const restartLimit = Math.min(brief.budgets.restarts, brief.startPoses.length);
+  /**
+   * The outermost level of the search, flattened.
+   *
+   * A closed loop finishes where it started, so an attempt is just a start
+   * pose. An open route finishes somewhere else, so an attempt is a (start,
+   * end) pair and every pairing is a distinct thing to try. Flattening the two
+   * cases into one list keeps the search below identical for both — there is no
+   * second loop and no second exit path to keep in step.
+   */
+  const attempts: { readonly start: Pose2; readonly finish: Pose2 }[] = [];
+  if (brief.closed) {
+    for (const pose of brief.startPoses) attempts.push({ start: pose, finish: pose });
+  } else {
+    for (const start of brief.startPoses) {
+      for (const finish of brief.endPoses) attempts.push({ start, finish });
+    }
+  }
+
+  const restartLimit = Math.min(brief.budgets.restarts, attempts.length);
 
   for (let startIndex = 0; startIndex < restartLimit; startIndex += 1) {
     restarts = startIndex;
-    const startPose = brief.startPoses[startIndex];
-    if (!startPose) continue;
+    const attempt = attempts[startIndex];
+    if (!attempt) continue;
+    const startPose = attempt.start;
+    /**
+     * Where this attempt is trying to arrive: the start pose again for a loop,
+     * the chosen end pose for an open route. Everything downstream that used to
+     * say `startPose` because "the end is the start" says this instead.
+     */
+    const finishPose = attempt.finish;
 
     // Accepted pieces, and the samples they contributed, so self-clearance is
     // measured against the track that was actually laid rather than the poses
     // it was laid from.
     /**
      * The approach corridor: a pose sitting {@link APPROACH_DISTANCE} metres
-     * *behind* the start, facing the same way.
+     * *behind* the finish, facing the same way. For a loop the finish is the
+     * start, which is the case this was originally written for.
      *
      * Steering at the start itself is the obvious thing and it does not work.
      * The head duly arrives near home — within 7 m, measured — but pointing
@@ -374,14 +501,13 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
      * poses that are already nearly collinear — which is exactly the case a
      * biarc handles with a gentle radius.
      */
-    const approach: Pose2 = brief.closed
-      ? {
-          x: startPose.x - startPose.hx * APPROACH_DISTANCE,
-          z: startPose.z - startPose.hz * APPROACH_DISTANCE,
-          hx: startPose.hx,
-          hz: startPose.hz,
-        }
-      : startPose;
+    const approachDistance = brief.approachDistance ?? APPROACH_DISTANCE;
+    const approach: Pose2 = {
+      x: finishPose.x - finishPose.hx * approachDistance,
+      z: finishPose.z - finishPose.hz * approachDistance,
+      hx: finishPose.hx,
+      hz: finishPose.hz,
+    };
 
     const chosen: CubicSegment[] = [];
     const sampleCounts: number[] = [];
@@ -449,8 +575,11 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
             // The track immediately behind the head is not a collision, it is
             // where we just came from.
             if (s - earlier.s < SELF_IGNORE_ARC) continue;
-            // A closer is aiming at the start pose; the start is not an obstacle.
-            if (closing && earlier.s < SELF_IGNORE_ARC) continue;
+            // A loop's closer is aiming at the start pose, so the start is not
+            // an obstacle to it. An *open* route's finisher aims somewhere else
+            // entirely, and its own start is an ordinary piece of track it has
+            // no business running into — so this relaxation stays with loops.
+            if (closing && brief.closed && earlier.s < SELF_IGNORE_ARC) continue;
             if (Math.hypot(x - earlier.x, z - earlier.z) < brief.selfClearance) return false;
           }
         }
@@ -475,7 +604,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
         const t = i / steps;
         cubicPoint(seg, t, point);
         const s = accumulated + seg.length * t;
-        if (!brief.clear(point.x, point.z, brief.corridorRadius)) {
+        if (!brief.clear(point.x, point.z, brief.corridorRadius, s)) {
           rejected.collision += 1;
           return null;
         }
@@ -542,12 +671,12 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       return out;
     };
 
-    const tryClose = (): { seg: CubicSegment; samples: Sample[] }[] | null => {
+    const tryFinish = (): { seg: CubicSegment; samples: Sample[] }[] | null => {
       closerAttempts += 1;
       const head = headPose();
 
       // A biarc straight home, gentlest first.
-      for (const segs of chainFor(head, startPose, 'closer')) {
+      for (const segs of chainFor(head, finishPose, 'closer')) {
         const taken = tryChain(segs);
         if (taken) return taken;
       }
@@ -555,12 +684,12 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       // Nothing direct fits, so swing wide: go via a seeded intermediate pose
       // and biarc each half. This is where an obstacle sitting between the head
       // and home gets gone around.
-      const span = Math.hypot(startPose.x - head.x, startPose.z - head.z) || 1;
+      const span = Math.hypot(finishPose.x - head.x, finishPose.z - head.z) || 1;
       if (span > VIA_MAX_GAP) return null;
-      const midX = (head.x + startPose.x) / 2;
-      const midZ = (head.z + startPose.z) / 2;
-      const alongX = (startPose.x - head.x) / span;
-      const alongZ = (startPose.z - head.z) / span;
+      const midX = (head.x + finishPose.x) / 2;
+      const midZ = (head.z + finishPose.z) / 2;
+      const alongX = (finishPose.x - head.x) / span;
+      const alongZ = (finishPose.z - head.z) / span;
 
       for (let attempt = 0; attempt < CLOSER_VIA_TRIES; attempt += 1) {
         const sideways = rng.range(-span * 0.7, span * 0.7);
@@ -579,7 +708,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
           if (!takenFirst) continue;
           for (const { seg, samples: produced } of takenFirst) accept(seg, produced);
           let result: { seg: CubicSegment; samples: Sample[] }[] | null = null;
-          for (const secondHalf of chainFor(via, startPose, 'closerB')) {
+          for (const secondHalf of chainFor(via, finishPose, 'closerB')) {
             const takenSecond = tryChain(secondHalf);
             if (takenSecond) {
               result = [...takenFirst, ...takenSecond];
@@ -641,7 +770,23 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     const scoreOf = (seg: CubicSegment, wanted: readonly RouteInfluence[]): number => {
       const jitter = rng.unit() * 12;
       const pull = pullOf(seg, wanted);
-      if (!brief.closed || accumulated / brief.desiredLength <= BIAS_FROM) return jitter + pull;
+      // No `!brief.closed` here, and that is not an oversight of the #213 merge.
+      // Before open routes were first class this read `!brief.closed || …`,
+      // which sent an open route down the jitter-only path *always*: it never
+      // scored against the approach corridor, because it had no corridor to
+      // score against. #118 gave it one, aimed at its chosen end pose, and the
+      // whole point is that an open route now steers for its finish exactly as
+      // a loop steers for its start. Restoring the guard switches that steering
+      // back off: the route still solves, it just stops aiming.
+      //
+      // **Do not "restore" it.** This comment used to say nothing would fail,
+      // which was an invitation to try — and was wrong. Measured in review: with
+      // the guard back, `the ginormous slide stands on legs a child can walk
+      // between` fails on seed 5, because the unaimed route reshapes and stands
+      // on 0 legs where 3 are wanted. But that is one seed catching it by luck,
+      // not a guard rail: the other four stay green, so a change made here that
+      // looks fine on the canonical seed is exactly how this gets switched off.
+      if (accumulated / brief.desiredLength <= BIAS_FROM) return jitter + pull;
       const end = endPose(seg);
       const dx = approach.x - end.x;
       const dz = approach.z - end.z;
@@ -676,12 +821,12 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       if (retries[depth] === undefined) retries[depth] = 0;
       if (closerTried[depth] === undefined) closerTried[depth] = false;
 
-      // Closure is tried once per fresh arrival at a depth: backtracking to a
+      // Finishing is tried once per fresh arrival at a depth: backtracking to a
       // depth leaves its head pose unchanged, so a second attempt would be
       // asking the same question.
-      if (brief.closed && !closerTried[depth] && accumulated >= brief.desiredLength * CLOSE_AFTER) {
+      if (!closerTried[depth] && accumulated >= brief.desiredLength * CLOSE_AFTER) {
         closerTried[depth] = true;
-        const closer = tryClose();
+        const closer = tryFinish();
         if (closer) {
           // Accepted exactly as validated — never re-validated, because a
           // second pass could disagree and quietly drop a piece, leaving a
@@ -717,11 +862,11 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       }
 
       const shortlist = options[depth] ?? [];
-      const mustClose = brief.closed && accumulated >= brief.desiredLength * CLOSE_ONLY_AFTER;
+      const mustFinish = accumulated >= brief.desiredLength * CLOSE_ONLY_AFTER;
       const cursor = retries[depth] ?? 0;
       const exhausted = cursor >= Math.min(shortlist.length, brief.budgets.perJoint);
 
-      if (mustClose || exhausted) {
+      if (mustFinish || exhausted) {
         if (depth === 0) {
           alive = false;
           break;
@@ -745,8 +890,12 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     }
 
     if (solved) {
+      // `attempts.length`, never `brief.startPoses.length`. See the field's own
+      // doc on {@link SolveReport.startPoseCount}: `startPoseIndex` indexes the
+      // flat attempt list, so counting the other list makes the two describe
+      // different things and nothing anywhere would complain.
       const reportFor = (satisfied: boolean): SolveReport => ({
-        startPoseCount: brief.startPoses.length,
+        startPoseCount: attempts.length,
         startPoseIndex: startIndex,
         segmentCount: chosen.length,
         candidatesTried,
@@ -775,7 +924,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
             const keptLength = accumulated;
             makeFallback = (): SolvedRailRoute =>
               buildRoute(kept, brief.closed, {
-                startPoseCount: brief.startPoses.length,
+                startPoseCount: attempts.length,
                 startPoseIndex: keptIndex,
                 segmentCount: kept.length,
                 candidatesTried,
@@ -804,7 +953,7 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   if (makeFallback) return makeFallback();
 
   const report: SolveReport = {
-    startPoseCount: brief.startPoses.length,
+    startPoseCount: attempts.length,
     startPoseIndex: -1,
     segmentCount: 0,
     candidatesTried,
@@ -822,10 +971,14 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   // at all is a brief that could never have worked, and says to go and look at
   // how the caller is choosing them, not at the search.
   const level =
-    brief.startPoses.length === 0
-      ? 'the brief offered no admissible start poses at all — the outermost ' +
-        'level of the search was empty before it began'
-      : `all ${restartLimit} start poses were tried and every one dead-ended`;
+    attempts.length === 0
+      ? brief.closed
+        ? 'the brief offered no admissible start poses at all — the outermost ' +
+          'level of the search was empty before it began'
+        : `the brief offered ${brief.startPoses.length} start poses and ` +
+          `${brief.endPoses.length} end poses, which pair into no attempts at ` +
+          'all — the outermost level of the search was empty before it began'
+      : `all ${restartLimit} attempts were tried and every one dead-ended`;
   throw new RailRouteUnsolvable(
     `rail route did not solve: ${level}. ` +
       `${candidatesTried} candidate pieces, ${backtracks} backtracks, ` +
