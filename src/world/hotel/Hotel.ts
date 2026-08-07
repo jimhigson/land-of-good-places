@@ -209,6 +209,19 @@ export class Hotel implements GameSystem {
     this.player = player;
   }
 
+  /**
+   * The `/hotel` deep link: straight into the lobby from wherever she is.
+   * Safe from anywhere, the way the slide's own deep link is: the change
+   * happens behind a closed iris and teleports, so it does not care where
+   * she was standing when she asked.
+   */
+  requestEnterLobby(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    this.changeSpace(() => this.enterLobby());
+    return true;
+  }
+
   // ---------------------------------------------------------------- zones
 
   interactZones(): InteractZone[] {

@@ -709,6 +709,8 @@ export class Game {
       if (stallId === 'ginormousSlideWithGrownUp') {
         return this.world.building.requestBoardSlide(true);
       }
+      // Not a ride: the hotel's front door, for its deep link.
+      if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
       return false;
     };
 
