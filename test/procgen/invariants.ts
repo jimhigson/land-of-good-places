@@ -2782,21 +2782,35 @@ const theCatBusIsInThePark: Invariant = (facts) => {
  * on. `Scenery.ts` now asks them; this is what proves it kept asking.
  *
  * Measured against the **game's** numbers rather than the generator's target,
- * per this file's rule 2: what has to be true is that a child of
- * `PLAYER_RADIUS` can stand where the game spawns her and walk the route the
- * arrival walks her along, not that the scatter respected some particular
- * radius. The corridor sampled is the real one — from the bus's parked position
- * up to where she is handed the controls.
+ * per this file's rule 2: what has to be true is that a child set down here can
+ * stand and walk away, not that the scatter respected some particular radius.
+ * The corridor sampled is the real one — from where the bus parks, round to
+ * where she is handed the controls.
+ *
+ * **{@link DROP_OFF_CLEAR} was measured, not guessed.** A bare `PLAYER_RADIUS`
+ * was the first threshold written here and it was **vacuous**: with the keep-out
+ * deliberately removed, all five seeds still passed, because the nearest bush to
+ * her spawn on the canonical seed sits 0.94 m away — clear of her 0.62 m body
+ * and therefore, on that reading, fine. It is plainly not fine; she would spawn
+ * pressed into a bush. Two of five seeds go red at 1.5 m, which is the same
+ * clearance `Scenery.ts` already demands around a ride exit and for the same
+ * documented reason: 0.62 m of body plus the 0.85 m widest clump collider this
+ * park plants is 1.47 m, so 1.5 m is room to be set down and *step off*, rather
+ * than merely to be inserted.
  */
 const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
   const fouls: string[] = [];
 
-  // The route she is actually walked along, plus where she ends up standing.
-  const corridor: readonly (readonly [number, number])[] = [
-    [ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_STOP_Z],
-    [ENTRANCE_BUS_STOP_X, (ENTRANCE_BUS_STOP_Z + ENTRANCE_PLAYER_Z) / 2],
-    [ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z],
-  ];
+  // The route she is actually walked along, sampled every half metre, plus
+  // where the bus parks and where she ends up standing.
+  const corridor = samplePolyline(
+    [
+      [ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_STOP_Z],
+      [ENTRANCE_BUS_STOP_X + 2, ENTRANCE_PLAYER_Z],
+      [ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z],
+    ],
+    0.5,
+  );
 
   const planted: readonly { x: number; z: number; footprint: number; what: string }[] = [
     ...facts.trees.map((tree) => ({
@@ -2815,19 +2829,58 @@ const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
     })),
   ];
 
-  for (const [x, z] of corridor) {
-    for (const thing of planted) {
+  // Report the worst offender per plant rather than once per sampled point, or
+  // one bush in the road becomes forty near-identical complaints.
+  for (const thing of planted) {
+    let worst = Infinity;
+    let where: readonly [number, number] = [0, 0];
+    for (const [x, z] of corridor) {
       const gap = Math.hypot(thing.x - x, thing.z - z) - thing.footprint;
-      if (gap < PLAYER_RADIUS) {
-        fouls.push(
-          `a ${thing.what} at ${fmt([thing.x, thing.z])} reaches to ${gap.toFixed(2)} m of ` +
-            `${fmt([x, z])} on the walk in from the bus — a child needs ${PLAYER_RADIUS} m`,
-        );
+      if (gap < worst) {
+        worst = gap;
+        where = [x, z];
       }
+    }
+    if (worst < DROP_OFF_CLEAR) {
+      fouls.push(
+        `a ${thing.what} at ${fmt([thing.x, thing.z])} reaches to ${worst.toFixed(2)} m of ` +
+          `${fmt(where)} on the walk in from the cat bus — a child set down here needs ` +
+          `${DROP_OFF_CLEAR} m to stand and step off`,
+      );
     }
   }
   return fouls;
 };
+
+/**
+ * Room to be set down by a vehicle and walk away from it, in metres.
+ *
+ * `PLAYER_RADIUS` (0.62) of body, plus the 0.85 m collider of the widest bush
+ * clump this park plants, is 1.47 — so 1.5 m is the point at which a drop-off
+ * is somewhere you can *leave*, not merely somewhere you fit. `Scenery.ts`
+ * reaches the same number by the same argument for a ride exit.
+ */
+const DROP_OFF_CLEAR = 1.5;
+
+/** Points every `step` metres along a polyline, corners included. */
+function samplePolyline(
+  points: readonly (readonly [number, number])[],
+  step: number,
+): readonly (readonly [number, number])[] {
+  const out: (readonly [number, number])[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (!a || !b) continue;
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const count = Math.max(1, Math.ceil(length / step));
+    for (let n = 0; n <= count; n += 1) {
+      const t = n / count;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] as const);
+    }
+  }
+  return out;
+}
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
