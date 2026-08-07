@@ -270,6 +270,11 @@ export class Hotel implements GameSystem {
         standX: chair.x - Math.sin(chair.facing) * 0.9,
         standZ: chair.z - Math.cos(chair.facing) * 0.9,
         standRadius: 2.2,
+        // Sitting is a ride as far as the engine cares, and a zone is not
+        // selectable while riding unless it says so — the train's own 'Get
+        // off' precedent. Without this, sitting down eats every chip
+        // including 'Hop down' and a child is stuck at the table forever.
+        selectableWhileRiding: true,
         verb: 'Sit',
         sign: { title: 'Breakfast', note: 'sit down and choose!', glyph: '🥄' },
         actions: () =>
@@ -419,17 +424,20 @@ export class Hotel implements GameSystem {
   /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
   private travelTo(room: HotelRoom): void {
     this.controls.iris(() => {
+      const player = this.player;
+      if (player) {
+        // Behind the closed iris, like every other space change — posing
+        // her before it closed gave a visible cross-space camera whip
+        // (reviewer finding 2 on PR #247). The lift keeps the ride pose;
+        // only the world jumps. Land in the new room's alcove.
+        const x = room.originX - room.halfX - 1.2;
+        const z = room.originZ + (room.liftZ ?? 0);
+        player.setRidePose(x, 0, z, Math.PI / 2);
+      }
       this.boundTo(room);
       this.controls.snapCamera();
       this.spaceCooldown = SPACE_COOLDOWN;
     });
-    const player = this.player;
-    if (!player) return;
-    // The lift keeps the ride pose; only the world jumps. Land in the new
-    // room's alcove.
-    const x = room.originX - room.halfX - 1.2;
-    const z = room.originZ + (room.liftZ ?? 0);
-    player.setRidePose(x, 0, z, Math.PI / 2);
   }
 
   private boundTo(room: HotelRoom): void {

@@ -443,6 +443,15 @@ function coversWindow(free: readonly Interval[], from: number, to: number): bool
  * jumps when a gap closes entirely between bearings.
  */
 function snapToFree(free: readonly Interval[], value: number): number {
+  if (free.length === 0) {
+    // A bearing with no free interval at all would silently unconstrain the
+    // profile here and fail three invariants later as an unexplained red.
+    // Name it at the source instead (reviewer finding 6 on PR #247).
+    throw new Error(
+      'train route: a bearing has no free radial interval at all — the plots have ' +
+        'sealed the park annulus shut on this seed; loosen the manifest or re-roll',
+    );
+  }
   let best = value;
   let bestGap = Infinity;
   for (const [lo, hi] of free) {

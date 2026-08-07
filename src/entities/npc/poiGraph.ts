@@ -5,6 +5,7 @@ import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 import { isOnPath, PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
 import { STALL_STANDS } from '../../minigames/stallPlacement';
+import { NPC_RADIUS } from './NpcCharacter';
 import { TRAIN_PLAN } from '../../world/train/plan';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
@@ -104,10 +105,11 @@ const CLEARANCE = 0.7;
  * guaranteed-walkable ground; where it threads a level crossing's gap or
  * skirts a booth, its centreline legitimately passes within CLEARANCE of the
  * fence while a child on the 2.6 m ribbon has ample room. Off paving the
- * comfy margin stays — this is the NPC's own radius plus a whisker, only
+ * comfy margin stays — on paving the probe is the NPC's own radius less a
+ * float whisker (derived from {@link NPC_RADIUS}, never restated), only
  * granted where the park has already promised the ground is walkable.
  */
-const PAVED_CLEARANCE = 0.48;
+const PAVED_CLEARANCE = NPC_RADIUS - 0.02;
 
 /** Metres between clearance samples along a candidate edge. */
 const SAMPLE_STEP = 0.55;

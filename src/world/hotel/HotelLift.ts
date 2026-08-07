@@ -145,7 +145,10 @@ export class HotelLift implements LiftPanelSource {
         return;
       }
       case 'coming': {
-        if (!room) {
+        // She may wander off while it comes — in which case never mind
+        // (the castle lift's own rule). Grabbing her from across the room
+        // was the reviewer's first finding on PR #247.
+        if (!room || !this.deps.atLiftDoors(player)) {
           this.phase = 'away';
           return;
         }

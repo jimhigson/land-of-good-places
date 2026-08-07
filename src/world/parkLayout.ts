@@ -143,6 +143,17 @@ function solve(): ParkLayout {
   );
 }
 
+/**
+ * The bearing a camera-facing entry's counter (and so its doormat) faces,
+ * from its sign yaw. THE one owner of the formula — `stallPlacement.ts`
+ * builds the booth with it and this file places the doormat with it, which
+ * is exactly the pair that drifted apart before (two authorities for which
+ * side of a booth is the front; reviewer finding 4 on PR #247).
+ */
+export function counterFacing(signYaw: number): number {
+  return signYaw * 0.35;
+}
+
 /** One candidate position, with the spread score it was chosen on. */
 interface Candidate {
   readonly x: number;
@@ -204,7 +215,7 @@ function buildOnce(restart: number): ParkLayout | null {
     let dirX: number;
     let dirZ: number;
     if (entry.cameraFacing) {
-      const facing = signYaw * 0.35;
+      const facing = counterFacing(signYaw);
       dirX = Math.sin(facing);
       dirZ = Math.cos(facing);
     } else {

@@ -207,6 +207,12 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     boundingRadius: 9,
     band: { min: 10, max: 90 },
     near: { id: 'building', min: 28, max: 42 },
+    // Jim's ruling, 7 Aug: ALL assets face the camera. The tower's door, its
+    // awning and its doormat all derive from this one flag, exactly like a
+    // stall's counter — without it the solver faced the door at the park
+    // middle, which from most placements is straight away from the camera:
+    // a hotel you could walk all round without ever seeing a way in.
+    cameraFacing: true,
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   //

@@ -1,5 +1,5 @@
 import { ANCHORS_BY_ID } from '../world/anchors';
-import { placedEntry } from '../world/parkLayout';
+import { counterFacing, placedEntry } from '../world/parkLayout';
 
 /**
  * Where each stall stands, and where a child stands to be served.
@@ -59,7 +59,7 @@ export const STALL_STAND_DISTANCE = 3.1;
  */
 function placedStall(layoutId: string): StallPlacement {
   const p = placedEntry(layoutId);
-  return { position: [p.x, p.z], facing: p.signYaw * 0.35 };
+  return { position: [p.x, p.z], facing: counterFacing(p.signYaw) };
 }
 
 /**
