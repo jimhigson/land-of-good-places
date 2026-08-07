@@ -5,7 +5,7 @@ import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
-import { planSlideShots, SlideShotDirector } from '../slide/cameras';
+import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import { RideCamera } from '../../core/RideCamera';
 import { PALETTE } from '../../core/palette';
 import { TAU } from '../../core/mathUtils';
@@ -331,11 +331,30 @@ export class Building implements GameSystem {
    * so the opening shot is decided in exactly one place — `slide/cameras.ts`'s
    * shot plan — instead of being a fact about the plan that `Game` also has to
    * know. Change which shot the ride opens on and nothing here moves.
+   *
+   * **Before the first frame there is no live shot**, because {@link boardSlide}
+   * resets the director so a ride cannot inherit the shot the last one ended on.
+   * So this falls back to the plan's **first** shot rather than to the chase
+   * camera. Those are the same camera today — `BEATS` is even, so beat 0 is the
+   * chase — but writing the chase here would be the plan's opening restated as
+   * a second fact about it, and reversing the plan would then open on one camera
+   * and cut to the other a frame later. See CLAUDE.md, "Two definitions of one
+   * thing".
    */
   get rideCameraNow(): PerspectiveCamera | null {
-    const shot = this.slideShots.liveShot;
-    if (!shot) return this.rideView?.camera ?? null;
-    return shot.kind === 'trackside' ? this.slideShots.camera : (this.rideView?.camera ?? null);
+    return this.cameraForShot(this.slideShots.liveShot ?? this.slideShots.shots[0] ?? null);
+  }
+
+  /**
+   * Which of the ride's two cameras shows `shot`.
+   *
+   * The single owner of that mapping — {@link rideCameraNow} and
+   * {@link cutTheSlideShot} both ask it, so the shot the ride opens on and the
+   * shots it cuts to can never disagree about which lens they mean.
+   */
+  private cameraForShot(shot: SlideShot | null): PerspectiveCamera | null {
+    if (shot?.kind === 'trackside') return this.slideShots.camera;
+    return this.rideView?.camera ?? null;
   }
 
   /** The last camera handed out, so a cut is fired on the frame the shot changes. */
@@ -1077,8 +1096,7 @@ export class Building implements GameSystem {
     player.model.head.getWorldPosition(this.riderHead);
     const shot = this.slideShots.update(t, player.position, this.riderHead);
 
-    const camera =
-      shot.kind === 'trackside' ? this.slideShots.camera : (this.rideView?.camera ?? null);
+    const camera = this.cameraForShot(shot);
     if (!camera || camera === this.liveRideCamera) return;
     this.liveRideCamera = camera;
     this.onRideCameraCut?.(camera);

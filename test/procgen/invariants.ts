@@ -1806,6 +1806,70 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * strictly better here than firing a ring of probe rays and hoping the gaps
  * between them are small enough to catch a thin obstacle.
  */
+const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const towers = facts.castleTowers;
+  const envelope = facts.chuteEnvelope;
+
+  if (towers.length === 0) {
+    complaints.push(
+      'no castle towers were found in the built park, so this invariant is ' +
+        'measuring nothing — the tower meshes have been renamed or removed',
+    );
+    return complaints;
+  }
+  if (chute.length < 2) {
+    complaints.push('the ginormous slide has no chute to check against the towers');
+    return complaints;
+  }
+
+  let worstGap = Infinity;
+  let worstTower = '';
+  let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
+  let buried = 0;
+
+  for (const point of chute) {
+    const [px, py, pz] = point;
+    for (const tower of towers) {
+      // The chute occupies a band around its centre line, so it fouls the
+      // tower's height range if either edge of that band is inside it.
+      if (py + envelope.above < tower.bottomY) continue;
+      if (py - envelope.below > tower.topY) continue;
+
+      // Radius where the two actually meet in height, so a cone is measured at
+      // the height the chute passes it rather than at its widest.
+      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
+      const span = tower.topY - tower.bottomY;
+      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
+      const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
+
+      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
+      if (gap < worstGap) {
+        worstGap = gap;
+        worstTower = tower.name;
+        worstAt = point;
+      }
+      if (gap < 0) buried += 1;
+    }
+  }
+
+  // `worstGap` stays Infinity only if the chute never shares a height with any
+  // tower, which is a clean pass rather than a missing measurement — but it must
+  // never reach a message, because Infinity and NaN compare false against every
+  // threshold and would make this look green while testing nothing.
+  if (Number.isFinite(worstGap) && worstGap < 0) {
+    complaints.push(
+      `the ginormous slide passes ${(-worstGap).toFixed(2)} m inside ${worstTower} at ` +
+        `(${worstAt[0].toFixed(2)}, ${worstAt[1].toFixed(2)}, ${worstAt[2].toFixed(2)}) ` +
+        `— ${buried} of ${chute.length} sampled points are inside a tower, and a child ` +
+        'rides through solid masonry',
+    );
+  }
+
+  return complaints;
+};
+
 /**
  * **Every trackside camera on the ginormous slide can see the bit of ride it
  * was stood beside, on every seed.**
@@ -1923,70 +1987,6 @@ const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
           'renders dirt',
       );
     }
-  }
-
-  return complaints;
-};
-
-const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
-  const complaints: string[] = [];
-  const chute = facts.slideChute;
-  const towers = facts.castleTowers;
-  const envelope = facts.chuteEnvelope;
-
-  if (towers.length === 0) {
-    complaints.push(
-      'no castle towers were found in the built park, so this invariant is ' +
-        'measuring nothing — the tower meshes have been renamed or removed',
-    );
-    return complaints;
-  }
-  if (chute.length < 2) {
-    complaints.push('the ginormous slide has no chute to check against the towers');
-    return complaints;
-  }
-
-  let worstGap = Infinity;
-  let worstTower = '';
-  let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
-  let buried = 0;
-
-  for (const point of chute) {
-    const [px, py, pz] = point;
-    for (const tower of towers) {
-      // The chute occupies a band around its centre line, so it fouls the
-      // tower's height range if either edge of that band is inside it.
-      if (py + envelope.above < tower.bottomY) continue;
-      if (py - envelope.below > tower.topY) continue;
-
-      // Radius where the two actually meet in height, so a cone is measured at
-      // the height the chute passes it rather than at its widest.
-      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
-      const span = tower.topY - tower.bottomY;
-      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
-      const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-
-      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
-      if (gap < worstGap) {
-        worstGap = gap;
-        worstTower = tower.name;
-        worstAt = point;
-      }
-      if (gap < 0) buried += 1;
-    }
-  }
-
-  // `worstGap` stays Infinity only if the chute never shares a height with any
-  // tower, which is a clean pass rather than a missing measurement — but it must
-  // never reach a message, because Infinity and NaN compare false against every
-  // threshold and would make this look green while testing nothing.
-  if (Number.isFinite(worstGap) && worstGap < 0) {
-    complaints.push(
-      `the ginormous slide passes ${(-worstGap).toFixed(2)} m inside ${worstTower} at ` +
-        `(${worstAt[0].toFixed(2)}, ${worstAt[1].toFixed(2)}, ${worstAt[2].toFixed(2)}) ` +
-        `— ${buried} of ${chute.length} sampled points are inside a tower, and a child ` +
-        'rides through solid masonry',
-    );
   }
 
   return complaints;
