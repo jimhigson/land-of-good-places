@@ -1,11 +1,10 @@
-import type { Object3D } from 'three';
-import { clamp01, lerp, smoothstep } from '../core/mathUtils';
+import { CAMERA_YAW_DEGREES } from '../core/constants';
+import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
+import { KID_HEIGHT } from '../art/models/kid';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
-import type { NpcCharacter } from '../entities/npc/NpcCharacter';
 import { WanderDriver, type ClimbPhase } from '../entities/npc/wanderDriver';
-import type { KidAvatar } from '../entities/npc/kidCrowd';
 import type { NpcSystem } from '../entities/npc';
 import type { Hud } from '../ui/Hud';
 import { pressZone, type InteractZone } from './interact';
@@ -35,18 +34,40 @@ import { terrainHeight } from './terrain';
  *   pose, via the small `beginClimb/setClimbPose/endClimb` trio added to
  *   `NpcCharacter` for exactly this.
  *
- * **Body hidden, head out**: rather than trust the isometric camera to see a
- * body occluded by a canopy blob from every one of its four snap angles, the
- * body is simply hidden for the duration and the head positioned at the
- * canopy top. For the player that is a `Group.visible` toggle on everything
- * under `model.body` except `model.head` (three.js visibility only cascades
- * down through ancestors, so the head stays visible while its siblings don't
- * — no change needed to `CharacterModel`/`kid.ts`). For an NPC, drawn through
- * `InstancedCrowd`, a proxy's `.visible` is not what `commit()` reads —
- * only `CrowdMember.shown[partIndex]` is — so the equivalent is finding every
- * part whose prototype mesh is *not* a descendant of the head joint and
- * zeroing those indices for the duration (cached per avatar, since the rig
- * shape is identical for the whole crowd).
+ * **Everybody who climbs is drawn whole — the player and every NPC alike.**
+ * Jim, 6 August: *"make nobody ever just a head."*
+ *
+ * The history is worth keeping, because the reasoning failed in an instructive
+ * way. Originally *everyone* was hidden below the neck: rather than trust the
+ * isometric camera to see a body occluded by a canopy blob from every one of
+ * its four snap angles, the body was switched off for the duration and the
+ * head positioned at the canopy top. What that actually relied on — nobody
+ * wrote it down, which is the whole problem — was the **canopy being wide
+ * enough to hide the absence of a body**. It was not hiding a torso; it was
+ * hiding the hole where the torso would have been. Widen the set of climbable
+ * trees so thinner canopies qualify, or raise the climber out of the leaves
+ * ({@link CLIMB_PEEK_LIFT}), and the hole stops being covered: what you see is
+ * a head and a hand floating over a tree. Jim, on seeing exactly that:
+ * *"why do they no longer have a body?"*
+ *
+ * The ruling was to draw all of her — *"just include the whole body, no other
+ * change needed"* — and, on the legs that then hang out past the canopy and
+ * the trunk, *"legs poking out is fine when climbing a tree, that's natural"*.
+ * That is the look: a child sitting up a tree with her legs dangling, not a
+ * disembodied head. The player got it first; **that left ~31 NPC climbers as
+ * floating heads, and his *"they"* had been plural all along**, so they now
+ * get the same treatment.
+ *
+ * It cost nothing to give it to them, which is worth stating because the
+ * instanced path looks like it might be the reason they were left out. It is
+ * not: an NPC is drawn through `InstancedCrowd`, where a proxy's `.visible` is
+ * not what `commit()` reads — only `CrowdMember.shown[partIndex]` is — and
+ * that array is built `.fill(1)`. Drawing a whole child is therefore the
+ * *default*, and hiding one was the work: a cached list of part indices, a
+ * `Uint8Array` copy of every climber's flags to restore afterwards, and a
+ * separate `.visible` ledger for the one pinned kid built as a real
+ * `CharacterModel`. All three are now deleted, so this is less code and less
+ * per-climb allocation than before, on every one of those climbers.
  *
  * **The tree's collider is untouched.** Nothing here adds or removes a
  * collision shape; the trunk stays exactly as solid as it always was for
@@ -67,25 +88,21 @@ export class TreeClimbing implements GameSystem {
   private playerStartZ = 0;
   /** Which way she faces while peeking — captured at the top of the scramble. */
   private playerPeekFacing = 0;
+  /** Seconds into the current wave cycle. Runs only during `peek`. */
+  private playerWaveClock = 0;
+  /** Eased 0..1 — 0 arms down, 1 arm up and waggling. */
+  private playerWaveAmount = 0;
+  /** The facing actually in use this frame, eased between peek and camera. */
+  private playerFacingNow = 0;
 
   // --- NPC state ---------------------------------------------------------
-  /** Every part hidden while an avatar climbs — computed once, reused forever. */
-  private readonly npcHideParts = new WeakMap<KidAvatar, readonly number[]>();
-  /** What each part's `shown` flag was before climbing, so it restores exactly. */
-  private readonly npcShownBackup = new Map<NpcCharacter, Uint8Array>();
-  /**
-   * The player-style `.visible` toggle's own bookkeeping, for a pinned kid
-   * built as a one-off `CharacterModel` rather than an instanced `KidAvatar`
-   * — see `hideNpcBody`'s doc comment for why it needs a different mechanism
-   * from the crowd's `shown` array entirely.
-   *
-   * The player once had a counterpart to this. It was deleted on 6 August 2026
-   * (see the note where it used to live): the family want to see the whole
-   * child. **The NPC side is deliberately untouched** — nobody has complained
-   * about an avatar peeking out of a canopy, and it is a different mechanism
-   * with different bookkeeping.
-   */
-  private readonly npcHiddenVisibleParts = new Map<NpcCharacter, Object3D[]>();
+  //
+  // There is none. A climbing NPC is simply posed, exactly like the player:
+  // nothing is switched off, so nothing has to be remembered and put back. The
+  // three maps that used to live here — a cached list of part indices, a
+  // `Uint8Array` copy of every climber's `shown` flags, and a parallel
+  // `.visible` ledger for the one pinned kid built as a real `CharacterModel`
+  // — all existed only to undo the hiding. See the class doc.
 
   constructor(
     private readonly player: Player,
@@ -221,11 +238,20 @@ export class TreeClimbing implements GameSystem {
   private beginPlayerDescend(): void {
     this.playerPhase = 'down';
     this.playerTimer = 0;
+    this.endPlayerWave();
   }
 
   private updatePlayerClimb(context: FrameContext): void {
     const tree = this.playerTree;
     if (!tree) {
+      // Bailing out has to undo everything the climb did, not just the phase.
+      // Clearing the phase alone left her still `riding` — a player who cannot
+      // move. (It used to leave her *invisible* too, the body being restored
+      // only on a normal descent; drawing the whole child has retired that
+      // half of the hazard outright.) Cheap to make safe, and impossible to
+      // notice in testing if it is ever reachable.
+      this.endPlayerWave();
+      if (this.player.riding) this.player.endRide(0, 0, 0);
       this.playerPhase = null;
       return;
     }
@@ -235,13 +261,28 @@ export class TreeClimbing implements GameSystem {
 
     if (this.playerPhase === 'up') {
       const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_UP_SECONDS);
-      const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'up', t, 0);
+      const pose = climbPose(
+        tree,
+        this.playerStartX,
+        this.playerStartZ,
+        headOffset,
+        'up',
+        t,
+        0,
+        CLIMB_PEEK_LIFT,
+      );
       this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
       this.hud.setPrompt(null);
       if (t >= 1) {
         this.playerPhase = 'peek';
         this.playerTimer = 0;
         this.playerPeekFacing = pose.facing;
+        this.playerFacingNow = pose.facing;
+        // Wound so the first wave lands WAVE_FIRST_DELAY from here, rather than
+        // the instant she arrives — she gets a beat to look pleased with
+        // herself first.
+        this.playerWaveClock = WAVE_CYCLE_SECONDS - WAVE_FIRST_DELAY;
+        this.playerWaveAmount = 0;
         this.player.model.setExpression('happy');
       }
       return;
@@ -267,8 +308,31 @@ export class TreeClimbing implements GameSystem {
         'peek',
         0,
         this.playerPeekFacing,
+        CLIMB_PEEK_LIFT,
       );
-      this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
+      const wave = this.updatePlayerWave(dt);
+      // She turns to the camera to wave and drifts back to her peek facing
+      // afterwards. This is a *scripted pose*, not a control — the CONTROL RULE
+      // bans the stick rotating her, and nothing here reads the stick.
+      this.playerFacingNow = turnTowards(
+        this.playerFacingNow,
+        wave > WAVE_TURN_THRESHOLD ? CAMERA_FACING : this.playerPeekFacing,
+        PEEK_TURN_SPEED * dt,
+      );
+      // The hoist. Her arm cannot reach above her own head (shoulder 0.72 +
+      // reach 0.455 against a 1.36 head), so raising the arm alone leaves the
+      // hand inside the leaves — the whole child has to come up, which is what
+      // a child hauling herself up to be seen actually does. See WAVE_RISE.
+      this.player.setRidePose(
+        pose.x,
+        pose.y + WAVE_RISE * wave,
+        pose.z,
+        this.playerFacingNow,
+      );
+      // The arm pose itself belongs to `Player`: its riding branch rewrites both
+      // arms from scratch every frame (a ride's "holding on" pose), so an arm
+      // posed from out here would survive exactly one tick.
+      this.player.setClimbWave(wave);
       // Reasserted every frame rather than only on the transition: Player's
       // own blink cycle (`Player.animate`) calls `setExpression('neutral')`
       // whenever a blink ends, which would otherwise quietly erase the happy
@@ -290,7 +354,16 @@ export class TreeClimbing implements GameSystem {
 
     // 'down'
     const t = clamp01(this.playerTimer / PLAYER_SCRAMBLE_DOWN_SECONDS);
-    const pose = climbPose(tree, this.playerStartX, this.playerStartZ, headOffset, 'down', t, 0);
+    const pose = climbPose(
+      tree,
+      this.playerStartX,
+      this.playerStartZ,
+      headOffset,
+      'down',
+      t,
+      0,
+      CLIMB_PEEK_LIFT,
+    );
     this.player.setRidePose(pose.x, pose.y, pose.z, pose.facing);
     this.hud.setPrompt(null);
     if (t >= 1) {
@@ -300,25 +373,43 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
-  // **`hidePlayerBody`/`showPlayerBody` deleted, 6 August 2026.** They hid every
-  // child of `model.body` except the head so that peeking out of a canopy showed
-  // a head in the leaves. The family's verdict on both the trees and the
-  // ginormous slide was the same — they want the whole child — and
-  // `feat/climb-wave-and-npc-climb` deleted this pair for the tree complaint
-  // before this branch deleted it for the slide one.
-  //
-  // It is deleted rather than fixed because it was **the only thing in the game
-  // that hid parts of her**, and it could hide her permanently. `hidePlayerBody`
-  // cleared `playerHiddenParts` and then skipped children that were already
-  // invisible, so a second call without an intervening `showPlayerBody` recorded
-  // an empty list and the restore put nothing back. From then on she was a
-  // floating head *everywhere* — including on rides that had never heard of
-  // trees, which is how it reached the slide.
-  //
-  // One owner, and now there is nothing to own: no ride, camera or activity
-  // hides part of her, so none of them needs a matching "show her again" call
-  // that can be missed. `scripts/check-slide-rider.mts` asserts every one of her
-  // six body parts is drawn for every frame of the ride.
+  /**
+   * The wave cycle while peeking: a settle, a wave, a settle, repeat.
+   *
+   * The timing is the whole feature. Too often and it reads as a twitch; too
+   * rarely and she looks like she has forgotten she is up there. One wave per
+   * {@link WAVE_CYCLE_SECONDS} is roughly a child checking you are still
+   * watching — and the *first* one comes fast (see {@link WAVE_FIRST_DELAY}),
+   * because the whole point of climbing something is being seen to have done it.
+   */
+  private updatePlayerWave(dt: number): number {
+    this.playerWaveClock = (this.playerWaveClock + dt) % WAVE_CYCLE_SECONDS;
+    const waving = this.playerWaveClock < WAVE_DURATION_SECONDS;
+    this.playerWaveAmount = damp(this.playerWaveAmount, waving ? 1 : 0, WAVE_EASE_HALF_LIFE, dt);
+    return this.playerWaveAmount;
+  }
+
+  /**
+   * Puts the wave away. Called on every way out of a climb, normal or not.
+   *
+   * This used to be `showPlayerBody`, and used to have a second job: restoring
+   * the `.visible` flags of every part `hidePlayerBody` had switched off. Both
+   * are gone — **the whole child is drawn up a tree now** (see the class doc),
+   * so there is nothing to restore and nothing that could be left hidden by a
+   * climb that ended in an unusual way.
+   *
+   * That deletion took the PR #188 model-swap guard with it, and it is worth
+   * recording *why* that is safe rather than just noting it went: the guard
+   * existed because the parts we had switched off might belong to a model
+   * already thrown away by the time the climb ended, so restoring them would
+   * touch a dead object. Nothing is switched off any more, so there is no
+   * second object to get out of step with — the hazard is gone rather than
+   * merely unhandled.
+   */
+  private endPlayerWave(): void {
+    this.playerWaveAmount = 0;
+    this.player.setClimbWave(0);
+  }
 
   // ================================================================= NPCs
 
@@ -332,10 +423,8 @@ export class TreeClimbing implements GameSystem {
 
       if (shouldClimb && !isClimbing) {
         character.beginClimb();
-        this.hideNpcBody(character);
       } else if (!shouldClimb && isClimbing) {
         character.endClimb();
-        this.showNpcBody(character);
         continue;
       }
 
@@ -367,64 +456,6 @@ export class TreeClimbing implements GameSystem {
     }
   }
 
-  /**
-   * Hides everything but the head, whichever of the two shapes `avatar` is —
-   * see the class doc's "Body hidden, head out" section. An instanced
-   * `KidAvatar` (has `member`) goes through `member.shown`, same as always;
-   * a pinned kid's one-off `CharacterModel`-backed avatar (no `member`,
-   * real scene-graph meshes) gets exactly the player's own `.visible`
-   * toggle, because it *is* the player's own kind of model.
-   */
-  private hideNpcBody(character: NpcCharacter): void {
-    const { avatar } = character;
-    const member = avatar.member;
-    if (member) {
-      const parts = this.hidePartsFor(avatar as KidAvatar);
-      this.npcShownBackup.set(character, Uint8Array.from(member.shown));
-      for (const index of parts) member.shown[index] = 0;
-      return;
-    }
-
-    const hidden: Object3D[] = [];
-    for (const child of avatar.rig.body.children) {
-      if (child === avatar.rig.head) continue;
-      if (!child.visible) continue;
-      child.visible = false;
-      hidden.push(child);
-    }
-    this.npcHiddenVisibleParts.set(character, hidden);
-  }
-
-  private showNpcBody(character: NpcCharacter): void {
-    const member = character.avatar.member;
-    if (member) {
-      const backup = this.npcShownBackup.get(character);
-      if (!backup) return;
-      member.shown.set(backup);
-      this.npcShownBackup.delete(character);
-      return;
-    }
-
-    const hidden = this.npcHiddenVisibleParts.get(character);
-    if (!hidden) return;
-    for (const child of hidden) child.visible = true;
-    this.npcHiddenVisibleParts.delete(character);
-  }
-
-  /** Every part index that is not the head or one of its own parts. Cached. */
-  private hidePartsFor(avatar: KidAvatar): readonly number[] {
-    const cached = this.npcHideParts.get(avatar);
-    if (cached) return cached;
-
-    const head = avatar.rig.head;
-    const indices: number[] = [];
-    avatar.member.proxies.forEach((proxy, index) => {
-      if (proxy !== head && !isDescendantOf(proxy, head)) indices.push(index);
-    });
-
-    this.npcHideParts.set(avatar, indices);
-    return indices;
-  }
 }
 
 // -------------------------------------------------------------------- pose
@@ -435,6 +466,134 @@ const PLAYER_SCRAMBLE_DOWN_SECONDS = 0.4;
 
 /** How close (trunk edge to feet) counts as "near enough to climb". */
 const INTERACT_MARGIN = 2.4;
+
+/**
+ * How far outside the trunk the climber actually perches.
+ *
+ * Exported because it decides *where* on the canopy the head and the waving
+ * hand come out, which is what `check:climb-wave` has to sample.
+ */
+export const CLIMB_EDGE_GAP = 0.35;
+
+/**
+ * How much of a child's height the seat came down once she had a body.
+ *
+ * **Jim, 6 August: "make them lower by about 30% of their height."** Said
+ * immediately after the whole body started being drawn, which is what makes
+ * "their height" a *child's* height rather than a tree's: with her body clear
+ * of the canopy she read as floating above the tree instead of sitting in it,
+ * and a third of a child is the amount of her he wanted back in the leaves.
+ *
+ * Taken from {@link KID_HEIGHT} rather than written as the 0.636 m it currently
+ * comes to, so resizing the character carries the seat with it.
+ *
+ * The alternative reading — 30% of the *tree* — was ruled out by measuring
+ * rather than by taste. The 43 climbable trees stand 4.69–6.79 m above their
+ * own ground, mean 5.79, so it would have meant dropping her **1.74 m**: a lift
+ * of −0.54 m, putting her head half a metre *under* the canopy top and burying
+ * the child, the wave and the face he had just asked to see. The two readings
+ * differ by 1.1 m and only one of them leaves anything on screen.
+ *
+ * The effect of the chosen one, against `canopyTopY`: her head goes +1.20 →
+ * **+0.56 m** and her feet −0.16 → **−0.80 m**, so where she used to sit with
+ * her whole body clear of the leaves she now has about 0.8 m of herself down
+ * in them. That is the "sitting in it rather than floating above it" he wanted.
+ */
+const CLIMB_SEAT_DROP = 0.3 * KID_HEIGHT;
+
+/**
+ * How much higher she sits than the canopy top, in metres.
+ *
+ * **Jim's number, 5 August: "about 1 m higher and ship it."** Raised to 1.2 m
+ * on 6 August after he tried it (*"another 20cm higher"*), then brought back
+ * down by {@link CLIMB_SEAT_DROP} the same day once she had a body to see.
+ *
+ * The 1.2 is kept as the term it was rather than folded into a single literal,
+ * because the drop is a correction *to* it and the history is the reason both
+ * numbers exist: the lift is the fix for a specific measured failure. Her
+ * waving hand tops out 0.303 m below her head, which put it essentially level
+ * with `canopyTopY`, so from the far bearings the bulk of the canopy sat in
+ * front of it — QA found the arm contributed **zero pixels to the whole
+ * screen** at 225°, 270° and 315°, on every tree.
+ *
+ * **So this constant is the one place the PR's two asks pull against each
+ * other**, and lowering her was a real risk to the wave that opened it.
+ *
+ * Measured after the drop rather than assumed. `check:climb-wave` reports the
+ * hand **100% un-occluded on all 43 climbable trees**, and 18 px at play scale
+ * — unchanged from the 1.2 m seat. The wave survives because it never needed
+ * the whole lift: her hand tops out 0.303 m below her head, so anything above
+ * about **0.31 m** keeps the hand clear of `canopyTopY`, and 0.564 still has
+ * 0.25 m of room. Below that the geometry puts the hand back among the leaves,
+ * and `check:climb-wave` is the arbiter — the 0.31 is where it *starts* being
+ * at risk, not a number that check reads.
+ *
+ * What the drop did cost is how much of her body you can see, which is the
+ * point of it: 60 px → 20 px at the worst approach. See `REQUIRED_BODY_PIXELS`.
+ *
+ * **This is the player's lift and nobody else's.** It reaches `climbPose` as an
+ * argument from her three call sites; see that function's `lift` parameter for
+ * why putting it back inside would be a regression, and `check:crowd`'s
+ * NPC-perch assertion (issue #224) for what now catches it if anyone does.
+ */
+export const CLIMB_PEEK_LIFT = 1.2 - CLIMB_SEAT_DROP;
+
+// ------------------------------------------------------------------- waving
+//
+// "After climbing a tree the player waves toward the camera every few seconds"
+// (issue #120, REQUIREMENTS-2026-07-28.md §11).
+//
+// One wave every {@link WAVE_CYCLE_SECONDS}, held for
+// {@link WAVE_DURATION_SECONDS}, so she is waving a bit under half the time she
+// is up there. Faster reads as a twitch; much slower and she seems to have
+// forgotten she climbed anything.
+
+/** How long from reaching the top to the first wave. Deliberately short. */
+const WAVE_FIRST_DELAY = 0.85;
+/** Wave, then settle, then wave again. */
+const WAVE_CYCLE_SECONDS = 4.4;
+const WAVE_DURATION_SECONDS = 1.7;
+/** Half-life of the eased 0..1 blend, so the arm swings up rather than snaps. */
+const WAVE_EASE_HALF_LIFE = 0.09;
+
+/**
+ * A small pop as she hoists herself up to wave, in metres. **Decorative.**
+ *
+ * This used to claim the wave was invisible without it, and that was true when
+ * written: she peeked with her head at `canopyTopY`, and since her arm cannot
+ * reach above her own head — shoulder 0.72 on a body whose head sits at 1.36
+ * (`kid.ts`), hand topping out 0.303 m below it — a raised arm alone stayed
+ * buried in the leaves.
+ *
+ * {@link CLIMB_PEEK_LIFT} does that job now, and does it far better. Set this
+ * to 0 and `check:climb-wave` passes with **identical** numbers (18 px of
+ * hand, 7.0 px of rock): it no longer moves anything the check gates on.
+ *
+ * It survives only as a little vertical pop at the start of each wave, which
+ * QA liked the look of. Keep or delete on taste — but do not restore the claim
+ * that it is load-bearing, and do not add a *new* number here expecting it to
+ * buy visibility. The camera follows `player.position` and damps toward it, so
+ * it eats vertical translation; that is why the wave's readable motion is a
+ * rotation ({@link CLIMB_WAVE_LEAN}) and its clearance is a static perch
+ * height, neither of which the camera can cancel.
+ */
+export const WAVE_RISE = 0.3;
+
+/** Above this much wave, she has turned to the camera to do it. */
+const WAVE_TURN_THRESHOLD = 0.15;
+/** Radians per second she swings round to the camera and back. */
+const PEEK_TURN_SPEED = 2.6;
+
+/**
+ * The yaw that points her at the camera.
+ *
+ * `facingAngle`'s forward is `(sin, cos)` (`Player`), and `cameraOffset` puts
+ * the camera at `(sin yaw, cos yaw)` from its target (`core/cameraRig.ts`), so
+ * facing the camera is the camera's own yaw. This is a *scripted* turn, not a
+ * control — the CONTROL RULE bans the stick rotating her, and nothing here
+ * reads the stick.
+ */
+const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
 
 interface ClimbPose {
   readonly x: number;
@@ -468,12 +627,26 @@ function climbPose(
   phase: ClimbPhase,
   progress: number,
   peekFacing: number,
+  /**
+   * How far above the canopy top this climber perches — **the player's own
+   * lift, and hers alone**. Defaults to 0, so NPCs are unaffected.
+   *
+   * A parameter rather than a constant read inside here, because this function
+   * is shared: `updateNpcClimbs` calls it too. Adding the lift inside it raised
+   * every NPC climber by the same metre, and they get none of what the metre
+   * buys — their body-hide leaves no arm drawn and they have no wave — so it
+   * was pure elevation: a head floating above the canopy with nothing under it.
+   * Jim ruled on *her* height, and dismissed the floating worry because she has
+   * a wave to justify it. That reasoning does not carry to a character with no
+   * wave at all.
+   */
+  lift = 0,
 ): ClimbPose {
   const approachAngle = Math.atan2(startX - tree.x, startZ - tree.z);
-  const edgeDistance = tree.trunkRadius + 0.35;
+  const edgeDistance = tree.trunkRadius + CLIMB_EDGE_GAP;
   const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
-  const topY = tree.canopyTopY - headOffsetY;
+  const topY = tree.canopyTopY - headOffsetY + lift;
 
   if (phase === 'peek') return { x: edgeX, y: topY, z: edgeZ, facing: peekFacing };
 
@@ -491,15 +664,6 @@ function climbPose(
     y: lerp(climbingUp ? groundY : topY, climbingUp ? topY : groundY, eased),
     facing: approachAngle + Math.PI,
   };
-}
-
-function isDescendantOf(node: Object3D, ancestor: Object3D): boolean {
-  let current: Object3D | null = node.parent;
-  while (current) {
-    if (current === ancestor) return true;
-    current = current.parent;
-  }
-  return false;
 }
 
 function descendPrompt(): string {

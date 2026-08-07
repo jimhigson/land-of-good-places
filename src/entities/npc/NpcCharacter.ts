@@ -395,7 +395,20 @@ export class NpcCharacter {
     const gait = this.gait;
     const phase = this.walkPhase;
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
-    const hopHeight = Math.max(0, this.position.y - groundY);
+    // The little tuck a child pulls their knees into on the way up from a hop —
+    // scaled by how far off the ground they are, which is fine for a hop and
+    // **wrong for a climb**, where "off the ground" is the whole height of the
+    // tree. Left at 0 while climbing, exactly as `Player.update`'s riding
+    // branch has always done by passing a hop height of 0 into its own
+    // `animate`; this is the crowd catching up with her, not a new rule.
+    //
+    // It was measurable before anyone could see it — the term lifted a climbing
+    // NPC's head 0.30–0.67 m clear of the topmost leaf on ~31 climbers — but
+    // while only a head was drawn it read as a peeking child rather than as a
+    // fault. Drawing the whole body (`world/TreeClimbing.ts`, Jim's *"make
+    // nobody ever just a head"*) makes it a child hovering bodily above the
+    // canopy, which is why it is fixed now and was left alone before.
+    const hopHeight = this.climbingFlag ? 0 : Math.max(0, this.position.y - groundY);
 
     const bob = Math.abs(Math.sin(phase)) * PLAYER_BOB_HEIGHT * gait;
     const breathe = Math.sin(elapsed * 1.9 + this.walkPhase) * 0.014 * (1 - gait);

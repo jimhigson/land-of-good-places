@@ -61,6 +61,23 @@ export interface BushFact {
   readonly radius: number;
 }
 
+/**
+ * One tree a child can actually climb, as published to the game.
+ *
+ * New for the same reason {@link BushFact} was, and it went wrong the same way:
+ * `climbableTrees` was reachable by `TreeClimbing` and by every NPC's wander
+ * driver, and by **nothing that could measure it**. So a rule that admitted
+ * only large lollipops quietly left the canonical park with **two** climbable
+ * trees, and one CI seed with **one**, until Jim went looking for a tree to
+ * climb and could not find one. Trees were counted; climbable trees were not.
+ */
+export interface ClimbableTreeFact {
+  readonly x: number;
+  readonly z: number;
+  /** Where a head pops out — the top of the ball she comes out of. */
+  readonly canopyTopY: number;
+}
+
 export interface PlotFact {
   readonly id: string;
   readonly x: number;
@@ -164,6 +181,8 @@ export interface ParkFacts {
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
   readonly bushes: readonly BushFact[];
+  /** The subset of {@link trees} a child is offered a climb on. */
+  readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
@@ -459,6 +478,15 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     x: bush.x,
     z: bush.z,
     radius: bush.radius,
+  }));
+
+  // Read off the same array `TreeClimbing` and every wander driver read, so
+  // what the tests measure is what the game offers, not a re-derivation of the
+  // rule that filled it.
+  const climbableTrees: ClimbableTreeFact[] = world.scenery.climbableTrees.map((tree) => ({
+    x: tree.x,
+    z: tree.z,
+    canopyTopY: tree.canopyTopY,
   }));
 
   const plots: PlotFact[] = [...PARK_LAYOUT.entries.values()].map((entry) => ({
@@ -837,6 +865,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     walls,
     trees,
     bushes,
+    climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
