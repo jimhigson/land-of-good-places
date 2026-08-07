@@ -9,7 +9,11 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE, hexToCss } from '../../core/palette';
-import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import {
+  CHILD_FOOTPRINT,
+  TALLEST_CHILD_HEIGHT,
+  WIDEST_CHILD_FOOTPRINT,
+} from '../../art/models/kid';
 import { RIDER_HEADROOM } from '../train/clearance';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
@@ -46,12 +50,27 @@ import { blob } from '../../art/style/asset';
  * It was a garden shed with a cat painted on it.
  *
  * So **the seat plan is the source and every body dimension is derived from
- * it.** Twelve seats in six rows of two either side of an aisle; the length is
- * whatever six rows take, the width is whatever two seats and an aisle take,
- * and the height is whatever lets a child stand up in the aisle and walk to the
- * door. Nothing here agrees with anything else by coincidence — which is the
- * trap the Rail Race cart hit, where lane spacing and cart width were two
- * independent `1.04`s that matched by luck.
+ * it.** Twelve seats in six rows of two either side of a gangway; the length is
+ * whatever six rows take, the width is whatever two seats and a gangway take,
+ * and the height is whatever clears the tallest child's hat. Nothing here
+ * agrees with anything else by coincidence — which is the trap the Rail Race
+ * cart hit, where lane spacing and cart width were two independent `1.04`s that
+ * matched by luck.
+ *
+ * **That claim was half true when it was written, and the half that was false
+ * cost us a round of family QA.** The *height* really was derived from
+ * `TALLEST_CHILD_HEIGHT`. The *seat plan* was not derived from anything: it was
+ * `SEAT_PITCH = 1.0` and `SEAT_WIDTH = 0.92`, picked by eye against an imagined
+ * child "about 0.6 m across", because `kid.ts` published no width for anyone to
+ * derive from. A real child measures **1.53 m across and 1.54 m deep** — a
+ * chibi rig is almost entirely head — so all twelve passengers overlapped their
+ * neighbour by half a metre and poked through the bodywork, on a bus whose own
+ * documentation said that could not happen.
+ *
+ * The lesson is not "measure the bus". It is that **a derivation naming a
+ * source it does not actually read is indistinguishable from a guess**, and
+ * reads more convincingly. `CHILD_FOOTPRINT` now exists so there is something
+ * real to derive from, and `childrenFitTheSeatsTheySitIn` re-measures it.
  */
 
 /** Rows of seats, and seats per row — one either side of the aisle. */
@@ -61,13 +80,34 @@ const SEATS_PER_ROW = 2;
 export const CAT_BUS_SEAT_COUNT = SEAT_ROWS * SEATS_PER_ROW;
 
 /**
- * Row-to-row spacing, and the **one owner** of it: the cabin's length is
- * `SEAT_ROWS * SEAT_PITCH`, never a length that happens to fit.
+ * Row-to-row spacing, and across-the-bus seat spacing — **both a whole child
+ * wide**, because that is what a child measures.
+ *
+ * Jim, 7 August 2026: *"the bus far too small to hold that many child models at
+ * their size"*. He was right, and the reason is worth keeping, because the file
+ * you are reading claimed the opposite in large friendly letters. These were
+ * `1.0` and `0.92`, hand-picked against an imagined child "about 0.6 m across".
+ * A real child is **1.53 m across and 1.54 m deep** — it is nearly all head,
+ * `KID_HEAD_SCALE` being 1.5 — so every one of the twelve passengers stuck
+ * 0.10–0.24 m through the bodywork and overlapped the child behind them by
+ * **0.52 m**.
+ *
+ * The height above was derived honestly from `TALLEST_CHILD_HEIGHT` and fits.
+ * The seat plan was not derived from anything, because **`kid.ts` exported no
+ * width at all** — there was nothing to derive it from. {@link CHILD_FOOTPRINT}
+ * is that missing number, measured across every hair style and every hat, and
+ * these are now simply it.
  */
-const SEAT_PITCH = 1.0;
-/** Across the bus: how wide one child's seat is, and the gangway between them. */
-const SEAT_WIDTH = 0.92;
-const AISLE_WIDTH = 0.9;
+const SEAT_PITCH = CHILD_FOOTPRINT;
+const SEAT_WIDTH = CHILD_FOOTPRINT;
+/**
+ * The gangway. Not walkable, and deliberately not pretending to be: a child is
+ * 1.8 m wide, so **no aisle this bus could carry is one a child fits down**
+ * without brushing the seat backs either side. Nobody walks it — the arrival
+ * re-parents a child out of their seat and onto the pavement — so this is the
+ * gap that makes it read as a bus rather than a promise about traffic.
+ */
+const AISLE_WIDTH = 0.8;
 /** A low cushion. Children are seated with their feet on the floor — see below. */
 const SEAT_PAD_HEIGHT = 0.3;
 
@@ -103,12 +143,59 @@ const CABIN_HEIGHT = TALLEST_CHILD_HEIGHT + RIDER_HEADROOM;
 const WALL_THICKNESS = 0.16;
 
 const BODY_HEIGHT = CABIN_HEIGHT;
-const BODY_WIDTH = SEATS_PER_ROW * SEAT_WIDTH + AISLE_WIDTH + WALL_THICKNESS * 2;
+
+/** How far off the centre line one seat sits. The one owner of "which side". */
+const SEAT_OFFSET_X = AISLE_WIDTH / 2 + SEAT_WIDTH / 2;
+
+/**
+ * **Wide enough to contain the widest child it can ever carry.**
+ *
+ * `SEAT_OFFSET_X` spaces the children so they do not overlap *each other*;
+ * this is the separate question of whether the **bodywork** contains them, and
+ * the answer has to hold for the one passenger who can be wearing a sun hat —
+ * the player, who made her own look in the character creator immediately
+ * before boarding. The other eleven are crowd NPCs and go bare-headed.
+ *
+ * Sized on {@link WIDEST_CHILD_FOOTPRINT} rather than {@link CHILD_FOOTPRINT}
+ * precisely because "a child sticking out through the side of the bus" is the
+ * fault being fixed here, and shipping a known remaining instance of it would
+ * be absurd.
+ */
+const BODY_WIDTH = 2 * (SEAT_OFFSET_X + WIDEST_CHILD_FOOTPRINT / 2 + WALL_THICKNESS);
+
+/**
+ * Slack at the front and back of the seat block, for the same reason.
+ *
+ * The rows are a child apart, so the front and rear children each hang half a
+ * child past the outermost row centre. Without this the back row sat 0.24 m
+ * through the back wall — measured, on the bus this replaces.
+ */
+const ROW_END_MARGIN = Math.max(0, WIDEST_CHILD_FOOTPRINT - SEAT_PITCH) / 2;
 /** Six rows, plus the driver's area up front and a little behind the back row. */
-const CABIN_LENGTH_FROM_SEATS = SEAT_ROWS * SEAT_PITCH;
+const CABIN_LENGTH_FROM_SEATS = SEAT_ROWS * SEAT_PITCH + ROW_END_MARGIN * 2;
 const DRIVER_AREA_LENGTH = 1.45;
 const FACE_RADIUS = BODY_WIDTH * 0.52;
 const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS * 1.1;
+
+/**
+ * **Where the bodywork stops and the window opening starts.**
+ *
+ * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`
+ * with transparent panes stuck on the *outside* of it. The glass was real —
+ * `transparent: true, opacity: 0.34` — and completely pointless, because 2 cm
+ * behind it was a solid cream wall. Jim, 7 August: *"the windows are also not
+ * transparent"*. He was reading the wall.
+ *
+ * So the side walls are now built in two bands with a genuine gap between them,
+ * divided by pillars, and the glass fills the gap. The band is placed to frame
+ * a **seated child's head**, which sits at `BODY_BOTTOM_Y + KID_HEAD_HEIGHT`
+ * and is 1.53 m across — that is what there is to look at, and Stage B's whole
+ * ask is that you can see them.
+ */
+const WINDOW_SILL_Y = BODY_BOTTOM_Y + 0.55;
+const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
+/** Thickness of the posts between one window and the next. */
+const PILLAR_Z = 0.26;
 
 const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
 
@@ -227,15 +314,91 @@ export function createCatBus(): CatBusHandle {
   // so the join between "boxy body" and "round cat face" reads as one shape
   // rather than a sphere glued onto a box.
   const cabinLength = BODY_LENGTH - FACE_RADIUS * 1.1;
-  const body = solid(
+  const bodyCentreZ = BODY_LENGTH / 2 - cabinLength / 2 - FACE_RADIUS * 0.55;
+  const cabinBackZ = bodyCentreZ - cabinLength / 2;
+  const bodyTopY = BODY_BOTTOM_Y + BODY_HEIGHT;
+
+  /** Where a row of seats sits, and where a window therefore goes. One owner. */
+  const rowZ = (row: number): number =>
+    cabinBackZ + ROW_END_MARGIN + SEAT_PITCH * (row + 0.5);
+  const seatX = (column: number): number => (column === 0 ? -1 : 1) * SEAT_OFFSET_X;
+
+  // The door's z span, needed here because the side wall must not grow a window
+  // pillar across the doorway. Derived once and reused by the door below.
+  const doorZ = bodyCentreZ + cabinLength * 0.28;
+
+  // --- the shell, built as bands so the windows are real holes ---------------
+  // Under the windows: the full-width lower body, floor to sill.
+  const lowerBody = solid(
     new Mesh(
-      new RoundedBoxGeometry(BODY_WIDTH, BODY_HEIGHT, cabinLength, 5, 0.26 * DETAIL),
+      new RoundedBoxGeometry(BODY_WIDTH, WINDOW_SILL_Y - BODY_BOTTOM_Y, cabinLength, 4, 0.22 * DETAIL),
       bodyMaterial,
     ),
   );
-  body.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT / 2, BODY_LENGTH / 2 - cabinLength / 2 - FACE_RADIUS * 0.55);
-  chassis.add(body);
-  addOutline(body, 0.02 * DETAIL);
+  // Named, because a check has to be able to find the cabin's own volume to ask
+  // whether the passengers are inside it. Guessing "the biggest opaque mesh"
+  // picks the cat's face and reports nonsense — which it duly did, once.
+  lowerBody.name = 'cat-bus-shell-lower';
+  lowerBody.position.set(0, (BODY_BOTTOM_Y + WINDOW_SILL_Y) / 2, bodyCentreZ);
+  chassis.add(lowerBody);
+  addOutline(lowerBody, 0.02 * DETAIL);
+
+  // Over the windows: the header band, window head to roof.
+  const upperBody = solid(
+    new Mesh(
+      new RoundedBoxGeometry(BODY_WIDTH, bodyTopY - WINDOW_HEAD_Y, cabinLength, 4, 0.22 * DETAIL),
+      bodyMaterial,
+    ),
+  );
+  upperBody.name = 'cat-bus-shell-upper';
+  upperBody.position.set(0, (WINDOW_HEAD_Y + bodyTopY) / 2, bodyCentreZ);
+  chassis.add(upperBody);
+  addOutline(upperBody, 0.02 * DETAIL);
+
+  // The back of the bus is closed — you look in through the sides, not through
+  // the whole vehicle and out the far end.
+  const windowBandHeight = WINDOW_HEAD_Y - WINDOW_SILL_Y;
+  const backWall = solid(
+    new Mesh(
+      new RoundedBoxGeometry(BODY_WIDTH, windowBandHeight, PILLAR_Z * DETAIL, 3, 0.08 * DETAIL),
+      bodyMaterial,
+    ),
+  );
+  backWall.position.set(0, (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, cabinBackZ + (PILLAR_Z * DETAIL) / 2);
+  chassis.add(backWall);
+
+  // Pillars between one window and the next, at the row boundaries — so the
+  // posts land between children rather than across their faces.
+  const pillarGeometry = new RoundedBoxGeometry(
+    WALL_THICKNESS,
+    windowBandHeight,
+    PILLAR_Z * DETAIL,
+    3,
+    0.06 * DETAIL,
+  );
+  for (const side of [-1, 1] as const) {
+    for (let boundary = 1; boundary <= SEAT_ROWS; boundary += 1) {
+      const z = cabinBackZ + ROW_END_MARGIN + SEAT_PITCH * boundary;
+      // The doorway is an opening too: no post may stand in it.
+      if (side < 0 && Math.abs(z - doorZ) < SEAT_PITCH * 0.6) continue;
+      const pillar = solid(new Mesh(pillarGeometry, bodyMaterial));
+      pillar.position.set(side * (BODY_WIDTH / 2 - WALL_THICKNESS / 2), (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, z);
+      chassis.add(pillar);
+    }
+  }
+
+  // A dark cabin floor, so looking in through a window lands on something.
+  const floorPan = solid(
+    new Mesh(
+      new RoundedBoxGeometry(BODY_WIDTH - WALL_THICKNESS, 0.08 * DETAIL, cabinLength - WALL_THICKNESS, 2, 0.05 * DETAIL),
+      toonMaterial(new Color(PALETTE.woodLight).multiplyScalar(0.8).getHex()),
+    ),
+  );
+  floorPan.position.set(0, BODY_BOTTOM_Y + 0.04 * DETAIL, bodyCentreZ);
+  chassis.add(floorPan);
+
+  /** Kept for the handful of places below that positioned off the old body. */
+  const body = { position: { z: bodyCentreZ } };
 
   // A paler roof cap, rounded, so the bus doesn't read as a single flat-topped
   // box — every shop and ride in this park gets a bobble or a cap on top.
@@ -291,27 +454,23 @@ export function createCatBus(): CatBusHandle {
   // A window count and a seat count that agreed by hand would be two
   // definitions of the same thing; `rowZ` is the only one, so a window cannot
   // end up between two rows however the seat plan changes.
-  const cabinBackZ = body.position.z - cabinLength / 2;
-  const rowZ = (row: number): number => cabinBackZ + SEAT_PITCH * (row + 0.5);
-  const seatX = (column: number): number =>
-    (column === 0 ? -1 : 1) * (AISLE_WIDTH / 2 + SEAT_WIDTH / 2);
-
-  const windowGeometry = new RoundedBoxGeometry(
-    SEAT_PITCH * 0.72,
-    CABIN_HEIGHT * 0.44,
-    0.06 * DETAIL,
+  // Glass that fills the openings the shell above left, rather than a pane
+  // stuck on the outside of a solid wall. One per row, sized to the gap between
+  // its pillars, so a child sitting in that row is framed by it.
+  const glassGeometry = new RoundedBoxGeometry(
+    0.05 * DETAIL,
+    (WINDOW_HEAD_Y - WINDOW_SILL_Y) * 0.98,
+    SEAT_PITCH - PILLAR_Z * DETAIL,
     3,
-    0.1 * DETAIL,
+    0.05 * DETAIL,
   );
   for (const side of [-1, 1] as const) {
     for (let row = 0; row < SEAT_ROWS; row += 1) {
-      const win = decal(new Mesh(windowGeometry, windowMaterial));
-      win.position.set(
-        side * (BODY_WIDTH / 2 + 0.02),
-        BODY_BOTTOM_Y + CABIN_HEIGHT * 0.6,
-        rowZ(row),
-      );
-      win.rotation.y = Math.PI / 2;
+      const z = rowZ(row);
+      // No glass across the doorway — that opening is a door, not a window.
+      if (side < 0 && Math.abs(z - doorZ) < SEAT_PITCH * 0.6) continue;
+      const win = decal(new Mesh(glassGeometry, windowMaterial));
+      win.position.set(side * (BODY_WIDTH / 2 - WALL_THICKNESS / 2), (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, z);
       chassis.add(win);
     }
   }
@@ -364,11 +523,7 @@ export function createCatBus(): CatBusHandle {
   // friendly little flap. The hinge sits at its front edge.
   const doorGroup = new Group();
   doorGroup.name = 'door-hinge';
-  doorGroup.position.set(
-    -(BODY_WIDTH / 2),
-    BODY_BOTTOM_Y,
-    body.position.z + cabinLength * 0.28,
-  );
+  doorGroup.position.set(-(BODY_WIDTH / 2), BODY_BOTTOM_Y, doorZ);
   chassis.add(doorGroup);
 
   const doorPanel = solid(

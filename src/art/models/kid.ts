@@ -108,6 +108,55 @@ export const KID_HEIGHT = 2.12;
 export const TALLEST_CHILD_HEIGHT = 2.97;
 
 /**
+ * **How much floor a child actually takes up**, in metres — the diameter of the
+ * circle one child occupies, measured on real models across every hair style
+ * and every hat.
+ *
+ * This is {@link TALLEST_CHILD_HEIGHT}'s missing other half, and its absence
+ * cost us the cat bus. That bus was documented as *"sized by what it has to
+ * hold, not by a number picked by eye"* and its height genuinely was — but its
+ * **seat plan was not**, because there was nothing here to derive one from. So
+ * `SEAT_PITCH` and `SEAT_WIDTH` were hand-picked at 1.0 m and 0.92 m against an
+ * imagined child about 0.6 m across, and the result was a bus whose every
+ * passenger stuck 0.10–0.24 m through the bodywork and overlapped the child
+ * behind them by **0.52 m**. A derivation that names its source is still a guess
+ * if the source does not exist.
+ *
+ * **A child is far wider than anyone assumes, and it is all head.** These are
+ * chibi proportions — `KID_HEAD_SCALE` is 1.5 — so the torso is only 0.73 m
+ * across while the skull and hair reach 1.53 m. Anyone sizing a seat, a doorway,
+ * a queue spacing or a crowd separation from "about 0.6 m, a child's shoulders"
+ * is out by a factor of two and a half, and will not find out until a child is
+ * seen standing inside another child.
+ *
+ * Measured spread (max of x and z, real models):
+ *
+ * - bare-headed: 1.530 m every style but mohican, whose crest reaches 1.570
+ * - hatted: 1.53 (flower) - 1.76 (cap), except the **sun hat at 2.354**
+ *
+ * **The sun hat is deliberately excluded**, and it is the one judgement call
+ * here. It is a wide flat disc of a brim, half a metre wider than the next hat
+ * in the list; sizing every seat in the park for it would make the cat bus 5.9 m
+ * across and wider than it is tall. Two neighbouring brims touching reads as two
+ * children in sun hats sitting together, which is what it is — no *body* is
+ * inside another body. Anything that must contain the brim outright (the bus's
+ * shell does) uses {@link WIDEST_CHILD_FOOTPRINT} instead.
+ *
+ * **It cannot go stale.** `test/procgen/invariants.ts`'s
+ * `childrenFitTheSeatsTheySitIn` re-measures the hair x hat cross product from
+ * real models on every seed and fails if a built child outgrows it.
+ */
+export const CHILD_FOOTPRINT = 1.8;
+
+/**
+ * The widest a child can *ever* be, sun hat included — for anything that has to
+ * contain a child outright rather than space one out from their neighbour.
+ *
+ * See {@link CHILD_FOOTPRINT} for why there are two numbers rather than one.
+ */
+export const WIDEST_CHILD_FOOTPRINT = 2.36;
+
+/**
  * How far the head is tipped back, in radians (≈ 10°).
  *
  * The game camera looks down at 38°. A head this big, sitting level, presents
