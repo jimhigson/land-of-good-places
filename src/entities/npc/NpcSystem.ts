@@ -1,4 +1,5 @@
 import { Group, Object3D, Vector3 } from 'three';
+import { CIRCULAR_PARK_AREA, PARK_BOUNDARY } from '../../world/boundary';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { KID_SKIN_TONES } from '../../art/models/kid';
@@ -83,8 +84,26 @@ const MAX_CONCURRENT_CHATTERS = 2;
  * the camera runs at half rate. Nothing in the frame path allocates.
  */
 
-/** Children in the park. Enough to feel populated, few enough to feel like a park. */
-const NPC_COUNT = 12;
+/**
+ * Children in the park — **derived from the park's actual area, not picked.**
+ *
+ * Twelve was the right number when the park was a 58 m circle. #115 then grew
+ * it into a spline running out to 101 m: **21,136 m² against that circle's
+ * 10,568 — exactly twice the ground, and still twelve children on it.** Jim,
+ * 7 August 2026: *"we have a bigger park now so it should handle more NPCs
+ * anyway"*.
+ *
+ * So what is authored here is the **density** the park was tuned at, and the
+ * count follows the boundary. Change the park's shape again and the crowd comes
+ * with it, instead of this constant quietly going stale a second time.
+ *
+ * Cost is not the constraint (see this file's header): every child is instanced
+ * and shares one toon material, so *"adding the thirteenth costs nothing but a
+ * matrix"*. Behaviour for children far from the camera already runs at half
+ * rate.
+ */
+const NPC_DENSITY_PER_SQUARE_METRE = 12 / CIRCULAR_PARK_AREA;
+const NPC_COUNT = Math.round(NPC_DENSITY_PER_SQUARE_METRE * PARK_BOUNDARY.area);
 
 /** …and two of them brought something. */
 const PET_COUNT = 2;

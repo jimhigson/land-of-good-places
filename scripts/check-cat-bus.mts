@@ -537,6 +537,86 @@ notes.push(`${seatNodes.length} seats, ${occupied} with a child on them plus the
   check(crossers.size > 0, 'nobody ever crossed the park boundary — nobody actually walked in');
 }
 
+// --- they get off at different times, and do not march in a line ---------
+// Jim, watching twelve arrive: "make the children all get off at different
+// times, and then walk into the park, currently they all move exactly in a
+// line". Both halves are asserted here, because both were true.
+{
+  /** The first frame each child was out in the world, by index. */
+  const startedAt = new Map<number, number>();
+  for (const f of trace) {
+    f.kids.forEach((k, n) => {
+      if (k && !startedAt.has(n)) startedAt.set(n, f.t);
+    });
+  }
+  check(
+    startedAt.size === ARRIVAL_KID_COUNT,
+    `only ${startedAt.size} of ${ARRIVAL_KID_COUNT} children ever got off the bus`,
+  );
+
+  const times = [...startedAt.values()].sort((a, b) => a - b);
+  const first = times[0] ?? 0;
+  const last = times[times.length - 1] ?? 0;
+  check(
+    last - first > 2,
+    `every child was off the bus within ${(last - first).toFixed(2)} s of the first — ` +
+      'they unloaded like cargo rather than getting off at different times',
+  );
+  // And no two share a moment, which a naive "stagger" by even division does.
+  let sameMoment = 0;
+  for (let i = 1; i < times.length; i += 1) {
+    if (Math.abs((times[i] ?? 0) - (times[i - 1] ?? 0)) < 0.08) sameMoment += 1;
+  }
+  check(sameMoment === 0, `${sameMoment} pairs of children stepped down at the same moment`);
+  notes.push(
+    `children got off over ${(last - first).toFixed(1)} s, no two within 0.08 s of each other`,
+  );
+
+  // **Not in a line.** For every frame, how far apart are the two closest
+  // children? If they are walking in formation this stays pinned at the
+  // spacing they were given and never varies; real children bunch and string
+  // out. Measuring the *variation* catches a rigid formation that happens to
+  // be widely spaced, which a bare minimum-distance test would pass.
+  const spreads: number[] = [];
+  for (const f of trace) {
+    const here = f.kids.filter((k): k is readonly [number, number] => !!k);
+    if (here.length < 3) continue;
+    let closest = Infinity;
+    for (let i = 0; i < here.length; i += 1) {
+      for (let j = i + 1; j < here.length; j += 1) {
+        const a = here[i];
+        const b = here[j];
+        if (!a || !b) continue;
+        closest = Math.min(closest, Math.hypot(a[0] - b[0], a[1] - b[1]));
+      }
+    }
+    if (Number.isFinite(closest)) spreads.push(closest);
+  }
+  check(spreads.length > 30, `only ${spreads.length} frames with three or more children walking`);
+  if (spreads.length > 0) {
+    const lo = Math.min(...spreads);
+    const hi = Math.max(...spreads);
+    check(
+      hi - lo > 0.5,
+      `the closest pair of children stayed ${lo.toFixed(2)}–${hi.toFixed(2)} m apart all the ` +
+        'way in — that is a formation, not a group of children',
+    );
+    check(lo > 0.25, `two children came within ${lo.toFixed(2)} m — they are walking through each other`);
+    notes.push(`closest pair varied ${lo.toFixed(2)}–${hi.toFixed(2)} m — not a formation`);
+  }
+
+  // No two children may walk the same route, however staggered in time.
+  let identical = 0;
+  for (let i = 0; i < ARRIVAL_KID_COUNT; i += 1) {
+    for (let j = i + 1; j < ARRIVAL_KID_COUNT; j += 1) {
+      const a = trace.map((f) => f.kids[i]).filter(Boolean).pop();
+      const b = trace.map((f) => f.kids[j]).filter(Boolean).pop();
+      if (a && b && Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.3) identical += 1;
+    }
+  }
+  check(identical === 0, `${identical} pairs of children finished in the same spot`);
+}
+
 // And the flag that stops it happening twice is set by the sequence itself.
 check(saveFlags.arrivedByBus, 'markArrived() never fired — the arrival would replay for ever');
 

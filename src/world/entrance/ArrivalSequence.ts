@@ -1,5 +1,5 @@
 import { Group, Vector3 } from 'three';
-import { clamp01, lerp, smoothstep, turnTowards } from '../../core/mathUtils';
+import { clamp01, createRandom, lerp, smoothstep, turnTowards } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
@@ -93,6 +93,9 @@ export type ArrivalPhase =
   | 'departing'
   | 'done';
 
+/** Index of the doors-opening phase in {@link PHASE_ORDER} — when children may move. */
+const DOORS_OPEN_PHASE = 1;
+
 const PHASE_ORDER: readonly (readonly [ArrivalPhase, number])[] = [
   ['rolling-in', ARRIVAL_TIMELINE.rollingIn],
   ['doors-opening', ARRIVAL_TIMELINE.doorsOpening],
@@ -149,6 +152,30 @@ interface WalkRoute {
   readonly to: Vector2Like;
 }
 
+/**
+ * **One child's own walk — their own moment to get off, their own pace.**
+ *
+ * Jim, watching the twelve arrive: *"make the children all get off at different
+ * times, and then walk into the park, currently they all move exactly in a
+ * line"*. They did, and the reason was structural rather than cosmetic: every
+ * child's progress was a function of the *phase clock*, so whatever their route,
+ * they were all at the same fraction of it on the same frame and moved as one
+ * rigid body.
+ *
+ * Progress is now each child's **own** — distance covered at their own speed
+ * since their own start time — so they spread out on their own, bunch at the
+ * gate, and arrive strung out. A stagger painted on top of a shared clock would
+ * have looked like a stagger for about a second and then snapped back.
+ */
+interface KidWalk {
+  /** Seconds after the doors open before this one moves at all. */
+  readonly delay: number;
+  /** Metres a second, varied — children dawdle at different rates. */
+  readonly speed: number;
+  /** Rough length of their route, so speed means metres rather than fractions. */
+  readonly length: number;
+}
+
 /** A quadratic Bézier — a rounded walk rather than two straight legs. */
 function bezier(a: Vector2Like, c: Vector2Like, b: Vector2Like, t: number): { x: number; z: number } {
   const u = 1 - t;
@@ -163,6 +190,23 @@ const SCRATCH = new Vector3();
 
 /** How fast anyone in this sequence turns to face where they are going, rad/s. */
 const TURN_RATE = 7;
+
+/** Fixed, so the arrival plays the same way every time the family watches it. */
+const ARRIVAL_SEED = 20260807;
+/** Base gap between one child stepping down and the next, in seconds. */
+const KID_QUEUE_GAP = 0.42;
+/** How much longer than that any one of them might take to get going. */
+const KID_DAWDLE = 0.9;
+/** A child's ambling pace, metres a second, before their own variation. */
+const KID_WALK_SPEED = 1.5;
+/**
+ * How close two children get before they push each other apart, in metres.
+ *
+ * A child is about 0.6 m across, so this is shoulder to shoulder with a little
+ * air — close enough to look like a crowd squeezing through a gate, far enough
+ * that nobody is inside anybody.
+ */
+const KID_PERSONAL_SPACE = 0.72;
 
 export interface ArrivalOptions {
   /**
@@ -180,6 +224,9 @@ export class ArrivalSequence {
   private readonly driver: DisembarkingKid;
   private readonly playerRoute: WalkRoute;
   private readonly kidRoutes: readonly WalkRoute[];
+  private readonly kidWalks: readonly KidWalk[];
+  /** Seconds since the doors opened — the clock every child's own walk reads. */
+  private kidClock = 0;
   /** Where the bus's centre comes to rest, worked back from where its door goes. */
   private readonly stopX: number;
 
@@ -235,15 +282,46 @@ export class ArrivalSequence {
 
     // The others fan out through the same gate and spread across the park edge
     // ahead of her, so she walks in among a crowd rather than behind a queue.
-    this.kidRoutes = this.kids.map((_kid, index) => {
+    //
+    // **Everything here is jittered from a fixed seed.** An even fan with an
+    // even stagger is still a formation — it just marches diagonally instead of
+    // abreast. The seed is fixed so the arrival is the same every time it is
+    // watched, which matters when the family is giving notes on it.
+    const rng = createRandom(ARRIVAL_SEED);
+    const spread: WalkRoute[] = [];
+    const walks: KidWalk[] = [];
+    for (let index = 0; index < this.kids.length; index += 1) {
       const across = ARRIVAL_KID_COUNT <= 1 ? 0 : index / (ARRIVAL_KID_COUNT - 1) - 0.5;
-      return {
-        from: { x: drop.x + across * 2.4, z: drop.z + 0.5 + Math.abs(across) * 0.7 },
-        // Everyone squeezes through the same opening — that is what a gate is.
-        corner: { x: ENTRANCE_BUS_DOOR_X + across * 2.2, z: ENTRANCE_GATE_Z },
-        to: { x: end.x + across * 13, z: end.z - 2.2 - Math.abs(across) * 1.6 },
+      const wobble = (amount: number): number => (rng() - 0.5) * 2 * amount;
+
+      const route: WalkRoute = {
+        // Spread along the kerb and **towards the park**, never back towards
+        // the bus: the drop point is already on the park side of the bodywork,
+        // so a positive z jitter here walks them into the bus — which is
+        // exactly what the "nobody walks through the parked bus" guard caught.
+        from: { x: drop.x + across * 6.2 + wobble(0.5), z: drop.z - 0.2 - rng() * 1.4 },
+        // Tight: this is the point they funnel through, and the opening is only
+        // ~8.8 m wide. A fan wider than the gate walks them into the masonry
+        // either side of it, which the wall guard duly caught.
+        corner: { x: ENTRANCE_BUS_DOOR_X + across * 3.4 + wobble(0.5), z: ENTRANCE_GATE_Z },
+        to: {
+          x: end.x + across * 24 + wobble(2.2),
+          z: end.z - 1.6 - rng() * 5.5 - Math.abs(across) * 1.4,
+        },
       };
-    });
+      spread.push(route);
+      walks.push({
+        // Queued at the door: a base wait by position in the queue, plus a
+        // dawdle of its own, so two children never step down together.
+        delay: index * KID_QUEUE_GAP + rng() * KID_DAWDLE,
+        speed: KID_WALK_SPEED * (0.78 + rng() * 0.5),
+        length:
+          Math.hypot(route.corner.x - route.from.x, route.corner.z - route.from.z) +
+          Math.hypot(route.to.x - route.corner.x, route.to.z - route.corner.z),
+      });
+    }
+    this.kidRoutes = spread;
+    this.kidWalks = walks;
   }
 
   /** The player, once `Game` has built her — via `World.attachPlayer`. */
@@ -290,7 +368,7 @@ export class ArrivalSequence {
         this.openDoors(t);
         break;
       case 'kids-off':
-        this.kidsOff(t);
+        this.kidsOff();
         break;
       case 'stepping-down':
         this.stepDown(t, dt);
@@ -303,6 +381,14 @@ export class ArrivalSequence {
         break;
       default:
         break;
+    }
+
+    // Every child walks on their own clock, every frame from the doors opening
+    // onward — not on the phase's. That is what stops them moving in a line.
+    if (this.phaseIndex >= DOORS_OPEN_PHASE) {
+      this.kidClock += dt;
+      for (let index = 0; index < this.kids.length; index += 1) this.advanceKid(index);
+      this.pushApart();
     }
 
     this.bus.animate(dt, context.elapsed, this.busSpeed);
@@ -350,24 +436,15 @@ export class ArrivalSequence {
     this.poseSeated();
   }
 
-  /** The others hop down and set off, staggered along the queue. */
-  private kidsOff(t: number): void {
+  /** The others hop down and set off, each in their own time. */
+  private kidsOff(): void {
     this.busSpeed = 0;
-    this.kids.forEach((_kid, index) => {
-      const start = (index / Math.max(1, ARRIVAL_KID_COUNT)) * 0.75;
-      const local = clamp01((t - start) / Math.max(0.05, 1 - start));
-      if (local <= 0) return;
-      this.walkKid(index, local * 0.3);
-    });
     this.poseSeated();
   }
 
   /** Down the step onto the pavement, with a little hop. */
   private stepDown(t: number, dt: number): void {
     this.busSpeed = 0;
-    for (let index = 0; index < this.kids.length; index += 1) {
-      this.walkKid(index, 0.3 + t * 0.22);
-    }
 
     const player = this.player;
     if (!player) return;
@@ -392,9 +469,6 @@ export class ArrivalSequence {
   /** Through the gate and into the park, the other children alongside. */
   private walkIn(t: number, dt: number): void {
     this.busSpeed = 0;
-    for (let index = 0; index < this.kids.length; index += 1) {
-      this.walkKid(index, 0.52 + t * 0.48);
-    }
 
     const player = this.player;
     if (!player) return;
@@ -426,9 +500,6 @@ export class ArrivalSequence {
    */
   private depart(t: number, dt: number): void {
     this.handOver();
-    for (let index = 0; index < this.kids.length; index += 1) {
-      this.walkKid(index, 1);
-    }
 
     const previous = this.busX;
     if (t < 0.18) {
@@ -455,6 +526,59 @@ export class ArrivalSequence {
     const seat = this.bus.passengerSeat.getWorldPosition(SCRATCH);
     player.ridePosture = 'seated';
     player.setRidePose(seat.x, seat.y, seat.z, BUS_FACING);
+  }
+
+  /**
+   * **Children do not walk through each other.**
+   *
+   * Eleven of them funnel through an 8.8 m gate, so they bunch — that is what a
+   * gate does and it looks right. What does not look right is two of them
+   * occupying the same half metre, which is what the routes alone produced
+   * (0.16 m at the worst frame, against a child about 0.6 m wide).
+   *
+   * Separation rather than hand-tuning eleven Bézier curves until they happen
+   * never to cross: curves tuned to miss each other are eleven numbers that
+   * must all stay true of one another for ever, and the park's own NPC crowd
+   * already solved this with a push-apart. This is that, one relaxation pass a
+   * frame, on the scripted walk.
+   */
+  private pushApart(): void {
+    for (let i = 0; i < this.kids.length; i += 1) {
+      const a = this.kids[i]?.root;
+      if (!a || a.parent !== this.group) continue;
+      for (let j = i + 1; j < this.kids.length; j += 1) {
+        const b = this.kids[j]?.root;
+        if (!b || b.parent !== this.group) continue;
+        const dx = b.position.x - a.position.x;
+        const dz = b.position.z - a.position.z;
+        const gap = Math.hypot(dx, dz);
+        if (gap >= KID_PERSONAL_SPACE || gap < 1e-4) continue;
+        // Half the correction each, so neither is privileged by index order.
+        const push = (KID_PERSONAL_SPACE - gap) / 2;
+        const nx = dx / gap;
+        const nz = dz / gap;
+        a.position.x -= nx * push;
+        a.position.z -= nz * push;
+        b.position.x += nx * push;
+        b.position.z += nz * push;
+      }
+    }
+  }
+
+  /**
+   * Moves one child along their own route, by their own distance covered.
+   *
+   * Progress is `(their own elapsed time) x (their own speed) / (their own
+   * route length)`, so no two are ever at the same point of the same curve on
+   * the same frame — which is the whole of Jim's "they all move exactly in a
+   * line".
+   */
+  private advanceKid(index: number): void {
+    const walk = this.kidWalks[index];
+    if (!walk) return;
+    const moving = this.kidClock - walk.delay;
+    if (moving <= 0) return;
+    this.walkKid(index, (moving * walk.speed) / Math.max(0.5, walk.length));
   }
 
   /** Walks one child along its own route, `progress` 0..1 of the whole walk. */
