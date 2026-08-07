@@ -361,3 +361,85 @@ free to be chosen purely for **how big she reads**.
 
 `npm run build` and `npm run test:procgen`, exit codes read, never piped.
 Own port 5413 if a dev server is ever needed.
+
+---
+
+## Finished by `e-slide-cameras-finish`, 7 August — the camera work is done
+
+Branch `e/slide-cameras-finish`, worktree
+`.claude/worktrees/e-slide-cameras-finish`, pushed to `feat/slide-parapet-gap`.
+**Do not merge — Jim merges.**
+
+### The WIP tip was sound; three defects around it were not
+
+`e4d2298` ("UNVERIFIED, DO NOT TRUST") does in fact build and pass — verified
+before building on it: `npm run build` exit 0, `test:procgen` **186 / 0
+skipped**. The predecessor had built more than the handoff above claims.
+
+Three defects found and fixed (`733eecb`):
+
+1. **`rideCameraNow` restated the opening shot as a second fact about it.** Its
+   doc promised "the opening shot is decided in exactly one place — the shot
+   plan", then returned the chase camera whenever no shot was live. That is
+   exactly the state boarding leaves behind, because `boardSlide` resets the
+   director so a ride cannot inherit the last one's shot. Today the two agree
+   (`BEATS` is even, so beat 0 is the chase); reversing the plan would have
+   opened on one camera and cut to the other a frame later. Now it asks the plan
+   for its **first** shot, and a new private `cameraForShot` is the single owner
+   of the shot-to-lens mapping, which had been written out twice.
+2. The new camera invariant had been inserted **between**
+   `theGinormousSlideMissesTheCastleTowers` and its own doc comment, leaving 70
+   lines of prose about swept discs sitting above a function about cameras.
+3. The same pattern again in `Player.ts` — `ridePosture` inserted between
+   `hopClearance`'s doc comment and its field.
+
+### Merged `origin/main`, did not rebase — and why
+
+**A rebase is not available on this branch.** It has 54 commits including an
+existing `Merge origin/main` (`c75773d`); replaying them conflicts on
+`src/world/rail/generate.ts` at #118, a commit nothing here touches. Merging is
+also the pattern this branch already uses. Two merges done: #215 + #239.
+
+**#215 ("Wave from up a tree") collided with the reclined pose, and the
+resolution matters.** #215 extracted the seated ride pose out of
+`Player.update` into a module-level `applyRidePose(model, climbWave, elapsed)`
+*specifically* so `check:climb-wave` poses a kid exactly as the game does — its
+own doc comment says a check that re-implements a pose can pass a pose the game
+never renders. Meanwhile this branch had added `ridePosture` plus two private
+methods, `holdSeated`/`holdReclined`. Keeping both as written would have left
+**two definitions of "how a rider is posed"** — `check:climb-wave` posing
+through one and `check:slide-rider` through the other. Combined instead:
+`applyRidePose` now takes a `posture` and owns both, with `holdSeated`/
+`holdReclined` gone.
+
+**A latent bug on our side that main's reasoning exposed.** The seated pose
+zeroes `body.rotation.z` deliberately — `Player.animate` runs immediately before
+it and writes the gait's roll there, so a rider who boarded mid-stride would
+otherwise keep a frozen sliver of that lean for the whole ride. The reclined
+pose never did this. It does now.
+
+**Checked, not assumed: no body-part hider survives anywhere in `src/`.** Both
+branches independently deleted `hidePlayerBody`/`showPlayerBody` — ours for the
+slide complaint, #215's for the tree one — so the merge could have silently
+reverted the floating-head fix. It did not; `grep` over `src/` finds no
+`.visible = false` on any character body part.
+
+### One trap worth knowing: `scripts/*.mts` are not typechecked
+
+Adding `root` to `RidePoseTarget` compiled clean under **both** `tsc --noEmit`
+and `typecheck:test`, then failed at runtime inside `check:climb-wave`, which
+hands `applyRidePose` an object literal built by hand. Neither tsconfig covers
+`scripts/`. If you change a type that a `scripts/*.mts` imports from `src/`,
+**run the build** — the compiler will not tell you. (There is a
+`chore/typecheck-scripts` branch that would close this.)
+
+### Standards
+
+`npm run build` exit 0 and `npm run test:procgen` **196 passed / 0 skipped**,
+counts read not colours, never piped. The 196 reconciles: 181 before this PR,
+**+5** for the camera invariant across five seeds, **+10** for #215's two new
+invariants across five seeds.
+
+No dev server was needed and no Chrome tab was used — the pixel evidence comes
+from `check:slide-rider`'s offscreen raster, not from a browser. **Visual QA
+still wants eyes on the cut** (see the PR body).
