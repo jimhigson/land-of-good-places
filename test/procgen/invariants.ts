@@ -48,7 +48,7 @@ import {
   isInEntranceGateGap,
 } from '../../src/world/entrance/layout.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
-import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
+import { CHILD_FOOTPRINT, createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
 import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // `train/trainDimensions.ts` and `train/clearance.ts` rather than
@@ -2795,6 +2795,67 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **Every child fits in the seat they are sitting in.**
+ *
+ * `catBus.ts` says, in large friendly letters, that *"the bus is sized by what
+ * it has to hold, not by a number picked by eye"*. That was half true: the
+ * height was honestly derived from `TALLEST_CHILD_HEIGHT`, and the **seat plan
+ * was not derived from anything at all**, because `kid.ts` published no width
+ * for anyone to derive from. A real child is 1.53 m across — a chibi rig is
+ * almost all head — against a seat pitch of 1.0 m, so all twelve passengers
+ * overlapped the child behind them by 0.52 m and stuck through the bodywork.
+ * Jim saw it the first time he watched: *"the bus far too small to hold that
+ * many child models at their size"*.
+ *
+ * The old check counted seats and counted occupants, and passed throughout.
+ *
+ * This measures three things off real models, none of them restated from the
+ * constants that positioned them:
+ *
+ * 1. **`CHILD_FOOTPRINT` still covers a real child**, hair x hats, so adding a
+ *    wider hairstyle turns this red rather than quietly shrinking everybody's
+ *    personal space. (The sun hat is excluded by design — see the constant.)
+ * 2. **Twelve children in the twelve built seats are inside the built cabin**,
+ *    measured against the two named shell bands rather than against
+ *    `BODY_WIDTH`.
+ * 3. **No two of them are inside each other.**
+ *
+ * Seed-independent — the bus is the same on every seed — but it costs nothing
+ * to run here and this is the file CLAUDE.md sends anyone changing the park to.
+ */
+const childrenFitTheSeatsTheySitIn: Invariant = (facts) => {
+  const bus = facts.catBus;
+  if (!bus) return [];
+
+  const fouls: string[] = [];
+
+  if (bus.widestRealChild > CHILD_FOOTPRINT) {
+    fouls.push(
+      `CHILD_FOOTPRINT is ${CHILD_FOOTPRINT} m but the widest bare-headed child the park ` +
+        `can build measures ${bus.widestRealChild.toFixed(3)} m — raise it in kid.ts, ` +
+        'because the cat bus\u2019s seat plan and the crowd\u2019s separation both derive from it',
+    );
+  }
+
+  if (bus.worstOccupantProtrusion > 0) {
+    fouls.push(
+      `a seated child sticks ${bus.worstOccupantProtrusion.toFixed(2)} m out through the cat ` +
+        'bus\u2019s own bodywork — the bus is smaller than the children it is documented ' +
+        'as being sized around',
+    );
+  }
+
+  if (bus.worstOccupantOverlap > 0) {
+    fouls.push(
+      `two children sitting in the cat bus overlap each other by ` +
+        `${bus.worstOccupantOverlap.toFixed(2)} m — the seat plan is tighter than a child is wide`,
+    );
+  }
+
+  return fouls;
+};
+
 const theCatBusIsInThePark: Invariant = (facts) => {
   const bus = facts.catBus;
   if (!bus) {
@@ -2824,8 +2885,14 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     fouls.push(`the cat bus is ${bus.height.toFixed(2)} m tall, which is too big even for a bus`);
   }
   if (!bus.hasDriver) fouls.push('the cat bus has nobody driving it');
-  if (bus.kidCount !== 2) {
-    fouls.push(`expected 2 other children to arrive with her, found ${bus.kidCount}`);
+  // Every seat but hers. Both numbers measured off the built park — the seat
+  // count from the bus that was built, the passenger count from how many of the
+  // crowd are actually under the arrival's control.
+  if (bus.kidCount !== bus.seatCount - 1) {
+    fouls.push(
+      `expected ${bus.seatCount - 1} other children to arrive with her, found ` +
+        `${bus.kidCount} under the arrival\u2019s control`,
+    );
   }
 
   // Waiting on the kerb outside the gate, where the sequence starts. A bus left
@@ -3027,6 +3094,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
+  ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',

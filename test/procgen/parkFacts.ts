@@ -15,7 +15,10 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
+import { createKid } from '../../src/art/models/kid.ts';
+import { HAIR_STYLES } from '../../src/state/types.ts';
+import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 
@@ -110,6 +113,18 @@ export interface CatBusFact {
   readonly height: number;
   /** True if a driver was found seated in the cabin. */
   readonly hasDriver: boolean;
+  /** Seats actually built on it. */
+  readonly seatCount: number;
+  /**
+   * How far the worst of twelve seated children sticks out through the cabin,
+   * and how deeply the worst pair overlap each other — both in metres, both
+   * measured on real models in the real seats. Zero or less is a bus that fits
+   * its passengers.
+   */
+  readonly worstOccupantProtrusion: number;
+  readonly worstOccupantOverlap: number;
+  /** The widest bare-headed child the park can build, for `CHILD_FOOTPRINT`. */
+  readonly widestRealChild: number;
   /** How many disembarking children were found in the arrival's group. */
   readonly kidCount: number;
 }
@@ -460,6 +475,96 @@ export function pairKey(a: string, b: string): string {
  * would hand every seed the same park and six green suites would be measuring
  * one park six times.
  */
+/**
+ * **Does the cat bus fit the children it carries?**
+ *
+ * Measured here rather than in `invariants.ts` for a reason worth keeping. The
+ * first attempt put it in the invariant file, which meant statically importing
+ * `catBus.ts` and `ArrivalSequence.ts` into `test/`. Those reach `layout.ts`
+ * and then the seeded park manifest, so the manifest loaded **before the seed
+ * was set**, every seed but the canonical one threw — *"asked for seed 11 but
+ * the park built with 20260728"* — and 156 tests went down as silent skips.
+ * That is precisely the failure CLAUDE.md documents (*"a skipped test is not a
+ * passing test... the tell was the pass count, not the fail count"*), and the
+ * repo's own seed guard caught it within a minute of it being written.
+ *
+ * `parkFacts.ts` is loaded after the seed is chosen, so it is the safe place to
+ * touch seed-dependent modules. Invariants read these numbers from here.
+ *
+ * The measurement is seed-independent — the bus is the same on every seed — but
+ * it costs a few milliseconds, so running it per seed is free.
+ */
+function measureCatBusFit(): {
+  seatCount: number;
+  worstProtrusion: number;
+  worstOverlap: number;
+  widestChild: number;
+} {
+  const size = new Vector3();
+  let widestChild = 0;
+  for (const style of HAIR_STYLES) {
+    const bare = createKid({ hairStyle: style });
+    bare.root.updateMatrixWorld(true);
+    new Box3().setFromObject(bare.root).getSize(size);
+    widestChild = Math.max(widestChild, size.x, size.z);
+  }
+
+  const bus = createCatBus();
+  const shell = new Box3();
+  shell.makeEmpty();
+  let bands = 0;
+  bus.root.traverse((object) => {
+    if (object.name === 'cat-bus-shell-lower' || object.name === 'cat-bus-shell-upper') {
+      shell.expandByObject(object);
+      bands += 1;
+    }
+  });
+  const seatCount = bus.seats.length;
+  if (bands !== 2) {
+    bus.dispose();
+    // Reported as an impossible protrusion rather than silently as zero: a
+    // measurement that cannot find its subject must not read as a pass.
+    return { seatCount, worstProtrusion: Infinity, worstOverlap: Infinity, widestChild };
+  }
+
+  for (const seat of bus.seats) seat.add(createKid({ hairStyle: 'short' }).root);
+  bus.root.updateMatrixWorld(true);
+  const boxes = bus.seats.map((seat) =>
+    new Box3().setFromObject(seat.children[seat.children.length - 1]!),
+  );
+
+  let worstProtrusion = -Infinity;
+  for (const box of boxes) {
+    worstProtrusion = Math.max(
+      worstProtrusion,
+      box.max.y - shell.max.y,
+      shell.min.x - box.min.x,
+      box.max.x - shell.max.x,
+      box.max.z - shell.max.z,
+      shell.min.z - box.min.z,
+    );
+  }
+
+  let worstOverlap = 0;
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i]!;
+      const b = boxes[j]!;
+      if (!a.intersectsBox(b)) continue;
+      worstOverlap = Math.max(
+        worstOverlap,
+        Math.min(
+          Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x),
+          Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z),
+        ),
+      );
+    }
+  }
+
+  bus.dispose();
+  return { seatCount, worstProtrusion, worstOverlap, widestChild };
+}
+
 export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
 
@@ -594,13 +699,21 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       let hasDriver = false;
       root.traverse((object) => {
         if ((object as { isMesh?: boolean }).isMesh) meshCount += 1;
-        if (object.name === 'entrance-kid-2') hasDriver = true;
+        if (object.name === 'cat-bus-driver') hasDriver = true;
       });
-      let kidCount = 0;
-      scene.traverse((object) => {
-        if (/^entrance-kid-[01]$/.test(object.name)) kidCount += 1;
-      });
+      // **Counted off the crowd, not off the scene graph.** The children who
+      // ride in are park NPCs now — instanced members of `KidCrowd`, drawn from
+      // one `InstancedMesh` — so there are no per-child nodes named
+      // `entrance-kid-N` to find any more, and looking for them would report
+      // an empty bus for ever. "Who is aboard" is "who is under scripted
+      // control", which is the thing the arrival actually asserts.
+      const kidCount = world.npcs.all.filter((child) => child.scripted).length;
+      const fit = measureCatBusFit();
       catBus = {
+        seatCount: fit.seatCount,
+        worstOccupantProtrusion: fit.worstProtrusion,
+        worstOccupantOverlap: fit.worstOverlap,
+        widestRealChild: fit.widestChild,
         x: where.x,
         y: where.y,
         z: where.z,
