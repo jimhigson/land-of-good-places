@@ -300,3 +300,64 @@ His explicit instruction — no more stage-by-stage.
 The rider 26.65 m off the chute, a pose the harness never exercised because it
 never called `Player.update`, and visibility asked of the wrapper instead of
 the thing. **Assert the thing, not its container.**
+
+---
+
+## Picked up by `e-slide-cameras`, 6 August — the two-camera work
+
+Branch `e/slide-cameras`, worktree `.claude/worktrees/e-slide-cameras`, pushed
+to `feat/slide-parapet-gap`. **Do not merge — Jim merges.**
+
+### What the ride actually measures (canonical seed)
+
+| | |
+|---|---|
+| chute curve length | **74.41 m** (the plan-view route is 68.75 m; the 3D Catmull curve is longer) |
+| speed | 6.5 m/s (`GIANT_SLIDE_SPEED`) |
+| ride duration | **11.45 s** |
+| top of chute | y 14.84, dead level (0.0° slope) until t≈0.22 |
+| steepest | 20.7° at t≈0.60 |
+| mouth | y 1.09, 0.89 m over the ground |
+| castle centre | (−15.34, −21.79) |
+
+### The measurement that decided the camera placement
+
+A trackside eye is placed in the **chute's own frame** (`right`/`up`
+perpendicular to the tangent, the same construction `SlideRide.sampleFrames`
+uses), at a standoff distance and an elevation angle. Sweeping both and asking
+"can this one eye see a rider lying in the trough, all the way through its
+beat?" (41 samples per beat, raycast against the chute **and** the castle):
+
+| elevation | worst beat coverage |
+|---|---|
+| 40° | **41–59%** |
+| 45° | 83–90% |
+| **50°** | **100%** |
+| 55°–65° | 100% |
+
+**Standoff made no difference at all** — 4.5 m and 9.0 m give identical
+coverage at every elevation. The limit is a fixed *angle*, not a distance:
+what blocks the shot is the hand-rail along the near side of the trough
+(a tube of radius 0.11 at ±1.0 across, 0.9 up), and clearing it is an angle in
+the chute's own frame however far away you stand. The naive rail geometry says
+34°; the measured threshold is 50°, and the extra 16° is because the chute
+**turns** within a beat, so at the beat's ends you are looking along the trough
+obliquely and the effective wall is taller.
+
+So: elevation is chosen with margin over a measured threshold, and standoff is
+free to be chosen purely for **how big she reads**.
+
+### Placement rule (derived, never pinned)
+
+- Beats are **equal fractions of the solved arc**, so the rhythm is the same on
+  every seed — the same argument `SlideRide`'s `BAND_PERIOD` already makes for
+  the see-through bands.
+- The eye sits on the side **away from the castle centre**. The chute is
+  planned to clear the castle and its towers by `CORRIDOR_RADIUS`, so outward
+  is the open side by construction. Measured: the three eyes land 27.4, 30.0
+  and 32.2 m from the castle centre, and 20.0, 13.8 and 6.7 m over the ground.
+
+### Standards
+
+`npm run build` and `npm run test:procgen`, exit codes read, never piped.
+Own port 5413 if a dev server is ever needed.
