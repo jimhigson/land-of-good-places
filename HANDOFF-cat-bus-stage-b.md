@@ -94,9 +94,86 @@ from `catBus.ts` (newly exported), run from `layout.ts`.
    Exactly CLAUDE.md's *"quote the count off the screen, never the one you
    expected"*, and worth the entry because the deletion was the confident move.
 
+## Stage B — built and watched
+
+`src/world/entrance/BusJourney.ts` (its own `Scene`),
+`journeyDirector.ts` (the sequencing, so a check can hold it),
+`ui/JourneySkip.ts`, `scripts/check-bus-journey.mts`.
+
+`Engine` is **hoisted out of `Game`'s constructor** — the ride draws before
+`Game` exists and a second `WebGLRenderer` on one canvas is not a thing WebGL
+gives you.
+
+### Faults found by watching, that no check would have caught
+
+1. **The lane's hills were 100 m out of step with everything on it.** The ground
+   plane was displaced by `groundHeight(x, LOCAL z)` and then the *mesh* moved
+   100 m down the lane; the road, hedges, trees and bus all read the same
+   function in world coordinates. On screen it read as *"the camera is too
+   high"*, which it was not.
+2. **A shut door was a black rectangle.** `catBus.ts`'s *"dark opening behind
+   the door"* sat **0.26 m in front of it**, on a slab 1.09 m thick. Pre-existing;
+   invisible until something orbited the bus.
+3. **Moving that slab inboard at full thickness broke `check:cat-bus`** — it
+   then stood behind two windows. `WALL_THICKNESS` is what filling an aperture
+   means.
+4. **`WhatsNew` opens from `Game`'s constructor and pauses the park**, so the
+   ride handed over to a modal with the bus frozen behind it.
+5. **The first hill tuning hit a 27-degree gradient.** Shortening a wavelength
+   makes a hill steeper without making it taller. Now 12.6, guarded both ways.
+
+### Guards — `check:bus-journey`, all eight mutations red
+
+| mutation | went red with |
+|---|---|
+| camera stops tracking the bus | *"the bus fills only 3.0% of the frame height"* |
+| `BUS_SPEED = 0` | *"travelled only 0.0 m in 20s"* |
+| settle aims off the park bearing | *"ends 34.4 degrees off the park camera's own bearing"* |
+| `turns: 0` | *"sweeps only 0 degrees in half a ride"* |
+| flat lane | *"never exceeds 0.0 degrees — this is a table"* |
+| `skipOffered` always true | *"offered on the first frame, before any park exists"* |
+| `readyToHandOver` ignores the park | *"hands over to a park that has not finished generating"* |
+| park built on frame 1 | *"must wait until a frame of the ride has been drawn"* |
+
+## NOT DONE, and this is the honest headline
+
+**The 4.03 s of module-scope generation still happens before the ride, not
+during it.** The ride hides only the 442 ms `World` build — about 10% of the
+boot cost. `planSlide()` alone is **~3.46 s, 86% of it**, and it runs at import
+of `src/world/slide/plan.ts`.
+
+The route to fixing it, measured and specific:
+
+1. Stop statically importing `Game` from `main.ts`. Every solved artefact is an
+   independent module-scope `const` (boundary 43 ms, layout 3, train 44,
+   coaster 37, rail race 13, paths 12–29) — `await import()` them in dependency
+   order between ride frames and each is one frame's work.
+2. That leaves `planSlide()`. Its cost is a single `solveRailRoute` with
+   `restarts: 700` (`slide/plan.ts:1064`) — **700 independent attempts**, which
+   is a generator waiting to happen: yield between restarts, drive it from the
+   ride, and cache the result so `SLIDE_PLAN` picks it up at import.
+3. Keep `SLIDE_PLAN` a module-scope `const` that runs to completion
+   synchronously when nothing pre-warmed it, so `park-harness.mts`,
+   `check:park` and `test:procgen` stay byte-identical and stay green. One
+   solver, two drivers.
+
+Do **not** convert the §7 module-scope constants to lazy accessors: that
+invalidates the one-module-registry-per-seed contract `buildParkFacts` depends
+on, and the blast radius is `vitest.config.ts` plus all five seed files.
+
 ## Decisions
 
-(recorded as they are taken; see the PR comment for the full reasoning)
+- **The rail-race rainbow arch stays.** It crosses in front of the bus in every
+  arrival frame and it is the loudest thing in the shot — and it is also the
+  single strongest *"this is a theme park"* signal in the first frame of the
+  park a child ever sees. The alternatives all cost more than the complaint:
+  moving a solved four-rail route, moving the gate (the one fixed thing,
+  Decision 5), or popping a rainbow rollercoaster into existence at hand-over.
+  Reversible in one place if Jim disagrees.
+- **The journey's passengers are copies, not the park NPCs.** They cannot be the
+  crowd — it does not exist yet. They are dressed from the crowd's own lists
+  (`art/models/kidLooks.ts`, moved out of `NpcSystem.ts` so this file can reach
+  them without dragging `PARK_BOUNDARY` in), and her own look is carried across.
 
 ## Status
 
@@ -105,9 +182,10 @@ from `catBus.ts` (newly exported), run from `layout.ts`.
 - [x] Measured park generation cost (277–488 ms)
 - [x] Root-caused the foreground trees (treeline, not the plantable scatter)
 - [x] Bus dimensions exported; sightline keep-out + invariant (231 tests, 3 mutations red)
-- [ ] Opening framing
-- [ ] Rainbow arch ruling
-- [ ] Stage B journey
-- [ ] Loading screen (incremental generation)
-- [ ] Skip
-- [ ] Watched end to end in a browser
+- [x] Opening framing — derived from the bus's bounding sphere; cat's face fully in shot
+- [x] Rainbow arch ruling — stays; reasoning above
+- [x] Stage B journey — built, watched, guarded
+- [~] Loading screen — the `World` build is hidden by the ride; the 4 s of
+      module-scope solving is **not**. Plan above.
+- [x] Skip — gated on a park object existing, both directions guarded
+- [x] Watched end to end in headless Chromium (SwiftShader), four rounds
