@@ -181,14 +181,28 @@ export class Game {
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   constructor(
-    canvas: HTMLCanvasElement,
+    /**
+     * The renderer, the scene and the canvas sizing — built by the **caller**,
+     * not here.
+     *
+     * It used to be `new Engine(canvas)` on the next line. It was hoisted out
+     * on 8 August 2026 because the cat bus's journey (`BusJourney`) has to draw
+     * a scene of its own *before this constructor has ever run*: the ride is
+     * the park's loading screen, so the park is being built while it plays, and
+     * a second `WebGLRenderer` on the same canvas is not a thing WebGL will
+     * give you — `getContext` hands back the context that already exists.
+     *
+     * One renderer, made once, handed to whoever is drawing.
+     */
+    engine: Engine,
     // Kept as a field (not just a constructor-local) for `applyLiveLook`,
     // which needs somewhere to mount the "Look" pill's `CharacterCreation`
     // overlay long after the constructor has returned.
     private readonly uiRoot: HTMLElement,
     options: GameOptions = {},
   ) {
-    this.engine = new Engine(canvas);
+    this.engine = engine;
+    const canvas = engine.canvas;
     this.camera = new IsoCamera();
     this.input = new InputSystem();
     this.sky = new Sky();

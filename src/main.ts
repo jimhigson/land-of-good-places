@@ -2,6 +2,11 @@ import './style.css';
 import { Vector3 } from 'three';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type GameOptions } from './Game';
+import { Engine } from './core/Engine';
+import { Loop } from './core/Loop';
+import { BusJourney, JOURNEY_SECONDS } from './world/entrance/BusJourney';
+import { arrivalIsDue } from './world/entrance/ArrivalSequence';
+import { JourneySkip } from './ui/JourneySkip';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
@@ -290,7 +295,121 @@ function launchGame(
     boardStallId !== undefined || debugView !== undefined
       ? { ...options, arriveByBus: false }
       : options;
-  const game = new Game(canvas, uiRoot, gameOptions);
+  const engine = new Engine(canvas);
+
+  // **The ride comes first, and the park is built while it plays.**
+  //
+  // Only for a genuine arrival: a ride deep link or `/view` has already said
+  // `arriveByBus: false`, and a continued save has already arrived, so both go
+  // straight to the park exactly as before. `arrivalIsDue()` is the same one
+  // question `Entrance` asks — asked here too rather than answered a second
+  // way, so a journey without an arrival behind it is not expressible.
+  if (gameOptions.arriveByBus !== false && arrivalIsDue()) {
+    rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
+      finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+    });
+    return;
+  }
+  finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+}
+
+/**
+ * Plays the cat bus's journey, building the park behind it, then hands over.
+ *
+ * The park is built **one frame after the ride's first frame has been drawn**,
+ * not before it: the point is that a child is already watching a bus by the
+ * time any of it happens. `new Game(...)` is still one synchronous block, so
+ * this hides the `World` build rather than spreading it — see the PR for what
+ * moving the rest would cost.
+ *
+ * **The skip is gated on `game` existing**, which is the generator's own
+ * completion signal and not a timer that hopes to match it. There is no way to
+ * offer the skip early here without also having somewhere to skip *to*, which
+ * is the property Jim asked for: *"make it skippable only once the park has
+ * generated"*.
+ */
+function rideInThenPlay(
+  engine: Engine,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  options: GameOptions,
+  handOver: () => void,
+): void {
+  const player = gameStore.get().player;
+  const journey = new BusJourney({
+    skin: player.skinColour,
+    hair: player.hairColour,
+    outfit: player.outfitColour,
+    hairStyle: player.hairStyle,
+  });
+
+  const skip = new JourneySkip();
+  let built = false;
+  let done = false;
+
+  const finish = (): void => {
+    if (done) return;
+    done = true;
+    loop.stop();
+    skip.dispose();
+    journey.dispose();
+    handOver();
+  };
+
+  skip.onPress(() => {
+    // Only ever reachable once `built` is true — `JourneySkip` is not shown
+    // before then — but asserted rather than assumed, because "the button is
+    // hidden" and "the button does nothing" are two different guarantees and
+    // only one of them survives a stray tap on a touchscreen.
+    if (!built) return;
+    finish();
+  });
+
+  const loop = new Loop((tick) => {
+    journey.update(tick.dt);
+    const renderer = engine.renderer;
+    renderer.clear(true, true, true);
+    journey.render(renderer, engine.width, engine.height);
+
+    // The park, on the frame after the first one drawn. `Game`'s constructor is
+    // synchronous, so this is a single hitch early in a twenty-second ride
+    // rather than a wait in front of a blank screen.
+    if (!built && tick.frame >= 2) {
+      built = true;
+      // The park's HUD belongs to the park. `Game`'s constructor mounts the
+      // whole of it, and without this the pills, the buttons and the backpack
+      // would appear over a bus in a lane a mile from anywhere the controls
+      // mean anything. Put back at hand-over, below.
+      uiRoot.style.visibility = 'hidden';
+      handOverGame = new Game(engine, uiRoot, options);
+      skip.show();
+    }
+
+    if (journey.elapsed >= JOURNEY_SECONDS && built) finish();
+  });
+  // The splash goes the moment the ride is on screen, not when the park is.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => splash?.classList.add('hidden'));
+  });
+  loop.start();
+}
+
+/** The park, once there is one — built by {@link rideInThenPlay} or here. */
+let handOverGame: Game | null = null;
+
+function finishLaunch(
+  engine: Engine,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  gameOptions: GameOptions,
+  boardStallId?: string,
+  debugView?: DebugViewParams,
+): void {
+  const game = handOverGame ?? new Game(engine, uiRoot, gameOptions);
+  handOverGame = null;
+  // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
+  // park's, and the park is what is about to be on screen.
+  uiRoot.style.visibility = '';
   game.start();
 
   if (boardStallId) {

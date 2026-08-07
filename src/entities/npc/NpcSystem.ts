@@ -4,6 +4,12 @@ import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
 import { CHILD_FOOTPRINT, KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
+import {
+  BAG_COLOURS,
+  HAIR_COLOURS,
+  OUTFIT_COLOURS,
+  SHOE_COLOURS,
+} from '../../art/models/kidLooks';
 import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
 import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
@@ -305,54 +311,11 @@ const VISIBLE_LABEL_CAP = 10;
 const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
 
 /**
- * Colour choices, all of them already named in `PALETTE` or `ART`.
- *
- * Skin tones are drawn from `KID_SKIN_TONES` — the same hand-picked, inclusive
- * range the character creator offers the player (see `art/models/kid.ts`),
- * rather than one base hue scaled darker: a uniform scale drifts warm skin
- * towards grey at the low end, and never actually reaches a deep tone. Every
- * child in the park should look plausibly reachable from the creator's own
- * swatch row.
+ * Colour choices — now in `art/models/kidLooks.ts`, so the cat bus's journey
+ * can dress its passengers out of the same tin without importing this file.
+ * `NpcSystem` reads `PARK_BOUNDARY` at module scope, and the journey has to be
+ * on screen *before* the park is solved. See that file for the full reasoning.
  */
-
-const HAIR_COLOURS = [
-  PALETTE.hair,
-  ART.ripikaTip,
-  ART.corgiTan,
-  ART.biscuitFurDark,
-  PALETTE.ink,
-  ART.ripikaYellow,
-  PALETTE.blossomPink,
-  ART.miniLilac,
-] as const;
-
-const OUTFIT_COLOURS = [
-  PALETTE.outfit,
-  PALETTE.markerMint,
-  PALETTE.markerSky,
-  PALETTE.markerLemon,
-  PALETTE.markerLilac,
-  ART.jumperRed,
-  ART.miniLilac,
-  ART.corgiTan,
-  ART.heartPink,
-] as const;
-
-const SHOE_COLOURS = [
-  PALETTE.shoe,
-  ART.jumperRed,
-  PALETTE.markerLemon,
-  PALETTE.markerLilac,
-  ART.miniBelly,
-] as const;
-
-const BAG_COLOURS = [
-  ART.kidBackpack,
-  PALETTE.markerLemon,
-  PALETTE.markerPink,
-  ART.miniBelly,
-  ART.corgiTan,
-] as const;
 
 /** A pet, and the child it belongs to. */
 interface Pet {

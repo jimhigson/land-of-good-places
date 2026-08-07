@@ -4530,3 +4530,56 @@ kbd {
   pointer-events: none;
   z-index: 40;
 }
+
+/* ---------------------------------------------------------------- journey skip
+   "Go to the park!" — offered only once the park has finished generating, so
+   it has to *arrive* rather than merely become clickable. See
+   `ui/JourneySkip.ts` for why this is not a Game-owned overlay.
+   Sizes are all `rem`, i.e. the one root scale in this file's TEXT RULE clamp. */
+.journey-skip {
+  position: fixed;
+  left: 50%;
+  bottom: 2.2rem;
+  transform: translateX(-50%);
+  z-index: 40;
+  pointer-events: none;
+}
+
+.journey-skip--waiting {
+  /* Not merely transparent: a hidden control must not be tappable, or a child
+     who happens to press the right patch of screen skips a ride she was never
+     offered a way out of. */
+  display: none;
+}
+
+.journey-skip--ready .journey-skip__button {
+  animation: journey-skip-pop 420ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.journey-skip__button {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #4a2a52;
+  background: linear-gradient(180deg, #ffe9a8, #ffc861);
+  border: 0.16rem solid #ffffff;
+  border-radius: 999px;
+  padding: 0.7rem 1.5rem;
+  box-shadow: 0 0.35rem 0 rgba(120, 70, 40, 0.28), 0 0.7rem 1.4rem rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.journey-skip__button:active {
+  transform: translateY(0.18rem);
+  box-shadow: 0 0.17rem 0 rgba(120, 70, 40, 0.28), 0 0.4rem 0.9rem rgba(0, 0, 0, 0.25);
+}
+
+@keyframes journey-skip-pop {
+  from { transform: scale(0.2) translateY(1.6rem); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-skip--ready .journey-skip__button { animation: none; }
+}
