@@ -303,3 +303,77 @@ left untracked on purpose. Useful for re-running the field simulation.
 ### Do not hand Jim a URL until the whole list is done
 
 His explicit instruction. He does not want it stage by stage any more.
+
+---
+
+## Round 6 (6 Aug), agent `e-railrace-round5` — branch `e/railrace-round5`
+
+Rebased onto `origin/main` (24 commits replayed, no conflicts; diff vs main is
+rail-race files only, checked).
+
+### Difficulty — DONE, measured, and the pushed commit was broken
+
+**The pushed round-5 commit failed `check:rail-race`, so `npm run build` was
+red on this branch.** Two assertions: the strong player won by 534 m (a
+near-lap procession) and sloppy play won 24/24.
+
+**It also did not fix Jim's complaint.** The whole race is decided by *tap
+rate*, and nothing in the build measured it — every checker strategy mashes at
+a flat 6/s by design (`STRATEGY_MASH_RATE` isolates judgement from thumb
+speed). Measured at realistic rates with a jittered tap stream, 24 seeds,
+level 3:
+
+| taps/s | bars | wins (committed) | margin | her top speed |
+| --- | --- | --- | --- | --- |
+| 6.0 | 100% | 24/24 | +24.0 s | 33.5 m/s |
+| 4.0 | 65% | 21/24 | +3.1 s | 28.0 m/s |
+| **3.0** | **50%** | **1/24** | **−2.7 s** | **23.5 m/s** |
+| 2.0 | 30% | 0/24 | −29.4 s | 18.0 m/s |
+
+Boost settles at `gain × rate / decay`: at 3 taps/s she held 0.50, the rivals
+0.49–0.55. **She was slower than every rival before a single hazard.** That is
+Jim's sentence as a number.
+
+Now: `PLAYER_BOOST_ADVANTAGE` 1.5 → **3.0**, `RIVAL_SKILL` → **.40/.48/.56**,
+`SWING_BEHIND` 0.12 → **0.40**, `MAX_SPEED` **40 unchanged**. Child at 3 taps/s:
+**24/24 wins, mean 114.8 m**, top speed 23.5 → **30.1 m/s**.
+
+**Why the advantage is the right lever: it is self-limiting.** `BOOST_MAX`
+clamps boost at 1 and a 6-taps/s player is already there, so it speeds up a slow
+tapper and does *nothing* for a fast one. Do not "simplify" it into
+`BOOST_GAIN_PER_PRESS` — that is shared with the rivals and was measured making
+sloppy play *worse*.
+
+**`SWING_BEHIND` 0.12 was too far.** The ceiling engages at
+`SWING_BEHIND / CATCHUP_BEHIND` metres = 20 m at 0.12 — *inside* the camera's
+picture, the one part of the band a child sees. 0.40 puts it at 67 m and buys
+"nobody gets lapped" (worst case 640 → 544 m against a 600.2 m lap). The win
+celebration needs the rivals still on the track.
+
+### New guards, all proved red by mutation
+
+Two new strategies in `simulate.ts` — `childPace` (3/s, jittered, half the
+bars) and `playsBadly` (1.2/s, a tenth of the bars). `tickMash` takes optional
+jitter; rivals unaffected.
+
+- child must win — red at the old advantage ("wins only 11/24")
+- child's mean margin > 40 m — red the same way ("only 14.4 m")
+- badly-played must be able to lose — red given a star's thumb ("wins 24/24")
+- nobody lapped — red at `SWING_BEHIND = 0` ("660.7 m, which laps them")
+
+**The 170 m procession bound was re-derived, not loosened.** Worked backwards it
+demanded rivals at ~0.86 skill — almost exactly the 0.62/0.72/0.82 the family
+rejected as "far too good" — held up by a band towing a far-behind rival to
+38.9 m/s, *faster than the player*, so it came screaming back into shot: Jim's
+complaint precisely. A bound only meetable by reinstating the complaint is not a
+bound. Replaced with a physical fact from the game's own geometry
+(`route.length`).
+
+Old `sloppyField.wins < 24` asserted the right idea about the wrong player —
+`mashSloppy` taps 6/s, a metronome that forgets bars, not a careless child.
+`playsBadly` carries that guard now.
+
+Scratch measurement scripts left untracked: `scratch-difficulty.mts`,
+`scratch-sweep.mts`, `scratch-focus.mts`.
+
+### Still to do (items 1–6 of the round-5 list, none started)
