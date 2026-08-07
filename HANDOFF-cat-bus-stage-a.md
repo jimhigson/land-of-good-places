@@ -95,7 +95,7 @@ Watch the anti-vacuity floors when this thins the scatter: `trees > 24`,
 
 `npm run test:procgen` on `origin/main`: **9 files, 200 tests, 0 skipped**.
 (200 = 5 seeds x (1 + 34 invariants) = 175, plus 25 across the 4 non-seed
-files.) Adding one invariant makes it 5 x 35 = 175 -> 180, i.e. 205.
+files.) Final measured: **11 files, 216 tests** — +10 (5 seeds x 2 invariants) +6 (save round trip).
 **Quote the count off the screen, never the one you expected.**
 
 ## Stage B seam (do not build, do not make harder)
@@ -114,7 +114,7 @@ front of it with no seam. Keep that boundary a named phase.
 - [x] Wired: `World` -> `Entrance` -> arrival; `DEFAULT_SPAWN` moved to the gate
 - [x] `ENTRANCE_CLEAR_*` wired into `Scenery.ts` + invariant
 - [x] Guards proved red by mutation (five of them, below)
-- [x] `npm run build` exit 0; `npm run test:procgen` 10 files / 210 tests / 0 skipped
+- [x] `npm run build` exit 0; `npm run test:procgen` exit 0, **11 files / 216 tests / 0 skipped** (was 10 / 200)
 - [ ] **Browser QA — NOT DONE, tooling unavailable. See below.**
 - [x] PR raised referencing #245
 
