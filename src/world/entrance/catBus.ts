@@ -9,6 +9,8 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE, hexToCss } from '../../core/palette';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import { RIDER_HEADROOM } from '../train/clearance';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { paintFace, facePatchGeometry } from '../../art/style/faces';
@@ -31,12 +33,103 @@ import { blob } from '../../art/style/asset';
  * face does, instead of floating over a flat windscreen.
  */
 
-const WHEEL_RADIUS = 0.42;
-const BODY_BOTTOM_Y = 0.5;
-const BODY_HEIGHT = 1.55;
-const BODY_WIDTH = 2.05;
-const BODY_LENGTH = 4.2;
-const FACE_RADIUS = 1.04;
+/**
+ * **The bus is sized by what it has to hold, not by a number picked by eye.**
+ *
+ * Jim, 7 August 2026, watching the first run anyone had ever seen: *"the bus is
+ * also barely bigger than a child, and smaller vertically than one child with a
+ * hat"*, and then *"the seats should have children on them too, and there
+ * should be about 12 seats total on the bus"*.
+ *
+ * He was right and the old numbers were unarguable: the bus stood 2.66 m, a
+ * child is 2.12 m, and a child in a party hat is `TALLEST_CHILD_HEIGHT` 2.97 m.
+ * It was a garden shed with a cat painted on it.
+ *
+ * So **the seat plan is the source and every body dimension is derived from
+ * it.** Twelve seats in six rows of two either side of an aisle; the length is
+ * whatever six rows take, the width is whatever two seats and an aisle take,
+ * and the height is whatever lets a child stand up in the aisle and walk to the
+ * door. Nothing here agrees with anything else by coincidence — which is the
+ * trap the Rail Race cart hit, where lane spacing and cart width were two
+ * independent `1.04`s that matched by luck.
+ */
+
+/** Rows of seats, and seats per row — one either side of the aisle. */
+const SEAT_ROWS = 6;
+const SEATS_PER_ROW = 2;
+/** Jim asked for "about 12 seats total". This is that number, derived once. */
+export const CAT_BUS_SEAT_COUNT = SEAT_ROWS * SEATS_PER_ROW;
+
+/**
+ * Row-to-row spacing, and the **one owner** of it: the cabin's length is
+ * `SEAT_ROWS * SEAT_PITCH`, never a length that happens to fit.
+ */
+const SEAT_PITCH = 1.0;
+/** Across the bus: how wide one child's seat is, and the gangway between them. */
+const SEAT_WIDTH = 0.92;
+const AISLE_WIDTH = 0.9;
+/** A low cushion. Children are seated with their feet on the floor — see below. */
+const SEAT_PAD_HEIGHT = 0.3;
+
+/**
+ * The cabin floor, above the ground — a **low-floor bus**.
+ *
+ * Deliberately low: it is one easy step down for a child, and every centimetre
+ * of floor height is a centimetre added to the overall height of an already
+ * tall vehicle.
+ */
+const BODY_BOTTOM_Y = 0.62;
+
+/**
+ * Interior height, floor to ceiling.
+ *
+ * `TALLEST_CHILD_HEIGHT` rather than `KID_HEIGHT`, per ARCHITECTURE-DECISIONS
+ * §147 — *"a child's height is `TALLEST_CHILD_HEIGHT` (2.97 m), not
+ * `KID_HEIGHT`"* — because children wear hats on rides and a ceiling that
+ * clips a party hat is the same bug as a duck bar that does. `RIDER_HEADROOM`
+ * (0.4 m) is the park train's own allowance over a rider's head, borrowed here
+ * so the two vehicles answer "how much room over a child?" with one number.
+ *
+ * **Children are seated with their origins on the floor**, not on top of the
+ * cushions. That is not a fudge: the rig has no knees and `applyRidePose`
+ * leaves a seated character's head at full standing height above its origin,
+ * so seating them on a 0.3 m pad would demand a 0.3 m taller bus for no visible
+ * gain. Feet on the floor, cushion drawn under them, and sitting costs exactly
+ * what standing costs.
+ */
+const CABIN_HEIGHT = TALLEST_CHILD_HEIGHT + RIDER_HEADROOM;
+
+/** Wall thickness either side of the seats. */
+const WALL_THICKNESS = 0.16;
+
+const BODY_HEIGHT = CABIN_HEIGHT;
+const BODY_WIDTH = SEATS_PER_ROW * SEAT_WIDTH + AISLE_WIDTH + WALL_THICKNESS * 2;
+/** Six rows, plus the driver's area up front and a little behind the back row. */
+const CABIN_LENGTH_FROM_SEATS = SEAT_ROWS * SEAT_PITCH;
+const DRIVER_AREA_LENGTH = 1.45;
+const FACE_RADIUS = BODY_WIDTH * 0.52;
+const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS * 1.1;
+
+const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
+
+/**
+ * How much bigger every *small* feature is than in the original drawing.
+ *
+ * The body above is now stated in real metres, but the ears, whiskers, paw
+ * prints, bumpers and door furniture were all drawn against a 1.55 m body. Left
+ * alone they would stay shed-sized details stuck on a bus. One factor, applied
+ * at each of them, keeps the drawing's proportions.
+ */
+const DETAIL = BODY_HEIGHT / 1.55;
+
+/**
+ * The doorway, sized by the child who walks down out of it.
+ *
+ * `TALLEST_CHILD_HEIGHT` again, not `KID_HEIGHT`: a door that decapitates a
+ * party hat is the same bug as a ceiling that does.
+ */
+const DOOR_HEIGHT = TALLEST_CHILD_HEIGHT + 0.2;
+const DOOR_WIDTH = SEAT_WIDTH * 1.15;
 
 /** How far the door swings open, in radians, at `doorOpen = 1`. */
 const DOOR_SWING = 2.05;
@@ -68,8 +161,16 @@ export interface CatBusHandle {
   readonly cabin: Group;
   /** Where the driver sits, at the wheel. A child of {@link cabin}. */
   readonly driverSeat: Group;
-  /** Where a passenger sits, by the door. A child of {@link cabin}. */
+  /** Where a passenger sits, by the door. One of {@link seats}. */
   readonly passengerSeat: Group;
+  /**
+   * **The twelve seats**, each an anchor at floor level for one child.
+   *
+   * Exposed so the arrival can fill them and so a check can count what was
+   * actually built rather than trust {@link CAT_BUS_SEAT_COUNT}. Jim asked for
+   * "about 12 seats total on the bus" with "children on them too".
+   */
+  readonly seats: readonly Group[];
   /**
    * Where somebody stepping out of the open door lands, **in the bus's own
    * local space** (`x` across, `z` along, `y` is the ground).
@@ -99,7 +200,18 @@ export function createCatBus(): CatBusHandle {
   const roofMaterial = toonMaterial(roofColour);
   const trimMaterial = toonMaterial(PALETTE.stonePink);
   const earInnerMaterial = toonMaterial(PALETTE.stonePinkLight);
-  const windowMaterial = toonMaterial(PALETTE.buildingWindow, { emissive: PALETTE.buildingWindow, emissiveIntensity: 0.08 });
+  // **Glazed, not painted.** These were opaque, which was fine while the bus was
+  // empty scenery and useless the moment there were twelve children inside it
+  // to look at — Jim's Stage B ask is that they are visible through the windows,
+  // and you cannot see anybody through a solid panel. Transparent glass with
+  // `depthWrite` off (which `toonMaterial` does for us) lets the cabin read
+  // through it.
+  const windowMaterial = toonMaterial(PALETTE.buildingWindow, {
+    emissive: PALETTE.buildingWindow,
+    emissiveIntensity: 0.08,
+    transparent: true,
+    opacity: 0.34,
+  });
   const wheelMaterial = toonMaterial(PALETTE.ink);
   const hubMaterial = toonMaterial(PALETTE.markerLemon);
   const pawMaterial = toonMaterial(PALETTE.stonePinkDark);
@@ -117,22 +229,22 @@ export function createCatBus(): CatBusHandle {
   const cabinLength = BODY_LENGTH - FACE_RADIUS * 1.1;
   const body = solid(
     new Mesh(
-      new RoundedBoxGeometry(BODY_WIDTH, BODY_HEIGHT, cabinLength, 5, 0.26),
+      new RoundedBoxGeometry(BODY_WIDTH, BODY_HEIGHT, cabinLength, 5, 0.26 * DETAIL),
       bodyMaterial,
     ),
   );
   body.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT / 2, BODY_LENGTH / 2 - cabinLength / 2 - FACE_RADIUS * 0.55);
   chassis.add(body);
-  addOutline(body, 0.02);
+  addOutline(body, 0.02 * DETAIL);
 
   // A paler roof cap, rounded, so the bus doesn't read as a single flat-topped
   // box — every shop and ride in this park gets a bobble or a cap on top.
   const roof = solid(
-    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34, cabinLength * 0.92, 4, 0.16), roofMaterial),
+    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.94, 0.34 * DETAIL, cabinLength * 0.92, 4, 0.16 * DETAIL), roofMaterial),
   );
-  roof.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT + 0.05, body.position.z);
+  roof.position.set(0, BODY_BOTTOM_Y + BODY_HEIGHT + 0.05 * DETAIL, body.position.z);
   chassis.add(roof);
-  addOutline(roof, 0.016);
+  addOutline(roof, 0.016 * DETAIL);
 
   // --- the face ---------------------------------------------------------------
   // A big squashed sphere at the front, flattened toward the windscreen — the
@@ -143,7 +255,7 @@ export function createCatBus(): CatBusHandle {
   const faceSphere = blob(FACE_RADIUS, bodyMaterial, [1, 0.92, 0.6]);
   faceSphere.position.set(0, faceY, faceZ);
   chassis.add(faceSphere);
-  addOutline(faceSphere, 0.02);
+  addOutline(faceSphere, 0.02 * DETAIL);
 
   const faceTexture = paintCatBusFace();
   const faceMaterial = toonMaterial(0xffffff, { map: faceTexture, transparent: true });
@@ -157,35 +269,93 @@ export function createCatBus(): CatBusHandle {
 
   // --- ears --------------------------------------------------------------------
   // Triangular, on the roof, leaning outward a touch — "nothing is plumb".
-  const earGeometry = new ConeGeometry(0.34, 0.56, 4);
-  const earInnerGeometry = new ConeGeometry(0.18, 0.32, 4);
+  const earGeometry = new ConeGeometry(0.34 * DETAIL, 0.56 * DETAIL, 4);
+  const earInnerGeometry = new ConeGeometry(0.18 * DETAIL, 0.32 * DETAIL, 4);
   for (const side of [-1, 1] as const) {
     const ear = solid(new Mesh(earGeometry, roofMaterial));
-    ear.position.set(side * 0.62, BODY_BOTTOM_Y + BODY_HEIGHT + 0.28, faceZ - 0.35);
+    ear.position.set(side * BODY_WIDTH * 0.3, BODY_BOTTOM_Y + BODY_HEIGHT + 0.28 * DETAIL, faceZ - 0.35 * DETAIL);
     ear.rotation.z = side * -0.22;
     ear.rotation.y = Math.PI / 4;
     chassis.add(ear);
-    addOutline(ear, 0.016);
+    addOutline(ear, 0.016 * DETAIL);
 
     const innerEar = decal(new Mesh(earInnerGeometry, earInnerMaterial));
-    innerEar.position.set(0, 0.03, 0.06);
+    innerEar.position.set(0, 0.03 * DETAIL, 0.06 * DETAIL);
     innerEar.rotation.copy(ear.rotation);
     innerEar.scale.set(0.92, 0.8, 0.92);
     ear.add(innerEar);
   }
 
   // --- windows -------------------------------------------------------------
-  const windowGeometry = new RoundedBoxGeometry(0.62, 0.5, 0.06, 3, 0.1);
+  // **One window per row of seats, derived from where the rows actually are.**
+  // A window count and a seat count that agreed by hand would be two
+  // definitions of the same thing; `rowZ` is the only one, so a window cannot
+  // end up between two rows however the seat plan changes.
+  const cabinBackZ = body.position.z - cabinLength / 2;
+  const rowZ = (row: number): number => cabinBackZ + SEAT_PITCH * (row + 0.5);
+  const seatX = (column: number): number =>
+    (column === 0 ? -1 : 1) * (AISLE_WIDTH / 2 + SEAT_WIDTH / 2);
+
+  const windowGeometry = new RoundedBoxGeometry(
+    SEAT_PITCH * 0.72,
+    CABIN_HEIGHT * 0.44,
+    0.06 * DETAIL,
+    3,
+    0.1 * DETAIL,
+  );
   for (const side of [-1, 1] as const) {
-    for (let i = 0; i < 2; i += 1) {
+    for (let row = 0; row < SEAT_ROWS; row += 1) {
       const win = decal(new Mesh(windowGeometry, windowMaterial));
       win.position.set(
         side * (BODY_WIDTH / 2 + 0.02),
-        BODY_BOTTOM_Y + BODY_HEIGHT * 0.68,
-        body.position.z + (i === 0 ? 0.75 : -0.55),
+        BODY_BOTTOM_Y + CABIN_HEIGHT * 0.6,
+        rowZ(row),
       );
       win.rotation.y = Math.PI / 2;
       chassis.add(win);
+    }
+  }
+
+  // --- the seats ---------------------------------------------------------
+  // Twelve of them, six rows of two either side of the aisle, because Jim asked
+  // for "about 12 seats total" and for children to be sitting on them. Each
+  // cushion gets an **anchor group at floor level** rather than on top of it —
+  // see `CABIN_HEIGHT` for why feet go on the floor.
+  const seatPadGeometry = new RoundedBoxGeometry(
+    SEAT_WIDTH * 0.86,
+    SEAT_PAD_HEIGHT,
+    SEAT_PITCH * 0.62,
+    3,
+    0.08 * DETAIL,
+  );
+  const seatBackGeometry = new RoundedBoxGeometry(
+    SEAT_WIDTH * 0.86,
+    SEAT_PAD_HEIGHT * 1.5,
+    0.12 * DETAIL,
+    3,
+    0.06 * DETAIL,
+  );
+  const seatMaterial = toonMaterial(PALETTE.stonePink);
+  const seats: Group[] = [];
+  for (let row = 0; row < SEAT_ROWS; row += 1) {
+    for (let column = 0; column < SEATS_PER_ROW; column += 1) {
+      const x = seatX(column);
+      const z = rowZ(row);
+
+      const pad = solid(new Mesh(seatPadGeometry, seatMaterial));
+      pad.position.set(x, BODY_BOTTOM_Y + SEAT_PAD_HEIGHT / 2, z);
+      chassis.add(pad);
+
+      const back = solid(new Mesh(seatBackGeometry, seatMaterial));
+      back.position.set(x, BODY_BOTTOM_Y + SEAT_PAD_HEIGHT * 1.35, z - SEAT_PITCH * 0.3);
+      chassis.add(back);
+
+      // Where a child goes. Feet on the floor, facing the front of the bus.
+      const seat = new Group();
+      seat.name = `cat-bus-seat-${seats.length}`;
+      seat.position.set(x, BODY_BOTTOM_Y, z);
+      chassis.add(seat);
+      seats.push(seat);
     }
   }
 
@@ -202,39 +372,52 @@ export function createCatBus(): CatBusHandle {
   chassis.add(doorGroup);
 
   const doorPanel = solid(
-    new Mesh(new RoundedBoxGeometry(0.06, BODY_HEIGHT * 0.86, 1.05, 2, 0.08), bodyMaterial),
+    new Mesh(new RoundedBoxGeometry(0.06 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.08 * DETAIL), bodyMaterial),
   );
-  doorPanel.position.set(0, BODY_HEIGHT * 0.43, 0.5);
+  doorPanel.position.set(0, DOOR_HEIGHT / 2, DOOR_WIDTH / 2);
   doorGroup.add(doorPanel);
-  addOutline(doorPanel, 0.014);
+  addOutline(doorPanel, 0.014 * DETAIL);
 
   const doorWindow = decal(
-    new Mesh(new RoundedBoxGeometry(0.04, BODY_HEIGHT * 0.36, 0.75, 2, 0.06), windowMaterial),
+    new Mesh(new RoundedBoxGeometry(0.04 * DETAIL, DOOR_HEIGHT * 0.42, DOOR_WIDTH * 0.7, 2, 0.06 * DETAIL), windowMaterial),
   );
-  doorWindow.position.set(0.02, BODY_HEIGHT * 0.58, 0.5);
+  doorWindow.position.set(0.02, DOOR_HEIGHT * 0.68, DOOR_WIDTH / 2);
   doorGroup.add(doorWindow);
 
   // A dark opening behind the door, so swinging it away actually reveals a
   // doorway instead of a hole showing the sky through the cabin.
   const doorway = decal(
     new Mesh(
-      new RoundedBoxGeometry(0.5, BODY_HEIGHT * 0.82, 1.1, 2, 0.1),
+      new RoundedBoxGeometry(0.5 * DETAIL, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.1 * DETAIL),
       toonMaterial(new Color(PALETTE.ink).multiplyScalar(0.7).getHex()),
     ),
   );
-  doorway.position.set(-0.24, BODY_HEIGHT * 0.42, 0.5);
+  doorway.position.set(
+    doorGroup.position.x - 0.12 * DETAIL,
+    BODY_BOTTOM_Y + DOOR_HEIGHT / 2,
+    doorGroup.position.z + DOOR_WIDTH / 2,
+  );
   chassis.add(doorway);
 
   // A couple of friendly steps, always visible, so hopping down reads clearly.
-  const step = solid(new Mesh(new RoundedBoxGeometry(0.5, 0.1, 0.7, 2, 0.04), bumperMaterial));
-  step.position.set(-(BODY_WIDTH / 2 + 0.16), BODY_BOTTOM_Y - 0.08, doorGroup.position.z + 0.5);
+  const step = solid(
+    new Mesh(
+      new RoundedBoxGeometry(0.5 * DETAIL, 0.1 * DETAIL, DOOR_WIDTH * 0.8, 2, 0.04 * DETAIL),
+      bumperMaterial,
+    ),
+  );
+  step.position.set(
+    -(BODY_WIDTH / 2 + 0.16 * DETAIL),
+    BODY_BOTTOM_Y / 2,
+    doorGroup.position.z + DOOR_WIDTH / 2,
+  );
   chassis.add(step);
 
   // --- bumpers ---------------------------------------------------------------
   const rearBumper = solid(
-    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.98, 0.3, 0.22, 3, 0.08), bumperMaterial),
+    new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.98, 0.3 * DETAIL, 0.22 * DETAIL, 3, 0.08 * DETAIL), bumperMaterial),
   );
-  rearBumper.position.set(0, BODY_BOTTOM_Y + 0.05, -BODY_LENGTH / 2 + 0.08);
+  rearBumper.position.set(0, BODY_BOTTOM_Y + 0.05 * DETAIL, -BODY_LENGTH / 2 + 0.08 * DETAIL);
   chassis.add(rearBumper);
 
   // --- paw-print livery --------------------------------------------------------
@@ -244,18 +427,19 @@ export function createCatBus(): CatBusHandle {
       paw.position.set(
         side * (BODY_WIDTH / 2 + 0.005),
         BODY_BOTTOM_Y + BODY_HEIGHT * 0.34,
-        body.position.z - cabinLength * 0.3 + i * 0.85,
+        body.position.z - cabinLength * 0.3 + i * 0.85 * DETAIL,
       );
       paw.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      paw.scale.setScalar(DETAIL);
       chassis.add(paw);
     }
   }
 
   // --- wheels --------------------------------------------------------------
-  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.34, 14);
-  const hubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.42, WHEEL_RADIUS * 0.42, 0.36, 10);
+  const wheelGeometry = new CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, 0.34 * DETAIL, 14);
+  const hubGeometry = new CylinderGeometry(WHEEL_RADIUS * 0.42, WHEEL_RADIUS * 0.42, 0.36 * DETAIL, 10);
   const wheels: Mesh[] = [];
-  for (const x of [-(BODY_WIDTH / 2 - 0.05), BODY_WIDTH / 2 - 0.05]) {
+  for (const x of [-(BODY_WIDTH / 2 - 0.05 * DETAIL), BODY_WIDTH / 2 - 0.05 * DETAIL]) {
     for (const z of [BODY_LENGTH * 0.28, -BODY_LENGTH * 0.3]) {
       const wheel = solid(new Mesh(wheelGeometry, wheelMaterial));
       wheel.rotation.z = Math.PI / 2;
@@ -275,7 +459,7 @@ export function createCatBus(): CatBusHandle {
   // nothing in this park is perfectly plumb or perfectly symmetrical.
   const tail = new Group();
   tail.name = 'tail';
-  tail.position.set(0.18, BODY_BOTTOM_Y + BODY_HEIGHT * 0.58, -BODY_LENGTH / 2 + 0.05);
+  tail.position.set(0.18 * DETAIL, BODY_BOTTOM_Y + BODY_HEIGHT * 0.58, -BODY_LENGTH / 2 + 0.05 * DETAIL);
   chassis.add(tail);
 
   let tailCursor = new Group();
@@ -283,7 +467,7 @@ export function createCatBus(): CatBusHandle {
   tailCursor.rotation.x = -0.3;
   const tailSegments: Group[] = [];
   for (let i = 0; i < 3; i += 1) {
-    const segRadius = 0.16 - i * 0.03;
+    const segRadius = (0.16 - i * 0.03) * DETAIL;
     const seg = solid(new Mesh(new SphereGeometry(segRadius, 12, 10), tailMaterial));
     seg.scale.set(1, 1, 1.4);
     tailCursor.add(seg);
@@ -295,9 +479,9 @@ export function createCatBus(): CatBusHandle {
     tailCursor.add(next);
     tailCursor = next;
   }
-  const tailTip = solid(new Mesh(new SphereGeometry(0.13, 12, 10), tailMaterial));
+  const tailTip = solid(new Mesh(new SphereGeometry(0.13 * DETAIL, 12, 10), tailMaterial));
   tailCursor.add(tailTip);
-  addOutline(tailTip, 0.012);
+  addOutline(tailTip, 0.012 * DETAIL);
 
   // --- who is riding inside ---------------------------------------------------
   // A child of the chassis, so anybody seated in here travels with the bus and
@@ -310,25 +494,40 @@ export function createCatBus(): CatBusHandle {
   // driver is not standing in the doorway everyone is climbing out of.
   const driverSeat = new Group();
   driverSeat.name = 'driver-seat';
-  driverSeat.position.set(BODY_WIDTH * 0.24, BODY_BOTTOM_Y + 0.34, faceZ - 1.0);
+  driverSeat.position.set(
+    -seatX(0),
+    BODY_BOTTOM_Y,
+    body.position.z + cabinLength / 2 - DRIVER_AREA_LENGTH * 0.5,
+  );
   cabin.add(driverSeat);
 
-  // A passenger, by the door, so stepping down is a short move rather than a
-  // slide across the cabin.
-  const passengerSeat = new Group();
-  passengerSeat.name = 'passenger-seat';
-  passengerSeat.position.set(-BODY_WIDTH * 0.2, BODY_BOTTOM_Y + 0.34, doorGroup.position.z + 0.5);
-  cabin.add(passengerSeat);
+  // **The player's seat is one of the twelve, not a thirteenth.** Picked as the
+  // real seat nearest the door on the door's own side, by measuring the seats
+  // that were built — so she is sitting somewhere a child could sit, and
+  // "twelve seats, all occupied" stays true with her in one of them.
+  const doorSideX = seatX(0);
+  let passengerSeat = seats[0] as Group;
+  let bestGap = Infinity;
+  for (const seat of seats) {
+    if (Math.sign(seat.position.x) !== Math.sign(doorSideX)) continue;
+    const gap = Math.abs(seat.position.z - doorGroup.position.z);
+    if (gap < bestGap) {
+      bestGap = gap;
+      passengerSeat = seat;
+    }
+  }
+
+  // --- height ----------------------------------------------------------------
+  // Measured to the **actual top**, ear tips included, per ART_DIRECTION §7's
+  // asset contract — not to the roof, which would crop a name label.
+  const height = BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
 
   // Straight out from the step, clear of the sill. Derived from the step's own
   // position rather than restated, so moving the door moves this with it.
   const doorDrop = {
-    x: step.position.x - 0.77,
+    x: step.position.x - 0.77 * DETAIL,
     z: step.position.z,
   } as const;
-
-  // --- height ----------------------------------------------------------------
-  const height = BODY_BOTTOM_Y + BODY_HEIGHT + 0.05 + 0.56; // roof cap + ear tip
 
   let doorOpenAmount = 0;
   let wheelSpin = 0;
@@ -339,6 +538,7 @@ export function createCatBus(): CatBusHandle {
     cabin,
     driverSeat,
     passengerSeat,
+    seats,
     doorDrop,
 
     setDoorOpen(amount01: number): void {
