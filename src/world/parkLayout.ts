@@ -193,13 +193,26 @@ function buildOnce(restart: number): ParkLayout | null {
     }
     const { x, z } = best;
 
-    // Entrance: on the plot edge, facing the park middle (the plaza is
-    // placed first among big plots in practice, but the middle is the
-    // stable thing to face — paths and the camera both live that way).
-    const towardMiddle = Math.hypot(x, z) > 1e-6 ? [-x, -z] : [0, 1];
-    const length = Math.hypot(towardMiddle[0] as number, towardMiddle[1] as number);
-    const dirX = (towardMiddle[0] as number) / length;
-    const dirZ = (towardMiddle[1] as number) / length;
+    // Entrance: on the plot edge. Camera-facing entries (the stall booths,
+    // whose counters obey GAME_DESIGN #16's absolute readability rule) get
+    // their doormat on the side the counter actually faces — the same
+    // signYaw-derived bearing `stallPlacement.ts` builds the booth with, so
+    // the doormat, the stand and the counter are one line by construction.
+    // Everything else faces the park middle, the stable thing paths and the
+    // camera both live by.
+    const signYaw = Math.PI * rng.range(0.2, 0.3);
+    let dirX: number;
+    let dirZ: number;
+    if (entry.cameraFacing) {
+      const facing = signYaw * 0.35;
+      dirX = Math.sin(facing);
+      dirZ = Math.cos(facing);
+    } else {
+      const towardMiddle = Math.hypot(x, z) > 1e-6 ? [-x, -z] : [0, 1];
+      const length = Math.hypot(towardMiddle[0] as number, towardMiddle[1] as number);
+      dirX = (towardMiddle[0] as number) / length;
+      dirZ = (towardMiddle[1] as number) / length;
+    }
     const edge = edgeDistanceAlong(entry.footprint, dirX, dirZ);
     const standOff = 1.4; // the sign and the doormat, just clear of the plot
     const entranceX = x + dirX * (edge + standOff);
@@ -213,7 +226,7 @@ function buildOnce(restart: number): ParkLayout | null {
       boundingRadius: entry.boundingRadius,
       entranceX,
       entranceZ,
-      signYaw: Math.PI * rng.range(0.2, 0.3),
+      signYaw,
     };
     placed.push(item);
     byId.set(entry.id, item);

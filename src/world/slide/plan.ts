@@ -1066,7 +1066,12 @@ function planSlide(): PlannedSlide {
     minRadius: MIN_TURN_RADIUS,
     // The default 38 m is most of this ride. See `RouteBrief.approachDistance`.
     approachDistance: APPROACH_DISTANCE,
-    budgets: { perJoint: 16, restarts: 700 },
+    // 2400, from 700 (issue #241): the pit, the booth and the cruiser all
+    // crowd the castle by design, and on a seed where the cruiser's loop
+    // wraps low over the run-in the slide needs far more attempts to thread
+    // a chute that keeps its air. Decision 6: budgets generous — a park that
+    // will not start is worse than one that takes another second to solve.
+    budgets: { perJoint: 16, restarts: 2400 },
   };
   const route = solveRailRoute(brief);
   const points = chutePoints(route);

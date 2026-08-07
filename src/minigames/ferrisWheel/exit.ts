@@ -34,7 +34,8 @@ function planFerrisExit(): FerrisExit {
   for (let distance = 2.5; distance <= 12; distance += 0.5) {
     const x = ex - sideX * distance;
     const z = ez - sideZ * distance;
-    if (clearOfPlots(x, z, 1.2)) return { x, z };
+    // 2.6, from 1.2 — same reasoning as railRace/plan.ts's exit margin.
+    if (clearOfPlots(x, z, 2.6)) return { x, z };
   }
   return { x: ex - sideX * 2.5, z: ez - sideZ * 2.5 };
 }

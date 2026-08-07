@@ -118,6 +118,13 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'what holds it at zero; the moment anything builds proud of the wall ' +
       'again this fails rather than quietly re-opening the old 2 m allowance.',
   },
+  'anchor.reach:waterFight': {
+    worst: 0,
+    why:
+      'Declared at the worst cross-seed build-out (18.5), which some seeds ' +
+      'hit exactly — the finding then fires at zero, and this entry is what ' +
+      'holds it there rather than re-opening an allowance.',
+  },
   // `anchor.reach:dodgems` (1.7) and `anchor.reach:waterFight` (2.3) were
   // DELETED 7 Aug 2026: the manifest now declares each ride's MEASURED
   // build-out (19 / 16.5) rather than its plot rectangle, so paths and spurs

@@ -17,6 +17,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { terrainHeight } from './terrain';
+import { isOnPath, PLAZA } from './paths';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 
@@ -116,8 +117,16 @@ export class FairyLights implements GameSystem {
 
     for (let i = 0; i < poleCount; i += 1) {
       const angle = (i / poleCount) * TAU;
-      const x = Math.cos(angle) * ringRadius;
-      const z = Math.sin(angle) * ringRadius;
+      // Around the PLAZA, not the origin: the fountain is solver-placed now
+      // (issue #241), and a ring about the origin marched its poles across
+      // whatever paths happened to pass there — three seeds stranded NPC
+      // waypoints on a pole planted in the middle of a paved lane. Poles
+      // that would stand on paving are skipped rather than nudged: a gap in
+      // a fairy-light ring reads as a gateway, which is what a path through
+      // it is.
+      const x = PLAZA.x + Math.cos(angle) * ringRadius;
+      const z = PLAZA.z + Math.sin(angle) * ringRadius;
+      if (isOnPath(x, z, 1.2)) continue;
       const ground = terrainHeight(x, z);
 
       const pole = new Mesh(poleGeometry, poleMaterial);

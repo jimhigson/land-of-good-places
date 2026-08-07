@@ -23,6 +23,7 @@ import { terrainHeight } from './terrain';
 import { distanceToPath, ROUTES } from './paths';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
+import { clearOfCruiser } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -460,6 +461,9 @@ const LAMP_GAP = 4;
 /** The lamp's own collider radius, as registered below. */
 const LAMP_RADIUS = 0.22;
 
+/** Top of the finial: base + shaft + housing + cap, with their overlaps. */
+const LAMP_TOP = 3.6;
+
 /**
  * Every lamp in the park, walked off the **real** path network.
  *
@@ -545,6 +549,15 @@ function lampFits(
   // the station platforms, neither of which exists yet when lamps are built
   // (see `World`) — the corridor is wider than both.
   if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+
+  // And out from under the Sky Cruiser wherever it flies low. The station
+  // spurs it now lights (issue #241 spread the plots, so paths follow them
+  // everywhere) can run right along the coaster's boarding ramp, and a lamp
+  // is 3.5 m of pole and housing under a rail that dips to 1 m — the
+  // procgen sweep caught the car passing straight through one on three of
+  // the five seeds. The whole finished curve is known by lamp time; only
+  // its low stretches matter, because the cruise floor clears a lamp.
+  if (!clearOfCruiser(x, z, LAMP_RADIUS + 0.8, LAMP_TOP)) return false;
 
   // Never in front of a door.
   for (const anchor of ANCHORS) {

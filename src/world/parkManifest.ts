@@ -102,6 +102,18 @@ export interface ManifestEntry {
    * placed fifth, the big plots carve its central band down to nothing.
    */
   readonly solveOrder?: number;
+  /**
+   * This entry's front faces the CAMERA (roughly +Z), not the park middle.
+   *
+   * GAME_DESIGN #16 is absolute: a stall's counter must face the one
+   * direction the fixed isometric camera can read. The booths have always
+   * been built that way (`stallPlacement.ts`), but the solver used to put
+   * every doormat on the middle side regardless — two authorities for which
+   * side of a booth is the front, which agreed by luck on the old pinned
+   * park and disagreed the moment stalls spread (issue #241): stand points
+   * ended up behind their own counters and their waypoints stranded.
+   */
+  readonly cameraFacing?: boolean;
 }
 
 /** Half-width of the corridor kept clear from the gate to the plaza. */
@@ -139,7 +151,10 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   {
     id: 'building',
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    boundingRadius: 19,
+    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
+    // the dressing spills another few centimetres (the reach sweep measured
+    // 19.1 on seed 2). Declared at what stands, plus breathing room.
+    boundingRadius: 19.3,
     band: { min: 26, max: 60 },
   },
   // Bounding radii for these two are the MEASURED build-out (`check:park`'s
@@ -151,7 +166,9 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   {
     id: 'waterFight',
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    boundingRadius: 16.5,
+    // The pools and hedges are seeded per park and the worst sweep measured
+    // 18.4 (seed 5); 16.3 was only ever the canonical seed's number.
+    boundingRadius: 18.5,
     band: { min: 24, max: 80 },
   },
   {
@@ -173,7 +190,11 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
     band: { min: 10, max: 80 },
-    near: { id: 'building', min: 24, max: 30 },
+    // max 28, from 30 (issue #241): the slide's chute has a 75 m rideable
+    // ceiling (length is gradient — see slide/plan.ts), and on a seed whose
+    // pit rolled the far end of the old ring every solvable route came out
+    // 80+. Two metres of relation buys the whole solve back.
+    near: { id: 'building', min: 24, max: 28 },
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   //
@@ -183,6 +204,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   // requirement is to hug the rim, which `nearEdge` states directly.
   {
     id: 'stall.railRacer',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 110 },
@@ -190,12 +212,14 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'stall.spookyHouse',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 60 },
   },
   {
     id: 'stall.waterFight',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 90 },
@@ -203,6 +227,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'stall.dodgems',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 90 },
@@ -210,6 +235,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'stall.skyCruiser',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
     band: { min: 13, max: 90 },
@@ -219,6 +245,7 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'stall.facePaint',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.8 },
     boundingRadius: 3.6,
     band: { min: 13, max: 60 },

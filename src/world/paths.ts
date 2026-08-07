@@ -407,9 +407,27 @@ function buildGraph(): PathGraph {
       l > 1e-6 && pastReach > 1e-6
         ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
         : []; // no "past the doormat" when the node is its own destination
+    // Arrive HEAD-ON, not obliquely. The doormat faces the park middle (the
+    // solver put it there), and the booth's own counter walls flank it — a
+    // branch point far off that axis used to draw a straight leg that grazed
+    // the counter's side at centimetres (seed 2's rim stall stranded its
+    // whole doormat that way). Routing via a lead a few metres out along the
+    // facing line makes the last leg run the way a visitor actually walks
+    // in; for a branch already on-axis the lead is collinear and free.
+    const lead: (readonly [number, number])[] = [];
+    if (placedTarget) {
+      // Along the doormat's own outward ray (entrance minus plot centre) —
+      // which is the counter's facing for a camera-facing booth and the
+      // toward-middle line for everything else, because the solver derived
+      // the entrance that way. One source of truth for "which way in".
+      const outX = ex - placedTarget.x;
+      const outZ = ez - placedTarget.z;
+      const out = Math.hypot(outX, outZ);
+      if (out > 1e-6) lead.push([ex + (outX / out) * 3.5, ez + (outZ / out) * 3.5]);
+    }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...routeAround(start, [ex, ez])];
+    const routed = [...routeAround(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];

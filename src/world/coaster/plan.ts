@@ -68,7 +68,8 @@ function planExit(route: CoasterRoute, stationStallId: string): { exitX: number;
   for (let distance = 5; distance <= 24; distance += 1) {
     const x = station.x + nx * distance;
     const z = station.z + nz * distance;
-    if (clearOfPlots(x, z, 1.4)) return { exitX: x, exitZ: z };
+    // 2.6, from 1.4 — same reasoning as railRace/plan.ts's exit margin.
+    if (clearOfPlots(x, z, 2.6)) return { exitX: x, exitZ: z };
   }
   // Never found clear ground out to 24 m — hand back the nearest try rather
   // than nothing; `dismount.ts`'s runtime safety net is the last resort for

@@ -304,7 +304,13 @@ const CASTLE_INFLUENCE: RouteInfluence = {
   x: BUILDING_CENTRE_X,
   z: BUILDING_CENTRE_Z,
   radius: CASTLE_OUTER_X + 2,
-  weight: 0.3,
+  // 0.55, from 0.3 (issue #241): with the manifest unpinned the booth lands
+  // anywhere on its 21-26 m ring around the castle, including bearings where
+  // a free solve naturally closes AWAY from the walls — seed 2 exhausted
+  // every start pose without one castle crossing at the old weight. Measured
+  // across the five CI seeds at 0.55 the backstop still fires (so the weight
+  // is not doing the satisfies' job alone), and every seed crosses.
+  weight: 0.55,
 };
 
 /**

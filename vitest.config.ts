@@ -19,7 +19,13 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     pool: 'forks',
     isolate: true,
-    testTimeout: 120_000,
-    hookTimeout: 120_000,
+    // 240 s: seed 11's park is the slow one — its slide legitimately burns a
+    // deep search budget threading between the castle, the pit and a low
+    // cruiser loop (~160 s wall). Decision 6 prefers a slow solve to a park
+    // that will not start, and the staged-procgen work (loading screen) will
+    // move these solves off the critical path; until then the hook budget
+    // simply has to fit the honest cost.
+    testTimeout: 240_000,
+    hookTimeout: 240_000,
   },
 });

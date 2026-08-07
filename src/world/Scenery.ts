@@ -1104,7 +1104,9 @@ function cruiserGrid(): Map<string, CruiserSample[]> {
  * `topY` is metres above this spot's own ground, so it is compared against the
  * car in world height — the track and the plant stand on different terrain.
  */
-function clearOfCruiser(x: number, z: number, reach: number, topY: number): boolean {
+/** Exported for `LampPosts`, which keeps its poles out from under the same
+ * low stretches — one grid, one definition of "the cruiser flies low here". */
+export function clearOfCruiser(x: number, z: number, reach: number, topY: number): boolean {
   const plantTop = terrainHeight(x, z) + topY;
   const needed = reach + CART_ENVELOPE.halfWidth;
   const grid = cruiserGrid();
@@ -1261,16 +1263,26 @@ function clearOfWalls(x: number, z: number, reach: number): boolean {
  */
 const MAZE_PIECE_GAP = 7;
 
+/** Fixed candidate budgets. Calibrated across the five CI seeds so the parks
+ * carry roughly the counts the old count-targets produced (~10 hiding walls,
+ * ~8 benches); the exact number now breathes with the seed. */
+const MAZE_CANDIDATES = 2600;
+const BENCH_CANDIDATES = 4200;
+const BENCH_SALT = 0xbe7c4;
+
 function generateWallMaze(placed: WallRun[]): WallRun[] {
   // Exactly 1.00 m sits ON the measured flight ceiling and fails the boot
   // assert by a float hair - honest heights only.
   const heights = [0.8, 0.95, 1.5, 1.8, 2.1, 2.6];
   const runs: WallRun[] = [];
   const cornerPoints: [number, number][] = [];
-  let attempts = 0;
   let piece = 0;
-  while (runs.length < 10 && attempts < 4000) {
-    attempts += 1;
+  // Fixed candidate set, every fitting L accepted — same reasoning as the
+  // benches (see generateStoneRuns): a count target turns any local refusal
+  // into a distant promotion, which is exactly the coupling the
+  // scatter-decoupling invariant forbids. Density is capped by the corner
+  // spacing rule, so the budget below is what sets the EXPECTED count.
+  for (let attempts = 1; attempts <= MAZE_CANDIDATES; attempts += 1) {
     // Per-candidate stream: this loop bailed out after 2, 6 or 8 draws
     // depending on which test refused it, which is precisely how a longer path
     // spur used to relocate a garden wall onto an unrelated kiosk's doorstep.
@@ -1343,26 +1355,31 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
     consider({ from, to, height: rng.pick([0.7, 0.85] as const), kind: 'stone', piece });
   }
   // Benches: low stonework on open lawn, honestly hoppable heights only.
-  // The attempt budget is generous because most candidates are now refused —
-  // a bench crossing another bench used to be accepted without a murmur.
-  let attempts = 0;
-  while (runs.length < 8 && attempts < 6000) {
-    attempts += 1;
-    const angle = rng.range(0, Math.PI * 2);
-    const radius = Math.sqrt(rng.range(16 * 16, 44 * 44));
+  //
+  // A FIXED number of index-seeded candidates, every fitting one accepted —
+  // not "keep drawing until 8 stand" (issue #241). A count target makes the
+  // scatter global: refusing one candidate promotes a later one somewhere
+  // else entirely, so bowing a path spur two metres moved stonework across
+  // the park and the scatter-decoupling invariant caught it. With fixed
+  // indices a refusal only ever removes THAT bench; the count breathes a
+  // little per seed instead, which "every park is unique" is happy with.
+  for (let attempt = 0; attempt < BENCH_CANDIDATES; attempt += 1) {
+    const bench = candidateRng(BENCH_SALT ^ PARK_SEED, attempt);
+    const angle = bench.range(0, Math.PI * 2);
+    const radius = Math.sqrt(bench.range(16 * 16, 44 * 44));
     const cx = Math.cos(angle) * radius;
     const cz = Math.sin(angle) * radius;
-    const yaw = rng.range(0, Math.PI);
+    const yaw = bench.range(0, Math.PI);
     // Shorter than the 7-9 m these used to roll. A run that long is a garden
     // wall, and the lawn has very few 9 m stretches that clear every path,
     // plot and now the railway along their whole length — the old length only
     // ever fitted because `runIsClear` sampled five points and stepped over
     // what lay between them. 4.4-6.4 m still reads as stonework to sit on.
-    const half = rng.range(2.2, 3.2);
+    const half = bench.range(2.2, 3.2);
     const from: [number, number] = [cx - Math.cos(yaw) * half, cz - Math.sin(yaw) * half];
     const to: [number, number] = [cx + Math.cos(yaw) * half, cz + Math.sin(yaw) * half];
     piece += 1;
-    consider({ from, to, height: rng.pick([0.8, 0.95] as const), kind: 'stone', piece });
+    consider({ from, to, height: bench.pick([0.8, 0.95] as const), kind: 'stone', piece });
   }
   return runs;
 }
