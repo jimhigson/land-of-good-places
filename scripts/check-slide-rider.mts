@@ -46,6 +46,59 @@
  * Coverage is asserted too, in the tradition of `check:crowd` and
  * `check:ride-camera`: a ride that never started, or ended after two frames,
  * must fail rather than quietly prove nothing.
+ *
+ * ### And, since 6 August, it asks each camera the question that camera answers
+ *
+ * The ride now cuts between a **chase** camera and three **trackside** ones —
+ * `world/slide/cameras.ts`, and Jim's ruling quoted there. That splits this
+ * check's central question in two, and getting the split wrong would be worse
+ * than not having it at all:
+ *
+ * - **Her body must read on a trackside camera.** Every trackside sample is
+ *   measured in pixels and must put at least {@link TRACKSIDE_BODY_FLOOR} of
+ *   the frame on her body. Not "more than zero": a child who is four pixels of
+ *   shoulder in the corner of the shot is not a child you can see, and
+ *   **unoccluded is not the same as legible** — which is the exact distinction
+ *   the per-part raycast this replaced could not make. Jim, on the build where
+ *   that raycast reported every part unobstructed: *"still can't see a body,
+ *   maybe it is hidden behind the head anyway?"*.
+ * - **Her body must NOT be demanded of the chase.** She lies on her back feet
+ *   first, so her head is between a lens behind her and the rest of her *by
+ *   construction* — measured at head ~2500 px, body 0. A clause demanding body
+ *   pixels from both cameras would **fail correct behaviour**, and the pressure
+ *   would then be to wreck the chase shot to satisfy it. What the chase is held
+ *   to instead is that she is **on screen at all**: some of her, head or body.
+ *   That is the assertion that would still have caught her riding 26.65 m off
+ *   the chute, which is what this file exists for.
+ *
+ * ### Every part of the ride is covered by some camera
+ *
+ * A beat where neither camera has her is the kind of hole nobody notices until
+ * a child rides it, so three separate things are asserted: **every ridden
+ * frame** finds a live shot and a camera to render it with; **every beat in the
+ * plan** is live at some point (a camera nobody cuts to is a camera nobody has
+ * ever looked through); and **every beat is sampled**, so no beat can pass by
+ * never having been measured.
+ *
+ * ### Measured in pixels, and only where she could possibly be
+ *
+ * Rays go through the **live** camera — the real object the game would render
+ * with, from `Building.rideCameraNow` — but only across the rectangle her world
+ * bounding box projects into. Pixels outside it provably cannot be her, so the
+ * counts are exact and the check costs a fraction of a full raster. The box is
+ * taken `precise`, from vertices rather than from each part's own axis-aligned
+ * box: she is lying down, so the loose version is the union of thirty rotated
+ * boxes and comes out 2.46 m across for a 1.1 m child, which is three times the
+ * rays for the same answer. If any corner of the box is behind the lens the
+ * whole frame is rastered instead, because the projection cannot be trusted
+ * there.
+ *
+ * The raster is 240x135 — **landscape**, and the same one the head ~2500 px /
+ * body 0 px measurement of the chase was taken on, so the numbers below are
+ * comparable with it. A portrait phone widens the field of view
+ * (`fitCameraToViewport`), which scales what fraction of the frame she fills
+ * but changes nothing about *what is in front of her*, and occlusion is the
+ * question here.
  */
 
 import './headless-dom.mjs';
@@ -185,6 +238,11 @@ function isDescendantOf(node: unknown, part: unknown): boolean {
  * the same complaint.
  */
 interface Shot {
+  readonly kind: 'chase' | 'trackside';
+  /** Which beat of the shot plan this was taken during. */
+  readonly beat: number;
+  /** Which ridden frame it was taken on. */
+  readonly frame: number;
   readonly headPixels: number;
   readonly bodyPixels: number;
   readonly framePixels: number;
@@ -193,17 +251,76 @@ interface Shot {
 const SHOT_W = 240;
 const SHOT_H = 135;
 
+/**
+ * The pixel rectangle her bounding box projects into — or the whole frame where
+ * the projection cannot be trusted, or `null` if she is off screen entirely.
+ *
+ * A corner at or behind the near plane projects with a negative `w`, which
+ * flips it to the far side of the screen and would silently shrink the search
+ * to a rectangle she is *not* in — a measurement quietly reporting 0 px about
+ * the wrong part of the frame, which is this project's signature bug. So that
+ * case rasters everything: slower, and never wrong.
+ */
+function searchWindow(
+  camera: { matrixWorldInverse: unknown; near: number },
+  root: unknown,
+): { x0: number; x1: number; y0: number; y1: number } | null {
+  // `precise` — from vertices, not from each part's axis-aligned box. She is
+  // lying down, so the loose version unions thirty *rotated* boxes and comes out
+  // 2.46 m across for a 1.1 m child, tripling the rays for the same answer.
+  const box = new Box3().setFromObject(root as never, true);
+  if (box.isEmpty()) return null;
+
+  const whole = { x0: 0, x1: SHOT_W - 1, y0: 0, y1: SHOT_H - 1 };
+  const corner = new Vector3();
+  const view = new Vector3();
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < 8; i += 1) {
+    corner.set(
+      i & 1 ? box.max.x : box.min.x,
+      i & 2 ? box.max.y : box.min.y,
+      i & 4 ? box.max.z : box.min.z,
+    );
+    // Camera space first, so "is this behind the lens" is a plain sign test
+    // rather than something inferred after the divide has already gone wrong.
+    view.copy(corner).applyMatrix4((camera as { matrixWorldInverse: never }).matrixWorldInverse);
+    if (view.z > -camera.near) return whole;
+    corner.project(camera as never);
+    minX = Math.min(minX, corner.x);
+    maxX = Math.max(maxX, corner.x);
+    minY = Math.min(minY, corner.y);
+    maxY = Math.max(maxY, corner.y);
+  }
+
+  // A pixel of slack each way, so a silhouette grazing the box's edge is
+  // clipped by the geometry rather than by the search.
+  const toX = (ndc: number): number => Math.round(((ndc + 1) / 2) * SHOT_W - 0.5);
+  const toY = (ndc: number): number => Math.round(((1 - ndc) / 2) * SHOT_H - 0.5);
+  const x0 = Math.max(0, toX(minX) - 1);
+  const x1 = Math.min(SHOT_W - 1, toX(maxX) + 1);
+  const y0 = Math.max(0, toY(maxY) - 1);
+  const y1 = Math.min(SHOT_H - 1, toY(minY) + 1);
+  if (x1 < x0 || y1 < y0) return null; // off screen — 0 px, which is the truth
+  return { x0, x1, y0, y1 };
+}
+
 function shoot(
   camera: never,
   targets: readonly unknown[],
   model: { root: unknown; head: unknown },
-): Shot {
+): { headPixels: number; bodyPixels: number; framePixels: number } {
   const caster = new Raycaster();
   let headPixels = 0;
   let bodyPixels = 0;
-  for (let iy = 0; iy < SHOT_H; iy += 1) {
+  const framePixels = SHOT_W * SHOT_H;
+  const window = searchWindow(camera as never, model.root);
+  if (window === null) return { headPixels: 0, bodyPixels: 0, framePixels };
+  for (let iy = window.y0; iy <= window.y1; iy += 1) {
     const ndcY = 1 - (2 * (iy + 0.5)) / SHOT_H;
-    for (let ix = 0; ix < SHOT_W; ix += 1) {
+    for (let ix = window.x0; ix <= window.x1; ix += 1) {
       const ndcX = (2 * (ix + 0.5)) / SHOT_W - 1;
       caster.setFromCamera({ x: ndcX, y: ndcY } as never, camera);
       const hit = caster.intersectObjects(targets as never[], true)[0];
@@ -213,7 +330,7 @@ function shoot(
       else bodyPixels += 1;
     }
   }
-  return { headPixels, bodyPixels, framePixels: SHOT_W * SHOT_H };
+  return { headPixels, bodyPixels, framePixels };
 }
 
 function bodyParts(model: {
@@ -250,17 +367,29 @@ let worstOffChute = 0;
 let worstOffChuteAt = -1;
 let hiddenFrames = 0;
 const hiddenPartNames = new Set<string>();
-const occludedParts = new Set<string>();
 const shots: Shot[] = [];
-const raycaster = new Raycaster();
-const rideCameraObject = building.rideView?.camera ?? null;
-if (rideCameraObject) {
-  // Headless never calls `RideCamera.resize`, so the camera would keep whatever
-  // aspect it was constructed with. A phone is about 16:9 and so is the raster
-  // below, so this makes "what is in frame" mean what it means on the device.
-  (rideCameraObject as { aspect: number }).aspect = SHOT_W / SHOT_H;
-  (rideCameraObject as { updateProjectionMatrix(): void }).updateProjectionMatrix();
-}
+// Headless never resizes a window, so the slide's cameras would keep whatever
+// aspect they were constructed with. Through the ride's **own** resize path
+// rather than by poking `aspect`: that path is what the game runs, and it is
+// where the portrait field-of-view rule lives.
+building.resizeRideCameras(SHOT_W, SHOT_H);
+
+/**
+ * What can stand between a camera and the child.
+ *
+ * The chute she is lying in, **the castle the chute wraps round**, and her own
+ * model. The castle is new with the trackside cameras: the old list was the
+ * chute alone, so an eye that ended up behind a tower would have measured a
+ * perfectly clear shot. Her own model has to be here because self-occlusion is
+ * the entire reason the chase camera cannot show a body.
+ */
+const occluders = [slide.group, building.gardenRoot, player.model.root];
+
+/** Which beats were ever live, and which were ever measured. */
+const beatsLive = new Set<number>();
+const beatsSampled = new Set<number>();
+let framesWithNoCamera = 0;
+const framesByKind = { chase: 0, trackside: 0 };
 let worstSeatGap = 0;
 let uprightFrames = 0;
 let headForwardFrames = 0;
@@ -287,6 +416,25 @@ const ON_CHUTE = Math.hypot(CHUTE_ENVELOPE.halfWidth, CHUTE_ENVELOPE.above) + PL
  * to tune, and he will.
  */
 const RECLINED_ALONG_CHUTE = -0.6;
+
+/**
+ * How much of the frame the child's **body** must fill on a trackside camera,
+ * as a fraction of the whole raster.
+ *
+ * Deliberately not "more than zero" — see the note at the top on legibility
+ * versus occlusion. Read off the built ride rather than picked in the abstract:
+ * sampling the canonical seed's ride every 40 frames, the three trackside
+ * cameras measure **0.92% to 2.57%** of frame — worst at the very end of the
+ * last beat, where she is furthest from that eye. 0.40% sits below that with room for the route to come
+ * out a different shape on another seed, and two orders of magnitude above the
+ * **0.00%** the chase camera scores — so it cannot be satisfied by accident,
+ * and moving the trackside placement badly turns it red.
+ *
+ * Proved red rather than assumed: dropping the elevation in `slide/cameras.ts`
+ * from 55° to 40° — where the sweep says the near hand-rail starts cutting her
+ * out — takes the worst sample to 0.00% and this check fails naming the beat.
+ */
+const TRACKSIDE_BODY_FLOOR = 0.004;
 
 while (frames < MAX_FRAMES) {
   const context = {
@@ -330,54 +478,46 @@ while (frames < MAX_FRAMES) {
     worstOffChuteAt = ridingFrames;
   }
 
-  // **Can the camera actually SEE her, or is the chute in the way?**
+  // **Which shot is the game rendering with, this frame?**
   //
-  // Visibility flags were all true while Jim was looking at a floating head, so
-  // "is it visible" is the wrong question. She lies *inside* a trough whose
-  // walls are `CHUTE_ENVELOPE.above` (0.86 m) tall, and a chase camera that
-  // looks across the chute rather than down into it has that near wall between
-  // it and everything below her chin. This casts a ray from the camera at each
-  // body part and asks what it hits first — the same trick CLAUDE.md records
-  // for the hood faces, where a mesh that looked correct everywhere was never
-  // being drawn.
-  if (rideCameraObject && ridingFrames % 30 === 0) {
-    rideCameraObject.updateMatrixWorld(true);
-    const eye = rideCameraObject.getWorldPosition(new Vector3());
-    for (const [name, part] of bodyParts(player.model as never)) {
-      const target = (part as { getWorldPosition(v: Vector3): Vector3 }).getWorldPosition(
-        new Vector3(),
-      );
-      const toPart = target.clone().sub(eye);
-      const distance = toPart.length();
-      if (distance < 1e-4) continue;
-      raycaster.set(eye, toPart.normalize());
-      raycaster.far = distance - 0.05;
-      // Against the chute **and against her own model**. Self-occlusion is the
-      // one that bit: lying on her back feet-first puts her head nearest a
-      // camera sitting directly behind her, so her own skull is between the
-      // lens and the rest of her. Testing only the chute passed happily while
-      // Jim looked at a floating head.
-      const hits = raycaster.intersectObjects([slide.group, player.model.root], true);
-      const blocked = hits.some((hit) => !isDescendantOf(hit.object, part));
-      if (blocked) occludedParts.add(name);
-    }
+  // Asked of the ride, never reconstructed: `rideCameraNow` is the very getter
+  // `Game.ts` reads, and `liveShot` is the plan's own answer. A check that
+  // recomputed the beat from `t` would agree with itself while the game
+  // disagreed with both — which is the shape of all three faults this ride has
+  // already produced.
+  const liveShot = building.slideShots.liveShot;
+  const liveCamera = building.rideCameraNow;
+  const beat = liveShot ? building.slideShots.shots.indexOf(liveShot) : -1;
+  if (!liveShot || !liveCamera || beat < 0) {
+    framesWithNoCamera += 1;
+  } else {
+    beatsLive.add(beat);
+    framesByKind[liveShot.kind] += 1;
   }
 
-  // Sampled rather than every frame: 240x135 rays is a third of a million
-  // intersection tests, and the shot does not change materially between
-  // neighbouring frames.
-  if (rideCameraObject && ridingFrames % 120 === 0) {
+  // Sampled rather than every frame: even restricted to her own bounding box
+  // this is thousands of intersection tests, and the shot does not change
+  // materially between neighbouring frames. Every 60 gives at least two samples
+  // inside each of the six beats, and `beatsSampled` below fails outright if
+  // that ever stops being true rather than letting a beat pass unmeasured.
+  if (liveShot && liveCamera && beat >= 0 && ridingFrames % 60 === 0) {
     // **From the scene root, not from the camera.** `updateMatrixWorld` composes
     // an object's world matrix from its *parent's current* one and refreshes its
-    // descendants — it does not walk up. The camera hangs off `eyeMount` off
-    // `rideMount`, so updating the camera alone leaves it reading whatever those
-    // two happened to hold, and `setFromCamera` then shoots from a stale pose.
-    // This is why the first run of this measurement reported 0 px of her: not
-    // because she was invisible, but because the rays were fired from the wrong
-    // place. Exactly the "measured or reconstructed rather than live" trap.
+    // descendants — it does not walk up. The chase camera hangs off `eyeMount`
+    // off `rideMount`, so updating the camera alone leaves it reading whatever
+    // those two happened to hold, and `setFromCamera` then shoots from a stale
+    // pose. This is why the first run of this measurement reported 0 px of her:
+    // not because she was invisible, but because the rays were fired from the
+    // wrong place. Exactly the "measured or reconstructed rather than live"
+    // trap.
     scene.updateMatrixWorld(true);
-    const shot = shoot(rideCameraObject as never, [slide.group, player.model.root], player.model as never);
-    shots.push(shot);
+    // The trackside camera is deliberately unparented (see `Building`), so the
+    // sweep above does not reach it. It keeps its own matrix current on every
+    // aim; this asks again rather than assuming so.
+    (liveCamera as { updateMatrixWorld(force: boolean): void }).updateMatrixWorld(true);
+    const pixels = shoot(liveCamera as never, occluders, player.model as never);
+    shots.push({ kind: liveShot.kind, beat, frame: ridingFrames, ...pixels });
+    beatsSampled.add(beat);
   }
 
   const seat = building.rideSeatWorldPosition(new Vector3());
@@ -427,20 +567,25 @@ while (frames < MAX_FRAMES) {
   if (headOff > worstHeadOffChute) worstHeadOffChute = headOff;
 }
 
-console.log('  the shot, sampled down the ride (240x135 rays through the live ride camera):');
-for (const [i, shot] of shots.entries()) {
+const plan = building.slideShots.shots;
+console.log(`  the cut: ${plan.length} beats — ${plan.map((s) => s.kind).join(' | ')}`);
+console.log(
+  `  ${framesByKind.chase} frames on the chase, ${framesByKind.trackside} trackside, ` +
+    `${framesWithNoCamera} with no camera at all`,
+);
+console.log('  the shot, sampled down the ride (240x135 rays through the live camera):');
+for (const shot of shots) {
   const pct = ((shot.bodyPixels / shot.framePixels) * 100).toFixed(2);
   console.log(
-    `    sample ${String(i + 1).padStart(2)}  head ${String(shot.headPixels).padStart(5)} px   ` +
+    `    beat ${shot.beat} ${shot.kind.padEnd(9)} frame ${String(shot.frame).padStart(3)}  ` +
+      `head ${String(shot.headPixels).padStart(5)} px   ` +
       `body ${String(shot.bodyPixels).padStart(5)} px   ` +
-      `body is ${pct.padStart(5)}% of frame   ` +
-      `body/head ${(shot.bodyPixels / Math.max(1, shot.headPixels)).toFixed(2)}`,
+      `body is ${pct.padStart(5)}% of frame`,
   );
 }
-const worstShot = shots.reduce(
-  (a, b) => (b.bodyPixels < a.bodyPixels ? b : a),
-  shots[0] ?? { headPixels: 0, bodyPixels: 0, framePixels: SHOT_W * SHOT_H },
-);
+
+const trackside = shots.filter((s) => s.kind === 'trackside');
+const chase = shots.filter((s) => s.kind === 'chase');
 
 const complaints: string[] = [];
 
@@ -464,13 +609,74 @@ if (worstOffChute > ON_CHUTE) {
       'slide, not on it',
   );
 }
-if (occludedParts.size > 0) {
+// --------------------------------------------------- the cut, camera by camera
+//
+// **Every ridden frame has a camera.** A stretch of chute the plan does not
+// cover is a stretch the game renders through whatever was last set, and nobody
+// would find it until a child rode it.
+if (framesWithNoCamera > 0) {
   complaints.push(
-    `the chute hides the child's ${[...occludedParts].sort().join(', ')} from the chase ` +
-      'camera — every visibility flag is true, she is simply down inside the trough with ' +
-      'its near wall between her and the lens, which is what "just a head on the slide" ' +
-      'looks like',
+    `${framesWithNoCamera} of ${ridingFrames} ridden frames had no live shot, or no camera ` +
+      'to render one with — part of the ride is covered by neither the chase nor a ' +
+      'trackside camera',
   );
+}
+
+// **Every camera in the plan is cut to.** One that is planned, placed and never
+// used is one nobody has ever looked through.
+const neverLive = plan.map((_, i) => i).filter((i) => !beatsLive.has(i));
+if (neverLive.length > 0) {
+  complaints.push(
+    `beats ${neverLive.join(', ')} of ${plan.length} were never live — they are in the shot ` +
+      'plan but the ride never cuts to them',
+  );
+}
+
+// **…and every one is measured.** Without this a beat could pass by never having
+// been sampled, which is a green light for a shot nothing ever looked at — the
+// exact failure this file's own first version shipped.
+const neverSampled = plan.map((_, i) => i).filter((i) => !beatsSampled.has(i));
+if (neverSampled.length > 0) {
+  complaints.push(
+    `beats ${neverSampled.join(', ')} were never sampled, so nothing below proves anything ` +
+      'about them — the sampling interval has grown too coarse for the beats',
+  );
+}
+
+// **Her body must read on a trackside camera.** This is the clause Jim's ruling
+// buys: the chase is allowed to be all head *because* these carry her body.
+if (trackside.length === 0) {
+  complaints.push('no trackside shot was measured at all, so her body was never checked');
+} else {
+  const tooSmall = trackside.filter((s) => s.bodyPixels / s.framePixels < TRACKSIDE_BODY_FLOOR);
+  if (tooSmall.length > 0) {
+    const worst = tooSmall.reduce((a, b) => (b.bodyPixels < a.bodyPixels ? b : a));
+    complaints.push(
+      `the child's body is ${((worst.bodyPixels / worst.framePixels) * 100).toFixed(2)}% of the ` +
+        `frame on beat ${worst.beat}'s trackside camera (ridden frame ${worst.frame}), against ` +
+        `${(TRACKSIDE_BODY_FLOOR * 100).toFixed(2)}% required — ${tooSmall.length} of ` +
+        `${trackside.length} trackside samples are under it. The trackside camera is the one ` +
+        'that has to show her whole self; if it cannot, nothing in this ride does',
+    );
+  }
+}
+
+// **The chase is held to a different question, on purpose.** It may be all head
+// — that is the shape of a rider lying feet-first with a lens behind her, and
+// demanding body pixels here would fail correct behaviour. What it may not be
+// is *empty*: that is the state she was in for the whole ride at 26.65 m off
+// the chute, and it is what this file was written for.
+if (chase.length === 0) {
+  complaints.push('no chase shot was measured at all, so the chase camera was never checked');
+} else {
+  const empty = chase.filter((s) => s.headPixels + s.bodyPixels === 0);
+  if (empty.length > 0) {
+    complaints.push(
+      `the child is not on screen at all on ${empty.length} of ${chase.length} chase samples ` +
+        `(first at ridden frame ${empty[0]?.frame}) — 0 px of her, head or body. She is ` +
+        'allowed to be all head on this camera; she is not allowed to be absent from it',
+    );
+  }
 }
 if (uprightFrames > 0) {
   complaints.push(
@@ -506,11 +712,18 @@ if (complaints.length > 0) {
   process.exit(1);
 }
 
+const worstTrackside = trackside.reduce((a, b) => (b.bodyPixels < a.bodyPixels ? b : a));
+const bestChaseBody = Math.max(...chase.map((s) => s.bodyPixels));
 console.log(
   `check:slide-rider ok — ${ridingFrames} frames ridden, drawn throughout, ` +
     `worst ${worstOffChute.toFixed(2)} m off the chute (trough allows ${ON_CHUTE.toFixed(2)} m), ` +
     `seat within ${worstSeatGap.toFixed(2)} m, ` +
     `reclined throughout (body at most ${worstAlong.toFixed(2)} along the chute, ` +
     `head at most ${worstHeadRise.toFixed(2)} m over her feet and ` +
-    `${worstHeadOffChute.toFixed(2)} m from the chute)`,
+    `${worstHeadOffChute.toFixed(2)} m from the chute).\n` +
+    `  All ${plan.length} beats live and sampled, every frame covered. Her body fills at least ` +
+    `${((worstTrackside.bodyPixels / worstTrackside.framePixels) * 100).toFixed(2)}% of the ` +
+    `frame on a trackside camera (floor ${(TRACKSIDE_BODY_FLOOR * 100).toFixed(2)}%), and she ` +
+    `is on screen on every chase sample — where she is allowed to be all head, and manages ` +
+    `${bestChaseBody} px of body at best.`,
 );
