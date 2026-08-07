@@ -81,15 +81,52 @@ seams and comparing raw indices would call a perfect solid full of holes.
 edge(s)`, all 12 other parts green. Log:
 `…/scratchpad/cartshape-RED.log`.
 
-## Status
+## Status — DONE, PR #249 open, not merged
 
 - [x] `check:cart-shape` green (incl. new closure assertion, width still 0.5500)
 - [x] `check:rail-race` green (arm clearances identical to this morning)
-- [ ] `npm run build`
-- [ ] `npm run test:procgen` (bar: 221 / 9 files / 0 skipped)
-- [ ] Visual verification in the running ride, headless Chromium, corners from
-      several angles
-- [ ] PR against `chore/rail-race-pr-triage`
+- [x] `npm run build` — exit 0
+- [x] `npm run test:procgen` — exit 0, `9 passed (9)` files, `221 passed (221)`,
+      0 skipped
+- [x] Visual verification in the running ride
+- [x] PR #249 against `chore/rail-race-pr-triage` — **not merged**
+
+## The pictures
+
+Headless Chromium via Playwright, **throwaway profile** (`chromium.launch()`
+mints a fresh temp profile per run — the shared chrome-devtools profile was
+never touched), real WebGL 2.0 / SwiftShader, on `/rail-race` at Level 1. Dev
+server was on **5317**, killed by PID when done.
+
+Before/after are the same viewpoint from the same script, and pairs 1–3 land on
+the same countdown frame, so they are directly comparable. In the "before" the
+tub's interior is see-through — grass, trees and the neighbouring cart visible
+*through* it. In the "after" it is opaque with a real rim edge.
+
+```
+/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/68ade46a-c81d-46a8-8676-003ebeeaa648/scratchpad/shots/
+  BEFORE-corner-1..5.png    the reported fault, reproduced
+  AFTER-corner-1..5.png     the same view, closed
+  AFTER-1..6.png            full frames, ride camera
+```
+
+Capture scripts (outside the repo, playwright installed in its own scratch
+project so `package.json` was untouched):
+`…/scratchpad/pw/ride-zoom.mjs`, `…/scratchpad/pw/ride.mjs`,
+`…/scratchpad/pw/shoot.mjs`.
+
+Blender analysis scripts used to find the fault:
+`…/scratchpad/analyze_cart.py` (boundary-edge audit of any .blend/.glb),
+`…/scratchpad/normals_check.py`, `…/scratchpad/dump_profile.py`.
+
+## Left for whoever picks this up
+
+- **Other authored assets are still unguarded for closure.** `duckbar.blend` and
+  `kid.blend` have never been checked; `analyze_cart.py` in the scratchpad will
+  audit any of them in one command.
+- `wallAt`'s `null` on fewer than 2 crossings is still a vacuous pass. Safe now
+  only because the closure guard exists — worth tightening if that check is
+  touched again.
 
 ## Rebuilding the asset
 
