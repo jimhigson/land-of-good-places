@@ -64,6 +64,7 @@ import { LANDING_DROP, riderClearanceFromChute } from '../../src/world/slide/lan
 // the train imports give above: `track.ts` reaches `parkLayout.ts`, and a static
 // import of that into `test/` fixes the park's seed before the harness sets
 // `LGP_SEED`. The leaf module imports nothing at all.
+import { SUPPORT_REACH_TOLERANCE as CRUISER_SUPPORT_REACH_TOLERANCE } from '../../src/world/coaster/cruiserDimensions.ts';
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BEAM_DROP,
@@ -3350,10 +3351,10 @@ const supportsMeetWhatTheyCarry: Invariant = (facts) => {
   if (!(pylons instanceof InstancedMesh) || pylons.count === 0) {
     complaints.push('the Sky Cruiser has no pylons in the built scene to measure');
   } else {
-    // The ties hang 0.12 m under the centre line and are 0.08 m thick
-    // (`coaster/Coaster.ts`), so 0.16 m is how far the track's own structure
-    // reaches down — the same rule as the Rail Race, read off that ride.
-    const CRUISER_STRUCTURE_DEPTH = 0.16;
+    // One rail radius plus half a tie, owned by `coaster/cruiserDimensions.ts`
+    // — the same rule the Rail Race branches are judged by, written from this
+    // ride's own numbers rather than copied into the test.
+    const CRUISER_STRUCTURE_DEPTH = CRUISER_SUPPORT_REACH_TOLERANCE;
     let worst = 0;
     let worstAt = new Vector3();
     const on = new Vector3();
