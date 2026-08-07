@@ -172,6 +172,9 @@ export class Game {
     // The building owns "how high is the ground?" from here on, so that its
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
+    // A save written inside the hotel restores into its room, not the plaza:
+    // rooms are true spaces, so being there is a position plus this adoption.
+    this.world.hotel.adoptRestoredPlayer();
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -1296,7 +1299,12 @@ export class Game {
  *    day `SpaceManager` exists.
  */
 function resolveSpawn(place: SavedPlace | undefined): Vector3 {
-  if (!place || place.space !== SPACE_GARDEN) return DEFAULT_SPAWN;
+  if (!place) return DEFAULT_SPAWN;
+  // Hotel rooms restore IN PLACE — they are true disjoint spaces with their
+  // own origins, so "being there" is a position plus one adoption call
+  // (`Hotel.adoptRestoredPlayer`), unlike the castle's stacked decks, whose
+  // restore stays deliberately deferred to Decision 3 (see below).
+  if (place.space !== SPACE_GARDEN && !place.space.startsWith('hotel.')) return DEFAULT_SPAWN;
   const world = localToWorld(place.space, place.x, place.y, place.z);
   if (!world) return DEFAULT_SPAWN;
   return new Vector3(world.x, world.y, world.z);

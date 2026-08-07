@@ -5,7 +5,7 @@ import type { FrameContext, GameSystem } from '../core/types';
  * which floor you are on, on the HUD."*
  *
  * A little pill that exists only while the hotel does: `source()` returns
- * the floor label ("Lobby", "Floor 25", "Floor 50") or `null` anywhere else,
+ * the floor label ("Lobby", "Floor 1", "Floor 50") or `null` anywhere else,
  * and null is the pill gone — not blanked, gone, because the family already
  * ruled the top bar eats too much screen and an empty pill is spent screen.
  * Follows `LiftPanel`'s pattern: a `GameSystem` that owns a bit of DOM and

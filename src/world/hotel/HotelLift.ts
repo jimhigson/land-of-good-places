@@ -106,7 +106,7 @@ export class HotelLift implements LiftPanelSource {
       case 'aboard':
         return { mode: 'floors', indicator: this.hereName() };
       case 'going':
-        return { mode: 'going', indicator: `Floor ${this.tickingStorey()}…` };
+        return { mode: 'going', indicator: `${this.tickingFloorName()}…` };
       case 'alighting':
         return { mode: 'going', indicator: this.hereName() };
       default:
@@ -242,5 +242,16 @@ export class HotelLift implements LiftPanelSource {
     const from = this.from.storey;
     const to = this.to.storey;
     return Math.round(from + (to - from) * eased);
+  }
+
+  /**
+   * What that storey is *called*. Storey 0 is the ground floor and says so:
+   * `HOTEL_FLOORS` numbers the hotel the British way (see its doc comment), so
+   * the number below Floor 1 is 0, and "Floor 0…" is not a thing a lift has
+   * ever said to a six-year-old.
+   */
+  private tickingFloorName(): string {
+    const storey = this.tickingStorey();
+    return storey === 0 ? 'Ground floor' : `Floor ${storey}`;
   }
 }

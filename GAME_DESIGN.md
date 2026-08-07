@@ -278,6 +278,12 @@ The HUD shows which floor you are on. Party rooms with free sweeties and a
 birthday party, and grown-ups and children walking around the hotel, are
 still to come.
 
+*Amended in play (7 August, Jim):* breakfast is served on **Floor 1** (the
+floor above ground, British), in a big sunny buffet room — Eleri's level-25
+breakfast lives on in the lift's fiction, which still counts fifty storeys.
+Each floor has its own theme: grand crystal lobby, sunny-morning Floor 1,
+up-among-the-clouds Floor 50, and the suite is the rainbow one.
+
 *As built (7 August 2026):* the tower is generator-placed `near` the castle
 (and an invariant holds it close on every seed); every room inside is **its
 own disjoint space** joined only by doors and the lift (Jim's ruling — the
