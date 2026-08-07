@@ -510,15 +510,23 @@ function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[
       // preferred verge alone left a 23 m unlit stretch of ring road.
       const nudge = (route.closed ? 1 / count : 1 / count) * 0.25;
       let stood = false;
-      for (const along of [0, nudge, -nudge]) {
-        for (const trySide of [preferred, -preferred as 1 | -1]) {
-          const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
-          const candidate = offsetFromCurve(curve, at, offset, trySide);
-          if (!candidate) continue;
-          if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
-          positions.push(candidate);
-          stood = true;
-          break;
+      // The widened offsets are for verges the Sky Cruiser's low ramp flies
+      // along (issue #241 let the two land together): a lamp three metres
+      // off the kerb clears the car's swept corridor and still lights the
+      // path many times over (LAMP_REACH is 15). Tried last, so the kerbside
+      // look wins everywhere the ride allows it.
+      for (const reach of [offset, offset + 2.2, offset + 3.4]) {
+        for (const along of [0, nudge, -nudge]) {
+          for (const trySide of [preferred, -preferred as 1 | -1]) {
+            const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
+            const candidate = offsetFromCurve(curve, at, reach, trySide);
+            if (!candidate) continue;
+            if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
+            positions.push(candidate);
+            stood = true;
+            break;
+          }
+          if (stood) break;
         }
         if (stood) break;
       }

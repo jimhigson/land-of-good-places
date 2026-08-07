@@ -16,6 +16,7 @@ import { Coaster } from './coaster/Coaster';
 import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
+import { Hotel } from './hotel/Hotel';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -58,6 +59,7 @@ export class World implements GameSystem {
   readonly fireflies: Fireflies;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
+  readonly hotel: Hotel;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -92,6 +94,11 @@ export class World implements GameSystem {
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots, interiorControls);
+    // The Land Hotel (issue #236): a crystal tower near the castle whose door
+    // leads to rooms that are each their own space. Shares the building's
+    // WalkSurfaces sampler — its floor plates and mattress tops are ordinary
+    // static platforms to it.
+    this.hotel = new Hotel(this.collision, this.anchorPlots, interiorControls, this.building.surfaces);
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -210,7 +217,7 @@ export class World implements GameSystem {
     // hundred metres from the park rather than inside the plot the facade
     // stands on. Deliberately **not** one of the park groups above — it is not
     // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(...this.parkGroups, this.building.interiorRoot, this.ferrisWheel.group);
+    scene.add(...this.parkGroups, this.building.interiorRoot, this.hotel.hotelRoot, this.ferrisWheel.group);
   }
 
   /**
@@ -279,6 +286,7 @@ export class World implements GameSystem {
     this.fireflies.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+    this.hotel.update(context);
 
     // The train runs before the children, and it has to: it carries the ones
     // who are aboard by writing their position, and their own movement code —
@@ -306,6 +314,7 @@ export class World implements GameSystem {
   interactZones(): InteractZone[] {
     return [
       ...this.building.interactZones(),
+      ...this.hotel.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
       ...this.train.interactZones(),
@@ -335,6 +344,7 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
+    this.hotel.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);

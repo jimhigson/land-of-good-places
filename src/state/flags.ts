@@ -22,6 +22,7 @@ class SaveFlags {
   private arrivedByBusFlag = false;
   private dexPrizeSeenFlag = false;
   private whatsNewSeenIdValue: number | null = null;
+  private hotelKeyFlag = false;
   private changes = 0;
 
   /**
@@ -38,6 +39,7 @@ class SaveFlags {
     if (flags.createdCharacter !== undefined) this.createdCharacterFlag = flags.createdCharacter;
     if (flags.arrivedByBus !== undefined) this.arrivedByBusFlag = flags.arrivedByBus;
     if (flags.dexPrizeSeen !== undefined) this.dexPrizeSeenFlag = flags.dexPrizeSeen;
+    if (flags.hotelKey !== undefined) this.hotelKeyFlag = flags.hotelKey;
     if (flags.whatsNewSeenId !== undefined) this.whatsNewSeenIdValue = flags.whatsNewSeenId;
     this.changes += 1;
   }
@@ -54,11 +56,13 @@ class SaveFlags {
       createdCharacter: boolean;
       arrivedByBus: boolean;
       dexPrizeSeen: boolean;
+      hotelKey: boolean;
       whatsNewSeenId?: number;
     } = {
       createdCharacter: this.createdCharacterFlag,
       arrivedByBus: this.arrivedByBusFlag,
       dexPrizeSeen: this.dexPrizeSeenFlag,
+      hotelKey: this.hotelKeyFlag,
     };
     // Omitted rather than null: `exactOptionalPropertyTypes`, and "never seen
     // one" is exactly what an absent field means everywhere else in the save.
@@ -98,6 +102,17 @@ class SaveFlags {
   markDexPrizeSeen(): void {
     if (this.dexPrizeSeenFlag) return;
     this.dexPrizeSeenFlag = true;
+    this.changes += 1;
+  }
+
+  /** True once the Land Hotel's reception has given her the room key. */
+  hasHotelKey(): boolean {
+    return this.hotelKeyFlag;
+  }
+
+  giveHotelKey(): void {
+    if (this.hotelKeyFlag) return;
+    this.hotelKeyFlag = true;
     this.changes += 1;
   }
 

@@ -171,6 +171,38 @@ prevent. The constant itself is safe either way, because every term is imported
 and the invariant re-measures; it is the geometry built on top that is expensive
 to redo. **Never shave the constant to avoid the conversation.**
 
+## Decision 9 — The limit is the boundary, and the manifest is unpinned
+
+**Date:** 7 August 2026 · **Status:** decided and implemented (issue #241,
+with the Land Hotel #236 as its first new resident)
+**Sources:** issue #241; Decision 5 and 6; `parkLayout.ts`, `boundary.ts`.
+
+1. **A plot may stand wherever the spline boundary lets it** — the fit test
+   is `PARK_BOUNDARY.distanceToEdge >= boundingRadius + BOUNDARY_CLEARANCE`,
+   per candidate, replacing `PLOT_EXTENT_LIMIT = 52` (the old circle, which
+   left half the doubled park empty).
+2. **Nothing is pinned.** Every entry draws from a stream of its own
+   (`candidateRng(hash(id) ^ seed, restart)`), so a manifest edit cannot
+   move any other entry's candidates — the coupling that forced pins is
+   gone, and "every park is unique" (5 Aug ruling) is true again.
+3. **Spread is a preference, not a reservation**: of twelve legal
+   candidates, the one whose nearest neighbour is furthest wins. Decision 6
+   stands untouched.
+4. **Rim systems ask the boundary, never a radius**: the train's wall clamp
+   is per-bearing; its obstacle model is free radial intervals (a plot may
+   sit beyond the loop now); the cruiser and slide solve inside the real
+   park; and a camera-facing booth's doormat derives from the same bearing
+   its counter is built with (GAME_DESIGN #16), because the solver and the
+   booth were two authorities for "which side is the front".
+5. **Solve order for the rails**: layout, then cruiser, then train — the
+   cruiser publishes its low corridor and the train (the most flexible
+   router) threads it, per Decision 6's arrow. The cruiser's cruise floor
+   alone satisfies Decision 4's rail-over-rail air at any grade crossing.
+6. Four invariants guard it: the park's area really is its target (the
+   check #115 asked for and never got), every plot stays inside the edge
+   with a walkable lane, no quarter of the park is desolate, and the hotel
+   stays close to the castle.
+
 ## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
 
 **Date:** 5 August 2026 · **Status:** decided, first implemented by the Sky

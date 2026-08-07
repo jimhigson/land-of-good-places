@@ -31,6 +31,7 @@ import {
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
+import { FloorPill } from './ui/FloorPill';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -99,6 +100,7 @@ export class Game {
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
+  readonly hotelLiftPanel: LiftPanel;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
@@ -458,6 +460,23 @@ export class Game {
     );
     this.addSystem(this.liftPanel);
 
+    // The Land Hotel's lift drives a second instance of the SAME panel: it
+    // implements Decision 3's floors()/go(n) seam (the first portal lift),
+    // which is exactly what the panel was written against. Only one of the
+    // two can ever be showing — the player is only ever in one space.
+    this.hotelLiftPanel = new LiftPanel(
+      uiRoot,
+      this.world.hotel.liftPanel,
+      () =>
+        (this.uiOwnsTheScreen() && !this.player.riding) ||
+        this.parkMap.isOpen ||
+        this.stairMenu.isOpen,
+    );
+    this.addSystem(this.hotelLiftPanel);
+
+    // Eleri: "It shows on the screen which floor you are on, on the HUD."
+    this.addSystem(new FloorPill(uiRoot, () => this.world.hotel.floorLabel()));
+
     // GAME_DESIGN.md's SELECTION RULE, built once for the whole game: one thing
     // in the park is selected at a time — by standing at it, hovering it or
     // tapping it — and that is what the rainbow outlines and what the chips
@@ -506,6 +525,11 @@ export class Game {
             name: 'liftPanel',
             active: () => this.liftPanel.awaitingPress,
             run: () => this.liftPanel.pressFocused(),
+          },
+          {
+            name: 'hotelLiftPanel',
+            active: () => this.hotelLiftPanel.awaitingPress,
+            run: () => this.hotelLiftPanel.pressFocused(),
           },
           {
             // Up a tree: `player.riding` is true, so nothing is selectable and

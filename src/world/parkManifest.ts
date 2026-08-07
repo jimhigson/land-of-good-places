@@ -196,6 +196,18 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     // 80+. Two metres of relation buys the whole solve back.
     near: { id: 'building', min: 24, max: 28 },
   },
+  // The Land Hotel (issue #236, Eleri's own spec): a crystal tower CLOSE TO
+  // THE CASTLE — the near relation is her requirement verbatim. Fifty
+  // storeys in the fiction; the inside is four disjoint spaces reached
+  // through the door (see world/hotel/). min 28 keeps the tower's crystal
+  // skirt clear of the castle rect's corner; max 42 keeps "close" honest.
+  {
+    id: 'hotel',
+    footprint: { kind: 'circle', radius: 8 },
+    boundingRadius: 9,
+    band: { min: 10, max: 90 },
+    near: { id: 'building', min: 28, max: 42 },
+  },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   //
   // stall.railRacer boards a ride that is a ring OUTSIDE the boundary wall

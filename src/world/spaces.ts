@@ -23,7 +23,18 @@
  * everything else intact. That is the intended failure, not an oversight.
  */
 
-import { INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z } from '../core/constants';
+import {
+  HOTEL_BREAKFAST_Z,
+  HOTEL_CORRIDOR_Z,
+  HOTEL_FLOOR_Y,
+  HOTEL_LOBBY_Z,
+  HOTEL_ORIGIN_X,
+  HOTEL_SUITE_Z,
+  INTERIOR_HALF_X,
+  INTERIOR_HALF_Z,
+  INTERIOR_ORIGIN_X,
+  INTERIOR_ORIGIN_Z,
+} from '../core/constants';
 import { BUILDING_BASE_Y } from './building/layout';
 
 /**
@@ -48,6 +59,18 @@ export const SPACE_GARDEN: SpaceId = 'garden';
  */
 export const SPACE_CASTLE: SpaceId = 'castle';
 
+/**
+ * The Land Hotel's rooms — each one **its own space** (Jim's ruling on issue
+ * #236): entirely disjoint worlds joined only by doors and the lift, exactly
+ * the shape Decision 3 wants for the castle's floors. Bigger on the inside
+ * than the outside is the point, not a compromise. Fifty storeys exist in
+ * the fiction; four rooms exist in the world.
+ */
+export const SPACE_HOTEL_LOBBY: SpaceId = 'hotel.lobby';
+export const SPACE_HOTEL_BREAKFAST: SpaceId = 'hotel.breakfast';
+export const SPACE_HOTEL_CORRIDOR: SpaceId = 'hotel.corridor';
+export const SPACE_HOTEL_SUITE: SpaceId = 'hotel.suite';
+
 interface SpaceOrigin {
   readonly x: number;
   readonly y: number;
@@ -59,7 +82,14 @@ const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
   // The interior's own floor-plate origin: its ground-floor deck height, and
   // the same pair `world/building/layout.ts`'s `worldX`/`worldZ` add.
   [SPACE_CASTLE]: { x: INTERIOR_ORIGIN_X, y: BUILDING_BASE_Y, z: INTERIOR_ORIGIN_Z },
+  [SPACE_HOTEL_LOBBY]: { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z: HOTEL_LOBBY_Z },
+  [SPACE_HOTEL_BREAKFAST]: { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z: HOTEL_BREAKFAST_Z },
+  [SPACE_HOTEL_CORRIDOR]: { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z: HOTEL_CORRIDOR_Z },
+  [SPACE_HOTEL_SUITE]: { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z: HOTEL_SUITE_Z },
 };
+
+/** Rooms are ~30 m across; anywhere within this of a room's origin is in it. */
+const HOTEL_ROOM_RADIUS = 70;
 
 /**
  * How far past the interior's floor plate still counts as being in it.
@@ -83,7 +113,18 @@ const CASTLE_RADIUS = Math.max(INTERIOR_HALF_X, INTERIOR_HALF_Z) + 90;
 export function spaceAt(x: number, z: number): SpaceId {
   const dx = x - INTERIOR_ORIGIN_X;
   const dz = z - INTERIOR_ORIGIN_Z;
-  return dx * dx + dz * dz <= CASTLE_RADIUS * CASTLE_RADIUS ? SPACE_CASTLE : SPACE_GARDEN;
+  if (dx * dx + dz * dz <= CASTLE_RADIUS * CASTLE_RADIUS) return SPACE_CASTLE;
+  for (const room of [
+    [SPACE_HOTEL_LOBBY, HOTEL_LOBBY_Z],
+    [SPACE_HOTEL_BREAKFAST, HOTEL_BREAKFAST_Z],
+    [SPACE_HOTEL_CORRIDOR, HOTEL_CORRIDOR_Z],
+    [SPACE_HOTEL_SUITE, HOTEL_SUITE_Z],
+  ] as const) {
+    const hx = x - HOTEL_ORIGIN_X;
+    const hz = z - (room[1] as number);
+    if (hx * hx + hz * hz <= HOTEL_ROOM_RADIUS * HOTEL_ROOM_RADIUS) return room[0] as SpaceId;
+  }
+  return SPACE_GARDEN;
 }
 
 /** World position -> the offset a save records, relative to its space. */

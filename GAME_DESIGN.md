@@ -261,6 +261,35 @@ At the start you choose to play as either:
 
 The default character name is **Eleri**.
 
+## The Land Hotel (6 August 2026 — Eleri's own spec, issue #236; first cut built 7 August)
+
+**Written by Eleri.** A crystal hotel, close to the castle, called **"The
+Land Hotel"**. Fifty levels; breakfast in the middle (level 25) and at the
+ground floor; a giant RiPika statue in the lobby with a disco ball above it;
+grown-ups who work there in **red jacket and pink clothes**, serving
+breakfast — loveheart-shaped cheerios, shreddies (for Ethan), and yoghurt
+and honey. When you enter they give you a key that works for your room. Your
+suite is on the top floor: it says **"yours"** on the door and on the lift
+button for your floor, there's an arrow showing the way, the room is rainbow
+coloured (only the top room) with a disco ball, and there are several beds
+to sleep in — sleep on them, jump on them, or go jumpy jumpy between the
+beds. In the corridors, smaller life-sized statues of all the cute pets.
+The HUD shows which floor you are on. Party rooms with free sweeties and a
+birthday party, and grown-ups and children walking around the hotel, are
+still to come.
+
+*As built (7 August 2026):* the tower is generator-placed `near` the castle
+(and an invariant holds it close on every seed); every room inside is **its
+own disjoint space** joined only by doors and the lift (Jim's ruling — the
+castle's bigger-on-the-inside trick, once per room). The lift is the first
+**portal lift** (Decision 3's `floors()`/`go(n)` seam with no car at all)
+and its indicator counts the fictional storeys past. All new hotel art is
+Blender-authored (`art/blend/hotel_build.py`); the statues are deliberately
+the live models — the fountain's own stone RiPika and `createPet` — so they
+can never go stale. *Deferred, tracked in issue #236: party rooms and
+sweeties, NPC guests walking the hotel (blocked on the NPC portal problem),
+eating as a real inventory acquisition.*
+
 ## The world
 
 A **big tall building with lots of floors**, next to a **big garden** with

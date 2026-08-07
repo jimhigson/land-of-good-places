@@ -176,6 +176,26 @@ export const INTERIOR_PLAZA_DROP = 1.2;
  */
 export const INTERIOR_PLAZA_RADIUS = 52;
 
+/**
+ * The Land Hotel's own spaces (issue #236). One X for all of them, rooms
+ * strung along +Z at 260 m spacing — far past every fog plane and far from
+ * both the garden and the castle's interior, exactly the "bigger on the
+ * inside" trick the castle proved. Each ROOM is its own disjoint space
+ * (Jim's ruling): lobby, the floor-25 breakfast room, the floor-50 corridor
+ * and the suite behind its "yours" door, joined only by the lift portal and
+ * the doors themselves.
+ */
+export const HOTEL_ORIGIN_X = -600;
+export const HOTEL_LOBBY_Z = 600;
+export const HOTEL_BREAKFAST_Z = 860;
+export const HOTEL_CORRIDOR_Z = 1120;
+export const HOTEL_SUITE_Z = 1380;
+/** The rooms' shared floor level. Terrain out there is ~-16 m; a flat plate
+ * at zero keeps every hotel Y a plain human number. */
+export const HOTEL_FLOOR_Y = 0;
+/** Soft play boundary radius inside any hotel room. */
+export const HOTEL_PLAY_RADIUS = 24;
+
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;
 

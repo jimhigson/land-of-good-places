@@ -1,84 +1,70 @@
 # HANDOFF — The Land Hotel (#236) + attraction spread (#241)
 
 Branch: `feat/hotel-236` · Worktree: `.claude/worktrees/hotel-236`
-Scope set by Jim, 7 Aug: build the hotel to delivery, AND pick up #241
-(attractions escape the old 52 m circle) because the hotel needs the space.
+Scope set by Jim: build the hotel to delivery; fold in #241 (the hotel
+needs the space); every hotel room its OWN disjoint space; all new hotel
+art Blender-authored by an Opus artist agent (done — HANDOFF-hotel-art.md).
 
-## Baseline (7 Aug, rebased onto origin/main at 2144699)
+## State: feature-complete, verification in flight
 
-- `npm run test:procgen` 196 pass · `check:park` 15/15 routes, 75/75
-  waypoints, 5 recorded ratchet deviations (worst rail.walkable 30) ·
-  `npm run build` exit 0.
+- [x] #241 placement reform (3 commits: unpin+boundary fit+spread; cruiser
+      first / train threads its published low corridor; doormats obey the
+      camera rule + lane-walk graph edges + density-driven wall scatter)
+- [x] check:park green with ZERO ratchet deviations on canonical + seeds
+      2/5/18 (seed 11 carries ONE dropped lawn-junction waypoint — a
+      leaning tree's 0.9 m collider beside a lawn chord; dropped cleanly at
+      boot, not CI-enforced; next step if wanted: tree scatter margin vs
+      lawn chords, or accept)
+- [x] Full 196-test procgen suite green BEFORE the hotel commit
+- [x] Hotel: manifest entry (near castle 28–42) + anchor + Blender tower
+      facade (yawed to its doormat) + 4 disjoint spaces (lobby / breakfast
+      25 / corridor 50 / suite) + portal lift (LiftPanel reused, storey
+      counter ticks, floor 50 needs the key) + reception key (persisted,
+      saveFlags.hotelKey) + giant RiPika statue + disco balls + pet statue
+      corridor + "yours" door + rainbow suite + 3 beds (sleep chip +
+      jumpy-jumpy platforms) + breakfast tables/bowls/chairs (sit + eat
+      chips) + keepers in red/pink + floor arrows + HUD floor pill
+- [x] 4 new invariants (area==target, plots inside boundary, no desolate
+      quarter, hotel close to castle) — each PROVEN RED first
+- [x] GAME_DESIGN hotel section; ARCHITECTURE-DECISIONS Decision 9
+- [ ] IN FLIGHT: full test:procgen with hotel (background); then
+      `npm run build` (full battery), commit, push, PR, one reviewer agent
 
-## Order of work
+## If you take over mid-flight
 
-1. #241 placement reform (parkLayout/parkManifest):
-   per-entry-per-restart RNG streams `Rng(hash(seed, id#restart))`; delete
-   pins; fit-inside-boundary via `PARK_BOUNDARY.distanceToEdge >= r + 2.5`
-   replacing PLOT_EXTENT_LIMIT; optional `nearEdge` manifest band (distance
-   to spline edge — rail-race stall wants the rim); maximin best-of-K spread;
-   LAYOUT_VERSION 2 → 3.
-2. Train route rework (`train/route.ts`): the loop currently clamps to ONE
-   outer radius (boundary's closest approach) and its `lower[]` uses
-   "furthest obstacle exit along the ray" — a plot wholly OUTSIDE the loop
-   inflates lower past upper and the clamp inverts. Needed: per-bearing
-   upper from `edgeRadiusAt(bearing)`, and interval-aware obstacle bounds
-   (pass outside a plot when there's room before the wall, thread inside
-   otherwise, greedy-continuous across bearings).
-3. #241 invariants: park area ≈ 2x within tolerance (the missing #115
-   check), every plot inside the boundary with clearance, no large empty
-   walkable region. Break each deliberately first (CLAUDE.md).
-4. Hotel (#236) — design decided against the code map:
-   - Manifest entry `hotel` (circle r≈8, boundingRadius≈9) with
-     `near: { id: 'building', min: 24, max: 38 }`; new AnchorId 'hotel';
-     facade = crystal tower (toon-shaded faceted prisms + instanced lit
-     window rows reading as ~50 storeys + crystals round the base), door
-     YAWED toward the solver's doormat (circle footprint so rotation-free).
-   - Interior = castle's far-offset trick at own origin, e.g. (-600, 600),
-     THREE rooms spread HORIZONTALLY (not stacked): Lobby / Floor 25
-     breakfast / Floor 50 suite, ~200 m apart inside SPACE_HOTEL
-     (spaces.ts gains one origin). Rooms are open-topped (no ceiling => no
-     fader, no InteriorLighting needed). Floors + bed-tops are static
-     MovingPlatforms via surfaces.addPlatform — ZERO edits to
-     WalkSurfaces.sample.
-   - Lift = FIRST PORTAL LIFT (Decision 3's shape): a `HotelLift
-     implements LiftPanelSource` (floors()/go(n)); reuse ui/LiftPanel
-     unchanged as a second instance. go(n) = iris + teleport + rebound play
-     area. Floor list: 'Yours ⭐ 50' (glyph says yours), 'Breakfast 25',
-     'Lobby G'. Floor 50 unreachable until checked in at reception.
-   - Reception keeper (red jacket/pink — KeeperOptions colours) grants the
-     key (saveFlags + speech), giant `createRipikaStatue()` in lobby with
-     disco ball above; suite: rainbow walls, disco ball, 3 beds =
-     platforms (jump between) + Sleep chip (scripted beat a la Toilets —
-     state from position, never a latched flag); corridor pet statues
-     (createPet on plinths); restaurant tables, sit chip + three breakfasts
-     (heart cheerios / shreddies for Ethan / yoghurt + honey).
-   - HUD floor pill while inside (gameStore field + Hud subscriber).
-   - "yours" on suite door plaque + painted arrow to the lift in lobby.
-5. GAME_DESIGN.md hotel section; ARCHITECTURE-DECISIONS Decision 9
-   (boundary-derived placement, unpinned manifest); invariants for hotel
-   (doormat/overlap free via existing checks; add near-castle distance).
-6. Build + test:procgen + check:park green; push; PR; ONE reviewer agent
-   (Jim's 1 Aug rule); do NOT merge (Jim reviews).
+1. Check the background suite result; fix, then `npm run build` — check
+   the EXIT CODE, never pipe through tail.
+2. Commit (small commits, named files), push `feat/hotel-236`, open PR
+   closing #236 + #241, noting: build-verified only (no browser owned);
+   list visual QA: tower look at gameplay distance under toon ramp, all
+   4 rooms, lift panel flow, key gating, bed nap pose, breakfast sit,
+   arrow decals, floor pill. `/view` camera URL + canonical hotel coords
+   for QA (hotel is at placedEntry('hotel') — print via node one-liner).
+3. ONE reviewer agent, comment-only verdict ("Verdict: …" first line).
+   Do NOT merge (Jim reviews; memory: no auto-merge).
 
-## Findings so far
+## Known deferred (list in PR body)
 
-- Rail Race rings live OUTSIDE the masonry (railRace/route.ts) — plots
-  can't hit them. The train is the only rim system that must learn the
-  spline.
-- `LiftPanel` is written against the two-method seam and takes any
-  `LiftPanelSource` — second instance works.
-- `createRipikaStatue()` (fountain) is reusable as-is for the lobby.
-- Keepers (`createKeeper`) take colour options — uniforms are easy.
-- `grantFree` in state/store.ts is the free-item path (character creator
-  uses it) — the hotel key uses it or saveFlags.
-- Shared checkout main is BEHIND origin/main; read docs from the worktree.
-- #233 (ferrisKiosk stand point inside wheel exclusion) may bite when
-  plots move — watch check:park.
+- Party rooms + free sweeties + birthday party; NPC guests inside
+  (portal problem); eating as inventory acquisition; castle's own door
+  vs doormat mismatch on spread seeds (pre-existing, doorway works via
+  its own zone); check-asset-contract coverage for the 8 hotel factories
+  (artist's handoff has the numbers, ~10 lines in collect()); #233/#234
+  remain open; seed-11 single dropped waypoint (above).
+- Another agent is staging procgen behind a loading screen — my solver
+  changes are inside the stages it wraps; expect a rebase on whoever
+  lands second. vitest hook budget at 240 s until that lands.
 
-## State
+## Landmine map for a successor
 
-- [x] Rebase, baseline green, design pinned
-- [ ] Layout reform  - [ ] Train rework  - [ ] 241 invariants
-- [ ] Hotel exterior/placement  - [ ] Interior+lift  - [ ] HUD
-- [ ] Docs  - [ ] PR
+- parkLayout: per-entry-per-restart streams `candidateRng(hash(id)^seed,
+  restart)`; validate() throws on bad pins only.
+- train/route: free INTERVALS per bearing (rects+circles expanded per
+  obstacle clearance), wall per-bearing, snapToFree each relax pass;
+  cruiser low discs have their own small clearance.
+- crossings: clusters near stations survive only if touches sit on BOTH
+  rail sides; fence.ts stationRun skips crossing gaps.
+- poiGraph: nodes carry `lane`; failed chords retry along LANES fine
+  chains; paved samples use PAVED_CLEARANCE 0.48.
+- Hotel doors/lift are portals: Hotel.changeSpace + HotelLift.travelTo
+  both re-bound play area per room (HOTEL_PLAY_RADIUS circle).
