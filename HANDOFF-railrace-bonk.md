@@ -377,3 +377,105 @@ Scratch measurement scripts left untracked: `scratch-difficulty.mts`,
 `scratch-sweep.mts`, `scratch-focus.mts`.
 
 ### Still to do (items 1–6 of the round-5 list, none started)
+
+---
+
+## Round 7 (7 Aug), agent `e-railrace-finish` — branch `e/railrace-finish`
+
+Worktree `.claude/worktrees/railrace-finish`, branched from
+`origin/chore/rail-race-pr-triage`. Already on top of `origin/main` (28 ahead, 0
+behind), so no rebase was needed; `git diff --stat origin/main..HEAD` is
+rail-race files only, checked for the squash-revert shape.
+
+**The inherited "UNVERIFIED, DO NOT TRUST" WIP was in fact green** — build exit
+0, `test:procgen` 171 passed / 9 files / 0 skipped, before I touched anything.
+That baseline was established first so nothing below could be blamed on it. It
+was, however, not finished, and it carried one defect that reached the screen.
+
+### The defect: the pump spring froze at the finish line
+
+`stepRider` returns early on `rider.finished`, and the `bob` decay sits below
+that return — so `bob` froze at whatever the last racing frame held, which for a
+child still mashing across the line is exactly **1**, for the whole 5 s result
+phase. Harmless while nothing read it; the WIP made two things read it:
+
+- the winner's celebration ran with `pump` pinned at 1, so `BOOST_ROCK` threw
+  her torso +0.42 rad forward against `CHEER_LEAN`'s 0.34 back — **net +0.27
+  rad, hunched over the handlebars for her victory jump**;
+- every finished rival sat locked at the bottom of its `BOB_DROP` seat dip.
+
+Fixed at source: the decay runs before the early return, counting no presses.
+Guarded by driving a real rider past the line **with the button still held**
+(1.00 crossing, 0.00 five seconds later), and proved red by restoring the bug.
+
+### A gate I wrote, my own check threw out — read this before re-adding it
+
+I gated `pump` by `(1 - cheer)` so the rock could not fight the jump. The new
+check caught it **claiming more than it delivered**: `cheerAt` peaks at 0.905,
+so 9.5% of the rock survived a gate whose whole purpose was that none should. A
+leaky gate that reads as a rule is worse than none, because the next person
+trusts it.
+
+Removed. What actually keeps the two apart is the clock, and that is what is
+guarded now: the spring is empty at `BOB_SECONDS` = 0.22 s and the first hop
+does not peak until 0.30 s. Two numbers from different modules, so lengthening
+the spring or quickening the hop fires it.
+
+### Two guards that were measuring the wrong thing
+
+Both looked reasonable and both named the zoom in a failure message about
+something else. Worth knowing before tightening either.
+
+1. **"The zoom moves the rider by exactly zero."** Red on arrival: she slides
+   0.0057 of the picture. At `SPEED_PULL_BACK = 0` the slide is **0.0078** —
+   *larger* — so it is the follower's `FOLLOW_LAG` lead cancelling the chase lag
+   only to first order, and the zoom slightly improves it. Now bounded end to
+   end at 2% of the picture; the genuinely broken case (scaling `stand` without
+   `look`) slides her 3.3%.
+2. **Frame-rate independence probed at one moment.** Caught a per-frame lerp of
+   0.05 at 1.768 m, but a lerp of **0.2 walked through it** at 0.028 m — fast
+   enough that both rates had settled before the probe looked. Now the worst of
+   a sweep along the ramp. Bound 1.0 m, from a measured table: 0.071 m with no
+   zoom, 0.260 shipping, 1.306 at pull-back 1.5, 2.018 for a 0.2 lerp, 4.063 for
+   a 0.05 lerp. Not zero, because `damp` is exact only for a stationary target
+   and both followers chase a moving one — an inherent O(dt) error, not a lerp.
+
+### Where the six items stand
+
+1. **Camera jerk — done** (round 6's commit, independently re-verified here:
+   `TANGENT_WINDOW` 2 m and `CAMERA_GUIDE_WINDOW` 10 m are both live, and
+   `raceCameraNeverRunsBackwards` runs on all five seeds).
+2. **Speed zoom — done and now guarded.** 25.6 m off at a crawl, 33.6 m racing
+   (31.2% back), eased on a 0.55 s half-life.
+3. **Boost rock — done, guarded.** Head throws 1.42 m on a pump.
+4. **Win celebration — done, guarded.** 3 hops, peak 0.905, 1.56 m of lift,
+   settled by 3.10 s of the 5 s the camera holds. The hold itself was already
+   there: finishing freezes `travelled`, so the rig settles on her.
+5. **Leg guards — done, guarded in all five phases** through the real rule and
+   the real setter, read back off `visible` *and* the drawn bounding box.
+6. **Skull clip — rechecked: 4.8 frames at a child's 30.3 m/s top speed** (was
+   4.8 at 30.3 — unchanged by the new difficulty). Reported at every build,
+   still not fixed: the ~1.9 m `BAR_CONTACT_LEAD` moves when the bonk fires, and
+   that wants eyes first. **This is the one deliberate omission.**
+
+`body.rotation.x` has one owner, `poseRailRaceRider`, told everything at once
+via `RiderPose`. Boosting while ducking is guarded (head top 5.66 either way,
+against a bar underside of 6.38).
+
+### Guards proved red by mutation — 15 in all
+
+Pose/state (10): `cheerAt` returning 0; one long hop; a jump outlasting the
+camera hold; legs hidden for the win; legs always drawn; the bob freeze
+restored; `BOB_SECONDS` 0.5; `BOOST_ROCK` 0; `CHEER_HOP` 0; the pump ungated by
+the fold. Camera (5): no pull-back; pull-back 1.5; `stand` scaled without
+`look`; per-frame lerps at 0.05 and at 0.2.
+
+Scripts: `/tmp/.../scratchpad/mutate.sh` and `mutate-cam.sh` (untracked, outside
+the repo).
+
+### Still needs eyes — no browser this session either
+
+The chrome MCP was not assigned to me, so **everything visual is unverified**.
+The list from earlier rounds still stands, plus: does the pull-back read as a
+camera easing off or as the picture breathing; does the victory jump read as a
+jump; do her legs appearing for the celebration look right or sudden.
