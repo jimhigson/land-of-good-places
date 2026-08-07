@@ -3,16 +3,17 @@ import { clamp01, lerp, smoothstep, turnTowards } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
-import { createCatBus, type CatBusHandle } from './catBus';
+import { createCatBus, CAT_BUS_SEAT_COUNT, type CatBusHandle } from './catBus';
 import { createDisembarkingKid, type DisembarkingKid } from './disembarkingKids';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { hasArrivedBefore, markArrived } from './arrivalFlag';
 import {
   ENTRANCE_ANGLE,
-  ENTRANCE_BUS_ARRIVE_Z,
-  ENTRANCE_BUS_STOP_X,
+  ENTRANCE_BUS_ARRIVE_X,
+  ENTRANCE_BUS_DOOR_X,
   ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_Z,
+  ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
 } from './layout';
@@ -23,59 +24,62 @@ import {
  * The bus, the children, the sounds and the waypoints all shipped in PR #27 on
  * 26 July 2026 and none of them ever ran: that PR added six files under
  * `world/entrance/` and wired **none** of them, so `Entrance` was never
- * constructed, `createCatBus` had no callers, and the string `cat-bus` did not
- * appear in the shipped bundle at all. What was missing was never a bug in the
- * art — it was this file. Nobody had written the choreography.
+ * constructed and the string `cat-bus` did not appear in the shipped bundle at
+ * all. What was missing was never the art — it was this file.
  *
  * ## Why it hangs off `World` and not off `Game`
  *
- * `Game` cannot be built in a test: it constructs `Engine`, which is a real
+ * `Game` cannot be built in a test: it constructs `Engine`, a real
  * `WebGLRenderer`. `World` **can** — `scripts/park-harness.mts` builds a real
- * `Scene` and a real `World` in Node, and `test/procgen/parkFacts.ts` already
- * traverses the result. So a cat bus owned by `World` is visible to the
- * invariant suite that CI blocks the merge on, and a cat bus owned by `Game`
- * would be visible to nothing whatsoever.
+ * `Scene` and a real `World` in Node, and `test/procgen/parkFacts.ts` traverses
+ * the result. So a cat bus owned by `World` is visible to the invariant suite
+ * CI blocks the merge on, and one owned by `Game` would be visible to nothing.
+ * The original went twelve days undetected precisely because nothing could see
+ * it; hanging the fix off `Game` would have rebuilt that blind spot.
  *
- * That is not a tidiness argument. The original feature went twelve days
- * undetected precisely because nothing could see it, and hanging the fix off
- * `Game` would have rebuilt that blind spot around the repair.
+ * ## The shape of it
+ *
+ * The bus **pulls up along the kerb outside the gate** and never enters the
+ * park — Jim watched the first run and said *"the bus drives something like 5 m
+ * into the park, through a wall"*, and both halves were true. A bus is not a
+ * park vehicle. It stops on the road, the children walk in through the arch,
+ * and the arch now actually has a hole in it (#195).
+ *
+ * Twelve seats, all occupied: eleven other children plus the player, and a
+ * driver who stays at the wheel because somebody has to drive it away.
+ * Everybody gets off — a bus arriving at a park unloads.
  *
  * ## When it runs
  *
- * Whenever the player has not already arrived — see {@link arrivalIsDue}. That
- * is the same thing as "every time a new game is started", because `main.ts`'s
+ * Whenever the player has not already arrived — {@link arrivalIsDue}. That is
+ * the same as "every time a new game is started", because `main.ts`'s
  * `startFresh` calls `clearSave()` and a cleared save has `arrivedByBus` false.
- * The flag is **the** mechanism rather than a second guard beside a "was this a
- * new game?" boolean, and the default is deliberately the arrival *happening*:
- * a caller who forgets to pass anything gets the sequence, and only an explicit
- * opt-out suppresses it. Forgetting then fails loud instead of failing silent,
- * which is the exact direction the original bug failed in.
- *
- * `markArrived()` fires when she is handed the controls, not before, so quitting
- * halfway through replays it — she never finished arriving.
+ * The default is deliberately the arrival *happening*: forgetting to wire an
+ * opt-out then fails loud rather than silent, which is the direction the
+ * original bug failed in. `markArrived()` fires when she is handed the
+ * controls, so quitting halfway replays it.
  *
  * ## Where Stage B attaches
  *
- * The animated journey down the lane (issue #245 part 1) ends exactly where
- * this begins: bus at {@link ENTRANCE_BUS_ARRIVE_Z}, outside the gate, facing
- * in, door shut, player aboard. That is the `'rolling-in'` phase's first frame.
- * {@link ArrivalSequence} therefore accepts an **already-built bus** so the
- * journey's own bus can be handed straight over at an identical pose, rather
- * than a second one being created and popping into place at the seam.
+ * The animated journey (issue #245 part 1) ends where this begins: bus at
+ * {@link ENTRANCE_BUS_ARRIVE_X} on the kerb, facing along it, door shut,
+ * everyone aboard. That is the `'rolling-in'` phase's first frame, and
+ * {@link ArrivalOptions.bus} lets the journey's own bus be handed straight over
+ * at an identical pose rather than a second one popping in at the seam.
  */
 
 /** How long each phase lasts, in seconds. Exported so a check can drive it. */
 export const ARRIVAL_TIMELINE = {
-  /** Rolling in through the gate to the stop. */
-  rollingIn: 3.0,
+  /** Rolling along the kerb to the stop. */
+  rollingIn: 3.2,
   /** The door swinging open. */
   doorsOpening: 0.8,
   /** The other children hopping down and setting off. */
-  kidsOff: 1.8,
-  /** The player stepping down onto the curb. */
-  steppingDown: 1.2,
-  /** Walking in, round the front of the bus and into the park. */
-  walkingIn: 2.4,
+  kidsOff: 2.2,
+  /** The player stepping down onto the pavement. */
+  steppingDown: 1.1,
+  /** Walking in through the gate. */
+  walkingIn: 4.6,
   /** The bus pulling away. She already has the controls throughout this. */
   departing: 3.2,
 } as const;
@@ -102,28 +106,29 @@ const PHASE_ORDER: readonly (readonly [ArrivalPhase, number])[] = [
 export const ARRIVAL_DURATION = PHASE_ORDER.reduce((total, [, seconds]) => total + seconds, 0);
 
 /**
- * Is the arrival due for this player?
+ * How many other children ride in with her.
  *
- * One question, asked in one place, so `World` and any check agree about it.
+ * Every seat is filled and one of them is hers, so this is simply the rest.
+ * Derived from the bus's own seat count — the bus owns how many seats it has.
  */
+export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 1;
+
+/** Is the arrival due for this player? One question, asked in one place. */
 export function arrivalIsDue(): boolean {
   return !hasArrivedBefore();
 }
 
 /**
- * Which way the bus points, as a `rotation.y`.
+ * Which way the bus points.
  *
- * It drives **inward** — nose first through the gate, so the first thing anyone
- * ever sees of this game is a cat's face coming towards them rather than a bus
- * reversing. A Three.js object at `rotation.y = t` sends its local +Z to world
- * `(sin t, cos t)`, and we want that to be the inward radial direction, hence
- * the `atan2` rather than a hand-written `Math.PI`: the gate is fixed at
- * `ENTRANCE_ANGLE` today (Decision 5), but nothing here has to be revisited if
- * it ever is not.
+ * It runs **along** the kerb, not at the gate: the travel direction is the
+ * boundary's own tangent at the gate's bearing, so this still reads correctly
+ * if the gate is ever moved. A Three.js object at `rotation.y = t` sends local
+ * +Z to world `(sin t, cos t)`, hence the `atan2`.
  */
-const INWARD_X = -Math.cos(ENTRANCE_ANGLE);
-const INWARD_Z = -Math.sin(ENTRANCE_ANGLE);
-const BUS_FACING = Math.atan2(INWARD_X, INWARD_Z);
+const TRAVEL_X = -Math.sin(ENTRANCE_ANGLE);
+const TRAVEL_Z = Math.cos(ENTRANCE_ANGLE);
+const BUS_FACING = Math.atan2(TRAVEL_X, TRAVEL_Z);
 
 /** A point in the bus's own local space, in world space, for a bus at `(bx, bz)`. */
 function busLocalToWorld(bx: number, bz: number, lx: number, lz: number): { x: number; z: number } {
@@ -132,17 +137,19 @@ function busLocalToWorld(bx: number, bz: number, lx: number, lz: number): { x: n
   return { x: bx + lx * cos + lz * sin, z: bz - lx * sin + lz * cos };
 }
 
-/**
- * A quadratic Bézier — the walk off the curb, round the bus's nose, into the
- * park.
- *
- * A rounded corner rather than two straight legs, and it matters: the drop-off
- * is on the **curb side** (`Entrance.ts` puts the shelter there and says the
- * door opens onto it), while the place gameplay starts is on the other side of
- * the bus. Walking that as a hard right-angle looks like a bug; the control
- * point pulls the turn out in front of the bus's nose, which is both prettier
- * and what keeps everyone clear of the bodywork.
- */
+interface Vector2Like {
+  readonly x: number;
+  readonly z: number;
+}
+
+/** One walker's route: off the pavement, through the gate, into the park. */
+interface WalkRoute {
+  readonly from: Vector2Like;
+  readonly corner: Vector2Like;
+  readonly to: Vector2Like;
+}
+
+/** A quadratic Bézier — a rounded walk rather than two straight legs. */
 function bezier(a: Vector2Like, c: Vector2Like, b: Vector2Like, t: number): { x: number; z: number } {
   const u = 1 - t;
   return {
@@ -151,28 +158,16 @@ function bezier(a: Vector2Like, c: Vector2Like, b: Vector2Like, t: number): { x:
   };
 }
 
-interface Vector2Like {
-  readonly x: number;
-  readonly z: number;
-}
-
 /** Reused rather than allocated every frame — `getWorldPosition` needs a target. */
 const SCRATCH = new Vector3();
 
 /** How fast anyone in this sequence turns to face where they are going, rad/s. */
 const TURN_RATE = 7;
 
-/** One walker's route off the bus and into the park. */
-interface WalkRoute {
-  readonly from: Vector2Like;
-  readonly corner: Vector2Like;
-  readonly to: Vector2Like;
-}
-
 export interface ArrivalOptions {
   /**
    * A bus that already exists — Stage B's journey handing its own bus over at
-   * the gate. Omitted, one is built here, parked outside the gate.
+   * the kerb. Omitted, one is built here.
    */
   readonly bus?: CatBusHandle;
 }
@@ -185,18 +180,19 @@ export class ArrivalSequence {
   private readonly driver: DisembarkingKid;
   private readonly playerRoute: WalkRoute;
   private readonly kidRoutes: readonly WalkRoute[];
+  /** Where the bus's centre comes to rest, worked back from where its door goes. */
+  private readonly stopX: number;
 
   private player: Player | null = null;
   private phaseIndex = 0;
   private phaseTime = 0;
-  private busZ = ENTRANCE_BUS_ARRIVE_Z;
+  private busX = ENTRANCE_BUS_ARRIVE_X;
   private busSpeed = 0;
   private doneFlag = false;
   private handedOver = false;
   private tootedHorn = false;
   private squeaked = false;
   private hissed = false;
-  /** Facing, carried across frames so turns are smoothed rather than snapped. */
   private playerFacing = BUS_FACING;
 
   constructor(options: ArrivalOptions = {}) {
@@ -205,54 +201,52 @@ export class ArrivalSequence {
     this.bus = options.bus ?? createCatBus();
     this.group.add(this.bus.root);
     this.bus.setDoorOpen(0);
-    this.placeBus(ENTRANCE_BUS_ARRIVE_Z);
 
-    // The driver rides in the cabin, so she moves with the bus for free. She
-    // never gets out — somebody has to drive it away again.
-    this.driver = createDisembarkingKid(2);
+    // The bus knows where its own door is; the layout knows where the door
+    // should end up. Working back from the two is what keeps them from
+    // drifting apart — and means a longer bus still stops with its door at the
+    // gate rather than needing a second constant nudged by hand.
+    this.stopX = ENTRANCE_BUS_DOOR_X + this.bus.doorDrop.z;
+    this.placeBus(ENTRANCE_BUS_ARRIVE_X);
+
+    // The driver rides at the wheel and never gets out.
+    this.driver = createDisembarkingKid(CAT_BUS_SEAT_COUNT);
     this.driver.setWalkPhase(0, 0);
     this.bus.driverSeat.add(this.driver.root);
 
-    // Two other children, aboard until the door opens.
-    this.kids = [createDisembarkingKid(0), createDisembarkingKid(1)];
-    for (const kid of this.kids) {
-      kid.root.visible = false;
-      this.group.add(kid.root);
-    }
+    // Eleven other children, one per seat that is not the player's, so every
+    // one of the twelve seats has somebody on it.
+    const free = this.bus.seats.filter((seat) => seat !== this.bus.passengerSeat);
+    this.kids = free.slice(0, ARRIVAL_KID_COUNT).map((seat, index) => {
+      const kid = createDisembarkingKid(index);
+      kid.setWalkPhase(0, 0);
+      seat.add(kid.root);
+      return kid;
+    });
 
-    // Every route is derived from where the bus's own door actually is (see
-    // `CatBusHandle.doorDrop`) rather than from a second copy of the bus's
-    // dimensions kept in step by hand.
-    const drop = busLocalToWorld(
-      ENTRANCE_BUS_STOP_X,
-      ENTRANCE_BUS_STOP_Z,
-      this.bus.doorDrop.x,
-      this.bus.doorDrop.z,
-    );
+    // Routes are derived from where the bus's own door actually is.
+    const drop = busLocalToWorld(this.stopX, ENTRANCE_BUS_STOP_Z, this.bus.doorDrop.x, this.bus.doorDrop.z);
     const end = { x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z };
-    this.playerRoute = { from: drop, corner: { x: drop.x, z: end.z }, to: end };
-    this.kidRoutes = [
-      {
-        from: { x: drop.x + 0.55, z: drop.z + 0.36 },
-        corner: { x: drop.x + 0.55, z: end.z - 0.7 },
-        to: { x: end.x + 2.1, z: end.z - 1.2 },
-      },
-      {
-        from: { x: drop.x + 0.55, z: drop.z - 0.34 },
-        corner: { x: drop.x + 0.65, z: end.z - 0.4 },
-        to: { x: end.x - 1.7, z: end.z - 0.7 },
-      },
-    ];
+    this.playerRoute = {
+      from: drop,
+      corner: { x: ENTRANCE_BUS_DOOR_X, z: ENTRANCE_GATE_Z },
+      to: end,
+    };
+
+    // The others fan out through the same gate and spread across the park edge
+    // ahead of her, so she walks in among a crowd rather than behind a queue.
+    this.kidRoutes = this.kids.map((_kid, index) => {
+      const across = ARRIVAL_KID_COUNT <= 1 ? 0 : index / (ARRIVAL_KID_COUNT - 1) - 0.5;
+      return {
+        from: { x: drop.x + across * 2.4, z: drop.z + 0.5 + Math.abs(across) * 0.7 },
+        // Everyone squeezes through the same opening — that is what a gate is.
+        corner: { x: ENTRANCE_BUS_DOOR_X + across * 2.2, z: ENTRANCE_GATE_Z },
+        to: { x: end.x + across * 13, z: end.z - 2.2 - Math.abs(across) * 1.6 },
+      };
+    });
   }
 
-  /**
-   * The player, once `Game` has built her — same shape as every other
-   * `World.attachPlayer` consumer.
-   *
-   * She is put aboard immediately: the sequence starts with the bus already
-   * outside the gate with her in it, so there is never a frame where she is
-   * standing in the park watching her own bus arrive.
-   */
+  /** The player, once `Game` has built her — via `World.attachPlayer`. */
   attachPlayer(player: Player): void {
     this.player = player;
     if (this.doneFlag) return;
@@ -276,8 +270,7 @@ export class ArrivalSequence {
   update(context: FrameContext): void {
     if (this.doneFlag) return;
     const { dt } = context;
-    // Paused (the pause menu, `/view`'s frozen clock) hands `dt` of zero, so
-    // the timeline stops on its own and needs no pause flag of its own.
+    // Paused hands `dt` of zero, so the timeline stops on its own.
     if (dt <= 0) return;
 
     this.phaseTime += dt;
@@ -324,19 +317,17 @@ export class ArrivalSequence {
   // --- the phases ---------------------------------------------------------
 
   /**
-   * Through the gate and up to the stop, decelerating into it.
+   * Along the kerb to the stop, easing to a halt.
    *
-   * `smoothstep` rather than a linear run so the bus eases to a halt instead of
-   * stopping dead — and the speed handed to `catBus.animate` is the **measured**
-   * one (how far it actually moved this frame, over `dt`), so the wheel spin and
-   * the tail swish cannot disagree with the motion on screen.
+   * The speed handed to `catBus.animate` is the **measured** one — how far it
+   * actually moved this frame over `dt` — so the wheel spin and the tail swish
+   * cannot disagree with the motion on screen.
    */
   private rollIn(t: number, dt: number): void {
-    const previous = this.busZ;
-    const eased = smoothstep(0, 1, t);
-    this.busZ = lerp(ENTRANCE_BUS_ARRIVE_Z, ENTRANCE_BUS_STOP_Z, eased);
-    this.placeBus(this.busZ);
-    this.busSpeed = Math.abs(this.busZ - previous) / dt;
+    const previous = this.busX;
+    this.busX = lerp(ENTRANCE_BUS_ARRIVE_X, this.stopX, smoothstep(0, 1, t));
+    this.placeBus(this.busX);
+    this.busSpeed = Math.abs(this.busX - previous) / dt;
 
     if (!this.tootedHorn && t > 0.08) {
       this.tootedHorn = true;
@@ -359,27 +350,23 @@ export class ArrivalSequence {
     this.poseSeated();
   }
 
-  /** The other two hop down and set off, the second a beat behind the first. */
+  /** The others hop down and set off, staggered along the queue. */
   private kidsOff(t: number): void {
     this.busSpeed = 0;
-    this.kids.forEach((kid, index) => {
-      const start = index * 0.34;
-      const local = clamp01((t - start) / Math.max(0.01, 1 - start));
+    this.kids.forEach((_kid, index) => {
+      const start = (index / Math.max(1, ARRIVAL_KID_COUNT)) * 0.75;
+      const local = clamp01((t - start) / Math.max(0.05, 1 - start));
       if (local <= 0) return;
-      kid.root.visible = true;
-      // A short hop down from the step onto the curb, then the first strides of
-      // the walk in — this phase and the next two share one clock for the kids,
-      // so they keep moving while the player is still getting off.
-      this.walkKid(index, local * 0.34);
+      this.walkKid(index, local * 0.3);
     });
     this.poseSeated();
   }
 
-  /** Down the step onto the curb, with a little hop. */
+  /** Down the step onto the pavement, with a little hop. */
   private stepDown(t: number, dt: number): void {
     this.busSpeed = 0;
     for (let index = 0; index < this.kids.length; index += 1) {
-      this.walkKid(index, 0.34 + t * 0.3);
+      this.walkKid(index, 0.3 + t * 0.22);
     }
 
     const player = this.player;
@@ -390,7 +377,6 @@ export class ArrivalSequence {
     const x = lerp(seat.x, drop.x, eased);
     const z = lerp(seat.z, drop.z, eased);
     const ground = terrainHeight(x, z);
-    // A shallow arc, so she hops down rather than sliding out at seat height.
     const y = lerp(seat.y, ground, eased) + Math.sin(eased * Math.PI) * 0.16;
 
     player.ridePosture = 'walking';
@@ -403,20 +389,17 @@ export class ArrivalSequence {
     player.setRidePose(x, y, z, this.playerFacing);
   }
 
-  /** Round the nose of the bus and into the park, the children alongside. */
+  /** Through the gate and into the park, the other children alongside. */
   private walkIn(t: number, dt: number): void {
     this.busSpeed = 0;
     for (let index = 0; index < this.kids.length; index += 1) {
-      this.walkKid(index, 0.64 + t * 0.36);
+      this.walkKid(index, 0.52 + t * 0.48);
     }
 
     const player = this.player;
     if (!player) return;
     const eased = smoothstep(0, 1, t);
     const here = bezier(this.playerRoute.from, this.playerRoute.corner, this.playerRoute.to, eased);
-    // Sampled a little ahead on her own curve rather than differentiated: the
-    // direction she is *going* is what she should be facing, and one extra
-    // evaluation is cheaper and steadier than a derivative near the ends.
     const ahead = bezier(
       this.playerRoute.from,
       this.playerRoute.corner,
@@ -436,11 +419,10 @@ export class ArrivalSequence {
   }
 
   /**
-   * The bus pulls away back out of the gate — and she already has the controls.
+   * The bus pulls away along the kerb — and she already has the controls.
    *
-   * Handing over at the *start* of this phase rather than the end is deliberate:
-   * a six-year-old should be walking while the bus is still leaving, not made to
-   * watch it go. The rest of the sequence finishes around her.
+   * Handing over at the *start* of this phase is deliberate: a six-year-old
+   * should be walking while the bus is still leaving, not made to watch it go.
    */
   private depart(t: number, dt: number): void {
     this.handOver();
@@ -448,22 +430,21 @@ export class ArrivalSequence {
       this.walkKid(index, 1);
     }
 
-    const previous = this.busZ;
+    const previous = this.busX;
     if (t < 0.18) {
       this.bus.setDoorOpen(1 - smoothstep(0, 0.18, t));
       return;
     }
-    const away = smoothstep(0.18, 1, t);
     this.bus.setDoorOpen(0);
-    this.busZ = lerp(ENTRANCE_BUS_STOP_Z, ENTRANCE_BUS_VANISH_Z, away);
-    this.placeBus(this.busZ);
-    this.busSpeed = Math.abs(this.busZ - previous) / dt;
+    this.busX = lerp(this.stopX, ENTRANCE_BUS_VANISH_X, smoothstep(0.18, 1, t));
+    this.placeBus(this.busX);
+    this.busSpeed = Math.abs(this.busX - previous) / dt;
   }
 
   // --- helpers ------------------------------------------------------------
 
-  private placeBus(z: number): void {
-    this.bus.root.position.set(ENTRANCE_BUS_STOP_X, terrainHeight(ENTRANCE_BUS_STOP_X, z), z);
+  private placeBus(x: number): void {
+    this.bus.root.position.set(x, terrainHeight(x, ENTRANCE_BUS_STOP_Z), ENTRANCE_BUS_STOP_Z);
     this.bus.root.rotation.y = BUS_FACING;
   }
 
@@ -481,7 +462,11 @@ export class ArrivalSequence {
     const kid = this.kids[index];
     const route = this.kidRoutes[index];
     if (!kid || !route) return;
-    kid.root.visible = true;
+
+    // The moment a child starts walking they leave their seat and join the
+    // world, so the group is re-parented once rather than having its seat
+    // transform cancelled every frame.
+    if (kid.root.parent !== this.group) this.group.add(kid.root);
 
     const t = clamp01(progress);
     const here = bezier(route.from, route.corner, route.to, t);
@@ -501,13 +486,9 @@ export class ArrivalSequence {
    * Gives her the controls, exactly once.
    *
    * `endRide` first, then `teleportTo`: `endRide` hands back a fresh velocity
-   * and marks her airborne, and `teleportTo` is what puts her feet on the ground
-   * with the momentum cleared. The other way round she drops the last few
+   * and marks her airborne, and `teleportTo` puts her feet on the ground with
+   * the momentum cleared. The other way round she drops the last few
    * centimetres onto the grass the instant she is given the controls.
-   *
-   * She lands on `ENTRANCE_PLAYER_X/Z` — the same point `check:park` measures
-   * "every attraction routes from the entrance" from, and the same point
-   * `Game.DEFAULT_SPAWN` now uses, so all three agree by construction.
    */
   private handOver(): void {
     if (this.handedOver) return;

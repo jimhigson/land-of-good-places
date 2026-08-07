@@ -80,20 +80,44 @@ export const ENTRANCE_PLAYER_Z = ENTRANCE_STOP_Z - 0.4;
  * argument that Stage B's journey cannot happen on this terrain and needs its
  * own scene, as #245 already specifies.
  */
-export const ENTRANCE_BUS_STOP_X = ENTRANCE_STOP_X;
-export const ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 5.8;
+export const ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 9;
 
 /**
- * Where the roll-in begins: the far end of the flat ground outside the gate.
+ * **Where the bus's *door* stops: dead in front of the gate.**
  *
- * Kept at 69 rather than pushed to the last flat metre (72) so that the bus's
- * **back end** is still on level ground at the start, not overhanging the rim.
- * This is the frame Stage B hands over on — see `ArrivalSequence`.
+ * The bus pulls up **along** the kerb rather than nosing at the gate, which is
+ * what a bus at a bus stop does — and here it is also the only thing that fits.
+ * Sized to hold twelve children (see `catBus.ts`) the bus is 11 m long, and the
+ * flat ground outside the wall is only 12 m deep before the hilltop's rim falls
+ * away, so a bus pointed at the gate could not park, let alone drive. Turned
+ * along the kerb it needs only its own width across that band, and has ±28 m of
+ * level ground to run along — measured on the built terrain.
+ *
+ * The kerb sits 9 m out rather than hard against the wall, and that distance
+ * was **measured, not chosen**. The park boundary is a spline pinned to 60 m at
+ * the gate's bearing but bulging to 92 m a few degrees either side (#115), so a
+ * straight kerb close to the wall dives back **inside** the park at both ends of
+ * its run: at 4.5 m out, an 11 m bus had only a 15 m window it could stand in
+ * without part of it being in the park. At 9 m out the window is 41 m of level
+ * ground, which is room to drive. The rim starts at z = 73, so this still
+ * leaves the bus a comfortable margin.
+ *
+ * This names where the **door** goes, not where the bus's centre goes, because
+ * the door is the thing that has to line up with the gate. `ArrivalSequence`
+ * asks the bus where its own door is (`CatBusHandle.doorDrop`) and works back
+ * to the centre — so the two cannot drift apart, and a bus of a different
+ * length still stops with its door in the right place.
  */
-export const ENTRANCE_BUS_ARRIVE_Z = ENTRANCE_GATE_Z + 9;
+export const ENTRANCE_BUS_DOOR_X = 0;
 
-/** Once the departing bus has rolled back out this far, it is disposed. */
-export const ENTRANCE_BUS_VANISH_Z = ENTRANCE_GATE_Z + 9;
+/**
+ * Where the bus comes in from, along the kerb. This is the frame Stage B hands
+ * over on — see `ArrivalSequence`.
+ */
+export const ENTRANCE_BUS_ARRIVE_X = 12;
+
+/** Once the departing bus has rolled on this far, it is disposed. */
+export const ENTRANCE_BUS_VANISH_X = -28;
 
 /** Keeps the tree/bush scatter (`Scenery.ts`) off the stop and the gate plaza. */
 export const ENTRANCE_CLEAR_X = ENTRANCE_STOP_X;

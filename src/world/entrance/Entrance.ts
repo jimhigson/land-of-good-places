@@ -17,10 +17,9 @@ import { buildPawPrint } from './catBus';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import {
   ENTRANCE_ANGLE,
+  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
-  ENTRANCE_STOP_X,
-  ENTRANCE_STOP_Z,
 } from './layout';
 
 export interface EntranceOptions {
@@ -120,10 +119,17 @@ export class Entrance implements GameSystem {
     this.group.add(crossbar);
 
     // --- the bus stop shelter ----------------------------------------------
-    // Set back on the eastern verge of the entrance road, so the cat bus's
-    // curb-side door opens directly onto it.
-    const shelterX = ENTRANCE_STOP_X + 3.5;
-    const shelterZ = ENTRANCE_STOP_Z;
+    // **On the pavement, outside the gate** — because that is where the bus
+    // stops. It used to stand at `ENTRANCE_STOP_X + 3.5, ENTRANCE_STOP_Z`,
+    // 8 m *inside* the park, under a comment claiming the bus's kerb-side door
+    // opened onto it. That was only ever true of a bus parked inside the park,
+    // which is exactly the thing Jim saw and objected to on 7 August 2026.
+    //
+    // Now it sits between the wall and the kerb the bus pulls up along, off to
+    // one side of the opening so it never blocks the way in, and clear of the
+    // bus's own footprint.
+    const shelterX = -9;
+    const shelterZ = (ENTRANCE_GATE_Z + ENTRANCE_BUS_STOP_Z) / 2;
     const shelterGround = terrainHeight(shelterX, shelterZ);
     const woodMaterial = toonMaterial(0xffffff, { map: woodTexture(2, 1) });
 

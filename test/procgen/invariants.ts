@@ -40,9 +40,9 @@ import {
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_Z,
-  ENTRANCE_BUS_STOP_X,
+  ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
 } from '../../src/world/entrance/layout.ts';
@@ -2749,23 +2749,43 @@ const theCatBusIsInThePark: Invariant = (facts) => {
   if (bus.meshCount < 20) {
     fouls.push(`the cat bus has only ${bus.meshCount} meshes on it — that is not a built bus`);
   }
-  // Tall enough to be a bus a child could get into, short enough to be a bus.
-  if (!(bus.height > 1.5 && bus.height < 5)) {
-    fouls.push(`the cat bus measures ${bus.height.toFixed(2)} m tall, which is not bus-shaped`);
+  // Big enough to be a bus, measured against the children who ride in it rather
+  // than against a literal — so it stays true if they are ever resized. Jim, on
+  // the first version anyone saw: "barely bigger than a child, and smaller
+  // vertically than one child with a hat".
+  if (bus.height <= TALLEST_CHILD_HEIGHT * 1.4) {
+    fouls.push(
+      `the cat bus is ${bus.height.toFixed(2)} m tall against a ${TALLEST_CHILD_HEIGHT} m ` +
+        'child in a hat — that is a shed, not a bus',
+    );
+  }
+  if (bus.height >= TALLEST_CHILD_HEIGHT * 2.6) {
+    fouls.push(`the cat bus is ${bus.height.toFixed(2)} m tall, which is too big even for a bus`);
   }
   if (!bus.hasDriver) fouls.push('the cat bus has nobody driving it');
   if (bus.kidCount !== 2) {
     fouls.push(`expected 2 other children to arrive with her, found ${bus.kidCount}`);
   }
 
-  // Standing at the gate, on the entrance axis, outside the wall — where the
-  // sequence starts. A bus left at the origin is in the middle of the ball pit.
-  const gateGap = Math.hypot(bus.x - ENTRANCE_BUS_STOP_X, bus.z - ENTRANCE_BUS_ARRIVE_Z);
-  if (gateGap > 1) {
+  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // at the origin is in the middle of the ball pit.
+  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, which is ${gateGap.toFixed(2)} m from the ` +
-        `gate approach ${fmt([ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_ARRIVE_Z])} it is supposed to ` +
-        'roll in from',
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
+        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+    );
+  }
+
+  // **And it is outside the park.** Jim, watching the first run: "the bus drives
+  // something like 5 m into the park, through a wall". `distanceToEdge` is
+  // positive inside the boundary, so anything at or above zero is a bus
+  // somewhere a bus has no business being.
+  const inside = facts.boundary.distanceToEdge(bus.x, bus.z);
+  if (inside >= 0) {
+    fouls.push(
+      `the cat bus is parked ${inside.toFixed(2)} m INSIDE the park boundary — it belongs on ` +
+        'the road outside the gate',
     );
   }
   return fouls;
@@ -2803,10 +2823,12 @@ const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
 
   // The route she is actually walked along, sampled every half metre, plus
   // where the bus parks and where she ends up standing.
+  // From the gate she walks in through, to where the game hands her the
+  // controls. The bus itself is outside the park now, so the part of the walk
+  // that the scatter can foul is the part inside it.
   const corridor = samplePolyline(
     [
-      [ENTRANCE_BUS_STOP_X, ENTRANCE_BUS_STOP_Z],
-      [ENTRANCE_BUS_STOP_X + 2, ENTRANCE_PLAYER_Z],
+      [0, ENTRANCE_GATE_Z],
       [ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z],
     ],
     0.5,

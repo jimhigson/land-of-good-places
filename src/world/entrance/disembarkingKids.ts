@@ -24,16 +24,39 @@ export interface DisembarkingKid {
   dispose(): void;
 }
 
-const KID_A_COLOURS = { hair: PALETTE.flowerBlue, outfit: PALETTE.flowerYellow, hairStyle: 'short' as const };
-const KID_B_COLOURS = { hair: PALETTE.blossomPink, outfit: PALETTE.markerMint, hairStyle: 'bunches' as const };
-/** The driver — reuses this same lightweight builder (index 2), just seated and scaled down. */
-const DRIVER_COLOURS = { hair: PALETTE.hair, outfit: PALETTE.markerSky, hairStyle: 'bob' as const };
+/**
+ * **A busload of individuals, not four copies of three children.**
+ *
+ * This was a three-entry table read with `index % VARIANTS.length`, which was
+ * fine while exactly two children got off. Jim then asked for twelve seats with
+ * children on them, and twelve children through a three-entry modulo is four
+ * identical sets of triplets — the one thing a crowd must not look like.
+ *
+ * So there is now one distinct entry per seat, plus the driver on the end. Hair
+ * style and both colours vary together, and the styles are drawn from
+ * `HAIR_STYLES` so a busload shows off the range a child can actually pick from
+ * in the character creator.
+ */
+const VARIANTS = [
+  { hair: PALETTE.flowerBlue, outfit: PALETTE.flowerYellow, hairStyle: 'short' as const },
+  { hair: PALETTE.blossomPink, outfit: PALETTE.markerMint, hairStyle: 'bunches' as const },
+  { hair: PALETTE.hair, outfit: PALETTE.markerSky, hairStyle: 'bob' as const },
+  { hair: PALETTE.flowerRed, outfit: PALETTE.markerLilac, hairStyle: 'ponytail' as const },
+  { hair: PALETTE.woodDark, outfit: PALETTE.flowerViolet, hairStyle: 'long' as const },
+  { hair: PALETTE.markerLemon, outfit: PALETTE.flowerBlue, hairStyle: 'spiky' as const },
+  { hair: PALETTE.barkDark, outfit: PALETTE.markerPink, hairStyle: 'bowl' as const },
+  { hair: PALETTE.flowerViolet, outfit: PALETTE.grassLight, hairStyle: 'messy' as const },
+  { hair: PALETTE.wood, outfit: PALETTE.markerSky, hairStyle: 'longPonytail' as const },
+  { hair: PALETTE.ink, outfit: PALETTE.flowerYellow, hairStyle: 'mohican' as const },
+  { hair: PALETTE.markerPink, outfit: PALETTE.leafLight, hairStyle: 'bunches' as const },
+  { hair: PALETTE.blossomWhite, outfit: PALETTE.markerLilac, hairStyle: 'bob' as const },
+  /** The driver, last — reuses this same lightweight builder, just seated. */
+  { hair: PALETTE.grownUpCoat, outfit: PALETTE.grownUpScarf, hairStyle: 'short' as const },
+];
 
-const VARIANTS = [KID_A_COLOURS, KID_B_COLOURS, DRIVER_COLOURS];
-
-/** Builds one of the disembarking kids (0 or 1) or the driver (2). */
+/** Builds one of the disembarking children, or the driver (the last index). */
 export function createDisembarkingKid(index: number): DisembarkingKid {
-  const colours = VARIANTS[index % VARIANTS.length] ?? KID_A_COLOURS;
+  const colours = VARIANTS[index % VARIANTS.length] ?? VARIANTS[0]!;
   const handle: KidHandle = createKid({
     hair: colours.hair,
     outfit: colours.outfit,

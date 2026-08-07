@@ -30,22 +30,27 @@
  */
 import './headless-canvas.mjs';
 import { writeFileSync } from 'node:fs';
-import { Box3, Object3D } from 'three';
+import { Box3, Object3D, Vector3 } from 'three';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   ArrivalSequence,
   ARRIVAL_DURATION,
+  ARRIVAL_KID_COUNT,
   ARRIVAL_TIMELINE,
   type ArrivalPhase,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_Z,
-  ENTRANCE_BUS_STOP_X,
+  ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_Z,
+  ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
 } from '../src/world/entrance/layout.ts';
+import { CAT_BUS_SEAT_COUNT, createCatBus } from '../src/world/entrance/catBus.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { PARK_BOUNDARY } from '../src/world/boundary.ts';
+import { isInEntranceGateGap } from '../src/world/entrance/layout.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
@@ -147,18 +152,56 @@ check(doorHinge !== null, 'the cat bus has no `door-hinge` to swing');
  * Half-extents rather than a box, because the bus moves: the test below places
  * this rectangle at wherever the bus is parked.
  */
+const busBoxNow = new Box3();
 const busBox = busRoot ? new Box3().setFromObject(busRoot) : null;
 const busHalfX = busBox ? (busBox.max.x - busBox.min.x) / 2 : 0;
 const busHalfZ = busBox ? (busBox.max.z - busBox.min.z) / 2 : 0;
 
-const kidRoots = [findByName(arrival.group, 'entrance-kid-0'), findByName(arrival.group, 'entrance-kid-1')];
-check(kidRoots.every((k) => k !== null), 'the two other children are not in the arrival group');
-
-const startZ = busRoot?.position.z ?? NaN;
+// Every other child, found by name off the built scene rather than assumed.
+const kidRoots: (Object3D | null)[] = [];
+for (let i = 0; i < ARRIVAL_KID_COUNT; i += 1) {
+  kidRoots.push(findByName(arrival.group, `entrance-kid-${i}`));
+}
 check(
-  Math.abs(startZ - ENTRANCE_BUS_ARRIVE_Z) < 0.01,
-  `the bus should start at the gate approach z=${ENTRANCE_BUS_ARRIVE_Z}, found z=${startZ.toFixed(2)}`,
+  kidRoots.every((k) => k !== null),
+  `only ${kidRoots.filter(Boolean).length} of ${ARRIVAL_KID_COUNT} other children were built`,
 );
+
+/**
+ * **World position, not local.** A child still in their seat is a descendant of
+ * the bus, so `.position` is an offset inside the cabin — reading it as a world
+ * point put children tens of metres from where they actually were and made
+ * "child 0 walked 49 m" out of a nineteen-metre walk.
+ */
+const WHERE = new Vector3();
+const worldXZ = (object: Object3D): readonly [number, number] => {
+  object.getWorldPosition(WHERE);
+  return [WHERE.x, WHERE.z] as const;
+};
+
+const startX = busRoot?.position.x ?? NaN;
+check(
+  Math.abs(startX - ENTRANCE_BUS_ARRIVE_X) < 0.01,
+  `the bus should start on the kerb at x=${ENTRANCE_BUS_ARRIVE_X}, found x=${startX.toFixed(2)}`,
+);
+
+// **Sampled before the run, not after.** The children leave their seats during
+// the sequence and are disposed at the end, so counting occupants afterwards
+// counts an empty bus — which is exactly what the first version of this check
+// did, and it duly reported "0 of 12".
+const seatNodes: Object3D[] = [];
+if (busRoot) {
+  busRoot.traverse((object) => {
+    if (/^cat-bus-seat-\d+$/.test(object.name)) seatNodes.push(object);
+  });
+}
+const occupied = seatNodes.filter((seat) => {
+  let found = false;
+  seat.traverse((o) => {
+    if (/^entrance-kid-/.test(o.name)) found = true;
+  });
+  return found;
+}).length;
 
 const phasesSeen = new Set<ArrivalPhase>();
 /**
@@ -174,8 +217,10 @@ let doorSwingWhileOpen = 0;
 /** The door at rest, at either end — it must start shut and finish shut. */
 let doorAtStart = Number.NaN;
 let doorAtEnd = Number.NaN;
-let minBusZ = Infinity;
-let maxBusZ = -Infinity;
+let minBusX = Infinity;
+let maxBusX = -Infinity;
+/** The deepest any part of the bus ever got, as a distance inside the park edge. */
+let deepestIntoPark = -Infinity;
 let ridingWhileWalkingIn = true;
 let posesDuringWalkIn = 0;
 /** Where she was standing on the frame the controls were handed over. */
@@ -205,8 +250,18 @@ for (let i = 0; i < frames; i += 1) {
   elapsed += DT;
 
   if (busRoot) {
-    minBusZ = Math.min(minBusZ, busRoot.position.z);
-    maxBusZ = Math.max(maxBusZ, busRoot.position.z);
+    minBusX = Math.min(minBusX, busRoot.position.x);
+    maxBusX = Math.max(maxBusX, busRoot.position.x);
+    // **Did any part of the bus get inside the park?** Measured on the built
+    // bounding box every frame, against the real boundary outline — not against
+    // the stop position it was told to drive to. This is the frame-by-frame
+    // form of Jim's "the bus drives something like 5 m into the park".
+    busBoxNow.setFromObject(busRoot);
+    for (const cx of [busBoxNow.min.x, busBoxNow.max.x]) {
+      for (const cz of [busBoxNow.min.z, busBoxNow.max.z]) {
+        deepestIntoPark = Math.max(deepestIntoPark, PARK_BOUNDARY.distanceToEdge(cx, cz));
+      }
+    }
   }
   if (doorHinge) {
     const swing = Math.abs(doorHinge.rotation.y);
@@ -250,7 +305,9 @@ for (let i = 0; i < frames; i += 1) {
       walkers.push({ name: 'the player', x: lastPose.x, z: lastPose.z });
     }
     kidRoots.forEach((kid, index) => {
-      if (kid && kid.visible) walkers.push({ name: `child ${index}`, x: kid.position.x, z: kid.position.z });
+      if (!kid || !kid.visible || kid.parent !== arrival.group) return;
+      const [kx, kz] = worldXZ(kid);
+      walkers.push({ name: `child ${index}`, x: kx, z: kz });
     });
     for (const walker of walkers) {
       const insideX = Math.abs(walker.x - busHere.x) < busHalfX - PLAYER_RADIUS * 0.5;
@@ -273,9 +330,8 @@ for (let i = 0; i < frames; i += 1) {
       const p = player.poses[player.poses.length - 1];
       return p ? [+p.x.toFixed(3), +p.z.toFixed(3)] : null;
     })(),
-    kids: kidRoots.map((k) =>
-      k && k.visible ? [+k.position.x.toFixed(3), +k.position.z.toFixed(3)] : null,
-    ),
+    // Only once they are walking in the world, not while seated in the bus.
+    kids: kidRoots.map((k) => (k && k.visible && k.parent === arrival.group ? worldXZ(k) : null)),
     door: doorHinge ? +Math.abs(doorHinge.rotation.y).toFixed(3) : 0,
   });
 
@@ -297,16 +353,27 @@ for (const phase of [
   check(phasesSeen.has(phase), `the '${phase}' phase never ran — the sequence skipped it`);
 }
 
-// The bus really travelled, in both directions, over its real span.
+// **The bus never enters the park.** `distanceToEdge` is positive inside the
+// boundary, so anything above zero is a bus where a bus should not be.
 check(
-  minBusZ <= ENTRANCE_BUS_STOP_Z + 0.05,
-  `the bus never reached the stop at z=${ENTRANCE_BUS_STOP_Z}; closest was ${minBusZ.toFixed(2)}`,
+  deepestIntoPark < 0,
+  `the bus reached ${deepestIntoPark.toFixed(2)} m INSIDE the park boundary — it is a bus, ` +
+    'it belongs on the road outside the gate',
+);
+notes.push(
+  `closest the bus ever got to the park edge: ${(-deepestIntoPark).toFixed(2)} m outside it`,
+);
+
+// It really travelled, along the kerb, over its real span.
+check(
+  minBusX <= ENTRANCE_BUS_VANISH_X + 0.05,
+  `the bus never drove away to x=${ENTRANCE_BUS_VANISH_X}; furthest was ${minBusX.toFixed(2)}`,
 );
 check(
-  maxBusZ >= ENTRANCE_BUS_VANISH_Z - 0.05,
-  `the bus never drove back out to z=${ENTRANCE_BUS_VANISH_Z}; furthest was ${maxBusZ.toFixed(2)}`,
+  maxBusX >= ENTRANCE_BUS_ARRIVE_X - 0.05,
+  `the bus never started out at x=${ENTRANCE_BUS_ARRIVE_X}; furthest was ${maxBusX.toFixed(2)}`,
 );
-const travelled = maxBusZ - minBusZ;
+const travelled = maxBusX - minBusX;
 check(travelled > 5, `the bus only moved ${travelled.toFixed(2)} m in total — it barely went anywhere`);
 
 // The door actually swung, measured on the hinge rather than on the setter, and
@@ -368,6 +435,108 @@ kidRoots.forEach((kid, index) => {
   notes.push(`child ${index} walked ${walked.toFixed(2)} m, finishing at ${last[0].toFixed(2)}, ${last[1].toFixed(2)}`);
 });
 
+// --- twelve seats, with children on them --------------------------------
+// Measured off the bus that was built, not restated from CAT_BUS_SEAT_COUNT.
+check(
+  seatNodes.length === CAT_BUS_SEAT_COUNT,
+  `found ${seatNodes.length} seats on the built bus, expected ${CAT_BUS_SEAT_COUNT}`,
+);
+// Eleven, not twelve: the player has the other one, and she is not built here.
+check(
+  occupied === CAT_BUS_SEAT_COUNT - 1,
+  `${occupied} of ${CAT_BUS_SEAT_COUNT} seats had a child on them at the start ` +
+    '(one is the player\u2019s, so eleven is right)',
+);
+notes.push(`${seatNodes.length} seats, ${occupied} with a child on them plus the player\u2019s`);
+
+// --- big enough to be a bus ---------------------------------------------
+// Thresholds from the children, not from a literal, so they stay true if the
+// characters are ever resized. Jim: "barely bigger than a child, and smaller
+// vertically than one child with a hat".
+{
+  const fresh = createCatBus();
+  fresh.root.updateMatrixWorld(true);
+  const box = new Box3().setFromObject(fresh.root);
+  const tall = box.max.y - box.min.y;
+  check(
+    tall > TALLEST_CHILD_HEIGHT * 1.4,
+    `the bus is ${tall.toFixed(2)} m tall against a ${TALLEST_CHILD_HEIGHT} m child in a hat — ` +
+      'that is a shed, not a bus',
+  );
+  check(
+    tall < TALLEST_CHILD_HEIGHT * 2.6,
+    `the bus is ${tall.toFixed(2)} m tall, which is more than two and a half children — too big`,
+  );
+
+  // A child has to be able to stand where they are sitting, and get out.
+  const seatTop = new Vector3();
+  const firstSeat = fresh.seats[0];
+  if (firstSeat) {
+    firstSeat.getWorldPosition(seatTop);
+    const overhead = box.max.y - seatTop.y;
+    check(
+      overhead > TALLEST_CHILD_HEIGHT,
+      `only ${overhead.toFixed(2)} m from a seat to the top of the bus — a ` +
+        `${TALLEST_CHILD_HEIGHT} m child does not fit on it`,
+    );
+    notes.push(`seat to roof: ${overhead.toFixed(2)} m for a ${TALLEST_CHILD_HEIGHT} m child`);
+  }
+
+  const hinge = findByName(fresh.root, 'door-hinge');
+  if (hinge) {
+    const doorBox = new Box3().setFromObject(hinge);
+    const doorTall = doorBox.max.y - doorBox.min.y;
+    check(
+      doorTall > TALLEST_CHILD_HEIGHT,
+      `the door is ${doorTall.toFixed(2)} m tall — a ${TALLEST_CHILD_HEIGHT} m child cannot ` +
+        'walk out of it',
+    );
+    notes.push(`door opening ${doorTall.toFixed(2)} m tall`);
+  }
+  fresh.dispose();
+}
+
+// --- nobody walks through the wall --------------------------------------
+// Everyone crosses the boundary at z = ENTRANCE_GATE_Z on their way in. That
+// crossing has to happen inside the opening the masonry actually leaves (#195),
+// or they are walking through pink stone — the same fault as the bus, at a
+// smaller scale.
+{
+  const throughWall: string[] = [];
+  const crossers = new Map<string, { x: number; z: number } | null>();
+  for (let i = 1; i < trace.length; i += 1) {
+    const before = trace[i - 1];
+    const now = trace[i];
+    if (!before || !now) continue;
+    const pairs: [string, readonly [number, number] | null, readonly [number, number] | null][] = [
+      ['the player', before.player, now.player],
+      ...now.kids.map(
+        (k, n) =>
+          [`child ${n}`, before.kids[n] ?? null, k] as [
+            string,
+            readonly [number, number] | null,
+            readonly [number, number] | null,
+          ],
+      ),
+    ];
+    for (const [who, was, is] of pairs) {
+      if (!was || !is) continue;
+      const crossed = (was[1] - ENTRANCE_GATE_Z) * (is[1] - ENTRANCE_GATE_Z) < 0;
+      if (!crossed) continue;
+      crossers.set(who, { x: is[0], z: is[1] });
+      if (!isInEntranceGateGap(Math.atan2(is[1], is[0]))) {
+        throughWall.push(`${who} crossed the boundary at x=${is[0].toFixed(2)}, outside the gate gap`);
+      }
+    }
+  }
+  if (throughWall.length > 0) {
+    failures.push(`${throughWall.length} wall crossings outside the gate, e.g. ${throughWall[0]}`);
+  } else {
+    notes.push(`${crossers.size} walkers crossed the boundary, every one through the gate`);
+  }
+  check(crossers.size > 0, 'nobody ever crossed the park boundary — nobody actually walked in');
+}
+
 // And the flag that stops it happening twice is set by the sequence itself.
 check(saveFlags.arrivedByBus, 'markArrived() never fired — the arrival would replay for ever');
 
@@ -377,7 +546,7 @@ const seatedPoses = player.poses.filter((p) => p.posture === 'seated').length;
 check(seatedPoses > 60, `only ${seatedPoses} seated frames — she barely rode the bus at all`);
 check(walkingPoses > 60, `only ${walkingPoses} walking frames — she never really walked in`);
 
-notes.push(`bus travelled ${travelled.toFixed(2)} m, z ${maxBusZ.toFixed(1)} down to ${minBusZ.toFixed(1)}`);
+notes.push(`bus travelled ${travelled.toFixed(2)} m along the kerb, x ${maxBusX.toFixed(1)} to ${minBusX.toFixed(1)}`);
 notes.push(
   `door swung to ${doorSwingWhileOpen.toFixed(2)} rad while unloading, shut at both ends`,
 );
