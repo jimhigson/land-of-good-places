@@ -178,6 +178,17 @@ const FACE_RADIUS = BODY_WIDTH * 0.52;
 const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS * 1.1;
 
 /**
+ * The longest walk anybody has from their seat to the door, in metres.
+ *
+ * Exported because `ArrivalSequence` walks children down the bus at the park's
+ * ordinary pace rather than teleporting them from seat to pavement, and it has
+ * to know at module scope how long to keep the bus waiting. Derived from the
+ * cabin it is a walk down, so a longer bus keeps its bus waiting longer without
+ * anybody adjusting a second number.
+ */
+export const CAT_BUS_LONGEST_WALK_TO_DOOR = CABIN_LENGTH_FROM_SEATS + BODY_WIDTH / 2;
+
+/**
  * **Where the bodywork stops and the window opening starts.**
  *
  * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`

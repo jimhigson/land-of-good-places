@@ -368,6 +368,8 @@ const lastPosition = kids.map((kid) => kid.position.clone());
 const walkedDistance = new Array<number>(ARRIVAL_KID_COUNT).fill(0);
 const walkingFrames = new Array<number>(ARRIVAL_KID_COUNT).fill(0);
 const onFootLastFrame = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
+const offTheBus = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
+const enteredPark = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
 let closestPairEver = Infinity;
 let closestPairWhen = 0;
 let closestPairWho = '';
@@ -427,7 +429,15 @@ for (let index = 0; index < frames; index += 1) {
     //
     // Whether a child is inside the bus is a question about the bus, so it is
     // asked of the bus's own bounding box.
-    const onFoot = busFootprint !== null && !insideFootprint(busFootprint, kid.position);
+    // **Sticky.** Getting off a bus is not something you undo, and the test has
+    // to say so: the bus drives 30 m away at the end, sweeping its bounding box
+    // straight across the children who already got out of it. Without this they
+    // are re-classified as "back aboard" as it passes, which breaks the
+    // consecutive-frame guard below and reported a 12.3 m/s child.
+    if (!offTheBus[kidIndex] && busFootprint !== null && !insideFootprint(busFootprint, kid.position)) {
+      offTheBus[kidIndex] = true;
+    }
+    const onFoot = offTheBus[kidIndex]!;
     if (Number.isNaN(leftSeatAt[kidIndex]) && onFoot) leftSeatAt[kidIndex] = elapsed;
     if (Number.isNaN(releasedAt[kidIndex]) && !kid.scripted) releasedAt[kidIndex] = elapsed;
 
@@ -453,11 +463,20 @@ for (let index = 0; index < frames; index += 1) {
     // strolling around the middle of the park at x = 6.1, thirty seconds after
     // the arrival ended, as having walked through a wall. Radial, and only
     // while the arrival still owns them.
-    if (kid.scripted) {
-      const wasOutside = Math.hypot(previous.x, previous.z) > edgeRadiusAt(PARK_BOUNDARY, Math.atan2(previous.z, previous.x));
-      const nowInside = Math.hypot(kid.position.x, kid.position.z) <= edgeRadiusAt(PARK_BOUNDARY, Math.atan2(kid.position.z, kid.position.x));
-      if (wasOutside && nowInside && !isInEntranceGateGap(Math.atan2(kid.position.z, kid.position.x))) {
-        crossedGateOutsideGap.push(`child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)}`);
+    // Only the **first** time each child enters the park, and only while the
+    // arrival still owns them. Once inside they wander, and a child strolling
+    // about the middle of the park re-crosses this line all afternoon.
+    if (kid.scripted && !enteredPark[kidIndex]) {
+      const nowInside =
+        Math.hypot(kid.position.x, kid.position.z) <=
+        edgeRadiusAt(PARK_BOUNDARY, Math.atan2(kid.position.z, kid.position.x));
+      if (nowInside) {
+        enteredPark[kidIndex] = true;
+        if (!isInEntranceGateGap(Math.atan2(kid.position.z, kid.position.x))) {
+          crossedGateOutsideGap.push(
+            `child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)}`,
+          );
+        }
       }
     }
 

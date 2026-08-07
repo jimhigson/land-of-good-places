@@ -6,7 +6,12 @@ import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import { CHILD_FOOTPRINT } from '../../art/models/kid';
-import { createCatBus, CAT_BUS_SEAT_COUNT, type CatBusHandle } from './catBus';
+import {
+  createCatBus,
+  CAT_BUS_LONGEST_WALK_TO_DOOR,
+  CAT_BUS_SEAT_COUNT,
+  type CatBusHandle,
+} from './catBus';
 import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { hasArrivedBefore, markArrived } from './arrivalFlag';
@@ -120,6 +125,23 @@ const KID_DELAYS: readonly number[] = (() => {
   return delays;
 })();
 
+/**
+ * The longest anybody spends walking down the inside of the bus to the door.
+ *
+ * **Children walk out; they do not teleport out.** The first version moved each
+ * child from their seat straight to the pavement in a single frame, which
+ * `check:jitter` caught at once — an 8.8 m step and an apparent 26.9 m/s, right
+ * at the door, against bounds of 1 m and 8 m/s. That check exists because
+ * something writing a child's position behind their own movement code is how
+ * the park train once accelerated its passengers to 2,200 m/s, and it was
+ * entirely right to complain.
+ *
+ * It also just looked wrong: with real windows in the bus you can now watch the
+ * seats, so a child blinking out of one and appearing on the step is a jump cut
+ * in the middle of the shot.
+ */
+const KID_AISLE_SECONDS = CAT_BUS_LONGEST_WALK_TO_DOOR / NPC_WALK_SPEED;
+
 /** How long the last child needs to walk clear before the bus may move. */
 const KID_CLEAR_SECONDS = 1.8;
 
@@ -142,7 +164,8 @@ const BUS_PULLS_AWAY = 3.0;
  */
 const BUS_WAITS_FOR_THE_REST = Math.max(
   0,
-  LAST_KID_DELAY + KID_CLEAR_SECONDS - (DOORS_OPENING + STEPPING_DOWN + WALKING_IN),
+  LAST_KID_DELAY + KID_AISLE_SECONDS + KID_CLEAR_SECONDS -
+    (DOORS_OPENING + STEPPING_DOWN + WALKING_IN),
 );
 
 export const ARRIVAL_TIMELINE = {
@@ -320,11 +343,26 @@ const KID_PERSONAL_SPACE = CHILD_FOOTPRINT;
 /** How fast a push-apart correction fades once the crowding is over, m/s. */
 const NUDGE_DECAY = 1.2;
 
+/**
+ * The most a child may ever be nudged off their own route.
+ *
+ * Without a cap this accumulates: a child standing on the step is permanently
+ * within a body's width of the passengers still sitting inside the bus beside
+ * them, so the correction was re-applied every frame and grew to **several
+ * metres**, teleporting children into the park at 12 m/s past the gate. Half a
+ * body is as far as anybody needs to step aside, and a correction bigger than
+ * that means the routes are wrong rather than the crowd being tight.
+ */
+const NUDGE_LIMIT = CHILD_FOOTPRINT / 2;
+
 /** One child's scripted walk out of the bus and into the park. */
 interface KidWalk {
   readonly route: WalkRoute;
   readonly arc: ArcTable;
   readonly speed: number;
+  /** Where this child sits, and how long their walk to the door takes. */
+  seat: Group | null;
+  aisleSeconds: number;
   /** Lateral correction from the push-apart, carried between frames. */
   nudgeX: number;
   nudgeZ: number;
@@ -447,6 +485,8 @@ export class ArrivalSequence {
         // independent number any more: `KID_WALK_SPEED = 1.5` was 46-75% of
         // what every other child in the park walks at, and it showed.
         speed: NPC_WALK_SPEED * (0.94 + rng() * 0.12),
+        seat: null,
+        aisleSeconds: 0,
         nudgeX: 0,
         nudgeZ: 0,
         released: false,
@@ -476,6 +516,27 @@ export class ArrivalSequence {
     if (this.doneFlag) return;
     this.kids = children.slice(0, ARRIVAL_KID_COUNT);
     for (const kid of this.kids) kid.beginScripted();
+
+    // **Nearest the door first.** Whoever sits closest gets off first, which is
+    // both what happens on a bus and what keeps the queue in order: the walk to
+    // the door then gets *longer* with every child, so the gaps between people
+    // appearing on the step can only widen from the stagger, never narrow.
+    const drop = this.playerRoute.from;
+    const free = this.bus.seats
+      .filter((seat) => seat !== this.bus.passengerSeat)
+      .map((seat) => {
+        const at = seat.getWorldPosition(new Vector3());
+        return { seat, distance: Math.hypot(at.x - drop.x, at.z - drop.z) };
+      })
+      .sort((a, b) => a.distance - b.distance);
+
+    for (let index = 0; index < this.kidWalks.length; index += 1) {
+      const walk = this.kidWalks[index];
+      const slot = free[index];
+      if (!walk || !slot) continue;
+      walk.seat = slot.seat;
+      walk.aisleSeconds = slot.distance / NPC_WALK_SPEED;
+    }
     this.seatKids();
   }
 
@@ -727,12 +788,11 @@ export class ArrivalSequence {
    * the same answer without the second frame of reference.
    */
   private seatKids(): void {
-    const seats = this.bus.seats.filter((seat) => seat !== this.bus.passengerSeat);
     for (let index = 0; index < this.kids.length; index += 1) {
       const kid = this.kids[index];
-      const seat = seats[index];
-      if (!kid || !seat || this.kidWalks[index]?.released) continue;
-      seat.getWorldPosition(SCRATCH);
+      const walk = this.kidWalks[index];
+      if (!kid || !walk || walk.released || !walk.seat) continue;
+      walk.seat.getWorldPosition(SCRATCH);
       kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, BUS_FACING, 0);
     }
   }
@@ -756,11 +816,15 @@ export class ArrivalSequence {
     for (let i = 0; i < this.kids.length; i += 1) {
       const a = this.kids[i];
       const wa = this.kidWalks[i];
-      if (!a || !wa || wa.released) continue;
+      if (!a || !wa || wa.released || !this.onThePavement(i)) continue;
       for (let j = i + 1; j < this.kids.length; j += 1) {
         const b = this.kids[j];
         const wb = this.kidWalks[j];
-        if (!b || !wb || wb.released) continue;
+        // **Only children who are actually outside.** Somebody still in their
+        // seat is inside a vehicle, a metre from the doorway by construction,
+        // and pushing the child on the step away from them is both meaningless
+        // and unbounded — it is what grew the nudge to several metres.
+        if (!b || !wb || wb.released || !this.onThePavement(j)) continue;
         const dx = b.position.x - a.position.x;
         const dz = b.position.z - a.position.z;
         const gap = Math.hypot(dx, dz);
@@ -777,10 +841,16 @@ export class ArrivalSequence {
     }
 
     // Fade the corrections out, so a squeeze at the gate does not leave eleven
-    // children permanently walking a metre to the left of their own route.
+    // children permanently walking a metre to the left of their own route — and
+    // cap them, so no accumulation can ever throw somebody across the park.
     const decay = NUDGE_DECAY * dt;
     for (const walk of this.kidWalks) {
-      const size = Math.hypot(walk.nudgeX, walk.nudgeZ);
+      let size = Math.hypot(walk.nudgeX, walk.nudgeZ);
+      if (size > NUDGE_LIMIT) {
+        walk.nudgeX = (walk.nudgeX / size) * NUDGE_LIMIT;
+        walk.nudgeZ = (walk.nudgeZ / size) * NUDGE_LIMIT;
+        size = NUDGE_LIMIT;
+      }
       if (size <= decay) {
         walk.nudgeX = 0;
         walk.nudgeZ = 0;
@@ -789,6 +859,14 @@ export class ArrivalSequence {
         walk.nudgeZ -= (walk.nudgeZ / size) * decay;
       }
     }
+  }
+
+  /** Has this child finished walking down the bus and stepped onto the kerb? */
+  private onThePavement(index: number): boolean {
+    const walk = this.kidWalks[index];
+    const delay = KID_DELAYS[index];
+    if (!walk || delay === undefined) return false;
+    return this.kidClock - delay >= walk.aisleSeconds;
   }
 
   /**
@@ -808,18 +886,36 @@ export class ArrivalSequence {
     const moving = this.kidClock - delay;
     if (moving <= 0) {
       // Still in their seat, waiting their turn.
-      const seats = this.bus.seats.filter((seat) => seat !== this.bus.passengerSeat);
-      const seat = seats[index];
-      if (seat) {
-        seat.getWorldPosition(SCRATCH);
+      if (walk.seat) {
+        walk.seat.getWorldPosition(SCRATCH);
         kid.setScriptedPose(SCRATCH.x, SCRATCH.y, SCRATCH.z, BUS_FACING, 0);
       }
       return;
     }
 
+    // --- down the bus to the door ------------------------------------------
+    // At the park's own walking pace, so nothing about this child ever moves
+    // faster than a child walks — which is what `check:jitter` is asserting and
+    // what the old single-frame jump violated by a factor of three.
+    if (moving < walk.aisleSeconds && walk.seat) {
+      const seat = walk.seat.getWorldPosition(SCRATCH);
+      const eased = clamp01(moving / Math.max(0.001, walk.aisleSeconds));
+      const to = walk.route.from;
+      const x = lerp(seat.x, to.x, eased);
+      const z = lerp(seat.z, to.z, eased);
+      // Down off the floor onto the pavement over the last of it, with the same
+      // little hop the player's own step down has.
+      const ground = terrainHeight(x, z);
+      const step = smoothstep(0.72, 1, eased);
+      const y = lerp(seat.y, ground, step) + Math.sin(step * Math.PI) * 0.14;
+      const facing = Math.atan2(to.x - seat.x, to.z - seat.z);
+      kid.setScriptedPose(x, y, z, facing, walk.speed);
+      return;
+    }
+
     // Distance walked, mapped back onto the curve — so the pace on screen is
     // the pace that was asked for, everywhere along it.
-    const walked = moving * walk.speed;
+    const walked = (moving - walk.aisleSeconds) * walk.speed;
     const progress = clamp01(walked / Math.max(0.5, walk.arc.total));
     const route = walk.route;
     const at = tAtDistance(walk.arc, walked);
