@@ -204,6 +204,37 @@ export interface ArchClearanceFact {
 }
 
 /**
+ * One straight leg carrying the finish rainbow down to the ground, as built.
+ *
+ * Jim, 7 August 2026: *"make the rainbow extend all the way to the floor with
+ * straight sections, not just float in space"*. Everything here is read off the
+ * leg's own world-space bounding box and the terrain function the game itself
+ * uses, so the invariant measures the arch that was built rather than the
+ * arithmetic that placed it.
+ */
+export interface ArchLegFact {
+  readonly ring: string;
+  readonly name: string;
+  /** Which rainbow band this leg continues, inner band 0 outwards. */
+  readonly band: number;
+  /** Which side of the track it comes down: park side, or out on the rim. */
+  readonly side: 'inner' | 'outer';
+  readonly x: number;
+  readonly z: number;
+  /** Lowest vertex of the leg, world metres. */
+  readonly bottomY: number;
+  /** Highest vertex of the leg, world metres. */
+  readonly topY: number;
+  /** Lowest vertex of the arc band this leg belongs to, world metres. */
+  readonly arcFootY: number;
+  /** The **lowest** terrain anywhere under the leg's own footprint. */
+  readonly groundY: number;
+  readonly distanceToPath: number;
+  readonly distanceToRail: number;
+  readonly clearOfPlots: boolean;
+}
+
+/**
  * How the race camera moves as a rider runs the built ring.
  *
  * **Measured by driving the real `RaceCamera`**, not by re-deriving where it
@@ -265,6 +296,13 @@ export interface ParkFacts {
    * rider on the ride, every lap, with nothing complaining.
    */
   readonly archClearance: readonly ArchClearanceFact[];
+  /**
+   * Every straight leg carrying the finish rainbow down to the ground — see
+   * {@link ArchLegFact}. Empty means the rainbow is floating in the sky again,
+   * which is the whole of what Jim asked to have fixed, so the invariant treats
+   * an empty list as a failure rather than as nothing to check.
+   */
+  readonly archLegs: readonly ArchLegFact[];
   /**
    * Every duck bar on the race ring, with what the race does at it — see
    * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
@@ -1216,7 +1254,15 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   // --- headroom under the finish rainbow -----------------------------------
   const { RIDER_HEAD_TOP_AT_PARK_SCALE } = await import('../../src/world/railRace/hazards.ts');
+  // The park's own predicates for "is there anything under here", the same three
+  // `railRace/track.ts`'s `groundIsClear` asks about a trestle foot. Dynamically
+  // imported like everything else seed-dependent in this file.
+  const { distanceToPath } = await import('../../src/world/paths.ts');
+  const { distanceToRailCorridor, clearOfPlots } = await import(
+    '../../src/world/train/plan.ts'
+  );
   const archClearance: ArchClearanceFact[] = [];
+  const archLegs: ArchLegFact[] = [];
   for (const [label, groupName, ringRoute] of [
     ['race', 'railRace:race-ring', world.railRace.raceRoute],
     ['walk-past', 'railRace:walk-past-ring', world.railRace.walkPastRoute],
@@ -1228,11 +1274,20 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     const outward = ringRoute.outwardAt(start, new Vec3());
 
     // Every rainbow vertex, reduced to (across the track, height).
+    //
+    // **The arcs only, matched exactly.** `startsWith('railRace:finish-rainbow')`
+    // also catches `…-leg-3-outer`, and a leg runs all the way down to the
+    // terrain — so the moment one came within a child's width of a lane it would
+    // silently become the lowest thing over that lane and this would report a
+    // headroom of about zero for a reason that has nothing to do with headroom.
+    // It cannot happen today (the nearest leg is 13 m outside the outermost
+    // lane), which is exactly why it is worth pinning now rather than after
+    // somebody narrows the span.
     const band: { across: number; y: number }[] = [];
     const vertex = new Vec3();
     group.traverse((child) => {
       if (!(child instanceof Mesh)) return;
-      if (!child.name.startsWith('railRace:finish-rainbow')) return;
+      if (!/^railRace:finish-rainbow-\d+$/.test(child.name)) return;
       const position = child.geometry.getAttribute('position');
       if (!position) return;
       child.updateWorldMatrix(true, false);
@@ -1264,10 +1319,59 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         rainbowY,
       });
     }
+
+    // --- and where the rainbow's legs come down ----------------------------
+    //
+    // The feet of each arc, so a leg can be measured against the thing it is
+    // meant to be holding up rather than against the rule that placed it.
+    const arcFootY = new Map<string, number>();
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      if (!/^railRace:finish-rainbow-\d+$/.test(child.name)) return;
+      arcFootY.set(child.name, new Box3().setFromObject(child).min.y);
+    });
+
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const match = /^railRace:finish-rainbow-leg-(\d+)-(inner|outer)$/.exec(child.name);
+      if (!match) return;
+      const box = new Box3().setFromObject(child);
+      const at = child.getWorldPosition(new Vec3());
+      // **The lowest terrain under the leg's own footprint, not the terrain at
+      // its centre.** The centre reading is `bottom = ground - tube` played
+      // back — arithmetic this repo just wrote, identical on every seed, and a
+      // check that reads back a constant is the failure this PR has hit five
+      // times. Daylight appears at the *downhill* edge, so that is where it has
+      // to be looked for, and these legs land on the rim, the steepest ground
+      // in the park.
+      const radius = (box.max.x - box.min.x) / 2;
+      let groundY = terrainHeight(at.x, at.z);
+      for (let k = 0; k < 16; k += 1) {
+        const angle = (k / 16) * Math.PI * 2;
+        const h = terrainHeight(at.x + Math.cos(angle) * radius, at.z + Math.sin(angle) * radius);
+        if (h < groundY) groundY = h;
+      }
+      archLegs.push({
+        ring: label,
+        name: child.name,
+        band: Number(match[1]),
+        side: match[2] as 'inner' | 'outer',
+        x: at.x,
+        z: at.z,
+        bottomY: box.min.y,
+        topY: box.max.y,
+        arcFootY: arcFootY.get(`railRace:finish-rainbow-${match[1]}`) ?? Number.NaN,
+        groundY,
+        distanceToPath: distanceToPath(at.x, at.z),
+        distanceToRail: distanceToRailCorridor(at.x, at.z),
+        clearOfPlots: clearOfPlots(at.x, at.z, radius),
+      });
+    });
   }
 
   return {
     archClearance,
+    archLegs,
     duckBars,
     cameraTracking,
     castlePass,

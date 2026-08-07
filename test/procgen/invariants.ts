@@ -1470,6 +1470,88 @@ const finishRainbowClearsEveryRider: Invariant = (facts) => {
  */
 const ARCH_MIN_HEADROOM = 0.5;
 
+/**
+ * **The finish rainbow stands on the ground, on both sides, on every seed.**
+ *
+ * Jim, 7 August 2026: *"make the rainbow extend all the way to the floor with
+ * straight sections, not just float in space"*. It was an arc whose feet stopped
+ * dead at `footY` — 6.0 m over the lawn on the park side and 22.6 m over the
+ * hillside on the rim side, on the canonical seed.
+ *
+ * Three things have to be true, and they are deliberately three separate
+ * assertions because the ways this breaks are different shapes:
+ *
+ * 1. **The legs exist.** An empty list is the original bug exactly, and
+ *    "measure the legs you find" would pass in silence with none.
+ * 2. **Each reaches the ground**, judged against the *lowest* terrain under its
+ *    own footprint rather than the terrain at its centre — see
+ *    {@link ArchLegFact.groundY}. The centre reading is the placement arithmetic
+ *    played straight back, and would be green with the legs stopped anywhere.
+ * 3. **Each meets the arc it hangs from.** A leg that reaches the floor but
+ *    starts below its own band is the same complaint with a gap in a new place,
+ *    and nothing else in the suite would see it.
+ *
+ * Plus the ordinary question asked of anything the park stands on the ground:
+ * that it did not come down on a path, on the railway, or in somebody's plot.
+ * The thresholds are the game's own — `WALKABLE_GAP` (two player radii, what it
+ * takes to get past a thing) and `TRACK_CLEARANCE` (half the train track's
+ * width) — not numbers invented here.
+ */
+const finishRainbowStandsOnTheGround: Invariant = (facts) => {
+  const complaints: string[] = [];
+  if (facts.archLegs.length === 0) {
+    return [
+      'the finish rainbow has no legs at all in the built scene — its arc stops in mid-air ' +
+        '6 m over the lawn on one side and 22 m over the rim on the other, which is exactly the ' +
+        '"not just float in space" complaint. See buildArch in railRace/track.ts',
+    ];
+  }
+  for (const leg of facts.archLegs) {
+    if (!Number.isFinite(leg.bottomY) || !Number.isFinite(leg.groundY)) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring measures as non-finite (bottom ${leg.bottomY}, ` +
+          `ground ${leg.groundY}) — a NaN loses every comparison below rather than failing one`,
+      );
+      continue;
+    }
+    // Above the ground by any amount is daylight under the foot.
+    if (leg.bottomY > leg.groundY) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring stops ${(leg.bottomY - leg.groundY).toFixed(2)} m ` +
+          `above the ground beneath it (foot at ${leg.bottomY.toFixed(2)}, lowest terrain under it ` +
+          `${leg.groundY.toFixed(2)}) — the rainbow is floating again. See buildArch in ` +
+          `railRace/track.ts`,
+      );
+    }
+    if (leg.topY < leg.arcFootY) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring ends ${(leg.arcFootY - leg.topY).toFixed(2)} m below ` +
+          `the foot of the band it carries (leg top ${leg.topY.toFixed(2)}, arc foot ` +
+          `${leg.arcFootY.toFixed(2)}) — there is a gap between the arc and its own leg`,
+      );
+    }
+    if (leg.distanceToPath < WALKABLE_GAP) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring comes down ${leg.distanceToPath.toFixed(2)} m from a ` +
+          `path (needs ${WALKABLE_GAP} m, two player radii) — it lands in the way of somebody walking`,
+      );
+    }
+    if (leg.distanceToRail < TRACK_CLEARANCE) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring comes down ${leg.distanceToRail.toFixed(2)} m from the ` +
+          `railway corridor (needs ${TRACK_CLEARANCE} m) — the train would run through it`,
+      );
+    }
+    if (!leg.clearOfPlots) {
+      complaints.push(
+        `${leg.name} on the ${leg.ring} ring comes down inside a building plot — it would grow up ` +
+          `through whatever is built there`,
+      );
+    }
+  }
+  return complaints;
+};
+
 const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
   const complaints: string[] = [];
   const bars = facts.duckBars;
@@ -3129,6 +3211,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
   ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
+  ['the Rail Race finish rainbow stands on the ground', finishRainbowStandsOnTheGround],
   ['every Rail Race dropper hangs under a real rail', droppersHangUnderRealRails],
   ['the Rail Race camera never runs backwards', raceCameraNeverRunsBackwards],
   [

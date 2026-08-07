@@ -1288,9 +1288,10 @@ function buildArch(
   for (let i = 0; i < ART.rainbow.length; i += 1) {
     const material = toonMaterial(ART.rainbow[i]!);
     keep(material);
+    const radius = innerRadius + i * band;
     // A half torus: `TorusGeometry` sweeps from +X anticlockwise, so an arc of
     // π is exactly the upper half, with its feet on the ground either side.
-    const geometry = new TorusGeometry(innerRadius + i * band, tube, 8, 96, Math.PI);
+    const geometry = new TorusGeometry(radius, tube, 8, 96, Math.PI);
     keep(geometry);
     const arc = solid(new Mesh(geometry, material));
     arc.position.set(centre.x, footY, centre.z);
@@ -1304,6 +1305,58 @@ function buildArch(
     // is what stops six bright bands reading as a gradient rather than as six
     // painted stripes.
     addOutline(arc, 0.02);
+
+    // **The legs.** Jim, 7 August 2026: *"make the rainbow extend all the way to
+    // the floor with straight sections, not just float in space"*.
+    //
+    // The arc alone ends at `footY`, which is just under the lowest rail — so on
+    // the race ring its feet stopped 6.0 m above the lawn on the inner side and
+    // 22.6 m above the hillside on the outer, and it read as a decal hung in the
+    // sky rather than a thing standing on the park.
+    //
+    // **The solve above is untouched.** `innerRadius` still comes from
+    // `hypot(halfWidth, clearHeight)` and the span and apex are exactly what they
+    // were; these are added *beneath* the existing feet, not a resize. Each leg
+    // is the band's own tube continued straight down at the band's own radius, in
+    // the band's own colour, so the arch reads as one object rather than an arc
+    // sitting on a trestle.
+    //
+    // Down to `terrainHeight`, which is the same idiom — and the same function —
+    // the ring's own trestle legs use (`legHeight = beamY - ground`, see
+    // `trestles` above). The two sides come out very different lengths, and that
+    // is the park being honest rather than a bug: the ring runs `NOMINAL_OUTSET`
+    // outside the park edge and the arch is wider than the ring, so the inner
+    // feet land on the lawn while the outer ones land out on the rim, past
+    // `RIM_OUTSET_END`, where the terrain has already fallen the full `RIM_DROP`.
+    // The trestles carrying the track next to it are just as lopsided.
+    for (const side of [-1, 1] as const) {
+      const footX = centre.x + outward.x * side * radius;
+      const footZ = centre.z + outward.z * side * radius;
+      const ground = terrainHeight(footX, footZ);
+      // Sunk by the leg's own radius rather than stopped dead on the terrain
+      // height, because a flat-bottomed cylinder standing exactly on a *slope*
+      // shows daylight under its downhill edge — and the rim these outer feet
+      // land on is the steepest ground in the park. One tube radius buries the
+      // bottom face for any slope up to 45° across the leg's own width, and it
+      // is taken from the leg rather than invented so a fatter band cannot grow
+      // a gap. Nothing here is solid, so burying it costs nothing.
+      const bottom = ground - tube;
+      const height = footY - bottom;
+      // A rainbow whose foot is already above its own arc would be inside-out.
+      // Cannot happen with the park's terrain under today's `BASE_HEIGHT`, but
+      // the geometry would silently invert rather than fail, and
+      // `finishRainbowStandsOnTheGround` in the procgen invariants is what says
+      // so out loud on every seed.
+      if (height <= 0) continue;
+      const legGeometry = new CylinderGeometry(tube, tube, height, 8);
+      keep(legGeometry);
+      const leg = solid(new Mesh(legGeometry, material));
+      leg.position.set(footX, bottom + height / 2, footZ);
+      leg.name = `railRace:finish-rainbow-leg-${i}-${side < 0 ? 'inner' : 'outer'}`;
+      leg.frustumCulled = false;
+      group.add(leg);
+      addOutline(leg, 0.02);
+    }
   }
 
   return group;
