@@ -43,7 +43,7 @@
  * `door-hinge`'s own `rotation.y`, not the argument passed to `setDoorOpen`.
  */
 import './headless-canvas.mjs';
-import { Box3, Object3D, Vector3 } from 'three';
+import { Box3, InstancedMesh, Matrix4, Object3D, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import {
   ARRIVAL_CONTROL_AT,
@@ -538,6 +538,48 @@ check(
   stillInTheWorld === 24,
   `the park has ${stillInTheWorld} children ${AFTERWARDS_SECONDS} s after the arrival, expected 24 — somebody was disposed of`,
 );
+// **Is anything actually being DRAWN where each of them is?**
+//
+// The strongest form of "they did not vanish", and the first version of this
+// check could not ask it: counting `npcs.all` counts an array, and an array is
+// exactly what still had eleven entries in it on the build where Jim watched
+// children disappear. A crowd child's rig is a *detached* proxy skeleton with
+// no parent, so scene-graph attachment says nothing either — what reaches the
+// screen is an instance matrix in a `KidCrowd` `InstancedMesh`, and a hidden
+// member's is the zero matrix, parked at the origin.
+//
+// So: gather every instance translation in the built scene, and require one
+// near each child. This is measuring pixels' worth of truth rather than
+// bookkeeping.
+const drawnAt: Vector3[] = [];
+const instanceMatrix = new Matrix4();
+park.scene.traverse((object) => {
+  const instanced = object as InstancedMesh;
+  if (!instanced.isInstancedMesh) return;
+  for (let index = 0; index < instanced.count; index += 1) {
+    instanced.getMatrixAt(index, instanceMatrix);
+    const at = new Vector3().setFromMatrixPosition(instanceMatrix);
+    if (at.lengthSq() < 1e-6) continue; // the zero matrix: this member is hidden
+    instanced.localToWorld(at);
+    drawnAt.push(at);
+  }
+});
+let undrawn = 0;
+for (const kid of kids) {
+  let nearest = Infinity;
+  for (const at of drawnAt) {
+    nearest = Math.min(nearest, Math.hypot(at.x - kid.position.x, at.z - kid.position.z));
+  }
+  if (nearest > 2) undrawn += 1;
+}
+check(
+  undrawn === 0,
+  `${undrawn} of the ${ARRIVAL_KID_COUNT} bus children have nothing drawn anywhere near them ` +
+    `${AFTERWARDS_SECONDS} s after the arrival — they are in the crowd's book-keeping but not ` +
+    'on the screen, which is exactly what "they walk in and vanish" looks like from in here',
+);
+notes.push(`${drawnAt.length} crowd instances drawn; all ${ARRIVAL_KID_COUNT} arrivals have one within 2 m`);
+
 const stillScripted = kids.filter((kid) => kid.scripted).length;
 check(
   stillScripted === 0,
