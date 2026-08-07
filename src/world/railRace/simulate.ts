@@ -664,6 +664,10 @@ export const RIVAL_SKILL: readonly number[] = [0.51, 0.60, 0.69];
  */
 const CATCHUP_BEHIND = 0.006;
 const CATCHUP_AHEAD = 0.01;
+// #223 re-balanced the whole race around 0.7 (a race a six-year-old can
+// win) after this branch had compensated the moved booth with 0.95 against
+// the OLD balance; the newer family-tested tuning wins, and check:rail-race
+// judges the combination on the moved-booth geometry.
 const SWING_BEHIND = 0.7;
 const SWING_AHEAD = 0.32;
 
