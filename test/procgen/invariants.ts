@@ -2115,14 +2115,31 @@ const raceCameraNeverRunsBackwards: Invariant = (facts) => {
   if (tracking.probes === 0) {
     return ['the race camera could not be walked round the built ring at all'];
   }
+  if (tracking.nonFiniteProbes > 0) {
+    return [
+      `the race camera placed itself at a non-number on ${tracking.nonFiniteProbes} of ` +
+        `${tracking.probes} probes. Every reading below is therefore taken over whichever probes ` +
+        'happened to survive, so treat the numbers this suite prints about the camera as absent ' +
+        "rather than as good news — that is precisely how a NaN hides: it loses every comparison " +
+        'it is asked instead of failing one. See RaceCamera.measureZoomCeiling.',
+    ];
+  }
   if (tracking.leastForwardProgress >= CAMERA_MIN_FORWARD_PROGRESS) return [];
   return [
     `the race camera falls to ${tracking.leastForwardProgress.toFixed(3)} m of camera per metre of ` +
-      `rider at ${tracking.worstAt.toFixed(1)} m from the arch (${tracking.backwardsProbes} of ` +
+      `rider at ${tracking.worstAt.toFixed(1)} m from the arch, with the rider doing ` +
+      `${tracking.worstSpeed.toFixed(0)} m/s (${tracking.backwardsProbes} of ` +
       `${tracking.probes} probes actually run backwards), under the ` +
       `${CAMERA_MIN_FORWARD_PROGRESS} floor — with a ${tracking.standOff.toFixed(1)} m stand-off the ` +
       `rig is riding an offset curve tighter than its own radius, so the picture lurches the wrong ` +
-      `way. Widen CAMERA_GUIDE_WINDOW in railRace/ringPath.ts`,
+      `way.\n` +
+      `      If the worst reading is at speed and the standstill one is fine, the speed zoom is ` +
+      `pulling the rig back further than this ring can carry: that is RaceCamera's zoom ceiling ` +
+      `failing to bite, not a smoothing problem.\n` +
+      `      Do NOT reach for CAMERA_GUIDE_WINDOW, which is what this message used to advise. It ` +
+      `is walled in on both sides and both walls are measured: 12 m fails check:rail-race's ` +
+      `side-scroller floor at 0.897, and the drift a wider window adds sits at the very same ` +
+      `hairpins as the reversal it removes.`,
   ];
 };
 

@@ -227,8 +227,26 @@ export interface CameraTrackingFact {
   readonly leastForwardProgress: number;
   /** Arc distance at which that happened, metres from the arch. */
   readonly worstAt: number;
+  /**
+   * The rider speed the worst reading was taken at, m/s.
+   *
+   * The ring is walked twice — at a standstill and at the speed the zoom stops
+   * growing — because the rig's stand-off scales with the zoom and the zoom
+   * scales with speed. Probing only the resting rig is what let this whole
+   * invariant pass while the racing one ran backwards.
+   */
+  readonly worstSpeed: number;
   /** How many probes of {@link probes} ran backwards at all. */
   readonly backwardsProbes: number;
+  /**
+   * Probes at which the rig put the camera somewhere that is not a number.
+   *
+   * Always 0 in a healthy park, and separate from {@link backwardsProbes} on
+   * purpose: a NaN loses every comparison it is asked, so it is *skipped* by a
+   * running minimum rather than caught by one, and leaves a clean-looking
+   * reading taken over however many probes survived.
+   */
+  readonly nonFiniteProbes: number;
   readonly probes: number;
   /** Greatest horizontal distance from camera to rider, metres. */
   readonly standOff: number;
@@ -717,7 +735,23 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Drives the real rig. `reset` is the ride's own "snap to this rider" call and
   // it runs the same private placement the per-frame `update` does, so this
   // measures the camera the renderer draws through rather than a model of it.
-  const { RaceCamera } = await import('../../src/world/railRace/camera.ts');
+  //
+  // **At the speed a child actually rides at, and that took three days to
+  // matter.** This walked the ring through `reset(travelled)`, which pinned the
+  // rig's zoom to 1 — its value on the start line and nowhere else. The shipping
+  // camera reaches 1.34 within a second of the lights going out and holds it for
+  // the rest of the race, and the zoom scales the stand-off, which is the exact
+  // quantity a reversal is decided by. So the invariant passed at 0.094 while
+  // the rig a child rides ran backwards over 2.67% of the lap: a guard measuring
+  // a crawl-speed rig nobody is ever on.
+  //
+  // Both speeds are swept and the worse is kept, so neither the resting framing
+  // nor the racing one can hide behind the other, and the ceiling that fixed
+  // this (`RaceCamera.measureZoomCeiling`) cannot pass by simply refusing to
+  // pull back at all — the resting rig would still have to clear the floor.
+  const { RaceCamera, FULL_PULL_BACK_SPEED } = await import(
+    '../../src/world/railRace/camera.ts'
+  );
   const raceCamera = new RaceCamera(raceRoute);
   raceCamera.resize(1600, 900);
   // 0.25 m: the reversal is a sustained geometric effect spanning metres of
@@ -725,39 +759,55 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // on each of five seeds.
   const CAMERA_PROBE_STEP = 0.25;
   const cameraProbes = Math.floor(raceRoute.length / CAMERA_PROBE_STEP);
-  const cameraAt: { x: number; z: number }[] = [];
-  let standOff = 0;
-  for (let i = 0; i < cameraProbes; i += 1) {
-    raceCamera.reset(i * CAMERA_PROBE_STEP);
-    cameraAt.push({ x: raceCamera.camera.position.x, z: raceCamera.camera.position.z });
-    const here = raceRoute.path.sampleAt(raceRoute.startDistance + i * CAMERA_PROBE_STEP);
-    standOff = Math.max(
-      standOff,
-      Math.hypot(here.x - raceCamera.camera.position.x, here.z - raceCamera.camera.position.z),
-    );
-  }
   let leastForwardProgress = Infinity;
   let worstAt = 0;
+  let worstSpeed = 0;
   let backwardsProbes = 0;
-  for (let i = 0; i < cameraProbes; i += 1) {
-    const s = i * CAMERA_PROBE_STEP;
-    const here = raceRoute.path.sampleAt(raceRoute.startDistance + s);
-    const a = cameraAt[i]!;
-    const b = cameraAt[(i + 1) % cameraProbes]!;
-    // The camera's own motion, projected on the way the rider is going.
-    const forward =
-      ((b.x - a.x) * here.tangentX + (b.z - a.z) * here.tangentZ) / CAMERA_PROBE_STEP;
-    if (forward < 0) backwardsProbes += 1;
-    if (forward < leastForwardProgress) {
-      leastForwardProgress = forward;
-      worstAt = s;
+  let standOff = 0;
+  // Probes the rig placed somewhere that is not a number. Counted rather than
+  // folded into the reading below, because a NaN loses every `<` it is asked and
+  // would otherwise be *skipped* — leaving a pristine-looking minimum taken over
+  // whichever probes happened to survive. Not hypothetical: an
+  // `Infinity - Infinity` in the zoom ceiling did exactly this while it was being
+  // written, and silently dropped 1763 of 2400 probes.
+  let nonFiniteProbes = 0;
+  for (const probeSpeed of [0, FULL_PULL_BACK_SPEED]) {
+    const cameraAt: { x: number; z: number }[] = [];
+    for (let i = 0; i < cameraProbes; i += 1) {
+      raceCamera.reset(i * CAMERA_PROBE_STEP, probeSpeed);
+      const { x, z } = raceCamera.camera.position;
+      cameraAt.push({ x, z });
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        nonFiniteProbes += 1;
+        continue;
+      }
+      const here = raceRoute.path.sampleAt(raceRoute.startDistance + i * CAMERA_PROBE_STEP);
+      standOff = Math.max(standOff, Math.hypot(here.x - x, here.z - z));
+    }
+    for (let i = 0; i < cameraProbes; i += 1) {
+      const s = i * CAMERA_PROBE_STEP;
+      const here = raceRoute.path.sampleAt(raceRoute.startDistance + s);
+      const a = cameraAt[i]!;
+      const b = cameraAt[(i + 1) % cameraProbes]!;
+      // The camera's own motion, projected on the way the rider is going.
+      const forward =
+        ((b.x - a.x) * here.tangentX + (b.z - a.z) * here.tangentZ) / CAMERA_PROBE_STEP;
+      if (!Number.isFinite(forward)) continue;
+      if (forward < 0) backwardsProbes += 1;
+      if (forward < leastForwardProgress) {
+        leastForwardProgress = forward;
+        worstAt = s;
+        worstSpeed = probeSpeed;
+      }
     }
   }
   const cameraTracking: CameraTrackingFact = {
     leastForwardProgress: leastForwardProgress === Infinity ? 0 : leastForwardProgress,
     worstAt,
+    worstSpeed,
     backwardsProbes,
-    probes: cameraProbes,
+    nonFiniteProbes,
+    probes: cameraProbes * 2,
     standOff,
   };
 
