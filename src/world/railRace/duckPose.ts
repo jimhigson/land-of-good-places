@@ -151,10 +151,21 @@ const SIT_ARM = -1.0;
  * better than a sustained lean would, because pumping a handcar *is* a rhythm —
  * you can see how fast she is going by how fast she rocks.
  *
- * 0.42 rad is 24°, a little over half the duck's own fold, which is legible at
- * the ~37 px/m the phone rig draws her at without turning into a bow.
+ * **0.21 rad is 12°.** It was 0.42 (24°) for exactly one round, and that round
+ * was the first in which the rock was *drawn at all* — until the ordering fix in
+ * round 8, `applyRidePose` stamped `body.rotation.x` back to a constant after
+ * this had written it, so every earlier number here was chosen against a screen
+ * that never showed it. Jim rode the first version that reached his eyes and
+ * said the lean was *"too exagerated - reduce the range of motion by 50%"*.
+ *
+ * Halved rather than re-solved, because 0.42 was never a measurement either —
+ * it was a guess at legibility at the ~37 px/m the phone rig draws her at, and
+ * the only real evidence about it is that a person watched it and found it too
+ * much. Halving keeps the rhythm (you can still read her tap rate off the rock,
+ * which is the whole point of driving it from `Rider.bob`) and takes out the
+ * bow.
  */
-export const BOOST_ROCK = 0.42;
+export const BOOST_ROCK = 0.21;
 
 /**
  * How high she springs out of the seat when she wins, in her own metres.

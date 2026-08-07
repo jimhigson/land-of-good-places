@@ -1200,8 +1200,16 @@ say('');
   );
   // Jim asked for the boost to be *felt*. A rock nobody can see is the same
   // non-feature as a face nobody can look at.
+  //
+  // **The floor moved 0.4 → 0.2 of the ride scale (1.0 m → 0.5 m) when Jim cut
+  // the rock by 50%** — deliberately, and this is what it is still for. The two
+  // failures it has to keep catching are both *disappearances*, not shrinkages:
+  // `BOOST_ROCK` at 0, and round 8's bug where the pose was computed correctly
+  // and then stamped over by a later writer, which read as exactly 0.00 m here.
+  // A rock of 0.713 m clears 0.5 m by 1.43x, so the bound is not a restatement
+  // of the constant — it sits between "halved, as asked" and "gone".
   require(
-    rockThrow > 0.4 * route.scale,
+    rockThrow > 0.2 * route.scale,
     `a full pump moves the rider's head by only ${rockThrow.toFixed(3)} m — at the ~37 px/m this ` +
       'ride draws her at, that is not visual feedback. See BOOST_ROCK in railRace/duckPose.ts.',
   );
