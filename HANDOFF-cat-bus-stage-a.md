@@ -482,3 +482,95 @@ the arrival owns the player.
 
 Headless Chromium via Playwright, own throwaway profile, dev server on **5421**
 (`--strictPort`, killed by PID). **5200 / 5210 / 5410 / 5412 are not ours.**
+
+## What was built (round 4)
+
+All six faults fixed, plus the NPCs-from-birth restructure. Commits on
+`e-cat-bus-npcs-work`, pushed to `e/cat-bus-stage-a`.
+
+### The restructure — deviations from the round-3 plan, and why
+
+The plan in round 3 was followed except in two places, both deliberate:
+
+1. **No new `PinnedKidSpec` entries.** The plan said port
+   `disembarkingKids.ts`'s twelve `VARIANTS` into `PINNED_KIDS`. Don't: the
+   eleven passengers are simply **the first eleven of the park's existing 24**,
+   via a new `NpcSystem` constructor argument `arrivingByBus`. That keeps
+   `NPC_COUNT` at 24 untouched, needs no crowd-capacity change, and avoids
+   exhausting the 30-name pool (24 + 11 = 35 would have silently produced
+   children called "Friend"). The crowd already randomises looks, so the
+   hand-authored table bought nothing.
+2. **`disembarkingKids.ts` is not deleted, it is `busDriver.ts`.** The driver
+   really is a one-off: he never gets out and leaves with the bus, so making
+   him one of the twenty-four would spend a permanent inhabitant on somebody
+   who is gone in twenty seconds.
+
+`World.update` ordering changed: `entrance.update` now runs **before**
+`npcs.update` (so passengers reach the crowd's instance buffer on the right
+frame, exactly like `train.carryPassengers`), and a new
+`entrance.reassertPlayerPose()` runs where it used to be. One pose, computed
+once, applied twice.
+
+### Bugs found by the new guards that nobody had seen
+
+- **Children flung across the park at 12 m/s.** The push-apart nudge was
+  accumulating without bound, because a child on the step is permanently within
+  a body's width of the passengers still *sitting inside the bus* beside them.
+  Now scoped to children actually on the pavement, and capped.
+- **The walk routes were not arc-length parameterised.** Advancing the Bézier
+  parameter at a constant rate walks the curve at 1.3 m/s where it bends
+  tightest — which is the bit right outside the door — and over 3 m/s later.
+  The slow part was exactly where the next child was stepping down. Fixed with
+  a distance→parameter table.
+- **`check:jitter` caught the seat→pavement teleport** (8.8 m in one frame,
+  26.9 m/s). Children now walk down the bus at `NPC_WALK_SPEED`, seated
+  nearest-the-door-first so the queue cannot reorder.
+- **Handing a scripted child back ejected them from scenery.** Scripted
+  children bypass collision, so a route can pass through a tree; the first free
+  frame's `collision.resolve` was read back as speed the child had earned.
+  `endScripted` now depenetrates before any velocity exists.
+
+### A park-wide bug fixed on the way
+
+`SEPARATION` was `NPC_RADIUS * 2` = **1.0 m** for children who measure
+**1.8 m**. Every pair of children in the park stood with their heads half a
+metre inside one another; it was simply most visible at the bus. Now
+`CHILD_FOOTPRINT`. That alone broke `check:jitter` (an unlimited push moves a
+child further in one frame than they walk in twenty), so `separate()` is now
+rate-limited by `MAX_DEPENETRATION_SPEED`, matching what `separateFromPlayer`
+already did.
+
+### Seeing it — headless Chromium works, and here is how
+
+No chrome-devtools MCP and no Claude-in-Chrome in this session (the only MCP
+present is Blender). **Playwright driving headless Chromium with a throwaway
+profile does work**, with real WebGL:
+
+```
+--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader
+--disable-gpu-sandbox --no-sandbox --disable-dev-shm-usage
+```
+
+`renderer: ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device), SwiftShader)`.
+
+**SwiftShader runs the park at 1-2 fps** and the game clamps frame delta to
+`MAX_FRAME_DELTA` (1/12 s), so game time runs ~10x slower than wall clock. Any
+capture script must poll the park's own clock rather than sleeping.
+
+Script: `scratchpad/shoot.mjs` (see the round-4 notes in the PR for the exact
+command). It clicks through character creation, the update gate and What's New
+on its own, and blocks Vite's HMR socket so another agent's save cannot destroy
+a capture mid-run.
+
+**Baseline captures of the pre-fix build confirmed every one of Jim's faults**,
+and added two nobody had reported:
+
+- **The camera opens far too close and almost directly overhead** — the first
+  frame is a large flat cream slab, which is the bus roof. It does not read as
+  a bus at all.
+- **The roof band is deep relative to the glazed band**, so from the game's
+  fixed camera angle you see mostly roof and only a thin strip of window.
+
+Also visible and worth a decision: the **rail-race rainbow track passes
+directly over the bus stop**, cutting across almost every arrival frame, and
+foreground trees block the left half of the bus from t=3 to t=6.

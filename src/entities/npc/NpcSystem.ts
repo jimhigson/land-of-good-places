@@ -714,7 +714,7 @@ export class NpcSystem implements GameSystem {
       character.avatar.tick?.(charDt);
     }
 
-    this.separate();
+    this.separate(dt);
     this.separateFromPlayer(dt);
 
     for (const character of this.characters) {
@@ -755,14 +755,29 @@ export class NpcSystem implements GameSystem {
    * against. Relaxation moves both parties half the overlap and stops, so it
    * cannot oscillate.
    */
-  private separate(): void {
+  /**
+   * `dt` because the correction is **rate-limited**, exactly as
+   * `separateFromPlayer` already limits its own.
+   *
+   * It was not, and at the old 1.0 m {@link SEPARATION} that never showed:
+   * the worst single correction two children could need was half a metre, which
+   * hides under `check:jitter`'s 1 m own-step bound. Widening the separation to
+   * a whole child brought it out — 118 violations, worst step 1.209 m — because
+   * an unlimited push moves a child further in one frame than they can walk in
+   * twenty. `MAX_DEPENETRATION_SPEED` is the same 3 m/s escort the collision
+   * world uses to ease anything out of anything else, and using it here means
+   * two children who end up overlapping *slide* apart over a few frames instead
+   * of snapping.
+   */
+  private separate(dt: number): void {
+    const maxPush = MAX_DEPENETRATION_SPEED * dt;
     for (let a = 0; a < this.characters.length; a += 1) {
       const first = this.characters[a];
       if (!first) continue;
       for (let b = a + 1; b < this.characters.length; b += 1) {
         const second = this.characters[b];
         if (!second) continue;
-        first.separateFrom(second, SEPARATION);
+        first.separateFrom(second, SEPARATION, maxPush);
       }
     }
   }

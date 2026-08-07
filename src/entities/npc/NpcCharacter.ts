@@ -108,11 +108,12 @@ export class NpcCharacter {
   // needs **x, y, z and facing**, no gravity, no collision, no soft park
   // boundary, and **exemption from separation**.
   //
-  // That last one is not a nicety. `SEPARATION` is 1.0 m and the bus's seats
-  // are 1.8 m apart, which sounds safe until you remember the crowd also
-  // separates from the *player*, and that a bus is a box the crowd knows
-  // nothing about: without the exemption the relaxation pass walks passengers
-  // out through the sides of the vehicle they are sitting in.
+  // That last one is not a nicety. `SEPARATION` and the bus's `SEAT_PITCH` are
+  // now the same number — a whole child, 1.8 m — because both are derived from
+  // `CHILD_FOOTPRINT`, so fore-and-aft seat neighbours sit exactly on the
+  // crowd's threshold. A bus is also a box the crowd knows nothing about:
+  // without the exemption the relaxation pass walks passengers out through the
+  // sides of the vehicle they are sitting in.
   //
   // Explicit begin/end, again like the climb: a child is aboard a bus for
   // fifteen seconds across a phase change, and "a frame nobody claimed you is a
@@ -220,6 +221,21 @@ export class NpcCharacter {
    */
   endScripted(): void {
     this.scriptedFlag = false;
+
+    // **Step out of anything they were standing in, before they own a
+    // velocity.** A scripted child bypasses collision — that is the point, it
+    // is how they ride in a bus parked outside the park wall — so the route may
+    // well have walked them through a tree trunk on the way in. The first
+    // ordinary frame after this would call `collision.resolve`, be shoved a
+    // third of a metre, and then `move()` would read that shove back as *speed
+    // the child earned*: measured, 26.9 m/s against a bound of 8, which is the
+    // same feedback loop that once had train passengers doing 2,200 m/s.
+    //
+    // Resolving here, while the velocity is still being decided rather than
+    // derived, makes the hand-back silent.
+    this.collision.resolve(this.position, NPC_RADIUS);
+    this.previousPosition.copy(this.position);
+    this.avatar.rig.root.position.copy(this.position);
     // Not zeroed: she is mid-stride walking into the park, and dropping the
     // velocity here is what would make her stop dead the instant the cutscene
     // ends — a visible hitch exactly when the player takes over.
@@ -338,7 +354,7 @@ export class NpcCharacter {
    * Instead the system relaxes overlaps directly, which cannot jitter because
    * it moves both parties half way and then stops.
    */
-  separateFrom(other: NpcCharacter, minimum: number): void {
+  separateFrom(other: NpcCharacter, minimum: number, maxPush = Infinity): void {
     // A climbing character's (x, z) is the tree it is up, not somewhere it is
     // standing — shoving it "apart" from a passer-by at ground level would
     // knock it out of setClimbPose's next call for nothing visible in return.
@@ -362,11 +378,11 @@ export class NpcCharacter {
     const bothScripted = this.scriptedFlag && other.scriptedFlag;
     if (bothScripted) return;
     if (this.scriptedFlag) {
-      pushAway(other, this, minimum);
+      pushAway(other, this, minimum, maxPush);
       return;
     }
     if (other.scriptedFlag) {
-      pushAway(this, other, minimum);
+      pushAway(this, other, minimum, maxPush);
       return;
     }
     const dx = other.position.x - this.position.x;
@@ -375,7 +391,7 @@ export class NpcCharacter {
     if (distanceSquared >= minimum * minimum || distanceSquared < 1e-8) return;
 
     const distance = Math.sqrt(distanceSquared);
-    const push = (minimum - distance) * 0.5;
+    const push = Math.min((minimum - distance) * 0.5, maxPush);
     const nx = (dx / distance) * push;
     const nz = (dz / distance) * push;
     this.position.x -= nx;
@@ -582,13 +598,18 @@ export class NpcCharacter {
  * The asymmetric half of {@link NpcCharacter.separateFrom}: used when one of
  * the pair is under scripted control and so cannot be moved by anybody else.
  */
-function pushAway(mover: NpcCharacter, fixed: NpcCharacter, minimum: number): void {
+function pushAway(
+  mover: NpcCharacter,
+  fixed: NpcCharacter,
+  minimum: number,
+  maxPush = Infinity,
+): void {
   const dx = mover.position.x - fixed.position.x;
   const dz = mover.position.z - fixed.position.z;
   const distanceSquared = dx * dx + dz * dz;
   if (distanceSquared >= minimum * minimum || distanceSquared < 1e-8) return;
   const distance = Math.sqrt(distanceSquared);
-  const push = minimum - distance;
+  const push = Math.min(minimum - distance, maxPush);
   mover.position.x += (dx / distance) * push;
   mover.position.z += (dz / distance) * push;
 }
