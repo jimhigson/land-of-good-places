@@ -500,3 +500,167 @@ to eight times the floor at the worst framing.
 claim in round 7 that is not proved red by mutation. It would become one by
 driving the face sweep through a rig settled at racing speed instead of a reset
 one — worth doing if the zoom depth is ever raised.
+
+---
+
+## Round 8 (7 Aug), agent `e-railrace-blockers` — branch `e/railrace-blockers`
+
+Worktree `.claude/worktrees/e-railrace-blockers`, branched from
+`origin/chore/rail-race-pr-triage`, `origin/main` merged in (one commit: the
+dev-service-worker change). Two review blockers only; nothing else touched.
+
+**Both were found by going past a green build, and both were the same disease
+in different organs: a check that could not see the thing it was named after.**
+
+### Blocker 1 — the pose never reached the screen. FIXED, and the check now runs the real pipeline
+
+`poseRailRaceRider` was correctly the single **owner** of `body.rotation.x`. It
+was not the last **writer**. `Player.update`'s riding branch ran `animate()`
+(which ends by applying the pose) and *then* `applyRidePose`, which assigns
+`body.rotation.x = 0.3` unconditionally.
+
+| state | the owner asks for | the screen showed |
+| --- | --- | --- |
+| seated | 0.160 | **0.300** |
+| duck | 0.860 | **0.300** |
+| boost | 0.580 | **0.300** |
+| celebration | −0.148 | **0.300** |
+
+So the waist fold, the boost rock and the victory lean were computed exactly
+right and thrown away before being drawn, for the whole life of the feature.
+Only the squash and hip drop survived, which is why the duck delivered 0.42 m
+against a bar sized for 0.73 m: **the duck bar went through her head while she
+was ducking**, and `check:rail-race` printed *"clears by 0.73"* about it.
+
+**Fixed by ordering, not by a fourth writer.** `applyRidePose` now runs at the
+end of `Player.animate`, immediately before `poseRailRaceRider`. A quiet second
+gain: `model.update` (the ponytail) now runs *after* the ride pose rather than
+before it, which is what its own comment already claimed.
+
+**The check posed a bare `createKid` and called the pose function directly**, so
+it never executed the player's pipeline. It now builds a real `Player`, boards
+her as `RailRace.requestBoard` does, poses her as `RailRace.poseRider` does, and
+reads every height off the model *after* `Player.update` has finished. Plus one
+direct guard: what she draws must equal what the pose asked for, in all four
+states, against a bare kid posed by the owner alone.
+
+**Proved red first — 7 failures**, including `boost rock head throws 0.00 m` and
+`clears by −0.40`. Green after: `clears by 0.73, strikes by 0.72`, `head throws
+1.42 m`, `pose drawn seated 0.160 duck 0.860 boost 0.580 celebration −0.148`.
+
+### Blocker 2 — the camera invariant probed a rig nobody rides. FIXED
+
+`parkFacts` drove the rig through `reset()`, which pinned `zoom = 1`. The game
+reaches **1.34** within a second and holds it, and zoom scales the stand-off —
+the quantity a reversal is decided by.
+
+| | zoom | stand-off | least forward | backwards |
+| --- | --- | --- | --- | --- |
+| crawl | 1.000 | 27.5 m | 0.094 | 0/2400 |
+| racing | 1.340 | 35.5 m | **−0.150** | **64/2400 (2.67%)** |
+
+Proved red through the real suite: **4 of 5 seeds fail, every one at 32 m/s**
+(−0.150 / −0.156 / −0.189, plus one at +0.016 that never reverses but is well
+under the floor).
+
+**Both obvious levers are walled off, and both walls are measured — do not
+reopen either without reading this:**
+
+```
+  guide window   racing reversal   check:rail-race
+     10 m         -0.150 (2.67%)   passes            <- shipping
+     12 m         -0.043 (0.79%)   FAILS  side-scroller 0.897
+     14 m         +0.055 (0.00%)   FAILS  swing 27.3°, eye facing 0.348
+```
+
+The drift a wider window adds and the reversal it removes sit at the **same two
+hairpins**, so no window fixes one without breaking the other. The sweep table
+in `CAMERA_GUIDE_WINDOW`'s own comment was taken at zoom 1. And clamping the
+zoom globally to what the ring carries everywhere gives **1.062** — a 6%
+pull-back instead of Jim's 34%.
+
+**Why it happens:** the ring is the park boundary pushed outward, and pushing a
+boundary outward *tightens* its concave corners. That leaves two hairpins of
+about **22 m radius**, at 68 m and 473 m from the arch. A camera 35 m outside a
+22 m bend rides a tighter circle than the rider does. She stays exactly on her
+screen mark, so what a child sees is the world swinging the wrong way behind her.
+
+**Fixed with a per-station zoom ceiling solved from the built ring**
+(`RaceCamera.measureZoomCeiling`). Camera position is `rider(s) + zoom·V(s)`, so
+forward progress is affine in zoom and the largest safe zoom falls out of
+rearranging it — no search, no tuning. Eroded then blurred (which cannot raise a
+value above the raw ceiling, so the guarantee survives the smoothing). Floored
+at 1: it may take the *pull-back* away, never the resting stand-off.
+
+Result: **full 34% pull-back on 493 m of the 600.2 m lap (82.1%)**, easing in
+through the two hairpins. `check:rail-race`'s zoom line moves 33.6 m/31.2% →
+33.0 m/29.0% and still passes.
+
+The rig keeps 0.15 of forward progress; the invariant demands 0.05 of the built
+ring. **Deliberately different numbers** — had the rig aimed at the number the
+check tests for, the check would be reading back a constant.
+
+**One trap worth knowing about, hit while writing this:** an
+`Infinity − Infinity` in the ceiling's interpolation put the camera at NaN on
+1763 of 2400 probes, and the sweep reported a pristine 0.094 anyway. NaN loses
+every `<` it is asked, so a running minimum **skips** it rather than catching it;
+only the stand-off, a running `Math.max`, said so (it read `NaN`). The fact now
+counts non-finite probes separately and the invariant fails on them outright.
+
+### The reviewer's addition — a max-margin bound on `childPace`. DONE
+
+Correcting the record first: that procession bound went **140 → 170 → 600.2**,
+not 140 → 170, and it moved onto `mashPerfect` on the way. Not reopened.
+
+**A bound on the *worst* seed cannot do this job, and that is measured.**
+`SWING_BEHIND`'s band tows a far-behind rival forward, compressing the very
+number a max-bound reads:
+
+```
+  RIVAL_SKILL              child margin (24 seeds)      mean
+  0.40 / 0.48 / 0.56        27.3 - 306.2 m             114.8   <- shipping
+  0.30 / 0.36 / 0.42        64.3 - 389.9 m             219.4
+  0.20 / 0.24 / 0.28       187.9 - 484.5 m             316.4
+  0.10 / 0.12 / 0.14       308.0 - 529.1 m             425.4
+```
+
+The max never reaches one lap (600.2 m) however absurd the rivals get, so
+`max(...) < route.length` would be a guard **incapable of failing** here. The
+mean separates all four cleanly.
+
+So: a child's **mean** margin must stay under **half a lap** (300.1 m), from the
+game's own geometry, protecting something visible — the camera holds on her for
+the whole celebration and a rival half a lap back is round the far side of the
+ring. Met at 114.8 m with 2.6x room; **no difficulty was re-tuned**. Red at
+rivals cut to half skill (316.4 m).
+
+### FOR JIM, not acted on
+
+**A competent player now wins by a mean of 461 m on a 1200 m race** (range
+279.8–551.1). That may be too easy. It is a direct consequence of what he asked
+for, he rides this too, and it is his call — so it is flagged, not changed.
+
+### Checks
+
+- `npm run build` — **exit 0**, run directly, never piped.
+- `npm run test:procgen` — **171 passed, 9 files, 0 skipped**.
+
+### Still needs eyes — no browser this session either
+
+The chrome MCP was not assigned to me. Everything visual is still unverified,
+and round 8 adds three things to the list that have **never been seen by
+anyone**, because until this branch they were not drawn at all:
+
+1. **The waist fold.** Does a duck read as ducking now that it actually happens?
+2. **The boost rock.** 1.42 m of head throw per pump — feedback, or a twitch?
+3. **The victory lean**, and the jump it belongs to.
+
+Plus, new in round 8: **does the camera easing in through the two hairpins read
+as a camera tucking in on a corner, or as the picture breathing?** It is 107 m
+of the 600 m lap, twice a lap.
+
+### Untouched, deliberately
+
+The 4.8-frame skull graze is still the one deliberate omission — unchanged by
+either fix, still reported at every build, still wanting eyes before a
+`BAR_CONTACT_LEAD` moves when the bonk fires.
