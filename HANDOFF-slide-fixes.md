@@ -443,3 +443,58 @@ invariants across five seeds.
 No dev server was needed and no Chrome tab was used — the pixel evidence comes
 from `check:slide-rider`'s offscreen raster, not from a browser. **Visual QA
 still wants eyes on the cut** (see the PR body).
+
+---
+
+## Review round (Overseer), 7 August — one fix, then Jim
+
+**PR approved with one blocker, now fixed.**
+
+### The blocker: `scripts/map-slide-space.mts` exited 1
+
+A new file on this branch importing `FACADE_SLIDE_DOOR_MIN_X`/`MAX_X` from
+`layout.ts` — constants this same branch deletes. `SyntaxError`, exit 1. Nothing
+caught it: wired into no npm script, and `scripts/` is in neither tsconfig.
+
+**Deleted, not repaired.** It is #118 scaffolding that maps where the chute may
+go *on the assumption the slide leaves through a hole in the facade* — the very
+premise this branch measured false (chute clears the battlements by 3.44 m on
+all five seeds, which is why those constants went). Repairing the import would
+mean inventing a coordinate for a door that is not there, which is the thing the
+branch already declined to do for `slideGap`. It also modelled the chute as a
+hand-rolled smoothstep between two env knobs, which is what you write *before*
+there is a solver; the route is solved now, and its job is covered by
+`measure:slide-comfort`, `measure:slide-towers`, `measure:slide-fingerprint`,
+`check:slide-rider` and the procgen invariants.
+
+**Swept for more**: an ad-hoc `tsc` pass over `scripts/**/*.mts` after the
+deletion reports **no other missing-export errors**. Both instances of the
+`scripts/` typecheck gap seen on this branch are now written up on **#197**
+(the loud one — `root` on `RidePoseTarget` compiling clean and crashing in
+`check:climb-wave`; and this silent one).
+
+### What the reviewer verified by breaking it — keep this
+
+The guards are **not** hollow, proved on three failure axes. The one worth
+remembering: dropping the trackside elevation 55° → 40° reproduced the
+documented claim exactly — **98 of 342 trackside frames blocked, worst pixel
+sample 0.77%, still above the 0.40% floor**. So the pixel clause alone would
+have stayed **green**, and the continuous per-frame sight line is genuinely
+load-bearing rather than belt-and-braces. If anyone ever proposes dropping one
+of the two clauses as redundant, this is the number that says no.
+
+Also confirmed independently: 196 reconciles as 34 invariants + 1 anti-vacuity
+× 5 seeds = 175, plus 4+8+3+6 = 21, zero skipped; **seed-independence holds** —
+on seed 5 beat 1's eye lands on the *opposite side of the castle* from
+canonical, which is the test that actually matters for a procgen ride; neither
+pre-merge path zeroed `body.rotation.z`, so the merge fixed something **neither
+parent had right alone**; no body-part hider anywhere; build chain 34 → 35 steps
+with nothing lost; merge base equals `origin/main`; merge-over-rebase endorsed.
+
+### Still unseen by anyone
+
+The reviewer had no browser. **Nobody has watched this ride.** 344/342/0 and the
+pixel counts say the cut *happens* and that she is *on screen*; they say nothing
+about whether six beats feels right, whether opening on the chase lands, or
+whether the trackside framing looks good. That is Jim's to judge, and it is
+stated plainly in the PR body rather than left to be inferred.
