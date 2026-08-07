@@ -390,6 +390,34 @@ const beatsLive = new Set<number>();
 const beatsSampled = new Set<number>();
 let framesWithNoCamera = 0;
 const framesByKind = { chase: 0, trackside: 0 };
+
+/**
+ * **Is anything between the trackside eye and the child — on every frame, not
+ * just the sampled ones?**
+ *
+ * The pixel measurement is the legibility test and it is expensive, so it runs
+ * about twice per beat. That is not enough on its own, and this was **proved**
+ * rather than supposed: dropping the trackside elevation to 40°, where the
+ * placement sweep says the near hand-rail cuts her out for roughly half of every
+ * beat, left every pixel sample above the floor and the check green. The samples
+ * had simply landed in the visible half.
+ *
+ * So the two tests divide the job:
+ *
+ * - the **pixel** samples ask *is she big enough to see*, at a few moments;
+ * - this asks *is she behind something*, on **every single frame** she is on a
+ *   trackside camera — one ray, so it costs nothing next to a raster.
+ *
+ * A hit on her own model does not count. Self-occlusion is a legibility
+ * question and the pixels own it; what this is for is the chute's trough wall
+ * and the castle, which are the things that put her behind scenery entirely.
+ */
+const eyeAt = new Vector3();
+const bodyAt = new Vector3();
+const sightLine = new Raycaster();
+let tracksideFrames = 0;
+let tracksideBlockedFrames = 0;
+let firstBlockedFrame = -1;
 let worstSeatGap = 0;
 let uprightFrames = 0;
 let headForwardFrames = 0;
@@ -430,9 +458,14 @@ const RECLINED_ALONG_CHUTE = -0.6;
  * **0.00%** the chase camera scores — so it cannot be satisfied by accident,
  * and moving the trackside placement badly turns it red.
  *
- * Proved red rather than assumed: dropping the elevation in `slide/cameras.ts`
- * from 55° to 40° — where the sweep says the near hand-rail starts cutting her
- * out — takes the worst sample to 0.00% and this check fails naming the beat.
+ * **This clause on its own is not enough, and that was measured, not guessed.**
+ * Dropping the elevation in `slide/cameras.ts` from 55° to 40° — where the
+ * placement sweep says the near hand-rail cuts her out for about half of every
+ * beat — left the worst sample at **0.77%**, still over this floor, and the
+ * check stayed green: eleven samples had all landed in the visible half. What
+ * turns that red is the continuous sight line beside it, which reported 98 of
+ * 342 trackside frames blocked. Legibility and occlusion are two questions and
+ * they need two tests.
  */
 const TRACKSIDE_BODY_FLOOR = 0.004;
 
@@ -493,6 +526,30 @@ while (frames < MAX_FRAMES) {
   } else {
     beatsLive.add(beat);
     framesByKind[liveShot.kind] += 1;
+  }
+
+  // The continuous sight line — see the note where `tracksideBlockedFrames` is
+  // declared for why this exists beside the pixel samples rather than instead of
+  // them. Her model's matrices are current: `Building.cutTheSlideShot` refreshes
+  // them every frame in order to aim at her.
+  if (liveShot?.kind === 'trackside' && liveCamera) {
+    tracksideFrames += 1;
+    (liveCamera as { updateMatrixWorld(force: boolean): void }).updateMatrixWorld(true);
+    (liveCamera as { getWorldPosition(v: Vector3): Vector3 }).getWorldPosition(eyeAt);
+    player.model.body.getWorldPosition(bodyAt);
+    const toBody = bodyAt.clone().sub(eyeAt);
+    const reach = toBody.length();
+    if (reach > 1e-4) {
+      sightLine.set(eyeAt, toBody.normalize());
+      sightLine.far = reach;
+      const hit = sightLine.intersectObjects(occluders, true)[0];
+      // Blocked only by something that is **not her**. Her own arm in front of
+      // her torso is a legibility question, and the pixel samples own that.
+      if (hit && !isDescendantOf(hit.object, player.model.root)) {
+        tracksideBlockedFrames += 1;
+        if (firstBlockedFrame < 0) firstBlockedFrame = ridingFrames;
+      }
+    }
   }
 
   // Sampled rather than every frame: even restricted to her own bounding box
@@ -661,6 +718,21 @@ if (trackside.length === 0) {
   }
 }
 
+// **Nothing stands between a trackside eye and her, on any frame.** The clause
+// that actually catches a badly-placed camera: the pixel samples above are too
+// sparse to, as 40° of elevation proved by staying green.
+if (tracksideFrames === 0) {
+  complaints.push('no frame was ever on a trackside camera, so its sight line was never tested');
+} else if (tracksideBlockedFrames > 0) {
+  complaints.push(
+    `the chute or the castle stands between a trackside camera and the child on ` +
+      `${tracksideBlockedFrames} of ${tracksideFrames} trackside frames (first at ridden ` +
+      `frame ${firstBlockedFrame}) — she disappears behind scenery mid-shot. If this is the ` +
+      'near hand-rail, the trackside elevation in `slide/cameras.ts` is too shallow; the ' +
+      'sweep recorded there puts the threshold at 50°',
+  );
+}
+
 // **The chase is held to a different question, on purpose.** It may be all head
 // — that is the shape of a rider lying feet-first with a lens behind her, and
 // demanding body pixels here would fail correct behaviour. What it may not be
@@ -723,7 +795,8 @@ console.log(
     `${worstHeadOffChute.toFixed(2)} m from the chute).\n` +
     `  All ${plan.length} beats live and sampled, every frame covered. Her body fills at least ` +
     `${((worstTrackside.bodyPixels / worstTrackside.framePixels) * 100).toFixed(2)}% of the ` +
-    `frame on a trackside camera (floor ${(TRACKSIDE_BODY_FLOOR * 100).toFixed(2)}%), and she ` +
+    `frame on a trackside camera (floor ${(TRACKSIDE_BODY_FLOOR * 100).toFixed(2)}%), with ` +
+    `nothing between the lens and her on any of ${tracksideFrames} trackside frames, and she ` +
     `is on screen on every chase sample — where she is allowed to be all head, and manages ` +
     `${bestChaseBody} px of body at best.`,
 );
