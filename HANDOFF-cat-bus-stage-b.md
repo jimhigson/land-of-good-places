@@ -65,6 +65,35 @@ So the keep-out wanted is not a bigger disc: it is *"nothing may stand in the
 camera's own line to the bus, anywhere along the bus's run"* — derived from the
 bus's box, its run along the kerb, and the camera's own angles.
 
+## The keep-out — done, and the mutations that proved it
+
+`src/world/entrance/arrivalSightline.ts`. The park camera is **orthographic**,
+so occlusion depends only on its *direction* and "is this in front of the bus?"
+has a closed form — no tuned radius. Angles from `core/constants`, bus extents
+from `catBus.ts` (newly exported), run from `layout.ts`.
+
+| mutation | went red with |
+|---|---|
+| treeline keep-out off | **25** planted things, canonical — *"treeline-canopies at 19.3, 78.6 reaching 7.0 m"* |
+| tree keep-out off | seed 2 — *"tree-cones at 21.2, 64.8 reaching 4.1 m"* |
+| bush keep-out off | seed 2 — *"bushes at 18.7, 64.7 reaching 0.7 m"* |
+
+**Two of my own mistakes, both caught by measurement rather than by reading:**
+
+1. **The occlusion test was inverted.** It asked whether the grazing ray fell
+   *below the roof*; the right question is whether the object's top, projected
+   to the bus, still lands *above the kerb*. The wrong version flags far
+   harmless things and exempts the tall near ones, and it *looked* right — it
+   did clear the corridor, just of the wrong trees. The tell was seed 2
+   reporting a **0.7 m bush** as hiding an 18 m bus.
+2. **I called the tree and bush keep-outs vacuous and deleted them.** I had
+   measured "all three off" against "treeline off" **on the canonical seed
+   only** and generalised to five. Seeds 2 has both a tree and two bushes in the
+   corridor — the boundary bulges to 92 m off the gate's bearing, so the
+   plantable scatter *can* reach the kerb. The invariant went red immediately.
+   Exactly CLAUDE.md's *"quote the count off the screen, never the one you
+   expected"*, and worth the entry because the deletion was the confident move.
+
 ## Decisions
 
 (recorded as they are taken; see the PR comment for the full reasoning)
@@ -75,7 +104,7 @@ bus's box, its run along the kerb, and the camera's own angles.
 - [x] Own worktree, `npm ci`, baseline build + procgen measured
 - [x] Measured park generation cost (277–488 ms)
 - [x] Root-caused the foreground trees (treeline, not the plantable scatter)
-- [ ] Bus dimensions exported; sightline keep-out + invariant
+- [x] Bus dimensions exported; sightline keep-out + invariant (231 tests, 3 mutations red)
 - [ ] Opening framing
 - [ ] Rainbow arch ruling
 - [ ] Stage B journey
