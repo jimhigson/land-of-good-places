@@ -233,6 +233,56 @@ const LOOKAHEAD_STATIONS = 512;
 const FOLLOW = 0.12;
 
 /**
+ * **How much further back the rig stands at full speed** — 0.34 means a third
+ * again as far away when flat out as when crawling.
+ *
+ * Jim, 6 August 2026: the camera should pull back as she speeds up, showing more
+ * track ahead, *eased not snapped* — and he named why it matters: a duck bar
+ * slows her hard, so the transition happens right where she is looking.
+ *
+ * ### Why this can be a plain multiplier and change nothing else
+ *
+ * It scales {@link RaceCamera.stand} **and** {@link RaceCamera.look} by the same
+ * factor, which is a uniform scaling of the whole rig *about the rider*. That
+ * changes every distance and no direction: the camera's aim, its tilt, its swing
+ * and the rider's own position on screen all come out bit-identical, and the only
+ * thing that moves is how many metres of the world the lens covers. So none of
+ * the framing the family signed off is at risk — {@link AHEAD} is a floor and
+ * this only ever raises it.
+ *
+ * That is also why it is applied here rather than by re-running {@link solve}:
+ * solving per frame would re-derive the swing and the stand-off from a moving
+ * number and could walk the rider off her mark.
+ */
+const SPEED_PULL_BACK = 0.34;
+
+/**
+ * The speed {@link SPEED_PULL_BACK} is reached at, m/s.
+ *
+ * `simulate.ts`'s `MAX_SPEED` is a hard ceiling that nothing actually touches —
+ * a strong player cruises about 33.5 and a child about 30 — so pinning the zoom
+ * to it would spend most of its range on speeds the ride never sees. 32 is where
+ * real racing happens, and the factor is clamped, so going faster simply holds
+ * the widest framing.
+ */
+const PULL_BACK_AT = 32;
+
+/**
+ * Half-life of the zoom's easing, seconds.
+ *
+ * Much slower than {@link FOLLOW}, deliberately: the follower has to keep the
+ * rider on her mark and so must be quick, while the zoom is the thing Jim asked
+ * to be *eased*. A bonk drops her speed by two thirds in one frame, and at
+ * `FOLLOW`'s 0.12 s that would read as the picture flinching. 0.55 s lets the
+ * camera drift in over about a second, which reads as a camera operator easing
+ * off rather than a cut.
+ *
+ * A half-life, not a per-frame lerp, so it behaves the same on a 120 Hz monitor
+ * as on a struggling phone.
+ */
+const ZOOM_HALF_LIFE = 0.55;
+
+/**
  * The lag a follower with that half-life settles into behind a target moving at
  * constant speed, in seconds — `halfLife / ln 2`.
  *
@@ -433,6 +483,11 @@ export class RaceCamera {
   private anchor = 0;
   private lastTravelled = 0;
   private speed = 0;
+  /**
+   * How far the rig is scaled out from the rider right now, 1 at a standstill.
+   * Eased on its own half-life — see {@link SPEED_PULL_BACK}.
+   */
+  private zoom = 1;
 
   private readonly rider = new Vector3();
   private readonly out = new Vector3();
@@ -473,6 +528,7 @@ export class RaceCamera {
     this.anchor = this.route.startDistance + travelled;
     this.lastTravelled = travelled;
     this.speed = 0;
+    this.zoom = 1;
     this.place();
   }
 
@@ -482,6 +538,10 @@ export class RaceCamera {
       this.speed = damp(this.speed, (travelled - this.lastTravelled) / dt, FOLLOW, dt);
     }
     this.lastTravelled = travelled;
+    // Stand further back the faster she is going, eased on its own much slower
+    // half-life than the follower's. See SPEED_PULL_BACK.
+    const wanted = 1 + SPEED_PULL_BACK * clamp(this.speed / PULL_BACK_AT, 0, 1);
+    this.zoom = damp(this.zoom, wanted, ZOOM_HALF_LIFE, dt);
     // Lead by the lag the follower is about to have, so it settles on the rider
     // at every speed rather than at one. See FOLLOW_LAG.
     const target = this.route.startDistance + travelled + FOLLOW_LAG * this.speed;
@@ -516,16 +576,20 @@ export class RaceCamera {
     this.out.set(sample.normalX, 0, sample.normalZ);
     this.along.set(sample.tangentX, 0, sample.tangentZ);
 
+    // One factor on both, which is a uniform scaling of the rig about the rider:
+    // every direction survives it untouched and only the distances grow. See
+    // SPEED_PULL_BACK.
+    const zoom = this.zoom;
     this.camera.position
       .copy(this.rider)
-      .addScaledVector(this.out, this.stand.out)
-      .addScaledVector(this.along, this.stand.along)
-      .addScaledVector(UP, this.stand.rise);
+      .addScaledVector(this.out, this.stand.out * zoom)
+      .addScaledVector(this.along, this.stand.along * zoom)
+      .addScaledVector(UP, this.stand.rise * zoom);
     this.aim
       .copy(this.rider)
-      .addScaledVector(this.out, this.look.out)
-      .addScaledVector(this.along, this.look.along)
-      .addScaledVector(UP, this.look.rise);
+      .addScaledVector(this.out, this.look.out * zoom)
+      .addScaledVector(this.along, this.look.along * zoom)
+      .addScaledVector(UP, this.look.rise * zoom);
     this.camera.lookAt(this.aim);
     this.camera.updateMatrixWorld();
   }

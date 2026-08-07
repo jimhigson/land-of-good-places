@@ -78,6 +78,18 @@ const COUNT_HOLD = 0.9;
 /** How long the result card sits there before she is set down at the booth. */
 const RESULT_SECONDS = 5;
 
+/** How long one celebration hop takes, seconds — see `RailRace.cheer`. */
+const CHEER_HOP_SECONDS = 0.62;
+
+/**
+ * How long she keeps jumping for, seconds.
+ *
+ * Comfortably inside {@link RESULT_SECONDS} so the bouncing stops and she
+ * settles while the camera is still on her, rather than being cut off in the
+ * air when the phase ends.
+ */
+const CHEER_SECONDS = 3.2;
+
 /** Safety net: no race may run longer than this. Nobody has ever reached it. */
 const RACE_TIME_LIMIT = 180;
 
@@ -886,6 +898,33 @@ export class RailRace implements GameSystem {
     return this.phase !== 'countdown' && this.phase !== 'racing';
   }
 
+  /**
+   * **How far through a celebration jump she is, 0..1** — derived every frame
+   * from the ride's own state, never held in a timer of its own.
+   *
+   * Jim: the win wants the camera to hold on her for a few seconds while she
+   * *jumps in the cart*, with her legs showing. The hold was already there —
+   * finishing freezes `Rider.travelled`, so `RaceCamera` settles on her and
+   * {@link RESULT_SECONDS} keeps the phase alive for five seconds — and
+   * {@link legsShow} already turns the legs back on for `'finishing'`. What was
+   * missing was the jump.
+   *
+   * `max(0, sin)` gives a hop and then a pause before the next one, which is
+   * what jumping on the spot actually looks like; a plain sine is a bob. The
+   * fade means the last hop lands and she settles, rather than being cut off
+   * mid-air when the result card goes.
+   *
+   * Zero unless she actually won: fourth place gets confetti and a kind
+   * sentence (see this file's header), not a victory jump.
+   */
+  private get cheer(): number {
+    if (this.phase !== 'finishing' || this.me.rider.place !== 1) return 0;
+    const since = RESULT_SECONDS - this.resultTimer;
+    if (since < 0 || since >= CHEER_SECONDS) return 0;
+    const fade = 1 - since / CHEER_SECONDS;
+    return Math.max(0, Math.sin((since / CHEER_HOP_SECONDS) * Math.PI)) * fade;
+  }
+
   private faceTurn(cartYaw: number, at: Vector3, sadness: number): FaceTurn {
     const view = this.rideView;
     if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;
@@ -974,7 +1013,9 @@ export class RailRace implements GameSystem {
       // Seated, always — she is aboard a cart whether or not she is ducking.
       // Applied before the arm chain below so that chain can still own the
       // arms while she is upright; the fold takes them over when it happens.
-      poseRailRaceRider(kid, fold);
+      // The pump rock rivals get too — a child reads the rhythm of the control
+      // off the cart beside her as much as off her own.
+      poseRailRaceRider(kid, { duck: fold, pump: cart.rider.bob, cheer: 0 });
       setRiderLegsVisible(kid, this.legsShow);
       if (fold > 0) {
         // Folded: `poseRailRaceRider` owns the whole pose, arms included.
@@ -1051,10 +1092,14 @@ export class RailRace implements GameSystem {
     // own animation rewrites the very transforms the fold needs — see
     // `Player.railRaceDuck` and `duckPose.ts`.
     setRiderLegsVisible(this.player.model, this.legsShow);
-    this.player.railRaceRide = Math.max(
-      this.ducking && this.phase === 'racing' ? 1 : 0,
-      knockdown(rider.wobble),
-    );
+    // Everything her body is doing, stated at once. See `RiderPose` — four
+    // things want `body.rotation.x` and handing them over one at a time is how
+    // they end up fighting.
+    this.player.railRaceRide = {
+      duck: Math.max(this.ducking && this.phase === 'racing' ? 1 : 0, knockdown(rider.wobble)),
+      pump: rider.bob,
+      cheer: this.cheer,
+    };
     const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
     // Round towards the camera far enough for her face to be worth painting —
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,

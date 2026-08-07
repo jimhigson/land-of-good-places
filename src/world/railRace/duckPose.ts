@@ -139,6 +139,50 @@ const SIT_LEAN = 0.16;
 const SIT_ARM = -1.0;
 
 /**
+ * **How far her torso throws forward on a pump, radians.**
+ *
+ * Jim, 6 August 2026: the boost needs more visual feedback — *"torso rocks
+ * forward while boosting"*.
+ *
+ * Driven by {@link Rider.bob}, the per-press spring `simulate.ts` already keeps
+ * and which the **player had no use for at all**: the rivals spent it on a seat
+ * dip (`kid.root.position.y`) and the player's own pose ignored it, so the one
+ * control in the game gave her nothing to look at. A per-tap throw reads far
+ * better than a sustained lean would, because pumping a handcar *is* a rhythm —
+ * you can see how fast she is going by how fast she rocks.
+ *
+ * 0.42 rad is 24°, a little over half the duck's own fold, which is legible at
+ * the ~37 px/m the phone rig draws her at without turning into a bow.
+ */
+export const BOOST_ROCK = 0.42;
+
+/**
+ * How high she springs out of the seat when she wins, in her own metres.
+ *
+ * `body`, not `root`, for the same reason the crouch uses `body` — except that
+ * here the direction is the safe one. A jump is the one motion that *cannot*
+ * clip her through the tub, because it goes up; using `body` anyway keeps one
+ * rule ("the ride never moves the root") rather than one rule and an exception.
+ */
+export const CHEER_HOP = 0.55;
+
+/** How far she leans back as she throws her arms up. Negative of the sit lean. */
+const CHEER_LEAN = 0.34;
+
+/** Arms straight up in the air. */
+const CHEER_ARM = 2.5;
+
+/**
+ * How far her legs come down out of the soapbox stretch as she jumps.
+ *
+ * Jim asked for legs on for the celebration (*"this one will need legs
+ * showing"*), and legs still held out at {@link SIT_LEG} while the rest of her
+ * jumps read as a mannequin being lifted. Bringing them under her is what makes
+ * it a jump.
+ */
+const CHEER_LEG = 0.95;
+
+/**
  * **Whether a rider's legs are drawn.**
  *
  * Jim: *"legs also clip through slightly on the race ride — just hide the legs
@@ -185,41 +229,81 @@ export interface Duckable {
 }
 
 /**
- * Folds `target` by `amount` (0 = upright, 1 = fully ducked).
+ * **Everything the ride wants a rider's body to be doing, in one object.**
  *
- * Safe to call every frame with 0 — that is the plain **seated** pose, written
- * out in full, so a rider who has just stopped ducking is actively put back
- * rather than left wherever the last frame happened to leave her. It is never
- * the *standing* pose: a rider on this ride is sat down for as long as she is
- * aboard, and `RailRace.arrive()` stops calling this at all when she gets off.
+ * There are four things that want `body.rotation.x` on this ride — the seated
+ * pose, the duck fold, the boost rock and the win jump — and `Player.animate()`
+ * rewrites that property from scratch every single frame, so anything set from
+ * outside is stamped over before it is drawn. The answer is not four setters
+ * that take turns; it is **one owner that is told everything at once** and
+ * writes the property exactly once, which is what {@link poseRailRaceRider}
+ * does. Add a fifth claimant by adding a field here, never by assigning to the
+ * body from somewhere else.
  */
-export function poseRailRaceRider(target: Duckable, amount: number): void {
-  const fold = Math.max(0, Math.min(1, amount));
-  // Seated first, then folded on top of it — she ducks *from* the seat, so the
-  // duck's own numbers are added to the seat's rather than replacing them.
-  target.body.rotation.x = SIT_LEAN + DUCK_BEND * fold;
-  target.body.position.y = -(SIT_HIP_DROP + DUCK_HIP_DROP * fold);
+export interface RiderPose {
+  /** 0 upright, 1 fully ducked — her own duck or the shove a bar gave her. */
+  readonly duck: number;
+  /** 0..1, the per-press pump spring (`Rider.bob`). See {@link BOOST_ROCK}. */
+  readonly pump: number;
+  /** 0..1 through the win celebration's jump. See {@link CHEER_HOP}. */
+  readonly cheer: number;
+}
+
+/** Seated and doing nothing else — the resting state of {@link RiderPose}. */
+export const SEATED: RiderPose = { duck: 0, pump: 0, cheer: 0 };
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+/**
+ * Poses `target` for the ride.
+ *
+ * Safe to call every frame with {@link SEATED} — that is the plain seated pose,
+ * written out in full, so a rider who has just stopped ducking is actively put
+ * back rather than left wherever the last frame happened to leave her. It is
+ * never the *standing* pose: a rider on this ride is sat down for as long as she
+ * is aboard, and `RailRace.arrive()` stops calling this at all when she gets
+ * off.
+ */
+export function poseRailRaceRider(target: Duckable, pose: RiderPose): void {
+  const fold = clamp01(pose.duck);
+  const cheer = clamp01(pose.cheer);
+  // **The rock is gated by the fold, and that is not cosmetic.** A child will
+  // hold boost under a bar — `simulate.ts` already refuses to let a press build
+  // boost while ducking (`registersAsPressed`), and `Rider.bob` is set from the
+  // raw press regardless, so without this the two would disagree: she would
+  // throw her torso forward on a pump that bought her nothing, on top of a 40°
+  // fold, and put her head through her own knees. One rule, stated once.
+  const pump = clamp01(pose.pump) * (1 - fold);
+
+  // Seated first, then everything else on top of it — she ducks, pumps and
+  // cheers *from* the seat, so their numbers add to the seat's rather than
+  // replacing them. This is the only write to each of these properties.
+  target.body.rotation.x = SIT_LEAN + DUCK_BEND * fold + BOOST_ROCK * pump - CHEER_LEAN * cheer;
+  target.body.position.y = -(SIT_HIP_DROP + DUCK_HIP_DROP * fold) + CHEER_HOP * cheer;
   const squash = 1 - DUCK_SQUASH * fold;
   // Widen as she flattens, the way every squash in this park does: a body that
   // only loses height reads as scaled, one that spreads reads as squashed.
   target.body.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
-  target.head.rotation.x = DUCK_HEAD_TUCK * fold;
+  target.head.rotation.x = DUCK_HEAD_TUCK * fold - CHEER_LEAN * cheer;
 
   const leftLeg = target.limbs?.leftLeg ?? target.leftLeg;
   const rightLeg = target.limbs?.rightLeg ?? target.rightLeg;
   if (leftLeg && rightLeg) {
-    leftLeg.rotation.x = SIT_LEG;
-    rightLeg.rotation.x = SIT_LEG;
+    const leg = SIT_LEG + (CHEER_LEG - SIT_LEG) * cheer;
+    leftLeg.rotation.x = leg;
+    rightLeg.rotation.x = leg;
   }
 
   const leftArm = target.limbs?.leftArm ?? target.leftArm;
   const rightArm = target.limbs?.rightArm ?? target.rightArm;
   if (leftArm && rightArm) {
-    // Hands on the rail when she is up, pulled in to her head when she folds.
-    const arm = SIT_ARM - (DUCK_ARM_TUCK + SIT_ARM) * fold;
+    // Hands on the rail when she is up, pulled in to her head when she folds,
+    // straight up in the air when she has won.
+    const seatedArm = SIT_ARM - (DUCK_ARM_TUCK + SIT_ARM) * fold;
+    const arm = seatedArm + (CHEER_ARM - seatedArm) * cheer;
     leftArm.rotation.x = arm;
     rightArm.rotation.x = arm;
-    leftArm.rotation.z = 0.3 * fold;
-    rightArm.rotation.z = -0.3 * fold;
+    leftArm.rotation.z = 0.3 * fold + 0.5 * cheer;
+    rightArm.rotation.z = -0.3 * fold - 0.5 * cheer;
   }
 }

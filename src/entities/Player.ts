@@ -20,7 +20,7 @@ import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
-import { poseRailRaceRider } from '../world/railRace/duckPose';
+import { poseRailRaceRider, type RiderPose } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
@@ -614,14 +614,19 @@ export class Player implements GameSystem {
   railRaceFrown = false;
 
   /**
-   * `null` when she is not on the Rail Race; otherwise how far it is folding
-   * her, 0..1 — see `railRace/duckPose.ts`.
+   * `null` when she is not on the Rail Race; otherwise everything the ride
+   * wants her body doing this frame — see `RiderPose` in `railRace/duckPose.ts`.
    *
    * A field rather than the ride posing her directly, for the same reason
    * {@link railRaceFrown} is one: `animate()` below rewrites `body.rotation.x`,
    * `body.position.y`, `body.scale`, `head.rotation.x` and both legs every
    * single frame, so anything the ride set from outside would be stamped over
    * before it was ever drawn.
+   *
+   * **A whole pose rather than a single duck amount** because four separate
+   * things now want `body.rotation.x` — sitting, ducking, the boost rock and the
+   * win jump. Handing them over one at a time is how they end up fighting; the
+   * ride states all of them and `poseRailRaceRider` writes the property once.
    *
    * **`null` rather than 0** because being *aboard* is the state that matters:
    * a rider is sat down for the whole ride, not only while ducking. Setting it
@@ -631,7 +636,7 @@ export class Player implements GameSystem {
    * of. (`TreeClimbing.hidePlayerBody` kept such a list, got it wrong, and left
    * her a floating head on every ride in the park until it was deleted today.)
    */
-  railRaceRide: number | null = null;
+  railRaceRide: RiderPose | null = null;
 
   constructor(
     private readonly collision: CollisionWorld,

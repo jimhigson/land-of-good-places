@@ -784,17 +784,23 @@ say('');
    * re-created the pose would prove only that two copies of the arithmetic
    * agree with each other while she folded through the floor in the game.
    */
-  const pose = (fold: number): { headTop: number; body: Box3 } => {
+  const pose = (
+    rider: { duck: number; pump: number; cheer: number },
+  ): { headTop: number; headAt: Vector3; headDepth: number; body: Box3 } => {
     // Seat her **first**, then fold — this order is load-bearing. Posing first
     // and seating afterwards would quietly undo any translation `poseRailRaceRider`
     // performed, so the "root is still on the seat" assertion below would be
     // asserting the line above it rather than the thing it names. That is the
     // hollow-check disease this whole PR keeps running into.
     kid.root.position.y = SEAT_HEIGHT;
-    poseRailRaceRider(kid, fold);
+    poseRailRaceRider(kid, rider);
     cartGroup.updateMatrixWorld(true);
     return {
       headTop: new Box3().setFromObject(kid.head).max.y - railPoint.y,
+      headAt: kid.head.getWorldPosition(new Vector3()),
+      // Along the track: the cart group is positioned and scaled but never
+      // rotated here, so the model's own forward is world +Z.
+      headDepth: new Box3().setFromObject(kid.head).getSize(new Vector3()).z,
       body: visibleBox(kid.root),
     };
   };
@@ -805,8 +811,8 @@ say('');
   // a torso that really did go through the floor.
   setRiderLegsVisible(kid, false);
 
-  const uprightPose = pose(0);
-  const duckedPose = pose(1);
+  const uprightPose = pose({ duck: 0, pump: 0, cheer: 0 });
+  const duckedPose = pose({ duck: 1, pump: 0, cheer: 0 });
   const standing = uprightPose.headTop;
   const ducked = duckedPose.headTop;
   const barUnderside = DUCK_CLEARANCE_AT_PARK_SCALE * route.scale - barHalfDepth;
@@ -868,6 +874,91 @@ say('');
     Math.abs(kid.root.position.y - SEAT_HEIGHT) < 1e-6,
     `the duck pose moved the rider's root to ${kid.root.position.y.toFixed(3)} instead of leaving ` +
       `it on the seat at ${SEAT_HEIGHT} — that is a translation, not a duck.`,
+  );
+
+  // --- the boost rock, the win jump, and the two of them meeting a duck ------
+  //
+  // **Assert the movement, not the flag.** Four times this PR has shipped a
+  // "boost is active"/"she won" boolean that was set correctly while nothing on
+  // screen moved a millimetre. So every one of these measures where her head
+  // actually ends up, through the real pose function, in the real cart.
+  const pumpedPose = pose({ duck: 0, pump: 1, cheer: 0 });
+  const cheeringPose = pose({ duck: 0, pump: 0, cheer: 1 });
+  const duckPumpPose = pose({ duck: 1, pump: 1, cheer: 0 });
+
+  const rockThrow = pumpedPose.headAt.distanceTo(uprightPose.headAt);
+  say(
+    `boost rock   head throws ${rockThrow.toFixed(2)} m on a pump   ` +
+      `win jump ${(cheeringPose.headTop - uprightPose.headTop).toFixed(2)} m of lift`,
+  );
+  // Jim asked for the boost to be *felt*. A rock nobody can see is the same
+  // non-feature as a face nobody can look at.
+  require(
+    rockThrow > 0.4 * route.scale,
+    `a full pump moves the rider's head by only ${rockThrow.toFixed(3)} m — at the ~37 px/m this ` +
+      'ride draws her at, that is not visual feedback. See BOOST_ROCK in railRace/duckPose.ts.',
+  );
+  // The win jump has to leave the seat, upwards and visibly.
+  require(
+    cheeringPose.headTop - uprightPose.headTop > 0.3 * route.scale,
+    `winning lifts the rider only ${(cheeringPose.headTop - uprightPose.headTop).toFixed(3)} m — ` +
+      'she is meant to jump in the cart, and this would read as sitting still. See CHEER_HOP.',
+  );
+  // ...and she must still be *in* it, not launched through the seat.
+  require(
+    cheeringPose.body.min.y > tubFloor,
+    `the win jump puts her lowest visible part at ${cheeringPose.body.min.y.toFixed(2)}, below the ` +
+      `cart's tub floor at ${tubFloor.toFixed(2)}.`,
+  );
+  require(
+    Math.abs(kid.root.position.y - SEAT_HEIGHT) < 1e-6,
+    `the celebration moved the rider's root to ${kid.root.position.y.toFixed(3)} instead of leaving ` +
+      `it on the seat at ${SEAT_HEIGHT} — the ride never moves the root.`,
+  );
+
+  // **Boosting while ducking.** A child will hold boost under a bar — keyboard
+  // duck and keyboard boost are genuinely independent signals — and `Rider.bob`
+  // is set from the raw press whether or not it registered as thrust. If the
+  // rock were not gated by the fold, she would throw forward on top of a 40°
+  // crouch and her head would come up out of the duck she is relying on.
+  say(
+    `ducking while boosting   head top ${duckPumpPose.headTop.toFixed(2)} against ` +
+      `${duckedPose.headTop.toFixed(2)} ducked alone (bar underside ${barUnderside.toFixed(2)})`,
+  );
+  require(
+    duckPumpPose.headTop < barUnderside,
+    `a rider who holds boost while ducking reaches ${duckPumpPose.headTop.toFixed(2)} m over the ` +
+      `rail, and the bar's underside is at ${barUnderside.toFixed(2)} — mashing under a bar takes ` +
+      'the duck away from her. The rock must be gated by the fold; see poseRailRaceRider.',
+  );
+  require(
+    duckPumpPose.body.min.y > tubFloor,
+    `ducking while boosting puts her lowest visible part at ${duckPumpPose.body.min.y.toFixed(2)}, ` +
+      `through the cart's tub floor at ${tubFloor.toFixed(2)}.`,
+  );
+
+  // --- the approach-frame skull graze, rechecked at the new speeds ----------
+  //
+  // Her head is enormous (a cartoon child at ride scale), so its *front* reaches
+  // a bar well before her centre does — and the bonk fires at her centre. For
+  // the frames in between, the bar is inside the top of her skull while she is
+  // still upright, before the knock-down folds her.
+  //
+  // Reported rather than asserted, deliberately. The fix is a ~1.9 m contact
+  // lead subtracted inside `planHazards` so every consumer sees one number, and
+  // it moves *when the bonk fires* — immediately after a PR that fixed the bonk
+  // firing in the wrong place. It wants eyes on it before it ships, and this
+  // line is here so the size of the artefact is on the screen at every build
+  // rather than being rediscovered by measurement each round.
+  const skullReach = uprightPose.headDepth / 2 + barHalfDepth;
+  const childRace = simulateRailRace('childPace', 3);
+  // Her top speed, not her average: she arrives at a bar still mashing, and a
+  // race's average is dragged down by the standing start and every bonk in it.
+  const frames = skullReach / (childRace.topSpeed / 60);
+  say(
+    `skull graze   bar is inside her head for the last ${skullReach.toFixed(2)} m of the approach ` +
+      `— ${frames.toFixed(1)} frames at a child's ${childRace.topSpeed.toFixed(1)} m/s top speed ` +
+      `(fix: a BAR_CONTACT_LEAD in planHazards; not shipped, wants eyes)`,
   );
 
   kid.dispose?.();

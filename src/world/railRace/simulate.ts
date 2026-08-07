@@ -821,6 +821,16 @@ export interface RaceOutcome {
   readonly seconds: number;
   readonly bonks: number;
   readonly sparkSeconds: number;
+  /**
+   * The fastest she actually got, m/s.
+   *
+   * The honest denominator for anything asking "how long does X last on
+   * screen", because a race's *average* speed is dragged down by the standing
+   * start, every bonk and every black stretch — it is not a speed she spends
+   * much time at. She meets a duck bar mashing flat out, so a bar's approach
+   * happens near this, not near the average.
+   */
+  readonly topSpeed: number;
 }
 
 /**
@@ -841,6 +851,7 @@ export function simulateRailRace(strategy: Strategy, level: RaceLevel): RaceOutc
 
   // A generous ceiling: nothing that finishes is anywhere near it, and a rider
   // that somehow cannot finish should end the check rather than the process.
+  let topSpeed = 0;
   while (!rider.finished && seconds < 400) {
     stepRider(
       route,
@@ -852,9 +863,10 @@ export function simulateRailRace(strategy: Strategy, level: RaceLevel): RaceOutc
       PLAYER_BOOST_ADVANTAGE,
     );
     seconds += dt;
+    if (rider.speed > topSpeed) topSpeed = rider.speed;
   }
 
-  return { seconds, bonks: rider.bonks, sparkSeconds: rider.sparkSeconds };
+  return { seconds, bonks: rider.bonks, sparkSeconds: rider.sparkSeconds, topSpeed };
 }
 
 /** How a whole four-cart race came out. */
