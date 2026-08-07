@@ -124,7 +124,7 @@ import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
 import { PALETTE } from '../src/core/palette.ts';
-import { Box3, Group, Mesh, Object3D } from 'three';
+import { Box3, DoubleSide, Group, Mesh, Object3D, Raycaster } from 'three';
 import { Player } from '../src/entities/Player.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
@@ -1250,6 +1250,104 @@ say('');
       `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)} — the ride ` +
       'never moves the root.',
   );
+
+  // --- her arms stay inside the tub -----------------------------------------
+  //
+  // Jim, 7 August 2026: *"the characters arm clips through the mine cart - make
+  // the box of the cart wider until this no longer happens"*. Measured then: her
+  // hand reached **0.285 m outside** the tub's own surface at ride scale.
+  //
+  // **Ray-cast across the built hopper, not compared against a half-width**, for
+  // two reasons. The tub is not a box — it was a taper, and is now a vertical
+  // wall over a flared foot, so "the cart's width" is a different number at every
+  // height and a single constant would be wrong nearly everywhere. And the whole
+  // point of the fix was a change of *shape*: a check written against a width
+  // would have gone green on a uniform scale-up that never touched the taper.
+  //
+  // Every vertex her arms actually draw, outlines included, in each pose that
+  // moves them. The victory jump lifts her arms clear over the rim, so it has
+  // nothing beside the tub at all and says so rather than silently passing.
+  {
+    const hopperMesh = rideCart.root.getObjectByName('hopper');
+    if (!(hopperMesh instanceof Mesh)) {
+      problems.push('check:rail-race: the built cart has no hopper mesh to measure her arms against');
+    } else {
+      // Both faces must register or a ray leaving the solid is invisible.
+      (hopperMesh.material as { side: number }).side = DoubleSide;
+      cartGroup.updateMatrixWorld(true);
+      const hopperBox = new Box3().setFromObject(hopperMesh);
+      const armCaster = new Raycaster();
+      armCaster.far = 500;
+
+      /** Where a line straight across the cart at this height and depth meets the tub. */
+      const wallAt = (y: number, z: number, x: number): number | null => {
+        armCaster.set(new Vector3(hopperBox.min.x - 10, y, z), new Vector3(1, 0, 0));
+        const xs = armCaster
+          .intersectObject(hopperMesh, false)
+          .map((hit) => hit.point.x)
+          .sort((a, b) => a - b);
+        if (xs.length < 2) return null;
+        const half = Math.floor(xs.length / 2);
+        // How far past the tub's surface on this point's own side. Positive is
+        // through it.
+        return x >= hopperBox.getCenter(new Vector3()).x
+          ? x - xs[half]!
+          : xs[half - 1]! - x;
+      };
+
+      const armReport: string[] = [];
+      let worstThrough = -Infinity;
+      let worstPose = '';
+      for (const state of [
+        { name: 'seated', rider: { duck: 0, pump: 0, cheer: 0 } },
+        { name: 'duck', rider: { duck: 1, pump: 0, cheer: 0 } },
+        { name: 'boost', rider: { duck: 0, pump: 1, cheer: 0 } },
+        { name: 'duck+boost', rider: { duck: 1, pump: 1, cheer: 0 } },
+        { name: 'celebration', rider: { duck: 0, pump: 0, cheer: cheerPeak } },
+      ]) {
+        pose(state.rider);
+        let through = -Infinity;
+        let beside = 0;
+        for (const limb of [player.model.leftArm, player.model.rightArm]) {
+          if (!limb) continue;
+          limb.updateMatrixWorld(true);
+          limb.traverse((object) => {
+            if (!(object instanceof Mesh)) return;
+            const position = object.geometry.getAttribute('position');
+            if (!position) return;
+            const vertex = new Vector3();
+            for (let i = 0; i < position.count; i += 1) {
+              vertex
+                .set(position.getX(i), position.getY(i), position.getZ(i))
+                .applyMatrix4(object.matrixWorld);
+              // Above the rim there is no tub to go through.
+              if (vertex.y > hopperBox.max.y) continue;
+              beside += 1;
+              const past = wallAt(vertex.y, vertex.z, vertex.x);
+              if (past !== null && Number.isFinite(past) && past > through) through = past;
+            }
+          });
+        }
+        if (beside === 0) {
+          armReport.push(`${state.name} clear of the tub`);
+          continue;
+        }
+        armReport.push(`${state.name} ${(-through).toFixed(3)}`);
+        if (through > worstThrough) {
+          worstThrough = through;
+          worstPose = state.name;
+        }
+      }
+      say(`arms in the tub   ${armReport.join('   ')}   (metres of clearance)`);
+      require(
+        worstThrough < 0,
+        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart in the ` +
+          `'${worstPose}' pose — this is Jim's 7 August report. The tub's width and shape are ` +
+          'authored in art/blend/cart.blend and stated by CART_WIDTH_AT_PARK_SCALE in ' +
+          'railRace/route.ts; widen the tub rather than moving her arm.',
+      );
+    }
+  }
 
   // **Boosting while ducking.** A child will hold boost under a bar — keyboard
   // duck and keyboard boost are genuinely independent signals — and `Rider.bob`

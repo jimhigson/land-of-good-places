@@ -68,7 +68,7 @@ import { createCart, WHEEL_RADIUS, SEAT_HEIGHT, CART_PARTS } from '../src/world/
 import { cartAssetPart, cartAssetGeometry, cartAssetPartNames } from '../src/art/models/cartAsset.ts';
 import { isShared } from '../src/art/style/materials.ts';
 import { RAIL_GAUGE } from '../src/world/railRace/track.ts';
-import { RIDE_SCALE } from '../src/world/railRace/route.ts';
+import { RIDE_SCALE, CART_WIDTH_AT_PARK_SCALE } from '../src/world/railRace/route.ts';
 import { RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
 import { RaceCamera } from '../src/world/railRace/camera.ts';
 import { PLAYER_LANE } from '../src/world/railRace/route.ts';
@@ -102,6 +102,29 @@ assert(
   Math.abs(Math.abs(wheelFl.position.x) - expectedHalfGauge) < 1e-6,
   `wheel-fl's baked x (${wheelFl.position.x.toFixed(4)}) equals RAIL_GAUGE / RIDE_SCALE / 2 (${expectedHalfGauge.toFixed(4)})`,
 );
+
+// --- the tub really is CART_WIDTH_AT_PARK_SCALE wide -------------------------
+//
+// The tub's shape is authored in `art/blend/cart.blend`; `CART_WIDTH_AT_PARK_SCALE`
+// in `railRace/route.ts` is the number **the park is built around** — every
+// lane's spacing, the trestle beams, the duck bars' span and the finish arch's
+// own half-width all come off it. Two definitions of one thing kept in step by
+// hand is this repo's most common bug, and here the two live in different
+// languages in different directories, so nothing but this line can catch them
+// disagreeing. It is exactly the shape of the `wheel-fl` gauge assertion above.
+{
+  const hopper = cartAssetPart('hopper');
+  hopper.geometry.computeBoundingBox();
+  const box = hopper.geometry.boundingBox!;
+  const halfWidth = Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) * hopper.scale.x;
+  const expected = CART_WIDTH_AT_PARK_SCALE / 2;
+  assert(
+    Math.abs(halfWidth - expected) < 1e-3,
+    `the built hopper's widest vertices (±${halfWidth.toFixed(4)}) match ` +
+      `CART_WIDTH_AT_PARK_SCALE / 2 (${expected.toFixed(4)}) — the asset and the number the ring ` +
+      `is derived from agree`,
+  );
+}
 
 // --- the seat's own top surface is exactly SEAT_HEIGHT -----------------------
 const seatBase = cartAssetPart('seat-base');
