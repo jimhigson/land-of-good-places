@@ -42,7 +42,8 @@ const NPC_ACCELERATION = 18;
 const NPC_DECELERATION = 16;
 
 /** Narrower than the player, so two children pass each other on a path. */
-export const NPC_RADIUS = 0.5;
+export { NPC_RADIUS } from '../../core/constants';
+import { NPC_RADIUS } from '../../core/constants';
 
 const NPC_JUMP_SPEED = 4.6;
 const GRAVITY = 17;

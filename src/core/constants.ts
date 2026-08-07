@@ -111,6 +111,15 @@ export const PLAYER_TURN_SPEED = 13;
 /** Radius used for pushing the player out of scenery. */
 export const PLAYER_RADIUS = 0.62;
 
+/**
+ * An NPC child's collision radius. Lives here rather than in
+ * `entities/npc/NpcCharacter.ts` (which re-exports it) so that leaf modules
+ * loaded under Node's strip-only TypeScript (`check:waypoints` and friends)
+ * can read the number without dragging in a class full of parameter
+ * properties the stripper cannot parse.
+ */
+export const NPC_RADIUS = 0.5;
+
 /** Full bob cycles per metre travelled — drives the walk animation phase. */
 export const PLAYER_BOB_CYCLES_PER_METRE = 0.42;
 

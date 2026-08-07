@@ -5,7 +5,7 @@ import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 import { isOnPath, PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
 import { STALL_STANDS } from '../../minigames/stallPlacement';
-import { NPC_RADIUS } from './NpcCharacter';
+import { NPC_RADIUS } from '../../core/constants';
 import { TRAIN_PLAN } from '../../world/train/plan';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
