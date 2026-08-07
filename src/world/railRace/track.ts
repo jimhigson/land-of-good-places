@@ -36,7 +36,13 @@ import {
   type HazardLayout,
   type RaceLevel,
 } from './hazards';
-import { LANE_COUNT, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './route';
+import {
+  LANE_COUNT,
+  PLAYER_LANE,
+  RIDE_SCALE,
+  UNDULATION_REACH,
+  type RailRaceRoute,
+} from './route';
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
@@ -593,7 +599,11 @@ export function buildRailRaceTrack(
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
 
   // --- the duck bars ---------------------------------------------------------
-  const barCount = layout.bars.length * LANE_COUNT;
+  //
+  // One bar object, one bar — not one object drawn once per lane. See
+  // `hazards.ts`'s `DuckBar.lane`: four bars at one arc distance overlapped by
+  // 3.00 m because a bar is 5.75 m wide and the lanes are 2.75 m apart.
+  const barCount = layout.bars.length;
   const frameMaterial = toonMaterial(PALETTE.buildingTrim);
   // Diagonal yellow-and-black hazard tape (Jim, 1 August 2026) — a canvas
   // texture, not baked into the asset; see `hazardTapeTexture`'s own doc
@@ -670,15 +680,28 @@ export function buildRailRaceTrack(
   let postIndex = 0;
   let barIndex = 0;
   // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
-  // `barSlots[b]` holds the instance ids of that bar across all four lanes.
+  // `barSlots[b]` holds the instance id of bar `b`. A list per bar rather than a
+  // bare number because a bar whose trestle was never placed contributes no
+  // instance at all, and `setAlerts` must skip it rather than shift every id
+  // after it by one.
   const barSlots: number[][] = [];
-  // Every post belongs to one lane's own bar — coloured to match, the same
-  // `LANE_COLOURS` entry as that lane's rails/cart/trestle, so a post reads as
-  // "this lane's post" at a glance instead of every post in the ring looking
-  // identical regardless of which rail it stands over. Per-instance colour on
-  // one shared `InstancedMesh`, the same trick `sleeves` below already uses
-  // for its alert-state colour — one draw call for every post in the ring,
-  // four lane colours and all.
+  /**
+   * Every post takes **its own lane's** colour — the same `LANE_COLOURS` entry
+   * as that lane's rails and cart, read from the one owner rather than a second
+   * palette. Jim, 7 August 2026: "make their legs the colour of the track they
+   * apply to."
+   *
+   * **This is deliberately the opposite decision from the trestles below**, and
+   * the two are not in tension. A trestle carries all four lanes at once, so it
+   * cannot belong to any one of them and Jim asked for it in a single neutral
+   * grey. A duck bar belongs to exactly one lane, and now that bars are spread
+   * around the lap instead of stacked four abreast, its colour is the only thing
+   * that answers "is that one mine?" at fourteen metres a second.
+   *
+   * Per-instance colour on one shared `InstancedMesh`, the same trick `sleeves`
+   * uses for its alert state — one draw call for every post in the ring, four
+   * lane colours and all.
+   */
   const postLaneColour = new Color();
 
   for (const bar of layout.bars) {
@@ -716,35 +739,33 @@ export function buildRailRaceTrack(
     const at = route.wrap(route.startDistance + bar.at);
     route.outwardAt(at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, at, point);
-      const barY = point.y + duckClearance;
-      postLaneColour.set(LANE_COLOURS[lane % LANE_COLOURS.length]!);
+    route.pointAt(bar.lane, at, point);
+    const barY = point.y + duckClearance;
+    postLaneColour.set(LANE_COLOURS[bar.lane % LANE_COLOURS.length]!);
 
-      for (const side of [-1, 1] as const) {
-        position.set(
-          point.x + outward.x * side * barHalfSpan,
-          point.y + postFootY + (postHeight * postStretch) / 2,
-          point.z + outward.z * side * barHalfSpan,
-        );
-        matrix.compose(position, rotation, postScale);
-        posts.setMatrixAt(postIndex, matrix);
-        posts.setColorAt(postIndex, postLaneColour);
-        postIndex += 1;
-      }
-
-      position.set(point.x, barY, point.z);
-      matrix.compose(position, rotation, assetScale);
-      bars.setMatrixAt(barIndex, matrix);
-      // The sleeve's own geometry is already built at this ring's size (see
-      // `sleeveGeometry`), so it must not take the asset scale on top — and
-      // `setAlerts` below decomposes this matrix and re-composes it with
-      // `(1, size, size)`, which assumes exactly that.
-      matrix.compose(position, rotation, one);
-      sleeves.setMatrixAt(barIndex, matrix);
-      slots.push(barIndex);
-      barIndex += 1;
+    for (const side of [-1, 1] as const) {
+      position.set(
+        point.x + outward.x * side * barHalfSpan,
+        point.y + postFootY + (postHeight * postStretch) / 2,
+        point.z + outward.z * side * barHalfSpan,
+      );
+      matrix.compose(position, rotation, postScale);
+      posts.setMatrixAt(postIndex, matrix);
+      posts.setColorAt(postIndex, postLaneColour);
+      postIndex += 1;
     }
+
+    position.set(point.x, barY, point.z);
+    matrix.compose(position, rotation, assetScale);
+    bars.setMatrixAt(barIndex, matrix);
+    // The sleeve's own geometry is already built at this ring's size (see
+    // `sleeveGeometry`), so it must not take the asset scale on top — and
+    // `setAlerts` below decomposes this matrix and re-composes it with
+    // `(1, size, size)`, which assumes exactly that.
+    matrix.compose(position, rotation, one);
+    sleeves.setMatrixAt(barIndex, matrix);
+    slots.push(barIndex);
+    barIndex += 1;
     barSlots.push(slots);
   }
 
@@ -986,9 +1007,18 @@ export function buildRailRaceTrack(
       layout.bars.forEach((bar, index) => {
         // How close the player is to this bar, going forwards. Bars behind are
         // calm; the one coming up swells and colours.
+        //
+        // **Only her own lane's bars ever alarm.** Since 7 August a bar crosses
+        // one lane (`hazards.ts`'s `DuckBar.lane`) and `simulate.ts` only bonks
+        // her on her own, so a rival's bar swelling amber as she passes it would
+        // be teaching her to duck for something that cannot touch her — and with
+        // forty bars a lap instead of ten, it would be most of what she sees.
+        // The bar's posts still carry its lane colour, which is what makes the
+        // other three legible as somebody else's.
         let ahead = bar.at - lapOffset;
         if (ahead < -6) ahead += route.length;
-        const closeness = ahead < 0 ? 0 : clamp01(1 - ahead / ALERT_RANGE);
+        const mine = bar.lane === PLAYER_LANE;
+        const closeness = ahead < 0 || !mine ? 0 : clamp01(1 - ahead / ALERT_RANGE);
         tint.copy(CALM).lerp(safe ? SAFE : WARN, closeness);
         const pulse = 1 + Math.sin(elapsed * (safe ? 7 : 13)) * 0.16 * closeness;
         const size = lerp(0.9, 1.3, closeness) * pulse;

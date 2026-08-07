@@ -441,7 +441,10 @@ export function stepRider(
   // distances, so this is an interval test walked by one cursor: a bar between
   // `before` and now is caught whatever the frame rate.
   let bonked = false;
-  const crossings = hazards.barCrossings;
+  // This rider's **own lane's** bars. Since 7 August a bar crosses one lane
+  // rather than all four (see `hazards.ts`'s `DuckBar.lane`), so a rider who
+  // walked the whole ring's list would bonk on three other people's bars.
+  const crossings = hazards.barCrossingsByLane[rider.lane] ?? [];
   while (rider.barCursor < crossings.length && (crossings[rider.barCursor] ?? Infinity) <= rider.travelled) {
     if (!rider.ducking) {
       bonk(rider);
@@ -484,7 +487,7 @@ function bonk(rider: Rider): void {
  * the family's rule gives no credit for coasting down first.
  */
 function barIsHere(rider: Rider, hazards: HazardSchedule, dt: number, margin: number): boolean {
-  const next = hazards.barCrossings[rider.barCursor];
+  const next = hazards.barCrossingsByLane[rider.lane]?.[rider.barCursor];
   if (next === undefined) return false;
   return next - rider.travelled <= rider.speed * dt + margin;
 }
