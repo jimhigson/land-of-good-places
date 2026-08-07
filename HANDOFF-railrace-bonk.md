@@ -479,3 +479,24 @@ The chrome MCP was not assigned to me, so **everything visual is unverified**.
 The list from earlier rounds still stands, plus: does the pull-back read as a
 camera easing off or as the picture breathing; does the victory jump read as a
 jump; do her legs appearing for the celebration look right or sudden.
+
+### One interaction between two of this PR's own features — arithmetic, not a guard
+
+The face-turn check and the speed zoom landed in the same PR and touch the same
+quantity. `RaceCamera.reset()` sets `zoom = 1`, and every downstream user of the
+rig in `check:rail-race` (`sweep`, the face sweep) calls `reset` before reading
+the camera — so **the face checks all measure the resting framing**, never the
+pulled-back one, which is exactly when a child is looking at her.
+
+Worked through rather than left hanging: the pull-back is a uniform scaling of
+the rig about the rider, so the *rider* holds her NDC mark exactly, and the eyes
+— a fixed world offset from her — move **towards** that mark as the lens
+retreats. So the "on screen" margins (monitor 0.288, phone 0.112) only improve.
+Eye *separation* shrinks with distance, 25.6 → 33.6 m being a factor of 1.313:
+monitor 0.055 → ~0.042, phone 0.102 → ~0.078, against a floor of **0.01**. Four
+to eight times the floor at the worst framing.
+
+**This is arithmetic off the measured numbers, not a guard**, and it is the one
+claim in round 7 that is not proved red by mutation. It would become one by
+driving the face sweep through a rig settled at racing speed instead of a reset
+one — worth doing if the zoom depth is ever raised.
