@@ -1878,6 +1878,44 @@ require(
     'close enough to read as a photo finish every time rather than a win. Jim asked to err well on ' +
     'the easy side.',
 );
+// ...and the other end of it, because after 6 August nothing guarded that end at
+// all. The floor above says a child's win must be *visible*; this says it must
+// still be a **race**. Between them the margin is bounded on both sides, which is
+// what the retired 140 m bound used to do for a different player before it went
+// 140 → 170 → `route.length` and moved onto `mashPerfect`.
+//
+// **A bound on the *worst* seed cannot do this job, and that is measured, not
+// assumed.** `SWING_BEHIND`'s rubber band tows a far-behind rival forward, which
+// compresses exactly the number a max-bound would read. Sweeping the rivals down
+// to a quarter of their skill:
+//
+//   RIVAL_SKILL              child margin (24 seeds)      mean
+//   0.40 / 0.48 / 0.56        27.3 – 306.2 m             114.8   <- shipping
+//   0.30 / 0.36 / 0.42        64.3 – 389.9 m             219.4
+//   0.20 / 0.24 / 0.28       187.9 – 484.5 m             316.4
+//   0.10 / 0.12 / 0.14       308.0 – 529.1 m             425.4
+//
+// The max never reaches even one lap (600.2 m) however absurd the rivals get, so
+// `max(...) < route.length` — the shape the `mashPerfect` bound uses — would be a
+// guard incapable of failing here. The mean separates all four cleanly, and the
+// handoff already says so about a different question: win count is seed noise,
+// mean margin is the signal.
+//
+// Half a lap, from the game's own geometry rather than a preference, and it
+// protects something you can see: the camera holds on her for the whole
+// celebration, and a rival half a lap back is round the far side of the ring and
+// not in the picture at all. Met today at 114.8 m with 2.6x of room — the point
+// is to catch a runaway, not to pin the tuning Jim has already approved — and it
+// fires at rivals cut to half skill (316.4 m).
+const CHILD_PROCESSION_MARGIN = route.length / 2;
+require(
+  childMeanMargin < CHILD_PROCESSION_MARGIN,
+  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins by a mean of ${childMeanMargin.toFixed(1)} m on a ` +
+    `${(route.length * RACE_LAPS).toFixed(1)} m race — over the ${CHILD_PROCESSION_MARGIN.toFixed(1)} m ` +
+    'half-lap bound, so the field is half a ring behind her and off screen for the entire finish. ' +
+    'That is a procession, not a race she won. Raise RIVAL_SKILL, or lower PLAYER_BOOST_ADVANTAGE ' +
+    'in simulate.ts.',
+);
 // The one guard rail Jim left standing: *"she must still be able to lose if she
 // plays badly"*. This replaces the old `sloppyField.wins < 24`, which asserted
 // the right idea about the wrong player — `mashSloppy` taps at 6/s, so it is
