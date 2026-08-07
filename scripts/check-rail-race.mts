@@ -117,12 +117,18 @@ import {
   SEATED,
   RESULT_SECONDS,
   type RidePhase,
+  type RiderPose,
 } from '../src/world/railRace/duckPose.ts';
 import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
 import { PALETTE } from '../src/core/palette.ts';
 import { Box3, Group, Mesh, Object3D } from 'three';
+import { Player } from '../src/entities/Player.ts';
+import { CollisionWorld } from '../src/world/Collision.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import type { FrameContext } from '../src/core/types.ts';
+import type { InputSystem } from '../src/core/input/index.ts';
 
 /**
  * A bounding box over only the parts that are actually **drawn**.
@@ -946,36 +952,83 @@ say('');
   // A real cart, because the complaint was about her going through *it*.
   const rideCart = createCart(PALETTE.markerPink);
   cartGroup.add(rideCart.root);
-  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
-  cartGroup.add(kid.root);
+
+  // --- the rider is a real `Player`, driven through her real update order ----
+  //
+  // **This used to pose a bare `createKid` and it is the reason this PR was
+  // still broken behind a green build.** `poseRailRaceRider` is genuinely the
+  // single owner of `body.rotation.x` — but on the player it was not the last
+  // *writer*: `Player.update`'s riding branch runs `animate()` (where the pose
+  // is applied) and *then* `applyRidePose`, which assigned `body.rotation.x =
+  // 0.3` unconditionally. Calling the pose function directly, as this check
+  // did, skips that second write entirely — so seated / duck / boost /
+  // celebration measured 0.160 / 0.860 / 0.580 / −0.148 here while the game
+  // drew 0.300 for all four, and this file printed "clears by 0.73" about a bar
+  // that went through her head.
+  //
+  // So the rider below is a **real `Player`**, boarded the way `RailRace` boards
+  // her and posed the way `RailRace.poseRider` poses her, and every height on
+  // this page is read off the model *after* `Player.update` has finished with
+  // it. A check that cannot see the player's own pipeline cannot see the player's
+  // own bugs, however faithfully it calls the ride's functions.
+  const player = new Player(new CollisionWorld(), new IsoCamera(), new Vector3());
+  // `RailRace.requestBoard()`, in order.
+  player.beginRide();
+  player.model.root.scale.setScalar(RIDE_SCALE);
+  // Her group sits where `poseRider` puts it: on the cart's seat, at ring scale.
+  // `route.scale` for the seat and `RIDE_SCALE` for the model is not a slip — it
+  // is exactly the split the ride makes, kept so a third ring would show up here
+  // as a disagreement rather than as a silent pass.
+  const seatY = railPoint.y + SEAT_HEIGHT * route.scale;
+
+  /** A player who is aboard and pressing nothing — the riding branch reads no input. */
+  const idleInput = {
+    isDown: () => false,
+    wasPressed: () => false,
+    moveX: 0,
+    moveY: 0,
+  } as unknown as InputSystem;
+  let riderFrame = 0;
 
   /**
-   * Poses her folded by `fold` and returns the top of her head, hair included,
-   * in metres over the rail head — **and her whole body's box**, because the
+   * Poses her by `rider` and returns the top of her head, hair included, in
+   * metres over the rail head — **and her whole body's box**, because the
    * complaint that started this was not about her head at all.
    *
-   * `poseRailRaceRider` is the ride's own function, not a copy of it: a check that
-   * re-created the pose would prove only that two copies of the arithmetic
-   * agree with each other while she folded through the floor in the game.
+   * Everything here is the game's own: `RailRace.poseRider` sets the pose field
+   * and the root's place, then `Player.update` runs the whole animation
+   * pipeline over it. Nothing re-creates a pose — a check that re-created one
+   * would prove only that two copies of the arithmetic agree with each other
+   * while she folded through the floor in the game.
    */
   const pose = (
     rider: { duck: number; pump: number; cheer: number },
   ): { headTop: number; headAt: Vector3; headDepth: number; body: Box3 } => {
-    // Seat her **first**, then fold — this order is load-bearing. Posing first
-    // and seating afterwards would quietly undo any translation `poseRailRaceRider`
-    // performed, so the "root is still on the seat" assertion below would be
-    // asserting the line above it rather than the thing it names. That is the
-    // hollow-check disease this whole PR keeps running into.
-    kid.root.position.y = SEAT_HEIGHT;
-    poseRailRaceRider(kid, rider);
-    cartGroup.updateMatrixWorld(true);
+    // Seat her **first**, then pose — this order is `poseRider`'s and it is
+    // load-bearing. Posing first and seating afterwards would quietly undo any
+    // translation the pose performed, so the "root is still on the seat"
+    // assertion below would be asserting the line above it rather than the
+    // thing it names. That is the hollow-check disease this whole PR keeps
+    // running into.
+    player.setRidePose(railPoint.x, seatY, railPoint.z, 0, 0);
+    player.railRaceRide = rider;
+    player.update({
+      dt: 1 / 60,
+      elapsed: 1,
+      input: idleInput,
+      playerPosition: player.position,
+      cameraForward: new Vector3(0, 0, 1),
+      frame: riderFrame++,
+    } satisfies FrameContext);
+    player.group.updateMatrixWorld(true);
+    const head = player.model.head;
     return {
-      headTop: new Box3().setFromObject(kid.head).max.y - railPoint.y,
-      headAt: kid.head.getWorldPosition(new Vector3()),
-      // Along the track: the cart group is positioned and scaled but never
+      headTop: new Box3().setFromObject(head).max.y - railPoint.y,
+      headAt: head.getWorldPosition(new Vector3()),
+      // Along the track: the rider's group is positioned and scaled but never
       // rotated here, so the model's own forward is world +Z.
-      headDepth: new Box3().setFromObject(kid.head).getSize(new Vector3()).z,
-      body: visibleBox(kid.root),
+      headDepth: new Box3().setFromObject(head).getSize(new Vector3()).z,
+      body: visibleBox(player.model.root),
     };
   };
 
@@ -983,7 +1036,7 @@ say('');
   // is measured below is what a family can actually see. Measuring hidden legs
   // would fail the ride for clipping nobody will ever witness, and would miss
   // a torso that really did go through the floor.
-  setRiderLegsVisible(kid, false);
+  setRiderLegsVisible(player.model, false);
 
   const uprightPose = pose({ duck: 0, pump: 0, cheer: 0 });
   const duckedPose = pose({ duck: 1, pump: 0, cheer: 0 });
@@ -1043,11 +1096,17 @@ say('');
       'railRace/duckPose.ts.',
   );
   // ...and the fold must be a fold. A pose that got its clearance by sliding
-  // the whole child down would leave the root somewhere other than the seat.
+  // the whole child down would leave her somewhere other than the seat — either
+  // by moving the model's own root, or by moving the group `setRidePose` put on
+  // the seat. Both are checked, because either would be the translation Jim
+  // rejected and only one of them is where the old bug lived.
   require(
-    Math.abs(kid.root.position.y - SEAT_HEIGHT) < 1e-6,
-    `the duck pose moved the rider's root to ${kid.root.position.y.toFixed(3)} instead of leaving ` +
-      `it on the seat at ${SEAT_HEIGHT} — that is a translation, not a duck.`,
+    Math.abs(player.model.root.position.y) < 1e-6 &&
+      Math.abs(player.group.position.y - seatY) < 1e-6,
+    `the duck pose moved the rider off the seat — model root at ` +
+      `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
+      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)}. That is a ` +
+      'translation, not a duck.',
   );
 
   // --- the boost rock, the win jump, and the two of them meeting a duck ------
@@ -1078,6 +1137,55 @@ say('');
   const pumpedPose = pose({ duck: 0, pump: 1, cheer: 0 });
   const cheeringPose = pose({ duck: 0, pump: 0, cheer: cheerPeak });
   const duckPumpPose = pose({ duck: 1, pump: 1, cheer: 0 });
+
+  // --- ONE OWNER, AND THAT OWNER IS THE LAST WRITER --------------------------
+  //
+  // **The bug this whole PR exists to fix hid behind a green build for three
+  // days, and this is the assertion that would have caught it on day one.**
+  //
+  // `poseRailRaceRider` is the single owner of `body.rotation.x` — that much was
+  // true and was checked. What nobody checked is that it is the last thing to
+  // *write* it. `Player.update`'s riding branch ran `animate()` (which ends by
+  // applying the pose) and then `applyRidePose`, which assigned
+  // `body.rotation.x = RIDE_POSE_BODY_PITCH` unconditionally. So the owner wrote
+  // 0.160 / 0.860 / 0.580 / −0.148 for seated / duck / boost / celebration, and
+  // the screen showed **0.300 for all four**: the waist fold, the boost rock and
+  // the celebration lean were invisible for the player, every frame, and only
+  // the squash and the hip drop survived — 0.42 m of duck against the 0.73 m the
+  // clearance is sized for, so the duck bar went through her head *while she was
+  // ducking* and the line above printed "clears by 0.73".
+  //
+  // "One owner" is therefore not a property of a module; it is a property of an
+  // **order**, and an order can only be checked by running it. So this compares
+  // what the real `Player` ends up drawing against what the owner asked for on a
+  // bare kid — two numbers from genuinely different places, neither able to
+  // satisfy the other. Any fourth claimant assigning to the body after the pose
+  // fires it, whatever it is called and however well-meant.
+  const reference = createKid({ outfit: 0xffffff, hairStyle: 'short' });
+  const POSE_STATES: readonly { readonly name: string; readonly rider: RiderPose }[] = [
+    { name: 'seated', rider: SEATED },
+    { name: 'duck', rider: { duck: 1, pump: 0, cheer: 0 } },
+    { name: 'boost', rider: { duck: 0, pump: 1, cheer: 0 } },
+    { name: 'celebration', rider: { duck: 0, pump: 0, cheer: cheerPeak } },
+  ];
+  const poseReport: string[] = [];
+  for (const state of POSE_STATES) {
+    pose(state.rider);
+    poseRailRaceRider(reference, state.rider);
+    const drawn = player.model.body.rotation.x;
+    const asked = reference.body.rotation.x;
+    poseReport.push(`${state.name} ${drawn.toFixed(3)}`);
+    require(
+      Math.abs(drawn - asked) < 1e-6,
+      `the player's '${state.name}' pose never reaches the screen: poseRailRaceRider asks for ` +
+        `body.rotation.x = ${asked.toFixed(3)} and Player.update leaves it at ` +
+        `${drawn.toFixed(3)}. Something writes the body AFTER the pose does — check the order in ` +
+        'Player.update/Player.animate. The owner of a property has to be its last writer, and ' +
+        'the answer is never a fourth writer to patch over the third.',
+    );
+  }
+  say(`pose drawn   ${poseReport.join('   ')}   (as poseRailRaceRider asked)`);
+  reference.dispose?.();
 
   const rockThrow = pumpedPose.headAt.distanceTo(uprightPose.headAt);
   const cheerLift = cheeringPose.headTop - uprightPose.headTop;
@@ -1126,9 +1234,12 @@ say('');
       `cart's tub floor at ${tubFloor.toFixed(2)}.`,
   );
   require(
-    Math.abs(kid.root.position.y - SEAT_HEIGHT) < 1e-6,
-    `the celebration moved the rider's root to ${kid.root.position.y.toFixed(3)} instead of leaving ` +
-      `it on the seat at ${SEAT_HEIGHT} — the ride never moves the root.`,
+    Math.abs(player.model.root.position.y) < 1e-6 &&
+      Math.abs(player.group.position.y - seatY) < 1e-6,
+    `the celebration moved the rider off the seat — model root at ` +
+      `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
+      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)} — the ride ` +
+      'never moves the root.',
   );
 
   // **Boosting while ducking.** A child will hold boost under a bar — keyboard
@@ -1228,18 +1339,18 @@ say('');
     racing: false,
     finishing: true,
   };
-  poseRailRaceRider(kid, SEATED);
-  const legParts = [kid.limbs?.leftLeg ?? kid.leftLeg, kid.limbs?.rightLeg ?? kid.rightLeg];
+  pose(SEATED);
+  const legParts = [player.model.leftLeg, player.model.rightLeg];
   require(
     legParts.every((part) => part !== undefined && part !== null),
     'the rider has no legs to show or hide, so everything below this line is vacuous.',
   );
   const legReport: string[] = [];
   for (const phase of PHASES) {
-    setRiderLegsVisible(kid, riderLegsShow(phase));
-    cartGroup.updateMatrixWorld(true);
+    setRiderLegsVisible(player.model, riderLegsShow(phase));
+    player.group.updateMatrixWorld(true);
     const drawn = legParts.every((part) => part?.visible === true);
-    const reach = visibleBox(kid.root).min.y;
+    const reach = visibleBox(player.model.root).min.y;
     legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
     require(
       drawn === WANT_LEGS[phase],
@@ -1256,14 +1367,14 @@ say('');
     );
   }
   const legsRacing = (() => {
-    setRiderLegsVisible(kid, riderLegsShow('racing'));
-    cartGroup.updateMatrixWorld(true);
-    return visibleBox(kid.root).min.y;
+    setRiderLegsVisible(player.model, riderLegsShow('racing'));
+    player.group.updateMatrixWorld(true);
+    return visibleBox(player.model.root).min.y;
   })();
   const legsWinning = (() => {
-    setRiderLegsVisible(kid, riderLegsShow('finishing'));
-    cartGroup.updateMatrixWorld(true);
-    return visibleBox(kid.root).min.y;
+    setRiderLegsVisible(player.model, riderLegsShow('finishing'));
+    player.group.updateMatrixWorld(true);
+    return visibleBox(player.model.root).min.y;
   })();
   say(`legs         ${legReport.join('   ')}`);
   say(
@@ -1335,7 +1446,7 @@ say('');
       "stepRider's `if (rider.finished)` return.",
   );
 
-  kid.dispose?.();
+  player.dispose();
 }
 
 // --- can you actually SEE her face? ------------------------------------------
