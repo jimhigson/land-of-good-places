@@ -6,7 +6,10 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToPath } from '../paths';
 import { terrainHeight } from '../terrain';
-import { cruiserCrossesColumn, insideCastle } from './plan';
+// `./solve`, not `./plan`: these two are plan-view geometry helpers, and
+// importing them has no business triggering the three-and-a-half-second solve
+// that `plan.ts` runs to initialise `SLIDE_PLAN`. See `slide/plan.ts`.
+import { cruiserCrossesColumn, insideCastle } from './solve';
 
 /**
  * **Legs to stand the ginormous slide on.**

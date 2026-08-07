@@ -426,7 +426,32 @@ interface Sample {
   readonly s: number;
 }
 
-export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
+/**
+ * **The search, as a generator — one route, solved a slice at a time.**
+ *
+ * Identical to {@link solveRailRoute} in every respect except that it suspends
+ * at each joint and at the top of each attempt, so a caller with a frame budget
+ * can advance it a little and come back. {@link solveRailRoute} is nothing but a
+ * loop that drives this to completion, which is what keeps the two from ever
+ * being two searches.
+ *
+ * ### Why the yields cannot move the route
+ *
+ * The whole search lives in this function's own locals — the `Rng`, the
+ * counters, the accepted pieces, the grid. Suspending a generator preserves all
+ * of that untouched and resumes at the same statement, so **the sequence of
+ * `rng` draws is the same sequence, in the same order, whatever cadence the
+ * caller advances it at.** There is no clock, no `await` and no shared state to
+ * interleave with; a yield here is exactly as inert as a semicolon.
+ *
+ * That is an argument, and this repo does not ship arguments. `check:park-boot`
+ * solves the ginormous slide **both ways in one process** and compares a hash of
+ * 4000 sampled points: same route, or red.
+ *
+ * The value yielded is the index of the attempt in progress, purely so a driver
+ * can say how far along it is. Nothing reads it to make a decision.
+ */
+export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRailRoute, void> {
   const started = Date.now();
   const rng = new Rng(brief.seed);
 
@@ -469,6 +494,11 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
   const restartLimit = Math.min(brief.budgets.restarts, attempts.length);
 
   for (let startIndex = 0; startIndex < restartLimit; startIndex += 1) {
+    // The coarse suspension point: one whole attempt is the natural unit of
+    // work, and on the slide's brief one costs tens of milliseconds — too long
+    // for a frame on its own, which is why there is a second one at each joint
+    // below.
+    yield startIndex;
     restarts = startIndex;
     const attempt = attempts[startIndex];
     if (!attempt) continue;
@@ -814,6 +844,12 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
     let steps = 0;
 
     while (alive) {
+      // The fine suspension point. A joint — shortlist sixteen candidates,
+      // validate each, take one or back up — is the smallest piece of this
+      // search that leaves the route in a coherent state, and it is well under
+      // a millisecond. Yielding here is what lets a caller stop inside an
+      // attempt rather than being committed to all of it.
+      yield startIndex;
       steps += 1;
       if (steps > stepLimit) break;
 
@@ -990,6 +1026,29 @@ export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
       `${rejected.selfClearance} self-clearance, ${rejected.curvature} curvature.`,
     report,
   );
+}
+
+/**
+ * Solves a rail route, start to finish, right now.
+ *
+ * **The only entry point the park's own generation uses**, and deliberately
+ * still synchronous: every ride's route is solved at module load, before a
+ * scene object exists, because `paths.ts` needs each ride's exit to build the
+ * walk graph. See this file's own header.
+ *
+ * It is a driver over {@link railRouteSearch} rather than a second copy of the
+ * search, so "the route the game builds" and "the route the loading screen
+ * solves a slice at a time" cannot be two different routes — there is one
+ * search and two cadences. A `throw` propagates out of `next()` exactly as it
+ * would from a plain call, so {@link RailRouteUnsolvable} still reaches the
+ * caller unchanged.
+ */
+export function solveRailRoute(brief: RouteBrief): SolvedRailRoute {
+  const search = railRouteSearch(brief);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 /**
