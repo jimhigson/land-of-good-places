@@ -190,3 +190,24 @@ It confirms the geometry (the walk goes round the bus's nose, she lands on
    one, but this is unverified.
 5. Does the door read as opening on the shelter side, and does walking round
    the nose look deliberate rather than like a bug?
+
+## Two things verified by reading, worth not re-deriving
+
+- **"Start again" does not carry a stale flag.** `saveFlags.hydrate` is called
+  in exactly one place (`main.ts:224`, inside `continueGame`). The
+  `onStartAgain` path never hydrates, so `saveFlags` stays at its module
+  defaults and `arrivedByBus` is false — a brand-new character always gets the
+  arrival, a continued save never does. Both directions correct on the real
+  boot path.
+- **Quitting mid-arrival replays it**, correctly: `markArrived()` only fires at
+  hand-over. The autosave may record her position inside the bus, but the
+  arrival overrides the restored spawn on the next boot.
+
+## Known caveat, deliberately not fixed in Stage A
+
+**The bus has no collision.** For the 3.2 s of `departing` she has the controls
+while a solid-looking bus is still there and walk-through-able. `CollisionWorld`
+is built once from static circles and has no removal, so a moving collider is
+not a small change. Low risk — she is handed control beside a bus that is
+already leaving, so she has to chase it — but it is real, and a child might.
+Worth doing properly if Stage B gives the bus a longer on-screen life.
