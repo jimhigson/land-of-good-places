@@ -594,7 +594,7 @@ export class RailRace implements GameSystem {
    * The player rides as herself: her own hair colour off the save, exactly as
    * the dodgems do it, so the head at the top of the screen is recognisably
    * hers. Accents come from `LANE_COLOURS`, the same array that paints the
-   * rails, the carts and the droppers, so "my colour" is one fact from the
+   * rails and the carts, so "my colour" is one fact from the
    * rail under her all the way up to the portrait in the corner.
    */
   private racers(): RaceRacer[] {

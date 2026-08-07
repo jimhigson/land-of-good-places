@@ -418,7 +418,18 @@ export class Coaster implements GameSystem {
     pylons.count = pylonSpots.length;
     const stretch = new Vector3();
     pylonSpots.forEach((spot, index) => {
-      position.set(spot.x, spot.ground + spot.height / 2 - 0.15, spot.z);
+      // Top at `ground + height` exactly, which `pylons.ts` derives as
+      // `route.pointAt(d).y` — **the middle of the track**, the same rule the
+      // Rail Race's branches now end on.
+      //
+      // This used to subtract 0.15, sinking the top below the centre line.
+      // Measured off the built scene on 7 August, that left the tops 0.131 to
+      // 0.152 m under the track while the ties occupy 0.08–0.16 m below it: an
+      // overlap of about a centimetre at best, and at the far end of the range
+      // no overlap at all. A support whose contact with what it carries is
+      // measured in millimetres and varies by pylon is not joined on purpose —
+      // it is joined by luck, which is the fault Jim reported on the Rail Race.
+      position.set(spot.x, spot.ground + spot.height / 2, spot.z);
       stretch.set(1, spot.height, 1);
       matrix.compose(position, rotation.identity(), stretch);
       pylons.setMatrixAt(index, matrix);

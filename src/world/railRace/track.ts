@@ -39,7 +39,6 @@ import {
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BRANCH_TAPER,
-  DROPPER_RADIUS,
   forkPlan,
   POST_FOOT_RADIUS,
   POST_TOP_RADIUS,
@@ -118,10 +117,20 @@ export const DUCKBAR_PARTS = ['post', 'bar'] as const;
 export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
 /**
- * How far under the lowest a rail ever gets the trestle's four tops sit.
+ * The notional deck the fork plan is **solved against** — how far under the
+ * lowest a rail ever gets it sits.
  *
- * Tightened from 0.45 on 7 August: it is pure visual gap, and every centimetre
- * of it is a centimetre of dropper.
+ * Since 7 August this is no longer a plane anything is built on. The branches
+ * end at their own lane's middle (`trestleGeometry.ts`'s note on that ruling),
+ * so nothing is level any more. What survives is this height's *other* job:
+ * `forkPlan` needs one post height to solve the fork angle from, and taking the
+ * lowest the track ever gets is what keeps that angle **exactly** what it was
+ * before the change — the walk-past ring's 30.0° and the race ring's 41.6°,
+ * both of which Jim has settled and neither of which this work may move.
+ *
+ * It is deliberately the conservative choice: every real branch now rises to a
+ * lane at or above this, so every trunk is at least as long as the plan assumed
+ * and `MIN_TRUNK_FRACTION` is honoured with room to spare.
  */
 const BEAM_DROP = 0.2;
 
@@ -156,7 +165,7 @@ export interface RailRaceTrack {
    * the black-stretch plate and the duck-bar meshes, and repaints the rails'
    * own resting vertex colours (black over every live zone — see
    * `paintRestingRailColours`), once, when
-   * `RailRace.chooseLevel` fires. The trestle legs, beams and droppers are
+   * `RailRace.chooseLevel` fires. The trestle legs and branches are
    * never touched here — they carry the rails at every level, not just the
    * ones with hazards on them.
    */
@@ -697,8 +706,8 @@ export function buildRailRaceTrack(
   // --- the trestles ----------------------------------------------------------
   const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
 
-  // One colour for the whole support tree — trunk, both generations of branch
-  // and the droppers — which is Jim's "the supports can all be one colour that
+  // One colour for the whole support tree — trunk and both generations of
+  // branch — which is Jim's "the supports can all be one colour that
   // doesn't clash with the track itself, such as grey".
   //
   // Grey, but **not** a neutral one. `ART.statueStone`'s own doc comment is the
@@ -733,11 +742,9 @@ export function buildRailRaceTrack(
     1,
     8,
   );
-  const dropperGeometry = new CylinderGeometry(DROPPER_RADIUS, DROPPER_RADIUS, 1, 6);
   keep(legGeometry);
   keep(lowerBranchGeometry);
   keep(upperBranchGeometry);
-  keep(dropperGeometry);
 
   const legs = new InstancedMesh(legGeometry, trestleMaterial, Math.max(1, spots.length));
   // Two lower branches and four upper ones per trestle. Two meshes rather than
@@ -752,18 +759,6 @@ export function buildRailRaceTrack(
     trestleMaterial,
     Math.max(1, spots.length * LANE_COUNT),
   );
-  const droppers = new InstancedMesh(
-    dropperGeometry,
-    trestleMaterial,
-    // Two per lane, not one — see the placement loop below.
-    Math.max(1, spots.length * LANE_COUNT * 2),
-  );
-  // Half the gauge of *this* ring, matching `sweptRails`' own convention
-  // (`sweptRail.ts` sweeps its pair at `side * gauge * 0.5` along the same
-  // outward axis `outwardAt` gives us), so a dropper lands under a rail rather
-  // than near one.
-  const dropperHalfGauge = railGauge * 0.5;
-  let dropperIndex = 0;
   let lowerIndex = 0;
   let upperIndex = 0;
 
@@ -799,26 +794,39 @@ export function buildRailRaceTrack(
     const postHeight = beamY - ground;
     const plan = forkPlan(postHeight, route.laneSpacing);
 
-    // Where each lane wants carrying, taken from `route.pointAt` — the same
-    // owner the droppers below take their feet from, so a branch top and the
-    // dropper standing on it cannot drift apart. Only the *height* is this
-    // file's: all four tops are level, at `beamY`, which is what makes the
-    // droppers above them the only thing tracking the rails' undulation.
+    // **A branch top is the middle of the lane it carries** — the whole point of
+    // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
+    // flattened onto a plane. One owner: this is the same call the rails
+    // themselves are swept from, so a branch cannot end up anywhere but on the
+    // track's own centre line.
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, spot.at, point);
-      laneTops[lane]!.set(point.x, beamY, point.z);
+      laneTops[lane]!.copy(route.pointAt(lane, spot.at, point));
     }
     // A fork node sits under the midpoint of the pair it carries, and the trunk
-    // under the midpoint of the two fork nodes — derived from the tops rather
-    // than from `spot`, which `trestleSpots` may have nudged sideways to find
-    // clear ground.
+    // under the midpoint of the two fork nodes — horizontally derived from the
+    // tops rather than from `spot`, which `trestleSpots` may have nudged
+    // sideways to find clear ground.
+    //
+    // The *height* is measured down from the *lowest* of what each node carries,
+    // never the mean. That is what stops "different branches reach different
+    // heights" turning into a branch lying nearly flat: the lower of a pair then
+    // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
+    // partner — whose lane is higher — is steeper. The solved angle is the
+    // widest the fork can ever open, in one direction only. See
+    // `trestleGeometry.ts` for the measured lane spread (up to 4.38 m across the
+    // four, 3.02 m within one pair) that makes this necessary.
     for (let half = 0; half < 2; half += 1) {
+      const a = laneTops[half * 2]!;
+      const b = laneTops[half * 2 + 1]!;
       forkNodes[half]!
-        .copy(laneTops[half * 2]!)
-        .lerp(laneTops[half * 2 + 1]!, 0.5)
-        .setY(beamY - plan.upper);
+        .copy(a)
+        .lerp(b, 0.5)
+        .setY(Math.min(a.y, b.y) - plan.upper);
     }
-    trunkTop.copy(forkNodes[0]!).lerp(forkNodes[1]!, 0.5).setY(beamY - plan.fork);
+    trunkTop
+      .copy(forkNodes[0]!)
+      .lerp(forkNodes[1]!, 0.5)
+      .setY(Math.min(forkNodes[0]!.y, forkNodes[1]!.y) - plan.lower);
     // The foot, though, stands exactly where the clear ground was found — so a
     // nudged trestle leans very slightly rather than planting itself in whatever
     // the nudge was avoiding.
@@ -832,34 +840,6 @@ export function buildRailRaceTrack(
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       strut(upperBranches, upperIndex, forkNodes[Math.floor(lane / 2)]!, laneTops[lane]!);
       upperIndex += 1;
-    }
-
-    // One dropper under each *rail*, so two per lane — not one on the lane's
-    // centre line. `RAIL_GAUGE_AT_PARK_SCALE` is 0.62 m, which `RIDE_SCALE`
-    // (2.5) takes to 1.55 m on the race ring: a single centre post stands
-    // three quarters of a metre clear of either rail and visibly holds up
-    // nothing, which is what the family reported on 1 August as "the supports
-    // don't look real". Reported in PR #157; that PR's other half — the ring
-    // flying on four legs — was fixed separately by `trestleSpots`' nudge
-    // search, but this half was never landed.
-    //
-    // `strut` above leaves `rotation` pointing along whichever branch it placed
-    // last, so re-establish the across-the-ring frame the droppers want.
-    rotation.setFromUnitVectors(ACROSS, outward);
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, spot.at, point);
-      const length = point.y - beamY;
-      for (const side of [-1, 1] as const) {
-        position.set(
-          point.x + outward.x * side * dropperHalfGauge,
-          beamY + length / 2,
-          point.z + outward.z * side * dropperHalfGauge,
-        );
-        scale.set(ringSizeVsRace, length, ringSizeVsRace);
-        matrix.compose(position, rotation, scale);
-        droppers.setMatrixAt(dropperIndex, matrix);
-        dropperIndex += 1;
-      }
     }
 
     // A post is a thing a child can walk into — on the ring that is actually
@@ -876,15 +856,13 @@ export function buildRailRaceTrack(
   legs.count = spots.length;
   lowerBranches.count = lowerIndex;
   upperBranches.count = upperIndex;
-  droppers.count = dropperIndex;
   // Named so `test/procgen/invariants.ts` can find the legs in the built scene
   // and measure where they actually landed, rather than re-deriving the rules
   // that placed them.
   legs.name = 'railRace:trestle-legs';
   lowerBranches.name = 'railRace:trestle-branches-lower';
   upperBranches.name = 'railRace:trestle-branches-upper';
-  droppers.name = 'railRace:trestle-droppers';
-  for (const mesh of [legs, lowerBranches, upperBranches, droppers]) {
+  for (const mesh of [legs, lowerBranches, upperBranches]) {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.castShadow = true;
     group.add(mesh);
@@ -1243,7 +1221,7 @@ const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
  * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
  * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
  * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
- * beside the droppers hanging down from the actual rails (drawn, correctly,
+ * beside the branch tops standing under the actual rails (drawn, correctly,
  * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
  * the trestle loop above), not under them.
  *

@@ -335,7 +335,7 @@ export class RingPath {
    * {@link TANGENT_WINDOW}.
    *
    * Only `railRace/camera.ts` should call this. Everything that draws or
-   * collides — rails, sleepers, droppers, lanes, duck bars — wants
+   * collides — rails, sleepers, branches, lanes, duck bars — wants
    * {@link sampleAt}, because those must sit exactly where the ring is, and
    * this deliberately does not.
    *

@@ -40,28 +40,59 @@ export const LEGACY_LEG_FOOT_RADIUS = 0.34;
  */
 export const BRANCH_TAPER = 0.62;
 
-/**
- * A dropper is the **next generation of branch**, not a wire.
+/*
+ * **A branch ends at the middle of the lane it carries. There is nothing above
+ * it.**
  *
- * The eight droppers of a trestle bridge the last stretch between its four level
- * tops and the rails, which undulate +/-2.95 m about the base — so they are up to
- * ~5.9 m long, and at the 0.08 m they were built at in #223 they read as a
- * curtain of threads hanging under the track. Seen in the game on 7 August, next
- * to the new chunky posts, they were the thinnest thing left on the ride and so
- * the thing Jim's "far too thin" now landed on.
+ * This is Jim's ruling of 7 August 2026, and it replaces a shape that did not
+ * hold the track up:
  *
- * Written as the taper carried one generation past the upper branch rather than
- * as a fresh number, so a dropper is exactly as thick as the branch tip it hangs
- * from and the two cannot drift apart. That is 0.52 * 0.62^3 = 0.124 m.
+ * > *"actually the track supports don't even join to the track"*
+ * > *"just make the branches terminate at the middle of the track — the
+ * > different branches can all reach different heights"*
+ * > *"that vertical section of supports under the rail ride isn't needed"*
  *
- * The tops stay level and the droppers stay two-per-lane. Level, because each
- * lane's rail undulates on its **own** phase (`route.ts`'s `undulation` rotates
- * by `lane * LANE_ROTATION`), so branches reaching their own lane's rail height
- * would swing between near-vertical and near-horizontal from one trestle to the
- * next. Two per lane, because #223 landed that after the family reported one on
- * the lane's centre line as "the supports don't look real".
+ * ## What was wrong, measured
+ *
+ * Until now a trestle's four tops were all **level**, at a `beamY` plane below
+ * the lowest the rails ever get, and eight 0.124 m *droppers* carried on from
+ * there to the rails. Measured off the built scene on the canonical seed, the
+ * chunky part of the tree finished **0.58 m to 4.30 m short** of the middle of
+ * the lane above it. The droppers did touch — they landed exactly half a rail
+ * gauge either side of the lane centre — but at an eighth of the trunk's
+ * thickness, what a rider sees is a solid tree stopping in mid-air with threads
+ * going on above it. Both of Jim's notes describe that one picture.
+ *
+ * So the droppers are **deleted**, not thinned or thickened, and the branch runs
+ * the whole way. One member from fork to track: there is no second piece that
+ * has to be positioned by a formula tracking the first (CLAUDE.md, *"two
+ * definitions of one thing, kept in step by hand"*).
+ *
+ * ## Why the tops were level, and what replaces that reason
+ *
+ * The level plane was not arbitrary. Each lane undulates on its **own** phase
+ * (`route.ts`'s `undulation` rotates by `lane * LANE_ROTATION`), so at one
+ * station the four lanes stand at four different heights — measured on the built
+ * ring, spread up to **4.38 m** across the four, and up to **3.02 m** between the
+ * two lanes of a single pair. Hanging all four branches from one level fork
+ * would therefore swing a branch between near-vertical and near-horizontal, which
+ * is exactly what the old comment here predicted and why it kept the tops level.
+ *
+ * Jim's *"the different branches can all reach different heights"* is the
+ * permission that dissolves it, but the permission alone is not a design. The
+ * design is {@link forkPlan}'s drop being measured **down from the lowest lane a
+ * fork carries**, not from a plane and not from the pair's mean:
+ *
+ * - the shallower of the two branches gets exactly the solved drop, so it makes
+ *   exactly the solved angle;
+ * - the other one is *steeper*, never shallower, because its lane is higher.
+ *
+ * The solved angle therefore becomes the **widest the fork ever opens**, rather
+ * than an angle it can miss in either direction. A branch reaching a higher lane
+ * is simply longer and more upright, which reads as the structure following the
+ * track — and nothing ever goes near horizontal. That is a stronger property
+ * than the old code had, and it is what the invariant asserts.
  */
-export const DROPPER_RADIUS = POST_TOP_RADIUS * BRANCH_TAPER ** 3;
 
 /**
  * The angle a branch wants to make with whatever it split from — Jim's "~30º",
