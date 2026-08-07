@@ -41,6 +41,29 @@ export const LEGACY_LEG_FOOT_RADIUS = 0.34;
 export const BRANCH_TAPER = 0.62;
 
 /**
+ * A dropper is the **next generation of branch**, not a wire.
+ *
+ * The eight droppers of a trestle bridge the last stretch between its four level
+ * tops and the rails, which undulate +/-2.95 m about the base — so they are up to
+ * ~5.9 m long, and at the 0.08 m they were built at in #223 they read as a
+ * curtain of threads hanging under the track. Seen in the game on 7 August, next
+ * to the new chunky posts, they were the thinnest thing left on the ride and so
+ * the thing Jim's "far too thin" now landed on.
+ *
+ * Written as the taper carried one generation past the upper branch rather than
+ * as a fresh number, so a dropper is exactly as thick as the branch tip it hangs
+ * from and the two cannot drift apart. That is 0.52 * 0.62^3 = 0.124 m.
+ *
+ * The tops stay level and the droppers stay two-per-lane. Level, because each
+ * lane's rail undulates on its **own** phase (`route.ts`'s `undulation` rotates
+ * by `lane * LANE_ROTATION`), so branches reaching their own lane's rail height
+ * would swing between near-vertical and near-horizontal from one trestle to the
+ * next. Two per lane, because #223 landed that after the family reported one on
+ * the lane's centre line as "the supports don't look real".
+ */
+export const DROPPER_RADIUS = POST_TOP_RADIUS * BRANCH_TAPER ** 3;
+
+/**
  * The angle a branch wants to make with whatever it split from — Jim's "~30º",
  * twice over.
  *

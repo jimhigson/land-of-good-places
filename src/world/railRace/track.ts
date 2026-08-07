@@ -39,6 +39,7 @@ import {
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BRANCH_TAPER,
+  DROPPER_RADIUS,
   forkPlan,
   POST_FOOT_RADIUS,
   POST_TOP_RADIUS,
@@ -116,8 +117,13 @@ const ARCH_SHOULDER_ROOM = 2.4;
 export const DUCKBAR_PARTS = ['post', 'bar'] as const;
 export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
-/** How far under the lowest a rail ever gets the trestle's four tops sit. */
-const BEAM_DROP = 0.45;
+/**
+ * How far under the lowest a rail ever gets the trestle's four tops sit.
+ *
+ * Tightened from 0.45 on 7 August: it is pure visual gap, and every centimetre
+ * of it is a centimetre of dropper.
+ */
+const BEAM_DROP = 0.2;
 
 export interface RailRaceTrack {
   readonly group: Group;
@@ -727,7 +733,7 @@ export function buildRailRaceTrack(
     1,
     8,
   );
-  const dropperGeometry = new CylinderGeometry(0.08, 0.08, 1, 6);
+  const dropperGeometry = new CylinderGeometry(DROPPER_RADIUS, DROPPER_RADIUS, 1, 6);
   keep(legGeometry);
   keep(lowerBranchGeometry);
   keep(upperBranchGeometry);
