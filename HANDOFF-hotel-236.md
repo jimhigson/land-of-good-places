@@ -5,7 +5,15 @@ Scope set by Jim: build the hotel to delivery; fold in #241 (the hotel
 needs the space); every hotel room its OWN disjoint space; all new hotel
 art Blender-authored by an Opus artist agent (done — HANDOFF-hotel-art.md).
 
-## State: feature-complete, verification in flight
+## State: DELIVERED — PR #247 open, reviewer dispatched
+
+PR: https://github.com/jimhigson/land-of-good-places/pull/247
+npm run build EXIT 0 (full battery) · test:procgen green all seeds ·
+check:park zero deviations (canonical, 2, 5, 18; seed 11's one dropped
+lawn waypoint documented below). One reviewer agent posting a comment
+verdict on the PR (Jim's one-review rule). DO NOT MERGE — Jim reviews.
+
+## Earlier state (for the record)
 
 - [x] #241 placement reform (3 commits: unpin+boundary fit+spread; cruiser
       first / train threads its published low corridor; doormats obey the
