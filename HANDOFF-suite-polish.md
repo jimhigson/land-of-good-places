@@ -81,7 +81,30 @@ Committed and pushed on fix/suite-polish:
   0.186–0.274. Suite floor → stonePink (0.27), breakfast → pathSandDark
   (0.31). Needs screenshot judgement in QA.
 
-## Item 4 plan (in progress)
+## Item 4 — DONE (7a45fe4 + 3347f41)
+
+Browser QA found two things the first cut got wrong, both fixed and both
+now owned by checks:
+- pan by the hall doorway was invisible (east partition sight shadow) →
+  pan mid-room on its mat at (−7.8, 4.6);
+- a phone tap in the bathroom doorway SELECTED the pan instead of walking
+  (Jim's original mobile bug shape) → the doorway moved to the lounge side
+  (door at z 2.9 in the z-run), became a real PortalBand (kind 'room-door',
+  derived from partition data, enforced by check:tap-spacing), pan pick
+  1.8, and the west pane is light-only (WindowWall.lookZone: false).
+
+QA evidence in scratchpad: sp-*.png (suite wide, partition west, bathroom
+from hall / roof on / flush / wash-lifted, bedroom, breakfast),
+sp-phone-*.png (390x844 taps: doorway tap walks 2.13 m through; pan tap
+raises the sign), sp-journey-*.png (real play: check-in E → key → walked
+east through the yours door → hall clear door-to-far-end).
+Roof telemetry: covered while inside, visible=false after wash beat.
+
+Final gates: check:hotel OK, check:tap-spacing OK, test:procgen 270/270
+zero skips, full npm run build re-running at time of writing (first full
+run on dd79257-era code exited 0).
+
+## Old plan (superseded)
 
 Bathroom = suite SW: rect clearFloorAround(SUITE, −7.6, 4.8) →
 x −10.8..−4.4, z 1.9..7.8. Door off the hall at x=−7.6 (already in data).
