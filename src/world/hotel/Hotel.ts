@@ -28,6 +28,7 @@ import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
 import { interiorMaterial, softMaterial } from '../building/parts';
+import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import { toonMaterial, solid, decal, inkTint } from '../../art/style/materials';
 import {
   BED_MATTRESS_TOP,
@@ -1847,29 +1848,40 @@ export class Hotel implements GameSystem {
       const along = side === 'north' || side === 'south' ? 'x' : 'z';
       const from = along === 'x' ? x1 : z1;
       const to = along === 'x' ? x2 : z2;
-      const spans: [number, number][] = gap
-        ? [
-            [from, gap[0]],
-            [gap[1], to],
-          ]
-        : [[from, to]];
+      // The shared span arithmetic — `world/wallRuns.ts`, the same owner the
+      // castle's storeys use.
+      const spans = segmentsMinusGaps(from, to, gap ? [gap] : []);
       // Every pane this side declares, clipped to the wall's own solid spans
       // below — so a window can never end up floating across a doorway, and
-      // `layout.ts` never has to repeat where the doorways are.
+      // `layout.ts` never has to repeat where the doorways are. Panes clip to
+      // the *logical* spans, never the corner-closed ones — a pane slid past
+      // the room's half-extent would glaze the inside of a corner pillar.
       this.glazeWall(shell, room, side, spans);
 
-      for (const [a, b] of spans) {
+      // North and south take the corners; east and west butt between them —
+      // `wallRuns.ts`'s rule. Before this, all four walls stopped at the
+      // room's half-extent (the perpendicular wall's centre line), leaving an
+      // empty see-through column half a wall square at every outer corner:
+      // Jim's "the walls don't abut each other properly". Only the drawn box
+      // is extended; the collider keeps the logical span, which changes
+      // nothing a child can reach.
+      const drawn =
+        along === 'x' ? cornerClosedSpans(spans, from, to, WALL_HALF_DEPTH) : spans;
+
+      for (const [index, [a, b]] of spans.entries()) {
         if (b - a < 0.05) continue;
-        const length = b - a;
-        const mid = (a + b) / 2;
+        const [drawnA, drawnB] = drawn[index] ?? [a, b];
+        const length = drawnB - drawnA;
+        const mid = (drawnA + drawnB) / 2;
         const wall = solid(
           new Mesh(
             along === 'x'
-              ? new BoxGeometry(length, height, 0.5)
-              : new BoxGeometry(0.5, height, length),
+              ? new BoxGeometry(length, height, WALL_HALF_DEPTH * 2)
+              : new BoxGeometry(WALL_HALF_DEPTH * 2, height, length),
             wallMaterial,
           ),
         );
+        wall.name = 'hotel.wall';
         wall.position.set(along === 'x' ? mid : x1, height / 2, along === 'x' ? z1 : mid);
         shell.add(wall);
         const wx1 = room.originX + (along === 'x' ? a : x1);
@@ -1885,10 +1897,14 @@ export class Hotel implements GameSystem {
     if (room.liftZ !== null) {
       const ax = -room.halfX;
       const depth = LIFT_ALCOVE_DEPTH;
+      // The back wall runs 0.2 m (its own half-thickness) past each side wall,
+      // closing the alcove's outer corners the same way `cornerClosedSpans`
+      // closes the room's — one wall owns each corner, no notch, no doubled
+      // box.
       for (const [x1, z1, x2, z2] of [
         [ax - depth, room.liftZ - 1.7, ax, room.liftZ - 1.7],
         [ax - depth, room.liftZ + 1.7, ax, room.liftZ + 1.7],
-        [ax - depth, room.liftZ - 1.7, ax - depth, room.liftZ + 1.7],
+        [ax - depth, room.liftZ - 1.9, ax - depth, room.liftZ + 1.9],
       ] as const) {
         this.collision.addWall(
           room.originX + x1,
@@ -1905,6 +1921,7 @@ export class Hotel implements GameSystem {
             interiorMaterial(room.theme.trim),
           ),
         );
+        wall.name = 'hotel.wall';
         wall.position.set((x1 + x2) / 2, room.wallHeight / 2, (z1 + z2) / 2);
         shell.add(wall);
       }
@@ -1948,15 +1965,16 @@ export class Hotel implements GameSystem {
     const half = SUITE_DOOR_WIDTH / 2;
 
     for (const wall of partitions) {
-      // Doorways, sorted, become the gaps between the solid spans.
-      const cuts = [...wall.doors].sort((a, b) => a - b);
-      const spans: [number, number][] = [];
-      let cursor = wall.from;
-      for (const door of cuts) {
-        spans.push([cursor, door - half]);
-        cursor = door + half;
-      }
-      spans.push([cursor, wall.to]);
+      // Doorways become the gaps between the solid spans — the same shared
+      // arithmetic (`world/wallRuns.ts`) the outer walls and the castle use.
+      // No corner-closing here: a partition's ends stop on a perpendicular
+      // wall's centre line and its box already reaches half a thickness into
+      // that wall's own band, so the joint is solid masonry as built.
+      const spans = segmentsMinusGaps(
+        wall.from,
+        wall.to,
+        wall.doors.map((door) => [door - half, door + half] as const),
+      );
 
       for (const [a, b] of spans) {
         if (b - a < 0.05) continue;
@@ -1970,6 +1988,7 @@ export class Hotel implements GameSystem {
             interiorMaterial(room.theme.wall),
           ),
         );
+        panel.name = 'hotel.wall';
         panel.position.set(alongX ? mid : wall.at, height / 2, alongX ? wall.at : mid);
         shell.add(panel);
         this.collision.addWall(

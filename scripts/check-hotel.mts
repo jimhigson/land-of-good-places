@@ -895,6 +895,84 @@ if (fallenPlayer.position.y < 0) {
   }
 }
 
+// --------------------------------- 15. the walls abut: no notch at any corner
+//
+// Jim, live play, 8 Aug 2026: *"the walls don't abut each other properly, they
+// stop leaving gaps ... even where they join they don't abut nicely."*
+// Measured cause: every wall box stopped at the room's half-extent — the
+// perpendicular wall's **centre line** — so at each outer corner the two walls
+// each stopped half a thickness short of the other, leaving an empty
+// see-through column 0.25 m square, floor to ceiling, on the exact corners the
+// iso camera views diagonally. The fix is `world/wallRuns.ts` (shared with the
+// castle, which already closed its corners): north/south spans extend past the
+// run's ends by the wall half-thickness, east/west butt between them.
+//
+// This walks the perimeter of every room as built: two fibres per wall — the
+// centre line and the outer skin, where the notch lived — sampled every 5 cm,
+// skipping declared doorway gaps, and asserts every sample sits inside some
+// wall's world box. Walls are found structurally (tall thin boxes on the
+// shell), not by name, so the probe cannot be satisfied by naming alone.
+//
+// Proven red before trusted green: on the pre-fix build it reports all four
+// corners open in every room — see the commit message for the run.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const WALL_HALF = 0.25;
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) {
+      problems.push(`${room.space} has no shell at all`);
+      continue;
+    }
+    const wallBoxes: Box3[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      const box = bounds.clone().applyMatrix4(object.matrixWorld);
+      const height = box.max.y - box.min.y;
+      const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
+      if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
+    });
+
+    const sides = [
+      { side: 'north' as const, along: 'x' as const, cross: -room.halfZ, out: -1 },
+      { side: 'south' as const, along: 'x' as const, cross: room.halfZ, out: 1 },
+      { side: 'west' as const, along: 'z' as const, cross: -room.halfX, out: -1 },
+      { side: 'east' as const, along: 'z' as const, cross: room.halfX, out: 1 },
+    ];
+    let openings = 0;
+    const spots: string[] = [];
+    const point = new Vector3();
+    for (const { side, along, cross, out } of sides) {
+      const gap = room.gaps[side];
+      // North and south own the corner columns, so their scan runs past the
+      // room's half-extent; east and west butt between them and stop short.
+      const reach = along === 'x' ? room.halfX + WALL_HALF - 0.05 : room.halfZ - 0.05;
+      for (const fibre of [cross, cross + out * (WALL_HALF / 2)]) {
+        for (let t = -reach; t <= reach; t += 0.05) {
+          if (gap && t > gap[0] - 0.01 && t < gap[1] + 0.01) continue;
+          point.set(
+            room.originX + (along === 'x' ? t : fibre),
+            1.2,
+            room.originZ + (along === 'x' ? fibre : t),
+          );
+          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          openings += 1;
+          if (spots.length < 4) spots.push(`${side} at ${t.toFixed(2)}`);
+        }
+      }
+    }
+    if (openings > 0) {
+      problems.push(
+        `${room.space}'s perimeter has ${openings} unwalled sample(s) outside its doorways ` +
+          `(${spots.join(', ')}…) — walls that stop short of abutting, i.e. a see-through gap`,
+      );
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(

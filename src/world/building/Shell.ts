@@ -43,9 +43,9 @@ import {
   interiorMaterial,
   planHole,
   planRect,
-  segmentsMinusGaps,
   softMaterial,
 } from './parts';
+import { segmentsMinusGaps } from '../wallRuns';
 import {
   DECK_HOLES,
   ENTRANCE_MAX_X,
