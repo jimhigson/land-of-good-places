@@ -3323,15 +3323,17 @@ export class Hotel implements GameSystem {
     this.hangOnWalls(shell, SUITE, {
       // Threaded between the three north windows, one per bedroom.
       north: [-3.6, 3.6],
-      west: [-5.6, 5.6],
-      // Nudged out to make room for the suite's two west windows
-      // (`SUITE.windows`), which sit either side of your own front door —
-      // and a hand further (4.6 → 4.8, 8 Aug 2026) to give the corridor
-      // doorway its full finger of tap clearance.
-      pictures: [
-        { wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 },
-        { wall: 'west', along: 4.8, width: 1.5, height: 1.15, seed: 0x40c2 },
-      ],
+      // The south sconce moved off z = 5.6 when the west pane did (the pane
+      // now spans 5.15–6.65 there — see `SUITE.windows`); 3.6 lights the
+      // bathroom from beside its own wall junction instead of from on the
+      // glass.
+      west: [-5.6, 3.6],
+      // One west painting, in bedroom 1 — at −4.8 for the corridor doorway's
+      // full finger of tap clearance (8 Aug 2026). Its old twin at +4.8 went
+      // with the bathroom: that stretch of wall now holds the bathroom's
+      // window, and a painting's "Look" zone in there would crowd the
+      // bathroom's own tap targets (`world/tapSpacing.ts`).
+      pictures: [{ wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 }],
     });
 
     // Over the hall, where all four rooms can see it.
@@ -3476,8 +3478,11 @@ export class Hotel implements GameSystem {
     // authored facing +Z with nodes at identity, so one local-Z nudge stands
     // the picture 2 cm in front of the wood.
     tv.screen.position.z += 0.09;
+    // A hand east of where it stood: the bathroom wall now runs at x = −4.2
+    // (face −4.0), and the set's 0.7 m footprint at −3.4 backed 10 cm into
+    // it. At −3.0 it backs *against* the wall, which is where a telly goes.
     this.props.place(shell, SUITE, tv.root, {
-      x: -3.4,
+      x: -3.0,
       z: FLOOR_Z,
       spin: Math.PI / 2 - 0.7,
       radius: 0.7,

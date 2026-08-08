@@ -531,18 +531,27 @@ export const SUITE: HotelRoom = {
   wallHeight: 3.0,
   // West: back out to the corridor.
   gaps: { west: [-1.1, 1.1] },
-  // Three bedrooms across the north half, the lounge across the south, and a
-  // hall between them that the corridor door opens straight into.
+  // Three bedrooms across the north half, the lounge and the bathroom across
+  // the south, and a hall between them that the corridor door opens straight
+  // into. The hall is z ±1.7 and the door gap only z ±1.1, so the partitions
+  // meeting the west wall leave the doorway untouched.
   //
-  // The two long partitions stop short of the west wall (−9.4 rather than −11)
-  // so the hall runs clear from the door to the far end: a child who walks in
-  // and immediately meets a wall corner has been given a maze, and this is
-  // meant to be the nicest room in the game.
+  // **Every run reaches a wall or a doorway jamb — nothing ends in open
+  // air.** The two long runs used to stop at −9.4, 1.6 m short of the west
+  // wall, on the theory that this kept the hall clear; what it actually built
+  // was a free-standing wall end past which you could see (and walk) around
+  // every "room" — Jim, looking at the bedroom: *"The dividing walls don't go
+  // to the edge of the space."* `check:hotel` probe 18 now measures every
+  // partition end in the hotel against the built walls.
   partitions: [
-    { along: 'x', at: -1.7, from: -9.4, to: 11, doors: [-6.6, 0, 6.6] },
-    { along: 'x', at: 1.7, from: -9.4, to: 11, doors: [4.4] },
+    { along: 'x', at: -1.7, from: -11, to: 11, doors: [-6.6, 0, 6.6] },
+    { along: 'x', at: 1.7, from: -11, to: 11, doors: [-7.6, 4.4] },
     { along: 'z', at: -4.2, from: -8, to: -1.7, doors: [] },
     { along: 'z', at: 3.4, from: -8, to: -1.7, doors: [] },
+    // The bathroom's own wall — the south half's answer to the bedroom
+    // divider at the same x, so the plan reads as one grid. Its doorway is
+    // the one at −7.6 in the run above: you step in off the hall.
+    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [] },
   ],
   // **One per room.** The suite is four rooms now, and a bedroom with no
   // window is the thing Jim objected to in the first place (*"a room without
@@ -563,11 +572,15 @@ export const SUITE: HotelRoom = {
     // the default picker slid to the first bedroom's pane — 3.04 m from the
     // west wall's painting, inside the tap rule's finger.
     north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
-    // Flanking your own front door — kept for the light, but no "Look out"
-    // zone can stand here: both panes sit inside a finger of the corridor
-    // doorway, which is the exact tap Jim reported eaten. The picker skips
-    // walls with no compliant pane; the north wall carries the suite's zone.
-    west: { at: [-1.95, 1.95], width: 1.5, sill: 0.9, head: 2.6 },
+    // One pane, lighting the bathroom. The pair that used to flank the front
+    // door (±1.95) could not survive the partitions reaching the west wall:
+    // the junctions land at z ±1.7, straight through the middle of each old
+    // pane, and a wall running into a window is worse than no window. The
+    // slot between the door gap (±1.1) and the junction (±1.5) is 0.4 m —
+    // no pane fits there — so the west light moves to the one stretch of
+    // that wall with room for it, which the bathroom is glad of. Bedroom 1
+    // keeps its own north pane like the others.
+    west: { at: [5.9], width: 1.5, sill: 0.9, head: 2.6 },
   },
   liftZ: null,
   liftFloor: 4,

@@ -80,7 +80,9 @@ import {
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
   SUITE_BED_SPOTS,
+  SUITE_DOOR_WIDTH,
 } from '../src/world/hotel/layout.ts';
+import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
@@ -1041,6 +1043,26 @@ if (fallenPlayer.position.y < 0) {
 //
 // Proven red before trusted green: on the pre-fix build it reports all four
 // corners open in every room — see the commit message for the run.
+/**
+ * Every wall-like box on a room shell, found structurally (tall thin boxes),
+ * never by name — so no probe using these can be satisfied by naming alone.
+ * Shared by probes 15 (perimeter) and 18 (partition ends).
+ */
+function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): Box3[] {
+  const wallBoxes: Box3[] = [];
+  shell.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    object.geometry.computeBoundingBox();
+    const bounds = object.geometry.boundingBox;
+    if (!bounds) return;
+    const box = bounds.clone().applyMatrix4(object.matrixWorld);
+    const height = box.max.y - box.min.y;
+    const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
+    if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
+  });
+  return wallBoxes;
+}
+
 {
   hotel.hotelRoot.updateMatrixWorld(true);
   const WALL_HALF = 0.25;
@@ -1050,17 +1072,7 @@ if (fallenPlayer.position.y < 0) {
       problems.push(`${room.space} has no shell at all`);
       continue;
     }
-    const wallBoxes: Box3[] = [];
-    shell.traverse((object) => {
-      if (!(object instanceof Mesh)) return;
-      object.geometry.computeBoundingBox();
-      const bounds = object.geometry.boundingBox;
-      if (!bounds) return;
-      const box = bounds.clone().applyMatrix4(object.matrixWorld);
-      const height = box.max.y - box.min.y;
-      const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
-      if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
-    });
+    const wallBoxes = wallBoxesOf(shell);
 
     const sides = [
       { side: 'north' as const, along: 'x' as const, cross: -room.halfZ, out: -1 },
@@ -1187,6 +1199,67 @@ if (fallenPlayer.position.y < 0) {
             `${(gap * 1000).toFixed(1)} mm apart — inside the ${(MIN_DECAL_GAP * 1000).toFixed(1)} mm ` +
             `a 16-bit depth buffer can tell apart, so they flicker`,
         );
+      }
+    }
+  }
+}
+
+// ------------------- 18. every partition end meets a wall or is a doorway
+//
+// Jim, looking at the suite bedroom, 8 Aug 2026: *"The dividing walls don't
+// go to the edge of the space"* — the two long SuitePartition runs declared
+// `from: −9.4` while the suite's west wall stands at −11, leaving a
+// free-standing 1.6 m opening at each west end that reads as a wall somebody
+// forgot to finish (and whose bare end corner interrupts a slide along the
+// partition face). The owner is the partition DATA: the builder cannot know
+// that −9.4 "meant" the wall, so a run that should reach a wall must say so,
+// and this probe holds every partition end in the hotel to it.
+//
+// For each declared partition, the built spans (the same `segmentsMinusGaps`
+// arithmetic `partitionRoom` uses) are walked and every span end must be one
+// of exactly two things: a **declared doorway jamb**, or **abutting a
+// perpendicular wall** — proven against the *built* wall boxes by sampling a
+// point just past the end, which must land inside some wall (outer wall or a
+// crossing partition). Free air past a partition end is the bug.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const half = SUITE_DOOR_WIDTH / 2;
+  const point = new Vector3();
+  for (const room of ROOMS) {
+    if (!room.partitions || room.partitions.length === 0) continue;
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    const wallBoxes = wallBoxesOf(shell);
+    for (const [index, run] of room.partitions.entries()) {
+      const spans = segmentsMinusGaps(
+        run.from,
+        run.to,
+        run.doors.map((door) => [door - half, door + half] as const),
+      );
+      for (const [a, b] of spans) {
+        if (b - a < 0.05) continue;
+        for (const [end, outward] of [
+          [a, -1],
+          [b, 1],
+        ] as const) {
+          const jamb = run.doors.some(
+            (door) => Math.abs(end - (door - half)) < 0.01 || Math.abs(end - (door + half)) < 0.01,
+          );
+          if (jamb) continue;
+          // Just past the end, halfway up the partition: inside a wall, or open air.
+          const t = end + outward * 0.05;
+          point.set(
+            room.originX + (run.along === 'x' ? t : run.at),
+            1.1,
+            room.originZ + (run.along === 'x' ? run.at : t),
+          );
+          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          problems.push(
+            `${room.space}: partition ${index} (along ${run.along} at ${run.at}) ends at ` +
+              `${end.toFixed(2)} in open air — neither a declared doorway jamb nor abutting a ` +
+              `wall, i.e. a dividing wall that stops short of the edge of the space`,
+          );
+        }
       }
     }
   }
