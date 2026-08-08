@@ -1,69 +1,74 @@
 # HANDOFF: interior-rules (fix/interior-rules)
 
-Four defects from Jim's live hotel play, each with a generalisation:
+Four defects from Jim's live hotel play, each fixed with a one-owner
+generalisation and a red-first probe. **All four are implemented and
+committed**; remaining work is full-build confirmation, test:procgen, browser
+QA, PR.
 
-1. **Walls don't abut** — `Hotel.buildRoomShell` wall spans are boxes centred
-   on the perimeter line, each stopping at ±half-extent: at every outer corner
-   two perpendicular walls leave an empty 0.25 × 0.25 m column (half a wall
-   thickness each way) you can see through diagonally. The castle
-   (`building/Shell.ts` `wallShapes`) does NOT have the disease — its north
-   face runs the full outer width (`planRect(-ox, ox, …)`), covering corners.
-   Plan: extract a common span-run builder the hotel uses (mirroring the
-   castle's closed-corner rule), plus a red-first perimeter probe in
-   check:hotel.
+## Done (each commit message carries its red proof)
 
-2. **Tap targets too close to doors** — tap flow: `Game` → `Selection.handleTap`
-   (ray vs pick sphere centred `(x, y+r/2, z)` radius `pickRadius`); if it hits
-   a zone the tap selects and does NOT walk; otherwise TapNavigator walks and
-   `checkDoorways`' walk-through bands do the exits. Suite exit (west gap
-   ±1.1) vs suite west-window zone (centre 0.4 m in from wall at z≈±1.95,
-   pickRadius 2.2): pick sphere covers the doorway band → tap on the door
-   selects the window. Plan: extract doorway bands as data with one owner
-   (checkDoorways reads them), new rule = zone pick area must clear every
-   doorway band and other zones' pick areas by a finger-derived margin; check
-   script `scripts/check-tap-spacing.mts` in the build chain, red first.
+1. **Walls abut** — root cause: every hotel wall box stopped at the room's
+   half-extent (the perpendicular wall's centre line), leaving a see-through
+   0.25 m² corner column, floor to ceiling, at every outer corner. Owner:
+   `src/world/wallRuns.ts` (`segmentsMinusGaps` moved from building/parts.ts +
+   `cornerClosedSpans`); hotel outer walls/partitions/alcove build through it,
+   north/south own corners, east/west butt. Castle was already healthy (its
+   plan rects run the full outer width) and now imports the shared arithmetic.
+   Probe: check:hotel 15 walks every perimeter (two fibres, 5 cm steps,
+   doorway gaps skipped) — red: 6 rooms × 14 unwalled samples.
 
-3. **Napping child vanishes** — `Hotel.nap` sets `ridePosture = 'reclined'`
-   (model.root.rotation.x = −1.35 via `applyRidePose`) AND
-   `setRidePose(…, pitch = −π/2)` (group.rotation.x). Double recline ≈ −167°:
-   she is rotated backwards into the mattress. Fix: one recline owner, head on
-   pillow (bed asset pillow is at −Z end, mattress top 0.55 =
-   `BED_MATTRESS_TOP`), plus a nap blanket per bed shown during the nap.
+2. **Nap visible** — root cause: `Hotel.nap` stacked TWO reclines (posture
+   'reclined' → model root −1.35, PLUS group pitch −π/2) ≈ −167°: head
+   measured at y = −0.64 (mattress 0.55). Fix: posture only, feet at
+   bed z +0.61 so the pose's measured 1.33 m throw lands the head on the
+   pillow (−0.72, y ≈ 1.01); per-bed `napBlanket` (dressing.ts) in the bed's
+   rainbow, shown during nap, hidden on wake; `Bed.blanket` wiring. Probe:
+   check:hotel 16 drives a REAL Player through the bed zone's Sleep action,
+   one real tick, asserts head above mattress on the pillow + down-rays (head
+   ray hits kid, body ray hits 'hotel.napBlanket') — red: 4 failures.
 
-4. **Rug/decal ladder z-fights** — the "decal ladder" (dressing.ts header):
-   mosaic plate (flat PlaneGeometry) 0.02, rug tops 0.03, sunburst rays 0.022,
-   ring 0.04, chevrons 0.06. Gaps of 2–10 mm between overlapping flat faces.
-   WebGL guarantees only 16 depth bits; ortho far = CAMERA_DISTANCE·3 = 270 →
-   one depth step ≈ 4.1 mm; at 38° pitch a vertical gap needs ~6.7 mm per
-   step. Plan: derive a MIN separation (~2 cm) from those constants with one
-   owner, rebuild the ladder on it, give the mosaic real thickness or lift the
-   rugs; extend probe 10 to all rooms/heights, red first.
+3. **Tap spacing rule** — owner `src/world/tapSpacing.ts`:
+   `TAP_FINGER_METRES` (two UI units through IsoCamera's frustum formula on
+   the 390×844 QA viewport ≈ 1.13 m), zone-vs-band clearance, zone-vs-zone
+   separation (hard only for DIFFERENT verbs; same-verb pairs = warnings).
+   Door bands became data: `layout.ts hotelDoorBands` (checkDoorways +
+   atLiftDoors consume them), `Hotel.towerDoorBand`, Building
+   `castleEntranceBand/castleExitBand` (+ instance `doorBands()` to dodge the
+   static-import seed trap). `scripts/check-tap-spacing.mts` in the build
+   chain — red: 19 failures incl. the reported suite-window-eats-door-tap by
+   1.75 m. Fixes: band-aware window-zone picker (+ `WindowWall.zoneAt` pins
+   lobby/suite choices; suite west wall offers no zone, glass stays);
+   paintings rehung (lobby west→north 10.2, breakfast down to one at −6.4,
+   garden west→north 6.3, suite ±4.8); breakfast tables a→(−6.4,6.2),
+   e→(−4.6,0.2); castle frontDoor zone = its band's own handle; flowers keep
+   out of stall + train-station pick areas (`STALL_PICK_RADIUS` moved to
+   stallPlacement.ts; stations fed via `World` → `keepClearOfTapZones` after
+   the route solves). procgen invariant 'no two tap targets crowd each other
+   or a doorway' — red proof by planting large flower slot 111 on the
+   water-fight booth (1 failed | 48 passed); NB disabling the keep-out alone
+   stays green on all 5 seeds (no seed happens to collide), hence the planted
+   mutation.
 
-## State
-- Worktree fresh off origin/main 993dcf3. npm ci done. No code changes yet.
-- Next: diagnostic measurement of the built world (scripts/diagnose-interior.mts,
-  scratch, not for commit) to confirm all four with numbers.
+4. **Decal ladder** — owner `DECAL_STEP = 0.02` in hotel/dressing.ts, derived:
+   ortho far (CAMERA_DISTANCE·3=270) / 2^16 ≈ 4.1 mm a depth step, ~6.7 mm
+   height at 38°; probe 17 fails overlapping flat tops within 2 steps
+   (13.4 mm), computed from the same constants — red: 20 problems (garden
+   lawn/path EXACTLY coplanar 5.4 m², ocean mat/sand 19.4 m², lift-car floor
+   at plate's exact 0.000 ×5 rooms, mosaic 10 mm under rugs, sunburst 8 mm).
+   Fixes: rug/roundRug real boxes on rungs + `tier` for stacked rugs (lawn 1,
+   ocean mat 1, pond 2), sunburst/lilyPond/rainbowRing/rainbowRug on rungs,
+   chevrons rung 4 (6 over the lawn), floor plate west apron pulled back
+   under the wall in lift rooms, lily pads keep a pad's width apart.
+   KNOWN TRADE-OFF: rugs have no walk platforms, so feet sink 4–6 cm (lawn
+   10 cm) — pre-existing behaviour, slightly deeper; flag for QA eyes.
 
-## Key files
-- src/world/hotel/Hotel.ts — buildRoomShell 1806, partitionRoom 1942,
-  interactZones 832, checkDoorways 1182, nap 1774, update napping 1131,
-  layMosaic ~3545, dressSuite beds ~3113.
-- src/world/hotel/layout.ts — rooms, gaps, partitions, SUITE_BED_SPOTS.
-- src/world/hotel/dressing.ts — rug/roundRug/rainbowRing/sunburst/floorChevron,
-  RUG_Y ladder at top.
-- src/world/Selection.ts — pick sphere in `intersect`; interact.ts —
-  pickInteractZone (XZ disc).
-- src/entities/Player.ts — applyRidePose/applyReclinedRidePose (RIDE_RECLINE
-  −1.35), setRidePose pitch.
-- scripts/check-hotel.mts — probe framework; probe 10 = lobby deck coplanar
-  scan. scripts/park-harness.mts — buildHeadlessPark.
-- Castle: src/world/building/Shell.ts wallShapes (closed corners, healthy),
-  interactZones.ts.
-
-## Verification plan
-- Headless probes red-first (record red in commit messages).
-- Browser via headless Playwright: chromium at
-  /Users/jim/Library/Caches/ms-playwright/chromium_headless_shell-1234/…,
-  patterns in scratchpad live-stair.mjs / live-art-sofa.mjs; /hotel deep link;
-  lobby origin (−600, 600), suite (−600, 1380). Phone viewport 390x844 for tap
-  test. Own vite port with --strictPort, kill by PID.
+## State / next steps
+- All committed & pushed on fix/interior-rules (base 993dcf3).
+- `npm run build` running in background (log /tmp/build-interior.log) — READ
+  ITS EXIT CODE DIRECTLY.
+- Then: `npm run test:procgen` full; browser QA headless Playwright
+  (chromium at /Users/jim/Library/Caches/ms-playwright/chromium_headless_shell-1234/…,
+  pattern scripts live-stair.mjs / live-art-sofa.mjs in scratchpad;
+  /hotel deep link; lobby origin (−600,600), suite (−600,1380); phone
+  viewport 390×844 for the door-tap test; mid-nap screenshot; corner look).
+- Own vite port, --strictPort, kill by PID. Then gh pr create (do NOT merge).
