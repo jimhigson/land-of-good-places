@@ -486,9 +486,32 @@ function coversWindow(free: readonly Interval[], from: number, to: number): bool
 }
 
 /**
- * The nearest point to `value` that lies in a free interval — greedy
- * continuity: the profile stays in whichever gap it is already in, and only
- * jumps when a gap closes entirely between bearings.
+ * The nearest point to `value` that lies in a free interval.
+ *
+ * **Nearest, and nothing else.** This is called once per bearing per relaxation
+ * pass and is given no memory of what the previous bearing chose, so if
+ * smoothing walks `value` across a blocked band it will happily snap into the
+ * interval on the far side. The profile can hop.
+ *
+ * That matters because the curve is built from every {@link CONTROL_STRIDE}th
+ * bearing, so a hop between two control bearings is interpolated *straight
+ * through the obstacle between them* — which is how seed 2 put the lineside
+ * fence inside the Sky Cruiser's car, and how the invariant came to report it
+ * as the cruiser's fault.
+ *
+ * This doc used to claim the opposite — "greedy continuity: the profile stays
+ * in whichever gap it is already in, and only jumps when a gap closes entirely
+ * between bearings" — which was never true of the code below and sent at least
+ * one reader looking for the seed 2 bug everywhere except here. A comment
+ * describing a property the code does not have is the same two-definitions
+ * disease as a duplicated constant, in prose.
+ *
+ * What actually keeps the profile honest today is {@link freeIntervals}
+ * refusing to offer a gap too narrow for a fenced railway, so there is no
+ * tempting sliver on the far side of an obstacle to hop into. **That removes
+ * the temptation, not the capability.** A profile that genuinely cannot hop —
+ * one that tracks which interval it is in and may only change where two
+ * intervals merge — is the real fix, and is not written yet.
  */
 function snapToFree(free: readonly Interval[], value: number): number {
   if (free.length === 0) {
