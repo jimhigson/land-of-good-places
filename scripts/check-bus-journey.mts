@@ -24,8 +24,10 @@ import {
   BusJourney,
   JOURNEY_SECONDS,
   LANE_MAX_GRADIENT,
+  SETTLE_SECONDS,
   cameraPoseAt,
   laneHeight,
+  planJourneyShots,
 } from '../src/world/entrance/BusJourney.ts';
 import { CAT_BUS_SEAT_COUNT } from '../src/world/entrance/catBus.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
@@ -238,18 +240,59 @@ if (busRoot) {
     hairStyle: 'bunches',
   });
 
-  // The toggle itself, before anything is driven.
-  said.push(`the ride opens ${inside.view}`);
-  if (inside.view !== 'outside') {
-    fouls.push(`the ride opens ${inside.view} the bus — it should open on the bus, from outside`);
+  // --- the shot list, before anything is driven ----------------------------
+  //
+  // Jim: *"the view shouldn't be switchable, it should switch by itself."* So
+  // the schedule is the feature, and it is asserted as a schedule: `shotAt` is
+  // pure, so all of this is measurable without a bus.
+  const shots = planJourneyShots();
+  said.push(
+    `shot list: ${shots.map((shot) => `${shot.view} ${shot.from.toFixed(0)}-${shot.to.toFixed(0)}s`).join(', ')}`,
+  );
+
+  if (shots.length < 3) {
+    fouls.push(`the ride is cut into only ${shots.length} shots — it does not cut between views at all`);
   }
-  if (inside.toggleView() !== 'inside' || inside.view !== 'inside') {
-    fouls.push('toggling the view does not put the camera inside the bus');
+  if (shots[0]?.view !== 'outside') {
+    fouls.push(
+      `the ride opens ${shots[0]?.view} the bus — it must open on the bus itself, which is the ` +
+        'establishing shot: a child has to see what she is riding in before being put inside it',
+    );
   }
-  if (inside.toggleView() !== 'outside') {
-    fouls.push('toggling the view a second time does not bring the camera back outside');
+  const finalShot = shots[shots.length - 1];
+  if (finalShot?.view !== 'outside') {
+    fouls.push(
+      `the ride ends ${finalShot?.view} the bus — the last seconds are the settle onto the park ` +
+        "camera's own bearing, and the hand-over is a cut between two frames of the same bus",
+    );
   }
-  inside.setView('inside');
+  // **The settle must fit inside the closing shot**, or the cut into the park
+  // happens partway through easing onto its bearing. Both numbers are read from
+  // the modules that own them, so neither can drift.
+  if (finalShot && finalShot.to - finalShot.from < SETTLE_SECONDS) {
+    fouls.push(
+      `the closing shot is ${(finalShot.to - finalShot.from).toFixed(1)}s but the camera needs ` +
+        `${SETTLE_SECONDS.toFixed(1)}s to settle onto the park's bearing — the hand-over will land mid-turn`,
+    );
+  }
+  // No gap, no overlap: every instant of the ride has exactly one camera.
+  for (let i = 0; i < shots.length; i += 1) {
+    const shot = shots[i];
+    if (!shot) continue;
+    const previous = i === 0 ? { to: 0 } : shots[i - 1];
+    if (previous && Math.abs(shot.from - previous.to) > 1e-9) {
+      fouls.push(
+        `shot ${i} starts at ${shot.from.toFixed(2)}s where the one before it ended at ` +
+          `${(previous.to ?? 0).toFixed(2)}s — part of the ride has no camera`,
+      );
+    }
+  }
+  if (finalShot && Math.abs(finalShot.to - JOURNEY_SECONDS) > 1e-9) {
+    fouls.push(
+      `the shot list ends at ${finalShot.to.toFixed(2)}s but the ride runs ${JOURNEY_SECONDS}s — ` +
+        'the last stretch has no camera',
+    );
+  }
 
   const insideBus = inside.scene.getObjectByName('cat-bus');
   const seats: Object3D[] = [];
@@ -298,9 +341,20 @@ if (busRoot) {
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
   let insideFrames = 0;
+  let outsideFrames = 0;
+  let cuts = 0;
+  let wasView = inside.view;
 
   for (let t = 0; t <= JOURNEY_SECONDS + 1e-9; t += STEP) {
     inside.update(STEP);
+    if (inside.view !== wasView) {
+      cuts += 1;
+      wasView = inside.view;
+    }
+    if (inside.view !== 'inside') {
+      outsideFrames += 1;
+      continue;
+    }
     insideFrames += 1;
     inside.camera.aspect = 16 / 10;
     inside.camera.updateProjectionMatrix();
@@ -381,6 +435,31 @@ if (busRoot) {
     fewestChildrenInShot = Math.min(fewestChildrenInShot, inShot);
   }
 
+  // **Both shots get real time, and the cut actually happens on the built
+  // ride** — not merely in the plan above. A director that never consults the
+  // shot list would satisfy every assertion up there.
+  said.push(
+    `the ride cut ${cuts} times; ${outsideFrames} frames outside the bus and ${insideFrames} inside`,
+  );
+  if (cuts < 2) {
+    fouls.push(
+      `the ride cut between views ${cuts} times over ${JOURNEY_SECONDS}s — it is not switching by ` +
+        'itself, which is the whole of what Jim asked for',
+    );
+  }
+  if (insideFrames === 0 || outsideFrames === 0) {
+    fouls.push(
+      `the ride spent ${insideFrames} frames inside the bus and ${outsideFrames} outside — one of the ` +
+        'two shots is never on screen at all',
+    );
+  }
+  if (insideFrames + outsideFrames !== framesRun) {
+    fouls.push(
+      `${framesRun} frames of ride but ${insideFrames + outsideFrames} accounted for by a shot — ` +
+        'part of the ride has no camera',
+    );
+  }
+
   said.push(
     `from inside, at worst ${fewestChildrenInShot} children could actually be seen; their heads moved ` +
       `${headMotion.toFixed(1)} m between them over the ride`,
@@ -435,6 +514,8 @@ if (busRoot) {
   let bounce = 0;
   const seatSpace = new Vector3();
   // A further four seconds, measuring each head against its own seat's frame.
+  // The ride is over by now, so the director holds its closing shot; that does
+  // not matter here, because this measures bodies rather than the camera.
   const localPrevious = new Map<Object3D, Vector3>();
   for (let i = 0; i < 240; i += 1) {
     inside.update(STEP);

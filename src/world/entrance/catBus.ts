@@ -537,7 +537,14 @@ export function createCatBus(): CatBusHandle {
   const faceMaterial = applyStaticBakedFace(
     faceSphere,
     { fill: bodyColour, ...CAT_BUS_FACE_PAINT, spreadX: 2.0, spreadY: 1.7, tilt: 0.08 },
-    { over: paintWhiskers },
+    {
+      // Both painted into the one canvas: the whiskers below the eyes, the
+      // destination board above them. Neither is a mesh.
+      over: (ctx, size) => {
+        paintWhiskers(ctx, size);
+        paintDestinationBoard(ctx, size);
+      },
+    },
   );
   const faceTexture = faceMaterial.map;
 
@@ -891,6 +898,134 @@ const CAT_BUS_FACE_PAINT = {
   blushR: 0.085,
   nose: PALETTE.cheek,
 } as const satisfies FacePaintOptions;
+
+/**
+ * **The park's name and the route number, on the front of the bus.**
+ *
+ * Jim, 7 August 2026: *"write 'Land of Good Places' on the front of the bus"*,
+ * and then *"also make the bus number 67"*.
+ *
+ * ## Painted into the bus's own UV map, like the face
+ *
+ * This goes into the **same canvas as the cat's face**, in the band above its
+ * eyes — the cat's forehead, which is where a bus carries its destination board
+ * anyway. It is not a second mesh and not a plane hung in front of the
+ * bodywork: CLAUDE.md's rule about a worn face applies to any flat appliqué,
+ * and a destination board hovering a centimetre off the front is the identical
+ * bug wearing a different hat. That bug is fixed on the cat's face in this same
+ * change; reintroducing it one band higher would be absurd.
+ *
+ * One surface, one texture. It cannot come adrift from the face because it *is*
+ * the face's canvas, and it cannot crowd it because the band is measured
+ * against {@link CAT_BUS_FACE_PAINT}'s own `eyeY` rather than guessed.
+ *
+ * ## The lettering
+ *
+ * `"Trebuchet MS"` bold in `PALETTE.ink`, which is what `nameLabelTexture`
+ * paints every character's name pill in — the park's existing treatment for
+ * canvas lettering rather than a new one invented here. The board is a
+ * flat-filled rounded panel with an inked edge and a filled roundel for the
+ * number: flat fills and bold outlines per ART_DIRECTION §7, no gradient and no
+ * shading anywhere. Set a degree and a half off level, because nothing in this
+ * park is plumb and a perfectly square board on a hand-painted toy reads as a
+ * decal.
+ *
+ * Two lines for the destination rather than one: nineteen characters across
+ * two-thirds of a cat's forehead sets a line so small that measuring it is
+ * embarrassing, and broken in two it is nearly twice the height on the same
+ * board.
+ *
+ * ## On GAME_DESIGN.md's TEXT RULE
+ *
+ * The rule's floor is a *screen* size, and the mechanism for honouring it on
+ * canvas text is `NameLabel`'s — size the billboard in world units so its font
+ * lands on `minTextPx()`. That mechanism is not available here, because this is
+ * painted on **a bus**: it is as big as the front of a bus, at whatever
+ * distance the ride shows it, and scaling it to a screen size would be a
+ * destination board that grows and shrinks against its own vehicle.
+ *
+ * That is not a licence to paint it small. It is drawn as large as the band
+ * allows and auto-fitted to the width ({@link fitText}) rather than set at a
+ * chosen point size, and `check:cat-bus` reports what it actually says. Worth
+ * noting too that the park's name is already carried in DOM text at the minimum
+ * size by `Hud`'s park pill — the rule-compliant channel for it ever since
+ * every in-world sign was taken out on 28 July 2026 — so this is decoration on
+ * top of something that already complies, not a replacement for it.
+ */
+export const CAT_BUS_DESTINATION = 'Land of Good Places';
+export const CAT_BUS_ROUTE_NUMBER = '67';
+
+function paintDestinationBoard(ctx: CanvasRenderingContext2D, size: number): void {
+  // The band above the eyes. `eyeY` is where the eyes sit in this same window,
+  // so the board can never creep down over them however the face is retuned.
+  const top = size * 0.015;
+  const bottom = size * (CAT_BUS_FACE_PAINT.eyeY - 0.12);
+  const height = bottom - top;
+  const left = size * 0.05;
+  const right = size * 0.95;
+
+  ctx.save();
+  ctx.translate(size / 2, (top + bottom) / 2);
+  ctx.rotate(-0.026);
+  ctx.translate(-size / 2, -(top + bottom) / 2);
+
+  const radius = height * 0.28;
+  ctx.beginPath();
+  ctx.roundRect(left, top, right - left, height, radius);
+  ctx.fillStyle = hexToCss(PALETTE.stonePinkLight);
+  ctx.fill();
+  ctx.strokeStyle = hexToCss(PALETTE.ink);
+  ctx.lineWidth = size * 0.008;
+  ctx.stroke();
+
+  // The route number, in a roundel at the near end, as a bus carries it.
+  const roundelR = height * 0.36;
+  const roundelX = left + roundelR + height * 0.12;
+  const roundelY = top + height / 2;
+  ctx.beginPath();
+  ctx.arc(roundelX, roundelY, roundelR, 0, Math.PI * 2);
+  ctx.fillStyle = hexToCss(PALETTE.markerLemon);
+  ctx.fill();
+  ctx.strokeStyle = hexToCss(PALETTE.ink);
+  ctx.lineWidth = size * 0.007;
+  ctx.stroke();
+
+  ctx.fillStyle = hexToCss(PALETTE.ink);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  fitText(ctx, CAT_BUS_ROUTE_NUMBER, roundelR * 1.5, roundelR * 1.25);
+  ctx.fillText(CAT_BUS_ROUTE_NUMBER, roundelX, roundelY + roundelR * 0.04);
+
+  const textLeft = roundelX + roundelR + height * 0.14;
+  const textRight = right - height * 0.12;
+  const lines = CAT_BUS_DESTINATION_LINES;
+  fitText(ctx, lines[1] ?? '', textRight - textLeft, height * 0.42);
+  for (let i = 0; i < lines.length; i += 1) {
+    ctx.fillText(lines[i] ?? '', (textLeft + textRight) / 2, top + height * (0.3 + i * 0.42));
+  }
+  ctx.restore();
+}
+
+/** How the destination is broken across the board. Exported so a check can ask. */
+export const CAT_BUS_DESTINATION_LINES = ['Land of', 'Good Places'] as const;
+
+/**
+ * Sets the largest of the house font that fits `width` and `height`.
+ *
+ * Auto-fitted rather than set at a chosen point size, so the lettering is as
+ * large as the board allows — which is what GAME_DESIGN.md's TEXT RULE asks for
+ * on a surface that cannot be scaled to a screen size.
+ */
+function fitText(ctx: CanvasRenderingContext2D, text: string, width: number, height: number): void {
+  const font = (px: number): string => `bold ${px}px "Trebuchet MS", "Segoe UI", sans-serif`;
+  let px = height;
+  ctx.font = font(px);
+  const measured = ctx.measureText(text).width;
+  if (measured > width && measured > 0) {
+    px = Math.max(1, px * (width / measured));
+    ctx.font = font(px);
+  }
+}
 
 function paintWhiskers(ctx: CanvasRenderingContext2D, size: number): void {
   const ink = hexToCss(PALETTE.ink);

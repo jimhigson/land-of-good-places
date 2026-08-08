@@ -61,7 +61,12 @@ import {
   ENTRANCE_PLAYER_Z,
   isInEntranceGateGap,
 } from '../src/world/entrance/layout.ts';
-import { CAT_BUS_SEAT_COUNT, createCatBus } from '../src/world/entrance/catBus.ts';
+import {
+  CAT_BUS_DESTINATION,
+  CAT_BUS_ROUTE_NUMBER,
+  CAT_BUS_SEAT_COUNT,
+  createCatBus,
+} from '../src/world/entrance/catBus.ts';
 import { isBakedFaceMesh } from '../src/art/style/faces.ts';
 import { ROAD_TILE_METRES } from '../src/world/entrance/road.ts';
 import {
@@ -76,6 +81,48 @@ import { PARK_BOUNDARY, edgeRadiusAt } from '../src/world/boundary.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import type { FrameContext } from '../src/core/types.ts';
 import type { Player } from '../src/entities/Player.ts';
+
+/**
+ * Every word the art code paints, and which canvas it painted it onto.
+ *
+ * Installed by wrapping `document.createElement`, so it sees canvases the art
+ * modules make for themselves rather than needing them handed over. Used to
+ * establish that the bus's lettering goes into the bus's **own** face texture
+ * — see the destination-board section below for why that is the question.
+ */
+const wordsPainted: { text: string; canvas: unknown }[] = [];
+{
+  const create = document.createElement.bind(document);
+  (document as { createElement: unknown }).createElement = (tag: string): unknown => {
+    const element = create(tag) as { getContext?: (kind: string) => unknown };
+    if (tag !== 'canvas' || typeof element.getContext !== 'function') return element;
+    const getContext = element.getContext.bind(element);
+    element.getContext = (kind: string): unknown => {
+      const context = getContext(kind) as { fillText?: unknown } | null;
+      if (!context || typeof context !== 'object') return context;
+      return new Proxy(context, {
+        get(target, key, receiver) {
+          if (key === 'fillText') {
+            return (text: string, ...rest: unknown[]): unknown => {
+              wordsPainted.push({ text: String(text), canvas: element });
+              return (Reflect.get(target, key, receiver) as (...a: unknown[]) => unknown)(
+                text,
+                ...rest,
+              );
+            };
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+    };
+    return element;
+  };
+}
+
+/** The words painted since this was last called, and by whom. */
+function paintedWords(): readonly { text: string; canvas: unknown }[] {
+  return wordsPainted;
+}
 
 const DT = 1 / 60;
 
@@ -814,6 +861,10 @@ check(
 //    ray meets. So the surface the face is on is also measured against the
 //    bus's own solid bodywork.
 {
+  // Everything painted from here on is the bus's own doing. Scoped, because the
+  // recorder is global and the park built above paints two dozen NPC name
+  // labels; asserting over all of them would be asserting about the crowd.
+  const paintedBefore = paintedWords().length;
   const faceBus = createCatBus();
   faceBus.root.updateMatrixWorld(true);
 
@@ -906,6 +957,67 @@ check(
     } else {
       check(false, "no shadow-casting bodywork lies behind the cat's face at all");
     }
+
+    // --- the destination board ------------------------------------------
+    //
+    // Jim: *"write 'Land of Good Places' on the front of the bus"*, and *"make
+    // the bus number 67"*.
+    //
+    // **"The texture exists" is not the assertion.** The hood-face bug was a
+    // mesh never rendered while its texture, its geometry and its code all
+    // looked correct. What has to be true is that the words were painted **into
+    // the bus's own face canvas** — not onto a second surface, which is the
+    // exact fault being fixed on the face this same round — and that the
+    // surface carrying them is drawn and in front.
+    //
+    // Node's canvas is a no-op stub (`headless-canvas.mjs`), so the ink cannot
+    // be read back out of the bitmap. What *can* be established here, and is:
+    // every `fillText` the bus makes is recorded along with the canvas it went
+    // to, and the canvas the words land on must be the one that became the face
+    // material's map. Anything painting a destination board onto a mesh of its
+    // own fails that, and so does a board that is never painted at all.
+    const painted = paintedWords().slice(paintedBefore);
+    const faceCanvas = (faceMesh.material as { map?: { image?: unknown } }).map?.image;
+    const onTheFace = painted.filter((word) => word.canvas === faceCanvas);
+    const said = onTheFace.map((word) => word.text).join(' | ');
+
+    for (const wanted of [CAT_BUS_DESTINATION, CAT_BUS_ROUTE_NUMBER]) {
+      const whole = onTheFace.some((word) => word.text === wanted);
+      const split = wanted
+        .split(' ')
+        .every((part) => onTheFace.some((word) => word.text.includes(part)));
+      check(
+        whole || split,
+        `"${wanted}" is not painted into the bus's own face texture — the words actually painted ` +
+          `onto it are: ${said || '(none at all)'}`,
+      );
+    }
+    check(
+      painted.length > 0 && painted.length === onTheFace.length,
+      `${painted.length - onTheFace.length} of the ${painted.length} words the bus paints go onto a ` +
+        "canvas that is not the face's — a destination board on a surface of its own is the floating " +
+        'face bug wearing a different hat',
+    );
+    notes.push(
+      `the bus paints ${painted.length} words, all ${onTheFace.length} of them into its own face texture`,
+    );
+    notes.push(`the front of the bus reads: ${said}`);
+
+    // And the band it is painted in is drawn, from outside, like the face.
+    // Aimed above the eyes, where the board sits.
+    const boardY = faceBox.max.y - (faceBox.max.y - faceBox.min.y) * 0.28;
+    const boardRay = new Raycaster(
+      new Vector3(faceCentre.x, boardY, faceBox.max.z + 25),
+      new Vector3(0, 0, -1),
+      0,
+      200,
+    );
+    const boardHit = boardRay.intersectObject(faceBus.root, true)[0];
+    check(
+      boardHit !== undefined && boardHit.object === faceMesh,
+      'a ray fired at the destination board on the front of the bus does not land on the surface ' +
+        'the lettering is painted into — the board is not being drawn',
+    );
   }
   faceBus.dispose();
 }

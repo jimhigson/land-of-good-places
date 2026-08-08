@@ -40,13 +40,17 @@ import {
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
 import {
+  ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_GATE_HALF_WIDTH,
+  ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
   isInEntranceGateGap,
 } from '../../src/world/entrance/layout.ts';
+import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { CHILD_FOOTPRINT, createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
@@ -2796,6 +2800,98 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
 };
 
 /**
+ * **The road reaches the gate, and stays out of the park except through it.**
+ *
+ * Jim, 7 August 2026: *"it doesn't actually drive up to the park, the road needs
+ * to actually go to the park."* There was no road at the entrance at all — the
+ * bus pulled up on grass.
+ *
+ * There is one now (`Entrance.ts`'s `buildEntranceRoad`), and it has to satisfy
+ * two things that pull against each other, which is why this is an invariant
+ * rather than a one-seed check:
+ *
+ * 1. **It must reach the gate**, and go *through* it, or the park is somewhere
+ *    the road merely stops near.
+ * 2. **It must not sprawl into the park** anywhere else. The boundary is a
+ *    spline pinned to 60 m on the gate's bearing and bulging to 92 m within 40
+ *    degrees of it (#115), so a straight kerb road outside the gate curves back
+ *    *inside* the park at both ends of its run. `buildEntranceRoad` walks
+ *    outward and stops where that would happen — and how far it gets is
+ *    different on every seed, because the spline is different on every seed.
+ *    That is exactly the shape of thing that works on the canonical seed and
+ *    quietly fails on a sweep one.
+ *
+ * Measured off the built road's own world vertices. A version comparing
+ * `ENTRANCE_BUS_STOP_Z` against itself would pass on a park with no road in it.
+ */
+const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
+  const points: { x: number; z: number }[] = [];
+  const at = new Vector3();
+  facts.world.entrance.group.traverse((object: Object3D) => {
+    if (!(object instanceof Mesh)) return;
+    if (!object.name.startsWith('entrance-road')) return;
+    const position = object.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i += 1) {
+      at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
+      points.push({ x: at.x, z: at.z });
+    }
+  });
+
+  if (points.length === 0) {
+    return ['there is no road at the park entrance at all — the cat bus arrives on grass'];
+  }
+
+  const fouls: string[] = [];
+
+  let toTheGate = Infinity;
+  for (const p of points) {
+    toTheGate = Math.min(toTheGate, Math.hypot(p.x - ENTRANCE_GATE_X, p.z - ENTRANCE_GATE_Z));
+  }
+  // The road's own segment length is the finest resolution a vertex can land
+  // at; anything tighter asserts on where the tessellation happened to fall.
+  if (toTheGate > ROAD_TILE_METRES / 2) {
+    fouls.push(
+      `the nearest the road gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+    );
+  }
+
+  // `facts.boundary`, not a static `PARK_BOUNDARY` import: that constant is
+  // solved at module scope from the seed, and importing it here would pin all
+  // five seeds to the canonical park — CLAUDE.md's 76-silent-skips trap.
+  // `distanceToEdge` is positive inside the park.
+  const inside = points.filter((p) => facts.boundary.distanceToEdge(p.x, p.z) > 0);
+  if (inside.length === 0) {
+    fouls.push('no part of the road is inside the park — it stops at the wall rather than going in');
+  }
+
+  // **Everything inside the park runs between the arch's posts.**
+  //
+  // Measured as perpendicular distance from the gate's own radial axis, not
+  // with `isInEntranceGateGap`. That predicate is an *angle*, which is the
+  // right question at the wall and the wrong one further in: a constant angle
+  // is a corridor that narrows as it approaches the plaza, so the spur's far
+  // corners — 8 m inside the park, and perfectly between the posts — fell
+  // outside it by 0.0017 rad and were reported as having "spilled over the
+  // boundary". The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side of the
+  // axis, so that is the width the road may not exceed anywhere.
+  const axisX = Math.cos(ENTRANCE_ANGLE);
+  const axisZ = Math.sin(ENTRANCE_ANGLE);
+  const offAxis = (p: { x: number; z: number }): number => Math.abs(p.z * axisX - p.x * axisZ);
+  const trespassing = inside.filter((p) => offAxis(p) > ENTRANCE_GATE_HALF_WIDTH);
+  if (trespassing.length > 0) {
+    const worst = trespassing[0];
+    fouls.push(
+      `${trespassing.length} road vertices inside the park stand more than ` +
+        `${ENTRANCE_GATE_HALF_WIDTH} m off the gate's axis, e.g. ${fmt([worst?.x ?? 0, worst?.z ?? 0])} at ` +
+        `${offAxis(worst ?? { x: 0, z: 0 }).toFixed(2)} m — the road is not going through the arch, it is ` +
+        'spilling across the park',
+    );
+  }
+
+  return fouls;
+};
+
+/**
  * **Every child fits in the seat they are sitting in.**
  *
  * `catBus.ts` says, in large friendly letters, that *"the bus is sized by what
@@ -3139,6 +3235,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',
     theEntranceIsClearEnoughToArriveAt,

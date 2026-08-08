@@ -4583,37 +4583,3 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .journey-skip--ready .journey-skip__button { animation: none; }
 }
-
-/* The cat bus ride's "Look inside!" toggle.
-   Sits opposite the skip button rather than beside it: they are on screen at
-   the same time for most of the ride, and two pill buttons touching in the
-   middle of the bottom edge is one target a six-year-old misses. Sized in
-   `rem` throughout, per GAME_DESIGN.md's TEXT/UI-SCALE rule — no pixel sizes
-   are restated here. */
-.journey-view {
-  position: fixed;
-  left: 50%;
-  bottom: 6.1rem;
-  transform: translateX(-50%);
-  z-index: 40;
-  pointer-events: none;
-}
-
-.journey-view__button {
-  pointer-events: auto;
-  font: inherit;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #33324f;
-  background: linear-gradient(180deg, #d8f0ff, #8fd0ff);
-  border: 0.16rem solid #ffffff;
-  border-radius: 999px;
-  padding: 0.6rem 1.3rem;
-  box-shadow: 0 0.35rem 0 rgba(50, 90, 130, 0.28), 0 0.7rem 1.4rem rgba(0, 0, 0, 0.25);
-  cursor: pointer;
-}
-
-.journey-view__button:active {
-  transform: translateY(0.18rem);
-  box-shadow: 0 0.17rem 0 rgba(50, 90, 130, 0.28), 0 0.4rem 0.9rem rgba(0, 0, 0, 0.25);
-}
