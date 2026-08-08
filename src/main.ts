@@ -466,17 +466,19 @@ function rideInThenPlay(
 
   const loop = new Loop((tick) => {
     director.advance(tick.dt);
-    // **The bus idles rather than lying.** Once the ride has run its course
-    // with no park behind it, the road stops moving and the bus waits at the
-    // kerb; `JourneyDirector.overrunning` is the one place that is decided.
-    // The bus stops; the children on it keep bouncing. `travelling` is the one
-    // place that distinction is made — driving both off a single clamped clock
-    // froze twelve passengers mid-bounce.
+    // **The bus waits rather than lying.** Once the ride has run its course
+    // with no park behind it, the lane stops going past and the bus pulls in to
+    // the gate and idles there; `JourneyDirector.overrunning` is the one place
+    // that is decided.
     journey.update(tick.dt, !director.overrunning);
-    // Driven off the ride's own clock, not wall time and not a CSS keyframe: the
-    // letters then stop hopping exactly when the bus stops, and a check can see
-    // that they moved at all. See `ui/JourneyTitle.ts`.
-    title.update(journey.elapsed);
+    // **`animationTime`, not `elapsed`.** `elapsed` is a distance down the lane
+    // dressed as a clock: it clamps at twenty seconds and stops dead while the
+    // bus waits. Feeding it to the title froze the letters mid-jump for the
+    // whole of an overrun — which QA measured at one title layout in 51 samples
+    // over 6.4 s, against 262 during the ride, and read as a crash rather than
+    // as a wait. Anything drawn that must keep moving reads the clock that
+    // never stops. See `ui/JourneyTitle.ts` and `BusJourney.animationTime`.
+    title.update(journey.animationTime);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
     journey.render(renderer, engine.width, engine.height);

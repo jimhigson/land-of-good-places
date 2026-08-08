@@ -166,13 +166,24 @@ export class JourneyTitle {
   }
 
   /**
-   * Drives the hops from the ride's own clock.
+   * Drives the hops from a clock, rather than from a CSS keyframe, for the
+   * reason in the header: a check has to be able to see that the characters
+   * moved.
    *
-   * Driven from `main.ts`'s loop with `journey.elapsed` rather than left to a
-   * CSS keyframe, for the reason in the header: a check has to be able to see
-   * that the characters moved. It also means the title stops bouncing exactly
-   * when the ride stops, instead of carrying on over a frozen bus if generation
-   * overruns.
+   * **Which clock is the whole of one QA defect.** This was fed
+   * `journey.elapsed`, and the note here argued for it — *"the title stops
+   * bouncing exactly when the ride stops, instead of carrying on over a frozen
+   * bus"*. That reasoning had the case backwards. `elapsed` is distance down
+   * the lane, so on an overrun the letters stopped mid-jump at scattered
+   * heights and stayed there: measured over 6.4 s of waiting, **one title
+   * layout in 51 samples**, against 262 during the ride. A title frozen
+   * mid-hop is not restraint, it is the single loudest "this has crashed"
+   * signal on the screen, and it was arriving at exactly the moment a child is
+   * being asked to wait.
+   *
+   * `main.ts` now passes `journey.animationTime`, the clock that never stops —
+   * the same one the children's bounce and the bus's tail have always read,
+   * which is precisely why those two were the only things still moving.
    */
   update(elapsedSeconds: number): void {
     for (let i = 0; i < this.letters.length; i += 1) {

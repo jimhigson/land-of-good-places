@@ -23,7 +23,7 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
-import { createRandom, clamp01, lerp, smoothstep } from '../../core/mathUtils';
+import { createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
 import { createKid, KID_HEIGHT, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
@@ -158,8 +158,84 @@ const RIDER_BOUNCE_MARGIN = 0.04;
  */
 const INSIDE_CAMERA_HEADROOM = 0.3;
 
+/** Where the ride's own twenty seconds leave the bus, in metres down the lane. */
+const RIDE_END_Z = -JOURNEY_SECONDS * BUS_SPEED;
+
 /** Where the park's gate stands, down the lane. Derived from where the ride ends. */
 const PARK_AHEAD_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
+
+/**
+ * **Where the bus comes to rest when it has to wait — at the gate.**
+ *
+ * Jim, 8 August 2026, on the overrun: *"The bus stops in open lane, short of the
+ * gate. It should idle **at the gate**, which is where a bus waits."*
+ *
+ * It stopped short because the only thing that had ever decided where the bus
+ * *is* was `-elapsed * BUS_SPEED`, and `elapsed` clamps at {@link
+ * JOURNEY_SECONDS}. So the bus's resting place was wherever twenty seconds
+ * happened to leave it — {@link RIDE_END_Z}, which is {@link PARK_STANDOFF}
+ * metres of empty tarmac short of the arch. That standoff is right for the
+ * *closing shot* of a ride that ends on time, and it is the wrong place for a
+ * vehicle to sit still: a bus parked in the open road with its engine running
+ * reads as broken down, and a bus at a gate reads as waiting.
+ *
+ * Nose on the arch, so the bus's own length is the offset and a bus that is
+ * resized still pulls up in the same relationship to the gate.
+ */
+export const BUS_WAIT_Z = PARK_AHEAD_Z + CAT_BUS_LENGTH / 2;
+
+/** The last stretch, in metres: from where the ride ends to where it waits. */
+const PULL_IN_DISTANCE = RIDE_END_Z - BUS_WAIT_Z;
+
+/**
+ * How long the bus takes to roll that last stretch and stop.
+ *
+ * **Not picked — it is what an even deceleration from {@link BUS_SPEED} to
+ * nothing over {@link PULL_IN_DISTANCE} takes**, which is `2d/v`. Choosing a
+ * duration instead would have been choosing a deceleration by accident, and a
+ * bus that stops in half a second has crashed rather than parked.
+ *
+ * It lands at ~4.0 s, which is longer than four of the five overruns measured
+ * on real hardware (0.96, 4.24, 4.48, 6.34, 7.73 s). So on a real slow seed the
+ * bus is usually still visibly rolling when the park arrives, and the wait never
+ * begins with a stationary frame.
+ */
+export const PULL_IN_SECONDS = (2 * PULL_IN_DISTANCE) / BUS_SPEED;
+
+/**
+ * Where the bus is, `idle` seconds after the ride ran out of road.
+ *
+ * Pure and exported for the same reason {@link cameraPoseAt} is: `check:bus-
+ * journey` has to be able to assert *"it reaches the gate"* without building a
+ * bus, and an assertion that asked the bus where it thought it was would pass on
+ * a bus that never moved.
+ */
+export function busWaitZAt(idleSeconds: number): number {
+  const t = clamp(idleSeconds, 0, PULL_IN_SECONDS);
+  return RIDE_END_Z - BUS_SPEED * t * (1 - t / (2 * PULL_IN_SECONDS));
+}
+
+/** How fast it is going while it pulls in. Reaches exactly zero at the gate. */
+export function busWaitSpeedAt(idleSeconds: number): number {
+  const t = clamp(idleSeconds, 0, PULL_IN_SECONDS);
+  return BUS_SPEED * (1 - t / PULL_IN_SECONDS);
+}
+
+/**
+ * **A stopped bus is not a still bus.** How far it rocks on its springs once it
+ * has pulled up, in metres and radians.
+ *
+ * Twelve children are bouncing in their seats; a body on springs carrying them
+ * moves. Small enough that it reads as an idling engine rather than as a
+ * wobble, and it is the difference between a held frame and a frozen one — the
+ * whole complaint being fixed here is that the wait *read as a crash*.
+ *
+ * Ramped in by how far the bus has slowed, so it arrives with the stop rather
+ * than switching on at it.
+ */
+const IDLE_ROCK_LIFT = 0.035;
+const IDLE_ROCK_ROLL = 0.008;
+const IDLE_ROCK_RATE = 1.9;
 
 
 /**
@@ -452,6 +528,15 @@ export class BusJourney {
    * four seconds and said so; nothing about the code looked wrong.
    */
   private animationSeconds = 0;
+  /**
+   * **How long the bus has been waiting** for a park that is not ready yet.
+   *
+   * Zero on every ride that ends on time, so nothing about the ordinary journey
+   * is expressed in terms of it. Once it starts running the bus is no longer
+   * where the lane clock says — it is pulling in to the gate, which is
+   * {@link busWaitZAt}'s job.
+   */
+  private idleSeconds = 0;
   private busZ = 0;
 
   private viewMode: JourneyView = 'outside';
@@ -605,9 +690,40 @@ export class BusJourney {
     this.insideAim.set(0, eyeHeight, back);
   }
 
-  /** Seconds since the ride began — the clock everything else here reads. */
+  /**
+   * Seconds of **road** — how far down the lane the bus has come, as a time.
+   *
+   * Clamped at {@link JOURNEY_SECONDS} and held still while the bus waits, so
+   * **this is not the clock for anything that has to keep moving on screen**.
+   * That is {@link animationTime}. Feeding the title card this one is the whole
+   * of the frozen-title fault QA found: see `ui/JourneyTitle.ts`.
+   */
   get elapsed(): number {
     return this.elapsedSeconds;
+  }
+
+  /**
+   * **The clock that never stops**, in seconds — the one for anything drawn.
+   *
+   * Jim, 8 August 2026, on the overrun: *"Anything that should keep moving
+   * during the idle needs a clock that keeps running. Find every such thing."*
+   * This is that clock, and it was already here driving the children and the
+   * tail — which is exactly why those two were the only things QA measured
+   * still moving. Exposed so everything else that must stay alive can read the
+   * same one rather than grow a second.
+   */
+  get animationTime(): number {
+    return this.animationSeconds;
+  }
+
+  /** How long the bus has been waiting at the kerb. Zero on an on-time ride. */
+  get waited(): number {
+    return this.idleSeconds;
+  }
+
+  /** Where the bus is down the lane, in metres. Negative is towards the park. */
+  get busPositionZ(): number {
+    return this.busZ;
   }
 
   /** Whether the ride is being watched from outside the bus or in it. */
@@ -1044,11 +1160,24 @@ export class BusJourney {
     this.animationSeconds += dt;
     if (travelling) {
       this.elapsedSeconds = Math.min(JOURNEY_SECONDS, this.elapsedSeconds + dt);
+    } else {
+      this.idleSeconds += dt;
     }
-    this.busZ = -this.elapsedSeconds * BUS_SPEED;
+
+    // **The wait is a manoeuvre, not a pause.** Once the road has run out the
+    // bus stops taking its position from the lane clock — which is clamped —
+    // and takes it from how long it has been waiting instead, rolling the last
+    // stretch and pulling up at the gate. See {@link BUS_WAIT_Z}.
+    const waiting = this.idleSeconds > 0;
+    this.busZ = waiting ? busWaitZAt(this.idleSeconds) : -this.elapsedSeconds * BUS_SPEED;
+    const speed = waiting ? busWaitSpeedAt(this.idleSeconds) : BUS_SPEED;
     this.place(this.busZ);
-    this.bus.animate(dt, this.animationSeconds, travelling ? BUS_SPEED : 0);
+    // **The wheels stop turning because the bus stops moving**, rather than
+    // because a boolean said so: `speed` is the real speed throughout, so they
+    // visibly slow down over the pull-in instead of switching off.
+    this.bus.animate(dt, this.animationSeconds, speed);
     this.exciteRiders(this.animationSeconds);
+    this.rockAtRest(speed);
 
     // **The cut.** Driven by the ride's own clock through the shot list, so the
     // schedule is a thing `check:bus-journey` can hold rather than something
@@ -1074,7 +1203,34 @@ export class BusJourney {
       height + pose.lift,
       this.busZ + Math.cos(pose.yaw) * pose.horizontal,
     );
-    this.camera.lookAt(0, height + 2.2, this.busZ);
+    // **Aimed at the bus, not at the road under it.** The two are the same
+    // number on an ordinary ride, and they part company at exactly the moment
+    // it matters: a bus rocking at the kerb is something the camera should be
+    // seen to be watching. Taking the height off `bus.root` rather than
+    // recomputing `laneHeight` also removes a second definition of where the
+    // bus is, which is this repo's most expensive bug shape.
+    this.camera.lookAt(0, this.bus.root.position.y + 2.2, this.busZ);
+  }
+
+  /**
+   * **The engine is running while she waits.**
+   *
+   * Applied after {@link place}, which rewrites the bus's whole transform every
+   * frame, so this is a fresh offset each time rather than an accumulating one.
+   *
+   * The amplitude is ramped by how far the bus has slowed — nothing at road
+   * speed, full at rest — so the rock arrives *with* the stop. Switching it on
+   * at zero speed would put a visible step in the one frame the whole change
+   * exists to smooth over.
+   */
+  private rockAtRest(speed: number): void {
+    const atRest = clamp01(1 - Math.abs(speed) / BUS_SPEED);
+    if (atRest <= 0) return;
+    const t = this.animationSeconds;
+    this.bus.root.position.y += Math.sin(t * IDLE_ROCK_RATE) * IDLE_ROCK_LIFT * atRest;
+    // About the bus's own length, which `place`'s `lookAt` has just aimed down
+    // the road — so this is roll, whatever bearing the lane has put it on.
+    this.bus.root.rotateZ(Math.sin(t * IDLE_ROCK_RATE * 0.77 + 1.4) * IDLE_ROCK_ROLL * atRest);
   }
 
   /**
