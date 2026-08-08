@@ -148,6 +148,10 @@ OMIT = {
 
 # file stem -> (collection, camera azimuth in degrees off the front, elevation)
 # Azimuth 0 looks straight along +Y (at the asset's front face, which is −Y).
+# An optional fifth field widens the frame: `frame()` sizes the ortho view off
+# the asset's largest single dimension, which crops anything whose diagonal is
+# much longer than that — a quarter-turn staircase is 4.4 m in three directions
+# at once and lost its newels at the default 1.22.
 SHOTS = [
     ("tower", "hotel-tower", 34.0, 24.0),
     ("tower-front", "hotel-tower", 0.0, 8.0),
@@ -173,11 +177,11 @@ SHOTS = [
     # looks from focus + (+X, +Y, +Z) at 38° of pitch; the game's +Z is
     # Blender's −Y, so +45° of azimuth here puts the camera at (+X, −Y), which
     # is the same corner. This is the shot that says whether the sweep reads.
-    ("staircase", "hotel-stair", 45.0, 36.0),
+    ("staircase", "hotel-stair", 45.0, 36.0, 1.6),
     # …and a low one from the foot of the flight, which is the only angle that
     # shows the rake: strings, handrail and coping should be three parallel
     # straight lines, and any tread out of step shows up as a kink in them.
-    ("staircase-rake", "hotel-stair", 8.0, 10.0),
+    ("staircase-rake", "hotel-stair", 8.0, 10.0, 1.45),
 ]
 
 
@@ -219,7 +223,7 @@ def configure() -> None:
         obj.color = linear_rgba(COLOURS.get(obj.name, 0xCCCCCC))
 
 
-def frame(objects, azimuth_deg: float, elevation_deg: float, camera) -> None:
+def frame(objects, azimuth_deg: float, elevation_deg: float, camera, pad: float = 1.22) -> None:
     lo = Vector((1e9, 1e9, 1e9))
     hi = Vector((-1e9, -1e9, -1e9))
     for obj in objects:
@@ -244,7 +248,7 @@ def frame(objects, azimuth_deg: float, elevation_deg: float, camera) -> None:
     camera.rotation_mode = "QUATERNION"
     camera.rotation_quaternion = direction.to_track_quat("Z", "Y")
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = size * 1.22
+    camera.data.ortho_scale = size * pad
 
 
 def main() -> None:
@@ -258,7 +262,8 @@ def main() -> None:
     bpy.context.scene.camera = camera
 
     print("\nhotel_render")
-    for stem, coll_name, azimuth, elevation in SHOTS:
+    for stem, coll_name, azimuth, elevation, *rest in SHOTS:
+        pad = rest[0] if rest else 1.22
         coll = bpy.data.collections.get(coll_name)
         if coll is None:
             raise SystemExit(f"hotel_render: no collection '{coll_name}' — rerun hotel_build.py")
@@ -270,7 +275,7 @@ def main() -> None:
             if obj.type == "MESH":
                 obj.location = layout.get(obj.name, (0.0, 0.0, 0.0))
         bpy.context.view_layer.update()
-        frame(shown, azimuth, elevation, camera)
+        frame(shown, azimuth, elevation, camera, pad)
         path = os.path.join(OUT, f"{stem}.png")
         bpy.context.scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
