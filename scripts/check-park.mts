@@ -269,7 +269,16 @@ function destinations(): Destination[] {
 /** Can the lattice route a child from the entrance to (x, z)? */
 const reachScratch = new Float64Array(MAX_ROUTE_WAYPOINTS * 2);
 function walkReachable(x: number, z: number): boolean {
-  const count = navGrid.findRoute(ENTRANCE_X, ENTRANCE_Z, x, z, park.sample, 0, reachScratch);
+  const count = navGrid.findRoute(
+    ENTRANCE_X,
+    ENTRANCE_Z,
+    park.sample(ENTRANCE_X, ENTRANCE_Z, 0),
+    x,
+    z,
+    park.sample(x, z, 0),
+    park.sample,
+    reachScratch,
+  );
   if (count === 0) return false;
   const endX = reachScratch[(count - 1) * 2] ?? Infinity;
   const endZ = reachScratch[(count - 1) * 2 + 1] ?? Infinity;
@@ -435,10 +444,11 @@ for (const target of targets) {
   const points = navGrid.findRoute(
     ENTRANCE_X,
     ENTRANCE_Z,
+    park.sample(ENTRANCE_X, ENTRANCE_Z, 0),
     target.x,
     target.z,
+    park.sample(target.x, target.z, 0),
     park.sample,
-    0,
     route,
   );
 

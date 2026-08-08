@@ -1273,10 +1273,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     const count = navGrid.findRoute(
       ENTRANCE_PLAYER_X,
       ENTRANCE_PLAYER_Z,
+      sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0),
       x,
       z,
+      sample(x, z, 0),
       sample,
-      0,
       routeBuffer,
     );
     if (count === 0) return false;

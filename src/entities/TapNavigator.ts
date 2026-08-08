@@ -4,7 +4,7 @@ import type { InputSystem } from '../core/input';
 import type { TapPoint } from '../core/input/PointerControls';
 import type { IsoCamera } from '../core/IsoCamera';
 import { pickWalkablePoint } from '../world/pickWalkable';
-import { MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGrid';
+import { MAX_LEVEL_GAP, MAX_ROUTE_WAYPOINTS, type NavGrid } from '../world/NavGrid';
 import { TapMarker } from '../art/models/tapMarker';
 import type { GroundSampler, Player } from './Player';
 
@@ -164,6 +164,13 @@ export class TapNavigator implements GameSystem {
     private readonly camera: IsoCamera,
     private readonly input: InputSystem,
     private readonly navGrid: NavGrid,
+    /**
+     * The height above which surfaces are hidden from the player — the castle
+     * cutaway's fact, `Infinity` everywhere everything is on show. The pick
+     * tests the ray against the topmost surface *below* this, so a tap lands
+     * on what the child can see and never on a floor the fade has removed.
+     */
+    private readonly visibleCeiling: () => number = () => Infinity,
   ) {}
 
   /** The tap marker's geometry. Add it to the scene once, at construction. */
@@ -199,7 +206,7 @@ export class TapNavigator implements GameSystem {
     const found = pickWalkablePoint(
       this.raycaster.ray,
       sampler,
-      this.player.position.y,
+      this.visibleCeiling(),
       this.hit,
     );
     if (!found) return false;
@@ -282,7 +289,14 @@ export class TapNavigator implements GameSystem {
 
     const distance = this.planarDistance();
 
-    if (distance <= ARRIVE_RADIUS) {
+    // Arrived means arrived **on the destination's level**: standing on the
+    // deck directly above a tapped floor spot is planar-zero and three metres
+    // wrong, and calling that "arrived" is exactly the shipped bug where the
+    // marker jumped to the child's own feet. An unrouted walk (no lattice —
+    // the pre-routing fallback) keeps the old planar-only rule, because its
+    // target's level is wherever she already is.
+    const levelGap = Math.abs(this.player.position.y - this.target.y);
+    if (distance <= ARRIVE_RADIUS && (this.routeLength === 0 || levelGap <= MAX_LEVEL_GAP)) {
       this.arrive();
       this.marker.update(dt, elapsed, false);
       return;
@@ -376,19 +390,37 @@ export class TapNavigator implements GameSystem {
     this.routeLength = this.navGrid.findRoute(
       this.player.position.x,
       this.player.position.z,
+      this.player.position.y,
       this.target.x,
       this.target.z,
+      this.target.y,
       sampler,
-      this.player.position.y,
       this.route,
     );
-    if (this.routeLength === 0 || this.navGrid.lastRouteReachedGoal) return;
+    if (this.routeLength === 0) return;
+    if (this.navGrid.lastRouteReachedGoal) {
+      // Stand the destination on the level the route actually ends on — the
+      // pick already put it there for a tap, and for a caller that passed a
+      // guessed `y` (the park map passes the terrain's), this is what makes
+      // the arrival check compare against the real floor.
+      this.target.y = this.navGrid.lastRouteEndY;
+      return;
+    }
 
     const endX = this.route[(this.routeLength - 1) * 2] ?? this.target.x;
     const endZ = this.route[(this.routeLength - 1) * 2 + 1] ?? this.target.z;
-    if (Math.hypot(endX - this.target.x, endZ - this.target.z) <= SHORTFALL_TOLERANCE) return;
+    // A shortfall is only "the stand point beside the stall" when it is short
+    // on the **same level**. Ending nearby on another level — the deck edge
+    // above a tapped floor spot — is a genuinely different place, and the
+    // destination honestly becomes where she can actually get to.
+    if (
+      Math.hypot(endX - this.target.x, endZ - this.target.z) <= SHORTFALL_TOLERANCE &&
+      Math.abs(this.navGrid.lastRouteEndY - this.target.y) <= MAX_LEVEL_GAP
+    ) {
+      return;
+    }
 
-    this.target.set(endX, sampler(endX, endZ, this.player.position.y), endZ);
+    this.target.set(endX, this.navGrid.lastRouteEndY, endZ);
   }
 
   /**

@@ -137,6 +137,7 @@ import {
   type HotelDoorBand,
   type HotelRoom,
   type Mezzanine,
+  mezzanineWalkConnectors,
   type SuitePartition,
   type WallSide,
 } from './layout';
@@ -2513,6 +2514,18 @@ export class Hotel implements GameSystem {
         top,
         solid: false,
       });
+    }
+
+    // The way between the two levels, declared for the router. The path is
+    // derived from the same plan the treads were built from
+    // (`mezzanineWalkConnectors`), so it descends the real arc; `NavGrid`
+    // consumes it as an edge between the floor and the deck — the lattice
+    // itself can never route the channel between the fattened flanks. See
+    // ARCHITECTURE-DECISIONS.md Decision 11.
+    for (const path of mezzanineWalkConnectors(plan)) {
+      this.surfaces.addConnector(
+        path.map((p) => ({ x: room.originX + p.x, y: p.y, z: room.originZ + p.z })),
+      );
     }
 
     // The stair's own two flanks, as a chain of short walls along each radius.

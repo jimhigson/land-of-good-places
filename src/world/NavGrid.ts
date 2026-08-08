@@ -1,10 +1,11 @@
 import type { ParkBoundary } from './boundary';
-import { BUILDING_FLOOR_HEIGHT, BUILDING_STEP_UP } from '../core/constants';
+import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
+import type { LevelConnector } from './building/surfaces';
 import { autoHopClears, type CollisionWorld } from './Collision';
 
 /**
- * The park, as something you can find a way across.
+ * The park, as something you can find a way across — **on every level of it**.
  *
  * A six-year-old plays this game by tapping where she wants to be. Steering
  * straight at that point — which is all tap-to-move used to do — works right up
@@ -44,13 +45,51 @@ import { autoHopClears, type CollisionWorld } from './Collision';
  * - **`CollisionWorld`** for the solid things. Every registered collider is
  *   stamped into the lattice, fattened by the walker's own radius, so a cell is
  *   free exactly when a character of that width could stand in it.
- * - **the ground sampler** for the height of each free cell, so a route can
- *   never step up something too tall to walk up, nor off the edge of a deck.
+ * - **the ground sampler** for the heights of each free cell — note the
+ *   plural, which is the whole of Decision 11 (see below).
  *
  * Both are read at plan time from the *finished* world, so the railway,
  * the replanned attractions and anything else built later appear in it for
  * free, with nothing to re-author. That is the whole reason it is built this
  * way rather than drawn by hand.
+ *
+ * ## Levels (ARCHITECTURE-DECISIONS Decision 11)
+ *
+ * Jim, having climbed the lobby's mezzanine and tapped the floor below
+ * (8 August 2026): *"Route planning in general needs to work between levels.
+ * It can't be a purely 2D algo."* The lattice used to keep **one** height per
+ * cell — whichever surface sat within a step of the walker's own feet when
+ * the lattice was built — so a route could never see the floor from the deck,
+ * and the tap walked her to the balustrade and gave up there.
+ *
+ * So a cell now keeps **every** walkable surface over it, asked of the same
+ * sampler top-down, and a route node is *(cell, level)* rather than a bare
+ * cell: the deck over the lobby floor is a different node from the floor
+ * beneath it. Neighbouring nodes connect when their heights are within the
+ * game's own step (`BUILDING_STEP_UP`), exactly the rule a walking foot obeys
+ * — which is what lets a ramp's gentle slope join its levels with no more
+ * declaration than being walkable.
+ *
+ * **Blocked stays two-dimensional, and that is deliberate.** `CollisionWorld`
+ * is height-agnostic for everything but a jump (see `Mezzanine`'s header for
+ * the law, and Decision 8 for why the rail fence's `Infinity` top must never
+ * become a number): a wall pushes a walker back at any height, so a lattice
+ * that blocked per-level would promise routes the resolver refuses. One
+ * blocked bit per cell mirrors the physics that will actually run.
+ *
+ * ## Connectors: a stair is an edge, declared by its own plan
+ *
+ * A stair whose flanks are solid — the lobby's sweeping arc — is *physically*
+ * narrower than any lattice pitch once those flanks are fattened by the
+ * walker's radius: the free band up the middle is centimetres wide, cells are
+ * classified by their centres, and no layering fixes that. The honest answer
+ * is the one the rest of this repo keeps arriving at: **the plan that built
+ * the stair declares the way up it.** `WalkSurfaces.addConnector` takes the
+ * walk path (derived from the same numbers as the treads — never typed in
+ * beside them), and the router consumes it as an ordinary edge between the
+ * two levels, its cost the path's real length, its geometry spliced into the
+ * route so the walk descends the actual arc. Multi-flight compositions chain
+ * for free, because a route through two edges is just a route.
  *
  * ## Walls she can hop are not obstacles
  *
@@ -66,24 +105,23 @@ import { autoHopClears, type CollisionWorld } from './Collision';
  * ## Nothing here happens per frame
  *
  * The lattice is built lazily, on the first route asked for in a space, and
- * kept until the space changes (the soft play bounds move), the collision world
- * changes (`CollisionWorld.revision`) or the walker's height moves by half a
- * storey — i.e. she has changed floor and "the ground" means something else
- * now. A route is planned **once per tap** and then simply followed; the
- * per-frame cost of a routed walk is one distance check more than an unrouted
- * one, and no allocation. Every buffer below is allocated once per lattice and
- * reused (ARCHITECTURE-REVIEW's standing complaint about per-frame garbage).
+ * kept until the space changes (the soft play bounds move) or the collision
+ * world changes (`CollisionWorld.revision`). It no longer cares how high the
+ * walker stands — every level is in it, so climbing the deck does not force a
+ * rebuild the way moving half a storey used to. A route is planned **once per
+ * tap** and then simply followed; the per-frame cost of a routed walk is one
+ * distance check more than an unrouted one, and no allocation. Every buffer
+ * below is allocated per lattice and reused.
  *
  * ## When there is no route
  *
- * There is always an answer. A* keeps the reachable cell that got closest to
- * the goal, so an unreachable destination — the middle of the fountain, a
- * corner of the park behind a locked gate — yields a route to the nearest place
- * she *can* stand, and `TapNavigator` walks her there and stops. It never
- * returns nothing because the goal was hopeless; it returns nothing only when
- * it has no lattice covering where she is standing, which is `TapNavigator`'s
- * cue to fall back to the old straight-line seek and behave exactly as the game
- * did before.
+ * There is always an answer. A* keeps the reachable node that got closest to
+ * the goal — closest planar, with a gentle preference for the goal's own level
+ * among near-ties — so an unreachable destination yields a route to the
+ * nearest place she *can* stand, and `TapNavigator` walks her there and stops.
+ * It returns nothing only when it has no lattice covering where she is
+ * standing, which is `TapNavigator`'s cue to fall back to the old
+ * straight-line seek and behave exactly as the game did before.
  */
 
 /**
@@ -91,11 +129,12 @@ import { autoHopClears, type CollisionWorld } from './Collision';
  *
  * Half a metre against a 0.62 m walker radius: fine enough that the gaps
  * between trees and the doorways between stalls survive, coarse enough that the
- * whole park is 240 cells square and builds in a few milliseconds. Cells are
- * classified by their **centre**, so the lattice is very slightly optimistic
- * about tight corners — which is the right way to be wrong. An optimistic route
- * clips a corner and the collision resolver slides her round it; a pessimistic
- * one seals a gap she can plainly see and walks her the long way about.
+ * whole park is a few hundred cells square and builds in a few tens of
+ * milliseconds. Cells are classified by their **centre**, so the lattice is
+ * very slightly optimistic about tight corners — which is the right way to be
+ * wrong. An optimistic route clips a corner and the collision resolver slides
+ * her round it; a pessimistic one seals a gap she can plainly see and walks her
+ * the long way about.
  */
 const CELL = 0.5;
 const INVERSE_CELL = 1 / CELL;
@@ -104,7 +143,7 @@ const INVERSE_CELL = 1 / CELL;
 const MARGIN = 2;
 
 /**
- * The biggest height change between neighbouring cells a route may take.
+ * The biggest height change between neighbouring nodes a route may take.
  *
  * The same step the building already uses for "can you walk up this?", applied
  * in both directions: up, because a taller rise is not walkable at all; down,
@@ -115,16 +154,25 @@ const MARGIN = 2;
 const MAX_STEP = BUILDING_STEP_UP;
 
 /**
- * How far the walker's height may drift before the lattice is rebuilt.
- *
- * Heights are sampled once, with the walker's own height as the reference —
- * exactly as `pickWalkable` does, and for the same reason: the sampler answers
- * with the surfaces within a step of *her feet*, which is the floor she is
- * standing on and can see. Half a storey never fires for the park's gentle
- * hills (whose whole range is about 1.4 m) and always fires for a change of
- * floor inside the building.
+ * How far apart two levels of one cell may match a height being looked up —
+ * the same step, because "the level your feet are on" and "a level you could
+ * step to" are the same fact to a walker.
  */
-const REBUILD_HEIGHT = BUILDING_FLOOR_HEIGHT * 0.5;
+export const MAX_LEVEL_GAP = MAX_STEP;
+
+/**
+ * A reference height above everything walkable, for asking the sampler
+ * "what is the topmost surface here?". The tallest walkable thing in the game
+ * is the castle's top deck at ~18 m; nothing legitimate approaches this.
+ */
+const TOP_REFERENCE = 500;
+
+/** Surfaces closer than this are one surface, asked twice. */
+const LEVEL_EPSILON = 0.01;
+
+/** Most levels one cell can carry. The castle's tower is six (five decks and
+ *  the ground); nothing else in the game reaches four. */
+const MAX_LEVELS_PER_CELL = 8;
 
 /** Rings of cells searched for somewhere to stand when the walker is inside something. */
 const START_SEARCH_RINGS = 8;
@@ -133,20 +181,31 @@ const START_SEARCH_RINGS = 8;
  * Ceiling on A* expansions, as insurance rather than as tuning.
  *
  * A reachable goal is found in a few thousand; a hopeless one floods the whole
- * lattice, which is 57 600 cells for the park, and that is the number this
- * protects against being exceeded by some future, larger space.
+ * lattice, and this protects against that flood being exceeded by some future,
+ * larger space. Nodes rather than cells now, but the park is single-level
+ * almost everywhere, so the count is the same.
  */
-const MAX_EXPANSIONS = 80_000;
+const MAX_EXPANSIONS = 160_000;
+
+/**
+ * How much a metre of height error counts against a candidate "closest
+ * reachable" ending, in cell units. Deliberately gentle: it breaks planar
+ * near-ties toward the tapped level (the floor by the stair mouth beats the
+ * deck edge directly above the target) without ever dragging a route metres
+ * out of its way to end on the right level of the wrong place.
+ */
+const BEST_HEIGHT_WEIGHT = 0.25 / CELL;
 
 /**
  * Waypoints a single route may have after smoothing.
  *
  * A route across open park smooths to one; the worst case measured — corner to
  * corner of a park-sized space stuffed with fourteen hundred obstacles — was
- * 28. This is deliberately several times that, because the overflow behaviour
- * (end the route at the destination regardless, rather than stop somewhere
- * arbitrary) is the one place in here that can put a leg through scenery, and
- * the cost of never reaching it is a 1 KB array.
+ * 28, and a stair connector splices in about a dozen more. This is deliberately
+ * several times that, because the overflow behaviour (end the route at the
+ * destination regardless, rather than stop somewhere arbitrary) is the one
+ * place in here that can put a leg through scenery, and the cost of never
+ * reaching it is a 1 KB array.
  */
 export const MAX_ROUTE_WAYPOINTS = 128;
 
@@ -158,6 +217,19 @@ const CLOSED = 2;
 const NEIGHBOUR_X = [1, -1, 0, 0, 1, 1, -1, -1] as const;
 const NEIGHBOUR_Z = [0, 0, 1, -1, 1, -1, 1, -1] as const;
 
+/** A connector edge out of a node, resolved against the current lattice. */
+interface ConnectorEdge {
+  readonly to: number;
+  /** Path length in cell units, so it compares with lattice g-scores. */
+  readonly cost: number;
+  /**
+   * Which connector, walked which way: `index + 1` first-to-last,
+   * `-(index + 1)` last-to-first. Recorded in `cameVia` so reconstruction can
+   * splice the real path back in.
+   */
+  readonly via: number;
+}
+
 export class NavGrid {
   /** Cells per side. 0 until the first lattice is built. */
   private cells = 0;
@@ -166,27 +238,46 @@ export class NavGrid {
   private originZ = 0;
 
   private blocked = new Uint8Array(0);
-  private height = new Float32Array(0);
+  /** Level count prefix: cell `c`'s nodes are `levelStart[c] .. levelStart[c+1]`. */
+  private levelStart = new Int32Array(0);
+  /** Height of each node's surface, descending within a cell. */
+  private nodeHeight = new Float32Array(0);
+  /** The cell each node stands in. */
+  private nodeCell = new Int32Array(0);
+  private nodeCount = 0;
 
   private gScore = new Float32Array(0);
   private fScore = new Float32Array(0);
   private cameFrom = new Int32Array(0);
+  private cameVia = new Int32Array(0);
   private state = new Uint8Array(0);
   private heap = new Int32Array(0);
   private heapLength = 0;
 
-  /** The cell path A* found, start-first, before smoothing. */
+  /** The node path A* found, start-first, and how each step was taken. */
   private path = new Int32Array(0);
-  /** The same as world points, plus the true start and goal at the ends. */
+  private pathVia = new Int32Array(0);
+  /** The path as world points plus heights, with connector splices marked. */
   private pointX = new Float32Array(0);
   private pointZ = new Float32Array(0);
+  private pointY = new Float32Array(0);
+  private pointSpliced = new Uint8Array(0);
+
+  /** Connector edges by node, rebuilt with the lattice. */
+  private readonly connectorEdges = new Map<number, ConnectorEdge[]>();
+  private builtConnectors: readonly LevelConnector[] = [];
 
   private built = false;
   private builtBoundary: ParkBoundary | null = null;
-  private builtY = 0;
   private builtRevision = -1;
 
   private reachedGoal = false;
+  private routeEndY = 0;
+
+  /** The best fallback ending seen by the current search. Fields rather than
+   *  captured locals so a relaxation allocates nothing. */
+  private searchBestNode = -1;
+  private searchBestScore = Infinity;
 
   constructor(
     private readonly collision: CollisionWorld,
@@ -199,6 +290,12 @@ export class NavGrid {
      * and handed straight to `Collision`'s shared {@link autoHopClears}.
      */
     private readonly hopApex: number,
+    /**
+     * The declared ways between levels — `WalkSurfaces.connectors`, read at
+     * lattice build so a connector registered while the world goes up is in
+     * the first lattice anyone asks for. See the file comment.
+     */
+    private readonly connectors: () => readonly LevelConnector[] = () => [],
   ) {}
 
   /**
@@ -212,8 +309,22 @@ export class NavGrid {
   }
 
   /**
+   * The height of the surface the last route ends on — the goal's own level
+   * when it was reached, and the level of the closest reachable point when it
+   * was not. `TapNavigator` moves the marker there, so a child sees the level
+   * her character is really going to.
+   */
+  get lastRouteEndY(): number {
+    return this.routeEndY;
+  }
+
+  /**
    * Plans a walk from one world point to another, writing `x, z` pairs into
    * `out` and returning how many it wrote.
+   *
+   * `startY` and `goalY` say **which level** each end means — the walker's own
+   * feet, and the height the tap's pick landed on. Two taps at the same `x, z`
+   * on different levels are different destinations now, which is the point.
    *
    * Returns 0 only when there is no lattice covering the start — a walker
    * outside the current space's play bounds altogether — which the caller
@@ -226,14 +337,16 @@ export class NavGrid {
   findRoute(
     startX: number,
     startZ: number,
+    startY: number,
     goalX: number,
     goalZ: number,
+    goalY: number,
     sample: GroundSampler,
-    referenceY: number,
     out: Float32Array,
   ): number {
     this.reachedGoal = false;
-    if (!this.ensureLattice(sample, referenceY)) return 0;
+    this.routeEndY = startY;
+    if (!this.ensureLattice(sample)) return 0;
 
     let startCell = this.cellAt(startX, startZ);
     if (startCell < 0) return 0;
@@ -245,17 +358,25 @@ export class NavGrid {
       startCell = this.nearestFreeCell(startCell);
       if (startCell < 0) return 0;
     }
+    const startNode = this.nodeNearest(startCell, startY);
+    if (startNode < 0) return 0;
 
     const goalCell = this.cellAt(goalX, goalZ);
     // A goal off the edge of the lattice is not "unreachable", it is
     // unknowable. Say so, and let the caller fall back.
     if (goalCell < 0) return 0;
+    const goalNode = this.blocked[goalCell] === 0 ? this.nodeNearest(goalCell, goalY) : -1;
 
-    const endCell = this.search(startCell, goalCell);
-    this.reachedGoal = endCell === goalCell && this.blocked[goalCell] === 0;
+    const endNode = this.search(startNode, goalNode, goalCell, goalY);
+    // Reaching the goal *node* is reaching the goal: the node was chosen as
+    // the goal cell's level nearest `goalY`, so the level agreement is already
+    // in the choice — a caller who only knows "somewhere on the ground" still
+    // gets an honest yes on a hilltop whose one level is the hill.
+    this.reachedGoal = endNode === goalNode && goalNode >= 0;
+    this.routeEndY = this.nodeHeight[endNode] ?? startY;
 
-    const pathLength = this.reconstruct(startCell, endCell);
-    return this.smooth(startX, startZ, goalX, goalZ, pathLength, out);
+    const pathLength = this.reconstruct(startNode, endNode);
+    return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
   }
 
   // ------------------------------------------------------------- the lattice
@@ -264,23 +385,22 @@ export class NavGrid {
    * Builds or rebuilds the lattice if the one in hand does not describe the
    * space the walker is in. Returns false if there is no usable lattice at all.
    */
-  private ensureLattice(sample: GroundSampler, referenceY: number): boolean {
+  private ensureLattice(sample: GroundSampler): boolean {
     const boundary = this.collision.playBounds;
 
     if (
       this.built &&
       this.builtRevision === this.collision.revision &&
-      this.builtBoundary === boundary &&
-      Math.abs(referenceY - this.builtY) <= REBUILD_HEIGHT
+      this.builtBoundary === boundary
     ) {
       return true;
     }
 
-    this.rebuild(boundary, sample, referenceY);
+    this.rebuild(boundary, sample);
     return this.built;
   }
 
-  private rebuild(boundary: ParkBoundary, sample: GroundSampler, referenceY: number): void {
+  private rebuild(boundary: ParkBoundary, sample: GroundSampler): void {
     // Sized and centred on the boundary's own extent rather than on a radius
     // about a centre: the park's edge is neither circular nor, for the castle
     // interior, centred on the origin.
@@ -302,15 +422,7 @@ export class NavGrid {
     const total = side * side;
     if (this.blocked.length !== total) {
       this.blocked = new Uint8Array(total);
-      this.height = new Float32Array(total);
-      this.gScore = new Float32Array(total);
-      this.fScore = new Float32Array(total);
-      this.cameFrom = new Int32Array(total);
-      this.state = new Uint8Array(total);
-      this.heap = new Int32Array(total);
-      this.path = new Int32Array(total);
-      this.pointX = new Float32Array(total + 2);
-      this.pointZ = new Float32Array(total + 2);
+      this.levelStart = new Int32Array(total + 1);
     } else {
       this.blocked.fill(0);
     }
@@ -340,22 +452,148 @@ export class NavGrid {
       this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
     });
 
-    // Heights, for the free cells only — a blocked cell is never stepped on, so
-    // its height is never asked for, and this is much the most expensive part.
+    // Levels, for the free cells only — a blocked cell is never stepped on, so
+    // its heights are never asked for, and this is much the most expensive
+    // part. Top-down: the topmost surface first, then whatever the sampler
+    // offers from just over a step beneath it, until it repeats itself (the
+    // unconditional ground). Surfaces within a step of one another are one
+    // walking level, and the higher one speaks for it — exactly as the old
+    // single-height lattice behaved around the ball pit's lip.
+    this.growNodes(total + 64);
+    let nodes = 0;
     for (let cz = 0; cz < side; cz += 1) {
       const z = this.originZ + cz * CELL;
       const row = cz * side;
       for (let cx = 0; cx < side; cx += 1) {
         const index = row + cx;
+        this.levelStart[index] = nodes;
         if (this.blocked[index] === 1) continue;
-        this.height[index] = sample(this.originX + cx * CELL, z, referenceY);
+        const x = this.originX + cx * CELL;
+
+        let cursor = sample(x, z, TOP_REFERENCE);
+        if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) {
+          this.growNodes(this.nodeHeight.length * 2);
+        }
+        this.nodeHeight[nodes] = cursor;
+        this.nodeCell[nodes] = index;
+        let kept = cursor;
+        nodes += 1;
+        for (let level = 1; level < MAX_LEVELS_PER_CELL; level += 1) {
+          const next = sample(x, z, cursor - MAX_STEP - LEVEL_EPSILON);
+          if (next >= cursor - LEVEL_EPSILON) break;
+          cursor = next;
+          if (next < kept - MAX_STEP) {
+            this.nodeHeight[nodes] = next;
+            this.nodeCell[nodes] = index;
+            kept = next;
+            nodes += 1;
+          }
+        }
       }
     }
+    this.levelStart[total] = nodes;
+    this.nodeCount = nodes;
+
+    if (this.gScore.length < nodes) {
+      this.gScore = new Float32Array(this.nodeHeight.length);
+      this.fScore = new Float32Array(this.nodeHeight.length);
+      this.cameFrom = new Int32Array(this.nodeHeight.length);
+      this.cameVia = new Int32Array(this.nodeHeight.length);
+      this.state = new Uint8Array(this.nodeHeight.length);
+      this.heap = new Int32Array(this.nodeHeight.length);
+      this.path = new Int32Array(this.nodeHeight.length);
+      this.pathVia = new Int32Array(this.nodeHeight.length);
+    }
+    this.resolveConnectors();
+    this.sizePointBuffers();
 
     this.built = true;
     this.builtBoundary = boundary;
-    this.builtY = referenceY;
     this.builtRevision = this.collision.revision;
+  }
+
+  private growNodes(capacity: number): void {
+    if (this.nodeHeight.length >= capacity) return;
+    const heights = new Float32Array(capacity);
+    heights.set(this.nodeHeight);
+    this.nodeHeight = heights;
+    const cellsOf = new Int32Array(capacity);
+    cellsOf.set(this.nodeCell);
+    this.nodeCell = cellsOf;
+  }
+
+  /**
+   * Ties every declared connector's endpoints to nodes of this lattice.
+   *
+   * A connector whose endpoints fall off the lattice, in a blocked cell or on
+   * no level of it belongs to another space (the lobby's stair, seen from the
+   * park) and is skipped without comment. Cost is the walk path's real 3D
+   * length; both directions are edges, because a stair goes down as well as up.
+   */
+  private resolveConnectors(): void {
+    this.connectorEdges.clear();
+    this.builtConnectors = this.connectors();
+    this.builtConnectors.forEach((connector, index) => {
+      const first = connector.points[0];
+      const last = connector.points[connector.points.length - 1];
+      if (!first || !last) return;
+      const from = this.nodeAt(first.x, first.z, first.y);
+      const to = this.nodeAt(last.x, last.z, last.y);
+      if (from < 0 || to < 0) return;
+
+      let length = 0;
+      for (let i = 1; i < connector.points.length; i += 1) {
+        const a = connector.points[i - 1];
+        const b = connector.points[i];
+        if (!a || !b) continue;
+        length += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      }
+      const cost = length * INVERSE_CELL;
+      this.addConnectorEdge(from, { to, cost, via: index + 1 });
+      this.addConnectorEdge(to, { to: from, cost, via: -(index + 1) });
+    });
+  }
+
+  private addConnectorEdge(from: number, edge: ConnectorEdge): void {
+    const list = this.connectorEdges.get(from);
+    if (list) list.push(edge);
+    else this.connectorEdges.set(from, [edge]);
+  }
+
+  /** Node at a world point on the level nearest `y`, or -1. */
+  private nodeAt(x: number, z: number, y: number): number {
+    const cell = this.cellAt(x, z);
+    if (cell < 0 || this.blocked[cell] === 1) return -1;
+    const node = this.nodeNearest(cell, y);
+    if (node < 0) return -1;
+    return Math.abs((this.nodeHeight[node] ?? 0) - y) <= MAX_LEVEL_GAP ? node : -1;
+  }
+
+  /** The node of `cell` whose surface is nearest `y`, or -1 for a blocked cell. */
+  private nodeNearest(cell: number, y: number): number {
+    const from = this.levelStart[cell] ?? 0;
+    const to = this.levelStart[cell + 1] ?? 0;
+    let best = -1;
+    let bestGap = Infinity;
+    for (let node = from; node < to; node += 1) {
+      const gap = Math.abs((this.nodeHeight[node] ?? 0) - y);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = node;
+      }
+    }
+    return best;
+  }
+
+  private sizePointBuffers(): void {
+    let connectorPoints = 0;
+    for (const connector of this.builtConnectors) connectorPoints += connector.points.length;
+    const size = this.nodeHeight.length + connectorPoints + 2;
+    if (this.pointX.length >= size) return;
+    this.pointX = new Float32Array(size);
+    this.pointZ = new Float32Array(size);
+    this.pointY = new Float32Array(size);
+    this.pointSpliced = new Uint8Array(size);
   }
 
   private stampCircle(x: number, z: number, radius: number): void {
@@ -422,53 +660,57 @@ export class NavGrid {
   // --------------------------------------------------------------- the search
 
   /**
-   * A* from one cell to another, over an eight-connected lattice.
+   * A* from one node to another, over the eight-connected lattice plus the
+   * connector edges.
    *
-   * Returns the cell the route ends on: the goal when it was reached, and
-   * otherwise the reachable cell that got nearest to it, which is what makes
-   * "no route exists" degrade into "walk as close as you can and stop" rather
-   * than into a shrug.
+   * Returns the node the route ends on: the goal when it was reached, and
+   * otherwise the reachable node that got nearest to it — nearest planar, with
+   * {@link BEST_HEIGHT_WEIGHT}'s gentle preference for the goal's own level —
+   * which is what makes "no route exists" degrade into "walk as close as you
+   * can and stop" rather than into a shrug.
    */
-  private search(startCell: number, goalCell: number): number {
-    const total = this.cells * this.cells;
-    this.state.fill(NEW, 0, total);
+  private search(startNode: number, goalNode: number, goalCell: number, goalY: number): number {
+    this.state.fill(NEW, 0, this.nodeCount);
     this.heapLength = 0;
 
     const goalX = goalCell % this.cells;
     const goalZ = (goalCell - goalX) / this.cells;
 
-    this.gScore[startCell] = 0;
-    this.fScore[startCell] = this.heuristic(startCell, goalX, goalZ);
-    this.cameFrom[startCell] = -1;
-    this.state[startCell] = OPEN;
-    this.push(startCell);
+    this.gScore[startNode] = 0;
+    this.fScore[startNode] = this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ);
+    this.cameFrom[startNode] = -1;
+    this.cameVia[startNode] = 0;
+    this.state[startNode] = OPEN;
+    this.push(startNode);
 
-    let bestCell = startCell;
-    let bestHeuristic = this.fScore[startCell] ?? 0;
+    this.searchBestNode = startNode;
+    this.searchBestScore =
+      this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ) +
+      Math.abs((this.nodeHeight[startNode] ?? 0) - goalY) * BEST_HEIGHT_WEIGHT;
     let expansions = 0;
 
     while (this.heapLength > 0) {
-      const cell = this.pop();
-      if (cell === goalCell) return cell;
-      if (this.state[cell] === CLOSED) continue;
-      this.state[cell] = CLOSED;
+      const node = this.pop();
+      if (node === goalNode) return node;
+      if (this.state[node] === CLOSED) continue;
+      this.state[node] = CLOSED;
 
       expansions += 1;
       if (expansions > MAX_EXPANSIONS) break;
 
+      const cell = this.nodeCell[node] ?? 0;
       const cx = cell % this.cells;
       const cz = (cell - cx) / this.cells;
-      const cellHeight = this.height[cell] ?? 0;
-      const cellCost = this.gScore[cell] ?? 0;
+      const nodeHeight = this.nodeHeight[node] ?? 0;
+      const nodeCost = this.gScore[node] ?? 0;
 
       for (let i = 0; i < 8; i += 1) {
         const nx = cx + (NEIGHBOUR_X[i] ?? 0);
         const nz = cz + (NEIGHBOUR_Z[i] ?? 0);
         if (nx < 0 || nz < 0 || nx >= this.cells || nz >= this.cells) continue;
 
-        const neighbour = nz * this.cells + nx;
-        if (this.blocked[neighbour] === 1) continue;
-        if (Math.abs((this.height[neighbour] ?? 0) - cellHeight) > MAX_STEP) continue;
+        const neighbourCell = nz * this.cells + nx;
+        if (this.blocked[neighbourCell] === 1) continue;
 
         let step = 1;
         if (i >= 4) {
@@ -481,26 +723,55 @@ export class NavGrid {
           step = Math.SQRT2;
         }
 
-        const tentative = cellCost + step;
-        if (this.state[neighbour] !== NEW && tentative >= (this.gScore[neighbour] ?? 0)) {
-          continue;
+        // Every level of the neighbouring cell a walking foot could reach.
+        // Levels of one cell are more than a step apart by construction, so
+        // at most one matches; the loop is over the cell's own short range.
+        const from = this.levelStart[neighbourCell] ?? 0;
+        const to = this.levelStart[neighbourCell + 1] ?? 0;
+        for (let neighbour = from; neighbour < to; neighbour += 1) {
+          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > MAX_STEP) continue;
+          this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
         }
+      }
 
-        const heuristic = this.heuristic(neighbour, goalX, goalZ);
-        this.gScore[neighbour] = tentative;
-        this.fScore[neighbour] = tentative + heuristic;
-        this.cameFrom[neighbour] = cell;
-        this.state[neighbour] = OPEN;
-        this.push(neighbour);
-
-        if (heuristic < bestHeuristic) {
-          bestHeuristic = heuristic;
-          bestCell = neighbour;
+      const edges = this.connectorEdges.get(node);
+      if (edges) {
+        for (const edge of edges) {
+          this.relax(node, edge.to, nodeCost + edge.cost, edge.via, goalX, goalZ, goalY);
         }
       }
     }
 
-    return bestCell;
+    return this.searchBestNode;
+  }
+
+  /** One A* relaxation, tracking the best fallback ending as it goes. */
+  private relax(
+    node: number,
+    neighbour: number,
+    tentative: number,
+    via: number,
+    goalX: number,
+    goalZ: number,
+    goalY: number,
+  ): void {
+    if (this.state[neighbour] !== NEW && tentative >= (this.gScore[neighbour] ?? 0)) {
+      return;
+    }
+    const heuristic = this.heuristic(this.nodeCell[neighbour] ?? 0, goalX, goalZ);
+    this.gScore[neighbour] = tentative;
+    this.fScore[neighbour] = tentative + heuristic;
+    this.cameFrom[neighbour] = node;
+    this.cameVia[neighbour] = via;
+    this.state[neighbour] = OPEN;
+    this.push(neighbour);
+
+    const score =
+      heuristic + Math.abs((this.nodeHeight[neighbour] ?? 0) - goalY) * BEST_HEIGHT_WEIGHT;
+    if (score < this.searchBestScore) {
+      this.searchBestScore = score;
+      this.searchBestNode = neighbour;
+    }
   }
 
   /** Octile distance, in cells: exact for an eight-connected lattice. */
@@ -513,19 +784,23 @@ export class NavGrid {
   }
 
   /** Walks `cameFrom` back from the end, writing the path start-first. */
-  private reconstruct(startCell: number, endCell: number): number {
+  private reconstruct(startNode: number, endNode: number): number {
     let length = 0;
-    for (let cell = endCell; cell >= 0; cell = this.cameFrom[cell] ?? -1) {
-      this.path[length] = cell;
+    for (let node = endNode; node >= 0; node = this.cameFrom[node] ?? -1) {
+      this.path[length] = node;
+      this.pathVia[length] = this.cameVia[node] ?? 0;
       length += 1;
-      if (cell === startCell) break;
+      if (node === startNode) break;
       if (length >= this.path.length) break;
     }
 
     for (let i = 0, j = length - 1; i < j; i += 1, j -= 1) {
-      const swap = this.path[i] ?? 0;
+      const swapNode = this.path[i] ?? 0;
       this.path[i] = this.path[j] ?? 0;
-      this.path[j] = swap;
+      this.path[j] = swapNode;
+      const swapVia = this.pathVia[i] ?? 0;
+      this.pathVia[i] = this.pathVia[j] ?? 0;
+      this.pathVia[j] = swapVia;
     }
     return length;
   }
@@ -540,33 +815,67 @@ export class NavGrid {
    * straight line back to it is walkable, and emit the last point that was. On
    * open ground the whole route collapses to a single waypoint — the goal — and
    * the walk is bit-for-bit the straight line tap-to-move always did.
+   *
+   * A connector's spliced-in walk path is exempt: its points are somebody's
+   * real stair, emitted verbatim and never string-pulled across — a straight
+   * line from the floor to the deck is exactly the line the levels exist to
+   * refuse.
    */
   private smooth(
     startX: number,
     startZ: number,
+    startY: number,
     goalX: number,
     goalZ: number,
     pathLength: number,
     out: Float32Array,
   ): number {
-    // The true start, then the cell centres, then — if we got there — the true
-    // goal, so the last step lands on the tapped spot rather than on a lattice
-    // centre up to 35 cm away from it.
+    // The true start, then the node centres — with each connector's own walk
+    // path spliced in where the route took its edge — then, if we got there,
+    // the true goal, so the last step lands on the tapped spot rather than on
+    // a lattice centre up to 35 cm away from it.
     let points = 0;
     this.pointX[points] = startX;
     this.pointZ[points] = startZ;
+    this.pointY[points] = startY;
+    this.pointSpliced[points] = 0;
     points += 1;
     for (let i = 1; i < pathLength; i += 1) {
-      const cell = this.path[i] ?? 0;
+      const via = this.pathVia[i] ?? 0;
+      if (via !== 0) {
+        const connector = this.builtConnectors[Math.abs(via) - 1];
+        if (connector) {
+          // The whole path, its own first point included: the previous entry
+          // is the endpoint's *cell centre*, up to a third of a metre off the
+          // true stand point, and the walk should funnel through the true one.
+          const count = connector.points.length;
+          for (let p = 0; p < count; p += 1) {
+            const point = connector.points[via > 0 ? p : count - 1 - p];
+            if (!point) continue;
+            this.pointX[points] = point.x;
+            this.pointZ[points] = point.z;
+            this.pointY[points] = point.y;
+            this.pointSpliced[points] = 1;
+            points += 1;
+          }
+          continue;
+        }
+      }
+      const node = this.path[i] ?? 0;
+      const cell = this.nodeCell[node] ?? 0;
       const cx = cell % this.cells;
       const cz = (cell - cx) / this.cells;
       this.pointX[points] = this.originX + cx * CELL;
       this.pointZ[points] = this.originZ + cz * CELL;
+      this.pointY[points] = this.nodeHeight[node] ?? 0;
+      this.pointSpliced[points] = 0;
       points += 1;
     }
     if (this.reachedGoal) {
       this.pointX[points] = goalX;
       this.pointZ[points] = goalZ;
+      this.pointY[points] = this.routeEndY;
+      this.pointSpliced[points] = 0;
       points += 1;
     }
     if (points < 2) {
@@ -582,16 +891,22 @@ export class NavGrid {
     let anchor = 0;
     while (anchor < points - 1 && written < MAX_ROUTE_WAYPOINTS) {
       let furthest = anchor + 1;
-      while (
-        furthest + 1 < points &&
-        this.lineIsWalkable(
-          this.pointX[anchor] ?? 0,
-          this.pointZ[anchor] ?? 0,
-          this.pointX[furthest + 1] ?? 0,
-          this.pointZ[furthest + 1] ?? 0,
-        )
-      ) {
-        furthest += 1;
+      // A spliced point is emitted as it stands: never pulled, never pulled
+      // across. Only a run of ordinary lattice points may be straightened.
+      if (this.pointSpliced[furthest] !== 1) {
+        while (
+          furthest + 1 < points &&
+          this.pointSpliced[furthest + 1] !== 1 &&
+          this.lineIsWalkable(
+            this.pointX[anchor] ?? 0,
+            this.pointZ[anchor] ?? 0,
+            this.pointY[anchor] ?? 0,
+            this.pointX[furthest + 1] ?? 0,
+            this.pointZ[furthest + 1] ?? 0,
+          )
+        ) {
+          furthest += 1;
+        }
       }
       out[written * 2] = this.pointX[furthest] ?? 0;
       out[written * 2 + 1] = this.pointZ[furthest] ?? 0;
@@ -609,25 +924,34 @@ export class NavGrid {
   }
 
   /**
-   * Is the straight line between two world points walkable end to end?
+   * Is the straight line between two world points walkable end to end, on the
+   * levels a walking foot would take?
    *
-   * Samples at half a cell, which cannot step over a blocked cell, and carries
-   * the height along so a line that crosses a deck edge or a drop fails for the
-   * same reason a step across one does.
+   * Samples at half a cell, which cannot step over a blocked cell, and follows
+   * the nearest level along, so a line that crosses a deck edge or a drop
+   * fails for the same reason a step across one does.
    */
-  private lineIsWalkable(ax: number, az: number, bx: number, bz: number): boolean {
+  private lineIsWalkable(
+    ax: number,
+    az: number,
+    aHeight: number,
+    bx: number,
+    bz: number,
+  ): boolean {
     const startCell = this.cellAt(ax, az);
     if (startCell < 0 || this.blocked[startCell] === 1) return false;
 
     const distance = Math.hypot(bx - ax, bz - az);
     const steps = Math.max(1, Math.ceil(distance / (CELL * 0.5)));
-    let previousHeight = this.height[startCell] ?? 0;
+    let previousHeight = aHeight;
 
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
       const cell = this.cellAt(ax + (bx - ax) * t, az + (bz - az) * t);
       if (cell < 0 || this.blocked[cell] === 1) return false;
-      const height = this.height[cell] ?? 0;
+      const node = this.nodeNearest(cell, previousHeight);
+      if (node < 0) return false;
+      const height = this.nodeHeight[node] ?? 0;
       if (Math.abs(height - previousHeight) > MAX_STEP) return false;
       previousHeight = height;
     }
@@ -674,17 +998,17 @@ export class NavGrid {
     return -1;
   }
 
-  private push(cell: number): void {
+  private push(node: number): void {
     let i = this.heapLength;
     this.heapLength += 1;
-    this.heap[i] = cell;
+    this.heap[i] = node;
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      const parentCell = this.heap[parent] ?? 0;
+      const parentNode = this.heap[parent] ?? 0;
       const own = this.heap[i] ?? 0;
-      if ((this.fScore[parentCell] ?? 0) <= (this.fScore[own] ?? 0)) break;
+      if ((this.fScore[parentNode] ?? 0) <= (this.fScore[own] ?? 0)) break;
       this.heap[parent] = own;
-      this.heap[i] = parentCell;
+      this.heap[i] = parentNode;
       i = parent;
     }
   }

@@ -215,6 +215,78 @@ export interface Mezzanine {
   };
 }
 
+/**
+ * How far past a stair's first and last tread its walk path stands, metres.
+ *
+ * Far enough that the endpoint clears the stair's own flank colliders once
+ * they are fattened by the walker's radius (the flanks end 0.9 m either side
+ * of the arc's centreline; `hypot(1.2, 0.9) = 1.5 m` beats the 0.84 m
+ * fattened reach), close enough that "walk to the mouth, then up" reads as
+ * one movement rather than a detour.
+ */
+export const CONNECTOR_APPROACH = 1.2;
+
+/** A point on a connector's walk path, room-local metres. */
+export interface LocalConnectorPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * The walk paths between a room's floor and its mezzanine — **declared here,
+ * registered by `Hotel.buildMezzanine`**, consumed by `NavGrid` as graph
+ * edges between the two levels (ARCHITECTURE-DECISIONS.md Decision 11).
+ *
+ * Everything is derived from {@link Mezzanine.stair}: a point one stride out
+ * from the arc's bottom on the floor, the centre of every tread's top along
+ * the arc's mid-radius, and a point one stride past the top tread on the
+ * deck. Move the stair and the path moves with it; there is no coordinate
+ * here to go stale — the same one-owner rule `Hotel.stairMouth` follows for
+ * the hole in the gallery's front face.
+ *
+ * Today that is one path. When the lobby becomes the imperial composition —
+ * two mirrored curved flights to a landing, one straight flight to the deck —
+ * this returns one path per flight, each ending on the level it serves, and
+ * the router chains them without changing: a route is free to pass
+ * floor → landing → deck because each flight is just an edge.
+ */
+export function mezzanineWalkConnectors(
+  plan: Mezzanine,
+): readonly (readonly LocalConnectorPoint[])[] {
+  const { stair, height } = plan;
+  const midRadius = (stair.innerRadius + stair.outerRadius) / 2;
+  const riser = height / stair.treads;
+  const sweep = stair.toAngle - stair.fromAngle;
+  const at = (angle: number): { x: number; z: number } => ({
+    x: stair.centreX - Math.sin(angle) * midRadius,
+    z: stair.centreZ + Math.cos(angle) * midRadius,
+  });
+
+  const points: LocalConnectorPoint[] = [];
+  // One stride out from the bottom tread, on the floor. The walk direction
+  // along the arc at angle a is (-cos a, -sin a) for increasing a, so the
+  // floor-side approach continues it backwards: (+cos, +sin).
+  const bottom = at(stair.fromAngle);
+  points.push({
+    x: bottom.x + Math.cos(stair.fromAngle) * CONNECTOR_APPROACH,
+    y: 0,
+    z: bottom.z + Math.sin(stair.fromAngle) * CONNECTOR_APPROACH,
+  });
+  for (let i = 0; i < stair.treads; i += 1) {
+    const centre = at(stair.fromAngle + (sweep * (i + 0.5)) / stair.treads);
+    points.push({ x: centre.x, y: riser * (i + 1), z: centre.z });
+  }
+  // One stride past the top tread, on the deck.
+  const top = at(stair.toAngle);
+  points.push({
+    x: top.x - Math.cos(stair.toAngle) * CONNECTOR_APPROACH,
+    y: height,
+    z: top.z - Math.sin(stair.toAngle) * CONNECTOR_APPROACH,
+  });
+  return [points];
+}
+
 export interface HotelRoom {
   readonly space: SpaceId;
   /** This floor's colours. See {@link HotelTheme}. */

@@ -33,6 +33,35 @@ export interface MovingPlatform {
 }
 
 /**
+ * A point along a {@link LevelConnector}'s walk path, world metres.
+ * `y` is the walking surface's height at that point.
+ */
+export interface ConnectorPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * A declared way between two walkable **levels** — a stair, a ramp — as the
+ * walk path along it, first point on the lower level's floor, last point on
+ * the upper one's, both stood a stride clear of the connector's own flanks.
+ *
+ * Whatever builds a stair declares one of these, **derived from the same plan
+ * data the stair's geometry and walk surfaces come from** (the lobby's is
+ * `hotel/layout.ts`'s `mezzanineWalkConnectors`), so the path can never drift
+ * from the treads. `NavGrid` consumes them as ordinary graph edges between
+ * the levels — see ARCHITECTURE-DECISIONS.md Decision 11 for why a declared
+ * edge and not the lattice: a stair channel between solid flanks is narrower
+ * than any lattice pitch once the flanks are fattened by the walker's own
+ * radius, so no grid, however layered, can find its way through; the plan
+ * that built the stair is the one authority that knows the way.
+ */
+export interface LevelConnector {
+  readonly points: readonly ConnectorPoint[];
+}
+
+/**
  * Anything within this of the interior origin is in the building's own space.
  *
  * The two spaces are 848 m apart, so the exact number does not matter as long as
@@ -64,9 +93,25 @@ export function inInteriorSpace(x: number, z: number): boolean {
 export class WalkSurfaces {
   private readonly ramps: readonly RampDefinition[] = allRamps();
   private readonly platforms: MovingPlatform[] = [];
+  private readonly levelConnectors: LevelConnector[] = [];
 
   addPlatform(platform: MovingPlatform): void {
     this.platforms.push(platform);
+  }
+
+  /**
+   * Declares a walk path between two levels. Register at build time, before
+   * the first route is asked for — `NavGrid` reads the list when it builds a
+   * lattice, and a connector added later is invisible until the next rebuild.
+   */
+  addConnector(points: readonly ConnectorPoint[]): void {
+    if (points.length < 2) throw new Error('a level connector needs at least two points');
+    this.levelConnectors.push({ points });
+  }
+
+  /** Every declared way between levels. See {@link LevelConnector}. */
+  get connectors(): readonly LevelConnector[] {
+    return this.levelConnectors;
   }
 
   /**
