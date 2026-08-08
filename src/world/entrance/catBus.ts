@@ -421,6 +421,32 @@ export interface CatBusHandle {
   readonly doorDrop: { readonly x: number; readonly z: number };
   /** 0 = fully shut, 1 = fully open. Tweened by the arrival sequence. */
   setDoorOpen(amount01: number): void;
+  /**
+   * **Cutaway: drop the lower body's outline shell so a lens inside the cabin
+   * can see the cabin.**
+   *
+   * The cabin below {@link WINDOW_SILL_Y} is one solid `RoundedBoxGeometry`
+   * ({@link CAT_BUS_CABIN_CEILING_Y}'s neighbour, `cat-bus-shell-lower`), with
+   * the twelve seats, the floor pan and every child's body **inside** it. That
+   * is right for the exterior and it is what gives the bus its soft rounded
+   * flanks.
+   *
+   * From *inside*, the block itself is invisible — its material is `FrontSide`,
+   * so every face round the lens is back-facing and culled. The one thing that
+   * does draw is the outline shell `addOutline` hangs on it: `BackSide`,
+   * `MeshBasicMaterial`, unlit. So a camera in the cabin sees a flat lightless
+   * box and nothing else, whichever way it points.
+   *
+   * **That, and not where the camera was aimed, is why the ride's interior shot
+   * had no seat, no window, no pillar and no ceiling in it** (QA, 8 August
+   * 2026). Proved by hiding this one mesh at runtime and re-shooting the
+   * identical pose. Turning it off is a cutaway — exactly what a cross-section
+   * drawing of a bus does — and it is the whole of the difference.
+   *
+   * Only the *ride's* bus is ever asked: `BusJourney` builds its own, and the
+   * park's arrival builds another that nobody climbs inside.
+   */
+  setCutaway(open: boolean): void;
   /** Spins the wheels and gives the tail a gentle idle swish. */
   animate(dt: number, elapsed: number, speed: number): void;
   dispose(): void;
@@ -501,7 +527,9 @@ export function createCatBus(): CatBusHandle {
   lowerBody.name = 'cat-bus-shell-lower';
   lowerBody.position.set(0, (BODY_BOTTOM_Y + WINDOW_SILL_Y) / 2, bodyCentreZ);
   chassis.add(lowerBody);
-  addOutline(lowerBody, 0.02 * DETAIL);
+  // Kept, because this shell is the only part of the lower body a camera inside
+  // the cabin can see at all — see `setCutaway`.
+  const lowerBodyOutline = addOutline(lowerBody, 0.02 * DETAIL);
 
   // Over the windows: the header band, window head to roof.
   const upperBody = solid(
@@ -994,6 +1022,10 @@ export function createCatBus(): CatBusHandle {
     setDoorOpen(amount01: number): void {
       doorOpenAmount = clamp01(amount01);
       doorGroup.rotation.y = -DOOR_SWING * doorOpenAmount;
+    },
+
+    setCutaway(open: boolean): void {
+      lowerBodyOutline.visible = !open;
     },
 
     animate(dt: number, elapsed: number, speed: number): void {

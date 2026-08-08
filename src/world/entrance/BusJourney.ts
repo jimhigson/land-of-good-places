@@ -25,13 +25,17 @@ import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
-import { createKid, KID_HEIGHT, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
+import {
+  createKid,
+  KID_SHOULDER_HEIGHT,
+  KID_SKIN_TONES,
+  type KidHandle,
+} from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
 import {
   createCatBus,
   CAT_BUS_CABIN_CEILING_Y,
-  CAT_BUS_CABIN_FRONT_Z,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_SEAT_Y,
   CAT_BUS_LENGTH,
@@ -149,14 +153,6 @@ const RIDER_BOUNCE = 0.13;
  * through the floor, seen from the other end.
  */
 const RIDER_BOUNCE_MARGIN = 0.04;
-
-/**
- * How far below the cabin's ceiling the inside camera hangs.
- *
- * Enough that the lens is in open air rather than grazing the header band, and
- * small enough that it still looks *down* the gangway over everybody's heads.
- */
-const INSIDE_CAMERA_HEADROOM = 0.3;
 
 /** Where the ride's own twenty seconds leave the bus, in metres down the lane. */
 const RIDE_END_Z = -JOURNEY_SECONDS * BUS_SPEED;
@@ -349,19 +345,41 @@ const CAMERA_LIFT = 11;
 const CAMERA_FOV = 42;
 
 /**
- * A narrower lens for the view from inside, and it is doing real work.
+ * A **wider** lens for the view from inside — and the swap from narrow to wide
+ * is the same correction as turning the camera round.
  *
- * The front row sits 0.53 m either side of the gangway — a child is 1.53 m
- * across — so at the outside camera's 42 degrees two enormous heads fill the
- * left and right edges of every interior frame and the busload behind them is
- * squeezed into the middle third. There is nowhere to retreat to: everything
- * ahead of the front row is the cat's own face.
+ * This was 33 degrees, and the reasoning was sound for the shot it was serving:
+ * with the lens beside the front row, two heads 0.53 m either side filled the
+ * frame edges, and the only way to crop them out was to narrow the lens.
  *
- * Narrowing the lens is the one move available, and it is the right one anyway:
- * it crops the two heads flanking the lens out of shot and fills the frame with
- * the rows in front of it, which are the faces there to be looked at.
+ * From the back seat looking forward there is nothing beside the lens to crop —
+ * the whole busload is *in front of* it — so the narrow lens stopped buying
+ * anything and started costing. What a bus interior is made of is a **long**
+ * shape: an aisle running away, seat backs down both sides, the window band and
+ * the ceiling over them. A 33-degree lens sees a keyhole of that and none of its
+ * edges, which is a large part of why the shot had no seat, window, pillar or
+ * ceiling in it. This is wide enough to hold all four.
  */
-const INSIDE_FOV = 33;
+const INSIDE_FOV = 52;
+
+/**
+ * How far back down the gangway the inside lens sits, in seat rows.
+ *
+ * Just over a third of a row behind the rearmost cushion: far enough that the
+ * back row is in front of the lens rather than either side of it, and not so far
+ * that the lens is in the back wall.
+ */
+const INSIDE_CAMERA_ROWS_BACK = 0.35;
+
+/**
+ * How far below the lens the inside shot is aimed, in metres.
+ *
+ * A slight tilt down, so the aisle and the seat bases hold the bottom of the
+ * frame. Aimed level, the bottom third is the floor running to a vanishing
+ * point and nothing else — which is the shape of the fault this is fixing, and
+ * it is worth noting that the *old* shot was level too.
+ */
+const INSIDE_CAMERA_DROP = 0.25;
 
 const DEG = Math.PI / 180;
 
@@ -607,10 +625,35 @@ export class BusJourney {
   /**
    * Where the inside camera sits, **measured off the seats that were built**.
    *
-   * Down the aisle at `x = 0` — which is also what keeps it clear of the driver,
-   * who sits off-centre at `-seatX(0)` — just ahead of the front row and at a
-   * seated child's head height, looking back down the bus. So what fills the
-   * frame is rows of faces, which is what Jim asked to be able to look at.
+   * ## It faces the front now, and it sits down among the seats
+   *
+   * QA, 8 August 2026, refusing to sign the shot off: *"the bottom 35–40% is
+   * featureless cream floor, the two near heads are cropped by the frame edges,
+   * and there is no seat, window, pillar or ceiling in shot — you cannot tell it
+   * is a bus."* Jim agreed, and pointed at the fix QA had found by trying it:
+   * *"the interior camera aims at the rear. **Aim it forward.**"*
+   *
+   * Two things were wrong, and the second is the one that mattered.
+   *
+   * **It was aimed backwards.** The seats face the nose; their backs are behind
+   * their cushions. A lens at the front looking aft therefore sees the one thing
+   * a bus interior has none of — the *fronts* of twelve seats, which is to say
+   * nothing but children. Turned round, the same cabin is rows of seat backs
+   * running away to the driver, which is what the inside of a coach looks like
+   * from the back seat, and what a six-year-old has actually sat in.
+   *
+   * **And it was above the shoulder line, where there is no bus.** Everything
+   * below {@link WINDOW_SILL_Y} — seats, cushions, floor pan, twelve bodies — is
+   * *inside* the solid `cat-bus-shell-lower` block. Above it there is only the
+   * flat top of that block, which is exactly the "featureless cream floor" in
+   * QA's note: not a floor at all, but the lid of a box, with heads sticking out
+   * of it. No shot from up there can contain a seat, because no seat reaches it:
+   * the backs stop dead level with the sill.
+   *
+   * So the lens goes **down into the cabin proper**, and `catBus.ts`'s
+   * `setCutaway` drops the one shell that would otherwise be all it could see.
+   *
+   * ## Everything here is measured, not chosen
    *
    * Asking `bus.seats` rather than restating `catBus.ts`'s seat plan matters
    * here more than usual: that plan has already been re-derived once, when a
@@ -622,72 +665,43 @@ export class BusJourney {
     const seats = this.bus.seats;
     let front = -Infinity;
     let back = Infinity;
-    let floor = 0;
+    let cushion = 0;
     for (const seat of seats) {
       front = Math.max(front, seat.position.z);
       back = Math.min(back, seat.position.z);
-      floor = seat.position.y;
+      cushion = seat.position.y;
     }
-    // **Above the aisle**, and that is the whole of the problem.
+
+    // **Behind the back row, in the gangway.** `AISLE_WIDTH` is 0.8 m and a
+    // seated child's shoulders start 0.53 m off the centre line, so `x = 0` is
+    // the one column of clear air running the length of this bus — that much is
+    // unchanged, and it is still the only place a lens can go.
     //
-    // A child is 1.53 m across and the seats are at x = ±1.3, so the twelve of
-    // them fill this bus almost solid: there is no head height anywhere in the
-    // cabin from which anything can be seen, because whatever is put there is
-    // inside somebody. The first attempt sat at a seated child's eye level a
-    // couple of metres ahead of the front row — which is *past the driver's own
-    // seat*, in the nose — and the ride's inside view was a flat brown wall
-    // 1.32 m from the lens.
+    // Half a row behind the rearmost cushion puts the whole busload in front of
+    // the lens rather than beside it, which is what stops the near pair being
+    // cropped by the frame edges: there is no near pair any more, only a first
+    // row. `SEAT_PITCH` comes off the built seats — the gap between the two
+    // rearmost rows — so a bus with a different seat plan still sits its camera
+    // one row back.
+    const pitch = seats.length > 2 ? Math.abs(seats[2]!.position.z - seats[0]!.position.z) : 1.8;
+    const eyeZ = back - pitch * INSIDE_CAMERA_ROWS_BACK;
+
+    // **At the height of a child's shoulders, not her eyes.** Low enough that
+    // the seat backs stand over it and the aisle floor runs away underneath —
+    // the two things that make the shot read as the inside of a vehicle — and
+    // high enough to see over the rearmost cushions to the rows beyond.
     //
-    // The one genuinely clear volume is the gangway: `AISLE_WIDTH` is 0.8 m and
-    // the heads start 0.53 m off the centre line, so `x = 0` is open the whole
-    // length of the bus. Up near the ceiling, looking back and down it, the shot
-    // is rows of faces either side — which is what Jim asked to be able to look
-    // at, and it is the only place in this vehicle it can be had from.
-    //
-    // **At the children's own eye level**, measured off the heads that were
-    // actually seated rather than computed from a height constant.
-    //
-    // Up near the ceiling was the first version that was *clear* of everything,
-    // and the captured frame showed twelve children from above: hair, foreheads
-    // and the tops of heads. Faces point forwards, so a camera looking down at
-    // them sees no faces at all — and "the children riding it and looking
-    // excited" is a shot of faces or it is nothing.
-    //
-    // Clamped under `CAT_BUS_CABIN_CEILING_Y` — the underside of the header
-    // band, which is the cabin's real ceiling and 0.47 m below what the bus's
-    // overall height suggests.
-    let heads = 0;
-    let headHeight = 0;
-    for (const kid of this.riders) {
-      kid.head.getWorldPosition(this.worldEye);
-      this.bus.root.worldToLocal(this.worldEye);
-      headHeight += this.worldEye.y;
-      heads += 1;
-    }
-    const eyeHeight = Math.min(
-      CAT_BUS_CABIN_CEILING_Y - INSIDE_CAMERA_HEADROOM,
-      heads > 0 ? headHeight / heads : floor + KID_HEIGHT * 0.8,
-    );
-    // **Directly over the front row**, which is as far forward as anything can
-    // go. Everything ahead of it is the cat's own face — a squashed sphere
-    // 2.7 m across whose back reaches to within a centimetre of the front row's
-    // heads — and the driver sits inside that same blob. Putting the lens
-    // midway between the front row and the driver's seat therefore parked it
-    // *inside the cat's head*, where the ray hit the inside of the face's
-    // BackSide outline shell 0.15 m away and the frame was a solid cream wall.
-    //
-    // As far forward as the cabin's clear interior allows, which buys the shot
-    // its only breathing room: the front row's heads are 0.53 m either side of
-    // the lens whatever happens, and every centimetre forward pushes them
-    // further towards the edge of the frame. `CAT_BUS_CABIN_FRONT_Z` is where
-    // the cat's own face begins; the headroom below it is the same clearance
-    // the ceiling gets, so the guard's *"nothing within 0.3 m of the lens"*
-    // holds in this direction too.
-    const eyeZ = Math.max(front, CAT_BUS_CABIN_FRONT_Z - INSIDE_CAMERA_HEADROOM);
+    // Taken off the cushion the children are actually sitting on rather than
+    // from a height constant, so it tracks the seats if they move.
+    const eyeHeight = cushion + KID_SHOULDER_HEIGHT * 0.72;
     this.insideEye.set(0, eyeHeight, eyeZ);
-    // Straight down the gangway, at the same height: level with their faces, so
-    // what fills the frame is faces.
-    this.insideAim.set(0, eyeHeight, back);
+
+    // Forward, down the gangway, and very slightly **down** — so the aisle and
+    // the seat bases hold the bottom of the frame instead of empty air, and the
+    // heads and the window band above them hold the top. Aimed at the far end of
+    // the seating rather than at a point in space: the shot ends on the front
+    // row and the driver beyond it.
+    this.insideAim.set(0, eyeHeight - INSIDE_CAMERA_DROP, front);
   }
 
   /**
@@ -747,6 +761,12 @@ export class BusJourney {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
+    // **The cabin is only a cabin from inside a cutaway.** The lower body's
+    // outline shell is a lightless `BackSide` box round every seat in the bus,
+    // and it is the only part of that body a lens in there can see. Dropped for
+    // the inside shot and put straight back for the outside one, where it is
+    // what draws the bus's own dark edge. See `catBus.ts`'s `setCutaway`.
+    this.bus.setCutaway(view === 'inside');
   }
 
   /** True once the ride has run its course. */
