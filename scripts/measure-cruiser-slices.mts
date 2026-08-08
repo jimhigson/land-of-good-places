@@ -8,12 +8,20 @@
  */
 import { performance } from 'node:perf_hooks';
 import { railRouteSearch } from '../src/world/rail/generate.ts';
-import { CoasterRoute } from '../src/world/coaster/route.ts';
-import { cruiserBriefs, cruiserOptions, finishCruiserPlan } from '../src/world/coaster/solve.ts';
+import { cruiserBriefs, finishCruiserPlan } from '../src/world/coaster/solve.ts';
 
+let briefMs = 0;
+const briefRuns: number[] = [];
+for (let i = 0; i < 3; i += 1) {
+  const t = performance.now();
+  cruiserBriefs();
+  briefRuns.push(performance.now() - t);
+}
 const t0 = performance.now();
-const briefs = cruiserBriefs();
-const briefMs = performance.now() - t0;
+const start = cruiserBriefs();
+const briefs = start.briefs;
+briefMs = performance.now() - t0;
+console.log(`brief runs ${briefRuns.map((m) => m.toFixed(1)).join(' / ')} ms`);
 
 const t1 = performance.now();
 const search = railRouteSearch(briefs.first);
@@ -29,14 +37,12 @@ for (;;) {
 }
 const searchMs = performance.now() - t1;
 
-const t2 = performance.now();
-const bare = new CoasterRoute(cruiserOptions(), solved);
-const routeMs = performance.now() - t2;
-
+// One finish only: `finishCruiserPlan` draws `hillPhase` from `start.rng`, so
+// building the route twice off the same stream would give the second one a
+// different height profile — a misleading measurement, not a second opinion.
 const t3 = performance.now();
-const plan = finishCruiserPlan(solved);
+const plan = finishCruiserPlan(solved, start.rng);
 const finishMs = performance.now() - t3;
-console.log(`  of which CoasterRoute ctor ${routeMs.toFixed(1)} ms, crest ${bare.crestY.toFixed(2)}`);
 
 console.log(`brief   ${briefMs.toFixed(1)} ms  (${briefs.first.startPoses.length} start poses)`);
 console.log(`search  ${searchMs.toFixed(1)} ms  (${joints} yields, satisfied=${solved.report.satisfied})`);

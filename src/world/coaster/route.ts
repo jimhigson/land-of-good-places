@@ -472,11 +472,32 @@ export interface CoasterRouteOptions {
  * scenery, where every plot is in its way. Putting that constraint on the start
  * pose keeps the plan-view search itself simple and purely horizontal.
  */
-function stationPoses(
+/**
+ * {@link stationPoses}, as a generator — the same list, built a ring at a time.
+ *
+ * **Why this needed slicing at all.** The park's edge is a spline now, so
+ * `boundary.distanceToEdge` is a real computation rather than a subtraction, and
+ * `stationWindowIsClear` asks it seven times for each of 704 candidate spots.
+ * Profiled: 17 ms of the brief's 19 ms is that one call. That is one indivisible
+ * lump inside a single `advance()` slice during the cat-bus ride, and it
+ * overran `check:park-boot`'s ceiling on its own — so it is sliced, exactly like
+ * the searches either side of it, rather than the ceiling being moved.
+ *
+ * A ring is the unit because it is ~1.8 ms: fine enough that no frame hitches,
+ * coarse enough that the whole thing costs eleven yields rather than 704.
+ *
+ * Suspending cannot move the result, by the same argument `rail/generate.ts`
+ * makes about its own search: every piece of state here is a local of this
+ * function, `rng` is drawn from in exactly the same order whatever cadence the
+ * caller advances at, and there is no clock and no shared state to interleave
+ * with. {@link stationPoses} drives it straight through, and `check:park-boot`
+ * hashes the loop that comes out of both cadences.
+ */
+function* stationPoseSearch(
   stallId: string,
   rng: Rng,
   boundary: ReturnType<typeof circleBoundary>,
-): Pose2[] {
+): Generator<number, Pose2[], void> {
   const stall = placedEntry(stallId);
   const poses: { pose: Pose2; key: number }[] = [];
   // Beside the booth, not a walk away from it: the old solve put the track
@@ -494,12 +515,28 @@ function stationPoses(
       const angle = (i / 64) * TAU;
       const x = stall.x + Math.cos(angle) * distance;
       const z = stall.z + Math.sin(angle) * distance;
+      // **Asked once per spot, not once per heading.** `stationWindowIsClear`
+      // walks `along` from -reach to +reach in even steps — a range symmetric
+      // about zero — so reversing the heading probes the *same set of points*
+      // and can only return the same answer. Testing both signs was doing the
+      // whole 7-sample plot scan twice for a boolean that cannot differ.
+      //
+      // This is a pure saving and it is load-bearing: the brief is built inside
+      // one `advance()` slice during the cat-bus ride, and at ~21 ms it was
+      // overrunning `check:park-boot`'s ceiling on its own. Halving it is what
+      // brings that frame back under budget without touching a threshold.
+      //
+      // The `rng` draws are untouched: both signs previously shared one verdict,
+      // so they were either both pushed or both skipped, and they still are — in
+      // the same order, the same number of times.
+      const hxBase = -Math.sin(angle);
+      const hzBase = Math.cos(angle);
+      if (!stationWindowIsClear({ x, z, hx: hxBase, hz: hzBase }, boundary, stallId)) continue;
       // Two headings per spot: the track may run past the booth either way.
       for (const sign of [1, -1] as const) {
-        const hx = -Math.sin(angle) * sign;
-        const hz = Math.cos(angle) * sign;
+        const hx = hxBase * sign;
+        const hz = hzBase * sign;
         const pose: Pose2 = { x, z, hx, hz };
-        if (!stationWindowIsClear(pose, boundary, stallId)) continue;
         // Plain seeded shuffle, and it is worth recording what was tried
         // instead, because both alternatives were worse.
         //
@@ -518,9 +555,32 @@ function stationPoses(
         poses.push({ pose, key: rng.unit() });
       }
     }
+    // One ring done. The count is only so a driver can say how far along it is;
+    // nothing reads it to make a decision.
+    yield poses.length;
   }
   poses.sort((a, b) => a.key - b.key);
   return poses.map((entry) => entry.pose);
+}
+
+/**
+ * Candidate stations, best first, solved start to finish right now.
+ *
+ * A thin driver over {@link stationPoseSearch} rather than a second copy of it,
+ * so "the poses the game offers" and "the poses the loading screen builds a
+ * slice at a time" cannot be two different lists — the same relationship
+ * `solveRailRoute` has with `railRouteSearch`.
+ */
+function stationPoses(
+  stallId: string,
+  rng: Rng,
+  boundary: ReturnType<typeof circleBoundary>,
+): Pose2[] {
+  const search = stationPoseSearch(stallId, rng, boundary);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 
@@ -585,28 +645,38 @@ export class CoasterRoute {
   /**
    * Builds the loop.
    *
-   * `presolved` is the plan a driver already searched **a slice at a time** —
+   * `presolved` is the work a driver already did **a slice at a time** —
    * `boot/parkGeneration.ts`, spreading the ~1.3 s solve across the cat-bus
-   * ride's frames. Handed one, this skips the search and does only the
-   * finishing work (the height profile, the carves, the vertical repair), which
-   * is the part that was never the expensive half.
-   *
-   * **The briefs are built either way, and that is load-bearing rather than
-   * wasteful.** `stationPoses` draws from `rng`, and `hillPhase` below draws
-   * from it next; skipping the brief on the pre-solved path would leave the
-   * height profile reading a different point in the stream and every hill in
-   * the park would move. Same draws, same order, both cadences.
+   * ride's frames. Handed one, this skips both the brief and the search and
+   * does only the finishing work (the height profile, the carves, the vertical
+   * repair), which is ~10 ms and was never the expensive half.
    */
-  constructor(options: CoasterRouteOptions, presolved?: SolvedRailRoute) {
-    const rng = new Rng(PARK_SEED ^ options.salt);
+  constructor(options: CoasterRouteOptions, presolved?: PresolvedCoaster) {
+    // The pre-solved path brings its own `Rng` — **the very object its own
+    // `coasterRouteBriefs` call already advanced** — rather than a fresh one.
+    //
+    // That is not a shortcut, it is the only honest way to do it. `stationPoses`
+    // is the sole thing that draws from this stream, `hillPhase` below draws
+    // from it next, and the number of draws `stationPoses` makes depends on how
+    // many candidates survive its filters — a count nothing could restate
+    // without becoming a second definition to keep in step by hand. Re-running
+    // the brief purely to move the stream on was the first attempt and cost
+    // ~20 ms inside a frame that must not hitch. Passing the advanced stream is
+    // identical by construction, and free.
+    const rng = presolved?.rng ?? new Rng(PARK_SEED ^ options.salt);
     const stall = placedEntry(options.stationStallId);
-    const briefs = coasterRouteBriefs(options, rng);
-    // Two cadences over one policy, exactly as the ginormous slide runs its
-    // length ladder in both `planSlide()` and `ParkGeneration`: the *briefs*
-    // have one owner (below), and each cadence writes only its own loop over
-    // them. `report.satisfied` is the single verdict both consult.
-    let plan = presolved ?? solveRailRoute(briefs.first);
-    if (!presolved && !plan.report.satisfied) plan = solveRailRoute(briefs.escalated);
+    let plan: SolvedRailRoute;
+    if (presolved) {
+      plan = presolved.plan;
+    } else {
+      // Two cadences over one policy, exactly as the ginormous slide runs its
+      // length ladder in both `planSlide()` and `ParkGeneration`: the *briefs*
+      // have one owner (below), and each cadence writes only its own loop over
+      // them. `report.satisfied` is the single verdict both consult.
+      const briefs = coasterRouteBriefs(options, rng);
+      plan = solveRailRoute(briefs.first);
+      if (!plan.report.satisfied) plan = solveRailRoute(briefs.escalated);
+    }
     this.plan = plan;
 
     const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));
@@ -854,6 +924,20 @@ export class CoasterRoute {
   }
 }
 
+/**
+ * A loop somebody else already searched, ready to be finished.
+ *
+ * Both halves are needed and neither can be rebuilt cheaply: the plan view is
+ * the ~1.3 s the ride spread out, and the `Rng` is the stream `stationPoses`
+ * advanced on the way to producing the brief that plan was searched from.
+ */
+export interface PresolvedCoaster {
+  /** The plan view a driver already searched, a slice at a time. */
+  readonly plan: SolvedRailRoute;
+  /** The stream that driver's own {@link coasterRouteBriefs} call advanced. */
+  readonly rng: Rng;
+}
+
 /** The Sky Cruiser's search brief, and the harder-pulling retry behind it. */
 export interface CoasterBriefs {
   /** What the loop is asked for first. */
@@ -880,10 +964,10 @@ export interface CoasterBriefs {
  * the poses and not the stream. Either way `stationPoses` is called exactly
  * once on a freshly seeded `Rng`, so the draw sequence is the same sequence.
  */
-export function coasterRouteBriefs(
+export function* coasterRouteBriefSearch(
   options: CoasterRouteOptions,
   rng: Rng = new Rng(PARK_SEED ^ options.salt),
-): CoasterBriefs {
+): Generator<number, CoasterBriefs, void> {
   const obstacles = tallObstacles();
   const other = options.avoid ?? null;
   const boundary =
@@ -927,6 +1011,9 @@ export function coasterRouteBriefs(
     if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
     return true;
   };
+  // Delegated rather than called, so the eleven ring-yields inside it surface
+  // to whoever is driving this. The straight-through driver below swallows them.
+  const startPoses = yield* stationPoseSearch(options.stationStallId, rng, boundary);
   const brief: RouteBrief = {
     // A stream of its own, so changing how many random draws the height
     // profile takes cannot silently reshape the loop.
@@ -934,7 +1021,7 @@ export function coasterRouteBriefs(
     vocabulary: CRUISER_VOCABULARY,
     desiredLength: options.desiredLength ?? DESIRED_LENGTH,
     closed: true,
-    startPoses: stationPoses(options.stationStallId, rng, boundary),
+    startPoses,
     clear,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
@@ -974,6 +1061,24 @@ export function coasterRouteBriefs(
     influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
   };
   return { first: brief, escalated };
+}
+
+/**
+ * The briefs, built start to finish right now.
+ *
+ * The thin driver over {@link coasterRouteBriefSearch}, for every caller that is
+ * not spreading the work over frames — `CoasterRoute`'s own constructor, the
+ * fingerprint scripts, `check:park`, `test:procgen`. One builder, two cadences.
+ */
+export function coasterRouteBriefs(
+  options: CoasterRouteOptions,
+  rng: Rng = new Rng(PARK_SEED ^ options.salt),
+): CoasterBriefs {
+  const search = coasterRouteBriefSearch(options, rng);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 /**

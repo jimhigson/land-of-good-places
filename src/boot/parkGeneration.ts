@@ -1,6 +1,6 @@
 import type { SolvedRailRoute } from '../world/rail/generate';
 import { railRouteSearch, RailRouteUnsolvable } from '../world/rail/generate';
-import type { CoasterBriefs } from '../world/coaster/route';
+import type { CruiserSearchStart } from '../world/coaster/solve';
 import { offerPrewarmedCruiser } from '../world/coaster/prewarm';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
 
@@ -159,7 +159,8 @@ export class ParkGeneration {
 
   /** The cruiser's how-module, once loaded. Holds no solved route itself. */
   private cruiserModule: typeof import('../world/coaster/solve') | null = null;
-  private cruiserBriefs: CoasterBriefs | null = null;
+  private cruiserStart: CruiserSearchStart | null = null;
+  private cruiserStartSearch: Generator<number, CruiserSearchStart, void> | null = null;
   private cruiserSearch: Generator<number, SolvedRailRoute, void> | null = null;
   /**
    * Whether the harder-pulling retry is the one being searched.
@@ -333,14 +334,30 @@ export class ParkGeneration {
     budgetMs: number,
   ): void {
     this.workingFrames += 1;
-    // Built once, on the frame the search starts — the briefs are pure but
-    // `stationPoses()` is not free.
-    const briefs = (this.cruiserBriefs ??= solve.cruiserBriefs());
+    const deadline = performance.now() + budgetMs;
+
+    // Phase one: the briefs, a ring of candidate stations at a time. ~19 ms of
+    // `boundary.distanceToEdge`, which is too much for one frame on its own, so
+    // it is driven to the same budget as the search that follows it.
+    if (!this.cruiserStart) {
+      const building = (this.cruiserStartSearch ??= solve.cruiserStartSearch());
+      for (;;) {
+        const step = building.next();
+        if (step.done) {
+          this.cruiserStart = step.value;
+          this.cruiserStartSearch = null;
+          break;
+        }
+        if (performance.now() >= deadline) return;
+      }
+    }
+    const start = this.cruiserStart;
+
+    // Phase two: the route itself.
     const search = (this.cruiserSearch ??= railRouteSearch(
-      this.cruiserEscalated ? briefs.escalated : briefs.first,
+      this.cruiserEscalated ? start.briefs.escalated : start.briefs.first,
     ));
 
-    const deadline = performance.now() + budgetMs;
     try {
       for (;;) {
         const step = search.next();
@@ -353,7 +370,7 @@ export class ParkGeneration {
             this.cruiserSearch = null;
             return;
           }
-          offerPrewarmedCruiser(solve.finishCruiserPlan(step.value));
+          offerPrewarmedCruiser(solve.finishCruiserPlan(step.value, start.rng));
           this.cruiserSolved = true;
           return;
         }

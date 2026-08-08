@@ -3,9 +3,11 @@ import {
   type CoasterBriefs,
   CoasterRoute,
   type CoasterRouteOptions,
-  coasterRouteBriefs,
+  coasterRouteBriefSearch,
 } from './route';
 import type { SolvedRailRoute } from '../rail/generate';
+import { PARK_SEED } from '../parkManifest';
+import { Rng } from '../../core/mathUtils';
 import { placedEntry } from '../parkLayout';
 import { clearOfPlots } from '../parkLayout';
 // The same "far enough inside the edge to stand" margin the Rail Race's exit
@@ -164,9 +166,48 @@ export function cruiserOptions(): CoasterRouteOptions {
   };
 }
 
-/** The briefs the sliced driver searches. Pure, and safe to call twice. */
-export function cruiserBriefs(): CoasterBriefs {
-  return coasterRouteBriefs(cruiserOptions());
+/** What a sliced driver needs to search the cruiser and then finish it. */
+export interface CruiserSearchStart {
+  readonly briefs: CoasterBriefs;
+  /**
+   * The stream {@link coasterRouteBriefs} advanced building those briefs.
+   *
+   * Carried to {@link finishCruiserPlan} rather than rebuilt there — see
+   * `CoasterRoute`'s constructor for why re-deriving it would be both slower
+   * and a second definition of the same thing.
+   */
+  readonly rng: Rng;
+}
+
+/**
+ * Everything the sliced driver needs to begin. Pure, and safe to call twice.
+ *
+ * ~20 ms, nearly all of it `stationPoses` filtering 762 candidate stations, so
+ * the driver builds it once on the frame the search starts — the same treatment
+ * `slide/solve.ts`'s door and pit poses get.
+ */
+export function cruiserBriefs(): CruiserSearchStart {
+  const search = cruiserStartSearch();
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * {@link cruiserBriefs}, a ring of candidate stations at a time.
+ *
+ * ~19 ms of the ~20 ms is `boundary.distanceToEdge`, asked seven times for each
+ * of 704 candidate spots — one indivisible lump that overran
+ * `check:park-boot`'s per-frame ceiling on its own. It is sliced with the same
+ * mechanism as the searches either side of it rather than the ceiling being
+ * moved: eleven yields, ~1.8 ms apiece.
+ */
+export function* cruiserStartSearch(): Generator<number, CruiserSearchStart, void> {
+  const options = cruiserOptions();
+  const rng = new Rng(PARK_SEED ^ options.salt);
+  const briefs = yield* coasterRouteBriefSearch(options, rng);
+  return { briefs, rng };
 }
 
 /**
@@ -174,12 +215,12 @@ export function cruiserBriefs(): CoasterBriefs {
  *
  * The counterpart of `slide/solve.ts`'s `finishSlidePlan`: everything after the
  * search — the height profile, the station and castle carves, the vertical
- * repair, and the exit hunt — done from an already-solved plan view. This is the
- * part that was never expensive, so it runs in one slice.
+ * repair, and the exit hunt — done from an already-solved plan view. Measured at
+ * ~10 ms, so it runs in one slice; it was never the expensive half.
  */
-export function finishCruiserPlan(solved: SolvedRailRoute): PlannedCoaster {
+export function finishCruiserPlan(solved: SolvedRailRoute, rng: Rng): PlannedCoaster {
   const options = cruiserOptions();
-  const route = new CoasterRoute(options, solved);
+  const route = new CoasterRoute(options, { plan: solved, rng });
   const { exitX, exitZ } = planExit(route, CRUISER_SEED.stationStallId);
   return {
     name: CRUISER_SEED.name,
