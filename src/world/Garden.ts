@@ -24,6 +24,7 @@ import { grassTexture, pinkStoneTexture } from '../core/textures';
 import { terrainHeight } from './terrain';
 import { buildPaths } from './paths';
 import type { CollisionWorld } from './Collision';
+import { isInEntranceGateGap } from './entrance/layout';
 
 /**
  * The ground itself: grassy terrain, the winding paths and the pink stone
@@ -180,11 +181,11 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const blockWidth = 1.7;
   const courses = 2;
   const courseStations = [
-    alongBoundary(PARK_BOUNDARY, blockWidth),
+    alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate),
     // Half a block along the edge, which is what makes alternate courses bond.
-    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2),
+    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2).filter(outsideTheGate),
   ];
-  const blockCount = courseStations[0]!.length;
+  const blockCount = Math.max(courseStations[0]!.length, courseStations[1]!.length);
   const courseHeight = 0.62;
 
   const blockGeometry = new BoxGeometry(blockWidth * 0.96, courseHeight, 0.7);
@@ -231,8 +232,13 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
   group.add(blocks);
 
-  // Pillars with rounded caps.
-  const pillarCount = 28;
+  // Pillars with rounded caps — the gate's own two posts stand in `Entrance.ts`,
+  // so the ring's regular pillars keep out of the opening like everything else.
+  const pillarStations = alongBoundary(
+    PARK_BOUNDARY,
+    PARK_BOUNDARY.perimeter / PILLAR_TARGET_COUNT,
+  ).filter(outsideTheGate);
+  const pillarCount = pillarStations.length;
   const pillarGeometry = new BoxGeometry(1.5, 2.1, 1.5);
   const pillarMaterial = new MeshStandardMaterial({
     map: pinkStoneTexture(1, 1),
@@ -252,9 +258,8 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const caps = new InstancedMesh(capGeometry, capMaterial, pillarCount);
   caps.castShadow = true;
 
-  const pillarStations = alongBoundary(PARK_BOUNDARY, PARK_BOUNDARY.perimeter / pillarCount);
   for (let i = 0; i < pillarCount; i += 1) {
-    const station = pillarStations[i % pillarStations.length] as EdgeStation;
+    const station = pillarStations[i] as EdgeStation;
     const { x, z } = station;
     const ground = terrainHeight(x, z);
 
@@ -271,13 +276,23 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   caps.instanceMatrix.needsUpdate = true;
   group.add(pillars, caps);
 
-  // The wall is solid. The collision polygon walks the same outline the blocks
-  // do, at a coarser step — one segment per ~2 m of edge, so the chord never
-  // bows further from the drawn masonry than the masonry is thick.
+  // The wall is solid **except at the gate**. The collision polygon walks the
+  // same outline the blocks do, at a coarser step — one segment per ~2 m of
+  // edge, so the chord never bows further from the drawn masonry than the
+  // masonry is thick — and skips the same opening, so the hole you can see is
+  // the hole you can walk through.
+  //
+  // Nothing escapes through it: the player is held by the **soft** boundary at
+  // `GARDEN_PLAY_RADIUS` (58 m), two metres inside this masonry, which is what
+  // has always actually kept her in the park. See `boundary.ts`.
   const collisionStations = alongBoundary(PARK_BOUNDARY, 2);
   for (let i = 0; i < collisionStations.length; i += 1) {
     const a = collisionStations[i] as EdgeStation;
     const b = collisionStations[(i + 1) % collisionStations.length] as EdgeStation;
+    // Tested at the midpoint: a segment with one end inside the opening and one
+    // end outside it is part of the opening's edge, and walling it off would put
+    // a stub back across the very gap the blocks above leave clear.
+    if (inGateGap((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
     collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
   }
 
@@ -294,6 +309,40 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
  * visible was their sunken flanks filling the gap above the crest with green.
  * If you want a horizon, paint it into the Sky shader instead.
  */
+
+/**
+ * How many pillars the ring would carry if it had no gate in it.
+ *
+ * The two or three that fall in the opening are dropped, so the built count is
+ * a little lower — spacing is what matters here, not the total.
+ */
+const PILLAR_TARGET_COUNT = 28;
+
+/**
+ * **Is this point on the boundary inside the gate's opening?**
+ *
+ * `isInEntranceGateGap` has existed in `entrance/layout.ts` since the entrance
+ * was written and, until now, had **zero callers anywhere in the repo** — so
+ * the gate was a gate in name only. `Entrance.ts` built an arch, `boundary.ts`
+ * pinned the outline's radius at the gate's bearing, and this function laid
+ * unbroken masonry straight across the opening between the arch's two posts,
+ * with a matching unbroken collision polygon. Its own comment said "the wall is
+ * solid", and it was.
+ *
+ * Jim, 7 August 2026, on the first time anyone ever watched the cat bus arrive:
+ * *"the bus drives something like 5 m into the park, through a wall."* The bus
+ * has been moved back outside where it belongs, but the wall it drove through
+ * was the second half of that, and the children walking in would have done
+ * exactly the same thing at a smaller scale. Issue #195.
+ */
+function inGateGap(x: number, z: number): boolean {
+  return isInEntranceGateGap(Math.atan2(z, x));
+}
+
+/** The same, as a predicate to filter edge stations with. */
+function outsideTheGate(station: EdgeStation): boolean {
+  return !inGateGap(station.x, station.z);
+}
 
 const UP = new Vector3(0, 1, 0);
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);

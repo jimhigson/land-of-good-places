@@ -1,8 +1,15 @@
 import { Group, Object3D, Vector3 } from 'three';
+import { CIRCULAR_PARK_AREA, PARK_BOUNDARY } from '../../world/boundary';
 import { ART } from '../../art/style/artPalette';
 import { PALETTE } from '../../core/palette';
-import { KID_SKIN_TONES } from '../../art/models/kid';
+import { CHILD_FOOTPRINT, KID_SKIN_TONES } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
+import {
+  BAG_COLOURS,
+  HAIR_COLOURS,
+  OUTFIT_COLOURS,
+  SHOE_COLOURS,
+} from '../../art/models/kidLooks';
 import { CROWD_BACKPACK_KINDS, type BackpackKind } from '../../art/models/backpacks';
 import { CROWD_SHOE_KINDS, type ShoeKind } from '../../art/models/shoes';
 import { Rng, TAU } from '../../core/mathUtils';
@@ -21,7 +28,7 @@ import { NameLabel } from '../../ui/NameLabel';
 import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
-import { NpcCharacter, NPC_RADIUS } from './NpcCharacter';
+import { NpcCharacter } from './NpcCharacter';
 import { characterModelAvatar, type NpcAvatar } from './npcAvatar';
 import { WaypointDriver, type Waypoint } from './waypointDriver';
 import { PoiGraph } from './poiGraph';
@@ -84,8 +91,26 @@ const MAX_CONCURRENT_CHATTERS = 2;
  * the camera runs at half rate. Nothing in the frame path allocates.
  */
 
-/** Children in the park. Enough to feel populated, few enough to feel like a park. */
-const NPC_COUNT = 12;
+/**
+ * Children in the park — **derived from the park's actual area, not picked.**
+ *
+ * Twelve was the right number when the park was a 58 m circle. #115 then grew
+ * it into a spline running out to 101 m: **21,136 m² against that circle's
+ * 10,568 — exactly twice the ground, and still twelve children on it.** Jim,
+ * 7 August 2026: *"we have a bigger park now so it should handle more NPCs
+ * anyway"*.
+ *
+ * So what is authored here is the **density** the park was tuned at, and the
+ * count follows the boundary. Change the park's shape again and the crowd comes
+ * with it, instead of this constant quietly going stale a second time.
+ *
+ * Cost is not the constraint (see this file's header): every child is instanced
+ * and shares one toon material, so *"adding the thirteenth costs nothing but a
+ * matrix"*. Behaviour for children far from the camera already runs at half
+ * rate.
+ */
+const NPC_DENSITY_PER_SQUARE_METRE = 12 / CIRCULAR_PARK_AREA;
+const NPC_COUNT = Math.round(NPC_DENSITY_PER_SQUARE_METRE * PARK_BOUNDARY.area);
 
 /** …and two of them brought something. */
 const PET_COUNT = 2;
@@ -93,8 +118,23 @@ const PET_COUNT = 2;
 /** Fixed seed: the same children, in the same clothes, on every reload. */
 const NPC_SEED = 20260726;
 
-/** Closer than this and two children push each other apart. */
-const SEPARATION = NPC_RADIUS * 2;
+/**
+ * Closer than this and two children push each other apart.
+ *
+ * **A whole child wide, measured off the model** — not `NPC_RADIUS * 2`, which
+ * is what this was, and which is 1.0 m. `NPC_RADIUS` is the radius a child is
+ * resolved against *walls* with, and 0.5 m is right for that: it is roughly the
+ * girth of the torso, and a narrow collision circle is what lets two children
+ * pass on a path. It is nowhere near the radius a child *looks* like. A chibi
+ * rig is almost entirely head — {@link CHILD_FOOTPRINT} is 1.8 m — so children
+ * separated to exactly 1.0 m are standing with their skulls half a metre inside
+ * one another, everywhere in the park, all the time.
+ *
+ * Found while fixing the cat bus, where Jim could see it happening to eleven
+ * children at once; but it was never a bus bug, and raising it here fixes the
+ * same overlap wherever two children happen to meet.
+ */
+const SEPARATION = CHILD_FOOTPRINT;
 
 /**
  * Closer than this and a child pushes gently apart from the player instead of
@@ -102,7 +142,7 @@ const SEPARATION = NPC_RADIUS * 2;
  * Exactly the same combined-radii idea as {@link SEPARATION}, just with the
  * player's own girth on one side instead of a second child's.
  */
-const PLAYER_SEPARATION = NPC_RADIUS + PLAYER_RADIUS;
+const PLAYER_SEPARATION = CHILD_FOOTPRINT / 2 + PLAYER_RADIUS;
 
 /** Beyond this from the player, behaviour runs every other frame. */
 const FAR_DISTANCE = 34;
@@ -272,54 +312,11 @@ const VISIBLE_LABEL_CAP = 10;
 const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
 
 /**
- * Colour choices, all of them already named in `PALETTE` or `ART`.
- *
- * Skin tones are drawn from `KID_SKIN_TONES` — the same hand-picked, inclusive
- * range the character creator offers the player (see `art/models/kid.ts`),
- * rather than one base hue scaled darker: a uniform scale drifts warm skin
- * towards grey at the low end, and never actually reaches a deep tone. Every
- * child in the park should look plausibly reachable from the creator's own
- * swatch row.
+ * Colour choices — now in `art/models/kidLooks.ts`, so the cat bus's journey
+ * can dress its passengers out of the same tin without importing this file.
+ * `NpcSystem` reads `PARK_BOUNDARY` at module scope, and the journey has to be
+ * on screen *before* the park is solved. See that file for the full reasoning.
  */
-
-const HAIR_COLOURS = [
-  PALETTE.hair,
-  ART.ripikaTip,
-  ART.corgiTan,
-  ART.biscuitFurDark,
-  PALETTE.ink,
-  ART.ripikaYellow,
-  PALETTE.blossomPink,
-  ART.miniLilac,
-] as const;
-
-const OUTFIT_COLOURS = [
-  PALETTE.outfit,
-  PALETTE.markerMint,
-  PALETTE.markerSky,
-  PALETTE.markerLemon,
-  PALETTE.markerLilac,
-  ART.jumperRed,
-  ART.miniLilac,
-  ART.corgiTan,
-  ART.heartPink,
-] as const;
-
-const SHOE_COLOURS = [
-  PALETTE.shoe,
-  ART.jumperRed,
-  PALETTE.markerLemon,
-  PALETTE.markerLilac,
-  ART.miniBelly,
-] as const;
-
-const BAG_COLOURS = [
-  ART.kidBackpack,
-  PALETTE.markerLemon,
-  PALETTE.markerPink,
-  ART.miniBelly,
-  ART.corgiTan,
-] as const;
 
 /**
  * Somebody who lives in a space that is not the park.
@@ -448,6 +445,21 @@ export class NpcSystem implements GameSystem {
     // driver so it can decide, on its own, whether one is worth stopping at.
     // Empty by default so nothing here breaks if a caller has none to offer.
     climbableTrees: readonly ClimbableTreeSeed[] = [],
+    /**
+     * How many of these children ride in on the cat bus.
+     *
+     * **They are park NPCs from birth, not passengers converted into NPCs
+     * afterwards** — Jim's ruling, and the code leaves no alternative anyway:
+     * `KidCrowd` sizes a fixed-capacity `InstancedMesh` from `NPC_COUNT` and
+     * `InstancedCrowd.spawn()` throws the moment it is exhausted, so eleven
+     * children joining *later* is not a thing this system can do.
+     *
+     * So the arrival does not add anybody. It borrows the first
+     * {@link arrivingByBus} of the park's own cast for the first fifteen
+     * seconds of their lives. `NPC_COUNT` is unchanged and unchangeable by
+     * this: eleven of the twenty-four simply start the game sitting down.
+     */
+    private readonly arrivingByBus: number = 0,
     // The people who live somewhere that is not the park — the hotel's guests,
     // today. See {@link ResidentSpec}. Built last of all, below, and on their
     // own seeded streams, so hosting them cannot shift a single roll the park's
@@ -561,6 +573,7 @@ export class NpcSystem implements GameSystem {
         climbableTrees,
         climberBudget,
         chatBudget: this.chatBudget,
+        arrivesByBus: i < this.arrivingByBus,
       });
       this.wanderDrivers.push(driver);
 
@@ -708,11 +721,6 @@ export class NpcSystem implements GameSystem {
     return this.characters;
   }
 
-  /** How many draw calls the crowd costs. Reported in the debug overlay. */
-  get drawCallCost(): number {
-    return this.kids.crowd.partCount + this.pets.partCount;
-  }
-
   /**
    * Every child in the crowd, for a system that wants to read or briefly take
    * over one of them — currently just `world/TreeClimbing.ts`, which reads
@@ -770,7 +778,7 @@ export class NpcSystem implements GameSystem {
       character.avatar.tick?.(charDt);
     }
 
-    this.separate();
+    this.separate(dt);
     this.separateFromPlayer(dt);
 
     for (const character of this.characters) {
@@ -817,14 +825,29 @@ export class NpcSystem implements GameSystem {
    * against. Relaxation moves both parties half the overlap and stops, so it
    * cannot oscillate.
    */
-  private separate(): void {
+  /**
+   * `dt` because the correction is **rate-limited**, exactly as
+   * `separateFromPlayer` already limits its own.
+   *
+   * It was not, and at the old 1.0 m {@link SEPARATION} that never showed:
+   * the worst single correction two children could need was half a metre, which
+   * hides under `check:jitter`'s 1 m own-step bound. Widening the separation to
+   * a whole child brought it out — 118 violations, worst step 1.209 m — because
+   * an unlimited push moves a child further in one frame than they can walk in
+   * twenty. `MAX_DEPENETRATION_SPEED` is the same 3 m/s escort the collision
+   * world uses to ease anything out of anything else, and using it here means
+   * two children who end up overlapping *slide* apart over a few frames instead
+   * of snapping.
+   */
+  private separate(dt: number): void {
+    const maxPush = MAX_DEPENETRATION_SPEED * dt;
     for (let a = 0; a < this.characters.length; a += 1) {
       const first = this.characters[a];
       if (!first) continue;
       for (let b = a + 1; b < this.characters.length; b += 1) {
         const second = this.characters[b];
         if (!second) continue;
-        first.separateFrom(second, SEPARATION);
+        first.separateFrom(second, SEPARATION, maxPush);
       }
     }
   }
@@ -861,8 +884,10 @@ export class NpcSystem implements GameSystem {
 
     for (const character of this.characters) {
       // A climbing child's (x, z) is the tree it is up, not somewhere it is
-      // standing — see `NpcCharacter.separateFrom`'s identical guard.
-      if (character.climbing) continue;
+      // standing — see `NpcCharacter.separateFrom`'s identical guard. A
+      // scripted one's is a bus seat, and this is the pass that would shove the
+      // player's own seatmate out through the bodywork beside her.
+      if (character.climbing || character.scripted) continue;
 
       const push = circleSeparation(
         character.position.x,

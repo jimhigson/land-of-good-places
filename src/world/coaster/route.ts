@@ -4,7 +4,12 @@ import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
 import { clearOfFootprints, PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary, insetBoundary, PARK_BOUNDARY, solverBoundary } from '../boundary';
+import {
+  circleBoundary,
+  insetBoundarySearch,
+  PARK_BOUNDARY,
+  solverBoundary,
+} from '../boundary';
 import {
   type RouteBrief,
   type RouteInfluence,
@@ -472,13 +477,48 @@ export interface CoasterRouteOptions {
  * scenery, where every plot is in its way. Putting that constraint on the start
  * pose keeps the plan-view search itself simple and purely horizontal.
  */
-function stationPoses(
+/**
+ * {@link stationPoses}, as a generator — the same list, built a ring at a time.
+ *
+ * **Why this needed slicing at all.** The park's edge is a spline now, so
+ * `boundary.distanceToEdge` is a real computation rather than a subtraction, and
+ * `stationWindowIsClear` asks it seven times for each of 704 candidate spots.
+ * Profiled: 17 ms of the brief's 19 ms is that one call. That is one indivisible
+ * lump inside a single `advance()` slice during the cat-bus ride, and it
+ * overran `check:park-boot`'s ceiling on its own — so it is sliced, exactly like
+ * the searches either side of it, rather than the ceiling being moved.
+ *
+ * A ring is the unit because it is ~1.8 ms: fine enough that no frame hitches,
+ * coarse enough that the whole thing costs eleven yields rather than 704.
+ *
+ * Suspending cannot move the result, by the same argument `rail/generate.ts`
+ * makes about its own search: every piece of state here is a local of this
+ * function, `rng` is drawn from in exactly the same order whatever cadence the
+ * caller advances at, and there is no clock and no shared state to interleave
+ * with. {@link stationPoses} drives it straight through, and `check:park-boot`
+ * hashes the loop that comes out of both cadences.
+ */
+/**
+ * Candidate spots examined between yields.
+ *
+ * 8 of the 704 spots, so the driver gets 88 chances to stop. Stated as a count
+ * of the job rather than in milliseconds on purpose: the wall-clock cost is the
+ * machine's, the granularity is the code's.
+ */
+const SPOTS_PER_SLICE = 8;
+
+function* stationPoseSearch(
   stallId: string,
   rng: Rng,
   boundary: ReturnType<typeof circleBoundary>,
-): Pose2[] {
+): Generator<number, Pose2[], void> {
   const stall = placedEntry(stallId);
   const poses: { pose: Pose2; key: number }[] = [];
+  // Before the first spot is examined, so the caller's frame is not charged for
+  // the boundary inset and the obstacle census its own caller built on the way
+  // in. Those are ~4 ms cold, and together with the first ring they measured a
+  // 69 ms unbreakable slice at CI's speed.
+  yield 0;
   // Beside the booth, not a walk away from it: the old solve put the track
   // about 4.5 m out from the stall, and a station much further than that stops
   // reading as the thing the booth boards. It also has to stay inside the
@@ -488,18 +528,47 @@ function stationPoses(
   // Offering plenty of candidates is not generosity, it is the thing that makes
   // this solve at all: a first cut offered six and the search failed on every
   // one. Each is cheap to propose and the search abandons a bad one quickly.
+  // A ring was the first unit tried and it is too coarse: 64 spots is ~1.8 ms
+  // here and five times that on the hardware CI runs on, so the last ring
+  // started before a deadline could overrun it badly. Yielding every
+  // {@link SPOTS_PER_SLICE} spots makes the unit small enough that the overrun
+  // is bounded by something much smaller than a frame.
+  let sinceYield = 0;
   for (let ring = 0; ring < 11; ring += 1) {
     const distance = 5 + ring;
     for (let i = 0; i < 64; i += 1) {
+      if (sinceYield >= SPOTS_PER_SLICE) {
+        sinceYield = 0;
+        // The count is only so a driver can say how far along it is; nothing
+        // reads it to make a decision.
+        yield poses.length;
+      }
+      sinceYield += 1;
       const angle = (i / 64) * TAU;
       const x = stall.x + Math.cos(angle) * distance;
       const z = stall.z + Math.sin(angle) * distance;
+      // **Asked once per spot, not once per heading.** `stationWindowIsClear`
+      // walks `along` from -reach to +reach in even steps — a range symmetric
+      // about zero — so reversing the heading probes the *same set of points*
+      // and can only return the same answer. Testing both signs was doing the
+      // whole 7-sample plot scan twice for a boolean that cannot differ.
+      //
+      // This is a pure saving and it is load-bearing: the brief is built inside
+      // one `advance()` slice during the cat-bus ride, and at ~21 ms it was
+      // overrunning `check:park-boot`'s ceiling on its own. Halving it is what
+      // brings that frame back under budget without touching a threshold.
+      //
+      // The `rng` draws are untouched: both signs previously shared one verdict,
+      // so they were either both pushed or both skipped, and they still are — in
+      // the same order, the same number of times.
+      const hxBase = -Math.sin(angle);
+      const hzBase = Math.cos(angle);
+      if (!stationWindowIsClear({ x, z, hx: hxBase, hz: hzBase }, boundary, stallId)) continue;
       // Two headings per spot: the track may run past the booth either way.
       for (const sign of [1, -1] as const) {
-        const hx = -Math.sin(angle) * sign;
-        const hz = Math.cos(angle) * sign;
+        const hx = hxBase * sign;
+        const hz = hzBase * sign;
         const pose: Pose2 = { x, z, hx, hz };
-        if (!stationWindowIsClear(pose, boundary, stallId)) continue;
         // Plain seeded shuffle, and it is worth recording what was tried
         // instead, because both alternatives were worse.
         //
@@ -521,6 +590,26 @@ function stationPoses(
   }
   poses.sort((a, b) => a.key - b.key);
   return poses.map((entry) => entry.pose);
+}
+
+/**
+ * Candidate stations, best first, solved start to finish right now.
+ *
+ * A thin driver over {@link stationPoseSearch} rather than a second copy of it,
+ * so "the poses the game offers" and "the poses the loading screen builds a
+ * slice at a time" cannot be two different lists — the same relationship
+ * `solveRailRoute` has with `railRouteSearch`.
+ */
+function stationPoses(
+  stallId: string,
+  rng: Rng,
+  boundary: ReturnType<typeof circleBoundary>,
+): Pose2[] {
+  const search = stationPoseSearch(stallId, rng, boundary);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }
 
 
@@ -582,308 +671,48 @@ export class CoasterRoute {
 
   private readonly scratch = new Vector3();
 
-  constructor(options: CoasterRouteOptions) {
-    const rng = new Rng(PARK_SEED ^ options.salt);
+  /**
+   * Builds the loop.
+   *
+   * `presolved` is the work a driver already did **a slice at a time** —
+   * `boot/parkGeneration.ts`, spreading the ~1.3 s solve across the cat-bus
+   * ride's frames. Handed one, this skips both the brief and the search and
+   * does only the finishing work (the height profile, the carves, the vertical
+   * repair), which is ~10 ms and was never the expensive half.
+   */
+  constructor(options: CoasterRouteOptions, presolved?: PresolvedCoaster) {
+    // The pre-solved path brings its own `Rng` — **the very object its own
+    // `coasterRouteBriefs` call already advanced** — rather than a fresh one.
+    //
+    // That is not a shortcut, it is the only honest way to do it. `stationPoses`
+    // is the sole thing that draws from this stream, `hillPhase` below draws
+    // from it next, and the number of draws `stationPoses` makes depends on how
+    // many candidates survive its filters — a count nothing could restate
+    // without becoming a second definition to keep in step by hand. Re-running
+    // the brief purely to move the stream on was the first attempt and cost
+    // ~20 ms inside a frame that must not hitch. Passing the advanced stream is
+    // identical by construction, and free.
+    const rng = presolved?.rng ?? new Rng(PARK_SEED ^ options.salt);
     const stall = placedEntry(options.stationStallId);
-    const obstacles = tallObstacles();
-    const other = options.avoid ?? null;
-    const boundary =
-      options.outerRadius !== undefined
-        ? circleBoundary(options.outerRadius)
-        : solverBoundary(insetBoundary(PARK_BOUNDARY, RIM_INSET));
-
-    // --- horizontal: the generator solves the plan view --------------------
-    const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
-    const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
-    const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
-      for (const tall of obstacles) {
-        if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
-      }
-      if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
-      if (other) {
-        const nearest = other.nearestPoint(x, z);
-        if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
-      }
-      // The station and its ramps are the one stretch that flies LOW, and the
-      // vertical repair may never lift it (a half-lift tilts the boarding
-      // deck) — so while the track is below cruise height it must only ever
-      // be over open ground: no plot may sit under the ramp. Footprints, not
-      // bounding circles, because the near-relation deliberately parks this
-      // ride's booth beside the castle and the castle's 19 m circle would
-      // reject every pose the relation just arranged. This is what keeps the
-      // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
-      // dodges the published low corridor itself (train/route.ts), because
-      // it solves later and threads intervals — Decision 6's arrow: publish
-      // what you solved, the next system treats it as an obstacle.
-      // The castle is EXEMPT from the low-ground rule: the booth is parked
-      // beside it by the near relation and the ride legally passes through
-      // its walls, so pieces near the station are always near the castle —
-      // holding them to its footprint made the search reject nearly every
-      // early piece and burn its whole restart budget (measured: the solve
-      // went 31 s with the blanket rule, 1.1 s without it; the castle's own
-      // safety is `castleClear`'s crossing-band rule, checked above, plus
-      // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
-      // through the ball pit's balls is what it exists to stop (seed 18).
-      const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
-      if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
-      return true;
-    };
-    const brief: RouteBrief = {
-      // A stream of its own, so changing how many random draws the height
-      // profile takes cannot silently reshape the loop.
-      seed: PARK_SEED ^ options.salt ^ 0x5a17,
-      vocabulary: CRUISER_VOCABULARY,
-      desiredLength: options.desiredLength ?? DESIRED_LENGTH,
-      closed: true,
-      startPoses: stationPoses(options.stationStallId, rng, boundary),
-      clear,
-      boundary,
-      corridorRadius: CORRIDOR_RADIUS,
-      selfClearance: SELF_CLEARANCE,
-      minRadius: PLAN_TURN_RADIUS,
-      // Enough that the cap is never the thing that gives up (Decision 6:
-      // "only bail if backtracking fails for a very large number of tries").
-      //
-      // `stationPoses` offers 210 candidates on the canonical seed and the
-      // search takes index 0, so at 200 this abandoned the last ten for no
-      // reason — and the reason it can afford not to is measured, not hoped:
-      // `npm run measure:solver-budget` times a deliberately unsolvable brief
-      // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
-      // about 0.1 ms each. A successful solve stops at the first start pose
-      // that works, so this costs nothing on a park that works; the whole cost
-      // lands on one that does not, and a park that bails is far worse than a
-      // park that took a fifth of a second longer to decide it could not.
-      budgets: { perJoint: 16, restarts: 2000 },
-      // The family asked that the ride always flies through the castle. The
-      // influence makes that likely at the decision point; the backstop makes
-      // it required. See `CASTLE_INFLUENCE` and `crossesTheCastle`.
-      influences: [CASTLE_INFLUENCE],
-      satisfies: crossesTheCastle,
-    };
-    let plan = solveRailRoute(brief);
-    if (!plan.report.satisfied) {
-      // The escalation valve Decision 7 implies but never built: a weight
-      // makes the castle crossing likely, the backstop makes it required —
-      // and on a seed where the geometry fights (the booth's bearing, the
-      // spread plots), a fixed weight can exhaust every start pose without
-      // one crossing. Rather than raise the weight for every park until the
-      // hardest seed passes (which makes every OTHER park's loop less free —
-      // the cost Decision 7 warns about), the seeds that need more pull are
-      // the only ones that pay for it: one re-solve, twice the weight.
-      plan = solveRailRoute({
-        ...brief,
-        seed: brief.seed ^ 0xe5ca,
-        influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
-      });
+    let plan: SolvedRailRoute;
+    if (presolved) {
+      plan = presolved.plan;
+    } else {
+      // Two cadences over one policy, exactly as the ginormous slide runs its
+      // length ladder in both `planSlide()` and `ParkGeneration`: the *briefs*
+      // have one owner (below), and each cadence writes only its own loop over
+      // them. `report.satisfied` is the single verdict both consult.
+      const briefs = coasterRouteBriefs(options, rng);
+      plan = solveRailRoute(briefs.first);
+      if (!plan.report.satisfied) plan = solveRailRoute(briefs.escalated);
     }
     this.plan = plan;
-
-    const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));
-    const flat: Vec2[] = [];
-    const probe2: Vec2 = { x: 0, z: 0 };
-    for (let i = 0; i < controls; i += 1) {
-      plan.pointAt((i / controls) * plan.length, probe2);
-      flat.push({ x: probe2.x, z: probe2.z });
-    }
-
-    // Where along the plan the station sits — measured, not assumed to be zero,
-    // even though the loop starts there.
-    let stationS = 0;
-    let bestToStall = Infinity;
-    for (let d = 0; d < plan.length; d += 1) {
-      plan.pointAt(d, probe2);
-      const toStall = Math.hypot(probe2.x - stall.x, probe2.z - stall.z);
-      if (toStall < bestToStall) {
-        bestToStall = toStall;
-        stationS = d;
-      }
-    }
-
-    // --- vertical: seeded hills over the cruise floor ----------------------
-    // Authored along **arc length**, in metres. Integer harmonics of the loop
-    // fraction, so the profile closes seamlessly where the loop meets itself —
-    // a fractional harmonic would leave a step at the join that the swept rail
-    // would have to smooth over and the physics would feel as a kink.
-    const heights = new Float64Array(controls);
-    const hillPhase = rng.range(0, TAU);
-    for (let i = 0; i < controls; i += 1) {
-      const angle = (i / controls) * TAU;
-      const hills =
-        Math.max(0, Math.sin(angle * 3 + hillPhase)) * 3.4 +
-        Math.max(0, Math.sin(angle * 5 + hillPhase * 1.7)) * 1.4;
-      heights[i] = CRUISE_FLOOR + hills;
-    }
-    // The station carve. No bearing-to-metres conversion any more: `along` is
-    // already the metres of track between this control and the platform.
-    for (let i = 0; i < controls; i += 1) {
-      const s = (i / controls) * plan.length;
-      const raw = Math.abs(s - stationS);
-      const along = Math.min(raw, plan.length - raw);
-      if (along < STATION_FLAT) heights[i] = STATION_HEIGHT;
-      else if (along < STATION_FLAT + STATION_RAMP) {
-        const t = (along - STATION_FLAT) / STATION_RAMP;
-        const eased = t * t * (3 - 2 * t);
-        heights[i] = STATION_HEIGHT + (heights[i]! - STATION_HEIGHT) * eased;
-      }
-    }
-
-    // The castle window carve (issue #113). Applied **after** the station's,
-    // and that order is load-bearing rather than incidental.
-    //
-    // The cruiser's booth is placed 21-26 m from the castle, so the station and
-    // the castle are always near neighbours, and the station's 26 m ramp
-    // reaches the castle on most seeds. Carving the castle first and letting
-    // the station ramp run over it was tried and measured: **one crossing came
-    // out pinned at window height and the other at 2-4 m**, halfway down the
-    // ramp — an opening that would have been cut through the courtyard floor.
-    // The flat run through the masonry is the one part of the profile that
-    // cannot be blended with anything, because a hole was cut to fit it, so it
-    // is applied last and wins outright.
-    //
-    // What the station keeps is its own flat: the two flats overlapping would
-    // tilt the boarding deck, so `checkCoasterClearances` complains if they come
-    // within reach of each other rather than letting either quietly deform.
-    //
-    // Level, not merely low: both openings then sit at the same height, the
-    // masonry surround is a plain rectangle rather than a swept slot, and the
-    // cart flies straight at the window instead of arriving at it climbing.
-    // Measured on the **plan**, because the curve this carves does not exist
-    // yet. The public `castleSpan` below is re-measured on the finished curve:
-    // the two parameterisations are not the same length, and treating one as
-    // the other is a bug this had — plan metres ran ~1.5% short of curve metres,
-    // so the span stopped just before the second wall crossing and one of the
-    // two windows was silently never cut. Three of the five CI seeds caught it.
-    const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
-    if (castleSpan) {
-      const windowY = castleY(WINDOW_TRACK_Y);
-      for (let i = 0; i < controls; i += 1) {
-        const s = (i / controls) * plan.length;
-        const away = outsideSpan(castleSpan, s, plan.length);
-        const spot = flat[i]!;
-        const wanted = windowY - terrainHeight(spot.x, spot.z);
-        if (away < WINDOW_FLAT) heights[i] = wanted;
-        else if (away < WINDOW_FLAT + WINDOW_RAMP) {
-          const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
-          const eased = t * t * (3 - 2 * t);
-          heights[i] = wanted + (heights[i]! - wanted) * eased;
-        }
-      }
-    }
-
-    const makeCurve = (): CatmullRomCurve3 => {
-      const points: Vector3[] = [];
-      for (let i = 0; i < controls; i += 1) {
-        const spot = flat[i]!;
-        points.push(
-          new Vector3(spot.x, terrainHeight(spot.x, spot.z) + (heights[i] ?? CRUISE_FLOOR), spot.z),
-        );
-      }
-      const curve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
-      curve.arcLengthDivisions = 1600;
-      return curve;
-    };
-
-    const stationOn = (curve: CatmullRomCurve3, length: number): number => {
-      let best = 0;
-      let bestDistance = Infinity;
-      const probe = new Vector3();
-      for (let d = 0; d < length; d += 1) {
-        curve.getPointAt(d / length, probe);
-        const toStall = Math.hypot(probe.x - stall.x, probe.z - stall.z);
-        if (toStall < bestDistance) {
-          bestDistance = toStall;
-          best = d;
-        }
-      }
-      return best;
-    };
-
-    // --- vertical repair: measure the finished curve, not the plan ---------
-    // Control-point heights are claims; between them the spline interpolates
-    // while the terrain does what it likes, so a rise between two samples can
-    // eat the cruise floor. Scan exactly the way the boot assert will (but with
-    // a slightly narrower station exemption, so everything the assert measures
-    // is either exempt or repaired), raise the control points under any
-    // deficit, and re-measure until the track really clears.
-    let curve = makeCurve();
-    let length = curve.getLength();
-    let station = stationOn(curve, length);
-    const probe = new Vector3();
-    for (let pass = 0; pass < 10; pass += 1) {
-      // Worst deficit per control point, so a run of low samples under one
-      // control raises it once by what it needs, not once per sample. The same
-      // sweep records how close to the station each control's track actually
-      // runs — measured on the curve, because a control's own nominal position
-      // along the loop drifts once height is added to it.
-      const lifts = new Map<number, number>();
-      const ownsStationTrack = new Map<number, number>();
-      for (let d = 0; d < length; d += 2) {
-        curve.getPointAt(d / length, probe);
-        const toStation = Math.min(Math.abs(d - station), length - Math.abs(d - station));
-        const control = Math.round((d / length) * controls) % controls;
-        ownsStationTrack.set(
-          control,
-          Math.min(ownsStationTrack.get(control) ?? Infinity, toStation),
-        );
-        if (toStation < STATION_FLAT + STATION_RAMP) continue;
-        const above = probe.y - terrainHeight(probe.x, probe.z);
-        if (above < CRUISE_FLOOR) {
-          const lift = CRUISE_FLOOR - above + 0.4;
-          lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
-        }
-      }
-      // Never lift a control that owns boarding-flat or early-ramp track — a
-      // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
-      // is fair game: steepening the ramp's tail is exactly how a sag just past
-      // the window gets fixed.
-      // A control carrying the level run through the castle is not liftable
-      // either, and for a sharper reason than the station's: lifting it would
-      // raise the track *inside a hole cut to fit it*, which is the one place
-      // in the park where gaining height is how you hit something rather than
-      // how you miss it. The ramp's outer two-thirds stay liftable, exactly as
-      // the station's do, so a sag just past the castle can still be repaired.
-      const holdsWindow = (index: number): boolean =>
-        castleSpan !== null &&
-        outsideSpan(castleSpan, (index / controls) * plan.length, plan.length) <
-          WINDOW_FLAT + WINDOW_RAMP * 0.35;
-      const liftable = (index: number): boolean =>
-        (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65 &&
-        !holdsWindow(index);
-      for (const [control, lift] of lifts) {
-        if (liftable(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
-        for (const side of [-1, 1]) {
-          const neighbour = (control + side + controls) % controls;
-          if (liftable(neighbour))
-            heights[neighbour] = (heights[neighbour] ?? CRUISE_FLOOR) + lift * 0.5;
-        }
-      }
-      if (lifts.size === 0) break;
-      curve = makeCurve();
-      length = curve.getLength();
-      station = stationOn(curve, length);
-    }
-
-    this.curve = curve;
-    this.length = length;
-    this.stationDistance = station;
-
-    // The span riders actually fly, in the metres every other consumer counts
-    // in: `openingsFor`, the swept-car assert and the station-overlap check all
-    // index the built curve, so this is measured on the built curve.
-    const built = new Vector3();
-    this.castleSpan = spanInsideCastle((d, into) => {
-      curve.getPointAt(this.wrap(d) / length, built);
-      into.x = built.x;
-      into.z = built.z;
-    }, length);
-
-    let crest = 0;
-    for (let d = 0; d < length; d += 1) {
-      curve.getPointAt(d / length, probe);
-      const above = probe.y - terrainHeight(probe.x, probe.z);
-      if (above > crest) crest = above;
-    }
-    this.crestY = crest;
+    const profile = presolved?.profile ?? coasterProfile(plan, rng, stall);
+    this.curve = profile.curve;
+    this.length = profile.length;
+    this.stationDistance = profile.stationDistance;
+    this.castleSpan = profile.castleSpan;
+    this.crestY = profile.crestY;
   }
 
   pointAt(distance: number, target = this.scratch): Vector3 {
@@ -920,6 +749,173 @@ export class CoasterRoute {
       }
     }
     return best;
+  }
+}
+
+/**
+ * A loop somebody else already searched, ready to be finished.
+ *
+ * Both halves are needed and neither can be rebuilt cheaply: the plan view is
+ * the ~1.3 s the ride spread out, and the `Rng` is the stream `stationPoses`
+ * advanced on the way to producing the brief that plan was searched from.
+ */
+export interface PresolvedCoaster {
+  /** The plan view a driver already searched, a slice at a time. */
+  readonly plan: SolvedRailRoute;
+  /** The stream that driver's own {@link coasterRouteBriefs} call advanced. */
+  readonly rng: Rng;
+  /**
+   * The finished profile, if the driver built that a slice at a time too.
+   *
+   * Omitted — never `undefined`, per `exactOptionalPropertyTypes` — by a caller
+   * that only pre-solved the plan view and is content for the constructor to do
+   * the finishing work in one go.
+   */
+  readonly profile?: CoasterProfile;
+}
+
+/** The Sky Cruiser's search brief, and the harder-pulling retry behind it. */
+export interface CoasterBriefs {
+  /** What the loop is asked for first. */
+  readonly first: RouteBrief;
+  /** Twice the castle pull, its own stream — tried only if `first` fell short. */
+  readonly escalated: RouteBrief;
+}
+
+/**
+ * **What the Sky Cruiser's search is asked, in one place, for both cadences.**
+ *
+ * Split out of the constructor so that something which is *not* the module
+ * owning `COASTER_PLANS` can build the brief and drive the search a slice at a
+ * time — importing that module is precisely what runs the ~1.3 s solve, so the
+ * loading screen could not otherwise get at the brief without paying for the
+ * thing it is trying to spread out. The same split, for the same reason, as
+ * `slide/solve.ts`'s `slideRouteBriefAt`; see `coaster/prewarm.ts` for why the
+ * cruiser turned out to need it too.
+ *
+ * **`rng` is a parameter rather than a local so the two callers can differ in
+ * the one way that matters.** `CoasterRoute` passes its own, because
+ * `stationPoses` draws from it and the height profile draws next; the
+ * pre-warmer omits it and gets a throwaway seeded identically, because it wants
+ * the poses and not the stream. Either way `stationPoses` is called exactly
+ * once on a freshly seeded `Rng`, so the draw sequence is the same sequence.
+ */
+export function* coasterRouteBriefSearch(
+  options: CoasterRouteOptions,
+  rng: Rng = new Rng(PARK_SEED ^ options.salt),
+): Generator<number, CoasterBriefs, void> {
+  const obstacles = tallObstacles();
+  const other = options.avoid ?? null;
+  const boundary =
+    options.outerRadius !== undefined
+      ? circleBoundary(options.outerRadius)
+      : // Delegated, so its sixteen slices surface to whoever is driving this.
+        // 25 ms in one go was the brief's largest unbreakable block.
+        solverBoundary(yield* insetBoundarySearch(PARK_BOUNDARY, RIM_INSET));
+
+  // --- horizontal: the generator solves the plan view --------------------
+  const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
+  const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
+  const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
+    for (const tall of obstacles) {
+      if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
+    }
+    if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
+    if (other) {
+      const nearest = other.nearestPoint(x, z);
+      if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
+    }
+    // The station and its ramps are the one stretch that flies LOW, and the
+    // vertical repair may never lift it (a half-lift tilts the boarding
+    // deck) — so while the track is below cruise height it must only ever
+    // be over open ground: no plot may sit under the ramp. Footprints, not
+    // bounding circles, because the near-relation deliberately parks this
+    // ride's booth beside the castle and the castle's 19 m circle would
+    // reject every pose the relation just arranged. This is what keeps the
+    // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
+    // dodges the published low corridor itself (train/route.ts), because
+    // it solves later and threads intervals — Decision 6's arrow: publish
+    // what you solved, the next system treats it as an obstacle.
+    // The castle is EXEMPT from the low-ground rule: the booth is parked
+    // beside it by the near relation and the ride legally passes through
+    // its walls, so pieces near the station are always near the castle —
+    // holding them to its footprint made the search reject nearly every
+    // early piece and burn its whole restart budget (measured: the solve
+    // went 31 s with the blanket rule, 1.1 s without it; the castle's own
+    // safety is `castleClear`'s crossing-band rule, checked above, plus
+    // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
+    // through the ball pit's balls is what it exists to stop (seed 18).
+    const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
+    if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
+    return true;
+  };
+  // Delegated rather than called, so the eleven ring-yields inside it surface
+  // to whoever is driving this. The straight-through driver below swallows them.
+  const startPoses = yield* stationPoseSearch(options.stationStallId, rng, boundary);
+  const brief: RouteBrief = {
+    // A stream of its own, so changing how many random draws the height
+    // profile takes cannot silently reshape the loop.
+    seed: PARK_SEED ^ options.salt ^ 0x5a17,
+    vocabulary: CRUISER_VOCABULARY,
+    desiredLength: options.desiredLength ?? DESIRED_LENGTH,
+    closed: true,
+    startPoses,
+    clear,
+    boundary,
+    corridorRadius: CORRIDOR_RADIUS,
+    selfClearance: SELF_CLEARANCE,
+    minRadius: PLAN_TURN_RADIUS,
+    // Enough that the cap is never the thing that gives up (Decision 6:
+    // "only bail if backtracking fails for a very large number of tries").
+    //
+    // `stationPoses` offers 210 candidates on the canonical seed and the
+    // search takes index 0, so at 200 this abandoned the last ten for no
+    // reason — and the reason it can afford not to is measured, not hoped:
+    // `npm run measure:solver-budget` times a deliberately unsolvable brief
+    // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
+    // about 0.1 ms each. A successful solve stops at the first start pose
+    // that works, so this costs nothing on a park that works; the whole cost
+    // lands on one that does not, and a park that bails is far worse than a
+    // park that took a fifth of a second longer to decide it could not.
+    budgets: { perJoint: 16, restarts: 2000 },
+    // The family asked that the ride always flies through the castle. The
+    // influence makes that likely at the decision point; the backstop makes
+    // it required. See `CASTLE_INFLUENCE` and `crossesTheCastle`.
+    influences: [CASTLE_INFLUENCE],
+    satisfies: crossesTheCastle,
+  };
+
+    // The escalation valve Decision 7 implies but never built: a weight
+    // makes the castle crossing likely, the backstop makes it required —
+    // and on a seed where the geometry fights (the booth's bearing, the
+    // spread plots), a fixed weight can exhaust every start pose without
+    // one crossing. Rather than raise the weight for every park until the
+    // hardest seed passes (which makes every OTHER park's loop less free —
+    // the cost Decision 7 warns about), the seeds that need more pull are
+    // the only ones that pay for it: one re-solve, twice the weight.
+  const escalated: RouteBrief = {
+    ...brief,
+    seed: brief.seed ^ 0xe5ca,
+    influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
+  };
+  return { first: brief, escalated };
+}
+
+/**
+ * The briefs, built start to finish right now.
+ *
+ * The thin driver over {@link coasterRouteBriefSearch}, for every caller that is
+ * not spreading the work over frames — `CoasterRoute`'s own constructor, the
+ * fingerprint scripts, `check:park`, `test:procgen`. One builder, two cadences.
+ */
+export function coasterRouteBriefs(
+  options: CoasterRouteOptions,
+  rng: Rng = new Rng(PARK_SEED ^ options.salt),
+): CoasterBriefs {
+  const search = coasterRouteBriefSearch(options, rng);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
   }
 }
 
@@ -1012,4 +1008,270 @@ export function checkCoasterClearances(
     }
   }
   return complaints;
+}
+
+
+/** Everything about the built loop that is not the plan view it came from. */
+export interface CoasterProfile {
+  readonly curve: CatmullRomCurve3;
+  readonly length: number;
+  readonly stationDistance: number;
+  readonly castleSpan: { readonly from: number; readonly to: number } | null;
+  readonly crestY: number;
+}
+
+/** `distance` wrapped into [0, length), free of any instance. */
+function wrapAround(distance: number, length: number): number {
+  let value = distance % length;
+  if (value < 0) value += length;
+  return value;
+}
+
+/**
+ * **The loop, finished — a repair pass at a time.**
+ *
+ * Everything after the plan-view search: the hill profile, the station and
+ * castle carves, the vertical repair, and the crest. Lifted out of
+ * `CoasterRoute`'s constructor so it can be driven either way, because as one
+ * indivisible block it was the single worst frame in the whole park build.
+ *
+ * Measured: 18.9 ms on an M4 Pro and **54.6 ms in CI**, against a 24 ms ceiling.
+ * That is the number CI failed on. It is one block because the repair loop
+ * rebuilds the curve ten times and nothing inside it ever yielded.
+ *
+ * Suspending cannot move the result, by the same argument the searches make:
+ * every piece of state is a local of this function, the single `rng` draw
+ * (`hillPhase`) happens before the first yield, and there is no clock or shared
+ * state to interleave with.
+ */
+export function* coasterProfileSearch(
+  plan: SolvedRailRoute,
+  rng: Rng,
+  stall: { readonly x: number; readonly z: number },
+): Generator<number, CoasterProfile, void> {
+  const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));
+  const flat: Vec2[] = [];
+  const probe2: Vec2 = { x: 0, z: 0 };
+  for (let i = 0; i < controls; i += 1) {
+    plan.pointAt((i / controls) * plan.length, probe2);
+    flat.push({ x: probe2.x, z: probe2.z });
+  }
+
+  // Where along the plan the station sits — measured, not assumed to be zero,
+  // even though the loop starts there.
+  let stationS = 0;
+  let bestToStall = Infinity;
+  for (let d = 0; d < plan.length; d += 1) {
+    plan.pointAt(d, probe2);
+    const toStall = Math.hypot(probe2.x - stall.x, probe2.z - stall.z);
+    if (toStall < bestToStall) {
+      bestToStall = toStall;
+      stationS = d;
+    }
+  }
+
+  // --- vertical: seeded hills over the cruise floor ----------------------
+  // Authored along **arc length**, in metres. Integer harmonics of the loop
+  // fraction, so the profile closes seamlessly where the loop meets itself —
+  // a fractional harmonic would leave a step at the join that the swept rail
+  // would have to smooth over and the physics would feel as a kink.
+  const heights = new Float64Array(controls);
+  const hillPhase = rng.range(0, TAU);
+  for (let i = 0; i < controls; i += 1) {
+    const angle = (i / controls) * TAU;
+    const hills =
+      Math.max(0, Math.sin(angle * 3 + hillPhase)) * 3.4 +
+      Math.max(0, Math.sin(angle * 5 + hillPhase * 1.7)) * 1.4;
+    heights[i] = CRUISE_FLOOR + hills;
+  }
+  // The station carve. No bearing-to-metres conversion any more: `along` is
+  // already the metres of track between this control and the platform.
+  for (let i = 0; i < controls; i += 1) {
+    const s = (i / controls) * plan.length;
+    const raw = Math.abs(s - stationS);
+    const along = Math.min(raw, plan.length - raw);
+    if (along < STATION_FLAT) heights[i] = STATION_HEIGHT;
+    else if (along < STATION_FLAT + STATION_RAMP) {
+      const t = (along - STATION_FLAT) / STATION_RAMP;
+      const eased = t * t * (3 - 2 * t);
+      heights[i] = STATION_HEIGHT + (heights[i]! - STATION_HEIGHT) * eased;
+    }
+  }
+
+  // The castle window carve (issue #113). Applied **after** the station's,
+  // and that order is load-bearing rather than incidental.
+  //
+  // The cruiser's booth is placed 21-26 m from the castle, so the station and
+  // the castle are always near neighbours, and the station's 26 m ramp
+  // reaches the castle on most seeds. Carving the castle first and letting
+  // the station ramp run over it was tried and measured: **one crossing came
+  // out pinned at window height and the other at 2-4 m**, halfway down the
+  // ramp — an opening that would have been cut through the courtyard floor.
+  // The flat run through the masonry is the one part of the profile that
+  // cannot be blended with anything, because a hole was cut to fit it, so it
+  // is applied last and wins outright.
+  //
+  // What the station keeps is its own flat: the two flats overlapping would
+  // tilt the boarding deck, so `checkCoasterClearances` complains if they come
+  // within reach of each other rather than letting either quietly deform.
+  //
+  // Level, not merely low: both openings then sit at the same height, the
+  // masonry surround is a plain rectangle rather than a swept slot, and the
+  // cart flies straight at the window instead of arriving at it climbing.
+  // Measured on the **plan**, because the curve this carves does not exist
+  // yet. The public `castleSpan` below is re-measured on the finished curve:
+  // the two parameterisations are not the same length, and treating one as
+  // the other is a bug this had — plan metres ran ~1.5% short of curve metres,
+  // so the span stopped just before the second wall crossing and one of the
+  // two windows was silently never cut. Three of the five CI seeds caught it.
+  const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
+  if (castleSpan) {
+    const windowY = castleY(WINDOW_TRACK_Y);
+    for (let i = 0; i < controls; i += 1) {
+      const s = (i / controls) * plan.length;
+      const away = outsideSpan(castleSpan, s, plan.length);
+      const spot = flat[i]!;
+      const wanted = windowY - terrainHeight(spot.x, spot.z);
+      if (away < WINDOW_FLAT) heights[i] = wanted;
+      else if (away < WINDOW_FLAT + WINDOW_RAMP) {
+        const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
+        const eased = t * t * (3 - 2 * t);
+        heights[i] = wanted + (heights[i]! - wanted) * eased;
+      }
+    }
+  }
+
+  const makeCurve = (): CatmullRomCurve3 => {
+    const points: Vector3[] = [];
+    for (let i = 0; i < controls; i += 1) {
+      const spot = flat[i]!;
+      points.push(
+        new Vector3(spot.x, terrainHeight(spot.x, spot.z) + (heights[i] ?? CRUISE_FLOOR), spot.z),
+      );
+    }
+    const curve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
+    curve.arcLengthDivisions = 1600;
+    return curve;
+  };
+
+  const stationOn = (curve: CatmullRomCurve3, length: number): number => {
+    let best = 0;
+    let bestDistance = Infinity;
+    const probe = new Vector3();
+    for (let d = 0; d < length; d += 1) {
+      curve.getPointAt(d / length, probe);
+      const toStall = Math.hypot(probe.x - stall.x, probe.z - stall.z);
+      if (toStall < bestDistance) {
+        bestDistance = toStall;
+        best = d;
+      }
+    }
+    return best;
+  };
+
+  // --- vertical repair: measure the finished curve, not the plan ---------
+  // Control-point heights are claims; between them the spline interpolates
+  // while the terrain does what it likes, so a rise between two samples can
+  // eat the cruise floor. Scan exactly the way the boot assert will (but with
+  // a slightly narrower station exemption, so everything the assert measures
+  // is either exempt or repaired), raise the control points under any
+  // deficit, and re-measure until the track really clears.
+  let curve = makeCurve();
+  let length = curve.getLength();
+  let station = stationOn(curve, length);
+  const probe = new Vector3();
+  for (let pass = 0; pass < 10; pass += 1) {
+    // One repair pass per slice. The loop rebuilds the whole curve and its
+    // 1600-sample arc-length table each pass and never converges early, so
+    // all ten always run: as one block that measured 18.9 ms here and 54.6 ms
+    // on CI, against a 24 ms ceiling. A pass is ~1.9 ms, which fits.
+    yield pass;
+    // Worst deficit per control point, so a run of low samples under one
+    // control raises it once by what it needs, not once per sample. The same
+    // sweep records how close to the station each control's track actually
+    // runs — measured on the curve, because a control's own nominal position
+    // along the loop drifts once height is added to it.
+    const lifts = new Map<number, number>();
+    const ownsStationTrack = new Map<number, number>();
+    for (let d = 0; d < length; d += 2) {
+      curve.getPointAt(d / length, probe);
+      const toStation = Math.min(Math.abs(d - station), length - Math.abs(d - station));
+      const control = Math.round((d / length) * controls) % controls;
+      ownsStationTrack.set(
+        control,
+        Math.min(ownsStationTrack.get(control) ?? Infinity, toStation),
+      );
+      if (toStation < STATION_FLAT + STATION_RAMP) continue;
+      const above = probe.y - terrainHeight(probe.x, probe.z);
+      if (above < CRUISE_FLOOR) {
+        const lift = CRUISE_FLOOR - above + 0.4;
+        lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+      }
+    }
+    // Never lift a control that owns boarding-flat or early-ramp track — a
+    // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
+    // is fair game: steepening the ramp's tail is exactly how a sag just past
+    // the window gets fixed.
+    // A control carrying the level run through the castle is not liftable
+    // either, and for a sharper reason than the station's: lifting it would
+    // raise the track *inside a hole cut to fit it*, which is the one place
+    // in the park where gaining height is how you hit something rather than
+    // how you miss it. The ramp's outer two-thirds stay liftable, exactly as
+    // the station's do, so a sag just past the castle can still be repaired.
+    const holdsWindow = (index: number): boolean =>
+      castleSpan !== null &&
+      outsideSpan(castleSpan, (index / controls) * plan.length, plan.length) <
+        WINDOW_FLAT + WINDOW_RAMP * 0.35;
+    const liftable = (index: number): boolean =>
+      (ownsStationTrack.get(index) ?? Infinity) > STATION_FLAT + STATION_RAMP * 0.65 &&
+      !holdsWindow(index);
+    for (const [control, lift] of lifts) {
+      if (liftable(control)) heights[control] = (heights[control] ?? CRUISE_FLOOR) + lift;
+      for (const side of [-1, 1]) {
+        const neighbour = (control + side + controls) % controls;
+        if (liftable(neighbour))
+          heights[neighbour] = (heights[neighbour] ?? CRUISE_FLOOR) + lift * 0.5;
+      }
+    }
+    if (lifts.size === 0) break;
+    curve = makeCurve();
+    length = curve.getLength();
+    station = stationOn(curve, length);
+  }
+
+
+  // The span riders actually fly, in the metres every other consumer counts
+  // in: `openingsFor`, the swept-car assert and the station-overlap check all
+  // index the built curve, so this is measured on the built curve.
+  const built = new Vector3();
+  // Named apart from the plan-space `castleSpan` above, which carved the height
+  // profile. These are two different measurements of the same stretch — plan
+  // metres run ~1.5% short of curve metres — and treating one as the other is a
+  // bug this file has already had.
+  const builtCastleSpan = spanInsideCastle((d, into) => {
+    curve.getPointAt(wrapAround(d, length) / length, built);
+    into.x = built.x;
+    into.z = built.z;
+  }, length);
+
+  let crest = 0;
+  for (let d = 0; d < length; d += 1) {
+    curve.getPointAt(d / length, probe);
+    const above = probe.y - terrainHeight(probe.x, probe.z);
+    if (above > crest) crest = above;
+  }
+  return { curve, length, stationDistance: station, castleSpan: builtCastleSpan, crestY: crest };
+}
+
+/** {@link coasterProfileSearch}, driven straight through. */
+function coasterProfile(
+  plan: SolvedRailRoute,
+  rng: Rng,
+  stall: { readonly x: number; readonly z: number },
+): CoasterProfile {
+  const search = coasterProfileSearch(plan, rng, stall);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
 }

@@ -163,6 +163,24 @@ export class IsoCamera {
     this.applyFrustum();
   }
 
+  /**
+   * Asks for a zoom outright, rather than nudging from wherever it is.
+   *
+   * For a cutscene that has to frame something the ordinary follow-cam was
+   * never sized for — the cat bus's arrival, whose subject is eighteen metres
+   * long against a default framing built around a two-metre child. Damped by
+   * {@link update} exactly like a pinch, so it eases rather than snapping.
+   *
+   * Safe to call every frame, and the arrival does: `Game.tick()` re-derives
+   * the whole world's state each frame and silently overwrites anything set
+   * once from outside it (see CLAUDE.md's `/view` note, which is this trap
+   * biting someone). Something that must hold therefore has to be re-asserted,
+   * not assigned.
+   */
+  setZoomTarget(zoom: number): void {
+    this.zoomTarget = clamp(zoom, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+  }
+
   nudgeZoom(delta: number): void {
     this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
   }

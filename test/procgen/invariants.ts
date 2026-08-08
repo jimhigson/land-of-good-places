@@ -48,8 +48,20 @@ import {
   zoneSeparation,
 } from '../../src/world/tapSpacing.ts';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
+import {
+  ENTRANCE_ANGLE,
+  ENTRANCE_BUS_ARRIVE_X,
+  ENTRANCE_BUS_STOP_Z,
+  ENTRANCE_GATE_HALF_WIDTH,
+  ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
+  ENTRANCE_PLAYER_X,
+  ENTRANCE_PLAYER_Z,
+  isInEntranceGateGap,
+} from '../../src/world/entrance/layout.ts';
+import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
-import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
+import { CHILD_FOOTPRINT, createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/art/models/hair.ts';
 import { HAT_KINDS, createHat } from '../../src/art/models/hats.ts';
 // `train/trainDimensions.ts` and `train/clearance.ts` rather than
@@ -3076,6 +3088,462 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
 };
 
 /**
+ * **Is the cat bus actually in the park?**
+ *
+ * This is the invariant the repo did not have, and its absence is the whole
+ * story of issue #245. The arrival merged on 26 July 2026 as PR #27 — six new
+ * files under `world/entrance/`, no `Game.ts`, no `main.ts`, no call site
+ * anywhere. `Entrance` was never constructed, `createCatBus` had no importers,
+ * and the identifier `cat-bus` did not appear in the shipped bundle at all.
+ * Two hundred tests and thirty-odd `check:*` scripts stayed green for twelve
+ * days, and all five of those files could have been deleted without a single
+ * one of them noticing. Jim found it the only way it could be found: *"I've
+ * never seen the cat bus, I don't think it works."*
+ *
+ * So this asks the one question none of them asked — **is the thing there?** —
+ * of the built scene graph, not of the code that was supposed to build it. It
+ * goes red if `World` stops constructing `Entrance`, if `Entrance` stops
+ * constructing the arrival, if the arrival stops adding the bus to a group that
+ * reaches the scene, or if the bus is built with no geometry on it.
+ *
+ * Thresholds are deliberately loose and physical: this is not a test of where
+ * the choreography puts the bus frame by frame (`scripts/check-cat-bus.mts`
+ * drives that), it is a test that a bus exists, has a body, has its driver and
+ * its passengers, and is standing at the gate rather than at the origin.
+ */
+/**
+ * **Is there actually a hole in the wall at the gate?**
+ *
+ * Issue #195. `isInEntranceGateGap` sat in `entrance/layout.ts` from the day the
+ * entrance was written with **zero callers anywhere**, so the gate was a gate in
+ * name only: an arch stood over unbroken masonry, with an unbroken collision
+ * polygon behind it. `buildBoundaryWall`'s own comment said "the wall is solid",
+ * and it was. Jim found it the way it was always going to be found — by
+ * watching a bus drive through it.
+ *
+ * This measures the **built** wall: every block instance the boundary actually
+ * placed, against the opening the gate claims to have. A predicate saying "the
+ * walkers pass through the gate's angle" is not this, and does not catch it —
+ * that stays true whether or not there is any stone in the way, which is
+ * precisely how the first version of this guard passed with the gap closed
+ * again.
+ */
+const theGateIsAHoleInTheWall: Invariant = (facts) => {
+  const blocks: { x: number; z: number }[] = [];
+  const local = new Matrix4();
+  const composed = new Matrix4();
+  const centre = new Vector3();
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof InstancedMesh)) return;
+    if (!/^boundary-(blocks|pillars)?/.test(object.name) && object.name !== 'boundary-blocks') return;
+    for (let i = 0; i < object.count; i += 1) {
+      object.getMatrixAt(i, local);
+      composed.multiplyMatrices(object.matrixWorld, local);
+      centre.setFromMatrixPosition(composed);
+      blocks.push({ x: centre.x, z: centre.z });
+    }
+  });
+
+  if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
+
+  const fouls: string[] = [];
+  const inGap = blocks.filter((b) => isInEntranceGateGap(Math.atan2(b.z, b.x)));
+  if (inGap.length > 0) {
+    const worst = inGap[0];
+    fouls.push(
+      `${inGap.length} boundary wall blocks stand inside the gate opening, e.g. ` +
+        `${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
+    );
+  }
+
+  // And the hole is wide enough to walk through: the nearest stone either side
+  // of the gate centre must leave more than a child's width between them.
+  let nearest = Infinity;
+  for (const b of blocks) {
+    nearest = Math.min(nearest, Math.hypot(b.x - 0, b.z - ENTRANCE_GATE_Z));
+  }
+  if (nearest < PLAYER_RADIUS * 2) {
+    fouls.push(
+      `the closest wall block sits ${nearest.toFixed(2)} m from the middle of the gate — ` +
+        `a child of ${PLAYER_RADIUS} m cannot get through`,
+    );
+  }
+  return fouls;
+};
+
+/**
+ * **The road reaches the gate, and stays out of the park except through it.**
+ *
+ * Jim, 7 August 2026: *"it doesn't actually drive up to the park, the road needs
+ * to actually go to the park."* There was no road at the entrance at all — the
+ * bus pulled up on grass.
+ *
+ * There is one now (`Entrance.ts`'s `buildEntranceRoad`), and it has to satisfy
+ * two things that pull against each other, which is why this is an invariant
+ * rather than a one-seed check:
+ *
+ * 1. **It must reach the gate**, and go *through* it, or the park is somewhere
+ *    the road merely stops near.
+ * 2. **It must not sprawl into the park** anywhere else. The boundary is a
+ *    spline pinned to 60 m on the gate's bearing and bulging to 92 m within 40
+ *    degrees of it (#115), so a straight kerb road outside the gate curves back
+ *    *inside* the park at both ends of its run. `buildEntranceRoad` walks
+ *    outward and stops where that would happen — and how far it gets is
+ *    different on every seed, because the spline is different on every seed.
+ *    That is exactly the shape of thing that works on the canonical seed and
+ *    quietly fails on a sweep one.
+ *
+ * Measured off the built road's own world vertices. A version comparing
+ * `ENTRANCE_BUS_STOP_Z` against itself would pass on a park with no road in it.
+ */
+const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
+  const points: { x: number; z: number }[] = [];
+  const at = new Vector3();
+  facts.world.entrance.group.traverse((object: Object3D) => {
+    if (!(object instanceof Mesh)) return;
+    if (!object.name.startsWith('entrance-road')) return;
+    const position = object.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i += 1) {
+      at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
+      points.push({ x: at.x, z: at.z });
+    }
+  });
+
+  if (points.length === 0) {
+    return ['there is no road at the park entrance at all — the cat bus arrives on grass'];
+  }
+
+  const fouls: string[] = [];
+
+  let toTheGate = Infinity;
+  for (const p of points) {
+    toTheGate = Math.min(toTheGate, Math.hypot(p.x - ENTRANCE_GATE_X, p.z - ENTRANCE_GATE_Z));
+  }
+  // The road's own segment length is the finest resolution a vertex can land
+  // at; anything tighter asserts on where the tessellation happened to fall.
+  if (toTheGate > ROAD_TILE_METRES / 2) {
+    fouls.push(
+      `the nearest the road gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+    );
+  }
+
+  // `facts.boundary`, not a static `PARK_BOUNDARY` import: that constant is
+  // solved at module scope from the seed, and importing it here would pin all
+  // five seeds to the canonical park — CLAUDE.md's 76-silent-skips trap.
+  // `distanceToEdge` is positive inside the park.
+  const inside = points.filter((p) => facts.boundary.distanceToEdge(p.x, p.z) > 0);
+  if (inside.length === 0) {
+    fouls.push('no part of the road is inside the park — it stops at the wall rather than going in');
+  }
+
+  // **Everything inside the park runs between the arch's posts.**
+  //
+  // Measured as perpendicular distance from the gate's own radial axis, not
+  // with `isInEntranceGateGap`. That predicate is an *angle*, which is the
+  // right question at the wall and the wrong one further in: a constant angle
+  // is a corridor that narrows as it approaches the plaza, so the spur's far
+  // corners — 8 m inside the park, and perfectly between the posts — fell
+  // outside it by 0.0017 rad and were reported as having "spilled over the
+  // boundary". The posts stand at `ENTRANCE_GATE_HALF_WIDTH` either side of the
+  // axis, so that is the width the road may not exceed anywhere.
+  const axisX = Math.cos(ENTRANCE_ANGLE);
+  const axisZ = Math.sin(ENTRANCE_ANGLE);
+  const offAxis = (p: { x: number; z: number }): number => Math.abs(p.z * axisX - p.x * axisZ);
+  const trespassing = inside.filter((p) => offAxis(p) > ENTRANCE_GATE_HALF_WIDTH);
+  if (trespassing.length > 0) {
+    const worst = trespassing[0];
+    fouls.push(
+      `${trespassing.length} road vertices inside the park stand more than ` +
+        `${ENTRANCE_GATE_HALF_WIDTH} m off the gate's axis, e.g. ${fmt([worst?.x ?? 0, worst?.z ?? 0])} at ` +
+        `${offAxis(worst ?? { x: 0, z: 0 }).toFixed(2)} m — the road is not going through the arch, it is ` +
+        'spilling across the park',
+    );
+  }
+
+  return fouls;
+};
+
+/**
+ * **Every child fits in the seat they are sitting in.**
+ *
+ * `catBus.ts` says, in large friendly letters, that *"the bus is sized by what
+ * it has to hold, not by a number picked by eye"*. That was half true: the
+ * height was honestly derived from `TALLEST_CHILD_HEIGHT`, and the **seat plan
+ * was not derived from anything at all**, because `kid.ts` published no width
+ * for anyone to derive from. A real child is 1.53 m across — a chibi rig is
+ * almost all head — against a seat pitch of 1.0 m, so all twelve passengers
+ * overlapped the child behind them by 0.52 m and stuck through the bodywork.
+ * Jim saw it the first time he watched: *"the bus far too small to hold that
+ * many child models at their size"*.
+ *
+ * The old check counted seats and counted occupants, and passed throughout.
+ *
+ * This measures three things off real models, none of them restated from the
+ * constants that positioned them:
+ *
+ * 1. **`CHILD_FOOTPRINT` still covers a real child**, hair x hats, so adding a
+ *    wider hairstyle turns this red rather than quietly shrinking everybody's
+ *    personal space. (The sun hat is excluded by design — see the constant.)
+ * 2. **Twelve children in the twelve built seats are inside the built cabin**,
+ *    measured against the two named shell bands rather than against
+ *    `BODY_WIDTH`.
+ * 3. **No two of them are inside each other.**
+ *
+ * Seed-independent — the bus is the same on every seed — but it costs nothing
+ * to run here and this is the file CLAUDE.md sends anyone changing the park to.
+ */
+const childrenFitTheSeatsTheySitIn: Invariant = (facts) => {
+  const bus = facts.catBus;
+  if (!bus) return [];
+
+  const fouls: string[] = [];
+
+  if (bus.widestRealChild > CHILD_FOOTPRINT) {
+    fouls.push(
+      `CHILD_FOOTPRINT is ${CHILD_FOOTPRINT} m but the widest bare-headed child the park ` +
+        `can build measures ${bus.widestRealChild.toFixed(3)} m — raise it in kid.ts, ` +
+        'because the cat bus\u2019s seat plan and the crowd\u2019s separation both derive from it',
+    );
+  }
+
+  if (bus.worstOccupantProtrusion > 0) {
+    fouls.push(
+      `a seated child sticks ${bus.worstOccupantProtrusion.toFixed(2)} m out through the cat ` +
+        'bus\u2019s own bodywork — the bus is smaller than the children it is documented ' +
+        'as being sized around',
+    );
+  }
+
+  if (bus.worstOccupantOverlap > 0) {
+    fouls.push(
+      `two children sitting in the cat bus overlap each other by ` +
+        `${bus.worstOccupantOverlap.toFixed(2)} m — the seat plan is tighter than a child is wide`,
+    );
+  }
+
+  return fouls;
+};
+
+const theCatBusIsInThePark: Invariant = (facts) => {
+  const bus = facts.catBus;
+  if (!bus) {
+    return [
+      'no node named `cat-bus` anywhere in the built scene — the arrival is not wired in. ' +
+        'This is exactly the state PR #27 shipped in and nothing caught for twelve days; ' +
+        'see `world/entrance/ArrivalSequence.ts`.',
+    ];
+  }
+
+  const fouls: string[] = [];
+  // A bus made of nothing would satisfy "a node called cat-bus exists".
+  if (bus.meshCount < 20) {
+    fouls.push(`the cat bus has only ${bus.meshCount} meshes on it — that is not a built bus`);
+  }
+  // Big enough to be a bus, measured against the children who ride in it rather
+  // than against a literal — so it stays true if they are ever resized. Jim, on
+  // the first version anyone saw: "barely bigger than a child, and smaller
+  // vertically than one child with a hat".
+  if (bus.height <= TALLEST_CHILD_HEIGHT * 1.4) {
+    fouls.push(
+      `the cat bus is ${bus.height.toFixed(2)} m tall against a ${TALLEST_CHILD_HEIGHT} m ` +
+        'child in a hat — that is a shed, not a bus',
+    );
+  }
+  if (bus.height >= TALLEST_CHILD_HEIGHT * 2.6) {
+    fouls.push(`the cat bus is ${bus.height.toFixed(2)} m tall, which is too big even for a bus`);
+  }
+  if (!bus.hasDriver) fouls.push('the cat bus has nobody driving it');
+  // Every seat but hers. Both numbers measured off the built park — the seat
+  // count from the bus that was built, the passenger count from how many of the
+  // crowd are actually under the arrival's control.
+  if (bus.kidCount !== bus.seatCount - 1) {
+    fouls.push(
+      `expected ${bus.seatCount - 1} other children to arrive with her, found ` +
+        `${bus.kidCount} under the arrival\u2019s control`,
+    );
+  }
+
+  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // at the origin is in the middle of the ball pit.
+  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  if (kerbGap > 1) {
+    fouls.push(
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
+        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+    );
+  }
+
+  // **And it is outside the park.** Jim, watching the first run: "the bus drives
+  // something like 5 m into the park, through a wall". `distanceToEdge` is
+  // positive inside the boundary, so anything at or above zero is a bus
+  // somewhere a bus has no business being.
+  const inside = facts.boundary.distanceToEdge(bus.x, bus.z);
+  if (inside >= 0) {
+    fouls.push(
+      `the cat bus is parked ${inside.toFixed(2)} m INSIDE the park boundary — it belongs on ` +
+        'the road outside the gate',
+    );
+  }
+  return fouls;
+};
+
+/**
+ * **Can the bus actually stop here, and can she actually walk in?**
+ *
+ * `entrance/layout.ts` has exported `ENTRANCE_CLEAR_X/Z/RADIUS` since the
+ * entrance was written, under a comment saying they keep the scatter off the
+ * stop and the gate plaza — and **nothing imported them**. The comment
+ * described an intention that no code implemented, so trees and bushes were
+ * free to grow in the road the bus parks in and on the ground she is set down
+ * on. `Scenery.ts` now asks them; this is what proves it kept asking.
+ *
+ * Measured against the **game's** numbers rather than the generator's target,
+ * per this file's rule 2: what has to be true is that a child set down here can
+ * stand and walk away, not that the scatter respected some particular radius.
+ * The corridor sampled is the real one — from where the bus parks, round to
+ * where she is handed the controls.
+ *
+ * **{@link DROP_OFF_CLEAR} was measured, not guessed.** A bare `PLAYER_RADIUS`
+ * was the first threshold written here and it was **vacuous**: with the keep-out
+ * deliberately removed, all five seeds still passed, because the nearest bush to
+ * her spawn on the canonical seed sits 0.94 m away — clear of her 0.62 m body
+ * and therefore, on that reading, fine. It is plainly not fine; she would spawn
+ * pressed into a bush. Two of five seeds go red at 1.5 m, which is the same
+ * clearance `Scenery.ts` already demands around a ride exit and for the same
+ * documented reason: 0.62 m of body plus the 0.85 m widest clump collider this
+ * park plants is 1.47 m, so 1.5 m is room to be set down and *step off*, rather
+ * than merely to be inserted.
+ */
+const theEntranceIsClearEnoughToArriveAt: Invariant = (facts) => {
+  const fouls: string[] = [];
+
+  // The route she is actually walked along, sampled every half metre, plus
+  // where the bus parks and where she ends up standing.
+  // From the gate she walks in through, to where the game hands her the
+  // controls. The bus itself is outside the park now, so the part of the walk
+  // that the scatter can foul is the part inside it.
+  const corridor = samplePolyline(
+    [
+      [0, ENTRANCE_GATE_Z],
+      [ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z],
+    ],
+    0.5,
+  );
+
+  const planted: readonly { x: number; z: number; footprint: number; what: string }[] = [
+    ...facts.trees.map((tree) => ({
+      x: tree.x,
+      z: tree.z,
+      footprint: tree.footprint,
+      what: 'tree',
+    })),
+    ...facts.bushes.map((bush) => ({
+      x: bush.x,
+      z: bush.z,
+      // A bush publishes the radius of the collider it puts in a walker's way,
+      // which is the same thing a tree's `footprint` is, under another name.
+      footprint: bush.radius,
+      what: 'bush',
+    })),
+  ];
+
+  // Report the worst offender per plant rather than once per sampled point, or
+  // one bush in the road becomes forty near-identical complaints.
+  for (const thing of planted) {
+    let worst = Infinity;
+    let where: readonly [number, number] = [0, 0];
+    for (const [x, z] of corridor) {
+      const gap = Math.hypot(thing.x - x, thing.z - z) - thing.footprint;
+      if (gap < worst) {
+        worst = gap;
+        where = [x, z];
+      }
+    }
+    if (worst < DROP_OFF_CLEAR) {
+      fouls.push(
+        `a ${thing.what} at ${fmt([thing.x, thing.z])} reaches to ${worst.toFixed(2)} m of ` +
+          `${fmt(where)} on the walk in from the cat bus — a child set down here needs ` +
+          `${DROP_OFF_CLEAR} m to stand and step off`,
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
+ * **You can see the bus she arrives on.**
+ *
+ * The first thing anyone ever sees of this game is a cat bus pulling up at a
+ * gate, and in the first run anyone captured its lower-left was behind trees
+ * from t = 3 to t = 6. The keep-out that was supposed to prevent that —
+ * `ENTRANCE_CLEAR_X/Z/RADIUS` — is a **10 m disc centred on (0, 56)**: a radius
+ * chosen for an 11 m bus that is now 18 m long, centred where the bus used to
+ * park before it moved outside the gate to z = 69. It has never covered the
+ * vehicle it is named after, before or after Stage A finally gave it a
+ * consumer. Both halves stale, in the one constant.
+ *
+ * And the trees actually in the shot were never subject to it anyway. They are
+ * `Scenery.ts`'s **treeline** — 540 trees in a band beginning 11.5 m outside a
+ * boundary that is 60 m on the gate's bearing, i.e. from z = 71.5, two and a
+ * half metres behind the kerb. `buildTreeline` does not go through
+ * `isPlantable`, so it asked nothing.
+ *
+ * This asserts the thing that actually matters — *is the bus visible* — rather
+ * than that some radius was respected, per this file's rule 1. The test is
+ * exact rather than a tuned distance because the park camera is **orthographic**
+ * and so occlusion depends only on its direction: see
+ * `entrance/arrivalSightline.ts` for the closed form, and note it takes the
+ * camera's angles from `core/constants` rather than restating them, per rule 2.
+ *
+ * **Scoped to what the scatter owns.** The boundary wall (20 blocks) and the
+ * Rail Race's trestles (40-odd parts) also cross this corridor, measured — but
+ * neither is scenery and neither can be moved by refusing a spot, so including
+ * them would make an assertion that can never be green, which is the same as no
+ * assertion at all.
+ */
+const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
+  if (facts.hidingTheArrivingBus.length === 0) return [];
+  const worst = [...facts.hidingTheArrivingBus].sort((a, b) => b.top - a.top).slice(0, 3);
+  return [
+    `${facts.hidingTheArrivingBus.length} planted thing(s) stand between the camera and the ` +
+      `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
+      worst
+        .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
+ * Room to be set down by a vehicle and walk away from it, in metres.
+ *
+ * `PLAYER_RADIUS` (0.62) of body, plus the 0.85 m collider of the widest bush
+ * clump this park plants, is 1.47 — so 1.5 m is the point at which a drop-off
+ * is somewhere you can *leave*, not merely somewhere you fit. `Scenery.ts`
+ * reaches the same number by the same argument for a ride exit.
+ */
+const DROP_OFF_CLEAR = 1.5;
+
+/** Points every `step` metres along a polyline, corners included. */
+function samplePolyline(
+  points: readonly (readonly [number, number])[],
+  step: number,
+): readonly (readonly [number, number])[] {
+  const out: (readonly [number, number])[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (!a || !b) continue;
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const count = Math.max(1, Math.ceil(length / step));
+    for (let n = 0; n <= count; n += 1) {
+      const t = n / count;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] as const);
+    }
+  }
+  return out;
+}
+
+/**
  * The middle of a lane's track, **in three dimensions**, taken from the built
  * rails.
  *
@@ -4316,6 +4784,15 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the clearance over the railway covers the train and everyone riding it',
     railwayClearanceCoversTheTrainAndItsRiders,
   ],
+  ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
+  ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
+  ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
+  [
+    'the bus stop and the walk in from it are clear of trees and bushes',
+    theEntranceIsClearEnoughToArriveAt,
+  ],
+  ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
 ];
 
 /**

@@ -12,7 +12,10 @@ import {
   VIEWMODEL_LAYER,
 } from './core/constants';
 import type { FrameContext, GameSystem } from './core/types';
-import { FoliageFade, Sky, TreeClimbing, World, skyViewFor } from './world';
+import { FoliageFade, Sky, TreeClimbing, World, skyViewFor, type WorldOptions } from './world';
+import { ENTRANCE_ANGLE, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './world/entrance/layout';
+import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
+import { arrivalCameraZoom } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import type { InteractZone } from './world/interact';
@@ -47,8 +50,36 @@ import type { SavedPlace } from './state/save';
 import { localToWorld, SPACE_GARDEN } from './world/spaces';
 import { OverlayPause } from './core/overlayPause';
 
-/** Where a brand-new player starts: the plaza, just south of the fountain. */
-const DEFAULT_SPAWN = new Vector3(0, 0, 7);
+/**
+ * Where a brand-new player starts: **the park edge, at the gate, where the cat
+ * bus drops her off.**
+ *
+ * This used to be `(0, 0, 7)` — the plaza, by the fountain — and that was wrong
+ * in a way nothing noticed, because two places disagreed about where "the
+ * entrance" is and only one of them was ever measured. `ENTRANCE_PLAYER_X/Z`
+ * was imported by `scripts/check-park.mts`, `scripts/check-npc-jitter.mts` and
+ * `test/procgen/parkFacts.ts` and **by nothing in `src/` at all**, so
+ * `check:park`'s "every attraction routes from the entrance" was proving a
+ * property of a point the game never once put the player on.
+ *
+ * Moving the spawn here is what makes that check honest, and it is also what
+ * the family asked for: *"gameplay starts at the edge of the park, where you
+ * walked in"* (issue #245). One place, measured by the checks and used by the
+ * game.
+ */
+const DEFAULT_SPAWN = new Vector3(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z);
+
+/**
+ * Facing at {@link DEFAULT_SPAWN}: into the park, with her back to the gate.
+ *
+ * Derived from the entrance's own bearing rather than typed as a number, so it
+ * still points inward if the gate ever moves. A Three.js `rotation.y` of `t`
+ * sends local +Z to world `(sin t, cos t)`; inward is the negative radial.
+ */
+const DEFAULT_SPAWN_FACING = Math.atan2(
+  -Math.cos(ENTRANCE_ANGLE),
+  -Math.sin(ENTRANCE_ANGLE),
+);
 
 export interface GameOptions {
   /**
@@ -58,6 +89,14 @@ export interface GameOptions {
    * has `exactOptionalPropertyTypes`.
    */
   readonly startPlace?: SavedPlace;
+  /**
+   * Whether the cat bus brings her in — see `world/entrance/Entrance.ts`.
+   *
+   * Omitted means "decide from the save flag", which is the arrival happening
+   * for anyone who has not had it. Only a caller that positively knows better
+   * passes `false`: a ride deep link, or `/view`.
+   */
+  readonly arriveByBus?: boolean;
 }
 
 /**
@@ -145,14 +184,28 @@ export class Game {
   /** Every sign in the park, as a selectable zone. Built once: signs do not move. */
 
   constructor(
-    canvas: HTMLCanvasElement,
+    /**
+     * The renderer, the scene and the canvas sizing — built by the **caller**,
+     * not here.
+     *
+     * It used to be `new Engine(canvas)` on the next line. It was hoisted out
+     * on 8 August 2026 because the cat bus's journey (`BusJourney`) has to draw
+     * a scene of its own *before this constructor has ever run*: the ride is
+     * the park's loading screen, so the park is being built while it plays, and
+     * a second `WebGLRenderer` on the same canvas is not a thing WebGL will
+     * give you — `getContext` hands back the context that already exists.
+     *
+     * One renderer, made once, handed to whoever is drawing.
+     */
+    engine: Engine,
     // Kept as a field (not just a constructor-local) for `applyLiveLook`,
     // which needs somewhere to mount the "Look" pill's `CharacterCreation`
     // overlay long after the constructor has returned.
     private readonly uiRoot: HTMLElement,
     options: GameOptions = {},
   ) {
-    this.engine = new Engine(canvas);
+    this.engine = engine;
+    const canvas = engine.canvas;
     this.camera = new IsoCamera();
     this.input = new InputSystem();
     this.sky = new Sky();
@@ -162,10 +215,22 @@ export class Game {
     // handed one rather than reaching up in here; the closures are only ever
     // called from a frame, long after everything below is built. The camera
     // goes in too: NPC name labels are screen-space, so the crowd needs it.
-    this.world = new World(this.engine.scene, this.sky, this.interiorControls(), this.camera);
+    // `arriveByBus` is threaded in rather than read from the flag in here, so
+    // there is one owner of "is the bus coming?" and `Entrance` is it. Built
+    // conditionally rather than spread, because `exactOptionalPropertyTypes`
+    // forbids handing an optional property an explicit `undefined`.
+    const worldOptions: WorldOptions =
+      options.arriveByBus === undefined ? {} : { entrance: { arriveByBus: options.arriveByBus } };
+    this.world = new World(
+      this.engine.scene,
+      this.sky,
+      this.interiorControls(),
+      this.camera,
+      worldOptions,
+    );
 
-    // Spawn on the plaza, just south of the fountain, looking at the park —
-    // or wherever a continued game left off (see `resolveSpawn`).
+    // Spawn at the park edge by the gate, looking into the park — or wherever a
+    // continued game left off (see `resolveSpawn`).
     const spawn = resolveSpawn(options.startPlace);
     this.player = new Player(this.world.collision, this.camera, spawn);
     this.engine.scene.add(this.player.group);
@@ -180,8 +245,29 @@ export class Game {
     // standing on a bridge, a deck or the fountain rim. Now that the building's
     // ground sampler is attached, put her back exactly where she was, facing
     // the way she was facing.
-    if (spawn !== DEFAULT_SPAWN && options.startPlace) {
+    //
+    // **Unless she is on the bus**, which is the one case where somebody has
+    // already put her somewhere on purpose. `world.attachPlayer` above runs
+    // `ArrivalSequence.attachPlayer`, which seats her in the cat bus out at the
+    // kerb; teleporting her to the spawn point immediately afterwards undid
+    // that, and then `camera.snapTo(this.player.position)` at the end of this
+    // constructor snapped the camera to the **park**, not to the bus. Frame one
+    // put her back in her seat and the camera spent the next half second gliding
+    // across the park to find her — Jim, 7 August: *"the camera starts in the
+    // middle of the park and then scrolls to the bus"*.
+    //
+    // Shortening the ease would not have fixed it. The camera was told the
+    // truth about a position that was wrong.
+    if (arrivalOwnsTheSpawn(this.world.entrance.arrival !== null, options.startPlace != null)) {
+      // She is aboard. Where she is, is the bus's business.
+    } else if (spawn !== DEFAULT_SPAWN && options.startPlace) {
       this.player.teleportTo(spawn.x, spawn.y, spawn.z, options.startPlace.facing);
+    } else {
+      // A fresh spawn faces into the park rather than back out through the gate
+      // she has just come in by. `Player` starts on the camera's own yaw, which
+      // was the right default when the spawn was the middle of the plaza and is
+      // the wrong one now that it is on the boundary looking inward.
+      this.player.teleportTo(spawn.x, this.player.position.y, spawn.z, DEFAULT_SPAWN_FACING);
     }
 
     // Whatever flower is currently worn in the hair (see `world/Flowers.ts` /
@@ -781,6 +867,11 @@ export class Game {
       }
     };
 
+    // **On the bus from the very first frame drawn**, not eased towards it.
+    // `player.position` is wherever she genuinely is by now — her seat, if the
+    // cat bus is bringing her in (see the spawn block above) — and `snapTo`
+    // skips the follow smoothing outright rather than shortening it, so there
+    // is no opening pan across a park she has not arrived at yet.
     this.camera.snapTo(this.player.position);
     this.loop = new Loop((tick) => this.tick(tick));
   }
@@ -1195,6 +1286,17 @@ export class Game {
     if (!paused) this.tapNavigator.update(this.frameContext);
 
     if (!paused) this.player.update(this.frameContext);
+
+    // The arrival's subject is an 18 m bus, and the default framing is sized
+    // around a 2.12 m child — so while the bus is what the shot is about, the
+    // camera sits further out. Re-asserted every frame rather than set once,
+    // because this method re-derives the world's state each frame and would
+    // otherwise overwrite it (CLAUDE.md's `/view` note is that trap biting
+    // somebody). The decision itself is `arrivalCameraZoom`, a pure function,
+    // so a check can hold it — `Game` builds a real `WebGLRenderer` and cannot
+    // be constructed in one.
+    const arrival = this.world.entrance.arrival;
+    if (arrival && !arrival.finished) this.camera.setZoomTarget(arrivalCameraZoom(arrival.phase));
 
     this.camera.update(this.frameContext, this.player.position, this.player.velocity);
     // Straight after the camera moves and before the sky is drawn: the stars,

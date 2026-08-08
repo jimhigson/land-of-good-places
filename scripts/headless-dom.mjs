@@ -33,6 +33,24 @@ class StubElement {
     this.children = [];
     this.parent = null;
     this.textContent = '';
+    /** Recorded, not interpreted — see {@link StubElement.setAttribute}. */
+    this.attributes = {};
+  }
+
+  /**
+   * Remembered so a check can read back what the code under test declared.
+   *
+   * `ui/JourneyTitle.ts` sets `aria-label` and `role` on the title card, and an
+   * element that throws on `setAttribute` cannot be constructed at all — which
+   * would make the title the one piece of ride UI with no guard, for want of
+   * two lines here.
+   */
+  setAttribute(name, value) {
+    this.attributes[String(name)] = String(value);
+  }
+
+  getAttribute(name) {
+    return this.attributes[String(name)] ?? null;
   }
 
   get classList() {

@@ -38,6 +38,12 @@ import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
+import {
+  ENTRANCE_CLEAR_RADIUS,
+  ENTRANCE_CLEAR_X,
+  ENTRANCE_CLEAR_Z,
+} from './entrance/layout';
+import { hidesTheArrivingBus } from './entrance/arrivalSightline';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
@@ -535,6 +541,14 @@ function buildFoliage(collision: CollisionWorld): {
     // Asked here rather than in `isPlantable` because it wants the kind, which
     // is already picked above — so no RNG draw moves to make room for it.
     if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) continue;
+    // ...and nor may it stand between the camera and the arriving cat bus. Asked
+    // here rather than in `isPlantable` for exactly the reason `clearOfCruiser`
+    // above is: it needs the tree's *height*, and the kind — which is what
+    // decides the height — has already been rolled. Asking earlier would mean
+    // guessing at the tallest tree the scatter can produce, and a keep-out sized
+    // for a tree that never grows there is the same disease as a 10 m disc sized
+    // for an 11 m bus. See `entrance/arrivalSightline.ts`.
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) continue;
     planted.push({ x, z, reach });
     const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
@@ -760,6 +774,7 @@ function buildFoliage(collision: CollisionWorld): {
     const z = Math.sin(angle) * distance;
     if (!isPlantable(x, z, 1.6)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
 
     // Bushes come in clumps of two or three overlapping blobs.
     const blobs = rng.int(2, 3);
@@ -883,6 +898,23 @@ function buildTreeline(): Group {
     const height = rng.range(2.8, 4.0) + rimness * 1.1;
     const radius = rng.range(1.7, 2.6) + rimness * 0.5;
 
+    // **The band starts 11.5 m outside the park, and the cat bus stops 9 m
+    // outside it.** So on the gate's bearing this woodland begins two and a half
+    // metres behind the kerb, squarely between the camera and the bus — and
+    // because it is scattered here rather than through `isPlantable`, it has
+    // never asked the entrance keep-out anything. That is what put trees across
+    // the lower-left of the bus in every captured frame from t = 3 to t = 6.
+    //
+    // Refused rather than moved: an outset nudged along the same bearing is
+    // still on the same bearing, and the whole point is to be off it. Every draw
+    // above happens first, so the RNG stream is untouched and the other 500-odd
+    // trees stand exactly where they always did.
+    //
+    // The canopy's own top, not the trunk's: `top = ground + height + radius *
+    // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
+    // from there at its tallest roll.
+    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5)) continue;
+
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),
       scale: new Vector3(1.1, height, 1.1),
@@ -998,8 +1030,27 @@ export function onRideExit(x: number, z: number, clearance: number): boolean {
   return false;
 }
 
+/**
+ * Is this spot on the gate plaza or the bus stop?
+ *
+ * `entrance/layout.ts` has carried `ENTRANCE_CLEAR_X/Z/RADIUS` since the
+ * entrance was written, under a comment reading *"Keeps the tree/bush scatter
+ * (`Scenery.ts`) off the stop and the gate plaza"* — and **nothing had ever
+ * imported them**. The comment described an intention; no code implemented it,
+ * so trees and bushes were free to grow in the road the cat bus parks in and on
+ * the ground the player is set down on. A comment asserting that two things
+ * agree is not a mechanism, and this is that failure in its plainest form: the
+ * constants were right, they were simply never asked.
+ *
+ * Now they are, at the one choke point every scatter goes through.
+ */
+function onEntrancePlaza(x: number, z: number, clearance: number): boolean {
+  return Math.hypot(x - ENTRANCE_CLEAR_X, z - ENTRANCE_CLEAR_Z) < ENTRANCE_CLEAR_RADIUS + clearance;
+}
+
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,
- * not on the railway, not where a ride sets a child down. */
+ * not on the railway, not where a ride sets a child down, not on the gate
+ * plaza the cat bus drives through. */
 function isPlantable(x: number, z: number, clearance: number): boolean {
   // Five metres inside the park's own edge — the same margin the old `> 55`
   // kept from the masonry at 60, now measured from an edge that moves.
@@ -1010,6 +1061,7 @@ function isPlantable(x: number, z: number, clearance: number): boolean {
   if (insideAnyAnchor(x, z, clearance)) return false;
   if (onRailway(x, z, clearance)) return false;
   if (onRideExit(x, z, clearance)) return false;
+  if (onEntrancePlaza(x, z, clearance)) return false;
   return true;
 }
 

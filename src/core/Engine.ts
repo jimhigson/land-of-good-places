@@ -39,6 +39,20 @@ export class Engine {
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(pixelRatioCap());
+    // **The single biggest cause of mid-play stutter, and it is not our code.**
+    // three.js checks every newly-linked shader program for errors the first
+    // time it is used (`WebGLProgram`'s `onFirstUse`), and the check begins with
+    // `gl.getProgramInfoLog`. That call cannot answer until the GPU process has
+    // finished linking, so it blocks the main thread on a synchronous
+    // round-trip — measured on an M4 Pro at up to **152 ms for a single
+    // program**, arriving in bursts as new materials come into view, and once
+    // stalling a frame for 1.29 s. Programs compile lazily, so this lands while
+    // a child is walking about, not at load.
+    //
+    // Off in the build the family plays; **on in dev**, where a shader author
+    // needs the error text and a stall costs nothing. This is why a broken
+    // hand-written `ShaderMaterial` still reports itself during development.
+    this.renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.renderer.outputColorSpace = SRGBColorSpace;
     // Neutral rather than ACES: ACES filmic desaturates bright colours towards
     // white, which is exactly the wrong look for a park made of sweets. Neutral

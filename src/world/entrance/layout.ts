@@ -33,6 +33,27 @@ export const ENTRANCE_GATE_HALF_ANGLE = 0.073;
 export const ENTRANCE_GATE_X = Math.cos(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
 export const ENTRANCE_GATE_Z = Math.sin(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
 
+/**
+ * **The gate arch itself** — how far apart its posts stand, and how tall they
+ * are.
+ *
+ * Here rather than inside `Entrance.ts`, because the arch is built **twice**:
+ * once in the park by `Entrance.ts`, and once at the end of the lane by
+ * `BusJourney.ts`, which is the park the bus is seen driving up to. They are the
+ * same gate a second apart — the cut between the ride and the arrival lands
+ * squarely on it — so a child looking at a gate and a road and nothing else
+ * would see any disagreement between them as a jump.
+ *
+ * `layout.ts` is where they can both reach: it imports two dependency-free core
+ * modules and nothing else, whereas `Entrance.ts` pulls in the terrain, the
+ * collision world and the park boundary, none of which exist yet while the ride
+ * is playing. A comment in the ride promising it matched the park's numbers was
+ * written first and deleted: a promise that two numbers agree is not a
+ * mechanism, and this repo has paid for that six times in a week.
+ */
+export const ENTRANCE_GATE_HALF_WIDTH = 4.3;
+export const ENTRANCE_GATE_POST_HEIGHT = 3.3;
+
 /** True if the angle (radians, `atan2(z, x)` convention) falls inside the gate gap. */
 export function isInEntranceGateGap(angle: number): boolean {
   return Math.abs(angleDelta(angle, ENTRANCE_ANGLE)) < ENTRANCE_GATE_HALF_ANGLE;
@@ -51,15 +72,85 @@ export const ENTRANCE_STOP_Z = Math.sin(ENTRANCE_ANGLE) * ENTRANCE_STOP_RADIUS;
 export const ENTRANCE_PLAYER_X = ENTRANCE_STOP_X - 1.6;
 export const ENTRANCE_PLAYER_Z = ENTRANCE_STOP_Z - 0.4;
 
-/** Where the bus parks, centred a little outside the player's spot, towards the gate. */
-export const ENTRANCE_BUS_STOP_X = ENTRANCE_STOP_X;
-export const ENTRANCE_BUS_STOP_Z = ENTRANCE_STOP_Z + 2.6;
+/**
+ * **Where the bus parks — outside the park, never in it.**
+ *
+ * This used to be `ENTRANCE_STOP_Z + 2.6` (z = 54.6), which is **5.4 m inside
+ * the boundary wall**, and on 7 August 2026 Jim watched the first ever run of
+ * the arrival and said so: *"the bus drives something like 5 m into the park,
+ * through a wall."* Both halves of that were true and neither was a rendering
+ * fault — the bus really did drive to a point inside the park, and the wall
+ * really had no hole in it (issue #195; `isInEntranceGateGap` had never been
+ * called by anything).
+ *
+ * A bus is not a park vehicle. It stops on the road **outside** the gate and
+ * the children walk in through the arch, which is what a bus stop is.
+ *
+ * The number is bounded at both ends and there is less room than you would
+ * think:
+ * - **Inwards** by the wall at `ENTRANCE_GATE_Z` (60) — the whole bus must
+ *   clear it, and the bus is over 7 m long once scaled (see `catBus.ts`'s
+ *   `BUS_SCALE`).
+ * - **Outwards** by the terrain, which is a hilltop diorama: measured on the
+ *   built ground, it is flat to z = 72 and then falls away hard — −0.13 m at
+ *   72, −1.35 m at 74, −14 m at 80. Park a bus past the rim and it hangs in
+ *   the air over a cliff.
+ *
+ * That leaves a **12 m window** between the wall and the rim for a 7 m bus,
+ * which is the real reason the roll-in here is short. It is also the clearest
+ * argument that Stage B's journey cannot happen on this terrain and needs its
+ * own scene, as #245 already specifies.
+ */
+export const ENTRANCE_BUS_STOP_Z = ENTRANCE_GATE_Z + 9;
 
-/** Just outside the gate — where the roll-in animation begins. */
-export const ENTRANCE_BUS_ARRIVE_Z = ENTRANCE_GATE_Z + 4;
+/**
+ * **Where the bus's *door* stops: dead in front of the gate.**
+ *
+ * The bus pulls up **along** the kerb rather than nosing at the gate, which is
+ * what a bus at a bus stop does — and here it is also the only thing that fits.
+ * Sized to hold twelve children (see `catBus.ts`) the bus is 11 m long, and the
+ * flat ground outside the wall is only 12 m deep before the hilltop's rim falls
+ * away, so a bus pointed at the gate could not park, let alone drive. Turned
+ * along the kerb it needs only its own width across that band, and has ±28 m of
+ * level ground to run along — measured on the built terrain.
+ *
+ * The kerb sits 9 m out rather than hard against the wall, and that distance
+ * was **measured, not chosen**. The park boundary is a spline pinned to 60 m at
+ * the gate's bearing but bulging to 92 m a few degrees either side (#115), so a
+ * straight kerb close to the wall dives back **inside** the park at both ends of
+ * its run: at 4.5 m out, an 11 m bus had only a 15 m window it could stand in
+ * without part of it being in the park. At 9 m out the window is 41 m of level
+ * ground, which is room to drive. The rim starts at z = 73, so this still
+ * leaves the bus a comfortable margin.
+ *
+ * This names where the **door** goes, not where the bus's centre goes, because
+ * the door is the thing that has to line up with the gate. `ArrivalSequence`
+ * asks the bus where its own door is (`CatBusHandle.doorDrop`) and works back
+ * to the centre — so the two cannot drift apart, and a bus of a different
+ * length still stops with its door in the right place.
+ */
+export const ENTRANCE_BUS_DOOR_X = 0;
 
-/** Once the departing bus has rolled back out this far, it is disposed. */
-export const ENTRANCE_BUS_VANISH_Z = ENTRANCE_GATE_Z + 8;
+/**
+ * Where the bus comes in from, along the kerb. This is the frame Stage B hands
+ * over on — see `ArrivalSequence`.
+ *
+ * **Both of these are bounded by a measurement, and the measurement moved.**
+ * Sizing the bus from a child that had actually been measured took it from
+ * 11 m to 18.2 m long, and the run of kerb an 18.2 m bus can stand on without
+ * any part of it being inside the park is `x` from **-23 to +7.5** at this
+ * kerb — not the ±28 an 11 m bus had. (`scripts/check-cat-bus.mts` measures the
+ * bus's own bounding box against `PARK_BOUNDARY` on every frame of the run and
+ * caught exactly this: *"the bus reached 1.48 m INSIDE the park boundary"*.)
+ *
+ * So these sit just inside that window, with the stop itself at x = -4.6 —
+ * see `catBus.ts`'s `doorZ` for why the door is behind the bus's centre, which
+ * is what buys the approach its 11.6 m.
+ */
+export const ENTRANCE_BUS_ARRIVE_X = 7;
+
+/** Once the departing bus has rolled on this far, it is disposed. */
+export const ENTRANCE_BUS_VANISH_X = -22;
 
 /** Keeps the tree/bush scatter (`Scenery.ts`) off the stop and the gate plaza. */
 export const ENTRANCE_CLEAR_X = ENTRANCE_STOP_X;

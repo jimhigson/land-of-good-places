@@ -1,7 +1,25 @@
 import './style.css';
 import { Vector3 } from 'three';
 import { registerSW } from 'virtual:pwa-register';
-import { Game, type GameOptions } from './Game';
+// **`import type`, not `import`** — this is the whole reason the ride can cover
+// the load. A static import of `Game` pulls in `World`, `paths.ts` and every
+// ride's plan module, and each of those solves its route in a top-level
+// `const`: four seconds of generation paid before `boot()` runs its first line,
+// in front of a blank screen. A type import is erased, so the park's code is
+// now fetched and evaluated by {@link loadGame} at a moment of our choosing —
+// which is while a bus is on screen. See `boot/parkGeneration.ts`.
+import type { Game, GameOptions } from './Game';
+import { Engine } from './core/Engine';
+import { Loop } from './core/Loop';
+import { BusJourney } from './world/entrance/BusJourney';
+// From `arrivalFlag`, not `ArrivalSequence`, for the same reason: importing the
+// sequence drags in `terrain` and `boundary` and solves the park's outline.
+import { arrivalIsDue } from './world/entrance/arrivalFlag';
+import { JourneyDirector } from './world/entrance/journeyDirector';
+import { GENERATION_BUDGET_MS, ParkGeneration } from './boot/parkGeneration';
+import { ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
+import { JourneySkip } from './ui/JourneySkip';
+import { JourneyTitle } from './ui/JourneyTitle';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
@@ -23,9 +41,13 @@ import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
  * `gameStore.get().player` (name, hair colour and style, outfit colour) the
  * moment it builds the kid, so both the save and the character creator have to
  * have finished writing the store before that happens. It also guarantees both
- * finish before the cat-bus arrival sequence (`world/entrance/`), whenever
- * that gets wired up — nothing downstream of `new Game(...)` can run before
- * this does. The HUD's "Look" pill, which changes a look mid-session, does
+ * finish before the cat-bus arrival sequence (`world/entrance/`) — nothing
+ * downstream of `new Game(...)` can run before this does, so by the time the
+ * bus is built she is already the character the child just made, and she rides
+ * in as herself. (This comment said "whenever that gets wired up" from July
+ * until 7 August 2026, which is exactly how long the arrival sat in the tree
+ * as dead code — see `world/entrance/ArrivalSequence.ts`.) The HUD's "Look"
+ * pill, which changes a look mid-session, does
  * not run through here at all any more — see `Game.applyLiveLook`, which
  * rebuilds `Player`'s own model in place instead of coming back through boot.
  *
@@ -271,6 +293,21 @@ function startFresh(
   });
 }
 
+/**
+ * Fetches and evaluates the park's own code, and hands back its constructor.
+ *
+ * **One place, so both boot paths load the same module the same way.** Awaiting
+ * this is what runs every module-scope `const` that has not been run already —
+ * so when the ride has pre-warmed them (`boot/parkGeneration.ts`) this settles
+ * in a frame, and when nothing has (a continued save, a ride deep link, `/view`)
+ * it pays the full cost here exactly as the old static import did.
+ *
+ * The module cache makes it idempotent, so calling it twice is free.
+ */
+async function loadGame(): Promise<typeof import('./Game').Game> {
+  return (await import('./Game')).Game;
+}
+
 function launchGame(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
@@ -279,7 +316,277 @@ function launchGame(
   boardStallId?: string,
   debugView?: DebugViewParams,
 ): void {
-  const game = new Game(canvas, uiRoot, options);
+  // A ride deep link and `/view` are the only two things that skip the cat-bus
+  // arrival, and both for the same reason: the entire point of typing either
+  // URL is to be looking at the thing it names on the first frame, not sitting
+  // through an arrival first. Everything else leaves the decision to the save
+  // flag, so the arrival is what happens unless something says otherwise —
+  // forgetting to wire an opt-out shows up as a bus that should not be there,
+  // which somebody notices, rather than as no bus at all, which nobody did for
+  // twelve days. See `world/entrance/ArrivalSequence.ts`.
+  const gameOptions: GameOptions =
+    boardStallId !== undefined || debugView !== undefined
+      ? { ...options, arriveByBus: false }
+      : options;
+  const engine = new Engine(canvas);
+
+  // **The ride comes first, and the park is built while it plays.**
+  //
+  // Only for a genuine arrival: a ride deep link or `/view` has already said
+  // `arriveByBus: false`, and a continued save has already arrived, so both go
+  // straight to the park exactly as before. `arrivalIsDue()` is the same one
+  // question `Entrance` asks — asked here too rather than answered a second
+  // way, so a journey without an arrival behind it is not expressible.
+  if (gameOptions.arriveByBus !== false && arrivalIsDue()) {
+    rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
+      void finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+    });
+    return;
+  }
+  void finishLaunch(engine, uiRoot, splash, gameOptions, boardStallId, debugView);
+}
+
+/**
+ * Plays the cat bus's journey, **generating the park during it**, then hands
+ * over.
+ *
+ * > *"this is the time when the procgen should actually run, amortised over
+ * > many small tasks over many frames, so it acts as a kind of loading screen
+ * > for the park generation"* — Jim, 7 August 2026
+ *
+ * Which is now what happens, and the ordering below is the whole feature:
+ *
+ * 1. **Draw the bus.** Nothing else may happen on frame one.
+ * 2. **Generate, eight milliseconds at a time** (`ParkGeneration`), from frame
+ *    two onwards. This is the ~4 s of module-scope solving that used to sit in
+ *    front of the first pixel — five ride plans one per frame, then the
+ *    ginormous slide's 3.46 s search sliced at every joint.
+ * 3. **Build the `World`** once, and only once generation says it is finished.
+ * 4. **Offer the skip**, and only once there is a park to skip to.
+ *
+ * **The skip is gated on `game` existing**, which is the generator's own
+ * completion signal and not a timer that hopes to match it. There is no way to
+ * offer the skip early here without also having somewhere to skip *to*, which
+ * is the property Jim asked for: *"make it skippable only once the park has
+ * generated"*.
+ *
+ * The one thing still unamortised is `new Game(...)` itself — 442 ms of `World`
+ * construction in a single synchronous constructor. It was always hidden by the
+ * ride, it is 10% of what the boot costs, and slicing a constructor is a much
+ * larger job than slicing a search; `JourneyDirector.overrunning` covers the
+ * case where even that does not fit.
+ */
+function rideInThenPlay(
+  engine: Engine,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  options: GameOptions,
+  handOver: () => void,
+): void {
+  const player = gameStore.get().player;
+  const journey = new BusJourney({
+    skin: player.skinColour,
+    hair: player.hairColour,
+    outfit: player.outfitColour,
+    hairStyle: player.hairStyle,
+  });
+
+  const director = new JourneyDirector();
+  const generation = new ParkGeneration();
+  const skip = new JourneySkip();
+  // The opening credit, over the whole ride. Mounted on `document.body` for the
+  // same reason the skip button is — `Hud` empties `#ui-root` from `new Game()`,
+  // which happens mid-ride — and disposed everywhere the ride tears down, of
+  // which there are two: `finish()` and the generation-failure path below.
+  const title = new JourneyTitle();
+  // Same spirit as `window.game` below: something to poke from a console, and
+  // the only practical way to drive a capture. Headless WebGL runs the park at
+  // one or two frames a second and `Loop` clamps `dt` to `MAX_FRAME_DELTA`, so
+  // ride time and wall-clock time are an order of magnitude apart — a capture
+  // script that sleeps is measuring the wrong clock.
+  if (import.meta.env.DEV) {
+    (
+      window as unknown as {
+        journey: {
+          ride: BusJourney;
+          skipOffered: () => boolean;
+          // The generation's own view of itself, for a capture to watch the
+          // loading screen actually loading. Read-only questions; nothing here
+          // can drive the boot.
+          stage: () => string;
+          generationReady: () => boolean;
+          framesWorked: () => number;
+          parkReady: () => boolean;
+          /** Which shot the ride's own director is cutting to — see `BusJourney`. */
+          view: () => string;
+          // The shader warm-up's own view of itself, same spirit as the
+          // generation's above: a capture has to be able to see whether the
+          // programs really were compiled before hand-over, rather than infer
+          // it from how smooth the park felt afterwards.
+          warmReady: () => boolean;
+          warmRemaining: () => number;
+          warmSpentMs: () => number;
+          warmWorstMs: () => number;
+          warmFrames: () => number;
+        };
+      }
+    ).journey = {
+      ride: journey,
+      view: () => journey.view,
+      skipOffered: () => director.skipOffered,
+      stage: () => generation.stage,
+      generationReady: () => generation.ready,
+      framesWorked: () => generation.framesWorked,
+      parkReady: () => director.parkReady,
+      warmReady: () => director.warmupReady,
+      warmRemaining: () => warmup?.progress.remaining ?? -1,
+      warmSpentMs: () => warmup?.spentMs ?? 0,
+      warmWorstMs: () => warmup?.worstMs ?? 0,
+      warmFrames: () => warmup?.framesWorked ?? 0,
+    };
+  }
+  let done = false;
+  // Built the moment the park is, because it needs that park's scene and
+  // camera. Null until then, which is also `shouldWarmShaders`'s answer.
+  let warmup: ShaderWarmup | null = null;
+
+  const finish = (): void => {
+    if (done) return;
+    done = true;
+    loop.stop();
+    skip.dispose();
+    title.dispose();
+    journey.dispose();
+    handOver();
+  };
+
+  skip.onPress(() => {
+    // Only ever reachable once the skip is offered — `JourneySkip` is not shown
+    // before then — but asked rather than assumed, because "the button is
+    // hidden" and "the button does nothing" are two different guarantees and
+    // only one of them survives a stray tap on a touchscreen.
+    if (!director.skipOffered) return;
+    finish();
+  });
+
+  const loop = new Loop((tick) => {
+    director.advance(tick.dt);
+    // **The bus waits rather than lying.** Once the ride has run its course
+    // with no park behind it, the lane stops going past and the bus pulls in to
+    // the gate and idles there; `JourneyDirector.overrunning` is the one place
+    // that is decided.
+    journey.update(tick.dt, !director.overrunning);
+    // **`animationTime`, not `elapsed`.** `elapsed` is a distance down the lane
+    // dressed as a clock: it clamps at twenty seconds and stops dead while the
+    // bus waits. Feeding it to the title froze the letters mid-jump for the
+    // whole of an overrun — which QA measured at one title layout in 51 samples
+    // over 6.4 s, against 262 during the ride, and read as a crash rather than
+    // as a wait. Anything drawn that must keep moving reads the clock that
+    // never stops. See `ui/JourneyTitle.ts` and `BusJourney.animationTime`.
+    title.update(journey.animationTime);
+    const renderer = engine.renderer;
+    renderer.clear(true, true, true);
+    journey.render(renderer, engine.width, engine.height);
+
+    // **The park's generation, a slice at a time, behind a moving bus.**
+    //
+    // From frame two onwards, and never more than a few milliseconds of it, so
+    // the orbit does not stutter. `ParkGeneration` owns what runs in what order;
+    // all that is decided here is *when* it may have the CPU, which is: after
+    // the bus has been drawn, and before anything downstream of it.
+    if (director.shouldAdvanceGeneration()) {
+      generation.advance(GENERATION_BUDGET_MS);
+      if (generation.ready) director.noteGenerationReady();
+      // A park that cannot be generated is not something to keep driving a bus
+      // in front of. Without this the ride idles at the kerb for ever waiting
+      // for a `ready` that will never come — see `showBootFailure`.
+      const problem = generation.failed;
+      if (problem) {
+        loop.stop();
+        skip.dispose();
+        title.dispose();
+        journey.dispose();
+        showBootFailure(problem);
+        return;
+      }
+    }
+
+    // The `World`, once — and only once every route it reads has been solved.
+    // `Game`'s constructor is synchronous, so this is one hitch in a
+    // twenty-second ride rather than a wait in front of a blank screen.
+    if (director.shouldBuildPark()) {
+      director.noteParkBuildStarted();
+      // The park's HUD belongs to the park. `Game`'s constructor mounts the
+      // whole of it, and without this the pills, the buttons and the backpack
+      // would appear over a bus in a lane a mile from anywhere the controls
+      // mean anything. Put back at hand-over, below.
+      uiRoot.style.visibility = 'hidden';
+      // Already fetched and evaluated by the generation above, so this settles
+      // on the next frame rather than going to the network.
+      void loadGame().then((GameClass) => {
+        handOverGame = new GameClass(engine, uiRoot, options);
+        // **The completion signal, and there is only one.** A park object in
+        // hand — not a timer that hopes to match how long one takes to build.
+        director.noteParkReady();
+        warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
+        skip.show();
+      });
+    }
+
+    // **The park's shader programs, a few milliseconds at a time.**
+    //
+    // Same loop, same budget, same reason as the generation slicing above: the
+    // work has to happen somewhere, and behind a moving bus is the one place it
+    // costs a child nothing. Without this, 64 of the park's 116 programs
+    // compiled while she was walking about, one of them freezing a frame for
+    // 1.29 s. See `boot/shaderWarmup.ts`.
+    if (warmup && director.shouldWarmShaders()) {
+      warmup.advance(WARMUP_BUDGET_MS);
+      if (warmup.ready) director.noteWarmupReady();
+    }
+
+    if (director.readyToHandOver) finish();
+  });
+  // The splash goes the moment the ride is on screen, not when the park is.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => splash?.classList.add('hidden'));
+  });
+  loop.start();
+}
+
+/** The park, once there is one — built by {@link rideInThenPlay} or here. */
+let handOverGame: Game | null = null;
+
+async function finishLaunch(
+  engine: Engine,
+  uiRoot: HTMLElement,
+  splash: HTMLElement | null,
+  gameOptions: GameOptions,
+  boardStallId?: string,
+  debugView?: DebugViewParams,
+): Promise<void> {
+  // Free when the ride has already loaded it; the full four seconds of
+  // module-scope solving when nothing has — a continued save, a ride deep link
+  // or `/view`, none of which play an arrival. Those are exactly the paths that
+  // paid it before this change too, so none of them got slower.
+  const GameClass = await loadGame();
+  const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
+  handOverGame = null;
+  // Whether or not a ride hid it (see `rideInThenPlay`), the park's HUD is the
+  // park's, and the park is what is about to be on screen.
+  uiRoot.style.visibility = '';
+
+  // **Nothing stands in front of the arrival.** `WhatsNew` opens itself from
+  // `Game`'s constructor when there is unseen content, and it pauses the park
+  // behind it — so the twenty-second ride handed over to a modal, with the bus
+  // frozen mid-roll behind it, which is what a capture of the first end-to-end
+  // run showed. It is doubly wrong for this player in particular: she made her
+  // character sixty seconds ago, so there is nothing that is *new* to her.
+  //
+  // A continued save has no arrival and still gets the panel, which is the case
+  // it was written for.
+  if (game.world.entrance.arrival) game.whatsNew.close();
+
   game.start();
 
   if (boardStallId) {
@@ -370,17 +677,34 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
 // than asking late.
 askForOrientationOnFirstGesture();
 
-try {
-  boot();
-} catch (error) {
+/**
+ * The apology card, for when the park cannot be opened at all.
+ *
+ * Its own function because there are now **two** ways to get here and they are
+ * not both a `throw` past `boot()`. Generation that fails during the cat-bus
+ * ride is caught inside `ParkGeneration` — a rejected promise, several frames
+ * deep in a `requestAnimationFrame` loop, a long way from any `try` — and
+ * before this existed that case simply hung: the bus would idle at the kerb
+ * forever, waiting for a park that was never going to arrive. A loading screen
+ * that lies is worse than one that waits, and one that waits for ever is worse
+ * than either.
+ */
+function showBootFailure(error: unknown): void {
   console.error(error);
   const splash = document.getElementById('boot-splash');
   if (splash) {
+    splash.classList.remove('hidden');
     splash.innerHTML =
       '<div class="boot-card"><h1>Oh no!</h1>' +
       '<p class="boot-sub">The park could not open.</p>' +
       '<p class="boot-hint">Check the browser console for details.</p></div>';
   }
+}
+
+try {
+  boot();
+} catch (error) {
+  showBootFailure(error);
 }
 
 // Outside `boot()`'s own try/catch on purpose — see `setupUpdateGate`'s doc
