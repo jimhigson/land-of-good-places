@@ -265,3 +265,97 @@ The stage boundaries are exactly the dynamic imports listed in
 slide → railRace → paths, then `World` construction, then `NavGrid` (already
 lazy — it measures 0 ms) and `PoiGraph`. Cruiser and slide are 60% of the
 budget between them and are the two worth showing progress for.
+
+---
+
+# ROUND 2 (7 Aug, later) — making `test:procgen` green for the merge
+
+Commission: PR #247's required "Procgen invariants" check is what blocks the
+hotel branch. Judged by real greenness, not a massaged pass.
+
+## Where it started, and where it is
+
+```
+BEFORE   Test Files  3 failed | 7 passed (10)
+              Tests  2 failed | 215 passed | 48 skipped (265)
+NOW      Test Files  1 failed | 9 passed (10)
+              Tests  1 failed | 264 passed (265)
+```
+
+The pass count is the number that moved: **215 -> 264**. Seed 5 could not build
+a park at all, so its 48 tests never ran — "48 skipped" was hiding a whole seed,
+exactly the trap CLAUDE.md names ("a skipped test is not a passing test").
+
+`npm run build` EXIT 0. `npx tsc --noEmit` clean.
+
+## What was wrong, and what fixed it
+
+Four faults, each measured before it was touched, and **three of the four were
+one disease: two numbers for one thing, agreeing only by coincidence.**
+
+1. **seed 5's park would not build.** The slide's search stopped at 92 m
+   (`MAX_LENGTH`, inside its own `clear` predicate) while the verdict that
+   judged its answer was 75 m (`MAX_RIDEABLE_LENGTH`) — so it solved 123
+   complete routes in the dead band and threw all 123 away. One number now,
+   handed to the search as `RouteBrief.maxLength`. Plus: `desiredLength` was a
+   fixed 60 on a journey whose shortest possible chute is **8.7 m on the
+   canonical seed and 30.4 m on seed 5** (`npm run measure:slide-feasibility`,
+   written for this) — and every threshold the search steers by is a *fraction*
+   of it, so seed 5 wandered 27 m before it began steering. The target is a
+   ladder now, 60 first so every already-solving seed is untouched.
+2. **The Sky Cruiser's exit was a ray, not a ring** — twenty samples in one
+   direction, and if all were blocked it returned the 5 m mark it had already
+   measured as bad. Revealed only once seed 5 could build. Now a fan.
+3. **seed 2's fence in the cruiser's car.** The train's radial profile is solved
+   at 360 bearings and the curve built from every 5th; a **1.7 m sliver** between
+   the cruiser's low corridor and the park wall counted as free (`>= 1`), the
+   profile sat in it at bearing 169 and was back inside by 175, and the
+   Catmull-Rom cut straight through the blocked band. A gap narrower than
+   `FENCE_OFFSET * 2` cannot hold a *fenced* railway however the centre line is
+   drawn, so it is no longer offered.
+4. **The finish rainbow's feet stood on the paths** (seeds 5 and 11). `buildArch`
+   placed twelve legs with no idea where the paths were — its only world query
+   was `terrainHeight`. `railRace/arch.ts` now owns where a foot lands, and
+   `paths.ts` routes around them (Decision 6: publish what you solved). **Fixed
+   seed 5; seed 11 is still red.**
+
+## The one that is still red, and what it needs
+
+`seed 11 > the Rail Race finish rainbow stands on the ground`.
+
+Measured, not guessed (`scripts/diag-arch.mts` in the gate snapshot): seed 11's
+arch inner feet run from (67.4, -21.4) to (65.1, -19.9) and the rail race
+booth's doormat is at **(65.9, -20.7) — in the middle of that line**. The
+nearest path is `spur-stall.railRacer`, and `routeAround` will not detour it
+*by design*: a spur has to arrive at the door it serves. The arch and the
+doormat are placed by the same bearing, so on this seed they are placed on top
+of each other.
+
+**I tried the obvious fix and backed it out, which is the useful part of this
+note.** Sliding `startDistance` along the ring is the only lever that moves the
+finish line and everything scored from it *together* (duck bars, spark zones,
+`RACE_DISTANCE`, cart placement). Nudging it clear of the doormat worked — seed
+11 went green, `48 passed` — but `startDistance` is the whole ride's datum, so
+moving it moved seed 5's ride too, and **seed 5 went red on two tests**
+(rainbow on paths again, plus a Sky Cruiser strike). One failure traded for two.
+Reverted; the tree is at the better state.
+
+What it actually needs: the nudge search must clear *everything the ride's datum
+can collide with* — the doormat and plots (done, in the reverted patch), **and
+the Sky Cruiser's loop, and the ride's own exit** — all of which are plan-time
+knowable except the exit, which `railRace/plan.ts` computes after the rings and
+would need reordering. That is a contained piece of work with a clear
+acceptance test; it is not a knob to tune.
+
+## Discipline notes for whoever is next
+
+- **A green `tsc` is not evidence an import is safe.** `coaster/plan ->
+  railRace/plan -> train/plan -> coaster/plan` typechecks perfectly and dies at
+  module load with "Cannot access 'COASTER_PLANS' before initialization".
+  `EXIT_INSIDE_EDGE` moved to `boundary.ts` to break it.
+- **`snapToFree`'s doc still lies.** It claims "greedy continuity — the profile
+  stays in whichever gap it is already in"; it snaps to the nearest interval
+  with no memory of the previous bearing at all. Fix 3 removed the temptation on
+  the seeds we test, not the capability.
+- Measure against a `git archive HEAD` snapshot: other agents are editing this
+  worktree live, and a suite run against their in-flight edits proves nothing.
