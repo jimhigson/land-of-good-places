@@ -2379,7 +2379,10 @@ assert abs(STAIR_RAIL_R - 4.93) < 1e-9, (
     f"the handrail's radius is {STAIR_RAIL_R:.4f} m and must be 4.93 m, which "
     "`hotelAssets.ts` re-declares as STAIR_RAIL_RADIUS — the flight's top newel stands "
     "there, and the placement recipe spaces the two arcs so those two posts come out a "
-    "whole number of balustrade tiles apart"
+    "whole number of balustrade tiles apart. It follows the mid radius, which follows "
+    "the tread count, which follows how tall a child in a party hat is: if `kid.ts` grew "
+    "a taller hat, this whole staircase has correctly got bigger and the number to bring "
+    "with it is STAIR_RAIL_RADIUS in `hotelAssets.ts`."
 )
 
 STAIR_HANDRAIL_SECTION = (
@@ -3751,6 +3754,20 @@ if __name__ == "__main__":
     # fail loudly when the geometry stops agreeing with `layout.ts`. Every
     # assertion above was, until this line, a check that could not fail.
     # (CLAUDE.md: "a check can pass without checking anything".)
+    #
+    # **And this line only covers half of them.** Found later the same day, by
+    # breaking each of the new assertions on purpose and reading the exit code
+    # rather than the traceback: `try/except` around `main()` cannot catch
+    # anything raised while the *module body* runs, and every constant in §14a
+    # and §14b — plus three asserts that shipped on 7 August — is checked out
+    # there. When one of those fires, this block never executes at all: the
+    # module dies during import, Blender prints the traceback, and exits 0.
+    #
+    # The fix is `--python-exit-code 1` on Blender's own command line, which is
+    # in `package.json`'s `blend:hotel` for both steps. It covers import-time
+    # and run-time alike, so this block is now only here for the tidy traceback.
+    # **A hand-run `blender --background --python art/blend/hotel_build.py` is
+    # still deaf to a module-level failure** — read the output, not the shell.
     try:
         main()
     except Exception:
