@@ -72,6 +72,41 @@ export interface HotelTheme {
   readonly glow: number;
 }
 
+/**
+ * WCAG relative luminance of a `PALETTE` colour — how bright it reads,
+ * 0 (black) to 1 (white), through the standard sRGB linearisation.
+ */
+export function relativeLuminance(hex: number): number {
+  const linear = (channel: number): number => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * linear((hex >> 16) & 255) +
+    0.7152 * linear((hex >> 8) & 255) +
+    0.0722 * linear(hex & 255)
+  );
+}
+
+/**
+ * The least a theme's wall and floor may differ in {@link relativeLuminance}.
+ *
+ * Jim, looking at the suite, 8 Aug 2026: *"The walls and floor colours are
+ * too similar — hard to distinguish."* Where a wall meets the floor at the
+ * iso camera's 38°, luminance separation is what draws the line; hue barely
+ * helps when both are pastel.
+ *
+ * The number is **measured, not invented** — from this hotel's own floors on
+ * the day the rule landed. The rooms that read well at a glance: lobby 0.274,
+ * corridor 0.251, ocean 0.232, garden 0.186. The rooms that did not: the
+ * suite Jim reported at 0.115, and the breakfast room — unreported but
+ * measured twelve times worse at 0.009, cream on cream. 0.15 sits beneath
+ * the weakest good reader and above both offenders. `check:hotel` probe 20
+ * holds every theme to it, so a future floor cannot quietly go
+ * wall-coloured.
+ */
+export const THEME_FLOOR_CONTRAST_MIN = 0.15;
+
 /** A wall of a room. `north` is −Z, `west` is −X — the two the camera sees. */
 export type WallSide = 'north' | 'south' | 'east' | 'west';
 
@@ -294,13 +329,20 @@ const LOBBY_THEME: HotelTheme = {
 };
 
 /**
- * **Floor 1 — a sunny morning.** Cream walls, warm cream floor, honey-gold
- * trim: the colours of toast and butter, which is the entire point of the
- * only room in the hotel you go to in order to eat.
+ * **Floor 1 — a sunny morning.** Cream walls over a golden-toast floor,
+ * honey-gold trim: the colours of toast and butter, which is the entire
+ * point of the only room in the hotel you go to in order to eat.
+ *
+ * The floor was `buildingWall` — cream on cream, measured at 0.009
+ * luminance apart from the walls, the worst reader in the hotel (see
+ * {@link THEME_FLOOR_CONTRAST_MIN}) — nobody had reported it only because
+ * seven tables and a buffet were doing the walls' job of drawing the room's
+ * edges. `pathSandDark` keeps the toast and gives the floor its own value
+ * (0.31 apart).
  */
 const BREAKFAST_THEME: HotelTheme = {
   wall: PALETTE.signBoard,
-  floor: PALETTE.buildingWall,
+  floor: PALETTE.pathSandDark,
   trim: PALETTE.liftFrame,
   accent: PALETTE.flowerYellow,
   glow: PALETTE.markerLemon,
@@ -325,10 +367,16 @@ const CORRIDOR_THEME: HotelTheme = {
  * The walls stay near-white on purpose — the rainbow is the stripes, the rug
  * and the blankets, and a rainbow on a coloured wall is a rainbow you cannot
  * see.
+ *
+ * So when Jim found the room hard to read — *"the walls and floor colours
+ * are too similar"* — the **floor** is what moved: `stonePinkLight` was
+ * 0.115 of luminance from the white walls, `stonePink` is 0.27, the same
+ * separation the lobby reads with, and still unmistakably the pink room.
+ * See {@link THEME_FLOOR_CONTRAST_MIN}.
  */
 const SUITE_THEME: HotelTheme = {
   wall: PALETTE.blossomWhite,
-  floor: PALETTE.stonePinkLight,
+  floor: PALETTE.stonePink,
   trim: PALETTE.markerPink,
   accent: PALETTE.markerPink,
   glow: PALETTE.markerPink,

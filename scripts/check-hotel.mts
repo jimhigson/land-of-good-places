@@ -81,6 +81,8 @@ import {
   SUITE_BEDSIDE_Z,
   SUITE_BED_SPOTS,
   SUITE_DOOR_WIDTH,
+  relativeLuminance,
+  THEME_FLOOR_CONTRAST_MIN,
 } from '../src/world/hotel/layout.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
@@ -1318,6 +1320,28 @@ function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): 
         break;
       }
     }
+  }
+}
+
+// ---------------------- 20. every floor reads apart from its own walls
+//
+// Jim, looking at the suite, 8 Aug 2026: *"The walls and floor colours are
+// too similar — hard to distinguish."* The rule, its measurement and its
+// measured threshold live with the themes (`layout.ts`'s
+// `relativeLuminance` / `THEME_FLOOR_CONTRAST_MIN`); this applies it to
+// every room so no future theme can go cream-on-cream unnoticed. Proven red
+// before trusted green: on the pre-fix palette the suite measured 0.115 and
+// the breakfast room 0.009 against good readers at 0.186–0.274.
+for (const room of ROOMS) {
+  const wall = relativeLuminance(room.theme.wall);
+  const floor = relativeLuminance(room.theme.floor);
+  const delta = Math.abs(wall - floor);
+  if (delta < THEME_FLOOR_CONTRAST_MIN) {
+    problems.push(
+      `${room.space}: wall luminance ${wall.toFixed(3)} and floor ${floor.toFixed(3)} differ by ` +
+        `${delta.toFixed(3)} — under the ${THEME_FLOOR_CONTRAST_MIN} the good-reading floors set, ` +
+        `so wall and floor blur together at a glance (layout.ts THEME_FLOOR_CONTRAST_MIN)`,
+    );
   }
 }
 
