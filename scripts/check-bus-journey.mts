@@ -86,6 +86,11 @@ const FRAME_GRID_Y = 14;
 const VIEWPORTS = [
   { label: 'a 1440x900 desktop', width: 1440, height: 900 },
   { label: 'a 390x844 phone', width: 390, height: 844 },
+  // **The tablet is not redundant.** It is at aspect 0.75, between the two
+  // above, and the inside shot swings across the rows over a span that ends at
+  // 0.9 — so this is the entry that fails if that span is ever stretched out,
+  // and a half-swung frame is measurably worse than either end of the swing.
+  { label: 'a 768x1024 tablet', width: 768, height: 1024 },
 ] as const;
 
 /**
@@ -415,10 +420,14 @@ if (busRoot) {
     /** The biggest share of the whole frame any **single** surface takes. */
     worstShare: number;
     worstName: string;
-    /** The same, within whichever horizontal third of the frame is worst. */
-    worstBandShare: number;
-    worstBandName: string;
-    worstBandLabel: string;
+    /**
+     * How much of the barest horizontal third of the frame is **bare bus** —
+     * floor pan, shell, the cat's own blank face. Not "any one surface": a
+     * child's head filling the top of a phone frame is the picture, and a
+     * rule that could not tell the two apart would fail the good shot.
+     */
+    barestBandShare: number;
+    barestBandLabel: string;
     /** How much of the frame is seating, and how much is children. */
     seatShare: number;
     childShare: number;
@@ -430,9 +439,8 @@ if (busRoot) {
       {
         worstShare: 0,
         worstName: '',
-        worstBandShare: 0,
-        worstBandName: '',
-        worstBandLabel: '',
+        barestBandShare: 0,
+        barestBandLabel: '',
         seatShare: 0,
         childShare: 0,
         said: '',
@@ -579,12 +587,8 @@ if (busRoot) {
 
         const perSurface = new Map<Object3D, number>();
         const perKind = new Map<string, number>();
-        /** The same two, per horizontal third: 0 is the bottom of the frame. */
-        const perSurfaceBand = [
-          new Map<Object3D, number>(),
-          new Map<Object3D, number>(),
-          new Map<Object3D, number>(),
-        ];
+        /** Rays that found bare bus, per horizontal third: 0 is the bottom. */
+        const bareInBand = [0, 0, 0];
         const bandRays = [0, 0, 0];
         let rays = 0;
         for (let gx = 0; gx < FRAME_GRID_X; gx += 1) {
@@ -636,10 +640,11 @@ if (busRoot) {
                 ? 'out of a window'
                 : 'out of the bus';
             perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
+            if (kind === 'the floor' || kind === 'bare bodywork') {
+              bareInBand[band] = (bareInBand[band] ?? 0) + 1;
+            }
             if (!surface) continue;
             perSurface.set(surface, (perSurface.get(surface) ?? 0) + 1);
-            const inBand = perSurfaceBand[band];
-            if (inBand) inBand.set(surface, (inBand.get(surface) ?? 0) + 1);
           }
         }
 
@@ -653,17 +658,13 @@ if (busRoot) {
           }
         }
         const BAND_NAMES = ['the bottom third', 'the middle third', 'the top third'];
-        for (let band = 0; band < perSurfaceBand.length; band += 1) {
-          const counts = perSurfaceBand[band];
+        for (let band = 0; band < bandRays.length; band += 1) {
           const total = bandRays[band] ?? 0;
-          if (!counts || total === 0) continue;
-          for (const [object, count] of counts) {
-            const share = count / total;
-            if (share > seen.worstBandShare) {
-              seen.worstBandShare = share;
-              seen.worstBandName = nameOf(object);
-              seen.worstBandLabel = BAND_NAMES[band] ?? `band ${band}`;
-            }
+          if (total === 0) continue;
+          const share = (bareInBand[band] ?? 0) / total;
+          if (share > seen.barestBandShare) {
+            seen.barestBandShare = share;
+            seen.barestBandLabel = BAND_NAMES[band] ?? `band ${band}`;
           }
         }
         const shareOf = (kind: string): number => (perKind.get(kind) ?? 0) / rays;
@@ -761,9 +762,9 @@ if (busRoot) {
     said.push(`inside, on ${viewport.label}, the shot is made of: ${seen.said || 'nothing measured'}`);
     said.push(
       `  its largest single surface is ${seen.worstName || '(none)'} at ` +
-        `${(100 * seen.worstShare).toFixed(0)}% of the frame, and ${seen.worstBandName || '(none)'} owns ` +
-        `${(100 * seen.worstBandShare).toFixed(0)}% of ${seen.worstBandLabel || 'no band'}; seating ` +
-        `${(100 * seen.seatShare).toFixed(0)}%, children ${(100 * seen.childShare).toFixed(0)}%`,
+        `${(100 * seen.worstShare).toFixed(0)}% of the frame; its barest band is ` +
+        `${seen.barestBandLabel || 'none'} at ${(100 * seen.barestBandShare).toFixed(0)}% bare bus; ` +
+        `seating ${(100 * seen.seatShare).toFixed(0)}%, children ${(100 * seen.childShare).toFixed(0)}%`,
     );
 
     if (seen.worstShare > 0.3) {
@@ -773,16 +774,26 @@ if (busRoot) {
           'with nothing on it, which is what "you cannot tell it is a bus" looks like from the inside',
       );
     }
-    // **Half a band is the point at which a surface stops being part of the
-    // picture and becomes the picture.** QA's sentence was about a band, not
-    // about the whole frame — *"the bottom 35–40% is featureless cream floor"* —
-    // and a shot can hold a healthy overall mix while its lower third is one
-    // blank slab, which is exactly what a phone's widened lens produces in here.
-    if (seen.worstBandShare > 0.5) {
+    // **QA's sentence was about a band, not about the whole frame** — *"the
+    // bottom 35–40% is featureless cream floor"* — and a shot can hold a
+    // perfectly healthy overall mix while one third of it is a blank slab,
+    // which is exactly what a phone's widened lens produces in here.
+    //
+    // **Bare bus, not "any one surface".** The obvious version of this rule
+    // asks whether one *mesh* owns a band, and it fails the good shot: swung
+    // across the rows, a child's head can be a fifth of a phone frame and half
+    // its top third, and that head is the picture. What may not own a band is
+    // floor pan and bodywork, which is what QA was looking at.
+    //
+    // Half, because half is where a band stops carrying a surface and becomes
+    // one. Landscape sits at 23% and the phone at 32%; the framing this
+    // replaced was at 88%.
+    if (seen.barestBandShare > 0.5) {
       fouls.push(
-        `on ${viewport.label}, ${seen.worstBandName} is ${(100 * seen.worstBandShare).toFixed(0)}% of ` +
-          `${seen.worstBandLabel} of the view inside the bus — that band is one unbroken surface, which ` +
-          'is QA\'s "the bottom 35–40% is featureless cream floor" whichever way up it happens to be',
+        `on ${viewport.label}, ${seen.barestBandLabel} of the view inside the bus is ` +
+          `${(100 * seen.barestBandShare).toFixed(0)}% bare floor and bodywork — that band has nothing ` +
+          'in it, which is QA\'s "the bottom 35–40% is featureless cream floor" whichever way up it ' +
+          'happens to be',
       );
     }
     if (seen.seatShare < 0.05) {

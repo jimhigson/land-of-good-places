@@ -424,6 +424,29 @@ const INSIDE_CAMERA_ROWS_BACK = 0.35;
  */
 const INSIDE_CAMERA_DROP = 0.25;
 
+/**
+ * **The aspect at which the inside shot is fully swung across the rows.**
+ *
+ * A tall frame and a wide frame want different subjects, and the swing between
+ * them is a **choice**, not a correction proportional to a fault — so this span
+ * is short on purpose and exists only so that a window being dragged across
+ * square fades rather than snaps.
+ *
+ * Deliberately narrow because **every partial swing is worse than either end**.
+ * Measured, at a 24x14 grid of rays through the real frame, as the share of the
+ * barest horizontal third of it — the number QA's complaint was actually about:
+ *
+ * | swung | 0% | 41% | 70% | 100% |
+ * |---|---|---|---|---|
+ * | barest third | 23% | **59%** | **47%** | 32% |
+ *
+ * Half-round is the one aim that gets neither: the aisle's vanishing point is
+ * still in frame, dragging the floor up it, and the rows are not yet square on.
+ * Any value nearer 1 than this would do equally well; what must not happen is a
+ * long ramp that parks real windows in the middle of that table.
+ */
+const INSIDE_SWING_COMPLETE_ASPECT = 0.9;
+
 const DEG = Math.PI / 180;
 
 /**
@@ -617,7 +640,17 @@ export class BusJourney {
    * with a face patch that had to track a surface it had left.
    */
   private readonly insideEye = new Vector3();
+  /**
+   * The aim actually in use, blended from the two below by the window's shape.
+   * Starts down the aisle, which is what a window wider than it is tall gets.
+   */
   private readonly insideAim = new Vector3();
+  /** Down the gangway to the front row — the shot a **wide** frame is given. */
+  private readonly insideAimAlong = new Vector3();
+  /** Square across the rows — the shot a **tall** frame is given. */
+  private readonly insideAimAcross = new Vector3();
+  private readonly swingFrom = new Vector3();
+  private readonly swingTo = new Vector3();
   private readonly worldEye = new Vector3();
   private readonly worldAim = new Vector3();
 
@@ -713,10 +746,13 @@ export class BusJourney {
     let front = -Infinity;
     let back = Infinity;
     let cushion = 0;
+    /** How far off the centre line a seat column sits — measured, not restated. */
+    let column = 0;
     for (const seat of seats) {
       front = Math.max(front, seat.position.z);
       back = Math.min(back, seat.position.z);
       cushion = seat.position.y;
+      column = Math.max(column, Math.abs(seat.position.x));
     }
 
     // **Behind the back row, in the gangway.** `AISLE_WIDTH` is 0.8 m and a
@@ -748,7 +784,101 @@ export class BusJourney {
     // heads and the window band above them hold the top. Aimed at the far end of
     // the seating rather than at a point in space: the shot ends on the front
     // row and the driver beyond it.
-    this.insideAim.set(0, eyeHeight - INSIDE_CAMERA_DROP, front);
+    this.insideAimAlong.set(0, eyeHeight - INSIDE_CAMERA_DROP, front);
+    this.insideAim.copy(this.insideAimAlong);
+
+    // **And square across the rows, for a frame that is taller than it is
+    // wide.** See {@link swingTheInsideAim} for why there are two of these at
+    // all. Aimed at the child sitting one row forward on the **far** side of
+    // the aisle: the near half of the busload then runs across the frame
+    // diagonally, seat backs and heads together, instead of away from it down
+    // a corridor.
+    //
+    // The far column rather than the near one because a lens at `x = 0` is
+    // already among the near column's seat backs, and because the door is cut
+    // into the **other** flank — `catBus.ts` skips a pillar and a pane at the
+    // doorway, so this is the side with an unbroken run of both.
+    //
+    // Level, with no {@link INSIDE_CAMERA_DROP}: that drop exists to hold the
+    // aisle in the bottom of a wide frame, and swung across the rows there is
+    // no aisle to hold, so it would only be pushing floor back into shot. It
+    // costs 10 points of bare floor in the lower third to leave it in (32% with
+    // the aim level, 42% with it dropped).
+    this.insideAimAcross.set(column, eyeHeight, eyeZ + pitch);
+  }
+
+  /**
+   * **Which way the inside camera looks, decided by the shape of the window.**
+   *
+   * QA, 8 August 2026, on a phone: *"the bottom 35–40% is featureless cream
+   * floor."* Turning the camera round fixed that for a **desktop** and left it
+   * exactly true for a phone, and three attempts to close the gap by nudging
+   * the aim all failed, because the cause is not the aim:
+   *
+   * `fitCameraToViewport` opens the vertical field from 52 degrees to **83.9**
+   * so a wide subject fits a tall frame. That is right for the shot of the bus
+   * from outside. Inside a 2.7 m cabin, pointed **along** an 11 m aisle, the
+   * extra 32 degrees has nothing to find but the floor below and the roof
+   * above. Measured: no camera height avoids it — raising the lens trades floor
+   * for ceiling one for one (34%/24% at the shipped height, 18%/41% a metre up)
+   * — and no lens avoids it either, because zooming is self-similar and closes
+   * the frame around the aisle exactly as fast as it shortens the floor: 34% of
+   * the frame at 83.9 degrees, 32% at 52.
+   *
+   * **So the fix is not to spend the extra field better; it is to point it at
+   * the part of the cabin that can fill it.** Across the rows the bus is 2.7 m
+   * tall and 2.6 m wide, and a tall frame lands on cushion, seat back, child
+   * and header band all the way up. Along the aisle it is 2.7 m tall and 11 m
+   * long, and a tall frame lands on floor and roof. Same cabin, same lens; the
+   * only difference is which way the tall axis of the picture is pointed.
+   *
+   * Portrait, at a 390x844 phone, goes from *floor 34%, ceiling 24%, seat 21%,
+   * child 20%* to *child 55%, seat 32%, floor 10%, ceiling 3%*, and the largest
+   * single surface in it stops being the floor pan and becomes a child's head.
+   *
+   * Landscape is **untouched by construction**: `swing` is exactly zero for any
+   * window at least as wide as it is tall, so every frame QA has already signed
+   * off is the frame they signed off.
+   */
+  private swingTheInsideAim(aspect: number): void {
+    const swing = 1 - smoothstep(INSIDE_SWING_COMPLETE_ASPECT, 1, clamp(aspect, 0, 1));
+    if (swing <= 0) {
+      this.insideAim.copy(this.insideAimAlong);
+      return;
+    }
+    // **Blend the direction, not the point.** The two aim points are 7.8 m
+    // apart down the bus and 1.3 m apart across it, so lerping between them
+    // moves the *bearing* almost not at all until the very end — 41% of the way
+    // between the points is 4.7 of the 35.8 degrees, which is how the first
+    // attempt at this managed to be worse in the middle than at either end.
+    this.swingFrom.copy(this.insideAimAlong).sub(this.insideEye).normalize();
+    this.swingTo.copy(this.insideAimAcross).sub(this.insideEye).normalize();
+    const reach = this.insideAimAcross.distanceTo(this.insideEye);
+    this.insideAim
+      .copy(this.swingFrom)
+      .lerp(this.swingTo, swing)
+      .normalize()
+      .multiplyScalar(reach)
+      .add(this.insideEye);
+  }
+
+  /**
+   * Puts the inside camera where it belongs and points it at {@link insideAim}.
+   *
+   * Through the bus's own matrix, so the camera climbs, dips and pitches with
+   * it exactly — you feel the hills from inside, which is half of why being
+   * able to sit in there is worth having.
+   *
+   * Its own method because **two** callers need it: `update` every frame, and
+   * `render` again on the one frame a window changes shape, so the swing lands
+   * on the frame that caused it rather than on the next one.
+   */
+  private pointTheInsideCamera(): void {
+    this.bus.root.updateMatrixWorld(true);
+    this.worldEye.copy(this.insideEye).applyMatrix4(this.bus.root.matrixWorld);
+    this.worldAim.copy(this.insideAim).applyMatrix4(this.bus.root.matrixWorld);
+    this.camera.position.copy(this.worldEye);
+    this.camera.lookAt(this.worldAim);
   }
 
   /**
@@ -1256,14 +1386,7 @@ export class BusJourney {
     this.cutTo(shotAt(this.elapsedSeconds).view);
 
     if (this.viewMode === 'inside') {
-      // Through the bus's own matrix, so the camera climbs, dips and pitches
-      // with it exactly — you feel the hills from inside, which is half of why
-      // being able to sit in there is worth having.
-      this.bus.root.updateMatrixWorld(true);
-      this.worldEye.copy(this.insideEye).applyMatrix4(this.bus.root.matrixWorld);
-      this.worldAim.copy(this.insideAim).applyMatrix4(this.bus.root.matrixWorld);
-      this.camera.position.copy(this.worldEye);
-      this.camera.lookAt(this.worldAim);
+      this.pointTheInsideCamera();
       return;
     }
 
@@ -1370,6 +1493,12 @@ export class BusJourney {
     if (this.camera.aspect !== aspect || this.fittedFov !== this.baseFov) {
       this.fittedFov = this.baseFov;
       fitCameraToViewport(this.camera, this.baseFov, width, height);
+      // **The lens and the aim answer the same question**, and they are settled
+      // together in the one place that knows the window's shape. A tall frame
+      // gets both a wider lens and a different subject; see
+      // {@link swingTheInsideAim} for why the second is not optional.
+      this.swingTheInsideAim(aspect);
+      if (this.viewMode === 'inside') this.pointTheInsideCamera();
     }
     renderer.render(this.scene, this.camera);
   }
