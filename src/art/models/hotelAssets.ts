@@ -12,7 +12,7 @@ import {
   toonMaterial,
   type ToonOptions,
 } from '../style/materials';
-import { visibleBounds } from '../style/measure';
+import { visibleBounds, visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
 
 /**
@@ -90,6 +90,15 @@ export const STAIR_HANDEDNESS: readonly StairHandedness[] = ['right', 'left'];
 const STAIR_PART_SUFFIXES = ['tread', 'stringer', 'rail', 'baluster', 'newel'] as const;
 
 /**
+ * The three flights the lobby's composition is made of, as they are named in
+ * the `.glb`: two mirrored curves and the wide straight one they gather into.
+ *
+ * One list rather than three, so a flight cannot be added to the asset and
+ * quietly go undressed — {@link stairStyles} walks it.
+ */
+const STAIR_FLIGHTS = ['right', 'left', 'straight'] as const;
+
+/**
  * How a flight is dressed, by part suffix — **one table for both hands**.
  *
  * The treads take the lobby's *floor* colour and the strings its *trim*, which
@@ -109,8 +118,8 @@ const STAIR_PART_STYLES: Record<(typeof STAIR_PART_SUFFIXES)[number], PartStyle>
 
 function stairStyles(): Record<string, PartStyle> {
   const out: Record<string, PartStyle> = {};
-  for (const hand of STAIR_HANDEDNESS) {
-    for (const part of STAIR_PART_SUFFIXES) out[`stair-${hand}-${part}`] = STAIR_PART_STYLES[part];
+  for (const flight of STAIR_FLIGHTS) {
+    for (const part of STAIR_PART_SUFFIXES) out[`stair-${flight}-${part}`] = STAIR_PART_STYLES[part];
   }
   return out;
 }
@@ -245,11 +254,11 @@ const STYLES: Record<string, PartStyle> = {
   },
   'gameboy-buttons': { colour: PALETTE.markerPink },
 
-  // --- the lobby's grand staircase, both hands -----------------------------
-  // Spread from `STAIR_PART_STYLES` below rather than typed twice. Two mirrored
-  // flights that were dressed by two hand-written tables would be one edit away
-  // from a staircase in two colour schemes, which is CLAUDE.md's "two
-  // definitions of one thing" applied to a colour.
+  // --- the lobby's grand staircase: two curves and the straight flight ------
+  // Spread from `STAIR_PART_STYLES` below rather than typed three times. Three
+  // flights a child walks in one go, dressed by three hand-written tables,
+  // would be one edit away from a staircase in three colour schemes — which is
+  // CLAUDE.md's "two definitions of one thing" applied to a colour.
   ...stairStyles(),
 
   // --- the mezzanine bridge's balustrade ------------------------------------
@@ -260,6 +269,13 @@ const STYLES: Record<string, PartStyle> = {
   'bridge-rail-baluster': { colour: PALETTE.blossomWhite, outline: 0.014 },
   'bridge-rail-hand': { colour: PALETTE.liftFrame, outline: 0.016 },
   'bridge-newel': { colour: PALETTE.flowerViolet, outline: 0.018 },
+
+  // --- the moulding that finishes the edge of the landing -------------------
+  // The stringers' colour, because that is what it is: the flights' own masonry
+  // carried round the edge of the floor they land on. Dressed as the balustrade
+  // instead (cream, gold) it would read as a second rail rather than as the
+  // floor stopping.
+  'landing-nose': { colour: PALETTE.markerLilac, outline: 0.016 },
 
   // --- the pendant-cluster chandelier ---------------------------------------
   // The drops carry a gentle emissive here so they read as lit at the moment
@@ -941,14 +957,56 @@ export function createGameBoy(): ScreenedHandle {
 export const STAIR_INNER_RADIUS = 2.4;
 /** @see STAIR_INNER_RADIUS */
 export const STAIR_OUTER_RADIUS = 4.2;
-/** A quarter turn. @see STAIR_INNER_RADIUS */
-export const STAIR_SWEEP = Math.PI / 2;
-/** Floor to gallery deck — `layout.ts`'s `LOBBY_MEZZANINE_Y`. */
+/**
+ * An eighth of a turn — 45°, **halved on 8 August 2026** along with the rise.
+ *
+ * A curve now climbs only as far as the landing, which is five treads rather
+ * than ten, and five treads spread over the old quarter turn would be 1.04 m
+ * deep at mid radius: a 17° pitch, which is a ramp with occasional steps. The
+ * tread depth is the invariant and the arc is what gave way, so the going comes
+ * out at exactly the 0.518 m it has always been and the flight is the same
+ * staircase, half as long. @see STAIR_INNER_RADIUS
+ */
+export const STAIR_SWEEP = Math.PI / 4;
+/**
+ * Floor to the **true level** — `layout.ts`'s `LOBBY_MEZZANINE_Y`, the gallery
+ * deck. No single flight climbs all of it any more: the two curves reach
+ * {@link LANDING_HEIGHT} and {@link createStraightStaircase} finishes the job.
+ */
 export const STAIR_RISE = 3.2;
-/** @see STAIR_INNER_RADIUS */
-export const STAIR_TREADS = 10;
-/** 0.32 m — half the game's `BUILDING_STEP_UP`, so every tread is walkable. */
-export const STAIR_RISER = STAIR_RISE / STAIR_TREADS;
+/**
+ * 0.32 m — half the game's `BUILDING_STEP_UP`, so every tread is walkable, and
+ * the **owner** of both flights' tread counts rather than a number derived from
+ * them. It is the constraint; the heights give way to it.
+ */
+export const STAIR_RISER = 0.32;
+/**
+ * The intermediate floor the two curves reach and the wide straight flight
+ * leaves — Jim, 8 August 2026: *"Make the curved stairs reach an intermediate
+ * floor that then turns into a single, wide straight staircase up to the true
+ * level."*
+ *
+ * Half of {@link STAIR_RISE}, so the composition splits evenly into five treads
+ * of curve and five of straight, and the landing reads as a proper mid-level
+ * rather than as a wide step near one end.
+ */
+export const LANDING_HEIGHT = 1.6;
+/**
+ * What the straight flight has left to climb.
+ *
+ * **Derived, and that is the point.** "The curves reach the landing and the
+ * straight flight finishes the job" is *one* relationship; writing it as one
+ * subtraction is the only way it cannot come apart. `hotel_build.py`'s
+ * `assert_flights_meet` then measures the same relationship off the two emitted
+ * meshes, because a derivation proves the arithmetic and only a measurement
+ * proves the geometry.
+ */
+export const STRAIGHT_RISE = STAIR_RISE - LANDING_HEIGHT;
+/**
+ * Treads in **a curved flight** — five, derived from the riser and the landing
+ * rather than typed, so it cannot disagree with either. @see STAIR_INNER_RADIUS
+ */
+export const STAIR_TREADS = Math.round(LANDING_HEIGHT / STAIR_RISER);
 /**
  * Handrail centre-line above the tread it stands over, in metres.
  *
@@ -974,6 +1032,15 @@ export interface GrandStaircaseHandle extends AssetHandle {
    * that is safe to hand to a collider, use {@link treadArc}.
    */
   readonly sweep: number;
+  /**
+   * **This flight's own rise — the landing, not the true level.**
+   *
+   * Since 8 August a curve climbs to {@link LANDING_HEIGHT} and stops there;
+   * {@link createStraightStaircase} carries the remaining
+   * {@link STRAIGHT_RISE} up to {@link STAIR_RISE}. Code that used to read
+   * `rise` as "the height of the gallery" is reading the height of the landing
+   * now, and wants `STAIR_RISE`.
+   */
   readonly rise: number;
   readonly treads: number;
   readonly riser: number;
@@ -1009,10 +1076,19 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
 }
 
 /**
- * **The lobby's grand staircase**: a quarter-turn sweep of ten treads from the
- * floor to the gallery, between two closed crystal strings, with a balustrade
- * of thirteen balusters carrying a continuous swept handrail, a newel at each
- * end, and a matching moulded coping along the inner string.
+ * **One curved flight of the lobby's grand staircase**: a 45° sweep of five
+ * treads from the floor to the intermediate landing, between two closed crystal
+ * strings, with a balustrade carrying a continuous swept handrail, a newel at
+ * each end, and a matching moulded coping along the inner string.
+ *
+ * ## It is one of three flights now
+ *
+ * Jim, 8 August 2026, on the twin-sweep renders: *"Make the curved stairs reach
+ * an intermediate floor that then turns into a single, wide straight staircase
+ * up to the true level."* So: two of these, mirrored, from the floor to
+ * {@link LANDING_HEIGHT}, and one {@link createStraightStaircase} from the
+ * landing to {@link STAIR_RISE}. An imperial composition, and the reason this
+ * factory's `rise` is 1.6 m rather than the 3.2 m it used to be.
  *
  * ## Its origin is the arc's centre, not the foot of the flight
  *
@@ -1041,23 +1117,43 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  *
  * | `handedness` | climbing, you turn | bottom tread | top tread | game yaw |
  * | --- | --- | --- | --- | --- |
- * | `'right'` | right | `+Z` from the origin | `−X` | 0 → `+π/2` |
- * | `'left'` | left | `+Z` from the origin (**the same place**) | `+X` | 0 → `−π/2` |
+ * | `'right'` | right | `+Z` from the origin | swings toward `−X` | 0 → `+π/4` |
+ * | `'left'` | left | `+Z` from the origin (**the same place**) | toward `+X` | 0 → `−π/4` |
  *
  * Both are authored at **`fromAngle = 0`** in the yaw the rest of the game
- * measures (`Mezzanine`: 0 is +Z, turning toward −X), so `'right'` is `LOBBY`'s
- * arc exactly and needs no rotation at all. A room that wants a different start
- * angle sets `root.rotation.y = -fromAngle` — negative, because three.js yaws
- * +Z toward +X and this game's stair angle turns it toward −X.
+ * measures (`Mezzanine`: 0 is +Z, turning toward −X). A room that wants a
+ * different start angle sets `root.rotation.y = -fromAngle` — negative, because
+ * three.js yaws +Z toward +X and this game's stair angle turns it toward −X.
  *
- * The two share a foot and differ in where the top lands, which is what makes
- * the twin-staircase composition fall out of the placement rather than out of
- * arithmetic: put the two origins at `(±C, Zc)` with the **right** hand on the
- * `+X` side and the **left** on `−X`, and each flight's top swings *inward*.
- * The feet then stand side by side at `z = Zc + r` and the two tops face each
- * other across a clear `2·(C − STAIR_OUTER_RADIUS)` at `z = Zc` — which is the
- * bridge's span, and the width of the archway underneath it. (At `C = 7`, in a
- * lobby of `halfX = 13`: outer edges at `±11.2`, a 5.6 m span.)
+ * ## Placing the imperial composition
+ *
+ * Put the two origins at `(±C, Zc)`, **`'right'` on the `+X` side** and
+ * `'left'` on `−X`, and give each flight `fromAngle = ±(π/2 − STAIR_SWEEP)` —
+ * `+π/4` for the right hand, `−π/4` for the left, i.e.
+ * `root.rotation.y = ∓π/4`. That quarter-turn's worth of rotation is what lands
+ * both flights' **top treads square to the landing**, running along X with the
+ * climber heading `−Z`: the tread that meets the landing is the one join in the
+ * composition that must not arrive at an angle, and with a 45° sweep you can
+ * have the foot square or the top square, not both. A floor takes a stair at
+ * any angle; a landing does not.
+ *
+ * With that rotation:
+ *
+ * - each top tread spans `x` from `±(C − STAIR_OUTER_RADIUS)` to
+ *   `±(C − STAIR_INNER_RADIUS)` at `z = Zc`, so the two tops face each other
+ *   across a clear `2·(C − STAIR_OUTER_RADIUS)`;
+ * - the feet stand side by side toward the entrance at
+ *   `z = Zc + r·cos(π/4)`, `x = ±(C − r·sin(π/4))` — closer together than the
+ *   old quarter-turn put them, and angled inward;
+ * - the landing spans that middle gap **and** both top treads: `x` from
+ *   `−(C − STAIR_INNER_RADIUS)` to `+(C − STAIR_INNER_RADIUS)`, at
+ *   {@link LANDING_HEIGHT}.
+ *
+ * Pick `C` so the middle gap is a whole number of {@link BRIDGE_RAIL_TILE}s —
+ * `C = STAIR_OUTER_RADIUS + n·BRIDGE_RAIL_TILE/2` — because that gap is the
+ * landing's front balustrade and a part-tile is the one thing the tile cannot
+ * do. At `C = 7.26` it is 6.12 m, six tiles, and the composition is 9.72 m
+ * across; at `C = 6.75`, 5.10 m and five.
  *
  * ## The mirror is authored, not scaled
  *
@@ -1072,12 +1168,12 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  *
  * ## What it was built to
  *
- * `STAIR_RISE` = 3.2 m, which is `LOBBY_MEZZANINE_Y`. Ten treads of a 0.32 m
- * riser, inner radius 2.4 m, outer 4.2 m, a 90° sweep — **identical for both
- * hands**, so anything derived from the constants (walk slices, flank
- * colliders, guest keep-outs) is derived the same way for either. The measured
- * top is ~4.35 m — the top newel's finial, standing on the deck, not a walkable
- * height; the *walkable* top is `STAIR_RISE`.
+ * `LANDING_HEIGHT` = 1.6 m. Five treads of a 0.32 m riser, inner radius 2.4 m,
+ * outer 4.2 m, a 45° sweep — **identical for both hands**, so anything derived
+ * from the constants (walk slices, flank colliders, guest keep-outs) is derived
+ * the same way for either. The measured top is ~2.75 m — the top newel's
+ * finial, standing on the landing, not a walkable height; the *walkable* top is
+ * `rise`, and the true level is another `STRAIGHT_RISE` above it.
  *
  * ## What the strings mean for collision
  *
@@ -1101,16 +1197,152 @@ export function createGrandStaircase(
     innerRadius: STAIR_INNER_RADIUS,
     outerRadius: STAIR_OUTER_RADIUS,
     sweep: STAIR_SWEEP * sign,
-    rise: STAIR_RISE,
+    rise: LANDING_HEIGHT,
     treads: STAIR_TREADS,
     riser: STAIR_RISER,
     railHeight: STAIR_RAIL_HEIGHT,
-    treadTop: (index: number) => (STAIR_RISE * (index + 1)) / STAIR_TREADS,
+    treadTop: (index: number) => STAIR_RISER * (index + 1),
     treadArc: (index: number) => {
       const a = (STAIR_SWEEP * sign * index) / STAIR_TREADS;
       const b = (STAIR_SWEEP * sign * (index + 1)) / STAIR_TREADS;
       return { from: Math.min(a, b), to: Math.max(a, b) };
     },
+    dispose: () => disposeTree(root),
+  };
+}
+
+/**
+ * Tread depth, metres — **the curved flight's own going, at its mid radius**.
+ *
+ * Derived rather than chosen: one pitch through the whole composition means a
+ * child's stride does not change at the landing, and it means the straight
+ * flight's rake, its soffit, its string easing and its handrail all come out at
+ * the 32° the curve was tuned to.
+ */
+export const STRAIGHT_GOING =
+  (((STAIR_INNER_RADIUS + STAIR_OUTER_RADIUS) / 2) * STAIR_SWEEP) / STAIR_TREADS;
+
+/** Treads in the straight flight — five, derived like the curve's. */
+export const STRAIGHT_TREADS = Math.round(STRAIGHT_RISE / STAIR_RISER);
+
+/**
+ * How far the straight flight travels in plan, metres.
+ *
+ * What the room has to find for it between the landing's back edge and the
+ * gallery it lands on.
+ */
+export const STRAIGHT_RUN = STRAIGHT_GOING * STRAIGHT_TREADS;
+
+/**
+ * The walking width between its two strings, metres — **both curved flights
+ * gathered into one**, which is what makes it the grand one. Two 1.8 m flights
+ * arrive at the landing and 3.6 m leaves it.
+ */
+export const STRAIGHT_WALK_WIDTH = 2 * (STAIR_OUTER_RADIUS - STAIR_INNER_RADIUS);
+
+export interface StraightStaircaseHandle extends AssetHandle {
+  /** @see STRAIGHT_WALK_WIDTH */
+  readonly walkWidth: number;
+  /**
+   * Overall width across the two closed strings, metres — **measured off the
+   * built asset**, outline and facet crests included, because that is the
+   * number a room needs to clear and a claimed one is only a claim.
+   */
+  readonly width: number;
+  /** @see STRAIGHT_RUN */
+  readonly run: number;
+  /** @see STRAIGHT_GOING */
+  readonly going: number;
+  /** {@link STRAIGHT_RISE} — landing to the true level. */
+  readonly rise: number;
+  /** @see STRAIGHT_TREADS */
+  readonly treads: number;
+  /** @see STAIR_RISER */
+  readonly riser: number;
+  /** @see STAIR_RAIL_HEIGHT */
+  readonly railHeight: number;
+  /**
+   * The walking height of tread `index` (0-based) **above the landing**, in
+   * metres. `treadTop(treads - 1) === rise` exactly; add the landing's own
+   * height for a world figure.
+   */
+  treadTop(index: number): number;
+  /**
+   * How far along the run tread `index`'s **leading edge** sits, in metres from
+   * the origin. `treadFront(0)` is 0 — the bottom riser, which the origin is
+   * on — and `treadFront(treads)` is {@link STRAIGHT_RUN}. Ask this rather than
+   * multiplying by the going, so the walk surfaces and the geometry are the
+   * same arithmetic done once.
+   */
+  treadFront(index: number): number;
+}
+
+const STRAIGHT_PARTS = STAIR_PART_SUFFIXES.map((part) => `stair-straight-${part}`);
+
+/**
+ * **The wide straight flight** that finishes the lobby's staircase: five treads
+ * from the intermediate landing up to the true level, as wide as both curved
+ * flights together, between two closed strings, with a handrail and a row of
+ * balusters down **each** side and a newel at all four corners.
+ *
+ * Jim, 8 August 2026: *"Make the curved stairs reach an intermediate floor that
+ * then turns into a single, wide straight staircase up to the true level."*
+ *
+ * ## Its origin is the centre of its bottom riser, at landing height
+ *
+ * `x = 0` across the flight, `y = 0` on the landing it stands on, `z = 0` at
+ * the face of the first riser. That is the one point a caller has to line up —
+ * the same argument as the curve's centre of curvature — so placing it is
+ *
+ * ```ts
+ * flight.root.position.set(room.originX + centreX, floorY + LANDING_HEIGHT, room.originZ + frontZ);
+ * ```
+ *
+ * with no half-width and no half-run arithmetic to get wrong. It climbs toward
+ * **−Z** (the asset's front, +Z, is the bottom riser you walk at), so an
+ * unrotated flight climbs away from the entrance and toward the gallery, which
+ * is the composition. The bottom newels reach {@link BRIDGE_NEWEL_RADIUS}
+ * behind `y = 0`: a post stands *on* the end of a run, not beyond it.
+ *
+ * ## It stands on the landing, and the landing has to be under all of it
+ *
+ * Its strings stop at `z = 0` — this flight is not solid to the lobby floor the
+ * way the curves are, because what is under it is the landing, not the floor.
+ * The room therefore has to carry the platform back under the whole
+ * {@link STRAIGHT_RUN}, or give the flight a podium of its own. That is the one
+ * thing about it a placing agent can get wrong and not see: the flight would
+ * float, correctly lit, over nothing.
+ *
+ * ## It is the curve's own joinery, run flat
+ *
+ * Same riser, same going, same string section and easing, same handrail
+ * profile, same {@link BRIDGE_RAIL_TILE}-matching baluster pitch. A hand runs
+ * off the landing's balustrade and up this without meeting a join, and a stride
+ * that worked on the curve works here. `hotel_build.py` asserts the flight is an
+ * exact mirror image **of itself** about its own centre line
+ * (`assert_straight_symmetric`), which is what catches a rail built down one
+ * side only — the defect that matters most here and the one a render from any
+ * single angle hides best.
+ */
+export function createStraightStaircase(): StraightStaircaseHandle {
+  const { root } = assemble('hotel.straightStaircase', STRAIGHT_PARTS);
+  let half = 0;
+  visiblePoints(root, (point) => {
+    if (Math.abs(point.x) > half) half = Math.abs(point.x);
+  });
+  return {
+    root,
+    height: measuredHeight(root),
+    walkWidth: STRAIGHT_WALK_WIDTH,
+    width: half * 2,
+    run: STRAIGHT_RUN,
+    going: STRAIGHT_GOING,
+    rise: STRAIGHT_RISE,
+    treads: STRAIGHT_TREADS,
+    riser: STAIR_RISER,
+    railHeight: STAIR_RAIL_HEIGHT,
+    treadTop: (index: number) => STAIR_RISER * (index + 1),
+    treadFront: (index: number) => STRAIGHT_GOING * index,
     dispose: () => disposeTree(root),
   };
 }
@@ -1249,6 +1481,89 @@ export function createBridgeNewel(): BridgeNewelHandle {
     root,
     height: measuredHeight(root),
     radius: BRIDGE_NEWEL_RADIUS,
+    dispose: () => disposeTree(root),
+  };
+}
+
+/**
+ * How far the nosing laps back over the floor it finishes, metres.
+ *
+ * Place it with its origin **on the edge**: at the line where the platform's
+ * top face meets its front face. It laps this far inboard and hangs over the
+ * face in front.
+ */
+export const LANDING_NOSE_BITE = 0.06;
+
+/**
+ * How far the nosing's top stands above the floor's own top face, metres.
+ *
+ * 8 mm, and it is not a mistake. A moulding whose top is *coplanar* with the
+ * slab it caps gives the depth buffer two faces in one plane over the whole
+ * lapped band, which is what z-fighting is; standing it proud buries the slab's
+ * own top face inside solid geometry instead. It is the stair string's
+ * bite-and-upstand trick at a tenth of the size — invisible from the game's
+ * camera, unmistakable to a depth test — and the walk surface is registered by
+ * code, so nothing steps on it.
+ */
+export const LANDING_NOSE_PROUD = 0.008;
+
+/** How far it overhangs the face below, metres — the shadow line. */
+export const LANDING_NOSE_REACH = 0.062;
+
+/**
+ * How far down the face it hangs, metres.
+ *
+ * Deliberately shallower than any platform this park builds: the moulding
+ * finishes the *edge* and the face below it stays the room's own colour, so
+ * nothing here has to agree with a slab thickness chosen in `Hotel.ts`.
+ */
+export const LANDING_NOSE_DROP = 0.15;
+
+export interface LandingNosingHandle extends AssetHandle {
+  /** Tile at exactly this pitch — {@link BRIDGE_RAIL_TILE}. */
+  readonly tile: number;
+  /** @see LANDING_NOSE_BITE */
+  readonly bite: number;
+  /** @see LANDING_NOSE_REACH */
+  readonly reach: number;
+}
+
+/**
+ * **The moulding that finishes the edge of a raised floor** — the intermediate
+ * landing, and the gallery deck if it wants one. One tile, 1.02 m long, laid
+ * along the edge at the balustrade's own pitch.
+ *
+ * ## Why it exists
+ *
+ * A landing is a *slab*, and a slab is what the room builds. From the lobby
+ * floor a child looks straight at its front face, and nine metres of flat
+ * colour with a balustrade standing on top of it is the one thing in this
+ * composition that would still read as programmer-art. This is the thin
+ * bullnose lip that says where a floor stops: it is deliberately **not** a
+ * second plinth, because the balustrade already brings a moulded kerb and two
+ * mouldings side by side is a wedding cake.
+ *
+ * ## Placing it
+ *
+ * Origin **on the edge line** — where the platform's top face meets its front
+ * face — centred along its length, with the overhang toward `+Z` (the face you
+ * look over, the same convention {@link createBridgeRailing} uses; a run along
+ * Z is the same tile at `root.rotation.y = Math.PI / 2`). Tile it exactly like
+ * the balustrade: `x0 + (i + 0.5) * BRIDGE_RAIL_TILE`, which also means one
+ * loop can lay the nosing and the rail together and they can never fall out of
+ * step with each other.
+ *
+ * The balustrade then stands on the floor **behind** it — the two do not
+ * interlock, and the nosing does not move where the plinth goes.
+ */
+export function createLandingNosing(): LandingNosingHandle {
+  const { root } = assemble('hotel.landingNosing', ['landing-nose']);
+  return {
+    root,
+    height: measuredHeight(root),
+    tile: BRIDGE_RAIL_TILE,
+    bite: LANDING_NOSE_BITE,
+    reach: LANDING_NOSE_REACH,
     dispose: () => disposeTree(root),
   };
 }

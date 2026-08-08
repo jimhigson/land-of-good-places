@@ -1994,27 +1994,91 @@ def build_gameboy(coll: bpy.types.Collection) -> float:
 # that was a modelling *style* problem: it was ten boxes.
 #
 # What replaces it is one continuous sweep. Everything below is a function of a
-# single parameter `u`, measured in **treads** (0 at the bottom riser, 10 at the
-# deck), which is what makes the flight even by construction rather than by
-# ten literals agreeing: constant riser, constant tread depth, a soffit and two
-# string top edges that are all straight rakes in (u, height), and a handrail
-# that is one more of those.
+# single parameter `u`, measured in **treads** (0 at the bottom riser, `treads`
+# at the top of that flight), which is what makes a flight even by construction
+# rather than by a column of literals agreeing: constant riser, constant tread
+# depth, a soffit and two string top edges that are all straight rakes in
+# (u, height), and a handrail that is one more of those.
+#
+# ## The imperial composition — Jim, 8 August 2026, on the twin-sweep renders
+#
+# *"Make the curved stairs reach an intermediate floor that then turns into a
+# single, wide straight staircase up to the true level."*
+#
+# So the lobby's stair is now **three** flights: two mirrored curves from the
+# floor to an intermediate landing at :data:`LANDING_HEIGHT`, and one wide
+# straight flight from that landing to the true level at :data:`STAIR_RISE`.
+# The riser never changes — :data:`STAIR_RISER` is half the game's
+# `BUILDING_STEP_UP`, which is the whole reason every tread is walkable — so
+# each half of the height simply buys five treads.
+#
+# **The tread depth is the invariant, and the sweep is what gave way.** Halving
+# a flight's rise halves its tread count, and five treads spread over the old
+# 90° arc would be 1.04 m deep at mid radius — a 17° pitch, which is a ramp with
+# occasional steps rather than a stair, and *every* constant below (the waist,
+# the nosing chamfer, the string's easing, the baluster pitch) is tuned to the
+# 32° rake Jim approved. So the arc halves with the rise, to 45°, and the going
+# at mid radius comes out at exactly the 0.518 m it has always been. It is the
+# same staircase, half as long.
 
 STAIR_INNER_R = 2.40
 STAIR_OUTER_R = 4.20
-STAIR_SWEEP_ANGLE = math.pi / 2
-STAIR_RISE = 3.20
-STAIR_TREADS = 10
-"""The arc. **`src/world/hotel/layout.ts` owns these five numbers, not this
-file** — `LOBBY.mezzanine.stair` and `LOBBY_MEZZANINE_Y`. The game derives its
-walkable `ArcTread` surfaces and the stair's two flank colliders from them, so
-an asset built to a different arc is a staircase a child falls through.
+STAIR_MID_R = (STAIR_INNER_R + STAIR_OUTER_R) * 0.5
+STAIR_SWEEP_ANGLE = math.pi / 4
+"""The arc. **`src/world/hotel/layout.ts` owns these numbers, not this file** —
+`LOBBY.mezzanine.stair` and `LOBBY_MEZZANINE_Y`. The game derives its walkable
+`ArcTread` surfaces and the stair's two flank colliders from them, so an asset
+built to a different arc is a staircase a child falls through.
 `src/art/models/hotelAssets.ts` re-exports them as `STAIR_*` for the placing
 code to read back, which keeps it at one owner and two readers rather than
-three hand-kept copies (CLAUDE.md, "two definitions of one thing")."""
+three hand-kept copies (CLAUDE.md, "two definitions of one thing").
 
-STAIR_RISER = STAIR_RISE / STAIR_TREADS
-assert abs(STAIR_RISER - 0.32) < 1e-9, "layout.ts promises a 0.32 m riser; the arc has moved"
+**The 8 August composition moves two of them**: the sweep from 90° to 45° and
+the tread count from ten to five, because a curve now climbs only as far as the
+landing. `layout.ts` has to be brought to these numbers by the agent that
+rebuilds the room, and until it is, the game builds walk surfaces for a flight
+that is no longer there — which `npm run check:hotel` says out loud."""
+
+STAIR_RISE = 3.20
+"""Floor to the **true level** — `layout.ts`'s `LOBBY_MEZZANINE_Y`, the height
+of the gallery deck. No flight climbs all of it any more; the composition does,
+in two halves that meet on the landing."""
+
+STAIR_RISER = 0.32
+"""Every riser in the composition, and now the **owner** of both tread counts.
+
+Half the game's `BUILDING_STEP_UP`, which is what makes a tread walkable up
+*and* back down (`Hotel.buildMezzanine`'s slice comment). It is a literal here
+rather than `rise / treads` because it is the constraint: the heights are what
+give way to it, not the other way round."""
+
+LANDING_HEIGHT = 1.60
+"""The intermediate floor the two curves reach, and the straight flight leaves.
+
+Half of :data:`STAIR_RISE`, so the composition splits evenly — five treads of
+curve, five of straight — and so the landing reads as a proper mid-level rather
+than as a wide step near the top or the bottom."""
+
+STRAIGHT_RISE = STAIR_RISE - LANDING_HEIGHT
+"""What the straight flight has left to climb.
+
+**Derived, and that is the point.** "The curve reaches the landing and the
+straight flight finishes the job" is *one* relationship, and writing it as one
+subtraction is the only way it cannot come apart: a second literal here would be
+a promise that `LANDING_HEIGHT + 1.6 == STAIR_RISE`, kept by hand, which is
+CLAUDE.md's most reliable bug in this repo. :func:`assert_flights_meet` then
+measures the same relationship off the two emitted meshes, because a derivation
+proves the arithmetic and only a measurement proves the geometry."""
+
+STAIR_TREADS = round(LANDING_HEIGHT / STAIR_RISER)
+STRAIGHT_TREADS = round(STRAIGHT_RISE / STAIR_RISER)
+assert abs(STAIR_TREADS * STAIR_RISER - LANDING_HEIGHT) < 1e-9, (
+    f"the landing at {LANDING_HEIGHT} m is not a whole number of {STAIR_RISER} m risers — "
+    "a curve would arrive at it over a part-step"
+)
+assert abs(STRAIGHT_TREADS * STAIR_RISER - STRAIGHT_RISE) < 1e-9, (
+    f"the straight flight's {STRAIGHT_RISE} m is not a whole number of {STAIR_RISER} m risers"
+)
 
 # The flight's own timber, none of which anything outside this file needs.
 STAIR_NOSE_DROP = 0.045
@@ -2067,11 +2131,36 @@ STAIR_RAIL_H = 0.86
 """Handrail centre-line above the nosing line — the same 0.86 m
 `Hotel.dressMezzanine` already puts the gallery's own rail at, so the two meet
 where the stair lands instead of stepping."""
-STAIR_BALUSTERS = 13
+BALUSTER_PITCH = 0.51
+"""Distance between two balusters, measured along the run they stand on.
+
+**The owner of the whole composition's rhythm.** The stair's balusters, the
+straight flight's and the bridge balustrade's two-per-tile (`BRIDGE_RAIL_TILE`
+is `BALUSTER_PITCH` × `BRIDGE_RAIL_BALUSTERS`) are all this one number, because
+a rail that changes rhythm where two runs meet is two railings. It used to be
+derived the other way round — 13 balusters over a 90° arc *happened* to come out
+at 0.514 m and the tile was cut to match — which is fine until the arc moves,
+which is exactly what the 8 August composition did to it."""
 
 STAIR_PART_SUFFIXES = ("tread", "stringer", "rail", "baluster", "newel")
-"""The five nodes a flight is made of. Named once so the mirror check, the
-closed-solid check and `hotelAssets.ts`'s part list cannot drift apart."""
+"""The five nodes a flight is made of — curved or straight. Named once so the
+mirror check, the closed-solid check and `hotelAssets.ts`'s part list cannot
+drift apart."""
+
+STAIR_STRING_FACET_PITCH = 0.572
+"""How long one facet of a string's exposed face is, in metres along the run.
+
+The sample count is derived from this rather than typed per flight, so the
+crystal facets are the same size on a 3.4 m curve and on a 2.6 m straight run.
+0.572 m is what the shipped 90° flight had (its outer string's 6.86 m of arc,
+sampled twelve times), kept so nothing about the approved look moves."""
+
+STAIR_RAIL_SAMPLE_PITCH = 0.224
+"""…and the same idea for the smooth mouldings, which are sampled finely enough
+that the eye reads a curve rather than a polygon: 0.224 m is the shipped
+flight's handrail spacing (30 samples over 6.71 m of arc). A 7.5° segment at
+this radius bulges 9 mm off the true curve, which is under the outline's own
+thickness."""
 
 STAIR_OUTER_STRING = (
     STAIR_OUTER_R - STAIR_STRING_BITE,
@@ -2141,6 +2230,34 @@ def newel_rings(ground: float, cap: float):
 NEWEL_GEM = (6, 0.092, 0.13, 0.10)
 """`gem()`'s arguments for a newel's finial, less its spin. 0.23 m tall."""
 
+NEWEL_REACH = 0.134 + 0.090
+"""A newel's widest radius plus a baluster's, in metres — how far apart the two
+have to be before they stop being one lump of geometry. Used to decide how many
+balusters a run holds; see :func:`baluster_fractions`."""
+
+
+def baluster_fractions(length: float):
+    """Where the balusters go along a run of `length` metres, as fractions 0…1.
+
+    **Fixed pitch, centred, with whatever is left over shared between the two
+    ends** — never `length / (count - 1)`, which is how a short flight and a
+    long one end up with two different rhythms and a join you can see. The count
+    is the most balusters that still leave each end clear of its newel.
+
+    Returned as fractions rather than metres because a curved flight measures
+    its run in *treads* and a straight one in metres, and this is the same
+    decision for both.
+    """
+    usable = length - 2.0 * NEWEL_REACH
+    gaps = max(1, int(math.floor(usable / BALUSTER_PITCH + 1e-9)))
+    span = gaps * BALUSTER_PITCH
+    margin = (length - span) * 0.5
+    assert margin >= NEWEL_REACH - 1e-9, (
+        f"a {length:.3f} m run cannot hold {gaps + 1} balusters at {BALUSTER_PITCH} m "
+        f"and still clear its newels: {margin:.3f} m < {NEWEL_REACH:.3f} m"
+    )
+    return [(margin + i * BALUSTER_PITCH) / length for i in range(gaps + 1)]
+
 
 STAIR_HANDS = {"right": 1.0, "left": -1.0}
 """The two chiralities, **named for the climber and never for a side of a room**.
@@ -2203,20 +2320,45 @@ def stair_section(points, hand: float):
     return list(points) if hand > 0 else list(reversed(points))
 
 
-def stair_nosing(u: float) -> float:
-    """The pitch line through the front top corner of every tread.
+def nosing_line(u: float, rise: float) -> float:
+    """The pitch line through the front top corner of every tread of a flight.
 
-    Clamped at the deck, so over the last tread it goes level: the handrail and
-    both strings then arrive at the gallery flat rather than continuing to climb
-    past it, which is what a flight meeting a landing does. The clamp is a
-    **smooth** minimum (`STAIR_STRING_EASE`) so that meeting is a curve rather
-    than an elbow — every line that follows this one inherits the easing for
-    free, which is what keeps rail, coping and both strings parallel through it.
+    Clamped at `rise` — the height that flight lands on — so over its last tread
+    it goes level: the handrail and both strings then arrive flat rather than
+    continuing to climb past it, which is what a flight meeting a landing does.
+    The clamp is a **smooth** minimum (`STAIR_STRING_EASE`) so that meeting is a
+    curve rather than an elbow — every line that follows this one inherits the
+    easing for free, which is what keeps rail, coping and both strings parallel
+    through it.
+
+    `rise` is an argument because there are two flights with two different tops
+    and one shape: the curve eases level on the landing, the straight flight on
+    the deck. (They are the same 1.6 m today, which is a coincidence of the
+    landing sitting at half height — write the argument, not the number.)
     """
     rake = STAIR_RISER * (u + 1.0)
     k = STAIR_STRING_EASE
-    h = max(0.0, k - abs(rake - STAIR_RISE)) / k
-    return min(rake, STAIR_RISE) - h * h * k * 0.25
+    h = max(0.0, k - abs(rake - rise)) / k
+    return min(rake, rise) - h * h * k * 0.25
+
+
+def ease_breaks(treads: int):
+    """The `u` values a sample list must contain for :func:`nosing_line`'s ease.
+
+    The ease bites where `|STAIR_RISER · (u + 1) − rise| < STAIR_STRING_EASE`,
+    which — since a flight's rise is `STAIR_RISER · treads` — is the tread
+    either side of `u = treads − 1`. Derived rather than written out, because
+    these were three literals (8.5, 9.0, 9.5) that silently stopped bracketing
+    anything the moment the flight got shorter, and a loft that misses the
+    corner sags the rail there with nothing to say it has.
+    """
+    k = STAIR_STRING_EASE / STAIR_RISER
+    return (treads - 1.0 - k, treads - 1.0, treads - 1.0 + k)
+
+
+def stair_nosing(u: float) -> float:
+    """:func:`nosing_line` for a curved flight — it lands on the landing."""
+    return nosing_line(u, LANDING_HEIGHT)
 
 
 def stair_soffit(u: float) -> float:
@@ -2252,17 +2394,30 @@ def stair_rail_line(u: float) -> float:
     return stair_nosing(u) + STAIR_RAIL_H
 
 
-def stair_samples(count: int, *breaks: float):
-    """`count` even samples along the sweep, plus every `u` where a rake kinks.
+def tread_samples(treads: int, count: int, *breaks: float):
+    """`count` even samples along a flight of `treads`, plus every `u` where a
+    rake kinks.
 
     Sampling a straight-in-(u, h) line only needs enough points for the *arc* to
     read round — but a sample must land exactly on each kink (where a clamp
     bites), or the loft cuts the corner and the rail sags there."""
     out: list[float] = []
-    for u in sorted([STAIR_TREADS * i / count for i in range(count + 1)] + list(breaks)):
+    for u in sorted([treads * i / count for i in range(count + 1)] + list(breaks)):
         if not out or u - out[-1] > 1e-6:
             out.append(u)
     return out
+
+
+def stair_samples(count: int, *breaks: float):
+    """:func:`tread_samples` for a curved flight."""
+    return tread_samples(STAIR_TREADS, count, *breaks)
+
+
+def arc_samples(pitch: float, radius: float) -> int:
+    """How many even samples an arc of `radius` wants at one sample per `pitch`.
+
+    At least two, so a flight can never degenerate into a single ring."""
+    return max(2, round(abs(STAIR_SWEEP_ANGLE) * radius / pitch))
 
 
 def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
@@ -2319,7 +2474,9 @@ def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
     # landing, or the loft cuts that corner and the string's top edge sags
     # away from the handrail running parallel to it.
     strings = Part(f"{tag}-stringer")
-    string_us = stair_samples(12, 8.5, 9.0, 9.5)
+    string_us = stair_samples(
+        arc_samples(STAIR_STRING_FACET_PITCH, STAIR_OUTER_STRING[1]), *ease_breaks(STAIR_TREADS)
+    )
     chamfer = STAIR_STRING_CHAMFER
     # `face` says which of the two radii is the one nobody's shin touches, and
     # is therefore the one free to facet: the outer string shows its outside,
@@ -2380,7 +2537,10 @@ def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
                     ],
                     hand,
                 )
-                for u in stair_samples(30, 8.5, 9.0, 9.5)
+                for u in stair_samples(
+                    arc_samples(STAIR_RAIL_SAMPLE_PITCH, STAIR_RAIL_R),
+                    *ease_breaks(STAIR_TREADS),
+                )
             ]
         )
     )
@@ -2398,21 +2558,25 @@ def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
                     ],
                     hand,
                 )
-                for u in stair_samples(24, 8.5, 9.0, 9.5)
+                for u in stair_samples(
+                    arc_samples(STAIR_RAIL_SAMPLE_PITCH, STAIR_COPING_R),
+                    *ease_breaks(STAIR_TREADS),
+                )
             ]
         )
     )
     rail.emit(coll)
 
     # --- balusters ------------------------------------------------------------
-    # Evenly spaced in `u`, which on a curve is what the eye reads as even:
-    # thirteen of them at 0.51 m centres along the outer radius, against the
-    # 0.62 m `dressMezzanine` uses on the gallery's own rail. Plumb, not radial
-    # — a real curved balustrade's balusters are vertical, and the slight fan
-    # they make in plan is the whole charm of one.
+    # At `BALUSTER_PITCH` measured along the rail's own arc, which on a curve is
+    # what the eye reads as even — the same 0.51 m centres as the bridge
+    # balustrade's tile, against the 0.62 m `dressMezzanine` uses on the
+    # gallery's own rail. Plumb, not radial: a real curved balustrade's
+    # balusters are vertical, and the slight fan they make in plan is the whole
+    # charm of one.
     balusters = Part(f"{tag}-baluster")
-    for k in range(STAIR_BALUSTERS):
-        u = 0.40 + (STAIR_TREADS - 0.80) * k / (STAIR_BALUSTERS - 1)
+    for fraction in baluster_fractions(abs(STAIR_SWEEP_ANGLE) * STAIR_RAIL_R):
+        u = STAIR_TREADS * fraction
         cx, cy, _ = point(u, STAIR_RAIL_R, 0.0)
         spin = math.atan2(cy, cx)
         foot = stair_string_top(u) - 0.04
@@ -2429,11 +2593,13 @@ def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
     balusters.emit(coll)
 
     # --- the two newels -------------------------------------------------------
-    # One on the lobby floor where the flight starts, one on the deck where it
-    # lands, each capped with the same six-sided gem the tower is grown from —
-    # the cheapest way to say "this staircase belongs to that building".
+    # One on the lobby floor where the flight starts, one on the **landing**
+    # where it finishes, each capped with the same six-sided gem the tower is
+    # grown from — the cheapest way to say "this staircase belongs to that
+    # building". The top one is also what the landing's balustrade runs into,
+    # post to post, where it turns the corner beside the flight.
     newels = Part(f"{tag}-newel")
-    for u, ground in ((0.0, 0.0), (float(STAIR_TREADS), STAIR_RISE)):
+    for u, ground in ((0.0, 0.0), (float(STAIR_TREADS), LANDING_HEIGHT)):
         cx, cy, _ = point(u, STAIR_RAIL_R, 0.0)
         spin = math.atan2(cy, cx)
         cap = stair_rail_line(u) + 0.062
@@ -2470,7 +2636,10 @@ def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
         "the walkable flight must span exactly the arc the game puts `ArcTread`s "
         f"over, and spans {min(radii):.4f}..{max(radii):.4f}"
     )
-    assert abs(max(v.co.z for v in flight.vertices) - STAIR_RISE) < 1e-6, "top tread ≠ deck height"
+    assert abs(max(v.co.z for v in flight.vertices) - LANDING_HEIGHT) < 1e-6, (
+        "the top tread of a curve is the landing, and it is at "
+        f"{max(v.co.z for v in flight.vertices):.4f} m rather than {LANDING_HEIGHT} m"
+    )
     # …and both strings have to house those tread ends at every point along the
     # arc, top and bottom, or the flight's bare side face shows through the
     # masonry that is meant to be hiding it.
@@ -2539,6 +2708,318 @@ def assert_stairs_mirror() -> None:
 
 
 # =============================================================================
+# 14b. THE WIDE STRAIGHT FLIGHT — landing to the true level, in one span
+# =============================================================================
+#
+# The half of the composition Jim asked for on 8 August: the two curves gather
+# on the landing and **one** flight, as wide as both of them together, finishes
+# the climb. Everything about it is the curved flight run flat — same riser,
+# same going, same strings, same handrail and coping profiles, same baluster
+# pitch, same easing where it lands — because two flights a child walks in one
+# go must be one staircase, not two that resemble each other.
+#
+# It runs along **+y**, which is the game's **−Z**: you approach its bottom
+# riser from the entrance side (the game's +Z, this asset's front per
+# ART_DIRECTION §7) and climb away from the camera, deeper into the room, which
+# is where the gallery is.
+
+STRAIGHT_GOING = STAIR_MID_R * abs(STAIR_SWEEP_ANGLE) / STAIR_TREADS
+"""Tread depth, metres — **the curve's own going, at its mid radius**.
+
+Derived, not chosen: one pitch through the whole composition means a child's
+stride does not change at the landing, and it means the straight flight's rake,
+its soffit, its string easing and its handrail all come out at the 32° the
+curve was tuned to. Type a number here instead and the two halves of one
+staircase are free to drift apart."""
+
+STRAIGHT_RUN = STRAIGHT_GOING * STRAIGHT_TREADS
+"""How far the flight travels in plan, metres. What the room has to find for it
+between the landing's back edge and the gallery."""
+
+STRAIGHT_WALK_W = 2.0 * (STAIR_OUTER_R - STAIR_INNER_R)
+"""The walking width between the two strings, metres — **both curved flights
+gathered into one**, which is what makes it read as the grand one. Two 1.8 m
+flights arrive and 3.6 m leaves."""
+
+STRAIGHT_HALF_W = STRAIGHT_WALK_W * 0.5
+
+STRAIGHT_STRING = (
+    STRAIGHT_HALF_W - STAIR_STRING_BITE,
+    STRAIGHT_HALF_W - STAIR_STRING_BITE + STAIR_STRING_T,
+)
+"""The closed string on the +x side, as (inner face, outer face) — the curve's
+:data:`STAIR_OUTER_STRING` unrolled. The −x side is its mirror."""
+
+STRAIGHT_RAIL_X = sum(STRAIGHT_STRING) * 0.5
+"""Handrail centre-line, |x| in metres: over the middle of its string, exactly
+as the curve's rail sits over the middle of its outer string."""
+
+STRAIGHT_WIDTH = 2.0 * (STRAIGHT_STRING[1] + STAIR_STRING_FACET)
+"""Overall width across the two strings **at the crest of their facets**, metres
+— what the room has to clear. The crest and not the true face, because a
+clearance measured to the average of a faceted wall is a clearance the wall
+sticks out of every other sample."""
+
+
+def straight_nosing(t: float) -> float:
+    """:func:`nosing_line` for the straight flight — it lands on the deck."""
+    return nosing_line(t, STRAIGHT_RISE)
+
+
+def straight_string_top(t: float) -> float:
+    return straight_nosing(t) + STAIR_STRING_UPSTAND
+
+
+def straight_rail_line(t: float) -> float:
+    return straight_nosing(t) + STAIR_RAIL_H
+
+
+def straight_ring(t: float, points, side: float = 1.0):
+    """A cross-section at `t` treads along the run, from (across, up) offsets.
+
+    `across` is measured **outward**, so one list of points describes both
+    strings and both handrails; `side` reflects it. The reflection reverses the
+    ring for the same reason :func:`stair_section` does — a mirrored ring
+    sweeps inside-out otherwise, and this asset does not rely on
+    `recalc_face_normals` to rescue geometry it could have built right.
+    """
+    y = t * STRAIGHT_GOING
+    ring_ = [(side * across, y, up) for across, up in points]
+    return ring_ if side > 0 else list(reversed(ring_))
+
+
+def build_straight_stair(coll: bpy.types.Collection) -> float:
+    """The wide straight flight, from the landing (z = 0) to the true level.
+
+    **Origin: the centre of the bottom riser, at landing height** — x = 0 across
+    the flight, y = 0 at the face of the first riser, z = 0 on the landing it
+    stands on. That is the one point a caller has to line up (the curve's
+    origin is its centre of curvature for exactly the same reason), and it means
+    placing this is `position.set(x, landingY, z)` with no half-width or
+    half-run arithmetic to get wrong. The bottom newels reach 0.134 m back
+    behind y = 0, which is the post standing *on* the end of the run rather than
+    beyond it — the balustrade's own convention.
+    """
+    treads = Part("stair-straight-tread")
+
+    # --- the flight -----------------------------------------------------------
+    # One swept solid, exactly like the curve's: the steps come from where the
+    # rings are put along the run, not from separate objects.
+    profile: list[tuple[float, float]] = []
+    for i in range(STRAIGHT_TREADS):
+        top = STAIR_RISER * (i + 1)
+        lean = 0.0 if i == 0 else STAIR_RISER_LEAN
+        profile.append((i + lean, top - STAIR_NOSE_DROP))
+        profile.append((i + lean + STAIR_NOSE_RUN, top))
+        profile.append((i + 0.55, top))
+        profile.append((i + 1.0, top))
+    treads.add(
+        *sweep_rings(
+            [
+                straight_ring(
+                    t,
+                    [
+                        (-STRAIGHT_HALF_W, stair_soffit(t)),
+                        (STRAIGHT_HALF_W, stair_soffit(t)),
+                        (STRAIGHT_HALF_W, top),
+                        (-STRAIGHT_HALF_W, top),
+                    ],
+                )
+                for t, top in profile
+            ]
+        )
+    )
+    treads.emit(coll)
+
+    # --- the two closed strings ----------------------------------------------
+    string_ts = tread_samples(
+        STRAIGHT_TREADS,
+        max(2, round(STRAIGHT_RUN / STAIR_STRING_FACET_PITCH)),
+        *ease_breaks(STRAIGHT_TREADS),
+    )
+    chamfer = STAIR_STRING_CHAMFER
+    inner, outer = STRAIGHT_STRING
+    strings = Part("stair-straight-stringer")
+    for side in (1.0, -1.0):
+        sections = []
+        for index, t in enumerate(string_ts):
+            push = STAIR_STRING_FACET if index % 2 == 0 else -STAIR_STRING_FACET
+            faceted = outer + push
+            bottom, top = 0.0, straight_string_top(t)
+            waist = top - STAIR_STRING_CAP
+            sections.append(
+                straight_ring(
+                    t,
+                    [
+                        (inner, bottom),
+                        (faceted, bottom),
+                        (faceted, waist),
+                        (outer, waist + STAIR_STRING_FACET),
+                        (outer, top - chamfer),
+                        (outer - chamfer, top),
+                        (inner + chamfer, top),
+                        (inner, top - chamfer),
+                        (inner, waist + STAIR_STRING_FACET),
+                        (inner, waist),
+                    ],
+                    side,
+                )
+            )
+        strings.add(*sweep_rings(sections))
+    strings.emit(coll, smooth=False)
+
+    # --- the handrails, one over each string ---------------------------------
+    # Both sides, because unlike the curve this flight has a drop on both of
+    # them: it stands in the middle of the room with the landing either side of
+    # it, and a rail on one edge only is a rail on the wrong edge for half the
+    # children. The section is the curve's, so a hand runs off the landing's
+    # balustrade and up this without meeting a join.
+    rail = Part("stair-straight-rail")
+    rail_ts = tread_samples(
+        STRAIGHT_TREADS,
+        max(2, round(STRAIGHT_RUN / STAIR_RAIL_SAMPLE_PITCH)),
+        *ease_breaks(STRAIGHT_TREADS),
+    )
+    for side in (1.0, -1.0):
+        rail.add(
+            *sweep_rings(
+                [
+                    straight_ring(
+                        t,
+                        [
+                            (STRAIGHT_RAIL_X + dr, straight_rail_line(t) + dz)
+                            for dr, dz in STAIR_HANDRAIL_SECTION
+                        ],
+                        side,
+                    )
+                    for t in rail_ts
+                ]
+            )
+        )
+    rail.emit(coll)
+
+    # --- balusters ------------------------------------------------------------
+    balusters = Part("stair-straight-baluster")
+    for fraction in baluster_fractions(STRAIGHT_RUN):
+        t = STRAIGHT_TREADS * fraction
+        foot = straight_string_top(t) - 0.04
+        head = straight_rail_line(t) - 0.045
+        for side in (1.0, -1.0):
+            balusters.add(
+                *loft(
+                    [
+                        ([(x, y) for x, y, _ in ring(6, r, 0.0)], z)
+                        for r, z in baluster_rings(foot, head)
+                    ]
+                ),
+                matrix=Matrix.Translation(
+                    (side * STRAIGHT_RAIL_X, t * STRAIGHT_GOING, 0.0)
+                ),
+            )
+    balusters.emit(coll)
+
+    # --- four newels ----------------------------------------------------------
+    # One at each end of each rail: two standing on the landing where the flight
+    # starts and two on the deck where it lands, the same post the curves start
+    # and finish with.
+    newels = Part("stair-straight-newel")
+    for t, ground in ((0.0, 0.0), (float(STRAIGHT_TREADS), STRAIGHT_RISE)):
+        cap = straight_rail_line(t) + 0.062
+        for side in (1.0, -1.0):
+            place = Matrix.Translation((side * STRAIGHT_RAIL_X, t * STRAIGHT_GOING, 0.0))
+            newels.add(
+                *loft(
+                    [
+                        ([(x, y) for x, y, _ in ring(6, r, 0.0)], z)
+                        for r, z in newel_rings(ground, cap)
+                    ]
+                ),
+                matrix=place,
+            )
+            newels.add(*gem(*NEWEL_GEM, 0.0), matrix=place @ Matrix.Translation((0.0, 0.0, cap - 0.012)))
+    newels.emit(coll)
+
+    # --- what a caller is entitled to assume, measured off the meshes ---------
+    flight = bpy.data.objects["stair-straight-tread"].data
+    heights = {round(v.co.z, 4) for v in flight.vertices}
+    for i in range(STRAIGHT_TREADS):
+        top = round(STAIR_RISER * (i + 1), 4)
+        assert top in heights, f"straight tread {i + 1} should top out at {top} m and none does"
+    assert abs(min(v.co.z for v in flight.vertices)) < 1e-6, (
+        "the straight flight stands on the landing, so its lowest vertex is z = 0"
+    )
+    assert abs(max(v.co.z for v in flight.vertices) - STRAIGHT_RISE) < 1e-6, (
+        f"the straight flight tops out at {max(v.co.z for v in flight.vertices):.4f} m "
+        f"and must reach {STRAIGHT_RISE} m above the landing"
+    )
+    lo_y, hi_y = min(v.co.y for v in flight.vertices), max(v.co.y for v in flight.vertices)
+    assert abs(lo_y) < 1e-6 and abs(hi_y - STRAIGHT_RUN) < 1e-6, (
+        f"the walkable flight runs y={lo_y:.4f}..{hi_y:.4f} and must run 0..{STRAIGHT_RUN:.4f}, "
+        "which is the run the room has to find for it"
+    )
+    assert abs(max(abs(v.co.x) for v in flight.vertices) - STRAIGHT_HALF_W) < 1e-6, (
+        "the walkable flight must be exactly STRAIGHT_WALK_W across"
+    )
+    # The strings have to house the tread ends the whole way up, same as the
+    # curve's — and the same check, because it is the same failure.
+    for t in tread_samples(STRAIGHT_TREADS, 120):
+        tread_top = STAIR_RISER * min(STRAIGHT_TREADS, math.floor(t) + 1)
+        assert straight_string_top(t) > tread_top, f"string sinks below its tread at t={t:.3f}"
+    string_mesh = bpy.data.objects["stair-straight-stringer"].data
+    assert abs(max(abs(v.co.x) for v in string_mesh.vertices) - STRAIGHT_WIDTH * 0.5) < 1e-6, (
+        "the strings must reach exactly STRAIGHT_WIDTH across, or the room's clearance is wrong"
+    )
+    return straight_rail_line(float(STRAIGHT_TREADS)) + 0.062 + 0.23
+
+
+def assert_straight_symmetric() -> None:
+    """The straight flight must be an exact mirror image **of itself** in x = 0.
+
+    Its whole reason for being is that two curves arrive and one flight leaves,
+    so anything one-sided about it — a rail built on one edge, a baluster row
+    half a pitch out, a string faceted the wrong way round — is the defect that
+    matters most and the one a render taken from any single angle hides best.
+    Measured as vertex sets, like :func:`assert_stairs_mirror`.
+    """
+    for part in STAIR_PART_SUFFIXES:
+        mesh = bpy.data.objects[f"stair-straight-{part}"].data
+        original = sorted((round(v.co.x, 5), round(v.co.y, 5), round(v.co.z, 5)) for v in mesh.vertices)
+        flipped = sorted((round(-v.co.x, 5), round(v.co.y, 5), round(v.co.z, 5)) for v in mesh.vertices)
+        assert flipped == original, (
+            f"stair-straight-{part} is not symmetric about its own centre line: "
+            f"{sum(1 for a, b in zip(flipped, original) if a != b)} vertices differ"
+        )
+
+
+def assert_flights_meet() -> None:
+    """The curve stops exactly where the straight flight starts, and together
+    they climb exactly :data:`STAIR_RISE`.
+
+    **The composition's one relationship, measured off the geometry** rather
+    than off the constants that made it. `STRAIGHT_RISE` being defined as
+    `STAIR_RISE − LANDING_HEIGHT` makes the arithmetic impossible to get wrong;
+    it says nothing at all about whether the two meshes actually stack up, which
+    is what a child walks. Reading both tops off the emitted vertices is the
+    only version of this check that could ever fail.
+    """
+    curve_top = max(v.co.z for v in bpy.data.objects["stair-right-tread"].data.vertices)
+    straight = bpy.data.objects["stair-straight-tread"].data
+    straight_foot = min(v.co.z for v in straight.vertices)
+    straight_top = max(v.co.z for v in straight.vertices)
+    assert abs(curve_top - LANDING_HEIGHT) < 1e-5, (
+        f"the curve tops out at {curve_top:.4f} m, not on the {LANDING_HEIGHT} m landing"
+    )
+    assert abs(straight_foot) < 1e-5, (
+        f"the straight flight's foot is at {straight_foot:.4f} m in its own frame, so it does "
+        "not stand on the landing its origin claims to sit on"
+    )
+    assert abs(curve_top + straight_top - STAIR_RISE) < 1e-5, (
+        f"the two flights climb {curve_top:.4f} + {straight_top:.4f} = "
+        f"{curve_top + straight_top:.4f} m between them, and the true level is {STAIR_RISE} m"
+    )
+
+
+# =============================================================================
 # 15. BRIDGE BALUSTRADE — one repeatable segment, and the post that ends a run
 # =============================================================================
 #
@@ -2567,13 +3048,20 @@ def assert_stairs_mirror() -> None:
 # the direction ART_DIRECTION §7 says an asset faces. A run along the game's Z
 # is the same tile at `rotation.y = π/2`.
 
-BRIDGE_RAIL_TILE = 1.02
-"""Length of one segment, metres. Two balusters at **0.51 m centres**, which is
-the staircase's own spacing measured along its outer radius — not the 0.62 m
-`Hotel.dressMezzanine` uses, because a bridge that a sweeping stair lands on is
-the same balustrade continuing, and a rail that changes rhythm at the join is
-two railings. It is also the denser of the two, which is what "ornate" means
-here at no cost but a spindle.
+BRIDGE_RAIL_BALUSTERS = 2
+
+BRIDGE_RAIL_TILE = BALUSTER_PITCH * BRIDGE_RAIL_BALUSTERS
+"""Length of one segment, metres — two balusters at :data:`BALUSTER_PITCH`.
+
+1.02 m, and **derived** so that it stays the staircase's own spacing whatever
+happens to the arc: it is not the 0.62 m `Hotel.dressMezzanine` uses, because a
+bridge that a sweeping stair lands on is the same balustrade continuing, and a
+rail that changes rhythm at the join is two railings. It is also the denser of
+the two, which is what "ornate" means here at no cost but a spindle. (Until
+8 August the arrow pointed the other way — the stair's thirteen balusters over a
+90° arc happened to land on 0.514 m and this literal was cut to match. Halving
+the arc would have quietly broken that agreement, which is why the pitch is now
+the owner and both readers ask it.)
 
 Tiles butt end to end: place them at `x0 + (i + 0.5) * BRIDGE_RAIL_TILE` and the
 balusters stay evenly spaced straight across every join."""
@@ -2591,6 +3079,11 @@ z = 0 exactly. The profile's own bottom offset, and no more than that."""
 
 BRIDGE_PLINTH_TOP = BRIDGE_PLINTH_BASE + 0.085
 """…and where its top lands: 0.115 m, which is what the balusters stand on."""
+
+assert abs(BRIDGE_RAIL_TILE - 1.02) < 1e-9, (
+    "the balustrade tile has moved off 1.02 m — every note about tiling a run, and "
+    "`hotelAssets.ts`'s BRIDGE_RAIL_TILE, is written to that number"
+)
 
 
 def straight_sweep(section, x0: float, x1: float, height: float):
@@ -2688,6 +3181,89 @@ def build_bridge_newel(coll: bpy.types.Collection) -> float:
     newel.emit(coll)
     mesh = bpy.data.objects["bridge-newel"].data
     return max(v.co.z for v in mesh.vertices)
+
+
+# -----------------------------------------------------------------------------
+# 15b. LANDING NOSING — the moulding that finishes the edge of a raised floor
+# -----------------------------------------------------------------------------
+#
+# The landing is a *slab*, and a slab is what the room builds: `Hotel` already
+# draws the gallery deck as a box with a coloured front face, and the new
+# intermediate landing will be one too. From the lobby floor you look straight
+# at that face, and a 9 m band of flat colour with a balustrade standing on top
+# of it is the one thing in this composition that would still read as
+# programmer-art.
+#
+# So: a nosing. One tile at the balustrade's own pitch, laid along the edge, and
+# the slab keeps its own colour behind it. It is deliberately **not** another
+# plinth — the balustrade already brings a moulded kerb of its own and two
+# mouldings side by side is a wedding cake — it is the thin bullnose lip that
+# tells you where a floor stops.
+#
+# **How it avoids z-fighting**, which is the only hard part: it laps
+# `LANDING_NOSE_BITE` *into* the slab and stands `LANDING_NOSE_PROUD` above it,
+# so the slab's own top face over the lapped band is buried inside solid
+# geometry rather than coplanar with it. That is the stair string's trick
+# (`STAIR_STRING_BITE` / `STAIR_STRING_UPSTAND`) at a tenth of the size: 8 mm is
+# invisible from the game's camera and unmistakable to a depth buffer.
+
+LANDING_NOSE_BITE = 0.06
+"""How far the moulding laps back over the slab it finishes, metres."""
+
+LANDING_NOSE_PROUD = 0.008
+"""How far its top stands above the slab's own top face, metres. Small enough to
+be invisible, large enough that no depth buffer has to choose."""
+
+LANDING_NOSE_REACH = 0.062
+"""How far it overhangs the face below, metres — the shadow line."""
+
+LANDING_NOSE_DROP = 0.150
+"""How far down the face it hangs, metres. Deliberately shallower than any slab
+this park builds: the moulding finishes the *edge*, and the face below it stays
+the room's own colour, so nothing here has to agree with a thickness chosen in
+`Hotel.ts`."""
+
+LANDING_NOSE_SECTION = (
+    (LANDING_NOSE_BITE, LANDING_NOSE_PROUD),
+    (-LANDING_NOSE_REACH, LANDING_NOSE_PROUD),
+    (-LANDING_NOSE_REACH, -0.028),
+    (-0.046, -0.058),
+    (-0.030, -0.086),
+    (-0.030, -LANDING_NOSE_DROP),
+    (LANDING_NOSE_BITE, -LANDING_NOSE_DROP),
+)
+"""The moulding, as (across, up) offsets from the point where the slab's top
+face meets its front face. Positive across is **into** the slab, so the
+overhang is negative — at −y, which is the game's +Z, the same
+face-you-look-over convention the balustrade tile is authored to.
+
+Read from the top: a flat 8 mm-proud top over the lap, out to the lip, then
+down, in, and down again — a bullnose with an undercut under it, which is what
+throws the shadow that says "edge" from twelve metres away."""
+
+
+def build_landing_nose(coll: bpy.types.Collection) -> float:
+    half = BRIDGE_RAIL_TILE * 0.5
+    nose = Part("landing-nose")
+    nose.add(*straight_sweep(LANDING_NOSE_SECTION, -half, half, 0.0))
+    nose.emit(coll)
+
+    mesh = bpy.data.objects["landing-nose"].data
+    lo = min(v.co.x for v in mesh.vertices)
+    hi = max(v.co.x for v in mesh.vertices)
+    assert abs(lo + half) < 1e-6 and abs(hi - half) < 1e-6, (
+        f"landing-nose runs x={lo:.4f}..{hi:.4f} and must run exactly {-half:.4f}..{half:.4f}, "
+        "or a run of them leaves a gap at every join"
+    )
+    assert abs(max(v.co.z for v in mesh.vertices) - LANDING_NOSE_PROUD) < 1e-6, (
+        "the nosing's top must stand exactly LANDING_NOSE_PROUD above the floor it finishes, "
+        "or it is coplanar with the slab and the two z-fight"
+    )
+    assert min(v.co.y for v in mesh.vertices) < 0.0 < max(v.co.y for v in mesh.vertices), (
+        "the nosing must overhang the face (−y) *and* lap back into the slab (+y); one without "
+        "the other is either a floating shelf or a moulding nobody can see"
+    )
+    return LANDING_NOSE_PROUD
 
 
 # =============================================================================
@@ -2874,15 +3450,24 @@ def main() -> None:
             collection(f"hotel-stair-{handedness}"), handedness
         )
     assert_stairs_mirror()
+    heights["stair-straight"] = build_straight_stair(collection("hotel-stair-straight"))
+    assert_straight_symmetric()
+    assert_flights_meet()
     heights["bridgeRail"] = build_bridge_rail(collection("hotel-bridge-rail"))
     heights["bridgeNewel"] = build_bridge_newel(collection("hotel-bridge-newel"))
+    heights["landingNose"] = build_landing_nose(collection("hotel-landing-nose"))
     heights["chandelier"] = build_chandelier(collection("hotel-chandelier"))
     assert_closed(
-        *(f"stair-{hand}-{part}" for hand in STAIR_HANDS for part in STAIR_PART_SUFFIXES),
+        *(
+            f"stair-{flight}-{part}"
+            for flight in (*STAIR_HANDS, "straight")
+            for part in STAIR_PART_SUFFIXES
+        ),
         "bridge-rail-plinth",
         "bridge-rail-baluster",
         "bridge-rail-hand",
         "bridge-newel",
+        "landing-nose",
         "chandelier-frame",
         "chandelier-drop",
     )
