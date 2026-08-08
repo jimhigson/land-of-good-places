@@ -121,6 +121,10 @@ ArcTread slices per tread (wedges, Hotel.ts ~2469).
       x < −400 and zero velocity before teleporting, and wait for the camera
       to settle before projecting tap pixels.
 - [x] npm run build EXIT 0 (full chain incl. check:nav-routes)
-- [ ] test:procgen (running), PR
+- [x] test:procgen: 306 passed (306), 11 files, zero skips (count reconciled
+      against an origin/main baseline run — see scratchpad
+      procgen-main-baseline.log)
+- [x] PR #256 raised. NOT merged — QA gate decides (lane 1). origin/main has
+      not moved since branch (checked post-PR).
 
-Dev server: vite on port 5877, PID 54365 — kill it (kill 54365) when done.
+Dev server on 5877 (PID 54365) has been stopped.
