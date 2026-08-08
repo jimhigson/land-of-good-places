@@ -1,10 +1,13 @@
 import type { Group, Object3D } from 'three';
 import type { CollisionWorld } from '../Collision';
+import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
+import { JUMP_APEX_HEIGHT } from '../../entities/Player';
 import type { HotelRoom } from './layout';
 
 /**
- * **Putting a thing in a hotel room is one call, and that call decides both
- * whether you can walk through it and whether a guest may stand there.**
+ * **Putting a thing in a hotel room is one call, and that call decides
+ * whether you can walk through it, whether a guest may stand there, and
+ * whether a jump can land you on top of it.**
  *
  * Jim, having played it: *"the statues and chairs you can clip through are
  * weird."* The bug behind that was not a missing collider on a chair — it was
@@ -14,17 +17,39 @@ import type { HotelRoom } from './layout';
  * have noticed: the two facts were never the same fact.
  *
  * So every prop in this hotel now goes through {@link HotelProps.place}, which
- * takes **one** footprint and hands it to **two** consumers:
+ * takes **one** footprint and hands it to **three** consumers:
  *
  * 1. the shared {@link CollisionWorld}, so a child meets the statue rather
  *    than walking through it;
- * 2. the guest keep-out list, so nobody strolls into it either.
+ * 2. the guest keep-out list, so nobody strolls into it either;
+ * 3. the shared {@link WalkSurfaces}, so a prop with a flat top a jump can
+ *    reach is somewhere she can *land* — see the next section.
  *
  * They cannot disagree, because there is nothing to disagree *with*: forget to
- * describe a prop's footprint and it is invisible to both, which is a failure
- * a six-year-old finds in one visit rather than one that hides in a table of
- * numbers. This is CLAUDE.md's "one owner; everyone else asks", applied to the
- * thing that file names as the repo's most common bug.
+ * describe a prop's footprint and it is invisible to all three, which is a
+ * failure a six-year-old finds in one visit rather than one that hides in a
+ * table of numbers. This is CLAUDE.md's "one owner; everyone else asks",
+ * applied to the thing that file names as the repo's most common bug.
+ *
+ * ## Solid AND standable — the rule Jim asked for
+ *
+ * Live play, 7 Aug 2026: *"I can't even jump onto a sofa that's much less
+ * tall than my jump — I should be able to jump onto any solid item that's not
+ * too high, here and elsewhere in the game."* The old registration made every
+ * prop an infinitely tall pillar (the `topHeight = Infinity` default), and
+ * the relative height scheme could not have fixed it: a collider's relative
+ * top is compared against clearance above *the sampler's* ground, so a child
+ * already stood on a sofa is at clearance 0 and its own edge would shove her
+ * off — the law that forced the beds to be registered soft.
+ *
+ * So a prop's collider is registered with an **absolute** top
+ * (`Collision.ts`'s `topIsAbsolute`): solid to feet below it, air to feet
+ * above it, and still beneath the feet standing on it. Every {@link PropPlan}
+ * must therefore say how tall its prop really is (`top` — required, so the
+ * pillar bug cannot come back by omission), and anything whose flat top is
+ * within {@link JUMP_APEX_HEIGHT} of its base gets a walkable plate at
+ * exactly that height. A crystal or a hedge opts out with `stand: false` —
+ * its *collider* still has the real top, there is simply no floor up there.
  *
  * ## Two rules the footprints obey
  *
@@ -36,14 +61,12 @@ import type { HotelRoom } from './layout';
  * {@link WALL_HALF_THICKNESS}) so the collider lands exactly on the visual
  * edge rather than a fifth of a metre outside it.
  *
- * **Anything you can stand on is placed soft.** The suite's beds are
- * `WalkSurfaces` platforms — Eleri's "sleep, or go jumpy jumpy!" — and
- * `Collision`'s height rule (`clearsTop`) is fed `Player.hopClearance`, which
- * is height above *the sampler's* ground. A child stood on a mattress is
- * therefore at clearance 0, so a wall round the bed's edge would shove her
- * straight back off it. A prop that is its own floor does not get a second
- * opinion about where its edges are: `solid: false`, and it keeps only its
- * keep-out.
+ * **A prop that is its own floor is placed soft.** The suite's beds are pure
+ * `WalkSurfaces` platforms — Eleri's "sleep, or go jumpy jumpy!" — with
+ * `solid: false` and no collider at all, because a bed is for bouncing across
+ * and even an absolute-top wall at its edge would catch her mid-bounce at the
+ * mattress rim. `solid: false` keeps only the keep-out (and whatever platform
+ * its own dressing code registers).
  */
 
 /**
@@ -58,6 +81,29 @@ import type { HotelRoom } from './layout';
  * footprint is still the visual one.
  */
 const WALL_HALF_THICKNESS = 0.2;
+
+/**
+ * A round prop's standing plate is this fraction of its collider radius, per
+ * side — between the inscribed square (0.71, gaps at the compass points) and
+ * the circumscribed one (1.0, floating corners). Slightly floaty corners on a
+ * table read better than falling off a plate while visibly on the table.
+ */
+const ROUND_PLATE_FRACTION = 0.75;
+
+/** A static walkable plate — a room floor, a mattress top, a sofa seat. */
+export class Plate implements MovingPlatform {
+  constructor(
+    readonly surfaceY: number,
+    private readonly minX: number,
+    private readonly maxX: number,
+    private readonly minZ: number,
+    private readonly maxZ: number,
+  ) {}
+
+  covers(x: number, z: number): boolean {
+    return x >= this.minX && x <= this.maxX && z >= this.minZ && z <= this.maxZ;
+  }
+}
 
 /**
  * Somewhere in a room a strolling guest must not stand, in that room's own
@@ -87,7 +133,7 @@ export interface RoomKeepOut {
 export interface PropPlan {
   readonly x: number;
   readonly z: number;
-  /** Height off the floor, for anything standing on something else. */
+  /** Height off the floor for the *model* — purely visual (a centred mesh). */
   readonly y?: number;
   /** Yaw, radians. The footprint stays axis-aligned — see {@link place}. */
   readonly spin?: number;
@@ -96,6 +142,29 @@ export interface PropPlan {
   /** Rectangular footprint: half-extents before {@link spin}. */
   readonly halfX?: number;
   readonly halfZ?: number;
+  /**
+   * The prop's top, metres above its own base — **required**, because the
+   * default that let a sofa be an infinitely tall pillar is exactly the bug
+   * this file exists to prevent (see the header). For a standable prop this
+   * is the surface her feet occupy (a sofa's seat, not its backrest); for
+   * anything pointy it is the honest overall height, with {@link stand}
+   * false.
+   */
+  readonly top: number;
+  /**
+   * Height of the floor this prop stands on — the mezzanine deck for the
+   * gallery's furniture. Both the collider top and the standing plate are at
+   * `base + top`; the jump-reachability test uses `top` alone, because she
+   * jumps from the same floor the prop stands on.
+   */
+  readonly base?: number;
+  /**
+   * `false` for a prop whose top is real but is not a floor — crystals,
+   * hedges, seaweed, a lamp-topped table. The collider keeps the honest
+   * height; there is simply no plate to land on, so a jump that clears the
+   * top slides off rather than standing in the foliage.
+   */
+  readonly stand?: false;
   /**
    * `false` for anything that is also a floor — see the header. Everything
    * else is solid, because that is the rule Jim asked for.
@@ -111,7 +180,10 @@ export interface PropPlan {
 export class HotelProps {
   private readonly keepOuts: RoomKeepOut[] = [];
 
-  constructor(private readonly collision: CollisionWorld) {}
+  constructor(
+    private readonly collision: CollisionWorld,
+    private readonly surfaces: WalkSurfaces,
+  ) {}
 
   /** The whole keep-out list, once the rooms are dressed. */
   get roomKeepOuts(): readonly RoomKeepOut[] {
@@ -149,9 +221,13 @@ export class HotelProps {
     const worldX = room.originX + plan.x;
     const worldZ = room.originZ + plan.z;
     const solid = plan.solid ?? true;
+    const worldTop = (plan.base ?? 0) + plan.top;
 
     if (plan.radius !== undefined) {
-      if (solid) this.collision.addCircle(worldX, worldZ, plan.radius);
+      if (solid) {
+        this.collision.addCircle(worldX, worldZ, plan.radius, worldTop, false, true);
+        this.standable(plan, worldX, worldZ, plan.radius * ROUND_PLATE_FRACTION, plan.radius * ROUND_PLATE_FRACTION, worldTop);
+      }
       this.keepOuts.push({ room, x: plan.x, z: plan.z, radius: plan.radius });
       return;
     }
@@ -169,9 +245,35 @@ export class HotelProps {
         Math.max(0.05, halfX - WALL_HALF_THICKNESS),
         Math.max(0.05, halfZ - WALL_HALF_THICKNESS),
         WALL_HALF_THICKNESS,
+        worldTop,
+        false,
+        true,
       );
+      this.standable(plan, worldX, worldZ, halfX, halfZ, worldTop);
     }
     this.coverWithDiscs(room, plan.x, plan.z, halfX, halfZ);
+  }
+
+  /**
+   * The standing plate on top of a mountable prop — the third consumer of the
+   * one footprint (see the header). Nothing is added for a prop that opted
+   * out (`stand: false`) or whose top the jump cannot reach from the floor it
+   * shares with her; the threshold is the game's own {@link JUMP_APEX_HEIGHT}
+   * rather than a number invented here.
+   */
+  private standable(
+    plan: PropPlan,
+    worldX: number,
+    worldZ: number,
+    halfX: number,
+    halfZ: number,
+    worldTop: number,
+  ): void {
+    if (plan.stand === false) return;
+    if (plan.top > JUMP_APEX_HEIGHT) return;
+    this.surfaces.addPlatform(
+      new Plate(worldTop, worldX - halfX, worldX + halfX, worldZ - halfZ, worldZ + halfZ),
+    );
   }
 
   /**

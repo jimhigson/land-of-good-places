@@ -69,6 +69,7 @@ import {
   SUITE_BEDSIDE_Z,
   SUITE_BED_SPOTS,
 } from '../src/world/hotel/layout.ts';
+import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { saveFlags } from '../src/state/flags.ts';
@@ -185,6 +186,69 @@ const chairX = BREAKFAST.originX - 7.6 + Math.sin(chairYaw) * 1.45;
 const chairZ = BREAKFAST.originZ + 5.4 + Math.cos(chairYaw) * 1.45;
 if (deflection(chairX, chairZ) < 0.1) {
   problems.push('a breakfast chair is not solid — Jim asked for exactly this one');
+}
+
+// -------------------------------------------- 11. furniture is landable-on
+//
+// Jim, live play, 7 Aug 2026: *"jumping is also very underpowered in the
+// hotel... I can't even jump onto a sofa that's much less tall than my jump —
+// I should be able to jump onto any solid item that's not too high."* Root
+// cause: every prop went through `place.ts` with the default
+// `topHeight = Infinity`, making a 0.5 m sofa an infinitely tall pillar.
+//
+// Three claims per exemplar prop, each asked of the built world:
+//  * solid from the floor (the existing mustBeSolid probes above);
+//  * **yielding to feet on its top** — a probe stood at the prop's own top
+//    height is not pushed, which is what lets her stand there;
+//  * **standable** — `WalkSurfaces.sample` offers a surface on it.
+// Plus a sweep: no circle collider inside any hotel room may be infinitely
+// tall, so the next prop placed cannot regress to a pillar silently.
+//
+// Proven red before trusted green, on the pre-fix build: the sofa-top probe
+// was deflected 1.10 m, the sofa sample said 0.00 m, and the sweep counted
+// 76 infinite pillars.
+function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
+  const probe = new Vector3(worldX, worldY, worldZ);
+  collision.resolve(probe, PLAYER_RADIUS);
+  return Math.hypot(probe.x - worldX, probe.z - worldZ);
+}
+
+const mustBeMountable: readonly [string, number, number, number][] = [
+  ['a lobby sofa', LOBBY.originX + 5.8, LOBBY.originZ + 2.4, SOFA_SEAT_TOP],
+  ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
+  ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4, 0.74],
+  ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
+];
+for (const [what, x, z, top] of mustBeMountable) {
+  const atop = deflectionAt(x, top + 0.05, z);
+  if (atop > 0.01) {
+    problems.push(
+      `${what} pushes a child stood on its own ${top.toFixed(2)} m top ${atop.toFixed(2)} m ` +
+        `sideways — solid and standable are still fighting each other`,
+    );
+  }
+  const surface = world.building.surfaces.sample(x, z, top + 0.5);
+  if (surface < top - 0.05) {
+    problems.push(
+      `${what} has no standing surface: sample says ${surface.toFixed(2)} m where its top is ` +
+        `${top.toFixed(2)} m — she can jump over it but never onto it`,
+    );
+  }
+}
+
+let infinitePillars = 0;
+collision.forEachCircle((x, z, _radius, topHeight) => {
+  const inHotelRoom = ROOMS.some(
+    (room) =>
+      Math.abs(x - room.originX) <= room.halfX + 4 && Math.abs(z - room.originZ) <= room.halfZ + 4,
+  );
+  if (inHotelRoom && !Number.isFinite(topHeight)) infinitePillars += 1;
+});
+if (infinitePillars > 0) {
+  problems.push(
+    `${infinitePillars} hotel prop collider(s) are infinitely tall pillars — every prop must ` +
+      `register its real top so a jump can carry a child onto it (world/hotel/place.ts)`,
+  );
 }
 
 // Read off `layout.ts` rather than copied: these three pairs used to live here

@@ -32,6 +32,31 @@ import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
  * anything the building registers — auto-hop must never fire for something a
  * child did not choose to jump into, which the fountain's water and a stair's
  * side rail both are.
+ *
+ * ## `topIsAbsolute` — a top you can stand on, not just jump over
+ *
+ * The relative scheme above compares a collider's `topHeight` against the
+ * mover's clearance above *the sampler's* ground, which makes it impossible
+ * for one collider to be both solid and standable: a child stood on top of a
+ * sofa is at clearance 0, so the sofa's own wall shoves her straight back
+ * off it — the law that forced the suite's beds to be registered soft, and
+ * the reason every piece of hotel furniture used to be an infinitely tall
+ * pillar (Jim, live play, 7 Aug 2026: *"I can't even jump onto a sofa that's
+ * much less tall than my jump"*).
+ *
+ * A collider with `topIsAbsolute` instead states its top as a **world-space
+ * Y** and is compared against the mover's actual `position.y` — which for
+ * the player is genuinely absolute, ground plus jump. Walking into it from
+ * the floor blocks (feet at 0 against a 0.5 m top); a jump whose flight
+ * carries her feet above the top sails on; and once she is *stood* on the
+ * prop (a `WalkSurfaces` plate at exactly that top), her feet equal the top
+ * and it holds still beneath her instead of ejecting her. One collider,
+ * three honest answers, no second registration to fall out of step.
+ *
+ * Not combinable with `autoHoppable`: the auto-hop planner reasons in
+ * relative clearances, and nothing a child did not choose to jump onto
+ * should auto-fire anyway. `world/hotel/place.ts` is the caller this exists
+ * for.
  */
 
 interface CircleCollider {
@@ -40,6 +65,7 @@ interface CircleCollider {
   radius: number;
   topHeight: number;
   autoHoppable: boolean;
+  topIsAbsolute: boolean;
 }
 
 export interface WallCollider {
@@ -50,6 +76,7 @@ export interface WallCollider {
   halfThickness: number;
   topHeight: number;
   autoHoppable: boolean;
+  topIsAbsolute: boolean;
 }
 
 /**
@@ -369,8 +396,15 @@ export class CollisionWorld {
     return this.bounds;
   }
 
-  addCircle(x: number, z: number, radius: number, topHeight = Infinity, autoHoppable = false): void {
-    this.circles.push({ x, z, radius, topHeight, autoHoppable });
+  addCircle(
+    x: number,
+    z: number,
+    radius: number,
+    topHeight = Infinity,
+    autoHoppable = false,
+    topIsAbsolute = false,
+  ): void {
+    this.circles.push({ x, z, radius, topHeight, autoHoppable, topIsAbsolute });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
   }
@@ -383,8 +417,18 @@ export class CollisionWorld {
     halfThickness = 0.35,
     topHeight = Infinity,
     autoHoppable = false,
+    topIsAbsolute = false,
   ): WallCollider {
-    const wall: WallCollider = { x1, z1, x2, z2, halfThickness, topHeight, autoHoppable };
+    const wall: WallCollider = {
+      x1,
+      z1,
+      x2,
+      z2,
+      halfThickness,
+      topHeight,
+      autoHoppable,
+      topIsAbsolute,
+    };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
     this.revisionCounter += 1;
@@ -412,11 +456,12 @@ export class CollisionWorld {
     halfThickness = 0.35,
     topHeight = Infinity,
     autoHoppable = false,
+    topIsAbsolute = false,
   ): void {
-    this.addWall(cx - halfX, cz - halfZ, cx + halfX, cz - halfZ, halfThickness, topHeight, autoHoppable);
-    this.addWall(cx + halfX, cz - halfZ, cx + halfX, cz + halfZ, halfThickness, topHeight, autoHoppable);
-    this.addWall(cx + halfX, cz + halfZ, cx - halfX, cz + halfZ, halfThickness, topHeight, autoHoppable);
-    this.addWall(cx - halfX, cz + halfZ, cx - halfX, cz - halfZ, halfThickness, topHeight, autoHoppable);
+    this.addWall(cx - halfX, cz - halfZ, cx + halfX, cz - halfZ, halfThickness, topHeight, autoHoppable, topIsAbsolute);
+    this.addWall(cx + halfX, cz - halfZ, cx + halfX, cz + halfZ, halfThickness, topHeight, autoHoppable, topIsAbsolute);
+    this.addWall(cx + halfX, cz + halfZ, cx - halfX, cz + halfZ, halfThickness, topHeight, autoHoppable, topIsAbsolute);
+    this.addWall(cx - halfX, cz + halfZ, cx - halfX, cz - halfZ, halfThickness, topHeight, autoHoppable, topIsAbsolute);
   }
 
   get colliderCount(): number {
@@ -701,7 +746,9 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (clearsTop(circle.topHeight, clearance)) {
+        // Absolute tops compare against the mover's real feet height, so a
+        // prop she is stood on holds still under her — see the header.
+        if (clearsTop(circle.topHeight, circle.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -731,7 +778,8 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        if (clearsTop(wall.topHeight, clearance)) {
+        // Same absolute-top rule as the circles above.
+        if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -921,6 +969,14 @@ export class CollisionWorld {
     for (const circle of this.circles) {
       if (!circle.autoHoppable) continue;
       const where = `the hoppable circle at [${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}]`;
+      if (circle.topIsAbsolute) {
+        // The hop planner reasons in relative clearances; an absolute top in
+        // its arithmetic would be nonsense — see the header.
+        problems.push(`${where} is autoHoppable with an absolute top, which is unsupported`);
+        circle.autoHoppable = false;
+        demoted += 1;
+        continue;
+      }
       if (inspect(circle.topHeight, circle.radius, where)) {
         circle.autoHoppable = false;
         demoted += 1;
@@ -931,6 +987,12 @@ export class CollisionWorld {
       const where =
         `the hoppable wall [${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)}] → ` +
         `[${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}]`;
+      if (wall.topIsAbsolute) {
+        problems.push(`${where} is autoHoppable with an absolute top, which is unsupported`);
+        wall.autoHoppable = false;
+        demoted += 1;
+        continue;
+      }
       if (inspect(wall.topHeight, wall.halfThickness, where)) {
         wall.autoHoppable = false;
         demoted += 1;

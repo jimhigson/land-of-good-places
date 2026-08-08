@@ -239,6 +239,14 @@ export function rainbowRing(innerRadius: number, band: number): Group {
  * that. It is scenery you walk round, which is also why it registers no
  * collision — the hotel's interiors only wall off the room itself.
  */
+/**
+ * The height of a sofa's seat — the surface a child who jumps onto one stands
+ * on (plinth 0.3 + cushion 0.2). Named because two other files need the same
+ * number: `Hotel` registers it as every sofa's collider top and standing
+ * plate, and `check:hotel` probes a sofa at exactly this height.
+ */
+export const SOFA_SEAT_TOP = 0.5;
+
 export function sofa(width: number, colour: number, cushion: number): Group {
   const group = new Group();
   group.name = 'hotel.sofa';
