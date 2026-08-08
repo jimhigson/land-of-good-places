@@ -219,13 +219,23 @@ function groundHeight(x: number, z: number): number {
  * frames of the same bus, the same size, at the same angle, moving the same way
  * — which is what makes an arrival out of what would otherwise be a jump.
  */
+/**
+ * How long the closing shot spends easing onto the park camera's bearing.
+ *
+ * Exported so `check:bus-journey` can assert the **shot list's** last beat is
+ * at least this long: a cut to the inside during the settle would throw away
+ * the 0.00-degree hand-over the arrival depends on. One owner, asked by the
+ * check rather than restated in it.
+ */
+export const SETTLE_SECONDS = 3.2;
+
 const ORBIT = {
   /** Turns completed over the ride, before the settle. */
   turns: 1.15,
   /** Where the swing starts, so the cat's face leads the first shot. */
   startYawDegrees: CAMERA_YAW_DEGREES + 150,
   /** Seconds at the end spent easing onto the park camera's own bearing. */
-  settleSeconds: 3.2,
+  settleSeconds: SETTLE_SECONDS,
 } as const;
 
 /**
@@ -293,6 +303,91 @@ function rollLook(rng: () => number): JourneyRider {
  * outside."*
  */
 export type JourneyView = 'outside' | 'inside';
+
+/**
+ * **How the ride is cut**, as a shot list.
+ *
+ * Jim, correcting a first reading of *"switch between"* as a player control:
+ * *"the view shouldn't be switchable, it should switch by itself."* So this is
+ * direction. There is no button; the ride cuts between the two on its own
+ * schedule, the way an on-ride video cuts between a trackside camera and a cart
+ * cam.
+ *
+ * Modelled on `world/slide/cameras.ts`, which does the same job for the
+ * ginormous slide and is the pattern this repo already has for "a ride that
+ * cuts between cameras on its own": plan a list of shots over the ride's own
+ * parameter, and have something *pure* answer which shot is playing, so a check
+ * can hold the schedule without a renderer.
+ *
+ * ## The rhythm
+ *
+ * Five equal beats over twenty seconds — a cut every four seconds, four cuts in
+ * all. Fewer and the inside shot is a single event you might blink through;
+ * many more and a twenty-second ride becomes a trailer. Four seconds is also
+ * long enough for the orbit to move visibly between cuts, which is what stops
+ * the two outside shots reading as the same frame twice.
+ *
+ * **Odd, so the ride opens and closes outside** — the same trick the slide uses
+ * with an even `BEATS`, for two reasons here:
+ *
+ * - It **opens** on the bus, the establishing shot: a child has to see what she
+ *   is riding in before being put inside it.
+ * - It **closes** outside, which is a requirement rather than a preference. The
+ *   last {@link SETTLE_SECONDS} ease the camera onto the park's own bearing so
+ *   the hand-over to the arrival is a cut between two frames of the same bus at
+ *   the same angle — measured at 0.00 degrees off. A cut to the inside during
+ *   the settle would throw that away. `check:bus-journey` asserts the closing
+ *   beat is at least that long, so neither number can move without the other
+ *   being reconsidered.
+ *
+ * ## Hard cuts, not blends
+ *
+ * A blend between a camera inside a vehicle and one outside it is a shot of the
+ * lens travelling through the bodywork — here, through a giant cat's face. It
+ * would read as a rendering fault rather than a transition. The slide hard-cuts
+ * between its chase and trackside cameras and it reads well.
+ */
+export const JOURNEY_BEATS = 5;
+
+/** How long one shot lasts. */
+export const JOURNEY_BEAT_SECONDS = JOURNEY_SECONDS / JOURNEY_BEATS;
+
+export interface JourneyShot {
+  readonly view: JourneyView;
+  /** When this shot starts, in seconds. Inclusive. */
+  readonly from: number;
+  /** When it ends. Exclusive, except the last shot, which owns the end. */
+  readonly to: number;
+}
+
+/**
+ * The whole shot list, in order. Pure and exported so a check can assert the
+ * schedule — that it opens and closes outside, that both views get real time,
+ * and that the beats tile the ride with no gap — without building a bus.
+ */
+export function planJourneyShots(): JourneyShot[] {
+  const shots: JourneyShot[] = [];
+  for (let beat = 0; beat < JOURNEY_BEATS; beat += 1) {
+    shots.push({
+      // Even beats outside. With an odd `JOURNEY_BEATS` that opens and closes
+      // outside, which is what the settle needs.
+      view: beat % 2 === 0 ? 'outside' : 'inside',
+      from: beat * JOURNEY_BEAT_SECONDS,
+      to: (beat + 1) * JOURNEY_BEAT_SECONDS,
+    });
+  }
+  return shots;
+}
+
+const JOURNEY_SHOTS = planJourneyShots();
+
+/** Which shot is playing at `t` seconds. The last one owns the end of the ride. */
+export function shotAt(t: number): JourneyShot {
+  for (const shot of JOURNEY_SHOTS) {
+    if (t < shot.to) return shot;
+  }
+  return JOURNEY_SHOTS[JOURNEY_SHOTS.length - 1] as JourneyShot;
+}
 
 export class BusJourney {
   readonly scene = new Scene();
@@ -483,19 +578,22 @@ export class BusJourney {
     return this.viewMode;
   }
 
-  setView(view: JourneyView): void {
+  /**
+   * Cuts to a shot. Private: **the ride decides, not the player.**
+   *
+   * There was a "Look inside!" button here, built from a first reading of Jim's
+   * *"switch between"*. He corrected it — *"the view shouldn't be switchable,
+   * it should switch by itself"* — and the correction makes the feature both
+   * simpler and better: a six-year-old watching her first twenty seconds of the
+   * game should be shown the ride, not asked to operate it.
+   */
+  private cutTo(view: JourneyView): void {
     this.viewMode = view;
     const fov = view === 'inside' ? INSIDE_FOV : CAMERA_FOV;
     if (this.camera.fov !== fov) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
-  }
-
-  /** Swaps inside for outside. What the button on screen does. */
-  toggleView(): JourneyView {
-    this.setView(this.viewMode === 'outside' ? 'inside' : 'outside');
-    return this.viewMode;
   }
 
   /** True once the ride has run its course. */
@@ -897,6 +995,11 @@ export class BusJourney {
     this.place(this.busZ);
     this.bus.animate(dt, this.animationSeconds, travelling ? BUS_SPEED : 0);
     this.exciteRiders(this.animationSeconds);
+
+    // **The cut.** Driven by the ride's own clock through the shot list, so the
+    // schedule is a thing `check:bus-journey` can hold rather than something
+    // that only exists while a frame is being drawn.
+    this.cutTo(shotAt(this.elapsedSeconds).view);
 
     if (this.viewMode === 'inside') {
       // Through the bus's own matrix, so the camera climbs, dips and pitches
