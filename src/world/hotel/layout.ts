@@ -72,6 +72,41 @@ export interface HotelTheme {
   readonly glow: number;
 }
 
+/**
+ * WCAG relative luminance of a `PALETTE` colour — how bright it reads,
+ * 0 (black) to 1 (white), through the standard sRGB linearisation.
+ */
+export function relativeLuminance(hex: number): number {
+  const linear = (channel: number): number => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * linear((hex >> 16) & 255) +
+    0.7152 * linear((hex >> 8) & 255) +
+    0.0722 * linear(hex & 255)
+  );
+}
+
+/**
+ * The least a theme's wall and floor may differ in {@link relativeLuminance}.
+ *
+ * Jim, looking at the suite, 8 Aug 2026: *"The walls and floor colours are
+ * too similar — hard to distinguish."* Where a wall meets the floor at the
+ * iso camera's 38°, luminance separation is what draws the line; hue barely
+ * helps when both are pastel.
+ *
+ * The number is **measured, not invented** — from this hotel's own floors on
+ * the day the rule landed. The rooms that read well at a glance: lobby 0.274,
+ * corridor 0.251, ocean 0.232, garden 0.186. The rooms that did not: the
+ * suite Jim reported at 0.115, and the breakfast room — unreported but
+ * measured twelve times worse at 0.009, cream on cream. 0.15 sits beneath
+ * the weakest good reader and above both offenders. `check:hotel` probe 20
+ * holds every theme to it, so a future floor cannot quietly go
+ * wall-coloured.
+ */
+export const THEME_FLOOR_CONTRAST_MIN = 0.15;
+
 /** A wall of a room. `north` is −Z, `west` is −X — the two the camera sees. */
 export type WallSide = 'north' | 'south' | 'east' | 'west';
 
@@ -114,6 +149,15 @@ export interface WindowWall {
    * chosen pane either way, so this cannot be used to break the rule.
    */
   readonly zoneAt?: number;
+  /**
+   * `false` when this wall's panes are **light only** — no "Look out" zone
+   * may stand at any of them. The suite's west pane lights its bathroom, and
+   * a stand spot inside that small privacy-roofed room cannot keep the tap
+   * rule's finger of clearance from the room's own tap target (the pan) —
+   * measured, not guessed: every candidate pairing came up 0.2–0.9 m short.
+   * The suite's "Look out" lives on the north wall instead.
+   */
+  readonly lookZone?: false;
 }
 
 /**
@@ -227,6 +271,57 @@ export interface HotelRoom {
 /** Half-width of every door gap. */
 export const DOOR_HALF = 1.3;
 
+/** Half-thickness of a room's outer walls. `Hotel.buildRoomShell` builds the
+ *  boxes from it; {@link clearFloorAround} keeps the rugs off them. */
+export const WALL_HALF_DEPTH = 0.25;
+
+/** Half-thickness of an internal partition (`Hotel.partitionRoom`). */
+export const SUITE_PARTITION_HALF = 0.2;
+
+/** A rectangle of a room's floor, local metres. */
+export interface ClearRect {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+/**
+ * The clear floor around a point — the rectangle bounded by the nearest wall
+ * *faces*: the outer walls, and every partition run whose line crosses the
+ * point's own row or column.
+ *
+ * This exists so a rug's extents can be **derived** rather than hand-sized.
+ * Jim, looking at the suite bedroom: *"The rainbow rug goes under the walls"*
+ * — the hall's rug was a number typed next to a partition plan that did not
+ * know about it, and the day the plan moved, nothing owned the disagreement.
+ * Dressing code now asks this function for the floor it may cover, so a rug
+ * *cannot* reach a wall and a partition move re-fits the rugs by itself
+ * (`check:hotel` probe 19 measures the built scene either way).
+ *
+ * A doorway does not widen the answer: the run's whole `from`–`to` line
+ * bounds it, because a rug poking through a doorway into the next room is
+ * the same bug wearing a smaller hat.
+ */
+export function clearFloorAround(room: HotelRoom, x: number, z: number): ClearRect {
+  let minX = -room.halfX + WALL_HALF_DEPTH;
+  let maxX = room.halfX - WALL_HALF_DEPTH;
+  let minZ = -room.halfZ + WALL_HALF_DEPTH;
+  let maxZ = room.halfZ - WALL_HALF_DEPTH;
+  for (const run of room.partitions ?? []) {
+    if (run.along === 'x') {
+      if (x < run.from || x > run.to) continue;
+      if (run.at >= z) maxZ = Math.min(maxZ, run.at - SUITE_PARTITION_HALF);
+      else minZ = Math.max(minZ, run.at + SUITE_PARTITION_HALF);
+    } else {
+      if (z < run.from || z > run.to) continue;
+      if (run.at >= x) maxX = Math.min(maxX, run.at - SUITE_PARTITION_HALF);
+      else minX = Math.max(minX, run.at + SUITE_PARTITION_HALF);
+    }
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
 /** How far the lift alcove pokes out of the west wall. */
 export const LIFT_ALCOVE_DEPTH = 3.4;
 
@@ -243,13 +338,20 @@ const LOBBY_THEME: HotelTheme = {
 };
 
 /**
- * **Floor 1 — a sunny morning.** Cream walls, warm cream floor, honey-gold
- * trim: the colours of toast and butter, which is the entire point of the
- * only room in the hotel you go to in order to eat.
+ * **Floor 1 — a sunny morning.** Cream walls over a golden-toast floor,
+ * honey-gold trim: the colours of toast and butter, which is the entire
+ * point of the only room in the hotel you go to in order to eat.
+ *
+ * The floor was `buildingWall` — cream on cream, measured at 0.009
+ * luminance apart from the walls, the worst reader in the hotel (see
+ * {@link THEME_FLOOR_CONTRAST_MIN}) — nobody had reported it only because
+ * seven tables and a buffet were doing the walls' job of drawing the room's
+ * edges. `pathSandDark` keeps the toast and gives the floor its own value
+ * (0.31 apart).
  */
 const BREAKFAST_THEME: HotelTheme = {
   wall: PALETTE.signBoard,
-  floor: PALETTE.buildingWall,
+  floor: PALETTE.pathSandDark,
   trim: PALETTE.liftFrame,
   accent: PALETTE.flowerYellow,
   glow: PALETTE.markerLemon,
@@ -274,10 +376,16 @@ const CORRIDOR_THEME: HotelTheme = {
  * The walls stay near-white on purpose — the rainbow is the stripes, the rug
  * and the blankets, and a rainbow on a coloured wall is a rainbow you cannot
  * see.
+ *
+ * So when Jim found the room hard to read — *"the walls and floor colours
+ * are too similar"* — the **floor** is what moved: `stonePinkLight` was
+ * 0.115 of luminance from the white walls, `stonePink` is 0.27, the same
+ * separation the lobby reads with, and still unmistakably the pink room.
+ * See {@link THEME_FLOOR_CONTRAST_MIN}.
  */
 const SUITE_THEME: HotelTheme = {
   wall: PALETTE.blossomWhite,
-  floor: PALETTE.stonePinkLight,
+  floor: PALETTE.stonePink,
   trim: PALETTE.markerPink,
   accent: PALETTE.markerPink,
   glow: PALETTE.markerPink,
@@ -531,18 +639,33 @@ export const SUITE: HotelRoom = {
   wallHeight: 3.0,
   // West: back out to the corridor.
   gaps: { west: [-1.1, 1.1] },
-  // Three bedrooms across the north half, the lounge across the south, and a
-  // hall between them that the corridor door opens straight into.
+  // Three bedrooms across the north half, the lounge and the bathroom across
+  // the south, and a hall between them that the corridor door opens straight
+  // into. The hall is z ±1.7 and the door gap only z ±1.1, so the partitions
+  // meeting the west wall leave the doorway untouched.
   //
-  // The two long partitions stop short of the west wall (−9.4 rather than −11)
-  // so the hall runs clear from the door to the far end: a child who walks in
-  // and immediately meets a wall corner has been given a maze, and this is
-  // meant to be the nicest room in the game.
+  // **Every run reaches a wall or a doorway jamb — nothing ends in open
+  // air.** The two long runs used to stop at −9.4, 1.6 m short of the west
+  // wall, on the theory that this kept the hall clear; what it actually built
+  // was a free-standing wall end past which you could see (and walk) around
+  // every "room" — Jim, looking at the bedroom: *"The dividing walls don't go
+  // to the edge of the space."* `check:hotel` probe 18 now measures every
+  // partition end in the hotel against the built walls.
   partitions: [
-    { along: 'x', at: -1.7, from: -9.4, to: 11, doors: [-6.6, 0, 6.6] },
-    { along: 'x', at: 1.7, from: -9.4, to: 11, doors: [4.4] },
+    { along: 'x', at: -1.7, from: -11, to: 11, doors: [-6.6, 0, 6.6] },
+    { along: 'x', at: 1.7, from: -11, to: 11, doors: [4.4] },
     { along: 'z', at: -4.2, from: -8, to: -1.7, doors: [] },
     { along: 'z', at: 3.4, from: -8, to: -1.7, doors: [] },
+    // The bathroom's own wall — the south half's answer to the bedroom
+    // divider at the same x, so the plan reads as one grid. **Its doorway
+    // opens off the lounge, not the hall** — an en-suite off the living
+    // room — because a hall-side door boxed the pan into corners the fixed
+    // camera cannot see (a 2.2 m partition hides 2.8 m of floor behind it)
+    // or into the door band's own finger of tap clearance; watched in the
+    // browser, not guessed. The door's north jamb lands exactly on the hall
+    // wall's line, so the run's built span is one clean piece from jamb to
+    // south wall.
+    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [2.9] },
   ],
   // **One per room.** The suite is four rooms now, and a bedroom with no
   // window is the thing Jim objected to in the first place (*"a room without
@@ -563,11 +686,16 @@ export const SUITE: HotelRoom = {
     // the default picker slid to the first bedroom's pane — 3.04 m from the
     // west wall's painting, inside the tap rule's finger.
     north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
-    // Flanking your own front door — kept for the light, but no "Look out"
-    // zone can stand here: both panes sit inside a finger of the corridor
-    // doorway, which is the exact tap Jim reported eaten. The picker skips
-    // walls with no compliant pane; the north wall carries the suite's zone.
-    west: { at: [-1.95, 1.95], width: 1.5, sill: 0.9, head: 2.6 },
+    // One pane, lighting the bathroom — light only, no zone (see
+    // {@link WindowWall.lookZone}). The pair that used to flank the front
+    // door (±1.95) could not survive the partitions reaching the west wall:
+    // the junctions land at z ±1.7, straight through the middle of each old
+    // pane, and a wall running into a window is worse than no window. The
+    // slot between the door gap (±1.1) and the junction (±1.5) is 0.4 m —
+    // no pane fits there — so the west light moves to the one stretch of
+    // that wall with room for it, which the bathroom is glad of. Bedroom 1
+    // keeps its own north pane like the others.
+    west: { at: [5.9], width: 1.5, sill: 0.9, head: 2.6, lookZone: false },
   },
   liftZ: null,
   liftFloor: 4,
@@ -651,7 +779,14 @@ export const ROOMS: readonly HotelRoom[] = [
  * way: one owner, everyone else asks.
  */
 export interface HotelDoorBand extends PortalBand {
-  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift';
+  /**
+   * `room-door` is an internal doorway between sub-rooms — no walk-through
+   * trigger fires on it (`Hotel.checkDoorways` looks bands up by the other
+   * four kinds), it exists so `check:tap-spacing` holds every zone a finger
+   * clear of it: a doorway a zone's pick area covers is a doorway a phone
+   * cannot use, which is the exact bug the tap rule was written for.
+   */
+  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift' | 'room-door';
 }
 
 export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
@@ -697,6 +832,27 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: Math.PI / 2,
       y: 0,
     });
+    // The bathroom's doorway, straight off the partition data so the two can
+    // never disagree. Only the doored **z-runs** are banded (today: exactly
+    // the bathroom door). Banding the x-runs' bedroom doorways too was
+    // measured, and trips the bed zones by 0.03 m — the beds and their signs
+    // would all have to shuffle, which is a reform for its own PR, not a
+    // rider on this one.
+    for (const run of room.partitions ?? []) {
+      if (run.along !== 'z') continue;
+      for (const door of run.doors) {
+        bands.push({
+          kind: 'room-door',
+          what: "the suite bathroom's doorway",
+          centreX: room.originX + run.at,
+          centreZ: room.originZ + door,
+          halfAlong: 0.6,
+          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+          yaw: Math.PI / 2,
+          y: 0,
+        });
+      }
+    }
   }
   if (room.liftZ !== null) {
     // The lift's auto-boarding band: the alcove and the floor in front of it.

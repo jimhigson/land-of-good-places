@@ -80,7 +80,11 @@ import {
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
   SUITE_BED_SPOTS,
+  SUITE_DOOR_WIDTH,
+  relativeLuminance,
+  THEME_FLOOR_CONTRAST_MIN,
 } from '../src/world/hotel/layout.ts';
+import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
@@ -1041,6 +1045,26 @@ if (fallenPlayer.position.y < 0) {
 //
 // Proven red before trusted green: on the pre-fix build it reports all four
 // corners open in every room — see the commit message for the run.
+/**
+ * Every wall-like box on a room shell, found structurally (tall thin boxes),
+ * never by name — so no probe using these can be satisfied by naming alone.
+ * Shared by probes 15 (perimeter) and 18 (partition ends).
+ */
+function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): Box3[] {
+  const wallBoxes: Box3[] = [];
+  shell.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    object.geometry.computeBoundingBox();
+    const bounds = object.geometry.boundingBox;
+    if (!bounds) return;
+    const box = bounds.clone().applyMatrix4(object.matrixWorld);
+    const height = box.max.y - box.min.y;
+    const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
+    if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
+  });
+  return wallBoxes;
+}
+
 {
   hotel.hotelRoot.updateMatrixWorld(true);
   const WALL_HALF = 0.25;
@@ -1050,17 +1074,7 @@ if (fallenPlayer.position.y < 0) {
       problems.push(`${room.space} has no shell at all`);
       continue;
     }
-    const wallBoxes: Box3[] = [];
-    shell.traverse((object) => {
-      if (!(object instanceof Mesh)) return;
-      object.geometry.computeBoundingBox();
-      const bounds = object.geometry.boundingBox;
-      if (!bounds) return;
-      const box = bounds.clone().applyMatrix4(object.matrixWorld);
-      const height = box.max.y - box.min.y;
-      const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
-      if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
-    });
+    const wallBoxes = wallBoxesOf(shell);
 
     const sides = [
       { side: 'north' as const, along: 'x' as const, cross: -room.halfZ, out: -1 },
@@ -1187,6 +1201,240 @@ if (fallenPlayer.position.y < 0) {
             `${(gap * 1000).toFixed(1)} mm apart — inside the ${(MIN_DECAL_GAP * 1000).toFixed(1)} mm ` +
             `a 16-bit depth buffer can tell apart, so they flicker`,
         );
+      }
+    }
+  }
+}
+
+// ------------------- 18. every partition end meets a wall or is a doorway
+//
+// Jim, looking at the suite bedroom, 8 Aug 2026: *"The dividing walls don't
+// go to the edge of the space"* — the two long SuitePartition runs declared
+// `from: −9.4` while the suite's west wall stands at −11, leaving a
+// free-standing 1.6 m opening at each west end that reads as a wall somebody
+// forgot to finish (and whose bare end corner interrupts a slide along the
+// partition face). The owner is the partition DATA: the builder cannot know
+// that −9.4 "meant" the wall, so a run that should reach a wall must say so,
+// and this probe holds every partition end in the hotel to it.
+//
+// For each declared partition, the built spans (the same `segmentsMinusGaps`
+// arithmetic `partitionRoom` uses) are walked and every span end must be one
+// of exactly two things: a **declared doorway jamb**, or **abutting a
+// perpendicular wall** — proven against the *built* wall boxes by sampling a
+// point just past the end, which must land inside some wall (outer wall or a
+// crossing partition). Free air past a partition end is the bug.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const half = SUITE_DOOR_WIDTH / 2;
+  const point = new Vector3();
+  for (const room of ROOMS) {
+    if (!room.partitions || room.partitions.length === 0) continue;
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    const wallBoxes = wallBoxesOf(shell);
+    for (const [index, run] of room.partitions.entries()) {
+      const spans = segmentsMinusGaps(
+        run.from,
+        run.to,
+        run.doors.map((door) => [door - half, door + half] as const),
+      );
+      for (const [a, b] of spans) {
+        if (b - a < 0.05) continue;
+        for (const [end, outward] of [
+          [a, -1],
+          [b, 1],
+        ] as const) {
+          const jamb = run.doors.some(
+            (door) => Math.abs(end - (door - half)) < 0.01 || Math.abs(end - (door + half)) < 0.01,
+          );
+          if (jamb) continue;
+          // Just past the end, halfway up the partition: inside a wall, or open air.
+          const t = end + outward * 0.05;
+          point.set(
+            room.originX + (run.along === 'x' ? t : run.at),
+            1.1,
+            room.originZ + (run.along === 'x' ? run.at : t),
+          );
+          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          problems.push(
+            `${room.space}: partition ${index} (along ${run.along} at ${run.at}) ends at ` +
+              `${end.toFixed(2)} in open air — neither a declared doorway jamb nor abutting a ` +
+              `wall, i.e. a dividing wall that stops short of the edge of the space`,
+          );
+        }
+      }
+    }
+  }
+}
+
+// ------------------------------- 19. no rug runs under a wall or partition
+//
+// Jim, looking at the suite bedroom, 8 Aug 2026: *"The rainbow rug goes
+// under the walls."* Measured cause: the hall's rainbow rug was hand-sized —
+// 0.8 m core plus six 0.3 m bands is a 2.6 m radius — in a hall whose clear
+// width is z ±1.5, so it ran ~1.1 m under both long partitions and surfaced
+// in the bedrooms and the lounge as a sliver of someone else's rug against
+// the skirting.
+//
+// The fix has an owner: `layout.ts`'s `clearFloorAround` derives each rug's
+// available floor from the partition plan itself, so a rug *cannot* reach a
+// wall and a future partition move re-fits the rugs automatically. This
+// probe holds the built scene to it: every rug-family group's world box,
+// against every wall box (structural, as everywhere else in this file), may
+// not overlap in plan by more than a paint line.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const RUG_NAMES = ['hotel.rug', 'hotel.rug.round', 'hotel.rainbowRug', 'hotel.rainbowRing'];
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    // Walls by name *and* shape here, unlike the purely structural sweeps in
+    // probes 15 and 18: the structural test alone also catches the garden's
+    // trellis arches, and a lawn running under a rose arch is the design, not
+    // a rug under a wall. A wall that loses its name cannot hide from those
+    // two probes, so the name is safe to lean on for this one.
+    const wallBoxes: Box3[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh) || object.name !== 'hotel.wall') return;
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      wallBoxes.push(bounds.clone().applyMatrix4(object.matrixWorld));
+    });
+    const rugBoxes: { readonly what: string; readonly box: Box3 }[] = [];
+    shell.traverse((object) => {
+      if (!RUG_NAMES.includes(object.name)) return;
+      rugBoxes.push({ what: object.name, box: new Box3().setFromObject(object) });
+    });
+    for (const rug of rugBoxes) {
+      for (const wall of wallBoxes) {
+        const overlapX = Math.min(rug.box.max.x, wall.max.x) - Math.max(rug.box.min.x, wall.min.x);
+        const overlapZ = Math.min(rug.box.max.z, wall.max.z) - Math.max(rug.box.min.z, wall.min.z);
+        if (overlapX <= 0.02 || overlapZ <= 0.02) continue;
+        problems.push(
+          `${room.space}: a '${rug.what}' reaches ${overlapX.toFixed(2)} × ${overlapZ.toFixed(2)} m ` +
+            `under a wall at (${((wall.min.x + wall.max.x) / 2 - room.originX).toFixed(1)}, ` +
+            `${((wall.min.z + wall.max.z) / 2 - room.originZ).toFixed(1)}) local — rugs must lie on ` +
+            `their own room's clear floor (layout.ts clearFloorAround)`,
+        );
+        break;
+      }
+    }
+  }
+}
+
+// ---------------------- 20. every floor reads apart from its own walls
+//
+// Jim, looking at the suite, 8 Aug 2026: *"The walls and floor colours are
+// too similar — hard to distinguish."* The rule, its measurement and its
+// measured threshold live with the themes (`layout.ts`'s
+// `relativeLuminance` / `THEME_FLOOR_CONTRAST_MIN`); this applies it to
+// every room so no future theme can go cream-on-cream unnoticed. Proven red
+// before trusted green: on the pre-fix palette the suite measured 0.115 and
+// the breakfast room 0.009 against good readers at 0.186–0.274.
+for (const room of ROOMS) {
+  const wall = relativeLuminance(room.theme.wall);
+  const floor = relativeLuminance(room.theme.floor);
+  const delta = Math.abs(wall - floor);
+  if (delta < THEME_FLOOR_CONTRAST_MIN) {
+    problems.push(
+      `${room.space}: wall luminance ${wall.toFixed(3)} and floor ${floor.toFixed(3)} differ by ` +
+        `${delta.toFixed(3)} — under the ${THEME_FLOOR_CONTRAST_MIN} the good-reading floors set, ` +
+        `so wall and floor blur together at a glance (layout.ts THEME_FLOOR_CONTRAST_MIN)`,
+    );
+  }
+}
+
+// ------------------------- 21. the suite has a bathroom with the manners
+//
+// Jim, 8 Aug 2026: *"Add a bathroom using the models and rules from the
+// bathroom in the other big building."* The castle's rules
+// (`building/Toilets.ts`, from GAME_DESIGN.md): the pan and basin are the
+// shared factories, using one is the two-beat flush-then-wash routine, and a
+// **privacy roof** slides over the room while she is in it and lifts at the
+// wash beat — on before she is out of sight, never able to trap her. The
+// suite's bathroom reuses those exact owners; this probe checks the built
+// result behaves like the castle's:
+//  * the pan and basin are solid (place.ts registered them), the pan
+//    mountable like any low flat-topped prop;
+//  * a bathroom zone exists, offers a real action, and its stand spot is
+//    walkable;
+//  * a player standing in the bathroom is covered by the roof, and the wash
+//    beat lifts it while she is still inside.
+{
+  const bathX = SUITE.originX - 7.8;
+  const bathZ = SUITE.originZ + 4.6;
+  if (deflection(bathX, bathZ) < 0.1) {
+    problems.push('the suite bathroom pan is not solid — a child walks straight through it');
+  }
+  if (deflection(SUITE.originX - 9.7, SUITE.originZ + 2.45) < 0.1) {
+    problems.push('the suite bathroom basin is not solid — a child walks straight through it');
+  }
+  const atopPan = deflectionAt(bathX, 0.75, bathZ);
+  if (atopPan > 0.01) {
+    problems.push(
+      `the suite bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m sideways — ` +
+        'solid and standable are fighting (place.ts)',
+    );
+  }
+
+  hotel.attachPlayer(fallenPlayer as never);
+  fallenPlayer.position.set(SUITE.originX - 7.6, 0, SUITE.originZ + 4.8);
+  hotel.adoptRestoredPlayer();
+  const bathroomZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bathroom');
+  if (!bathroomZone) {
+    problems.push('the suite offers no bathroom zone at all — nothing to tap, no routine to run');
+  } else {
+    if ((bathroomZone.actions?.() ?? []).length === 0) {
+      problems.push('the bathroom zone offers no actions — its sign can never appear');
+    }
+    if (
+      bathroomZone.standX !== undefined &&
+      bathroomZone.standZ !== undefined &&
+      deflection(bathroomZone.standX, bathroomZone.standZ) > 0.01
+    ) {
+      problems.push('the bathroom zone asks her to stand inside something solid');
+    }
+
+    // The privacy roof, driven exactly as the game drives it: she stands in
+    // the room, frames pass, the lid covers; the wash beat lifts it while
+    // she is still there (the castle's rule, `building/Toilets.ts`).
+    const suiteShell = hotel.hotelRoot.children.find(
+      (child) => child.name === `hotel:${SUITE.space}`,
+    );
+    let roofGroup: { visible: boolean } | null = null;
+    suiteShell?.traverse((object) => {
+      if (object.name === 'toilet-roof') roofGroup = object;
+    });
+    if (!roofGroup) {
+      problems.push('the suite bathroom has no privacy roof — the castle rule it must honour');
+    } else {
+      const tick = (seconds: number): void => {
+        for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
+          hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
+        }
+      };
+      tick(1.2);
+      if (!(roofGroup as { visible: boolean }).visible) {
+        problems.push(
+          'a child standing in the suite bathroom is not covered by the privacy roof — ' +
+            'the lid must lead her in',
+        );
+      }
+      const useAction = (bathroomZone.actions?.() ?? [])[0];
+      useAction?.run();
+      tick(3.0);
+      if ((roofGroup as { visible: boolean }).visible) {
+        problems.push(
+          'the privacy roof is still down after the wash beat — the lid must lift while she ' +
+            'washes her hands, not trap her',
+        );
+      }
+      // Out of the room: nothing remembered, the roof stays up.
+      fallenPlayer.position.set(SUITE.originX, 0, SUITE.originZ);
+      tick(1.0);
+      if ((roofGroup as { visible: boolean }).visible) {
+        problems.push('the privacy roof stayed on over an empty bathroom');
       }
     }
   }
