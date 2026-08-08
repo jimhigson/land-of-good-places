@@ -839,8 +839,11 @@ export class Hotel implements GameSystem {
         y: 1,
         z,
         pickRadius: 2.6,
-        standX: x,
-        standZ: z + 2.2,
+        // A step east of the axis: dead on it, the statue's head stands
+        // between the fixed camera and a child at the desk (watched in the
+        // browser, 7 Aug relayout). One stride east clears its silhouette.
+        standX: x + 1.6,
+        standZ: z + 2.4,
         verb: 'Check in',
         sign: {
           title: 'Reception',
@@ -1613,15 +1616,19 @@ export class Hotel implements GameSystem {
     // Framed on her chest, not over her head: she sits at CHAIR_SEAT_Y and a
     // seated child's chest is about 0.55 m above the seat.
     const chestY = CHAIR_SEAT_Y + 0.55;
-    // Across the table (1.9 m ahead is 0.85 m past its centre), stepped to the
-    // pet's side so the trot-in arrives on camera, from just above head
-    // height looking gently down.
+    // **From her free side, not across the table.** "Across the table" was
+    // the second draft, and watching it run found the flaw: the opposite
+    // chair often holds a seated diner (`seatGuests`), and 1.9 m ahead is
+    // exactly that seat — the shot ended inside the *neighbour's* face. The
+    // pet trots in on `facing + PI/2`, so the camera stands on the other
+    // side (`-side`), a touch ahead of her: her face three-quarters on, the
+    // bowl in front of her, and the pet arriving in the background.
     return {
       from: 'here',
       to: new Vector3(
-        chair.x + forwardX * 1.9 + sideX * 0.9,
-        1.7,
-        chair.z + forwardZ * 1.9 + sideZ * 0.9,
+        chair.x + forwardX * 0.7 - sideX * 2.1,
+        1.6,
+        chair.z + forwardZ * 0.7 - sideZ * 2.1,
       ),
       lookAt: new Vector3(chair.x, chestY, chair.z),
       easeSeconds: FOOD_EASE_SECONDS,
@@ -2480,8 +2487,13 @@ export class Hotel implements GameSystem {
     // only (the *room* full of them is Floor 1 now), tucked in the south-west
     // corner by the west windows, where a café by the glass belongs — not
     // scattered mid-floor where they read as lost furniture.
-    this.placeBreakfastTable(shell, LOBBY, -9.6, 8.6, 'lobby-a', 0.15);
-    this.placeBreakfastTable(shell, LOBBY, -9.4, 5.2, 'lobby-b', 0.45);
+    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6, 'lobby-a', 0.15);
+    // Spun so its chairs sit east-west (at the first spin a chair interleaved
+    // with the west lounge's rug), and kept a good two metres clear of the
+    // west wall's painting at z ~5.1: with the table at 6.4 the "Look!" shot
+    // flew through a seated café guest's head, and her chair's zone stole
+    // the E press from the painting's (both watched in the browser).
+    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7, 'lobby-b', 1.35);
 
     // **Two mirrored seating groups flanking the axis** — the symmetric pair
     // every grand lobby seats its guests in. Both groups face +Z so you see
