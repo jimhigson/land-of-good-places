@@ -10,9 +10,12 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE, hexToCss } from '../../core/palette';
 import {
   CHILD_FOOTPRINT,
+  KID_HEAD_HEIGHT,
+  SKULL_RADIUS,
   TALLEST_CHILD_HEIGHT,
   WIDEST_CHILD_FOOTPRINT,
 } from '../../art/models/kid';
+import { RIDE_POSE_BODY_PITCH } from '../../entities/ridePose';
 import { RIDER_HEADROOM } from '../train/clearance';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
@@ -107,7 +110,7 @@ const SEAT_WIDTH = CHILD_FOOTPRINT;
  * gap that makes it read as a bus rather than a promise about traffic.
  */
 const AISLE_WIDTH = 0.8;
-/** A low cushion. Children are seated with their feet on the floor — see below. */
+/** A low cushion. Children sit **on** it — see {@link CAT_BUS_SEAT_Y}. */
 const SEAT_PAD_HEIGHT = 0.3;
 
 /**
@@ -129,12 +132,15 @@ const BODY_BOTTOM_Y = 0.62;
  * (0.4 m) is the park train's own allowance over a rider's head, borrowed here
  * so the two vehicles answer "how much room over a child?" with one number.
  *
- * **Children are seated with their origins on the floor**, not on top of the
- * cushions. That is not a fudge: the rig has no knees and `applyRidePose`
- * leaves a seated character's head at full standing height above its origin,
- * so seating them on a 0.3 m pad would demand a 0.3 m taller bus for no visible
- * gain. Feet on the floor, cushion drawn under them, and sitting costs exactly
- * what standing costs.
+ * This used to carry a paragraph arguing that **children are seated with their
+ * origins on the floor**, not on the cushions, because *"sitting costs exactly
+ * what standing costs"*. It was wrong twice over, and Jim found both by riding
+ * the bus on 7 August 2026: *"the children on the bus aren't sitting on seats,
+ * they're clipped through the floor while on the inside view"*.
+ *
+ * They were not sitting because nothing ever posed them — see
+ * {@link CAT_BUS_SEAT_Y} — and they were through the floor because the constant
+ * that says where the floor is said the wrong thing; see {@link CAT_BUS_FLOOR_Y}.
  */
 const CABIN_HEIGHT = TALLEST_CHILD_HEIGHT + RIDER_HEADROOM;
 
@@ -142,6 +148,70 @@ const CABIN_HEIGHT = TALLEST_CHILD_HEIGHT + RIDER_HEADROOM;
 const WALL_THICKNESS = 0.16;
 
 const BODY_HEIGHT = CABIN_HEIGHT;
+
+/**
+ * How much bigger every *small* feature is than in the original drawing.
+ *
+ * The body above is now stated in real metres, but the ears, whiskers, paw
+ * prints, bumpers and door furniture were all drawn against a 1.55 m body. Left
+ * alone they would stay shed-sized details stuck on a bus. One factor, applied
+ * at each of them, keeps the drawing's proportions.
+ *
+ * Declared up here rather than two hundred lines down, because the floor's
+ * thickness is written in it and everything that stands on the floor needs that
+ * number before the model is built.
+ */
+const DETAIL = BODY_HEIGHT / 1.55;
+
+/** How thick the drawn cabin floor is. Its **top** is {@link CAT_BUS_FLOOR_Y}. */
+const FLOOR_PAN_THICKNESS = 0.08 * DETAIL;
+
+/**
+ * **The surface you stand on** — the top of the floor pan, not the underside of
+ * the bus.
+ *
+ * This was `BODY_BOTTOM_Y`, and that is the whole of Jim's *"clipped through the
+ * floor"*. `BODY_BOTTOM_Y` is where the bodywork's underside sits; the floor is
+ * a pan drawn *on* it, {@link FLOOR_PAN_THICKNESS} thick. Everything that put a
+ * body "on the floor" — the twelve seats, the driver — used the exported
+ * constant and so stood **0.17 m under the floor they were standing on**, feet
+ * buried in an opaque slab. From outside they read against the windows and
+ * nobody saw it; the inside camera landing is what made it visible.
+ *
+ * A textbook instance of CLAUDE.md's *"two definitions of one thing"*, with the
+ * sharpest possible twist: the two definitions were **the same constant**,
+ * meaning the underside to the builder and the walking surface to every reader.
+ * So the pan is now built from these two numbers rather than from its own copy
+ * of `0.08 * DETAIL`, and the surface has a name that can only mean one thing.
+ */
+export const CAT_BUS_FLOOR_Y = BODY_BOTTOM_Y + FLOOR_PAN_THICKNESS;
+
+/**
+ * **The top of a seat cushion — where a seated child's bottom goes.**
+ *
+ * The seats are anchored here rather than at the floor, and a child parented to
+ * one is posed by the game's own `applyRidePose` (see `entities/ridePose.ts`).
+ * That pairing is the fix for *"aren't sitting on seats"*: `BusJourney` used to
+ * do `seat.add(kid.root)` and nothing else, which left twelve children standing
+ * bolt upright with the cushions passing through their shins.
+ *
+ * **The rig has no knee**, so a seated child's legs stick straight out in front
+ * of her and her lowest drawn point is the hem of her own torso, level with her
+ * origin. That is exactly what makes this simple: put the origin on the cushion
+ * and she is sitting on it, feet dangling — which is what a small child on a bus
+ * seat actually looks like, and what a six-year-old will recognise.
+ */
+export const CAT_BUS_SEAT_Y = CAT_BUS_FLOOR_Y + SEAT_PAD_HEIGHT;
+
+/**
+ * **Where a seated child's head is**, which is what the glazing exists to frame.
+ *
+ * `applyRidePose` leans the torso forward by {@link RIDE_POSE_BODY_PITCH}, and
+ * the head hangs off the torso, so her head pivot is not `KID_HEAD_HEIGHT` above
+ * her origin but that times the cosine of the lean — 6 cm lower. The angle is
+ * imported rather than the 6 cm copied, so retuning the lean moves the window.
+ */
+const SEATED_HEAD_PIVOT_Y = CAT_BUS_SEAT_Y + KID_HEAD_HEIGHT * Math.cos(RIDE_POSE_BODY_PITCH);
 
 /** How far off the centre line one seat sits. The one owner of "which side". */
 const SEAT_OFFSET_X = AISLE_WIDTH / 2 + SEAT_WIDTH / 2;
@@ -223,11 +293,34 @@ export const CAT_BUS_WIDTH = BODY_WIDTH;
  *
  * So the side walls are now built in two bands with a genuine gap between them,
  * divided by pillars, and the glass fills the gap. The band is placed to frame
- * a **seated child's head**, which sits at `BODY_BOTTOM_Y + KID_HEAD_HEIGHT`
- * and is 1.53 m across — that is what there is to look at, and Stage B's whole
- * ask is that you can see them.
+ * a **seated child's head**, which sits at {@link SEATED_HEAD_PIVOT_Y} and is
+ * 1.53 m across — that is what there is to look at, and Stage B's whole ask is
+ * that you can see them.
+ *
+ * **The sill is a seated child's chin**, and that is Jim's second fault of
+ * 7 August: *"the windows of the bus go all the way down to the floor of the
+ * bus […] windows should only start about halfway up the sides"*. It was
+ * `BODY_BOTTOM_Y + 0.55` — a picked number, 0.38 m above the actual floor, which
+ * over a 2.72 m interior is glass from the ankles up. He was right.
+ *
+ * It is derived rather than picked now, and derived from the one thing the
+ * glazing is *for*: seeing the children. The glass starts exactly at the bottom
+ * of a seated child's skull, so the whole of her face is above the line and the
+ * solid panel below it is her body — which is what a bus looks like.
+ *
+ * **This lands at about a third of the way up, not a half, and that is a
+ * measured limit rather than a shortfall.** These children are chibi: the head
+ * is 59% of the height and 1.32 m across, and a seated one's chin is 1.11 m up a
+ * 3.37 m side. A sill at the halfway mark would cut across her mouth. Raising
+ * the children instead is not available either — the tallest of them already
+ * clears the header band by 4 cm once she bounces. The only lever that would buy
+ * a higher sill is a taller bus, and that is a change to a silhouette Jim has
+ * already approved, so it is his call rather than one to make quietly here.
+ *
+ * What he will see is the solid lower panel going from 0.59 m tall to 1.16 m —
+ * doubling — and the glass dropping from 80% of the side to 61%.
  */
-const WINDOW_SILL_Y = BODY_BOTTOM_Y + 0.55;
+const WINDOW_SILL_Y = SEATED_HEAD_PIVOT_Y - SKULL_RADIUS;
 const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
 
 /**
@@ -246,7 +339,6 @@ const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
  * and every check passed, because the camera really was within the bus's
  * bounding box and every child really was within its frustum.
  */
-export const CAT_BUS_FLOOR_Y = BODY_BOTTOM_Y;
 export const CAT_BUS_CABIN_CEILING_Y = WINDOW_HEAD_Y;
 
 /**
@@ -265,16 +357,6 @@ export const CAT_BUS_CABIN_FRONT_Z =
 const PILLAR_Z = 0.26;
 
 const WHEEL_RADIUS = BODY_BOTTOM_Y * 0.86;
-
-/**
- * How much bigger every *small* feature is than in the original drawing.
- *
- * The body above is now stated in real metres, but the ears, whiskers, paw
- * prints, bumpers and door furniture were all drawn against a 1.55 m body. Left
- * alone they would stay shed-sized details stuck on a bus. One factor, applied
- * at each of them, keeps the drawing's proportions.
- */
-const DETAIL = BODY_HEIGHT / 1.55;
 
 /**
  * The top of the bus above its own origin — **ear tips included**, per
@@ -476,13 +558,25 @@ export function createCatBus(): CatBusHandle {
   }
 
   // A dark cabin floor, so looking in through a window lands on something.
+  //
+  // Built from `FLOOR_PAN_THICKNESS`, and its top therefore lands exactly on
+  // `CAT_BUS_FLOOR_Y` by construction rather than by two numbers agreeing. That
+  // is the whole of the "clipped through the floor" fix: this pan and the
+  // constant everything stands on can no longer disagree, because one is
+  // written in terms of the other.
   const floorPan = solid(
     new Mesh(
-      new RoundedBoxGeometry(BODY_WIDTH - WALL_THICKNESS, 0.08 * DETAIL, cabinLength - WALL_THICKNESS, 2, 0.05 * DETAIL),
+      new RoundedBoxGeometry(
+        BODY_WIDTH - WALL_THICKNESS,
+        FLOOR_PAN_THICKNESS,
+        cabinLength - WALL_THICKNESS,
+        2,
+        0.05 * DETAIL,
+      ),
       toonMaterial(new Color(PALETTE.woodLight).multiplyScalar(0.8).getHex()),
     ),
   );
-  floorPan.position.set(0, BODY_BOTTOM_Y + 0.04 * DETAIL, bodyCentreZ);
+  floorPan.position.set(0, CAT_BUS_FLOOR_Y - FLOOR_PAN_THICKNESS / 2, bodyCentreZ);
   chassis.add(floorPan);
 
   /** Kept for the handful of places below that positioned off the old body. */
@@ -596,8 +690,8 @@ export function createCatBus(): CatBusHandle {
   // --- the seats ---------------------------------------------------------
   // Twelve of them, six rows of two either side of the aisle, because Jim asked
   // for "about 12 seats total" and for children to be sitting on them. Each
-  // cushion gets an **anchor group at floor level** rather than on top of it —
-  // see `CABIN_HEIGHT` for why feet go on the floor.
+  // cushion gets an anchor group **on top of it**, at `CAT_BUS_SEAT_Y` — see
+  // there for why that, and not the floor, is where a child's origin goes.
   const seatPadGeometry = new RoundedBoxGeometry(
     SEAT_WIDTH * 0.86,
     SEAT_PAD_HEIGHT,
@@ -605,9 +699,15 @@ export function createCatBus(): CatBusHandle {
     3,
     0.08 * DETAIL,
   );
+  // **The back stops at the window sill.** Derived rather than a multiple of the
+  // cushion, so that a seat back can never stand up inside a pane of glass
+  // however the sill moves — and so it reaches a seated child's shoulders,
+  // which is what a bus seat does and what the old `SEAT_PAD_HEIGHT * 1.5`
+  // (0.45 m, ending below her lap) did not.
+  const seatBackHeight = WINDOW_SILL_Y - CAT_BUS_SEAT_Y;
   const seatBackGeometry = new RoundedBoxGeometry(
     SEAT_WIDTH * 0.86,
-    SEAT_PAD_HEIGHT * 1.5,
+    seatBackHeight,
     0.12 * DETAIL,
     3,
     0.06 * DETAIL,
@@ -619,18 +719,19 @@ export function createCatBus(): CatBusHandle {
       const x = seatX(column);
       const z = rowZ(row);
 
+      // The cushion stands on the floor, so its top is `CAT_BUS_SEAT_Y`.
       const pad = solid(new Mesh(seatPadGeometry, seatMaterial));
-      pad.position.set(x, BODY_BOTTOM_Y + SEAT_PAD_HEIGHT / 2, z);
+      pad.position.set(x, CAT_BUS_FLOOR_Y + SEAT_PAD_HEIGHT / 2, z);
       chassis.add(pad);
 
       const back = solid(new Mesh(seatBackGeometry, seatMaterial));
-      back.position.set(x, BODY_BOTTOM_Y + SEAT_PAD_HEIGHT * 1.35, z - SEAT_PITCH * 0.3);
+      back.position.set(x, CAT_BUS_SEAT_Y + seatBackHeight / 2, z - SEAT_PITCH * 0.3);
       chassis.add(back);
 
-      // Where a child goes. Feet on the floor, facing the front of the bus.
+      // Where a child goes: **on the cushion**, facing the front of the bus.
       const seat = new Group();
       seat.name = `cat-bus-seat-${seats.length}`;
-      seat.position.set(x, BODY_BOTTOM_Y, z);
+      seat.position.set(x, CAT_BUS_SEAT_Y, z);
       chassis.add(seat);
       seats.push(seat);
     }
@@ -692,25 +793,52 @@ export function createCatBus(): CatBusHandle {
   );
   chassis.add(doorway);
 
-  // A couple of friendly steps, always visible, so hopping down reads clearly.
+  // A friendly step, always visible, so hopping down reads clearly.
+  //
+  // **Hung from the body's underside** rather than floated at `BODY_BOTTOM_Y / 2`,
+  // which left it 0.20 m clear of the bus in mid-air. Same fault as the rear
+  // bumper and found the same way — by measuring every part against the
+  // bodywork instead of looking at it from the front — and small enough that
+  // nobody had ever noticed, which is why it is worth fixing now that there is
+  // a check that would have to be loosened to let it pass.
+  const stepHeight = 0.1 * DETAIL;
   const step = solid(
     new Mesh(
-      new RoundedBoxGeometry(0.5 * DETAIL, 0.1 * DETAIL, DOOR_WIDTH * 0.8, 2, 0.04 * DETAIL),
+      new RoundedBoxGeometry(0.5 * DETAIL, stepHeight, DOOR_WIDTH * 0.8, 2, 0.04 * DETAIL),
       bumperMaterial,
     ),
   );
   step.position.set(
     -(BODY_WIDTH / 2 + 0.16 * DETAIL),
-    BODY_BOTTOM_Y / 2,
+    BODY_BOTTOM_Y - stepHeight / 2,
     doorGroup.position.z + DOOR_WIDTH / 2,
   );
   chassis.add(step);
 
   // --- bumpers ---------------------------------------------------------------
+  // **`cabinBackZ`, not `-BODY_LENGTH / 2`** — and that difference is Jim's
+  // *"strange block floating off the back of it"*, found on 7 August 2026.
+  //
+  // It is this bumper. `BODY_LENGTH` is a length *budget*: the bodywork is drawn
+  // as `cabinLength` centred on `bodyCentreZ`, which is pulled 1.51 m forward of
+  // the budget's midpoint so the boxy body sinks into the round cat face instead
+  // of being a sphere glued to a box. That reshaping moved the back of the bus
+  // forward by the same 1.51 m — and this bumper, which had been written against
+  // the budget, stayed where it was. It ended up a 5.2 x 0.65 x 0.48 m slab
+  // hanging in clear air **1.05 m behind the vehicle**, which is exactly what it
+  // looks like.
+  //
+  // Nothing warned, because nothing measured: it is invisible from the three-
+  // quarter front angle every check and every screenshot of this feature has
+  // used, and `CAT_BUS_LENGTH` kept reporting the budget, so the bumper was
+  // inside the size the bus claimed to be the whole time.
+  //
+  // The cure is to ask the bodywork where it ends rather than to keep a second
+  // opinion about it — the same one-owner rule the rest of this file runs on.
   const rearBumper = solid(
     new Mesh(new RoundedBoxGeometry(BODY_WIDTH * 0.98, 0.3 * DETAIL, 0.22 * DETAIL, 3, 0.08 * DETAIL), bumperMaterial),
   );
-  rearBumper.position.set(0, BODY_BOTTOM_Y + 0.05 * DETAIL, -BODY_LENGTH / 2 + 0.08 * DETAIL);
+  rearBumper.position.set(0, BODY_BOTTOM_Y + 0.05 * DETAIL, cabinBackZ + 0.08 * DETAIL);
   chassis.add(rearBumper);
 
   // --- paw-print livery --------------------------------------------------------
@@ -750,9 +878,14 @@ export function createCatBus(): CatBusHandle {
   // --- tail ------------------------------------------------------------------
   // A gentle curl of three stacked, shrinking blobs, leaning to one side —
   // nothing in this park is perfectly plumb or perfectly symmetrical.
+  // Rooted at `cabinBackZ` for the same reason the bumper is: written against
+  // `-BODY_LENGTH / 2`, the tail grew out of a point 0.88 m behind the bus, so
+  // the cat's tail was not attached to the cat. Less obvious than the bumper
+  // because a curling tail is *meant* to stand off the bodywork, which is
+  // precisely why it would have stayed.
   const tail = new Group();
   tail.name = 'tail';
-  tail.position.set(0.18 * DETAIL, BODY_BOTTOM_Y + BODY_HEIGHT * 0.58, -BODY_LENGTH / 2 + 0.05 * DETAIL);
+  tail.position.set(0.18 * DETAIL, BODY_BOTTOM_Y + BODY_HEIGHT * 0.58, cabinBackZ + 0.05 * DETAIL);
   chassis.add(tail);
 
   let tailCursor = new Group();
@@ -785,13 +918,20 @@ export function createCatBus(): CatBusHandle {
 
   // At the wheel: front of the cabin, on the far side from the door so the
   // driver is not standing in the doorway everyone is climbing out of.
+  //
+  // **On a cushion at `CAT_BUS_SEAT_Y`, like everybody else.** Jim's complaint
+  // named the children, but the driver was seated by the very same mechanism
+  // and so was 0.17 m under the floor too — he simply never gets a close-up. He
+  // had no cushion drawn under him at all, which is the tell for how little
+  // anybody had looked at him: he was a child standing at the front of a bus.
+  const driverZ = body.position.z + cabinLength / 2 - DRIVER_AREA_LENGTH * 0.5;
+  const driverPad = solid(new Mesh(seatPadGeometry, seatMaterial));
+  driverPad.position.set(-seatX(0), CAT_BUS_FLOOR_Y + SEAT_PAD_HEIGHT / 2, driverZ);
+  chassis.add(driverPad);
+
   const driverSeat = new Group();
   driverSeat.name = 'driver-seat';
-  driverSeat.position.set(
-    -seatX(0),
-    BODY_BOTTOM_Y,
-    body.position.z + cabinLength / 2 - DRIVER_AREA_LENGTH * 0.5,
-  );
+  driverSeat.position.set(-seatX(0), CAT_BUS_SEAT_Y, driverZ);
   cabin.add(driverSeat);
 
   // **The player's seat is one of the twelve, not a thirteenth.** Picked as the

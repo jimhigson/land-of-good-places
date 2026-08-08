@@ -479,7 +479,6 @@ export class ArrivalSequence {
     // The driver rides at the wheel and never gets out. He is the one person
     // here who is not a park NPC — see `busDriver.ts`.
     this.busDriver = createBusDriver();
-    this.busDriver.setWalkPhase(0, 0);
     this.bus.driverSeat.add(this.busDriver.root);
 
     // Routes are derived from where the bus's own door actually is.

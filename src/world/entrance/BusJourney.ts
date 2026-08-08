@@ -1,4 +1,5 @@
 import {
+  Box3,
   BoxGeometry,
   BufferAttribute,
   ConeGeometry,
@@ -32,10 +33,14 @@ import {
   CAT_BUS_CABIN_CEILING_Y,
   CAT_BUS_CABIN_FRONT_Z,
   CAT_BUS_SEAT_COUNT,
+  CAT_BUS_SEAT_Y,
   CAT_BUS_LENGTH,
   type CatBusHandle,
 } from './catBus';
 import { createBusDriver, type BusDriver } from './busDriver';
+// The game's own seated pose. A leaf module precisely so the ride can reach it
+// without dragging `PARK_BOUNDARY` in behind it — see `entities/ridePose.ts`.
+import { applyRidePose } from '../../entities/ridePose';
 import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
 // The park's own gate dimensions. Not a copy — `layout.ts` is the one owner, and
 // it is reachable from here precisely because it depends on nothing heavier than
@@ -127,6 +132,23 @@ const BUS_PITCH_SPAN = CAT_BUS_LENGTH * 0.78;
  * is the stretch where a child works out where she is going.
  */
 const PARK_STANDOFF = 30;
+
+/**
+ * How high a child bounces in her seat, at most, in metres.
+ *
+ * A ceiling on the excitement rather than the excitement itself: each rider gets
+ * this or whatever fits over her head, whichever is less. See `riderBounce`.
+ */
+const RIDER_BOUNCE = 0.13;
+
+/**
+ * Air kept between the top of a bouncing child and the header band.
+ *
+ * Small — this is a clearance, not a design gap — but not zero: a child whose
+ * hair grazes the ceiling on the peak of every bounce is the same defect as one
+ * through the floor, seen from the other end.
+ */
+const RIDER_BOUNCE_MARGIN = 0.04;
 
 /**
  * How far below the cabin's ceiling the inside camera hangs.
@@ -396,6 +418,22 @@ export class BusJourney {
   private readonly bus: CatBusHandle;
   private readonly driver: BusDriver;
   private readonly riders: KidHandle[] = [];
+  /**
+   * How far each rider may bounce, **measured against the ceiling over her own
+   * head** rather than shared.
+   *
+   * The bounce was a flat 0.13 m for everybody, and once the children were
+   * actually sat *on* the cushions rather than sunk through the floor that put
+   * the tallest of them 0.016 m up inside the header band at the top of her
+   * bob — measured, one seat in twelve, on the canonical look. A spiky-haired
+   * child is 0.22 m taller than a bunched one, so a single amplitude is either
+   * wrong for her or wasted on everybody else.
+   *
+   * Same seat, same cushion, same pose; only the hair differs, so the room left
+   * over differs. Each child is measured after she is posed and gets what is
+   * actually above her.
+   */
+  private readonly riderBounce: number[] = [];
   private readonly lane = new Group();
 
   private elapsedSeconds = 0;
@@ -470,7 +508,6 @@ export class BusJourney {
     this.scene.add(this.bus.root);
 
     this.driver = createBusDriver();
-    this.driver.setWalkPhase(0, 0);
     this.bus.driverSeat.add(this.driver.root);
 
     this.seatRiders(rider);
@@ -650,6 +687,23 @@ export class BusJourney {
       // At this angle they read as three-quarter faces from both places.
       const inboard = -Math.sign(seat.position.x || 1) * 0.6;
       kid.root.rotation.y = inboard + rng() * 0.4 - 0.2;
+      // **Actually sitting.** This line is the fix for Jim's *"the children on
+      // the bus aren't sitting on seats"*: there was no pose here at all, so
+      // twelve children rode the whole way stood bolt upright with the cushions
+      // through their shins, and the guard that counted twelve occupied seats
+      // was perfectly happy about it. `applyRidePose` is the game's own seated
+      // pose — the same one the ferris wheel and the Rail Race use — reached
+      // through `entities/ridePose.ts` rather than copied, so the bus cannot
+      // drift from what sitting means everywhere else.
+      applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, 0, 0);
+      // **How much air is over this particular child**, measured on her, posed,
+      // before she is parented into anything — so `box.max.y` is plainly "how
+      // far she reaches above her own origin" and her origin is about to become
+      // the cushion top. See `riderBounce`.
+      kid.root.updateMatrixWorld(true);
+      const reach = new Box3().setFromObject(kid.root).max.y;
+      const headroom = CAT_BUS_CABIN_CEILING_Y - (CAT_BUS_SEAT_Y + reach);
+      this.riderBounce.push(Math.max(0, Math.min(RIDER_BOUNCE, headroom - RIDER_BOUNCE_MARGIN)));
       seat.add(kid.root);
       this.riders.push(kid);
     }
@@ -1042,8 +1096,11 @@ export class BusJourney {
       const kid = this.riders[i];
       if (!kid) continue;
       const phase = i * 1.31;
-      // Bouncing on the seat. `body` is the rig's own bob target.
-      kid.body.position.y = Math.abs(Math.sin(elapsed * 3.2 + phase)) * 0.13;
+      // Bouncing on the seat. `body` is the rig's own bob target, and the
+      // amplitude is this child's own — measured against the ceiling over her
+      // head when she was seated. See `riderBounce`.
+      kid.body.position.y =
+        Math.abs(Math.sin(elapsed * 3.2 + phase)) * (this.riderBounce[i] ?? 0);
       // Looking out at what is going past, and up at each other.
       // Glancing about, not turning away: at ±0.55 rad most of the bus had its
       // face pointed somewhere other than forward, and the inside view is a

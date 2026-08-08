@@ -1,7 +1,7 @@
 import { Group } from 'three';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { PALETTE } from '../../core/palette';
-import { applyWalk } from '../../art/style/asset';
+import { applyRidePose } from '../../entities/ridePose';
 
 /**
  * **The one person on the cat bus who is not a park NPC: the driver.**
@@ -29,8 +29,6 @@ import { applyWalk } from '../../art/style/asset';
 export interface BusDriver {
   readonly root: Group;
   readonly height: number;
-  /** `phase` 0..1 through one stride, `speed` 0..1 of a gentle walk. */
-  setWalkPhase(phase01: number, speed01: number): void;
   dispose(): void;
 }
 
@@ -55,13 +53,31 @@ export function createBusDriver(): BusDriver {
   root.name = 'cat-bus-driver';
   root.add(handle.root);
 
+  // **Seated, through the game's own pose.** Jim's *"aren't sitting on seats,
+  // they're clipped through the floor"* named the children, but the driver was
+  // built the same way — dropped into his seat group with no pose at all — and
+  // was therefore standing at the wheel and 0.17 m under the floor with them.
+  // He only escaped the complaint because the ride never lingers on him.
+  applyRidePose(
+    { root: handle.root, body: handle.body, head: handle.head, ...handle.limbs },
+    0,
+    0,
+  );
+
   return {
     root,
     height: handle.height,
 
-    setWalkPhase(phase01: number, speed01: number): void {
-      applyWalk(handle.limbs, handle.body, phase01, speed01);
-    },
+    // **No `setWalkPhase`, deliberately.** He had one, and both call sites used
+    // it identically — `setWalkPhase(0, 0)`, meaning "stand still" — which is a
+    // walk cycle at zero speed and therefore writes *zero* into all four limb
+    // rotations. Called after the seated pose above, as both did, that silently
+    // straightened his legs and stood him back up at the wheel. A second way to
+    // pose the driver, whose only use was to undo the first: exactly CLAUDE.md's
+    // "two definitions of one thing", and the fix is to have one.
+    //
+    // He never walks. The file's own header says so: he never gets out, he
+    // leaves with the bus.
 
     dispose(): void {
       // `createKid()` exposes no `dispose()` of its own — same as the player's
