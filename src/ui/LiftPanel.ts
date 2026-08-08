@@ -41,6 +41,8 @@ export class LiftPanel implements GameSystem {
 
   private mode: LiftPanelMode | null = null;
   private indicatorText = '';
+  /** Last frame's `LiftPanelState.arrived`, so the ding fires once per arrival. */
+  private wasArriving = false;
 
   constructor(
     container: HTMLElement,
@@ -133,6 +135,15 @@ export class LiftPanel implements GameSystem {
       this.indicatorText = state.indicator;
       this.indicator.textContent = state.indicator;
     }
+
+    // The arrival ding, on the edge rather than every frame — the doors are
+    // opening at the floor she pressed. Checked before the early return below,
+    // because arriving does not change the panel's *face*: travelling and
+    // arriving are both `'going'`, which is exactly why the seam reports this
+    // as its own fact rather than leaving the panel to infer it.
+    const arrived = state.arrived === true;
+    if (arrived && !this.wasArriving) playLiftDing();
+    this.wasArriving = arrived;
 
     if (state.mode === this.mode) {
       // The floor lights still move while the car does, so they are refreshed

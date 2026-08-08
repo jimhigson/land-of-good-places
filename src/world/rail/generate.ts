@@ -145,6 +145,27 @@ interface RouteBriefBase {
   /** Metres of track wanted. Finishing is attempted from `CLOSE_AFTER` of this. */
   readonly desiredLength: number;
   /**
+   * **Metres of track the ride cannot exceed and still be worth building.**
+   *
+   * `desiredLength` is a target the search aims at; this is a wall it may not
+   * pass. A piece that would take the route beyond it is rejected exactly like
+   * a piece that hits a tree, so the whole branch below it is never explored.
+   *
+   * It exists because the ginormous slide had a hard 75 m ceiling
+   * (`MAX_RIDEABLE_LENGTH` — past it the drop is spread so thin the ride is a
+   * lazy river) that the search **could not see**. It was told to want 60 m,
+   * allowed to grow to `60 × CLOSE_ONLY_AFTER` plus a closer, and then had its
+   * finished routes rejected by `satisfies` for being too long: on seed 5 it
+   * solved **123 complete routes and threw all 123 away**, and the park did
+   * not build. A constraint that decides whether a route is acceptable belongs
+   * where routes are *made*, not where they are *marked*.
+   *
+   * Leave it unset and nothing changes at all — no comparison is made and no
+   * candidate's fate is altered, which is what keeps every ride that never
+   * asked for a ceiling solving exactly as it did.
+   */
+  readonly maxLength?: number;
+  /**
    * Where the route may begin, best first. This is the **outermost level of
    * the search**: when every route from one start pose fails, the next is
    * tried. For a closed loop whose station sits at the start, that makes the
@@ -312,6 +333,8 @@ export interface SolveReport {
     readonly boundary: number;
     readonly selfClearance: number;
     readonly curvature: number;
+    /** Pieces that would have taken the route past {@link RouteBrief.maxLength}. */
+    readonly tooLong: number;
   };
   /**
    * Whole solved routes thrown away by {@link RouteBrief.satisfies}.
@@ -471,7 +494,8 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
   let backtracks = 0;
   let closerAttempts = 0;
   let restarts = 0;
-  const rejected = { collision: 0, boundary: 0, selfClearance: 0, curvature: 0 };
+  const rejected = { collision: 0, boundary: 0, selfClearance: 0, curvature: 0, tooLong: 0 };
+  const maxLength = brief.maxLength;
 
   /**
    * The outermost level of the search, flattened.
@@ -558,10 +582,20 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
      * the one being taken back out.
      */
     const cell = Math.max(brief.selfClearance, 1);
-    const grid = new Map<string, Sample[]>();
+    const grid = new Map<number, Sample[]>();
     const laid: Sample[] = [];
-    const keyOf = (x: number, z: number): string =>
-      `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    // An INTEGER cell key, not `${gx},${gz}`. The string form built a fresh
+    // string on every one of the nine cell lookups `selfClear` does per
+    // sample — measured at 29% of the Sky Cruiser's whole solve in a Node CPU
+    // profile, nearly all of it string building and the garbage that follows.
+    // The park is tens of metres across and the cell is metres wide, so a
+    // signed 12-bit index each way covers it with room to spare, and
+    // `cellKey` is a bijection onto the integers exactly as the string was
+    // onto strings: the same samples land in the same buckets in the same
+    // order, so the search sees an identical world.
+    const cellKey = (gx: number, gz: number): number => (gx + 2048) * 4096 + (gz + 2048);
+    const keyOf = (x: number, z: number): number =>
+      cellKey(Math.floor(x / cell), Math.floor(z / cell));
 
     const headPose = (): Pose2 => {
       const last = chosen[chosen.length - 1];
@@ -593,24 +627,43 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       accumulated -= seg.length;
     };
 
-    /** Is (x, z) at arc `s` far enough from every earlier bit of track? */
-    const selfClear = (x: number, z: number, s: number, closing: boolean): boolean => {
+    /**
+     * Is (x, z) at arc `s` far enough from every earlier bit of track?
+     *
+     * The hottest loop in the whole generator — a CPU profile of one Sky
+     * Cruiser solve spent 21% of it here even after the cell key stopped being
+     * a string. Two things keep it cheap, and neither changes an answer:
+     *
+     *  - **Index loops, not `for…of`.** Nine buckets are walked per sample and
+     *    every `for…of` allocated an iterator to do it.
+     *  - **A bucket is in arc order, so the head skip can `break`.** Samples
+     *    are appended as the route grows and popped last-in-first-out when it
+     *    backtracks, so `s` never decreases within a bucket. The moment one
+     *    entry is close enough behind the head to be ignored, so is every
+     *    entry after it — carrying on to check them is provably wasted work.
+     */
+    const selfClearance = brief.selfClearance;
+    const ignoreStart = brief.closed;
+    const selfClear =(x: number, z: number, s: number, closing: boolean): boolean => {
       const gx = Math.floor(x / cell);
       const gz = Math.floor(z / cell);
+      // A loop's closer is aiming at the start pose, so the start is not an
+      // obstacle to it. An *open* route's finisher aims somewhere else
+      // entirely, and its own start is an ordinary piece of track it has no
+      // business running into — so this relaxation stays with loops.
+      const skipStart = closing && ignoreStart;
       for (let ix = gx - 1; ix <= gx + 1; ix += 1) {
         for (let iz = gz - 1; iz <= gz + 1; iz += 1) {
-          const bucket = grid.get(`${ix},${iz}`);
-          if (!bucket) continue;
-          for (const earlier of bucket) {
+          const bucket = grid.get(cellKey(ix, iz));
+          if (bucket === undefined) continue;
+          for (let i = 0; i < bucket.length; i += 1) {
+            const earlier = bucket[i] as Sample;
             // The track immediately behind the head is not a collision, it is
-            // where we just came from.
-            if (s - earlier.s < SELF_IGNORE_ARC) continue;
-            // A loop's closer is aiming at the start pose, so the start is not
-            // an obstacle to it. An *open* route's finisher aims somewhere else
-            // entirely, and its own start is an ordinary piece of track it has
-            // no business running into — so this relaxation stays with loops.
-            if (closing && brief.closed && earlier.s < SELF_IGNORE_ARC) continue;
-            if (Math.hypot(x - earlier.x, z - earlier.z) < brief.selfClearance) return false;
+            // where we just came from — and nothing later in this bucket is
+            // any further behind, so there is nothing left to look at.
+            if (s - earlier.s < SELF_IGNORE_ARC) break;
+            if (skipStart && earlier.s < SELF_IGNORE_ARC) continue;
+            if (Math.hypot(x - earlier.x, z - earlier.z) < selfClearance) return false;
           }
         }
       }
@@ -623,6 +676,16 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
      * is by definition heading straight for.
      */
     const validate = (seg: CubicSegment, closing: boolean): Sample[] | null => {
+      // The length wall, checked FIRST because it is the cheapest rejection
+      // there is — an addition and a comparison against work that would
+      // otherwise sample the cubic sixty-five times and then walk it metre by
+      // metre against the whole park. See {@link RouteBriefBase.maxLength}:
+      // unset, this is one comparison against `undefined` and nothing else in
+      // the search can tell the difference.
+      if (maxLength !== undefined && accumulated + seg.length > maxLength) {
+        rejected.tooLong += 1;
+        return null;
+      }
       if (minCurvatureRadius(seg) < brief.minRadius) {
         rejected.curvature += 1;
         return null;
@@ -1023,7 +1086,8 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       `corridor ${brief.corridorRadius} m, min radius ${brief.minRadius} m, ` +
       `self-clearance ${brief.selfClearance} m. ` +
       `Pieces rejected for: ${rejected.collision} collision, ${rejected.boundary} boundary, ` +
-      `${rejected.selfClearance} self-clearance, ${rejected.curvature} curvature.`,
+      `${rejected.selfClearance} self-clearance, ${rejected.curvature} curvature, ` +
+      `${rejected.tooLong} over the ${brief.maxLength ?? Infinity} m ceiling.`,
     report,
   );
 }

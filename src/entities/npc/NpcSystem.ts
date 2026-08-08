@@ -29,7 +29,8 @@ import { SpeechBubble } from '../../ui/SpeechBubble';
 import { InstancedCrowd, type CrowdMember } from './InstancedCrowd';
 import { BLUE_EYE_VARIANT, EYE_VARIANT_COUNT, KidCrowd, type KidColours } from './kidCrowd';
 import { NpcCharacter } from './NpcCharacter';
-import type { NpcAvatar } from './npcAvatar';
+import { characterModelAvatar, type NpcAvatar } from './npcAvatar';
+import { WaypointDriver, type Waypoint } from './waypointDriver';
 import { PoiGraph } from './poiGraph';
 import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
@@ -317,6 +318,71 @@ const BUBBLE_HEIGHT_OFFSET = LABEL_HEIGHT_OFFSET + 0.62;
  * on screen *before* the park is solved. See that file for the full reasoning.
  */
 
+/**
+ * Somebody who lives in a space that is not the park.
+ *
+ * The generalisation Jim asked for after playing the hotel: *"even other
+ * children can be walked through even though in the park NPCs are solid —
+ * they should be the same code."* They are now literally the same code. A
+ * resident is an ordinary {@link NpcCharacter} in the ordinary
+ * `this.characters` array, so it gets — without a line of its own —
+ * `NpcCharacter`'s movement and walk cycle, the shared `CollisionWorld`, the
+ * shared `WalkSurfaces` ground sampler, {@link NpcSystem.separate}'s
+ * child↔child push-apart and {@link NpcSystem.separateFromPlayer}'s
+ * player↔child one. The hotel's own bespoke movement layer is gone: there is
+ * nothing left for it to disagree with the park about.
+ *
+ * What is *not* shared is the decision layer, which is exactly the seam
+ * `driver.ts` exists to cut along: a resident is driven by a
+ * {@link WaypointDriver} round a circuit inside its own room rather than by a
+ * `WanderDriver` round the park's `PoiGraph`. A room is not a graph — see that
+ * file's header.
+ *
+ * ### Who builds what
+ *
+ * The space owns the *look and the geography*: it builds the model, parents it
+ * into its own root (so the body is shown and hidden with the space, and
+ * disposed with it), and works out where standing about is sensible. This
+ * system owns the *body and the physics*. That is why `avatar` arrives already
+ * built and already parented — `NpcSystem` never touches a resident's scene
+ * graph, and could not sensibly decide which of four hotel rooms one belongs
+ * to.
+ *
+ * ### What a resident deliberately does not get
+ *
+ * A name pill and a speech bubble. Both are park furniture — the pill is
+ * capped to the ten nearest and the bubble is driven by the chat activity,
+ * neither of which a room with three people in it wants. The parallel `labels`
+ * and `bubbles` arrays simply run out, and the frame path already skips a
+ * character with no entry in them.
+ */
+export interface ResidentSpec {
+  readonly name: string;
+  /**
+   * The body, already built **and already added to its own space's root**.
+   * Anything that satisfies `NpcAvatar` will do: `npcAvatar.ts`'s
+   * `characterModelAvatar` for a child, its `creatureAvatar` for a pet.
+   */
+  readonly avatar: NpcAvatar;
+  /** The circuit, in world metres. The body starts on the first one. */
+  readonly waypoints: readonly Waypoint[];
+  /** This resident's own seeded stream, so reloading gives the same stroll. */
+  readonly seed: number;
+  /** Fraction of the house walking pace. See {@link WaypointOptions.pace}. */
+  readonly pace?: number;
+  /**
+   * Height of the floor these waypoints are on. Defaults to 0.
+   *
+   * The space has to say, because nothing else can: `NpcCharacter` starts
+   * everybody at `terrainHeight`, which is the park's own hills and knows
+   * nothing about a floor plate six hundred metres away — and `WalkSurfaces`
+   * only offers a platform within a step *up* of where you ask from, so a
+   * body that starts far below its own floor is told it has none and falls
+   * for ever. See `NpcCharacter.settle`.
+   */
+  readonly floorY?: number;
+}
+
 /** A pet, and the child it belongs to. */
 interface Pet {
   readonly owner: NpcCharacter;
@@ -394,6 +460,11 @@ export class NpcSystem implements GameSystem {
      * this: eleven of the twenty-four simply start the game sitting down.
      */
     private readonly arrivingByBus: number = 0,
+    // The people who live somewhere that is not the park — the hotel's guests,
+    // today. See {@link ResidentSpec}. Built last of all, below, and on their
+    // own seeded streams, so hosting them cannot shift a single roll the park's
+    // own twelve children make.
+    residents: readonly ResidentSpec[] = [],
   ) {
     this.group.name = 'npcs';
 
@@ -555,8 +626,6 @@ export class NpcSystem implements GameSystem {
       this.bubbles.push(bubble);
     }
 
-    this.labelDistances = new Float32Array(this.characters.length);
-
     // --- pets ----------------------------------------------------------------
     const petPrototype = createPetBlob();
     this.pets = new InstancedCrowd(petPrototype.root, PET_COUNT, {
@@ -586,6 +655,43 @@ export class NpcSystem implements GameSystem {
         bounce: rng.range(0, TAU),
       });
     }
+
+    // --- residents -----------------------------------------------------------
+    // Deliberately after the pets: `petList` picks its owners by index into
+    // `this.characters`, so appending anybody before that runs would hand the
+    // park's two blob pets to two different children. Deliberately on their own
+    // `Rng` per resident, never the park's `rng`, for the same reason — see
+    // `ResidentSpec` and the seed-stream note in the constructor's signature.
+    for (const spec of residents) {
+      const rng = new Rng(spec.seed);
+      const start = spec.waypoints[0] ?? { x: 0, z: 0 };
+      const character = new NpcCharacter(
+        spec.avatar,
+        new WaypointDriver({
+          rng,
+          points: spec.waypoints,
+          ...(spec.pace !== undefined ? { pace: spec.pace } : {}),
+        }),
+        collision,
+        start.x,
+        start.z,
+        rng.range(-Math.PI, Math.PI),
+        spec.name,
+      );
+      character.groundSampler = groundSampler;
+      // The constructor could only guess with `terrainHeight`, which knows
+      // nothing about a floor plate six hundred metres from the park — see
+      // `NpcCharacter.settle` and `ResidentSpec.floorY`.
+      character.settle(spec.floorY ?? 0);
+      character.setWalkPhase(rng.range(0, TAU));
+      spec.avatar.setExpression('neutral');
+      this.characters.push(character);
+    }
+
+    // Sized once everybody exists, residents included: `updateLabels` walks
+    // `characters` and writes one distance per index, so a short array here
+    // would silently stop measuring the last few.
+    this.labelDistances = new Float32Array(this.characters.length);
   }
 
   /** Installs the building's ground sampler, so the ground floor is walkable. */
@@ -690,6 +796,12 @@ export class NpcSystem implements GameSystem {
     this.updateBubbles();
   }
 
+  /**
+   * Everything this system built. A **resident's** avatar is deliberately not
+   * in here: its model was built by, parented into and is disposed with its
+   * own space (see {@link ResidentSpec}), and disposing it from both places is
+   * how a shared material gets freed out from under something still drawing it.
+   */
   dispose(): void {
     this.kids.dispose();
     this.pets.dispose();
@@ -904,21 +1016,11 @@ export class NpcSystem implements GameSystem {
       model.setHatWorn(true);
     }
 
-    return {
-      rig: {
-        root: model.root,
-        body: model.body,
-        head: model.head,
-        leftArm: model.leftArm,
-        rightArm: model.rightArm,
-        leftLeg: model.leftLeg,
-        rightLeg: model.rightLeg,
-      },
-      headBaseY: model.head.position.y,
-      height: model.height,
-      setExpression: (expression) => model.setExpression(expression),
-      tick: (dt) => model.update(dt),
-    };
+    // The mapping from "the player's own model" to "something `NpcCharacter`
+    // can pose" lives in `npcAvatar.ts`, not here: the hotel's residents are
+    // the same body built by the same factory, and two copies of it is the
+    // repo's most-repeated bug.
+    return characterModelAvatar(model);
   }
 
   /**

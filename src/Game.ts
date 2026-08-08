@@ -34,6 +34,7 @@ import {
 import { JUMP_APEX_HEIGHT } from './entities/Player';
 import { NavGrid } from './world/NavGrid';
 import { CharacterCreation, CuteODex, Hud, LiftPanel, ScreenControls, TapBurst, WhatsNew } from './ui';
+import { FloorPill } from './ui/FloorPill';
 import { ActionChips } from './ui/ActionChips';
 import { ParkMap } from './ui/ParkMap';
 import { RaceHud } from './ui/RaceHud';
@@ -138,6 +139,7 @@ export class Game {
   readonly transitions: Transitions;
   readonly stairMenu: StairMenu;
   readonly liftPanel: LiftPanel;
+  readonly hotelLiftPanel: LiftPanel;
   readonly parade: Parade;
   readonly wornFlower: WornFlower;
   readonly wornHat: WornHat;
@@ -235,6 +237,9 @@ export class Game {
     // The building owns "how high is the ground?" from here on, so that its
     // decks, stairs, lift and bubble are all walkable.
     this.world.attachPlayer(this.player);
+    // A save written inside the hotel restores into its room, not the plaza:
+    // rooms are true spaces, so being there is a position plus this adoption.
+    this.world.hotel.adoptRestoredPlayer();
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -544,6 +549,23 @@ export class Game {
     );
     this.addSystem(this.liftPanel);
 
+    // The Land Hotel's lift drives a second instance of the SAME panel: it
+    // implements Decision 3's floors()/go(n) seam (the first portal lift),
+    // which is exactly what the panel was written against. Only one of the
+    // two can ever be showing — the player is only ever in one space.
+    this.hotelLiftPanel = new LiftPanel(
+      uiRoot,
+      this.world.hotel.liftPanel,
+      () =>
+        (this.uiOwnsTheScreen() && !this.player.riding) ||
+        this.parkMap.isOpen ||
+        this.stairMenu.isOpen,
+    );
+    this.addSystem(this.hotelLiftPanel);
+
+    // Eleri: "It shows on the screen which floor you are on, on the HUD."
+    this.addSystem(new FloorPill(uiRoot, () => this.world.hotel.floorLabel()));
+
     // GAME_DESIGN.md's SELECTION RULE, built once for the whole game: one thing
     // in the park is selected at a time — by standing at it, hovering it or
     // tapping it — and that is what the rainbow outlines and what the chips
@@ -592,6 +614,11 @@ export class Game {
             name: 'liftPanel',
             active: () => this.liftPanel.awaitingPress,
             run: () => this.liftPanel.pressFocused(),
+          },
+          {
+            name: 'hotelLiftPanel',
+            active: () => this.hotelLiftPanel.awaitingPress,
+            run: () => this.hotelLiftPanel.pressFocused(),
           },
           {
             // Up a tree: `player.riding` is true, so nothing is selectable and
@@ -652,6 +679,7 @@ export class Game {
       this.world.railRace.rideView?.resize(width, height);
       this.world.ferrisWheel.rideView?.resize(width, height);
       this.world.building.resizeRideCameras(width, height);
+      this.world.hotel.resizeCinematic(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -660,6 +688,7 @@ export class Game {
     // on boarding, so on a window that never resizes it would otherwise render
     // the whole ride at the 1:1 aspect it was constructed with.
     this.world.building.resizeRideCameras(window.innerWidth, window.innerHeight);
+    this.world.hotel.resizeCinematic(window.innerWidth, window.innerHeight);
 
     // First person on the train (Decision 4 C2): boarding wipes into the
     // seat's RideCamera, alighting wipes back. The override is the third
@@ -711,6 +740,18 @@ export class Game {
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,
         this.world.railRace.playerStaysVisible,
       );
+    // The hotel's own camera moments — the food close-up, a picture on the
+    // wall, the view out of a fiftieth-floor window (`hotel/cinematic.ts`).
+    //
+    // **Set directly, with no iris wipe**, exactly as `onRideCameraCut` above
+    // does: these are gentle push-ins and a wipe would turn each one into a
+    // blink. That is safe because the shot's first frame is the iso camera's
+    // own position and aim, so the instant control changes hands nothing on
+    // screen moves. Her model stays visible throughout — for two of the three
+    // she is the subject.
+    this.world.hotel.onCinematic = (camera) => {
+      this.cameraOverride = camera;
+    };
     this.world.ferrisWheel.touch = isTouchDevice();
     this.world.ferrisWheel.onRideChange = (riding) => {
       if (riding) {
@@ -771,6 +812,8 @@ export class Game {
       if (stallId === 'ginormousSlideWithGrownUp') {
         return this.world.building.requestBoardSlide(true);
       }
+      // Not a ride: the hotel's front door, for its deep link.
+      if (stallId === 'hotelLobby') return this.world.hotel.requestEnterLobby();
       return false;
     };
 
@@ -1372,7 +1415,12 @@ export class Game {
  *    day `SpaceManager` exists.
  */
 function resolveSpawn(place: SavedPlace | undefined): Vector3 {
-  if (!place || place.space !== SPACE_GARDEN) return DEFAULT_SPAWN;
+  if (!place) return DEFAULT_SPAWN;
+  // Hotel rooms restore IN PLACE — they are true disjoint spaces with their
+  // own origins, so "being there" is a position plus one adoption call
+  // (`Hotel.adoptRestoredPlayer`), unlike the castle's stacked decks, whose
+  // restore stays deliberately deferred to Decision 3 (see below).
+  if (place.space !== SPACE_GARDEN && !place.space.startsWith('hotel.')) return DEFAULT_SPAWN;
   const world = localToWorld(place.space, place.x, place.y, place.z);
   if (!world) return DEFAULT_SPAWN;
   return new Vector3(world.x, world.y, world.z);

@@ -3,8 +3,9 @@ import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../world/building/layout';
 import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
-import { PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
+import { isOnPath, PLAZA, ROUTES, type RouteDefinition } from '../../world/paths';
 import { STALL_STANDS } from '../../minigames/stallPlacement';
+import { NPC_RADIUS } from '../../core/constants';
 import { TRAIN_PLAN } from '../../world/train/plan';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 
@@ -99,6 +100,17 @@ const MAX_EDGE = 13;
 /** Half-width a waypoint route is tested against — a little wider than an NPC. */
 const CLEARANCE = 0.7;
 
+/**
+ * The narrower test used where the sample stands ON the paving. A ribbon is
+ * guaranteed-walkable ground; where it threads a level crossing's gap or
+ * skirts a booth, its centreline legitimately passes within CLEARANCE of the
+ * fence while a child on the 2.6 m ribbon has ample room. Off paving the
+ * comfy margin stays — on paving the probe is the NPC's own radius less a
+ * float whisker (derived from {@link NPC_RADIUS}, never restated), only
+ * granted where the park has already promised the ground is walkable.
+ */
+const PAVED_CLEARANCE = NPC_RADIUS - 0.02;
+
 /** Metres between clearance samples along a candidate edge. */
 const SAMPLE_STEP = 0.55;
 
@@ -107,10 +119,20 @@ interface NodeSeed {
   readonly z: number;
   /** Somewhere worth stopping and looking at, rather than a junction. */
   readonly interesting: boolean;
+  /** The paved lane this seed was sampled from, if any — see {@link LANES}. */
+  lane?: { readonly name: string; readonly at: number };
 }
 
-/** Metres between waypoints sampled along a path. Comfortably under {@link MAX_EDGE}. */
-const ROUTE_SPACING = 7;
+/** Metres between waypoints sampled along a path. Comfortably under {@link MAX_EDGE}.
+ *
+ * 4, down from 7 (issue #241): with plots spread to the rim, a station or
+ * doormat spur can run close beside the railway's exclusion fence, and a 7 m
+ * straight edge between two on-ribbon samples cuts enough of the ribbon's own
+ * bend to clip the fence's {@link CLEARANCE} — Bluebell Halt's whole spur end
+ * stranded exactly that way. At 4 m a straight edge stays within ~0.5 m of
+ * the paved curve, so an edge is only rejected when the *lane itself* is
+ * genuinely too tight, which is what the check is for. */
+const ROUTE_SPACING = 4;
 
 /** How many waypoints ring the fountain. Six is what the plaza has always had. */
 const PLAZA_RING_NODES = 6;
@@ -178,18 +200,31 @@ const MERGE_DISTANCE = 1.2;
  * solid building. See that file — it fails a build rather than a child's
  * afternoon.
  */
+/**
+ * Every paved lane's centreline at fine pitch, for {@link laneIsClear}.
+ * Populated by {@link sampleRoute} as the seeds are built.
+ */
+const LANES = new Map<string, { x: number; z: number }[]>();
+
 export const SEEDS: readonly NodeSeed[] = buildSeeds();
 
 function buildSeeds(): NodeSeed[] {
   const seeds: NodeSeed[] = [];
 
-  const add = (x: number, z: number, interesting: boolean): void => {
+  const add = (x: number, z: number, interesting: boolean, lane?: NodeSeed['lane']): void => {
     for (const seed of seeds) {
       const dx = seed.x - x;
       const dz = seed.z - z;
-      if (dx * dx + dz * dz < MERGE_DISTANCE * MERGE_DISTANCE) return;
+      if (dx * dx + dz * dz < MERGE_DISTANCE * MERGE_DISTANCE) {
+        // Merged. If the survivor has no lane identity and the incoming seed
+        // does, adopt it: a doormat that swallowed the spur's last sample is
+        // still ON that lane, and losing the identity would put its edges
+        // back on straight chords past the booth's counter.
+        if (!seed.lane && lane) seed.lane = lane;
+        return;
+      }
     }
-    seeds.push({ x, z, interesting });
+    seeds.push({ x, z, interesting, ...(lane ? { lane } : {}) });
   };
 
   // 1. The plaza kerb, starting at the fountain approach (-Z) and going round.
@@ -218,12 +253,13 @@ function buildSeeds(): NodeSeed[] {
   for (const route of ROUTES) {
     for (const point of sampleRoute(route)) {
       if (insideFacade(point.x, point.z)) continue;
-      add(point.x, point.z, false);
+      add(point.x, point.z, false, { name: route.name, at: point.at });
     }
   }
 
   return seeds;
 }
+
 
 /**
  * Points every {@link ROUTE_SPACING} metres along a route's centreline.
@@ -233,13 +269,24 @@ function buildSeeds(): NodeSeed[] {
  * points are on the paving rather than near it. A closed route stops one sample
  * short of the end, which is where it started.
  */
-function sampleRoute(route: RouteDefinition): { x: number; z: number }[] {
+function sampleRoute(route: RouteDefinition): { x: number; z: number; at: number }[] {
   const vectors = route.points.map(([x, z]) => new Vector3(x, 0, z));
   const curve = new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
+  const point = new Vector3();
+
+  // The fine chain first: the lane as a child would actually walk it, kept
+  // for {@link laneIsClear}. SAMPLE_STEP pitch, same as edge validation.
+  const fineCount = Math.max(2, Math.ceil(curve.getLength() / SAMPLE_STEP));
+  const fine: { x: number; z: number }[] = [];
+  for (let i = 0; i <= fineCount; i += 1) {
+    curve.getPointAt(i / fineCount, point);
+    fine.push({ x: point.x, z: point.z });
+  }
+  LANES.set(route.name, fine);
+
   const steps = Math.max(1, Math.round(curve.getLength() / ROUTE_SPACING));
   const last = route.closed ? steps - 1 : steps;
-  const point = new Vector3();
-  const points: { x: number; z: number }[] = [];
+  const points: { x: number; z: number; at: number }[] = [];
   for (let i = 0; i <= last; i += 1) {
     // getPointAt, not getPoint: parameter-uniform sampling gives each control
     // segment the same number of samples however long it is, and one long
@@ -247,7 +294,7 @@ function sampleRoute(route: RouteDefinition): { x: number; z: number }[] {
     // twice MAX_EDGE, so its far end was stranded. Arc-length sampling makes
     // "every ROUTE_SPACING metres" actually true.
     curve.getPointAt(i / steps, point);
-    points.push({ x: point.x, z: point.z });
+    points.push({ x: point.x, z: point.z, at: Math.round((i / steps) * fineCount) });
   }
   return points;
 }
@@ -278,6 +325,8 @@ export interface PoiNode {
   readonly x: number;
   readonly z: number;
   readonly interesting: boolean;
+  /** The paved lane this node was sampled from, for lane-walk edges. */
+  readonly lane?: { readonly name: string; readonly at: number };
   /**
    * Which place this is in — **derived from the coordinates**, never authored.
    *
@@ -329,6 +378,7 @@ export class PoiGraph {
         // Decided below, once there are edges to decide it from.
         reachable: false,
         neighbours: [],
+        ...(seed.lane ? { lane: seed.lane } : {}),
       });
     }
 
@@ -344,7 +394,15 @@ export class PoiGraph {
         const dx = to.x - from.x;
         const dz = to.z - from.z;
         if (dx * dx + dz * dz > MAX_EDGE * MAX_EDGE) continue;
-        if (!lineIsClear(collision, from.x, from.z, to.x, to.z, probe)) continue;
+        // A straight chord first; failing that, the paved lane itself. The
+        // chord is a fiction — a child walks the ribbon, and the ribbon
+        // BENDS: through a level crossing's gap, around a booth's counter,
+        // between a fence and a hedge. Near the rim (issue #241 spread the
+        // plots there) the chord between two on-lane samples routinely cuts
+        // the very corner the lane was drawn to avoid, and whole spur ends
+        // stranded over geometry a child could genuinely walk.
+        if (!lineIsClear(collision, from.x, from.z, to.x, to.z, probe) &&
+            !laneIsClear(collision, from, to, probe)) continue;
         from.neighbours.push(b);
         to.neighbours.push(a);
       }
@@ -508,22 +566,76 @@ function findClearSpot(
   z: number,
   probe: Vector3,
 ): { x: number; z: number } | null {
+  // Of every nudge that lands clear, prefer the one most towards the park
+  // middle — never just the first in list order. A doormat seed that needs
+  // rescuing is almost always pressed against its own booth, and a nudge on
+  // the booth's FAR side lands clear and then strands: nothing out there
+  // connects (the exact rim failure `paths.ts`'s PAST_CLEARANCE note
+  // documents). Towards the middle is towards the path that serves the
+  // doormat, on every plot, because the solver faces every doormat that way.
+  const inward = Math.hypot(x, z) > 1e-6 ? [-x, -z] : [0, 1];
+  const inwardLength = Math.hypot(inward[0] as number, inward[1] as number) || 1;
+  const inX = (inward[0] as number) / inwardLength;
+  const inZ = (inward[1] as number) / inwardLength;
+  let best: { x: number; z: number } | null = null;
+  let bestDot = -Infinity;
   for (const [dx, dz] of NUDGES) {
-    if (isClear(collision, x + dx, z + dz, probe)) return { x: x + dx, z: z + dz };
+    if (!isClear(collision, x + dx, z + dz, probe)) continue;
+    const dot = dx * inX + dz * inZ;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = { x: x + dx, z: z + dz };
+    }
   }
-  return null;
+  return best;
 }
 
-/** Would a character standing here be pushed out of something? */
+/** Would a character standing here be pushed out of something? On paving the
+ * probe narrows to {@link PAVED_CLEARANCE} — see its comment. */
 function isClear(collision: CollisionWorld, x: number, z: number, probe: Vector3): boolean {
   probe.set(x, 0, z);
-  collision.resolve(probe, CLEARANCE);
+  collision.resolve(probe, isOnPath(x, z, 0) ? PAVED_CLEARANCE : CLEARANCE);
   const dx = probe.x - x;
   const dz = probe.z - z;
   return dx * dx + dz * dz < 1e-6;
 }
 
 /** Walks the straight line between two points, testing clearance as it goes. */
+/**
+ * Can a child walk the PAVED LANE between two nodes sampled from it?
+ *
+ * The polyline is node -> the lane's fine chain between their `at` indices ->
+ * node, each short segment held to the same {@link CLEARANCE} as a chord.
+ * Only consulted when the straight chord fails; only valid when both nodes
+ * carry the same lane identity and sit close along it.
+ */
+function laneIsClear(
+  collision: CollisionWorld,
+  from: { x: number; z: number; lane?: { name: string; at: number } },
+  to: { x: number; z: number; lane?: { name: string; at: number } },
+  probe: Vector3,
+): boolean {
+  if (!from.lane || !to.lane || from.lane.name !== to.lane.name) return false;
+  const lane = LANES.get(from.lane.name);
+  if (!lane) return false;
+  const a = Math.min(from.lane.at, to.lane.at);
+  const b = Math.max(from.lane.at, to.lane.at);
+  // Close along the lane, like the chord rule: this is a local hop, not a
+  // license to declare the whole route connected in one edge.
+  if ((b - a) * SAMPLE_STEP > MAX_EDGE * 1.5) return false;
+  const walk: { x: number; z: number }[] = [
+    from.lane.at <= to.lane.at ? from : to,
+    ...lane.slice(a, b + 1),
+    from.lane.at <= to.lane.at ? to : from,
+  ];
+  for (let i = 0; i + 1 < walk.length; i += 1) {
+    const p = walk[i] as { x: number; z: number };
+    const q = walk[i + 1] as { x: number; z: number };
+    if (!lineIsClear(collision, p.x, p.z, q.x, q.z, probe)) return false;
+  }
+  return true;
+}
+
 function lineIsClear(
   collision: CollisionWorld,
   x1: number,

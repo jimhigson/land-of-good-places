@@ -31,12 +31,18 @@ import type { InteriorControls } from '../src/world/building/Building.ts';
  *
  * Every method on it is something the building asks the *game* to do — walk the
  * player, close the iris, run the clock fast. None of them happens while the
- * world is merely being built, which is all this harness does; if one is ever
- * called during construction it will be loudly obvious, because it throws
- * rather than shrugs.
+ * world is merely being built; if one is ever called during construction it
+ * will be loudly obvious, because it throws rather than shrugs. Once the build
+ * has returned, the same calls become silent no-ops instead: a checker
+ * stepping `update()` frames (check:hotel walks a fallen player back into a
+ * room, which snaps the camera) is deliberately doing what the game would do,
+ * and headless there is simply no camera to snap.
  */
+let worldUnderConstruction = true;
+
 function inertInteriorControls(): InteriorControls {
-  const refuse = (what: string) => (): never => {
+  const refuse = (what: string) => (): void => {
+    if (!worldUnderConstruction) return;
     throw new Error(
       `park-harness: the building called InteriorControls.${what}() while the ` +
         'world was being built. Nothing in a headless build should drive the ' +
@@ -121,6 +127,7 @@ export function buildHeadlessPark(): HeadlessPark {
     const camera = new IsoCamera();
     return new World(scene, sky, inertInteriorControls(), camera);
   });
+  worldUnderConstruction = false;
   const buildMs = performance.now() - started;
 
   return {

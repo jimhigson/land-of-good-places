@@ -105,6 +105,8 @@ export interface SavedFlags {
   readonly dexPrizeSeen?: boolean;
   /** Was `lgp:lastSeenWhatsNewId` — newest what's-new entry already read. */
   readonly whatsNewSeenId?: number;
+  /** The Land Hotel's reception gave her the key to floor 50 (issue #236). */
+  readonly hotelKey?: boolean;
 }
 
 /**
@@ -486,6 +488,7 @@ function readFlags(value: unknown): SavedFlags {
   put(flags, 'createdCharacter', readBoolean(value['createdCharacter']));
   put(flags, 'arrivedByBus', readBoolean(value['arrivedByBus']));
   put(flags, 'dexPrizeSeen', readBoolean(value['dexPrizeSeen']));
+  put(flags, 'hotelKey', readBoolean(value['hotelKey']));
   put(flags, 'whatsNewSeenId', readNumber(value['whatsNewSeenId']));
   return flags;
 }

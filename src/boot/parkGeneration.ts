@@ -1,5 +1,5 @@
 import type { SolvedRailRoute } from '../world/rail/generate';
-import { railRouteSearch } from '../world/rail/generate';
+import { railRouteSearch, RailRouteUnsolvable } from '../world/rail/generate';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
 
 /**
@@ -118,6 +118,17 @@ export class ParkGeneration {
   private moduleIndex = 0;
   private importInFlight = false;
   private search: Generator<number, SolvedRailRoute, void> | null = null;
+
+  /**
+   * Which rung of `DESIRED_LENGTH_LADDER` the sliced search is on. The hotel
+   * merge brought the ladder in (seed 5: a fixed 60 m target solved 123
+   * routes and threw every one away), and the sliced path must walk the SAME
+   * ladder `planSlide()` walks or the two cadences stop being one search.
+   */
+  private rung = 0;
+
+  /** The last rung's complaint, for the error if the whole ladder fails. */
+  private lastComplaint = 'never solved a route at all';
   private solveModule: typeof import('../world/slide/solve') | null = null;
   private slideSolved = false;
   private pathsDone = false;
@@ -220,25 +231,54 @@ export class ParkGeneration {
    */
   private advanceSlide(solve: typeof import('../world/slide/solve'), budgetMs: number): void {
     this.workingFrames += 1;
-    // Built once, on the frame the search starts, and never again — the brief
-    // is pure but `doorPoses()` and `pitPoses()` are not free.
-    const search = (this.search ??= railRouteSearch(solve.slideRouteBrief()));
+    const ladder = solve.DESIRED_LENGTH_LADDER;
+    const target = ladder[this.rung];
+    if (target === undefined) {
+      // Every rung tried, none rideable — the same terminal answer
+      // `planSlide()` gives, with the same shape of message.
+      this.failure = new Error(
+        `the ginormous slide never solved to a chute a child could ride: ` +
+          `after ${ladder.length} target lengths (${ladder.join(', ')} m), ` +
+          `the best on offer ${this.lastComplaint}.`,
+      );
+      return;
+    }
+    // Built once per rung, on the frame that rung starts — the brief is pure
+    // but `doorPoses()` and `pitPoses()` are not free.
+    const search = (this.search ??= railRouteSearch(solve.slideRouteBriefAt(target)));
 
     const deadline = performance.now() + budgetMs;
     try {
       for (;;) {
         const step = search.next();
         if (step.done) {
-          // **The same three steps, in the same order, as `planSlide()`.**
-          // Solved here, finished by the slide's own code, and handed over.
-          offerPrewarmedSlide(solve.finishSlidePlan(step.value));
-          this.slideSolved = true;
+          // **The same verdict, in the same order, as `planSlide()`**: judge
+          // the rung's route, step to the next rung on a complaint, finish
+          // and hand over on a clean one.
+          const complaint = solve.unrideableComplaint(step.value);
+          if (complaint === null) {
+            offerPrewarmedSlide(solve.finishSlidePlan(step.value));
+            this.slideSolved = true;
+          } else {
+            this.lastComplaint = `${complaint} (at a ${target} m target)`;
+            this.rung += 1;
+            this.search = null;
+          }
           return;
         }
         this.attemptsSeen = step.value;
         if (performance.now() >= deadline) return;
       }
     } catch (error) {
+      if (error instanceof RailRouteUnsolvable) {
+        // A target that admits no route at all is a rung that did not work,
+        // not a park that cannot be built — the next rung gets its turn,
+        // exactly as `solveChuteAt` treats the same throw.
+        this.lastComplaint = `admitted no route at a ${target} m target`;
+        this.rung += 1;
+        this.search = null;
+        return;
+      }
       this.failure = error instanceof Error ? error : new Error(String(error));
     }
   }

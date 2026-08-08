@@ -69,6 +69,7 @@ import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
+import { STATION_GAP } from '../src/world/train/fence.ts';
 import { TRAIN_CLEARANCE_Y } from '../src/world/train/clearance.ts';
 import type { InteractZone } from '../src/world/interact.ts';
 
@@ -102,48 +103,12 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
   // strictly better than the hand-authored one did — route.unreachable,
   // poi.nospot and poi.stranded all went to zero and their entries were
   // DELETED, not relaxed.
-  'rail.exclusion': {
-    worst: 21,
-    why:
-      'Metres of solved train curve with nothing solid beside it on one or ' +
-      'both sides. The §6 fence closed this from 231 (hand park) to ~20: the ' +
-      'residue is the crossing and station gaps themselves, open by design ' +
-      'and compartmented so they cannot be strolled along. Re-recorded at 21 ' +
-      'on 28 July when the railway became a pure pre-scene plan (train/plan) ' +
-      'and the loop re-solved: every metre was audited against the solved ' +
-      'curve — the level crossing at 90 m plus the two platform gaps — see ' +
-      'the race-coaster PR. Signs coming out of the 3D world (same day) also ' +
-      'removed invisible sign-post obstacles that had been standing near some ' +
-      'anchors; re-verify this number reflects both changes together. ' +
-      'TIGHTENED to 20 on 31 July by the Rail Race reform: the race coaster ' +
-      'was a solved loop through the middle of the park whose pylons stood ' +
-      'beside the railway in one place, and it is gone — the race now flies ' +
-      'round the rim on its own trestles, which are placed clear of the rail ' +
-      'corridor by construction and asserted so in test/procgen/invariants.ts. ' +
-      'RE-RECORDED at 21 on 2 August when both Rail Race rings moved outside ' +
-      'the boundary wall (r=65.5, from 53.5). That 20 was never really 20: the ' +
-      'ring used to circle the park INSIDE the railway band, and its trestle ' +
-      'search may nudge a leg five metres either side of nominal, so a handful ' +
-      'of legs landed just clear of the rail corridor and one of them happened ' +
-      'to be the only solid thing beside a metre of track. It was the ' +
-      "railway's fence by accident, never by design — the leg answers to the " +
-      "Rail Race's own placement rules, not to the train's. With the rings out " +
-      'past the wall the metre is honestly reported. This is a MORE ACCURATE ' +
-      'number, not a looser one, and closing it belongs to the §6 fence.',
-  },
-  'rail.walkable': {
-    worst: 30,
-    why:
-      'Points on the track centre line where a child can stand AND walk to ' +
-      'from the entrance: the level-crossing decks and the platform rail ' +
-      'edges — the deliberate places. Was 347-of-355 before the §6 fence.',
-  },
-  // `anchor.reach:ballPit` (was 1.0) was DELETED on 28 July when the park's
-  // signs came out, and `anchor.reach:building` fell from 2.0 to nothing at
-  // all: what had been building past both declarations was the "coming soon"
-  // sign post standing at each plot's entrance, invisible ever since the real
-  // ride moved in but still registered in the collision world. Same cause,
-  // smaller effect, on the three numbers below.
+  // `rail.exclusion` (21) and `rail.walkable` (30) were DELETED 7 Aug 2026
+  // (issue #241): both now measure only track OUTSIDE the declared open
+  // stretches (each crossing's own halfGap, each platform's STATION_GAP), so
+  // "how many open metres is normal" stopped being a number that scales with
+  // the loop and became zero everywhere the fence did not declare a gap. The
+  // platform far-side fence closed the last undeclared way across.
   'anchor.reach:building': {
     worst: 0,
     why:
@@ -153,17 +118,17 @@ const RATCHET: Readonly<Record<string, Recorded>> = {
       'what holds it at zero; the moment anything builds proud of the wall ' +
       'again this fails rather than quietly re-opening the old 2 m allowance.',
   },
-  'anchor.reach:dodgems': {
-    worst: 1.7,
-    why:
-      'The bumper wall builds 0.6 m proud, and the welcome arch was widened ' +
-      'to 1.9 m half-span so the nav lattice can route through it (its 1.35 m ' +
-      'posts inflated shut and pocketed the doorway). Structure, not drift.',
-  },
   'anchor.reach:waterFight': {
-    worst: 2.3,
-    why: 'The pools and hedges build ~2.3 m out against a declared 15 m.',
+    worst: 0,
+    why:
+      'Declared at the worst cross-seed build-out (18.5), which some seeds ' +
+      'hit exactly — the finding then fires at zero, and this entry is what ' +
+      'holds it there rather than re-opening an allowance.',
   },
+  // `anchor.reach:dodgems` (1.7) and `anchor.reach:waterFight` (2.3) were
+  // DELETED 7 Aug 2026: the manifest now declares each ride's MEASURED
+  // build-out (19 / 16.5) rather than its plot rectangle, so paths and spurs
+  // plan around the real edge and the doormats stopped falling short.
 };
 
 // --------------------------------------------------------------- the findings
@@ -657,9 +622,31 @@ function somethingSolidNear(x: number, z: number): boolean {
   let firstGapAt = -1;
   let firstStandableAt = -1;
 
+  // The stretches deliberately left open — every level crossing's own gap and
+  // the boarding gap at each platform. Measured *against the declarations*
+  // rather than against a recorded total (issue #241): the loop's length and
+  // its crossing count now change with the layout, so "how many open metres
+  // is normal" is not a stable number — but "no hole we did not declare" is,
+  // and it is the invariant a child actually experiences. Anything open
+  // outside these spans is a defect at any length.
+  const declaredOpen = (distance: number): boolean => {
+    const along = (target: number, halfGap: number): boolean => {
+      const wrapped = world.train.route.wrap(distance - target + world.train.route.length / 2);
+      return Math.abs(wrapped - world.train.route.length / 2) <= halfGap + step;
+    };
+    for (const crossing of world.train.crossings) {
+      if (along(crossing.railDistance, crossing.halfGap)) return true;
+    }
+    for (const station of world.train.stations) {
+      if (along(station.distance, STATION_GAP)) return true;
+    }
+    return false;
+  };
+
   for (let i = 0; i < TRACK_SAMPLES; i += 1) {
     const x = trackX[i] ?? 0;
     const z = trackZ[i] ?? 0;
+    if (declaredOpen(i * step)) continue;
     const next = (i + 1) % TRACK_SAMPLES;
     // The way the track is heading here, so "left" and "right" mean the two
     // sides of the rail rather than two compass directions.
@@ -677,8 +664,7 @@ function somethingSolidNear(x: number, z: number): boolean {
     }
     // Standable AND reachable: the fence cannot stop a teleported probe, so
     // since §6 built it, the honest question is whether a child can *walk*
-    // onto the track. Reachable stretches are the deliberate ones — the
-    // level-crossing decks and the station platforms' rail edges.
+    // onto the track — anywhere the declarations above did not invite her.
     if (isStandable(x, z) && walkReachable(x, z)) {
       standable += 1;
       if (firstStandableAt < 0) firstStandableAt = i;

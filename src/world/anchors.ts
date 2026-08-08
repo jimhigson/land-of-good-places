@@ -13,7 +13,7 @@ import { placedEntry } from './parkLayout';
  * network routes spurs to `entrance`, and scenery scattering avoids
  * `boundingRadius` so nobody plants a tree inside the ferris wheel.
  */
-export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight';
+export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel';
 
 export type AnchorFootprint =
   | { readonly kind: 'circle'; readonly radius: number }
@@ -86,6 +86,17 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'Multi-floor castle: glass lift, escalators, stairs, trampoline, bubble ' +
       'and the top of the ginormous slide. The slide exits towards the ballPit ' +
       'anchor, which the layout solver keeps within reach (see parkManifest).',
+  }),
+  placed('hotel', {
+    signTitle: 'The Land Hotel',
+    signSubtitle: 'fifty floors of crystal!',
+    glyph: '\u{1F3E8}',
+    accent: PALETTE.markerLilac,
+    notes:
+      'Eleri (issue #236): crystal hotel near the castle. Reception gives you ' +
+      'a key; the lift says "yours" on your floor; the top suite is rainbow ' +
+      'with beds to sleep on or jump between. Rooms are disjoint spaces - see ' +
+      'world/hotel/.',
   }),
   placed('ballPit', {
     signTitle: 'Ball Pit',

@@ -2,9 +2,9 @@ import { CatmullRomCurve3, Vector3 } from 'three';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
-import { PARK_LAYOUT, placedEntry } from '../parkLayout';
+import { clearOfFootprints, PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary } from '../boundary';
+import { circleBoundary, insetBoundary, PARK_BOUNDARY, solverBoundary } from '../boundary';
 import {
   type RouteBrief,
   type RouteInfluence,
@@ -82,12 +82,25 @@ const STATION_RAMP = 26;
 /**
  * How far out the loop may reach.
  *
- * The train owns the 48-58 m band and the Rail Race rings the park at 53.5 m,
- * so the coaster's centre line stops well short of both. The generator keeps a
- * corridor's width inside this, so the track edge lands at about the 43 m the
- * old polar band clamped to.
+ * How far in from the park's edge the loop's territory stops.
+ *
+ * This was `OUTER_RADIUS = 47`, a circle that stood for "inside the train's
+ * band" while the park was a disc. The park is a spline now and the plots
+ * spread across all of it (issue #241) — the coaster's own station stall can
+ * legally stand past 47 m — so the territory is the park itself, inset far
+ * enough that the rim band stays substantially the train's: the train hugs
+ * the wall at about 3.35 m in, and this keeps the coaster's *corridor*
+ * (which the generator already holds a `corridorRadius` inside its boundary)
+ * from camping on the same ground. Crossings still happen and are legal —
+ * clearance between the two is vertical, ratcheted by `check:park` — this
+ * only keeps the coaster from *running along* the train's lane.
  */
-const OUTER_RADIUS = 47;
+// 4, from 6: measured on seed 2, the pinched side of the spline left the
+// loop only FOUR closed routes in four thousand attempts — the annulus
+// between the castle band and a 6 m inset simply pinched shut. Two metres
+// back buys closure everywhere; the trains-vs-coaster separation was never
+// horizontal anyway (crossings are governed vertically, ratcheted).
+const RIM_INSET = 4;
 
 /**
  * Half-width kept clear either side of the centre line while solving.
@@ -158,6 +171,15 @@ const PLAN_TURN_RADIUS = MIN_TURN_RADIUS + 1;
 
 /** Metres of track wanted. The old loop came out at 221 m; this holds that. */
 const DESIRED_LENGTH = 220;
+
+/**
+ * Air the coaster keeps above the train's railhead wherever their plan
+ * positions come within 4 m — Decision 4's clearance rule, generalised. One
+ * constant, shared by the vertical repair (which lifts to honour it) and the
+ * boot assert (which measures it), so they cannot drift apart.
+ */
+export const RAIL_OVER_RAIL_AIR = 5.5;
+
 
 /**
  * Roughly this far apart, in metres, along the loop.
@@ -245,7 +267,18 @@ function tallObstacles(): TallObstacle[] {
     // Nothing kept the loop off the plaza at all before this, which is the
     // actual hole; the statue merely made it visible.
     { x: PARK_LAYOUT.fountain.x, z: PARK_LAYOUT.fountain.z, radius: STATUE_TALL_RADIUS },
+    // The Land Hotel (#236): 28 m of crystal against a 6.2 m cruise floor —
+    // the third member of the statue's category, added the way the statue's
+    // own comment predicted the next one would be: a tall thing merged on a
+    // branch with no cruiser sweep to run, made visible when the loop
+    // re-rolled (seed 5 flew the car straight through the tower's spires).
+    hotelTallObstacle(),
   ];
+}
+
+function hotelTallObstacle(): TallObstacle {
+  const hotel = placedEntry('hotel');
+  return { x: hotel.x, z: hotel.z, radius: hotel.boundingRadius + 1 };
 }
 
 /**
@@ -287,7 +320,13 @@ const CASTLE_INFLUENCE: RouteInfluence = {
   x: BUILDING_CENTRE_X,
   z: BUILDING_CENTRE_Z,
   radius: CASTLE_OUTER_X + 2,
-  weight: 0.3,
+  // 0.55, from 0.3 (issue #241): with the manifest unpinned the booth lands
+  // anywhere on its 21-26 m ring around the castle, including bearings where
+  // a free solve naturally closes AWAY from the walls — seed 2 exhausted
+  // every start pose without one castle crossing at the old weight. Measured
+  // across the five CI seeds at 0.55 the backstop still fires (so the weight
+  // is not doing the satisfies' job alone), and every seed crosses.
+  weight: 0.55,
 };
 
 /**
@@ -402,7 +441,7 @@ export interface CoasterRouteOptions {
   readonly salt: number;
   /** The stall whose booth is this ride's station. */
   readonly stationStallId: string;
-  /** How far out the loop may reach. Defaults to {@link OUTER_RADIUS}. */
+  /** Circular territory override. Defaults to the park inset {@link RIM_INSET}. */
   readonly outerRadius?: number;
   /** Metres of track wanted. Defaults to {@link DESIRED_LENGTH}. */
   readonly desiredLength?: number;
@@ -548,10 +587,15 @@ export class CoasterRoute {
     const stall = placedEntry(options.stationStallId);
     const obstacles = tallObstacles();
     const other = options.avoid ?? null;
-    const boundary = circleBoundary(options.outerRadius ?? OUTER_RADIUS);
+    const boundary =
+      options.outerRadius !== undefined
+        ? circleBoundary(options.outerRadius)
+        : solverBoundary(insetBoundary(PARK_BOUNDARY, RIM_INSET));
 
     // --- horizontal: the generator solves the plan view --------------------
-    const clear = (x: number, z: number, radius: number): boolean => {
+    const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
+    const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
+    const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
       for (const tall of obstacles) {
         if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
       }
@@ -560,6 +604,28 @@ export class CoasterRoute {
         const nearest = other.nearestPoint(x, z);
         if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
       }
+      // The station and its ramps are the one stretch that flies LOW, and the
+      // vertical repair may never lift it (a half-lift tilts the boarding
+      // deck) — so while the track is below cruise height it must only ever
+      // be over open ground: no plot may sit under the ramp. Footprints, not
+      // bounding circles, because the near-relation deliberately parks this
+      // ride's booth beside the castle and the castle's 19 m circle would
+      // reject every pose the relation just arranged. This is what keeps the
+      // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
+      // dodges the published low corridor itself (train/route.ts), because
+      // it solves later and threads intervals — Decision 6's arrow: publish
+      // what you solved, the next system treats it as an obstacle.
+      // The castle is EXEMPT from the low-ground rule: the booth is parked
+      // beside it by the near relation and the ride legally passes through
+      // its walls, so pieces near the station are always near the castle —
+      // holding them to its footprint made the search reject nearly every
+      // early piece and burn its whole restart budget (measured: the solve
+      // went 31 s with the blanket rule, 1.1 s without it; the castle's own
+      // safety is `castleClear`'s crossing-band rule, checked above, plus
+      // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
+      // through the ball pit's balls is what it exists to stop (seed 18).
+      const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
+      if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
       return true;
     };
     const brief: RouteBrief = {
@@ -594,7 +660,22 @@ export class CoasterRoute {
       influences: [CASTLE_INFLUENCE],
       satisfies: crossesTheCastle,
     };
-    const plan = solveRailRoute(brief);
+    let plan = solveRailRoute(brief);
+    if (!plan.report.satisfied) {
+      // The escalation valve Decision 7 implies but never built: a weight
+      // makes the castle crossing likely, the backstop makes it required —
+      // and on a seed where the geometry fights (the booth's bearing, the
+      // spread plots), a fixed weight can exhaust every start pose without
+      // one crossing. Rather than raise the weight for every park until the
+      // hardest seed passes (which makes every OTHER park's loop less free —
+      // the cost Decision 7 warns about), the seeds that need more pull are
+      // the only ones that pay for it: one re-solve, twice the weight.
+      plan = solveRailRoute({
+        ...brief,
+        seed: brief.seed ^ 0xe5ca,
+        influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
+      });
+    }
     this.plan = plan;
 
     const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));
@@ -746,9 +827,10 @@ export class CoasterRoute {
         );
         if (toStation < STATION_FLAT + STATION_RAMP) continue;
         const above = probe.y - terrainHeight(probe.x, probe.z);
-        if (above >= CRUISE_FLOOR) continue;
-        const lift = CRUISE_FLOOR - above + 0.4;
-        lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+        if (above < CRUISE_FLOOR) {
+          const lift = CRUISE_FLOOR - above + 0.4;
+          lifts.set(control, Math.max(lifts.get(control) ?? 0, lift));
+        }
       }
       // Never lift a control that owns boarding-flat or early-ramp track — a
       // half-lift bleeding onto the platform would tilt it. Mid-ramp and beyond
@@ -887,9 +969,9 @@ export function checkCoasterClearances(
       );
     }
     const train = trainPointNear(point.x, point.z);
-    if (train.distance < 3 && point.y - train.y < 5.5) {
+    if (train.distance < 3 && point.y - train.y < RAIL_OVER_RAIL_AIR) {
       complaints.push(
-        `coaster crosses the train with ${(point.y - train.y).toFixed(1)} m of air at (${point.x.toFixed(0)}, ${point.z.toFixed(0)}) — Decision 4 wants 5.5`,
+        `coaster crosses the train with ${(point.y - train.y).toFixed(1)} m of air at (${point.x.toFixed(0)}, ${point.z.toFixed(0)}) — Decision 4 wants ${RAIL_OVER_RAIL_AIR}`,
       );
     }
     // The two things it cannot fly over. Recorded as a worst-case per obstacle

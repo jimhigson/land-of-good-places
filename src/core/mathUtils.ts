@@ -165,3 +165,22 @@ export class Rng {
 export function candidateRng(salt: number, index: number): Rng {
   return new Rng((salt ^ Math.imul(index + 1, 0x9e3779b1)) >>> 0);
 }
+
+/**
+ * A stable 32-bit hash of a string, for deriving per-name RNG salts.
+ *
+ * FNV-1a. The layout solver hashes each manifest entry's id with this and
+ * feeds the result to {@link candidateRng}, so every entry draws from a
+ * stream of its very own: adding, removing or reordering entries cannot move
+ * any other entry's candidates (issue #241 — the reason the manifest could
+ * previously only grow behind pins). Not cryptographic, and must never
+ * change: a different hash is a different park on every seed.
+ */
+export function hashString(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}

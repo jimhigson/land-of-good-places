@@ -274,6 +274,24 @@ export function castleMasonryDistance(lx: number, lz: number, band: number): num
  * a wall you have described is a wall you can put a window in.
  */
 export function castleClear(x: number, z: number, radius: number, band: number): boolean {
-  const { lx, lz } = toCastleLocal(x, z);
+  const lx = x - BUILDING_CENTRE_X;
+  const lz = z - BUILDING_CENTRE_Z;
+  // **Far from the castle is the common case, and it is answerable in two
+  // comparisons.** Every piece of masonry lives inside the outer footprint,
+  // so a point more than `radius` outside that box on either axis is at least
+  // `radius` from all of it. The Sky Cruiser's route search asks this on every
+  // sample of every candidate piece — a Node CPU profile put this function and
+  // its `distanceToRect` at 14% of the whole solve, nearly all of it spent
+  // measuring seven rectangles and four towers for points that were never
+  // near any of them. Same answer, reached without the measuring.
+  //
+  // The box is the outer footprint inflated by {@link TOWER_KEEPOUT_RADIUS},
+  // because the four corner towers are centred ON the corners and so reach
+  // that far OUTSIDE it — a box drawn to the walls alone would wave a route
+  // straight through a tower, which is the one thing the castle pass is not
+  // allowed to do.
+  const reachX = CASTLE_OUTER_X + TOWER_KEEPOUT_RADIUS + radius;
+  const reachZ = CASTLE_OUTER_Z + TOWER_KEEPOUT_RADIUS + radius;
+  if (lx >= reachX || -lx >= reachX || lz >= reachZ || -lz >= reachZ) return true;
   return castleMasonryDistance(lx, lz, band) >= radius;
 }

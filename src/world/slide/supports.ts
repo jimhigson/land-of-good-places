@@ -58,8 +58,15 @@ const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
  * every rejection below still applies, and the crowding test keeps whatever is
  * placed at least a child's width apart. It only stops a chute going unsupported
  * because the handful of spots it happened to ask about were all on the path.
+ *
+ * 9 to 6 on 7 August 2026, for the same reason and on a different seed. Once
+ * the slide's length ceiling was fixed (`plan.ts`'s `MAX_RIDEABLE_LENGTH`)
+ * seed 2's chute came out at 80 m and stood on **3** legs where the invariant
+ * wants one per 20 m — eight attempts, five of them lost to the paths and plots
+ * this chute threads between. Six metres gives twelve, and four survive. The
+ * argument above is unchanged: this buys more *questions*, never a laxer answer.
  */
-const LEG_SPACING = 9;
+const LEG_SPACING = 6;
 
 /**
  * How far along the chute a leg may be nudged to find clear ground.

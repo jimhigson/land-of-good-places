@@ -1,0 +1,4397 @@
+import {
+  BoxGeometry,
+  CanvasTexture,
+  type PerspectiveCamera,
+  CylinderGeometry,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshToonMaterial,
+  type Object3D,
+  PlaneGeometry,
+  SpotLight,
+  SRGBColorSpace,
+  Vector3,
+} from 'three';
+import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
+import { hexToCss, PALETTE } from '../../core/palette';
+import { ART } from '../../art/style/artPalette';
+import { Rng } from '../../core/mathUtils';
+import { mosaicTexture } from '../../core/textures';
+import type { FrameContext, GameSystem } from '../../core/types';
+import type { CollisionWorld, WallCollider } from '../Collision';
+import type { AnchorPlots } from '../AnchorPlots';
+import type { CreatureHandle } from '../../art/style/asset';
+import type { Player } from '../../entities/Player';
+import type { InteriorControls } from '../building';
+import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
+import type { LiftPanelSource } from '../building/liftRide';
+import { interiorMaterial, softMaterial } from '../building/parts';
+import { toonMaterial, solid, decal, inkTint } from '../../art/style/materials';
+import {
+  BED_MATTRESS_TOP,
+  createBreakfastBowl,
+  createBreakfastChair,
+  createBreakfastTable,
+  createDiscoBall,
+  createEntranceDoors,
+  createGameBoy,
+  createGrandStaircase,
+  createHotelTv,
+  createHotelBed,
+  createHotelTower,
+  createLiftCar,
+  createLiftDial,
+  createLiftDoors,
+  createLiftFrame,
+  createPetBed,
+  createPetBowl,
+  createReceptionDesk,
+  createYoursDoor,
+  type BreakfastKind,
+  type LiftDialHandle,
+  PET_BED_CUSHION_RADIUS,
+  PET_BED_CUSHION_TOP,
+  type SlidingDoorsHandle,
+} from '../../art/models/hotelAssets';
+import { createRipikaStatue, type RipikaStatueHandle } from '../../art/models/ripikaStatue';
+import { createPet, PET_KINDS, type PetKind } from '../../art/models/pets';
+import { createKeeper, type KeeperHandle } from '../../art/models/keeper';
+import { KID_SKIN_TONES } from '../../art/models/kid';
+import { CharacterModel } from '../../entities/CharacterModel';
+import { SpeechBubble } from '../../ui/SpeechBubble';
+import type { IsoCamera } from '../../core/IsoCamera';
+import {
+  bedsideTable,
+  buffetCounter,
+  BUFFET_TOP,
+  SOFA_SEAT_TOP,
+  cloud,
+  crystalCluster,
+  crystalColumn,
+  crystalPlanter,
+  createDiscoSparkle,
+  ARTWORK_COUNT,
+  ARTWORK_TITLES,
+  paintedPicture,
+  type DiscoSparkle,
+  fishShape,
+  flatStar,
+  floorChevron,
+  flowerTuft,
+  hedge,
+  lilyPond,
+  picture,
+  porthole,
+  rainbowRing,
+  rainbowRug,
+  roundRug,
+  rug,
+  sconce,
+  seaweed,
+  sofa,
+  sunburst,
+  trellisArch,
+} from './dressing';
+import { hotelResidents } from './HotelGuests';
+import { HotelProps, Plate } from './place';
+import { HotelLighting } from './lighting';
+import type { ResidentSpec } from '../../entities/npc';
+import { placedEntry } from '../parkLayout';
+import { saveFlags } from '../../state/flags';
+import { gameStore } from '../../state';
+import { pressAction, type InteractZone } from '../interact';
+import {
+  BREAKFAST,
+  CORRIDOR,
+  DOOR_HALF,
+  GARDEN_FLOOR,
+  HOTEL_FLOORS,
+  LIFT_ALCOVE_DEPTH,
+  LOBBY,
+  OCEAN_FLOOR,
+  ROOMS,
+  roomFor,
+  SUITE,
+  SUITE_BED_SPOTS,
+  SUITE_BEDSIDE_X,
+  SUITE_BEDSIDE_Z,
+  SUITE_DOOR_WIDTH,
+  SUITE_PARTITION_HEIGHT,
+  type HotelRoom,
+  type Mezzanine,
+  type SuitePartition,
+  type WallSide,
+} from './layout';
+import { HotelLift } from './HotelLift';
+import { HotelCinematic, type Shot } from './cinematic';
+import { PLAZA } from '../paths';
+import { spaceAt, SPACE_GARDEN } from '../spaces';
+
+/** Seconds after a change of space before another may trigger. */
+const SPACE_COOLDOWN = 0.9;
+
+/** How long a nap on a suite bed lasts, in seconds. */
+const NAP_SECONDS = 2.6;
+
+/** How long the lobby celebrates a check-in. Long enough to see, short enough to want again. */
+const CHEER_SECONDS = 2.4;
+
+/** How long the star over the suite door blinks at a child with no key. */
+const REFUSE_SECONDS = 1.8;
+
+/**
+ * How far back the camera stands to look at a painting, and through what.
+ *
+ * Tuned as a pair (QA, 7 Aug 2026): the old 1.15 m through a 24° lens showed
+ * a 0.49 m-tall slice of a 1.25 m painting — "have a proper look" at the
+ * middle fifth. 1.6 m through 46° frames 1.36 m: the whole canvas plus a lip
+ * of frame, still inside the 1.9 m the child herself stands back, so she is
+ * behind the lens, not in the shot.
+ */
+const ART_VIEW_DISTANCE = 1.6;
+const ART_VIEW_FOV = 46;
+
+/** Height of a hung picture's centre. Module-wide: `hangOnWalls` hangs at it
+ *  and `clearOfGlass` tests window overlap against the band around it. */
+const PICTURE_Y = 1.9;
+
+/** Clear air demanded between a picture's frame and a pane's edge, metres. */
+const PICTURE_GLASS_MARGIN = 0.15;
+
+/** The breakfast tables' flat top, metres — the asset's own figure. */
+const TABLE_TOP = 0.74;
+
+/** The food moment: how long the camera takes to arrive, and how long it stays. */
+const FOOD_EASE_SECONDS = 2.5;
+const FOOD_HOLD_SECONDS = 1.9;
+/** How long the pet takes to trot over. Inside the ease, so it arrives on camera. */
+const FOOD_TROT_SECONDS = 2.1;
+
+/**
+ * The pointer dial's pivot height above the alcove floor.
+ *
+ * Over the doors and just under the top of the architrave (2.96 m), which is
+ * the only place a dial fits: three of these rooms have 3.0 m walls, so the
+ * strip *above* the frame that a real lift would use does not exist here. The
+ * arc is 0.45 m tall, so this puts its top at 2.91 m.
+ */
+const DIAL_PIVOT_Y = 2.46;
+
+/** The top of the hotel, in storeys — what the dial's right-hand end means. */
+const TOP_STOREY = 50;
+
+/** How far out an automatic door notices somebody, and how wide its approach is. */
+const AUTO_DOOR_REACH = 4.2;
+const AUTO_DOOR_SIDE = 2.4;
+
+/** Seconds an automatic door takes to slide fully open, or fully shut. */
+// 1.2, up from 0.55: at 0.55 s the slide was over before the fixed camera's
+// oblique view of the recess could register it — QA staged ten approaches and
+// never caught a legible mid-slide frame. A door a person is meant to SEE
+// open (Jim asked for exactly that) has to open at the pace of a person
+// arriving, not a sensor firing.
+const AUTO_DOOR_SECONDS = 1.2;
+
+/** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
+const WALL_HALF_DEPTH = 0.25;
+
+/**
+ * How far the grand staircase is sunk below the lobby floor, so its top
+ * tread's surface rides just under the deck plane the slab owns (probe 10's
+ * one-owner rule) instead of coplanar with it. The gallery rail in
+ * `dressMezzanine` drops by the same amount to keep butting the stair's
+ * handrail, which eases level at `rise + railHeight` above the asset origin.
+ */
+const STAIR_SINK = -0.02;
+
+/** How far a window's painted outside-glow spreads past the glass. */
+const GLOW_MARGIN = 0.34;
+
+/**
+ * Narrowest pane worth building. A declared window clipped by a doorway down
+ * to a slit is not a window; dropping it is tidier than drawing a sliver.
+ */
+const MIN_PANE_WIDTH = 0.6;
+
+/**
+ * How many beams come off a lit disco ball, and what they are like.
+ *
+ * Five, not twenty: they are real `SpotLight`s and the park's whole lighting
+ * budget is fourteen point lights (ORDER-OF-WORK). Five sweeping cones is
+ * already unmistakably a disco ball, and every one after that costs another
+ * pass over every lit surface in the room for a beam nobody counts.
+ *
+ * The intensity is deliberately *below* the room's own warm fill
+ * (`hotel/lighting.ts`'s 3.6): these are highlights sweeping over a lit room,
+ * and a mirror ball bright enough to be the room's light source blows the pale
+ * pastels of ART_DIRECTION §5 straight to white.
+ */
+const DISCO_BEAMS = 5;
+const DISCO_INTENSITY = 2.6;
+/** How far a beam carries. Comfortably the width of the lobby, and no further. */
+const DISCO_REACH = 26;
+/** Half-angle of one cone, radians. Narrow enough to read as a beam. */
+const DISCO_CONE = 0.34;
+/** The beams' colours — the park's own markers, so the lobby sparkles in the
+ *  same five inks the rest of the game is drawn with. */
+const DISCO_COLOURS: readonly number[] = [
+  PALETTE.markerPink,
+  PALETTE.markerSky,
+  PALETTE.markerMint,
+  PALETTE.markerLemon,
+  PALETTE.markerLilac,
+];
+
+/**
+ * Where reception stands, in the lobby's own local metres.
+ *
+ * Named because four things need it — the desk, the receptionist behind it, her
+ * speech bubble above her, and the interact zone a child presses — and because
+ * getting those four from two sources is a proven live bug: the desk moved to
+ * the east bay while the zone kept the old literal, so the *"check in and get
+ * your key!"* sign floated beside the staircase, ten metres from any desk
+ * (Jim, live play, 7 Aug 2026; QA pinned the stale pair). Every consumer now
+ * derives from these two numbers, and `check:hotel` probe 13 asserts the
+ * zone's anchor really stands on something solid that is not the staircase.
+ *
+ * **On the entrance axis**, per the grand-hotel research for this rework: you
+ * come through the south doors, pass the statue under the disco ball, and the
+ * desk is straight ahead against the gallery's face, facing you — a clear
+ * axis from the door to a focal reception, with the sweeping stair rising to
+ * its left.
+ */
+const RECEPTION_X = 0;
+const RECEPTION_Z = -5.9;
+
+/** Where the receptionist herself stands: between her desk and the gallery face. */
+const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
+
+/**
+ * Seat height of a breakfast chair — the asset's own 0.42 m.
+ *
+ * The player's sit-down pose has always used this figure; a diner sits on the
+ * same chairs, so it is named here rather than typed a second time three
+ * hundred lines away from the first.
+ */
+const CHAIR_SEAT_Y = 0.42;
+
+/**
+ * Honest tops for the scatter dressing, metres above the floor they stand on.
+ *
+ * Approximate on purpose — a seeded crystal cluster varies a little — but
+ * approximately *true*, where the old `Infinity` default made every one an
+ * unjumpable pillar (probe 11). All well above `JUMP_APEX_HEIGHT`'s reach or
+ * flagged `stand: false`, so none of them is a landing surface either way.
+ */
+const CLUSTER_TOP = 1.4;
+const PLANTER_TOP = 1.5;
+const SEAWEED_TOP = 1.5;
+
+/** What a child sat at breakfast is wearing. The park's own marker set. */
+const DINER_OUTFITS: readonly number[] = [
+  PALETTE.markerSky,
+  PALETTE.markerMint,
+  PALETTE.markerLemon,
+  PALETTE.flowerRed,
+  PALETTE.blossomPink,
+];
+const DINER_HAIRS: readonly number[] = [ART.kidHair, ART.kidHairBlonde, PALETTE.bark];
+/**
+ * Hair a diner may wear. **No ponytail**, for exactly the reason
+ * `HotelGuests.ts` gives: those styles carry a world-space simulated chain
+ * that wants driving every frame, and a child who never moves is not worth a
+ * second thing that can visibly go wrong.
+ */
+const DINER_HAIR_STYLES = ['bunches', 'bob', 'short', 'bowl'] as const;
+
+/** How far a seated child rocks over her cereal, radians, and how fast. */
+const DINER_BOB = 0.055;
+const DINER_BOB_RATE = 1.6;
+
+/** The three breakfasts, exactly as Eleri listed them. */
+const BREAKFASTS: readonly { kind: BreakfastKind; label: string; glyph: string }[] = [
+  { kind: 'cheerios', label: 'Heart cheerios', glyph: '🥣' },
+  { kind: 'shreddies', label: 'Shreddies', glyph: '🟫' },
+  { kind: 'yoghurt', label: 'Yoghurt + honey', glyph: '🍯' },
+];
+
+/**
+ * The two things the hotel needs from the rest of the game that are not
+ * geometry.
+ *
+ * Both are accessors rather than values, and deliberately: the hotel is built
+ * in `World`'s constructor, which is *before* `DayNight` exists, so a clock
+ * read eagerly would be a clock read once at dawn and never again. A closure
+ * costs nothing and cannot be got wrong.
+ */
+export interface HotelDeps {
+  /** For sizing the receptionist's speech bubble on screen. */
+  readonly camera: IsoCamera;
+  /** The park clock, 0..1 through a day — `DayNight.timeOfDay`. */
+  clock(): number;
+}
+
+/**
+ * One tread of a sweeping stair — a walkable **wedge**, not a rectangle.
+ *
+ * A curved stair built out of axis-aligned {@link Plate}s has to either overlap
+ * its treads or leave gaps between them, and overlapping is the one that breaks:
+ * `WalkSurfaces.sample` answers with the *highest* surface within a step up, so
+ * where tread N + 1 overlaps tread N a child standing on the upper one is told
+ * the upper one is still the floor and **cannot walk back down**. (The same
+ * arithmetic is why she can walk *up* at all, which is what makes the bug look
+ * like a working staircase right until somebody tries to leave.)
+ *
+ * A wedge tiles the arc exactly: adjacent, never overlapping, no gaps, and the
+ * test is two comparisons on a radius and one on an angle. It is also simply
+ * what a step of a spiral stair *is*.
+ */
+class ArcTread implements MovingPlatform {
+  constructor(
+    readonly surfaceY: number,
+    private readonly centreX: number,
+    private readonly centreZ: number,
+    private readonly innerRadius: number,
+    private readonly outerRadius: number,
+    private readonly fromAngle: number,
+    private readonly toAngle: number,
+  ) {}
+
+  covers(x: number, z: number): boolean {
+    const dx = x - this.centreX;
+    const dz = z - this.centreZ;
+    const radius = Math.hypot(dx, dz);
+    if (radius < this.innerRadius || radius > this.outerRadius) return false;
+    // The game's yaw convention: 0 is +Z, turning toward −X (`Math.atan2(x, z)`
+    // everywhere else in this file), so the same call is used here rather than a
+    // second angle convention nobody would remember.
+    let angle = Math.atan2(-dx, dz);
+    // The sweep is a quarter turn starting at 0, so only the wrap at ±π matters.
+    if (angle < this.fromAngle - Math.PI) angle += Math.PI * 2;
+    return angle >= this.fromAngle && angle < this.toAngle;
+  }
+}
+
+interface Chair {
+  readonly x: number;
+  readonly z: number;
+  readonly facing: number;
+  readonly room: HotelRoom;
+  readonly id: string;
+  /**
+   * True once a guest has sat down in it — see {@link Hotel.seatGuests}.
+   *
+   * A chair with somebody in it offers the player no zone at all, which is the
+   * whole mechanism: the alternative (a zone that appears and then refuses)
+   * teaches a six-year-old that chips sometimes lie. It is a `let` on purpose,
+   * because the chairs are built before the diners are dealt out and the
+   * alternative is a second list of chair ids to keep in step with this one.
+   */
+  taken: boolean;
+}
+
+interface Bed {
+  readonly x: number;
+  readonly z: number;
+  readonly id: string;
+}
+
+/** What `Hotel.hangOnWalls` puts on the two walls the camera can see. */
+interface WallPlan {
+  /** Sconce x positions on the north (−Z) wall. */
+  readonly north?: readonly number[];
+  /** Sconce z positions on the west (−X) wall. */
+  readonly west?: readonly number[];
+  readonly pictures?: readonly {
+    readonly wall: 'north' | 'west';
+    /** x on the north wall, z on the west wall. */
+    readonly along: number;
+    readonly width: number;
+    readonly height: number;
+    readonly seed: number;
+  }[];
+}
+
+/**
+ * **The Land Hotel** — Eleri's hotel (issue #236), close to the castle.
+ *
+ * Two places, like the castle: a crystal tower stands in the park (generator-
+ * placed, `near: 'building'` in the manifest), and walking through its door
+ * takes you somewhere else entirely. Unlike the castle — and per Jim's
+ * ruling — every room is **its own disjoint space** at its own far origin
+ * (`hotel/layout.ts`): lobby, breakfast room, floor-50 corridor, and the
+ * suite behind the door that says "yours". The lift between them is the
+ * first *portal* lift (Decision 3's shape, `HotelLift`), and the doors are
+ * portals too. Nothing pretends the inside fits the outside.
+ *
+ * All the hotel's new art is Blender-authored (`art/blend/hotel_build.py`,
+ * Jim's ruling; the Opus artist's handoff is HANDOFF-hotel-art.md). The
+ * statues are deliberately NOT new art: the lobby's giant RiPika is the
+ * fountain's own `createRipikaStatue` and the corridor pets are the live
+ * `createPet` models — a second RiPika is a statue that goes stale
+ * (`ripikaStatue.ts`'s own lesson).
+ */
+export class Hotel implements GameSystem {
+  readonly name = 'hotel';
+
+  /** Everything in the hotel's own spaces. Invisible until entered. */
+  readonly hotelRoot = new Group();
+  /** The tower in the park. */
+  readonly gardenRoot = new Group();
+
+  private readonly lift: HotelLift;
+  private player: Player | null = null;
+  private inside = false;
+  private changingSpace = false;
+  private spaceCooldown = 0;
+
+  private readonly statue: RipikaStatueHandle;
+  private readonly discoBalls: { spin: Group }[] = [];
+  /**
+   * The lit ball's beams, and the room they belong to. Kept so the frame can
+   * switch them off the moment she is anywhere else — see {@link hangDiscoBall}.
+   */
+  private readonly discoLights: { room: HotelRoom; lights: readonly Object3D[] }[] = [];
+  /** The glints and motes, stepped only while their own room is the one she is in. */
+  private readonly sparkles: { room: HotelRoom; sparkle: DiscoSparkle }[] = [];
+  private readonly keepers: KeeperHandle[] = [];
+  private readonly chairs: Chair[] = [];
+  private readonly beds: Bed[] = [];
+  /**
+   * The one way a prop gets put down in this hotel — see `place.ts`. It is
+   * what makes a prop solid *and* what tells the guests to walk round it, from
+   * a single description of its footprint.
+   */
+  private readonly props: HotelProps;
+  /** The guests, handed to `NpcSystem` — see {@link residents}. */
+  private readonly guests: readonly ResidentSpec[];
+  private seatedAt: string | null = null;
+  /** The person behind the desk, who does the talking. See {@link checkIn}. */
+  private receptionist: KeeperHandle | null = null;
+  private readonly receptionBubble = new SpeechBubble(PALETTE.markerLilac);
+  /** The lines still to say, and how long the current one has left. */
+  private speech: { lines: readonly string[]; index: number; timer: number; cheerAt: number } | null =
+    null;
+  /** Guests sat at tables, bobbing over their breakfast. See {@link seatGuests}. */
+  private readonly diners: { model: CharacterModel; phase: number }[] = [];
+  /** The pet asleep in the suite's four-poster — kept so it breathes. */
+  private sleepingPet: CreatureHandle | null = null;
+
+  // -------------------------------------------------- the camera moments
+  /**
+   * The one camera mechanism the hotel has — see `hotel/cinematic.ts`. Three
+   * features drive it and none of them owns it.
+   */
+  private readonly cine: HotelCinematic;
+  /** Set by `Game`; the seam that hands a camera to `Game.cameraOverride`. */
+  onCinematic: ((camera: PerspectiveCamera | null) => void) | null = null;
+  /** Whether the override is currently ours, so the seam is told only on a change. */
+  private cineOn = false;
+  /**
+   * Which of the three moments is running, because they end differently: a
+   * picture eases back, a window view fades back, and breakfast ends on its own.
+   */
+  private moment: 'food' | 'art' | 'window' | null = null;
+  /** Every painted picture in the hotel, as something to walk up to and look at. */
+  private readonly artworks: {
+    readonly id: string;
+    readonly art: number;
+    /** Where it hangs, and the way it faces — world metres. */
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly normalX: number;
+    readonly normalZ: number;
+    readonly room: HotelRoom;
+  }[] = [];
+  /** Breakfast's own little scene: her bowl, the pet, and the pet's bowl. */
+  private feast: {
+    readonly pet: CreatureHandle;
+    readonly petBowl: Group;
+    readonly bowl: Group;
+    readonly fromX: number;
+    readonly fromZ: number;
+    readonly toX: number;
+    readonly toZ: number;
+    readonly facing: number;
+    t: number;
+  } | null = null;
+  /** Seconds of "that door is not yours yet" left to run. See {@link refuseSuite}. */
+  private refusing = 0;
+  /**
+   * The real lock on the suite door: a collision wall across the corridor's
+   * east doorway, present until reception hands over the key. The lock lived
+   * only in {@link checkDoorways} once, as a trigger — and a trigger is not a
+   * wall: its own refusal cooldown gated the whole doorway check, so a second
+   * push walked clean through the open gap and off the floor slab into the
+   * void (Jim, live play, 7 Aug 2026). Removed in {@link update} the moment
+   * `hasHotelKey()` flips, wherever the key came from — check-in downstairs
+   * or a restored save — so nothing that grants the key needs to know a wall
+   * exists.
+   */
+  private suiteLock: WallCollider | null = null;
+  /** Every lift alcove's sliding leaves and pointer dial. See {@link fitLiftAlcove}. */
+  private readonly alcoves: {
+    readonly room: HotelRoom;
+    readonly doors: SlidingDoorsHandle;
+    readonly dial: LiftDialHandle;
+  }[] = [];
+  /** The tower's front doors, and the lobby's — see {@link fitAutoDoors}. */
+  private outerDoors: SlidingDoorsHandle | null = null;
+  private innerDoors: SlidingDoorsHandle | null = null;
+  private outerOpen = 0;
+  private innerOpen = 0;
+  /** Seconds of check-in celebration left to run. See {@link checkIn}. */
+  private cheer = 0;
+  /** The rainbow ring's six bands, which flash when you are given your key. */
+  private readonly cheerLights: MeshToonMaterial[] = [];
+  /** The star over the "yours" door — it lights up once the suite is yours. */
+  private yoursStar: Mesh | null = null;
+  private napping = 0;
+  private nappingAt: Bed | null = null;
+
+  /** Facade frame: the tower's yaw and centre, for the door trigger. */
+  /** The tower's measured height, for a window's proportional vantage. */
+  private readonly towerHeight: number;
+  private readonly facadeYaw: number;
+  private readonly facadeX: number;
+  private readonly facadeZ: number;
+
+  constructor(
+    private readonly collision: CollisionWorld,
+    anchorPlots: AnchorPlots,
+    private readonly controls: InteriorControls,
+    private readonly surfaces: WalkSurfaces,
+    private readonly deps: HotelDeps,
+  ) {
+    // ------------------------------------------------------------ the tower
+    const plot = placedEntry('hotel');
+    this.facadeX = plot.x;
+    this.facadeZ = plot.z;
+    // The door faces the doormat the solver placed — the tower is a cluster
+    // of crystals, so any yaw is as natural as any other.
+    this.facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
+
+    const tower = createHotelTower();
+    this.towerHeight = tower.height;
+    tower.root.rotation.y = this.facadeYaw;
+    // **Lift the porch clear of the doors.** At the camera's fixed 38° pitch
+    // the porch roof hid the 2.58 m sliding leaves from every legal standing
+    // spot — the auto-doors worked (QA read their openness live) and were
+    // invisible, which is the same as not existing. The glb bakes placement
+    // into vertices with nodes at identity, so one position lift raises the
+    // whole porch; the signboard is its own node and stays put.
+    tower.root.getObjectByName('tower-porch')?.position.setY(0.62);
+    paintSign(tower.signboard);
+    this.gardenRoot.add(tower.root);
+    this.gardenRoot.name = 'the-land-hotel-outside';
+
+    const group = anchorPlots.getGroup('hotel');
+    this.gardenRoot.position.set(plot.x - group.position.x, -group.position.y, plot.z - group.position.z);
+    group.add(this.gardenRoot);
+    anchorPlots.setPlaceholderVisible('hotel', false);
+
+    // Collision: an octagon of walls around the crystal cluster, with the
+    // doorway left open and a short lobby wall behind it — the same "a metre
+    // of hallway, then somewhere else entirely" trick as the castle facade.
+    registerTowerCollision(collision, plot.x, plot.z, this.facadeYaw);
+
+    // ------------------------------------------------------------ the rooms
+    this.hotelRoot.name = 'the-land-hotel-inside';
+    this.hotelRoot.visible = false;
+
+    // Its own constant warm light, because `World` now tells `DayNight` the
+    // player is indoors in here and the sky's own lights switch off — see
+    // `hotel/lighting.ts`. Inside `hotelRoot`, so it costs nothing at all
+    // while she is out in the park.
+    this.hotelRoot.add(new HotelLighting().group);
+
+    this.props = new HotelProps(collision, surfaces);
+    for (const room of ROOMS) this.buildRoomShell(room);
+    if (!saveFlags.hasHotelKey()) {
+      this.suiteLock = collision.addWall(
+        CORRIDOR.originX + CORRIDOR.halfX,
+        CORRIDOR.originZ - (DOOR_HALF + 0.4),
+        CORRIDOR.originX + CORRIDOR.halfX,
+        CORRIDOR.originZ + (DOOR_HALF + 0.4),
+        0.3,
+      );
+    }
+    this.statue = this.dressLobby();
+    this.dressBreakfast();
+    this.dressGarden();
+    this.dressOcean();
+    this.dressCorridor();
+    this.dressSuite();
+    // After every table exists, because it picks its chairs out of the list
+    // those tables filled in — see `seatGuests`.
+    this.seatGuests();
+    // After the lobby's shell exists, because the inner pair hangs in it.
+    this.fitAutoDoors(tower);
+
+    // ----------------------------------------------------------- the guests
+    // Built last, on purpose: it takes the keep-out list every `dress*` method
+    // above filled in as it put its furniture down, so nobody strolls through
+    // a sofa. Building it earlier would hand it an empty list, and the failure
+    // would be silent — which is why it is here rather than beside them.
+    //
+    // Parented to `hotelRoot` rather than to a room's shell: an `NpcCharacter`
+    // writes **world** positions onto its model's root, and `hotelRoot` is the
+    // only node here with an identity transform. It is also what hides them
+    // with the hotel.
+    this.guests = hotelResidents(this.hotelRoot, this.props.roomKeepOuts);
+
+    // -------------------------------------------------- the camera moments
+    this.cine = new HotelCinematic(deps.camera);
+    // See `dismissView`: one listener for every kind of press there is.
+    const press = (): void => this.dismissView();
+    window.addEventListener('pointerdown', press);
+    window.addEventListener('keydown', press);
+
+    // ------------------------------------------------------------- the lift
+    this.lift = new HotelLift({
+      currentRoom: () => this.currentRoom(),
+      atLiftDoors: (player) => this.atLiftDoors(player),
+      travelTo: (room) => this.travelTo(room),
+      cancelWalk: () => this.controls.cancelWalk(),
+      player: () => this.player,
+    });
+  }
+
+  get liftPanel(): LiftPanelSource {
+    return this.lift;
+  }
+
+  /** The cinematic camera's aspect, from `Game`'s resize handler. */
+  resizeCinematic(width: number, height: number): void {
+    this.cine.resize(width, height);
+  }
+
+  /**
+   * Where the camera stands to look out of `room`'s window — the tower's real
+   * place in the park, at this storey's proportional height up its spire.
+   *
+   * **Public because `check:hotel` asserts on it**, and because the
+   * alternative is the check recomputing the formula from the same inputs,
+   * which is a check that agrees with a copy of the code rather than with the
+   * code. It is one expression and it has one owner.
+   */
+  windowVantage(room: HotelRoom): Vector3 {
+    const storey = HOTEL_FLOORS[room.liftFloor ?? 0]?.storey ?? 0;
+    const ground = this.surfaces.sample(this.facadeX, this.facadeZ, 3);
+    // Proportional up the spire, and never right at the tip — the top floor
+    // looks out of the tower, not off the end of it.
+    const height = ground + 2.5 + (storey / TOP_STOREY) * (this.towerHeight - 5);
+    // **On the plaza's side of the tower, by construction.** Two drafts got
+    // this wrong by measuring off the doorway: 3.2 m from the tower's centre
+    // was *inside* the 7.2 m-wide base cluster, and 8.5 m out along the
+    // facade's yaw still left the spire between the camera and the plaza it
+    // was about to look at — both watched as crystal filling a third of the
+    // frame (QA, then /view, 7 Aug 2026). Standing 8.5 m out along the line
+    // from the tower **toward the plaza** puts the crystal behind the lens,
+    // whatever yaw the solver gave the doorway.
+    const toPlazaX = PLAZA.x - this.facadeX;
+    const toPlazaZ = PLAZA.z - this.facadeZ;
+    const along = Math.hypot(toPlazaX, toPlazaZ) || 1;
+    const out = 8.5;
+    return new Vector3(
+      this.facadeX + (toPlazaX / along) * out,
+      height,
+      this.facadeZ + (toPlazaZ / along) * out,
+    );
+  }
+
+  /**
+   * Where a child stands to look at each painting, in world metres — for
+   * `check:hotel`, which asserts none of them is inside the furniture.
+   */
+  get artworkStands(): readonly { readonly x: number; readonly z: number; readonly art: number }[] {
+    return this.artworks.map((art) => ({
+      x: art.x + art.normalX * 1.9,
+      z: art.z + art.normalZ * 1.9,
+      art: art.art,
+    }));
+  }
+
+  /**
+   * One frame of whichever camera moment is running, and the seam.
+   *
+   * `onCinematic` is told **only when the answer changes** — handing `Game` the
+   * same camera object sixty times a second would be sixty assignments to
+   * `cameraOverride` for one decision, and the one frame that matters (the
+   * hand-back) would be indistinguishable from the fifty-nine that do not.
+   */
+  private updateCinematic(dt: number): void {
+    const camera = this.cine.update(dt);
+    const on = camera !== null;
+    if (on !== this.cineOn) {
+      this.cineOn = on;
+      this.onCinematic?.(camera);
+    }
+  }
+
+  /**
+   * A press, while a held shot is up — the way out of a picture or a window.
+   *
+   * Jim asked for *"any-press exit"*, and any press genuinely means any: a tap,
+   * a click, a key, a controller button. Rather than teach three input systems
+   * about this, it listens on the window itself, which is the one place all of
+   * them arrive. Registered once for the hotel's whole life and guarded on
+   * `dismissible`, so it costs nothing at all until a shot is actually holding.
+   */
+  private dismissView(): void {
+    if (!this.cine.dismissible) return;
+    if (this.moment === 'window') {
+      // A window closes behind the same soft fade it opened behind, rather
+      // than flying the camera back across four hundred metres of park.
+      this.controls.iris(() => this.cine.cancel());
+      return;
+    }
+    this.cine.dismiss();
+  }
+
+  /**
+   * True while the player is in any of the hotel's own spaces.
+   *
+   * `World` OR-s this with the castle's `playerInRoofedInterior` into the one
+   * question it asks `DayNight`: *is the player in **any** interior?* Jim,
+   * having played it: *"the hotel shouldn't have a night/day cycle like
+   * outdoors."* Every room here counts — there is no roof terrace to be an
+   * exception, and a hotel room being open-topped is a *camera* decision, not
+   * a statement that it is outdoors.
+   */
+  get playerIsInside(): boolean {
+    // **False while she is looking out of a window**, even though she has not
+    // moved. This getter has exactly one consumer — `World.playerInAnyInterior`,
+    // which feeds `DayNight.setIndoors` — so it is not really "is she indoors"
+    // but "should the sky's own lights be off". During a window view the
+    // camera is out in the park, and `setIndoors(true)` switches off the sun,
+    // the fill and the ambient: the view would be of a park lit by nothing at
+    // all. Answering the question that is actually being asked is cheaper and
+    // truer than adding a second flag that has to be kept in step with this
+    // one.
+    return this.inside && this.moment !== 'window';
+  }
+
+  /**
+   * The hotel's guests, as park-NPC bodies for `NpcSystem` to run.
+   *
+   * Read once, by `World`, when it builds the crowd — which is why the hotel
+   * is constructed before `NpcSystem` there. See `NpcSystem`'s `ResidentSpec`
+   * for the split, and `HotelGuests.ts` for why there is no movement code left
+   * in this building at all.
+   */
+  get residents(): readonly ResidentSpec[] {
+    return this.guests;
+  }
+
+  /** What the HUD's floor pill shows — Eleri: "It shows which floor you are on". */
+  floorLabel(): string | null {
+    if (!this.inside) return null;
+    return this.currentRoom()?.floorLabel ?? null;
+  }
+
+  attachPlayer(player: Player): void {
+    this.player = player;
+  }
+
+  /**
+   * Adopt a player RESTORED into a hotel room (a reload mid-visit). Being in
+   * a room is not just a coordinate — the room must be visible, the play
+   * bounds re-bound, `inside` true — and none of that has happened at
+   * construction. Called once from `Game` after the spawn resolves; a
+   * no-op for a garden spawn. This is what stops the QA-observed limbo of
+   * "save says hotel.lobby, player stands at the plaza".
+   */
+  adoptRestoredPlayer(): void {
+    const room = this.currentRoom();
+    if (!room) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(room);
+    this.spaceCooldown = SPACE_COOLDOWN;
+  }
+
+  /**
+   * The `/hotel` deep link: straight into the lobby from wherever she is.
+   * Safe from anywhere, the way the slide's own deep link is: the change
+   * happens behind a closed iris and teleports, so it does not care where
+   * she was standing when she asked.
+   */
+  requestEnterLobby(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace || this.inside) return false;
+    this.changeSpace(() => this.enterLobby());
+    return true;
+  }
+
+  // ---------------------------------------------------------------- zones
+
+  interactZones(): InteractZone[] {
+    if (!this.inside) return [];
+    const zones: InteractZone[] = [];
+    const room = this.currentRoom();
+    if (!room) return zones;
+
+    if (room === LOBBY) {
+      // Derived from RECEPTION_X/Z — the same numbers the desk itself is
+      // placed by — never a second literal. The zone used to keep the desk's
+      // *old* spot and sent a child to check in beside the staircase.
+      const x = LOBBY.originX + RECEPTION_X;
+      const z = LOBBY.originZ + RECEPTION_Z;
+      zones.push({
+        id: 'hotel-reception',
+        label: 'reception',
+        x,
+        y: 1,
+        z,
+        pickRadius: 2.6,
+        // A step east of the axis: dead on it, the statue's head stands
+        // between the fixed camera and a child at the desk (watched in the
+        // browser, 7 Aug relayout). One stride east clears its silhouette.
+        standX: x + 1.6,
+        standZ: z + 2.4,
+        verb: 'Check in',
+        sign: {
+          title: 'Reception',
+          note: saveFlags.hasHotelKey()
+            ? 'welcome back! your room is floor 50'
+            : 'check in and get your key!',
+          glyph: '🔑',
+          accent: PALETTE.markerLilac,
+        },
+        actions: () =>
+          saveFlags.hasHotelKey()
+            ? pressAction('Hello!', () => this.wave())
+            : pressAction('Check in!', () => this.checkIn(), '🔑'),
+      });
+    }
+
+    // The suite door, from the corridor side — a sign that says whose door it
+    // is and, until reception has handed the key over, what to do about it.
+    //
+    // **The actions are real, or the sign never appears at all**:
+    // `Selection.selectable` drops any zone whose `actions()` is empty, so
+    // the first version of this — `actions: () => []`, on the theory that a
+    // sign needs no button — was a sign a child could never see (QA, 7 Aug
+    // 2026). With the key the chip walks her in, which the door would also do
+    // by touch; without it the chip blinks the star and says where the key
+    // lives, which is the gentle refusal Jim asked for with a button on it.
+    if (room === CORRIDOR) {
+      const hasKey = saveFlags.hasHotelKey();
+      zones.push({
+        id: 'hotel-yours-door',
+        label: 'your door',
+        x: CORRIDOR.originX + CORRIDOR.halfX - 0.6,
+        y: 1.2,
+        z: CORRIDOR.originZ,
+        pickRadius: 2.4,
+        standX: CORRIDOR.originX + CORRIDOR.halfX - 2.4,
+        standZ: CORRIDOR.originZ,
+        standRadius: 2.6,
+        verb: hasKey ? 'Go in' : 'Locked',
+        sign: {
+          title: 'yours',
+          note: hasKey ? 'walk in — this one is yours!' : 'get your key at reception!',
+          glyph: hasKey ? '⭐' : '🔑',
+          accent: hasKey ? PALETTE.flowerYellow : PALETTE.markerPink,
+        },
+        actions: () =>
+          hasKey
+            ? pressAction('Go in!', () => this.enterSuiteThroughDoor(), '⭐')
+            : pressAction('Where is my key?', () => this.blinkYoursStar(), '🔑'),
+      });
+    }
+
+    // The paintings — one "Look!" each. See `lookAtArt`.
+    for (const art of this.artworks) {
+      if (art.room !== room) continue;
+      zones.push({
+        id: `hotel-art-${art.id}`,
+        label: 'painting',
+        x: art.x,
+        y: art.y,
+        z: art.z,
+        pickRadius: 2,
+        standX: art.x + art.normalX * 1.9,
+        standZ: art.z + art.normalZ * 1.9,
+        standRadius: 2.4,
+        verb: 'Look',
+        sign: {
+          title: ARTWORK_TITLES[art.art] ?? 'A painting',
+          note: 'a painting — have a proper look!',
+          glyph: '🖼️',
+          accent: PALETTE.markerLilac,
+        },
+        actions: () => pressAction('Look!', () => this.lookAtArt(art), '🖼️'),
+      });
+    }
+
+    // The windows — one per wall that has any, at the middle pane. One zone
+    // per *wall* rather than per pane on purpose: forty-one panes would be
+    // forty-one selectable things in a hotel with four other verbs in it.
+    for (const side of ['north', 'west'] as const) {
+      const wall = room.windows[side];
+      if (!wall || wall.at.length === 0) continue;
+      // Middle pane by preference — but only a pane a child can actually
+      // stand at. The breakfast room's middle north pane is behind the
+      // buffet counter, and a zone whose stand spot is inside a counter is
+      // a chip that never comes in range (QA, 8 Aug 2026). The collision
+      // world is the authority on "can stand here", so ask it, nearest the
+      // middle first.
+      const stand = 1.8;
+      const middleOf = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
+      const probe = new Vector3();
+      const middle =
+        [...wall.at]
+          .sort((a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf))
+          .find((at) => {
+            const sx =
+              side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4 + stand;
+            const sz =
+              side === 'north' ? room.originZ - room.halfZ + 0.4 + stand : room.originZ + at;
+            probe.set(sx, 0, sz);
+            this.collision.resolve(probe, PLAYER_RADIUS);
+            return Math.hypot(probe.x - sx, probe.z - sz) < 0.05;
+          }) ?? middleOf;
+      const x = side === 'north' ? room.originX + middle : room.originX - room.halfX + 0.4;
+      const z = side === 'north' ? room.originZ - room.halfZ + 0.4 : room.originZ + middle;
+      zones.push({
+        id: `hotel-window-${room.space}-${side}`,
+        label: 'window',
+        x,
+        y: (wall.sill + wall.head) / 2,
+        z,
+        pickRadius: 2.2,
+        standX: side === 'north' ? x : x + stand,
+        standZ: side === 'north' ? z + stand : z,
+        standRadius: 2.6,
+        verb: 'Look out',
+        sign: {
+          title: room.floorLabel,
+          note: 'see the park from up here!',
+          glyph: '🪟',
+          accent: PALETTE.markerSky,
+        },
+        actions: () => pressAction('Look outside!', () => this.lookOutside(room), '🪟'),
+      });
+    }
+
+    for (const chair of this.chairs) {
+      if (chair.room !== room) continue;
+      // Somebody is already sitting there. See `seatGuests`.
+      if (chair.taken) continue;
+      zones.push({
+        id: `hotel-chair-${chair.id}`,
+        label: 'breakfast chair',
+        x: chair.x,
+        y: 1,
+        z: chair.z,
+        pickRadius: 1.6,
+        standX: chair.x - Math.sin(chair.facing) * 0.9,
+        standZ: chair.z - Math.cos(chair.facing) * 0.9,
+        standRadius: 2.2,
+        // Sitting is a ride as far as the engine cares, and a zone is not
+        // selectable while riding unless it says so — the train's own 'Get
+        // off' precedent. Without this, sitting down eats every chip
+        // including 'Hop down' and a child is stuck at the table forever.
+        selectableWhileRiding: true,
+        verb: 'Sit',
+        sign: { title: 'Breakfast', note: 'sit down and choose!', glyph: '🥄' },
+        actions: () =>
+          this.seatedAt === chair.id
+            ? [
+                ...BREAKFASTS.map((food) => ({
+                  id: `eat-${food.kind}`,
+                  label: food.label,
+                  glyph: food.glyph,
+                  run: () => this.eat(food.kind),
+                })),
+                // "Leave breakfast", not "Hop down" (Jim, 7 August 2026): the
+                // chip has to say what leaving *this* is, because a child sat
+                // at a table reads "Hop down" as another thing to do at the
+                // table rather than as the way out of it.
+                { id: 'hop-down', label: 'Leave breakfast', run: () => this.standUp() },
+              ]
+            : pressAction('Sit down!', () => this.sitAt(chair), '🪑'),
+      });
+    }
+
+    for (const bed of this.beds) {
+      if (room !== SUITE) continue;
+      zones.push({
+        id: `hotel-bed-${bed.id}`,
+        label: 'your bed',
+        x: bed.x,
+        y: 1,
+        z: bed.z,
+        pickRadius: 1.8,
+        standX: bed.x,
+        standZ: bed.z + 1.5,
+        standRadius: 2.4,
+        verb: 'Sleep',
+        sign: { title: 'Your bed', note: 'sleep, or go jumpy jumpy!', glyph: '🛏️' },
+        actions: () =>
+          this.napping > 0 ? [] : pressAction('Sleep!', () => this.nap(bed), '💤'),
+      });
+    }
+
+    return zones;
+  }
+
+  // ---------------------------------------------------------------- frame
+
+  update(context: FrameContext): void {
+    const { dt, elapsed } = context;
+    if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
+
+    // The key turning in the lock. Before the player-null return, so a
+    // headless world (check:hotel) can watch the door open too.
+    if (this.suiteLock && saveFlags.hasHotelKey()) {
+      this.collision.removeWall(this.suiteLock);
+      this.suiteLock = null;
+    }
+
+    this.lift.update(dt);
+    // After the lift, so the leaves answer to this frame's phase rather than
+    // to last frame's — a door that lags the ride by a frame is a door you can
+    // see close on the wrong side of the iris.
+    this.updateDoors(dt);
+    this.statue.update(dt, elapsed);
+    // No guest update here any more: they are ordinary `NpcCharacter`s in
+    // `NpcSystem`'s own array and are stepped by it, with the park's crowd,
+    // by the park's code — which is the whole point (see `HotelGuests.ts`).
+    for (const ball of this.discoBalls) ball.spin.rotation.y = elapsed * 0.5;
+    for (const keeper of this.keepers) keeper.setWalkPhase(elapsed * 0.4, 0.5);
+
+    // Five real spot lights per lit ball, so they burn only in the room they
+    // are in. `visible = false` takes a light out of three.js's own gather, so
+    // this is a genuine saving rather than a dimmer — see `hangDiscoBall`.
+    const here = this.currentRoom();
+    for (const rig of this.discoLights) {
+      const lit = this.inside && rig.room === here;
+      for (const light of rig.lights) light.visible = lit;
+    }
+    // Same rule for the sparkle: two `InstancedMesh` rewrites a frame is
+    // nothing next to the park, but it is not nothing when she is on the other
+    // side of the world and cannot see the ball at all.
+    for (const rig of this.sparkles) {
+      const near = this.inside && rig.room === here;
+      rig.sparkle.glints.visible = near;
+      rig.sparkle.motes.visible = near;
+      if (near) rig.sparkle.update(elapsed);
+    }
+
+    // The pet asleep in the suite, breathing. `setWalkPhase(phase, 0)` is the
+    // pets' own idle — no stride, just the body's bob — so a sleeping pet uses
+    // the same one line every other pet in the park uses to stand still.
+    this.sleepingPet?.setWalkPhase(elapsed * 0.7, 0);
+
+    // Children at breakfast, rocking gently over their cereal. Three lines of
+    // motion is the difference between somebody eating and a mannequin.
+    for (const diner of this.diners) {
+      diner.model.body.rotation.x = Math.sin(elapsed * DINER_BOB_RATE + diner.phase) * DINER_BOB;
+    }
+
+    this.updateCinematic(dt);
+    this.updateFeast(dt, elapsed);
+    this.updateSpeech(dt);
+    if (this.speech) {
+      const x = LOBBY.originX + RECEPTION_X;
+      const z = LOBBY.originZ + RECEPTIONIST_Z;
+      const camera = this.deps.camera;
+      this.receptionBubble.updateScreenSize(
+        camera.worldUnitsPerPixel,
+        Math.hypot(x - camera.focusPoint.x, z - camera.focusPoint.z),
+      );
+    }
+
+    // The "that door is not yours yet" blink. Driven off `elapsed` like the
+    // check-in flash, for the same reason: the same pulse rate every time.
+    if (this.refusing > 0) {
+      this.refusing -= dt;
+      const lit = this.refusing > 0 && Math.sin(elapsed * 11) > 0;
+      this.lightYoursStar(lit || saveFlags.hasHotelKey());
+    }
+
+    // The check-in flash. Driven off `elapsed` rather than off the countdown
+    // so the pulse rate is the same every time, and settled back to zero on
+    // the frame it runs out rather than left wherever the sine happened to be.
+    if (this.cheer > 0) {
+      this.cheer -= dt;
+      const pulse = this.cheer > 0 ? 0.25 + Math.abs(Math.sin(elapsed * 8.5)) * 0.95 : 0;
+      for (const band of this.cheerLights) band.emissiveIntensity = pulse;
+    }
+
+    const player = this.player;
+    if (!player) return;
+
+    if (this.napping > 0 && this.nappingAt) {
+      this.napping -= dt;
+      if (this.napping <= 0) {
+        this.napping = 0;
+        this.nappingAt = null;
+        player.group.rotation.order = 'XYZ';
+        player.group.rotation.x = 0;
+        player.endRide();
+        player.model.setExpression('happy');
+      }
+      return;
+    }
+
+    if (!this.changingSpace && !player.riding) this.checkDoorways(player);
+
+    // Nobody falls out of the world. Every doorway is a portal or a wall, but
+    // the proof is a backstop rather than an audit of doorways: anything that
+    // still slips a trigger — a cooldown window, a dropped frame, a door not
+    // written yet — lands back in the room it fell from, not in the void.
+    if (this.inside && !this.changingSpace && player.position.y < -2) {
+      const room = this.currentRoom() ?? LOBBY;
+      player.teleportTo(room.originX, 0, room.originZ, Math.PI);
+      this.controls.snapCamera();
+    }
+
+    // The same net for the one pocket that is not a fall: inside a gallery's
+    // solid mass at ground level — where a pre-fix save may still restore a
+    // player, invisible and pinned (QA, 8 Aug 2026). The stair's slices make
+    // it unreachable on foot now, but a save is not on foot.
+    if (this.inside && !this.changingSpace) {
+      const room = this.currentRoom();
+      const mez = room?.mezzanine;
+      // Threshold well below the flight's own crossing heights: the top
+      // treads enter the deck rectangle at 2.88–3.2 m and a climber's damped
+      // y can lag them by most of a metre — 1.5 m is unreachable on the
+      // stair but still far above the pocket's floor. (First cut used
+      // `height − 0.4` and teleported a legitimate climber off the top
+      // treads, measured live.)
+      if (room && mez && player.position.y < 1.5) {
+        const lx = player.position.x - room.originX;
+        const lz = player.position.z - room.originZ;
+        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) {
+          player.teleportTo(room.originX, 0, room.originZ, Math.PI);
+          this.controls.snapCamera();
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------ changing space
+
+  private checkDoorways(player: Player): void {
+    if (this.spaceCooldown > 0) return;
+
+    if (!this.inside) {
+      // The tower door, in the facade's own frame: `forward` is metres from
+      // the tower's centre along the doormat direction, `side` across it.
+      const dx = player.position.x - this.facadeX;
+      const dz = player.position.z - this.facadeZ;
+      const forward = dx * Math.sin(this.facadeYaw) + dz * Math.cos(this.facadeYaw);
+      const side = dx * Math.cos(this.facadeYaw) - dz * Math.sin(this.facadeYaw);
+      if (Math.abs(side) > DOOR_HALF + 0.4) return;
+      if (forward > 6.6 || forward < 4.4) return;
+      this.changeSpace(() => this.enterLobby());
+      return;
+    }
+
+    const room = this.currentRoom();
+    if (!room) return;
+    const localX = player.position.x - room.originX;
+    const localZ = player.position.z - room.originZ;
+
+    if (room === LOBBY && localZ > LOBBY.halfZ - 0.6 && Math.abs(localX) < DOOR_HALF + 0.4) {
+      this.changeSpace(() => this.leaveToPark());
+      return;
+    }
+    if (room === CORRIDOR && localX > CORRIDOR.halfX - 1.6 && Math.abs(localZ) < 1.5) {
+      // **The lock lives here, not in the lift.** Jim, 7 August 2026: *"go to
+      // level 50 before you have your key but not through the door to the
+      // room."* Every lift button is now pressable, so a child can ride up and
+      // see her own floor; what she cannot do is open her door until reception
+      // has given her the key. This is the better place for it by a distance —
+      // a refusal at the door happens *at the sign that says what to do next*,
+      // where a greyed-out lift button was a dead end three rooms away from
+      // any explanation.
+      //
+      // What she cannot do is *physically* cannot: `suiteLock` is a real wall
+      // and this branch is only the words at it. Its band starts a metre
+      // further out than the portal's because the wall itself stops her at
+      // `halfX − 0.92` (0.3 half-thickness + 0.62 player radius) — a refusal
+      // triggered at the old 0.6 band would sit beyond her reach, and the
+      // door would be a mute invisible wall.
+      if (!saveFlags.hasHotelKey()) {
+        this.refuseSuite(player);
+        return;
+      }
+      if (localX > CORRIDOR.halfX - 0.6) {
+        this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+      }
+      return;
+    }
+    if (room === SUITE && localX < -SUITE.halfX + 0.6 && Math.abs(localZ) < 1.5) {
+      this.changeSpace(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
+    }
+  }
+
+  private changeSpace(midpoint: () => void): void {
+    this.changingSpace = true;
+    this.controls.cancelWalk();
+    this.controls.iris(() => {
+      midpoint();
+      this.controls.snapCamera();
+      this.changingSpace = false;
+      this.spaceCooldown = SPACE_COOLDOWN;
+    });
+  }
+
+  private enterLobby(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = true;
+    this.hotelRoot.visible = true;
+    this.boundTo(LOBBY);
+    // Just inside the front door, facing the statue.
+    player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
+    if (!saveFlags.hasHotelKey()) {
+      this.greet();
+      // …and the receptionist calls out from the desk straight ahead of her,
+      // so the first words and the room agree about where checking in
+      // happens. The desk is on the entrance axis now — she is looking
+      // straight at it as this line appears.
+      this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
+    }
+  }
+
+  private leaveToPark(): void {
+    const player = this.player;
+    if (!player) return;
+    this.inside = false;
+    this.hotelRoot.visible = false;
+    this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
+    const plot = placedEntry('hotel');
+    const x = plot.entranceX;
+    const z = plot.entranceZ;
+    player.teleportTo(x, this.surfaces.sample(x, z, 3), z, this.facadeYaw);
+  }
+
+  private stepThroughDoor(room: HotelRoom, localX: number, localZ: number, facing: number): void {
+    const player = this.player;
+    if (!player) return;
+    this.boundTo(room);
+    player.teleportTo(room.originX + localX, 0, room.originZ + localZ, facing);
+  }
+
+  /** The lift's portal hop — same shape as a door, wrapped in its own iris. */
+  private travelTo(room: HotelRoom): void {
+    this.controls.iris(() => {
+      const player = this.player;
+      if (player) {
+        // Behind the closed iris, like every other space change — posing
+        // her before it closed gave a visible cross-space camera whip
+        // (reviewer finding 2 on PR #247). The lift keeps the ride pose;
+        // only the world jumps. Land in the new room's alcove.
+        const x = room.originX - room.halfX - 1.2;
+        const z = room.originZ + (room.liftZ ?? 0);
+        player.setRidePose(x, 0, z, Math.PI / 2);
+      }
+      this.boundTo(room);
+      this.controls.snapCamera();
+      this.spaceCooldown = SPACE_COOLDOWN;
+    });
+  }
+
+  private boundTo(room: HotelRoom): void {
+    this.collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ));
+  }
+
+  // ------------------------------------------------------------- actions
+
+  /**
+   * Other children, sat at breakfast — Jim, 7 August 2026: *"some residents SIT
+   * at breakfast tables."*
+   *
+   * ## Why these are not `NpcSystem` residents
+   *
+   * The hotel's strolling guests are ordinary park NPCs precisely because they
+   * *move*: they need the shared body, walk cycle, collision, ground sampler
+   * and push-apart, and `NpcCharacter` is all of that (see `HotelGuests.ts`).
+   * A diner needs **none** of it. She sits on a known chair, at a known height,
+   * facing a known way, and never goes anywhere. Driving her through the crowd
+   * system would mean fighting it — a driver whose every intent is "stay
+   * exactly here", a body being resolved against the very chair it is sat on,
+   * and a ground sampler asked a question about a seat.
+   *
+   * So a diner is a posed `CharacterModel` and nothing else, the same way the
+   * receptionist and the buffet's server are posed keepers. The pose itself is
+   * the ferris wheel's (`minigames/ferrisWheel/gondola.ts`): legs forward,
+   * arms resting. That is where seating a toy in this game is defined, and
+   * copying the four numbers rather than inventing new ones is what makes a
+   * child in a gondola and a child at breakfast read as the same child.
+   *
+   * ## The chair she is on stops being offered
+   *
+   * `Chair.taken` goes true and `interactZones` skips it, so the player never
+   * gets a "Sit down!" chip for a chair that already has somebody in it. The
+   * chairs are dealt out here, after every table exists, from a fixed list of
+   * ids — so moving a table moves its diner, and deleting one is caught by the
+   * lookup finding nothing rather than by a child finding two people in a seat.
+   */
+  private seatGuests(): void {
+    /** Which chairs have somebody in them. Ids, so they follow their tables. */
+    const takenChairs: readonly string[] = [
+      // The lobby café: one child at the near table, so the corner reads as
+      // occupied from the door rather than as furniture.
+      'lobby-a-0',
+      // Floor 1: three tables of the seven, spread across the room. Never all
+      // of them — a breakfast room with every seat full is a breakfast room a
+      // child cannot sit down in, and sitting down is the thing she came for.
+      'b1-b-1',
+      'b1-e-0',
+      'b1-g-1',
+    ];
+
+    takenChairs.forEach((id, index) => {
+      const chair = this.chairs.find((seat) => seat.id === id);
+      if (!chair) return;
+      chair.taken = true;
+
+      // Its own seeded stream, salted well away from `HotelGuests`' 0x6035 so
+      // adding a diner cannot reshuffle a stroller's clothes.
+      const rng = new Rng(0x7d10 + index * 613);
+      const outfit = rng.pick(DINER_OUTFITS);
+      const model = new CharacterModel(
+        {
+          skin: (KID_SKIN_TONES[rng.int(0, KID_SKIN_TONES.length - 1)] ?? KID_SKIN_TONES[1])!.colour,
+          hair: rng.pick(DINER_HAIRS),
+          outfit,
+          outfitArms: outfit,
+          shoe: PALETTE.shoe,
+        },
+        { hairStyle: rng.pick(DINER_HAIR_STYLES) },
+      );
+
+      // Sat down: legs forward, arms resting on the table. The gondola's own
+      // four numbers — see this method's header.
+      model.leftLeg.rotation.x = -1.25;
+      model.rightLeg.rotation.x = -1.15;
+      model.leftArm.rotation.x = 0.25;
+      model.rightArm.rotation.x = 0.25;
+      model.root.position.set(chair.x, CHAIR_SEAT_Y, chair.z);
+      model.root.rotation.y = chair.facing;
+      model.setExpression('happy');
+      // Parented to `hotelRoot`, not to the room's shell: the position above is
+      // already in world metres (a `Chair` carries world coordinates, because
+      // that is what the interact zones need), and `hotelRoot` is the only node
+      // in here with an identity transform. Same rule as the guests'.
+      this.hotelRoot.add(model.root);
+      this.diners.push({ model, phase: rng.range(0, Math.PI * 2) });
+    });
+  }
+
+  /**
+   * Reception hands over the key — the one moment in the hotel a child has
+   * *achieved* something, and until QA's note on 6 August the only sign of it
+   * was a line of text changing on a sign she had already stopped reading.
+   *
+   * So three things now happen, all of them things she can see from where she
+   * is standing:
+   *
+   *  - the receptionist beams (and so does she);
+   *  - the rainbow inlaid round the statue **flashes**, right in the middle of
+   *    the lobby, for {@link CHEER_SECONDS};
+   *  - the star over the "yours" door, fifty floors up, comes on for good —
+   *    which is the payoff she finds when she gets there.
+   *
+   * No new asset and no new sound: the ring and the star already existed, and
+   * the star's own doc comment in `hotelAssets.ts` asks for exactly this
+   * ("brighten its emissive when the suite unlocks").
+   */
+  private checkIn(): void {
+    saveFlags.giveHotelKey();
+    this.player?.model.setExpression('happy');
+    for (const keeper of this.keepers) keeper.setExpression('happy');
+    // …and now she is *told* so, out loud. Jim, 7 August 2026: *"good
+    // afternoon/morning, here is your key, enjoy your stay etc, maybe a bit
+    // longer and more embellished."* The flash and the star fire on the line
+    // that hands the key over rather than on the button press, so the
+    // celebration lands on the words rather than three sentences before them.
+    this.say(checkInLines(this.deps.clock()), 3);
+  }
+
+  /**
+   * Everything the check-in celebration lights up. Split out of
+   * {@link checkIn} so the speech can trigger it on the right line.
+   */
+  private celebrate(): void {
+    this.cheer = CHEER_SECONDS;
+    this.lightYoursStar(true);
+  }
+
+  /**
+   * Puts a short script in the receptionist's speech bubble.
+   *
+   * The bubble is `ui/SpeechBubble.ts` — the same one the park's chatting
+   * children use, so this is the game's one way of having somebody say
+   * something rather than a second one. Each line is held for a moment
+   * proportional to its length and then replaced; when the script runs out the
+   * bubble goes away.
+   *
+   * `cheerAt` is the index of the line the rainbow flash belongs to, or −1 for
+   * a script with nothing to celebrate.
+   */
+  private say(lines: readonly string[], cheerAt: number): void {
+    if (lines.length === 0) return;
+    this.speech = { lines, index: 0, timer: lineSeconds(lines[0] ?? ''), cheerAt };
+    this.receptionBubble.setText(lines[0] ?? null);
+    this.receptionist?.setExpression('happy');
+    if (cheerAt === 0) this.celebrate();
+  }
+
+  /** One frame of the receptionist's script. */
+  private updateSpeech(dt: number): void {
+    const speech = this.speech;
+    if (!speech) return;
+    // She only talks while somebody is in the lobby to hear her — walk out
+    // mid-sentence and the bubble stops rather than following you upstairs.
+    if (this.currentRoom() !== LOBBY) {
+      this.speech = null;
+      this.receptionBubble.setText(null);
+      return;
+    }
+    speech.timer -= dt;
+    if (speech.timer > 0) return;
+    speech.index += 1;
+    const line = speech.lines[speech.index];
+    if (line === undefined) {
+      this.speech = null;
+      this.receptionBubble.setText(null);
+      return;
+    }
+    this.receptionBubble.setText(line);
+    speech.timer = lineSeconds(line);
+    if (speech.index === speech.cheerAt) this.celebrate();
+  }
+
+  /** The star over the suite door: dim while the room is nobody's, lit once it is hers. */
+  private lightYoursStar(lit: boolean): void {
+    const material = this.yoursStar?.material;
+    if (material instanceof MeshToonMaterial) material.emissiveIntensity = lit ? 1.15 : 0.3;
+  }
+
+  private greet(): void {
+    for (const keeper of this.keepers) keeper.setExpression('happy');
+  }
+
+  private wave(): void {
+    this.player?.model.setExpression('happy');
+    // A returning guest gets a shorter hello — the long one is the check-in,
+    // and a hotel that reads you the whole welcome every time you walk past
+    // the desk is a hotel you stop walking past.
+    this.say(returningLines(this.deps.clock()), -1);
+  }
+
+  /**
+   * **Your door, before it is yours.**
+   *
+   * No fail state, nothing taken away, no noise: she is eased back a step, the
+   * star over the door blinks at her, and the sign on the door says where to
+   * go. Jim asked for *"a gentle refusal"* and the star was his own suggestion
+   * — it is already the thing that lights up for good the moment reception
+   * hands the key over (see {@link checkIn}), so blinking it here makes the
+   * two halves of the same story point at each other.
+   *
+   * Eased back rather than blocked with a collider because there is no collider
+   * available to add: `CollisionWorld` is built once, at construction, and a
+   * doorway that is solid until a flag flips is not a thing it can express. A
+   * nudge is also simply better — a child who walks into her own door and is
+   * stopped dead has met a bug; one who is turned round has met a locked door.
+   */
+  private refuseSuite(player: Player): void {
+    if (this.refusing > 0) return;
+    this.controls.cancelWalk();
+    player.teleportTo(
+      CORRIDOR.originX + CORRIDOR.halfX - 2.4,
+      0,
+      CORRIDOR.originZ,
+      Math.PI / 2,
+    );
+    player.model.setExpression('sad');
+    this.refusing = REFUSE_SECONDS;
+    // Deliberately NOT `spaceCooldown` here: that gate silences the whole of
+    // `checkDoorways`, and granting it on refusal was precisely the hole that
+    // let a second push through the doorway unchecked. The wall is the lock;
+    // `refusing` alone stops the words repeating every frame.
+  }
+
+  /**
+   * The "Go in!" chip on her own door — the same portal hop the doorway
+   * trigger makes, offered as a button so the sign is selectable at all
+   * (see the zone in {@link interactZones}).
+   */
+  private enterSuiteThroughDoor(): void {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace) return;
+    this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+  }
+
+  /**
+   * The keyless "Where is my key?" chip: the star over the door blinks — the
+   * same star the check-in lights for good — and the sign underneath is
+   * already saying "get your key at reception!". No teleport, no refusal
+   * noise: she asked a question and the door winked at her.
+   */
+  private blinkYoursStar(): void {
+    if (this.refusing > 0) return;
+    this.refusing = REFUSE_SECONDS;
+  }
+
+  private sitAt(chair: Chair): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    player.beginRide();
+    player.setRidePose(chair.x, CHAIR_SEAT_Y, chair.z, chair.facing);
+    this.seatedAt = chair.id;
+  }
+
+  private standUp(): void {
+    const player = this.player;
+    if (!player) return;
+    this.seatedAt = null;
+    player.endRide();
+    // Breakfast is over: the bowls and the pet go with it. Hidden rather than
+    // disposed — she may sit straight back down, and rebuilding a pet to eat a
+    // second bowl of cereal is three models for one child changing her mind.
+    if (this.feast) {
+      this.feast.bowl.visible = false;
+      this.feast.pet.root.visible = false;
+      this.feast.petBowl.visible = false;
+    }
+  }
+
+  /**
+   * **Breakfast, as a moment rather than a menu item.**
+   *
+   * Jim, 7 August 2026: a bowl appears in front of her, the camera eases in on
+   * her eating happily for a couple of seconds, and her own pet trots over,
+   * sits down and eats out of its bowl beside her.
+   *
+   * Choosing a cereal used to set a happy face and nothing else — which is to
+   * say the one thing a child came to the breakfast room to *do* had no
+   * result. This is the result.
+   *
+   * Everything here is built on first use and then kept: the pet, its bowl and
+   * her bowl are three objects for the life of the hotel, not three per
+   * mouthful. The shot itself is `hotel/cinematic.ts`, the same mechanism the
+   * pictures and the windows use.
+   */
+  private eat(kind: BreakfastKind): void {
+    const player = this.player;
+    const chair = this.chairs.find((seat) => seat.id === this.seatedAt);
+    if (!player || !chair) {
+      this.player?.model.setExpression('happy');
+      return;
+    }
+    player.model.setExpression('happy');
+
+    // Her bowl, on the table in front of her — 0.42 m toward the table's
+    // middle, which is the chair's own facing. Rebuilt per cereal because
+    // which one she chose is the whole point of choosing.
+    this.feast?.bowl.removeFromParent();
+    const bowl = new Group();
+    bowl.add(createBreakfastBowl(kind).root);
+    bowl.position.set(
+      chair.x + Math.sin(chair.facing) * 0.42,
+      TABLE_TOP,
+      chair.z + Math.cos(chair.facing) * 0.42,
+    );
+    this.hotelRoot.add(bowl);
+
+    // The pet, and its own bowl, beside her chair and a little to one side so
+    // it is not between her and the table.
+    const side = chair.facing + Math.PI / 2;
+    const petX = chair.x + Math.sin(side) * 1.15;
+    const petZ = chair.z + Math.cos(side) * 1.15;
+    const pet = this.feast?.pet ?? createPet(this.paradePetKind());
+    const petBowl = this.feast?.petBowl ?? new Group();
+    if (!this.feast) {
+      petBowl.add(createPetBowl().root);
+      this.hotelRoot.add(pet.root, petBowl);
+    }
+    petBowl.position.set(
+      petX + Math.sin(chair.facing) * 0.5,
+      0,
+      petZ + Math.cos(chair.facing) * 0.5,
+    );
+
+    this.feast = {
+      pet,
+      petBowl,
+      bowl,
+      // It trots in from a little way behind her, so it is seen to arrive.
+      fromX: petX - Math.sin(chair.facing) * 3.4,
+      fromZ: petZ - Math.cos(chair.facing) * 3.4,
+      toX: petX,
+      toZ: petZ,
+      facing: chair.facing,
+      t: 0,
+    };
+    pet.root.visible = true;
+    petBowl.visible = true;
+
+    this.moment = 'food';
+    this.cine.play(this.foodShotFor(chair), () => {
+      this.moment = null;
+    });
+  }
+
+  /**
+   * The breakfast push-in for one chair — a shot over her shoulder to a spot
+   * above the table, looking back at her over her cereal. A long-ish lens
+   * (30°) so the room behind her compresses and she is unmistakably the
+   * subject.
+   *
+   * A method rather than inline in {@link eat} because `check:hotel` measures
+   * every one of these (via {@link cinematicShots}) against
+   * `MIN_SHOT_DISTANCE` and the room's own walls.
+   */
+  private foodShotFor(chair: Chair): Shot {
+    // **Everything in the chair's own frame.** The first version offset the
+    // end pose `+0.9` on world X *and* world Z, which is a different shot for
+    // every facing — for chairs facing south-west it landed ~1.06 m from the
+    // diner, inside her head (Jim, live play, 7 Aug 2026). Forward and side
+    // are the chair's, so every table in the hotel gets the same framing.
+    const forwardX = Math.sin(chair.facing);
+    const forwardZ = Math.cos(chair.facing);
+    const sideX = Math.sin(chair.facing + Math.PI / 2);
+    const sideZ = Math.cos(chair.facing + Math.PI / 2);
+    // Framed on her chest, not over her head: she sits at CHAIR_SEAT_Y and a
+    // seated child's chest is about 0.55 m above the seat.
+    const chestY = CHAIR_SEAT_Y + 0.55;
+    // **From her free side, not across the table.** "Across the table" was
+    // the second draft, and watching it run found the flaw: the opposite
+    // chair often holds a seated diner (`seatGuests`), and 1.9 m ahead is
+    // exactly that seat — the shot ended inside the *neighbour's* face. The
+    // pet trots in on `facing + PI/2`, so the camera stands on the other
+    // side (`-side`), a touch ahead of her: her face three-quarters on, the
+    // bowl in front of her, and the pet arriving in the background.
+    // 2.7 m out through a 40° lens frames ~1.9 m at her — the whole seated
+    // child, her bowl and the pet, not a face-filling close-up: these kids
+    // are chibi-proportioned (the head is half the body), so a tight
+    // portrait lens on a chair is all head (watched in the browser, twice).
+    return {
+      from: 'here',
+      to: new Vector3(
+        chair.x + forwardX * 0.9 - sideX * 2.4,
+        1.7,
+        chair.z + forwardZ * 0.9 - sideZ * 2.4,
+      ),
+      lookAt: new Vector3(chair.x, chestY, chair.z),
+      easeSeconds: FOOD_EASE_SECONDS,
+      holdSeconds: FOOD_HOLD_SECONDS,
+      fov: 40,
+    };
+  }
+
+  /**
+   * The "Look!" shot for one painting — see {@link lookAtArt}, and
+   * {@link cinematicShots} for why it is a method.
+   */
+  private artShotFor(art: (typeof this.artworks)[number]): Shot {
+    return {
+      from: 'here',
+      to: new Vector3(
+        art.x + art.normalX * ART_VIEW_DISTANCE,
+        art.y,
+        art.z + art.normalZ * ART_VIEW_DISTANCE,
+      ),
+      lookAt: new Vector3(art.x, art.y, art.z),
+      easeSeconds: 1.1,
+      holdSeconds: null,
+      fov: ART_VIEW_FOV,
+    };
+  }
+
+  /**
+   * Every close-up shot the hotel can produce, one per chair and one per
+   * painting, exactly as the game would play them.
+   *
+   * **Public because `check:hotel` asserts on it** — the alternative is the
+   * check recomputing the end-pose formula from the same inputs, which is a
+   * check that agrees with a copy of the code rather than with the code. The
+   * bug this guards against was real: the old end pose was offset in *world*
+   * axes rather than the chair's own, so chairs facing south-west put the
+   * lens inside the diner's head (Jim, live play, 7 Aug 2026).
+   */
+  get cinematicShots(): readonly { readonly id: string; readonly room: HotelRoom; readonly shot: Shot }[] {
+    return [
+      ...this.chairs.map((chair) => ({
+        id: `food-${chair.id}`,
+        room: chair.room,
+        shot: this.foodShotFor(chair),
+      })),
+      ...this.artworks.map((art) => ({
+        id: `art-${art.id}`,
+        room: art.room,
+        shot: this.artShotFor(art),
+      })),
+    ];
+  }
+
+  /**
+   * The pet trotting over, sitting, and eating — one frame of it.
+   *
+   * Driven off the shot's own clock rather than a timer of its own, so the
+   * arrival lands inside the push-in rather than before or after it whatever
+   * the ease is retuned to. It uses the pets' own `setWalkPhase`, which is the
+   * same walk every pet in the park has.
+   */
+  private updateFeast(dt: number, elapsed: number): void {
+    const feast = this.feast;
+    if (!feast) return;
+    feast.t += dt;
+
+    const walk = Math.min(1, feast.t / FOOD_TROT_SECONDS);
+    const eased = walk * walk * (3 - 2 * walk);
+    feast.pet.root.position.set(
+      feast.fromX + (feast.toX - feast.fromX) * eased,
+      0,
+      feast.fromZ + (feast.toZ - feast.fromZ) * eased,
+    );
+    feast.pet.root.rotation.y = feast.facing;
+
+    if (walk < 1) {
+      // Trotting: a brisk stride, and a body that bobs with it.
+      feast.pet.setWalkPhase(elapsed * 9, 1);
+      return;
+    }
+    // Arrived: sat down, head dipping into the bowl. No stride — the bob alone
+    // is the pets' own idle, and dipping is one rotation on the head.
+    feast.pet.setWalkPhase(elapsed * 2.2, 0);
+    feast.pet.head.rotation.x = 0.5 + Math.sin(elapsed * 4.5) * 0.28;
+  }
+
+  private nap(bed: Bed): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    player.beginRide();
+    player.ridePosture = 'reclined';
+    player.group.rotation.order = 'YXZ';
+    player.setRidePose(bed.x, BED_MATTRESS_TOP + 0.16, bed.z, Math.PI, -Math.PI / 2);
+    this.napping = NAP_SECONDS;
+    this.nappingAt = bed;
+    player.model.setExpression('blink');
+  }
+
+  // ------------------------------------------------------------- queries
+
+  private currentRoom(): HotelRoom | null {
+    const player = this.player;
+    if (!player) return null;
+    const space = spaceAt(player.position.x, player.position.z);
+    if (space === SPACE_GARDEN) return null;
+    return roomFor(space);
+  }
+
+  private atLiftDoors(player: Player): boolean {
+    const room = this.currentRoom();
+    if (!room || room.liftZ === null) return false;
+    const localX = player.position.x - room.originX;
+    const localZ = player.position.z - room.originZ - room.liftZ;
+    return localX < -room.halfX + 3.4 && Math.abs(localZ) < 2.6;
+  }
+
+  // ------------------------------------------------------------- builders
+
+  private buildRoomShell(room: HotelRoom): void {
+    const shell = new Group();
+    shell.name = `hotel:${room.space}`;
+    shell.position.set(room.originX, 0, room.originZ);
+    this.hotelRoot.add(shell);
+
+    // The floor plate, in this floor's own colour, with a soft emissive lift
+    // so an open-topped room at night is cosy rather than cave-dark.
+    const floor = solid(
+      new Mesh(
+        new BoxGeometry(room.halfX * 2 + 1.2, 0.5, room.halfZ * 2 + 1.2),
+        interiorMaterial(room.theme.floor),
+      ),
+    );
+    floor.position.y = -0.25;
+    shell.add(floor);
+    this.surfaces.addPlatform(
+      new Plate(
+        0,
+        room.originX - room.halfX - 0.6,
+        room.originX + room.halfX + 0.6,
+        room.originZ - room.halfZ - 0.6,
+        room.originZ + room.halfZ + 0.6,
+      ),
+    );
+
+    // Walls per side, minus the door and lift gaps, both visual and solid.
+    const sides = [
+      { side: 'north' as const, x1: -room.halfX, z1: -room.halfZ, x2: room.halfX, z2: -room.halfZ },
+      { side: 'south' as const, x1: -room.halfX, z1: room.halfZ, x2: room.halfX, z2: room.halfZ },
+      { side: 'west' as const, x1: -room.halfX, z1: -room.halfZ, x2: -room.halfX, z2: room.halfZ },
+      { side: 'east' as const, x1: room.halfX, z1: -room.halfZ, x2: room.halfX, z2: room.halfZ },
+    ];
+    const wallMaterial = interiorMaterial(room.theme.wall);
+    for (const { side, x1, z1, x2, z2 } of sides) {
+      // The two walls the camera looks *through* may be shorter than the two it
+      // looks *at* — see `HotelRoom.nearWallHeight`. Everywhere but the lobby
+      // they are the same number and this reads as it always did.
+      const height =
+        side === 'south' || side === 'east' ? room.nearWallHeight ?? room.wallHeight : room.wallHeight;
+      const gap = room.gaps[side];
+      const along = side === 'north' || side === 'south' ? 'x' : 'z';
+      const from = along === 'x' ? x1 : z1;
+      const to = along === 'x' ? x2 : z2;
+      const spans: [number, number][] = gap
+        ? [
+            [from, gap[0]],
+            [gap[1], to],
+          ]
+        : [[from, to]];
+      // Every pane this side declares, clipped to the wall's own solid spans
+      // below — so a window can never end up floating across a doorway, and
+      // `layout.ts` never has to repeat where the doorways are.
+      this.glazeWall(shell, room, side, spans);
+
+      for (const [a, b] of spans) {
+        if (b - a < 0.05) continue;
+        const length = b - a;
+        const mid = (a + b) / 2;
+        const wall = solid(
+          new Mesh(
+            along === 'x'
+              ? new BoxGeometry(length, height, 0.5)
+              : new BoxGeometry(0.5, height, length),
+            wallMaterial,
+          ),
+        );
+        wall.position.set(along === 'x' ? mid : x1, height / 2, along === 'x' ? z1 : mid);
+        shell.add(wall);
+        const wx1 = room.originX + (along === 'x' ? a : x1);
+        const wz1 = room.originZ + (along === 'x' ? z1 : a);
+        const wx2 = room.originX + (along === 'x' ? b : x1);
+        const wz2 = room.originZ + (along === 'x' ? z1 : b);
+        this.collision.addWall(wx1, wz1, wx2, wz2, 0.3);
+      }
+    }
+
+    // The lift alcove: three walls poking out of the west gap, so the "car"
+    // is a little crystal room of its own.
+    if (room.liftZ !== null) {
+      const ax = -room.halfX;
+      const depth = LIFT_ALCOVE_DEPTH;
+      for (const [x1, z1, x2, z2] of [
+        [ax - depth, room.liftZ - 1.7, ax, room.liftZ - 1.7],
+        [ax - depth, room.liftZ + 1.7, ax, room.liftZ + 1.7],
+        [ax - depth, room.liftZ - 1.7, ax - depth, room.liftZ + 1.7],
+      ] as const) {
+        this.collision.addWall(
+          room.originX + x1,
+          room.originZ + z1,
+          room.originX + x2,
+          room.originZ + z2,
+          0.25,
+        );
+        const wall = solid(
+          new Mesh(
+            x1 === x2
+              ? new BoxGeometry(0.4, room.wallHeight, Math.abs(z2 - z1))
+              : new BoxGeometry(Math.abs(x2 - x1), room.wallHeight, 0.4),
+            interiorMaterial(room.theme.trim),
+          ),
+        );
+        wall.position.set((x1 + x2) / 2, room.wallHeight / 2, (z1 + z2) / 2);
+        shell.add(wall);
+      }
+      this.surfaces.addPlatform(
+        new Plate(
+          0,
+          room.originX - room.halfX - depth,
+          room.originX - room.halfX,
+          room.originZ + room.liftZ - 1.7,
+          room.originZ + room.liftZ + 1.7,
+        ),
+      );
+      this.fitLiftAlcove(shell, room, room.liftZ);
+    }
+
+    if (room.mezzanine) this.buildMezzanine(shell, room, room.mezzanine);
+    if (room.partitions) this.partitionRoom(shell, room, room.partitions);
+  }
+
+  /**
+   * Internal walls, turning one room into several — the suite's three bedrooms
+   * and its lounge (Jim, 7 August 2026).
+   *
+   * Exactly the same span arithmetic `buildRoomShell` already does for the
+   * outer walls' doorways, which is why it looks familiar: a run, minus the
+   * doorways, is a list of solid spans, and each span is one box and one
+   * collider. Doing it the same way is the point — a partition is a wall, and
+   * a second way of building walls is a second place for a doorway to end up
+   * in the wrong place.
+   *
+   * These are **not** open at the top and they *are* solid, but they are
+   * shorter than the room (see `SUITE_PARTITION_HEIGHT`), because every one of
+   * them stands between the camera and something.
+   */
+  private partitionRoom(
+    shell: Group,
+    room: HotelRoom,
+    partitions: readonly SuitePartition[],
+  ): void {
+    const height = SUITE_PARTITION_HEIGHT;
+    const half = SUITE_DOOR_WIDTH / 2;
+
+    for (const wall of partitions) {
+      // Doorways, sorted, become the gaps between the solid spans.
+      const cuts = [...wall.doors].sort((a, b) => a - b);
+      const spans: [number, number][] = [];
+      let cursor = wall.from;
+      for (const door of cuts) {
+        spans.push([cursor, door - half]);
+        cursor = door + half;
+      }
+      spans.push([cursor, wall.to]);
+
+      for (const [a, b] of spans) {
+        if (b - a < 0.05) continue;
+        const mid = (a + b) / 2;
+        const alongX = wall.along === 'x';
+        const panel = solid(
+          new Mesh(
+            alongX
+              ? new BoxGeometry(b - a, height, 0.4)
+              : new BoxGeometry(0.4, height, b - a),
+            interiorMaterial(room.theme.wall),
+          ),
+        );
+        panel.position.set(alongX ? mid : wall.at, height / 2, alongX ? wall.at : mid);
+        shell.add(panel);
+        this.collision.addWall(
+          room.originX + (alongX ? a : wall.at),
+          room.originZ + (alongX ? wall.at : a),
+          room.originX + (alongX ? b : wall.at),
+          room.originZ + (alongX ? wall.at : b),
+          0.25,
+        );
+        // Guests never come in here (the suite is yours — `HotelGuests`' roster
+        // says so), but the keep-out is registered anyway: it costs one entry
+        // and it means a future roster change cannot put somebody in a wall.
+        this.props.footprint(room, {
+          x: alongX ? mid : wall.at,
+          z: alongX ? wall.at : mid,
+          halfX: alongX ? (b - a) / 2 : 0.2,
+          halfZ: alongX ? 0.2 : (b - a) / 2,
+          top: height,
+          solid: false,
+        });
+      }
+    }
+  }
+
+  /**
+   * Everything that makes a hole in the west wall look like a lift: the
+   * architrave, the car behind it, two sliding leaves, and the pointer dial
+   * over the top.
+   *
+   * Jim, 7 August 2026: *"no doors, no floor and also no lift to speak of"* —
+   * the alcove was three collision walls and a teleport. All four pieces are
+   * the artist's (`art/models/hotelAssets.ts`), and every one of them is
+   * measured to the hole this file already cuts: the frame is 3.28 m against
+   * `gaps.west`'s 3.2 m so it overlaps the wall by 4 cm a side, and the car's
+   * floor has its top at exactly y = 0 so it lies flush *under* the walk
+   * surface the alcove already registers rather than standing on it as a step.
+   *
+   * **The doors face +Z as authored and are yawed a quarter turn to face +X**,
+   * out of the alcove into the room. That also turns their sliding axis — the
+   * leaves move along local X, which after the yaw runs along world Z, which is
+   * the way the doorway runs. Nothing here has to know that; it falls out of
+   * `setOpen` being written in the asset's own frame.
+   */
+  private fitLiftAlcove(shell: Group, room: HotelRoom, liftZ: number): void {
+    const wallX = -room.halfX;
+
+    // The car, at the back of the alcove, open side facing the room.
+    const car = createLiftCar();
+    car.root.position.set(wallX - 1.72, 0, liftZ);
+    car.root.rotation.y = Math.PI / 2;
+    shell.add(car.root);
+
+    // The architrave, plugging the wall gap.
+    const frame = createLiftFrame();
+    frame.root.position.set(wallX, 0, liftZ);
+    frame.root.rotation.y = Math.PI / 2;
+    shell.add(frame.root);
+
+    const doors = createLiftDoors();
+    doors.root.position.set(wallX, 0, liftZ);
+    doors.root.rotation.y = Math.PI / 2;
+    doors.setOpen(0);
+    shell.add(doors.root);
+
+    // The dial, over the doors and standing proud of the architrave, which is
+    // where a lift dial goes and the only place there is room for one: the
+    // frame is 2.96 m tall and three of these rooms have 3.0 m walls, so the
+    // strip *above* the frame does not exist except in the lobby.
+    const dial = createLiftDial();
+    dial.root.position.set(wallX + 0.3, DIAL_PIVOT_Y, liftZ);
+    dial.root.rotation.y = Math.PI / 2;
+    paintDialFace(dial.face);
+    dial.setSweep(0);
+    shell.add(dial.root);
+
+    this.alcoves.push({ room, doors, dial });
+  }
+
+  /**
+   * The doors that open because you walked up to them — Jim: the hotel
+   * entrance *"slides open as you approach"*.
+   *
+   * Two pairs, and they are the same pair twice: the tower's own front door out
+   * in the park, and the lobby's south doorway on the other side of the portal.
+   * A child who has just watched a door slide open for her and then walks
+   * through a permanent hole in a wall has been told the doors were a trick.
+   *
+   * **The portal is untouched.** `checkDoorways` still fires on exactly the
+   * same patch of ground it always did; these leaves are decoration in front of
+   * a trigger that already worked, opening a good two metres before it. That
+   * ordering is the whole design — the doors have to be visibly open by the
+   * time she reaches the threshold, or she walks through shut ones.
+   */
+  private fitAutoDoors(tower: { root: Group; doorGlow: Mesh }): void {
+    // **Measured off the asset, not written down here.** The doorway's own
+    // recess panel knows where the doorway is; `hotel_build.py` bakes every
+    // placement into vertices and leaves the nodes at identity, so the panel's
+    // geometry bounds *are* its position in the tower's frame. Retune the gem
+    // profile and the doors follow the hole rather than floating off it.
+    tower.doorGlow.geometry.computeBoundingBox();
+    const box = tower.doorGlow.geometry.boundingBox;
+    if (box) {
+      const outside = createEntranceDoors();
+      outside.root.position.set((box.min.x + box.max.x) / 2, box.min.y, box.max.z + 0.07);
+      outside.setOpen(0);
+      // Parented to the tower, so it takes the facade's yaw for free.
+      tower.root.add(outside.root);
+      this.outerDoors = outside;
+    }
+
+    // …and the same pair on the lobby's side of the portal, in the south wall.
+    const inside = createEntranceDoors();
+    inside.root.position.set(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ);
+    inside.setOpen(0);
+    this.roomShell(LOBBY).add(inside.root);
+    this.innerDoors = inside;
+  }
+
+  /**
+   * One frame of every door and dial in the hotel.
+   *
+   * The lift's doors are driven from `HotelLift.doorOpenness()` rather than
+   * from its phase: the lift owns *when*, the alcove owns what that looks like,
+   * and a copy of that switch statement over here would go stale the next time
+   * a phase is added. Same reason `activeRoom()` exists — while the car is
+   * "travelling" the doors that matter are the ones in the room she is about to
+   * be standing in, and only the lift knows which that is.
+   */
+  private updateDoors(dt: number): void {
+    const active = this.lift.activeRoom();
+    const openness = this.lift.doorOpenness();
+    for (const alcove of this.alcoves) {
+      alcove.doors.setOpen(alcove.room === active ? openness : 0);
+      // Every dial in the hotel reads the same storey, because every alcove is
+      // the same lift. The needle sweeps rather than snaps — `indicatedStorey`
+      // is already eased for the indicator's own count.
+      alcove.dial.setSweep(this.lift.indicatedStorey() / TOP_STOREY);
+    }
+
+    const player = this.player;
+    if (!player) return;
+
+    // The tower's front doors, in the facade's own frame — the same `forward`
+    // and `side` `checkDoorways` computes, so the doors and the portal can
+    // never end up measuring from different places.
+    if (this.outerDoors && !this.inside) {
+      const dx = player.position.x - this.facadeX;
+      const dz = player.position.z - this.facadeZ;
+      const forward = dx * Math.sin(this.facadeYaw) + dz * Math.cos(this.facadeYaw);
+      const side = dx * Math.cos(this.facadeYaw) - dz * Math.sin(this.facadeYaw);
+      const near =
+        Math.abs(side) < AUTO_DOOR_SIDE && forward > 3.6 && forward < AUTO_DOOR_REACH + 6.6;
+      this.outerOpen = ease(this.outerOpen, near ? 1 : 0, dt);
+      this.outerDoors.setOpen(this.outerOpen);
+    }
+
+    if (this.innerDoors) {
+      const localX = player.position.x - LOBBY.originX;
+      const localZ = player.position.z - LOBBY.originZ;
+      const near =
+        this.inside &&
+        this.currentRoom() === LOBBY &&
+        Math.abs(localX) < AUTO_DOOR_SIDE &&
+        localZ > LOBBY.halfZ - AUTO_DOOR_REACH;
+      this.innerOpen = ease(this.innerOpen, near ? 1 : 0, dt);
+      this.innerDoors.setOpen(this.innerOpen);
+    }
+  }
+
+  /**
+   * The lobby's raised gallery and the sweeping stair up to it — Jim, 7 August
+   * 2026: *"Make the lobby a double-height room with a sweeping staircase to
+   * the mezzanine level."*
+   *
+   * Read {@link Mezzanine}'s own header first: it explains why this is a
+   * gallery standing on a solid mass rather than a balcony hanging over the
+   * floor, and that reason is a fact about `CollisionWorld`, not about
+   * architecture.
+   *
+   * Three pieces, and the way they fit together is the whole trick:
+   *
+   * - **The mass.** Hollow — a front face, an east face, and the room's own
+   *   north and west walls behind them — with the deck slab as its lid. The
+   *   two faces are real colliders at every height, so nothing can walk under
+   *   the gallery except through the stair's own mouth, and the balustrade on
+   *   top needs no collider of its own because it stands on exactly the plane
+   *   the front face already occupies.
+   * - **The stair.** Its treads are `WalkSurfaces` only, never colliders: a
+   *   solid tread would be a wall to the child standing on the tread below it
+   *   (`clearsTop` is fed her height above *her own* ground, which on a step is
+   *   zero), so a stair built out of colliders is a stair nobody can climb.
+   * - **The stair's two sides**, at the inner and outer radius, *are* colliders
+   *   — and correctly so at both heights, because the side of a masonry stair
+   *   is solid from the floor all the way to the tread. They are what stops a
+   *   child walking off the side, and what stops her walking into the flank of
+   *   the staircase from the lobby.
+   */
+  private buildMezzanine(shell: Group, room: HotelRoom, plan: Mezzanine): void {
+    const { minX, maxX, minZ, maxZ, height, stair } = plan;
+    const midX = (minX + maxX) / 2;
+    const midZ = (minZ + maxZ) / 2;
+    const width = maxX - minX;
+    const depth = maxZ - minZ;
+
+    // Where the stair breaks through the mass's front face — **derived from
+    // the arc** by {@link stairMouth}, never typed in beside it: move the stair
+    // and the hole in the wall (and the gap in the balustrade) move with it.
+    const gap = this.stairMouth(plan);
+
+    // Nobody strolls into the mass. The gallery's faces are already colliders,
+    // so this is only the guests' half of the same fact — registered through
+    // the same helper every prop goes through (`place.ts`), which covers a long
+    // rectangle with a chain of discs rather than one enormous one. Without it
+    // a lobby guest is handed a waypoint inside a solid block and leans on it
+    // for ever; `check:hotel` asserts exactly that and would have found it.
+    this.props.footprint(room, {
+      x: midX,
+      z: midZ,
+      halfX: width / 2,
+      halfZ: depth / 2,
+      top: height,
+      solid: false,
+    });
+
+    // --- the deck ------------------------------------------------------------
+    // **The slab abuts the two faces instead of running through them.** Slab,
+    // faces and the stair's last tread all used to top out at exactly
+    // `height` with overlapping footprints — four authors of one plane, which
+    // is a per-pixel coin toss for the renderer: Jim, live play, 7 Aug 2026,
+    // *"the mezzanine level flickers like crazy on the floor due to two faces
+    // overlapping."* The slab now stops where the face boxes begin (each face
+    // is 0.5 m thick, centred on the deck's edge line), so the faces' own
+    // tops finish the rim as a trim-coloured border and no two boxes share a
+    // pixel of the deck plane. check:hotel probe 10 measures exactly this.
+    const slab = solid(
+      new Mesh(new BoxGeometry(width - 0.25, 0.4, depth - 0.25), interiorMaterial(room.theme.floor)),
+    );
+    slab.position.set(midX - 0.125, height - 0.2, midZ - 0.125);
+    shell.add(slab);
+    this.surfaces.addPlatform(
+      new Plate(
+        height,
+        room.originX + minX,
+        room.originX + maxX,
+        room.originZ + minZ,
+        room.originZ + maxZ,
+      ),
+    );
+
+    // --- the two faces that hold it up --------------------------------------
+    // The front, in the room's trim colour so the gallery reads as one piece of
+    // architecture with the lift alcove rather than as furniture.
+    const frontSpans: [number, number][] = gap
+      ? [
+          [minX, gap[0]],
+          [gap[1], maxX],
+        ]
+      : [[minX, maxX]];
+    for (const [a, b] of frontSpans) {
+      if (b - a < 0.05) continue;
+      // The last span carries the outer corner (its box runs half a thickness
+      // past `maxX`), so the side face below can stop short of this box and
+      // abut it rather than pass through it — two boxes sharing the corner's
+      // top pixels was one of probe 10's measured flickers.
+      const bx = b === maxX ? maxX + 0.25 : b;
+      const face = solid(
+        new Mesh(new BoxGeometry(bx - a, height, 0.5), interiorMaterial(room.theme.trim)),
+      );
+      face.position.set((a + bx) / 2, height / 2, maxZ);
+      shell.add(face);
+      this.collision.addWall(
+        room.originX + a,
+        room.originZ + maxZ,
+        room.originX + b,
+        room.originZ + maxZ,
+        0.3,
+      );
+    }
+    // Stops at the front face's south edge (maxZ − 0.25) — abutting, never
+    // interpenetrating. See probe 10 and the slab comment above.
+    const side = solid(
+      new Mesh(new BoxGeometry(0.5, height, depth - 0.25), interiorMaterial(room.theme.trim)),
+    );
+    side.position.set(maxX, height / 2, midZ - 0.125);
+    shell.add(side);
+    this.collision.addWall(
+      room.originX + maxX,
+      room.originZ + minZ,
+      room.originX + maxX,
+      room.originZ + maxZ,
+      0.3,
+    );
+
+    // --- the sweeping stair --------------------------------------------------
+    // **The artist's grand staircase** (hotelAssets.ts's
+    // `createGrandStaircase`) replaces the code-built box stack Jim called
+    // out (*"looking like a random stack of boxes more than anything"*).
+    // Placement is one line because the asset's origin is the arc's centre
+    // of curvature, which `layout.ts` already names; it is authored at
+    // `fromAngle = 0` in the game's own yaw convention, so a room whose arc
+    // starts elsewhere spins it by `-fromAngle` (three.js yaws the opposite
+    // way round from this game's stair angle).
+    //
+    // Sunk {@link STAIR_SINK} so the top tread's surface sits just below the
+    // deck plane the slab owns — probe 10's one-owner rule; without it the
+    // tread and the slab are coplanar where the flight crosses onto the
+    // deck. The walk surfaces keep the true heights, so her feet still land
+    // level; `dressMezzanine`'s gallery rail drops the same 2 cm so it keeps
+    // butting the stair's handrail, which eases level at
+    // `rise + railHeight`.
+    const flight = createGrandStaircase();
+    flight.root.position.set(stair.centreX, STAIR_SINK, stair.centreZ);
+    flight.root.rotation.y = -stair.fromAngle;
+    shell.add(flight.root);
+
+    // Everything a child's feet or body meet is derived from the **handle**
+    // of the asset she can actually see — wedge treads, flank colliders and
+    // guest keep-outs from one set of numbers (which the factory itself
+    // re-exports from `layout.ts`, so the plan and the asset cannot
+    // disagree without `hotel_build.py` failing loudly first).
+    const sweep = flight.sweep;
+    const midRadius = (flight.innerRadius + flight.outerRadius) / 2;
+    const treadDepth = flight.outerRadius - flight.innerRadius;
+    for (let i = 0; i < flight.treads; i += 1) {
+      const from = stair.fromAngle + (sweep * i) / flight.treads;
+      const to = stair.fromAngle + (sweep * (i + 1)) / flight.treads;
+      const top = flight.treadTop(i);
+      const angle = (from + to) / 2;
+
+      // Four walk-surface slices per visual tread, ramping up to its top —
+      // NOT one flat wedge at the tread's own height. A flat 0.32 riser is
+      // walkable in theory (half of `BUILDING_STEP_UP`) but not in practice
+      // at speed: `Player` *damps* onto the ground (time constant 0.04 s),
+      // so her sampled `y` lags the surface under her, and two treads in
+      // the lag has eaten the whole step-up ceiling — `sample` stops
+      // offering the next tread, the floor snaps back to the slab, and she
+      // walks clean under the flight at y = 0 into the gallery's hollow.
+      // Found live (8 Aug 2026): teleporting ONTO any tread stood her at
+      // its height while walking up never engaged, which is exactly the
+      // stand/walk split a lag bug produces. Slices of a quarter-riser keep
+      // the lag far inside the ceiling at sprint; her feet still finish on
+      // the tread's true top, and the transient shin-dip on a nose is
+      // hidden by the same damp that caused all this.
+      const slices = 4;
+      for (let slice = 0; slice < slices; slice += 1) {
+        this.surfaces.addPlatform(
+          new ArcTread(
+            top - (flight.riser * (slices - 1 - slice)) / slices,
+            room.originX + stair.centreX,
+            room.originZ + stair.centreZ,
+            flight.innerRadius,
+            flight.outerRadius,
+            from + ((to - from) * slice) / slices,
+            from + ((to - from) * (slice + 1)) / slices,
+          ),
+        );
+      }
+
+      // …and a keep-out over the same tread, so no guest is handed a waypoint
+      // on the staircase. The flanks are already colliders, so a waypoint in
+      // here is one a body can never reach: it walks at the side of the stair
+      // until its own leg timeout gives up, for ever. `check:hotel` catches
+      // exactly this, and did — on the first run after the stair landed.
+      this.props.footprint(room, {
+        x: stair.centreX - Math.sin(angle) * midRadius,
+        z: stair.centreZ + Math.cos(angle) * midRadius,
+        radius: treadDepth * 0.62,
+        top,
+        solid: false,
+      });
+    }
+
+    // The stair's own two flanks, as a chain of short walls along each radius.
+    // The asset's closed strings are solid from the floor to the tread at
+    // every point (its own doc says so, and why), so this is honest at both
+    // heights — and it is the only collision the staircase has.
+    for (const radius of [flight.innerRadius, flight.outerRadius]) {
+      const segments = Math.max(4, Math.ceil((sweep * radius) / 0.8));
+      for (let i = 0; i < segments; i += 1) {
+        const a = stair.fromAngle + (sweep * i) / segments;
+        const b = stair.fromAngle + (sweep * (i + 1)) / segments;
+        this.collision.addWall(
+          room.originX + stair.centreX - Math.sin(a) * radius,
+          room.originZ + stair.centreZ + Math.cos(a) * radius,
+          room.originX + stair.centreX - Math.sin(b) * radius,
+          room.originZ + stair.centreZ + Math.cos(b) * radius,
+          0.22,
+        );
+      }
+    }
+  }
+
+  /**
+   * The windows in one wall — Jim's *"a room without windows is not
+   * inviting"*, and *"the windowless building is weird and claustrophobic"*.
+   *
+   * **The room declares, this builds** (`layout.ts`'s `WindowWall`). It
+   * replaced a single hand-built glowing band bolted to the breakfast room's
+   * north wall — a fact about one room, written somewhere no other room could
+   * inherit it — with a mechanism every floor gets for four numbers.
+   *
+   * Two meshes per pane, and both of them earn their place:
+   *
+   * - a **soft glow** flat against the wall, a little larger all round, in
+   *   that floor's own `glow` colour. This is the light *spilling in*, and it
+   *   is what stops a bright rectangle reading as a poster. Painted rather
+   *   than lit: a real light per pane would be twenty-odd lights for a effect
+   *   that never moves (see `hotel/lighting.ts` for what is actually lit).
+   * - the **pane** itself, standing proud of it: `glassTint`, self-lit, the
+   *   same crystal the floor plate and the tower outside are made of.
+   *
+   * `spans` is the wall's *solid* stretches, handed in by the caller that just
+   * worked them out to leave the doorways alone. Clipping to them here is what
+   * makes the declared numbers safe to edit: the doorway is respected by
+   * construction rather than by everybody remembering it.
+   */
+  private glazeWall(
+    shell: Group,
+    room: HotelRoom,
+    side: WallSide,
+    spans: readonly (readonly [number, number])[],
+  ): void {
+    const plan = room.windows[side];
+    if (!plan) return;
+
+    const alongX = side === 'north' || side === 'south';
+    // Distance from the room's centre to the wall's inner face, and which way
+    // "into the room" points on this side.
+    const face = (alongX ? room.halfZ : room.halfX) - WALL_HALF_DEPTH;
+    const inward = side === 'north' || side === 'west' ? 1 : -1;
+    const height = plan.head - plan.sill;
+    if (height <= 0) return;
+    const centreY = (plan.sill + plan.head) / 2;
+
+    const glassMaterial = new MeshToonMaterial({
+      color: PALETTE.glassTint,
+      emissive: PALETTE.glassTint,
+      emissiveIntensity: 0.92,
+    });
+    const glowMaterial = new MeshToonMaterial({
+      color: PALETTE.blossomWhite,
+      emissive: room.theme.glow,
+      emissiveIntensity: 0.42,
+    });
+
+    for (const glazed of glazedSpans(room, side)) {
+      for (const [from, to] of spans) {
+        const a = Math.max(glazed.from, from);
+        const b = Math.min(glazed.to, to);
+        if (b - a < MIN_PANE_WIDTH) continue;
+        const width = b - a;
+        const along = (a + b) / 2;
+
+        const glow = decal(
+          new Mesh(
+            alongX
+              ? new BoxGeometry(width + GLOW_MARGIN * 2, height + GLOW_MARGIN * 2, 0.06)
+              : new BoxGeometry(0.06, height + GLOW_MARGIN * 2, width + GLOW_MARGIN * 2),
+            glowMaterial,
+          ),
+        );
+        const pane = decal(
+          new Mesh(
+            alongX
+              ? new BoxGeometry(width, height, 0.14)
+              : new BoxGeometry(0.14, height, width),
+            glassMaterial,
+          ),
+        );
+        glow.name = 'hotel.window-glow';
+        pane.name = 'hotel.window';
+        if (alongX) {
+          glow.position.set(along, centreY, -inward * face + inward * 0.04);
+          pane.position.set(along, centreY, -inward * face + inward * 0.1);
+        } else {
+          glow.position.set(-inward * face + inward * 0.04, centreY, along);
+          pane.position.set(-inward * face + inward * 0.1, centreY, along);
+        }
+        shell.add(glow, pane);
+      }
+    }
+  }
+
+  private dressLobby(): RipikaStatueHandle {
+    const shell = this.roomShell(LOBBY);
+
+    // The mosaic floor — Jim's first note after playing it, and the single
+    // biggest reason the lobby stops reading as a big pink rectangle. See
+    // `core/textures.ts`'s `mosaicTexture` for why a tiling map is the right
+    // answer here and a material colour is not.
+    this.layMosaic(shell, LOBBY);
+
+    // The giant RiPika, spinning gently exactly like the fountain's, with the
+    // disco ball above — Eleri: "a disco ball above the ripika statue" — in
+    // the middle of a rainbow inlaid in the floor. Inner radius 2.0 clears the
+    // plinth's 1.15 m footing with room for a child to walk round it.
+    const statue = createRipikaStatue();
+    // Solid at its plinth's own 1.15 m footing — Jim: *"the statues and chairs
+    // you can clip through are weird."*
+    this.props.place(shell, LOBBY, statue.root, {
+      x: 0,
+      z: -1,
+      radius: 1.2,
+      // The statue's real height — far above any jump, so no plate; honest
+      // rather than Infinity so probe 11's pillar sweep stays meaningful.
+      top: statue.height,
+      stand: false,
+    });
+    // **Three times the size, and it lights the room** (Jim, 7 August 2026).
+    // Hung so the ball's middle sits just above the gallery deck: from up
+    // there it is at eye height and close enough to touch, and from the lobby
+    // floor it is the thing hanging in the middle of a double-height room.
+    // Its own beams then sweep both levels, which is the whole reason the two
+    // heights were worth building.
+    this.hangDiscoBall(shell, 0, 6, -1, { scale: 3, lit: true, room: LOBBY });
+    const ring = rainbowRing(2, 0.34);
+    ring.position.set(0, 0, -1);
+    shell.add(ring);
+    // Kept, because checking in flashes them — see `checkIn`. The ring is six
+    // meshes with six materials and this is the only handle on them; asking
+    // the scene graph for "the rainbow" every frame would be a string lookup
+    // in the render loop for something that never moves.
+    for (const band of ring.children) {
+      if (band instanceof Mesh && band.material instanceof MeshToonMaterial) {
+        // Armed but off: `emissiveIntensity` defaults to 1, so setting the
+        // emissive colour without also zeroing the intensity would leave the
+        // rainbow permanently self-lit — the flash would be the *normal* state
+        // and checking in would make it stop.
+        band.material.emissive.setHex(band.material.color.getHex());
+        band.material.emissiveIntensity = 0;
+        this.cheerLights.push(band.material);
+      }
+    }
+
+    // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
+    // rather than a disc, or a child could not walk along it to reach the far
+    // end of it.
+    //
+    // **On the entrance axis, facing the doors**, against the gallery's front
+    // face — see RECEPTION_X's header. Clear of the sweeping stair, whose
+    // quarter circle rises to its east, and of the statue, which stands
+    // between it and the doors the way a grand lobby's centrepiece does.
+    const desk = createReceptionDesk();
+    this.props.place(shell, LOBBY, desk.root, {
+      x: RECEPTION_X,
+      z: RECEPTION_Z,
+      halfX: 1.35,
+      halfZ: 0.45,
+      // The asset's own measured height (counter plus key board). No plate:
+      // the counter is not the top of the asset, so there is no honest floor.
+      top: desk.height,
+      stand: false,
+    });
+    const reception = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
+    // The receptionist is a person, and people in this park are scenery-soft
+    // (see `NpcSystem.separate` for the one exception, which is a push rather
+    // than a wall). She stands behind her own solid desk regardless.
+    this.props.place(shell, LOBBY, reception.root, {
+      x: RECEPTION_X,
+      z: RECEPTIONIST_Z,
+      radius: 0.7,
+      top: reception.height,
+      solid: false,
+    });
+    this.keepers.push(reception);
+    this.receptionist = reception;
+    // Her speech bubble hangs over her own head and moves with nothing, because
+    // she never moves. Parented to the lobby's shell so it vanishes with the
+    // hotel; positioned once, here, rather than every frame.
+    this.receptionBubble.sprite.position.set(
+      RECEPTION_X,
+      reception.height + 0.42,
+      RECEPTIONIST_Z,
+    );
+    shell.add(this.receptionBubble.sprite);
+
+    // **The axis.** A runner from the doors up the middle of the room — the
+    // first of the grand-lobby moves this layout is built on (researched for
+    // this rework: a clear axis from the entrance to a focal desk, a
+    // centrepiece on that axis, symmetric seating either side, the stair
+    // sweeping up one flank). You walk it from the doors, round the statue's
+    // rainbow ring, to the desk.
+    const runner = rug(3.2, 8.8, LOBBY.theme.accent, PALETTE.blossomWhite);
+    runner.position.set(0, 0, 7);
+    shell.add(runner);
+
+    // The breakfast corner — "breakfast ... at the ground floor". Two tables
+    // only (the *room* full of them is Floor 1 now), tucked in the south-west
+    // corner by the west windows, where a café by the glass belongs — not
+    // scattered mid-floor where they read as lost furniture.
+    this.placeBreakfastTable(shell, LOBBY, -10.2, 9.6, 'lobby-a', 0.15);
+    // Spun so its chairs sit east-west (at the first spin a chair interleaved
+    // with the west lounge's rug), and kept a good two metres clear of the
+    // west wall's painting at z ~5.1: with the table at 6.4 the "Look!" shot
+    // flew through a seated café guest's head, and her chair's zone stole
+    // the E press from the painting's (both watched in the browser).
+    this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7, 'lobby-b', 1.35);
+
+    // **Two mirrored seating groups flanking the axis** — the symmetric pair
+    // every grand lobby seats its guests in. Both groups face +Z so you see
+    // who is sitting on them (the camera rule), each on its own round rug
+    // with a little table before it.
+    for (const side of [-1, 1] as const) {
+      const lounge = roundRug(2.9, LOBBY.theme.accent, PALETTE.stonePinkLight);
+      lounge.position.set(side * 7.6, 0, 4.1);
+      shell.add(lounge);
+      for (const [x, colour] of [
+        [side * 5.9, PALETTE.markerSky],
+        [side * 9.2, PALETTE.markerMint],
+      ] as const) {
+        this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
+          x,
+          z: 3.6,
+          halfX: 1.3,
+          halfZ: 0.48,
+          // The seat: what a jump lands on. Sailing over the backrest on the
+          // way is a visual graze a six-year-old reads as bouncing onto the
+          // cushions, which is the whole point.
+          top: SOFA_SEAT_TOP,
+        });
+      }
+      this.props.place(shell, LOBBY, bedsideTable(), {
+        x: side * 7.6,
+        z: 5.4,
+        radius: 0.36,
+        top: 1.0,
+        stand: false,
+      });
+    }
+
+    // Crystal columns — the lobby's theme is "a grand crystal welcome", and a
+    // column is the only prop in the hotel taller than a grown-up. Two of them
+    // now run the room's **full** 5.8 m, because a 3 m column in a 6.4 m room
+    // reads as a stub rather than as height.
+    //
+    // Both stand against the **west** wall, and that is not decoration: the
+    // camera looks along (−X, −Z) and down 38°, so anything tall on the +X or
+    // +Z side of a child stands between her and the lens. The far two walls
+    // are the only place a five-metre prop is free. (Same rule as
+    // `nearWallHeight`, applied to furniture.) They are set between the west
+    // windows rather than across them.
+    // The two grand columns hold the west wall; the stub 3 m column is gone
+    // (a stub mid-floor was exactly the "pretty random" scatter Jim called
+    // out). Planters now flank the entrance — the symmetric welcome — and the
+    // clusters keep to corners, out of the lift's approach.
+    this.placeProps(shell, LOBBY, [
+      { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: -6.6, radius: 0.62, top: 5.8 },
+      { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: 6.6, radius: 0.62, top: 5.8 },
+      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b2), x: 12, z: -10.4, top: CLUSTER_TOP },
+      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6, top: PLANTER_TOP },
+    ]);
+
+    // The one keep-out in the lobby that is not a prop: the patch of floor a
+    // child stands on to check in. See `HotelProps.reserve`.
+    this.props.reserve(LOBBY, RECEPTION_X, RECEPTION_Z + 2.2, 2);
+    this.hangOnWalls(shell, LOBBY, {
+      // North sconces only in the east bay: west of x = 5 that wall is behind
+      // the gallery's solid mass, and a lamp inside a wall lights nothing.
+      // The gallery's own front carries the rest — see `dressMezzanine`.
+      north: [7.2, 12],
+      west: [-6, 2],
+      pictures: [
+        { wall: 'north', along: 6.2, width: 1.7, height: 1.25, seed: 0x10c2 },
+        { wall: 'west', along: 4, width: 1.7, height: 1.25, seed: 0x10c3 },
+      ],
+    });
+    this.dressMezzanine(shell);
+
+    // A painted arrow on the floor pointing at the lift — "an arrow showing
+    // the way to your floor, on the floors of the hotel". Peels off the
+    // runner's west edge and threads between the west seating group and the
+    // café to the lift's mouth.
+    this.paintArrow(shell, -2.4, 9.2, -10.8, 0.4);
+
+    return statue;
+  }
+
+  /**
+   * Breakfast, **Floor 1** — the big room.
+   *
+   * Jim, having played it: *"Breakfast should be on the 1st floor … and should
+   * be a large room with lots of tables and a buffet with breakfast foods."*
+   * So: seven tables, none of them square-on to another, and a twelve-metre
+   * buffet along the far wall with a keeper serving behind it.
+   *
+   * **The tables are laid out by hand, not scattered.** `dressDeck`'s seeded
+   * rejection sampler is right for the castle, whose plan moves under it; this
+   * room's plan is these fourteen numbers, and a hand layout is the one that
+   * can guarantee a clear lane from the lift alcove to the buffet — which is
+   * the walk a child actually makes here.
+   */
+  private dressBreakfast(): void {
+    const shell = this.roomShell(BREAKFAST);
+
+    // Seven tables. Each gets its own `spin`, so the room reads as a café that
+    // people have been sitting in rather than as a grid — the chairs, the
+    // bowls and the sit-down pose all rotate with it, so the mechanics do not
+    // notice.
+    const tables: readonly (readonly [number, number, string, number])[] = [
+      [-7.6, 5.4, 'b1-a', 0.34],
+      [-2.4, 6.4, 'b1-b', -0.52],
+      [3.4, 5.6, 'b1-c', 0.18],
+      [8.8, 4.6, 'b1-d', -0.3],
+      [-6.6, 0.4, 'b1-e', 0.62],
+      [-2.6, -3, 'b1-f', -0.16],
+      [7.4, -0.8, 'b1-g', 0.46],
+    ];
+    for (const [x, z, id, spin] of tables) {
+      this.placeBreakfastTable(shell, BREAKFAST, x, z, id, spin);
+    }
+
+    // The buffet, along the north wall — the wall the camera looks straight
+    // at (see `hotel/dressing.ts`'s header on which walls are visible), so the
+    // food is the thing you see when you walk in.
+    // Fourteen metres of counter, registered as fourteen metres of counter:
+    // one footprint, which makes it solid *and* which `place.ts` covers with a
+    // chain of keep-out discs so a guest can still stroll along it.
+    this.props.place(shell, BREAKFAST, buffetCounter(14), {
+      x: 1.5,
+      z: -7.4,
+      halfX: 7.12,
+      halfZ: 0.47,
+      // The counter top — a jump can just reach it, so a determined child can
+      // stand on the buffet, which is exactly the sort of thing she should be
+      // able to do to a buffet.
+      top: BUFFET_TOP,
+    });
+    this.layBuffet(shell, 1.5, -7.4, 14);
+
+    const server = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
+    this.props.place(shell, BREAKFAST, server.root, {
+      x: 1.5,
+      z: -8.25,
+      radius: 0.7,
+      top: server.height,
+      solid: false,
+    });
+    this.keepers.push(server);
+
+    // (Floor 1's windows are `BREAKFAST.windows` now — seven declared panes
+    // along this same north wall, built by `glazeWall`. The single hand-built
+    // glowing band that used to be nailed here is gone: it was a fact about
+    // one room, kept somewhere no other room could inherit it.)
+
+    // The runner from the lift into the room, and the corners.
+    const runner = rug(5, 3, BREAKFAST.theme.trim, PALETTE.blossomWhite);
+    runner.position.set(-9.2, 0, 0);
+    shell.add(runner);
+
+    // The sun on the floor — Floor 1's theme in one shape, in the middle of
+    // the room, which is the first thing the lift doors show you.
+    const sun = sunburst(3.2);
+    sun.position.set(1, 0, 1.6);
+    shell.add(sun);
+
+    this.placeProps(shell, BREAKFAST, [
+      { prop: () => crystalCluster(0x20b1), x: -10.6, z: -7.4, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x20b2), x: 11, z: -7.4, top: CLUSTER_TOP },
+      { prop: () => crystalPlanter(0x20b3), x: -10.8, z: 6.4, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x20b4), x: 10.6, z: 1, top: PLANTER_TOP },
+    ]);
+    this.hangOnWalls(shell, BREAKFAST, {
+      // No sconces on the north wall here: the glowing window band already
+      // lights it, and anything mounted lower would be behind the buffet.
+      north: [],
+      west: [-7, 7],
+      pictures: [
+        { wall: 'west', along: -5, width: 1.6, height: 1.2, seed: 0x20c1 },
+        { wall: 'west', along: 5, width: 1.6, height: 1.2, seed: 0x20c2 },
+      ],
+    });
+  }
+
+  /**
+   * Floor 50 — **up among the clouds**, which is the only thing about a
+   * fiftieth floor a six-year-old cares about.
+   *
+   * The theme does the heavy lifting (sky-blue walls over a deeper sky floor,
+   * `layout.ts`'s `CORRIDOR_THEME`); this adds the two shapes that say *sky*
+   * without a word: chunky flat stars on the far wall, at the same angle as
+   * the "yours" door's own star, and clouds floating **above the wall line**,
+   * which an open-topped room is uniquely able to show off.
+   */
+  private dressCorridor(): void {
+    const shell = this.roomShell(CORRIDOR);
+    const sky: readonly number[] = [
+      PALETTE.markerSky,
+      PALETTE.flowerBlue,
+      PALETTE.bubbleSkin,
+      PALETTE.buildingRoof,
+    ];
+
+    // Life-sized statues of all the cute pets, on little plinths. The plinth
+    // is what carries the footprint — Jim's "the statues … you can clip
+    // through are weird" — and the pet standing on it needs none of its own,
+    // since anything that can reach the pet is already stopped by the plinth.
+    PET_KINDS.forEach((kind, index) => {
+      const plinth = solid(
+        new Mesh(new CylinderGeometry(0.85, 0.95, 0.4, 16), softMaterial(PALETTE.stonePink)),
+      );
+      const x = -7.5 + index * 5;
+      const z = -CORRIDOR.halfZ + 1.4;
+      // Top 0.4: the plinth's own height (`y` only centres the cylinder), so
+      // a jump lands her on the plinth beside the pet — pure six-year-old.
+      this.props.place(shell, CORRIDOR, plinth, { x, y: 0.2, z, radius: 0.95, top: 0.4 });
+      const pet = createPet(kind);
+      pet.root.position.set(x, 0.4, z);
+      shell.add(pet.root);
+    });
+
+    // The runner from the lift to the door. It is also the plainest possible
+    // "this way" — the chevrons painted on top of it point along it.
+    const runner = rug(17, 2.6, CORRIDOR.theme.accent, PALETTE.blossomWhite);
+    runner.position.set(0, 0, 0.6);
+    shell.add(runner);
+
+    // Stars on the far wall, at child's-eye height and above.
+    const starRng = new Rng(0x30a5);
+    for (const [x, y, r] of [
+      [-9.6, 2.35, 0.34],
+      [-5, 2.62, 0.42],
+      [0, 2.3, 0.3],
+      [5, 2.66, 0.4],
+      [9.6, 2.4, 0.36],
+    ] as const) {
+      const star = flatStar(r, CORRIDOR.theme.glow);
+      star.position.set(x, y, -CORRIDOR.halfZ + 0.3);
+      star.rotation.z = starRng.range(-0.3, 0.3);
+      shell.add(star);
+    }
+
+    // Clouds, floating over the wall line where the iso camera can see them.
+    for (const [x, y, z, scale, seed] of [
+      [-6.4, 3.7, -1, 1.25, 0x30c1],
+      [0.8, 4.05, 1.6, 1, 0x30c2],
+      [6.8, 3.65, -0.4, 1.15, 0x30c3],
+    ] as const) {
+      const puff = cloud(seed, scale);
+      puff.position.set(x, y, z);
+      shell.add(puff);
+    }
+
+    this.placeProps(shell, CORRIDOR, [
+      { prop: () => crystalCluster(0x30b1, 1, sky), x: -9.8, z: 2.6, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x30b2, 1, sky), x: 9.6, z: 2.6, top: CLUSTER_TOP },
+      { prop: () => crystalPlanter(0x30b3, CORRIDOR.theme.trim, sky), x: -4, z: 2.9, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x30b4, CORRIDOR.theme.trim, sky), x: 4, z: 2.9, top: PLANTER_TOP },
+    ]);
+    this.hangOnWalls(shell, CORRIDOR, { north: [], west: [-2.9, 2.9], pictures: [] });
+
+    // The door that says "yours", at the corridor's end, with an arrow to it.
+    const door = createYoursDoor();
+    door.root.position.set(CORRIDOR.halfX - 0.3, 0, 0);
+    door.root.rotation.y = -Math.PI / 2;
+    paintYours(door.plaque);
+    shell.add(door.root);
+    this.yoursStar = door.star;
+    // A returning child's star is already lit — the door has been hers since
+    // the moment reception handed the key over.
+    this.lightYoursStar(saveFlags.hasHotelKey());
+    this.paintArrow(shell, -2, 0, CORRIDOR.halfX - 2, 0);
+  }
+
+  /**
+   * **Floor 12 — the garden floor.** An indoor meadow, twelve storeys up.
+   *
+   * Jim, 7 August 2026: *"you should be able to go to certain other floors with
+   * their own schemes."* The scheme is `GARDEN_THEME`, and the job here is to
+   * make the *shape* of the room agree with it: you step out of the lift onto a
+   * lawn, walk under a rose arch, and there is a pond with lilies on it.
+   *
+   * The lawn is the one piece of this worth explaining. It runs the length of
+   * the room down the middle, and everything else — hedges, planters, arches —
+   * is placed *beside* it, which is what keeps a clear walk from the lift to
+   * the far end. Same reasoning as the breakfast room's hand layout: a room a
+   * child crosses wants a lane, and a scatter cannot promise one.
+   */
+  private dressGarden(): void {
+    const room = GARDEN_FLOOR;
+    const shell = this.roomShell(room);
+
+    // The lawn, straight down the middle — the lane from the lift.
+    const lawn = roundRug(3.4, PALETTE.grass, PALETTE.grassLight);
+    lawn.position.set(1.5, 0, 1.2);
+    shell.add(lawn);
+    const path = rug(17, 2.4, PALETTE.pathSand, PALETTE.pathEdge);
+    path.position.set(-0.5, 0, -2.6);
+    shell.add(path);
+
+    // Two rose arches over that path, so walking it is walking *through*
+    // something. The footprint is the posts, never the span — you go under an
+    // arch, and a solid rectangle across it would be a wall you cannot see.
+    for (const [x, seed] of [
+      [-4.5, 0x50a1],
+      [4.5, 0x50a2],
+    ] as const) {
+      const arch = trellisArch(3.2, 2.5, seed);
+      arch.position.set(x, 0, -2.6);
+      shell.add(arch);
+      for (const side of [-1, 1]) {
+        this.props.footprint(room, { x: x + side * 1.6, z: -2.6, radius: 0.22, top: 2.5, stand: false });
+      }
+    }
+
+    // Hedges along the north wall, either side of the windows' light, and a
+    // pair marking the room's south corners.
+    for (const [x, z, length, seed] of [
+      [-6.4, -6.4, 5.4, 0x50b1],
+      [6.4, -6.4, 5.4, 0x50b2],
+      [-7.4, 5.6, 4.6, 0x50b3],
+      [7.4, 5.6, 4.6, 0x50b4],
+    ] as const) {
+      this.props.place(shell, room, hedge(length, seed), {
+        x,
+        z,
+        halfX: length / 2,
+        halfZ: 0.31,
+        // Bobbles top out around a metre; a hedge's top is foliage, not floor.
+        top: 1.0,
+        stand: false,
+      });
+    }
+
+    // The pond, off the lane so it is something you walk *to*.
+    const pond = lilyPond(2.1, 0x50c0);
+    pond.position.set(6.2, 0, 2.4);
+    shell.add(pond);
+
+    // Planters and tufts scattered along the lane's edges. Tufts are ankle
+    // height and register nothing: a child who cannot walk over a daisy is a
+    // child fighting the floor.
+    const tuftRng = new Rng(0x50d0);
+    for (let i = 0; i < 14; i += 1) {
+      const tuft = flowerTuft(0x50e0 + i * 61, tuftRng.range(0.75, 1.15));
+      tuft.position.set(tuftRng.range(-9.4, 9.4), 0, tuftRng.range(-5.4, 6.6));
+      shell.add(tuft);
+    }
+
+    this.placeProps(shell, room, [
+      { prop: () => crystalPlanter(0x50f1, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.blossomPink]), x: -9.2, z: 0.4, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x50f2, PALETTE.woodLight, [PALETTE.leafMid, PALETTE.grass, PALETTE.flowerYellow]), x: 9.2, z: -0.6, top: PLANTER_TOP },
+      { prop: () => flowerTuft(0x50f3, 1.6), x: -2.4, z: 5.4, radius: 0.4, top: 1.2 },
+    ]);
+
+    // A bench to sit and look at the pond from. It is a sofa in the room's own
+    // accent, which is what a garden bench is in this game's language.
+    this.props.place(shell, room, sofa(2.4, room.theme.accent, PALETTE.blossomWhite), {
+      x: 2.2,
+      z: 5.2,
+      halfX: 1.2,
+      halfZ: 0.48,
+      top: SOFA_SEAT_TOP,
+    });
+
+    this.hangOnWalls(shell, room, {
+      north: [-9.8, 9.8],
+      west: [-4.2, 4.2],
+      // **Not at z = 0**, which is the lift alcove's own doorway: a painting
+      // hung there is a painting across the lift doors, and the spot a child
+      // stands on to look at it is inside the architrave. `check:hotel` found
+      // exactly that the first time it was asked, which is the whole reason
+      // the viewing spots are now measured rather than assumed.
+      pictures: [{ wall: 'west', along: 2.9, width: 1.6, height: 1.2, seed: 0x50c1 }],
+    });
+    this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0);
+  }
+
+  /**
+   * **Floor 33 — the ocean floor.** Under the sea, thirty-three storeys up.
+   *
+   * The trick this room plays is the one Floor 50 plays with its clouds, and it
+   * is only available because hotel rooms are open-topped: the **shoal swims
+   * above the wall line**, where the iso camera looks straight at it and where
+   * nothing a child does can reach it. Everything at floor level — seaweed,
+   * treasure, a sandy floor — is scenery she walks between; everything
+   * overhead is the bit that says *under the sea*, and it costs no collision at
+   * all.
+   */
+  private dressOcean(): void {
+    const room = OCEAN_FLOOR;
+    const shell = this.roomShell(room);
+    const fishColours: readonly number[] = [
+      PALETTE.markerLemon,
+      PALETTE.flowerRed,
+      PALETTE.markerPink,
+      PALETTE.markerMint,
+      PALETTE.flowerYellow,
+    ];
+
+    // The sandy sea bed, laid over the deep-water plate — the room's floor
+    // colour survives as a border, exactly as the lobby's mosaic does.
+    const sand = roundRug(5.2, PALETTE.pathSand, PALETTE.pathSandDark);
+    sand.position.set(0, 0, 1);
+    shell.add(sand);
+
+    // Portholes, round the room's own declared windows. The pane is the
+    // window; this is the brass. See `porthole`'s header for why the two are
+    // not one mesh.
+    for (const x of OCEAN_FLOOR.windows.north?.at ?? []) {
+      const ring = porthole(1.15);
+      ring.position.set(x, 1.85, -room.halfZ + 0.34);
+      shell.add(ring);
+    }
+    for (const z of OCEAN_FLOOR.windows.west?.at ?? []) {
+      const ring = porthole(1.15);
+      ring.position.set(-room.halfX + 0.34, 1.85, z);
+      ring.rotation.y = Math.PI / 2;
+      shell.add(ring);
+    }
+
+    // The shoal, swimming over the wall line. Angled a little off horizontal
+    // and all leaning the same way, because a shoal is a shoal precisely
+    // because everybody in it is going the same way.
+    const shoalRng = new Rng(0x60a0);
+    for (let i = 0; i < 11; i += 1) {
+      const fish = fishShape(shoalRng.range(0.5, 0.95), shoalRng.pick(fishColours));
+      fish.position.set(
+        shoalRng.range(-8, 8),
+        shoalRng.range(3.5, 5.4),
+        shoalRng.range(-6.5, 4),
+      );
+      fish.rotation.z = shoalRng.range(-0.24, 0.24);
+      shell.add(fish);
+    }
+
+    // A few more at child height on the far wall, so there is something to look
+    // at from standing on the floor as well as from looking up.
+    const wallRng = new Rng(0x60b0);
+    for (const [x, y] of [
+      [-8.2, 2.2],
+      [-3.4, 2.6],
+      [3.4, 2.15],
+      [8.2, 2.55],
+    ] as const) {
+      const fish = fishShape(0.72, wallRng.pick(fishColours));
+      fish.position.set(x, y, -room.halfZ + 0.3);
+      fish.rotation.z = wallRng.range(-0.2, 0.2);
+      shell.add(fish);
+    }
+
+    // Seaweed in the corners and along the walls — this floor's crystal
+    // cluster, and placed the same way.
+    this.placeProps(shell, room, [
+      { prop: () => seaweed(0x60c1, 1.2), x: -8.4, z: -6.4, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c2, 1.1), x: 8.4, z: -6.4, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c3, 1), x: -8.6, z: 6.4, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c4, 1.25), x: 8.6, z: 6.2, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c5, 0.9), x: -2.6, z: -6.6, top: SEAWEED_TOP },
+      { prop: () => seaweed(0x60c6, 0.95), x: 3.2, z: -6.6, top: SEAWEED_TOP },
+      {
+        prop: () => crystalPlanter(0x60c7, PALETTE.waterFoam, [PALETTE.markerMint, PALETTE.bubbleSkin, PALETTE.waterTop]),
+        x: -6.4,
+        z: 3.6,
+        top: PLANTER_TOP,
+      },
+      {
+        prop: () => crystalPlanter(0x60c8, PALETTE.waterFoam, [PALETTE.bubbleSkin, PALETTE.markerSky, PALETTE.waterTop]),
+        x: 6.4,
+        z: 3.6,
+        top: PLANTER_TOP,
+      },
+    ]);
+
+    // Somewhere to sit and watch the fish, in the room's own mint.
+    this.props.place(shell, room, sofa(2.8, room.theme.accent, PALETTE.blossomWhite), {
+      x: 0,
+      z: 5.4,
+      halfX: 1.4,
+      halfZ: 0.48,
+      top: SOFA_SEAT_TOP,
+    });
+    const mat = roundRug(2.2, PALETTE.markerSky, PALETTE.bubbleSkin);
+    mat.position.set(0, 0, 3.4);
+    shell.add(mat);
+
+    this.hangOnWalls(shell, room, {
+      north: [],
+      west: [-1.8, 1.8],
+      pictures: [],
+    });
+    this.paintArrow(shell, 4.6, 0, -room.halfX + 2.5, 0);
+  }
+
+  private dressSuite(): void {
+    const shell = this.roomShell(SUITE);
+
+    // Rainbow bands round the walls — "the room is rainbow coloured, only
+    // for the top room" — six stripes, the game's own rainbow.
+    //
+    // `ART.rainbow`, not six hand-typed hexes: they were six near-copies of
+    // it, and ART_DIRECTION §5's rule against a second definition of a colour
+    // the game already names is exactly the "two definitions kept in step by
+    // hand" trap CLAUDE.md opens with. The rug and the blankets below take the
+    // same six, so the suite is one rainbow rather than three.
+    // **The north run is broken around the windows.** The bands span y 0.43 to
+    // 2.87 and the suite's three north panes sit at 1.5–2.6, so an unbroken
+    // run would paint the rainbow straight across the glass — the stripes are
+    // `decal`s 5 cm proud of a pane that is itself 5 cm proud of the wall, so
+    // it would genuinely be a rainbow drawn over a window rather than a
+    // z-fight. Threading them through the wall's clear spans keeps both, which
+    // is the whole reason the panes are declared as data: the spans below are
+    // worked out from `SUITE.windows` rather than typed out beside it, so
+    // moving a window moves the gaps in the rainbow.
+    const panes = SUITE.windows.north;
+    const clearSpans: [number, number][] = [];
+    if (panes) {
+      let cursor = -SUITE.halfX + 0.15;
+      for (const at of [...panes.at].sort((a, b) => a - b)) {
+        clearSpans.push([cursor, at - panes.width / 2 - 0.15]);
+        cursor = at + panes.width / 2 + 0.15;
+      }
+      clearSpans.push([cursor, SUITE.halfX - 0.15]);
+    } else {
+      clearSpans.push([-SUITE.halfX + 0.15, SUITE.halfX - 0.15]);
+    }
+
+    ART.rainbow.forEach((colour, index) => {
+      const y = 0.6 + index * 0.42;
+      const material = toonMaterial(colour);
+      // North, in the clear spans only.
+      for (const [a, b] of clearSpans) {
+        if (b - a < 0.3) continue;
+        const stripe = decal(new Mesh(new BoxGeometry(b - a, 0.34, 0.12), material));
+        stripe.position.set((a + b) / 2, y, -SUITE.halfZ + 0.4);
+        shell.add(stripe);
+      }
+      // South and east, which have no windows and run unbroken.
+      for (const [w, d, x, z] of [
+        [SUITE.halfX * 2 - 0.3, 0.12, 0, SUITE.halfZ - 0.4],
+        [0.12, SUITE.halfZ * 2 - 0.3, SUITE.halfX - 0.4, 0],
+      ] as const) {
+        const stripe = decal(new Mesh(new BoxGeometry(w, 0.34, d), material));
+        stripe.position.set(x, y, z);
+        shell.add(stripe);
+      }
+    });
+
+    // **One bed per bedroom now.** The suite is four rooms (Jim, 7 August
+    // 2026), so the three beds that used to stand in a row along one wall get
+    // a room each — which is what makes "which is my bed" a question with a
+    // door on the answer. Each still keeps its own rainbow band, and the
+    // jumpy-jumpy platform on top is unchanged.
+    //
+    // The positions live in `layout.ts` because `check:hotel` needs them too;
+    // it used to keep its own copy and all three went stale the day the suite
+    // was split.
+    const spots = SUITE_BED_SPOTS;
+    spots.forEach(([x, z], index) => {
+      const bed = createHotelBed();
+      repaintPart(bed.root, 'bed-blanket', ART.rainbow[index * 2] ?? PALETTE.markerMint);
+      // **Soft on purpose.** A bed is a `WalkSurfaces` platform — Eleri's
+      // "sleep, or go jumpy jumpy!" — and `Collision`'s height rule is fed
+      // the player's height above *the sampler's* ground, which is 0 when she
+      // is stood on the mattress. A wall round its edge would therefore shove
+      // her straight back off the thing she climbed onto. See `place.ts`'s
+      // header: anything you can stand on is placed soft.
+      this.props.place(shell, SUITE, bed.root, {
+        x,
+        z,
+        halfX: 0.7,
+        halfZ: 1,
+        top: BED_MATTRESS_TOP,
+        solid: false,
+      });
+      const id = `bed-${index}`;
+      this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id });
+      this.surfaces.addPlatform(
+        new Plate(
+          BED_MATTRESS_TOP,
+          SUITE.originX + x - 0.7,
+          SUITE.originX + x + 0.7,
+          SUITE.originZ + z - 1,
+          SUITE.originZ + z + 1,
+        ),
+      );
+    });
+
+    // A bedside table and its little crystal lamp beside each bed. The lamp
+    // is the top, and a lamp is not a floor.
+    for (const x of SUITE_BEDSIDE_X) {
+      this.props.place(shell, SUITE, bedsideTable(), {
+        x,
+        z: SUITE_BEDSIDE_Z,
+        radius: 0.36,
+        top: 1.0,
+        stand: false,
+      });
+    }
+
+    // **The pet's four-poster**, in the middle bedroom, with the pet lying in
+    // it — Eleri's own brief for the bed, and Jim's for who is in it. See
+    // `dressPetBed`.
+    this.dressPetBed(shell);
+
+    // The rainbow rug, in the hall between the bedrooms and the lounge, under
+    // the disco ball — which is where a child actually stands when the ball is
+    // spinning, and now also the first floor she steps onto through her door.
+    const mat = rainbowRug(0.8, 0.3);
+    mat.position.set(-3.4, 0, 0);
+    shell.add(mat);
+
+    this.dressLounge(shell);
+
+    const suiteCrystals: readonly number[] = [
+      PALETTE.markerPink,
+      PALETTE.markerLilac,
+      PALETTE.markerMint,
+      PALETTE.markerSky,
+    ];
+    this.placeProps(shell, SUITE, [
+      { prop: () => crystalCluster(0x40b1, 1, suiteCrystals), x: -9.6, z: -7, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x40b2, 1, suiteCrystals), x: 9.8, z: -7, top: CLUSTER_TOP },
+      { prop: () => crystalPlanter(0x40b3, PALETTE.markerPink, suiteCrystals), x: -9.6, z: 6.6, top: PLANTER_TOP },
+    ]);
+    this.hangOnWalls(shell, SUITE, {
+      // Threaded between the three north windows, one per bedroom.
+      north: [-3.6, 3.6],
+      west: [-5.6, 5.6],
+      // Nudged out to make room for the suite's two west windows
+      // (`SUITE.windows`), which sit either side of your own front door.
+      pictures: [
+        { wall: 'west', along: -4.6, width: 1.5, height: 1.15, seed: 0x40c1 },
+        { wall: 'west', along: 4.6, width: 1.5, height: 1.15, seed: 0x40c2 },
+      ],
+    });
+
+    // Over the hall, where all four rooms can see it.
+    this.hangDiscoBall(shell, -3.4, SUITE.wallHeight + 0.9, 0);
+  }
+
+  /**
+   * The pet's four-poster, with the pet asleep in it — Eleri asked for the bed
+   * (*"half-human half-cat bed … with a pillow and a blanket and even a toy"*)
+   * and Jim asked for it to be **occupied when you walk in**.
+   *
+   * ## Which pet, and why it is read once
+   *
+   * Hers, if she has one: the first paradeable pet in the inventory, which is
+   * the same thing that walks behind her in the park. Read **once, here**,
+   * rather than subscribed to — the hotel's rooms are built at construction
+   * and a pet that changed mid-visit would be a pet that pops. If she has no
+   * pet yet the bed is not empty either: a bunny is asleep in it, because an
+   * empty pet bed in the room of a child who has not been to the pet shop reads
+   * as something missing rather than as something to look forward to.
+   *
+   * ## Lying down, from the asset's own two numbers
+   *
+   * `PET_BED_CUSHION_TOP` and `PET_BED_CUSHION_RADIUS` are exported for
+   * exactly this, and the artist's note asks callers to take them rather than
+   * measure the mesh. The pet is tipped onto its side about its own long axis
+   * and dropped so it rests on the cushion; the pillow is at −Z, so a pet
+   * lying with its head on it faces the camera without being turned.
+   */
+  private dressPetBed(shell: Group): void {
+    // **Where the camera can actually see it** (QA, 7 Aug 2026): the bed used
+    // to stand at (2.2, −6.4), which is 1.2 m behind the bedroom partition at
+    // x = 3.4 — squarely inside that wall's 1.28·H occlusion band, so Eleri's
+    // four-poster and its sleeping pet were invisible in play, canopy ring
+    // excepted. The partition at x = 3.4 hides x 0.6…3.4 and the one at
+    // x = −4.2 hides −7.0…−4.2; this spot sits in the clear strip between,
+    // beside her own bed.
+    const PET_BED_X = -2.6;
+    const PET_BED_Z = -6.4;
+    const bed = createPetBed();
+    // Solid and standable, like every other flat-topped prop now — QA found
+    // it walk-through, and a pet bed is a cushion, which is a thing a child
+    // may absolutely bounce onto.
+    this.props.place(shell, SUITE, bed.root, {
+      x: PET_BED_X,
+      z: PET_BED_Z,
+      radius: 0.62,
+      top: PET_BED_CUSHION_TOP,
+    });
+
+    const pet = createPet(this.paradePetKind());
+    // Onto its side, head toward the pillow at −Z. A quarter turn about X lays
+    // a standing pet down; the drop is the cushion plus roughly the radius of
+    // the body now resting on it.
+    pet.root.rotation.set(-Math.PI / 2, 0, 0);
+    pet.root.position.set(
+      PET_BED_X,
+      PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72,
+      PET_BED_Z - 0.1,
+    );
+    shell.add(pet.root);
+    // Kept so it breathes — a pet that is perfectly still in a bed reads as an
+    // ornament of a pet. `setWalkPhase(phase, 0)` is the pets' own idle: no
+    // stride, just the body's bob.
+    this.sleepingPet = pet;
+  }
+
+  /**
+   * The kind of pet walking behind her, or a bunny if there is not one yet.
+   *
+   * **The species is in the catalogue `id`, not in `kind`.** An
+   * `InventoryItem`'s `kind` is its *category* — `'pet'`, `'toy'`, `'hat'` —
+   * and the species is the second half of ids like `pet.bunny`. So this
+   * matches the id's tail against `PET_KINDS`, which means a pet the shop
+   * gains tomorrow is recognised here the day it is added, with no table to
+   * keep in step. A `toy.ripika` in the parade is deliberately not a match:
+   * it is paradeable, but it is a toy and it does not sleep.
+   */
+  private paradePetKind(): PetKind {
+    for (const item of gameStore.get().inventory) {
+      if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
+      const species = item.id.slice(item.id.lastIndexOf('.') + 1);
+      const kind = PET_KINDS.find((known) => known === species);
+      if (kind) return kind;
+    }
+    return 'bunny';
+  }
+
+  /**
+   * The suite's lounge — Jim, 7 August 2026: *"a lounge with sofa,
+   * `createHotelTv` facing sofa AND camera, Game Boy on a low table."*
+   *
+   * ## The one genuinely awkward constraint, and how it resolves
+   *
+   * A television has to face the sofa *and* the camera, and those are
+   * different directions: the camera looks from (+X, +Y, +Z) and the sofa
+   * faces whatever it is pointed at. If the telly faces the camera squarely
+   * its back is to the sofa; if it faces the sofa squarely you are looking at
+   * its back.
+   *
+   * The answer is that neither has to be square. The sofa sits at the room's
+   * **east** end facing −X, the telly stands at the **west** end turned about
+   * 40° off that axis — so it faces down the room at the sofa while its screen
+   * is still turned toward the lens. A real living room is arranged exactly
+   * like this and for exactly this reason: nobody puts a sofa dead square to a
+   * television either.
+   */
+  private dressLounge(shell: Group): void {
+    const FLOOR_Z = 4.9;
+
+    // The rug the room is arranged on.
+    const mat = rug(9, 5, PALETTE.markerLilac, PALETTE.blossomWhite);
+    mat.position.set(2.5, 0, FLOOR_Z);
+    shell.add(mat);
+
+    // The sofa, mid-room on the rug, turned partway between "facing the
+    // telly" (−X) and "facing the lens" (+Z) — the same both-at-once
+    // compromise the telly itself plays in the other direction (see the
+    // method header). A square −90° yaw showed the camera nothing but its
+    // back panel (QA, 7 Aug 2026); the east end at x = 8.2 stood it inside
+    // the low east wall's sight shadow, where the fixed lens sees only the
+    // sliver above the wall top — "a teal sliver, barely recognisable"
+    // (QA, 8 Aug 2026). Same rule as the lobby's crystal columns: the
+    // camera looks along (−X, −Z), so nothing worth seeing lives close
+    // behind a +X or +Z wall.
+    this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
+      x: 5.6,
+      z: 3.4,
+      spin: -0.9,
+      halfX: 1.1,
+      halfZ: 1.3,
+      top: SOFA_SEAT_TOP,
+    });
+
+    // The telly, at the west end. See this method's header for the angle.
+    const tv = createHotelTv();
+    paintTvScreen(tv.screen);
+    // **Pull the screen proud of the cabinet.** As authored, the screen panel
+    // sits ~7 cm behind the cabinet's front face — QA's raycast hit tv-body
+    // at 5.33 m before tv-screen at 5.40 m — so the set rendered as a blank
+    // wooden box with a perfectly good picture buried inside it. The set is
+    // authored facing +Z with nodes at identity, so one local-Z nudge stands
+    // the picture 2 cm in front of the wood.
+    tv.screen.position.z += 0.09;
+    this.props.place(shell, SUITE, tv.root, {
+      x: -3.4,
+      z: FLOOR_Z,
+      spin: Math.PI / 2 - 0.7,
+      radius: 0.7,
+      top: tv.height,
+      stand: false,
+    });
+
+    // The low table between them, with the Game Boy on it.
+    const table = createBreakfastTable();
+    this.props.place(shell, SUITE, table.root, { x: 3.4, z: FLOOR_Z, radius: 0.6, top: TABLE_TOP });
+    const gameBoy = createGameBoy();
+    paintGameBoyScreen(gameBoy.screen);
+    gameBoy.root.position.set(3.4, 0.74, FLOOR_Z);
+    // Turned to face the camera, since it is a 12 cm object seen from ten
+    // metres up: square to the lens is the only angle it reads at.
+    gameBoy.root.rotation.y = 0.5;
+    shell.add(gameBoy.root);
+
+    // A planter in the corner and a picture over the sofa, so the lounge is
+    // dressed to the same standard as the rest of the hotel.
+    this.props.place(shell, SUITE, crystalPlanter(0x41a1, PALETTE.markerPink), {
+      x: 9.8,
+      z: 7.2,
+      radius: 0.6,
+      top: PLANTER_TOP,
+      stand: false,
+    });
+  }
+
+  /**
+   * What is *on* the lobby's gallery — the half of the mezzanine that is not
+   * structure.
+   *
+   * Jim asked for *"a seating nook, planters, view over the statue"*, and the
+   * view is the point: both sofas face **+Z**, out over the balustrade, down
+   * at the giant RiPika and level with a disco ball three times the size of
+   * the one that used to hang up here out of reach. That is the whole reason
+   * to climb the stairs, and a mezzanine you climb for no reason is a
+   * staircase to a shelf.
+   *
+   * The balustrade is **visual only, and correctly so**: it stands on exactly
+   * the plane the gallery's own front face already occupies, and that face is a
+   * collider from the floor to the deck. A second collider along the same line
+   * would stop nothing that is not stopped already. See {@link Mezzanine}.
+   */
+  private dressMezzanine(shell: Group): void {
+    const plan = LOBBY.mezzanine;
+    if (!plan) return;
+    const { minX, maxX, minZ, maxZ, height } = plan;
+
+    // --- the balustrade -----------------------------------------------------
+    // A chunky rail on stubby posts, round the two edges you can walk to. It
+    // stops at the stair's mouth, which is where the rail of a real staircase
+    // stops too.
+    const mouth = this.stairMouth(plan);
+    const rail = (
+      from: [number, number],
+      to: [number, number],
+    ): void => {
+      const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      if (length < 0.3) return;
+      const yaw = Math.atan2(to[0] - from[0], to[1] - from[1]);
+      const midX = (from[0] + to[0]) / 2;
+      const midZ = (from[1] + to[1]) / 2;
+      const top = solid(
+        new Mesh(new BoxGeometry(0.22, 0.16, length), interiorMaterial(LOBBY.theme.trim)),
+      );
+      // `+ STAIR_SINK`: the whole flight is sunk 2 cm (see `buildMezzanine`),
+      // so the gallery rail drops the same 2 cm to keep meeting the stair's
+      // handrail where it eases level. One constant, both readers.
+      top.position.set(midX, height + 0.86 + STAIR_SINK, midZ);
+      top.rotation.y = yaw;
+      shell.add(top);
+      const posts = Math.max(2, Math.round(length / 0.62));
+      for (let i = 0; i <= posts; i += 1) {
+        const t = i / posts;
+        const baluster = solid(
+          new Mesh(
+            new CylinderGeometry(0.06, 0.075, 0.82, 6),
+            interiorMaterial(PALETTE.blossomWhite),
+          ),
+        );
+        baluster.position.set(
+          from[0] + (to[0] - from[0]) * t,
+          height + 0.41,
+          from[1] + (to[1] - from[1]) * t,
+        );
+        shell.add(baluster);
+      }
+    };
+    rail([minX, maxZ], [mouth ? mouth[0] : maxX, maxZ]);
+    if (mouth) rail([mouth[1], maxZ], [maxX, maxZ]);
+    rail([maxX, maxZ], [maxX, minZ]);
+
+    // --- the seating nook ---------------------------------------------------
+    const nook = roundRug(3.2, LOBBY.theme.accent, PALETTE.stonePinkLight);
+    nook.position.set(-6.4, height + 0.01, -10.2);
+    shell.add(nook);
+    for (const [x, colour] of [
+      [-8, PALETTE.markerLilac],
+      [-4.8, PALETTE.markerPink],
+    ] as const) {
+      this.props.place(shell, LOBBY, sofa(2.4, colour, PALETTE.blossomWhite), {
+        x,
+        y: height,
+        z: -10.6,
+        halfX: 1.2,
+        halfZ: 0.48,
+        // Standing ON the deck: base lifts collider top and plate with it.
+        base: height,
+        top: SOFA_SEAT_TOP,
+      });
+    }
+
+    // Planters along the gallery, and a low table between the sofas.
+    for (const [x, z, seed] of [
+      [-11.6, -8.6, 0x11a1],
+      [-6.4, -8.4, 0x11a2],
+      [1.4, -8.6, 0x11a3],
+      [3.6, -11.2, 0x11a4],
+    ] as const) {
+      this.props.place(shell, LOBBY, crystalPlanter(seed), {
+        x,
+        y: height,
+        z,
+        radius: 0.6,
+        base: height,
+        top: PLANTER_TOP,
+        stand: false,
+      });
+    }
+    this.props.place(shell, LOBBY, bedsideTable(), {
+      x: -6.4,
+      y: height,
+      z: -10.2,
+      radius: 0.36,
+      base: height,
+      top: 1.0,
+      stand: false,
+    });
+
+    // Sconces on the gallery's front face, which is now the wall a child on the
+    // lobby floor actually looks at where the north wall used to be.
+    for (const x of [-10.4, -5.4, 0.4]) {
+      const light = sconce(LOBBY.theme.glow);
+      light.position.set(x, 1.95, maxZ + 0.28);
+      shell.add(light);
+    }
+    for (const [x, seed] of [
+      [-8, 0x11c1],
+      [-2.6, 0x11c2],
+    ] as const) {
+      const art = picture(1.7, 1.25, seed);
+      art.position.set(x, 2, maxZ + 0.31);
+      shell.add(art);
+    }
+
+    // And two on the north wall *above* the gallery, which is the only wall up
+    // here and is otherwise four metres of blank paint.
+    for (const x of [-9.4, -2.4, 2.4]) {
+      const light = sconce(LOBBY.theme.glow);
+      light.position.set(x, height + 1.85, minZ + 0.28);
+      shell.add(light);
+    }
+  }
+
+  /**
+   * Where the sweeping stair breaks through the gallery's front face.
+   *
+   * The same two roots `buildMezzanine` solves, in one place both it and
+   * `dressMezzanine` ask — so the hole in the wall and the gap in the
+   * balustrade cannot end up in different places.
+   */
+  private stairMouth(plan: Mezzanine): [number, number] | null {
+    const { stair, maxZ } = plan;
+    const crossing = (radius: number): number | null => {
+      const cos = (maxZ - stair.centreZ) / radius;
+      if (cos < -1 || cos > 1) return null;
+      return stair.centreX - radius * Math.sqrt(1 - cos * cos);
+    };
+    const a = crossing(stair.innerRadius);
+    const b = crossing(stair.outerRadius);
+    if (a === null || b === null) return null;
+    return [Math.min(a, b) - 0.2, Math.max(a, b) + 0.2];
+  }
+
+  // ------------------------------------------------------ dressing helpers
+
+  /**
+   * The mosaic plate — Jim's *"an interesting and playful mosaic on the tiles
+   * of the floor"*, laid over the room's own floor slab rather than replacing
+   * it.
+   *
+   * A separate `decal` plate, not a map on the slab's material, for two
+   * reasons: the slab is a `BoxGeometry` whose UVs run over all six faces, and
+   * the plate stops 0.3 m short of every wall so the floor's own themed colour
+   * survives as a border. One canvas per 4 m, which puts a tile at ~0.5 m —
+   * chunky enough to survive being toon-banded (see `mosaicTexture`).
+   */
+  private layMosaic(shell: Group, room: HotelRoom): void {
+    const width = room.halfX * 2 - 0.6;
+    const depth = room.halfZ * 2 - 0.6;
+    const METRES_PER_CANVAS = 4;
+    const plate = decal(
+      new Mesh(
+        new PlaneGeometry(width, depth),
+        toonMaterial(PALETTE.blossomWhite, {
+          map: mosaicTexture(width / METRES_PER_CANVAS, depth / METRES_PER_CANVAS),
+          // The same cosy lift `interiorMaterial` gives every other interior
+          // surface, in the grout's own colour — a white emissive would wash
+          // the tile colours out to pastel mush after dark.
+          emissive: PALETTE.stonePinkLight,
+          emissiveIntensity: 0.14,
+        }),
+      ),
+    );
+    plate.rotation.x = -Math.PI / 2;
+    plate.position.y = 0.02;
+    shell.add(plate);
+  }
+
+  /** Bowls laid the length of a buffet counter, cycling the three breakfasts. */
+  private layBuffet(shell: Group, x: number, z: number, length: number): void {
+    const rng = new Rng(0x21b0f);
+    const count = 9;
+    for (let i = 0; i < count; i += 1) {
+      const food = BREAKFASTS[i % BREAKFASTS.length];
+      if (!food) continue;
+      const bowl = createBreakfastBowl(food.kind);
+      bowl.root.position.set(
+        x - length / 2 + 0.9 + (i / (count - 1)) * (length - 1.8),
+        BUFFET_TOP,
+        z + rng.range(-0.1, 0.2),
+      );
+      shell.add(bowl.root);
+    }
+    // The bowls need no footprint of their own: they stand on the counter,
+    // whose own footprint (registered where it was placed) is already between
+    // them and anybody who could reach them.
+  }
+
+  /**
+   * Stands a list of small round props on the floor.
+   *
+   * A thin wrapper over {@link HotelProps.place} for the case that repeats —
+   * a scatter of crystals, all round, all on the floor. The default radius is
+   * a crystal cluster's own spread; anything with a different shape is placed
+   * directly instead, so the call site shows what shape it is.
+   */
+  private placeProps(
+    shell: Group,
+    room: HotelRoom,
+    items: readonly { prop: () => Group; x: number; z: number; radius?: number; top: number }[],
+  ): void {
+    for (const item of items) {
+      this.props.place(shell, room, item.prop(), {
+        x: item.x,
+        z: item.z,
+        radius: item.radius ?? 0.6,
+        top: item.top,
+        // The scatter props are crystals, seaweed and tufts: real heights,
+        // never floors, so none of them offers a landing plate.
+        stand: false,
+      });
+    }
+  }
+
+  /**
+   * Sconces and pictures, on the two walls the camera can actually see.
+   *
+   * The camera sits at focus + (+X, +Y, +Z), so it looks at the **inside faces
+   * of the north (−Z) and west (−X) walls** and at the *outside* of the other
+   * two — anything hung on the south or east wall is a prop nobody will ever
+   * see. That is why this helper only offers those two.
+   */
+  private hangOnWalls(shell: Group, room: HotelRoom, plan: WallPlan): void {
+    const SCONCE_Y = 1.85;
+    for (const x of plan.north ?? []) {
+      const light = sconce(room.theme.glow);
+      light.position.set(x, SCONCE_Y, -room.halfZ + 0.28);
+      shell.add(light);
+    }
+    for (const z of plan.west ?? []) {
+      const light = sconce(room.theme.glow);
+      light.position.set(-room.halfX + 0.28, SCONCE_Y, z);
+      light.rotation.y = Math.PI / 2;
+      shell.add(light);
+    }
+    // **Real paintings now, and each one is something to walk up to.**
+    //
+    // Jim, 7 August 2026: he wanted actual artwork rather than the abstract
+    // shapes `picture` composes. `paintedPicture` hangs one of five shared
+    // canvases (see `dressing.ts` — five, because §7's texture budget is forty
+    // for the whole game and this round has already spent three), and every
+    // frame also registers itself as somewhere she can stand and look.
+    //
+    // The frame's own `seed` picks which of the five it gets, so the choice is
+    // stable across reloads and spread across the hotel without anybody having
+    // to allocate them by hand.
+    (plan.pictures ?? []).forEach((frame, index) => {
+      const art = frame.seed % ARTWORK_COUNT;
+      // **Never across the glass.** Jim, live play, 7 Aug 2026: *"some
+      // paintings overlap the windows and clip into them."* The declared
+      // spot is only a wish: the same glazed-span authority `glazeWall`
+      // builds the panes from decides whether a picture may hang there, and
+      // slides it along the wall to the nearest clear stretch when not —
+      // so moving a window can never quietly re-cover a painting.
+      // `check:hotel` probe 12 measures the built frames against the built
+      // panes.
+      const along = clearOfGlass(room, frame.wall, frame.along, frame.width, frame.height);
+      if (along === null) {
+        console.warn(
+          `hotel: no clear wall for the ${room.space} ${frame.wall} picture at ${frame.along} — dropped`,
+        );
+        return;
+      }
+      const painting = paintedPicture(frame.width, frame.height, art);
+      // The way the picture faces, which is also the way the camera has to
+      // come at it. North-wall pictures face +Z; west-wall ones face +X.
+      const normalX = frame.wall === 'north' ? 0 : 1;
+      const normalZ = frame.wall === 'north' ? 1 : 0;
+      if (frame.wall === 'north') {
+        painting.position.set(along, PICTURE_Y, -room.halfZ + 0.31);
+      } else {
+        painting.position.set(-room.halfX + 0.31, PICTURE_Y, along);
+        painting.rotation.y = Math.PI / 2;
+      }
+      shell.add(painting);
+      this.artworks.push({
+        id: `${room.space}-${index}`,
+        art,
+        x: room.originX + painting.position.x,
+        y: PICTURE_Y,
+        z: room.originZ + painting.position.z,
+        normalX,
+        normalZ,
+        room,
+      });
+    });
+  }
+
+  /**
+   * Standing back to look at a painting properly — Jim's *"Look!"*.
+   *
+   * The same `hotel/cinematic.ts` shot the food moment and the window views
+   * use, which is why this is nine lines: come off the wall along the
+   * picture's own normal, frame the **whole** canvas (see
+   * {@link ART_VIEW_DISTANCE} for the distance/lens pair), hold until she
+   * presses something.
+   */
+  private lookAtArt(art: (typeof this.artworks)[number]): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    this.controls.cancelWalk();
+    player.beginRide();
+    player.setRidePose(
+      art.x + art.normalX * 1.9,
+      0,
+      art.z + art.normalZ * 1.9,
+      Math.atan2(-art.normalX, -art.normalZ),
+    );
+    this.moment = 'art';
+    // The camera is her eyes for this moment, so the body steps out of the
+    // frame entirely. The lens ends 0.3 m in front of where her face is
+    // posed — inside the hair shell, a screenful of colour bands (QA, on
+    // all three paintings tested) — and no offset that keeps the canvas
+    // square-on can also miss a head posed on the canvas's own normal.
+    player.group.visible = false;
+    this.cine.play(this.artShotFor(art), () => {
+      this.moment = null;
+      player.group.visible = true;
+      player.endRide();
+    });
+  }
+
+  /**
+   * **"Look outside!"** — Jim, 7 August 2026.
+   *
+   * Every room in this hotel is six hundred metres from the tower it is
+   * supposedly inside, so a window cannot simply be transparent: the view has
+   * to be *fetched*. The camera goes to the tower's **real position in the
+   * park**, at the height this storey would be on its 28 m spire, and looks at
+   * the fountain — so Floor 50's window really is higher than Floor 1's, and
+   * both are looking at the park a child has actually walked around.
+   *
+   * ## What has to be true while it is out there, and what does not
+   *
+   * - **The hotel's own rooms are hidden.** They sit 600 m out — past
+   *   `FOG_FAR` (258 m), so they would in fact be fogged to invisibility — but
+   *   "invisible because it is far away" is the accident the ferris wheel
+   *   found out the hard way when it pushed the fog out and the castle's
+   *   insides appeared floating in the middle distance. Hidden outright is a
+   *   fact rather than a coincidence.
+   * - **The park has to be lit.** `DayNight` switches the sun, the fill and
+   *   the ambient off while the player is indoors, so a view of the park taken
+   *   from inside would be a view of an unlit park. `playerIsInside` reports
+   *   false for the duration — see its own doc comment.
+   * - **The fog does not need touching**, and deliberately is not. The whole
+   *   park is about 110 m across and `FOG_NEAR` is 132 m, so nothing in this
+   *   shot ever reaches the fog at all. The ferris wheel's `setSpaceFactor`
+   *   would have brought the stars out over an afternoon.
+   */
+  private lookOutside(room: HotelRoom): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    const eye = this.windowVantage(room);
+
+    this.controls.cancelWalk();
+    player.beginRide();
+    this.moment = 'window';
+
+    // Behind the soft fade, both ways — the camera is jumping four hundred
+    // metres and an ease would be a flight over the void between the spaces.
+    this.controls.iris(() => {
+      this.hotelRoot.visible = false;
+      this.cine.play(
+        {
+          from: eye,
+          to: eye,
+          lookAt: new Vector3(PLAZA.x, 2, PLAZA.z),
+          easeSeconds: 0,
+          holdSeconds: null,
+          // A slow orbit of the fountain, so the park moves and it reads as a
+          // view rather than a photograph.
+          drift: 0.045,
+          fov: 46,
+        },
+        () => {
+          this.moment = null;
+          this.hotelRoot.visible = this.inside;
+          player.endRide();
+        },
+      );
+    });
+  }
+
+  private roomShell(room: HotelRoom): Group {
+    const name = `hotel:${room.space}`;
+    const shell = this.hotelRoot.children.find((child) => child.name === name);
+    if (!shell) throw new Error(`hotel: no shell built for ${room.space}`);
+    return shell as Group;
+  }
+
+  /**
+   * Hangs a disco ball, and — if asked — makes it actually light the room.
+   *
+   * Jim, 7 August 2026: the lobby's ball should be *"3x size"* and *"should
+   * actually project light around the room"*. A mirror ball that only spins is
+   * a spinning ornament; what a child is looking for is the beams going round
+   * the walls, and there is no way to fake that with an emissive.
+   *
+   * So the lit version parents {@link DISCO_BEAMS} narrow `SpotLight`s to the
+   * **rotating group itself**: they inherit the spin for free, at no per-frame
+   * cost, and their cones sweep the room the way the real thing does. Each one
+   * needs its target in the graph too — a three.js spot light points at an
+   * `Object3D`, not at a direction — and both go under `spin`, so the pair
+   * cannot fall out of step.
+   *
+   * **They are switched off unless she is in the room.** The park's own point
+   * lights are already the biggest lighting cost it has (ORDER-OF-WORK's note:
+   * fourteen of them, and the ferris wheel's is the brightest thing in the
+   * game), so five more that burn while a child is out on the lawn would be
+   * five for nothing. `Hotel.update` toggles the group — see {@link discoLit}.
+   */
+  private hangDiscoBall(
+    shell: Group,
+    x: number,
+    y: number,
+    z: number,
+    options: { readonly scale?: number; readonly lit?: boolean; readonly room?: HotelRoom } = {},
+  ): void {
+    const scale = options.scale ?? 1;
+    // A slim beam carries the ball — the rooms are open-topped, so there is
+    // no ceiling to hang it from, and a ball on nothing reads as a bug.
+    const beam = solid(
+      new Mesh(new BoxGeometry(3.2 * scale, 0.16, 0.16), softMaterial(PALETTE.stonePinkDark)),
+    );
+    beam.position.set(x, y + 0.08, z);
+    shell.add(beam);
+    const ball = createDiscoBall();
+    const spin = new Group();
+    spin.position.set(x, y, z);
+    spin.scale.setScalar(scale);
+    spin.add(ball.root);
+    shell.add(spin);
+    this.discoBalls.push({ spin });
+
+    if (!options.lit || !options.room) return;
+
+    // **Sparkle.** Facet glints on the ball turning with it, and motes drifting
+    // down through the beams. Both instanced, neither allocating per frame —
+    // see `createDiscoSparkle`. The glints go under `spin` so they rotate with
+    // the facets they are lighting up; the motes go under the shell at the
+    // ball's own height, because falling specks that rotated with the ball
+    // would be a fairground ride rather than dust in a light beam.
+    const ballCentreY = -ball.height * 0.64;
+    const sparkle = createDiscoSparkle(0.45, 0x1d15c0);
+    spin.add(sparkle.glints);
+    sparkle.glints.position.y = ballCentreY;
+    sparkle.motes.position.set(x, y + ballCentreY * scale, z);
+    sparkle.motes.scale.setScalar(scale);
+    shell.add(sparkle.motes);
+    this.sparkles.push({ room: options.room, sparkle });
+
+    // The ball's own middle, in the (unscaled) local metres of `spin` — the
+    // beams have to leave the ball, not the hook 2.4 m above it.
+    const centreY = -ball.height * 0.64;
+    const lights: Object3D[] = [];
+    for (let i = 0; i < DISCO_BEAMS; i += 1) {
+      const angle = (i / DISCO_BEAMS) * Math.PI * 2;
+      const colour = DISCO_COLOURS[i % DISCO_COLOURS.length] ?? PALETTE.markerPink;
+      const light = new SpotLight(
+        colour,
+        DISCO_INTENSITY,
+        DISCO_REACH / scale,
+        DISCO_CONE,
+        0.55,
+        1,
+      );
+      light.castShadow = false;
+      light.position.set(0, centreY, 0);
+      // Down and out: the beam lands on the floor a little way from the ball
+      // and sweeps the room as the ball turns. Alternating pitches so the
+      // beams do not all trace the same circle.
+      const reach = i % 2 === 0 ? 5.4 : 8.2;
+      light.target.position.set(
+        Math.cos(angle) * reach,
+        centreY - 4.6,
+        Math.sin(angle) * reach,
+      );
+      spin.add(light, light.target);
+      lights.push(light);
+    }
+    this.discoLights.push({ room: options.room, lights });
+  }
+
+  /**
+   * One laid table with a chair on either side.
+   *
+   * `spin` yaws the whole setting — chairs, bowls and the sit-down pose all
+   * take it, because they are all derived from it rather than written down
+   * separately. It exists because seven tables at the same yaw is a canteen:
+   * Jim asked for the breakfast room to *"vary rotation/position so it doesn't
+   * grid"*, and a per-table angle is the cheapest way to buy that.
+   */
+  private placeBreakfastTable(
+    shell: Group,
+    room: HotelRoom,
+    x: number,
+    z: number,
+    id: string,
+    spin = 0,
+  ): void {
+    // The table top is 1.2 m across, so a disc is the honest footprint —
+    // which is also why `spin` never has to reach the collider.
+    const table = createBreakfastTable();
+    // TABLE_TOP: a jump onto the breakfast table works, and should.
+    this.props.place(shell, room, table.root, { x, z, spin, radius: 0.6, top: TABLE_TOP });
+    BREAKFASTS.forEach((food, index) => {
+      const bowl = createBreakfastBowl(food.kind);
+      const angle = (index / BREAKFASTS.length) * Math.PI * 2 + 0.4 + spin;
+      bowl.root.position.set(x + Math.cos(angle) * 0.34, 0.74, z + Math.sin(angle) * 0.34);
+      shell.add(bowl.root);
+    });
+    [spin, spin + Math.PI].forEach((yaw, index) => {
+      const chair = createBreakfastChair();
+      const cx = x + Math.sin(yaw) * 1.05;
+      const cz = z + Math.cos(yaw) * 1.05;
+      // 0.3 m — the seat is 0.44 across and the legs sit inside that, so this
+      // is the chair's own outline and not a metre of air around it. Small
+      // enough that the zone's stand point (0.9 m out, and a player is 0.62 m
+      // wide) is still reachable, which is the number that had to be checked.
+      this.props.place(shell, room, chair.root, {
+        x: cx,
+        z: cz,
+        spin: yaw + Math.PI,
+        radius: 0.3,
+        top: CHAIR_SEAT_Y,
+      });
+      this.chairs.push({
+        x: room.originX + cx,
+        z: room.originZ + cz,
+        facing: yaw + Math.PI,
+        room,
+        id: `${id}-${index}`,
+        taken: false,
+      });
+    });
+  }
+
+  /**
+   * The painted "this way to the lift" arrow — "an arrow showing the way to
+   * your floor, on the floors of the hotel" (Eleri).
+   *
+   * The chevrons are real arrow geometry (`dressing.ts`'s `floorChevron`)
+   * rather than the rotated rectangles they started as: QA's note was that
+   * from the play camera a rectangle reads as a stripe, not as a direction.
+   * They stay the same lemon on every floor on purpose — the *colour* is the
+   * wayfinding, and a way-out sign that changes colour per storey is one a
+   * child has to re-learn each time she leaves the lift.
+   */
+  private paintArrow(shell: Group, fromX: number, fromZ: number, toX: number, toZ: number): void {
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+    const length = Math.hypot(dx, dz);
+    const yaw = Math.atan2(dx, dz);
+    const chevrons = Math.max(2, Math.floor(length / 2.2));
+    for (let i = 0; i < chevrons; i += 1) {
+      const t = (i + 0.5) / chevrons;
+      const chevron = floorChevron(PALETTE.markerLemon);
+      chevron.position.set(fromX + dx * t, 0.06, fromZ + dz * t);
+      chevron.rotation.set(-Math.PI / 2, yaw, 0);
+      shell.add(chevron);
+    }
+  }
+}
+
+// ----------------------------------------------------------------- helpers
+
+/**
+ * The glazed stretches of one wall, straight from the room's declaration —
+ * **the one owner of "where is there glass"**. Two readers: `glazeWall`
+ * builds the panes inside these spans (clipped to the wall's solid spans),
+ * and `clearOfGlass` refuses to hang a picture across them. They used to
+ * read the declaration independently — which is to say the pictures did not
+ * read it at all, and hung straight over the lobby's west window.
+ */
+function glazedSpans(
+  room: HotelRoom,
+  side: WallSide,
+): readonly { readonly from: number; readonly to: number; readonly sill: number; readonly head: number }[] {
+  const plan = room.windows[side];
+  if (!plan) return [];
+  return plan.at.map((at) => ({
+    from: at - plan.width / 2,
+    to: at + plan.width / 2,
+    sill: plan.sill,
+    head: plan.head,
+  }));
+}
+
+/**
+ * Where a picture of `width` × `height` may actually hang on this wall, at or
+ * near the declared `along` — slid to the nearest clear stretch when the
+ * declared spot would put it over a pane (at the picture's own heights) or
+ * across the wall's doorway gap, or `null` when the whole wall is spoken
+ * for. The declared position is a wish; the glazing is the law.
+ */
+function clearOfGlass(
+  room: HotelRoom,
+  side: 'north' | 'west',
+  along: number,
+  width: number,
+  height: number,
+): number | null {
+  const bandLow = PICTURE_Y - height / 2;
+  const bandHigh = PICTURE_Y + height / 2;
+  // Panes that share any height with the picture, plus the doorway gap,
+  // which is forbidden at every height.
+  const forbidden: [number, number][] = glazedSpans(room, side)
+    .filter((pane) => pane.sill < bandHigh && pane.head > bandLow)
+    .map((pane) => [pane.from, pane.to]);
+  const gap = room.gaps[side];
+  if (gap) forbidden.push([gap[0], gap[1]]);
+
+  const wallHalf = side === 'north' ? room.halfX : room.halfZ;
+  const reach = width / 2 + PICTURE_GLASS_MARGIN;
+  const fits = (at: number): boolean =>
+    at - reach >= -wallHalf + 0.3 &&
+    at + reach <= wallHalf - 0.3 &&
+    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to);
+
+  if (fits(along)) return along;
+  for (let step = 0.1; step <= wallHalf * 2; step += 0.1) {
+    if (fits(along + step)) return along + step;
+    if (fits(along - step)) return along - step;
+  }
+  return null;
+}
+
+/**
+ * Moves `current` toward `target` at the automatic doors' own rate.
+ *
+ * Framerate-independent and linear rather than exponential, because a door is
+ * a motor: it opens at one speed and stops. An eased approach would leave the
+ * last centimetre of the leaf creeping for ever, which is exactly what a
+ * sliding door does not do.
+ */
+function ease(current: number, target: number, dt: number): number {
+  const step = dt / AUTO_DOOR_SECONDS;
+  if (target > current) return Math.min(target, current + step);
+  return Math.max(target, current - step);
+}
+
+/**
+ * The floor numbers, painted onto the dial's own UV map.
+ *
+ * **`flipY = false`, via `glbCanvasTexture`** — this face's UVs came out of a
+ * `.glb`, where v runs *down* from the top left, and three.js's default flip
+ * would cancel out the wrong way and paint the numbers upside down. That is
+ * the bug that ate a day on the tower's signboard; see that helper's header.
+ *
+ * The face's UVs are `u = x / 0.9 + 0.5`, `v = z / 0.9 + 0.5` off the disc's
+ * own vertices (`hotel_build.py`'s `uv_from_xz`), so a point at dial angle φ
+ * lands at `u = cos φ / 2 + 0.5`, `v = sin φ / 2 + 0.5`. With the flip off,
+ * v = 1 is the *bottom* of the canvas while it is the *top* of the dial — so
+ * the canvas is mirrored vertically once, here, and everything below can then
+ * be written in ordinary dial coordinates.
+ *
+ * Only the floors that exist are labelled. Eleven evenly-spaced numbers is
+ * what a real lift dial has and what a six-year-old cannot read; four is the
+ * hotel she is actually in.
+ */
+function paintDialFace(face: Mesh): void {
+  const SIZE = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = '#fff3c9';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // The one mirror, so the arithmetic below is in dial space: +y is up the
+  // dial, and a glyph drawn upright here reads upright on the plaque.
+  ctx.translate(0, SIZE);
+  ctx.scale(1, -1);
+
+  ctx.fillStyle = '#4a3a52';
+  ctx.font = 'bold 46px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Radius the labels sit at, as a fraction of the face — inside the ticks,
+  // which are geometry and stand at about 0.85 of it.
+  const LABEL_RADIUS = 0.64;
+  for (const [storey, label] of [
+    [0, 'G'],
+    [12, '12'],
+    [33, '33'],
+    [50, '50'],
+  ] as const) {
+    // Left-hand end of the arc is the ground floor, right-hand end the top.
+    const phi = Math.PI * (1 - storey / TOP_STOREY);
+    ctx.fillText(
+      label,
+      SIZE / 2 + Math.cos(phi) * LABEL_RADIUS * (SIZE / 2),
+      SIZE / 2 - Math.sin(phi) * LABEL_RADIUS * (SIZE / 2),
+    );
+  }
+
+  face.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
+}
+
+/**
+ * What is on the telly: the park, from the hotel, in four bands.
+ *
+ * Painted onto the set's **own** UV map via `glbCanvasTexture` — `flipY` off,
+ * because these UVs came out of a `.glb` (see that helper). Not a decal mesh
+ * floated in front of the cabinet: CLAUDE.md's hood-face rule, and the artist
+ * authored `tv-screen` as an inset panel of the cabinet's front precisely so
+ * there is nothing to keep in step.
+ *
+ * A picture rather than a pattern, because a child will look: it is the park
+ * she is staying above — green below, a pink castle, the ferris wheel, sky.
+ */
+function paintTvScreen(screen: Mesh): void {
+  const W = 512;
+  const H = 384;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = hexToCss(PALETTE.skyDayBottom);
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = hexToCss(PALETTE.grass);
+  ctx.fillRect(0, H * 0.66, W, H * 0.34);
+
+  // The castle: a block with a pink roof and a flag.
+  ctx.fillStyle = hexToCss(PALETTE.buildingWall);
+  ctx.fillRect(W * 0.14, H * 0.34, W * 0.24, H * 0.32);
+  ctx.fillStyle = hexToCss(PALETTE.buildingTrim);
+  ctx.beginPath();
+  ctx.moveTo(W * 0.12, H * 0.34);
+  ctx.lineTo(W * 0.26, H * 0.16);
+  ctx.lineTo(W * 0.4, H * 0.34);
+  ctx.closePath();
+  ctx.fill();
+
+  // The ferris wheel: a rim, a hub and six spokes.
+  const cx = W * 0.68;
+  const cy = H * 0.4;
+  const r = H * 0.22;
+  ctx.strokeStyle = hexToCss(PALETTE.markerSky);
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 6;
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+    ctx.stroke();
+  }
+  ctx.fillStyle = hexToCss(PALETTE.markerLemon);
+  ctx.beginPath();
+  ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // A sun, because every picture a six-year-old draws has one.
+  ctx.fillStyle = hexToCss(PALETTE.flowerYellow);
+  ctx.beginPath();
+  ctx.arc(W * 0.9, H * 0.13, H * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+
+  screen.material = new MeshToonMaterial({
+    map: glbCanvasTexture(canvas),
+    emissive: PALETTE.blossomWhite,
+    emissiveIntensity: 0.45,
+  });
+}
+
+/** The Game Boy's little screen: a green field with a tiny RiPika on it. */
+function paintGameBoyScreen(screen: Mesh): void {
+  const SIZE = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = hexToCss(PALETTE.markerMint);
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Chunky pixels, which is the whole joke of a Game Boy screen.
+  const PIXEL = SIZE / 16;
+  ctx.fillStyle = hexToCss(PALETTE.leafDeep);
+  for (const [x, y] of [
+    [6, 5], [7, 5], [8, 5],
+    [5, 6], [6, 6], [7, 6], [8, 6], [9, 6],
+    [5, 7], [7, 7], [9, 7],
+    [5, 8], [6, 8], [7, 8], [8, 8], [9, 8],
+    [6, 9], [8, 9],
+    [6, 10], [8, 10],
+  ] as const) {
+    ctx.fillRect(x * PIXEL, y * PIXEL, PIXEL, PIXEL);
+  }
+
+  screen.material = new MeshToonMaterial({
+    map: glbCanvasTexture(canvas),
+    emissive: PALETTE.markerMint,
+    emissiveIntensity: 0.5,
+  });
+}
+
+/**
+ * How long one spoken line stays on screen.
+ *
+ * Proportional to its length, because a four-word line held as long as a
+ * twelve-word one reads as the game having stalled. Floored well above reading
+ * speed: nobody in this family is reading these — a six-year-old is looking at
+ * the shape of a speech bubble and waiting for the next one.
+ */
+function lineSeconds(line: string): number {
+  return Math.min(3.8, Math.max(2.1, 1.5 + line.split(' ').length * 0.22));
+}
+
+/**
+ * What reception says when she hands the key over.
+ *
+ * Jim, 7 August 2026: *"good afternoon/morning, here is your key, enjoy your
+ * stay etc, maybe a bit longer and more embellished."* So: a greeting that
+ * knows what time it is, three warm lines that quietly tell her where the good
+ * bits are, and *then* the key — which is the beat the rainbow flashes on (see
+ * `Hotel.checkIn`'s `cheerAt`).
+ *
+ * Every line obeys GAME_DESIGN.md's BREVITY RULE on its own terms — one
+ * sentence, under fifty characters — because the rule is about the line a child
+ * reads at once, not about the total. Six short lines she watches go by is a
+ * conversation; one long one is a wall of text.
+ */
+function checkInLines(timeOfDay: number): readonly string[] {
+  return [
+    `${greetingFor(timeOfDay)}, and welcome to The Land Hotel!`,
+    'Breakfast is on Floor 1, all morning long.',
+    'Do visit the garden on 12 and the sea on 33!',
+    'Here is your key — the whole top floor is yours!',
+    'Enjoy your stay!',
+  ];
+}
+
+/** …and what she says to somebody who has already checked in. Shorter, warmer. */
+function returningLines(timeOfDay: number): readonly string[] {
+  return [`${greetingFor(timeOfDay)}! Your room is still Floor 50.`];
+}
+
+/**
+ * "Good morning", "Good afternoon" or "Good evening", off the park's own clock.
+ *
+ * `timeOfDay` is `DayNight`'s 0..1 through one day, so the boundaries are noon
+ * and six in the evening — the ones a six-year-old would name.
+ */
+function greetingFor(timeOfDay: number): string {
+  const hour = (((timeOfDay % 1) + 1) % 1) * 24;
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/** "The Land Hotel", painted onto the tower's signboard. */
+function paintSign(signboard: Mesh): void {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = '#3d2b4f';
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.fillStyle = '#ffe9f4';
+  ctx.font = 'bold 64px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('The Land Hotel', 256, 68);
+  signboard.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
+}
+
+/**
+ * A canvas texture for a mesh whose UVs came out of a **glTF file**.
+ *
+ * three.js defaults `Texture.flipY` to `true`, which is right for the whole
+ * rest of this game: a `CanvasTexture` is painted with y running *down* the
+ * page, and geometry built here has v running *up*, so the flip is what makes
+ * the two agree. glTF stores its UVs the other way up — v runs down, top-left
+ * origin — and the loader does not rewrite them, so the same default flip
+ * applied to an authored mesh cancels out the wrong way and the writing comes
+ * out **upside-down**. QA found exactly that on the tower's signboard
+ * (6 August 2026), and the "yours" plaque had it too — it was simply harder to
+ * spot on a five-letter word in a rounded panel.
+ *
+ * Both painted panels in this hotel are authored nodes (`hotel_build.py` UV-maps
+ * them), so both go through here. **Anything else that paints words onto an
+ * asset from a `.glb` must do the same** — the failure is silent, symmetrical
+ * and looks like a modelling mistake rather than a texture setting.
+ */
+function glbCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Recolours one named part of an authored asset, outline included.
+ *
+ * The `.glb` owns shape and code owns colour (`art/models/hotelAssets.ts`'s
+ * header) — normally through that file's `STYLES` table, which is the right
+ * home for "what colour is a bed blanket". This is the other case: *these
+ * three beds want three different blankets*, which is a fact about the suite,
+ * not about the asset, exactly as the rail cart's lane colour is a fact about
+ * the race. Each `hotelMesh` builds its own material, so this touches one bed.
+ *
+ * **The outline has to move with it.** `addOutline` bakes `inkTint(colour)`
+ * into a `MeshBasicMaterial` at build time, so a repaint that skipped it would
+ * leave a mint-tinted line drawn round a red blanket — the sort of thing that
+ * reads as a lighting bug rather than as a missed line of code.
+ */
+function repaintPart(root: Group, name: string, colour: number): void {
+  const mesh = root.getObjectByName(name);
+  if (!(mesh instanceof Mesh)) return;
+  const material = mesh.material;
+  if (material instanceof MeshToonMaterial) material.color.setHex(colour);
+  for (const child of mesh.children) {
+    if (child instanceof Mesh && child.material instanceof MeshBasicMaterial) {
+      child.material.color.setHex(inkTint(colour));
+    }
+  }
+}
+
+/** "yours", on the suite door's plaque — Eleri's exact word, lowercase. */
+function paintYours(plaque: Mesh): void {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = '#fff3c9';
+  ctx.fillRect(0, 0, 256, 128);
+  ctx.fillStyle = '#3d2b4f';
+  ctx.font = 'bold 72px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('yours', 128, 66);
+  plaque.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
+}
+
+/**
+ * The tower's collision: eight walls around the crystal cluster with the
+ * doorway open, and a lobby back wall a couple of metres in — walking on
+ * through is what enters the hotel, and the wall is what stops a sprinting
+ * child ending up inside solid crystal while the iris closes.
+ */
+function registerTowerCollision(
+  collision: CollisionWorld,
+  x: number,
+  z: number,
+  yaw: number,
+): void {
+  const R = 7.2;
+  const doorArc = 0.32;
+  for (let i = 0; i < 8; i += 1) {
+    const a1 = yaw + (i / 8) * Math.PI * 2 + doorArc;
+    const a2 = yaw + ((i + 1) / 8) * Math.PI * 2 - (i === 7 ? doorArc : -0.001);
+    // The doorway faces `yaw`; skip the segment straddling it.
+    if (i === 0) continue;
+    collision.addWall(
+      x + Math.sin(a1) * R,
+      z + Math.cos(a1) * R,
+      x + Math.sin(a2) * R,
+      z + Math.cos(a2) * R,
+      0.4,
+    );
+  }
+  // The doorway's jambs and the lobby back wall.
+  const doorSin = Math.sin(yaw);
+  const doorCos = Math.cos(yaw);
+  const sideSin = Math.sin(yaw + Math.PI / 2);
+  const sideCos = Math.cos(yaw + Math.PI / 2);
+  const jamb = (side: number) => {
+    collision.addWall(
+      x + doorSin * (R - 2.2) + sideSin * side * (DOOR_HALF + 0.5),
+      z + doorCos * (R - 2.2) + sideCos * side * (DOOR_HALF + 0.5),
+      x + doorSin * (R + 0.4) + sideSin * side * (DOOR_HALF + 0.5),
+      z + doorCos * (R + 0.4) + sideCos * side * (DOOR_HALF + 0.5),
+      0.35,
+    );
+  };
+  jamb(1);
+  jamb(-1);
+  collision.addWall(
+    x + doorSin * (R - 2.2) + sideSin * (DOOR_HALF + 0.5),
+    z + doorCos * (R - 2.2) + sideCos * (DOOR_HALF + 0.5),
+    x + doorSin * (R - 2.2) - sideSin * (DOOR_HALF + 0.5),
+    z + doorCos * (R - 2.2) - sideCos * (DOOR_HALF + 0.5),
+    0.35,
+  );
+}

@@ -111,6 +111,15 @@ export const PLAYER_TURN_SPEED = 13;
 /** Radius used for pushing the player out of scenery. */
 export const PLAYER_RADIUS = 0.62;
 
+/**
+ * An NPC child's collision radius. Lives here rather than in
+ * `entities/npc/NpcCharacter.ts` (which re-exports it) so that leaf modules
+ * loaded under Node's strip-only TypeScript (`check:waypoints` and friends)
+ * can read the number without dragging in a class full of parameter
+ * properties the stripper cannot parse.
+ */
+export const NPC_RADIUS = 0.5;
+
 /** Full bob cycles per metre travelled — drives the walk animation phase. */
 export const PLAYER_BOB_CYCLES_PER_METRE = 0.42;
 
@@ -175,6 +184,41 @@ export const INTERIOR_PLAZA_DROP = 1.2;
  * its rim into the horizon colour, so the cut never shows.
  */
 export const INTERIOR_PLAZA_RADIUS = 52;
+
+/**
+ * The Land Hotel's own spaces (issue #236). One X for all of them, rooms
+ * strung along +Z at 260 m spacing — far past every fog plane and far from
+ * both the garden and the castle's interior, exactly the "bigger on the
+ * inside" trick the castle proved. Each ROOM is its own disjoint space
+ * (Jim's ruling): lobby, the floor-25 breakfast room, the floor-50 corridor
+ * and the suite behind its "yours" door, joined only by the lift portal and
+ * the doors themselves.
+ */
+export const HOTEL_ORIGIN_X = -600;
+export const HOTEL_LOBBY_Z = 600;
+export const HOTEL_BREAKFAST_Z = 860;
+export const HOTEL_CORRIDOR_Z = 1120;
+export const HOTEL_SUITE_Z = 1380;
+/**
+ * Two more floors a child can actually press a button for — Jim, 7 August
+ * 2026: *"you should be able to go to certain other floors with their own
+ * schemes."* Floor 12 is the garden floor and Floor 33 the ocean floor
+ * (`world/hotel/layout.ts` owns what they look like).
+ *
+ * **Same 260 m step as every room above**, continuing the one axis: the
+ * spacing is what keeps a room's warm fill (`hotel/lighting.ts`'s 34 m
+ * `POOL_DISTANCE`) and its play boundary (`HOTEL_PLAY_RADIUS`, 24 m) from
+ * ever reaching its neighbour, and `spaces.ts`'s 70 m room radius from ever
+ * matching two rooms at once. A floor added at any other spacing would be a
+ * floor that quietly lights the one next door.
+ */
+export const HOTEL_GARDEN_Z = 1640;
+export const HOTEL_OCEAN_Z = 1900;
+/** The rooms' shared floor level. Terrain out there is ~-16 m; a flat plate
+ * at zero keeps every hotel Y a plain human number. */
+export const HOTEL_FLOOR_Y = 0;
+/** Soft play boundary radius inside any hotel room. */
+export const HOTEL_PLAY_RADIUS = 24;
 
 /** Radius of the interior's soft boundary, mirroring GARDEN_PLAY_RADIUS. */
 export const INTERIOR_PLAY_RADIUS = 46;

@@ -1670,6 +1670,27 @@ kbd {
    on it: the HUD pills live top and bottom-left, the action/read pill and the
    thumb buttons live bottom-right. It only exists while a child is standing at
    the lift doors or riding in the car. */
+/* The Land Hotel's floor read-out (issue #236): a little pill, gone entirely
+   outside the hotel — the family already ruled the top bar eats too much
+   screen, so it earns its pixels only where a floor number means something. */
+.hotel-floor-pill {
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.9rem;
+  border-radius: 999rem;
+  background: rgba(61, 43, 79, 0.82);
+  color: #ffe9f4;
+  font-size: 1rem;
+  font-weight: 700;
+  pointer-events: none;
+  display: none;
+}
+.hotel-floor-pill[data-show='true'] {
+  display: block;
+}
+
 .lift-panel {
   position: absolute;
   left: calc(0.875rem + env(safe-area-inset-left));

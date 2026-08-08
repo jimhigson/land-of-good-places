@@ -5,13 +5,25 @@ import type { AnchorFootprint } from './anchors';
  *
  * Decision 5 (ARCHITECTURE-DECISIONS.md): the park is generated, not
  * authored. This file is the API the family edits. **Adding an attraction is
- * adding an entry here; moving one is setting `pin`.** Everything without a
- * `pin` is placed by the solver in `parkLayout.ts`, deterministically from
- * {@link PARK_SEED}, and `check:park` proves the result is a working park.
+ * adding an entry here; moving one is a re-roll or a `pin`.** Everything
+ * without a `pin` is placed by the solver in `parkLayout.ts`,
+ * deterministically from {@link PARK_SEED}, and `check:park` proves the
+ * result is a working park.
  *
  * Only the entrance is conceptually pinned (family ruling, 02:40): it is a
  * hole in the boundary wall, not a manifest entry, and the generator keeps
  * the corridor from it clear instead of placing it.
+ *
+ * **Nothing here is pinned any more** (issue #241). The 28 July park was
+ * held together by 15-decimal pasted pins because every entry drew from one
+ * shared RNG stream, so any manifest edit re-rolled everything after it.
+ * The solver now gives each entry a stream of its own
+ * (`candidateRng(hashString(id), …)`), which is what makes an unpinned
+ * manifest safe to edit: adding or removing an entry cannot move any other
+ * entry's candidates, only (at worst) change which of them still fit.
+ * `pin` survives in the type for the day the family wants to nail one thing
+ * down, but the park itself is the seed's own — every park is unique
+ * (Jim's ruling, 5 Aug 2026).
  */
 
 /**
@@ -42,8 +54,13 @@ function seedOverride(): number | null {
   }
 }
 
-/** Bump alongside PARK_SEED (or any generator change that moves things). */
-export const LAYOUT_VERSION = 2;
+/**
+ * Bump alongside PARK_SEED (or any generator change that moves things).
+ *
+ * 3: issue #241 — the pins are gone and plots spread across the whole
+ * spline-bounded park, so every position from layout 2 is meaningless.
+ */
+export const LAYOUT_VERSION = 3;
 
 export interface ManifestEntry {
   readonly id: string;
@@ -68,45 +85,64 @@ export interface ManifestEntry {
    */
   readonly near?: { readonly id: string; readonly min: number; readonly max: number };
   /**
+   * Keep this entry's *edge* within [min, max] metres of the park boundary —
+   * for the things whose whole point is the rim. Distance is measured from
+   * the plot's bounding circle to the spline edge, per candidate, so "near
+   * the edge" stays true on every bearing of every seed even though the
+   * edge is 57 m out at the pinch and 100+ at the bulge. The Rail Race
+   * stall is the first user: its ride is a ring *outside* the wall, so what
+   * "close to the rails" means for the booth is small distance-to-edge —
+   * a radius band stopped meaning that when the park stopped being a circle.
+   */
+  readonly nearEdge?: { readonly min: number; readonly max: number };
+  /**
    * Placement priority: lower places earlier. Default is by size (largest
    * first, which packs reliably). The fountain overrides this to place
    * FIRST: it is the park's middle, and everything else arranges around it —
    * placed fifth, the big plots carve its central band down to nothing.
    */
   readonly solveOrder?: number;
+  /**
+   * This entry's front faces the CAMERA (roughly +Z), not the park middle.
+   *
+   * GAME_DESIGN #16 is absolute: a stall's counter must face the one
+   * direction the fixed isometric camera can read. The booths have always
+   * been built that way (`stallPlacement.ts`), but the solver used to put
+   * every doormat on the middle side regardless — two authorities for which
+   * side of a booth is the front, which agreed by luck on the old pinned
+   * park and disagreed the moment stalls spread (issue #241): stand points
+   * ended up behind their own counters and their waypoints stranded.
+   */
+  readonly cameraFacing?: boolean;
 }
-
-/**
- * Hard bound on how far out a plot may reach: |centre| + boundingRadius must
- * stay inside this. The train loop rests beyond 55 (`train/route.ts`) and
- * `Scenery.isPlantable` refuses past 55, so plots stopping at 52 keep the
- * treeline clear while still letting a big plot shoulder into the rail band —
- * the route solver's raycasts then bend the loop around it into a *squeeze*,
- * which Decision 4 records as a feature (the castle squeeze), not a clash.
- */
-export const PLOT_EXTENT_LIMIT = 52;
 
 /** Half-width of the corridor kept clear from the gate to the plaza. */
 export const GATE_CORRIDOR_HALF_WIDTH = 7;
 
 /**
+ * Walkable ground kept between a plot's edge and the boundary spline, so the
+ * perimeter lane survives whatever the solver does: wide enough for the
+ * player (2 x PLAYER_RADIUS = 1.24) plus the boundary wall's own footing.
+ * This replaces `PLOT_EXTENT_LIMIT = 52`, which capped every plot to the old
+ * circular park and left the added ground empty (issue #241) — the limit is
+ * now the park's real edge, asked per bearing.
+ */
+export const BOUNDARY_CLEARANCE = 2.5;
+
+/**
  * The attractions. Copy (sign titles, notes, accents) stays in `anchors.ts`,
  * keyed by id — this file owns only *where things may go*.
  *
- * **Why nearly everything is pinned:** these are the solved positions of the
- * park the family approved on 28 July. Pinning them keeps that park exactly
- * while new entries (the Sky Cruiser's stall was the first) are placed by
- * the solver around them — without pins, any addition re-rolled the whole
- * arrangement, which broke "adding an attraction is adding a line". To
- * re-roll the park deliberately: delete the pins and bump PARK_SEED.
+ * Bands are preferences, not the limit: the spline boundary is the limit,
+ * asked per candidate in `parkLayout.ts`. A band's `min` is what keeps the
+ * middle legible (the plaza stays a plaza); a generous `max` is what lets
+ * the solver use the park that now exists.
  */
 export const PARK_MANIFEST: readonly ManifestEntry[] = [
-  // The fountain plaza: the park's social middle. Movable (family ruling:
-  // everything moves but the entrance) but held near the centre so the park
-  // stays legible to a six-year-old.
+  // The fountain plaza: the park's social middle. Held near the centre so
+  // the park stays legible to a six-year-old.
   {
     id: 'fountain',
-    pin: [4.96489106075262, 7.750971156106802],
     footprint: { kind: 'circle', radius: 9.4 },
     boundingRadius: 10.5,
     band: { min: 0, max: 12 },
@@ -114,130 +150,125 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'building',
-    pin: [-17.379101772707354, -24.68456869332909],
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    boundingRadius: 19,
-    band: { min: 26, max: 42 },
+    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
+    // the dressing spills another few centimetres (the reach sweep measured
+    // 19.1 on seed 2). Declared at what stands, plus breathing room.
+    boundingRadius: 19.3,
+    band: { min: 26, max: 60 },
   },
+  // Bounding radii for these two are the MEASURED build-out (`check:park`'s
+  // anchor-bounds sweep: water fight 16.3 m, dodgems 18.8 m), not the plot
+  // rectangle: both rides dress past their plots, and everything that routes
+  // or scatters around an anchor plans around this number. Declaring the
+  // rectangle's 15 left the overhang unowned, which is where the dodgems
+  // doormat kept ending up (anchor.reach ratchet).
   {
     id: 'waterFight',
-    pin: [32.9413989483355, -14.5429227619724],
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    boundingRadius: 15,
-    band: { min: 24, max: 40 },
+    // The pools and hedges are seeded per park and the worst sweep measured
+    // 18.4 (seed 5); 16.3 was only ever the canonical seed's number.
+    boundingRadius: 18.5,
+    band: { min: 24, max: 80 },
   },
   {
     id: 'dodgems',
-    pin: [-23.62827940709836, 26.640671757006064],
     footprint: { kind: 'rect', halfX: 12, halfZ: 10 },
-    boundingRadius: 15,
-    band: { min: 24, max: 40 },
+    boundingRadius: 19,
+    band: { min: 24, max: 80 },
   },
   {
     id: 'ferrisWheel',
-    pin: [22.200529615211444, 30.762495788486575],
     footprint: { kind: 'circle', radius: 11 },
     boundingRadius: 13,
-    band: { min: 24, max: 40 },
+    band: { min: 24, max: 80 },
   },
   // The ginormous slide leaves the building's roof and lands here, so the
   // pit must stay within a slide's reach of the building whatever the seed.
   {
     id: 'ballPit',
-    pin: [6.935078330951129, -27.93267837318263],
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
-    band: { min: 10, max: 34 },
-    near: { id: 'building', min: 24, max: 30 },
+    band: { min: 10, max: 80 },
+    // max 26.5, from 30 via 28 (issue #241): the slide's chute has a 75 m
+    // rideable ceiling (length is gradient — see slide/plan.ts), and every
+    // time the rides re-solve, the seeds whose pit rolled the far end of
+    // the ring are the ones whose every solvable route comes out 80-90 m —
+    // the chute detours round whatever the cruiser grew between castle and
+    // pit. Each 1.5 m off the relation's far end has bought a failing seed
+    // back without costing the near end anything a player can see.
+    near: { id: 'building', min: 24, max: 26.5 },
+  },
+  // The Land Hotel (issue #236, Eleri's own spec): a crystal tower CLOSE TO
+  // THE CASTLE — the near relation is her requirement verbatim. Fifty
+  // storeys in the fiction; the inside is four disjoint spaces reached
+  // through the door (see world/hotel/). min 28 keeps the tower's crystal
+  // skirt clear of the castle rect's corner; max 42 keeps "close" honest.
+  {
+    id: 'hotel',
+    footprint: { kind: 'circle', radius: 8 },
+    boundingRadius: 9,
+    band: { min: 10, max: 90 },
+    near: { id: 'building', min: 28, max: 42 },
+    // Jim's ruling, 7 Aug: ALL assets face the camera. The tower's door, its
+    // awning and its doormat all derive from this one flag, exactly like a
+    // stall's counter — without it the solver faced the door at the park
+    // middle, which from most placements is straight away from the camera:
+    // a hotel you could walk all round without ever seeing a way in.
+    cameraFacing: true,
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.
   //
-  // stall.railRacer stands at the park's rim (1 August 2026), close to the
-  // rail-race loop it boards: `railRace/route.ts` flies that ring at a
-  // constant 53.5 m nominal radius all the way round, so what "close to the
-  // rails" means for a booth is *radial* distance from the middle, not
-  // bearing — the arch that carries a rider out to the ring already tracks
-  // whatever bearing the booth stands at (`route.ts`'s `startDistance`).
-  //
-  // 41 m keeps the plot's own edge (41 + 3.4 = 44.4) a solid margin short of
-  // the train's 48 m inner edge, so the rail loop is untouched by this move.
-  // An earlier attempt (PR #159) tried moving this pin, found `check:park`
-  // failing with stranded `poiGraph` waypoints at every rim position it
-  // swept, and concluded the move was blocked. It was not the rim itself
-  // that was unreachable — two separate, fixable bugs were:
-  //
-  // 1. `paths.ts`'s spur `past` extension always overshot 2 m towards the
-  //    plot regardless of how close the doormat already stood to the plot's
-  //    edge — for every stall (2.6 m footprint, 1.4 m standoff) that put the
-  //    waypoint 0.6 m *inside* the booth's own collision. Inland, with a
-  //    dense waypoint mesh on every side, `findClearSpot`'s nudge search
-  //    could rescue that overshoot in any direction and still land near a
-  //    neighbour; at the rim, with only one way back to the network, a nudge
-  //    onto the booth's far side stranded the waypoint behind its own wall.
-  //    Fixed generically in `paths.ts` (`PAST_CLEARANCE`), for every stall,
-  //    not just this one.
-  // 2. Once fixed, most bearings still failed for two *unrelated* reasons
-  //    that only a real sweep (not one hand-picked point) would separate:
-  //    low bearings (0-15°) put this plot's edge within `CORRIDOR_GAP` of
-  //    the `waterFight` anchor's own 15 m plot, which the solver correctly
-  //    rejects as an unbuildable pin; and a band of bearings around 10-18°
-  //    happened to shift `Scenery`'s single shared RNG stream (this spur is
-  //    now ~2.5x longer, which changes how much ground counts as "on path"
-  //    early in that stream) into placing a garden wall across the *ferris
-  //    wheel kiosk's* own line of sight — a waypoint with no relation to
-  //    this stall, stranded as pure collateral. Swept bearing 0-35° x radius
-  //    38-46 m against the real built park (`sweep.sh`/`sweep2.sh` in the
-  //    branch handoff) rather than chase one seed by hand; 20°/41 m is
-  //    clean on every invariant, with headroom either side.
+  // stall.railRacer boards a ride that is a ring OUTSIDE the boundary wall
+  // (`railRace/route.ts`), and the arch that carries a rider out to the ring
+  // tracks whatever bearing the booth stands at — so the booth's one real
+  // requirement is to hug the rim, which `nearEdge` states directly.
   {
     id: 'stall.railRacer',
-    pin: [38.527397452222246, 14.022825876352417],
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 42 },
+    band: { min: 13, max: 110 },
+    nearEdge: { min: 2, max: 10 },
   },
   {
     id: 'stall.spookyHouse',
-    pin: [-14.009419630595104, 2.531869221037949],
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 30 },
+    band: { min: 13, max: 60 },
   },
   {
     id: 'stall.waterFight',
-    pin: [16.198422689521646, -11.141212665997175],
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 30 },
+    band: { min: 13, max: 90 },
     near: { id: 'waterFight', min: 17, max: 22 },
   },
   {
     id: 'stall.dodgems',
-    pin: [-6.494351647680116, 24.895734667592652],
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    band: { min: 13, max: 30 },
+    band: { min: 13, max: 90 },
     near: { id: 'dodgems', min: 17, max: 22 },
   },
   {
     id: 'stall.skyCruiser',
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.6 },
     boundingRadius: 3.4,
-    // The pinned park is packed solid: a probe of the whole 13–36 annulus
-    // found zero cells that keep CORRIDOR_GAP from every plot, and the outer
-    // ring sits in the rail band (placing there deformed the train loop and
-    // regressed rail.exclusion). The one real pocket is west of the castle —
-    // inside the castle's rail shadow, so the train route never notices it.
-    // The near relation reaches it the same way the other booths snuggle
-    // their rides.
-    band: { min: 13, max: 36 },
+    band: { min: 13, max: 90 },
+    // The booth snuggles its ride the way the other booths do: the Sky
+    // Cruiser's loop is woven around the castle (Decision 7's influence).
     near: { id: 'building', min: 21, max: 26 },
   },
   {
     id: 'stall.facePaint',
-    pin: [-26.12933205483198, 2.951281913621141],
+    cameraFacing: true,
     footprint: { kind: 'circle', radius: 2.8 },
     boundingRadius: 3.6,
-    band: { min: 13, max: 30 },
+    band: { min: 13, max: 60 },
   },
 ];

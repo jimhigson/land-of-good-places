@@ -23,7 +23,20 @@
  * everything else intact. That is the intended failure, not an oversight.
  */
 
-import { INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z } from '../core/constants';
+import {
+  HOTEL_BREAKFAST_Z,
+  HOTEL_CORRIDOR_Z,
+  HOTEL_FLOOR_Y,
+  HOTEL_GARDEN_Z,
+  HOTEL_LOBBY_Z,
+  HOTEL_OCEAN_Z,
+  HOTEL_ORIGIN_X,
+  HOTEL_SUITE_Z,
+  INTERIOR_HALF_X,
+  INTERIOR_HALF_Z,
+  INTERIOR_ORIGIN_X,
+  INTERIOR_ORIGIN_Z,
+} from '../core/constants';
 import { BUILDING_BASE_Y } from './building/layout';
 
 /**
@@ -48,18 +61,64 @@ export const SPACE_GARDEN: SpaceId = 'garden';
  */
 export const SPACE_CASTLE: SpaceId = 'castle';
 
+/**
+ * The Land Hotel's rooms — each one **its own space** (Jim's ruling on issue
+ * #236): entirely disjoint worlds joined only by doors and the lift, exactly
+ * the shape Decision 3 wants for the castle's floors. Bigger on the inside
+ * than the outside is the point, not a compromise. Fifty storeys exist in
+ * the fiction; four rooms exist in the world.
+ */
+export const SPACE_HOTEL_LOBBY: SpaceId = 'hotel.lobby';
+export const SPACE_HOTEL_BREAKFAST: SpaceId = 'hotel.breakfast';
+export const SPACE_HOTEL_CORRIDOR: SpaceId = 'hotel.corridor';
+export const SPACE_HOTEL_SUITE: SpaceId = 'hotel.suite';
+/**
+ * Two floors with schemes of their own — Jim, 7 August 2026: *"you should be
+ * able to go to certain other floors with their own schemes."* Floor 12 is an
+ * indoor meadow and Floor 33 is under the sea; `world/hotel/layout.ts` owns
+ * what they look like and `core/constants.ts` owns where they are.
+ */
+export const SPACE_HOTEL_GARDEN: SpaceId = 'hotel.garden';
+export const SPACE_HOTEL_OCEAN: SpaceId = 'hotel.ocean';
+
 interface SpaceOrigin {
   readonly x: number;
   readonly y: number;
   readonly z: number;
 }
 
+/**
+ * **Every hotel room's Z, written once.**
+ *
+ * This list used to exist twice — once in `ORIGINS` and once, spelled out
+ * again as a tuple array, inside {@link spaceAt}. Adding a floor therefore
+ * meant editing both, and forgetting the second gives a room that is fully
+ * built, fully lit and fully furnished but which `spaceAt` reports as
+ * `garden`: the lift lands you in it, `Hotel.currentRoom` returns null, and
+ * the floor pill goes blank. That is CLAUDE.md's opening bug — two
+ * definitions of one thing kept in step by hand — so there is now one.
+ */
+const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
+  [SPACE_HOTEL_LOBBY, HOTEL_LOBBY_Z],
+  [SPACE_HOTEL_BREAKFAST, HOTEL_BREAKFAST_Z],
+  [SPACE_HOTEL_CORRIDOR, HOTEL_CORRIDOR_Z],
+  [SPACE_HOTEL_SUITE, HOTEL_SUITE_Z],
+  [SPACE_HOTEL_GARDEN, HOTEL_GARDEN_Z],
+  [SPACE_HOTEL_OCEAN, HOTEL_OCEAN_Z],
+];
+
 const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
   [SPACE_GARDEN]: { x: 0, y: 0, z: 0 },
   // The interior's own floor-plate origin: its ground-floor deck height, and
   // the same pair `world/building/layout.ts`'s `worldX`/`worldZ` add.
   [SPACE_CASTLE]: { x: INTERIOR_ORIGIN_X, y: BUILDING_BASE_Y, z: INTERIOR_ORIGIN_Z },
+  ...Object.fromEntries(
+    HOTEL_ROOM_Z.map(([space, z]) => [space, { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z }]),
+  ),
 };
+
+/** Rooms are ~30 m across; anywhere within this of a room's origin is in it. */
+const HOTEL_ROOM_RADIUS = 70;
 
 /**
  * How far past the interior's floor plate still counts as being in it.
@@ -83,7 +142,13 @@ const CASTLE_RADIUS = Math.max(INTERIOR_HALF_X, INTERIOR_HALF_Z) + 90;
 export function spaceAt(x: number, z: number): SpaceId {
   const dx = x - INTERIOR_ORIGIN_X;
   const dz = z - INTERIOR_ORIGIN_Z;
-  return dx * dx + dz * dz <= CASTLE_RADIUS * CASTLE_RADIUS ? SPACE_CASTLE : SPACE_GARDEN;
+  if (dx * dx + dz * dz <= CASTLE_RADIUS * CASTLE_RADIUS) return SPACE_CASTLE;
+  for (const [space, roomZ] of HOTEL_ROOM_Z) {
+    const hx = x - HOTEL_ORIGIN_X;
+    const hz = z - roomZ;
+    if (hx * hx + hz * hz <= HOTEL_ROOM_RADIUS * HOTEL_ROOM_RADIUS) return space;
+  }
+  return SPACE_GARDEN;
 }
 
 /** World position -> the offset a save records, relative to its space. */

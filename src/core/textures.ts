@@ -359,6 +359,189 @@ export function woodTexture(repeatX = 3, repeatY = 1): CanvasTexture {
 }
 
 /**
+ * Chunky rounded mosaic tiles, for The Land Hotel's reception floor.
+ *
+ * Jim, 6 August 2026, after playing the hotel: *"the hotel looks much too
+ * plain — make the reception have an interesting and playful mosaic on the
+ * tiles of the floor."*
+ *
+ * ### Why this is allowed to be a map at all
+ *
+ * ART_DIRECTION §7 is firm that **flat colours are material colours, not
+ * maps** — a texture that only carries one colour is a canvas doing a
+ * material's job. A mosaic is the case the same line explicitly leaves room
+ * for ("tiling maps 512²"): the floor is genuinely made of *many* small
+ * differently-coloured pieces, and the honest alternative — one mesh per
+ * tile — is 1 300 draw calls for a lobby floor.
+ *
+ * ### Why it still reads under the toon ramp
+ *
+ * §3's governing rule: a painted texture has to look like something that
+ * *could have been* built as geometry. So every tile here is a big flat fill
+ * with a hard edge — an 8 × 8 grid of 64 px cells, rounded corners, a pale
+ * grout gap between them, and a flat top highlight band exactly like the one
+ * `pinkStoneTexture` uses to make a cobble read as domed. No gradients, no
+ * noise. At the repeat the lobby uses (one canvas per 4 m) a tile is half a
+ * metre across, which is chunky enough to survive being toon-banded and to be
+ * legible from the iso camera rather than dissolving into fizz.
+ *
+ * Every sixth-ish tile carries one flat motif — a heart, a star, a flower or
+ * a paw print — in another palette colour. They are what makes it *playful*
+ * rather than merely tiled, and they are drawn as solid silhouettes for the
+ * same reason the eyes are: a shape with an outline reads at gameplay
+ * distance, a shaded one does not.
+ *
+ * The grid is axis-aligned at exact multiples of the cell size, so the canvas
+ * wraps seamlessly and a non-integer `repeat` (the lobby is 26 × 20 m, i.e.
+ * 6.5 × 5 canvases) simply cuts a tile at the plate's edge rather than
+ * showing a seam.
+ */
+export function mosaicTexture(repeatX = 6, repeatY = 6): CanvasTexture {
+  return cached(`mosaic:${repeatX}:${repeatY}`, () => {
+    const size = 512;
+    const cells = 8;
+    const cell = size / cells;
+    const { canvas, ctx } = createCanvas(size);
+    const rng = new Rng(0x0541c);
+
+    // Grout first, as a full-bleed fill: every tile is then drawn inset, and
+    // what shows between them is this.
+    ctx.fillStyle = hexToCss(PALETTE.stonePinkLight);
+    ctx.fillRect(0, 0, size, size);
+
+    const tileColours = [
+      PALETTE.markerPink,
+      PALETTE.markerMint,
+      PALETTE.markerSky,
+      PALETTE.markerLemon,
+      PALETTE.markerLilac,
+      PALETTE.blossomWhite,
+      PALETTE.flowerViolet,
+      PALETTE.stonePink,
+    ] as const;
+    const motifColours = [
+      PALETTE.markerPink,
+      PALETTE.markerLilac,
+      PALETTE.flowerYellow,
+      PALETTE.markerMint,
+      PALETTE.markerSky,
+    ] as const;
+    const motifs = ['heart', 'star', 'flower', 'paw'] as const;
+
+    for (let row = 0; row < cells; row += 1) {
+      for (let col = 0; col < cells; col += 1) {
+        const x = col * cell;
+        const y = row * cell;
+        const pad = 4;
+        const colour = rng.pick(tileColours);
+        ctx.fillStyle = hexToCss(colour);
+        roundedRect(ctx, x + pad, y + pad, cell - pad * 2, cell - pad * 2, 14);
+        ctx.fill();
+
+        // The glaze highlight — one flat band across the top third, the same
+        // trick (and the same strength) as the pink cobbles'.
+        ctx.fillStyle = '#ffffff3a';
+        roundedRect(ctx, x + pad + 4, y + pad + 3, cell - pad * 2 - 8, (cell - pad * 2) * 0.3, 8);
+        ctx.fill();
+
+        if (rng.chance(0.28)) {
+          drawMotif(
+            ctx,
+            rng.pick(motifs),
+            x + cell / 2,
+            y + cell / 2,
+            cell * 0.3,
+            hexToCss(pickContrast(motifColours, colour, rng)),
+          );
+        }
+      }
+    }
+
+    const texture = finish(canvas, 1);
+    texture.repeat.set(repeatX, repeatY);
+    return texture;
+  });
+}
+
+/** A motif colour that is not the colour of the tile it is painted on. */
+function pickContrast(choices: readonly number[], avoid: number, rng: Rng): number {
+  const usable = choices.filter((colour) => colour !== avoid);
+  return rng.pick(usable.length > 0 ? usable : choices);
+}
+
+/**
+ * One flat mosaic motif, centred, drawn as a solid silhouette.
+ *
+ * Each is built from arcs and straight lines only — no curve a child could not
+ * have cut out of card — because the whole point is that it reads as an inlaid
+ * tile shape rather than as a picture printed on the floor.
+ */
+function drawMotif(
+  ctx: CanvasRenderingContext2D,
+  motif: 'heart' | 'star' | 'flower' | 'paw',
+  cx: number,
+  cy: number,
+  r: number,
+  colour: string,
+): void {
+  ctx.fillStyle = colour;
+  switch (motif) {
+    case 'heart': {
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.45, cy - r * 0.28, r * 0.5, Math.PI * 0.9, Math.PI * 1.95);
+      ctx.arc(cx + r * 0.45, cy - r * 0.28, r * 0.5, Math.PI * 1.05, Math.PI * 0.1);
+      ctx.lineTo(cx, cy + r * 0.85);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'star': {
+      ctx.beginPath();
+      for (let i = 0; i < 10; i += 1) {
+        const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const radius = i % 2 === 0 ? r : r * 0.44;
+        const px = cx + Math.cos(angle) * radius;
+        const py = cy + Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'flower': {
+      for (let i = 0; i < 5; i += 1) {
+        const angle = (i / 5) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(angle) * r * 0.52, cy + Math.sin(angle) * r * 0.52, r * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = hexToCss(PALETTE.flowerYellow);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    case 'paw': {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + r * 0.34, r * 0.56, r * 0.46, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (const [dx, dy, rr] of [
+        [-0.66, -0.5, 0.24],
+        [-0.24, -0.78, 0.25],
+        [0.24, -0.78, 0.25],
+        [0.66, -0.5, 0.24],
+      ] as const) {
+        ctx.beginPath();
+        ctx.arc(cx + dx * r, cy + dy * r, rr * r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+  }
+}
+
+/**
  * Diagonal yellow-and-black hazard tape, for the Rail Race duck bar.
  *
  * Jim, 1 August 2026: "give it a yellow-and-black texture like diagonal

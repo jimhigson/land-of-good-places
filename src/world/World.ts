@@ -16,6 +16,7 @@ import { Coaster } from './coaster/Coaster';
 import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
+import { Hotel } from './hotel/Hotel';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -65,6 +66,7 @@ export class World implements GameSystem {
   readonly fireflies: Fireflies;
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
+  readonly hotel: Hotel;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -107,6 +109,20 @@ export class World implements GameSystem {
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
     this.building = new Building(this.collision, this.anchorPlots, interiorControls);
+    // The Land Hotel (issue #236): a crystal tower near the castle whose door
+    // leads to rooms that are each their own space. Shares the building's
+    // WalkSurfaces sampler — its floor plates and mattress tops are ordinary
+    // static platforms to it.
+    // The camera sizes the receptionist's speech bubble on screen; the clock is
+    // read as a closure because `dayNight` is built further down this
+    // constructor and a time read eagerly here would be dawn for ever.
+    this.hotel = new Hotel(
+      this.collision,
+      this.anchorPlots,
+      interiorControls,
+      this.building.surfaces,
+      { camera, clock: () => this.dayNight.timeOfDay },
+    );
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -207,18 +223,28 @@ export class World implements GameSystem {
     // occasionally climb one — the actual climbing (posing, hiding the body)
     // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
     //
-    // The last argument is the cat bus's eleven passengers. They are **park
+    // The fifth argument is the cat bus's eleven passengers. They are **park
     // NPCs from birth** — not extra children, and not children converted into
     // NPCs when the cutscene ends. `NPC_COUNT` is untouched: eleven of the
     // park's own twenty-four simply begin the game sitting on a bus outside the
     // gate. That is the only shape the code allows anyway, `KidCrowd` being a
     // fixed-capacity `InstancedMesh` that throws rather than growing.
+    //
+    // …and last, the hotel's guests, who are these same children:
+    // `NpcCharacter` bodies with the same walk cycle, the same collision and
+    // the same push-apart, pinned to a circuit inside their own room rather
+    // than wandering the park's graph. Jim, having played the hotel: *"even
+    // other children can be walked through even though in the park NPCs are
+    // solid — they should be the same code."* This is where that stops being
+    // two implementations. The hotel is built above, before this, precisely
+    // so it has guests to offer by the time the crowd is made.
     this.npcs = new NpcSystem(
       this.collision,
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
       this.entrance.arrival ? ARRIVAL_KID_COUNT : 0,
+      this.hotel.residents,
     );
 
     // …and now that both exist, introduce them. `Entrance` is built before
@@ -254,7 +280,7 @@ export class World implements GameSystem {
     // hundred metres from the park rather than inside the plot the facade
     // stands on. Deliberately **not** one of the park groups above — it is not
     // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(...this.parkGroups, this.building.interiorRoot, this.ferrisWheel.group);
+    scene.add(...this.parkGroups, this.building.interiorRoot, this.hotel.hotelRoot, this.ferrisWheel.group);
   }
 
   /**
@@ -295,11 +321,38 @@ export class World implements GameSystem {
     for (const group of this.parkGroups) group.visible = visible;
   }
 
+  /**
+   * **Is the player in an interior — any interior?**
+   *
+   * The one question `DayNight.setIndoors` is asked, and the reason it is a
+   * question rather than a field: it used to read `building.playerInRoofedInterior`
+   * directly, which quietly meant "indoors" was defined as *the castle*. Then
+   * the hotel arrived with four more indoor spaces, and Jim, having played it:
+   * *"the hotel shouldn't have a night/day cycle like outdoors."* It was not
+   * that the hotel had been forgotten — it was that there was nowhere for it to
+   * be remembered. Anything with an inside adds itself to this line, and gets
+   * the whole indoor rule (a still sun, no travelling shadows, daytime fog)
+   * without knowing that any of that is what it is asking for.
+   *
+   * Each space owns what "inside" means for itself, which is not the same
+   * answer twice: the castle's roof terrace is genuinely outdoors and excluded
+   * by `playerInRoofedInterior`, while every hotel room counts, because a
+   * hotel room being open-topped is a *camera* decision (the iso view looks
+   * in) rather than a claim that it is outside.
+   *
+   * Each interior is also responsible for lighting itself once the sky's own
+   * lights go out — `building/InteriorLighting.ts` for the castle,
+   * `hotel/lighting.ts` for the hotel.
+   */
+  private get playerInAnyInterior(): boolean {
+    return this.building.playerInRoofedInterior || this.hotel.playerIsInside;
+  }
+
   update(context: FrameContext): void {
     // Read before `building.update()` runs this frame, so it is a frame behind
     // — invisible in practice, since every doorway crossing already happens
     // behind a closed iris (see `Building.changeSpace`).
-    this.dayNight.setIndoors(this.building.playerInRoofedInterior);
+    this.dayNight.setIndoors(this.playerInAnyInterior);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read
@@ -323,6 +376,7 @@ export class World implements GameSystem {
     this.fireflies.update(context);
     this.anchorPlots.update(context);
     this.building.update(context);
+    this.hotel.update(context);
 
     // The train runs before the children, and it has to: it carries the ones
     // who are aboard by writing their position, and their own movement code —
@@ -362,6 +416,7 @@ export class World implements GameSystem {
   interactZones(): InteractZone[] {
     return [
       ...this.building.interactZones(),
+      ...this.hotel.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
       ...this.train.interactZones(),
@@ -391,6 +446,7 @@ export class World implements GameSystem {
    */
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
+    this.hotel.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.train.attachPlayer(player);
     this.coaster.attachPlayer(player);

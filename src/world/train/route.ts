@@ -1,11 +1,16 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
-import { PARK_BOUNDARY } from '../boundary';
+import { edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
+import { COASTER_PLANS } from '../coaster/plan';
+import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
+import { FENCE_OFFSET } from './fence';
 import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
 import { terrainHeight } from '../terrain';
+import { cachedSolve } from '../../core/solveCache';
+import { PARK_SEED } from '../parkManifest';
 
 /**
  * Where the park train's track goes.
@@ -22,27 +27,14 @@ import { terrainHeight } from '../terrain';
  * `world/anchors.ts` and `core/constants.ts`, the five plots and the boundary
  * wall leave this much room, as bands of distance from the park centre:
  *
- * | | occupies | on bearings |
- * | --- | --- | --- |
- * | dodgems plot | 23.7 – 54.6 | 14° – 56° |
- * | water fight plot | 23.6 – 56.1 | 118° – 162° |
- * | the building | 27.1 – 56.6 | 208° – 247° |
- * | ferris wheel plot | 30.1 – 52.1 | 303° – 334° |
- * | ball pit | 11.1 – 23.9 | 214° – 264° |
- * | boundary wall (inner face) | 59.2 at its closest | see below |
- *
- * The wall is no longer the same distance out on every bearing — the park's edge
- * is a spline, 59.7 m at its pinch and 101.4 m at its bulge, re-rolled per seed.
- * The row above is its **closest** approach, because that is the only figure a
- * single outer clamp can safely be built from; see {@link WALL_INNER_RADIUS}.
- * Everywhere else the wall is further away than the table suggests, which only
- * ever gives the loop more room than it asks for.
- *
- * Going round the *inside* is impossible: on the south-west bearings the ball
- * pit ends at 23.9 and the building starts at 27.1, and the corridor between
- * them is the main path ring. So the train goes round the *outside* of every
- * plot — which fits, but only just. Behind the building there are 2.95 metres
- * between its corner and the wall, and the train is 1.5 m wide.
+ * The park's edge is a spline, 57-odd metres at its pinch and 100+ at its
+ * bulge, re-rolled per seed — and since issue #241 the plots are placed by a
+ * solver that spreads them across all of it, unpinned, so there is no fixed
+ * table of "where the plots are" to write here any more. Any bearing may
+ * have a plot inside the loop, beyond it, or several stacked radially with a
+ * corridor between. The loop therefore reasons in per-bearing *free
+ * intervals* rather than a single lo/hi pair, and hugs the wall wherever the
+ * wall happens to be on that bearing.
  *
  * Two notes on what counts as an obstacle:
  *
@@ -59,20 +51,22 @@ import { terrainHeight } from '../terrain';
  * The loop is a radius per bearing — a shape that can bulge out to hug the wall
  * and pull back in towards the park, but never doubles back on itself.
  *
- * 1. Cast a ray from the park centre at each of {@link BEARINGS} bearings. The
- *    furthest point at which it leaves any obstacle gives `lo(θ)`: the smallest
- *    radius that is clear of the plots. `hi(θ)` is the wall, less the same
- *    clearance.
- * 2. Relax a profile between those bounds — Laplacian smoothing for gentle
- *    curves, a gentle pull towards {@link NOMINAL_RADIUS} so the train comes in
- *    off the wall wherever there is room, and a Euclidean repair step, because
- *    clamping a *radius* still leaves the track too close to a plot's *corner*.
+ * 1. Cast a ray from the park centre at each of {@link BEARINGS} bearings.
+ *    Every obstacle the ray crosses blocks a radial interval (plus the plot
+ *    clearance); what is left between {@link INNER_FLOOR} and the wall on
+ *    that bearing is the bearing's list of *free intervals*.
+ * 2. Relax a profile across those bearings — Laplacian smoothing for gentle
+ *    curves, a gentle pull towards the wall less {@link RIM_STANDOFF} so the
+ *    train hugs the park's real edge, and a Euclidean repair step, because
+ *    snapping a *radius* still leaves the track too close to a plot's
+ *    *corner*. Each pass ends by snapping into the nearest free interval, so
+ *    the profile threads gaps rather than clamping into a plot.
  * 3. Nudge whatever is left off the trees and bushes, by asking the finished
  *    collision world — `resolve()` used as a query, the trick `poiGraph` uses to
  *    check its edges.
  *
- * What comes out is 325-odd metres of track, 48 to 58 m from the middle of the
- * park, clearing every plot by at least a metre, crossing no path at all (the
+ * What comes out is a few hundred metres of track riding the park's rim,
+ * clearing every plot by at least a metre, crossing no path at all (the
  * path network tops out at r ≈ 37), with its tightest bend where it hooks round
  * the back corner of the building.
  */
@@ -98,51 +92,36 @@ export const TRACK_CLEARANCE = 1.3;
 export const TRACK_PLOT_CLEARANCE = 4.2;
 
 /**
- * Where the profile settles when nothing is pushing it outwards.
- *
- * Deliberately past 55, and that is the single most useful number in this file:
- * `Scenery.isPlantable` refuses to plant anything more than 55 m from the middle
- * of the park, and the treeline outside the wall starts at 63. So a loop that
- * stays out here is **tree-free by construction** — no dodging, no swerves, no
- * rail bent round a bush that a later scatter will move anyway. It also puts the
- * train exactly where the brief wants it: out at the edge, past the attractions,
- * with the boundary wall for company.
- *
- * The dodge below is kept as a safety net for whatever the next builder plants.
+ * How far inside the boundary wall the loop settles when nothing pushes it
+ * elsewhere — the modern reading of the old `NOMINAL_RADIUS = 56.2` against a
+ * 59.55 m wall. The loop now follows the wall **per bearing** (issue #241):
+ * with attractions spread across a spline-bounded park whose edge runs 57 m at
+ * the pinch to 100+ at the bulge, a loop parked at any single radius is
+ * *inside* the plots on one bearing and marooned in empty grass on another.
+ * Hugging the edge wherever the edge is keeps the brief's promise — out past
+ * the attractions, with the boundary wall for company — on every bearing of
+ * every seed.
  */
-const NOMINAL_RADIUS = 56.2;
+const RIM_STANDOFF = 3.35;
 
 /**
- * Inner face of the pink boundary wall at its **closest approach** to the middle
- * (see `Garden.buildBoundaryWall`), which is what the loop's outer clamp needs:
- * a single radius that is safe on every bearing.
- *
- * Was `GARDEN_HALF_SIZE - 2 - 0.45`. That arithmetic gave 59.55, and it was
- * right — but by coincidence rather than by construction. `GARDEN_HALF_SIZE - 2`
- * is 60, and 60 is where the boundary generator *pins* the edge at the entrance
- * gate, which is also the closest the edge ever comes to the middle. Two
- * unrelated numbers that happened to agree while the park was a disc.
- *
- * They no longer have any reason to. The edge is a spline now, re-rolled per
- * seed, running 59.7 m at its pinch and 101.4 m at its bulge; `GARDEN_HALF_SIZE`
- * is the old square garden's half width and has nothing to say about it. So ask
- * the boundary that was actually built. On a seed whose pinch comes in tighter
- * than the gate, this follows it; the old expression would not have.
- *
- * Deliberately the **minimum** and not a per-bearing clamp. Loosening it to
- * `edgeRadiusAt(bearing)` would let the loop drift out towards the bulge, which
- * buys nothing — {@link NOMINAL_RADIUS} is 56.2 and the plots only ever push the
- * loop to about 53.5, so this bound does not bind today — while moving a train
- * that four `check:park` invariants are measured against. A bound that is never
- * reached should be the safe one.
- *
- * (The 0.45 is `Garden.ts`'s `BOUNDARY_WALL_COLLISION_HALF`, restated rather
- * than imported: `Garden -> paths -> train/plan -> train/route` is a real import
- * cycle. Worth giving that constant a home both modules can reach — see the
- * handoff — but not worth doing from inside this change.)
+ * The loop never enters the plaza's heart, whatever the gaps between plots
+ * invite. The fountain and its clearance block the true centre on most
+ * bearings anyway; this floor is what says so on the bearings they miss.
  */
-const WALL_INNER_RADIUS =
-  Math.min(...PARK_BOUNDARY.outline().map(([x, z]) => Math.hypot(x, z))) - 0.45;
+const INNER_FLOOR = 20;
+
+/**
+ * The wall's own collision half-width (`Garden.ts`'s
+ * `BOUNDARY_WALL_COLLISION_HALF`, restated rather than imported:
+ * `Garden -> paths -> train/plan -> train/route` is a real import cycle).
+ */
+const WALL_COLLISION_HALF = 0.45;
+
+/** Per-bearing outer clamp: the wall's inner face, less the track's own width. */
+function wallInnerRadiusAt(angle: number): number {
+  return edgeRadiusAt(PARK_BOUNDARY, angle) - WALL_COLLISION_HALF - TRACK_CLEARANCE;
+}
 
 /** Relaxation: passes, smoothing weight, and the pull towards the target. */
 const RELAX_PASSES = 700;
@@ -179,6 +158,10 @@ interface CircleObstacle {
   readonly centreX: number;
   readonly centreZ: number;
   readonly radius: number;
+  /** Clearance the loop keeps from this obstacle. Plots get the full
+   * fence-plus-lane {@link TRACK_PLOT_CLEARANCE}; the Sky Cruiser's low
+   * corridor needs only the track kept out from under it. */
+  readonly clearance?: number;
 }
 
 /** The solved loop, and everything the train and the stations ask of it. */
@@ -195,12 +178,25 @@ export class TrainRoute {
   private readonly scratch = new Vector3();
 
   constructor() {
-    const radii = solveProfile();
+    // The profile is a pure function of the seed's layout and boundary, so
+    // it caches with them (core/solveCache): a reload of a park already
+    // visited skips the 700-pass relaxation entirely.
+    const radii = cachedSolve(
+      'train-profile',
+      `${PARK_SEED}`,
+      () => [...solveProfile()],
+      (value) => value,
+      (raw) => {
+        const list = raw as number[];
+        if (!Array.isArray(list) || list.length !== BEARINGS) throw new Error('stale profile');
+        return list;
+      },
+    );
 
     const points: Vector3[] = [];
     for (let i = 0; i < BEARINGS; i += CONTROL_STRIDE) {
       const angle = (i / BEARINGS) * Math.PI * 2;
-      const radius = radii[i] ?? NOMINAL_RADIUS;
+      const radius = radii[i] ?? INNER_FLOOR;
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
       points.push(new Vector3(x, terrainHeight(x, z), z));
@@ -313,33 +309,82 @@ function solveProfile(): Float64Array {
     circles.push({ centreX: entry.x, centreZ: entry.z, radius: entry.boundingRadius + 1.5 });
   }
 
-  const lower = new Float64Array(BEARINGS);
-  const upper = new Float64Array(BEARINGS);
+  // The Sky Cruiser's LOW corridor — its station flat and ramps, wherever
+  // this seed put them. The cruiser solves first and cannot know the train;
+  // the train solves second and treats what the cruiser actually built as
+  // ground truth (Decision 6: publish what you solved, the next system
+  // dodges it). Anywhere the cruiser's rail is too low for a train to pass
+  // under with Decision 4's {@link RAIL_OVER_RAIL_AIR} becomes a small
+  // no-go disc; at cruise height it is not an obstacle at all, and the
+  // crossing rule is satisfied by the cruise floor itself.
+  // The cruiser's DISMOUNT POINT too: the exit is chosen before the train
+  // exists (solve order), so the avoidance lives here — a fence across the
+  // spot a ride sets a child down is the seed-18 failure shape.
+  circles.push({
+    centreX: COASTER_PLANS.cruiser.exitX,
+    centreZ: COASTER_PLANS.cruiser.exitZ,
+    radius: 1.6,
+    clearance: 4.0,
+  });
+
+  {
+    const cruiser = COASTER_PLANS.cruiser.route;
+    const probe = new Vector3();
+    const lowCeiling = RAIL_OVER_RAIL_AIR + 0.4; // railhead sits ~0.3 above terrain
+    for (let d = 0; d < cruiser.length; d += 2) {
+      cruiser.pointAt(d, probe);
+      if (probe.y - terrainHeight(probe.x, probe.z) >= lowCeiling) continue;
+      // Clearance covers the FENCE the track carries, not just the track:
+      // rails at r means fence pickets at r + 2.0, and the cruiser's car is
+      // 1.45 m half-wide — 2.2 left the fence inside the car on seed 18.
+      circles.push({ centreX: probe.x, centreZ: probe.z, radius: 1.6, clearance: 4.0 });
+    }
+  }
+
+  // Per-bearing free intervals of radius (issue #241). The old bound-pair —
+  // "outside the furthest obstacle exit, inside one wall radius" — assumed
+  // every plot sits inside the loop and the wall is a circle. Neither is true
+  // any more: plots spread to the spline, so a bearing can have a plot
+  // *beyond* the loop (the loop passes inside it) or several plots stacked
+  // radially (the loop threads a gap). So each bearing gets the honest list
+  // of free intervals between [INNER_FLOOR, the wall on that bearing], and
+  // the solver keeps the profile inside whichever interval it is nearest —
+  // greedy continuity, smoothed by the same relaxation as ever.
+  const walls = new Float64Array(BEARINGS);
+  const free: Interval[][] = [];
   for (let i = 0; i < BEARINGS; i += 1) {
     const angle = (i / BEARINGS) * Math.PI * 2;
     const dirX = Math.cos(angle);
     const dirZ = Math.sin(angle);
+    walls[i] = wallInnerRadiusAt(angle);
 
-    let exit = 0;
-    for (const rect of rects) exit = Math.max(exit, rectExitRadius(dirX, dirZ, rect));
-    for (const circle of circles) exit = Math.max(exit, circleExitRadius(dirX, dirZ, circle));
-
-    lower[i] = exit > 0 ? exit + TRACK_PLOT_CLEARANCE : NOMINAL_RADIUS * 0.5;
-    upper[i] = WALL_INNER_RADIUS - TRACK_CLEARANCE;
+    const blocked: Interval[] = [];
+    for (const rect of rects) {
+      const span = rectSpan(dirX, dirZ, rect);
+      if (span) blocked.push([span[0] - TRACK_PLOT_CLEARANCE, span[1] + TRACK_PLOT_CLEARANCE]);
+    }
+    for (const circle of circles) {
+      const span = circleSpan(dirX, dirZ, circle);
+      const keep = circle.clearance ?? TRACK_PLOT_CLEARANCE;
+      if (span) blocked.push([span[0] - keep, span[1] + keep]);
+    }
+    free.push(freeIntervals(blocked, INNER_FLOOR, walls[i] as number));
   }
 
   // The per-bearing target: the wall behind plots, the dip floor in gaps.
-  // A bearing counts as a gap only when it and its neighbours are all clear
-  // well past the dip floor, so the run-in to every dip starts on open grass
-  // rather than scraping a plot corner.
+  // A bearing counts as a gap only when it and its neighbours all have free
+  // ground right through the dip window, so the run-in to every dip starts
+  // on open grass rather than scraping a plot corner.
   const target = new Float64Array(BEARINGS);
   for (let i = 0; i < BEARINGS; i += 1) {
     let clearForDip = true;
     for (let w = -DIP_GUARD; w <= DIP_GUARD && clearForDip; w += 1) {
       const j = (i + w + BEARINGS) % BEARINGS;
-      if ((lower[j] ?? 0) + DIP_HEADROOM > DIP_RADIUS) clearForDip = false;
+      if (!coversWindow(free[j] as Interval[], DIP_RADIUS - DIP_HEADROOM, DIP_RADIUS + DIP_HEADROOM)) {
+        clearForDip = false;
+      }
     }
-    target[i] = clearForDip ? DIP_RADIUS : NOMINAL_RADIUS;
+    target[i] = clearForDip ? DIP_RADIUS : (walls[i] as number) - RIM_STANDOFF;
   }
   // Soften the square edges of the target so the pull draws smooth S-bends.
   for (let pass = 0; pass < 40; pass += 1) {
@@ -352,7 +397,7 @@ function solveProfile(): Float64Array {
 
   let radii = new Float64Array(BEARINGS);
   for (let i = 0; i < BEARINGS; i += 1) {
-    radii[i] = clamp(target[i] ?? NOMINAL_RADIUS, lower[i] ?? 0, upper[i] ?? NOMINAL_RADIUS);
+    radii[i] = snapToFree(free[i] as Interval[], target[i] ?? INNER_FLOOR);
   }
 
   for (let pass = 0; pass < RELAX_PASSES; pass += 1) {
@@ -368,16 +413,17 @@ function solveProfile(): Float64Array {
       // Dips pull much harder than the wall does: a dip is a narrow angular
       // window, and at the wall's gentle pull the smoothing term wins and
       // the loop never leaves the wall at all (measured: zero dips).
-      const want = target[i] ?? NOMINAL_RADIUS;
-      const pull = want < NOMINAL_RADIUS - 1 ? PULL * 5 : PULL;
+      const want = target[i] ?? INNER_FLOOR;
+      const wall = walls[i] as number;
+      const pull = want < wall - RIM_STANDOFF - 1 ? PULL * 5 : PULL;
       let radius = here + SMOOTHING * (before + after - 2 * here) + pull * (want - here);
 
       const angle = (i / BEARINGS) * Math.PI * 2;
       const dirX = Math.cos(angle);
       const dirZ = Math.sin(angle);
-      radius = repair(radius, dirX, dirZ, rects, circles);
+      radius = repair(radius, dirX, dirZ, rects, circles, free[i] as Interval[]);
 
-      next[i] = clamp(radius, lower[i] ?? 0, upper[i] ?? radius);
+      next[i] = snapToFree(free[i] as Interval[], radius);
     }
     radii = next;
   }
@@ -387,6 +433,107 @@ function solveProfile(): Float64Array {
   // scenery can treat the railway as a given). The dependency now points the
   // right way: `Scenery.isPlantable` keeps trees off the rail corridor.
   return radii;
+}
+
+// ------------------------------------------------------------- intervals
+
+/** A closed radial interval [from, to] along one bearing's ray. */
+type Interval = readonly [number, number];
+
+/** The free intervals inside [floor, ceiling] once `blocked` is cut out. */
+function freeIntervals(blocked: Interval[], floor: number, ceiling: number): Interval[] {
+  if (ceiling <= floor) return [];
+  const sorted = [...blocked].sort((a, b) => a[0] - b[0]);
+  const out: Interval[] = [];
+  let cursor = floor;
+  for (const [from, to] of sorted) {
+    if (to <= cursor) continue;
+    if (from > ceiling) break;
+    if (from > cursor) out.push([cursor, Math.min(from, ceiling)]);
+    cursor = Math.max(cursor, to);
+    if (cursor >= ceiling) break;
+  }
+  if (cursor < ceiling) out.push([cursor, ceiling]);
+  // A sliver the track cannot actually sit in is not a choice — and "the
+  // track" is the fenced railway, not the centre line.
+  //
+  // This filter used to say `>= 1`, which let a **1.7 m** gap between the Sky
+  // Cruiser's low corridor and the park wall count as somewhere the railway
+  // could go. On seed 2 the profile duly put itself in that sliver at bearings
+  // 169-170 and back in the inner interval by 175; the curve is built from
+  // every fifth bearing (`CONTROL_STRIDE`), so the Catmull-Rom ran straight
+  // through the blocked band between them, and the lineside fence — 2 m off
+  // the rails, and taller than the ballast — ended up inside the cruiser's car
+  // at 1.10 m. The invariant reported it as the *cruiser* striking the fence,
+  // which is the last place anyone would look for a bug in the train's profile.
+  //
+  // `FENCE_OFFSET` either side is what the railway genuinely occupies, so a
+  // gap narrower than that cannot hold one however the centre line is drawn.
+  // Taken from `fence.ts` rather than typed again here: the two numbers used to
+  // agree by coincidence, and that is what this whole failure is made of.
+  const usable = out.filter(([from, to]) => to - from >= FENCE_OFFSET * 2);
+  // Never hand back nothing: a bearing with no interval at all throws in
+  // `snapToFree`, and a too-narrow gap is still better than a sealed park.
+  return usable.length > 0 ? usable : out.filter(([from, to]) => to - from >= 1);
+}
+
+/** Is [from, to] wholly inside one free interval? */
+function coversWindow(free: readonly Interval[], from: number, to: number): boolean {
+  for (const [lo, hi] of free) {
+    if (lo <= from && to <= hi) return true;
+  }
+  return false;
+}
+
+/**
+ * The nearest point to `value` that lies in a free interval.
+ *
+ * **Nearest, and nothing else.** This is called once per bearing per relaxation
+ * pass and is given no memory of what the previous bearing chose, so if
+ * smoothing walks `value` across a blocked band it will happily snap into the
+ * interval on the far side. The profile can hop.
+ *
+ * That matters because the curve is built from every {@link CONTROL_STRIDE}th
+ * bearing, so a hop between two control bearings is interpolated *straight
+ * through the obstacle between them* — which is how seed 2 put the lineside
+ * fence inside the Sky Cruiser's car, and how the invariant came to report it
+ * as the cruiser's fault.
+ *
+ * This doc used to claim the opposite — "greedy continuity: the profile stays
+ * in whichever gap it is already in, and only jumps when a gap closes entirely
+ * between bearings" — which was never true of the code below and sent at least
+ * one reader looking for the seed 2 bug everywhere except here. A comment
+ * describing a property the code does not have is the same two-definitions
+ * disease as a duplicated constant, in prose.
+ *
+ * What actually keeps the profile honest today is {@link freeIntervals}
+ * refusing to offer a gap too narrow for a fenced railway, so there is no
+ * tempting sliver on the far side of an obstacle to hop into. **That removes
+ * the temptation, not the capability.** A profile that genuinely cannot hop —
+ * one that tracks which interval it is in and may only change where two
+ * intervals merge — is the real fix, and is not written yet.
+ */
+function snapToFree(free: readonly Interval[], value: number): number {
+  if (free.length === 0) {
+    // A bearing with no free interval at all would silently unconstrain the
+    // profile here and fail three invariants later as an unexplained red.
+    // Name it at the source instead (reviewer finding 6 on PR #247).
+    throw new Error(
+      'train route: a bearing has no free radial interval at all — the plots have ' +
+        'sealed the park annulus shut on this seed; loosen the manifest or re-roll',
+    );
+  }
+  let best = value;
+  let bestGap = Infinity;
+  for (const [lo, hi] of free) {
+    const snapped = value < lo ? lo : value > hi ? hi : value;
+    const gap = Math.abs(snapped - value);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = snapped;
+    }
+  }
+  return best;
 }
 
 /**
@@ -402,44 +549,51 @@ function repair(
   dirZ: number,
   rects: readonly RectObstacle[],
   circles: readonly CircleObstacle[],
+  free: readonly Interval[],
 ): number {
   let value = radius;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const x = dirX * value;
     const z = dirZ * value;
 
-    let worst = WALL_INNER_RADIUS - value;
-    let fromWall = true;
+    // The wall needs no attention here: every free interval is already
+    // capped at the per-bearing wall radius, and the caller snaps into one
+    // after each repair. This loop only fixes 2D corner deficits — an
+    // obstacle whose corner pokes into the corridor diagonally, which a
+    // purely radial clamp cannot see. Each obstacle demands its own
+    // clearance: plots the fence-and-lane figure, the cruiser's low
+    // corridor just enough to keep the track out from under it.
+    let deficit = 0;
     for (const rect of rects) {
-      const gap = rectDistance(x, z, rect);
-      if (gap < worst) {
-        worst = gap;
-        fromWall = false;
-      }
+      const d = TRACK_PLOT_CLEARANCE - rectDistance(x, z, rect);
+      if (d > deficit) deficit = d;
     }
     for (const circle of circles) {
-      const gap = Math.hypot(x - circle.centreX, z - circle.centreZ) - circle.radius;
-      if (gap < worst) {
-        worst = gap;
-        fromWall = false;
-      }
+      const keep = circle.clearance ?? TRACK_PLOT_CLEARANCE;
+      const d = keep - (Math.hypot(x - circle.centreX, z - circle.centreZ) - circle.radius);
+      if (d > deficit) deficit = d;
     }
+    if (deficit <= 0) break;
 
-    // Plots demand the big clearance (fence + walkable lane); the wall only
-    // the track's own.
-    const needed = fromWall ? TRACK_CLEARANCE : TRACK_PLOT_CLEARANCE;
-    if (worst >= needed) break;
-    // Too close to the wall means come in; too close to anything else means the
-    // only way past is further out, because the plots reach the park centre.
-    value += fromWall ? -(needed - worst) : needed - worst;
+    // Too close to something's corner. The old rule pushed *outward* always,
+    // which was right while every plot lived inside the loop; now a plot can
+    // sit beyond it (issue #241), so try both ways and keep whichever lands
+    // on free ground — nearest first, so the profile deforms minimally.
+    const outward = value + deficit;
+    const inward = value - deficit;
+    const outFree = snapToFree(free, outward) === outward;
+    const inFree = snapToFree(free, inward) === inward;
+    if (outFree && (!inFree || outward - value <= value - inward)) value = outward;
+    else if (inFree) value = inward;
+    else value = outward;
   }
   return value;
 }
 
 // ------------------------------------------------------------------ geometry
 
-/** How far along a ray from the origin it finally leaves a rectangle. */
-function rectExitRadius(dirX: number, dirZ: number, rect: RectObstacle): number {
+/** Where a ray from the origin is inside a rectangle, or null if it misses. */
+function rectSpan(dirX: number, dirZ: number, rect: RectObstacle): Interval | null {
   let enter = -Infinity;
   let exit = Infinity;
 
@@ -452,7 +606,7 @@ function rectExitRadius(dirX: number, dirZ: number, rect: RectObstacle): number 
     const high = centre + half;
     if (Math.abs(direction) < 1e-9) {
       // Parallel to this slab: the origin is either inside it or the ray misses.
-      if (0 < low || 0 > high) return 0;
+      if (0 < low || 0 > high) return null;
       continue;
     }
     const first = low / direction;
@@ -461,17 +615,21 @@ function rectExitRadius(dirX: number, dirZ: number, rect: RectObstacle): number 
     exit = Math.min(exit, Math.max(first, second));
   }
 
-  return exit < enter || exit <= 0 ? 0 : exit;
+  if (exit < enter || exit <= 0) return null;
+  return [Math.max(0, enter), exit];
 }
 
-function circleExitRadius(dirX: number, dirZ: number, circle: CircleObstacle): number {
+/** Where a ray from the origin is inside a circle, or null if it misses. */
+function circleSpan(dirX: number, dirZ: number, circle: CircleObstacle): Interval | null {
   const along = dirX * circle.centreX + dirZ * circle.centreZ;
   const offset =
     circle.centreX * circle.centreX + circle.centreZ * circle.centreZ - circle.radius * circle.radius;
   const discriminant = along * along - offset;
-  if (discriminant <= 0) return 0;
-  const exit = along + Math.sqrt(discriminant);
-  return exit > 0 ? exit : 0;
+  if (discriminant <= 0) return null;
+  const half = Math.sqrt(discriminant);
+  const exit = along + half;
+  if (exit <= 0) return null;
+  return [Math.max(0, along - half), exit];
 }
 
 /** Distance from a point to a rectangle. Negative inside. */
@@ -486,12 +644,11 @@ function rectDistance(x: number, z: number, rect: RectObstacle): number {
 function measureClearance(xs: Float64Array, zs: Float64Array): number {
   let best = Infinity;
   for (let i = 0; i < xs.length; i += 1) {
-    const gap = WALL_INNER_RADIUS - Math.hypot(xs[i] ?? 0, zs[i] ?? 0);
+    const x = xs[i] ?? 0;
+    const z = zs[i] ?? 0;
+    const gap = wallInnerRadiusAt(Math.atan2(z, x)) + TRACK_CLEARANCE - Math.hypot(x, z);
     if (gap < best) best = gap;
   }
   return best;
 }
 
-function clamp(value: number, low: number, high: number): number {
-  return value < low ? low : value > high ? high : value;
-}
