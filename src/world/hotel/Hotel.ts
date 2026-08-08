@@ -37,6 +37,7 @@ import {
   createDiscoBall,
   createEntranceDoors,
   createGameBoy,
+  createGrandStaircase,
   createHotelTv,
   createHotelBed,
   createHotelTower,
@@ -174,6 +175,15 @@ const AUTO_DOOR_SECONDS = 0.55;
 
 /** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
 const WALL_HALF_DEPTH = 0.25;
+
+/**
+ * How far the grand staircase is sunk below the lobby floor, so its top
+ * tread's surface rides just under the deck plane the slab owns (probe 10's
+ * one-owner rule) instead of coplanar with it. The gallery rail in
+ * `dressMezzanine` drops by the same amount to keep butting the stair's
+ * handrail, which eases level at `rise + railHeight` above the asset origin.
+ */
+const STAIR_SINK = -0.02;
 
 /** How far a window's painted outside-glow spreads past the glass. */
 const GLOW_MARGIN = 0.34;
@@ -2109,46 +2119,48 @@ export class Hotel implements GameSystem {
     );
 
     // --- the sweeping stair --------------------------------------------------
-    const sweep = stair.toAngle - stair.fromAngle;
-    const midRadius = (stair.innerRadius + stair.outerRadius) / 2;
-    const treadDepth = stair.outerRadius - stair.innerRadius;
-    for (let i = 0; i < stair.treads; i += 1) {
-      const from = stair.fromAngle + (sweep * i) / stair.treads;
-      const to = stair.fromAngle + (sweep * (i + 1)) / stair.treads;
-      const top = (height * (i + 1)) / stair.treads;
-      // The last tread's *visual* box stops two centimetres shy of the deck:
-      // its top used to land at exactly `height`, coplanar with the slab it
-      // overlaps past the mouth — probe 10's biggest measured flicker. The
-      // walk surface below keeps the true `top`, so her feet still arrive
-      // level with the deck; the 2 cm lip is beneath notice at play scale.
-      const visualTop = Math.min(top, height - 0.02);
+    // **The artist's grand staircase** (hotelAssets.ts's
+    // `createGrandStaircase`) replaces the code-built box stack Jim called
+    // out (*"looking like a random stack of boxes more than anything"*).
+    // Placement is one line because the asset's origin is the arc's centre
+    // of curvature, which `layout.ts` already names; it is authored at
+    // `fromAngle = 0` in the game's own yaw convention, so a room whose arc
+    // starts elsewhere spins it by `-fromAngle` (three.js yaws the opposite
+    // way round from this game's stair angle).
+    //
+    // Sunk {@link STAIR_SINK} so the top tread's surface sits just below the
+    // deck plane the slab owns — probe 10's one-owner rule; without it the
+    // tread and the slab are coplanar where the flight crosses onto the
+    // deck. The walk surfaces keep the true heights, so her feet still land
+    // level; `dressMezzanine`'s gallery rail drops the same 2 cm so it keeps
+    // butting the stair's handrail, which eases level at
+    // `rise + railHeight`.
+    const flight = createGrandStaircase();
+    flight.root.position.set(stair.centreX, STAIR_SINK, stair.centreZ);
+    flight.root.rotation.y = -stair.fromAngle;
+    shell.add(flight.root);
 
-      // A chunky box lying along the arc, wide enough to overlap its
-      // neighbours at the outer radius so the flight reads as one sweep of
-      // masonry rather than as ten separate slabs.
+    // Everything a child's feet or body meet is derived from the **handle**
+    // of the asset she can actually see — wedge treads, flank colliders and
+    // guest keep-outs from one set of numbers (which the factory itself
+    // re-exports from `layout.ts`, so the plan and the asset cannot
+    // disagree without `hotel_build.py` failing loudly first).
+    const sweep = flight.sweep;
+    const midRadius = (flight.innerRadius + flight.outerRadius) / 2;
+    const treadDepth = flight.outerRadius - flight.innerRadius;
+    for (let i = 0; i < flight.treads; i += 1) {
+      const from = stair.fromAngle + (sweep * i) / flight.treads;
+      const to = stair.fromAngle + (sweep * (i + 1)) / flight.treads;
+      const top = flight.treadTop(i);
       const angle = (from + to) / 2;
-      const chord = stair.outerRadius * (to - from) * 1.6;
-      const box = solid(
-        new Mesh(
-          new BoxGeometry(treadDepth, visualTop, Math.max(chord, 0.5)),
-          interiorMaterial(i % 2 === 0 ? room.theme.floor : room.theme.trim),
-        ),
-      );
-      box.position.set(
-        stair.centreX - Math.sin(angle) * midRadius,
-        visualTop / 2,
-        stair.centreZ + Math.cos(angle) * midRadius,
-      );
-      box.rotation.y = angle;
-      shell.add(box);
 
       this.surfaces.addPlatform(
         new ArcTread(
           top,
           room.originX + stair.centreX,
           room.originZ + stair.centreZ,
-          stair.innerRadius,
-          stair.outerRadius,
+          flight.innerRadius,
+          flight.outerRadius,
           from,
           to,
         ),
@@ -2169,10 +2181,10 @@ export class Hotel implements GameSystem {
     }
 
     // The stair's own two flanks, as a chain of short walls along each radius.
-    // Solid from the floor to the tread at every point, which is exactly what
-    // the side of a masonry stair is — so this is honest at both heights, and
-    // it is the only collision the staircase has.
-    for (const radius of [stair.innerRadius, stair.outerRadius]) {
+    // The asset's closed strings are solid from the floor to the tread at
+    // every point (its own doc says so, and why), so this is honest at both
+    // heights — and it is the only collision the staircase has.
+    for (const radius of [flight.innerRadius, flight.outerRadius]) {
       const segments = Math.max(4, Math.ceil((sweep * radius) / 0.8));
       for (let i = 0; i < segments; i += 1) {
         const a = stair.fromAngle + (sweep * i) / segments;
@@ -3175,7 +3187,10 @@ export class Hotel implements GameSystem {
       const top = solid(
         new Mesh(new BoxGeometry(0.22, 0.16, length), interiorMaterial(LOBBY.theme.trim)),
       );
-      top.position.set(midX, height + 0.86, midZ);
+      // `+ STAIR_SINK`: the whole flight is sunk 2 cm (see `buildMezzanine`),
+      // so the gallery rail drops the same 2 cm to keep meeting the stair's
+      // handrail where it eases level. One constant, both readers.
+      top.position.set(midX, height + 0.86 + STAIR_SINK, midZ);
       top.rotation.y = yaw;
       shell.add(top);
       const posts = Math.max(2, Math.round(length / 0.62));
