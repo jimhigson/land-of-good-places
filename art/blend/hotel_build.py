@@ -2172,6 +2172,11 @@ STAIR_INNER_STRING = (
 )
 STAIR_RAIL_R = sum(STAIR_OUTER_STRING) * 0.5
 STAIR_COPING_R = sum(STAIR_INNER_STRING) * 0.5
+assert abs(STAIR_RAIL_R - 4.27) < 1e-9, (
+    "the handrail's radius has moved off 4.27 m, and `hotelAssets.ts` re-declares it as "
+    "STAIR_RAIL_RADIUS — the flight's top newel stands there, and the placement recipe "
+    "spaces the two arcs so those two posts come out a whole number of balustrade tiles apart"
+)
 
 STAIR_HANDRAIL_SECTION = (
     (-0.045, -0.060),

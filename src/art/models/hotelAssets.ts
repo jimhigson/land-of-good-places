@@ -958,6 +958,18 @@ export const STAIR_INNER_RADIUS = 2.4;
 /** @see STAIR_INNER_RADIUS */
 export const STAIR_OUTER_RADIUS = 4.2;
 /**
+ * The radius the handrail — and therefore each flight's **two newels** — stands
+ * on: over the middle of the outer string, 0.07 m outside the walking edge.
+ *
+ * `hotel_build.py`'s `STAIR_RAIL_R` is the owner and asserts this exact value at
+ * build time, so a string that changes thickness fails the asset build rather
+ * than silently moving a post. It is here because it is a *placement* number:
+ * the landing's front balustrade runs between the two curves' top newels, so
+ * spacing the two arcs by `C = STAIR_RAIL_RADIUS + n · BRIDGE_RAIL_TILE / 2` is
+ * what makes that run a whole number of tiles.
+ */
+export const STAIR_RAIL_RADIUS = 4.27;
+/**
  * An eighth of a turn — 45°, **halved on 8 August 2026** along with the rise.
  *
  * A curve now climbs only as far as the landing, which is five treads rather
@@ -1022,6 +1034,8 @@ export interface GrandStaircaseHandle extends AssetHandle {
   readonly handedness: StairHandedness;
   readonly innerRadius: number;
   readonly outerRadius: number;
+  /** Where this flight's handrail and both its newels stand. @see STAIR_RAIL_RADIUS */
+  readonly railRadius: number;
   /**
    * The quarter turn, **signed in the game's yaw** — `+STAIR_SWEEP` for a
    * right-hand flight and `−STAIR_SWEEP` for a left-hand one.
@@ -1196,6 +1210,7 @@ export function createGrandStaircase(
     height: measuredHeight(root),
     innerRadius: STAIR_INNER_RADIUS,
     outerRadius: STAIR_OUTER_RADIUS,
+    railRadius: STAIR_RAIL_RADIUS,
     sweep: STAIR_SWEEP * sign,
     rise: LANDING_HEIGHT,
     treads: STAIR_TREADS,
