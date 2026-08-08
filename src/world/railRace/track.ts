@@ -24,7 +24,7 @@ import { distanceToPath } from '../paths';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import type { CollisionWorld } from '../Collision';
-import { sweptRails, type RailSampler } from '../rail/sweptRail';
+import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
   ALERT_RANGE,
   BARS_FROM_LEVEL,
@@ -36,7 +36,30 @@ import {
   type HazardLayout,
   type RaceLevel,
 } from './hazards';
-import { LANE_COUNT, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './route';
+import {
+  BAR_HALF_SPAN_AT_PARK_SCALE,
+  BEAM_DROP,
+  BRANCH_TAPER,
+  forkPlan,
+  POST_FOOT_RADIUS,
+  POST_TOP_RADIUS,
+  RAIL_GAUGE_AT_PARK_SCALE,
+  RAIL_RADIUS_AT_PARK_SCALE,
+  SLEEPER_ALONG_TRACK,
+  SLEEPER_OVERHANG,
+  SLEEPER_SPACING,
+  SLEEPER_THICKNESS,
+} from './trestleGeometry';
+// Re-exported: these used to be defined here, and `cart.ts` and
+// `scripts/check-rail-race.mts` import them from this module.
+export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
+import {
+  LANE_COUNT,
+  PLAYER_LANE,
+  RIDE_SCALE,
+  UNDULATION_REACH,
+  type RailRaceRoute,
+} from './route';
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
@@ -53,15 +76,6 @@ import { LANE_COUNT, RIDE_SCALE, UNDULATION_REACH, type RailRaceRoute } from './
  * `InstancedMesh`es is five draw calls, whatever the layout turns out to be.
  */
 
-/**
- * Rail centre-to-centre within one lane, **at park scale**. Narrow: it is a
- * one-child cart.
- *
- * A ring builds its own rails at this times its own `route.scale`, so the two
- * rings are two genuinely different structures rather than one geometry with a
- * group transform on it. See `route.ts`'s header for why that matters.
- */
-export const RAIL_GAUGE_AT_PARK_SCALE = 0.62;
 
 /**
  * The gauge on the ring a child actually races on — the number `cart.ts` builds
@@ -95,8 +109,6 @@ const ARCH_HEADROOM = 1.2;
  */
 const ARCH_SHOULDER_ROOM = 2.4;
 
-/** How far a duck bar reaches either side of its lane's centre, at park scale. */
-const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
 
 /**
  * Every named part `art/blend/duckbar.blend` exports. Geometry only — see
@@ -106,8 +118,6 @@ const BAR_HALF_SPAN_AT_PARK_SCALE = 1.15;
 export const DUCKBAR_PARTS = ['post', 'bar'] as const;
 export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
-/** How far under the lowest a rail ever gets the cross-beam sits. */
-const BEAM_DROP = 0.45;
 
 export interface RailRaceTrack {
   readonly group: Group;
@@ -140,7 +150,7 @@ export interface RailRaceTrack {
    * the black-stretch plate and the duck-bar meshes, and repaints the rails'
    * own resting vertex colours (black over every live zone — see
    * `paintRestingRailColours`), once, when
-   * `RailRace.chooseLevel` fires. The trestle legs, beams and droppers are
+   * `RailRace.chooseLevel` fires. The trestle legs and branches are
    * never touched here — they carry the rails at every level, not just the
    * ones with hazards on them.
    */
@@ -279,6 +289,51 @@ export function buildRailRaceTrack(
   // over it whenever the chosen level has them live.
   const railBaseColoursByLane: Float32Array[] = [];
   const railColourAttributesByLane: BufferAttribute[][] = [];
+
+  // --- the sleepers ----------------------------------------------------------
+  //
+  // Wooden, like the Sky Cruiser's ties and like a real sleeper — the one part
+  // of a support structure that is *not* the grey the trestles below are, so the
+  // ring reads as timber laid on stone rather than as one grey mass.
+  const timberMaterial = toonMaterial(PALETTE.woodLight);
+  keep(timberMaterial);
+  //
+  // Built inside the lane loop below, off the very same `sampler` the rails are
+  // swept from, and oriented by `railFrameAt` — the same horizontal side/up/
+  // forward frame `sweptRail.ts` offsets the rails with. That is the whole
+  // argument for their landing on the rails: shared construction, not a second
+  // formula that agrees today. `scripts/check-tie-frame.mts` exists because the
+  // Sky Cruiser once used a *minimal* rotation onto the tangent here and its
+  // sleepers rolled off the rails on every climb (#112).
+  const sleeperGeometry = new BoxGeometry(1, 1, 1);
+  keep(sleeperGeometry);
+  const sleepersPerLane = Math.floor(route.length / SLEEPER_SPACING);
+  const sleepers = new InstancedMesh(
+    sleeperGeometry,
+    timberMaterial,
+    Math.max(1, sleepersPerLane * LANE_COUNT),
+  );
+  let sleeperIndex = 0;
+  const sleeperBasis = new Matrix4();
+  const sleeperMid = new Vector3();
+  const sleeperFrame: RailFrame = {
+    position: sleeperMid,
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+  const sleeperRotation = new Quaternion();
+  const sleeperScale = new Vector3(
+    railGauge + SLEEPER_OVERHANG * 2 * ringSizeVsRace,
+    SLEEPER_THICKNESS * ringSizeVsRace,
+    SLEEPER_ALONG_TRACK * ringSizeVsRace,
+  );
+  // Sunk so the rail rests **on** the sleeper rather than through it: the rail's
+  // own radius plus half the sleeper's thickness, both taken from the numbers
+  // the two are actually built from, so neither can drift from the other.
+  const railRadius = RAIL_RADIUS_AT_PARK_SCALE * ringSizeVsRace * RIDE_SCALE;
+  const sleeperDrop = railRadius + (SLEEPER_THICKNESS * ringSizeVsRace) / 2;
+
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     // The adapter that makes a lane of this ring look like any other route in
     // the park to the shared sweeper.
@@ -287,6 +342,18 @@ export function buildRailRaceTrack(
       pointAt: (distance, target) => route.pointAt(lane, distance, target),
       tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
     };
+    for (let i = 0; i < sleepersPerLane; i += 1) {
+      railFrameAt(sampler, i * SLEEPER_SPACING, sleeperFrame);
+      sleeperBasis.makeBasis(sleeperFrame.side, sleeperFrame.up, sleeperFrame.forward);
+      sleeperRotation.setFromRotationMatrix(sleeperBasis);
+      matrix.compose(
+        point.copy(sleeperMid).setY(sleeperMid.y - sleeperDrop),
+        sleeperRotation,
+        sleeperScale,
+      );
+      sleepers.setMatrixAt(sleeperIndex, matrix);
+      sleeperIndex += 1;
+    }
     const railMaterial = railMaterials[lane % railMaterials.length]!;
     const laneColour = new Color(LANE_COLOURS[lane % LANE_COLOURS.length]!);
     let baseColours: Float32Array | null = null;
@@ -327,6 +394,18 @@ export function buildRailRaceTrack(
     railBaseColoursByLane[lane] = baseColours!;
     railColourAttributesByLane[lane] = attributes;
   }
+
+  sleepers.count = sleeperIndex;
+  sleepers.instanceMatrix.needsUpdate = true;
+  // Named so `test/procgen/invariants.ts` can measure the real instance buffer.
+  sleepers.name = 'railRace:sleepers';
+  // Not casters, and that is a judgement rather than a saving — the same one
+  // `coaster/Coaster.ts` writes down for its ties. At this spacing a sleeper's
+  // shadow is a fine stripey comb that `VSMShadowMap`'s soft edges turn to mush,
+  // and the eight rail tubes above already cast the shadow that tells a child
+  // how high the ring is. 4800 extra casters would be drawn twice each.
+  sleepers.frustumCulled = false;
+  group.add(sleepers);
 
   // --- the black stretches ---------------------------------------------------
   //
@@ -415,7 +494,11 @@ export function buildRailRaceTrack(
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
 
   // --- the duck bars ---------------------------------------------------------
-  const barCount = layout.bars.length * LANE_COUNT;
+  //
+  // One bar object, one bar — not one object drawn once per lane. See
+  // `hazards.ts`'s `DuckBar.lane`: four bars at one arc distance overlapped by
+  // 3.00 m because a bar is 5.75 m wide and the lanes are 2.75 m apart.
+  const barCount = layout.bars.length;
   const frameMaterial = toonMaterial(PALETTE.buildingTrim);
   // Diagonal yellow-and-black hazard tape (Jim, 1 August 2026) — a canvas
   // texture, not baked into the asset; see `hazardTapeTexture`'s own doc
@@ -492,15 +575,28 @@ export function buildRailRaceTrack(
   let postIndex = 0;
   let barIndex = 0;
   // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
-  // `barSlots[b]` holds the instance ids of that bar across all four lanes.
+  // `barSlots[b]` holds the instance id of bar `b`. A list per bar rather than a
+  // bare number because a bar whose trestle was never placed contributes no
+  // instance at all, and `setAlerts` must skip it rather than shift every id
+  // after it by one.
   const barSlots: number[][] = [];
-  // Every post belongs to one lane's own bar — coloured to match, the same
-  // `LANE_COLOURS` entry as that lane's rails/cart/trestle, so a post reads as
-  // "this lane's post" at a glance instead of every post in the ring looking
-  // identical regardless of which rail it stands over. Per-instance colour on
-  // one shared `InstancedMesh`, the same trick `sleeves` below already uses
-  // for its alert-state colour — one draw call for every post in the ring,
-  // four lane colours and all.
+  /**
+   * Every post takes **its own lane's** colour — the same `LANE_COLOURS` entry
+   * as that lane's rails and cart, read from the one owner rather than a second
+   * palette. Jim, 7 August 2026: "make their legs the colour of the track they
+   * apply to."
+   *
+   * **This is deliberately the opposite decision from the trestles below**, and
+   * the two are not in tension. A trestle carries all four lanes at once, so it
+   * cannot belong to any one of them and Jim asked for it in a single neutral
+   * grey. A duck bar belongs to exactly one lane, and now that bars are spread
+   * around the lap instead of stacked four abreast, its colour is the only thing
+   * that answers "is that one mine?" at fourteen metres a second.
+   *
+   * Per-instance colour on one shared `InstancedMesh`, the same trick `sleeves`
+   * uses for its alert state — one draw call for every post in the ring, four
+   * lane colours and all.
+   */
   const postLaneColour = new Color();
 
   for (const bar of layout.bars) {
@@ -538,35 +634,33 @@ export function buildRailRaceTrack(
     const at = route.wrap(route.startDistance + bar.at);
     route.outwardAt(at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, at, point);
-      const barY = point.y + duckClearance;
-      postLaneColour.set(LANE_COLOURS[lane % LANE_COLOURS.length]!);
+    route.pointAt(bar.lane, at, point);
+    const barY = point.y + duckClearance;
+    postLaneColour.set(LANE_COLOURS[bar.lane % LANE_COLOURS.length]!);
 
-      for (const side of [-1, 1] as const) {
-        position.set(
-          point.x + outward.x * side * barHalfSpan,
-          point.y + postFootY + (postHeight * postStretch) / 2,
-          point.z + outward.z * side * barHalfSpan,
-        );
-        matrix.compose(position, rotation, postScale);
-        posts.setMatrixAt(postIndex, matrix);
-        posts.setColorAt(postIndex, postLaneColour);
-        postIndex += 1;
-      }
-
-      position.set(point.x, barY, point.z);
-      matrix.compose(position, rotation, assetScale);
-      bars.setMatrixAt(barIndex, matrix);
-      // The sleeve's own geometry is already built at this ring's size (see
-      // `sleeveGeometry`), so it must not take the asset scale on top — and
-      // `setAlerts` below decomposes this matrix and re-composes it with
-      // `(1, size, size)`, which assumes exactly that.
-      matrix.compose(position, rotation, one);
-      sleeves.setMatrixAt(barIndex, matrix);
-      slots.push(barIndex);
-      barIndex += 1;
+    for (const side of [-1, 1] as const) {
+      position.set(
+        point.x + outward.x * side * barHalfSpan,
+        point.y + postFootY + (postHeight * postStretch) / 2,
+        point.z + outward.z * side * barHalfSpan,
+      );
+      matrix.compose(position, rotation, postScale);
+      posts.setMatrixAt(postIndex, matrix);
+      posts.setColorAt(postIndex, postLaneColour);
+      postIndex += 1;
     }
+
+    position.set(point.x, barY, point.z);
+    matrix.compose(position, rotation, assetScale);
+    bars.setMatrixAt(barIndex, matrix);
+    // The sleeve's own geometry is already built at this ring's size (see
+    // `sleeveGeometry`), so it must not take the asset scale on top — and
+    // `setAlerts` below decomposes this matrix and re-composes it with
+    // `(1, size, size)`, which assumes exactly that.
+    matrix.compose(position, rotation, one);
+    sleeves.setMatrixAt(barIndex, matrix);
+    slots.push(barIndex);
+    barIndex += 1;
     barSlots.push(slots);
   }
 
@@ -597,95 +691,163 @@ export function buildRailRaceTrack(
   // --- the trestles ----------------------------------------------------------
   const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
 
-  const timberMaterial = toonMaterial(PALETTE.woodLight);
-  const trestleMaterial = toonMaterial(PALETTE.stonePinkLight);
-  keep(timberMaterial);
+  // One colour for the whole support tree — trunk and both generations of
+  // branch — which is Jim's "the supports can all be one colour that
+  // doesn't clash with the track itself, such as grey".
+  //
+  // Grey, but **not** a neutral one. `ART.statueStone`'s own doc comment is the
+  // park's ruling on this: a genuinely desaturated grey next to this palette
+  // "reads as a hole punched in the picture", so the sanctioned grey carries a
+  // nine-point red lift and a whisper of rose. It is comfortably clear of all
+  // four {@link LANE_COLOURS} (pink, sky, lemon, mint), which is the actual
+  // requirement — the old `stonePinkLight` was a pale pink standing under a
+  // pink rail. Light rather than dark for the reason that file gives too: the
+  // toon ramp's darkest band is ~68% brightness, so dark stone goes muddy in
+  // shade and vanishes at night, and these are nine metres up under the deck.
+  const trestleMaterial = toonMaterial(ART.statueStone);
   keep(trestleMaterial);
 
   // `spots` was already computed above, before the duck bars, so their
   // supports could be looked up by grid index.
-  const legGeometry = new CylinderGeometry(0.26, 0.34, 1, 8);
-  const beamGeometry = new BoxGeometry(1, 0.26, 0.42);
-  const dropperGeometry = new CylinderGeometry(0.08, 0.08, 1, 6);
+  //
+  // Three unit-height cylinders rather than one: a branch is thinner than the
+  // trunk it grew from, and a taper baked into the geometry costs nothing,
+  // where faking it with a non-uniform instance scale would squash the
+  // cross-section into an ellipse.
+  const legGeometry = new CylinderGeometry(POST_TOP_RADIUS, POST_FOOT_RADIUS, 1, 8);
+  const lowerBranchGeometry = new CylinderGeometry(
+    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
+    POST_TOP_RADIUS * BRANCH_TAPER,
+    1,
+    8,
+  );
+  const upperBranchGeometry = new CylinderGeometry(
+    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER * BRANCH_TAPER,
+    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
+    1,
+    8,
+  );
   keep(legGeometry);
-  keep(beamGeometry);
-  keep(dropperGeometry);
+  keep(lowerBranchGeometry);
+  keep(upperBranchGeometry);
 
   const legs = new InstancedMesh(legGeometry, trestleMaterial, Math.max(1, spots.length));
-  const beams = new InstancedMesh(beamGeometry, timberMaterial, Math.max(1, spots.length));
-  const droppers = new InstancedMesh(
-    dropperGeometry,
+  // Two lower branches and four upper ones per trestle. Two meshes rather than
+  // one because the two generations are different thicknesses.
+  const lowerBranches = new InstancedMesh(
+    lowerBranchGeometry,
     trestleMaterial,
-    // Two per lane, not one — see the placement loop below.
-    Math.max(1, spots.length * LANE_COUNT * 2),
+    Math.max(1, spots.length * 2),
   );
-  // Half the gauge of *this* ring, matching `sweptRails`' own convention
-  // (`sweptRail.ts` sweeps its pair at `side * gauge * 0.5` along the same
-  // outward axis `outwardAt` gives us), so a dropper lands under a rail rather
-  // than near one.
-  const dropperHalfGauge = railGauge * 0.5;
-  let dropperIndex = 0;
-  // Wide enough to carry the outer rail of the outer lane and the inner rail of
-  // the inner lane, with a little overhang so the beam reads as holding them up.
-  const beamSpan = route.laneSpan + railGauge + 0.8 * ringSizeVsRace;
+  const upperBranches = new InstancedMesh(
+    upperBranchGeometry,
+    trestleMaterial,
+    Math.max(1, spots.length * LANE_COUNT),
+  );
+  let lowerIndex = 0;
+  let upperIndex = 0;
+
+  /**
+   * Stands one unit-height cylinder between two world points.
+   *
+   * Every part of the tree — trunk, both generations of branch — is placed
+   * through here, so a branch cannot end up somewhere its own endpoints do not
+   * say it is. The one formula, used seven times per trestle.
+   */
+  const strut = (mesh: InstancedMesh, index: number, from: Vector3, to: Vector3): void => {
+    const span = to.clone().sub(from);
+    const length = span.length();
+    if (length < 1e-6) return;
+    rotation.setFromUnitVectors(UP, span.divideScalar(length));
+    position.copy(from).lerp(to, 0.5);
+    scale.set(ringSizeVsRace, length, ringSizeVsRace);
+    matrix.compose(position, rotation, scale);
+    mesh.setMatrixAt(index, matrix);
+  };
+
+  // Scratch points for one trestle's tree, reused across spots.
+  const laneTops = Array.from({ length: LANE_COUNT }, () => new Vector3());
+  const forkNodes = [new Vector3(), new Vector3()];
+  const trunkTop = new Vector3();
+  const trunkFoot = new Vector3();
 
   spots.forEach((spot, index) => {
     route.outwardAt(spot.at, outward);
     rotation.setFromUnitVectors(ACROSS, outward);
 
     const ground = terrainHeight(spot.x, spot.z);
-    const legHeight = beamY - ground;
-    position.set(spot.x, ground + legHeight / 2, spot.z);
-    scale.set(ringSizeVsRace, legHeight, ringSizeVsRace);
-    matrix.compose(position, rotation.clone().setFromAxisAngle(UP, 0), scale);
-    legs.setMatrixAt(index, matrix);
+    const postHeight = beamY - ground;
+    const plan = forkPlan(postHeight, route.laneSpacing);
 
-    route.outwardAt(spot.at, outward);
-    rotation.setFromUnitVectors(ACROSS, outward);
-    position.set(spot.x, beamY, spot.z);
-    scale.set(beamSpan, ringSizeVsRace, ringSizeVsRace);
-    matrix.compose(position, rotation, scale);
-    beams.setMatrixAt(index, matrix);
-
-    // One dropper under each *rail*, so two per lane — not one on the lane's
-    // centre line. `RAIL_GAUGE_AT_PARK_SCALE` is 0.62 m, which `RIDE_SCALE`
-    // (2.5) takes to 1.55 m on the race ring: a single centre post stands
-    // three quarters of a metre clear of either rail and visibly holds up
-    // nothing, which is what the family reported on 1 August as "the supports
-    // don't look real". Reported in PR #157; that PR's other half — the ring
-    // flying on four legs — was fixed separately by `trestleSpots`' nudge
-    // search, but this half was never landed.
+    // **A branch top is the middle of the lane it carries** — the whole point of
+    // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
+    // flattened onto a plane. One owner: this is the same call the rails
+    // themselves are swept from, so a branch cannot end up anywhere but on the
+    // track's own centre line.
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      route.pointAt(lane, spot.at, point);
-      const length = point.y - beamY;
-      for (const side of [-1, 1] as const) {
-        position.set(
-          point.x + outward.x * side * dropperHalfGauge,
-          beamY + length / 2,
-          point.z + outward.z * side * dropperHalfGauge,
-        );
-        scale.set(ringSizeVsRace, length, ringSizeVsRace);
-        matrix.compose(position, rotation, scale);
-        droppers.setMatrixAt(dropperIndex, matrix);
-        dropperIndex += 1;
-      }
+      laneTops[lane]!.copy(route.pointAt(lane, spot.at, point));
+    }
+    // A fork node sits under the midpoint of the pair it carries, and the trunk
+    // under the midpoint of the two fork nodes — horizontally derived from the
+    // tops rather than from `spot`, which `trestleSpots` may have nudged
+    // sideways to find clear ground.
+    //
+    // The *height* is measured down from the *lowest* of what each node carries,
+    // never the mean. That is what stops "different branches reach different
+    // heights" turning into a branch lying nearly flat: the lower of a pair then
+    // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
+    // partner — whose lane is higher — is steeper. The solved angle is the
+    // widest the fork can ever open, in one direction only. See
+    // `trestleGeometry.ts` for the measured lane spread (up to 4.38 m across the
+    // four, 3.02 m within one pair) that makes this necessary.
+    for (let half = 0; half < 2; half += 1) {
+      const a = laneTops[half * 2]!;
+      const b = laneTops[half * 2 + 1]!;
+      forkNodes[half]!
+        .copy(a)
+        .lerp(b, 0.5)
+        .setY(Math.min(a.y, b.y) - plan.upper);
+    }
+    trunkTop
+      .copy(forkNodes[0]!)
+      .lerp(forkNodes[1]!, 0.5)
+      .setY(Math.min(forkNodes[0]!.y, forkNodes[1]!.y) - plan.lower);
+    // The foot, though, stands exactly where the clear ground was found — so a
+    // nudged trestle leans very slightly rather than planting itself in whatever
+    // the nudge was avoiding.
+    trunkFoot.set(spot.x, ground, spot.z);
+
+    strut(legs, index, trunkFoot, trunkTop);
+    for (let half = 0; half < 2; half += 1) {
+      strut(lowerBranches, lowerIndex, trunkTop, forkNodes[half]!);
+      lowerIndex += 1;
+    }
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      strut(upperBranches, upperIndex, forkNodes[Math.floor(lane / 2)]!, laneTops[lane]!);
+      upperIndex += 1;
     }
 
     // A post is a thing a child can walk into — on the ring that is actually
     // there while she is on foot. See `RailRaceTrackOptions.registerCollision`.
-    if (options.registerCollision) collision.addCircle(spot.x, spot.z, 0.36 * ringSizeVsRace);
+    //
+    // Taken from the post's own foot radius rather than the 0.36 this was
+    // written as when the leg was half as thick: the collider and the thing you
+    // can see are now the same claim about the same post.
+    if (options.registerCollision) {
+      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS * ringSizeVsRace);
+    }
   });
 
   legs.count = spots.length;
-  beams.count = spots.length;
-  droppers.count = dropperIndex;
+  lowerBranches.count = lowerIndex;
+  upperBranches.count = upperIndex;
   // Named so `test/procgen/invariants.ts` can find the legs in the built scene
   // and measure where they actually landed, rather than re-deriving the rules
   // that placed them.
   legs.name = 'railRace:trestle-legs';
-  beams.name = 'railRace:trestle-beams';
-  droppers.name = 'railRace:trestle-droppers';
-  for (const mesh of [legs, beams, droppers]) {
+  lowerBranches.name = 'railRace:trestle-branches-lower';
+  upperBranches.name = 'railRace:trestle-branches-upper';
+  for (const mesh of [legs, lowerBranches, upperBranches]) {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.castShadow = true;
     group.add(mesh);
@@ -709,9 +871,18 @@ export function buildRailRaceTrack(
       layout.bars.forEach((bar, index) => {
         // How close the player is to this bar, going forwards. Bars behind are
         // calm; the one coming up swells and colours.
+        //
+        // **Only her own lane's bars ever alarm.** Since 7 August a bar crosses
+        // one lane (`hazards.ts`'s `DuckBar.lane`) and `simulate.ts` only bonks
+        // her on her own, so a rival's bar swelling amber as she passes it would
+        // be teaching her to duck for something that cannot touch her — and with
+        // forty bars a lap instead of ten, it would be most of what she sees.
+        // The bar's posts still carry its lane colour, which is what makes the
+        // other three legible as somebody else's.
         let ahead = bar.at - lapOffset;
         if (ahead < -6) ahead += route.length;
-        const closeness = ahead < 0 ? 0 : clamp01(1 - ahead / ALERT_RANGE);
+        const mine = bar.lane === PLAYER_LANE;
+        const closeness = ahead < 0 || !mine ? 0 : clamp01(1 - ahead / ALERT_RANGE);
         tint.copy(CALM).lerp(safe ? SAFE : WARN, closeness);
         const pulse = 1 + Math.sin(elapsed * (safe ? 7 : 13)) * 0.16 * closeness;
         const size = lerp(0.9, 1.3, closeness) * pulse;
@@ -1035,7 +1206,7 @@ const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
  * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
  * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
  * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
- * beside the droppers hanging down from the actual rails (drawn, correctly,
+ * beside the branch tops standing under the actual rails (drawn, correctly,
  * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
  * the trestle loop above), not under them.
  *

@@ -1099,17 +1099,37 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
-    const seen = new Set<string>();
+    const laneProbe = new Vec3();
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
       // The bar's real arc position, read off its own matrix rather than off
-      // the rule that placed it. All four lanes of one bar share it, hence the
-      // dedupe.
+      // the rule that placed it.
       const arch = archRelative(at.x, at.z);
-      const key = arch.toFixed(2);
-      if (seen.has(key)) continue;
-      seen.add(key);
+
+      // **Which lane is it on?** Since 7 August a duck bar crosses one lane
+      // rather than all four (`hazards.ts`'s `DuckBar.lane`), so the rider
+      // simulated below — who runs in `PLAYER_LANE` — only ever meets a quarter
+      // of the ring's bars. This used to dedupe by arc position instead, on the
+      // reasoning that "all four lanes of one bar share it"; that was true then
+      // and is false now, and left in place it made the invariant demand that a
+      // rider be bonked by three other people's bars.
+      //
+      // Decided by measuring the bar against each lane's own centre point at its
+      // own arc distance — not by its distance from the origin, which stopped
+      // meaning anything when #216 made this ring a spline whose radius varies
+      // by 40 m.
+      let onLane = 0;
+      let nearest = Infinity;
+      for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
+        raceRoute.pointAt(lane, raceRoute.wrap(raceRoute.startDistance + arch), laneProbe);
+        const d = Math.hypot(laneProbe.x - at.x, laneProbe.z - at.z);
+        if (d < nearest) {
+          nearest = d;
+          onLane = lane;
+        }
+      }
+      if (onLane !== PLAYER) continue;
       builtBarDistances.push(arch);
     }
     builtBarDistances.sort((a, b) => a - b);

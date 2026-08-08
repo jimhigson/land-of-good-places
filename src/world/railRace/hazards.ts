@@ -1,5 +1,5 @@
 import { Rng } from '../../core/mathUtils';
-import { RIDE_SCALE } from './route';
+import { LANE_COUNT, RIDE_SCALE } from './route';
 
 /**
  * **The two things you have to let go for.**
@@ -184,6 +184,24 @@ export const ALERT_RANGE = 34;
 export interface DuckBar {
   /** Metres along the loop, measured from the start/finish arch. */
   readonly at: number;
+  /**
+   * **Which single lane this bar crosses.**
+   *
+   * A bar used to have no lane, because there was one bar object per position
+   * and `track.ts` drew it four times, once over each lane. Jim, 7 August 2026:
+   * "the head bonk bars all intersect each other". They did, and by 3.00 m: a
+   * bar reaches {@link BAR_HALF_SPAN_AT_PARK_SCALE} (1.15 at park scale, 2.875 m
+   * on the race ring) either side of its lane's centre, while the lanes are only
+   * `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.75 m apart. Four of them at one
+   * arc distance therefore *had* to overlap — it was not a placement accident
+   * but arithmetic, and no amount of nudging one position would have fixed it.
+   *
+   * So a bar now belongs to exactly one lane, and {@link planHazards} spreads a
+   * lane's worth around the lap. Fairness is kept by **count**, not by position:
+   * every lane gets one bar per bar event, so every racer meets the same number
+   * of bars as every other racer *and* the same number as before this change.
+   */
+  readonly lane: number;
 }
 
 /** A blackened stretch of rail. */
@@ -212,8 +230,16 @@ export interface HazardLayout {
 export interface HazardSchedule {
   /** Where the hazards sit on one lap, for the geometry to be built from. */
   readonly lap: HazardLayout;
-  /** Every bar crossing of the whole race, in travelled metres, ascending. */
-  readonly barCrossings: readonly number[];
+  /**
+   * Every bar crossing of the whole race, in travelled metres, ascending —
+   * **indexed by lane**, because since 7 August a bar crosses one lane, not all
+   * four (see {@link DuckBar.lane}).
+   *
+   * A rider walks her own lane's list with her own cursor. Every lane's list is
+   * the same *length*, which is what makes the race fair, and no two are the
+   * same *list*, which is what Jim asked for.
+   */
+  readonly barCrossingsByLane: readonly (readonly number[])[];
   /** Every spark stretch of the whole race, in travelled metres, ascending. */
   readonly sparkStretches: readonly SparkZone[];
 }
@@ -253,6 +279,35 @@ const GAP_MAX = 39;
 /** How long a blackened stretch runs for. */
 const ZONE_MIN = 15;
 const ZONE_MAX = 23;
+
+/**
+ * Where each of a bar event's four lanes sits, in whole trestle spacings from
+ * the event's own cursor position.
+ *
+ * Whole spacings so each lands on its own trestle rather than being snapped onto
+ * a neighbour's. The spread is 48 m, comfortably more than the 5.75 m a bar is
+ * wide, so two bars from the same event cannot touch even before
+ * `usedTrestleIndices` guarantees they are on different slots entirely.
+ *
+ * Symmetric about the event, and wide: 48 m is more than the 24 m gap between
+ * the closest pair of bar events, so consecutive events' bars interleave and the
+ * ring ends up evenly scattered rather than carrying ten clumps of four.
+ *
+ * **Bars may sit over the black stretches.** Jim, 7 August 2026: "it is also ok
+ * for them to be over the black tracks", and again, reversing an intermediate
+ * decision to avoid them: "yes they can be over the black bits". Nothing here
+ * tests against {@link SparkZone} — a bar goes wherever the grid puts it.
+ */
+const BAR_LANE_OFFSETS: readonly number[] = [-2, -1, 1, 2];
+
+/**
+ * The least a single lane's own consecutive bars may be apart, in trestle slots.
+ *
+ * Two slots is 24 m, which is exactly the tightest pair any rider met before the
+ * bars were split per lane — chosen to preserve that measured property rather
+ * than to hit a round number. See {@link snapToTrestleGrid}'s `laneUsed`.
+ */
+const MIN_LANE_GAP_SLOTS = 2;
 
 /**
  * How many trestle grid slots fit round one lap — `track.ts`'s own
@@ -299,15 +354,53 @@ export function trestleGridIndex(at: number, loopLength: number): number {
  * collision would be a worse bug than the few metres' nudge this costs when
  * it actually happens.
  */
-function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<number>): number {
+function snapToTrestleGrid(
+  cursor: number,
+  loopLength: number,
+  usedIndices: Set<number>,
+  /**
+   * The slots a bar may actually use — everything between {@link OPENING_RUN}
+   * and {@link CLOSING_RUN}.
+   *
+   * Needed since the lane spread below started asking for four slots per bar
+   * event rather than one: with 40 bars a lap wanting distinct slots out of 50,
+   * the outward search really does reach the ends of the lap, and a bar landing
+   * in the opening run would quietly undo "the race opens with speed" — a tuned
+   * property, not an incidental one.
+   */
+  window?: { readonly min: number; readonly max: number },
+  /**
+   * Slots already taken **by this bar's own lane**, which the result must keep
+   * {@link MIN_LANE_GAP_SLOTS} clear of.
+   *
+   * Distinctness alone is not enough here. The outward search can hand one lane
+   * two adjacent slots when a busy stretch pushes bars around, and measured
+   * before this existed it did: lanes 0 and 2 each got a pair 12 m apart, where
+   * every rider's tightest pair used to be 24 m. 12 m at racing speed is under a
+   * second, and a rider who has just been bonked is doing 11.4 m/s — so this is
+   * the difference between "duck through two" and an unrecoverable double hit,
+   * which is exactly the tuned property this change was meant not to touch.
+   */
+  laneUsed?: Set<number>,
+): number {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
+  /** Slots apart, the short way round the loop. */
+  const apart = (a: number, b: number): number => {
+    const d = Math.abs(a - b) % count;
+    return Math.min(d, count - d);
+  };
+  const allowed = (index: number): boolean =>
+    !usedIndices.has(index) &&
+    (!window || (index >= window.min && index <= window.max)) &&
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
     for (const candidate of candidates) {
       const index = ((candidate % count) + count) % count;
-      if (!usedIndices.has(index)) {
+      if (allowed(index)) {
         usedIndices.add(index);
+        laneUsed?.add(index);
         return (index / count) * loopLength;
       }
     }
@@ -345,6 +438,20 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
   // Two bars to a zone keeps both fresh and lands about eight hazards a lap.
   let sinceZone = 0;
   const usedTrestleIndices = new Set<number>();
+  const usedByLane = Array.from({ length: LANE_COUNT }, () => new Set<number>());
+  // Which trestle slots a bar may use — the same opening and closing runs the
+  // cursor walk itself respects, expressed on the grid so the outward search in
+  // `snapToTrestleGrid` cannot spill past them.
+  const gridCount = trestleGridCount(loopLength);
+  const barWindow = {
+    min: Math.ceil((OPENING_RUN / loopLength) * gridCount),
+    max: Math.floor(((loopLength - CLOSING_RUN) / loopLength) * gridCount),
+  };
+
+  // **Pass one: the rhythm.** Unchanged from before the bars were split per
+  // lane — the same alternation, the same RNG draws in the same order, so the
+  // zones this produces are bit-identical to the ones the ride was tuned with.
+  const barEvents: number[] = [];
   while (cursor < limit) {
     if (sinceZone >= 2 && cursor + ZONE_MAX < limit) {
       const to = cursor + rng.range(ZONE_MIN, ZONE_MAX);
@@ -352,14 +459,40 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
       cursor = to;
       sinceZone = 0;
     } else {
-      // Snapped onto the trestle grid — see `snapToTrestleGrid` — rather than
-      // left at the raw cursor: a duck bar now always sits at a position
-      // `track.ts` can guarantee a real support for.
-      bars.push({ at: snapToTrestleGrid(cursor, loopLength, usedTrestleIndices) });
+      barEvents.push(cursor);
       sinceZone += 1;
     }
     cursor += rng.range(GAP_MIN, GAP_MAX);
   }
+
+  // **Pass two: one bar per lane per event.**
+  //
+  // Two passes rather than one because a bar's slot now has to be checked
+  // against the *whole* zone list, including zones the old single walk had not
+  // laid down yet when it placed a bar. See {@link clearOfZones}.
+  //
+  // Every lane gets exactly one bar from every event, which is what keeps the
+  // race fair: all four racers meet the same number of bars, and it is the same
+  // number they met when one bar spanned all four lanes. Only *where* changed.
+  //
+  // The lane-to-offset mapping rotates with the event, so it is not lane 0
+  // leading every single time — Jim's "not always at the same spots".
+  barEvents.forEach((at, barEvent) => {
+    for (let slot = 0; slot < LANE_COUNT; slot += 1) {
+      const lane = (slot + barEvent) % LANE_COUNT;
+      bars.push({
+        at: snapToTrestleGrid(
+          at + BAR_LANE_OFFSETS[slot]! * TRESTLE_SPACING,
+          loopLength,
+          usedTrestleIndices,
+          barWindow,
+          usedByLane[lane]!,
+        ),
+        lane,
+      });
+    }
+  });
+  bars.sort((a, b) => a.at - b.at);
 
   // Which of the physical layout above actually makes it into this level's
   // schedule — uniformly across every lap (unlike the old lap-escalation
@@ -367,7 +500,7 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
   // the whole race, not something that changes as the laps go by.
   const includeZones = level >= ZONES_FROM_LEVEL;
   const includeBars = level >= BARS_FROM_LEVEL;
-  const barCrossings: number[] = [];
+  const barCrossingsByLane: number[][] = Array.from({ length: LANE_COUNT }, () => []);
   const sparkStretches: SparkZone[] = [];
   for (let lap = 0; lap < laps; lap += 1) {
     const base = lap * loopLength;
@@ -381,11 +514,11 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
       // that file's duck-bar loop. The two used to be allowed to differ by the
       // supporting trestle's arc nudge, which is how a rider came to fly through
       // a bar and lose her speed a cart's length later.
-      for (const bar of bars) barCrossings.push(base + bar.at);
+      for (const bar of bars) barCrossingsByLane[bar.lane]!.push(base + bar.at);
     }
   }
-  barCrossings.sort((a, b) => a - b);
+  for (const crossings of barCrossingsByLane) crossings.sort((a, b) => a - b);
   sparkStretches.sort((a, b) => a.from - b.from);
 
-  return { lap: { bars, zones }, barCrossings, sparkStretches };
+  return { lap: { bars, zones }, barCrossingsByLane, sparkStretches };
 }

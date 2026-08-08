@@ -111,6 +111,7 @@ import {
 import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
 import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
 import {
+  BONK_SWAY,
   poseRailRaceRider,
   setRiderLegsVisible,
   riderLegsShow,
@@ -1004,6 +1005,16 @@ say('');
    */
   const pose = (
     rider: { duck: number; pump: number; cheer: number },
+    /**
+     * Sideways slide of the rider **relative to the cart**, in world metres.
+     *
+     * `RailRace.poseRider` places her at `cart.position.x + wobble` while the
+     * cart itself stays at `cart.position.x`, so after a bonk she really does
+     * travel across the tub she is sitting in. It is not part of `RiderPose`,
+     * which is exactly why sweeping the pose cube alone said everything was
+     * fine while Jim watched her hands come through.
+     */
+    sway = 0,
   ): { headTop: number; headAt: Vector3; headDepth: number; body: Box3 } => {
     // Seat her **first**, then pose — this order is `poseRider`'s and it is
     // load-bearing. Posing first and seating afterwards would quietly undo any
@@ -1011,7 +1022,7 @@ say('');
     // assertion below would be asserting the line above it rather than the
     // thing it names. That is the hollow-check disease this whole PR keeps
     // running into.
-    player.setRidePose(railPoint.x, seatY, railPoint.z, 0, 0);
+    player.setRidePose(railPoint.x + sway, seatY, railPoint.z, 0, 0);
     player.railRaceRide = rider;
     player.update({
       dt: 1 / 60,
@@ -1287,25 +1298,70 @@ say('');
           .map((hit) => hit.point.x)
           .sort((a, b) => a - b);
         if (xs.length < 2) return null;
-        const half = Math.floor(xs.length / 2);
-        // How far past the tub's surface on this point's own side. Positive is
-        // through it.
+        // How far past the tub's **outer** skin on this point's own side.
+        // Positive is through it, and out in the open air beside the cart —
+        // which is the thing Jim can actually see and the thing he reported.
+        //
+        // First and last crossing, deliberately, rather than the middle pair
+        // this used to take. When the tub was a zero-thickness paper shell a
+        // ray across it hit exactly twice, so the middle pair *was* the outer
+        // skin and the two spellings agreed. Closing the tub into a real solid
+        // (7 August, the see-through corners) gives every ray four crossings,
+        // and the middle pair silently becomes the **inner** skin — which asks
+        // a completely different question: not "does her arm come out of the
+        // cart" but "does her arm touch the wall's material". Her forearm rests
+        // against the inside of the wall and enters it by ~0.017 m, buried
+        // invisibly inside a 0.030 m wall, so the middle-pair spelling failed
+        // this check on an asset where nothing was visibly wrong at all.
+        //
+        // This is not a loosened bar: measured against the outer skin the five
+        // poses report 0.057 / 0.116 / 0.057 / 0.116 / clear — identical to the
+        // numbers this same check gave on the open-shelled asset before the tub
+        // was closed. The guarantee is exactly the one that landed this
+        // morning; it is now just written so that it cannot change meaning the
+        // next time the tub's wall gains or loses thickness.
         return x >= hopperBox.getCenter(new Vector3()).x
-          ? x - xs[half]!
-          : xs[half - 1]! - x;
+          ? x - xs[xs.length - 1]!
+          : xs[0]! - x;
       };
 
       const armReport: string[] = [];
       let worstThrough = -Infinity;
       let worstPose = '';
-      for (const state of [
-        { name: 'seated', rider: { duck: 0, pump: 0, cheer: 0 } },
-        { name: 'duck', rider: { duck: 1, pump: 0, cheer: 0 } },
-        { name: 'boost', rider: { duck: 0, pump: 1, cheer: 0 } },
-        { name: 'duck+boost', rider: { duck: 1, pump: 1, cheer: 0 } },
-        { name: 'celebration', rider: { duck: 0, pump: 0, cheer: cheerPeak } },
-      ]) {
-        pose(state.rider);
+      // **Every pose the ride can produce, swept — not a list of the ones
+      // somebody remembered.**
+      //
+      // `RiderPose` is exactly three numbers, each clamped to 0..1 by
+      // `poseRailRaceRider`, so the set of poses that exist *is* this cube and
+      // enumerating it is a finite job. The hand-written list this replaces held
+      // five named corners, and Jim's 7 August report — "after a head bonk the
+      // players hands clip through the cart" — landed between them: a bonk
+      // drives `duck` through `knockdown(wobble)`, which eases continuously from
+      // 1 back to 0 as the wobble decays, so the knock-down pose is every
+      // intermediate fold and not the `duck: 1` corner that was being checked.
+      const AXIS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+      const sweep: {
+        name: string;
+        rider: { duck: number; pump: number; cheer: number };
+        sway: number;
+      }[] = [];
+      for (const duck of AXIS) {
+        for (const pump of AXIS) {
+          for (const cheer of AXIS) {
+            for (const sway of [-BONK_SWAY, 0, BONK_SWAY]) {
+              sweep.push({
+                name:
+                  `duck ${duck.toFixed(1)} pump ${pump.toFixed(1)} cheer ${cheer.toFixed(1)} ` +
+                  `sway ${sway.toFixed(3)}`,
+                rider: { duck, pump, cheer },
+                sway,
+              });
+            }
+          }
+        }
+      }
+      for (const state of sweep) {
+        pose(state.rider, state.sway);
         let through = -Infinity;
         let beside = 0;
         for (const limb of [player.model.leftArm, player.model.rightArm]) {
@@ -1332,19 +1388,22 @@ say('');
           armReport.push(`${state.name} clear of the tub`);
           continue;
         }
-        armReport.push(`${state.name} ${(-through).toFixed(3)}`);
+        if (through > -Infinity) armReport.push(`${state.name} ${(-through).toFixed(3)}`);
         if (through > worstThrough) {
           worstThrough = through;
           worstPose = state.name;
         }
       }
-      say(`arms in the tub   ${armReport.join('   ')}   (metres of clearance)`);
+      say(`arms in the tub   worst of ${sweep.length} poses: ${worstPose} at ${(-worstThrough).toFixed(3)} m clearance`);
       require(
         worstThrough < 0,
-        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart in the ` +
-          `'${worstPose}' pose — this is Jim's 7 August report. The tub's width and shape are ` +
-          'authored in art/blend/cart.blend and stated by CART_WIDTH_AT_PARK_SCALE in ' +
-          'railRace/route.ts; widen the tub rather than moving her arm.',
+        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart at ` +
+          `'${worstPose}' — this is Jim's 7 August report. ` +
+          '**Do not widen the cart.** CART_WIDTH_AT_PARK_SCALE is 1.10 and that is a measured ' +
+          'ceiling, not a preference: 1.12 fails raceCameraNeverRunsBackwards on seed 5, and ' +
+          'lane spacing derives from it. Change what moves her instead — the pose ' +
+          '(railRace/duckPose.ts) or the bonk sway (BONK_SWAY in the same file), whichever the ' +
+          'name above points at.',
       );
     }
   }
@@ -1997,36 +2056,22 @@ require(
     `nearest rival, which laps them on a ${route.length.toFixed(1)} m lap — the rivals have become ` +
     "scenery. Raise RIVAL_SKILL or the rubber band's SWING_BEHIND.",
 );
-// **The number Jim actually complained about on 7 August, which nothing bounded.**
+// A bound on a *competent* player's mean winning margin used to sit here, and
+// was **deleted on 7 August 2026 at Jim's instruction**: "I never signed off
+// that check as a requirement, if you want me to, tell me what it is, otherwise
+// delete it."
 //
-// Round 8 flagged it and deliberately did not act: *"a competent player now wins
-// by a mean of 461 m on a 1200 m race … that may be too easy … it is his call"*.
-// He rode it and it was: *"the game is now too easy"*. So the competent player
-// gets the same bound the child already had, for the same reason and off the
-// same geometry — **half a lap** — because the thing it protects is the same
-// thing: the camera holds on the winner for the whole celebration, and a field
-// half a ring back is round the far side and not in the picture at all.
+// It was added the same morning by the Overseer rather than asked for by the
+// family. It asserted the mean margin stayed under half a lap, on the theory
+// that a larger margin would leave no rival in frame for the winner's
+// celebration — a staging consequence **nobody had ever looked at**. It is gone
+// rather than loosened, deliberately: a guess about an unobserved problem is not
+// made better by a bigger number. The child-facing bound further down is a
+// different assertion and stays.
 //
-// `mashPerfect` is the closest profile to Jim himself: 6 taps/s, every hazard
-// played. It is the only one of the four that measures *his* race rather than
-// Eleri's, which is why his complaint landed on a build where every child-facing
-// guard was green.
-//
-// **This bound is tight on purpose — 298.0 m against 300.1 m, 0.7% of room — and
-// it must not be slid.** That is safe to ship because the sweep is fully
-// deterministic (24 fixed seeds, fixed dt, seeded RNG), so it cannot flake: the
-// only thing that moves this number is somebody changing the balance, which is
-// exactly when it should speak up. If it fires, the tuning has drifted back
-// towards the procession Jim rejected and the tuning is what to fix.
-const PROCESSION_MARGIN = route.length / 2;
-require(
-  perfectMeanMargin < PROCESSION_MARGIN,
-  `playing well wins by a mean of ${perfectMeanMargin.toFixed(1)} m on a ` +
-    `${(route.length * RACE_LAPS).toFixed(1)} m race — over the ${PROCESSION_MARGIN.toFixed(1)} m ` +
-    'half-lap bound, so the field is round the far side of the ring and out of shot for the whole ' +
-    'finish. This is the "the game is now too easy" complaint, unfixed. Raise RIVAL_SKILL or the ' +
-    "rubber band's SWING_BEHIND in simulate.ts.",
-);
+// `perfectMeanMargin` is still measured and still printed above, because the
+// number is worth seeing; nothing asserts on it.
+
 // **The assertion Jim's complaint needed, and the build did not have.**
 //
 // Every strategy above taps 6 times a second. A child does not, and that single

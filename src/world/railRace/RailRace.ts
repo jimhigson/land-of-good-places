@@ -15,6 +15,7 @@ import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
 import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
 import {
+  BONK_SWAY,
   poseRailRaceRider,
   setRiderLegsVisible,
   riderLegsShow,
@@ -594,7 +595,7 @@ export class RailRace implements GameSystem {
    * The player rides as herself: her own hair colour off the save, exactly as
    * the dodgems do it, so the head at the top of the screen is recognisably
    * hers. Accents come from `LANE_COLOURS`, the same array that paints the
-   * rails, the carts and the droppers, so "my colour" is one fact from the
+   * rails and the carts, so "my colour" is one fact from the
    * rail under her all the way up to the portrait in the corner.
    */
   private racers(): RaceRacer[] {
@@ -1089,7 +1090,10 @@ export class RailRace implements GameSystem {
       pump: rider.bob,
       cheer: this.cheer,
     };
-    const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
+    // Sideways across the tub, bounded by {@link BONK_SWAY} — she must not be
+    // shaken out through the side of the cart she is sitting in.
+    const wobble =
+      rider.wobble > 0 ? Math.sin(rider.wobble * 34) * BONK_SWAY * rider.wobble : 0;
     // Round towards the camera far enough for her face to be worth painting —
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
     // and is set below because `setRidePose` only owns the root.
