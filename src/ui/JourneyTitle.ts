@@ -61,6 +61,35 @@ import { hexToCss } from '../core/palette';
 export const JOURNEY_TITLE_TEXT = 'Land of Good Places';
 
 /**
+ * **The warm half of the park's own rainbow — because the park is the cool half.**
+ *
+ * Jim asked for *"the game's existing colour palette, characters in different
+ * colours"*, so the colours are `ART.rainbow`'s bands and nothing new. But he
+ * also asked for it to stay **readable with no background behind it**, and the
+ * first build used all six bands and was measured against the actual ride: the
+ * green band (`#8fdf8a`) vanishes over grass and treetops, and the blue
+ * (`#8cc9ff`) vanishes over the sky. This lane is grass, trees and sky and
+ * almost nothing else, so two of the six characters in every word were washing
+ * out — on a lettering that by his own instruction has no plate to sit on.
+ *
+ * The fix is a **colour choice, not a scrim**: drop the two bands that are the
+ * same colours as the world behind them and keep the four that are not. Coral,
+ * orange, yellow and violet all sit opposite grass-green and sky-blue, so every
+ * character holds its edge without a shadow, an outline, or anything else that
+ * would amount to the background he said not to have.
+ *
+ * Sixteen characters over four bands means no two neighbours ever share a
+ * colour, which is the property that actually makes it read as "characters in
+ * different colours" rather than four words in four colours.
+ */
+const TITLE_BANDS = [
+  ART.rainbow[0], // coral
+  ART.rainbow[1], // orange
+  ART.rainbow[2], // yellow
+  ART.rainbow[5], // violet
+] as const;
+
+/**
  * Hops per second, per letter.
  *
  * Slow enough to read a nineteen-character title through, brisk enough to be a
@@ -119,14 +148,13 @@ export class JourneyTitle {
         const letter = document.createElement('span');
         letter.className = 'journey-title__letter';
         letter.textContent = character;
-        // **Colour from `ART.rainbow`, the park's own six bands.** Not a new
-        // palette, and not the six CSS custom properties that mirror it either:
-        // those are the same colours, but read from CSS a check cannot see them,
-        // and "each character a different colour" is one of the things that has
-        // to be provable. One owner, `art/style/artPalette.ts`; `style.css`'s
-        // `--lgp-rainbow-*` are that same list, and the HIGHLIGHT rule depends
-        // on them agreeing.
-        const band = ART.rainbow[this.letters.length % ART.rainbow.length];
+        // **Colour from the park's own rainbow** — see `TITLE_BANDS` for which
+        // of its bands and why. Not a new palette, and not the CSS custom
+        // properties that mirror it either: those are the same colours, but read
+        // from CSS a check cannot see them, and "each character a different
+        // colour" is one of the things that has to be provable. One owner,
+        // `art/style/artPalette.ts`.
+        const band = TITLE_BANDS[this.letters.length % TITLE_BANDS.length];
         if (band !== undefined) letter.style.color = hexToCss(band);
         wordEl.append(letter);
         this.letters.push(letter);
