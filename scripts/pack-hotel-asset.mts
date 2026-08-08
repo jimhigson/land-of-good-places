@@ -71,6 +71,46 @@ packGlbAsset({
    * deliberately not much: the next thing that needs the budget raised should
    * have to say so out loud, here, with its own arithmetic.
    *
+   * **8 August, later that day, 640 KB → 720 KB.** Saying so out loud, with the
+   * arithmetic, because the paragraph above asked whoever came next to.
+   *
+   * Jim, on the imperial composition's renders: *"Raise both landing and
+   * Mezzanine."* The reference photograph's subject is the see-through arch
+   * under the landing, and a landing at 1.6 m has 1.6 m of headroom under it,
+   * which is a shelf. The arch now has to clear the tallest child the park can
+   * build (`kid.ts`'s `TALLEST_CHILD_HEIGHT`, 2.97 m) plus the 0.40 m her hat
+   * transiently pops by (`train/clearance.ts`'s `RIDER_HEADROOM`), so the
+   * landing goes to 3.84 m — twelve risers instead of five.
+   *
+   * **The cost is all in the two curves and it is a tread count, not a style.**
+   * Measured, not estimated: 16,912 triangles and 619,536 bytes before, 19,464
+   * and 713,212 after — +2,552 triangles for +93,676 bytes, which is 36.7 bytes
+   * a triangle and the same rate this file has always run at.
+   *
+   * | what | triangles |
+   * | --- | --- |
+   * | each curved flight, 5 treads over 45° → 12 over 90° | 1,280 → 2,556 (×2) |
+   * | the straight flight | 1,532, unchanged |
+   *
+   * A curve costs ~205 triangles a tread (its strings, rail, coping and
+   * balusters are all sampled per metre of run, so the whole flight scales with
+   * its length), and seven more treads twice over is the entire bill. Nothing
+   * was made more detailed; the same joinery is simply longer.
+   *
+   * **What was not taken, and why.** The obvious 98 KB is the authored mirror —
+   * `stair-left-*` is a full second copy of `stair-right-*`. The paragraph below
+   * already calls it "a cheap one to revisit if this file ever gets tight", and
+   * this is that moment; it is still not taken, because what it buys is
+   * `assert_stairs_mirror` comparing two meshes vertex for vertex at build time,
+   * and a runtime flip cannot be asserted at all. Culled-flight bugs of exactly
+   * that kind have cost this project a fortnight before (CLAUDE.md's hood face).
+   * The genuinely cheap 62 KB is still `tower-windows`, and it is still shipped,
+   * QA'd art.
+   *
+   * 696.5 KB against 720 KB leaves ~23 KB of headroom — about 640 triangles,
+   * the same deliberate tightness as before, and the same request to whoever
+   * needs it next.
+   *
    * Where the bytes are, so a future change knows what it is trading:
    *
    * - The file costs a flat **~36 bytes per triangle** and always has. Nearly
@@ -88,7 +128,7 @@ packGlbAsset({
    *   part, which is the trade the whole no-materials-in-the-glb design
    *   refuses.
    */
-  budgetBytes: 640 * 1024,
+  budgetBytes: 720 * 1024,
   docLines: [
     'The Land Hotel, as authored geometry: the crystal tower, the furniture',
     'that goes inside it, the lift, the suite’s television, and the lobby’s',

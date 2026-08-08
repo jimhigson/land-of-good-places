@@ -14,6 +14,15 @@ import {
 } from '../style/materials';
 import { visibleBounds, visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
+import { TALLEST_CHILD_HEIGHT } from './kid';
+// The one import in this file that points at `world/`, and it is deliberate.
+// `RIDER_HEADROOM` is not a number about trains: it is the measured amount a
+// child's hat transiently overshoots her own height when `WornHat.update` pops
+// it in at 1.35×, which is the same fact whether she is riding under a bridge
+// or walking under this staircase's landing. One owner; everyone else asks
+// (CLAUDE.md, "two definitions of one thing"). It is a leaf module of three
+// floats and a sum — it drags in no three.js and nothing of the railway.
+import { RIDER_HEADROOM } from '../../world/train/clearance';
 
 /**
  * **The Land Hotel** — a crystal tower and everything that furnishes it.
@@ -942,21 +951,178 @@ export function createGameBoy(): ScreenedHandle {
 // ===========================================================================
 
 /**
- * The stair's arc, and **this file is not its owner** —
- * `src/world/hotel/layout.ts`'s `LOBBY.mezzanine` is.
- *
- * They are re-exported here because the asset had to be *built* to them and
- * the game has to *place* it on them, and a number that two files must agree
- * about is the single most reliable bug in this repo (CLAUDE.md, "two
- * definitions of one thing"). So: `layout.ts` decides, `hotel_build.py` builds
- * to it, and everything that places, walks or collides with the staircase asks
- * these constants rather than re-typing the literals. If `layout.ts` ever
- * moves the arc, `hotel_build.py` asserts its way to a loud failure instead of
- * shipping a staircase whose treads are not where a child's feet go.
+ * 0.32 m — about half the game's `BUILDING_STEP_UP` (0.62), so every tread is
+ * walkable up *and* back down, and the **owner** of both flights' tread counts
+ * rather than a number derived from them. It is the constraint; the heights
+ * give way to it.
  */
-export const STAIR_INNER_RADIUS = 2.4;
+export const STAIR_RISER = 0.32;
+/**
+ * **Clear air the arch under the landing has to leave a child**, in metres:
+ * 3.37 — and the number the whole composition's height is worked back from.
+ *
+ * Jim, 8 August 2026, on the first cut of the imperial composition, whose
+ * landing sat at 1.6 m: *"Raise both landing and Mezzanine."* The reference
+ * photograph's subject is the see-through arch under the landing, and 1.6 m of
+ * headroom is not an arch, it is a shelf. So the arch survives and the
+ * composition rises until the headroom is honest.
+ *
+ * Both terms are asked for, never typed:
+ *
+ * - `TALLEST_CHILD_HEIGHT` (2.97) is every hair style crossed with every hat,
+ *   measured on real models and re-measured by `test/procgen/invariants.ts` on
+ *   every seed. `KID_HEIGHT` (2.12) is the *default* style; an arch built to it
+ *   would clear the average child and hit the tall ones, which is exactly the
+ *   mistake `world/train/clearance.ts` was written to undo over the railway.
+ * - `RIDER_HEADROOM` (0.40) is the measured 0.346 m a hat overshoots by while
+ *   `WornHat.update` pops it in at 1.35×, rounded up to leave daylight. A child
+ *   who changes hat while standing under the landing really does reach that
+ *   high.
+ *
+ * `art/blend/hotel_build.py` reads both constants straight out of these source
+ * files at asset-build time and derives the same heights, so a taller hat moves
+ * the geometry and this module together or fails the build.
+ */
+export const ARCH_CLEAR = TALLEST_CHILD_HEIGHT + RIDER_HEADROOM;
+/**
+ * How far the landing's edge moulding hangs down its face, metres.
+ *
+ * Up here with the heights rather than with the rest of the nosing because it
+ * is load-bearing for them: twice this is {@link LANDING_SLAB_MIN}. Deliberately
+ * shallower than any slab this park builds — the moulding finishes the *edge*,
+ * and the face below it stays the room's own colour, so nothing here has to
+ * agree with a thickness chosen in `Hotel.ts`.
+ */
+export const LANDING_NOSE_DROP = 0.15;
+/**
+ * **The shallowest landing the room may build**, in metres: 0.30.
+ *
+ * The landing slab is the room's geometry, but its *depth* is this asset's
+ * business, because the arch's headroom is {@link LANDING_HEIGHT} minus it. So
+ * the asset states a range and the room picks inside it.
+ *
+ * The floor of the range is an art rule with a number behind it: a moulding that
+ * finishes an edge needs at least as much plain face below it as it occupies, or
+ * it stops being a nosing on a slab and becomes the whole edge. The nosing hangs
+ * {@link LANDING_NOSE_DROP}; twice that is the thinnest slab it still reads on.
+ */
+export const LANDING_SLAB_MIN = 2 * LANDING_NOSE_DROP;
+/**
+ * Treads in **one curved flight** — twelve, up from five.
+ *
+ * The first whole number of risers that lifts a landing, structure and all,
+ * clear over a hatted child's head: `ceil((ARCH_CLEAR + LANDING_SLAB_MIN) /
+ * STAIR_RISER)`. `ceil` and not `round`, because a landing half a riser too low
+ * is a landing you duck under.
+ */
+export const STAIR_TREADS = Math.ceil((ARCH_CLEAR + LANDING_SLAB_MIN) / STAIR_RISER - 1e-9);
+/**
+ * The intermediate floor the two curves reach and the wide straight flight
+ * leaves — Jim, 8 August 2026: *"Make the curved stairs reach an intermediate
+ * floor that then turns into a single, wide straight staircase up to the true
+ * level."*
+ *
+ * **3.84 m**, up from the 1.6 m of the first cut, and no longer a proportion of
+ * anything: it is {@link STAIR_TREADS} risers, which is a measurement of a child
+ * pushed up onto the next whole step. @see ARCH_CLEAR
+ */
+export const LANDING_HEIGHT = STAIR_TREADS * STAIR_RISER;
+/**
+ * **The deepest landing the room may build**, in metres: 0.47.
+ *
+ * The other end of {@link LANDING_SLAB_MIN}'s range, and the one with teeth:
+ * past this the arch stops clearing a child in a party hat, and Jim's ruling is
+ * undone by a slab thickness nobody thought was load-bearing. **0.40 m is the
+ * recommended build** — solid-looking, and 7 cm clear of the limit.
+ */
+export const LANDING_SLAB_MAX = LANDING_HEIGHT - ARCH_CLEAR;
+/**
+ * Treads in the wide straight flight — **the one number in the composition's
+ * heights that is still a choice**.
+ *
+ * Five treads at {@link STRAIGHT_WALK_WIDTH} wide is the ceremonial finish Jim
+ * approved on 8 August: a flight much wider than it is long, which is what the
+ * top of an imperial stair is. It is bounded from below by grandeur and from
+ * above by the room — every extra tread raises the gallery by a riser and the
+ * lobby's wall with it, and at five the composition already stands 5.44 m tall.
+ */
+export const STRAIGHT_TREADS = 5;
+/** What the straight flight climbs off the landing: 1.60 m. */
+export const STRAIGHT_RISE = STRAIGHT_TREADS * STAIR_RISER;
+/**
+ * Floor to the **true level**: 5.44 m — `layout.ts`'s `LOBBY_MEZZANINE_Y`, the
+ * gallery deck. No single flight climbs it; the composition does, in two.
+ *
+ * **The arrow turned round on 8 August.** This used to be given by `layout.ts`
+ * (3.2) with the landing derived from it; now the landing is derived from a
+ * child and the gallery is wherever the straight flight lands. The room has to
+ * follow, because the room does not know how tall a child in a party hat is and
+ * this asset does. `hotel_build.py`'s `assert_flights_meet` measures the same
+ * sum off the two emitted meshes.
+ */
+export const STAIR_RISE = LANDING_HEIGHT + STRAIGHT_RISE;
+/**
+ * **The shortest the lobby's two far walls may now be**, in metres: 8.81.
+ *
+ * A child standing on the gallery deck wants the same air over her head that the
+ * arch below gives her, or she is a hat sticking out of the top of her own
+ * hotel. `LOBBY.wallHeight` is 6.4 today and has to come up with the
+ * composition; `nearWallHeight` does not, because those two walls are low so the
+ * camera can see in and nobody stands on them.
+ */
+export const LOBBY_MIN_WALL_HEIGHT = STAIR_RISE + ARCH_CLEAR;
+/**
+ * A quarter turn — **back to 90°**, having been 45° for one day.
+ *
+ * The going is the invariant: 0.5184 m of tread at mid radius against a 0.32 m
+ * riser is the 31.7° rake Jim approved, and the waist, the nosing chamfer, the
+ * string easing and the baluster pitch are all cut for it. A flight that climbs
+ * further must therefore get *longer*, and a longer arc can be bought either by
+ * sweeping further or by sweeping the same angle further out.
+ *
+ * 90° wins, so the radius is what gives way. It is the only sweep at which a
+ * flight's foot is square to the room **and** its top square to the landing —
+ * at 45° the first cut had to choose, and past 90° the feet swing back outward
+ * and the two flights splay (measured: a 108° pair is 1.4 m wider overall than a
+ * 90° pair framing the same archway). @see STAIR_RADIUS_PER_TREAD
+ */
+export const STAIR_SWEEP = Math.PI / 2;
+/**
+ * **The approved pitch, written as a radius**: how much mid radius one tread
+ * buys on a quarter turn, in metres.
+ *
+ * A curved flight's going is `midRadius × sweep ÷ treads`, so on a quarter turn
+ * it is `STAIR_RADIUS_PER_TREAD × π/2` — 0.5184 m **whatever the tread count**,
+ * which is the whole reason the ratio is written down instead of the radius. The
+ * shipped 7 August flight was ten treads on a 3.3 m mid radius, and 3.3/10 is
+ * this number: a twelve-tread flight on 3.96 m is the same staircase, longer, to
+ * the last micrometre of tread depth.
+ */
+export const STAIR_RADIUS_PER_TREAD = 0.33;
+/** The centre line of the walking surface: 3.96 m, up from 3.3. */
+export const STAIR_MID_RADIUS = STAIR_RADIUS_PER_TREAD * STAIR_TREADS;
+/**
+ * How wide one curved flight is between its strings, metres.
+ *
+ * Unmoved by the 8 August rise, and the reason {@link STRAIGHT_WALK_WIDTH} is
+ * still 3.6: two of these arrive at the landing and one flight twice as wide
+ * leaves. The curves got longer and further out, not wider.
+ */
+export const STAIR_WALK_WIDTH = 1.8;
+/**
+ * The arc the game lays its walkable `ArcTread`s and two flank colliders over.
+ *
+ * **`src/world/hotel/layout.ts` used to own these and no longer can.** The radius
+ * is a function of the tread count, the tread count is a function of how tall a
+ * child in a party hat is, and `layout.ts` is a data file that knows about
+ * neither. So `hotel_build.py` owns them, this module re-exports them for the
+ * placing code, and `LOBBY.mezzanine.stair` has to be brought to them — until it
+ * is, the game builds walk surfaces for a flight that is not there, which
+ * `npm run check:hotel` says out loud.
+ */
+export const STAIR_INNER_RADIUS = STAIR_MID_RADIUS - STAIR_WALK_WIDTH / 2;
 /** @see STAIR_INNER_RADIUS */
-export const STAIR_OUTER_RADIUS = 4.2;
+export const STAIR_OUTER_RADIUS = STAIR_MID_RADIUS + STAIR_WALK_WIDTH / 2;
 /**
  * The radius the handrail — and therefore each flight's **two newels** — stands
  * on: over the middle of the outer string, 0.07 m outside the walking edge.
@@ -968,57 +1134,7 @@ export const STAIR_OUTER_RADIUS = 4.2;
  * spacing the two arcs by `C = STAIR_RAIL_RADIUS + n · BRIDGE_RAIL_TILE / 2` is
  * what makes that run a whole number of tiles.
  */
-export const STAIR_RAIL_RADIUS = 4.27;
-/**
- * An eighth of a turn — 45°, **halved on 8 August 2026** along with the rise.
- *
- * A curve now climbs only as far as the landing, which is five treads rather
- * than ten, and five treads spread over the old quarter turn would be 1.04 m
- * deep at mid radius: a 17° pitch, which is a ramp with occasional steps. The
- * tread depth is the invariant and the arc is what gave way, so the going comes
- * out at exactly the 0.518 m it has always been and the flight is the same
- * staircase, half as long. @see STAIR_INNER_RADIUS
- */
-export const STAIR_SWEEP = Math.PI / 4;
-/**
- * Floor to the **true level** — `layout.ts`'s `LOBBY_MEZZANINE_Y`, the gallery
- * deck. No single flight climbs all of it any more: the two curves reach
- * {@link LANDING_HEIGHT} and {@link createStraightStaircase} finishes the job.
- */
-export const STAIR_RISE = 3.2;
-/**
- * 0.32 m — half the game's `BUILDING_STEP_UP`, so every tread is walkable, and
- * the **owner** of both flights' tread counts rather than a number derived from
- * them. It is the constraint; the heights give way to it.
- */
-export const STAIR_RISER = 0.32;
-/**
- * The intermediate floor the two curves reach and the wide straight flight
- * leaves — Jim, 8 August 2026: *"Make the curved stairs reach an intermediate
- * floor that then turns into a single, wide straight staircase up to the true
- * level."*
- *
- * Half of {@link STAIR_RISE}, so the composition splits evenly into five treads
- * of curve and five of straight, and the landing reads as a proper mid-level
- * rather than as a wide step near one end.
- */
-export const LANDING_HEIGHT = 1.6;
-/**
- * What the straight flight has left to climb.
- *
- * **Derived, and that is the point.** "The curves reach the landing and the
- * straight flight finishes the job" is *one* relationship; writing it as one
- * subtraction is the only way it cannot come apart. `hotel_build.py`'s
- * `assert_flights_meet` then measures the same relationship off the two emitted
- * meshes, because a derivation proves the arithmetic and only a measurement
- * proves the geometry.
- */
-export const STRAIGHT_RISE = STAIR_RISE - LANDING_HEIGHT;
-/**
- * Treads in **a curved flight** — five, derived from the riser and the landing
- * rather than typed, so it cannot disagree with either. @see STAIR_INNER_RADIUS
- */
-export const STAIR_TREADS = Math.round(LANDING_HEIGHT / STAIR_RISER);
+export const STAIR_RAIL_RADIUS = 4.93;
 /**
  * Handrail centre-line above the tread it stands over, in metres.
  *
@@ -1090,7 +1206,7 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
 }
 
 /**
- * **One curved flight of the lobby's grand staircase**: a 45° sweep of five
+ * **One curved flight of the lobby's grand staircase**: a quarter turn of twelve
  * treads from the floor to the intermediate landing, between two closed crystal
  * strings, with a balustrade carrying a continuous swept handrail, a newel at
  * each end, and a matching moulded coping along the inner string.
@@ -1102,7 +1218,15 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  * up to the true level."* So: two of these, mirrored, from the floor to
  * {@link LANDING_HEIGHT}, and one {@link createStraightStaircase} from the
  * landing to {@link STAIR_RISE}. An imperial composition, and the reason this
- * factory's `rise` is 1.6 m rather than the 3.2 m it used to be.
+ * factory's `rise` is the landing rather than the gallery.
+ *
+ * ## …and it climbs to a landing you can walk under
+ *
+ * Jim, later the same day: *"Raise both landing and Mezzanine."* The landing is
+ * now {@link ARCH_CLEAR} plus a slab above the floor rather than half the rise,
+ * which is twelve treads instead of five, which is why this flight is a quarter
+ * turn on a 3.96 m mid radius rather than an eighth of one on 3.3. The going and
+ * the rake did not move a micrometre; nothing else about it is what it was.
  *
  * ## Its origin is the arc's centre, not the foot of the flight
  *
@@ -1131,8 +1255,8 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  *
  * | `handedness` | climbing, you turn | bottom tread | top tread | game yaw |
  * | --- | --- | --- | --- | --- |
- * | `'right'` | right | `+Z` from the origin | swings toward `−X` | 0 → `+π/4` |
- * | `'left'` | left | `+Z` from the origin (**the same place**) | toward `+X` | 0 → `−π/4` |
+ * | `'right'` | right | `+Z` from the origin | swings toward `−X` | 0 → `+π/2` |
+ * | `'left'` | left | `+Z` from the origin (**the same place**) | toward `+X` | 0 → `−π/2` |
  *
  * Both are authored at **`fromAngle = 0`** in the yaw the rest of the game
  * measures (`Mezzanine`: 0 is +Z, turning toward −X). A room that wants a
@@ -1141,33 +1265,32 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  *
  * ## Placing the imperial composition
  *
- * Put the two origins at `(±C, Zc)`, **`'right'` on the `+X` side** and
- * `'left'` on `−X`, and give each flight `fromAngle = ±(π/2 − STAIR_SWEEP)` —
- * `+π/4` for the right hand, `−π/4` for the left, i.e.
- * `root.rotation.y = ∓π/4`. That quarter-turn's worth of rotation is what lands
- * both flights' **top treads square to the landing**, running along X with the
- * climber heading `−Z`: the tread that meets the landing is the one join in the
- * composition that must not arrive at an angle, and with a 45° sweep you can
- * have the foot square or the top square, not both. A floor takes a stair at
- * any angle; a landing does not.
+ * Put the two origins at `(±C, Zc)`, **`'right'` on the `+X` side** and `'left'`
+ * on `−X`, both at **`fromAngle = 0`, i.e. `root.rotation.y = 0`**. No rotation
+ * at all, and that is the quarter turn's dividend: at 90° a flight's foot is
+ * square to the room *and* its top square to the landing. The tread that meets
+ * the landing is the one join in the composition that must not arrive at an
+ * angle (a floor takes a stair at any angle; a landing does not), and the 45°
+ * cut of 8 August had to buy that with a rotation which then stood both feet
+ * diagonally in the room.
  *
- * With that rotation:
+ * So, with the origins at `(±C, Zc)`:
  *
- * - each top tread spans `x` from `±(C − STAIR_OUTER_RADIUS)` to
+ * - each **top tread** spans `x` from `±(C − STAIR_OUTER_RADIUS)` to
  *   `±(C − STAIR_INNER_RADIUS)` at `z = Zc`, so the two tops face each other
  *   across a clear `2·(C − STAIR_OUTER_RADIUS)`;
- * - the feet stand side by side toward the entrance at
- *   `z = Zc + r·cos(π/4)`, `x = ±(C − r·sin(π/4))` — closer together than the
- *   old quarter-turn put them, and angled inward;
- * - the landing spans that middle gap **and** both top treads: `x` from
+ * - each **foot** stands at `x = ±C`, `z` from `Zc + STAIR_INNER_RADIUS` to
+ *   `Zc + STAIR_OUTER_RADIUS` — square on, facing the entrance;
+ * - the landing spans the middle gap **and** both top treads: `x` from
  *   `−(C − STAIR_INNER_RADIUS)` to `+(C − STAIR_INNER_RADIUS)`, at
  *   {@link LANDING_HEIGHT}.
  *
- * Pick `C` so the middle gap is a whole number of {@link BRIDGE_RAIL_TILE}s —
- * `C = STAIR_OUTER_RADIUS + n·BRIDGE_RAIL_TILE/2` — because that gap is the
- * landing's front balustrade and a part-tile is the one thing the tile cannot
- * do. At `C = 7.26` it is 6.12 m, six tiles, and the composition is 9.72 m
- * across; at `C = 6.75`, 5.10 m and five.
+ * Pick `C` so the run between the two **top newels** is a whole number of
+ * {@link BRIDGE_RAIL_TILE}s — `C = STAIR_RAIL_RADIUS + n·BRIDGE_RAIL_TILE/2` —
+ * because that run is the landing's front balustrade and a part-tile is the one
+ * thing the tile cannot do. At `n = 6`, `C = 7.99`: a 6.12 m balustrade, a 6.0 m
+ * clear archway between the two flights' masses, and a composition 16.25 m
+ * across and 5.12 m deep.
  *
  * ## The mirror is authored, not scaled
  *
@@ -1182,10 +1305,10 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  *
  * ## What it was built to
  *
- * `LANDING_HEIGHT` = 1.6 m. Five treads of a 0.32 m riser, inner radius 2.4 m,
- * outer 4.2 m, a 45° sweep — **identical for both hands**, so anything derived
- * from the constants (walk slices, flank colliders, guest keep-outs) is derived
- * the same way for either. The measured top is ~2.75 m — the top newel's
+ * `LANDING_HEIGHT` = 3.84 m. Twelve treads of a 0.32 m riser, inner radius
+ * 3.06 m, outer 4.86 m, a 90° sweep — **identical for both hands**, so anything
+ * derived from the constants (walk slices, flank colliders, guest keep-outs) is
+ * derived the same way for either. The measured top is ~4.99 m — the top newel's
  * finial, standing on the landing, not a walkable height; the *walkable* top is
  * `rise`, and the true level is another `STRAIGHT_RISE` above it.
  *
@@ -1227,18 +1350,15 @@ export function createGrandStaircase(
 }
 
 /**
- * Tread depth, metres — **the curved flight's own going, at its mid radius**.
+ * Tread depth, metres — **the curved flight's own going, at its mid radius**:
+ * 0.5184, and the same number it was at ten treads and at five.
  *
  * Derived rather than chosen: one pitch through the whole composition means a
  * child's stride does not change at the landing, and it means the straight
  * flight's rake, its soffit, its string easing and its handrail all come out at
- * the 32° the curve was tuned to.
+ * the 31.7° the curve was tuned to. @see STAIR_RADIUS_PER_TREAD
  */
-export const STRAIGHT_GOING =
-  (((STAIR_INNER_RADIUS + STAIR_OUTER_RADIUS) / 2) * STAIR_SWEEP) / STAIR_TREADS;
-
-/** Treads in the straight flight — five, derived like the curve's. */
-export const STRAIGHT_TREADS = Math.round(STRAIGHT_RISE / STAIR_RISER);
+export const STRAIGHT_GOING = (STAIR_MID_RADIUS * STAIR_SWEEP) / STAIR_TREADS;
 
 /**
  * How far the straight flight travels in plan, metres.
@@ -1253,7 +1373,7 @@ export const STRAIGHT_RUN = STRAIGHT_GOING * STRAIGHT_TREADS;
  * gathered into one**, which is what makes it the grand one. Two 1.8 m flights
  * arrive at the landing and 3.6 m leaves it.
  */
-export const STRAIGHT_WALK_WIDTH = 2 * (STAIR_OUTER_RADIUS - STAIR_INNER_RADIUS);
+export const STRAIGHT_WALK_WIDTH = 2 * STAIR_WALK_WIDTH;
 
 export interface StraightStaircaseHandle extends AssetHandle {
   /** @see STRAIGHT_WALK_WIDTH */
@@ -1525,14 +1645,10 @@ export const LANDING_NOSE_PROUD = 0.008;
 /** How far it overhangs the face below, metres — the shadow line. */
 export const LANDING_NOSE_REACH = 0.062;
 
-/**
- * How far down the face it hangs, metres.
- *
- * Deliberately shallower than any platform this park builds: the moulding
- * finishes the *edge* and the face below it stays the room's own colour, so
- * nothing here has to agree with a slab thickness chosen in `Hotel.ts`.
- */
-export const LANDING_NOSE_DROP = 0.15;
+// `LANDING_NOSE_DROP` is declared up with the composition's heights, because
+// since 8 August it is load-bearing for them: twice it is `LANDING_SLAB_MIN`,
+// the thinnest landing this moulding still reads on, which is one of the two
+// numbers the arch's headroom is worked out from.
 
 export interface LandingNosingHandle extends AssetHandle {
   /** Tile at exactly this pitch — {@link BRIDGE_RAIL_TILE}. */
