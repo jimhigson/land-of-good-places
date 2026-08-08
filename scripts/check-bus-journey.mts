@@ -19,7 +19,7 @@
  * has been solved.
  */
 import './headless-canvas.mjs';
-import { Box3, Frustum, Matrix4, Quaternion, Vector3 } from 'three';
+import { Box3, Frustum, Matrix4, type Object3D, Quaternion, Vector3 } from 'three';
 import {
   BusJourney,
   JOURNEY_SECONDS,
@@ -27,6 +27,7 @@ import {
   cameraPoseAt,
   laneHeight,
 } from '../src/world/entrance/BusJourney.ts';
+import { CAT_BUS_SEAT_COUNT } from '../src/world/entrance/catBus.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
 import { CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
 
@@ -213,6 +214,165 @@ if (busRoot) {
         'gone flat, so the tilt above is being asserted against nothing',
     );
   }
+}
+
+// ------------------------------------------------------- the view from inside
+//
+// Jim, 7 August 2026: *"we would like to be able to see inside the bus, switch
+// between the view inside of the children riding it and looking excited and the
+// outside."*
+//
+// Three separate claims, and each one passes on a build where the others are
+// broken, so each is measured on its own:
+//
+// 1. the camera really goes **inside the bus** — not "a second camera exists";
+// 2. **children are in shot** from there, projected against the real frustum;
+// 3. they are **moving**, because a smile painted on a body that never stirs is
+//    a photograph of excitement rather than excitement. `setExpression('happy')`
+//    on twelve motionless children would satisfy any check that counted faces.
+{
+  const inside = new BusJourney({
+    skin: 0xffd9be,
+    hair: 0x8b5a3c,
+    outfit: 0xff9fc4,
+    hairStyle: 'bunches',
+  });
+
+  // The toggle itself, before anything is driven.
+  said.push(`the ride opens ${inside.view}`);
+  if (inside.view !== 'outside') {
+    fouls.push(`the ride opens ${inside.view} the bus — it should open on the bus, from outside`);
+  }
+  if (inside.toggleView() !== 'inside' || inside.view !== 'inside') {
+    fouls.push('toggling the view does not put the camera inside the bus');
+  }
+  if (inside.toggleView() !== 'outside') {
+    fouls.push('toggling the view a second time does not bring the camera back outside');
+  }
+  inside.setView('inside');
+
+  const insideBus = inside.scene.getObjectByName('cat-bus');
+  const seats: Object3D[] = [];
+  inside.scene.traverse((object) => {
+    if (object.name.startsWith('cat-bus-seat-')) seats.push(object);
+  });
+
+  // A point on each seated child that moves when they do — the crown of the
+  // head. Found in the scene rather than through an accessor added for this,
+  // so a child who stops being drawn stops being measured.
+  const heads: Object3D[] = [];
+  for (const seat of seats) {
+    let skull: Object3D | null = null;
+    seat.traverse((object) => {
+      if (!skull && object.name === 'skull') skull = object;
+    });
+    if (skull) heads.push(skull);
+  }
+  said.push(`${seats.length} seats, ${heads.length} of them with a child's head in`);
+  if (heads.length < CAT_BUS_SEAT_COUNT) {
+    fouls.push(
+      `only ${heads.length} of the ${CAT_BUS_SEAT_COUNT} seats have a child in them — there is not much ` +
+        'to look at inside the bus',
+    );
+  }
+
+  const previous = new Map<Object3D, Vector3>();
+  const here = new Vector3();
+  let headMotion = 0;
+  let framesCameraOutsideTheBus = 0;
+  let fewestChildrenInShot = Infinity;
+  let insideFrames = 0;
+
+  for (let t = 0; t <= JOURNEY_SECONDS + 1e-9; t += STEP) {
+    inside.update(STEP);
+    insideFrames += 1;
+    inside.camera.aspect = 16 / 10;
+    inside.camera.updateProjectionMatrix();
+    inside.camera.updateMatrixWorld(true);
+    inside.scene.updateMatrixWorld(true);
+
+    // **The camera is in the bus.** Its own box, every frame, because the bus
+    // climbs and pitches and a camera pinned to a world coordinate would fall
+    // out of the back of it on the first hill.
+    if (insideBus) {
+      box.setFromObject(insideBus);
+      if (!box.containsPoint(inside.camera.position)) framesCameraOutsideTheBus += 1;
+    }
+
+    projection.multiplyMatrices(inside.camera.projectionMatrix, inside.camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projection);
+
+    let inShot = 0;
+    for (const head of heads) {
+      head.getWorldPosition(here);
+      if (frustum.containsPoint(here)) inShot += 1;
+      const was = previous.get(head);
+      if (was) headMotion += was.distanceTo(here);
+      previous.set(head, here.clone());
+    }
+    fewestChildrenInShot = Math.min(fewestChildrenInShot, inShot);
+  }
+
+  said.push(
+    `from inside, at worst ${fewestChildrenInShot} children were in frame; their heads moved ` +
+      `${headMotion.toFixed(1)} m between them over the ride`,
+  );
+
+  if (framesCameraOutsideTheBus > 0) {
+    fouls.push(
+      `on ${framesCameraOutsideTheBus} of ${insideFrames} frames the "inside" camera is outside the ` +
+        "bus's own bounding box — it is not inside anything",
+    );
+  }
+
+  // Enough of them to be a busload rather than one child in a seat.
+  if (fewestChildrenInShot < 4) {
+    fouls.push(
+      `looking inside the bus, at one point only ${fewestChildrenInShot} of the ${heads.length} children ` +
+        'are in frame — the camera is not pointed at the children',
+    );
+  }
+
+  // **Moving.** The bus itself travels 220 m, and the heads are carried along
+  // with it, so the *total* head movement is dominated by the journey and says
+  // nothing. What is measured instead is movement **relative to the seat they
+  // are sitting in**, which is only ever the child's own bouncing and waving.
+  let bounce = 0;
+  const seatSpace = new Vector3();
+  // A further four seconds, measuring each head against its own seat's frame.
+  const localPrevious = new Map<Object3D, Vector3>();
+  for (let i = 0; i < 240; i += 1) {
+    inside.update(STEP);
+    inside.scene.updateMatrixWorld(true);
+    for (const head of heads) {
+      const seat = seats.find((candidate) => isDescendant(head, candidate));
+      if (!seat) continue;
+      head.getWorldPosition(seatSpace);
+      seat.worldToLocal(seatSpace);
+      const was = localPrevious.get(head);
+      if (was) bounce += was.distanceTo(seatSpace);
+      localPrevious.set(head, seatSpace.clone());
+    }
+  }
+  said.push(`the children moved ${bounce.toFixed(2)} m in their own seats over four seconds of riding`);
+  if (bounce < 0.5) {
+    fouls.push(
+      `over four seconds the ${heads.length} children moved ${bounce.toFixed(2)} m in their seats between ` +
+        'them — they are sitting perfectly still, which is not "looking excited"',
+    );
+  }
+
+  inside.dispose();
+}
+
+/** Is `node` somewhere under `ancestor`? */
+function isDescendant(node: Object3D, ancestor: Object3D): boolean {
+  let at: Object3D | null = node;
+  while (at) {
+    if (at === ancestor) return true;
+    at = at.parent;
+  }
+  return false;
 }
 
 // --------------------------------------------------- the shot the cut lands on

@@ -18,6 +18,7 @@ import { arrivalIsDue } from './world/entrance/arrivalFlag';
 import { JourneyDirector } from './world/entrance/journeyDirector';
 import { GENERATION_BUDGET_MS, ParkGeneration } from './boot/parkGeneration';
 import { JourneySkip } from './ui/JourneySkip';
+import { JourneyView } from './ui/JourneyView';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
@@ -387,6 +388,11 @@ function rideInThenPlay(
   const director = new JourneyDirector();
   const generation = new ParkGeneration();
   const skip = new JourneySkip();
+  // On screen from the first frame — there is nothing for it to wait for, and a
+  // control that turns up partway through a twenty-second ride is one a child
+  // finds at second nineteen. See `JourneyView`.
+  const viewToggle = new JourneyView();
+  viewToggle.onPress(() => viewToggle.setView(journey.toggleView()));
   // Same spirit as `window.game` below: something to poke from a console, and
   // the only practical way to drive a capture. Headless WebGL runs the park at
   // one or two frames a second and `Loop` clamps `dt` to `MAX_FRAME_DELTA`, so
@@ -405,10 +411,14 @@ function rideInThenPlay(
           generationReady: () => boolean;
           framesWorked: () => number;
           parkReady: () => boolean;
+          view: () => string;
+          toggleView: () => void;
         };
       }
     ).journey = {
       ride: journey,
+      view: () => journey.view,
+      toggleView: () => viewToggle.setView(journey.toggleView()),
       skipOffered: () => director.skipOffered,
       stage: () => generation.stage,
       generationReady: () => generation.ready,
@@ -423,6 +433,7 @@ function rideInThenPlay(
     done = true;
     loop.stop();
     skip.dispose();
+    viewToggle.dispose();
     journey.dispose();
     handOver();
   };
@@ -441,7 +452,10 @@ function rideInThenPlay(
     // **The bus idles rather than lying.** Once the ride has run its course
     // with no park behind it, the road stops moving and the bus waits at the
     // kerb; `JourneyDirector.overrunning` is the one place that is decided.
-    journey.update(director.overrunning ? 0 : tick.dt);
+    // The bus stops; the children on it keep bouncing. `travelling` is the one
+    // place that distinction is made — driving both off a single clamped clock
+    // froze twelve passengers mid-bounce.
+    journey.update(tick.dt, !director.overrunning);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
     journey.render(renderer, engine.width, engine.height);
@@ -462,6 +476,7 @@ function rideInThenPlay(
       if (problem) {
         loop.stop();
         skip.dispose();
+        viewToggle.dispose();
         journey.dispose();
         showBootFailure(problem);
         return;

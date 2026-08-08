@@ -24,7 +24,7 @@ import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { createRandom, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
-import { createKid, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
+import { createKid, KID_HEIGHT, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
 import {
@@ -226,6 +226,15 @@ const ORBIT = {
  * top-left. The distance is derived from the bus's own length rather than
  * chosen, so a bus that grows is still fully in shot.
  */
+/**
+ * How far ahead of the front row the inside camera sits.
+ *
+ * Enough that the front row is whole in the frame rather than a shoulder
+ * filling it, and short enough that the back row is still a face rather than a
+ * dot: this is a small bus and the whole shot is twelve children in it.
+ */
+const INSIDE_CAMERA_AHEAD = 2.1;
+
 const CAMERA_BACK = 26;
 const CAMERA_LIFT = 11;
 const CAMERA_FOV = 42;
@@ -260,6 +269,15 @@ function rollLook(rng: () => number): JourneyRider {
   };
 }
 
+/**
+ * Where the ride is watched from.
+ *
+ * Jim, 7 August 2026: *"we would like to be able to see inside the bus, switch
+ * between the view inside of the children riding it and looking excited and the
+ * outside."*
+ */
+export type JourneyView = 'outside' | 'inside';
+
 export class BusJourney {
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
@@ -270,7 +288,39 @@ export class BusJourney {
   private readonly lane = new Group();
 
   private elapsedSeconds = 0;
+  /**
+   * **A clock that never stops, even when the bus does.**
+   *
+   * Separate from {@link elapsedSeconds}, which is *distance down the lane* and
+   * is deliberately held still in two cases: once the ride has run its course,
+   * and while `JourneyDirector.overrunning` idles the bus at the kerb waiting
+   * for a park that is taking too long.
+   *
+   * Driving the children's excitement off the travel clock meant that in both of
+   * those cases twelve children froze mid-bounce — arms up, motionless — which
+   * is a worse thing to be looking at than twelve still children would have
+   * been. Found by `check:bus-journey`, which measured 0.00 m of movement in
+   * four seconds and said so; nothing about the code looked wrong.
+   */
+  private animationSeconds = 0;
   private busZ = 0;
+
+  private viewMode: JourneyView = 'outside';
+  /**
+   * The inside camera's eye and aim, **in the bus's own local space**.
+   *
+   * Computed once, off the seats that were actually built, and then carried
+   * into world space through the bus's own matrix every frame. That is the
+   * whole reason they are stored local: the bus climbs, dips and pitches, and a
+   * camera inside it has to do all three exactly with it. A world-space pose
+   * recomputed from a formula each frame is a second definition of where the
+   * bus is, and this repo has paid for that shape repeatedly — most recently
+   * with a face patch that had to track a surface it had left.
+   */
+  private readonly insideEye = new Vector3();
+  private readonly insideAim = new Vector3();
+  private readonly worldEye = new Vector3();
+  private readonly worldAim = new Vector3();
 
   constructor(rider: JourneyRider) {
     this.scene.name = 'cat-bus-journey';
@@ -311,12 +361,60 @@ export class BusJourney {
     this.bus.driverSeat.add(this.driver.root);
 
     this.seatRiders(rider);
+    this.aimTheInsideCamera();
     this.place(0);
+  }
+
+  /**
+   * Where the inside camera sits, **measured off the seats that were built**.
+   *
+   * Down the aisle at `x = 0` — which is also what keeps it clear of the driver,
+   * who sits off-centre at `-seatX(0)` — just ahead of the front row and at a
+   * seated child's head height, looking back down the bus. So what fills the
+   * frame is rows of faces, which is what Jim asked to be able to look at.
+   *
+   * Asking `bus.seats` rather than restating `catBus.ts`'s seat plan matters
+   * here more than usual: that plan has already been re-derived once, when a
+   * child turned out to be 1.53 m across rather than the 0.6 m somebody had
+   * imagined, and every number that had been copied out of it was wrong
+   * afterwards.
+   */
+  private aimTheInsideCamera(): void {
+    const seats = this.bus.seats;
+    let front = -Infinity;
+    let back = Infinity;
+    let floor = 0;
+    for (const seat of seats) {
+      front = Math.max(front, seat.position.z);
+      back = Math.min(back, seat.position.z);
+      floor = seat.position.y;
+    }
+    // A seated child's head sits a standing height above their seat's origin —
+    // the rig has no knees, which `catBus.ts` explains where it sizes the cabin.
+    const eyeHeight = floor + KID_HEIGHT * 0.82;
+    this.insideEye.set(0, eyeHeight, front + INSIDE_CAMERA_AHEAD);
+    // Aimed a little low, at the back of the bus: heads, not ceiling.
+    this.insideAim.set(0, eyeHeight - 0.35, back);
   }
 
   /** Seconds since the ride began — the clock everything else here reads. */
   get elapsed(): number {
     return this.elapsedSeconds;
+  }
+
+  /** Whether the ride is being watched from outside the bus or in it. */
+  get view(): JourneyView {
+    return this.viewMode;
+  }
+
+  setView(view: JourneyView): void {
+    this.viewMode = view;
+  }
+
+  /** Swaps inside for outside. What the button on screen does. */
+  toggleView(): JourneyView {
+    this.viewMode = this.viewMode === 'outside' ? 'inside' : 'outside';
+    return this.viewMode;
   }
 
   /** True once the ride has run its course. */
@@ -687,12 +785,36 @@ export class BusJourney {
    * building a bus, which is the only way to assert that the ride ends on the
    * park's own bearing.
    */
-  update(dt: number): void {
+  /**
+   * One frame of the ride.
+   *
+   * `travelling` is false while the bus idles at the kerb — the ride has run its
+   * course and the park has not finished generating (`JourneyDirector`). The
+   * road stops moving; **the children do not**, because a bus of frozen
+   * passengers is what a stopped clock actually looks like on screen.
+   */
+  update(dt: number, travelling = true): void {
     if (dt <= 0) return;
-    this.elapsedSeconds = Math.min(JOURNEY_SECONDS, this.elapsedSeconds + dt);
+    this.animationSeconds += dt;
+    if (travelling) {
+      this.elapsedSeconds = Math.min(JOURNEY_SECONDS, this.elapsedSeconds + dt);
+    }
     this.busZ = -this.elapsedSeconds * BUS_SPEED;
     this.place(this.busZ);
-    this.bus.animate(dt, this.elapsedSeconds, BUS_SPEED);
+    this.bus.animate(dt, this.animationSeconds, travelling ? BUS_SPEED : 0);
+    this.exciteRiders(this.animationSeconds);
+
+    if (this.viewMode === 'inside') {
+      // Through the bus's own matrix, so the camera climbs, dips and pitches
+      // with it exactly — you feel the hills from inside, which is half of why
+      // being able to sit in there is worth having.
+      this.bus.root.updateMatrixWorld(true);
+      this.worldEye.copy(this.insideEye).applyMatrix4(this.bus.root.matrixWorld);
+      this.worldAim.copy(this.insideAim).applyMatrix4(this.bus.root.matrixWorld);
+      this.camera.position.copy(this.worldEye);
+      this.camera.lookAt(this.worldAim);
+      return;
+    }
 
     const pose = cameraPoseAt(this.elapsedSeconds);
     const height = laneHeight(this.busZ);
@@ -702,6 +824,42 @@ export class BusJourney {
       this.busZ + Math.cos(pose.yaw) * pose.horizontal,
     );
     this.camera.lookAt(0, height + 2.2, this.busZ);
+  }
+
+  /**
+   * **The children, riding and looking excited.**
+   *
+   * Jim asked for the inside view to show *"the children riding it and looking
+   * excited"*, and a `setExpression('happy')` on a body that never moves is a
+   * photograph of a smile rather than excitement. So they bounce in their seats,
+   * throw their arms up, and look about at the countryside going past — each on
+   * their own phase, so twelve children are not one child twelve times.
+   *
+   * Driven every frame **whatever the view is**, not only from inside. They are
+   * visible through the glazing from outside too — that glazing was the whole
+   * point of the previous round — and a bus full of children who freeze the
+   * moment you step out of it is a worse bug than one full of still children.
+   */
+  private exciteRiders(elapsed: number): void {
+    for (let i = 0; i < this.riders.length; i += 1) {
+      const kid = this.riders[i];
+      if (!kid) continue;
+      const phase = i * 1.31;
+      // Bouncing on the seat. `body` is the rig's own bob target.
+      kid.body.position.y = Math.abs(Math.sin(elapsed * 3.2 + phase)) * 0.13;
+      // Looking out at what is going past, and up at each other.
+      kid.head.rotation.y = Math.sin(elapsed * 0.9 + phase) * 0.55;
+      kid.head.rotation.z = Math.sin(elapsed * 1.7 + phase) * 0.09;
+      if (kid.limbs) {
+        // Arms up: negative `rotation.x` raises an arm, as the ferris wheel's
+        // excited riders do it.
+        const lift = -1.35 + Math.sin(elapsed * 6.5 + phase) * 0.32;
+        kid.limbs.leftArm.rotation.x = lift;
+        kid.limbs.rightArm.rotation.x = lift + Math.sin(elapsed * 7.4 + phase) * 0.3;
+        kid.limbs.leftArm.rotation.z = 0.34;
+        kid.limbs.rightArm.rotation.z = -0.34;
+      }
+    }
   }
 
   render(renderer: WebGLRenderer, width: number, height: number): void {
