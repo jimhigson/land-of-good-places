@@ -1127,6 +1127,29 @@ export class Hotel implements GameSystem {
       player.teleportTo(room.originX, 0, room.originZ, Math.PI);
       this.controls.snapCamera();
     }
+
+    // The same net for the one pocket that is not a fall: inside a gallery's
+    // solid mass at ground level — where a pre-fix save may still restore a
+    // player, invisible and pinned (QA, 8 Aug 2026). The stair's slices make
+    // it unreachable on foot now, but a save is not on foot.
+    if (this.inside && !this.changingSpace) {
+      const room = this.currentRoom();
+      const mez = room?.mezzanine;
+      // Threshold well below the flight's own crossing heights: the top
+      // treads enter the deck rectangle at 2.88–3.2 m and a climber's damped
+      // y can lag them by most of a metre — 1.5 m is unreachable on the
+      // stair but still far above the pocket's floor. (First cut used
+      // `height − 0.4` and teleported a legitimate climber off the top
+      // treads, measured live.)
+      if (room && mez && player.position.y < 1.5) {
+        const lx = player.position.x - room.originX;
+        const lz = player.position.z - room.originZ;
+        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) {
+          player.teleportTo(room.originX, 0, room.originZ, Math.PI);
+          this.controls.snapCamera();
+        }
+      }
+    }
   }
 
   // ------------------------------------------------------ changing space
@@ -2251,17 +2274,34 @@ export class Hotel implements GameSystem {
       const top = flight.treadTop(i);
       const angle = (from + to) / 2;
 
-      this.surfaces.addPlatform(
-        new ArcTread(
-          top,
-          room.originX + stair.centreX,
-          room.originZ + stair.centreZ,
-          flight.innerRadius,
-          flight.outerRadius,
-          from,
-          to,
-        ),
-      );
+      // Four walk-surface slices per visual tread, ramping up to its top —
+      // NOT one flat wedge at the tread's own height. A flat 0.32 riser is
+      // walkable in theory (half of `BUILDING_STEP_UP`) but not in practice
+      // at speed: `Player` *damps* onto the ground (time constant 0.04 s),
+      // so her sampled `y` lags the surface under her, and two treads in
+      // the lag has eaten the whole step-up ceiling — `sample` stops
+      // offering the next tread, the floor snaps back to the slab, and she
+      // walks clean under the flight at y = 0 into the gallery's hollow.
+      // Found live (8 Aug 2026): teleporting ONTO any tread stood her at
+      // its height while walking up never engaged, which is exactly the
+      // stand/walk split a lag bug produces. Slices of a quarter-riser keep
+      // the lag far inside the ceiling at sprint; her feet still finish on
+      // the tread's true top, and the transient shin-dip on a nose is
+      // hidden by the same damp that caused all this.
+      const slices = 4;
+      for (let slice = 0; slice < slices; slice += 1) {
+        this.surfaces.addPlatform(
+          new ArcTread(
+            top - (flight.riser * (slices - 1 - slice)) / slices,
+            room.originX + stair.centreX,
+            room.originZ + stair.centreZ,
+            flight.innerRadius,
+            flight.outerRadius,
+            from + ((to - from) * slice) / slices,
+            from + ((to - from) * (slice + 1)) / slices,
+          ),
+        );
+      }
 
       // …and a keep-out over the same tread, so no guest is handed a waypoint
       // on the staircase. The flanks are already colliders, so a waypoint in

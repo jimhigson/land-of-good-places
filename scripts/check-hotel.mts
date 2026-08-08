@@ -48,14 +48,21 @@
  * (2); making a bed solid fails (3); widening a declared window past its
  * doorway fails (4); removing the lock wall fails (5) with the march 3.00 m
  * past the plane; disabling the backstop fails (6) with the player still at
- * −6 m.
+ * −6 m; registering one flat walk-wedge per stair tread instead of
+ * quarter-riser slices fails (14) with a 0.64 m single-stride rise.
  */
 
 import './headless-canvas.mjs';
 import { Box3, Mesh, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
-import { NPC_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
+import {
+  NPC_RADIUS,
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  PLAYER_SPRINT_MULTIPLIER,
+} from '../src/core/constants.ts';
+import { damp } from '../src/core/mathUtils.ts';
 import {
   ROOMS,
   BREAKFAST,
@@ -768,6 +775,123 @@ if (fallenPlayer.position.y < 0) {
       'the yours-door zone offers no actions — Selection.selectable filters it out, so its ' +
         '"get your key at reception!" sign can never appear',
     );
+  }
+}
+
+// --------------------------------- 14. the stair climbs at walking pace too
+//
+// Probe 6 asks each tread "are you standable?" from the tread below — an
+// instant query, which is exactly how it stayed green while no real player
+// could climb the thing (QA, 8 Aug 2026). A real player's y *damps* onto the
+// ground (`Player`'s 0.04 s time constant), so at speed her sampled height
+// lags the surface, and once the lag eats the step-up ceiling the next tread
+// is never offered: the floor snaps to the slab and she walks under the
+// flight into the gallery's hollow. This probe walks the way she walks — a
+// damped y, sprint pace — along the mid-radius spiral, and straight west
+// across the fan on QA's exact trap line. The stair's quarter-riser slices
+// are what make both end well; registering one flat wedge per tread fails
+// this with the spiral march finishing on the slab.
+{
+  const mez = LOBBY.mezzanine;
+  if (mez) {
+    const { stair } = mez;
+    const midR = (stair.innerRadius + stair.outerRadius) / 2;
+    const surfaces = world.building.surfaces;
+    const dt = 1 / 60;
+    // Player's own ground damp: `damp(y, groundY, 0.04, dt)` — the real
+    // half-life form from mathUtils, imported rather than re-derived,
+    // because an approximation of it is exactly how the first draft of this
+    // probe stayed green against geometry a real player could not climb.
+    const GROUND_DAMP_HALF_LIFE = 0.04;
+    const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
+
+    const dampWalk = (points: (s: number) => [number, number], metres: number): number => {
+      let y = 0;
+      const steps = Math.ceil(metres / (sprint * dt));
+      for (let s = 0; s <= steps; s += 1) {
+        const [x, z] = points(s / steps);
+        const floor = surfaces.sample(x, z, y);
+        y = damp(y, floor, GROUND_DAMP_HALF_LIFE, dt);
+        if (y - floor > 0.5) y = floor;
+      }
+      return y;
+    };
+
+    const arcLength = (stair.toAngle - stair.fromAngle) * midR;
+    const spiralEnd = dampWalk((t) => {
+      const a = stair.fromAngle + (stair.toAngle - stair.fromAngle) * t;
+      return [
+        LOBBY.originX + stair.centreX - Math.sin(a) * midR,
+        LOBBY.originZ + stair.centreZ + Math.cos(a) * midR,
+      ];
+    }, arcLength);
+    if (Math.abs(spiralEnd - mez.height) > 0.45) {
+      problems.push(
+        `sprinting up the stair's own spiral ends at y=${spiralEnd.toFixed(2)} m, not the deck's ` +
+          `${mez.height.toFixed(2)} m — the flight defeats the ground damp and cannot be climbed`,
+      );
+    }
+
+    // The damp-lag rule, asserted on the surface itself. The march above is
+    // a smoke test — an idealised walker turns out to climb geometry a real
+    // one cannot (measured live, 8 Aug 2026: teleporting onto any tread
+    // stood her at its height while walking up never rose above 0.00), so
+    // the discriminating assertion is geometric: no sprint-pace stride up
+    // the flight may present a full riser at once. The slices present a
+    // quarter-riser each (measured 0.16 a stride here); the one flat wedge
+    // per tread this replaced presents 0.32–0.64 a stride, which the ground
+    // damp demonstrably cannot follow. The boundary sits between the two at
+    // the riser's own height minus a shim. The scan stops where it enters
+    // the deck rectangle: the deck's edge is a legitimate step *onto* the
+    // deck from the top treads, and probe 6 owns the deck.
+    let worstStepRise = 0;
+    const stride = sprint * dt;
+    for (const r of [stair.innerRadius + 0.2, midR, stair.outerRadius - 0.2]) {
+      let floorHere = 0;
+      for (let along = stride; along < arcLength; along += stride) {
+        const a = stair.fromAngle + along / r;
+        if (a > stair.toAngle) break;
+        const x = LOBBY.originX + stair.centreX - Math.sin(a) * r;
+        const z = LOBBY.originZ + stair.centreZ + Math.cos(a) * r;
+        const lx = x - LOBBY.originX;
+        const lz = z - LOBBY.originZ;
+        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) break;
+        const next = surfaces.sample(x, z, floorHere + 0.01);
+        worstStepRise = Math.max(worstStepRise, next - floorHere);
+        floorHere = next;
+      }
+    }
+    const riser = mez.height / stair.treads;
+    const stepBudget = riser - 0.02;
+    if (worstStepRise > stepBudget) {
+      problems.push(
+        `one sprint-pace step up the stair raises the floor ${worstStepRise.toFixed(2)} m — ` +
+          `a whole riser (${riser.toFixed(2)} m) or more at once, which is exactly the ` +
+          `geometry the ground damp was measured unable to climb`,
+      );
+    }
+
+    // QA's trap line: pushing due west across the fan from the open floor,
+    // with the real collision world deflecting the body as it goes — the
+    // strings and balustrade are what turn "across the fan" into "up the
+    // fan", so a kinematic line without them walks through the outer string
+    // and proves nothing. Pre-fix this ends at y = 0 inside the gallery's
+    // hollow; post-fix the body is carried up the flight as it slides.
+    const trap = new Vector3(LOBBY.originX + 7.9, 0, LOBBY.originZ - 5.4);
+    let trapY = 0;
+    for (let s = 0; s < Math.ceil(6.0 / (sprint * dt)); s += 1) {
+      trap.x -= sprint * dt;
+      collision.resolve(trap, PLAYER_RADIUS, trapY, dt);
+      const floor = surfaces.sample(trap.x, trap.z, trapY);
+      trapY = damp(trapY, floor, GROUND_DAMP_HALF_LIFE, dt);
+      if (trapY - floor > 0.5) trapY = floor;
+    }
+    if (trapY < 0.9) {
+      problems.push(
+        `pushing west across the stair fan leaves a player at y=${trapY.toFixed(2)} m — ` +
+          `under the flight at ground level, on the way into the gallery's hollow`,
+      );
+    }
   }
 }
 
