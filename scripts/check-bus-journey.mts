@@ -915,12 +915,21 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
      * **Does any glazing reach below the window sill?**
      *
      * Jim: *"the windows of the bus go all the way down to the floor of the bus
-     * […] windows should only start about halfway up the sides"*. The sill is
-     * now derived from a seated child's chin rather than picked, so this asserts
-     * the thing that stays true whatever that derivation yields: **no pane of
-     * glass may start below a seated child's seat.** A window whose bottom edge
-     * is under the cushion she is sitting on is a window down to the floor,
-     * which is the fault.
+     * […] windows should only start about halfway up the sides"*.
+     *
+     * **Measured against the children who are sitting there, not against a
+     * height.** The first version of this asserted that no glass reached below
+     * the seat cushions — and it *passed with the old floor-to-ceiling
+     * windows*, because the old sill sat 0.076 m above the cushion. A guard that
+     * cannot fail on the exact geometry it was written for is the failure this
+     * feature has shipped three times, and it took a mutation to find it here
+     * too.
+     *
+     * So the rule is the design intent stated against built objects: **the solid
+     * panel below the glass covers the children's bodies, and the glass shows
+     * their faces**. The lowest chin in the bus is found from the built skulls;
+     * glass starting below that is glass running down past the children, which
+     * is what "all the way down to the floor" means from outside.
      *
      * Found by material rather than by name — the glazing is the only
      * transparent material on the bus — so a pane added later is measured too
@@ -949,16 +958,34 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
       const sideBottom = lowerShell ? boxIn(lowerShell, toBus).min.y : bodywork.min.y;
       const sideTop = upperShell ? boxIn(upperShell, toBus).max.y : CAT_BUS_CABIN_CEILING_Y;
       const upTheSide = ((glass.min.y - sideBottom) / (sideTop - sideBottom)) * 100;
+
+      // The lowest chin aboard: the underside of a built, seated child's skull.
+      let lowestChin = Infinity;
+      for (const seat of seatNodes) {
+        let skull: Object3D | null = null;
+        seat.traverse((node) => {
+          if (!skull && node.name === 'skull') skull = node;
+        });
+        if (skull) lowestChin = Math.min(lowestChin, boxIn(skull, toBus).min.y);
+      }
+
+      /** A little slack, so a sill grazing a chin is not a foul. */
+      const CHIN_SLACK = 0.05;
+
       said.push(
-        `glazing starts at ${glass.min.y.toFixed(3)} m, ${upTheSide.toFixed(0)}% up the cabin side, ` +
-          `${(glass.min.y - CAT_BUS_SEAT_Y).toFixed(3)} m above the seat cushions (${panes} panes)`,
+        `glazing starts at ${glass.min.y.toFixed(3)} m, ${upTheSide.toFixed(0)}% up the bus's side, ` +
+          `${(glass.min.y - CAT_BUS_SEAT_Y).toFixed(3)} m above the seat cushions and ` +
+          `${(lowestChin - glass.min.y).toFixed(3)} m below the lowest chin aboard (${panes} panes)`,
       );
-      if (glass.min.y < CAT_BUS_SEAT_Y) {
+
+      if (!Number.isFinite(lowestChin)) {
+        fouls.push('found no children in the seats to measure the glazing against');
+      } else if (glass.min.y < lowestChin - CHIN_SLACK) {
         fouls.push(
           `glazing reaches down to ${glass.min.y.toFixed(3)} m, which is ` +
-            `${(CAT_BUS_SEAT_Y - glass.min.y).toFixed(3)} m below the seat cushions at ` +
-            `${CAT_BUS_SEAT_Y.toFixed(3)} — the windows run down past the children rather than ` +
-            'starting up the side of the bus',
+            `${(lowestChin - glass.min.y).toFixed(3)} m below the lowest seated child's chin at ` +
+            `${lowestChin.toFixed(3)} — the windows run down past the children's bodies to the floor ` +
+            `instead of starting up the side of the bus (they start ${upTheSide.toFixed(0)}% up it)`,
         );
       }
     }
