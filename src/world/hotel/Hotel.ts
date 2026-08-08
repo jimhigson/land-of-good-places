@@ -2040,10 +2040,19 @@ export class Hotel implements GameSystem {
     });
 
     // --- the deck ------------------------------------------------------------
+    // **The slab abuts the two faces instead of running through them.** Slab,
+    // faces and the stair's last tread all used to top out at exactly
+    // `height` with overlapping footprints — four authors of one plane, which
+    // is a per-pixel coin toss for the renderer: Jim, live play, 7 Aug 2026,
+    // *"the mezzanine level flickers like crazy on the floor due to two faces
+    // overlapping."* The slab now stops where the face boxes begin (each face
+    // is 0.5 m thick, centred on the deck's edge line), so the faces' own
+    // tops finish the rim as a trim-coloured border and no two boxes share a
+    // pixel of the deck plane. check:hotel probe 10 measures exactly this.
     const slab = solid(
-      new Mesh(new BoxGeometry(width, 0.4, depth), interiorMaterial(room.theme.floor)),
+      new Mesh(new BoxGeometry(width - 0.25, 0.4, depth - 0.25), interiorMaterial(room.theme.floor)),
     );
-    slab.position.set(midX, height - 0.2, midZ);
+    slab.position.set(midX - 0.125, height - 0.2, midZ - 0.125);
     shell.add(slab);
     this.surfaces.addPlatform(
       new Plate(
@@ -2066,10 +2075,15 @@ export class Hotel implements GameSystem {
       : [[minX, maxX]];
     for (const [a, b] of frontSpans) {
       if (b - a < 0.05) continue;
+      // The last span carries the outer corner (its box runs half a thickness
+      // past `maxX`), so the side face below can stop short of this box and
+      // abut it rather than pass through it — two boxes sharing the corner's
+      // top pixels was one of probe 10's measured flickers.
+      const bx = b === maxX ? maxX + 0.25 : b;
       const face = solid(
-        new Mesh(new BoxGeometry(b - a, height, 0.5), interiorMaterial(room.theme.trim)),
+        new Mesh(new BoxGeometry(bx - a, height, 0.5), interiorMaterial(room.theme.trim)),
       );
-      face.position.set((a + b) / 2, height / 2, maxZ);
+      face.position.set((a + bx) / 2, height / 2, maxZ);
       shell.add(face);
       this.collision.addWall(
         room.originX + a,
@@ -2079,10 +2093,12 @@ export class Hotel implements GameSystem {
         0.3,
       );
     }
+    // Stops at the front face's south edge (maxZ − 0.25) — abutting, never
+    // interpenetrating. See probe 10 and the slab comment above.
     const side = solid(
-      new Mesh(new BoxGeometry(0.5, height, depth), interiorMaterial(room.theme.trim)),
+      new Mesh(new BoxGeometry(0.5, height, depth - 0.25), interiorMaterial(room.theme.trim)),
     );
-    side.position.set(maxX, height / 2, midZ);
+    side.position.set(maxX, height / 2, midZ - 0.125);
     shell.add(side);
     this.collision.addWall(
       room.originX + maxX,
@@ -2100,6 +2116,12 @@ export class Hotel implements GameSystem {
       const from = stair.fromAngle + (sweep * i) / stair.treads;
       const to = stair.fromAngle + (sweep * (i + 1)) / stair.treads;
       const top = (height * (i + 1)) / stair.treads;
+      // The last tread's *visual* box stops two centimetres shy of the deck:
+      // its top used to land at exactly `height`, coplanar with the slab it
+      // overlaps past the mouth — probe 10's biggest measured flicker. The
+      // walk surface below keeps the true `top`, so her feet still arrive
+      // level with the deck; the 2 cm lip is beneath notice at play scale.
+      const visualTop = Math.min(top, height - 0.02);
 
       // A chunky box lying along the arc, wide enough to overlap its
       // neighbours at the outer radius so the flight reads as one sweep of
@@ -2108,13 +2130,13 @@ export class Hotel implements GameSystem {
       const chord = stair.outerRadius * (to - from) * 1.6;
       const box = solid(
         new Mesh(
-          new BoxGeometry(treadDepth, top, Math.max(chord, 0.5)),
+          new BoxGeometry(treadDepth, visualTop, Math.max(chord, 0.5)),
           interiorMaterial(i % 2 === 0 ? room.theme.floor : room.theme.trim),
         ),
       );
       box.position.set(
         stair.centreX - Math.sin(angle) * midRadius,
-        top / 2,
+        visualTop / 2,
         stair.centreZ + Math.cos(angle) * midRadius,
       );
       box.rotation.y = angle;

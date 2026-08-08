@@ -461,6 +461,55 @@ if (keyedReach < 1) {
   );
 }
 
+// ------------------------------------- 10. the deck plane has exactly one owner
+//
+// Jim, live play, 7 Aug 2026: *"the mezzanine level flickers like crazy on
+// the floor due to two faces overlapping."* Measured cause: the deck slab's
+// top, the gallery's front and side face tops and the final stair tread's top
+// were all built at exactly y = 3.2 with overlapping footprints — four
+// authors of one plane, so the renderer dithers between them per pixel.
+//
+// This scans every BoxGeometry mesh in the lobby shell and reports any two
+// whose world-space top faces are coplanar (within half a millimetre) in the
+// deck's own band *and* overlap in plan by more than a sliver. Scoped to the
+// deck band on purpose: wall-corner joins share their (much higher) top edges
+// too, and unpicking every T-joint in the hotel is not what Jim reported.
+//
+// Proven red before trusted green: on the unfixed build it reported five
+// pairs, the largest 'both top at y=3.200 m and overlap 3.87 m^2 in plan'.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${LOBBY.space}`);
+  const deckBand: [number, number] = [2.5, 3.3];
+  const tops: { readonly what: string; readonly box: Box3 }[] = [];
+  shell?.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    if (object.geometry.type !== 'BoxGeometry') return;
+    object.geometry.computeBoundingBox();
+    const bounds = object.geometry.boundingBox;
+    if (!bounds) return;
+    const box = bounds.clone().applyMatrix4(object.matrixWorld);
+    if (box.max.y < deckBand[0] || box.max.y > deckBand[1]) return;
+    tops.push({ what: object.name || object.parent?.name || 'a box', box });
+  });
+  for (let a = 0; a < tops.length; a += 1) {
+    for (let b = a + 1; b < tops.length; b += 1) {
+      const one = tops[a]!;
+      const two = tops[b]!;
+      if (Math.abs(one.box.max.y - two.box.max.y) > 5e-4) continue;
+      const overlapX =
+        Math.min(one.box.max.x, two.box.max.x) - Math.max(one.box.min.x, two.box.min.x);
+      const overlapZ =
+        Math.min(one.box.max.z, two.box.max.z) - Math.max(one.box.min.z, two.box.min.z);
+      if (overlapX < 0.03 || overlapZ < 0.03) continue;
+      problems.push(
+        `mezzanine z-fight: two slab-like faces both top at y=${one.box.max.y.toFixed(3)} m and ` +
+          `overlap ${(overlapX * overlapZ).toFixed(2)} m^2 in plan — the deck plane needs one owner`,
+      );
+    }
+  }
+}
+
 // ------------------------------------------ 9. the close-ups keep their distance
 //
 // Jim, live play, 7 Aug 2026: the breakfast push-in *"often zooms in to
