@@ -119,27 +119,9 @@ export function extrudePlan(shapes: Shape[], height: number): BufferGeometry {
   return geometry;
 }
 
-/** Plan rectangles that make up one wall run, minus any doorways in it. */
-export function segmentsMinusGaps(
-  from: number,
-  to: number,
-  gaps: readonly (readonly [number, number])[],
-): [number, number][] {
-  let spans: [number, number][] = [[from, to]];
-  for (const [gapStart, gapEnd] of gaps) {
-    const next: [number, number][] = [];
-    for (const [start, end] of spans) {
-      if (gapEnd <= start || gapStart >= end) {
-        next.push([start, end]);
-        continue;
-      }
-      if (gapStart > start) next.push([start, gapStart]);
-      if (gapEnd < end) next.push([gapEnd, end]);
-    }
-    spans = next;
-  }
-  return spans;
-}
+// `segmentsMinusGaps` lived here until 8 August 2026; it is now
+// `world/wallRuns.ts`, shared with the hotel's room shells — see that file for
+// the corner rule that made sharing it matter.
 
 export function disposeTree(root: { traverse(cb: (o: unknown) => void): void }): void {
   root.traverse((object) => {

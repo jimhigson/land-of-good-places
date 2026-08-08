@@ -38,6 +38,15 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
+// Leaf module: reaches only core/constants, core/uiScale and (type-only)
+// world/interact — nothing seeded, so a static import cannot fix the park.
+import {
+  differentActions,
+  sameStorey,
+  TAP_FINGER_METRES,
+  zoneBandClearance,
+  zoneSeparation,
+} from '../../src/world/tapSpacing.ts';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS, RIM_OUTSET_START } from '../../src/core/constants.ts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { createKid, TALLEST_CHILD_HEIGHT } from '../../src/art/models/kid.ts';
@@ -4175,7 +4184,59 @@ const hotelIsCloseToTheCastle: Invariant = (facts) => {
   return [`the hotel stands ${gap.toFixed(1)} m from the castle — Eleri asked for close`];
 };
 
+/**
+ * **No two tap targets in the park sit inside a finger of each other, unless
+ * they do the same thing** — the tap-spacing rule (`world/tapSpacing.ts`;
+ * Jim, live play on a phone, 8 Aug 2026, after a window zone ate every tap
+ * aimed at a hotel door). The hotel's fixed rooms are measured by
+ * `check:tap-spacing`; this covers what *moves with the seed* — the stalls,
+ * the solved train's platforms, and the seeded flower meadow, which keeps its
+ * pickable blooms out of both (`Flowers.insideAnyTapKeepOut`).
+ *
+ * Measured on the built world's own zone list, exactly what a tap is tested
+ * against — never on the scatter rules. Same-verb pairs (two flowers, two
+ * chairs) are ambiguity without harm and are not complaints.
+ *
+ * Proven red by disabling the flower keep-out: the canonical seed grew
+ * flower 111 within 0.59 m of the water-fight stall's pick edge.
+ */
+const tapTargetsKeepTheirDistance: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const zones = facts.world.interactZones();
+  for (let a = 0; a < zones.length; a += 1) {
+    for (let b = a + 1; b < zones.length; b += 1) {
+      const one = zones[a]!;
+      const two = zones[b]!;
+      if (!sameStorey(one.y, two.y)) continue;
+      if (!differentActions(one, two)) continue;
+      const separation = zoneSeparation(one, two);
+      if (separation >= TAP_FINGER_METRES) continue;
+      complaints.push(
+        `'${one.id}' and '${two.id}' sit ${Math.max(0, separation).toFixed(2)} m apart beyond ` +
+          `the bigger pick radius — a tap aimed at one does the other ` +
+          `(rule: ${TAP_FINGER_METRES.toFixed(2)} m, world/tapSpacing.ts)`,
+      );
+    }
+  }
+  // …and the walk-through doorways: nothing may eat a tap aimed at a door.
+  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands()];
+  for (const zone of zones) {
+    for (const band of bands) {
+      if (band.ownZoneId === zone.id) continue;
+      if (!sameStorey(zone.y, band.y)) continue;
+      const clearance = zoneBandClearance(zone, band);
+      if (clearance >= TAP_FINGER_METRES) continue;
+      complaints.push(
+        `'${zone.id}' sits ${clearance.toFixed(2)} m clear of ${band.what} — ` +
+          `a tap aimed at the door selects it instead (rule: ${TAP_FINGER_METRES.toFixed(2)} m)`,
+      );
+    }
+  }
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['no two tap targets crowd each other or a doorway', tapTargetsKeepTheirDistance],
   ['the park really is twice the park', parkAreaIsWhatWasAsked],
   ['every plot stands wholly inside the boundary', plotsStayInsideTheBoundary],
   ['the attractions use the whole park', attractionsUseTheWholePark],
