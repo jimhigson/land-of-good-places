@@ -148,10 +148,16 @@ if (frames < MIN_WORKING_FRAMES) {
 
 // --- no frame is allowed to hitch ------------------------------------------
 // A slice may overrun its budget by at most the one joint it was in the middle
-// of (~35 us), so twice the budget is generous and still catches a search that
-// can only be stopped between whole attempts (~17 ms each on the canonical
-// seed, and far worse on seed 5).
-const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS * 2;
+// of (~35 us), so a multiple of the budget is generous and still catches a
+// search that can only be stopped between whole attempts (~17 ms each on the
+// canonical seed, and far worse on seed 5).
+//
+// Three times rather than two because this machine measures 8.8 ms idle and
+// 11.6 ms with a full build running alongside, and a guard that goes red when
+// the box is busy is a guard people learn to re-run rather than read. The
+// mutation that removes the joint-level yield measures **69 ms**, so the
+// separation is still sixfold.
+const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS * 3;
 if (worstAdvanceMs > ADVANCE_CEILING_MS) {
   fouls.push(
     `one advance() blocked for ${worstAdvanceMs.toFixed(1)} ms against a ${GENERATION_BUDGET_MS} ms ` +
@@ -159,11 +165,25 @@ if (worstAdvanceMs > ADVANCE_CEILING_MS) {
   );
 }
 
-// The event loop's own view, which covers the module evaluations too. A single
-// ride plan's top-level `const` is ~44 ms at worst (the train), so a ceiling of
-// four 60 Hz frames passes those and is still two orders of magnitude below the
-// 3.46 s block this replaces.
-const BLOCK_CEILING_MS = 67;
+// The event loop's own view, which covers the module evaluations too.
+//
+// **Derived from the mechanism, not from what this machine printed** — and the
+// first version of this line was the latter, at 67 ms, which promptly went red
+// at 69.6 ms because a full `npm run build` happened to be running alongside.
+// A threshold taken from one idle observation is the same mistake as taking one
+// from the generator's own target instead of the game's.
+//
+// So: the largest *legitimate* block here is one ride plan's module evaluation,
+// and the train's is ~44 ms (measured 47 ms idle, 70 ms under load). The
+// smallest *illegitimate* one is the slide being solved a second time, at
+// ~3460 ms. Anything between the two is unambiguous, and 250 ms sits about five
+// times above the legitimate worst and fourteen times below the failure.
+//
+// It does not need to be tighter: the mutation that makes slices too coarse is
+// caught by ADVANCE_CEILING_MS above, which is the assertion that owns that
+// question. This one exists for the work that never passes through `advance()`
+// at all.
+const BLOCK_CEILING_MS = 250;
 if (worstBlockMs > BLOCK_CEILING_MS) {
   fouls.push(
     `the main thread was blocked for ${worstBlockMs.toFixed(0)} ms in one go — that is ` +
