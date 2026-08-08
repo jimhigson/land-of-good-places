@@ -415,37 +415,21 @@ const INSIDE_FOV = 52;
 const INSIDE_CAMERA_ROWS_BACK = 0.35;
 
 /**
- * How far below the lens the inside shot is aimed, in metres.
+ * **How far off the aisle the inside camera looks, in degrees.**
  *
- * A slight tilt down, so the aisle and the seat bases hold the bottom of the
- * frame. Aimed level, the bottom third is the floor running to a vanishing
- * point and nothing else — which is the shape of the fault this is fixing, and
- * it is worth noting that the *old* shot was level too.
+ * Jim, 8 August 2026, settling the inside shot for good: *"In all modes, not
+ * just portrait, make the camera pan down the aisle of the bus, at 45º so that
+ * it is moving along the row of seats with children on them."*
+ *
+ * Square down the aisle — which is what it did — a tall frame has nothing to
+ * find but the floor below and the roof above, because along its length the
+ * cabin is 2.7 m tall and 11 m long. Turned across the rows it is 2.7 m tall
+ * and 2.6 m wide, and the frame lands on cushion, seat back, child and header
+ * band the whole way up. Measured independently before Jim's note arrived: the
+ * best static angle available was **35.8 degrees**, which is his 45 to within a
+ * few degrees of the same answer.
  */
-const INSIDE_CAMERA_DROP = 0.25;
-
-/**
- * **The aspect at which the inside shot is fully swung across the rows.**
- *
- * A tall frame and a wide frame want different subjects, and the swing between
- * them is a **choice**, not a correction proportional to a fault — so this span
- * is short on purpose and exists only so that a window being dragged across
- * square fades rather than snaps.
- *
- * Deliberately narrow because **every partial swing is worse than either end**.
- * Measured, at a 24x14 grid of rays through the real frame, as the share of the
- * barest horizontal third of it — the number QA's complaint was actually about:
- *
- * | swung | 0% | 41% | 70% | 100% |
- * |---|---|---|---|---|
- * | barest third | 23% | **59%** | **47%** | 32% |
- *
- * Half-round is the one aim that gets neither: the aisle's vanishing point is
- * still in frame, dragging the floor up it, and the rows are not yet square on.
- * Any value nearer 1 than this would do equally well; what must not happen is a
- * long ramp that parks real windows in the middle of that table.
- */
-const INSIDE_SWING_COMPLETE_ASPECT = 0.9;
+const INSIDE_PAN_DEGREES = 45;
 
 const DEG = Math.PI / 180;
 
@@ -563,6 +547,20 @@ export function planJourneyShots(): JourneyShot[] {
 
 const JOURNEY_SHOTS = planJourneyShots();
 
+/**
+ * **How long the ride spends inside the bus, over the whole journey.**
+ *
+ * The pan down the aisle is paced by this, so it covers the cabin exactly once
+ * across the two interior beats however the shot list is re-cut. Summed off the
+ * list itself rather than written as `2 * JOURNEY_BEAT_SECONDS`, which would be
+ * a second opinion about how the ride is cut and would go quietly wrong the
+ * first time {@link JOURNEY_BEATS} changed.
+ */
+export const INSIDE_SECONDS = JOURNEY_SHOTS.filter((shot) => shot.view === 'inside').reduce(
+  (total, shot) => total + (shot.to - shot.from),
+  0,
+);
+
 /** Which shot is playing at `t` seconds. The last one owns the end of the ride. */
 export function shotAt(t: number): JourneyShot {
   for (const shot of JOURNEY_SHOTS) {
@@ -640,19 +638,26 @@ export class BusJourney {
    * with a face patch that had to track a surface it had left.
    */
   private readonly insideEye = new Vector3();
-  /**
-   * The aim actually in use, blended from the two below by the window's shape.
-   * Starts down the aisle, which is what a window wider than it is tall gets.
-   */
   private readonly insideAim = new Vector3();
-  /** Down the gangway to the front row — the shot a **wide** frame is given. */
-  private readonly insideAimAlong = new Vector3();
-  /** Square across the rows — the shot a **tall** frame is given. */
-  private readonly insideAimAcross = new Vector3();
-  private readonly swingFrom = new Vector3();
-  private readonly swingTo = new Vector3();
   private readonly worldEye = new Vector3();
   private readonly worldAim = new Vector3();
+  /** Where the pan down the aisle starts and ends, in the bus's own z. */
+  private panFromZ = 0;
+  private panToZ = 0;
+  /** The lens's height, and how far ahead of it the aim lands. */
+  private panEyeHeight = 0;
+  private panReach = 1;
+  /**
+   * **Seconds spent inside the bus so far**, which is what the pan runs on.
+   *
+   * Not the ride's clock: the interior is two four-second beats with four
+   * seconds of exterior between them, and a pan on the ride's clock would spend
+   * that gap travelling where nobody can see it and arrive at the second beat
+   * having skipped a third of the bus. On this clock the two beats are one
+   * continuous eight-second journey from the back seat to the front, cut in
+   * half — the second beat picks up exactly where the first was interrupted.
+   */
+  private insideSeconds = 0;
 
   constructor(rider: JourneyRider) {
     this.scene.name = 'cat-bus-journey';
@@ -779,87 +784,56 @@ export class BusJourney {
     const eyeHeight = cushion + KID_SHOULDER_HEIGHT * 0.72;
     this.insideEye.set(0, eyeHeight, eyeZ);
 
-    // Forward, down the gangway, and very slightly **down** — so the aisle and
-    // the seat bases hold the bottom of the frame instead of empty air, and the
-    // heads and the window band above them hold the top. Aimed at the far end of
-    // the seating rather than at a point in space: the shot ends on the front
-    // row and the driver beyond it.
-    this.insideAimAlong.set(0, eyeHeight - INSIDE_CAMERA_DROP, front);
-    this.insideAim.copy(this.insideAimAlong);
-
-    // **And square across the rows, for a frame that is taller than it is
-    // wide.** See {@link swingTheInsideAim} for why there are two of these at
-    // all. Aimed at the child sitting one row forward on the **far** side of
-    // the aisle: the near half of the busload then runs across the frame
-    // diagonally, seat backs and heads together, instead of away from it down
-    // a corridor.
+    // **Where the pan runs from and to.** Jim asked for the camera to *move*
+    // along the row rather than sit and stare at it, so the lens travels the
+    // length of the seating over the two interior beats, at a steady walk.
     //
-    // The far column rather than the near one because a lens at `x = 0` is
-    // already among the near column's seat backs, and because the door is cut
-    // into the **other** flank — `catBus.ts` skips a pillar and a pane at the
-    // doorway, so this is the side with an unbroken run of both.
+    // The end is where the aim lands on the **front** row: at 45 degrees the
+    // sightline reaches the far seat column one column-width ahead of the lens,
+    // so a lens that stopped level with the last row would be aiming at the
+    // bulkhead past it. Both ends therefore come off the seat plan, and a bus
+    // with more rows pans further without anybody adjusting a second number.
+    this.panEyeHeight = eyeHeight;
+    this.panFromZ = eyeZ;
+    this.panToZ = front - column;
+    // Far enough ahead for the aim to land on the far seat column rather than
+    // in the air short of it.
     //
-    // Level, with no {@link INSIDE_CAMERA_DROP}: that drop exists to hold the
-    // aisle in the bottom of a wide frame, and swung across the rows there is
-    // no aisle to hold, so it would only be pushing floor back into shot. It
-    // costs 10 points of bare floor in the lower third to leave it in (32% with
-    // the aim level, 42% with it dropped).
-    this.insideAimAcross.set(column, eyeHeight, eyeZ + pitch);
+    // **Level, with no downward tilt.** The shot this replaces aimed 0.25 m
+    // below the lens, to hold the aisle and the seat bases in the bottom of the
+    // frame. Turned across the rows there is no aisle running away to hold, so
+    // that tilt would do nothing but push floor back into shot — measured at 10
+    // points of the lower third.
+    this.panReach = column / Math.sin(INSIDE_PAN_DEGREES * DEG);
+    this.placeTheInsideCamera();
   }
 
   /**
-   * **Which way the inside camera looks, decided by the shape of the window.**
+   * **Where the inside lens is now**, as it travels down the aisle.
    *
-   * QA, 8 August 2026, on a phone: *"the bottom 35–40% is featureless cream
-   * floor."* Turning the camera round fixed that for a **desktop** and left it
-   * exactly true for a phone, and three attempts to close the gap by nudging
-   * the aim all failed, because the cause is not the aim:
+   * Bus-local, so the pose can be carried through the bus's own matrix and
+   * climb, dip and pitch with it exactly.
    *
-   * `fitCameraToViewport` opens the vertical field from 52 degrees to **83.9**
-   * so a wide subject fits a tall frame. That is right for the shot of the bus
-   * from outside. Inside a 2.7 m cabin, pointed **along** an 11 m aisle, the
-   * extra 32 degrees has nothing to find but the floor below and the roof
-   * above. Measured: no camera height avoids it — raising the lens trades floor
-   * for ceiling one for one (34%/24% at the shipped height, 18%/41% a metre up)
-   * — and no lens avoids it either, because zooming is self-similar and closes
-   * the frame around the aisle exactly as fast as it shortens the floor: 34% of
-   * the frame at 83.9 degrees, 32% at 52.
-   *
-   * **So the fix is not to spend the extra field better; it is to point it at
-   * the part of the cabin that can fill it.** Across the rows the bus is 2.7 m
-   * tall and 2.6 m wide, and a tall frame lands on cushion, seat back, child
-   * and header band all the way up. Along the aisle it is 2.7 m tall and 11 m
-   * long, and a tall frame lands on floor and roof. Same cabin, same lens; the
-   * only difference is which way the tall axis of the picture is pointed.
-   *
-   * Portrait, at a 390x844 phone, goes from *floor 34%, ceiling 24%, seat 21%,
-   * child 20%* to *child 55%, seat 32%, floor 10%, ceiling 3%*, and the largest
-   * single surface in it stops being the floor pan and becomes a child's head.
-   *
-   * Landscape is **untouched by construction**: `swing` is exactly zero for any
-   * window at least as wide as it is tall, so every frame QA has already signed
-   * off is the frame they signed off.
+   * Linear in {@link insideSeconds}, with no ease at either end: the beats are
+   * hard cuts, so an ease-in would only ever be seen as the shot arriving
+   * already moving, and a steady travel is what makes seat after seat land at
+   * the same rhythm. Over eight seconds it covers the cabin at roughly one
+   * metre a second — a row every 1.7 s, which is slow enough to read a face and
+   * fast enough that it is plainly a moving shot.
    */
-  private swingTheInsideAim(aspect: number): void {
-    const swing = 1 - smoothstep(INSIDE_SWING_COMPLETE_ASPECT, 1, clamp(aspect, 0, 1));
-    if (swing <= 0) {
-      this.insideAim.copy(this.insideAimAlong);
-      return;
-    }
-    // **Blend the direction, not the point.** The two aim points are 7.8 m
-    // apart down the bus and 1.3 m apart across it, so lerping between them
-    // moves the *bearing* almost not at all until the very end — 41% of the way
-    // between the points is 4.7 of the 35.8 degrees, which is how the first
-    // attempt at this managed to be worse in the middle than at either end.
-    this.swingFrom.copy(this.insideAimAlong).sub(this.insideEye).normalize();
-    this.swingTo.copy(this.insideAimAcross).sub(this.insideEye).normalize();
-    const reach = this.insideAimAcross.distanceTo(this.insideEye);
-    this.insideAim
-      .copy(this.swingFrom)
-      .lerp(this.swingTo, swing)
-      .normalize()
-      .multiplyScalar(reach)
-      .add(this.insideEye);
+  private placeTheInsideCamera(): void {
+    const travelled = clamp01(this.insideSeconds / INSIDE_SECONDS);
+    const z = lerp(this.panFromZ, this.panToZ, travelled);
+    this.insideEye.set(0, this.panEyeHeight, z);
+    // **45 degrees off the aisle**, towards the **far** side. That side because
+    // the door is cut into the other flank — `catBus.ts` skips a pillar and a
+    // pane at the doorway — so this is the one with an unbroken run of both,
+    // and because a lens at `x = 0` is already among the near column's backs.
+    this.insideAim.set(
+      Math.sin(INSIDE_PAN_DEGREES * DEG) * this.panReach,
+      this.panEyeHeight,
+      z + Math.cos(INSIDE_PAN_DEGREES * DEG) * this.panReach,
+    );
   }
 
   /**
@@ -1386,6 +1360,12 @@ export class BusJourney {
     this.cutTo(shotAt(this.elapsedSeconds).view);
 
     if (this.viewMode === 'inside') {
+      // **The pan's own clock, which only runs while the shot is on screen.**
+      // Advanced here rather than in `update`'s preamble so the four seconds of
+      // exterior between the two interior beats are not spent travelling down a
+      // bus nobody is looking at.
+      this.insideSeconds += dt;
+      this.placeTheInsideCamera();
       this.pointTheInsideCamera();
       return;
     }
@@ -1493,12 +1473,10 @@ export class BusJourney {
     if (this.camera.aspect !== aspect || this.fittedFov !== this.baseFov) {
       this.fittedFov = this.baseFov;
       fitCameraToViewport(this.camera, this.baseFov, width, height);
-      // **The lens and the aim answer the same question**, and they are settled
-      // together in the one place that knows the window's shape. A tall frame
-      // gets both a wider lens and a different subject; see
-      // {@link swingTheInsideAim} for why the second is not optional.
-      this.swingTheInsideAim(aspect);
-      if (this.viewMode === 'inside') this.pointTheInsideCamera();
+      // **The inside shot is the same shot in every window**, per Jim on 8
+      // August: *"in all modes, not just portrait."* So there is nothing to
+      // decide here beyond the lens — the pan down the aisle is what makes a
+      // tall frame work, and it is the same pan a wide one gets.
     }
     renderer.render(this.scene, this.camera);
   }

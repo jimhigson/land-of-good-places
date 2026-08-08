@@ -86,10 +86,6 @@ const FRAME_GRID_Y = 14;
 const VIEWPORTS = [
   { label: 'a 1440x900 desktop', width: 1440, height: 900 },
   { label: 'a 390x844 phone', width: 390, height: 844 },
-  // **The tablet is not redundant.** It is at aspect 0.75, between the two
-  // above, and the inside shot swings across the rows over a span that ends at
-  // 0.9 — so this is the entry that fails if that span is ever stretched out,
-  // and a half-swung frame is measurably worse than either end of the swing.
   { label: 'a 768x1024 tablet', width: 768, height: 1024 },
 ] as const;
 
@@ -448,6 +444,25 @@ if (busRoot) {
     ]),
   );
   const probe = new Vector3();
+  /**
+   * **The pan down the aisle, watched in the bus's own frame.**
+   *
+   * World space is useless for this: the bus travels 220 m during the ride and
+   * carries the camera with it, so a lens bolted rigidly to a seat would report
+   * hundreds of metres of "travel" while being perfectly static in the only
+   * frame that matters. Everything here is therefore taken through the bus's
+   * own inverse matrix.
+   */
+  const intoTheBus = new Matrix4();
+  const lensInTheBus = new Vector3();
+  const aimInTheBus = new Vector3();
+  let panFrom: Vector3 | null = null;
+  let panTo: Vector3 | null = null;
+  let panForward = 0;
+  let panBackward = 0;
+  let biggestPanStep = 0;
+  let aimOffTheAisle = 0;
+  let previousLens: Vector3 | null = null;
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
@@ -481,6 +496,26 @@ if (busRoot) {
     if (insideBus) {
       box.setFromObject(insideBus);
       if (!box.containsPoint(inside.camera.position)) framesCameraOutsideTheBus += 1;
+
+      intoTheBus.copy(insideBus.matrixWorld).invert();
+      lensInTheBus.copy(inside.camera.position).applyMatrix4(intoTheBus);
+      // Where it is looking, as a bearing off the aisle: 0 is straight down the
+      // bus, 90 is square at the seats beside it.
+      aimInTheBus.set(0, 0, -1).applyQuaternion(inside.camera.quaternion).transformDirection(intoTheBus);
+      aimOffTheAisle = Math.max(
+        aimOffTheAisle,
+        Math.abs((Math.atan2(aimInTheBus.x, aimInTheBus.z) * 180) / Math.PI),
+      );
+
+      if (!panFrom) panFrom = lensInTheBus.clone();
+      panTo = lensInTheBus.clone();
+      if (previousLens) {
+        const step = lensInTheBus.z - previousLens.z;
+        if (step >= 0) panForward += step;
+        else panBackward -= step;
+        biggestPanStep = Math.max(biggestPanStep, Math.abs(step));
+      }
+      previousLens = lensInTheBus.clone();
     }
 
     projection.multiplyMatrices(inside.camera.projectionMatrix, inside.camera.matrixWorldInverse);
@@ -723,6 +758,71 @@ if (busRoot) {
       `on ${framesCameraOutsideTheBus} of ${insideFrames} frames the "inside" camera is outside the ` +
         "bus's own bounding box — it is not inside anything",
     );
+  }
+
+  // ------------------------------------------- the camera pans down the aisle
+  //
+  // Jim, 8 August 2026, settling the inside shot: *"In all modes, not just
+  // portrait, make the camera pan down the aisle of the bus, at 45º so that it
+  // is moving along the row of seats with children on them."*
+  //
+  // Both halves of that are asserted, because the previous inside camera
+  // satisfied every other assertion in this file while being a **static** shot
+  // of a floor, and a regression to static is the obvious way for this to be
+  // lost again — a rebase that drops one line in `update` would do it, and
+  // nothing else here would notice.
+  {
+    const travelled = panFrom && panTo ? panTo.z - panFrom.z : 0;
+    said.push(
+      `inside, the lens panned ${travelled.toFixed(2)} m down the bus's own aisle (${panForward.toFixed(2)} m ` +
+        `forward, ${panBackward.toFixed(2)} m back), looking up to ${aimOffTheAisle.toFixed(1)} degrees off it`,
+    );
+
+    // **A row, at least.** Less than one seat pitch over eight seconds of
+    // interior is a shot that has not visibly moved past anything, whatever the
+    // arithmetic says — and the number comes off the seats that were built
+    // rather than from a target the pan set itself.
+    const rowPitch =
+      seats.length > 2 ? Math.abs(seats[2]!.position.z - seats[0]!.position.z) : 1.8;
+    if (travelled < rowPitch) {
+      fouls.push(
+        `inside, the lens moved ${travelled.toFixed(2)} m down the bus over ${insideFrames} frames — less ` +
+          `than the ${rowPitch.toFixed(2)} m from one row of seats to the next, so it is a static shot. ` +
+          'Jim asked for a camera that pans down the aisle past the children, and a shot that stares at ' +
+          'one spot is what QA would not sign off',
+      );
+    }
+    // **One way.** A pan that goes forward and back is a swish, not a travel,
+    // and it would also let a camera rocking with the bus pass the test above.
+    if (panBackward > rowPitch * 0.1) {
+      fouls.push(
+        `inside, the lens travelled ${panBackward.toFixed(2)} m *backwards* down the aisle as well as ` +
+          `${panForward.toFixed(2)} m forwards — the pan is not a steady travel in one direction`,
+      );
+    }
+    // **No jump between the two beats.** The pan runs on time spent inside, so
+    // the second beat continues exactly where the first was cut off; if it ever
+    // runs on the ride's own clock instead it will leap a third of the bus
+    // across the gap, and this is the frame-to-frame step that shows it.
+    const perFrame = insideFrames > 0 ? Math.abs(travelled) / insideFrames : 0;
+    if (biggestPanStep > perFrame * 4 + 1e-6) {
+      fouls.push(
+        `inside, the lens jumped ${biggestPanStep.toFixed(3)} m in one frame against an average of ` +
+          `${perFrame.toFixed(3)} m — the pan is not continuous across the cut between the two interior ` +
+          'beats, so it is travelling down a bus nobody is looking at',
+      );
+    }
+    // **Along the row, not square at it.** 45 degrees is what was asked for;
+    // this is wide enough to allow the pose to be reconsidered and narrow
+    // enough that aiming down the aisle again, or square at the seats beside
+    // the lens, both fail.
+    if (aimOffTheAisle < 25 || aimOffTheAisle > 70) {
+      fouls.push(
+        `inside, the lens looks ${aimOffTheAisle.toFixed(1)} degrees off the aisle — Jim asked for 45, so ` +
+          'that it moves *along* the row of seats and sees the children in three-quarter view rather ' +
+          'than down a corridor or square into the seat beside it',
+      );
+    }
   }
 
   if (nearestToTheLens < 0.3) {
