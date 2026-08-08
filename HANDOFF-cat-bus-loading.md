@@ -80,6 +80,35 @@ Worth knowing: mutation 1 leaves the route **identical** while blowing the
 timing assertions apart. That is the evidence the timing and equality halves
 measure different things.
 
+## Watched, and the bundle result
+
+Headless Chromium (SwiftShader), throwaway profile, driven off the **ride's own
+clock** — headless runs ~8 fps so wall clock and ride time are an order of
+magnitude apart. Script: `scratchpad/pw/watch-ride.mjs`.
+
+- **click "Let's go" -> first bus frame: 5 ms.**
+- Every main-thread block over 150 ms is either **before the ride** or **after
+  the park was built**. During the twenty seconds of ride there is exactly one:
+  611 ms at ride t=0.17s, the first plan-module batch, and that is a dev-server
+  figure (Vite serves them unbundled; the build makes them 2–6 kB chunks).
+- `/view` and `/rail-race` still reach `window.game`, no ride, no errors.
+
+**Entry bundle 1,733.41 kB -> 19.06 kB** (gzip 512.62 -> 7.52), `Game` split into
+its own 721.69 kB lazy chunk, 2 chunks -> 18. Rollup could not split anything
+while `main.ts` imported `Game` at parse.
+
+## Traps I hit, so the next agent does not
+
+- **`cd X && A; B` leaves `B` in the session's cwd, not `X`.** My first
+  `test:procgen` ran in a *different worktree* and reported 221/9. `cd`
+  explicitly in every command.
+- **The scratchpad had pre-existing files with names I picked.** A `procgen2.log`
+  I "created" was 1.5 h old and belonged to someone else's run, complete with a
+  plausible-looking seed-2 failure. Check `stat` mtime before believing a log.
+- **Background-command notifications report the *wrapper's* exit code, not the
+  build's.** Build #2 was reported "exit code 0" while `BUILD_EXIT=1` sat in the
+  log. Always echo `$?` into the file and grep for it.
+
 ## Status
 
 - [x] Read CLAUDE.md, ARCHITECTURE*.md, Stage B handoff, PR #246 body
@@ -88,7 +117,25 @@ measure different things.
 - [x] `solveRailRoute` resumable; byte-identical on 5 seeds
 - [x] `plan.ts` split; prewarm letterbox
 - [x] Boot stepper driven from the ride loop; hand-over gated on it
-- [x] `check:park-boot` + 6 mutations proved red
-- [ ] Full `npm run build` + `test:procgen` re-run after the guard landed
-- [ ] Watched end to end in headless Chromium, frame timings + screenshots
-- [ ] Pushed, PR #246 updated
+- [x] `check:park-boot` + 7 mutations proved red
+- [x] `npm run build` **exit 0**; `test:procgen` **exit 0, 11 files / 231 tests /
+      0 skipped** — read off the screen, in this worktree
+- [x] Watched end to end in headless Chromium; blocks attributed; screenshots
+- [x] Pushed to `e/cat-bus-stage-a`, PR #246 updated
+
+## Left for a human
+
+1. Frame timings from a **real GPU** — every number here says the orbit is
+   smooth, but headless SwiftShader cannot prove it.
+2. Generation finishes ~7 s into the 20 s ride on this machine, so **the skip
+   appears a third of the way through**. Honest signal, but a judgement call.
+3. A lane tree occasionally passes in front of the bus mid-orbit (t=11 s shot).
+   Reads as depth to me; the bus is still in frustum for all 1201 frames at no
+   less than 21.3% of frame height.
+
+## Not done, and deliberately
+
+`new Game(...)` — the 442 ms `World` constructor — is still one synchronous
+block. It was always hidden by the ride, it is ~10% of the boot, and slicing a
+constructor is a much bigger job than slicing a search. `JourneyDirector.
+overrunning` covers the case where even that does not fit inside the ride.
