@@ -141,8 +141,17 @@ const CHEER_SECONDS = 2.4;
 /** How long the star over the suite door blinks at a child with no key. */
 const REFUSE_SECONDS = 1.8;
 
-/** How far back the camera stands to look at a painting. */
-const ART_VIEW_DISTANCE = 1.15;
+/**
+ * How far back the camera stands to look at a painting, and through what.
+ *
+ * Tuned as a pair (QA, 7 Aug 2026): the old 1.15 m through a 24° lens showed
+ * a 0.49 m-tall slice of a 1.25 m painting — "have a proper look" at the
+ * middle fifth. 1.6 m through 46° frames 1.36 m: the whole canvas plus a lip
+ * of frame, still inside the 1.9 m the child herself stands back, so she is
+ * behind the lens, not in the shot.
+ */
+const ART_VIEW_DISTANCE = 1.6;
+const ART_VIEW_FOV = 46;
 
 /** Height of a hung picture's centre. Module-wide: `hangOnWalls` hangs at it
  *  and `clearOfGlass` tests window overlap against the band around it. */
@@ -563,6 +572,13 @@ export class Hotel implements GameSystem {
     const tower = createHotelTower();
     this.towerHeight = tower.height;
     tower.root.rotation.y = this.facadeYaw;
+    // **Lift the porch clear of the doors.** At the camera's fixed 38° pitch
+    // the porch roof hid the 2.58 m sliding leaves from every legal standing
+    // spot — the auto-doors worked (QA read their openness live) and were
+    // invisible, which is the same as not existing. The glb bakes placement
+    // into vertices with nodes at identity, so one position lift raises the
+    // whole porch; the signboard is its own node and stays put.
+    tower.root.getObjectByName('tower-porch')?.position.setY(0.62);
     paintSign(tower.signboard);
     this.gardenRoot.add(tower.root);
     this.gardenRoot.name = 'the-land-hotel-outside';
@@ -663,13 +679,18 @@ export class Hotel implements GameSystem {
     // Proportional up the spire, and never right at the tip — the top floor
     // looks out of the tower, not off the end of it.
     const height = ground + 2.5 + (storey / TOP_STOREY) * (this.towerHeight - 5);
-    // Stood a little off the tower's face, on the doorway's side, so the
-    // crystal it is cut into is not filling half the frame.
-    const out = 3.2;
+    // **Clear of the crystal, not just off its face.** The old 3.2 m was
+    // measured from the tower's centre, and the base cluster is 7.2 m wide —
+    // the vantage sat *inside* the crystal, which is why the view opened with
+    // facets filling a third of the frame (QA, 7 Aug 2026). 8.5 m clears the
+    // widest part with margin, and the sideways step keeps the spire out of
+    // the drift's opening arc.
+    const out = 8.5;
+    const side = 2.0;
     return new Vector3(
-      this.facadeX + Math.sin(this.facadeYaw) * out,
+      this.facadeX + Math.sin(this.facadeYaw) * out + Math.sin(this.facadeYaw + Math.PI / 2) * side,
       height,
-      this.facadeZ + Math.cos(this.facadeYaw) * out,
+      this.facadeZ + Math.cos(this.facadeYaw) * out + Math.cos(this.facadeYaw + Math.PI / 2) * side,
     );
   }
 
@@ -1624,7 +1645,7 @@ export class Hotel implements GameSystem {
       lookAt: new Vector3(art.x, art.y, art.z),
       easeSeconds: 1.1,
       holdSeconds: null,
-      fov: 24,
+      fov: ART_VIEW_FOV,
     };
   }
 
@@ -3121,13 +3142,24 @@ export class Hotel implements GameSystem {
    * lying with its head on it faces the camera without being turned.
    */
   private dressPetBed(shell: Group): void {
+    // **Where the camera can actually see it** (QA, 7 Aug 2026): the bed used
+    // to stand at (2.2, −6.4), which is 1.2 m behind the bedroom partition at
+    // x = 3.4 — squarely inside that wall's 1.28·H occlusion band, so Eleri's
+    // four-poster and its sleeping pet were invisible in play, canopy ring
+    // excepted. The partition at x = 3.4 hides x 0.6…3.4 and the one at
+    // x = −4.2 hides −7.0…−4.2; this spot sits in the clear strip between,
+    // beside her own bed.
+    const PET_BED_X = -2.6;
+    const PET_BED_Z = -6.4;
     const bed = createPetBed();
+    // Solid and standable, like every other flat-topped prop now — QA found
+    // it walk-through, and a pet bed is a cushion, which is a thing a child
+    // may absolutely bounce onto.
     this.props.place(shell, SUITE, bed.root, {
-      x: 2.2,
-      z: -6.4,
+      x: PET_BED_X,
+      z: PET_BED_Z,
       radius: 0.62,
       top: PET_BED_CUSHION_TOP,
-      solid: false,
     });
 
     const pet = createPet(this.paradePetKind());
@@ -3135,7 +3167,11 @@ export class Hotel implements GameSystem {
     // a standing pet down; the drop is the cushion plus roughly the radius of
     // the body now resting on it.
     pet.root.rotation.set(-Math.PI / 2, 0, 0);
-    pet.root.position.set(2.2, PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72, -6.5);
+    pet.root.position.set(
+      PET_BED_X,
+      PET_BED_CUSHION_TOP + PET_BED_CUSHION_RADIUS * 0.72,
+      PET_BED_Z - 0.1,
+    );
     shell.add(pet.root);
     // Kept so it breathes — a pet that is perfectly still in a bed reads as an
     // ornament of a pet. `setWalkPhase(phase, 0)` is the pets' own idle: no
@@ -3191,20 +3227,30 @@ export class Hotel implements GameSystem {
     mat.position.set(2.5, 0, FLOOR_Z);
     shell.add(mat);
 
-    // The sofa, at the east end, facing back down the room (−X). `sofa` is
-    // authored facing +Z, so a −90° yaw turns it to face −X.
+    // The sofa, at the east end, turned partway between "facing the telly"
+    // (−X) and "facing the lens" (+Z) — the same both-at-once compromise the
+    // telly itself plays in the other direction (see the method header). A
+    // square −90° yaw showed the camera nothing but its back panel for the
+    // whole life of the room (QA, 7 Aug 2026).
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
       x: 8.2,
       z: FLOOR_Z,
-      spin: -Math.PI / 2,
-      halfX: 0.48,
-      halfZ: 1.6,
+      spin: -0.9,
+      halfX: 1.1,
+      halfZ: 1.3,
       top: SOFA_SEAT_TOP,
     });
 
     // The telly, at the west end. See this method's header for the angle.
     const tv = createHotelTv();
     paintTvScreen(tv.screen);
+    // **Pull the screen proud of the cabinet.** As authored, the screen panel
+    // sits ~7 cm behind the cabinet's front face — QA's raycast hit tv-body
+    // at 5.33 m before tv-screen at 5.40 m — so the set rendered as a blank
+    // wooden box with a perfectly good picture buried inside it. The set is
+    // authored facing +Z with nodes at identity, so one local-Z nudge stands
+    // the picture 2 cm in front of the wood.
+    tv.screen.position.z += 0.09;
     this.props.place(shell, SUITE, tv.root, {
       x: -3.4,
       z: FLOOR_Z,
@@ -3553,9 +3599,9 @@ export class Hotel implements GameSystem {
    *
    * The same `hotel/cinematic.ts` shot the food moment and the window views
    * use, which is why this is nine lines: come off the wall along the
-   * picture's own normal, frame it, hold until she presses something. A
-   * 24° lens, because a painting seen through a wide one is a painting with a
-   * room bent round it.
+   * picture's own normal, frame the **whole** canvas (see
+   * {@link ART_VIEW_DISTANCE} for the distance/lens pair), hold until she
+   * presses something.
    */
   private lookAtArt(art: (typeof this.artworks)[number]): void {
     const player = this.player;
