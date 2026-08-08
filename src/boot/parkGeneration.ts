@@ -219,9 +219,18 @@ export class ParkGeneration {
    *
    * The device-independent form of "the search can be stopped where it was
    * asked to stop". Every drive loop here checks the clock after each step and
-   * returns, so a step can never *begin* past the deadline — this counter is
-   * therefore 0 on a correct implementation, on a phone and on a fast laptop
-   * alike, and goes positive the moment a loop is written without that check.
+   * returns, so having done one step it can never *begin* another past the
+   * deadline — this counter is therefore 0 on a correct implementation, on a
+   * phone and on a fast laptop alike, and goes positive the moment a loop is
+   * written without that check.
+   *
+   * **The first step of a slice is deliberately not counted**, and finding out
+   * why was worth the detour: a garbage collection between computing the
+   * deadline and entering the loop spends the whole budget before any step has
+   * run, which made this fire 1-4 times a run on a slowed machine with every
+   * loop written correctly. That is the budget being gone on arrival, not a
+   * loop refusing to stop, and counting it would have made the check
+   * flaky-by-design — the exact failure mode it exists to prevent.
    *
    * It is not a millisecond count on purpose. How long a step takes is a fact
    * about the machine; how many steps run after the driver was told to stop is
@@ -419,8 +428,10 @@ export class ParkGeneration {
     // it is driven to the same budget as the search that follows it.
     if (!this.cruiserStart) {
       const building = (this.cruiserStartSearch ??= solve.cruiserStartSearch());
+      let steps = 0;
       for (;;) {
-        if (performance.now() >= deadline) this.noteLateStep('brief');
+        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('brief');
+        steps += 1;
         const step = building.next();
         this.units.brief += 1;
         if (step.done) {
@@ -452,8 +463,10 @@ export class ParkGeneration {
         const search = (this.cruiserSearch ??= railRouteSearch(
           this.cruiserEscalated ? start.briefs.escalated : start.briefs.first,
         ));
+        let steps = 0;
         for (;;) {
-          if (performance.now() >= deadline) this.noteLateStep('cruiserSearch');
+          if (steps > 0 && performance.now() >= deadline) this.noteLateStep('cruiserSearch');
+          steps += 1;
           const step = search.next();
           this.units.cruiserSearch += 1;
           if (step.done) {
@@ -481,8 +494,10 @@ export class ParkGeneration {
         this.cruiserRoute,
         start.rng,
       ));
+      let steps = 0;
       for (;;) {
-        if (performance.now() >= deadline) this.noteLateStep('cruiserFinish');
+        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('cruiserFinish');
+        steps += 1;
         const step = finishing.next();
         this.units.cruiserFinish += 1;
         if (step.done) {
@@ -555,8 +570,10 @@ export class ParkGeneration {
     const search = this.search;
 
     try {
+      let steps = 0;
       for (;;) {
-        if (performance.now() >= deadline) this.noteLateStep('slideSearch');
+        if (steps > 0 && performance.now() >= deadline) this.noteLateStep('slideSearch');
+        steps += 1;
         const step = search.next();
         this.units.slideSearch += 1;
         if (step.done) {
