@@ -458,6 +458,32 @@ const INSIDE_PAN_DEGREES = 45;
  */
 const INSIDE_PAN_DEPRESSION_DEGREES = 5;
 
+/**
+ * **How far the lens hugs the near side of the aisle**, away from the flank it
+ * is looking at, in metres.
+ *
+ * A chibi child's head is most of a metre across, and at 45 degrees a lens on
+ * the centre line crosses the far seat column 1.84 m away — so one head can be
+ * a third of a wide frame and most of a narrow one. On a phone, whose
+ * *horizontal* field is only 45 degrees however far `fitCameraToViewport` opens
+ * the vertical one, that is a head cropped by the frame edges with nothing else
+ * in shot: the same "you cannot tell it is a bus" fault QA rejected, wearing a
+ * different surface.
+ *
+ * Sliding the lens to the *other* side of the gangway is the only distance
+ * available in a cabin this wide. It is worth 0.35 m — a fifth further — and
+ * measured over the whole pan it takes the largest single surface from **44% to
+ * 31%** of the frame. Seen by eye the difference is not subtle: the opening
+ * frame goes from one amorphous tan mass to a row of four faces receding down
+ * the bus, which is the shot Jim asked for.
+ *
+ * `AISLE_WIDTH` is 0.8, so this is three quarters of the way to the seat edge —
+ * as far as it can go while leaving the lens in the gangway rather than in
+ * somebody's lap. `check:bus-journey` holds the other end of that: nothing may
+ * come within 0.3 m of the lens, and it measures 0.76 m.
+ */
+const AISLE_HUG = 0.3;
+
 const DEG = Math.PI / 180;
 
 /**
@@ -841,7 +867,7 @@ export class BusJourney {
     // Far enough along for the aim to land on the far seat column rather than
     // in the air short of it.
     this.panReach = column / Math.sin(INSIDE_PAN_DEGREES * DEG);
-    this.insideEye.set(0, eyeHeight, this.panFromZ);
+    this.insideEye.set(-AISLE_HUG, eyeHeight, this.panFromZ);
     this.placeTheInsideCamera();
   }
 
@@ -861,7 +887,7 @@ export class BusJourney {
   private placeTheInsideCamera(): void {
     const travelled = clamp01(this.insideSeconds / INSIDE_SECONDS);
     const z = lerp(this.panFromZ, this.panToZ, travelled);
-    this.insideEye.set(0, this.panEyeHeight, z);
+    this.insideEye.set(-AISLE_HUG, this.panEyeHeight, z);
     // **45 degrees off the aisle**, towards the **far** side and towards the
     // back. That side because the door is cut into the other flank —
     // `catBus.ts` skips a pillar and a pane at the doorway — so this is the one
@@ -874,7 +900,7 @@ export class BusJourney {
     const drop = Math.sin(INSIDE_PAN_DEPRESSION_DEGREES * DEG) * this.panReach;
     const along = Math.cos(INSIDE_PAN_DEPRESSION_DEGREES * DEG) * this.panReach;
     this.insideAim.set(
-      Math.sin(INSIDE_PAN_DEGREES * DEG) * along,
+      -AISLE_HUG + Math.sin(INSIDE_PAN_DEGREES * DEG) * along,
       this.panEyeHeight - drop,
       z - Math.cos(INSIDE_PAN_DEGREES * DEG) * along,
     );
