@@ -43,6 +43,7 @@ import { JOURNEY_SECONDS } from './BusJourney';
 export class JourneyDirector {
   private elapsedSeconds = 0;
   private parkReadyFlag = false;
+  private generationReadyFlag = false;
   private framesDrawn = 0;
   private parkStartedOnFrame = -1;
 
@@ -61,6 +62,41 @@ export class JourneyDirector {
     return this.framesDrawn;
   }
 
+/**
+   * **The park's procedural generation has finished.**
+   *
+   * Set by `main.ts` from `ParkGeneration.ready` — every ride's route solved,
+   * the slide pre-warmed, the walk graph joined up. Distinct from
+   * {@link parkReady}, which is the `World` *built* out of all that, and the two
+   * are one frame apart at least.
+   *
+   * This is the gate that makes "amortised generation" and "never hand a child
+   * a half-built park" the same mechanism rather than two hopeful ones: the
+   * generation is spread over frames precisely *because* nothing downstream may
+   * start until it says it is done.
+   */
+  noteGenerationReady(): void {
+    this.generationReadyFlag = true;
+  }
+
+  get generationReady(): boolean {
+    return this.generationReadyFlag;
+  }
+
+  /**
+   * May generation take a slice this frame?
+   *
+   * The **same frame-2 rule** as {@link shouldBuildPark}, and for the same
+   * reason. The first slice is a dynamic `import()`, and the module evaluation
+   * it triggers — the park boundary, ~43 ms — runs off the microtask queue,
+   * which the browser drains before it paints. Starting on frame one would
+   * therefore push back the very first pixel of the bus by exactly the work the
+   * bus is there to hide.
+   */
+  shouldAdvanceGeneration(): boolean {
+    return !this.generationReadyFlag && this.framesDrawn >= 2;
+  }
+
   /**
    * Should the park be built now?
    *
@@ -69,9 +105,21 @@ export class JourneyDirector {
    * frame one would put the whole `World` construction in front of the first
    * pixel, which is the wait this replaces. One frame later it is hidden behind
    * a moving bus instead.
+   *
+   * **And not until generation has finished.** `new World(...)` reads
+   * `PATH_GRAPH`, `SLIDE_PLAN` and every other solved artefact; asking for it
+   * early does not build a smaller park, it *blocks the frame* solving the lot
+   * synchronously — which is the four-second stall this whole thing exists to
+   * remove, merely moved to the middle of the ride where it would read as a
+   * freeze rather than a wait.
    */
   shouldBuildPark(): boolean {
-    return !this.parkReadyFlag && this.parkStartedOnFrame < 0 && this.framesDrawn >= 2;
+    return (
+      this.generationReadyFlag &&
+      !this.parkReadyFlag &&
+      this.parkStartedOnFrame < 0 &&
+      this.framesDrawn >= 2
+    );
   }
 
   /** Called immediately before the park build begins. */

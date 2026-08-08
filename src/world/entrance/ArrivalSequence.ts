@@ -18,7 +18,7 @@ import {
 import { CAMERA_VIEW_HEIGHT } from '../../core/constants';
 import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
-import { hasArrivedBefore, markArrived } from './arrivalFlag';
+import { markArrived } from './arrivalFlag';
 import {
   ENTRANCE_ANGLE,
   ENTRANCE_BUS_ARRIVE_X,
@@ -262,10 +262,15 @@ export function arrivalCameraZoom(phase: ArrivalPhase): number {
   return phase === 'departing' || phase === 'done' ? 1 : ARRIVAL_CAMERA_ZOOM;
 }
 
-/** Is the arrival due for this player? One question, asked in one place. */
-export function arrivalIsDue(): boolean {
-  return !hasArrivedBefore();
-}
+/**
+ * Re-exported from `arrivalFlag.ts`, which is where it is now defined.
+ *
+ * It had to move so that `main.ts` could ask it without importing this file,
+ * which drags in `terrain` and `boundary` and so solves `PARK_BOUNDARY` — see
+ * that function's own note. `Entrance` still reads it from here, and there is
+ * still one definition of "is the arrival due".
+ */
+export { arrivalIsDue } from './arrivalFlag';
 
 /**
  * Which way the bus points.
