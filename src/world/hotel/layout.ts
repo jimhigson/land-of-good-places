@@ -149,6 +149,15 @@ export interface WindowWall {
    * chosen pane either way, so this cannot be used to break the rule.
    */
   readonly zoneAt?: number;
+  /**
+   * `false` when this wall's panes are **light only** — no "Look out" zone
+   * may stand at any of them. The suite's west pane lights its bathroom, and
+   * a stand spot inside that small privacy-roofed room cannot keep the tap
+   * rule's finger of clearance from the room's own tap target (the pan) —
+   * measured, not guessed: every candidate pairing came up 0.2–0.9 m short.
+   * The suite's "Look out" lives on the north wall instead.
+   */
+  readonly lookZone?: false;
 }
 
 /**
@@ -644,13 +653,19 @@ export const SUITE: HotelRoom = {
   // partition end in the hotel against the built walls.
   partitions: [
     { along: 'x', at: -1.7, from: -11, to: 11, doors: [-6.6, 0, 6.6] },
-    { along: 'x', at: 1.7, from: -11, to: 11, doors: [-7.6, 4.4] },
+    { along: 'x', at: 1.7, from: -11, to: 11, doors: [4.4] },
     { along: 'z', at: -4.2, from: -8, to: -1.7, doors: [] },
     { along: 'z', at: 3.4, from: -8, to: -1.7, doors: [] },
     // The bathroom's own wall — the south half's answer to the bedroom
-    // divider at the same x, so the plan reads as one grid. Its doorway is
-    // the one at −7.6 in the run above: you step in off the hall.
-    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [] },
+    // divider at the same x, so the plan reads as one grid. **Its doorway
+    // opens off the lounge, not the hall** — an en-suite off the living
+    // room — because a hall-side door boxed the pan into corners the fixed
+    // camera cannot see (a 2.2 m partition hides 2.8 m of floor behind it)
+    // or into the door band's own finger of tap clearance; watched in the
+    // browser, not guessed. The door's north jamb lands exactly on the hall
+    // wall's line, so the run's built span is one clean piece from jamb to
+    // south wall.
+    { along: 'z', at: -4.2, from: 1.7, to: 8, doors: [2.9] },
   ],
   // **One per room.** The suite is four rooms now, and a bedroom with no
   // window is the thing Jim objected to in the first place (*"a room without
@@ -671,7 +686,8 @@ export const SUITE: HotelRoom = {
     // the default picker slid to the first bedroom's pane — 3.04 m from the
     // west wall's painting, inside the tap rule's finger.
     north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
-    // One pane, lighting the bathroom. The pair that used to flank the front
+    // One pane, lighting the bathroom — light only, no zone (see
+    // {@link WindowWall.lookZone}). The pair that used to flank the front
     // door (±1.95) could not survive the partitions reaching the west wall:
     // the junctions land at z ±1.7, straight through the middle of each old
     // pane, and a wall running into a window is worse than no window. The
@@ -679,7 +695,7 @@ export const SUITE: HotelRoom = {
     // no pane fits there — so the west light moves to the one stretch of
     // that wall with room for it, which the bathroom is glad of. Bedroom 1
     // keeps its own north pane like the others.
-    west: { at: [5.9], width: 1.5, sill: 0.9, head: 2.6 },
+    west: { at: [5.9], width: 1.5, sill: 0.9, head: 2.6, lookZone: false },
   },
   liftZ: null,
   liftFloor: 4,
@@ -763,7 +779,14 @@ export const ROOMS: readonly HotelRoom[] = [
  * way: one owner, everyone else asks.
  */
 export interface HotelDoorBand extends PortalBand {
-  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift';
+  /**
+   * `room-door` is an internal doorway between sub-rooms — no walk-through
+   * trigger fires on it (`Hotel.checkDoorways` looks bands up by the other
+   * four kinds), it exists so `check:tap-spacing` holds every zone a finger
+   * clear of it: a doorway a zone's pick area covers is a doorway a phone
+   * cannot use, which is the exact bug the tap rule was written for.
+   */
+  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift' | 'room-door';
 }
 
 export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
@@ -809,6 +832,27 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
       yaw: Math.PI / 2,
       y: 0,
     });
+    // The bathroom's doorway, straight off the partition data so the two can
+    // never disagree. Only the doored **z-runs** are banded (today: exactly
+    // the bathroom door). Banding the x-runs' bedroom doorways too was
+    // measured, and trips the bed zones by 0.03 m — the beds and their signs
+    // would all have to shuffle, which is a reform for its own PR, not a
+    // rider on this one.
+    for (const run of room.partitions ?? []) {
+      if (run.along !== 'z') continue;
+      for (const door of run.doors) {
+        bands.push({
+          kind: 'room-door',
+          what: "the suite bathroom's doorway",
+          centreX: room.originX + run.at,
+          centreZ: room.originZ + door,
+          halfAlong: 0.6,
+          halfAcross: SUITE_DOOR_WIDTH / 2 + 0.4,
+          yaw: Math.PI / 2,
+          y: 0,
+        });
+      }
+    }
   }
   if (room.liftZ !== null) {
     // The lift's auto-boarding band: the alcove and the floor in front of it.

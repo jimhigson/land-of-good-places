@@ -979,6 +979,10 @@ export class Hotel implements GameSystem {
     for (const side of ['north', 'west'] as const) {
       const wall = room.windows[side];
       if (!wall || wall.at.length === 0) continue;
+      // A wall may declare its panes light-only — see `WindowWall.lookZone`
+      // (the suite's west pane lights the bathroom, whose own tap target
+      // cannot share the little room with a second verb).
+      if (wall.lookZone === false) continue;
       const stand = 1.8;
       const paneX = (at: number): number =>
         side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4;
@@ -1097,9 +1101,12 @@ export class Hotel implements GameSystem {
         x: SUITE.originX + panX,
         y: 1,
         z: SUITE.originZ + panZ,
-        pickRadius: 2.4,
+        // A bed-sized target: any bigger and the pick area reaches the
+        // bathroom doorway's band (`hotelDoorBands`), and a doorway a zone
+        // covers is a doorway a phone cannot use.
+        pickRadius: 1.8,
         standX: SUITE.originX + panX,
-        standZ: SUITE.originZ + panZ + 1.1,
+        standZ: SUITE.originZ + panZ - 1.1,
         standRadius: 2.2,
         verb: 'Use',
         sign: {
@@ -3639,19 +3646,26 @@ export class Hotel implements GameSystem {
     );
     tiles.position.set(centreX, 0, centreZ);
     shell.add(tiles);
-    const bathMat = rug(2.2, 1.5, PALETTE.markerMint, PALETTE.blossomWhite, 1);
-    bathMat.position.set(centreX, 0, 4.4);
+    // The pan stands mid-room on its own mat, facing the lens, because the
+    // walls this room got are exactly the ones a prop cannot stand against:
+    // the east partition hides 2.8 m of floor behind it (2.2 m of wall at the
+    // 38° pitch — watched in the browser: a pan by the doorway was simply
+    // absent from the frame), the hall wall's west end belongs to the basin,
+    // and the west wall is owned by the corridor door's tap band and the
+    // pane. Mid-room is also honestly where a child can walk all round it,
+    // which is what the mat says. The exact spot keeps the zone's pick area
+    // a full finger clear of the bathroom doorway's own band — measured by
+    // check:tap-spacing, found the hard way by a phone tap in the doorway
+    // selecting the pan instead of walking through.
+    const panX = -7.8;
+    const panZ = 4.6;
+    const bathMat = rug(2.0, 1.6, PALETTE.markerMint, PALETTE.blossomWhite, 1);
+    bathMat.position.set(panX, 0, panZ);
     shell.add(bathMat);
-
-    // The pan against the hall wall, east of the doorway, facing the room
-    // (which is also facing the camera); the basin west of the doorway, its
-    // mirror against the same wall. Both derived off the rect, both solid
-    // through `place.ts`: the pan's flat lid is a jumpable top like any low
-    // prop, a basin's bowl is a real height but no floor.
-    const panX = rect.maxX - 0.8;
-    const panZ = rect.minZ + 0.9;
     const pan = buildPan(0, 0);
     this.props.place(shell, SUITE, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
+    // The basin west of the doorway, its mirror against the hall wall — far
+    // enough from the east partition's sight shadow to be in frame.
     const basin = buildBasin(0, 0);
     this.props.place(shell, SUITE, basin.group, {
       x: rect.minX + 1.1,

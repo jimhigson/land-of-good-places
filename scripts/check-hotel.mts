@@ -1362,8 +1362,8 @@ for (const room of ROOMS) {
 //  * a player standing in the bathroom is covered by the roof, and the wash
 //    beat lifts it while she is still inside.
 {
-  const bathX = SUITE.originX - 5.2;
-  const bathZ = SUITE.originZ + 2.8;
+  const bathX = SUITE.originX - 7.8;
+  const bathZ = SUITE.originZ + 4.6;
   if (deflection(bathX, bathZ) < 0.1) {
     problems.push('the suite bathroom pan is not solid — a child walks straight through it');
   }
