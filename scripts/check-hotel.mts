@@ -60,6 +60,7 @@ import {
   SUITE_BED_SPOTS,
 } from '../src/world/hotel/layout.ts';
 import { spaceAt } from '../src/world/spaces.ts';
+import { placedEntry } from '../src/world/parkLayout.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -341,6 +342,74 @@ if (!mezzanine) {
         `it climbs the full height and stops in mid-air beside the deck`,
     );
   }
+}
+
+// -------------------------------------------- 7. you can stand and look
+//
+// **Every painting has somewhere to stand in front of it.** "Look!" walks her
+// to a point 1.9 m off the wall and then flies the camera in; a picture hung
+// behind the buffet, a sofa or a crystal column gives her a stand point inside
+// something solid, and the walk simply never arrives — a chip that does
+// nothing, which is the worst thing a button can do to a six-year-old.
+//
+// Asked of the built collision world, at the player's own girth, and taken
+// from `Hotel` itself rather than recomputed here so the check cannot agree
+// with a stale copy of the arithmetic.
+for (const stand of hotel.artworkStands) {
+  if (deflection(stand.x, stand.z) > 0.01) {
+    problems.push(
+      `a painting's viewing spot at (${stand.x.toFixed(1)}, ${stand.z.toFixed(1)}) is inside ` +
+        `something solid — "Look!" would walk her into furniture and never arrive`,
+    );
+  }
+}
+
+// …and the five shared canvases really are shared. §7 caps the whole game at
+// forty textures; thirteen paintings drawing thirteen of them would be a third
+// of the budget spent on wall art nobody asked to be unique.
+const distinctArt = new Set(hotel.artworkStands.map((stand) => stand.art));
+if (distinctArt.size > 5) {
+  problems.push(
+    `the hotel hangs ${distinctArt.size} distinct artworks — the budget is five shared canvases ` +
+      `(ART_DIRECTION §7 caps the game at forty textures)`,
+  );
+}
+
+// ------------------------------------------- 8. the windows look somewhere
+//
+// The view out of a hotel window is fetched from four hundred metres away —
+// the camera goes to the tower's real place in the park at this storey's
+// proportional height (see `Hotel.windowVantage`). Two things have to hold, and
+// neither is obvious from reading the formula:
+//
+//  * the vantage is **on the tower**, not underground and not above its tip;
+//  * a higher floor really does look from higher up, which is the entire
+//    reason the hotel has fifty storeys in its fiction.
+const ground = world.building.surfaces.sample(
+  placedEntry('hotel').x,
+  placedEntry('hotel').z,
+  3,
+);
+let previousStorey = -1;
+let previousHeight = -Infinity;
+for (const floor of HOTEL_FLOORS) {
+  const eye = hotel.windowVantage(floor.room);
+  if (eye.y < ground) {
+    problems.push(`${floor.name}'s window looks out from ${eye.y.toFixed(1)} m — below the ground`);
+  }
+  if (eye.y > ground + 28.1) {
+    problems.push(
+      `${floor.name}'s window looks out from ${eye.y.toFixed(1)} m — above the top of a 28 m tower`,
+    );
+  }
+  if (floor.storey > previousStorey && eye.y <= previousHeight) {
+    problems.push(
+      `${floor.name} (storey ${floor.storey}) looks out from ${eye.y.toFixed(1)} m, no higher than ` +
+        `the floor below it at ${previousHeight.toFixed(1)} m — the storeys are not stacked`,
+    );
+  }
+  previousStorey = floor.storey;
+  previousHeight = eye.y;
 }
 
 // ----------------------------------------------------------------- report

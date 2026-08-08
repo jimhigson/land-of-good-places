@@ -593,6 +593,7 @@ export class Game {
       this.world.railRace.rideView?.resize(width, height);
       this.world.ferrisWheel.rideView?.resize(width, height);
       this.world.building.resizeRideCameras(width, height);
+      this.world.hotel.resizeCinematic(width, height);
       this.sky.setAspect(width / Math.max(1, height));
     });
     this.world.train.rideView?.resize(window.innerWidth, window.innerHeight);
@@ -601,6 +602,7 @@ export class Game {
     // on boarding, so on a window that never resizes it would otherwise render
     // the whole ride at the 1:1 aspect it was constructed with.
     this.world.building.resizeRideCameras(window.innerWidth, window.innerHeight);
+    this.world.hotel.resizeCinematic(window.innerWidth, window.innerHeight);
 
     // First person on the train (Decision 4 C2): boarding wipes into the
     // seat's RideCamera, alighting wipes back. The override is the third
@@ -652,6 +654,18 @@ export class Game {
         riding ? (this.world.railRace.rideView?.camera ?? null) : null,
         this.world.railRace.playerStaysVisible,
       );
+    // The hotel's own camera moments — the food close-up, a picture on the
+    // wall, the view out of a fiftieth-floor window (`hotel/cinematic.ts`).
+    //
+    // **Set directly, with no iris wipe**, exactly as `onRideCameraCut` above
+    // does: these are gentle push-ins and a wipe would turn each one into a
+    // blink. That is safe because the shot's first frame is the iso camera's
+    // own position and aim, so the instant control changes hands nothing on
+    // screen moves. Her model stays visible throughout — for two of the three
+    // she is the subject.
+    this.world.hotel.onCinematic = (camera) => {
+      this.cameraOverride = camera;
+    };
     this.world.ferrisWheel.touch = isTouchDevice();
     this.world.ferrisWheel.onRideChange = (riding) => {
       if (riding) {

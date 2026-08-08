@@ -1,5 +1,6 @@
 import {
   BoxGeometry,
+  CanvasTexture,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -8,14 +9,16 @@ import {
   Matrix4,
   Mesh,
   OctahedronGeometry,
+  PlaneGeometry,
   Quaternion,
   RingGeometry,
   Shape,
   ShapeGeometry,
   SphereGeometry,
+  SRGBColorSpace,
   Vector3,
 } from 'three';
-import { PALETTE } from '../../core/palette';
+import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
@@ -334,6 +337,265 @@ export function picture(width: number, height: number, seed: number): Group {
     );
     group.add(shape);
   }
+  return group;
+}
+
+/**
+ * **The hotel's five paintings.** Real pictures, painted once, hung everywhere.
+ *
+ * Jim, 7 August 2026: he wanted actual artwork on the walls rather than the
+ * abstract discs-and-triangles {@link picture} composes out of geometry.
+ *
+ * ## Five, shared, and 256²
+ *
+ * ART_DIRECTION §7 caps the whole game at forty distinct textures, and this
+ * round has already spent three (the lift dial's face, the television and the
+ * Game Boy). So there are **five** canvases in total and every frame in the
+ * hotel draws one of them — thirteen pictures, five textures. They are built
+ * on first use and cached in {@link artworks}, so a hotel nobody visits pays
+ * nothing and a hotel visited twice pays once.
+ *
+ * 256² because these are seen from across a room at an oblique angle under a
+ * toon ramp. 512² would be four times the memory for detail the camera cannot
+ * resolve, and it is the same reasoning behind everything else here being
+ * chunky.
+ *
+ * ## Why these are canvases when `picture` is geometry
+ *
+ * §3's test for anything decorative is whether it *could* have been built as
+ * geometry, and a painting is the one thing where the honest answer is no: a
+ * painting is a flat image by definition, which is exactly what a texture is.
+ * Drawing a rainbow, a cat and a ferris wheel out of primitives would be
+ * thirty meshes per frame to imitate a picture.
+ */
+const artworks: (CanvasTexture | null)[] = [null, null, null, null, null];
+
+/** How many there are. Callers index modulo this, so a hotel cannot run out. */
+export const ARTWORK_COUNT = 5;
+
+/** What each one is, for the card a child gets when she looks at it. */
+export const ARTWORK_TITLES: readonly string[] = [
+  'Rainbow Hill',
+  'Somebody’s Cat',
+  'The Big Wheel',
+  'Flowers for You',
+  'Little Boat',
+];
+
+function artworkTexture(index: number): CanvasTexture {
+  const slot = ((index % ARTWORK_COUNT) + ARTWORK_COUNT) % ARTWORK_COUNT;
+  const cached = artworks[slot];
+  if (cached) return cached;
+
+  const SIZE = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable');
+
+  const fill = (colour: number): void => {
+    ctx.fillStyle = hexToCss(colour);
+  };
+  const disc = (x: number, y: number, r: number): void => {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // Every one starts as paper, so a picture always reads as a picture.
+  fill(PALETTE.blossomWhite);
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  switch (slot) {
+    case 0: {
+      // A rainbow over a green hill — the game's own six bands.
+      fill(PALETTE.skyDayBottom);
+      ctx.fillRect(0, 0, SIZE, SIZE * 0.72);
+      ctx.lineWidth = 15;
+      ART.rainbow.forEach((colour, i) => {
+        ctx.strokeStyle = hexToCss(colour);
+        ctx.beginPath();
+        ctx.arc(SIZE / 2, SIZE * 0.78, 40 + i * 15, Math.PI, 0);
+        ctx.stroke();
+      });
+      fill(PALETTE.grass);
+      ctx.beginPath();
+      ctx.ellipse(SIZE / 2, SIZE * 0.95, SIZE * 0.62, SIZE * 0.24, 0, Math.PI, 0);
+      ctx.fill();
+      break;
+    }
+    case 1: {
+      // A cat's face, filling the frame — a portrait, so it reads at a glance.
+      fill(PALETTE.markerLemon);
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      fill(ART.biscuitFur);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(SIZE / 2 + side * 62, 92);
+        ctx.lineTo(SIZE / 2 + side * 86, 26);
+        ctx.lineTo(SIZE / 2 + side * 24, 58);
+        ctx.closePath();
+        ctx.fill();
+      }
+      disc(SIZE / 2, SIZE * 0.56, 88);
+      fill(PALETTE.eyeDark);
+      disc(SIZE / 2 - 32, SIZE * 0.5, 13);
+      disc(SIZE / 2 + 32, SIZE * 0.5, 13);
+      fill(PALETTE.markerPink);
+      disc(SIZE / 2, SIZE * 0.6, 11);
+      ctx.strokeStyle = hexToCss(PALETTE.ink);
+      ctx.lineWidth = 4;
+      for (const side of [-1, 1]) {
+        for (const dy of [-8, 6]) {
+          ctx.beginPath();
+          ctx.moveTo(SIZE / 2 + side * 26, SIZE * 0.62 + dy);
+          ctx.lineTo(SIZE / 2 + side * 104, SIZE * 0.62 + dy * 2.2);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 2: {
+      // The big wheel against a sunset.
+      fill(PALETTE.skySunsetBottom);
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.strokeStyle = hexToCss(PALETTE.markerSky);
+      ctx.lineWidth = 11;
+      ctx.beginPath();
+      ctx.arc(SIZE / 2, SIZE * 0.45, 84, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 6;
+      for (let i = 0; i < 8; i += 1) {
+        const angle = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(SIZE / 2, SIZE * 0.45);
+        ctx.lineTo(SIZE / 2 + Math.cos(angle) * 84, SIZE * 0.45 + Math.sin(angle) * 84);
+        ctx.stroke();
+        fill(ART.rainbow[i % ART.rainbow.length] ?? PALETTE.markerPink);
+        disc(SIZE / 2 + Math.cos(angle) * 84, SIZE * 0.45 + Math.sin(angle) * 84, 13);
+      }
+      fill(PALETTE.grassDark);
+      ctx.fillRect(0, SIZE * 0.82, SIZE, SIZE * 0.18);
+      break;
+    }
+    case 3: {
+      // Flowers in a jug — the still life every hotel corridor has one of.
+      fill(PALETTE.stonePinkLight);
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.strokeStyle = hexToCss(PALETTE.leafDeep);
+      ctx.lineWidth = 7;
+      const blooms: readonly (readonly [number, number, number])[] = [
+        [SIZE * 0.32, SIZE * 0.3, PALETTE.flowerRed],
+        [SIZE * 0.5, SIZE * 0.22, PALETTE.flowerYellow],
+        [SIZE * 0.68, SIZE * 0.32, PALETTE.markerLilac],
+      ];
+      for (const [x, y] of blooms) {
+        ctx.beginPath();
+        ctx.moveTo(SIZE / 2, SIZE * 0.66);
+        ctx.quadraticCurveTo(SIZE / 2, y + 30, x, y);
+        ctx.stroke();
+      }
+      for (const [x, y, colour] of blooms) {
+        fill(colour);
+        for (let i = 0; i < 6; i += 1) {
+          const angle = (i / 6) * Math.PI * 2;
+          disc(x + Math.cos(angle) * 20, y + Math.sin(angle) * 20, 15);
+        }
+        fill(PALETTE.markerLemon);
+        disc(x, y, 13);
+      }
+      fill(PALETTE.buildingRoofDeep);
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.38, SIZE * 0.66);
+      ctx.lineTo(SIZE * 0.62, SIZE * 0.66);
+      ctx.lineTo(SIZE * 0.58, SIZE * 0.94);
+      ctx.lineTo(SIZE * 0.42, SIZE * 0.94);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    default: {
+      // A little boat — the one the ocean floor deserves.
+      fill(PALETTE.skyDayBottom);
+      ctx.fillRect(0, 0, SIZE, SIZE * 0.6);
+      fill(PALETTE.waterTop);
+      ctx.fillRect(0, SIZE * 0.6, SIZE, SIZE * 0.4);
+      fill(PALETTE.flowerYellow);
+      disc(SIZE * 0.8, SIZE * 0.18, 30);
+      fill(PALETTE.blossomWhite);
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.5, SIZE * 0.16);
+      ctx.lineTo(SIZE * 0.5, SIZE * 0.58);
+      ctx.lineTo(SIZE * 0.24, SIZE * 0.58);
+      ctx.closePath();
+      ctx.fill();
+      fill(PALETTE.markerPink);
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.53, SIZE * 0.2);
+      ctx.lineTo(SIZE * 0.76, SIZE * 0.58);
+      ctx.lineTo(SIZE * 0.53, SIZE * 0.58);
+      ctx.closePath();
+      ctx.fill();
+      fill(PALETTE.flowerRed);
+      ctx.beginPath();
+      ctx.moveTo(SIZE * 0.2, SIZE * 0.6);
+      ctx.lineTo(SIZE * 0.8, SIZE * 0.6);
+      ctx.lineTo(SIZE * 0.68, SIZE * 0.74);
+      ctx.lineTo(SIZE * 0.32, SIZE * 0.74);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.anisotropy = 4;
+  artworks[slot] = texture;
+  return texture;
+}
+
+/**
+ * A framed painting, front on **+Z** — one of the five {@link artworkTexture}s
+ * in a chunky frame with a mount.
+ *
+ * The same construction as {@link picture} (which stays, because its abstract
+ * shapes are right where a *pattern* is wanted) with the middle replaced by a
+ * real image on a `decal` plane. `decal` rather than `solid` for the canvas
+ * itself: a painting hangs flat against a wall, and a lit-from-the-side
+ * painting reads as a poster peeling off.
+ */
+export function paintedPicture(width: number, height: number, art: number): Group {
+  const group = new Group();
+  group.name = 'hotel.artwork';
+
+  const frame = solid(
+    new Mesh(new BoxGeometry(width, height, 0.1), toonMaterial(PALETTE.woodLight)),
+  );
+  addOutline(frame, 0.016);
+  group.add(frame);
+
+  const mount = decal(
+    new Mesh(new BoxGeometry(width - 0.14, height - 0.14, 0.06), toonMaterial(PALETTE.blossomWhite)),
+  );
+  mount.position.z = 0.04;
+  group.add(mount);
+
+  const canvasPlane = decal(
+    new Mesh(
+      new PlaneGeometry(width - 0.3, height - 0.3),
+      toonMaterial(PALETTE.blossomWhite, {
+        map: artworkTexture(art),
+        // A gentle self-lift so a painting on a far wall is still legible at
+        // dusk, in the same spirit as the mosaic floor's.
+        emissive: PALETTE.blossomWhite,
+        emissiveIntensity: 0.22,
+      }),
+    ),
+  );
+  canvasPlane.position.z = 0.075;
+  group.add(canvasPlane);
   return group;
 }
 

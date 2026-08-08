@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   CanvasTexture,
+  type PerspectiveCamera,
   CylinderGeometry,
   Group,
   Mesh,
@@ -10,6 +11,7 @@ import {
   PlaneGeometry,
   SpotLight,
   SRGBColorSpace,
+  Vector3,
 } from 'three';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { HOTEL_PLAY_RADIUS } from '../../core/constants';
@@ -43,6 +45,7 @@ import {
   createLiftDoors,
   createLiftFrame,
   createPetBed,
+  createPetBowl,
   createReceptionDesk,
   createYoursDoor,
   type BreakfastKind,
@@ -67,6 +70,9 @@ import {
   crystalColumn,
   crystalPlanter,
   createDiscoSparkle,
+  ARTWORK_COUNT,
+  ARTWORK_TITLES,
+  paintedPicture,
   type DiscoSparkle,
   fishShape,
   flatStar,
@@ -99,6 +105,7 @@ import {
   CORRIDOR,
   DOOR_HALF,
   GARDEN_FLOOR,
+  HOTEL_FLOORS,
   LIFT_ALCOVE_DEPTH,
   LOBBY,
   OCEAN_FLOOR,
@@ -116,6 +123,8 @@ import {
   type WallSide,
 } from './layout';
 import { HotelLift } from './HotelLift';
+import { HotelCinematic } from './cinematic';
+import { PLAZA } from '../paths';
 import { spaceAt, SPACE_GARDEN } from '../spaces';
 
 /** Seconds after a change of space before another may trigger. */
@@ -129,6 +138,18 @@ const CHEER_SECONDS = 2.4;
 
 /** How long the star over the suite door blinks at a child with no key. */
 const REFUSE_SECONDS = 1.8;
+
+/** How far back the camera stands to look at a painting. */
+const ART_VIEW_DISTANCE = 1.15;
+
+/** The breakfast tables' flat top, metres — the asset's own figure. */
+const TABLE_TOP = 0.74;
+
+/** The food moment: how long the camera takes to arrive, and how long it stays. */
+const FOOD_EASE_SECONDS = 2.5;
+const FOOD_HOLD_SECONDS = 1.9;
+/** How long the pet takes to trot over. Inside the ease, so it arrives on camera. */
+const FOOD_TROT_SECONDS = 2.1;
 
 /**
  * The pointer dial's pivot height above the alcove floor.
@@ -415,6 +436,46 @@ export class Hotel implements GameSystem {
   private readonly diners: { model: CharacterModel; phase: number }[] = [];
   /** The pet asleep in the suite's four-poster — kept so it breathes. */
   private sleepingPet: CreatureHandle | null = null;
+
+  // -------------------------------------------------- the camera moments
+  /**
+   * The one camera mechanism the hotel has — see `hotel/cinematic.ts`. Three
+   * features drive it and none of them owns it.
+   */
+  private readonly cine: HotelCinematic;
+  /** Set by `Game`; the seam that hands a camera to `Game.cameraOverride`. */
+  onCinematic: ((camera: PerspectiveCamera | null) => void) | null = null;
+  /** Whether the override is currently ours, so the seam is told only on a change. */
+  private cineOn = false;
+  /**
+   * Which of the three moments is running, because they end differently: a
+   * picture eases back, a window view fades back, and breakfast ends on its own.
+   */
+  private moment: 'food' | 'art' | 'window' | null = null;
+  /** Every painted picture in the hotel, as something to walk up to and look at. */
+  private readonly artworks: {
+    readonly id: string;
+    readonly art: number;
+    /** Where it hangs, and the way it faces — world metres. */
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly normalX: number;
+    readonly normalZ: number;
+    readonly room: HotelRoom;
+  }[] = [];
+  /** Breakfast's own little scene: her bowl, the pet, and the pet's bowl. */
+  private feast: {
+    readonly pet: CreatureHandle;
+    readonly petBowl: Group;
+    readonly bowl: Group;
+    readonly fromX: number;
+    readonly fromZ: number;
+    readonly toX: number;
+    readonly toZ: number;
+    readonly facing: number;
+    t: number;
+  } | null = null;
   /** Seconds of "that door is not yours yet" left to run. See {@link refuseSuite}. */
   private refusing = 0;
   /** Every lift alcove's sliding leaves and pointer dial. See {@link fitLiftAlcove}. */
@@ -438,6 +499,8 @@ export class Hotel implements GameSystem {
   private nappingAt: Bed | null = null;
 
   /** Facade frame: the tower's yaw and centre, for the door trigger. */
+  /** The tower's measured height, for a window's proportional vantage. */
+  private readonly towerHeight: number;
   private readonly facadeYaw: number;
   private readonly facadeX: number;
   private readonly facadeZ: number;
@@ -458,6 +521,7 @@ export class Hotel implements GameSystem {
     this.facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
 
     const tower = createHotelTower();
+    this.towerHeight = tower.height;
     tower.root.rotation.y = this.facadeYaw;
     paintSign(tower.signboard);
     this.gardenRoot.add(tower.root);
@@ -509,6 +573,13 @@ export class Hotel implements GameSystem {
     // with the hotel.
     this.guests = hotelResidents(this.hotelRoot, this.props.roomKeepOuts);
 
+    // -------------------------------------------------- the camera moments
+    this.cine = new HotelCinematic(deps.camera);
+    // See `dismissView`: one listener for every kind of press there is.
+    const press = (): void => this.dismissView();
+    window.addEventListener('pointerdown', press);
+    window.addEventListener('keydown', press);
+
     // ------------------------------------------------------------- the lift
     this.lift = new HotelLift({
       currentRoom: () => this.currentRoom(),
@@ -523,6 +594,85 @@ export class Hotel implements GameSystem {
     return this.lift;
   }
 
+  /** The cinematic camera's aspect, from `Game`'s resize handler. */
+  resizeCinematic(width: number, height: number): void {
+    this.cine.resize(width, height);
+  }
+
+  /**
+   * Where the camera stands to look out of `room`'s window — the tower's real
+   * place in the park, at this storey's proportional height up its spire.
+   *
+   * **Public because `check:hotel` asserts on it**, and because the
+   * alternative is the check recomputing the formula from the same inputs,
+   * which is a check that agrees with a copy of the code rather than with the
+   * code. It is one expression and it has one owner.
+   */
+  windowVantage(room: HotelRoom): Vector3 {
+    const storey = HOTEL_FLOORS[room.liftFloor ?? 0]?.storey ?? 0;
+    const ground = this.surfaces.sample(this.facadeX, this.facadeZ, 3);
+    // Proportional up the spire, and never right at the tip — the top floor
+    // looks out of the tower, not off the end of it.
+    const height = ground + 2.5 + (storey / TOP_STOREY) * (this.towerHeight - 5);
+    // Stood a little off the tower's face, on the doorway's side, so the
+    // crystal it is cut into is not filling half the frame.
+    const out = 3.2;
+    return new Vector3(
+      this.facadeX + Math.sin(this.facadeYaw) * out,
+      height,
+      this.facadeZ + Math.cos(this.facadeYaw) * out,
+    );
+  }
+
+  /**
+   * Where a child stands to look at each painting, in world metres — for
+   * `check:hotel`, which asserts none of them is inside the furniture.
+   */
+  get artworkStands(): readonly { readonly x: number; readonly z: number; readonly art: number }[] {
+    return this.artworks.map((art) => ({
+      x: art.x + art.normalX * 1.9,
+      z: art.z + art.normalZ * 1.9,
+      art: art.art,
+    }));
+  }
+
+  /**
+   * One frame of whichever camera moment is running, and the seam.
+   *
+   * `onCinematic` is told **only when the answer changes** — handing `Game` the
+   * same camera object sixty times a second would be sixty assignments to
+   * `cameraOverride` for one decision, and the one frame that matters (the
+   * hand-back) would be indistinguishable from the fifty-nine that do not.
+   */
+  private updateCinematic(dt: number): void {
+    const camera = this.cine.update(dt);
+    const on = camera !== null;
+    if (on !== this.cineOn) {
+      this.cineOn = on;
+      this.onCinematic?.(camera);
+    }
+  }
+
+  /**
+   * A press, while a held shot is up — the way out of a picture or a window.
+   *
+   * Jim asked for *"any-press exit"*, and any press genuinely means any: a tap,
+   * a click, a key, a controller button. Rather than teach three input systems
+   * about this, it listens on the window itself, which is the one place all of
+   * them arrive. Registered once for the hotel's whole life and guarded on
+   * `dismissible`, so it costs nothing at all until a shot is actually holding.
+   */
+  private dismissView(): void {
+    if (!this.cine.dismissible) return;
+    if (this.moment === 'window') {
+      // A window closes behind the same soft fade it opened behind, rather
+      // than flying the camera back across four hundred metres of park.
+      this.controls.iris(() => this.cine.cancel());
+      return;
+    }
+    this.cine.dismiss();
+  }
+
   /**
    * True while the player is in any of the hotel's own spaces.
    *
@@ -534,7 +684,16 @@ export class Hotel implements GameSystem {
    * a statement that it is outdoors.
    */
   get playerIsInside(): boolean {
-    return this.inside;
+    // **False while she is looking out of a window**, even though she has not
+    // moved. This getter has exactly one consumer — `World.playerInAnyInterior`,
+    // which feeds `DayNight.setIndoors` — so it is not really "is she indoors"
+    // but "should the sky's own lights be off". During a window view the
+    // camera is out in the park, and `setIndoors(true)` switches off the sun,
+    // the fill and the ambient: the view would be of a park lit by nothing at
+    // all. Answering the question that is actually being asked is cheaper and
+    // truer than adding a second flag that has to be kept in step with this
+    // one.
+    return this.inside && this.moment !== 'window';
   }
 
   /**
@@ -652,6 +811,60 @@ export class Hotel implements GameSystem {
       });
     }
 
+    // The paintings — one "Look!" each. See `lookAtArt`.
+    for (const art of this.artworks) {
+      if (art.room !== room) continue;
+      zones.push({
+        id: `hotel-art-${art.id}`,
+        label: 'painting',
+        x: art.x,
+        y: art.y,
+        z: art.z,
+        pickRadius: 2,
+        standX: art.x + art.normalX * 1.9,
+        standZ: art.z + art.normalZ * 1.9,
+        standRadius: 2.4,
+        verb: 'Look',
+        sign: {
+          title: ARTWORK_TITLES[art.art] ?? 'A painting',
+          note: 'a painting — have a proper look!',
+          glyph: '🖼️',
+          accent: PALETTE.markerLilac,
+        },
+        actions: () => pressAction('Look!', () => this.lookAtArt(art), '🖼️'),
+      });
+    }
+
+    // The windows — one per wall that has any, at the middle pane. One zone
+    // per *wall* rather than per pane on purpose: forty-one panes would be
+    // forty-one selectable things in a hotel with four other verbs in it.
+    for (const side of ['north', 'west'] as const) {
+      const wall = room.windows[side];
+      if (!wall || wall.at.length === 0) continue;
+      const middle = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
+      const x = side === 'north' ? room.originX + middle : room.originX - room.halfX + 0.4;
+      const z = side === 'north' ? room.originZ - room.halfZ + 0.4 : room.originZ + middle;
+      zones.push({
+        id: `hotel-window-${room.space}-${side}`,
+        label: 'window',
+        x,
+        y: (wall.sill + wall.head) / 2,
+        z,
+        pickRadius: 2.2,
+        standX: side === 'north' ? x : x + 1.8,
+        standZ: side === 'north' ? z + 1.8 : z,
+        standRadius: 2.6,
+        verb: 'Look out',
+        sign: {
+          title: room.floorLabel,
+          note: 'see the park from up here!',
+          glyph: '🪟',
+          accent: PALETTE.markerSky,
+        },
+        actions: () => pressAction('Look outside!', () => this.lookOutside(room), '🪟'),
+      });
+    }
+
     for (const chair of this.chairs) {
       if (chair.room !== room) continue;
       // Somebody is already sitting there. See `seatGuests`.
@@ -680,7 +893,7 @@ export class Hotel implements GameSystem {
                   id: `eat-${food.kind}`,
                   label: food.label,
                   glyph: food.glyph,
-                  run: () => this.eat(),
+                  run: () => this.eat(food.kind),
                 })),
                 // "Leave breakfast", not "Hop down" (Jim, 7 August 2026): the
                 // chip has to say what leaving *this* is, because a child sat
@@ -761,6 +974,8 @@ export class Hotel implements GameSystem {
       diner.model.body.rotation.x = Math.sin(elapsed * DINER_BOB_RATE + diner.phase) * DINER_BOB;
     }
 
+    this.updateCinematic(dt);
+    this.updateFeast(dt, elapsed);
     this.updateSpeech(dt);
     if (this.speech) {
       const x = LOBBY.originX + RECEPTION_X;
@@ -1140,7 +1355,7 @@ export class Hotel implements GameSystem {
     const player = this.player;
     if (!player || player.riding) return;
     player.beginRide();
-    player.setRidePose(chair.x, 0.42, chair.z, chair.facing);
+    player.setRidePose(chair.x, CHAIR_SEAT_Y, chair.z, chair.facing);
     this.seatedAt = chair.id;
   }
 
@@ -1149,10 +1364,143 @@ export class Hotel implements GameSystem {
     if (!player) return;
     this.seatedAt = null;
     player.endRide();
+    // Breakfast is over: the bowls and the pet go with it. Hidden rather than
+    // disposed — she may sit straight back down, and rebuilding a pet to eat a
+    // second bowl of cereal is three models for one child changing her mind.
+    if (this.feast) {
+      this.feast.bowl.visible = false;
+      this.feast.pet.root.visible = false;
+      this.feast.petBowl.visible = false;
+    }
   }
 
-  private eat(): void {
-    this.player?.model.setExpression('happy');
+  /**
+   * **Breakfast, as a moment rather than a menu item.**
+   *
+   * Jim, 7 August 2026: a bowl appears in front of her, the camera eases in on
+   * her eating happily for a couple of seconds, and her own pet trots over,
+   * sits down and eats out of its bowl beside her.
+   *
+   * Choosing a cereal used to set a happy face and nothing else — which is to
+   * say the one thing a child came to the breakfast room to *do* had no
+   * result. This is the result.
+   *
+   * Everything here is built on first use and then kept: the pet, its bowl and
+   * her bowl are three objects for the life of the hotel, not three per
+   * mouthful. The shot itself is `hotel/cinematic.ts`, the same mechanism the
+   * pictures and the windows use.
+   */
+  private eat(kind: BreakfastKind): void {
+    const player = this.player;
+    const chair = this.chairs.find((seat) => seat.id === this.seatedAt);
+    if (!player || !chair) {
+      this.player?.model.setExpression('happy');
+      return;
+    }
+    player.model.setExpression('happy');
+
+    // Her bowl, on the table in front of her — 0.42 m toward the table's
+    // middle, which is the chair's own facing. Rebuilt per cereal because
+    // which one she chose is the whole point of choosing.
+    this.feast?.bowl.removeFromParent();
+    const bowl = new Group();
+    bowl.add(createBreakfastBowl(kind).root);
+    bowl.position.set(
+      chair.x + Math.sin(chair.facing) * 0.42,
+      TABLE_TOP,
+      chair.z + Math.cos(chair.facing) * 0.42,
+    );
+    this.hotelRoot.add(bowl);
+
+    // The pet, and its own bowl, beside her chair and a little to one side so
+    // it is not between her and the table.
+    const side = chair.facing + Math.PI / 2;
+    const petX = chair.x + Math.sin(side) * 1.15;
+    const petZ = chair.z + Math.cos(side) * 1.15;
+    const pet = this.feast?.pet ?? createPet(this.paradePetKind());
+    const petBowl = this.feast?.petBowl ?? new Group();
+    if (!this.feast) {
+      petBowl.add(createPetBowl().root);
+      this.hotelRoot.add(pet.root, petBowl);
+    }
+    petBowl.position.set(
+      petX + Math.sin(chair.facing) * 0.5,
+      0,
+      petZ + Math.cos(chair.facing) * 0.5,
+    );
+
+    this.feast = {
+      pet,
+      petBowl,
+      bowl,
+      // It trots in from a little way behind her, so it is seen to arrive.
+      fromX: petX - Math.sin(chair.facing) * 3.4,
+      fromZ: petZ - Math.cos(chair.facing) * 3.4,
+      toX: petX,
+      toZ: petZ,
+      facing: chair.facing,
+      t: 0,
+    };
+    pet.root.visible = true;
+    petBowl.visible = true;
+
+    // The shot: in over her shoulder from where the camera already is, to a
+    // little above and in front of her, looking at her head. A long-ish lens
+    // (30°) so the room behind her compresses and she is unmistakably the
+    // subject.
+    const eyeY = 1.35;
+    const inFront = 1.9;
+    this.moment = 'food';
+    this.cine.play(
+      {
+        from: 'here',
+        to: new Vector3(
+          chair.x + Math.sin(chair.facing) * inFront + 0.9,
+          eyeY + 0.85,
+          chair.z + Math.cos(chair.facing) * inFront + 0.9,
+        ),
+        lookAt: new Vector3(chair.x, eyeY, chair.z),
+        easeSeconds: FOOD_EASE_SECONDS,
+        holdSeconds: FOOD_HOLD_SECONDS,
+        fov: 30,
+      },
+      () => {
+        this.moment = null;
+      },
+    );
+  }
+
+  /**
+   * The pet trotting over, sitting, and eating — one frame of it.
+   *
+   * Driven off the shot's own clock rather than a timer of its own, so the
+   * arrival lands inside the push-in rather than before or after it whatever
+   * the ease is retuned to. It uses the pets' own `setWalkPhase`, which is the
+   * same walk every pet in the park has.
+   */
+  private updateFeast(dt: number, elapsed: number): void {
+    const feast = this.feast;
+    if (!feast) return;
+    feast.t += dt;
+
+    const walk = Math.min(1, feast.t / FOOD_TROT_SECONDS);
+    const eased = walk * walk * (3 - 2 * walk);
+    feast.pet.root.position.set(
+      feast.fromX + (feast.toX - feast.fromX) * eased,
+      0,
+      feast.fromZ + (feast.toZ - feast.fromZ) * eased,
+    );
+    feast.pet.root.rotation.y = feast.facing;
+
+    if (walk < 1) {
+      // Trotting: a brisk stride, and a body that bobs with it.
+      feast.pet.setWalkPhase(elapsed * 9, 1);
+      return;
+    }
+    // Arrived: sat down, head dipping into the bowl. No stride — the bob alone
+    // is the pets' own idle, and dipping is one rotation on the head.
+    feast.pet.setWalkPhase(elapsed * 2.2, 0);
+    feast.pet.head.rotation.x = 0.5 + Math.sin(elapsed * 4.5) * 0.28;
   }
 
   private nap(bed: Bed): void {
@@ -2211,7 +2559,12 @@ export class Hotel implements GameSystem {
     this.hangOnWalls(shell, room, {
       north: [-9.8, 9.8],
       west: [-4.2, 4.2],
-      pictures: [{ wall: 'west', along: 0, width: 1.6, height: 1.2, seed: 0x50c1 }],
+      // **Not at z = 0**, which is the lift alcove's own doorway: a painting
+      // hung there is a painting across the lift doors, and the spot a child
+      // stands on to look at it is inside the architrave. `check:hotel` found
+      // exactly that the first time it was asked, which is the whole reason
+      // the viewing spots are now measured rather than assumed.
+      pictures: [{ wall: 'west', along: 2.9, width: 1.6, height: 1.2, seed: 0x50c1 }],
     });
     this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0);
   }
@@ -2829,16 +3182,140 @@ export class Hotel implements GameSystem {
       light.rotation.y = Math.PI / 2;
       shell.add(light);
     }
-    for (const frame of plan.pictures ?? []) {
-      const art = picture(frame.width, frame.height, frame.seed);
+    // **Real paintings now, and each one is something to walk up to.**
+    //
+    // Jim, 7 August 2026: he wanted actual artwork rather than the abstract
+    // shapes `picture` composes. `paintedPicture` hangs one of five shared
+    // canvases (see `dressing.ts` — five, because §7's texture budget is forty
+    // for the whole game and this round has already spent three), and every
+    // frame also registers itself as somewhere she can stand and look.
+    //
+    // The frame's own `seed` picks which of the five it gets, so the choice is
+    // stable across reloads and spread across the hotel without anybody having
+    // to allocate them by hand.
+    (plan.pictures ?? []).forEach((frame, index) => {
+      const art = frame.seed % ARTWORK_COUNT;
+      const painting = paintedPicture(frame.width, frame.height, art);
+      // The way the picture faces, which is also the way the camera has to
+      // come at it. North-wall pictures face +Z; west-wall ones face +X.
+      const normalX = frame.wall === 'north' ? 0 : 1;
+      const normalZ = frame.wall === 'north' ? 1 : 0;
       if (frame.wall === 'north') {
-        art.position.set(frame.along, PICTURE_Y, -room.halfZ + 0.31);
+        painting.position.set(frame.along, PICTURE_Y, -room.halfZ + 0.31);
       } else {
-        art.position.set(-room.halfX + 0.31, PICTURE_Y, frame.along);
-        art.rotation.y = Math.PI / 2;
+        painting.position.set(-room.halfX + 0.31, PICTURE_Y, frame.along);
+        painting.rotation.y = Math.PI / 2;
       }
-      shell.add(art);
-    }
+      shell.add(painting);
+      this.artworks.push({
+        id: `${room.space}-${index}`,
+        art,
+        x: room.originX + painting.position.x,
+        y: PICTURE_Y,
+        z: room.originZ + painting.position.z,
+        normalX,
+        normalZ,
+        room,
+      });
+    });
+  }
+
+  /**
+   * Standing back to look at a painting properly — Jim's *"Look!"*.
+   *
+   * The same `hotel/cinematic.ts` shot the food moment and the window views
+   * use, which is why this is nine lines: come off the wall along the
+   * picture's own normal, frame it, hold until she presses something. A
+   * 24° lens, because a painting seen through a wide one is a painting with a
+   * room bent round it.
+   */
+  private lookAtArt(art: (typeof this.artworks)[number]): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    this.controls.cancelWalk();
+    player.beginRide();
+    player.setRidePose(
+      art.x + art.normalX * 1.9,
+      0,
+      art.z + art.normalZ * 1.9,
+      Math.atan2(-art.normalX, -art.normalZ),
+    );
+    this.moment = 'art';
+    this.cine.play(
+      {
+        from: 'here',
+        to: new Vector3(art.x + art.normalX * ART_VIEW_DISTANCE, art.y, art.z + art.normalZ * ART_VIEW_DISTANCE),
+        lookAt: new Vector3(art.x, art.y, art.z),
+        easeSeconds: 1.1,
+        holdSeconds: null,
+        fov: 24,
+      },
+      () => {
+        this.moment = null;
+        player.endRide();
+      },
+    );
+  }
+
+  /**
+   * **"Look outside!"** — Jim, 7 August 2026.
+   *
+   * Every room in this hotel is six hundred metres from the tower it is
+   * supposedly inside, so a window cannot simply be transparent: the view has
+   * to be *fetched*. The camera goes to the tower's **real position in the
+   * park**, at the height this storey would be on its 28 m spire, and looks at
+   * the fountain — so Floor 50's window really is higher than Floor 1's, and
+   * both are looking at the park a child has actually walked around.
+   *
+   * ## What has to be true while it is out there, and what does not
+   *
+   * - **The hotel's own rooms are hidden.** They sit 600 m out — past
+   *   `FOG_FAR` (258 m), so they would in fact be fogged to invisibility — but
+   *   "invisible because it is far away" is the accident the ferris wheel
+   *   found out the hard way when it pushed the fog out and the castle's
+   *   insides appeared floating in the middle distance. Hidden outright is a
+   *   fact rather than a coincidence.
+   * - **The park has to be lit.** `DayNight` switches the sun, the fill and
+   *   the ambient off while the player is indoors, so a view of the park taken
+   *   from inside would be a view of an unlit park. `playerIsInside` reports
+   *   false for the duration — see its own doc comment.
+   * - **The fog does not need touching**, and deliberately is not. The whole
+   *   park is about 110 m across and `FOG_NEAR` is 132 m, so nothing in this
+   *   shot ever reaches the fog at all. The ferris wheel's `setSpaceFactor`
+   *   would have brought the stars out over an afternoon.
+   */
+  private lookOutside(room: HotelRoom): void {
+    const player = this.player;
+    if (!player || player.riding) return;
+    const eye = this.windowVantage(room);
+
+    this.controls.cancelWalk();
+    player.beginRide();
+    this.moment = 'window';
+
+    // Behind the soft fade, both ways — the camera is jumping four hundred
+    // metres and an ease would be a flight over the void between the spaces.
+    this.controls.iris(() => {
+      this.hotelRoot.visible = false;
+      this.cine.play(
+        {
+          from: eye,
+          to: eye,
+          lookAt: new Vector3(PLAZA.x, 2, PLAZA.z),
+          easeSeconds: 0,
+          holdSeconds: null,
+          // A slow orbit of the fountain, so the park moves and it reads as a
+          // view rather than a photograph.
+          drift: 0.045,
+          fov: 46,
+        },
+        () => {
+          this.moment = null;
+          this.hotelRoot.visible = this.inside;
+          player.endRide();
+        },
+      );
+    });
   }
 
   private roomShell(room: HotelRoom): Group {
