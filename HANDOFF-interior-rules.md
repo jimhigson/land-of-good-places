@@ -62,13 +62,25 @@ QA, PR.
    KNOWN TRADE-OFF: rugs have no walk platforms, so feet sink 4–6 cm (lawn
    10 cm) — pre-existing behaviour, slightly deeper; flag for QA eyes.
 
-## State / next steps
-- All committed & pushed on fix/interior-rules (base 993dcf3).
-- `npm run build` running in background (log /tmp/build-interior.log) — READ
-  ITS EXIT CODE DIRECTLY.
-- Then: `npm run test:procgen` full; browser QA headless Playwright
-  (chromium at /Users/jim/Library/Caches/ms-playwright/chromium_headless_shell-1234/…,
-  pattern scripts live-stair.mjs / live-art-sofa.mjs in scratchpad;
-  /hotel deep link; lobby origin (−600,600), suite (−600,1380); phone
-  viewport 390×844 for the door-tap test; mid-nap screenshot; corner look).
-- Own vite port, --strictPort, kill by PID. Then gh pr create (do NOT merge).
+## Verification done
+- **npm run build: EXIT 0** (full battery incl. check:hotel probes 15/16/17
+  and check:tap-spacing), exit code read directly, log /tmp/build-interior.log.
+- **Browser QA** (headless Playwright vs vite on 5717 --strictPort, PID
+  94159; scripts qa-interior.mjs / qa-tap.mjs in scratchpad):
+  - Corners: qa-interior-corner-lobby-se/nw.png — solid mitred corners, no
+    notch. (corner-suite-ne.png mis-aimed at sky — retake if wanted.)
+  - Nap: qa-interior-nap-mid.png — head on the pillow, red rainbow blanket
+    over the body, pet beside the bed; telemetry head y=0.84 (0.29 above
+    the 0.55 mattress), on the pillow band.
+  - Phone tap (390×844): tap ON the suite doorway → walked straight
+    through to the corridor (z 1120), NO window/painting menu. (Tap at the
+    door *mouth* stops 0.3 m short of the band by TapNavigator's 0.55 m
+    arrive radius — she stands in the doorway; a tap in the hole goes
+    through. The '🪞Look' button seen in chip dumps is the permanent HUD
+    mirror button, not a zone chip.)
+  - Rugs: qa-interior-rugs-lobby/garden.png — real depth, clean edges;
+    flicker is not still-testable, probe 17 owns the geometry assertion.
+- test:procgen final full run in background (/tmp/procgen-final.log).
+
+## Next steps
+- Confirm procgen EXIT 0, kill vite PID 94159, gh pr create (do NOT merge).
