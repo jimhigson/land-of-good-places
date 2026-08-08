@@ -19,12 +19,13 @@
  * has been solved.
  */
 import './headless-canvas.mjs';
-import { Box3, Frustum, Matrix4, Vector3 } from 'three';
+import { Box3, Frustum, Matrix4, Quaternion, Vector3 } from 'three';
 import {
   BusJourney,
   JOURNEY_SECONDS,
   LANE_MAX_GRADIENT,
   cameraPoseAt,
+  laneHeight,
 } from '../src/world/entrance/BusJourney.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
 import { CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
@@ -54,6 +55,34 @@ let smallestOnScreenHeight = Infinity;
 let framesRun = 0;
 let busMoved = 0;
 let previousZ: number | null = null;
+
+/**
+ * **Does the bus lie along the hill, or across it?**
+ *
+ * Jim, 7 August 2026: *"the bus doesn't tilt up when going over a hill."* It
+ * tilted the *opposite* way on every frame — `rotation.x` was set from
+ * `behind − ahead` and then applied after a separate `rotation.y = π` — and the
+ * previous guards here could not see it, because a bus that is on screen, the
+ * right size and travelling is all of those things whichever way up it is.
+ *
+ * So this measures the one relationship that was wrong: the sign of the bus's
+ * nose against the sign of the road's gradient. Both come off the built scene —
+ * the nose from the bus's own world quaternion, the gradient from `laneHeight`,
+ * which is the lane's one owner. Nothing here reads `place()`'s arithmetic.
+ *
+ * Sampled only where the road is meaningfully sloped: on the flat, the sign of
+ * a gradient of 0.001 is noise and asserting on it would make this a check that
+ * fails for reasons that are not faults.
+ */
+const MEANINGFUL_GRADIENT = 0.02;
+const forward = new Vector3();
+const spin = new Quaternion();
+let framesTiltedWrongWay = 0;
+let framesOnASlope = 0;
+let worstDisagreement: { at: number; gradient: number; nose: number } | null = null;
+let steepestClimbNose = 0;
+let steepestClimbGradient = 0;
+let flattestTilt = Infinity;
 
 const busRoot = journey.scene.getObjectByName('cat-bus');
 if (!busRoot) {
@@ -96,6 +125,37 @@ for (let t = 0; t <= JOURNEY_SECONDS + 1e-9; t += STEP) {
   const bottom = centre.clone().setY(box.min.y).project(journey.camera);
   const onScreenHeight = Math.abs(top.y - bottom.y) / 2;
   if (onScreenHeight < smallestOnScreenHeight) smallestOnScreenHeight = onScreenHeight;
+
+  // --- the tilt ------------------------------------------------------------
+  // The bus's own forward direction, read off its world matrix: `catBus.ts`
+  // builds the bus along local +Z, so that axis rotated into the world *is*
+  // where the nose points. Taken from the quaternion rather than from
+  // `rotation.x` on purpose — an Euler angle only means something once you know
+  // the order it is applied in and what came before it, which is exactly what
+  // went wrong.
+  busRoot.getWorldQuaternion(spin);
+  forward.set(0, 0, 1).applyQuaternion(spin);
+
+  // The road's gradient in the direction the bus is travelling. The bus drives
+  // towards −Z, so the ground ahead of it is at the smaller z; a positive
+  // gradient means the road is climbing.
+  const z = busRoot.position.z;
+  const gradient = (laneHeight(z - 1) - laneHeight(z + 1)) / 2;
+
+  if (Math.abs(gradient) > MEANINGFUL_GRADIENT) {
+    framesOnASlope += 1;
+    if (Math.sign(gradient) !== Math.sign(forward.y)) {
+      framesTiltedWrongWay += 1;
+      if (!worstDisagreement || Math.abs(gradient) > Math.abs(worstDisagreement.gradient)) {
+        worstDisagreement = { at: t, gradient, nose: forward.y };
+      }
+    }
+    if (gradient > steepestClimbGradient) {
+      steepestClimbGradient = gradient;
+      steepestClimbNose = forward.y;
+    }
+  }
+  flattestTilt = Math.min(flattestTilt, Math.abs(forward.y));
 }
 
 if (busRoot) {
@@ -118,6 +178,39 @@ if (busRoot) {
     fouls.push(
       `at its smallest the bus fills only ${(smallestOnScreenHeight * 100).toFixed(1)}% of the frame ` +
         'height — the camera is too far out to see who is on it',
+    );
+  }
+
+  said.push(
+    `the bus met a real slope on ${framesOnASlope} of ${framesRun} frames; on the steepest climb ` +
+      `(${(steepestClimbGradient * 100).toFixed(1)}%) its nose sat ${steepestClimbNose.toFixed(3)} above horizontal`,
+  );
+
+  // **The bus tilts with the hill, not against it.**
+  if (framesTiltedWrongWay > 0 && worstDisagreement) {
+    const { at, gradient, nose } = worstDisagreement;
+    fouls.push(
+      `the bus tilts the WRONG way on ${framesTiltedWrongWay} of the ${framesOnASlope} frames where the ` +
+        `lane is actually sloped — worst at t = ${at.toFixed(1)}s, where the road ${gradient > 0 ? 'climbs' : 'falls'} ` +
+        `at ${(Math.abs(gradient) * 100).toFixed(1)}% and the bus's nose points ${nose > 0 ? 'up' : 'down'} ` +
+        `(${nose.toFixed(3)}). Going over a hill it should pitch with the road, not across it`,
+    );
+  }
+
+  // And it must tilt *at all*. A bus welded level would never disagree with the
+  // gradient's sign either — `Math.sign(0)` is 0, which matches nothing — so
+  // without this the check above is satisfied by a bus that does nothing, which
+  // is the fault as Jim actually phrased it: *"the bus doesn't tilt up"*.
+  if (steepestClimbNose < 0.02) {
+    fouls.push(
+      `on the steepest climb of the ride (${(steepestClimbGradient * 100).toFixed(1)}%) the bus's nose is ` +
+        `only ${steepestClimbNose.toFixed(4)} above horizontal — it is driving up a hill dead level`,
+    );
+  }
+  if (framesOnASlope < framesRun * 0.2) {
+    fouls.push(
+      `only ${framesOnASlope} of ${framesRun} frames had any gradient worth the name — the lane has ` +
+        'gone flat, so the tilt above is being asserted against nothing',
     );
   }
 }

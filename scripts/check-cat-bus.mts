@@ -43,7 +43,7 @@
  * `door-hinge`'s own `rotation.y`, not the argument passed to `setDoorOpen`.
  */
 import './headless-canvas.mjs';
-import { Box3, InstancedMesh, Matrix4, Object3D, Vector3 } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import {
   ARRIVAL_CONTROL_AT,
@@ -61,6 +61,7 @@ import {
   isInEntranceGateGap,
 } from '../src/world/entrance/layout.ts';
 import { CAT_BUS_SEAT_COUNT, createCatBus } from '../src/world/entrance/catBus.ts';
+import { isBakedFaceMesh } from '../src/art/style/faces.ts';
 import {
   CHILD_FOOTPRINT,
   TALLEST_CHILD_HEIGHT,
@@ -713,6 +714,122 @@ check(
     `${openingDistanceToBus.toFixed(1)} m from the arriving bus — the camera snaps to her, so it opens on ` +
     'the park and then scrolls out to the bus',
 );
+
+// --- 7b. the cat's face is DRAWN, on the bus's own bodywork ---------------
+//
+// Jim, 7 August 2026: *"the face of the cat projects off its head and floats in
+// space. It should be a texture map on the head."*
+//
+// Two separate things have to be true, and a check for either one alone passes
+// on a build where the other is broken:
+//
+// 1. **It is drawn.** CLAUDE.md's hood-face bug was a mesh that was never
+//    rendered while the mesh, the texture and the code all looked correct on
+//    inspection — wound inside out, so `MeshToonMaterial`'s `FrontSide` culled
+//    it. Asserting that a face texture *exists* would have passed on it
+//    throughout. The only test that can tell the difference is the one that
+//    found it in the end: fire a ray in from where a viewer is and see what it
+//    hits. That is what happens below.
+// 2. **It is not floating.** A ray test alone passes on the build Jim watched,
+//    because a patch hanging a metre off the bus is still the first thing the
+//    ray meets. So the surface the face is on is also measured against the
+//    bus's own solid bodywork.
+{
+  const faceBus = createCatBus();
+  faceBus.root.updateMatrixWorld(true);
+
+  // Every mesh in the bus carrying a painted texture. `catBus.ts` has exactly
+  // one — the cat's face — on both the floating-patch build and the baked one,
+  // which is what lets this find "the thing with the face on it" without being
+  // told which mesh that is.
+  const painted: Mesh[] = [];
+  faceBus.root.traverse((node) => {
+    const mesh = node as Mesh;
+    if (!mesh.isMesh) return;
+    const material = mesh.material as { map?: unknown } | undefined;
+    if (material && material.map) painted.push(mesh);
+  });
+
+  check(
+    painted.length === 1,
+    `the bus carries ${painted.length} painted surfaces where it should carry exactly one, the cat's ` +
+      'face — a second one is a second place for a face to be in the wrong position',
+  );
+
+  // **Every** painted surface, not just the first one traversal happens to
+  // reach: a check decided by traversal order reports on something other than
+  // what it is describing.
+  for (const mesh of painted) {
+    check(
+      isBakedFaceMesh(mesh),
+      "the surface carrying the cat's face was not written by the baked-face path — it is a patch " +
+        'worn in front of the bus rather than the bus’s own UV map (CLAUDE.md: one surface, one texture)',
+    );
+    // `solid()` marks a real, shadow-casting part of the vehicle; `decal()`
+    // marks something stuck on the outside of one. A face that is a decal is by
+    // definition not the bodywork, whatever its coordinates say.
+    check(
+      mesh.castShadow,
+      "the cat's face is on a decal rather than on the bus's own bodywork — a decal is a second " +
+        'surface, which is a second thing that can be in the wrong place',
+    );
+  }
+
+  const faceMesh = painted[0];
+  if (faceMesh) {
+    const faceBox = new Box3().setFromObject(faceMesh);
+
+    // **The ray.** From well in front of the bus, straight down its length, at
+    // the height of the face's own centre — aimed at the built object rather
+    // than at a constant, so this follows a face that is moved rather than
+    // going quietly green.
+    const faceCentre = faceBox.getCenter(new Vector3());
+    const from = new Vector3(faceCentre.x, faceCentre.y, faceBox.max.z + 25);
+    const raycaster = new Raycaster(from, new Vector3(0, 0, -1), 0, 200);
+    const hits = raycaster.intersectObject(faceBus.root, true);
+    const first = hits[0];
+    check(
+      first !== undefined && first.object === faceMesh,
+      first === undefined
+        ? "a ray fired straight at the cat's face from outside the bus hits NOTHING — the face is not " +
+          'being drawn at all (this is the hood-face bug: wound inside out and culled by FrontSide)'
+        : `a ray fired at the cat's face hits \`${first.object.name || '(unnamed)'}\` first, not the face — ` +
+          'something stands in front of it',
+    );
+
+    // **How much air is there behind the cat's face?**
+    //
+    // The measurement Jim's complaint actually names. Walk the ray's hits from
+    // the front and find the first one that is on a shadow-casting piece of the
+    // vehicle: that is where the bus's skin really starts. If the face is
+    // printed into that skin the answer is zero, because the first hit *is* the
+    // skin. If it is worn in front of it — the build Jim watched — the answer is
+    // the size of the gap, and it was **1.13 m**.
+    //
+    // Deliberately *not* "the face's front against the frontmost bodywork":
+    // that version was written first, went green, and turned out to be incapable
+    // of failing, because the face sphere is itself the frontmost bodywork and
+    // so was being compared against itself. Moving it a metre forward left it
+    // reporting 0.000. Caught by mutation, which is the only thing that would
+    // have caught it.
+    const solidHit = hits.find((hit) => (hit.object as Mesh).castShadow);
+    if (first && solidHit) {
+      const airBehindTheFace = solidHit.distance - first.distance;
+      check(
+        airBehindTheFace <= 0.02,
+        `the cat's face floats ${airBehindTheFace.toFixed(2)} m in front of the bus's own skin — there is ` +
+          'clear air between the face and the vehicle it belongs to',
+      );
+      notes.push(
+        `the cat's face is drawn on the bus's skin itself, ${airBehindTheFace.toFixed(3)} m of air behind it ` +
+          `(ray lands at z = ${(from.z - first.distance).toFixed(2)})`,
+      );
+    } else {
+      check(false, "no shadow-casting bodywork lies behind the cat's face at all");
+    }
+  }
+  faceBus.dispose();
+}
 
 // --- 8. coverage: none of the above passed because nothing happened -------
 check(busXs.length > 100, `only ${busXs.length} frames of bus motion were recorded`);
