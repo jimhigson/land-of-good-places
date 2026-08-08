@@ -23,6 +23,10 @@ import {
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
+// The declared one owner of "what a camera does in a portrait window". A leaf
+// module — three, mathUtils and the look controls — so the ride can reach it
+// without dragging the park in behind it.
+import { fitCameraToViewport } from '../../core/RideCamera';
 import { createRandom, clamp, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
 import {
@@ -558,6 +562,10 @@ export class BusJourney {
   private busZ = 0;
 
   private viewMode: JourneyView = 'outside';
+  /** The lens this shot asks for, before the window's shape is taken into account. */
+  private baseFov = CAMERA_FOV;
+  /** The last base lens `render` fitted, so a cut re-fits and a still frame does not. */
+  private fittedFov = -1;
   /**
    * The inside camera's eye and aim, **in the bus's own local space**.
    *
@@ -756,11 +764,10 @@ export class BusJourney {
    */
   private cutTo(view: JourneyView): void {
     this.viewMode = view;
-    const fov = view === 'inside' ? INSIDE_FOV : CAMERA_FOV;
-    if (this.camera.fov !== fov) {
-      this.camera.fov = fov;
-      this.camera.updateProjectionMatrix();
-    }
+    // **The shot chooses a lens; `render` decides what that lens does in this
+    // window.** Writing `camera.fov` here as well would be two owners of one
+    // number, and the portrait rule would be silently undone on every cut.
+    this.baseFov = view === 'inside' ? INSIDE_FOV : CAMERA_FOV;
     // **The cabin is only a cabin from inside a cutaway.** The lower body's
     // outline shell is a lightless `BackSide` box round every seat in the bus,
     // and it is the only part of that body a lens in there can see. Dropped for
@@ -1295,10 +1302,23 @@ export class BusJourney {
     }
   }
 
+  /**
+   * Draws the ride, **fitted to the window it is being drawn into**.
+   *
+   * This used to set `aspect` and nothing else, which is the whole of QA's
+   * *"the bus is cropped at both ends mid-orbit"* on a phone: a
+   * `PerspectiveCamera`'s `fov` is its *vertical* one, so on a portrait window
+   * the horizontal field narrows with the width and an 18 m vehicle broadside
+   * to the lens runs off both edges. Every other ride camera in the game
+   * already widens for this, through `fitCameraToViewport` — the declared one
+   * owner of the portrait rule — and the ride was the one camera that did not
+   * ask it.
+   */
   render(renderer: WebGLRenderer, width: number, height: number): void {
-    if (this.camera.aspect !== width / Math.max(1, height)) {
-      this.camera.aspect = width / Math.max(1, height);
-      this.camera.updateProjectionMatrix();
+    const aspect = width / Math.max(1, height);
+    if (this.camera.aspect !== aspect || this.fittedFov !== this.baseFov) {
+      this.fittedFov = this.baseFov;
+      fitCameraToViewport(this.camera, this.baseFov, width, height);
     }
     renderer.render(this.scene, this.camera);
   }
