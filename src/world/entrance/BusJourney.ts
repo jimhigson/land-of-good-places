@@ -406,11 +406,11 @@ const CAMERA_FOV = 42;
 const INSIDE_FOV = 52;
 
 /**
- * How far back down the gangway the inside lens sits, in seat rows.
+ * How far beyond the end row the pan begins, in seat rows.
  *
- * Just over a third of a row behind the rearmost cushion: far enough that the
- * back row is in front of the lens rather than either side of it, and not so far
- * that the lens is in the back wall.
+ * Just over a third of a row clear of the endmost cushion: far enough that the
+ * first row is in front of the lens rather than either side of it, and not so
+ * far that the lens is in the bulkhead.
  */
 const INSIDE_CAMERA_ROWS_BACK = 0.35;
 
@@ -430,6 +430,33 @@ const INSIDE_CAMERA_ROWS_BACK = 0.35;
  * few degrees of the same answer.
  */
 const INSIDE_PAN_DEGREES = 45;
+
+/**
+ * **How far the lens looks *down*, in degrees.**
+ *
+ * The lens rides on the seat-back line, and that line is also the window sill —
+ * `catBus.ts` builds the backrest to exactly `CAT_BUS_SEAT_Y +
+ * KID_SHOULDER_HEIGHT`, which is where the glazing starts. So a perfectly level
+ * lens splits the frame on the one horizontal edge that runs the whole length
+ * of the cabin, and everything above it is header band and roof.
+ *
+ * Measured, over the whole pan, on the phone — the frame where it costs most:
+ *
+ * | depression | roof in frame | barest third | pillar |
+ * |---|---|---|---|
+ * | 0 deg | 17% | **47%** (top) | 5% |
+ * | **5 deg** | **10%** | **28%** (top) | 4% |
+ * | 8 deg | 5% | 25% (bottom) | 3% |
+ *
+ * Five degrees buys most of the roof back and costs almost no pillar; eight
+ * starts putting the floor pan back into the bottom third and loses a pillar
+ * for it. **This is a tilt *down*, and it is the opposite of the change that
+ * was tried and reverted on 8 August** — that one tilted the aim *up* while
+ * looking along the aisle and turned 33% of floor into 37% of ceiling. Across
+ * the rows there is bus in both directions, so a few degrees down lands on
+ * cushions and seat bases rather than on a blank pan.
+ */
+const INSIDE_PAN_DEPRESSION_DEGREES = 5;
 
 const DEG = Math.PI / 180;
 
@@ -772,39 +799,49 @@ export class BusJourney {
     // rearmost rows — so a bus with a different seat plan still sits its camera
     // one row back.
     const pitch = seats.length > 2 ? Math.abs(seats[2]!.position.z - seats[0]!.position.z) : 1.8;
-    const eyeZ = back - pitch * INSIDE_CAMERA_ROWS_BACK;
 
-    // **At the height of a child's shoulders, not her eyes.** Low enough that
-    // the seat backs stand over it and the aisle floor runs away underneath —
-    // the two things that make the shot read as the inside of a vehicle — and
-    // high enough to see over the rearmost cushions to the rows beyond.
+    // **On the seat-back line**, which is the same line as the window sill:
+    // `catBus.ts` builds the backrest from `CAT_BUS_SEAT_Y +
+    // KID_SHOULDER_HEIGHT` and starts the glazing at the same height, so this
+    // is one landmark rather than two. Taken off the cushion the children are
+    // actually sitting on plus the game's own shoulder constant — the same two
+    // numbers the seat back is built from — so a re-planned seat moves the lens
+    // with it instead of leaving it hanging.
     //
-    // Taken off the cushion the children are actually sitting on rather than
-    // from a height constant, so it tracks the seats if they move.
-    const eyeHeight = cushion + KID_SHOULDER_HEIGHT * 0.72;
-    this.insideEye.set(0, eyeHeight, eyeZ);
+    // The height matters because of what is either side of it: below, cushions,
+    // seat backs and twelve bodies; above, the window band, the pillars and the
+    // heads standing proud of the backs. A lens on the line gets both, and it is
+    // the only height in the cabin that does.
+    const eyeHeight = cushion + KID_SHOULDER_HEIGHT;
 
-    // **Where the pan runs from and to.** Jim asked for the camera to *move*
-    // along the row rather than sit and stare at it, so the lens travels the
-    // length of the seating over the two interior beats, at a steady walk.
+    // **The pan runs front to back, and the lens looks the way it is going.**
     //
-    // The end is where the aim lands on the **front** row: at 45 degrees the
-    // sightline reaches the far seat column one column-width ahead of the lens,
-    // so a lens that stopped level with the last row would be aiming at the
-    // bulkhead past it. Both ends therefore come off the seat plan, and a bus
-    // with more rows pans further without anybody adjusting a second number.
+    // This is the half of the shot that was wrong, and it was wrong in a way no
+    // amount of tuning would have reached. The seats face the nose and each
+    // child is turned 0.6 rad in towards the gangway, so **a lens looking
+    // forward is behind every head on the bus**: measured over the whole pan,
+    // aimed forward, the number of children whose face is actually turned
+    // towards the lens bottoms out at **zero**. Aimed aft it never drops below
+    // **two**, and averages three and a half. Jim asked for children who read as
+    // excited; you cannot read excitement off the back of a head.
+    //
+    // Travelling aft as well as looking aft makes it a dolly rather than a
+    // reversing shot: each row is approached, grows, and passes. The alternative
+    // — travelling forward while looking back — shows the same faces receding,
+    // which is the same information arriving in the less interesting order.
+    //
+    // Both ends come off the seat plan, so a bus with more rows pans further
+    // without anybody adjusting a second number. The far end stops one column
+    // short because at 45 degrees the sightline reaches the far seat column one
+    // column-width along, so a lens that ran level with the last row would be
+    // aiming at the bulkhead past it.
     this.panEyeHeight = eyeHeight;
-    this.panFromZ = eyeZ;
-    this.panToZ = front - column;
-    // Far enough ahead for the aim to land on the far seat column rather than
+    this.panFromZ = front + pitch * INSIDE_CAMERA_ROWS_BACK;
+    this.panToZ = back + column;
+    // Far enough along for the aim to land on the far seat column rather than
     // in the air short of it.
-    //
-    // **Level, with no downward tilt.** The shot this replaces aimed 0.25 m
-    // below the lens, to hold the aisle and the seat bases in the bottom of the
-    // frame. Turned across the rows there is no aisle running away to hold, so
-    // that tilt would do nothing but push floor back into shot — measured at 10
-    // points of the lower third.
     this.panReach = column / Math.sin(INSIDE_PAN_DEGREES * DEG);
+    this.insideEye.set(0, eyeHeight, this.panFromZ);
     this.placeTheInsideCamera();
   }
 
@@ -825,14 +862,21 @@ export class BusJourney {
     const travelled = clamp01(this.insideSeconds / INSIDE_SECONDS);
     const z = lerp(this.panFromZ, this.panToZ, travelled);
     this.insideEye.set(0, this.panEyeHeight, z);
-    // **45 degrees off the aisle**, towards the **far** side. That side because
-    // the door is cut into the other flank — `catBus.ts` skips a pillar and a
-    // pane at the doorway — so this is the one with an unbroken run of both,
-    // and because a lens at `x = 0` is already among the near column's backs.
+    // **45 degrees off the aisle**, towards the **far** side and towards the
+    // back. That side because the door is cut into the other flank —
+    // `catBus.ts` skips a pillar and a pane at the doorway — so this is the one
+    // with an unbroken run of both, and it is the difference between a pillar
+    // being in the frame and not: measured over the pan, aimed at this flank a
+    // pillar is up to 4% of the picture, and aimed forward it is 0%.
+    //
+    // Down by {@link INSIDE_PAN_DEPRESSION_DEGREES}, so the horizon of the shot
+    // is the row of seat backs rather than the header band above them.
+    const drop = Math.sin(INSIDE_PAN_DEPRESSION_DEGREES * DEG) * this.panReach;
+    const along = Math.cos(INSIDE_PAN_DEPRESSION_DEGREES * DEG) * this.panReach;
     this.insideAim.set(
-      Math.sin(INSIDE_PAN_DEGREES * DEG) * this.panReach,
-      this.panEyeHeight,
-      z + Math.cos(INSIDE_PAN_DEGREES * DEG) * this.panReach,
+      Math.sin(INSIDE_PAN_DEGREES * DEG) * along,
+      this.panEyeHeight - drop,
+      z - Math.cos(INSIDE_PAN_DEGREES * DEG) * along,
     );
   }
 

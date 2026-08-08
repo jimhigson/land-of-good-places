@@ -417,6 +417,12 @@ if (busRoot) {
     worstShare: number;
     worstName: string;
     /**
+     * The biggest share any single **bare** surface takes — floor pan, shell,
+     * the cat's own blank face. This is the one QA's complaint was about.
+     */
+    worstBareShare: number;
+    worstBareName: string;
+    /**
      * How much of the barest horizontal third of the frame is **bare bus** —
      * floor pan, shell, the cat's own blank face. Not "any one surface": a
      * child's head filling the top of a phone frame is the picture, and a
@@ -427,6 +433,12 @@ if (busRoot) {
     /** How much of the frame is seating, and how much is children. */
     seatShare: number;
     childShare: number;
+    /**
+     * How much of the frame is **the bus's own glazing or the pillars between
+     * the panes** — the strongest "this is a vehicle" signal there is, and the
+     * one QA measured at exactly zero.
+     */
+    windowShare: number;
     said: string;
   }
   const composition = new Map<string, Composition>(
@@ -435,15 +447,27 @@ if (busRoot) {
       {
         worstShare: 0,
         worstName: '',
+        worstBareShare: 0,
+        worstBareName: '',
         barestBandShare: 0,
         barestBandLabel: '',
         seatShare: 0,
         childShare: 0,
+        windowShare: 0,
         said: '',
       },
     ]),
   );
   const probe = new Vector3();
+  const faceOn = new Vector3();
+  const headSpin = new Quaternion();
+  /**
+   * How square-on a child has to be turned before she counts as facing the
+   * lens. A cosine, so 0 is exactly side-on: a shade past that, because a child
+   * turned a hair away from the camera is still showing her face, and one
+   * turned a hair towards it is not showing anything else.
+   */
+  const FACING_THE_LENS = 0.2;
   /**
    * **The pan down the aisle, watched in the bus's own frame.**
    *
@@ -466,6 +490,7 @@ if (busRoot) {
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
+  let fewestFacesInShot = Infinity;
   let insideFrames = 0;
   let outsideFrames = 0;
   let cuts = 0;
@@ -502,10 +527,13 @@ if (busRoot) {
       // Where it is looking, as a bearing off the aisle: 0 is straight down the
       // bus, 90 is square at the seats beside it.
       aimInTheBus.set(0, 0, -1).applyQuaternion(inside.camera.quaternion).transformDirection(intoTheBus);
-      aimOffTheAisle = Math.max(
-        aimOffTheAisle,
-        Math.abs((Math.atan2(aimInTheBus.x, aimInTheBus.z) * 180) / Math.PI),
-      );
+      // **Off the aisle, which is a line and not a direction.** Straight down
+      // the bus is 0 whichever end it points at, and 90 is square at the seats
+      // beside the lens. Measuring the raw bearing instead reported a camera
+      // looking aft at 45 degrees as being 135 degrees off the aisle and failed
+      // it — the aisle runs both ways, and a shot along it is a shot along it.
+      const bearing = Math.abs((Math.atan2(aimInTheBus.x, aimInTheBus.z) * 180) / Math.PI);
+      aimOffTheAisle = Math.max(aimOffTheAisle, Math.min(bearing, 180 - bearing));
 
       if (!panFrom) panFrom = lensInTheBus.clone();
       panTo = lensInTheBus.clone();
@@ -533,6 +561,7 @@ if (busRoot) {
     // So: fire a ray from the camera at each child and require it to arrive.
     // Same technique as the cat's face and the windows.
     let inShot = 0;
+    let facesInShot = 0;
     for (const head of heads) {
       head.getWorldPosition(here);
       const was = previous.get(head);
@@ -546,7 +575,25 @@ if (busRoot) {
       sight.set(inside.camera.position, toHead.normalize());
       sight.near = inside.camera.near;
       sight.far = reach + 0.5;
-      const hits = sight.intersectObject(inside.scene, true);
+      // **What the camera can actually see, not what is there.** `Raycaster`
+      // ignores `visible`, and the ride hides the lower body's outline shell
+      // for exactly these frames (`setCutaway`). Without this filter that
+      // hidden shell — an unnamed `BackSide` `RoundedBoxGeometry` that
+      // `addOutline` hangs on `cat-bus-shell-lower`, and which wraps the lens
+      // on every interior frame — counts as bodywork standing in front of
+      // every child on the bus.
+      //
+      // That is exactly what it was doing: this check reported *"at worst 0
+      // children could actually be seen"* and *"bodywork standing between the
+      // inside camera and a child: (unnamed RoundedBoxGeometry) (1327)"* on a
+      // shot where twelve children were plainly visible, and it reported
+      // `nearestToTheLens` as the near plane because the shell surrounds the
+      // camera. The composition grid thirty lines below has always filtered
+      // this and said so; the sightline test never did. Same disease, second
+      // organ.
+      const hits = sight
+        .intersectObject(inside.scene, true)
+        .filter((hit) => isDrawn(hit.object));
       // The first thing the ray meets that is not see-through. Glass is not an
       // obstruction — looking at children through the bus's own windows is the
       // whole point of the glazing.
@@ -574,14 +621,27 @@ if (busRoot) {
       // 0.15 m away.
       nearestToTheLens = Math.min(nearestToTheLens, blocker.distance);
       const onAChild = seats.some((seat) => isDescendant(blocker.object, seat));
-      if (onAChild) inShot += 1;
-      else {
+      if (onAChild) {
+        inShot += 1;
+        // **And is she turned towards the lens, or away from it?**
+        //
+        // Jim asked for children who *look excited*, and excitement is on a
+        // face. A kid's painted face points along its own +Z (`seatRiders`
+        // says so, and turns each child 0.6 rad in towards the gangway), so
+        // this is the one measurement that separates a shot of a busload of
+        // children from a shot of the backs of their heads — and it is the
+        // measurement that decides which way the camera looks, because the
+        // seats all face the nose. Aimed forward it bottoms out at zero.
+        faceOn.set(0, 0, 1).applyQuaternion(head.getWorldQuaternion(headSpin));
+        if (faceOn.dot(toHead.clone().negate()) > FACING_THE_LENS) facesInShot += 1;
+      } else {
         blockedByTheBus += 1;
         const name = blocker.object.name || `(unnamed ${(blocker.object as Mesh).geometry?.type ?? '?'})`;
         blocked.set(name, (blocked.get(name) ?? 0) + 1);
       }
     }
     fewestChildrenInShot = Math.min(fewestChildrenInShot, inShot);
+    fewestFacesInShot = Math.min(fewestFacesInShot, facesInShot);
 
     // ------------------------------------------- does the shot read as a bus?
     //
@@ -691,6 +751,15 @@ if (busRoot) {
             seen.worstShare = share;
             seen.worstName = nameOf(object);
           }
+          // **And the same question asked only of the blank ones.** A surface
+          // is bare if `describeInsideHit` calls it floor or bodywork — the
+          // same definition the band rule uses, asked here of a whole frame
+          // rather than a third of one, so the two cannot drift apart.
+          const kind = describeInsideHit(object, seats);
+          if ((kind === 'the floor' || kind === 'bare bodywork') && share > seen.worstBareShare) {
+            seen.worstBareShare = share;
+            seen.worstBareName = nameOf(object);
+          }
         }
         const BAND_NAMES = ['the bottom third', 'the middle third', 'the top third'];
         for (let band = 0; band < bandRays.length; band += 1) {
@@ -705,6 +774,13 @@ if (busRoot) {
         const shareOf = (kind: string): number => (perKind.get(kind) ?? 0) / rays;
         seen.seatShare = Math.max(seen.seatShare, shareOf('a seat'));
         seen.childShare = Math.max(seen.childShare, shareOf('a child'));
+        // Glazing and the pillars between the panes count together: they are
+        // the same feature of the bus seen from either side of the glass, and a
+        // shot that has picked up one has picked up the window band.
+        seen.windowShare = Math.max(
+          seen.windowShare,
+          shareOf('out of a window') + shareOf('a pillar') + shareOf('a solid pane where the glazing should be'),
+        );
         if (seen.said === '') {
           seen.said = [...perKind]
             .sort((a, b) => b[1] - a[1])
@@ -740,10 +816,7 @@ if (busRoot) {
     );
   }
 
-  said.push(
-    `from inside, at worst ${fewestChildrenInShot} children could actually be seen; their heads moved ` +
-      `${headMotion.toFixed(1)} m between them over the ride`,
-  );
+  said.push(`the riders' heads moved ${headMotion.toFixed(1)} m between them over the ride`);
   said.push(`nothing came closer than ${nearestToTheLens.toFixed(2)} m to the inside camera's lens`);
   said.push(
     `bodywork standing between the inside camera and a child: ${
@@ -772,10 +845,20 @@ if (busRoot) {
   // lost again — a rebase that drops one line in `update` would do it, and
   // nothing else here would notice.
   {
-    const travelled = panFrom && panTo ? panTo.z - panFrom.z : 0;
+    // **Signed, and then taken as a distance.** The pan runs from the nose
+    // towards the tail — the camera travels the way it looks, so that each row
+    // is approached rather than left behind — which is the bus's own −z. A
+    // check that required +z would be asserting a direction nobody ever asked
+    // for; what was asked for is a steady travel along the aisle, and that is
+    // what is measured. Which end it starts at is the shot's business.
+    const travelled = panFrom && panTo ? Math.abs(panTo.z - panFrom.z) : 0;
+    /** The way it went, and the way it did not. One of these must be ~zero. */
+    const wentWith = Math.max(panForward, panBackward);
+    const wentAgainst = Math.min(panForward, panBackward);
     said.push(
-      `inside, the lens panned ${travelled.toFixed(2)} m down the bus's own aisle (${panForward.toFixed(2)} m ` +
-        `forward, ${panBackward.toFixed(2)} m back), looking up to ${aimOffTheAisle.toFixed(1)} degrees off it`,
+      `inside, the lens panned ${travelled.toFixed(2)} m along the bus's own aisle, from z ` +
+        `${panFrom?.z.toFixed(2) ?? '?'} to ${panTo?.z.toFixed(2) ?? '?'} (${wentWith.toFixed(2)} m one way, ` +
+        `${wentAgainst.toFixed(2)} m the other), looking up to ${aimOffTheAisle.toFixed(1)} degrees off it`,
     );
 
     // **A row, at least.** Less than one seat pitch over eight seconds of
@@ -786,18 +869,19 @@ if (busRoot) {
       seats.length > 2 ? Math.abs(seats[2]!.position.z - seats[0]!.position.z) : 1.8;
     if (travelled < rowPitch) {
       fouls.push(
-        `inside, the lens moved ${travelled.toFixed(2)} m down the bus over ${insideFrames} frames — less ` +
+        `inside, the lens moved ${travelled.toFixed(2)} m along the bus over ${insideFrames} frames — less ` +
           `than the ${rowPitch.toFixed(2)} m from one row of seats to the next, so it is a static shot. ` +
           'Jim asked for a camera that pans down the aisle past the children, and a shot that stares at ' +
           'one spot is what QA would not sign off',
       );
     }
-    // **One way.** A pan that goes forward and back is a swish, not a travel,
-    // and it would also let a camera rocking with the bus pass the test above.
-    if (panBackward > rowPitch * 0.1) {
+    // **One way.** A pan that goes up and back down the aisle is a swish, not a
+    // travel, and it would also let a camera rocking with the bus pass the test
+    // above.
+    if (wentAgainst > rowPitch * 0.1) {
       fouls.push(
-        `inside, the lens travelled ${panBackward.toFixed(2)} m *backwards* down the aisle as well as ` +
-          `${panForward.toFixed(2)} m forwards — the pan is not a steady travel in one direction`,
+        `inside, the lens travelled ${wentAgainst.toFixed(2)} m back up the aisle as well as ` +
+          `${wentWith.toFixed(2)} m down it — the pan is not a steady travel in one direction`,
       );
     }
     // **No jump between the two beats.** The pan runs on time spent inside, so
@@ -862,16 +946,45 @@ if (busRoot) {
     said.push(`inside, on ${viewport.label}, the shot is made of: ${seen.said || 'nothing measured'}`);
     said.push(
       `  its largest single surface is ${seen.worstName || '(none)'} at ` +
-        `${(100 * seen.worstShare).toFixed(0)}% of the frame; its barest band is ` +
+        `${(100 * seen.worstShare).toFixed(0)}% of the frame, its largest *bare* one ` +
+        `${seen.worstBareName || '(none)'} at ${(100 * seen.worstBareShare).toFixed(0)}%; its barest band is ` +
         `${seen.barestBandLabel || 'none'} at ${(100 * seen.barestBandShare).toFixed(0)}% bare bus; ` +
-        `seating ${(100 * seen.seatShare).toFixed(0)}%, children ${(100 * seen.childShare).toFixed(0)}%`,
+        `seating ${(100 * seen.seatShare).toFixed(0)}%, children ${(100 * seen.childShare).toFixed(0)}%, ` +
+        `window band ${(100 * seen.windowShare).toFixed(0)}%`,
     );
 
-    if (seen.worstShare > 0.3) {
+    // **A blank surface may not own the frame — and only a blank one can.**
+    //
+    // This rule used to be asked of *any* surface, and on the shot Jim asked
+    // for it fired on `cat-bus-backrest` and on `skull`, reporting a seat back
+    // and a child's face as *"a wall or a floor with nothing on it"*. Those are
+    // the two things that say **bus** and **children**; the rule was catching
+    // its own subject.
+    //
+    // **It is not relaxed, it is aimed.** The threshold is the same 30%, and it
+    // still fails QA's actual photograph — a third of the frame in featureless
+    // cream floor — because the floor pan is bare. What it no longer does is
+    // demand that no child be close enough to see. The band rule twenty lines
+    // down already drew exactly this distinction, for exactly this reason, and
+    // this is that lesson applied to the whole frame rather than a third of it.
+    if (seen.worstBareShare > 0.3) {
       fouls.push(
-        `on ${viewport.label}, one surface — ${seen.worstName} — fills ` +
-          `${(100 * seen.worstShare).toFixed(0)}% of the view inside the bus. That is a wall or a floor ` +
+        `on ${viewport.label}, one bare surface — ${seen.worstBareName} — fills ` +
+          `${(100 * seen.worstBareShare).toFixed(0)}% of the view inside the bus. That is a wall or a floor ` +
           'with nothing on it, which is what "you cannot tell it is a bus" looks like from the inside',
+      );
+    }
+    // **And nothing at all may be jammed against the lens.** The rule above
+    // cannot see a camera buried in a child, because a child is not bare. This
+    // one can, and it is the other half of what the single rule was doing.
+    // Two thirds, because that is where a frame stops being a view of a cabin
+    // and becomes a portrait of one object — well past the 50% a head reaches
+    // at the closest the pan ever comes to one.
+    if (seen.worstShare > 0.67) {
+      fouls.push(
+        `on ${viewport.label}, ${seen.worstName} fills ${(100 * seen.worstShare).toFixed(0)}% of the view ` +
+          'inside the bus — whatever it is, the lens is jammed against it and the shot is a portrait of ' +
+          'one object rather than a view of a cabin',
       );
     }
     // **QA's sentence was about a band, not about the whole frame** — *"the
@@ -910,6 +1023,58 @@ if (busRoot) {
           'shot exists',
       );
     }
+    // **A window or a pillar has to be in it.**
+    //
+    // QA, 8 August 2026: *"there is zero glazing and zero pillar in frame at
+    // either aspect"*, and it is the strongest single signal that this is a
+    // vehicle rather than a room. It was structurally unreachable until the
+    // window band was scored as a window rather than as "out of the bus", and
+    // it stayed at 0% on a lens aimed down the aisle at the front of the cabin.
+    //
+    // The pan makes it reachable: swung across the rows towards the unbroken
+    // flank — the door is cut into the other one — the sightline picks up the
+    // pillars between the panes as it passes each row. One percent, because
+    // twelve children with their arms up stand in the window band for most of
+    // its length and a demand for more than a glimpse would be a demand to
+    // empty the seats. It measures 3-5% today, and 0% on the shot QA rejected.
+    if (seen.windowShare < 0.01) {
+      fouls.push(
+        `on ${viewport.label}, the bus's own window band — glazing and the pillars between the panes — is ` +
+          `${(100 * seen.windowShare).toFixed(1)}% of the view inside it. QA's words were "zero glazing ` +
+          'and zero pillar in frame", and without either the shot is a room with children in it rather ' +
+          'than a bus',
+      );
+    }
+  }
+
+  // ------------------------------------------ the children can be seen, facing
+  //
+  // **The two numbers that decide which way the camera looks**, and neither is
+  // a matter of composition — they are about whether the passengers are in the
+  // shot at all.
+  //
+  // The seats face the nose and `seatRiders` turns every child 0.6 rad in
+  // towards the gangway, so a lens looking *forward* is behind every head on
+  // the bus. Measured over the whole pan: aimed forward, the number of children
+  // whose face is turned towards the lens bottoms out at **zero**; aimed aft it
+  // never drops below **two**. Jim asked for children who look excited, and
+  // excitement is on a face.
+  said.push(
+    `from inside, at worst ${fewestChildrenInShot} children could be seen at once, of whom ` +
+      `${fewestFacesInShot} were turned towards the lens`,
+  );
+  if (fewestChildrenInShot < 1) {
+    fouls.push(
+      `at some point in the pan not one of the ${heads.length} children aboard could be seen — the shot ` +
+        'goes through a stretch of empty bus, which a still frame would never show',
+    );
+  }
+  if (fewestFacesInShot < 1) {
+    fouls.push(
+      `at some point in the pan not one child was turned towards the lens — every face on the bus was ` +
+        'pointed away from the camera, and "the children riding it and looking excited" cannot be read ' +
+        'off the back of a head. This is what a camera aimed down the aisle towards the nose measures',
+    );
   }
 
   // **Moving.** The bus itself travels 220 m, and the heads are carried along
