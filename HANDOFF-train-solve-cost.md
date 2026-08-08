@@ -3,60 +3,74 @@
 Branch: `fix/train-solve-cost` · Worktree: `.claude/worktrees/train-solve-cost`
 Base: `993dcf3` (main, the Land Hotel merge #236/#241)
 
-## Findings so far (measured, 8 Aug)
+## The findings (all measured, 8 Aug)
 
-**The headline "train/plan.ts costs 1.4–1.5 s" is a real number measuring the
-wrong thing.** A bare timed import of `train/plan.ts` costs 1478–1569 ms on the
-canonical seed, but decomposed (scratch script importing each dependency first,
-same method as `measure-procgen.mts`):
+**1. The headline "train/plan.ts costs 1.4–1.5 s" is a real number measuring
+two things at once.** A bare timed import of `train/plan.ts` costs 1478–1569 ms
+on the canonical seed, decomposed (scratch script importing each dependency
+first, same billing as `measure-procgen.mts`):
 
 ```
-three 15 · boundary 54 · layout 8 · cruiser 1264 · train's own 153   = 1479 ms
+three 15 · boundary 54 · layout 8 · cruiser 1264-1345 · train's own 153  ≈ 1480 ms
 ```
 
-- The **cruiser stage (~1.26–1.35 s)** dominates the bare import: it is a
-  dependency of the train plan (`COASTER_PLANS` for the low corridor + exit),
-  already 3.1x-optimised by the hotel session, and out of scope here.
-- The **train's own stage is ~153 ms** against the documented **~44 ms** — a
-  ~3.5x regression from the hotel merge, and that is the fixable part.
+The cruiser stage is a *dependency* of the train plan (`COASTER_PLANS` for the
+low corridor + exit) and owns ~1.3 s of the bare import. Out of scope here;
+already 3.1x-optimised by the hotel session (3218 → 1291 ms canonical).
 
-**Where the lying comment actually lives:** NOT in `train/route.ts`/`plan.ts` —
-it is `scripts/check-park-boot.mts` on the unmerged `e/cat-bus-stage-a` branch
-(lines 65 and 177: "the train's is ~44 ms (measured 47 ms idle, 70 ms under
-load)"). Grep proof: `git grep -n "44 ms" $(git for-each-ref --format='%(refname)'
-refs/remotes/origin)`. Since that file is not on main, the fix on main is to
-carry the measured number in the train solver's own header + the new check;
-the cat-bus owner must re-measure when that branch merges (flagged in the PR).
+**2. The train's own stage regressed ~44 → ~153 ms (3.5x) at the hotel merge.**
+CPU profile (canonical, inclusive): `train/plan.ts` eval 135 ms → `TrainRoute`
+ctor 117 → `solveProfile` 115 → **`repair()` 108 ms**. repair ran
+`RELAX_PASSES(700) × BEARINGS(360) = 252,000` times, each scanning **every**
+obstacle: 3 rects + 34 circles on canonical (7 layout entries, 24 cruiser
+low-corridor discs, ball pit, ferris, cruiser exit) ≈ 9.3M
+`Math.hypot`/`rectDistance` calls. The hotel merge doubled the park, which
+doubled the census; the scan is O(passes × bearings × obstacles).
 
-**Where the train's own 153 ms goes** (node --cpu-prof, canonical seed,
-inclusive): `train/plan.ts` module eval 135 ms → `TrainRoute` ctor 117 ms →
-`solveProfile` 115 ms → **`repair()` 108 ms**. Everything else (stations,
-curve build, crossings) is ~20 ms.
+**3. Where the lying "~44 ms" comment lives:** NOT in `train/route.ts`/`plan.ts`
+on main — it is `scripts/check-park-boot.mts` on the unmerged
+`e/cat-bus-stage-a` branch (lines 65 and 177: "the train's is ~44 ms (measured
+47 ms idle, 70 ms under load)"). Proof:
+`git grep -n "44 ms" $(git for-each-ref --format='%(refname)' refs/remotes/origin)`.
+Main carries the measured truth in `train/route.ts`'s header now ("What it
+costs — measured, not promised", with the re-measure commands); the cat-bus
+owner must re-measure their prose when that branch merges.
 
-**Why repair is hot:** it is called `RELAX_PASSES(700) × BEARINGS(360) =
-252,000` times, and each call scans **every** obstacle — canonical seed:
-3 rects + 34 circles (7 layout entries + 24 cruiser low-corridor discs + ball
-pit + ferris + cruiser exit) = 37 distance evaluations (`Math.hypot` /
-`rectDistance`) per call ≈ **9.3M evaluations**. The hotel merge doubled the
-park, which grew the layout census and the cruiser's low corridor — the scan
-is O(passes × bearings × obstacles) and obstacles roughly doubled.
+## The fix (committed, 4d4d736)
 
-## The fix (in progress)
+`src/world/train/route.ts` — per-bearing obstacle shortlists for `repair()`:
+- Once per solve, each bearing gets the subset of obstacles whose clearance
+  disc its probe segment [INNER_FLOOR−16, maxWall+16]·dir can enter
+  (`segmentReaches`, conservative by +1e-6).
+- Identity: an excluded obstacle measures `d = keep − dist ≤ 0` at every probe
+  on that bearing, and repair's `deficit` is a strict running max from 0 — a
+  ≤ 0 term can never change the max's value; max is order-independent;
+  `Math.hypot` kept (NOT `sqrt(x²+z²)`: different rounding).
+- A probe pushed off the segment (deficits can exceed the margin only when a
+  probe lands deep inside an obstacle) is caught in repair, which re-runs the
+  full scan from the original arguments — replaying the identical in-range
+  prefix, then continuing soundly.
 
-Per-bearing obstacle prefilter, byte-identical by construction:
-- Precompute once per bearing the subset of obstacles whose inflated
-  (by their own `keep` + margin) distance to that bearing's probe segment
-  can ever be positive; `repair()` then scans only that subset.
-- Identity argument: an excluded obstacle has `d = keep − dist ≤ 0` for every
-  probe on that bearing, and `deficit` starts at 0 and is a strict max — an
-  excluded obstacle can never change the max's value. Max is order-independent,
-  no accumulation, `Math.hypot` retained (NOT `sqrt(x²+z²)`, different
-  rounding).
-- Probe-range bound: entry radius is a convex-ish blend of snapped values in
-  [INNER_FLOOR, max wall] ± pull; each of ≤3 attempts moves ≤ keep(4.2) →
-  drift ≤ 12.6 m; margin 16 m used.
+`src/world/train/plan.ts` — `nearCruiserLowCorridor` walked the whole cruiser
+curve per call (122 calls per solve × ~98 `pointAt` arc-length lookups);
+the low points depend only on the solved cruiser, so they are walked once and
+cached (same d sequence, same order, same comparisons → same booleans).
 
-## Fingerprints (BEFORE, HEAD untouched) — must be identical after
+## Numbers
+
+| | before | after |
+|---|---|---|
+| train stage, canonical | 152.3 ms | 40.4–41.3 ms (3 runs) |
+| bare import of train/plan | ~1480 ms | ~1370 ms (cruiser dominates) |
+| train sweep (60 seeds) median/p90/max | 202.8 / 255.9 / 294.3 | (after-sweep pending) |
+| solve rate 60 seeds | 48/60 | (after-sweep pending) |
+
+## Fingerprint proof — identical before/after
+
+`scripts/fingerprint-train.mts` (new): full-double-precision SHA256 of route
+control points + 2000 samples + stations (all fields) + crossings (all fields,
+computed exactly as `ParkTrain` computes them); fence spans are a pure
+function of hashed inputs (`fence.ts` step 1).
 
 ```
 seed 20260728  c97d68e9e7b1e3cdfb920c35d04e943aa5c0e9d19865fecae33acb41f04394da
@@ -65,42 +79,50 @@ seed 5         09b19156639d3818ab844dcf3a6bc035789513693ce60d1f056dba8ba1c088c8
 seed 11        2b647dde0aa98b0f98f36b55c698e76d87e2332e2e40cb855c835f3c51391d08
 seed 18        325a88f7b92c8093594632bf5383774b71159a8b0cb46fae3abd841a32f08bc8
 ```
+Byte-for-byte the same hashes before and after the fix, all five CI seeds.
 
-Tool: `scripts/fingerprint-train.mts` (new, this branch) — full-double-precision
-hash of route control points + 2000 samples + stations + crossings; fence spans
-are a pure function of hashed inputs.
+`npm run test:procgen`: **Test Files 10 passed (10) · Tests 265 passed (265)**
+(after the fix; bare-exit-code re-run pending in background).
 
-Repro commands:
-```
-env LGP_SEED=<seed> node --experimental-transform-types --no-warnings \
-  --import ./scripts/ts-extension-resolver-register.mjs scripts/fingerprint-train.mts
-node --experimental-transform-types --no-warnings \
-  --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-procgen.mts --no-world
-```
+## The new check: `check:solve-cost` (bridge, not rival owner)
 
-## Coordinator addendum to carry into the PR body (Jim, via coordinator)
+`scripts/check-solve-cost.mts`, wired into `npm run build` after `check:park`.
+- Owns: raw module-scope cost of each solver stage (boundary, layout, cruiser,
+  train, slide, railRace, paths), Node, canonical seed, vs regression budgets.
+- Does NOT own: whether generation fits the ride's frame slices — that is
+  `check:park-boot` (cat-bus branch), driven through `ParkGeneration.advance()`
+  + event-loop lag. Both should exist on main when cat-bus lands; reconcile
+  numbers, not ownership (details in the check's header).
+- Budget = **8 × measured, floor 250 ms** (formula is one owner, `budgetMs`).
+  8x absorbs CI hardware (~2-3x) and load (~2x); a 30x regression trips the
+  stages that matter several times over; sub-20 ms stages sit on the floor and
+  are guarded at ~15-30x — stated trade, it is a tripwire not a profiler.
+- Measured medians recorded in the file: boundary 54, layout 9, cruiser 1274,
+  train 41, slide 4609, railRace 13, paths 12 (canonical, idle, 3 runs).
+- Red proof: pending (busy-wait scratch mutation in train/plan.ts, after the
+  bare vitest re-run finishes — src must not move mid-suite).
+
+## Coordinator addendum, to flag in the PR body (Jim, via coordinator)
 
 - `check:park-boot` on `e/cat-bus-stage-a` already catches this class of cost
   and went red the moment that branch merged main's hotel work; nothing ever
   pointed it at main — "the check isn't wrong, nobody asks it the question"
-  (same shape as #231's five hollow gates).
-- The new solve-cost check on main is a BRIDGE, not a rival owner. Mine owns:
-  raw module-scope stage cost vs a regression budget, in Node, per stage.
-  check:park-boot owns: whether generation fits the ride's frame slices
-  (advance() budget + event-loop lag) under `ParkGeneration`. Reconciliation
-  when both are on main: keep both if they measure different questions;
-  if the cat-bus merge makes mine redundant for the train stage, fold my
-  budgets into check-park-boot and delete mine — written answer in the check
-  header.
+  (the #231 five-hollow-gates shape).
+- Other checks that exist but are never asked where the code changes
+  (observations only, no fixes):
+  - `check:wall-tunnelling` is defined in package.json but absent from
+    `npm run build`; only `check:all` runs it, and **no workflow runs
+    `check:all`** — CI runs `test:procgen` + `build` (procgen-invariants.yml)
+    and `build` (deploy.yml). It never runs on CI.
+  - `measure:solver-budget` / `probe-solve.mts` are measure-only by design
+    (fine), but nothing asserts on what they measure.
+  - `check:park-boot` / `check:frame-time` exist only on `e/cat-bus-stage-a`
+    (the named gap this PR bridges).
 
 ## Still to do
 
-- [ ] Baseline 60-seed sweep (running, background task bk0gm6rrz)
-- [ ] Implement repair() prefilter in `src/world/train/route.ts`
-- [ ] (maybe) cache cruiser low points for `nearCruiserLowCorridor` in plan.ts
-- [ ] After-fingerprints ×5 must match; measure-procgen canonical + sweep after
-- [ ] test:procgen 265/265
-- [ ] New `scripts/check-solve-cost.mts` + package.json `check:solve-cost`,
-      budgets as ~4x measured, red-proof via scratch mutation, wire into build
-- [ ] Truthful cost note in train/route.ts header (number + command)
-- [ ] PR with before/after + addendum flags; do NOT merge
+- [ ] bare-exit-code `test:procgen` re-run (background task bxajb0gz0)
+- [ ] red-proof the check (busy-wait mutation, record, restore), commit check
+- [ ] after-fix 60-seed sweep (train medians + solve-rate for the PR table)
+- [ ] `npm run build` full chain, exit code from the command
+- [ ] PR (`gh pr create`), before/after + addendum; do NOT merge
