@@ -20,6 +20,7 @@ import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { KID_REST_GAZE_PITCH } from '../art/models/kid';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
+import { poseRailRaceRider, type RiderPose } from '../world/railRace/duckPose';
 import { createRainbowRings, type RainbowRings } from '../art/effects/rainbowRing';
 import { createDustPuffs, type DustPuffs } from '../art/effects/dustPuff';
 import { disposeTree } from '../art/style/materials';
@@ -242,6 +243,14 @@ export interface RidePoseTarget {
  * one — two definitions of "how a rider is posed", and the seated one already
  * has a note above it about exactly that failure. A ride names its posture and
  * this decides what that means.
+ *
+ * **Called from the end of {@link Player.animate}, not after it.** Extracting it
+ * left the *call* in `update`, one line after `animate` returned, and that made
+ * it the last writer of `body.rotation.x` for every ride in the park — so the
+ * Rail Race's pose, which is applied at the end of `animate` and which owns that
+ * property, was computed correctly and then overwritten before it was ever
+ * drawn. The pose that runs last wins; this one must not be it. See the call
+ * site for the full account.
  */
 export function applyRidePose(
   model: RidePoseTarget,
@@ -274,8 +283,8 @@ export function applyRidePose(
   model.body.rotation.x = RIDE_POSE_BODY_PITCH;
   // Zeroed for *every* ride, not only a climb, and deliberately: this function
   // writes a complete pose rather than a patch, so nothing the walk cycle left
-  // behind can leak into it. `Player.animate` runs immediately before this and
-  // sets `body.rotation.z` from the gait; a rider who boarded mid-stride would
+  // behind can leak into it. The walk cycle above this in `Player.animate` sets
+  // `body.rotation.z` from the gait; a rider who boarded mid-stride would
   // otherwise keep a frozen sliver of that roll for as long as the ride lasted.
   // The climb's own rock is written back over this a few lines down.
   model.body.rotation.z = 0;
@@ -745,6 +754,39 @@ export class Player implements GameSystem {
    */
   waterHappy = false;
 
+  /**
+   * True while some other system wants the face to read a frown without
+   * fighting the blink state machine in `animate()` — the Rail Race sets this
+   * for the moments a bonk's wobble is still fresh, and while she is actively
+   * holding through a sparking black stretch. See `RailRace.driveRiders`.
+   */
+  railRaceFrown = false;
+
+  /**
+   * `null` when she is not on the Rail Race; otherwise everything the ride
+   * wants her body doing this frame — see `RiderPose` in `railRace/duckPose.ts`.
+   *
+   * A field rather than the ride posing her directly, for the same reason
+   * {@link railRaceFrown} is one: `animate()` below rewrites `body.rotation.x`,
+   * `body.position.y`, `body.scale`, `head.rotation.x` and both legs every
+   * single frame, so anything the ride set from outside would be stamped over
+   * before it was ever drawn.
+   *
+   * **A whole pose rather than a single duck amount** because four separate
+   * things now want `body.rotation.x` — sitting, ducking, the boost rock and the
+   * win jump. Handing them over one at a time is how they end up fighting; the
+   * ride states all of them and `poseRailRaceRider` writes the property once.
+   *
+   * **`null` rather than 0** because being *aboard* is the state that matters:
+   * a rider is sat down for the whole ride, not only while ducking. Setting it
+   * back to `null` in `RailRace.arrive()` is all the restoring that is needed —
+   * `animate()`'s own walk pose owns every one of those transforms again from
+   * the very next frame, so there is no list of what-was-changed to lose track
+   * of. (`TreeClimbing.hidePlayerBody` kept such a list, got it wrong, and left
+   * her a floating head on every ride in the park until it was deleted today.)
+   */
+  railRaceRide: RiderPose | null = null;
+
   constructor(
     private readonly collision: CollisionWorld,
     private readonly camera: IsoCamera,
@@ -1071,6 +1113,13 @@ export class Player implements GameSystem {
     this.dust.update(dt);
 
     if (this.ridingFlag) {
+      // The ride positions us; all we do is hold a suitably delighted pose.
+      //
+      // The ride pose itself is applied *inside* `animate`, not after it — see
+      // the end of that method for why the difference cost this project three
+      // days. Calling it out here, after `animate` returned, made it the last
+      // writer of `body.rotation.x` and silently deleted the Rail Race's entire
+      // pose from the screen.
       this.wornJetpack?.setThrust(0);
       if (this.ridePosture === 'walking') {
         // A sequence is walking her rather than carrying her. Her *position*
@@ -1082,14 +1131,20 @@ export class Player implements GameSystem {
         this.gait = damp(this.gait, clamp01(this.scriptedWalkSpeed / PLAYER_MAX_SPEED), 0.07, dt);
         this.walkPhase += this.scriptedWalkSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;
         if (this.walkPhase > TAU) this.walkPhase -= TAU;
+        // No `applyRidePose` call here, and that is the merge of #223 talking:
+        // `animate` is now the one place the ride pose is applied, at its very
+        // end. A second call out here would be the last writer of
+        // `body.rotation.x` again — the exact thing that deleted the Rail
+        // Race's pose from the screen. It happened to be harmless for this
+        // branch (`applyRidePose` returns immediately for `'walking'`, which is
+        // what keeps the walk cycle `animate` just wrote), but a no-op that
+        // contradicts the comment above it is a trap for the next reader.
         this.animate(context, 0);
-        applyRidePose(this.model, this.climbWave, context.elapsed, this.ridePosture);
         return;
       }
       // The ride positions us; all we do is hold a suitably delighted pose.
       this.gait = damp(this.gait, 0, 0.1, dt);
       this.animate(context, 0);
-      applyRidePose(this.model, this.climbWave, context.elapsed, this.ridePosture);
       return;
     }
 
@@ -1573,6 +1628,7 @@ export class Player implements GameSystem {
 
   private animate({ elapsed, dt }: FrameContext, hopHeight: number): void {
     const model = this.model;
+    // Applied at the very end of this method — see `railRaceDuck`.
     const gait = this.gait;
     const phase = this.walkPhase;
 
@@ -1625,12 +1681,52 @@ export class Player implements GameSystem {
     // so a blink is a texture swap. That makes it cheap, but only if it happens
     // on the two TRANSITIONS — calling `setExpression` every frame would flip
     // `needsUpdate` every frame and re-upload the texture to the GPU.
-    this.face.update(dt, this.waterHappy || this.smelling ? 'happy' : 'neutral');
+    //
+    // `railRaceFrown` outranks `waterHappy`/`smelling` because a bonk is a
+    // sudden thing that happens *to* her and should win over an ambient good
+    // mood, but a blink still outranks the lot — `faceLife` punches one
+    // through whatever resting face it is handed, so the ordinary blink cycle
+    // keeps interrupting a held frown exactly as it does a held smile.
+    this.face.update(
+      dt,
+      this.railRaceFrown ? 'frown' : this.waterHappy || this.smelling ? 'happy' : 'neutral',
+    );
+
+    // The pose worn on any ride — "holding on, delighted", with the tree-climb
+    // wave blended over it. See `applyRidePose`.
+    //
+    // **Here, and not in `update`'s riding branch where it used to be.** It ran
+    // there for months, immediately *after* this method returned, which made it
+    // the last writer of `body.rotation.x` — so it stamped
+    // `RIDE_POSE_BODY_PITCH` (0.3) over whatever the line below had just
+    // written. `poseRailRaceRider` was correctly built as the single owner of
+    // that property and correctly checked as one, and none of that mattered:
+    // the Rail Race's waist fold, boost rock and victory lean were computed
+    // exactly right and then thrown away before they were drawn, every frame,
+    // for the whole life of the feature. The measured cost was a duck worth
+    // 0.42 m against a bar sized for 0.73 m — a duck bar that went through her
+    // head *while she was ducking*, under a check that reported a clearance.
+    //
+    // So the rule this ordering encodes: **one owner, and that owner writes
+    // last.** Anything that wants a say in `body.rotation.x` on a ride goes
+    // into `RiderPose` (or into `applyRidePose`, above this line) — never into
+    // a new assignment after the pose, however local and harmless it looks.
+    // `check:rail-race` drives a real `Player` through this exact order and
+    // compares what she ends up drawing against what the pose asked for, so a
+    // writer added below here fails the build rather than the family.
+    if (this.ridingFlag) applyRidePose(model, this.climbWave, elapsed, this.ridePosture);
+
+    // The Rail Race's own pose, last of all — everything above has just
+    // finished writing `body.rotation.x`, `body.scale` and `head.rotation.x`,
+    // which are the three things it needs to own outright while she is ducking.
+    // See `railRace/duckPose.ts` and `railRaceRide`.
+    if (this.railRaceRide !== null) poseRailRaceRider(model, this.railRaceRide);
 
     // Secondary motion the model owns: the swishy ponytail, if that is what
     // the child chose. Last, and deliberately so — it is pinned to the world
     // position of an anchor on the head, and the head's pose for this frame
-    // was only just written above. See `CharacterModel.update`.
+    // was only just written above (the duck included). See
+    // `CharacterModel.update`.
     model.update(dt);
 
     // The name label counter-rotates so it never tips with the character.

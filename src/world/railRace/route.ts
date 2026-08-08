@@ -113,13 +113,12 @@ export const PLAYER_LANE = LANE_COUNT - 1;
  * rings, so `travelled` means the same distance whichever one a rider is on.
  *
  * **Chosen by the wide ring's outer edge, not by taste.** The race ring is four
- * lanes at `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.6 m plus a 1.55 m
- * gauge: 9.35 m of radial width, 4.675 m of it either side of this circle. At
- * 65.5 m its innermost rail sits at 60.8 m — clear of the boundary masonry at
- * `ENTRANCE_WALL_RADIUS` (60 m) with the better part of a metre to spare, which
- * is what "outside the park" has to mean if it is to mean anything. Any smaller
- * and the inner rail is back over the wall; any larger and the outer rail walks
- * out onto the hillside for no gain.
+ * lanes at `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.75 m plus a 1.55 m
+ * gauge: 9.80 m of radial width, 4.90 m of it either side of this circle. At
+ * 65.5 m its innermost rail sits at 60.6 m — clear of the boundary masonry at
+ * `ENTRANCE_WALL_RADIUS` (60 m), which is what "outside the park" has to mean if
+ * it is to mean anything. Any smaller and the inner rail is back over the wall;
+ * any larger and the outer rail walks out onto the hillside for no gain.
  */
 export const NOMINAL_OUTSET = 6.5;
 
@@ -133,17 +132,25 @@ export const NOMINAL_OUTSET = 6.5;
  * ### Why 6.5 and not the 5.5 the old circle worked out at
  *
  * The corridor is bounded at both ends and it is narrow. The race ring's own
- * half-width is 4.675 m of lanes and gauge, which the curve's own bending widens
- * to about 4.85 m of true perpendicular reach. So:
+ * half-width is 4.90 m of lanes and gauge, which the curve's own bending widens
+ * to about 5.08 m of true perpendicular reach. So:
  *
- * - **inner limit 5.92 m** — the innermost rail must stand `1.07 m` clear of the
+ * - **inner limit 6.15 m** — the innermost rail must stand `1.07 m` clear of the
  *   outline (a child stopped by the collision wall, plus her own radius), and
- *   `1.07 + 4.85 = 5.92`.
- * - **outer limit 7.15 m** — the outermost rail must stay inside
+ *   `1.07 + 5.08 = 6.15`.
+ * - **outer limit 6.92 m** — the outermost rail must stay inside
  *   `RIM_OUTSET_START` (12 m), where the ground starts falling 17 m away, or
- *   there is nothing to stand a trestle on. `12 - 4.85 = 7.15`.
+ *   there is nothing to stand a trestle on. `12 - 5.08 = 6.92`.
  *
- * 6.5 sits in the middle with about 0.6 m either side. Note the old circle put
+ * 6.5 sits in the middle with 0.35 m inside and 0.42 m outside. **That was 0.58
+ * m either way until the cart was widened on 7 August 2026** — see
+ * {@link CART_WIDTH_AT_PARK_SCALE}, which every lane is now derived from. Half
+ * the remaining slack went on that fix, and it is worth knowing that this is the
+ * constraint the cart's width is really trading against: the tub was reshaped
+ * rather than simply scaled up precisely because a uniform widening large enough
+ * to clear her arm would have wanted 1.36 here and had nowhere to put it.
+ *
+ * Note the old circle put
  * the innermost rail **0.825 m** outside the wall at the gate — already inside
  * that 1.07 m, so the ride was marginally clipping the masonry there before any
  * of this; the old invariant did not catch it because it compared against the
@@ -152,12 +159,56 @@ export const NOMINAL_OUTSET = 6.5;
 const RING_PATH = new RingPath(NOMINAL_OUTSET);
 
 /**
- * Metres between neighbouring rails **at park scale**. A ring's own spacing is
- * this times its {@link RailRaceRoute.scale}, so the race ring keeps the 2.6 m
- * it has always had and the walk-past ring is a genuinely narrower structure
- * rather than the same one drawn small.
+ * **How wide a cart is at park scale — the one number the ring is built around.**
+ *
+ * The tub is authored in `art/blend/cart.blend`, not here, so this is a
+ * *statement about the asset* rather than a second definition of it:
+ * `check:cart-shape` measures the built hopper's own widest vertices and fails
+ * the build if they disagree with this number. That is what stops the two
+ * drifting apart, which is this repo's most common bug by a distance.
+ *
+ * ### 7 August 2026: 1.04 -> 1.10, because her arm came through the side
+ *
+ * Jim, having ridden it: *"the characters arm clips through the mine cart -
+ * make the box of the cart wider until this no longer happens"*. Measured by
+ * ray-casting the built hopper against every vertex her arms draw, her hand
+ * reached **0.285 m outside the tub** at ride scale.
+ *
+ * The cause was the *taper*, not the width: the tub was 0.62 m across at its
+ * floor and 1.04 m at its rim, and her hands hang only **24% of the way up that
+ * wall**. So most of the fix is shape — the wall is now vertical from the bevel
+ * to the rim instead of sloping — and only 0.06 m of it is extra footprint. A
+ * uniform widening big enough to fix the floor would have needed 1.36 here, and
+ * the corridor below has nothing like that much room.
+ *
+ * **1.10 is a ceiling, not a preference.** Every extra centimetre here walks the
+ * outermost lane — the one the player rides — further out, and the race camera
+ * stands off *that* lane round a ~22 m hairpin where it is already turning
+ * tighter than she is. Swept against the park's own
+ * `raceCameraNeverRunsBackwards` invariant: 1.04, 1.06, 1.08 and 1.10 pass;
+ * **1.12 fails on seed 5** at 0.049 m of camera per metre of rider against its
+ * 0.05 floor. So this is the widest the ring can carry, and it is enough.
+ *
+ * Worst remaining clearance across the four poses that move her arms: **0.058 m**
+ * (seated and boost; the duck has more, and the victory jump lifts her arms clear
+ * of the tub altogether). Guarded in `check:rail-race`.
  */
-const LANE_SPACING_AT_PARK_SCALE = 1.04;
+export const CART_WIDTH_AT_PARK_SCALE = 1.10;
+
+/**
+ * Metres between neighbouring rails **at park scale**. A ring's own spacing is
+ * this times its {@link RailRaceRoute.scale}, so the race ring keeps the 2.8 m
+ * of lane pitch its carts need and the walk-past ring is a genuinely narrower
+ * structure rather than the same one drawn small.
+ *
+ * **Exactly one cart wide, and derived rather than copied.** It was an
+ * independent 1.04 that happened to equal the cart's own 1.04, with nothing
+ * anywhere saying they had to agree — so the four carts sat side by side with
+ * zero gap by coincidence, and any widening of the cart would silently have made
+ * neighbours interpenetrate. Lanes are one cart apart because a cart has to fit
+ * in one; that is the rule, and this is now the only place it is written.
+ */
+const LANE_SPACING_AT_PARK_SCALE = CART_WIDTH_AT_PARK_SCALE;
 
 /**
  * The size-up of the carts, riders, rail gauge and lane spacing on the **race

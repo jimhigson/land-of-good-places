@@ -1,5 +1,5 @@
 import { Rng } from '../../core/mathUtils';
-import { RIDE_SCALE } from './route';
+import { LANE_COUNT, RIDE_SCALE } from './route';
 
 /**
  * **The two things you have to let go for.**
@@ -54,31 +54,113 @@ import { RIDE_SCALE } from './route';
  * purely visual clearance (bonking is decided by button state at the moment
  * of crossing, not an actual pose/collision test, see the header above).
  *
- * **2.1, not 1.5.** A previous pass (1 August 2026) set this to 1.5,
- * documented as "measured live... setting the bar roughly halfway between
- * [her ducking and standing head heights]." Re-measured live against the
- * actual running dev build (1 August 2026, same day, during the duck-bar
- * asset work — see `HANDOFF-duck-bar-blender-asset.md`): querying
- * `window.game.world.railRace` and `window.game.player.model.hatAnchor`'s
- * real world position directly (not recomputing the pose formula and
- * checking it against itself — the exact tautology
- * `ART-AGENT-NOTES.md` §6 warns a parity check can quietly become), her
- * crown sits **4.70 m above the rail even while off the button** (the
- * *better* of her two states). The old 1.5 was still nearly a metre below
- * that — she passed through every bar whichever way she was holding, not
- * "occasionally clipped", which is exactly Jim's report ("even while
- * ducking the character clearly goes through them overlapping by a lot").
+ * **2.82, and the two numbers before it were both measured wrong.**
  *
- * `DUCK_DROP` (`RailRace.ts`) is a fixed vertical translate, not a pose
- * change, so her head-to-root distance is the same in both states; her
- * standing head height is the same 4.70 m plus `DUCK_DROP * RIDE_SCALE`
- * (1.25 m) = 5.95 m. 2.1 sits roughly halfway between the two measured
- * figures (4.70 m and 5.95 m) — the same "halfway between the two real
- * states" rule the previous pass intended, just re-grounded in what the
- * running game actually measures rather than a formula re-derived from the
- * same code that produces the pose.
+ * 1.5, then 2.1 (1 August 2026), both documented as "roughly halfway between
+ * her ducking and standing head heights" and both derived from a live reading
+ * of `hatAnchor`'s world position that recorded her crown at **4.70 m** over
+ * the rail ducked and 5.95 m standing.
+ *
+ * Those figures are wrong by 1.40 m. Re-measured 5 August 2026 by composing the
+ * real transform chain — a real `createKid` parented into a real cart group at
+ * the ring's own scale, `updateMatrixWorld`, then read back — her crown is at
+ * **6.10 m** ducked and **7.35 m** standing, and the top of her head, hair and
+ * all, reaches **6.42 m** ducked and **7.67 m** standing. (Whatever the 1
+ * August reading actually caught, it was not a rider on this ring at this
+ * scale.) Against a bar hanging at 2.1 × 2.5 = 5.25 m, that means the bar sat
+ * *inside her head in both states*: Jim, riding it, *"their head just passes
+ * through the bonkers like a ghost which looks very bad"*.
+ *
+ * The rule is the one both earlier passes intended — halfway between the two
+ * real states — finally applied to real numbers, and measured against her head
+ * **top** rather than the bare crown, because hair is what a family sees pass
+ * through a bar. Halfway between 6.42 and 7.67 is 7.04 m, which is
+ * `2.82 × RIDE_SCALE`. A ducked rider now clears the bar's underside by about a
+ * quarter of a metre and a standing one meets it across the top of her head,
+ * which is what a duck bar is for.
+ *
+ * **This is no longer a comment anybody has to trust.**
+ * `scripts/check-rail-race.mts` builds the real kid, poses her in both states
+ * the way `RailRace.ts` does, and asserts the separation — so the next time
+ * anything about her height, the seat, the ring's scale or this number moves,
+ * the build says so instead of a family finding out on the ride.
+ *
+ * `track.ts` derives the duck bar posts' own length from this, so raising it
+ * does not leave the bars floating above their supports — see `postStretch`.
  */
-export const DUCK_CLEARANCE_AT_PARK_SCALE = 2.1;
+/**
+ * **How tall a rider on this ride is: the top of a SEATED head above the rail
+ * head, at park scale.** Multiply by a ring's own `scale` for that ring.
+ *
+ * *Seated*, since 6 August 2026, because Jim asked the question nobody had:
+ * *"why does the character stand up in the cart anyway? can't they sit down?"*
+ * She stood in a race cart for months for no better reason than that
+ * `setRidePose` only ever owned the root and no seated pose had ever been
+ * written. Sitting her down took 0.71 m off this number at ride scale.
+ *
+ * The single owner of "how much room does a rider need", and the reason this
+ * exists as a named constant at all: on 5 August 2026 the duck bars were found
+ * hanging *inside* riders' heads in both states, because the figure they had
+ * twice been set from — a live reading of 4.70 m ducked / 5.95 m standing — was
+ * 1.40 m wrong. Re-measured by composing the real transform chain (a real
+ * `createKid` parented into a real cart group at the ring's own scale,
+ * `updateMatrixWorld`, then read back): the crown reaches 7.35 m over the rail
+ * and the top of her head, hair and all, **7.67 m** — which at `RIDE_SCALE` is
+ * the 3.068 below. Hair, not crown, because hair is what a family watches pass
+ * through things.
+ *
+ * **This is the third time this number has moved in a day** — it was found
+ * 1.40 m wrong, re-derived for the crouch, and re-derived again for the seat —
+ * and each time everything downstream moved with it without being touched.
+ * That is the whole value of the chain: the duck bars and the finish rainbow
+ * are *consequences* of a rider's height, not opinions about it.
+ *
+ * Everything that has to clear a rider derives from this and nothing invents a
+ * height of its own:
+ *
+ * - {@link DUCK_CLEARANCE_AT_PARK_SCALE} hangs a duck bar halfway between this
+ *   and the same head once ducked (`RailRace.ts`'s `DUCK_DROP`, 0.5 at park
+ *   scale), i.e. halfway between 3.068 and 2.568 — the 2.82 below.
+ * - `track.ts`'s finish rainbow arcs clear *over* it. That one was the point of
+ *   Jim's 6 August report: the old straight finish beam sat 2.2 m above the
+ *   rail against this 3.068, so it passed through every rider on the ride, and
+ *   a finish line you are hit by is not a finish line.
+ *
+ * `scripts/check-rail-race.mts` measures the real model against this rather
+ * than trusting it, which is what stops it going 1.40 m stale a second time.
+ */
+export const RIDER_HEAD_TOP_AT_PARK_SCALE = 2.843;
+
+/**
+ * ...and the top of the same head once she has **folded** — see
+ * `railRace/duckPose.ts`. Measured the same way, off the real posed model.
+ *
+ * Was a translation of the whole child (`DUCK_DROP`, 0.5), which Jim rejected
+ * twice: *"that's not what ducking means."* The crouch that replaced it is
+ * **deeper** than the translation it removed — **1.49 m** at ride scale against
+ * 1.25 — because sinking the hips and folding the waist buys more than sliding
+ * the whole child down ever did. So the bars did not *have* to be re-tuned to
+ * keep working; they were re-derived anyway, because the number they derive
+ * *from* moved, and a constant that survives by luck is exactly what this file
+ * has already been burned by once.
+ */
+export const RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE = 2.263;
+
+/**
+ * Half the duck-bar asset's own depth, at park scale — `duckbar.blend` measures
+ * 0.75 m tall about its centre, and a ring hangs it by that centre.
+ */
+const DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE = 0.15;
+
+/**
+ * Where a duck bar's **underside** wants to be: halfway between a standing head
+ * and a ducked one, so ducking clears it by as much as standing meets it.
+ */
+const DUCK_BAR_UNDERSIDE_AT_PARK_SCALE =
+  (RIDER_HEAD_TOP_AT_PARK_SCALE + RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE) / 2;
+
+export const DUCK_CLEARANCE_AT_PARK_SCALE =
+  DUCK_BAR_UNDERSIDE_AT_PARK_SCALE + DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE;
 
 /**
  * The clearance on the ring a child actually races on. A ring builds its own
@@ -102,6 +184,24 @@ export const ALERT_RANGE = 34;
 export interface DuckBar {
   /** Metres along the loop, measured from the start/finish arch. */
   readonly at: number;
+  /**
+   * **Which single lane this bar crosses.**
+   *
+   * A bar used to have no lane, because there was one bar object per position
+   * and `track.ts` drew it four times, once over each lane. Jim, 7 August 2026:
+   * "the head bonk bars all intersect each other". They did, and by 3.00 m: a
+   * bar reaches {@link BAR_HALF_SPAN_AT_PARK_SCALE} (1.15 at park scale, 2.875 m
+   * on the race ring) either side of its lane's centre, while the lanes are only
+   * `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.75 m apart. Four of them at one
+   * arc distance therefore *had* to overlap — it was not a placement accident
+   * but arithmetic, and no amount of nudging one position would have fixed it.
+   *
+   * So a bar now belongs to exactly one lane, and {@link planHazards} spreads a
+   * lane's worth around the lap. Fairness is kept by **count**, not by position:
+   * every lane gets one bar per bar event, so every racer meets the same number
+   * of bars as every other racer *and* the same number as before this change.
+   */
+  readonly lane: number;
 }
 
 /** A blackened stretch of rail. */
@@ -130,8 +230,16 @@ export interface HazardLayout {
 export interface HazardSchedule {
   /** Where the hazards sit on one lap, for the geometry to be built from. */
   readonly lap: HazardLayout;
-  /** Every bar crossing of the whole race, in travelled metres, ascending. */
-  readonly barCrossings: readonly number[];
+  /**
+   * Every bar crossing of the whole race, in travelled metres, ascending —
+   * **indexed by lane**, because since 7 August a bar crosses one lane, not all
+   * four (see {@link DuckBar.lane}).
+   *
+   * A rider walks her own lane's list with her own cursor. Every lane's list is
+   * the same *length*, which is what makes the race fair, and no two are the
+   * same *list*, which is what Jim asked for.
+   */
+  readonly barCrossingsByLane: readonly (readonly number[])[];
   /** Every spark stretch of the whole race, in travelled metres, ascending. */
   readonly sparkStretches: readonly SparkZone[];
 }
@@ -171,6 +279,35 @@ const GAP_MAX = 39;
 /** How long a blackened stretch runs for. */
 const ZONE_MIN = 15;
 const ZONE_MAX = 23;
+
+/**
+ * Where each of a bar event's four lanes sits, in whole trestle spacings from
+ * the event's own cursor position.
+ *
+ * Whole spacings so each lands on its own trestle rather than being snapped onto
+ * a neighbour's. The spread is 48 m, comfortably more than the 5.75 m a bar is
+ * wide, so two bars from the same event cannot touch even before
+ * `usedTrestleIndices` guarantees they are on different slots entirely.
+ *
+ * Symmetric about the event, and wide: 48 m is more than the 24 m gap between
+ * the closest pair of bar events, so consecutive events' bars interleave and the
+ * ring ends up evenly scattered rather than carrying ten clumps of four.
+ *
+ * **Bars may sit over the black stretches.** Jim, 7 August 2026: "it is also ok
+ * for them to be over the black tracks", and again, reversing an intermediate
+ * decision to avoid them: "yes they can be over the black bits". Nothing here
+ * tests against {@link SparkZone} — a bar goes wherever the grid puts it.
+ */
+const BAR_LANE_OFFSETS: readonly number[] = [-2, -1, 1, 2];
+
+/**
+ * The least a single lane's own consecutive bars may be apart, in trestle slots.
+ *
+ * Two slots is 24 m, which is exactly the tightest pair any rider met before the
+ * bars were split per lane — chosen to preserve that measured property rather
+ * than to hit a round number. See {@link snapToTrestleGrid}'s `laneUsed`.
+ */
+const MIN_LANE_GAP_SLOTS = 2;
 
 /**
  * How many trestle grid slots fit round one lap — `track.ts`'s own
@@ -217,15 +354,53 @@ export function trestleGridIndex(at: number, loopLength: number): number {
  * collision would be a worse bug than the few metres' nudge this costs when
  * it actually happens.
  */
-function snapToTrestleGrid(cursor: number, loopLength: number, usedIndices: Set<number>): number {
+function snapToTrestleGrid(
+  cursor: number,
+  loopLength: number,
+  usedIndices: Set<number>,
+  /**
+   * The slots a bar may actually use — everything between {@link OPENING_RUN}
+   * and {@link CLOSING_RUN}.
+   *
+   * Needed since the lane spread below started asking for four slots per bar
+   * event rather than one: with 40 bars a lap wanting distinct slots out of 50,
+   * the outward search really does reach the ends of the lap, and a bar landing
+   * in the opening run would quietly undo "the race opens with speed" — a tuned
+   * property, not an incidental one.
+   */
+  window?: { readonly min: number; readonly max: number },
+  /**
+   * Slots already taken **by this bar's own lane**, which the result must keep
+   * {@link MIN_LANE_GAP_SLOTS} clear of.
+   *
+   * Distinctness alone is not enough here. The outward search can hand one lane
+   * two adjacent slots when a busy stretch pushes bars around, and measured
+   * before this existed it did: lanes 0 and 2 each got a pair 12 m apart, where
+   * every rider's tightest pair used to be 24 m. 12 m at racing speed is under a
+   * second, and a rider who has just been bonked is doing 11.4 m/s — so this is
+   * the difference between "duck through two" and an unrecoverable double hit,
+   * which is exactly the tuned property this change was meant not to touch.
+   */
+  laneUsed?: Set<number>,
+): number {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
+  /** Slots apart, the short way round the loop. */
+  const apart = (a: number, b: number): number => {
+    const d = Math.abs(a - b) % count;
+    return Math.min(d, count - d);
+  };
+  const allowed = (index: number): boolean =>
+    !usedIndices.has(index) &&
+    (!window || (index >= window.min && index <= window.max)) &&
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
     for (const candidate of candidates) {
       const index = ((candidate % count) + count) % count;
-      if (!usedIndices.has(index)) {
+      if (allowed(index)) {
         usedIndices.add(index);
+        laneUsed?.add(index);
         return (index / count) * loopLength;
       }
     }
@@ -263,6 +438,20 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
   // Two bars to a zone keeps both fresh and lands about eight hazards a lap.
   let sinceZone = 0;
   const usedTrestleIndices = new Set<number>();
+  const usedByLane = Array.from({ length: LANE_COUNT }, () => new Set<number>());
+  // Which trestle slots a bar may use — the same opening and closing runs the
+  // cursor walk itself respects, expressed on the grid so the outward search in
+  // `snapToTrestleGrid` cannot spill past them.
+  const gridCount = trestleGridCount(loopLength);
+  const barWindow = {
+    min: Math.ceil((OPENING_RUN / loopLength) * gridCount),
+    max: Math.floor(((loopLength - CLOSING_RUN) / loopLength) * gridCount),
+  };
+
+  // **Pass one: the rhythm.** Unchanged from before the bars were split per
+  // lane — the same alternation, the same RNG draws in the same order, so the
+  // zones this produces are bit-identical to the ones the ride was tuned with.
+  const barEvents: number[] = [];
   while (cursor < limit) {
     if (sinceZone >= 2 && cursor + ZONE_MAX < limit) {
       const to = cursor + rng.range(ZONE_MIN, ZONE_MAX);
@@ -270,14 +459,40 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
       cursor = to;
       sinceZone = 0;
     } else {
-      // Snapped onto the trestle grid — see `snapToTrestleGrid` — rather than
-      // left at the raw cursor: a duck bar now always sits at a position
-      // `track.ts` can guarantee a real support for.
-      bars.push({ at: snapToTrestleGrid(cursor, loopLength, usedTrestleIndices) });
+      barEvents.push(cursor);
       sinceZone += 1;
     }
     cursor += rng.range(GAP_MIN, GAP_MAX);
   }
+
+  // **Pass two: one bar per lane per event.**
+  //
+  // Two passes rather than one because a bar's slot now has to be checked
+  // against the *whole* zone list, including zones the old single walk had not
+  // laid down yet when it placed a bar. See {@link clearOfZones}.
+  //
+  // Every lane gets exactly one bar from every event, which is what keeps the
+  // race fair: all four racers meet the same number of bars, and it is the same
+  // number they met when one bar spanned all four lanes. Only *where* changed.
+  //
+  // The lane-to-offset mapping rotates with the event, so it is not lane 0
+  // leading every single time — Jim's "not always at the same spots".
+  barEvents.forEach((at, barEvent) => {
+    for (let slot = 0; slot < LANE_COUNT; slot += 1) {
+      const lane = (slot + barEvent) % LANE_COUNT;
+      bars.push({
+        at: snapToTrestleGrid(
+          at + BAR_LANE_OFFSETS[slot]! * TRESTLE_SPACING,
+          loopLength,
+          usedTrestleIndices,
+          barWindow,
+          usedByLane[lane]!,
+        ),
+        lane,
+      });
+    }
+  });
+  bars.sort((a, b) => a.at - b.at);
 
   // Which of the physical layout above actually makes it into this level's
   // schedule — uniformly across every lap (unlike the old lap-escalation
@@ -285,7 +500,7 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
   // the whole race, not something that changes as the laps go by.
   const includeZones = level >= ZONES_FROM_LEVEL;
   const includeBars = level >= BARS_FROM_LEVEL;
-  const barCrossings: number[] = [];
+  const barCrossingsByLane: number[][] = Array.from({ length: LANE_COUNT }, () => []);
   const sparkStretches: SparkZone[] = [];
   for (let lap = 0; lap < laps; lap += 1) {
     const base = lap * loopLength;
@@ -295,11 +510,15 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
       }
     }
     if (includeBars) {
-      for (const bar of bars) barCrossings.push(base + bar.at);
+      // `bar.at` is also exactly where `track.ts` hangs the bar's geometry — see
+      // that file's duck-bar loop. The two used to be allowed to differ by the
+      // supporting trestle's arc nudge, which is how a rider came to fly through
+      // a bar and lose her speed a cart's length later.
+      for (const bar of bars) barCrossingsByLane[bar.lane]!.push(base + bar.at);
     }
   }
-  barCrossings.sort((a, b) => a - b);
+  for (const crossings of barCrossingsByLane) crossings.sort((a, b) => a - b);
   sparkStretches.sort((a, b) => a.from - b.from);
 
-  return { lap: { bars, zones }, barCrossings, sparkStretches };
+  return { lap: { bars, zones }, barCrossingsByLane, sparkStretches };
 }

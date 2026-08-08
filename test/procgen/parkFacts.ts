@@ -189,9 +189,178 @@ export interface PathEdgeFact {
   readonly points: readonly (readonly [number, number])[];
 }
 
+/**
+ * One duck bar on the race ring, and **what the race actually does at it.**
+ *
+ * Measured, never re-derived, and the two sides come from genuinely different
+ * places — which is the whole point. `builtAt` is read off the bar's own
+ * instance matrix **in the built scene**; `bonkAt`/`speedBefore`/`speedAt` come
+ * from driving `stepRider` — the very function the browser calls sixty times a
+ * second — against `scheduleForLevel`, the very call `RailRace.chooseLevel`
+ * makes. Neither can be quietly satisfied by the other.
+ *
+ * It exists because the two used to disagree and nothing noticed. A bar renders
+ * over its supporting trestle, which may have been nudged along the loop to
+ * find clear ground; the physics bonked at the *unnudged* position it was
+ * planned for. On the canonical seed that was 2.00 m on every bar, and Jim,
+ * riding it: *"they slow down only after passing through it"*.
+ */
+export interface DuckBarFact {
+  /** Metres from the arch, off the bar's own instance matrix. */
+  readonly builtAt: number;
+  /** Metres from the arch where the bonk actually fires, or null if it never does. */
+  readonly bonkAt: number | null;
+  /** Her speed entering the frame in which she first reaches `builtAt`. */
+  readonly speedBefore: number;
+  /** ...and leaving it. Equal to `speedBefore` means nothing happened at the bar. */
+  readonly speedAt: number;
+  /**
+   * Her speed once she is {@link BAR_SPEED_SAMPLE} past the bar.
+   *
+   * The honest place to ask "has this bar cost her anything yet". Sampling
+   * exactly *at* `builtAt` is a frame too early: `builtAt` is measured off an
+   * instance matrix and can land a hair before the scheduled crossing, so a
+   * correct ride is still at full speed on that one frame. A sample just past
+   * the bar cannot be fooled that way, and is still nowhere near the 2.5 m of
+   * lateness the original defect had.
+   */
+  readonly speedAfter: number;
+  /** How far she travels during that frame — the finest resolution available. */
+  readonly frameTravel: number;
+}
+
+/**
+ * How far past a duck bar {@link DuckBarFact.speedAfter} is sampled, in metres.
+ *
+ * A shade over one frame's travel at the ride's top speed (33 m/s at 60 Hz is
+ * 0.55 m), so the sample is never taken before the crossing it is asking about
+ * — and a quarter of the 2.5 m by which the bonk used to land late, so a return
+ * of that defect still reads as full speed here.
+ */
+const BAR_SPEED_SAMPLE = 0.6;
+
+
+/** One lane's headroom under the finish rainbow, on one ring. */
+export interface ArchClearanceFact {
+  readonly ring: string;
+  readonly lane: number;
+  /** Top of a standing rider's head at the arch, in world metres. */
+  readonly crownY: number;
+  /** The lowest the rainbow gets directly over that lane, in world metres. */
+  readonly rainbowY: number;
+}
+
+/**
+ * One straight leg carrying the finish rainbow down to the ground, as built.
+ *
+ * Jim, 7 August 2026: *"make the rainbow extend all the way to the floor with
+ * straight sections, not just float in space"*. Everything here is read off the
+ * leg's own world-space bounding box and the terrain function the game itself
+ * uses, so the invariant measures the arch that was built rather than the
+ * arithmetic that placed it.
+ */
+export interface ArchLegFact {
+  readonly ring: string;
+  readonly name: string;
+  /** Which rainbow band this leg continues, inner band 0 outwards. */
+  readonly band: number;
+  /** Which side of the track it comes down: park side, or out on the rim. */
+  readonly side: 'inner' | 'outer';
+  readonly x: number;
+  readonly z: number;
+  /** Lowest vertex of the leg, world metres. */
+  readonly bottomY: number;
+  /** Highest vertex of the leg, world metres. */
+  readonly topY: number;
+  /** Lowest vertex of the arc band this leg belongs to, world metres. */
+  readonly arcFootY: number;
+  /** The **lowest** terrain anywhere under the leg's own footprint. */
+  readonly groundY: number;
+  readonly distanceToPath: number;
+  readonly distanceToRail: number;
+  readonly clearOfPlots: boolean;
+}
+
+/**
+ * How the race camera moves as a rider runs the built ring.
+ *
+ * **Measured by driving the real `RaceCamera`**, not by re-deriving where it
+ * ought to stand: the rig is reset to each arc distance in turn and its world
+ * position read off the camera object, which is the same object the renderer
+ * draws through.
+ *
+ * The defect this exists to catch is geometric and was found on 6 August 2026.
+ * The rig stands ~27.5 m out along the ring's normal; the ring's tightest bend
+ * has a radius near 20 m. A point held a fixed distance out along a curve's
+ * normal traces an offset curve of radius `R - offset`, so wherever the ring
+ * bends towards the camera tighter than the rig stands out, that offset curve
+ * **runs backwards** — the picture lurches the wrong way while the rider is
+ * still going forwards. It is not damping-shaped and no half-life hides it.
+ */
+export interface CameraTrackingFact {
+  /**
+   * The least the camera moves *along the rider's direction of travel*, in
+   * metres of camera per metre of rider. Negative means it went backwards.
+   */
+  readonly leastForwardProgress: number;
+  /** Arc distance at which that happened, metres from the arch. */
+  readonly worstAt: number;
+  /**
+   * The rider speed the worst reading was taken at, m/s.
+   *
+   * The ring is walked twice — at a standstill and at the speed the zoom stops
+   * growing — because the rig's stand-off scales with the zoom and the zoom
+   * scales with speed. Probing only the resting rig is what let this whole
+   * invariant pass while the racing one ran backwards.
+   */
+  readonly worstSpeed: number;
+  /** How many probes of {@link probes} ran backwards at all. */
+  readonly backwardsProbes: number;
+  /**
+   * Probes at which the rig put the camera somewhere that is not a number.
+   *
+   * Always 0 in a healthy park, and separate from {@link backwardsProbes} on
+   * purpose: a NaN loses every comparison it is asked, so it is *skipped* by a
+   * running minimum rather than caught by one, and leaves a clean-looking
+   * reading taken over however many probes survived.
+   */
+  readonly nonFiniteProbes: number;
+  readonly probes: number;
+  /** Greatest horizontal distance from camera to rider, metres. */
+  readonly standOff: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /**
+   * Headroom under the finish rainbow, per ring per lane — see
+   * {@link ArchClearanceFact}.
+   *
+   * Measured off the built arc's own vertices against a rider's real height,
+   * because the thing it replaced was not measured at all: the old straight
+   * finish beam used an invented 2.2 m of clearance and passed through every
+   * rider on the ride, every lap, with nothing complaining.
+   */
+  readonly archClearance: readonly ArchClearanceFact[];
+  /**
+   * Every straight leg carrying the finish rainbow down to the ground — see
+   * {@link ArchLegFact}. Empty means the rainbow is floating in the sky again,
+   * which is the whole of what Jim asked to have fixed, so the invariant treats
+   * an empty list as a failure rather than as nothing to check.
+   */
+  readonly archLegs: readonly ArchLegFact[];
+  /**
+   * Every duck bar on the race ring, with what the race does at it — see
+   * {@link DuckBarFact}. Empty is not a healthy answer: the ring always
+   * schedules bars, and none in the built scene would itself be a bug.
+   */
+  readonly duckBars: readonly DuckBarFact[];
+  /**
+   * How smoothly the race camera actually tracks a rider round the built ring —
+   * see {@link CameraTrackingFact}.
+   */
+  readonly cameraTracking: CameraTrackingFact;
   /**
    * The Sky Cruiser's pass through the castle (#113), measured by the *same*
    * functions the boot assert and `check:castle-window` use.
@@ -1117,7 +1286,374 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     ],
   };
 
+  // --- what the race really does at each duck bar --------------------------
+  //
+  // Dynamically imported like everything else seed-dependent here: `simulate.ts`
+  // pulls in `railRace/plan.ts` at module scope, which reads the stall's own
+  // placement out of `parkManifest.ts`, so a static import at the top of this
+  // file would race this seed's rider against the default seed's ring.
+  // `Matrix4` is aliased because the castle-tower block above this one already
+  // holds that name in this same function scope. Aliased here rather than there
+  // so the rename stays inside the rail-race block that introduced the clash.
+  const { InstancedMesh: Instanced, Matrix4: Mat4, Mesh, Vector3: Vec3 } = await import('three');
+  const { createRider, scheduleForLevel, stepRider } = await import(
+    '../../src/world/railRace/simulate.ts'
+  );
+  const { BARS_FROM_LEVEL } = await import('../../src/world/railRace/hazards.ts');
+  const { PLAYER_LANE: PLAYER } = await import('../../src/world/railRace/route.ts');
+
+  const raceRoute = world.railRace.raceRoute;
+
+  /**
+   * Arc distance from the arch of the ring point nearest `(x, z)`.
+   *
+   * **Inverted against the path itself, not against a formula for it.** This
+   * used to invert `angleAt(s) = -s / NOMINAL_RADIUS` in closed form, which was
+   * exact while the ring was a circle and became meaningless the moment #216
+   * made it follow the park boundary — `NOMINAL_RADIUS` is not even exported
+   * any more, so the closed form silently produced `NaN` and every bar deduped
+   * to a single phantom. Walking `route.path`'s own samples works for whatever
+   * shape the ring is next, which is the point.
+   *
+   * The samples sit ~0.25 m apart, which is half the distance a rider covers in
+   * a frame — too coarse to compare against on its own — so the nearest one is
+   * refined by projecting onto the polyline either side of it. That lands well
+   * inside a centimetre.
+   */
+  const archRelative = (x: number, z: number): number => {
+    const samples = raceRoute.path.samples;
+    let nearest = 0;
+    let nearestD2 = Infinity;
+    for (let i = 0; i < samples.length; i += 1) {
+      const s = samples[i]!;
+      const d2 = (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z);
+      if (d2 < nearestD2) {
+        nearestD2 = d2;
+        nearest = i;
+      }
+    }
+    let bestAt = samples[nearest]!.at;
+    let bestD2 = nearestD2;
+    for (const step of [-1, 1]) {
+      const a = samples[nearest]!;
+      const b = samples[(nearest + step + samples.length) % samples.length]!;
+      const ex = b.x - a.x;
+      const ez = b.z - a.z;
+      const len2 = ex * ex + ez * ez;
+      if (len2 === 0) continue;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / len2));
+      const px = a.x + ex * t;
+      const pz = a.z + ez * t;
+      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        // `samples` are evenly spaced in arc length, so `t` interpolates it.
+        bestAt = raceRoute.wrap(a.at + step * t * (raceRoute.length / samples.length));
+      }
+    }
+    return raceRoute.wrap(bestAt - raceRoute.startDistance);
+  };
+  const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
+  const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
+  const builtBarDistances: number[] = [];
+  if (barsMesh instanceof Instanced) {
+    const matrix = new Mat4();
+    const at = new Vec3();
+    const laneProbe = new Vec3();
+    for (let i = 0; i < barsMesh.count; i += 1) {
+      barsMesh.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      // The bar's real arc position, read off its own matrix rather than off
+      // the rule that placed it.
+      const arch = archRelative(at.x, at.z);
+
+      // **Which lane is it on?** Since 7 August a duck bar crosses one lane
+      // rather than all four (`hazards.ts`'s `DuckBar.lane`), so the rider
+      // simulated below — who runs in `PLAYER_LANE` — only ever meets a quarter
+      // of the ring's bars. This used to dedupe by arc position instead, on the
+      // reasoning that "all four lanes of one bar share it"; that was true then
+      // and is false now, and left in place it made the invariant demand that a
+      // rider be bonked by three other people's bars.
+      //
+      // Decided by measuring the bar against each lane's own centre point at its
+      // own arc distance — not by its distance from the origin, which stopped
+      // meaning anything when #216 made this ring a spline whose radius varies
+      // by 40 m.
+      let onLane = 0;
+      let nearest = Infinity;
+      for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
+        raceRoute.pointAt(lane, raceRoute.wrap(raceRoute.startDistance + arch), laneProbe);
+        const d = Math.hypot(laneProbe.x - at.x, laneProbe.z - at.z);
+        if (d < nearest) {
+          nearest = d;
+          onLane = lane;
+        }
+      }
+      if (onLane !== PLAYER) continue;
+      builtBarDistances.push(arch);
+    }
+    builtBarDistances.sort((a, b) => a - b);
+  }
+
+  const duckBars: DuckBarFact[] = [];
+  if (builtBarDistances.length > 0) {
+    // A rider who mashes flat out and never ducks: the one who meets every bar.
+    // `scheduleForLevel` is the very call `RailRace.chooseLevel` makes, so this
+    // races the schedule the game races, not a second opinion about it.
+    const schedule = scheduleForLevel(BARS_FROM_LEVEL);
+    const rider = createRider(PLAYER);
+    const dt = 1 / 60;
+    const pending = new Map(
+      builtBarDistances.map((builtAt) => [builtAt, { builtAt } as { builtAt: number } & Partial<DuckBarFact>]),
+    );
+    const bonks: number[] = [];
+    let steps = 0;
+    while (rider.travelled < raceRoute.length && steps < 60 * 400) {
+      const before = rider.travelled;
+      const speedBefore = rider.speed;
+      const events = stepRider(raceRoute, rider, schedule, { pressed: true, ducking: false }, dt);
+      if (events.bonked) bonks.push(rider.travelled);
+      for (const [builtAt, row] of pending) {
+        if (before <= builtAt && rider.travelled >= builtAt && row.speedAt === undefined) {
+          Object.assign(row, {
+            speedBefore,
+            speedAt: rider.speed,
+            frameTravel: rider.travelled - before,
+          });
+        }
+        const sample = builtAt + BAR_SPEED_SAMPLE;
+        if (before <= sample && rider.travelled >= sample && row.speedAfter === undefined) {
+          Object.assign(row, { speedAfter: rider.speed });
+        }
+      }
+      steps += 1;
+    }
+    for (const builtAt of builtBarDistances) {
+      const row = pending.get(builtAt);
+      // The bonk nearest this bar, whichever side of it it landed.
+      let bonkAt: number | null = null;
+      let nearest = Infinity;
+      for (const bonk of bonks) {
+        const d = Math.abs(bonk - builtAt);
+        if (d < nearest) {
+          nearest = d;
+          bonkAt = bonk;
+        }
+      }
+      duckBars.push({
+        builtAt,
+        bonkAt,
+        speedBefore: row?.speedBefore ?? 0,
+        speedAt: row?.speedAt ?? 0,
+        speedAfter: row?.speedAfter ?? 0,
+        frameTravel: row?.frameTravel ?? 0,
+      });
+    }
+  }
+
+  // --- how smoothly the camera tracks a rider round this ring ---------------
+  //
+  // Drives the real rig. `reset` is the ride's own "snap to this rider" call and
+  // it runs the same private placement the per-frame `update` does, so this
+  // measures the camera the renderer draws through rather than a model of it.
+  //
+  // **At the speed a child actually rides at, and that took three days to
+  // matter.** This walked the ring through `reset(travelled)`, which pinned the
+  // rig's zoom to 1 — its value on the start line and nowhere else. The shipping
+  // camera reaches 1.34 within a second of the lights going out and holds it for
+  // the rest of the race, and the zoom scales the stand-off, which is the exact
+  // quantity a reversal is decided by. So the invariant passed at 0.094 while
+  // the rig a child rides ran backwards over 2.67% of the lap: a guard measuring
+  // a crawl-speed rig nobody is ever on.
+  //
+  // Both speeds are swept and the worse is kept, so neither the resting framing
+  // nor the racing one can hide behind the other, and the ceiling that fixed
+  // this (`RaceCamera.measureZoomCeiling`) cannot pass by simply refusing to
+  // pull back at all — the resting rig would still have to clear the floor.
+  const { RaceCamera, FULL_PULL_BACK_SPEED } = await import(
+    '../../src/world/railRace/camera.ts'
+  );
+  const raceCamera = new RaceCamera(raceRoute);
+  raceCamera.resize(1600, 900);
+  // 0.25 m: the reversal is a sustained geometric effect spanning metres of
+  // track, so this resolves it comfortably without walking the ring 12000 times
+  // on each of five seeds.
+  const CAMERA_PROBE_STEP = 0.25;
+  const cameraProbes = Math.floor(raceRoute.length / CAMERA_PROBE_STEP);
+  let leastForwardProgress = Infinity;
+  let worstAt = 0;
+  let worstSpeed = 0;
+  let backwardsProbes = 0;
+  let standOff = 0;
+  // Probes the rig placed somewhere that is not a number. Counted rather than
+  // folded into the reading below, because a NaN loses every `<` it is asked and
+  // would otherwise be *skipped* — leaving a pristine-looking minimum taken over
+  // whichever probes happened to survive. Not hypothetical: an
+  // `Infinity - Infinity` in the zoom ceiling did exactly this while it was being
+  // written, and silently dropped 1763 of 2400 probes.
+  let nonFiniteProbes = 0;
+  for (const probeSpeed of [0, FULL_PULL_BACK_SPEED]) {
+    const cameraAt: { x: number; z: number }[] = [];
+    for (let i = 0; i < cameraProbes; i += 1) {
+      raceCamera.reset(i * CAMERA_PROBE_STEP, probeSpeed);
+      const { x, z } = raceCamera.camera.position;
+      cameraAt.push({ x, z });
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        nonFiniteProbes += 1;
+        continue;
+      }
+      const here = raceRoute.path.sampleAt(raceRoute.startDistance + i * CAMERA_PROBE_STEP);
+      standOff = Math.max(standOff, Math.hypot(here.x - x, here.z - z));
+    }
+    for (let i = 0; i < cameraProbes; i += 1) {
+      const s = i * CAMERA_PROBE_STEP;
+      const here = raceRoute.path.sampleAt(raceRoute.startDistance + s);
+      const a = cameraAt[i]!;
+      const b = cameraAt[(i + 1) % cameraProbes]!;
+      // The camera's own motion, projected on the way the rider is going.
+      const forward =
+        ((b.x - a.x) * here.tangentX + (b.z - a.z) * here.tangentZ) / CAMERA_PROBE_STEP;
+      if (!Number.isFinite(forward)) continue;
+      if (forward < 0) backwardsProbes += 1;
+      if (forward < leastForwardProgress) {
+        leastForwardProgress = forward;
+        worstAt = s;
+        worstSpeed = probeSpeed;
+      }
+    }
+  }
+  const cameraTracking: CameraTrackingFact = {
+    leastForwardProgress: leastForwardProgress === Infinity ? 0 : leastForwardProgress,
+    worstAt,
+    worstSpeed,
+    backwardsProbes,
+    nonFiniteProbes,
+    probes: cameraProbes * 2,
+    standOff,
+  };
+
+  // --- headroom under the finish rainbow -----------------------------------
+  const { RIDER_HEAD_TOP_AT_PARK_SCALE } = await import('../../src/world/railRace/hazards.ts');
+  // The park's own predicates for "is there anything under here", the same three
+  // `railRace/track.ts`'s `groundIsClear` asks about a trestle foot. Dynamically
+  // imported like everything else seed-dependent in this file.
+  const { distanceToPath } = await import('../../src/world/paths.ts');
+  const { distanceToRailCorridor, clearOfPlots } = await import(
+    '../../src/world/train/plan.ts'
+  );
+  const archClearance: ArchClearanceFact[] = [];
+  const archLegs: ArchLegFact[] = [];
+  for (const [label, groupName, ringRoute] of [
+    ['race', 'railRace:race-ring', world.railRace.raceRoute],
+    ['walk-past', 'railRace:walk-past-ring', world.railRace.walkPastRoute],
+  ] as const) {
+    const group = world.railRace.group.getObjectByName(groupName);
+    if (!group) continue;
+    const start = ringRoute.startDistance;
+    const sample = ringRoute.path.sampleAt(start);
+    const outward = ringRoute.outwardAt(start, new Vec3());
+
+    // Every rainbow vertex, reduced to (across the track, height).
+    //
+    // **The arcs only, matched exactly.** `startsWith('railRace:finish-rainbow')`
+    // also catches `…-leg-3-outer`, and a leg runs all the way down to the
+    // terrain — so the moment one came within a child's width of a lane it would
+    // silently become the lowest thing over that lane and this would report a
+    // headroom of about zero for a reason that has nothing to do with headroom.
+    // It cannot happen today (the nearest leg is 13 m outside the outermost
+    // lane), which is exactly why it is worth pinning now rather than after
+    // somebody narrows the span.
+    const band: { across: number; y: number }[] = [];
+    const vertex = new Vec3();
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      if (!/^railRace:finish-rainbow-\d+$/.test(child.name)) return;
+      const position = child.geometry.getAttribute('position');
+      if (!position) return;
+      child.updateWorldMatrix(true, false);
+      for (let i = 0; i < position.count; i += 1) {
+        vertex
+          .set(position.getX(i), position.getY(i), position.getZ(i))
+          .applyMatrix4(child.matrixWorld);
+        band.push({
+          across: (vertex.x - sample.x) * outward.x + (vertex.z - sample.z) * outward.z,
+          y: vertex.y,
+        });
+      }
+    });
+    if (band.length === 0) continue;
+
+    for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
+      const laneAcross = ringRoute.laneOffsets[lane] ?? 0;
+      const rail = ringRoute.pointAt(lane, start, new Vec3());
+      let rainbowY = Infinity;
+      for (const point of band) {
+        // Directly over this lane, give or take the width of a child.
+        if (Math.abs(point.across - laneAcross) > 1) continue;
+        if (point.y < rainbowY) rainbowY = point.y;
+      }
+      archClearance.push({
+        ring: label,
+        lane,
+        crownY: rail.y + RIDER_HEAD_TOP_AT_PARK_SCALE * ringRoute.scale,
+        rainbowY,
+      });
+    }
+
+    // --- and where the rainbow's legs come down ----------------------------
+    //
+    // The feet of each arc, so a leg can be measured against the thing it is
+    // meant to be holding up rather than against the rule that placed it.
+    const arcFootY = new Map<string, number>();
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      if (!/^railRace:finish-rainbow-\d+$/.test(child.name)) return;
+      arcFootY.set(child.name, new Box3().setFromObject(child).min.y);
+    });
+
+    group.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const match = /^railRace:finish-rainbow-leg-(\d+)-(inner|outer)$/.exec(child.name);
+      if (!match) return;
+      const box = new Box3().setFromObject(child);
+      const at = child.getWorldPosition(new Vec3());
+      // **The lowest terrain under the leg's own footprint, not the terrain at
+      // its centre.** The centre reading is `bottom = ground - tube` played
+      // back — arithmetic this repo just wrote, identical on every seed, and a
+      // check that reads back a constant is the failure this PR has hit five
+      // times. Daylight appears at the *downhill* edge, so that is where it has
+      // to be looked for, and these legs land on the rim, the steepest ground
+      // in the park.
+      const radius = (box.max.x - box.min.x) / 2;
+      let groundY = terrainHeight(at.x, at.z);
+      for (let k = 0; k < 16; k += 1) {
+        const angle = (k / 16) * Math.PI * 2;
+        const h = terrainHeight(at.x + Math.cos(angle) * radius, at.z + Math.sin(angle) * radius);
+        if (h < groundY) groundY = h;
+      }
+      archLegs.push({
+        ring: label,
+        name: child.name,
+        band: Number(match[1]),
+        side: match[2] as 'inner' | 'outer',
+        x: at.x,
+        z: at.z,
+        bottomY: box.min.y,
+        topY: box.max.y,
+        arcFootY: arcFootY.get(`railRace:finish-rainbow-${match[1]}`) ?? Number.NaN,
+        groundY,
+        distanceToPath: distanceToPath(at.x, at.z),
+        distanceToRail: distanceToRailCorridor(at.x, at.z),
+        clearOfPlots: clearOfPlots(at.x, at.z, radius),
+      });
+    });
+  }
+
   return {
+    archClearance,
+    archLegs,
+    duckBars,
+    cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     seed,
