@@ -61,32 +61,131 @@ import { hexToCss } from '../core/palette';
 export const JOURNEY_TITLE_TEXT = 'Land of Good Places';
 
 /**
- * **The warm half of the park's own rainbow — because the park is the cool half.**
+ * **How dark a band has to be to survive the thing it is drawn over.**
  *
- * Jim asked for *"the game's existing colour palette, characters in different
- * colours"*, so the colours are `ART.rainbow`'s bands and nothing new. But he
- * also asked for it to stay **readable with no background behind it**, and the
- * first build used all six bands and was measured against the actual ride: the
- * green band (`#8fdf8a`) vanishes over grass and treetops, and the blue
- * (`#8cc9ff`) vanishes over the sky. This lane is grass, trees and sky and
- * almost nothing else, so two of the six characters in every word were washing
- * out — on a lettering that by his own instruction has no plate to sit on.
+ * `ART.rainbow`'s own comment says the bands are *"pulled a long way towards
+ * cream"* on purpose — they are ribbon colours for a hop ring on grass, and
+ * they are lovely there. Over lettering with no plate under it they are close
+ * to invisible, and **that was never measured until now**.
  *
- * The fix is a **colour choice, not a scrim**: drop the two bands that are the
- * same colours as the world behind them and keep the four that are not. Coral,
- * orange, yellow and violet all sit opposite grass-green and sky-blue, so every
- * character holds its edge without a shadow, an outline, or anything else that
- * would amount to the background he said not to have.
+ * The measurement, taken off the running ride on a real GPU by hiding the title
+ * and sampling the pixels in the rectangle it had occupied, once every 1.5 s of
+ * a whole journey at 1440x900 and at 390x844:
+ *
+ * - the background behind the title runs from **0.008 to 0.79** relative
+ *   luminance *within a single frame* — dark canopy and pale sky at once;
+ * - the four shipped bands cleared 3:1 over **19–24%** of it;
+ * - a band at 0.17 clears 3:1 over **three times** that.
+ *
+ * Against the bus itself — which is what QA found and what nobody had checked,
+ * because on a desktop frame the title sits above the vehicle and never touches
+ * it — the shipped numbers were **1.07:1 on the roof and 1.12:1 on the cream**
+ * for the yellow band. That is not a weak contrast, it is no contrast: the
+ * letter and the bus were the same brightness.
+ *
+ * ## So the bands are deepened, and the hues are kept
+ *
+ * {@link deepen} holds each band's hue exactly, pushes saturation up, and takes
+ * lightness down until the band hits {@link BAND_LUMINANCE}. Derived from
+ * `ART.rainbow` rather than written out as four new hexes, so there is still
+ * one owner of what the park's rainbow is and the title cannot drift from it.
+ *
+ * Coral, orange, yellow and violet come out `#dc2a2a`, `#a1661a`, `#8a7116`,
+ * `#8953e3` — **4.0–4.2:1 against both the bus's cream and its roof**, up from
+ * 1.07–1.92:1.
+ *
+ * ## The limit, stated rather than papered over
+ *
+ * Jim: *"If you cannot make it legible without one, say so rather than adding a
+ * shadow or outline that amounts to a background."*
+ *
+ * **No single flat colour is legible over this whole background, and no
+ * darkening fixes that.** A frame contains both canopy at 0.02 and sky at 0.78;
+ * clearing 3:1 against the pale end forces the text under 0.23 luminance, and
+ * clearing it against the dark end forces it over 0.16 — a window that exists,
+ * but every value in it collides with some mid-tone in between, and the deep
+ * tree greens are exactly there. The remaining weak case is a letter crossing a
+ * dark canopy at **1.48:1**. It is much rarer than the case being fixed (10–20%
+ * of the area against 93% in the portrait frame QA photographed), the letters
+ * are 900-weight and chunky so shape carries where luminance does not, and the
+ * layout change in `style.css` moves the title up into the sky band where the
+ * canopy is rarest. There is no scrim, no shadow and no outline.
  *
  * Sixteen characters over four bands means no two neighbours ever share a
  * colour, which is the property that actually makes it read as "characters in
  * different colours" rather than four words in four colours.
  */
+const BAND_LUMINANCE = 0.17;
+const BAND_SATURATION = 0.72;
+
+/** sRGB channel to linear, for the relative-luminance sum below. */
+function toLinear(channel255: number): number {
+  const s = channel255 / 255;
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+
+/** WCAG relative luminance of a packed hex colour. */
+function relativeLuminance(hex: number): number {
+  return (
+    0.2126 * toLinear((hex >> 16) & 255) +
+    0.7152 * toLinear((hex >> 8) & 255) +
+    0.0722 * toLinear(hex & 255)
+  );
+}
+
+/** Hue of a packed hex colour, in degrees. */
+function hueOf(hex: number): number {
+  const r = ((hex >> 16) & 255) / 255;
+  const g = ((hex >> 8) & 255) / 255;
+  const b = (hex & 255) / 255;
+  const max = Math.max(r, g, b);
+  const span = max - Math.min(r, g, b);
+  if (span === 0) return 0;
+  const hue =
+    max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
+  return (hue * 60 + 360) % 360;
+}
+
+/** A hue and saturation at a given HSL lightness, packed back to hex. */
+function atLightness(hue: number, saturation: number, lightness: number): number {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const base = lightness - chroma / 2;
+  const sextant = Math.floor(hue / 60) % 6;
+  const parts: readonly [number, number, number][] = [
+    [chroma, second, 0],
+    [second, chroma, 0],
+    [0, chroma, second],
+    [0, second, chroma],
+    [second, 0, chroma],
+    [chroma, 0, second],
+  ];
+  const [r, g, b] = parts[sextant] ?? [0, 0, 0];
+  const pack = (v: number): number => Math.round((v + base) * 255);
+  return (pack(r) << 16) | (pack(g) << 8) | pack(b);
+}
+
+/**
+ * Takes a pastel rainbow band down to {@link BAND_LUMINANCE}, **keeping its
+ * hue**, so it still reads as that colour of the rainbow rather than as a new
+ * one. Walks lightness up from black and stops at the first value bright enough,
+ * which is a search rather than a formula because relative luminance is not
+ * linear in HSL lightness.
+ */
+function deepen(band: number): number {
+  const hue = hueOf(band);
+  for (let lightness = 0.02; lightness <= 0.8; lightness += 0.001) {
+    const candidate = atLightness(hue, BAND_SATURATION, lightness);
+    if (relativeLuminance(candidate) >= BAND_LUMINANCE) return candidate;
+  }
+  return band;
+}
+
 const TITLE_BANDS = [
-  ART.rainbow[0], // coral
-  ART.rainbow[1], // orange
-  ART.rainbow[2], // yellow
-  ART.rainbow[5], // violet
+  deepen(ART.rainbow[0]), // coral
+  deepen(ART.rainbow[1]), // orange
+  deepen(ART.rainbow[2]), // yellow
+  deepen(ART.rainbow[5]), // violet
 ] as const;
 
 /**
