@@ -20,6 +20,8 @@ import { isOnPath } from './paths';
 import { ANCHORS } from './anchors';
 import { pressZone, type InteractZone } from './interact';
 import { highlightInstance } from './highlight';
+import { STALL_PICK_RADIUS, STALL_PLACEMENTS } from '../minigames/stallPlacement';
+import { TAP_FINGER_METRES } from './tapSpacing';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
 import { FLOWER_COLOURS, FLOWER_HEX, gameStore } from '../state';
@@ -157,6 +159,18 @@ export class Flowers implements GameSystem {
 
   private readonly count = FLOWER_POPULATION;
   private readonly rng = new Rng(0xf7010e);
+
+  /**
+   * Pick areas no flower may grow inside — the booths' from birth, the train
+   * platforms' once the route is solved. See {@link insideAnyTapKeepOut}.
+   */
+  private readonly tapKeepOuts: { x: number; z: number; pickRadius: number }[] = Object.values(
+    STALL_PLACEMENTS,
+  ).map((placement) => ({
+    x: placement.position[0],
+    z: placement.position[1],
+    pickRadius: STALL_PICK_RADIUS,
+  }));
 
   private readonly posX = new Float32Array(this.count);
   private readonly posZ = new Float32Array(this.count);
@@ -519,7 +533,7 @@ export class Flowers implements GameSystem {
     this.paintColour(index, this.stage[index] === STAGE_BLOOMED);
   }
 
-  /** Somewhere clear of paths and every reserved anchor plot. */
+  /** Somewhere clear of paths, every reserved anchor plot, and every booth's tap area. */
   private pickSpawnPoint(): { x: number; z: number } {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const angle = this.rng.range(0, TAU);
@@ -531,11 +545,53 @@ export class Flowers implements GameSystem {
       const z = Math.sin(angle) * distance;
       if (isOnPath(x, z, 0.5)) continue;
       if (this.insideAnyAnchor(x, z, 0.5)) continue;
+      if (this.insideAnyTapKeepOut(x, z)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —
     // the plaza edge is always clear of both paths and plots.
     return { x: 0, z: 12 };
+  }
+
+  /**
+   * Inside some other tap target's pick area (plus the finger margin) — the
+   * tap-spacing rule (`world/tapSpacing.ts`): a pickable flower is a "Pick"
+   * zone, and one that grows within a finger of a booth's "Play" zone or a
+   * platform's "Ride" zone steals taps aimed at it. Found live on 8 Aug 2026:
+   * flower 111 sprouted 0.59 m from the water-fight stall's pick edge. The
+   * 5 cm on top is float head-room so a respawn can never land exactly on the
+   * rule's own boundary.
+   *
+   * The stalls are known at construction ({@link STALL_PLACEMENTS} is data);
+   * anything solved later — the train's platforms — arrives through
+   * {@link keepClearOfTapZones}.
+   */
+  private insideAnyTapKeepOut(x: number, z: number): boolean {
+    for (const zone of this.tapKeepOuts) {
+      if (Math.hypot(x - zone.x, z - zone.z) < zone.pickRadius + TAP_FINGER_METRES + 0.05) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Tells the meadow about tap targets that did not exist when it was planted
+   * — the train stations, solved against the finished park after the flowers
+   * are in. Any bloom already inside one is replanted elsewhere on the spot.
+   */
+  keepClearOfTapZones(zones: readonly { x: number; z: number; pickRadius: number }[]): void {
+    this.tapKeepOuts.push(...zones);
+    for (let i = 0; i < this.count; i += 1) {
+      const x = this.posX[i] ?? 0;
+      const z = this.posZ[i] ?? 0;
+      if (!this.insideAnyTapKeepOut(x, z)) continue;
+      this.spawnAt(i, true);
+      this.writeMatrix(i);
+    }
+    this.stems.instanceMatrix.needsUpdate = true;
+    this.heads.instanceMatrix.needsUpdate = true;
+    this.petals.instanceMatrix.needsUpdate = true;
   }
 
   private insideAnyAnchor(x: number, z: number, margin: number): boolean {

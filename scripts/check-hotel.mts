@@ -53,10 +53,15 @@
  */
 
 import './headless-canvas.mjs';
-import { Box3, Mesh, Vector3 } from 'three';
+import { BackSide, Box3, Mesh, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { Player } from '../src/entities/Player.ts';
+import { BED_MATTRESS_TOP } from '../src/art/models/hotelAssets.ts';
 import {
+  CAMERA_DISTANCE,
+  CAMERA_PITCH_DEGREES,
   NPC_RADIUS,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
@@ -88,7 +93,7 @@ const FLOOR_OF_THE_WORLD = -2;
 const SETTLE_SECONDS = 8;
 
 const problems: string[] = [];
-const { world } = quietly(() => buildHeadlessPark());
+const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision, npcs, hotel } = world;
 
 // ---------------------------------------------------------------- 1. falling
@@ -168,7 +173,9 @@ const mustBeSolid: readonly [string, number, number][] = [
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
   ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
   ['a Floor 33 bench', OCEAN_FLOOR.originX + 0, OCEAN_FLOOR.originZ + 5.4],
-  ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4],
+  // Table b1-a's spot — moved 8 Aug 2026 for the tap-spacing rule; if it
+  // moves again, `dressBreakfast`'s table list is the owner to copy from.
+  ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4],
   ['a suite bedside table', SUITE.originX + (SUITE_BEDSIDE_X[0] ?? 0), SUITE.originZ + SUITE_BEDSIDE_Z],
@@ -189,8 +196,8 @@ for (const [what, x, z] of mustBeSolid) {
 // and the chair still can (0.4 m against 0.3 + 0.62), so the answer is about
 // the chair.
 const chairYaw = 0.34;
-const chairX = BREAKFAST.originX - 7.6 + Math.sin(chairYaw) * 1.45;
-const chairZ = BREAKFAST.originZ + 5.4 + Math.cos(chairYaw) * 1.45;
+const chairX = BREAKFAST.originX - 6.4 + Math.sin(chairYaw) * 1.45;
+const chairZ = BREAKFAST.originZ + 6.2 + Math.cos(chairYaw) * 1.45;
 if (deflection(chairX, chairZ) < 0.1) {
   problems.push('a breakfast chair is not solid — Jim asked for exactly this one');
 }
@@ -223,7 +230,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 const mustBeMountable: readonly [string, number, number, number][] = [
   ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
-  ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4, 0.74],
+  ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
 ];
 for (const [what, x, z, top] of mustBeMountable) {
@@ -891,6 +898,296 @@ if (fallenPlayer.position.y < 0) {
         `pushing west across the stair fan leaves a player at y=${trapY.toFixed(2)} m — ` +
           `under the flight at ground level, on the way into the gallery's hollow`,
       );
+    }
+  }
+}
+
+// ------------------------------ 16. a napping child is visibly in bed
+//
+// Jim, live play, 8 Aug 2026: *"the hotel room beds, once the character gets
+// into them, they sort-of vanish — they should lie in a bed visibly with a
+// blanket on them."* Measured cause: `Hotel.nap` reclined her twice — the
+// shared `'reclined'` ride posture (model root −1.35) **and** a −π/2 pitch on
+// the player group — ≈ −167° in all, folding her backwards through the
+// mattress: her head ended 0.64 m *below the floor*.
+//
+// This runs the real thing: a real `Player`, stood at the first suite bed,
+// running the bed zone's own Sleep action, ticked one frame so the ride pose
+// is applied exactly as the game applies it. Then three claims, measured on
+// the posed kid and the built bed:
+//  * her head is **above the mattress top** and at the pillow end;
+//  * a straight-down ray at her head hits *her*, not a blanket — head out;
+//  * a straight-down ray over her body hits the bed's nap blanket — tucked in.
+//
+// Proven red before trusted green, on the pre-fix build:
+//   x a napping child's head is at y=-0.66 m — the mattress top is 0.55 m,
+//     so she has vanished into the bed
+//   x nothing over the napping child's body says 'blanket' — no blanket mesh
+{
+  const napCamera = new IsoCamera();
+  const napper = quietly(
+    () => new Player(collision, napCamera, new Vector3(SUITE.originX, 0, SUITE.originZ)),
+  );
+  scene.add(napper.group);
+  hotel.attachPlayer(napper as never);
+  hotel.adoptRestoredPlayer();
+  const spot = SUITE_BED_SPOTS[0];
+  const bedX = SUITE.originX + (spot?.[0] ?? 0);
+  const bedZ = SUITE.originZ + (spot?.[1] ?? 0);
+  napper.position.set(bedX, BED_MATTRESS_TOP, bedZ + 1.4);
+  napper.group.position.copy(napper.position);
+
+  const bedZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bed-bed-0');
+  if (!bedZone) {
+    problems.push('the suite offers no zone for bed 0 — Sleep! cannot be reached');
+  } else {
+    const sleep = bedZone.actions?.()[0];
+    if (!sleep) {
+      problems.push('bed 0 offers no Sleep action');
+    } else {
+      sleep.run();
+      napper.update({
+        dt: 1 / 60,
+        elapsed: 0,
+        input: { justPressed: () => false, isDown: () => false },
+      } as never);
+      hotel.hotelRoot.updateMatrixWorld(true);
+      napper.group.updateMatrixWorld(true);
+
+      const head = new Vector3();
+      napper.model.head.getWorldPosition(head);
+      if (head.y < BED_MATTRESS_TOP + 0.1) {
+        problems.push(
+          `a napping child's head is at y=${head.y.toFixed(2)} m — the mattress top is ` +
+            `${BED_MATTRESS_TOP.toFixed(2)} m, so she has vanished into the bed`,
+        );
+      }
+      // The pillow is the −Z end of the bed (halfZ 1.0); "on the pillow" is
+      // the outer half-metre of that end, under her head's own plan position.
+      if (head.z > bedZ - 0.35 || head.z < bedZ - 1.1 || Math.abs(head.x - bedX) > 0.4) {
+        problems.push(
+          `a napping child's head is at (${(head.x - bedX).toFixed(2)}, ` +
+            `${(head.z - bedZ).toFixed(2)}) bed-local — not on the pillow end (z −1.1…−0.35)`,
+        );
+      }
+
+      // What a straight-down look actually meets: her at the pillow, the
+      // blanket over her body.
+      const downcast = new Raycaster();
+      // The player's name label is a Sprite, and Sprite.raycast wants to know
+      // the camera; without one it throws headless.
+      downcast.camera = napCamera.camera;
+      const isKid = (object: unknown): boolean => {
+        let walk = object as { parent?: unknown } | null;
+        while (walk) {
+          if (walk === napper.group) return true;
+          walk = (walk as { parent?: null }).parent ?? null;
+        }
+        return false;
+      };
+      const isBlanket = (object: unknown): boolean => {
+        let walk = object as { name?: string; parent?: unknown } | null;
+        while (walk) {
+          if (walk.name === 'hotel.napBlanket') return true;
+          walk = (walk as { parent?: null }).parent ?? null;
+        }
+        return false;
+      };
+      const firstHit = (x: number, z: number): unknown => {
+        downcast.set(new Vector3(x, BED_MATTRESS_TOP + 4, z), new Vector3(0, -1, 0));
+        const hits = downcast.intersectObjects([...hotel.hotelRoot.children, napper.group], true);
+        return hits[0]?.object ?? null;
+      };
+      const overHead = firstHit(head.x, head.z);
+      if (!overHead || !isKid(overHead)) {
+        problems.push(
+          'looking straight down at a napping child\'s head does not meet the child — ' +
+            'her face is covered or buried',
+        );
+      }
+      const overBody = firstHit(bedX, bedZ + 0.35);
+      if (!overBody || !isBlanket(overBody)) {
+        problems.push(
+          "nothing over the napping child's body says 'blanket' — she is lying on the " +
+            'covers, not under them',
+        );
+      }
+
+      // Hand the room back the way the earlier probes left it: one giant tick
+      // outlasts any nap.
+      hotel.update({ dt: 999, elapsed: 0 } as never);
+      scene.remove(napper.group);
+    }
+  }
+}
+
+// --------------------------------- 15. the walls abut: no notch at any corner
+//
+// Jim, live play, 8 Aug 2026: *"the walls don't abut each other properly, they
+// stop leaving gaps ... even where they join they don't abut nicely."*
+// Measured cause: every wall box stopped at the room's half-extent — the
+// perpendicular wall's **centre line** — so at each outer corner the two walls
+// each stopped half a thickness short of the other, leaving an empty
+// see-through column 0.25 m square, floor to ceiling, on the exact corners the
+// iso camera views diagonally. The fix is `world/wallRuns.ts` (shared with the
+// castle, which already closed its corners): north/south spans extend past the
+// run's ends by the wall half-thickness, east/west butt between them.
+//
+// This walks the perimeter of every room as built: two fibres per wall — the
+// centre line and the outer skin, where the notch lived — sampled every 5 cm,
+// skipping declared doorway gaps, and asserts every sample sits inside some
+// wall's world box. Walls are found structurally (tall thin boxes on the
+// shell), not by name, so the probe cannot be satisfied by naming alone.
+//
+// Proven red before trusted green: on the pre-fix build it reports all four
+// corners open in every room — see the commit message for the run.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const WALL_HALF = 0.25;
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) {
+      problems.push(`${room.space} has no shell at all`);
+      continue;
+    }
+    const wallBoxes: Box3[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      const box = bounds.clone().applyMatrix4(object.matrixWorld);
+      const height = box.max.y - box.min.y;
+      const thickness = Math.min(box.max.x - box.min.x, box.max.z - box.min.z);
+      if (height >= 1.4 && thickness <= 0.6) wallBoxes.push(box.expandByScalar(1e-4));
+    });
+
+    const sides = [
+      { side: 'north' as const, along: 'x' as const, cross: -room.halfZ, out: -1 },
+      { side: 'south' as const, along: 'x' as const, cross: room.halfZ, out: 1 },
+      { side: 'west' as const, along: 'z' as const, cross: -room.halfX, out: -1 },
+      { side: 'east' as const, along: 'z' as const, cross: room.halfX, out: 1 },
+    ];
+    let openings = 0;
+    const spots: string[] = [];
+    const point = new Vector3();
+    for (const { side, along, cross, out } of sides) {
+      const gap = room.gaps[side];
+      // North and south own the corner columns, so their scan runs past the
+      // room's half-extent; east and west butt between them and stop short.
+      const reach = along === 'x' ? room.halfX + WALL_HALF - 0.05 : room.halfZ - 0.05;
+      for (const fibre of [cross, cross + out * (WALL_HALF / 2)]) {
+        for (let t = -reach; t <= reach; t += 0.05) {
+          if (gap && t > gap[0] - 0.01 && t < gap[1] + 0.01) continue;
+          point.set(
+            room.originX + (along === 'x' ? t : fibre),
+            1.2,
+            room.originZ + (along === 'x' ? fibre : t),
+          );
+          if (wallBoxes.some((box) => box.containsPoint(point))) continue;
+          openings += 1;
+          if (spots.length < 4) spots.push(`${side} at ${t.toFixed(2)}`);
+        }
+      }
+    }
+    if (openings > 0) {
+      problems.push(
+        `${room.space}'s perimeter has ${openings} unwalled sample(s) outside its doorways ` +
+          `(${spots.join(', ')}…) — walls that stop short of abutting, i.e. a see-through gap`,
+      );
+    }
+  }
+}
+
+// ------------------------- 17. the floor-decal ladder keeps its steps apart
+//
+// Jim, live play, 8 Aug 2026: *"Rugs etc are coplanar with floors, so they
+// snap in and out and flicker due to z-buffer rounding."* The camera is
+// orthographic (far = CAMERA_DISTANCE·3) and WebGL guarantees only a 16-bit
+// depth buffer on the family's phones, so one depth step is ~4.1 mm along the
+// view axis — ~6.7 mm of height at the 38° pitch. Any two upward faces closer
+// than about two steps and overlapping in plan dither per pixel: measured on
+// the pre-fix build, the garden's lawn rug sat *exactly* coplanar with its
+// path rug over 5.4 m², the lobby mosaic 10 mm under every rug, the sunburst's
+// own discs 8 mm apart, and the lift car's floor at exactly the room plate's
+// 0.000.
+//
+// So: across every room, no two upward faces in the floor band (top ≤ 0.35 m)
+// that overlap by more than a hand's area may sit within two depth steps of
+// each other. The threshold is derived from the same constants the renderer
+// uses, not invented; the fix (`DECAL_STEP` in `hotel/dressing.ts`) spaces the
+// ladder at three steps, comfortably clear. Outline shells (back-side
+// materials) are not faces a viewer ever sees from above and are skipped.
+//
+// Proven red before trusted green: 12 problem(s) on the pre-fix build — see
+// the commit message for the run.
+{
+  const DEPTH_STEP = (CAMERA_DISTANCE * 3 - 0.1) / 65536;
+  const MIN_DECAL_GAP = (2 * DEPTH_STEP) / Math.sin((CAMERA_PITCH_DEGREES * Math.PI) / 180);
+  hotel.hotelRoot.updateMatrixWorld(true);
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    // Only geometry with a genuinely *flat* top can shimmer plane-on-plane:
+    // spheres and cones (tufts, crystals) meet their neighbours along curves,
+    // which is ordinary intersection, not a depth fight. Baked assets come in
+    // as plain BufferGeometry and are kept — the lift car's floor is one.
+    const FLAT_TOPPED = new Set([
+      'BoxGeometry',
+      'BufferGeometry',
+      'CylinderGeometry',
+      'ExtrudeGeometry',
+      'PlaneGeometry',
+      'RingGeometry',
+      'ShapeGeometry',
+    ]);
+    const tops: { readonly what: string; readonly box: Box3; readonly mesh: Mesh }[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (!FLAT_TOPPED.has(object.geometry.type)) return;
+      const material = object.material as { side?: number } | { side?: number }[];
+      const side = Array.isArray(material) ? material[0]?.side : material.side;
+      if (side === BackSide) return; // an outline shell, never seen from above
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      const box = bounds.clone().applyMatrix4(object.matrixWorld);
+      if (box.max.y > 0.35 || box.max.y < -0.1) return;
+      if (box.max.x - box.min.x < 0.05 || box.max.z - box.min.z < 0.05) return;
+      tops.push({ what: object.name || object.parent?.name || object.geometry.type, box, mesh: object });
+    });
+    const reported = new Set<string>();
+    for (let a = 0; a < tops.length; a += 1) {
+      for (let b = a + 1; b < tops.length; b += 1) {
+        const one = tops[a]!;
+        const two = tops[b]!;
+        // Two rings of one inlay are concentric annuli: disjoint by
+        // construction, coplanar by design, and only their *bounding boxes*
+        // overlap (a ring's box includes its own hole).
+        if (
+          one.mesh.geometry.type === 'RingGeometry' &&
+          two.mesh.geometry.type === 'RingGeometry' &&
+          one.mesh.parent === two.mesh.parent
+        ) {
+          continue;
+        }
+        const gap = Math.abs(one.box.max.y - two.box.max.y);
+        if (gap >= MIN_DECAL_GAP) continue;
+        const overlapX =
+          Math.min(one.box.max.x, two.box.max.x) - Math.max(one.box.min.x, two.box.min.x);
+        const overlapZ =
+          Math.min(one.box.max.z, two.box.max.z) - Math.max(one.box.min.z, two.box.min.z);
+        if (overlapX <= 0 || overlapZ <= 0 || overlapX * overlapZ < 0.05) continue;
+        const key = `${room.space}|${one.what}|${two.what}`;
+        if (reported.has(key)) continue;
+        reported.add(key);
+        problems.push(
+          `${room.space}: '${one.what}' (top ${one.box.max.y.toFixed(3)} m) and '${two.what}' ` +
+            `(top ${two.box.max.y.toFixed(3)} m) overlap ${(overlapX * overlapZ).toFixed(1)} m² ` +
+            `${(gap * 1000).toFixed(1)} mm apart — inside the ${(MIN_DECAL_GAP * 1000).toFixed(1)} mm ` +
+            `a 16-bit depth buffer can tell apart, so they flicker`,
+        );
+      }
     }
   }
 }

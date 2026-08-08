@@ -146,3 +146,12 @@ export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMEN
 export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = new Map(
   STALL_STANDS.map((stand) => [stand.id, stand]),
 );
+
+/**
+ * How close a tap must land to a booth to select it — the pick radius every
+ * stall's interact zone declares (`minigames/stalls.ts`), here in the
+ * data-only module because the flower scatter needs the same number to keep
+ * its blooms out of the booths' tap areas (`world/Flowers.ts`, the
+ * tap-spacing rule in `world/tapSpacing.ts`).
+ */
+export const STALL_PICK_RADIUS = 3.2;

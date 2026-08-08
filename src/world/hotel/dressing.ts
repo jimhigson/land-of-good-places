@@ -22,6 +22,7 @@ import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { BED_MATTRESS_TOP } from '../../art/models/hotelAssets';
 
 /**
  * The furniture that stops a hotel room being a rectangle with a statue in it.
@@ -56,10 +57,26 @@ import { addOutline, decal, solid, toonMaterial } from '../../art/style/material
  * these shapes is the continuous organic form that would send it to Blender.
  */
 
-/** Height of a rug's top face. See the ladder in this file's header. */
-const RUG_Y = 0.03;
-/** Height of the rainbow ring's top face. */
-const RING_Y = 0.04;
+/**
+ * One rung of the floor-decal ladder — the vertical step between any two
+ * overlapping horizontal faces on a floor.
+ *
+ * **Derived, not tuned** (Jim, live play, 8 Aug 2026: *"Rugs etc are coplanar
+ * with floors, so they snap in and out and flicker due to z-buffer
+ * rounding"*): the camera is orthographic with far = `CAMERA_DISTANCE`·3
+ * (270 m) and WebGL guarantees only 16 depth bits on a phone, so one depth
+ * step is ~4.1 mm along the view axis — ~6.7 mm of height at the 38° pitch.
+ * Faces within about two steps of each other dither per pixel. Three steps —
+ * 2 cm — is the rung that keeps every pair safely apart, and `check:hotel`
+ * probe 17 measures every overlapping pair in every room against the same
+ * derivation.
+ *
+ * The ladder itself (all rungs, in `DECAL_STEP`s above the floor): mosaic
+ * plate 1; a rug's base 2 and its inner panel 3 (a tier-1 rug stacked on
+ * another starts at 4); the rainbow ring 4; floor chevrons 4 (6 where they
+ * cross a stacked rug). Add to the top, never in between.
+ */
+export const DECAL_STEP = 0.02;
 
 /**
  * The default crystal palette — the tower's own three pastel tones plus the
@@ -171,38 +188,52 @@ export function sconce(colour: number = PALETTE.liftFrame): Group {
 }
 
 /**
- * A flat rug. `accent` draws an inner panel, so it reads as woven rather than
- * as a coloured hole in the floor.
+ * A rug with real depth: a low box whose sides reach the floor, its top two
+ * {@link DECAL_STEP}s up, the `accent` inner panel one more — so it reads as
+ * woven rather than as a coloured hole in the floor, and no face of it can
+ * ever be within a depth-buffer step of the surface it lies on.
+ *
+ * `tier` stacks rugs: the garden's lawn lies over its sand path, and two
+ * rugs on the same rungs are exactly the coplanar flicker the ladder exists
+ * to prevent. A tier-1 rug starts two rungs higher; its sides still reach
+ * the floor.
  */
-export function rug(width: number, depth: number, colour: number, accent: number): Group {
+export function rug(width: number, depth: number, colour: number, accent: number, tier = 0): Group {
   const group = new Group();
   group.name = 'hotel.rug';
 
-  const base = decal(new Mesh(new BoxGeometry(width, 0.04, depth), toonMaterial(colour)));
-  base.position.y = RUG_Y - 0.02;
+  const baseTop = (2 + 2 * tier) * DECAL_STEP;
+  const base = decal(new Mesh(new BoxGeometry(width, baseTop, depth), toonMaterial(colour)));
+  base.position.y = baseTop / 2;
   group.add(base);
 
   const inner = decal(
-    new Mesh(new BoxGeometry(width - 0.7, 0.04, depth - 0.7), toonMaterial(accent)),
+    new Mesh(new BoxGeometry(width - 0.7, 2 * DECAL_STEP, depth - 0.7), toonMaterial(accent)),
   );
-  inner.position.y = RUG_Y;
+  inner.position.y = baseTop;
   group.add(inner);
   return group;
 }
 
 /** A round rug — the same thing in discs, for under a statue or a disco ball. */
-export function roundRug(radius: number, colour: number, accent: number): Group {
+export function roundRug(radius: number, colour: number, accent: number, tier = 0): Group {
   const group = new Group();
   group.name = 'hotel.rug.round';
 
-  const base = decal(new Mesh(new CylinderGeometry(radius, radius, 0.04, 28), toonMaterial(colour)));
-  base.position.y = RUG_Y - 0.02;
+  const baseTop = (2 + 2 * tier) * DECAL_STEP;
+  const base = decal(
+    new Mesh(new CylinderGeometry(radius, radius, baseTop, 28), toonMaterial(colour)),
+  );
+  base.position.y = baseTop / 2;
   group.add(base);
 
   const inner = decal(
-    new Mesh(new CylinderGeometry(radius - 0.45, radius - 0.45, 0.04, 24), toonMaterial(accent)),
+    new Mesh(
+      new CylinderGeometry(radius - 0.45, radius - 0.45, 2 * DECAL_STEP, 24),
+      toonMaterial(accent),
+    ),
   );
-  inner.position.y = RUG_Y;
+  inner.position.y = baseTop;
   group.add(inner);
   return group;
 }
@@ -225,7 +256,7 @@ export function rainbowRing(innerRadius: number, band: number): Group {
       new Mesh(new RingGeometry(inner, inner + band * 0.94, 44), toonMaterial(colour)),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = RING_Y;
+    ring.position.y = 4 * DECAL_STEP;
     group.add(ring);
   });
   return group;
@@ -805,25 +836,27 @@ export function sunburst(radius: number): Group {
   shape.closePath();
   const rays = decal(new Mesh(new ShapeGeometry(shape), toonMaterial(PALETTE.flowerYellow)));
   rays.rotation.x = -Math.PI / 2;
-  rays.position.y = RUG_Y - 0.008;
+  rays.position.y = DECAL_STEP;
   group.add(rays);
 
+  // Each piece one whole DECAL_STEP over the one below it — the first cut
+  // spaced them 4 mm apart, which a 16-bit depth buffer cannot tell apart.
   const disc = decal(
     new Mesh(
-      new CylinderGeometry(radius * 0.72, radius * 0.72, 0.04, 40),
+      new CylinderGeometry(radius * 0.72, radius * 0.72, 2 * DECAL_STEP, 40),
       toonMaterial(PALETTE.markerLemon),
     ),
   );
-  disc.position.y = RUG_Y - 0.004;
+  disc.position.y = DECAL_STEP;
   group.add(disc);
 
   const core = decal(
     new Mesh(
-      new CylinderGeometry(radius * 0.4, radius * 0.4, 0.04, 32),
+      new CylinderGeometry(radius * 0.4, radius * 0.4, 2 * DECAL_STEP, 32),
       toonMaterial(PALETTE.flowerYellow),
     ),
   );
-  core.position.y = RUG_Y + 0.004;
+  core.position.y = 2 * DECAL_STEP;
   group.add(core);
   return group;
 }
@@ -837,15 +870,50 @@ export function sunburst(radius: number): Group {
 export function rainbowRug(innerRadius: number, band: number): Group {
   const group = new Group();
   group.name = 'hotel.rainbowRug';
+  // Top one DECAL_STEP under the ring's own rung, because the disc runs a
+  // couple of centimetres under the innermost band.
   const middle = decal(
     new Mesh(
-      new CylinderGeometry(innerRadius + 0.02, innerRadius + 0.02, 0.04, 32),
+      new CylinderGeometry(innerRadius + 0.02, innerRadius + 0.02, 3 * DECAL_STEP, 32),
       toonMaterial(ART.cream),
     ),
   );
-  middle.position.y = RUG_Y;
+  middle.position.y = (3 * DECAL_STEP) / 2;
   group.add(middle);
   group.add(rainbowRing(innerRadius, band));
+  return group;
+}
+
+/**
+ * The blanket a napping child is tucked under — built with each suite bed,
+ * hidden until `Hotel.nap` shows it (Jim, 8 August 2026: *"they should lie in
+ * a bed visibly with a blanket on them"*).
+ *
+ * Bed-local, origin at the bed's origin: a chunky quilt over the body half of
+ * the 1.4 × 2 m bed (the pillow end stays open — her head lies there, in the
+ * air) with a folded-back hem at the chest. Sized a whisker wider than the
+ * mattress so its sides drape past the bed's own flat blanket rather than
+ * sharing a face with anything: bottom 2 cm above the mattress top, hem 4 cm
+ * above the quilt, which keeps every horizontal face a step of its own (the
+ * decal-ladder rule in this file's header, writ soft).
+ *
+ * `decal` because it exists only mid-nap: a shadow popping in and out with it
+ * would read as a glitch, and nothing about a quilt needs one.
+ */
+export function napBlanket(colour: number): Group {
+  const group = new Group();
+  group.name = 'hotel.napBlanket';
+
+  const quilt = decal(new Mesh(new BoxGeometry(1.5, 0.38, 1.42), toonMaterial(colour)));
+  quilt.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.19, 0.25);
+  addOutline(quilt, 0.018);
+  group.add(quilt);
+
+  const hem = decal(
+    new Mesh(new BoxGeometry(1.54, 0.42, 0.3), toonMaterial(PALETTE.blossomWhite)),
+  );
+  hem.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.21, -0.3);
+  group.add(hem);
   return group;
 }
 
@@ -1187,34 +1255,50 @@ export function trellisArch(width: number, height: number, seed: number): Group 
  * header), so a child walks straight over it — a pond you can fall into is a
  * pond that needs a whole swimming system behind it, and this is scenery.
  */
-export function lilyPond(radius: number, seed: number): Group {
+export function lilyPond(radius: number, seed: number, tier = 0): Group {
   const group = new Group();
   group.name = 'hotel.pond';
   const rng = new Rng(seed);
 
+  // The same rung arithmetic as `rug`: rim two steps (plus the tier's lift)
+  // over whatever it sits on, water one more, pads one more again — the
+  // garden's pond lies half across its tier-1 lawn, so it rides at tier 2.
+  const rimTop = (2 + 2 * tier) * DECAL_STEP;
   const rim = decal(
-    new Mesh(new CylinderGeometry(radius, radius, 0.04, 32), toonMaterial(PALETTE.stonePinkLight)),
+    new Mesh(new CylinderGeometry(radius, radius, rimTop, 32), toonMaterial(PALETTE.stonePinkLight)),
   );
-  rim.position.y = RUG_Y - 0.02;
+  rim.position.y = rimTop / 2;
   group.add(rim);
 
   const water = decal(
     new Mesh(
-      new CylinderGeometry(radius - 0.26, radius - 0.26, 0.04, 32),
+      new CylinderGeometry(radius - 0.26, radius - 0.26, 2 * DECAL_STEP, 32),
       toonMaterial(PALETTE.waterTop, { emissive: PALETTE.waterTop, emissiveIntensity: 0.32 }),
     ),
   );
-  water.position.y = RUG_Y;
+  water.position.y = rimTop;
   group.add(water);
 
+  // The pads share one rung, so two overlapping pads would be coplanar —
+  // probe 17 caught exactly that on the first roll. They keep a pad's width
+  // apart instead; with three pads in a two-metre pond the rejection loop
+  // cannot realistically fail, and a fourth overlapping pad is simply skipped.
+  const placed: { x: number; z: number }[] = [];
   for (let i = 0; i < 3; i += 1) {
-    const pad = decal(
-      new Mesh(new CylinderGeometry(0.3, 0.3, 0.04, 12), toonMaterial(PALETTE.leafMid)),
-    );
-    const angle = rng.range(0, TAU);
-    const out = rng.range(0, radius - 0.7);
-    pad.position.set(Math.cos(angle) * out, RUG_Y + 0.01, Math.sin(angle) * out);
-    group.add(pad);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const angle = rng.range(0, TAU);
+      const out = rng.range(0, radius - 0.7);
+      const x = Math.cos(angle) * out;
+      const z = Math.sin(angle) * out;
+      if (placed.some((other) => Math.hypot(x - other.x, z - other.z) < 0.65)) continue;
+      const pad = decal(
+        new Mesh(new CylinderGeometry(0.3, 0.3, 2 * DECAL_STEP, 12), toonMaterial(PALETTE.leafMid)),
+      );
+      pad.position.set(x, rimTop + DECAL_STEP, z);
+      group.add(pad);
+      placed.push({ x, z });
+      break;
+    }
   }
   return group;
 }

@@ -128,6 +128,10 @@ export class World implements GameSystem {
     // The platforms and the carriage floors are things you stand on, so they go
     // to the same sampler the lift and the bubble use.
     for (const platform of this.train.platforms()) this.building.surfaces.addPlatform(platform);
+    // …and they are tap targets, which the meadow — planted before the loop
+    // was solved — must keep its pickable blooms out of (the tap-spacing
+    // rule, `world/tapSpacing.ts`). Any flower already inside is replanted.
+    this.flowers.keepClearOfTapZones(this.train.stationTapAreas());
 
     // Garlands of lights strung tree to tree. Nothing about them is authored:
     // they are generated from where `Scenery` actually planted the trees and
