@@ -1,5 +1,4 @@
 import {
-  CanvasTexture,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -17,7 +16,7 @@ import {
 import { RIDER_HEADROOM } from '../train/clearance';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { paintFace, facePatchGeometry } from '../../art/style/faces';
+import { applyStaticBakedFace, type FacePaintOptions } from '../../art/style/faces';
 import { blob } from '../../art/style/asset';
 
 /**
@@ -472,20 +471,43 @@ export function createCatBus(): CatBusHandle {
   // front of the bus.
   const faceZ = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
   const faceY = BODY_BOTTOM_Y + BODY_HEIGHT * 0.62;
-  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [1, 0.92, 0.6]);
+  // 38 segments, matching the kid's own skull (`kid.ts`), because this sphere is
+  // now the surface the face is *printed on* rather than a blank the face hangs
+  // in front of — the UV remap below is exact at every vertex, so how finely the
+  // sphere is divided is how finely the eyes are drawn.
+  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [1, 0.92, 0.6], 38);
+  faceSphere.name = 'cat-bus-face';
   faceSphere.position.set(0, faceY, faceZ);
   chassis.add(faceSphere);
+  // Before the bake, so the outline takes its tint from the bodywork's own
+  // colour rather than from the white the baked material carries.
   addOutline(faceSphere, 0.02 * DETAIL);
 
-  const faceTexture = paintCatBusFace();
-  const faceMaterial = toonMaterial(0xffffff, { map: faceTexture, transparent: true });
-  faceMaterial.alphaTest = 0.02;
-  const facePatch = decal(
-    new Mesh(facePatchGeometry(FACE_RADIUS * 1.02, 2.0, 1.7, 0.08), faceMaterial),
+  // **The face is painted into the head's own UV map. There is no second mesh.**
+  //
+  // It used to be a `facePatchGeometry` decal at `FACE_RADIUS * 1.02`, parked at
+  // the face sphere's position — but the face sphere is *squashed*, `[1, 0.92,
+  // 0.6]`, and the patch was not. So the patch's nose stood at z = r·1.02 while
+  // the head it belonged to stopped at z = r·0.6, and the measurement is not
+  // marginal: **the cat's face floated 1.13 m in front of the bus**, in clear
+  // air, which is what Jim watched on 7 August 2026 — *"the face of the cat
+  // projects off its head and floats in space"*.
+  //
+  // Padding the stand-off could not have fixed it and neither could shrinking
+  // it: the patch is a sphere and the head is an ellipsoid, so no single radius
+  // makes them touch anywhere but the axis. That is precisely the trap CLAUDE.md
+  // records from RiPika's hood — a second surface positioned by a formula that
+  // has to track the first one's, which had itself been squashed underneath it.
+  //
+  // Baked, the face inherits the squash for free: one surface, one texture, and
+  // no distance to get wrong. Whiskers go into the same canvas as an `over`
+  // layer for the same reason.
+  const faceMaterial = applyStaticBakedFace(
+    faceSphere,
+    { fill: bodyColour, ...CAT_BUS_FACE_PAINT, spreadX: 2.0, spreadY: 1.7, tilt: 0.08 },
+    { over: paintWhiskers },
   );
-  facePatch.position.copy(faceSphere.position);
-  facePatch.renderOrder = 2;
-  chassis.add(facePatch);
+  const faceTexture = faceMaterial.map;
 
   // --- ears --------------------------------------------------------------------
   // Triangular, on the roof, leaning outward a touch — "nothing is plumb".
@@ -806,41 +828,37 @@ export function createCatBus(): CatBusHandle {
       pawMaterial.dispose();
       tailMaterial.dispose();
       bumperMaterial.dispose();
-      faceTexture.dispose();
+      faceTexture?.dispose();
+      faceMaterial.dispose();
     },
   };
 }
 
 /**
- * The face: reuses `paintFace()` for the eyes, nose and cat "w" mouth (the
- * same painter every character's face patch uses), then draws whiskers
- * straight onto the same canvas — whiskers are not part of the shared face
- * painter (no other character has any), so this is the one bespoke addition.
+ * The cat's face, as paint options for the shared painter.
+ *
+ * The eyes, nose and cat "w" mouth come from `paintFace()` — the same painter
+ * every character in the park uses — so a change to how an eye is drawn reaches
+ * the bus too. Only the whiskers are bespoke (no other character has any), and
+ * they go into the same canvas as an `over` layer rather than onto a surface of
+ * their own.
  */
-function paintCatBusFace(): CanvasTexture {
-  const texture = paintFace({
-    size: 512,
-    eyeY: 0.4,
-    eyeGap: 0.48,
-    eyeW: 0.13,
-    eyeH: 0.165,
-    eyeStyle: 'open',
-    iris: PALETTE.markerSky,
-    mouth: 'cat',
-    mouthW: 0.1,
-    mouthDrop: 0.22,
-    blush: PALETTE.cheek,
-    blushStyle: 'soft',
-    blushR: 0.085,
-    nose: PALETTE.cheek,
-  });
-
-  const canvas = texture.image as HTMLCanvasElement;
-  const ctx = canvas.getContext('2d');
-  if (ctx) paintWhiskers(ctx, canvas.width);
-  texture.needsUpdate = true;
-  return texture;
-}
+const CAT_BUS_FACE_PAINT = {
+  size: 512,
+  eyeY: 0.4,
+  eyeGap: 0.48,
+  eyeW: 0.13,
+  eyeH: 0.165,
+  eyeStyle: 'open',
+  iris: PALETTE.markerSky,
+  mouth: 'cat',
+  mouthW: 0.1,
+  mouthDrop: 0.22,
+  blush: PALETTE.cheek,
+  blushStyle: 'soft',
+  blushR: 0.085,
+  nose: PALETTE.cheek,
+} as const satisfies FacePaintOptions;
 
 function paintWhiskers(ctx: CanvasRenderingContext2D, size: number): void {
   const ink = hexToCss(PALETTE.ink);

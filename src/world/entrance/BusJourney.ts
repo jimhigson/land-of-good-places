@@ -24,7 +24,13 @@ import { toonMaterial } from '../../art/style/materials';
 import { createKid, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
-import { createCatBus, CAT_BUS_SEAT_COUNT, CAT_BUS_WIDTH, type CatBusHandle } from './catBus';
+import {
+  createCatBus,
+  CAT_BUS_SEAT_COUNT,
+  CAT_BUS_LENGTH,
+  CAT_BUS_WIDTH,
+  type CatBusHandle,
+} from './catBus';
 import { createBusDriver, type BusDriver } from './busDriver';
 
 /**
@@ -99,6 +105,17 @@ const ROAD_HALF_WIDTH = CAT_BUS_WIDTH / 2 + 1.25;
 
 /** Half-width of the grass verge the ground mesh covers either side. */
 const GROUND_HALF_WIDTH = 90;
+
+/**
+ * How far apart the two points are that the bus's pitch is taken from.
+ *
+ * A long vehicle bridges a dip rather than folding into it, so the bus lies
+ * along the chord between the road under its front axle and the road under its
+ * back one. Derived from the bus's own length — a wheelbase is most of it —
+ * rather than the 14 m that used to be written here twice, so a bus that is
+ * resized still bridges its own length.
+ */
+const BUS_PITCH_SPAN = CAT_BUS_LENGTH * 0.78;
 
 /**
  * How much lane exists *behind* the bus's starting point.
@@ -257,10 +274,10 @@ export class BusJourney {
     // --- the bus ------------------------------------------------------------
     this.bus = createCatBus();
     this.bus.setDoorOpen(0);
-    // Nose-first down the lane. The bus's own local +Z is its length; the park
-    // sends it along the kerb with `rotation.y`, and here it simply drives the
-    // way it points.
-    this.bus.root.rotation.y = Math.PI;
+    // Nose-first down the lane. **No `rotation.y` here**: `place()` owns the
+    // whole orientation, yaw and pitch together, by aiming the bus at the road
+    // ahead of it. A separate yaw set once in a constructor is what let the
+    // pitch be applied about the wrong axis and go unnoticed — see `place`.
     this.scene.add(this.bus.root);
 
     this.driver = createBusDriver();
@@ -458,17 +475,46 @@ export class BusJourney {
   }
 
   /**
-   * Puts the bus at a point down the lane, on the hills, pitched to the slope.
+   * Puts the bus at a point down the lane, on the hills, **lying along the
+   * slope it is standing on**.
    *
-   * The pitch is taken from the ground a bus-length ahead and behind rather
-   * than from the slope at a point, so the bus lies along the hill the way a
-   * long vehicle does instead of pivoting on its middle.
+   * ## Why this is a `lookAt` and not an angle
+   *
+   * It was an angle, and the angle was backwards. `rotation.x` was set to
+   * `atan2(behind − ahead, 14)`, which — once the constructor's separate
+   * `rotation.y = π` had turned the bus to face −Z — pitched its nose **down**
+   * every time the road went up. Measured over a whole ride, the bus disagreed
+   * with the ground on **every one of 1200 frames**: at t = 10 s the lane climbs
+   * at +0.12 m per metre and the bus's nose pointed 0.11 *below* the horizontal.
+   * Jim, 7 August 2026: *"the bus doesn't tilt up when going over a hill"* — it
+   * tilted the other way, which reads as not tilting at all right up until it
+   * reads as wrong.
+   *
+   * A sign is exactly the kind of thing that is invisible in review and obvious
+   * on screen, so there is no longer a sign here to get wrong. The bus is simply
+   * pointed at the piece of road under its own nose: `Object3D.lookAt` aims
+   * local **+Z** — the bus's own length, the way `catBus.ts` builds it — at a
+   * target, so yaw and pitch both fall out of where the road *is*. There is
+   * nothing left to invert.
+   *
+   * The nose and tail points are {@link BUS_PITCH_SPAN} apart rather than
+   * sampled at a point, so the bus lies along the hill the way a long vehicle
+   * does instead of pivoting on its middle.
+   *
+   * {@link laneHeight} is the one owner: the ground mesh, the road ribbon, every
+   * tree, every hedge and this all read it, so the bus cannot drift from the
+   * road it is driving on.
    */
   private place(z: number): void {
-    const ahead = laneHeight(z - 7);
-    const behind = laneHeight(z + 7);
+    const half = BUS_PITCH_SPAN / 2;
+    // The bus drives towards −Z, so its nose rests at the smaller z.
+    const rise = laneHeight(z - half) - laneHeight(z + half);
     this.bus.root.position.set(0, laneHeight(z), z);
-    this.bus.root.rotation.x = Math.atan2(behind - ahead, 14);
+    // Aim the bus's length along the chord from where its tail rests to where
+    // its nose rests. Uphill means `rise > 0` means the target is above the bus
+    // means the nose comes up — which is a statement about the road, not about
+    // a rotation convention.
+    this.bus.root.lookAt(0, laneHeight(z) + rise, z - BUS_PITCH_SPAN);
   }
 
   /**

@@ -470,10 +470,14 @@ export function paintFaceOnFill(
   fill: number,
   options: FacePaintOptions = {},
   under?: (ctx: CanvasRenderingContext2D, size: number) => void,
+  over?: (ctx: CanvasRenderingContext2D, size: number) => void,
 ): CanvasTexture {
   const s = options.size ?? DEFAULTS.size;
   const { canvas, ctx } = newCanvas(s);
-  drawFaceOnFill(ctx, s, fill, options, under ? { under } : {});
+  drawFaceOnFill(ctx, s, fill, options, {
+    ...(under ? { under } : {}),
+    ...(over ? { over } : {}),
+  });
   return finish(canvas);
 }
 
@@ -776,8 +780,19 @@ export function createBakedFace(options: BakedFaceOptions): BakedFace {
  *
  * Sets the same `bakedFace` flag {@link isBakedFaceMesh} and `check:baked-face`
  * look for, so a static face is checked exactly like an animated one.
+ *
+ * `layers` paints extra ink into the **same canvas**, in the face window's own
+ * coordinates. It exists for markings that belong to this particular face and
+ * to no other — the cat bus's whiskers are the case, and the reason they are a
+ * layer rather than a second mesh is the whole point of this function: a
+ * whisker drawn on its own quad in front of the muzzle is one more surface
+ * positioned by a formula that has to track the first one.
  */
-export function applyStaticBakedFace(mesh: Mesh, options: BakedFaceOptions): MeshToonMaterial {
+export function applyStaticBakedFace(
+  mesh: Mesh,
+  options: BakedFaceOptions,
+  layers: FaceFillLayers = {},
+): MeshToonMaterial {
   const { fill, spreadX = 1.7, spreadY = 1.7, tilt = 0.1, ...paint } = options;
 
   if (isShared(mesh.geometry)) {
@@ -789,7 +804,9 @@ export function applyStaticBakedFace(mesh: Mesh, options: BakedFaceOptions): Mes
   }
   remapSphereFaceUv(mesh.geometry, { spreadX, spreadY, tilt });
 
-  const material = toonMaterial(0xffffff, { map: paintFaceOnFill(fill, paint) });
+  const material = toonMaterial(0xffffff, {
+    map: paintFaceOnFill(fill, paint, layers.under, layers.over),
+  });
   mesh.material = material;
   (mesh.userData as Record<string, unknown>)[BAKED_FACE_FLAG] = true;
   if (!mesh.name) mesh.name = 'bakedFace';
