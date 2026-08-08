@@ -10,12 +10,10 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE, hexToCss } from '../../core/palette';
 import {
   CHILD_FOOTPRINT,
-  KID_HEAD_HEIGHT,
-  SKULL_RADIUS,
+  KID_SHOULDER_HEIGHT,
   TALLEST_CHILD_HEIGHT,
   WIDEST_CHILD_FOOTPRINT,
 } from '../../art/models/kid';
-import { RIDE_POSE_BODY_PITCH } from '../../entities/ridePose';
 import { RIDER_HEADROOM } from '../train/clearance';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
@@ -203,16 +201,6 @@ export const CAT_BUS_FLOOR_Y = BODY_BOTTOM_Y + FLOOR_PAN_THICKNESS;
  */
 export const CAT_BUS_SEAT_Y = CAT_BUS_FLOOR_Y + SEAT_PAD_HEIGHT;
 
-/**
- * **Where a seated child's head is**, which is what the glazing exists to frame.
- *
- * `applyRidePose` leans the torso forward by {@link RIDE_POSE_BODY_PITCH}, and
- * the head hangs off the torso, so her head pivot is not `KID_HEAD_HEIGHT` above
- * her origin but that times the cosine of the lean — 6 cm lower. The angle is
- * imported rather than the 6 cm copied, so retuning the lean moves the window.
- */
-const SEATED_HEAD_PIVOT_Y = CAT_BUS_SEAT_Y + KID_HEAD_HEIGHT * Math.cos(RIDE_POSE_BODY_PITCH);
-
 /** How far off the centre line one seat sits. The one owner of "which side". */
 const SEAT_OFFSET_X = AISLE_WIDTH / 2 + SEAT_WIDTH / 2;
 
@@ -293,34 +281,36 @@ export const CAT_BUS_WIDTH = BODY_WIDTH;
  *
  * So the side walls are now built in two bands with a genuine gap between them,
  * divided by pillars, and the glass fills the gap. The band is placed to frame
- * a **seated child's head**, which sits at {@link SEATED_HEAD_PIVOT_Y} and is
- * 1.53 m across — that is what there is to look at, and Stage B's whole ask is
+ * a **seated child's head**, which sits a little over a metre above the seat
+ * and is 1.53 m across — that is what there is to look at, and Stage B's whole ask is
  * that you can see them.
  *
- * **The sill is a seated child's chin**, and that is Jim's second fault of
- * 7 August: *"the windows of the bus go all the way down to the floor of the
+ * **The sill is a seated child's shoulder line**, and that is Jim's second fault
+ * of 7 August: *"the windows of the bus go all the way down to the floor of the
  * bus […] windows should only start about halfway up the sides"*. It was
  * `BODY_BOTTOM_Y + 0.55` — a picked number, 0.38 m above the actual floor, which
  * over a 2.72 m interior is glass from the ankles up. He was right.
  *
- * It is derived rather than picked now, and derived from the one thing the
- * glazing is *for*: seeing the children. The glass starts exactly at the bottom
- * of a seated child's skull, so the whole of her face is above the line and the
- * solid panel below it is her body — which is what a bus looks like.
+ * Derived rather than picked now, and from the thing that makes a bus look like
+ * a bus: **the panel below the glass is the passengers' bodies, and the band
+ * above it is their heads.** {@link KID_SHOULDER_HEIGHT} is where a child's
+ * torso stops, measured off the built rig, so the glazing starts at her
+ * shoulders exactly as a real coach's does.
  *
- * **This lands at about a third of the way up, not a half, and that is a
- * measured limit rather than a shortfall.** These children are chibi: the head
- * is 59% of the height and 1.32 m across, and a seated one's chin is 1.11 m up a
- * 3.37 m side. A sill at the halfway mark would cut across her mouth. Raising
- * the children instead is not available either — the tallest of them already
- * clears the header band by 4 cm once she bounces. The only lever that would buy
- * a higher sill is a taller bus, and that is a change to a silhouette Jim has
- * already approved, so it is his call rather than one to make quietly here.
+ * That lands it **44% up the side** — Jim's "about halfway", reached by
+ * derivation rather than by aiming at it. The solid lower panel goes from 0.55 m
+ * tall to 1.50 m, nearly tripling.
  *
- * What he will see is the solid lower panel going from 0.59 m tall to 1.16 m —
- * doubling — and the glass dropping from 80% of the side to 61%.
+ * The obvious alternative — the sill at her **chin** — was built and looked at
+ * first. It is safer, in that the whole face is above the line whatever else
+ * changes, but it only reaches 34% and still reads as a glasshouse rather than a
+ * bus: these children are chibi, the head is 59% of their height and 1.32 m
+ * across, so a chin-height sill sits barely above the seat. The shoulder line
+ * hides the bottom quarter of the skull — the jaw — and leaves eyes and mouth
+ * well clear; the mouth is painted 60% of the way down the face canvas, and the
+ * flank captures show every face whole above the glass line.
  */
-const WINDOW_SILL_Y = SEATED_HEAD_PIVOT_Y - SKULL_RADIUS;
+const WINDOW_SILL_Y = CAT_BUS_SEAT_Y + KID_SHOULDER_HEIGHT;
 const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
 
 /**

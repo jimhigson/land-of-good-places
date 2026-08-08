@@ -959,34 +959,69 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
       const sideTop = upperShell ? boxIn(upperShell, toBus).max.y : CAT_BUS_CABIN_CEILING_Y;
       const upTheSide = ((glass.min.y - sideBottom) / (sideTop - sideBottom)) * 100;
 
-      // The lowest chin aboard: the underside of a built, seated child's skull.
-      let lowestChin = Infinity;
+      // Two landmarks off the built, seated children — one for each way the
+      // sill can be wrong.
+      let lowestShoulder = Infinity;   // top of a torso: where a body stops
+      let skullBottom = Infinity;      // a chin
+      let skullTop = -Infinity;
       for (const seat of seatNodes) {
         let skull: Object3D | null = null;
+        let torso: Object3D | null = null;
         seat.traverse((node) => {
           if (!skull && node.name === 'skull') skull = node;
+          if (!torso && node.name === 'torso') torso = node;
         });
-        if (skull) lowestChin = Math.min(lowestChin, boxIn(skull, toBus).min.y);
+        if (torso) lowestShoulder = Math.min(lowestShoulder, boxIn(torso, toBus).max.y);
+        if (skull) {
+          const box = boxIn(skull, toBus);
+          skullBottom = Math.min(skullBottom, box.min.y);
+          skullTop = Math.max(skullTop, box.max.y);
+        }
       }
 
-      /** A little slack, so a sill grazing a chin is not a foul. */
-      const CHIN_SLACK = 0.05;
+      /** A little slack, so a sill grazing a shoulder is not a foul. */
+      const SHOULDER_SLACK = 0.08;
+      /**
+       * How much of a head the panel may hide before the faces stop reading.
+       *
+       * The jaw, and no more. The mouth is painted 60% of the way down the face
+       * canvas, so hiding much beyond a quarter of the skull starts eating the
+       * expression — and the whole reason this bus has glass at all is Stage B's
+       * ask that you can see the children being excited.
+       */
+      const MOST_OF_A_HEAD_HIDDEN = 0.4;
+
+      const skullHeight = skullTop - skullBottom;
+      const hiddenFraction = skullHeight > 0 ? (glass.min.y - skullBottom) / skullHeight : 0;
 
       said.push(
         `glazing starts at ${glass.min.y.toFixed(3)} m, ${upTheSide.toFixed(0)}% up the bus's side, ` +
-          `${(glass.min.y - CAT_BUS_SEAT_Y).toFixed(3)} m above the seat cushions and ` +
-          `${(lowestChin - glass.min.y).toFixed(3)} m below the lowest chin aboard (${panes} panes)`,
+          `${(glass.min.y - lowestShoulder).toFixed(3)} m from the lowest shoulder aboard, ` +
+          `hiding ${(hiddenFraction * 100).toFixed(0)}% of a head (${panes} panes)`,
       );
 
-      if (!Number.isFinite(lowestChin)) {
-        fouls.push('found no children in the seats to measure the glazing against');
-      } else if (glass.min.y < lowestChin - CHIN_SLACK) {
-        fouls.push(
-          `glazing reaches down to ${glass.min.y.toFixed(3)} m, which is ` +
-            `${(lowestChin - glass.min.y).toFixed(3)} m below the lowest seated child's chin at ` +
-            `${lowestChin.toFixed(3)} — the windows run down past the children's bodies to the floor ` +
-            `instead of starting up the side of the bus (they start ${upTheSide.toFixed(0)}% up it)`,
-        );
+      if (!Number.isFinite(lowestShoulder) || !Number.isFinite(skullBottom)) {
+        fouls.push('found no seated children to measure the glazing against');
+      } else {
+        // Too low: glass running down past their bodies to the floor.
+        if (glass.min.y < lowestShoulder - SHOULDER_SLACK) {
+          fouls.push(
+            `glazing reaches down to ${glass.min.y.toFixed(3)} m, ` +
+              `${(lowestShoulder - glass.min.y).toFixed(3)} m below the lowest seated child's ` +
+              `shoulders at ${lowestShoulder.toFixed(3)} — the windows run down past the children's ` +
+              `bodies towards the floor instead of starting up the side of the bus (they start ` +
+              `${upTheSide.toFixed(0)}% up it)`,
+          );
+        }
+        // Too high: a bus you cannot see the children in, which is the fault the
+        // glazing was cut into the bodywork to fix in the first place.
+        if (hiddenFraction > MOST_OF_A_HEAD_HIDDEN) {
+          fouls.push(
+            `the panel below the glass hides ${(hiddenFraction * 100).toFixed(0)}% of a seated ` +
+              `child's head — over the ${(MOST_OF_A_HEAD_HIDDEN * 100).toFixed(0)}% that still ` +
+              'leaves a face to look at. The windows exist so the children can be seen through them.',
+          );
+        }
       }
     }
   }

@@ -72,6 +72,25 @@ const HEAD = KID_HEAD_SCALE;
 export const KID_HEAD_HEIGHT = 1.36;
 
 /**
+ * **Height of the shoulders above the origin** — the top of the torso, in metres.
+ *
+ * Measured off a built kid (`torso`'s own bounding box, 0.987), not derived from
+ * the numbers that place it, per this repo's first commandment.
+ *
+ * Exported because the **cat bus's window sill is this line**. Jim, 7 August
+ * 2026: *"the windows of the bus go all the way down to the floor of the bus […]
+ * windows should only start about halfway up the sides"*. A bus's glazing starts
+ * at its passengers' shoulders — that is what makes the panel below read as
+ * bodywork and the band above read as a row of faces — so `catBus.ts` asks where
+ * a child's shoulders are rather than picking a height that looks about right,
+ * which is exactly what the old `BODY_BOTTOM_Y + 0.55` was.
+ *
+ * `check:bus-journey` re-measures it against the built children in the bus, so
+ * this cannot quietly drift from the rig it describes.
+ */
+export const KID_SHOULDER_HEIGHT = 0.99;
+
+/**
  * Total height in metres, measured to the top of the hair.
  *
  * The **default** style's height. Since hair styles landed, a kid's real height

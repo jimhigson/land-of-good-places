@@ -135,19 +135,7 @@ export const CLIMB_WAVE_LEAN_RATE = 5.5;
  * is this plus whatever the neck does. Two numbers that must agree, in one
  * expression each.
  */
-/**
- * Exported as well, because **the cat bus derives its window sill from it.**
- *
- * The glazing exists so that a seated child's face can be seen — from outside
- * through the glass, and by her from inside looking out. Where her face
- * actually ends up depends on this pitch: leaning her forward by 0.3 rad drops
- * her head pivot from `KID_HEAD_HEIGHT` to `KID_HEAD_HEIGHT * cos(0.3)`, which
- * is 6 cm, and 6 cm is the difference between a sill under her chin and one
- * across her mouth. `catBus.ts` asks for the angle rather than keeping its own
- * copy of the 6 cm — which would be a number that silently stopped being true
- * the moment anyone retuned the lean.
- */
-export const RIDE_POSE_BODY_PITCH = 0.3;
+const RIDE_POSE_BODY_PITCH = 0.3;
 
 /**
  * The neck angle that points her face **at the camera** while she waves.
