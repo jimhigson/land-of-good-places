@@ -1265,6 +1265,62 @@ function wallBoxesOf(shell: { traverse(cb: (object: unknown) => void): void }): 
   }
 }
 
+// ------------------------------- 19. no rug runs under a wall or partition
+//
+// Jim, looking at the suite bedroom, 8 Aug 2026: *"The rainbow rug goes
+// under the walls."* Measured cause: the hall's rainbow rug was hand-sized —
+// 0.8 m core plus six 0.3 m bands is a 2.6 m radius — in a hall whose clear
+// width is z ±1.5, so it ran ~1.1 m under both long partitions and surfaced
+// in the bedrooms and the lounge as a sliver of someone else's rug against
+// the skirting.
+//
+// The fix has an owner: `layout.ts`'s `clearFloorAround` derives each rug's
+// available floor from the partition plan itself, so a rug *cannot* reach a
+// wall and a future partition move re-fits the rugs automatically. This
+// probe holds the built scene to it: every rug-family group's world box,
+// against every wall box (structural, as everywhere else in this file), may
+// not overlap in plan by more than a paint line.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const RUG_NAMES = ['hotel.rug', 'hotel.rug.round', 'hotel.rainbowRug', 'hotel.rainbowRing'];
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    // Walls by name *and* shape here, unlike the purely structural sweeps in
+    // probes 15 and 18: the structural test alone also catches the garden's
+    // trellis arches, and a lawn running under a rose arch is the design, not
+    // a rug under a wall. A wall that loses its name cannot hide from those
+    // two probes, so the name is safe to lean on for this one.
+    const wallBoxes: Box3[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh) || object.name !== 'hotel.wall') return;
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      wallBoxes.push(bounds.clone().applyMatrix4(object.matrixWorld));
+    });
+    const rugBoxes: { readonly what: string; readonly box: Box3 }[] = [];
+    shell.traverse((object) => {
+      if (!RUG_NAMES.includes(object.name)) return;
+      rugBoxes.push({ what: object.name, box: new Box3().setFromObject(object) });
+    });
+    for (const rug of rugBoxes) {
+      for (const wall of wallBoxes) {
+        const overlapX = Math.min(rug.box.max.x, wall.max.x) - Math.max(rug.box.min.x, wall.min.x);
+        const overlapZ = Math.min(rug.box.max.z, wall.max.z) - Math.max(rug.box.min.z, wall.min.z);
+        if (overlapX <= 0.02 || overlapZ <= 0.02) continue;
+        problems.push(
+          `${room.space}: a '${rug.what}' reaches ${overlapX.toFixed(2)} × ${overlapZ.toFixed(2)} m ` +
+            `under a wall at (${((wall.min.x + wall.max.x) / 2 - room.originX).toFixed(1)}, ` +
+            `${((wall.min.z + wall.max.z) / 2 - room.originZ).toFixed(1)}) local — rugs must lie on ` +
+            `their own room's clear floor (layout.ts clearFloorAround)`,
+        );
+        break;
+      }
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(

@@ -107,6 +107,7 @@ import { gameStore } from '../../state';
 import { pressAction, type InteractZone } from '../interact';
 import {
   BREAKFAST,
+  clearFloorAround,
   CORRIDOR,
   DOOR_HALF,
   GARDEN_FLOOR,
@@ -118,6 +119,8 @@ import {
   ROOMS,
   roomFor,
   SUITE,
+  SUITE_PARTITION_HALF,
+  WALL_HALF_DEPTH,
   SUITE_BED_SPOTS,
   SUITE_BEDSIDE_X,
   SUITE_BEDSIDE_Z,
@@ -205,11 +208,15 @@ const AUTO_DOOR_SIDE = 2.4;
 // arriving, not a sensor firing.
 const AUTO_DOOR_SECONDS = 1.2;
 
-/** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
-const WALL_HALF_DEPTH = 0.25;
-
 /** How close a tap must land to a wall's "Look out" pane to select it. */
 const WINDOW_PICK_RADIUS = 2.2;
+
+/**
+ * How much floor a fitted rug leaves between its own edge and a wall face.
+ * Rug extents are derived from `layout.ts`'s `clearFloorAround` minus this —
+ * never hand-sized against a wall a partition move could bring closer.
+ */
+const RUG_CLEARANCE = 0.15;
 
 /**
  * How far the grand staircase is sunk below the lobby floor, so its top
@@ -2069,8 +2076,8 @@ export class Hotel implements GameSystem {
         const panel = solid(
           new Mesh(
             alongX
-              ? new BoxGeometry(b - a, height, 0.4)
-              : new BoxGeometry(0.4, height, b - a),
+              ? new BoxGeometry(b - a, height, SUITE_PARTITION_HALF * 2)
+              : new BoxGeometry(SUITE_PARTITION_HALF * 2, height, b - a),
             interiorMaterial(room.theme.wall),
           ),
         );
@@ -2090,8 +2097,8 @@ export class Hotel implements GameSystem {
         this.props.footprint(room, {
           x: alongX ? mid : wall.at,
           z: alongX ? wall.at : mid,
-          halfX: alongX ? (b - a) / 2 : 0.2,
-          halfZ: alongX ? 0.2 : (b - a) / 2,
+          halfX: alongX ? (b - a) / 2 : SUITE_PARTITION_HALF,
+          halfZ: alongX ? SUITE_PARTITION_HALF : (b - a) / 2,
           top: height,
           solid: false,
         });
@@ -3303,8 +3310,20 @@ export class Hotel implements GameSystem {
     // The rainbow rug, in the hall between the bedrooms and the lounge, under
     // the disco ball — which is where a child actually stands when the ball is
     // spinning, and now also the first floor she steps onto through her door.
-    const mat = rainbowRug(0.8, 0.3);
-    mat.position.set(-3.4, 0, 0);
+    //
+    // **Sized from the hall it lies in, never by hand.** It used to be a
+    // hand-sized 2.6 m radius in a hall whose clear half-width is 1.5 m, so
+    // it ran a metre under both partitions and surfaced in the rooms beyond
+    // — Jim: *"The rainbow rug goes under the walls."* `clearFloorAround`
+    // owns the answer now; the ring keeps its old proportions (cream core
+    // 0.8 : band 0.3) at whatever radius the hall actually has.
+    const HALL_RUG_X = -3.4;
+    const hall = clearFloorAround(SUITE, HALL_RUG_X, 0);
+    const hallRadius =
+      Math.min(HALL_RUG_X - hall.minX, hall.maxX - HALL_RUG_X, -hall.minZ, hall.maxZ) -
+      RUG_CLEARANCE;
+    const mat = rainbowRug(hallRadius * (0.8 / 2.6), hallRadius * (0.3 / 2.6));
+    mat.position.set(HALL_RUG_X, 0, 0);
     shell.add(mat);
 
     this.dressLounge(shell);
@@ -3444,9 +3463,23 @@ export class Hotel implements GameSystem {
   private dressLounge(shell: Group): void {
     const FLOOR_Z = 4.9;
 
-    // The rug the room is arranged on.
-    const mat = rug(9, 5, PALETTE.markerLilac, PALETTE.blossomWhite);
-    mat.position.set(2.5, 0, FLOOR_Z);
+    // The rug the room is arranged on — wanting 9 × 5, taking whatever the
+    // lounge's clear floor (`clearFloorAround`) actually allows, so the
+    // bathroom wall arriving at x = −4.2 can never put a wall on the rug.
+    const RUG_X = 2.5;
+    const lounge = clearFloorAround(SUITE, RUG_X, FLOOR_Z);
+    const rugWidth = Math.min(
+      9,
+      2 * (RUG_X - lounge.minX - RUG_CLEARANCE),
+      2 * (lounge.maxX - RUG_X - RUG_CLEARANCE),
+    );
+    const rugDepth = Math.min(
+      5,
+      2 * (FLOOR_Z - lounge.minZ - RUG_CLEARANCE),
+      2 * (lounge.maxZ - FLOOR_Z - RUG_CLEARANCE),
+    );
+    const mat = rug(rugWidth, rugDepth, PALETTE.markerLilac, PALETTE.blossomWhite);
+    mat.position.set(RUG_X, 0, FLOOR_Z);
     shell.add(mat);
 
     // The sofa, mid-room on the rug, turned partway between "facing the
@@ -3578,8 +3611,18 @@ export class Hotel implements GameSystem {
     rail([maxX, maxZ], [maxX, minZ]);
 
     // --- the seating nook ---------------------------------------------------
-    const nook = roundRug(3.2, LOBBY.theme.accent, PALETTE.stonePinkLight);
-    nook.position.set(-6.4, height + 0.01, -10.2);
+    // The nook's rug is fitted to the deck it lies on: its old hand-sized
+    // 3.2 m radius at z = −10.2 ran a metre through the lobby's north wall
+    // *and* hung 0.6 m past the gallery's front edge over the floor below
+    // (found by check:hotel probe 19). Bounded by the north wall's face and
+    // the deck's own front, the same derived-not-tuned rule as the suite's
+    // rugs.
+    const NOOK_X = -6.4;
+    const nookZ = ((-LOBBY.halfZ + WALL_HALF_DEPTH) + maxZ) / 2;
+    const nookRadius =
+      (maxZ - (-LOBBY.halfZ + WALL_HALF_DEPTH)) / 2 - RUG_CLEARANCE;
+    const nook = roundRug(nookRadius, LOBBY.theme.accent, PALETTE.stonePinkLight);
+    nook.position.set(NOOK_X, height + 0.01, nookZ);
     shell.add(nook);
     for (const [x, colour] of [
       [-8, PALETTE.markerLilac],

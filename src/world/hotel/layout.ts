@@ -227,6 +227,57 @@ export interface HotelRoom {
 /** Half-width of every door gap. */
 export const DOOR_HALF = 1.3;
 
+/** Half-thickness of a room's outer walls. `Hotel.buildRoomShell` builds the
+ *  boxes from it; {@link clearFloorAround} keeps the rugs off them. */
+export const WALL_HALF_DEPTH = 0.25;
+
+/** Half-thickness of an internal partition (`Hotel.partitionRoom`). */
+export const SUITE_PARTITION_HALF = 0.2;
+
+/** A rectangle of a room's floor, local metres. */
+export interface ClearRect {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+/**
+ * The clear floor around a point — the rectangle bounded by the nearest wall
+ * *faces*: the outer walls, and every partition run whose line crosses the
+ * point's own row or column.
+ *
+ * This exists so a rug's extents can be **derived** rather than hand-sized.
+ * Jim, looking at the suite bedroom: *"The rainbow rug goes under the walls"*
+ * — the hall's rug was a number typed next to a partition plan that did not
+ * know about it, and the day the plan moved, nothing owned the disagreement.
+ * Dressing code now asks this function for the floor it may cover, so a rug
+ * *cannot* reach a wall and a partition move re-fits the rugs by itself
+ * (`check:hotel` probe 19 measures the built scene either way).
+ *
+ * A doorway does not widen the answer: the run's whole `from`–`to` line
+ * bounds it, because a rug poking through a doorway into the next room is
+ * the same bug wearing a smaller hat.
+ */
+export function clearFloorAround(room: HotelRoom, x: number, z: number): ClearRect {
+  let minX = -room.halfX + WALL_HALF_DEPTH;
+  let maxX = room.halfX - WALL_HALF_DEPTH;
+  let minZ = -room.halfZ + WALL_HALF_DEPTH;
+  let maxZ = room.halfZ - WALL_HALF_DEPTH;
+  for (const run of room.partitions ?? []) {
+    if (run.along === 'x') {
+      if (x < run.from || x > run.to) continue;
+      if (run.at >= z) maxZ = Math.min(maxZ, run.at - SUITE_PARTITION_HALF);
+      else minZ = Math.max(minZ, run.at + SUITE_PARTITION_HALF);
+    } else {
+      if (z < run.from || z > run.to) continue;
+      if (run.at >= x) maxX = Math.min(maxX, run.at - SUITE_PARTITION_HALF);
+      else minX = Math.max(minX, run.at + SUITE_PARTITION_HALF);
+    }
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
 /** How far the lift alcove pokes out of the west wall. */
 export const LIFT_ALCOVE_DEPTH = 3.4;
 
