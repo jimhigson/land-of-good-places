@@ -30,14 +30,18 @@ import {
   BusJourney,
   JOURNEY_SECONDS,
   LANE_MAX_GRADIENT,
+  JOURNEY_GATE_Z,
   SETTLE_SECONDS,
   cameraPoseAt,
   laneHeight,
   planJourneyShots,
 } from '../src/world/entrance/BusJourney.ts';
 import {
+  CAT_BUS_BODY_COLOUR,
   CAT_BUS_CABIN_CEILING_Y,
   CAT_BUS_FLOOR_Y,
+  CAT_BUS_LENGTH,
+  CAT_BUS_ROOF_COLOUR,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_SEAT_Y,
 } from '../src/world/entrance/catBus.ts';
@@ -1308,6 +1312,154 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
 }
 
 journey.dispose();
+
+// ------------------------------------------------------ the wait, and the gate
+/**
+ * **What the screen does when the park is not ready and the bus has to wait.**
+ *
+ * QA measured the shipped behaviour under 4x CPU throttling: over 6.4 s of
+ * waiting, **1 distinct camera pose in 51 samples, 1 bus transform, and the
+ * title frozen mid-jump**, against 270 camera poses and 262 title layouts during
+ * the ride itself. It read as a crash. On seed 5 generation finished at ride
+ * t = 19.04 s on an M4 Pro, so this is a state real hardware reaches with under
+ * a second to spare, not a theoretical branch.
+ *
+ * Nothing measured the wait at all, because nothing ever passed
+ * `travelling = false` — the overrun was only ever wired up in `main.ts`, where
+ * no check can reach. That is the same gap that let the whole cat bus ship as
+ * dead code for twelve days.
+ *
+ * Two things are asserted, and they are the two Jim named:
+ *
+ * - the bus **reaches the gate**, rather than stopping in open lane wherever
+ *   twenty seconds happened to leave it;
+ * - the presentation **stays alive** — the clock that drives anything drawn
+ *   keeps running while the lane clock is stopped.
+ */
+{
+  const waiting = new BusJourney({
+    skin: 0xffd9be,
+    hair: 0x8b5a3c,
+    outfit: 0xff9fc4,
+    hairStyle: 'bunches',
+  });
+  const waitingBus = waiting.scene.getObjectByName('cat-bus');
+
+  // Run the ride out first — the wait only exists after the road does.
+  for (let t = 0; t <= JOURNEY_SECONDS + 1e-9; t += STEP) waiting.update(STEP);
+  const zWhenTheRideRanOut = waiting.busPositionZ;
+  const elapsedWhenTheRideRanOut = waiting.elapsed;
+  const animationWhenTheRideRanOut = waiting.animationTime;
+
+  // Then wait, the way `main.ts` does while `JourneyDirector.overrunning`.
+  const busPositions = new Set<string>();
+  const cameraPoses = new Set<string>();
+  const titlePositions = new Set<string>();
+  const idleTitle = new JourneyTitle();
+  const idleLetters: { style?: { transform?: string } }[] = [];
+  const gather = (node: { children?: unknown[] }): void => {
+    const kids = Array.isArray(node.children) ? node.children : [];
+    if (kids.length === 0) idleLetters.push(node as { style?: { transform?: string } });
+    for (const kid of kids) gather(kid as { children?: unknown[] });
+  };
+  const idleBody = (globalThis as { document?: { body?: { children?: unknown[] } } }).document?.body;
+  const idleRoot = Array.isArray(idleBody?.children) ? idleBody.children.at(-1) : undefined;
+  if (idleRoot) gather(idleRoot as { children?: unknown[] });
+
+  const WAIT_SECONDS = 8;
+  for (let i = 0; i < WAIT_SECONDS / STEP; i += 1) {
+    waiting.update(STEP, false);
+    waiting.scene.updateMatrixWorld(true);
+    // **The clock `main.ts` hands the title.** Written as the same expression,
+    // so what is measured here is what is drawn there.
+    idleTitle.update(waiting.animationTime);
+    if (waitingBus) {
+      const at = waitingBus.getWorldPosition(new Vector3());
+      busPositions.add(`${at.x.toFixed(3)},${at.y.toFixed(3)},${at.z.toFixed(3)}`);
+    }
+    const eye = waiting.camera.position;
+    cameraPoses.add(`${eye.x.toFixed(3)},${eye.y.toFixed(3)},${eye.z.toFixed(3)}`);
+    titlePositions.add(idleLetters.map((letter) => letter.style?.transform ?? '').join('|'));
+  }
+
+  const restedAt = waiting.busPositionZ;
+  const noseAt = restedAt - CAT_BUS_LENGTH / 2;
+  const shortOfTheGate = Math.abs(noseAt - JOURNEY_GATE_Z);
+
+  said.push(
+    `waiting ${WAIT_SECONDS}s past the end of the ride: the bus rolled from ` +
+      `${zWhenTheRideRanOut.toFixed(1)} to ${restedAt.toFixed(1)} m, nose ${shortOfTheGate.toFixed(2)} m ` +
+      `from the gate at ${JOURNEY_GATE_Z}`,
+  );
+  said.push(
+    `while waiting: ${busPositions.size} bus positions, ${cameraPoses.size} camera poses, ` +
+      `${titlePositions.size} title layouts over ${Math.round(WAIT_SECONDS / STEP)} frames`,
+  );
+
+  // **At the gate.** A bus length of slack, because "at the gate" is a place a
+  // vehicle stands, not a coordinate — but 30 m of open tarmac is not it.
+  if (shortOfTheGate > CAT_BUS_LENGTH) {
+    fouls.push(
+      `after ${WAIT_SECONDS}s of waiting the bus's nose is ${shortOfTheGate.toFixed(1)} m from the ` +
+        `gate — it is idling in open lane, and a bus standing still in the middle of a road reads as ` +
+        'broken down rather than as waiting',
+    );
+  }
+  if (Math.abs(restedAt - zWhenTheRideRanOut) < 1) {
+    fouls.push(
+      `the bus moved ${Math.abs(restedAt - zWhenTheRideRanOut).toFixed(2)} m in ${WAIT_SECONDS}s of ` +
+        'waiting — it stopped dead the moment the road ran out instead of pulling in',
+    );
+  }
+
+  // **Alive.** Each of the three things QA found frozen, measured separately,
+  // because they froze for one reason and could be revived one at a time.
+  if (busPositions.size < 10) {
+    fouls.push(
+      `the bus took ${busPositions.size} distinct positions over ${WAIT_SECONDS}s of waiting — it is a ` +
+        'still image, which is what QA read as a crash',
+    );
+  }
+  if (cameraPoses.size < 10) {
+    fouls.push(
+      `the camera took ${cameraPoses.size} distinct poses over ${WAIT_SECONDS}s of waiting — the shot ` +
+        'is frozen',
+    );
+  }
+  if (titlePositions.size < 10) {
+    fouls.push(
+      `the title took ${titlePositions.size} distinct layouts over ${WAIT_SECONDS}s of waiting — it is ` +
+        'stopped mid-jump with its letters at scattered heights, which is the loudest "this has ' +
+        'crashed" signal on the screen',
+    );
+  }
+
+  // **And the distinction that causes it is real**: the lane clock must stop
+  // (she is not being driven anywhere) while the animation clock must not. If
+  // these two ever became the same number, the fix above would be undone and
+  // every assertion here would still pass.
+  said.push(
+    `while waiting the lane clock held at ${waiting.elapsed.toFixed(2)}s and the animation clock ran ` +
+      `on to ${waiting.animationTime.toFixed(2)}s`,
+  );
+  if (waiting.elapsed !== elapsedWhenTheRideRanOut) {
+    fouls.push(
+      `the lane clock ran on from ${elapsedWhenTheRideRanOut.toFixed(2)} to ` +
+        `${waiting.elapsed.toFixed(2)}s while the bus was waiting — the ride believes it is still ` +
+        'travelling, and the orbit will swing off the park camera\'s bearing before hand-over',
+    );
+  }
+  if (waiting.animationTime - animationWhenTheRideRanOut < WAIT_SECONDS * 0.9) {
+    fouls.push(
+      `the animation clock advanced only ` +
+        `${(waiting.animationTime - animationWhenTheRideRanOut).toFixed(2)}s over ${WAIT_SECONDS}s of ` +
+        'waiting — the one clock that must never stop has stopped',
+    );
+  }
+
+  idleTitle.dispose();
+  waiting.dispose();
+}
 
 for (const line of said) console.log(`  ${line}`);
 if (fouls.length > 0) {

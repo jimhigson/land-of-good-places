@@ -343,6 +343,22 @@ export const CAT_BUS_CABIN_CEILING_Y = WINDOW_HEAD_Y;
  */
 export const CAT_BUS_CABIN_FRONT_Z =
   BODY_LENGTH / 2 - FACE_RADIUS * 0.62 - FACE_RADIUS * 0.6;
+/**
+ * **What colour the bus is** — cream body, pale lemon roof.
+ *
+ * Exported because anything drawn *over* the bus has to know: the ride's title
+ * card sits on top of this vehicle on a portrait phone, and its colours were
+ * chosen against grass and sky by somebody who had no way to ask what the bus
+ * was painted. The yellow band came out at 1.07:1 against this roof — the same
+ * brightness as the thing behind it. A colour that must contrast with another
+ * colour has to be able to read it, or the two are kept in step by hand, which
+ * is the bug shape this repo pays for most often.
+ */
+export const CAT_BUS_BODY_COLOUR = PALETTE.pathEdge;
+export const CAT_BUS_ROOF_COLOUR = new Color(PALETTE.flowerYellow)
+  .lerp(new Color(0xffffff), 0.35)
+  .getHex();
+
 /** Thickness of the posts between one window and the next. */
 const PILLAR_Z = 0.26;
 
@@ -456,9 +472,9 @@ export function createCatBus(): CatBusHandle {
   const root = new Group();
   root.name = 'cat-bus';
 
-  const bodyColour = PALETTE.pathEdge; // cream — a friendly, toy-bright base coat
+  const bodyColour = CAT_BUS_BODY_COLOUR;
   const bodyMaterial = toonMaterial(bodyColour);
-  const roofColour = new Color(PALETTE.flowerYellow).lerp(new Color(0xffffff), 0.35).getHex();
+  const roofColour = CAT_BUS_ROOF_COLOUR;
   const roofMaterial = toonMaterial(roofColour);
   const trimMaterial = toonMaterial(PALETTE.stonePink);
   const earInnerMaterial = toonMaterial(PALETTE.stonePinkLight);

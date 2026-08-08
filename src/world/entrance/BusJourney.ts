@@ -161,8 +161,14 @@ const RIDER_BOUNCE_MARGIN = 0.04;
 /** Where the ride's own twenty seconds leave the bus, in metres down the lane. */
 const RIDE_END_Z = -JOURNEY_SECONDS * BUS_SPEED;
 
-/** Where the park's gate stands, down the lane. Derived from where the ride ends. */
-const PARK_AHEAD_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
+/**
+ * Where the park's gate stands, down the lane. Derived from where the ride ends.
+ *
+ * Exported so `check:bus-journey` can assert the bus **reaches** it while
+ * waiting, rather than restating −250 in the check and having the two drift.
+ */
+export const JOURNEY_GATE_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
+const PARK_AHEAD_Z = JOURNEY_GATE_Z;
 
 /**
  * **Where the bus comes to rest when it has to wait — at the gate.**
