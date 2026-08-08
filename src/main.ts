@@ -17,6 +17,7 @@ import { BusJourney } from './world/entrance/BusJourney';
 import { arrivalIsDue } from './world/entrance/arrivalFlag';
 import { JourneyDirector } from './world/entrance/journeyDirector';
 import { GENERATION_BUDGET_MS, ParkGeneration } from './boot/parkGeneration';
+import { ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
@@ -405,7 +406,17 @@ function rideInThenPlay(
           generationReady: () => boolean;
           framesWorked: () => number;
           parkReady: () => boolean;
+          /** Which shot the ride's own director is cutting to — see `BusJourney`. */
           view: () => string;
+          // The shader warm-up's own view of itself, same spirit as the
+          // generation's above: a capture has to be able to see whether the
+          // programs really were compiled before hand-over, rather than infer
+          // it from how smooth the park felt afterwards.
+          warmReady: () => boolean;
+          warmRemaining: () => number;
+          warmSpentMs: () => number;
+          warmWorstMs: () => number;
+          warmFrames: () => number;
         };
       }
     ).journey = {
@@ -416,9 +427,17 @@ function rideInThenPlay(
       generationReady: () => generation.ready,
       framesWorked: () => generation.framesWorked,
       parkReady: () => director.parkReady,
+      warmReady: () => director.warmupReady,
+      warmRemaining: () => warmup?.progress.remaining ?? -1,
+      warmSpentMs: () => warmup?.spentMs ?? 0,
+      warmWorstMs: () => warmup?.worstMs ?? 0,
+      warmFrames: () => warmup?.framesWorked ?? 0,
     };
   }
   let done = false;
+  // Built the moment the park is, because it needs that park's scene and
+  // camera. Null until then, which is also `shouldWarmShaders`'s answer.
+  let warmup: ShaderWarmup | null = null;
 
   const finish = (): void => {
     if (done) return;
@@ -490,8 +509,21 @@ function rideInThenPlay(
         // **The completion signal, and there is only one.** A park object in
         // hand — not a timer that hopes to match how long one takes to build.
         director.noteParkReady();
+        warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
         skip.show();
       });
+    }
+
+    // **The park's shader programs, a few milliseconds at a time.**
+    //
+    // Same loop, same budget, same reason as the generation slicing above: the
+    // work has to happen somewhere, and behind a moving bus is the one place it
+    // costs a child nothing. Without this, 64 of the park's 116 programs
+    // compiled while she was walking about, one of them freezing a frame for
+    // 1.29 s. See `boot/shaderWarmup.ts`.
+    if (warmup && director.shouldWarmShaders()) {
+      warmup.advance(WARMUP_BUDGET_MS);
+      if (warmup.ready) director.noteWarmupReady();
     }
 
     if (director.readyToHandOver) finish();

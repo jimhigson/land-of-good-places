@@ -628,16 +628,34 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
     fouls.push('the skip is offered after the ride has run out with no park behind it');
   }
 
-  // ...and now it is ready.
+  // ...the park is built — but its shaders are not compiled yet.
+  //
+  // A park that stutters for its first few seconds is the same promise broken
+  // as a park that is half-built, only more quietly, so `parkFitToPlay` covers
+  // both and the bus keeps idling. The skip, though, is offered the moment the
+  // park exists: that is Jim's rule ("skippable only once the park has
+  // generated") and warming must not quietly tighten it into something else.
   director.noteParkReady();
   if (!director.skipOffered) {
     fouls.push('the skip is NOT offered once the park has finished generating — there is no way out of the ride');
   }
+  if (director.readyToHandOver) {
+    fouls.push(
+      'the ride hands over before the park\'s shaders are warmed — the first seconds of play will stutter',
+    );
+  }
+  if (!director.overrunning) {
+    fouls.push('the park is built but not warmed, and the bus does not know to keep idling at the gate');
+  }
+
+  // ...and now it is genuinely ready.
+  director.noteWarmupReady();
   if (!director.readyToHandOver) {
-    fouls.push('the park is built and the ride is over, and it still will not hand over');
+    fouls.push('the park is built and warmed and the ride is over, and it still will not hand over');
   }
   if (director.overrunning) fouls.push('the ride still believes it is waiting for a park that exists');
   said.push('the skip is withheld before the park exists and offered once it does, in both directions');
+  said.push('hand-over waits for the shader warm-up as well as the park, in both directions');
 }
 
 // The build order, on its own: not before something has been drawn.
