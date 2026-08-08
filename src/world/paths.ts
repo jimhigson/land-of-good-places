@@ -6,6 +6,7 @@ import {
   MeshStandardMaterial,
   Vector3,
 } from 'three';
+import { PLAYER_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
@@ -14,6 +15,7 @@ import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
+import { archFeet } from './railRace/arch';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
@@ -120,9 +122,42 @@ interface Blocker {
   readonly radius: number; // bounding circle, already inflated for kerbs
 }
 
-const BLOCKERS: readonly Blocker[] = [...PARK_LAYOUT.entries.values()]
-  .filter((e) => e.id !== 'fountain')
-  .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 }));
+/**
+ * How much room to leave round a rail-race arch foot: the post itself, plus
+ * the width a child genuinely needs to walk past it.
+ *
+ * `PLAYER_RADIUS * 2` is `test/procgen/invariants.ts`'s `WALKABLE_GAP` — the
+ * same number, taken from the game rather than from the check, because
+ * `NavGrid` fattens every collider by a player radius before deciding a cell is
+ * walkable. A margin narrower than this is a gap only on paper.
+ */
+const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
+
+/**
+ * Everything the ring road and the spurs must steer around: every plot, and
+ * the feet of the Rail Race's finish rainbow.
+ *
+ * **The arch is in this list because it cannot move and the paving can.** Its
+ * radius is solved from rider head height and lane span, and its position is
+ * the ride's own finish line — the datum the duck bars, the spark zones and
+ * `RACE_DISTANCE` are all measured from, so nudging it would decouple the drawn
+ * finish from the scored one. Meanwhile nothing told the paving it was there:
+ * on seeds 5 and 11 twelve legs came down between 1.14 m *inside* the path and
+ * 0.40 m from its edge. Decision 6's rule settles which one gives way — the
+ * ride publishes what it solved (`railRace/arch.ts`), and the walk network
+ * treats it as an obstacle exactly as it does a plot.
+ *
+ * Both rings, because both arches are built and they stand at the same place
+ * at different scales.
+ */
+const BLOCKERS: readonly Blocker[] = [
+  ...[...PARK_LAYOUT.entries.values()]
+    .filter((e) => e.id !== 'fountain')
+    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 })),
+  ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
+    .flatMap((ring) => archFeet(ring))
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN })),
+];
 
 /** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
 function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker): number {

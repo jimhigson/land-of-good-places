@@ -21,6 +21,7 @@ import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
 import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../paths';
+import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import type { CollisionWorld } from '../Collision';
@@ -1456,6 +1457,8 @@ function buildArch(
 
   const band = 0.55 * ringSizeVsRace;
   const tube = band * 0.5;
+  // Inner then outer, per band — the same order this loop consumes them in.
+  const feet = archFeet(route);
   for (let i = 0; i < ART.rainbow.length; i += 1) {
     const material = toonMaterial(ART.rainbow[i]!);
     keep(material);
@@ -1501,8 +1504,13 @@ function buildArch(
     // `RIM_OUTSET_END`, where the terrain has already fallen the full `RIM_DROP`.
     // The trestles carrying the track next to it are just as lopsided.
     for (const side of [-1, 1] as const) {
-      const footX = centre.x + outward.x * side * radius;
-      const footZ = centre.z + outward.z * side * radius;
+      // Not recomputed here: `archFeet` is the one owner of where a foot comes
+      // down, because `paths.ts` has to keep the paving out from under these
+      // and cannot import this file. Two copies of this formula is exactly how
+      // the legs ended up standing on the path on seeds 5 and 11.
+      const foot = feet[i * 2 + (side < 0 ? 0 : 1)]!;
+      const footX = foot.x;
+      const footZ = foot.z;
       const ground = terrainHeight(footX, footZ);
       // Sunk by the leg's own radius rather than stopped dead on the terrain
       // height, because a flat-bottomed cylinder standing exactly on a *slope*
