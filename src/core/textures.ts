@@ -135,6 +135,130 @@ export function pathTexture(repeat = 8): CanvasTexture {
   });
 }
 
+/**
+ * **The road the cat bus drives in on** — a cross-section of a lane, tiling
+ * along its length.
+ *
+ * Jim, 7 August 2026, having ridden it: *"the texture on the road is too plain,
+ * make it more detailed."* It was one flat `PALETTE.pathSand`, so twenty
+ * seconds of driving had nothing moving past underneath the bus and the ride's
+ * whole sense of speed rested on the hedges.
+ *
+ * ## Why it is a cross-section rather than a tile
+ *
+ * The road is one long ribbon whose `u` runs **across** it and whose `v` runs
+ * **along** it, so a texture repeated `(1, N)` paints the lane's whole width
+ * once and marches it up the road N times. That is what lets the kerbs stay at
+ * the kerbs and the centre line stay down the centre: they are painted at fixed
+ * `u`, not scattered and hoped over. A square tile repeated in both directions
+ * cannot have a centre line at all.
+ *
+ * ## What is painted, and why each thing earns its place
+ *
+ * ART_DIRECTION §7's governing rule is that a texture should look like
+ * something that *could have been* geometry and merely wasn't — flat fills,
+ * clear silhouettes, no photographic grain. So the detail here is all
+ * **structure**: courses of paving slabs in running bond, kerb stones down both
+ * verges, and a dashed centre line. Every one of those is a shape a child could
+ * point at. None of it is noise, and there is no gradient anywhere.
+ *
+ * The kerbs are the park's own `stonePink` family — the same material as the
+ * boundary wall and the gate posts — which is not decoration: the lane and the
+ * park are meant to read as one road arriving at one place, and matching the
+ * stone is how the eye is told that before the gate is even in shot.
+ */
+export function roadTexture(): CanvasTexture {
+  return cached('road', () => {
+    const size = 512;
+    const { canvas, ctx } = createCanvas(size);
+    const rng = new Rng(0x0ad0a1);
+
+    /** Where the kerb stops and the carriageway starts, as a fraction across. */
+    const KERB = 0.085;
+    const seam = `${hexToCss(PALETTE.ink)}2e`;
+
+    // The mortar the slabs are bedded in, showing through every joint.
+    ctx.fillStyle = hexToCss(PALETTE.pathSandDark);
+    ctx.fillRect(0, 0, size, size);
+
+    /** A slab with a soft corner and an inked joint, in the house style. */
+    const slab = (x: number, y: number, w: number, h: number, fill: number): void => {
+      const r = Math.min(w, h) * 0.22;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fillStyle = hexToCss(fill);
+      ctx.fill();
+      ctx.strokeStyle = seam;
+      ctx.lineWidth = size * 0.004;
+      ctx.stroke();
+    };
+
+    // --- the carriageway: eight courses of slabs, in running bond ------------
+    // The half-slab offset on alternate courses is what stops it reading as
+    // graph paper, and eight courses divide the canvas exactly so the joints
+    // still line up where the tile wraps.
+    const COURSES = 8;
+    const ACROSS = 4;
+    const courseH = size / COURSES;
+    const laneX = size * KERB;
+    const laneW = size * (1 - 2 * KERB);
+    const slabW = laneW / ACROSS;
+    const joint = size * 0.008;
+
+    for (let course = 0; course < COURSES; course += 1) {
+      const y = course * courseH;
+      const shift = course % 2 === 0 ? 0 : slabW / 2;
+      // One extra slab either end, clipped by the kerbs below, so the offset
+      // courses are not short a slab at the edges.
+      for (let i = -1; i <= ACROSS; i += 1) {
+        const x = laneX + shift + i * slabW;
+        const tone = rng.range(0, 1);
+        const fill =
+          tone > 0.72 ? PALETTE.pathEdge : tone > 0.3 ? PALETTE.pathSand : PALETTE.pathSandDark;
+        slab(x + joint / 2, y + joint / 2, slabW - joint, courseH - joint, fill);
+      }
+    }
+
+    // --- the kerbs -----------------------------------------------------------
+    // Painted last so they cover the slab courses that were allowed to run
+    // under them, which is how a kerb sits on a road anyway.
+    ctx.fillStyle = hexToCss(PALETTE.pathSandDark);
+    ctx.fillRect(0, 0, size * KERB, size);
+    ctx.fillRect(size * (1 - KERB), 0, size * KERB, size);
+    const KERB_STONES = 6;
+    const stoneH = size / KERB_STONES;
+    for (let i = 0; i < KERB_STONES; i += 1) {
+      const y = i * stoneH;
+      const light = i % 2 === 0;
+      for (const x of [0, size * (1 - KERB)] as const) {
+        slab(
+          x + joint / 2,
+          y + joint / 2,
+          size * KERB - joint,
+          stoneH - joint,
+          light ? PALETTE.stonePink : PALETTE.stonePinkLight,
+        );
+      }
+    }
+
+    // --- the centre line -----------------------------------------------------
+    // Two dashes per tile, so it reads as a rhythm going past rather than a
+    // continuous stripe — the thing that actually sells speed at 11 m/s.
+    const DASHES = 2;
+    const dashH = size / DASHES;
+    const lineW = size * 0.035;
+    for (let i = 0; i < DASHES; i += 1) {
+      const y = i * dashH + dashH * 0.22;
+      slab((size - lineW) / 2, y, lineW, dashH * 0.56, PALETTE.markerLemon);
+    }
+
+    // Repeat `(1, 1)`: every road writes its own `v` in **tiles** rather than
+    // scaling this, so one texture serves the lane and the park's own road
+    // alike and `ROAD_TILE_METRES` is the only place their scale is decided.
+    return finish(canvas, 1);
+  });
+}
+
 /** Rounded pink cobbles — the park's signature wall material. */
 export function pinkStoneTexture(repeatX = 4, repeatY = 1): CanvasTexture {
   return cached(`pinkStone:${repeatX}:${repeatY}`, () => {

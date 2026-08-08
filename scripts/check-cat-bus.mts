@@ -55,6 +55,7 @@ import {
   ENTRANCE_BUS_ARRIVE_X,
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
+  ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
@@ -62,6 +63,7 @@ import {
 } from '../src/world/entrance/layout.ts';
 import { CAT_BUS_SEAT_COUNT, createCatBus } from '../src/world/entrance/catBus.ts';
 import { isBakedFaceMesh } from '../src/art/style/faces.ts';
+import { ROAD_TILE_METRES } from '../src/world/entrance/road.ts';
 import {
   CHILD_FOOTPRINT,
   TALLEST_CHILD_HEIGHT,
@@ -714,6 +716,83 @@ check(
     `${openingDistanceToBus.toFixed(1)} m from the arriving bus — the camera snaps to her, so it opens on ` +
     'the park and then scrolls out to the bus',
 );
+
+// --- 7a. the road actually reaches the park -------------------------------
+//
+// Jim, 7 August 2026: *"it doesn't actually drive up to the park, the road
+// needs to actually go to the park."* The bus pulled up on grass — there was no
+// road at the entrance at all.
+//
+// **Measured off the built park, in metres, not restated from the constants
+// that built it.** A check comparing `ENTRANCE_BUS_STOP_Z` to itself would pass
+// on a park with no road in it whatsoever, which is precisely the state this is
+// about. So every number below comes from the road meshes' own world-space
+// vertices.
+{
+  const roadPoints: Vector3[] = [];
+  const at = new Vector3();
+  park.scene.traverse((object) => {
+    const mesh = object as Mesh;
+    if (!mesh.isMesh || !mesh.name.startsWith('entrance-road')) return;
+    const position = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i += 1) {
+      at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld);
+      roadPoints.push(at.clone());
+    }
+  });
+
+  check(roadPoints.length > 0, 'there is no road at the park entrance at all — the bus arrives on grass');
+
+  if (roadPoints.length > 0) {
+    /** How close the road gets to a point on the ground. */
+    const roadReaches = (x: number, z: number): number => {
+      let nearest = Infinity;
+      for (const point of roadPoints) nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
+      return nearest;
+    };
+
+    // **The gate.** Not "a road exists somewhere near the entrance" — the road
+    // has to come up to the one fixed thing in the park (Decision 5). The
+    // threshold is the road's own segment length, because that is the finest
+    // resolution a vertex can land at; anything tighter would be asserting on
+    // where the tessellation happened to fall.
+    const toTheGate = roadReaches(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+    check(
+      toTheGate < ROAD_TILE_METRES / 2,
+      `the nearest the road gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+    );
+
+    // **And through it.** A road that stops at the wall is a road that arrives
+    // at a park you cannot drive into. The gate is a hole in the wall
+    // (`theGateIsAHoleInTheWall` in the invariant suite), so the road must have
+    // surface on both sides of it.
+    const outside = roadPoints.filter((point) => point.z > ENTRANCE_GATE_Z).length;
+    const inside = roadPoints.filter((point) => point.z < ENTRANCE_GATE_Z).length;
+    check(
+      outside > 0 && inside > 0,
+      `the road has ${outside} vertices outside the wall and ${inside} inside it — it does not pass ` +
+        'through the gate, so it arrives at the park without going in',
+    );
+
+    // **And the bus stands on it**, everywhere it stops along its run — which is
+    // the fault as Jim actually saw it, a bus on grass.
+    let worstOffRoad = 0;
+    for (const x of [ENTRANCE_BUS_ARRIVE_X, 0, ENTRANCE_BUS_VANISH_X / 2]) {
+      worstOffRoad = Math.max(worstOffRoad, roadReaches(x, ENTRANCE_BUS_STOP_Z));
+    }
+    check(
+      worstOffRoad < ROAD_TILE_METRES / 2,
+      `somewhere along its run the bus stands ${worstOffRoad.toFixed(1)} m from the nearest road surface ` +
+        '— it is parked on the grass',
+    );
+
+    const deepest = Math.min(...roadPoints.map((point) => point.z));
+    notes.push(
+      `the road runs from z ${Math.max(...roadPoints.map((p) => p.z)).toFixed(0)} outside the wall to ` +
+        `z ${deepest.toFixed(0)} inside the park, passing ${toTheGate.toFixed(2)} m from the gate centre`,
+    );
+  }
+}
 
 // --- 7b. the cat's face is DRAWN, on the bus's own bodywork ---------------
 //

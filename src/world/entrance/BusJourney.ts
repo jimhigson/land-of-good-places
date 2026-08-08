@@ -1,5 +1,7 @@
 import {
+  BoxGeometry,
   BufferAttribute,
+  ConeGeometry,
   CylinderGeometry,
   DirectionalLight,
   Fog,
@@ -14,6 +16,7 @@ import {
   Quaternion,
   Scene,
   SphereGeometry,
+  TorusGeometry,
   Vector3,
   type WebGLRenderer,
 } from 'three';
@@ -28,10 +31,17 @@ import {
   createCatBus,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_LENGTH,
-  CAT_BUS_WIDTH,
   type CatBusHandle,
 } from './catBus';
 import { createBusDriver, type BusDriver } from './busDriver';
+import { ROAD_HALF_WIDTH, applyRoadUvs, roadMaterial } from './road';
+// The park's own gate dimensions. Not a copy — `layout.ts` is the one owner, and
+// it is reachable from here precisely because it depends on nothing heavier than
+// two import-free core modules. See its note on why the arch is built twice.
+import {
+  ENTRANCE_GATE_HALF_WIDTH as GATE_HALF_WIDTH,
+  ENTRANCE_GATE_POST_HEIGHT as GATE_POST_HEIGHT,
+} from './layout';
 
 /**
  * **The ride to the park — the twenty seconds before the gate.**
@@ -92,17 +102,6 @@ const BUS_SPEED = 11;
 /** The lane, in metres — everything the ride will cross, plus room to see ahead. */
 const LANE_LENGTH = JOURNEY_SECONDS * BUS_SPEED + 220;
 
-/**
- * Half-width of the road — **derived from the bus, so "narrow" stays true.**
- *
- * *"A narrow lane"* is a relationship, not a number: the lane is narrow when
- * the bus nearly fills it. A hand-picked 5.2 gave a carriageway 1.6 times the
- * bus's width, which on screen read as a wide sandy road with a bus somewhere
- * on it. A verge of about half a bus-width in total is a lane a bus only just
- * belongs on, and it moves on its own if the bus is ever resized again.
- */
-const ROAD_HALF_WIDTH = CAT_BUS_WIDTH / 2 + 1.25;
-
 /** Half-width of the grass verge the ground mesh covers either side. */
 const GROUND_HALF_WIDTH = 90;
 
@@ -118,12 +117,38 @@ const GROUND_HALF_WIDTH = 90;
 const BUS_PITCH_SPAN = CAT_BUS_LENGTH * 0.78;
 
 /**
+ * **How far short of the park's gate the bus stops.**
+ *
+ * Far enough that the arch is whole in the frame and the wall reads as a wall
+ * rather than filling the screen; close enough that it is plainly *there*. At
+ * {@link BUS_SPEED} this is the last two and a half seconds of the ride, which
+ * is the stretch where a child works out where she is going.
+ */
+const PARK_STANDOFF = 30;
+
+/** Where the park's gate stands, down the lane. Derived from where the ride ends. */
+const PARK_AHEAD_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
+
+
+/**
  * How much lane exists *behind* the bus's starting point.
  *
  * The camera orbits, so for a third of every turn it is looking back down the
  * road the bus came in on. Without this there is nothing there.
  */
 const LANE_AHEAD = 120;
+
+/**
+ * The stretch of **open** lane — from behind the bus's start down to the park's
+ * wall, with a few metres to spare.
+ *
+ * The hedges and trees are scattered over this rather than over the whole ground
+ * mesh, because the ground now runs on past the gate to hold the park up: left
+ * alone, the roadside hedge marched straight through the boundary wall and out
+ * the other side.
+ */
+const LANE_OPEN_FROM = PARK_AHEAD_Z + 7;
+const LANE_OPEN_RUN = LANE_AHEAD - LANE_OPEN_FROM;
 
 /**
  * The hills, as a function of distance down the lane.
@@ -270,6 +295,7 @@ export class BusJourney {
     this.scene.add(this.lane);
     this.buildGround();
     this.buildScenery();
+    this.buildParkAhead();
 
     // --- the bus ------------------------------------------------------------
     this.bus = createCatBus();
@@ -380,9 +406,13 @@ export class BusJourney {
     ground.receiveShadow = true;
     this.lane.add(ground);
 
-    // The tarmac, a narrow ribbon laid on the same hills a hand's breadth up so
-    // it never z-fights the grass.
-    const roadGeometry = new PlaneGeometry(ROAD_HALF_WIDTH * 2, LANE_LENGTH, 2, segmentsZ);
+    // The carriageway, a narrow ribbon laid on the same hills a hand's breadth
+    // up so it never z-fights the grass.
+    //
+    // **Segmented across as well as along**, at 8 rather than 2: the texture now
+    // carries kerbs at fixed `u`, and two segments across a 5.7 m road put the
+    // nearest UV sample 2.9 m from the kerb it is meant to draw.
+    const roadGeometry = new PlaneGeometry(ROAD_HALF_WIDTH * 2, LANE_LENGTH, 8, segmentsZ);
     roadGeometry.rotateX(-Math.PI / 2);
     roadGeometry.translate(0, 0, LANE_AHEAD - LANE_LENGTH / 2);
     const roadPosition = roadGeometry.getAttribute('position') as BufferAttribute;
@@ -391,7 +421,11 @@ export class BusJourney {
     }
     roadPosition.needsUpdate = true;
     roadGeometry.computeVertexNormals();
-    const road = new Mesh(roadGeometry, toonMaterial(PALETTE.pathSand));
+    // Slabs, kerbs and a dashed centre line, in metres — the same road the park
+    // lays at its own gate. Jim: *"the texture on the road is too plain"*; it was
+    // one flat fill, so nothing moved past under the bus for twenty seconds.
+    applyRoadUvs(roadGeometry, { across: 'x', along: 'z' });
+    const road = new Mesh(roadGeometry, roadMaterial());
     road.name = 'journey-road';
     road.receiveShadow = true;
     this.lane.add(road);
@@ -426,7 +460,7 @@ export class BusJourney {
       // Clear of the tarmac, thinning outwards so the lane has a near edge and
       // a soft far one.
       const x = side * (ROAD_HALF_WIDTH + 2.6 + rng() * rng() * 62);
-      const z = LANE_AHEAD - rng() * LANE_LENGTH;
+      const z = LANE_AHEAD - rng() * LANE_OPEN_RUN;
       const ground = groundHeight(x, z);
       const height = 3.4 + rng() * 4.2;
       const radius = 1.5 + rng() * 1.6;
@@ -459,7 +493,7 @@ export class BusJourney {
     hedge.name = 'journey-hedge';
     for (let i = 0; i < HEDGE; i += 1) {
       const side = i % 2 === 0 ? 1 : -1;
-      const along = (i / HEDGE) * LANE_LENGTH;
+      const along = (i / HEDGE) * LANE_OPEN_RUN;
       const z = LANE_AHEAD - along;
       const x = side * (ROAD_HALF_WIDTH + 0.9 + rng() * 0.5);
       const radius = 0.75 + rng() * 0.45;
@@ -472,6 +506,134 @@ export class BusJourney {
     hedge.instanceMatrix.needsUpdate = true;
     hedge.castShadow = true;
     this.lane.add(hedge);
+  }
+
+  /**
+   * **The park, at the end of the lane.**
+   *
+   * Jim, 7 August 2026: *"it doesn't actually drive up to the park, the road
+   * needs to actually go to the park."*
+   *
+   * The road went nowhere. The lane ran on past the horizon, the ride simply
+   * stopped after twenty seconds, and the cut put a child beside a gate she had
+   * never seen coming. Nothing on screen ever said where the bus was going, so
+   * "driving to the park" was a caption rather than a thing you watched happen.
+   *
+   * Now the park is **built at the far end of the road**: its boundary wall
+   * across the view, its gate arch dead ahead with the carriageway running
+   * through it, and its trees and rooftops standing over the wall behind. It
+   * begins the ride buried in {@link Scene.fog} — 250 m out against a fog that
+   * ends at 235 — and emerges over the last third, so the arrival is something
+   * that grows in the windscreen rather than something that is announced.
+   *
+   * ## It is the park's own gate, not a lookalike
+   *
+   * The posts, the caps and the crossbar are built to `Entrance.ts`'s own
+   * dimensions and out of the same `stonePink` family, and the road through it
+   * is `road.ts`'s road at `road.ts`'s width. That matters at exactly one
+   * moment — the cut — where a child is looking at a gate and a road and
+   * nothing else, and any disagreement between the two scenes is a jump.
+   *
+   * The bus stops {@link PARK_STANDOFF} short of the arch, which is what makes
+   * it an arrival rather than a collision.
+   */
+  private buildParkAhead(): void {
+    const gateZ = PARK_AHEAD_Z;
+    const stone = toonMaterial(PALETTE.stonePink);
+    const capStone = toonMaterial(PALETTE.stonePinkLight);
+
+    // --- the boundary wall, either side of the opening -----------------------
+    // Blocks laid along the ground it stands on, so the wall rides the same
+    // hills as everything else rather than hovering over them.
+    const BLOCK = 2.2;
+    const WALL_HEIGHT = 2.6;
+    const blockGeometry = new BoxGeometry(BLOCK * 0.96, WALL_HEIGHT, 1.1);
+    const perSide = 26;
+    const wall = new InstancedMesh(blockGeometry, stone, perSide * 2);
+    wall.name = 'journey-park-wall';
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    const spin = new Quaternion();
+    const one = new Vector3(1, 1, 1);
+    let laid = 0;
+    for (const side of [-1, 1] as const) {
+      for (let i = 0; i < perSide; i += 1) {
+        // Starts clear of the gate opening and marches outward.
+        const x = side * (GATE_HALF_WIDTH + 1.2 + i * BLOCK);
+        at.set(x, groundHeight(x, gateZ) + WALL_HEIGHT / 2 - 0.3, gateZ);
+        matrix.compose(at, spin, one);
+        wall.setMatrixAt(laid, matrix);
+        laid += 1;
+      }
+    }
+    wall.instanceMatrix.needsUpdate = true;
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    this.lane.add(wall);
+
+    // --- the gate arch -------------------------------------------------------
+    // `Entrance.ts`'s own posts, caps and crossbar. Same shape, same stone: this
+    // is the gate she is about to walk through, seen from outside.
+    const gateGround = groundHeight(0, gateZ);
+    const gate = new Group();
+    gate.name = 'journey-park-gate';
+    for (const side of [-1, 1] as const) {
+      const post = new Mesh(new CylinderGeometry(0.42, 0.5, GATE_POST_HEIGHT, 12), stone);
+      post.position.set(side * GATE_HALF_WIDTH, gateGround + GATE_POST_HEIGHT / 2, gateZ);
+      post.castShadow = true;
+      gate.add(post);
+
+      const cap = new Mesh(new SphereGeometry(0.62, 14, 10), capStone);
+      cap.position.set(side * GATE_HALF_WIDTH, gateGround + GATE_POST_HEIGHT + 0.15, gateZ);
+      cap.scale.set(1, 0.75, 1);
+      gate.add(cap);
+    }
+    const crossbar = new Mesh(new TorusGeometry(GATE_HALF_WIDTH, 0.28, 10, 24, Math.PI), capStone);
+    crossbar.position.set(0, gateGround + GATE_POST_HEIGHT + 0.15, gateZ);
+    crossbar.rotation.z = Math.PI;
+    crossbar.castShadow = true;
+    gate.add(crossbar);
+    this.lane.add(gate);
+
+    // --- what stands over the wall -------------------------------------------
+    // Trees and bright pastel rooftops behind the stone, so what is on the other
+    // side reads as somewhere worth arriving at rather than a walled field. Kept
+    // to silhouettes: at this distance that is all anybody can see anyway, and a
+    // second park modelled in detail is a second park to keep in step.
+    const rng = createRandom(20260808);
+    const PARK_THINGS = 54;
+    const roofGeometry = new ConeGeometry(1, 1, 7);
+    const roofs = new InstancedMesh(roofGeometry, toonMaterial(PALETTE.markerPink), PARK_THINGS);
+    roofs.name = 'journey-park-rooftops';
+    const canopyGeometry = new IcosahedronGeometry(1, 1);
+    const canopies = new InstancedMesh(canopyGeometry, toonMaterial(PALETTE.leafMid), PARK_THINGS);
+    canopies.name = 'journey-park-trees';
+    const scale = new Vector3();
+    for (let i = 0; i < PARK_THINGS; i += 1) {
+      const x = (rng() - 0.5) * 120;
+      const z = gateZ - 6 - rng() * 55;
+      const ground = groundHeight(x, z);
+
+      const roofHeight = 5 + rng() * 7;
+      spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI * 2);
+      at.set(x, ground + roofHeight / 2, z);
+      scale.set(2.4 + rng() * 2.2, roofHeight, 2.4 + rng() * 2.2);
+      matrix.compose(at, spin, scale);
+      roofs.setMatrixAt(i, matrix);
+
+      const treeX = (rng() - 0.5) * 130;
+      const treeZ = gateZ - 4 - rng() * 60;
+      const radius = 2.6 + rng() * 2.4;
+      at.set(treeX, groundHeight(treeX, treeZ) + radius * 1.5, treeZ);
+      scale.set(radius, radius * 1.15, radius);
+      matrix.compose(at, spin, scale);
+      canopies.setMatrixAt(i, matrix);
+    }
+    roofs.instanceMatrix.needsUpdate = true;
+    canopies.instanceMatrix.needsUpdate = true;
+    roofs.castShadow = true;
+    canopies.castShadow = true;
+    this.lane.add(roofs, canopies);
   }
 
   /**

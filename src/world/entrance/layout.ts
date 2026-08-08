@@ -33,6 +33,27 @@ export const ENTRANCE_GATE_HALF_ANGLE = 0.073;
 export const ENTRANCE_GATE_X = Math.cos(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
 export const ENTRANCE_GATE_Z = Math.sin(ENTRANCE_ANGLE) * ENTRANCE_WALL_RADIUS;
 
+/**
+ * **The gate arch itself** — how far apart its posts stand, and how tall they
+ * are.
+ *
+ * Here rather than inside `Entrance.ts`, because the arch is built **twice**:
+ * once in the park by `Entrance.ts`, and once at the end of the lane by
+ * `BusJourney.ts`, which is the park the bus is seen driving up to. They are the
+ * same gate a second apart — the cut between the ride and the arrival lands
+ * squarely on it — so a child looking at a gate and a road and nothing else
+ * would see any disagreement between them as a jump.
+ *
+ * `layout.ts` is where they can both reach: it imports two dependency-free core
+ * modules and nothing else, whereas `Entrance.ts` pulls in the terrain, the
+ * collision world and the park boundary, none of which exist yet while the ride
+ * is playing. A comment in the ride promising it matched the park's numbers was
+ * written first and deleted: a promise that two numbers agree is not a
+ * mechanism, and this repo has paid for that six times in a week.
+ */
+export const ENTRANCE_GATE_HALF_WIDTH = 4.3;
+export const ENTRANCE_GATE_POST_HEIGHT = 3.3;
+
 /** True if the angle (radians, `atan2(z, x)` convention) falls inside the gate gap. */
 export function isInEntranceGateGap(angle: number): boolean {
   return Math.abs(angleDelta(angle, ENTRANCE_ANGLE)) < ENTRANCE_GATE_HALF_ANGLE;
