@@ -4,6 +4,102 @@ Branch: `feat/hotel-236` · Worktree: `.claude/worktrees/hotel-236`
 Role: **Artist.** Authors the hotel's new art in Blender. Another agent owns
 procgen/placement/interior in the same worktree — do not touch its files.
 
+## Round 3 (7 August) — THE GRAND STAIRCASE. DONE, committed `ea589e6`
+
+Jim, live play: *"the staircase is also poorly modelled, looking like a random
+stack of boxes more than anything… Model the staircase properly in blender,
+with a rail and a nice consistent sweep all the way up and a hand rail."*
+
+`npm run blend:hotel` exits 0, `npx tsc --noEmit` exits 0, `npm run build`
+exits 0. Renders: `art/renders/hotel/staircase.png` (the park's own camera
+angle) and `staircase-rake.png` (low from the foot, which is the shot that
+shows whether the rake is straight).
+
+### The API
+
+```ts
+createGrandStaircase(): GrandStaircaseHandle
+// + innerRadius, outerRadius, sweep, rise, treads, riser, railHeight,
+//   treadTop(index)
+```
+
+Constants exported alongside — **and `src/world/hotel/layout.ts` owns them,
+this file only re-exports**: `STAIR_INNER_RADIUS` 2.4, `STAIR_OUTER_RADIUS`
+4.2, `STAIR_SWEEP` π/2, `STAIR_RISE` 3.2 (= `LOBBY_MEZZANINE_Y`),
+`STAIR_TREADS` 10, `STAIR_RISER` 0.32, `STAIR_RAIL_HEIGHT` 0.86.
+
+Measured through the real factory, `root.scale` 1: height **4.348** (the top
+newel's finial, standing on the deck — the *walkable* top is `STAIR_RISE`),
+bottom **−0.022** (the stringer's own outline, same as `entranceDoors`), bbox
+X −4.419…0.134, Z −0.134…4.432.
+
+### What the integrator has to know
+
+- **Origin is the arc's centre of curvature, on the floor** — not the foot of
+  the flight. Third documented exception after the disco ball's hang point and
+  the dial's needle pivot, same reason. Placing it is one line:
+  `root.position.set(room.originX + stair.centreX, floorY, room.originZ +
+  stair.centreZ)`.
+- **Authored at `fromAngle = 0`**, which is `LOBBY`'s, so it needs **no
+  rotation**. A different start angle would be `root.rotation.y = -fromAngle`
+  (negative: three.js yaws +Z toward +X, this game's stair angle toward −X).
+- **The handrail eases level over the last tread at 4.06 m** = `STAIR_RISE +
+  STAIR_RAIL_HEIGHT`, which is exactly where `dressMezzanine`'s gallery rail
+  sits (`height + 0.86`). They are meant to read as one line — butt them.
+- **Both strings are solid to the floor.** That is a collision decision:
+  `buildMezzanine`'s flank colliders are solid floor-to-tread, and an open
+  flight would show a metre of daylight with an invisible wall in it.
+- `hotel_build.py` **asserts the built mesh against the arc** — every tread top
+  present, radii exactly 2.4/4.2, both strings housing the tread ends at every
+  sample. Move the arc in `layout.ts` and the build fails loudly.
+
+### The old stair was wrong in a way worth writing down
+
+`Hotel.buildMezzanine` drew each tread as a `BoxGeometry` from the floor to
+that tread's own top — ten nested slabs — and set `box.rotation.y = angle`.
+That is **90° out**: three.js yaws +X toward −Z, and the arc's outward normal
+at angle *a* is (−sin a, cos a), so the box wanted `−a − π/2`. Every tread lay
+across the flight instead of along it, at ten heights, in two alternating
+colours. Not a style problem — ten boxes.
+
+### The four things this round got wrong first
+
+1. **Spindly balusters.** 0.072 → 0.055 m over 0.75 m rendered as a row of tent
+   pegs: on a spindle, a taper the eye can *see* reads as a point (§1, "no thin
+   parts"). Now 0.18 m across the belly, barely tapered — the gallery's own
+   chunk.
+2. **A hard elbow where the rail met the landing.** `min(rake, RISE)` is a
+   vertex, and it was the one place a "consistent sweep all the way up" stopped
+   being consistent. Replaced with a smooth min (`STAIR_STRING_EASE` = 0.16 m).
+   Everything that derives from `stair_nosing` — rail, coping, both strings —
+   inherits the easing, which is what keeps them parallel through it.
+3. **A blank 6.6 m slab for a stringer.** Faceted it with the reception desk's
+   trick (±4 cm per sample, flat-shaded, because 20° is *under* `emit`'s 46°
+   threshold and smooth shading would have averaged the facets back into a
+   wobble).
+4. **…and then the facet chewed up the string's top edge**, wobbling it ±4 cm
+   so the nosings showing over it turned into a sawtooth. The rake is the one
+   line that must stay clean. Fixed by keeping the top `STAIR_STRING_CAP`
+   (0.34 m) of the section at the true radius: plinth below, capping above.
+
+### The byte budget moved again, and it is not my file
+
+`scripts/pack-hotel-asset.mts`: **432 KB → 512 KB**, arithmetic in the file.
+Flagged rather than done quietly, exactly as round 2 flagged the same edit:
+the budget line lives there and `npm run blend:hotel` cannot exit 0 without
+it. The `.glb` is 480 KB / 172 KB gzipped for **sixteen factories** — ~30 KB
+each against the 150 KB one character gets. The stair costs 2,304 triangles
+and 89 KB, and it *replaced* ten meshes the game used to build itself.
+
+### Not done, round 3
+
+- **No browser QA.** Judged in Workbench renders only. It wants one look under
+  the real toon ramp, in the lobby, at gameplay distance.
+- The features agent still has to delete the box-stack from
+  `Hotel.buildMezzanine` and place this. Nothing here touches `src/world/`.
+
+---
+
 ## Round 2 (7 August) — DONE, uncommitted
 
 Nine more factories in the **same** `hotel.glb`: Jim's pet bed, the whole lift
