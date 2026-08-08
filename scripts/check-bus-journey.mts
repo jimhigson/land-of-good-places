@@ -31,6 +31,7 @@ import {
   JOURNEY_SECONDS,
   LANE_MAX_GRADIENT,
   JOURNEY_GATE_Z,
+  PULL_IN_SECONDS,
   SETTLE_SECONDS,
   cameraPoseAt,
   laneHeight,
@@ -1366,20 +1367,79 @@ journey.dispose();
   const idleRoot = Array.isArray(idleBody?.children) ? idleBody.children.at(-1) : undefined;
   if (idleRoot) gather(idleRoot as { children?: unknown[] });
 
-  const WAIT_SECONDS = 8;
+  /**
+   * **Long enough to outlast the manoeuvre**, which is the whole point.
+   *
+   * At 8 s this ran for twice {@link PULL_IN_SECONDS} and reported the wait as
+   * comfortably alive — 310 bus positions, 241 camera poses — on a build whose
+   * *stopped* idle holds **one** camera pose. The pull-in is a moving bus with a
+   * camera following it, so every liveness number is carried by it, and the
+   * state QA actually photographed as a crash begins where it ends. Measured on
+   * the running game under QA's own 4x throttle, the split was 301 poses over
+   * the 4.0 s pull-in against 1 over the 1.7 s after it.
+   *
+   * So the wait is run well past the stop and the two halves are asserted
+   * **separately**. Two of the five overruns measured on real hardware (6.34 and
+   * 7.73 s) reach the settled half, so this is a state the family gets to.
+   */
+  const WAIT_SECONDS = PULL_IN_SECONDS * 3;
+  /** Which half of the wait a frame belongs to — the stop is the boundary. */
+  type Half = 'pulling in' | 'stopped at the gate';
+  const halves: Half[] = ['pulling in', 'stopped at the gate'];
+  const busPositionsIn = new Map<Half, Set<string>>();
+  const cameraPosesIn = new Map<Half, Set<string>>();
+  const titlePositionsIn = new Map<Half, Set<string>>();
+  const framesIn = new Map<Half, number>();
+  for (const half of halves) {
+    busPositionsIn.set(half, new Set());
+    cameraPosesIn.set(half, new Set());
+    titlePositionsIn.set(half, new Set());
+    framesIn.set(half, 0);
+  }
+
+  /** The bearing the ride ends on — the park camera's, which the cut lands on. */
+  const endBearing = cameraPoseAt(JOURNEY_SECONDS).yaw;
+  let worstBearingDrift = 0;
+
   for (let i = 0; i < WAIT_SECONDS / STEP; i += 1) {
     waiting.update(STEP, false);
     waiting.scene.updateMatrixWorld(true);
     // **The clock `main.ts` hands the title.** Written as the same expression,
     // so what is measured here is what is drawn there.
     idleTitle.update(waiting.animationTime);
+    // Taken from the ride's own idle clock rather than counted off `i`, so the
+    // split lands where the bus actually stops.
+    const half: Half = waiting.waited <= PULL_IN_SECONDS ? 'pulling in' : 'stopped at the gate';
+    framesIn.set(half, (framesIn.get(half) ?? 0) + 1);
     if (waitingBus) {
       const at = waitingBus.getWorldPosition(new Vector3());
-      busPositions.add(`${at.x.toFixed(3)},${at.y.toFixed(3)},${at.z.toFixed(3)}`);
+      const where = `${at.x.toFixed(3)},${at.y.toFixed(3)},${at.z.toFixed(3)}`;
+      busPositions.add(where);
+      busPositionsIn.get(half)?.add(where);
     }
     const eye = waiting.camera.position;
-    cameraPoses.add(`${eye.x.toFixed(3)},${eye.y.toFixed(3)},${eye.z.toFixed(3)}`);
-    titlePositions.add(idleLetters.map((letter) => letter.style?.transform ?? '').join('|'));
+    const from = `${eye.x.toFixed(3)},${eye.y.toFixed(3)},${eye.z.toFixed(3)}`;
+    cameraPoses.add(from);
+    cameraPosesIn.get(half)?.add(from);
+    // **Alive is not enough — it has to stay on the park's bearing.**
+    //
+    // The hand-over is a cut from this pose to the park camera's, and it can
+    // fall on *any* frame of the wait, because it happens the instant
+    // generation finishes. So whatever keeps the shot alive must not be
+    // something that swings it round: an idle that orbited would pass every
+    // liveness assertion above and turn the arrival into a jump cut, on a
+    // schedule set by how slow the machine is.
+    //
+    // Measured as the camera's own bearing about the bus it is watching, off
+    // the built camera, against the bearing the ride ended on.
+    const bearing = Math.atan2(eye.x, eye.z - waiting.busPositionZ);
+    let off = (bearing - endBearing) % (Math.PI * 2);
+    if (off > Math.PI) off -= Math.PI * 2;
+    if (off < -Math.PI) off += Math.PI * 2;
+    worstBearingDrift = Math.max(worstBearingDrift, Math.abs(off));
+    const layout = idleLetters.map((letter) => letter.style?.transform ?? '').join('|');
+    titlePositions.add(layout);
+    titlePositionsIn.get(half)?.add(layout);
   }
 
   const restedAt = waiting.busPositionZ;
@@ -1387,7 +1447,7 @@ journey.dispose();
   const shortOfTheGate = Math.abs(noseAt - JOURNEY_GATE_Z);
 
   said.push(
-    `waiting ${WAIT_SECONDS}s past the end of the ride: the bus rolled from ` +
+    `waiting ${WAIT_SECONDS.toFixed(1)}s past the end of the ride: the bus rolled from ` +
       `${zWhenTheRideRanOut.toFixed(1)} to ${restedAt.toFixed(1)} m, nose ${shortOfTheGate.toFixed(2)} m ` +
       `from the gate at ${JOURNEY_GATE_Z}`,
   );
@@ -1400,37 +1460,77 @@ journey.dispose();
   // vehicle stands, not a coordinate — but 30 m of open tarmac is not it.
   if (shortOfTheGate > CAT_BUS_LENGTH) {
     fouls.push(
-      `after ${WAIT_SECONDS}s of waiting the bus's nose is ${shortOfTheGate.toFixed(1)} m from the ` +
+      `after ${WAIT_SECONDS.toFixed(1)}s of waiting the bus's nose is ${shortOfTheGate.toFixed(1)} m from the ` +
         `gate — it is idling in open lane, and a bus standing still in the middle of a road reads as ` +
         'broken down rather than as waiting',
     );
   }
   if (Math.abs(restedAt - zWhenTheRideRanOut) < 1) {
     fouls.push(
-      `the bus moved ${Math.abs(restedAt - zWhenTheRideRanOut).toFixed(2)} m in ${WAIT_SECONDS}s of ` +
+      `the bus moved ${Math.abs(restedAt - zWhenTheRideRanOut).toFixed(2)} m in ${WAIT_SECONDS.toFixed(1)}s of ` +
         'waiting — it stopped dead the moment the road ran out instead of pulling in',
     );
   }
 
-  // **Alive.** Each of the three things QA found frozen, measured separately,
-  // because they froze for one reason and could be revived one at a time.
-  if (busPositions.size < 10) {
-    fouls.push(
-      `the bus took ${busPositions.size} distinct positions over ${WAIT_SECONDS}s of waiting — it is a ` +
-        'still image, which is what QA read as a crash',
+  // **Alive — in each half of the wait on its own.**
+  //
+  // Each of the three things QA found frozen, measured separately, because they
+  // froze for one reason and could be revived one at a time. And each measured
+  // once per half, because a number taken across the whole wait is dominated by
+  // the pull-in: a camera following a bus that is still rolling moves whatever
+  // else is broken, so the totals cannot see a stopped bus's frozen shot.
+  //
+  // The bar is a tenth of that half's own frames. A screen that changes on fewer
+  // than one frame in ten is not "subtly alive", it is stuttering — and against
+  // QA's measured 1-in-51 it is still an order of magnitude of headroom.
+  for (const half of halves) {
+    const frames = framesIn.get(half) ?? 0;
+    if (frames === 0) {
+      fouls.push(
+        `no frames of the wait were spent ${half} — the two halves of the idle cannot both be ` +
+          'measured, so one of these assertions is running against nothing',
+      );
+      continue;
+    }
+    const lively = Math.max(10, Math.round(frames * 0.1));
+    const buses = busPositionsIn.get(half)?.size ?? 0;
+    const eyes = cameraPosesIn.get(half)?.size ?? 0;
+    const layouts = titlePositionsIn.get(half)?.size ?? 0;
+    said.push(
+      `  while ${half} (${frames} frames): ${buses} bus positions, ${eyes} camera poses, ` +
+        `${layouts} title layouts`,
     );
+    if (buses < lively) {
+      fouls.push(
+        `while ${half} the bus took ${buses} distinct positions over ${frames} frames — it is a ` +
+          'still image, which is what QA read as a crash',
+      );
+    }
+    if (eyes < lively) {
+      fouls.push(
+        `while ${half} the camera took ${eyes} distinct poses over ${frames} frames — the shot is ` +
+          'frozen. One pose held for the whole of a wait is the exact number QA reported as a crash',
+      );
+    }
+    if (layouts < lively) {
+      fouls.push(
+        `while ${half} the title took ${layouts} distinct layouts over ${frames} frames — it is ` +
+          'stopped mid-jump with its letters at scattered heights, which is the loudest "this has ' +
+          'crashed" signal on the screen',
+      );
+    }
   }
-  if (cameraPoses.size < 10) {
+
+  said.push(
+    `over the whole wait the camera stayed within ` +
+      `${((worstBearingDrift * 180) / Math.PI).toFixed(3)} degrees of the bearing the ride ended on`,
+  );
+  if (worstBearingDrift > 0.02) {
     fouls.push(
-      `the camera took ${cameraPoses.size} distinct poses over ${WAIT_SECONDS}s of waiting — the shot ` +
-        'is frozen',
-    );
-  }
-  if (titlePositions.size < 10) {
-    fouls.push(
-      `the title took ${titlePositions.size} distinct layouts over ${WAIT_SECONDS}s of waiting — it is ` +
-        'stopped mid-jump with its letters at scattered heights, which is the loudest "this has ' +
-        'crashed" signal on the screen',
+      `while waiting, the camera swung ${((worstBearingDrift * 180) / Math.PI).toFixed(1)} degrees off ` +
+        'the bearing the ride ended on. The park is handed over the instant generation finishes, ' +
+        'which can be any frame of the wait, so an idle that moves the camera round turns the ' +
+        'arrival into a jump cut on a schedule set by how slow the machine is',
     );
   }
 
@@ -1452,7 +1552,7 @@ journey.dispose();
   if (waiting.animationTime - animationWhenTheRideRanOut < WAIT_SECONDS * 0.9) {
     fouls.push(
       `the animation clock advanced only ` +
-        `${(waiting.animationTime - animationWhenTheRideRanOut).toFixed(2)}s over ${WAIT_SECONDS}s of ` +
+        `${(waiting.animationTime - animationWhenTheRideRanOut).toFixed(2)}s over ${WAIT_SECONDS.toFixed(1)}s of ` +
         'waiting — the one clock that must never stop has stopped',
     );
   }

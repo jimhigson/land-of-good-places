@@ -243,6 +243,39 @@ const IDLE_ROCK_LIFT = 0.035;
 const IDLE_ROCK_ROLL = 0.008;
 const IDLE_ROCK_RATE = 1.9;
 
+/**
+ * **The camera breathes once the bus has stopped**, as a fraction of how far out
+ * it is standing.
+ *
+ * Measured, not assumed. Under QA's own reproduction — 4x CPU throttle, real
+ * Metal renderer — the wait divides into two halves that behave completely
+ * differently, and only the first was ever looked at:
+ *
+ * | the wait | camera poses | bus positions | title layouts |
+ * |---|---|---|---|
+ * | pulling in (4.0 s) | 301 / 301 frames | 301 | 301 |
+ * | stopped at the gate (1.7 s) | **1** / 131 frames | 65 | 131 |
+ *
+ * The pull-in moves the camera because the camera is following a moving bus, so
+ * *any* liveness measurement taken across the whole wait passes on the manoeuvre
+ * alone. Once the bus is parked, `busZ` stops changing and every term of the
+ * camera's position is a constant: it holds one pose exactly, for as long as the
+ * park takes. **One camera pose is the number QA reported as a crash**, and it
+ * was still reachable, just later than anybody had looked.
+ *
+ * A dolly, deliberately, rather than a drift or an orbit: it scales the camera's
+ * distance from the bus and leaves its **bearing untouched**, so the pose the
+ * hand-over cuts from is still the park camera's own — which `cameraPoseAt` is
+ * asserted against, and which an orbiting idle would quietly break, at an
+ * instant chosen by however long generation happened to take.
+ *
+ * Ramped in by how far the bus has slowed, exactly like {@link IDLE_ROCK_LIFT},
+ * so it arrives with the stop rather than switching on at it — and is therefore
+ * identically zero for the whole of an on-time ride.
+ */
+const IDLE_BREATH = 0.02;
+const IDLE_BREATH_RATE = 0.62;
+
 
 /**
  * How much lane exists *behind* the bus's starting point.
@@ -1204,13 +1237,18 @@ export class BusJourney {
     const waiting = this.idleSeconds > 0;
     this.busZ = waiting ? busWaitZAt(this.idleSeconds) : -this.elapsedSeconds * BUS_SPEED;
     const speed = waiting ? busWaitSpeedAt(this.idleSeconds) : BUS_SPEED;
+    // **How stopped the bus is**, 0 at road speed and 1 at rest. Computed once
+    // and handed to everything that ramps with the stop — the rock on the
+    // springs and the camera's breath — rather than each deriving it from
+    // `speed` again, which would be two definitions of one number.
+    const atRest = clamp01(1 - Math.abs(speed) / BUS_SPEED);
     this.place(this.busZ);
     // **The wheels stop turning because the bus stops moving**, rather than
     // because a boolean said so: `speed` is the real speed throughout, so they
     // visibly slow down over the pull-in instead of switching off.
     this.bus.animate(dt, this.animationSeconds, speed);
     this.exciteRiders(this.animationSeconds);
-    this.rockAtRest(speed);
+    this.rockAtRest(atRest);
 
     // **The cut.** Driven by the ride's own clock through the shot list, so the
     // schedule is a thing `check:bus-journey` can hold rather than something
@@ -1231,10 +1269,15 @@ export class BusJourney {
 
     const pose = cameraPoseAt(this.elapsedSeconds);
     const height = laneHeight(this.busZ);
+    // **The breath.** A scale on how far out the camera stands, so the bearing
+    // — `pose.yaw`, the whole of what the hand-over cuts on — is untouched.
+    // Exactly 1 for the whole of an on-time ride, because `atRest` is 0 until
+    // the bus starts slowing. See {@link IDLE_BREATH}.
+    const breath = 1 + Math.sin(this.animationSeconds * IDLE_BREATH_RATE) * IDLE_BREATH * atRest;
     this.camera.position.set(
-      Math.sin(pose.yaw) * pose.horizontal,
-      height + pose.lift,
-      this.busZ + Math.cos(pose.yaw) * pose.horizontal,
+      Math.sin(pose.yaw) * pose.horizontal * breath,
+      height + pose.lift * breath,
+      this.busZ + Math.cos(pose.yaw) * pose.horizontal * breath,
     );
     // **Aimed at the bus, not at the road under it.** The two are the same
     // number on an ordinary ride, and they part company at exactly the moment
@@ -1251,13 +1294,15 @@ export class BusJourney {
    * Applied after {@link place}, which rewrites the bus's whole transform every
    * frame, so this is a fresh offset each time rather than an accumulating one.
    *
-   * The amplitude is ramped by how far the bus has slowed — nothing at road
-   * speed, full at rest — so the rock arrives *with* the stop. Switching it on
-   * at zero speed would put a visible step in the one frame the whole change
-   * exists to smooth over.
+   * `atRest` is how far the bus has slowed — 0 at road speed, 1 stopped — and
+   * the amplitude is ramped by it, so the rock arrives *with* the stop.
+   * Switching it on at zero speed would put a visible step in the one frame the
+   * whole change exists to smooth over. Taken as an argument rather than
+   * re-derived from `speed` here: `update` needs the same number for the
+   * camera's breath, and two derivations of one quantity is the bug shape this
+   * repo pays for most often.
    */
-  private rockAtRest(speed: number): void {
-    const atRest = clamp01(1 - Math.abs(speed) / BUS_SPEED);
+  private rockAtRest(atRest: number): void {
     if (atRest <= 0) return;
     const t = this.animationSeconds;
     this.bus.root.position.y += Math.sin(t * IDLE_ROCK_RATE) * IDLE_ROCK_LIFT * atRest;
