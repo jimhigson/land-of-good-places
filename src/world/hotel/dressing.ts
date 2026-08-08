@@ -22,6 +22,7 @@ import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { Rng, TAU } from '../../core/mathUtils';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
+import { BED_MATTRESS_TOP } from '../../art/models/hotelAssets';
 
 /**
  * The furniture that stops a hotel room being a rectangle with a statue in it.
@@ -846,6 +847,39 @@ export function rainbowRug(innerRadius: number, band: number): Group {
   middle.position.y = RUG_Y;
   group.add(middle);
   group.add(rainbowRing(innerRadius, band));
+  return group;
+}
+
+/**
+ * The blanket a napping child is tucked under — built with each suite bed,
+ * hidden until `Hotel.nap` shows it (Jim, 8 August 2026: *"they should lie in
+ * a bed visibly with a blanket on them"*).
+ *
+ * Bed-local, origin at the bed's origin: a chunky quilt over the body half of
+ * the 1.4 × 2 m bed (the pillow end stays open — her head lies there, in the
+ * air) with a folded-back hem at the chest. Sized a whisker wider than the
+ * mattress so its sides drape past the bed's own flat blanket rather than
+ * sharing a face with anything: bottom 2 cm above the mattress top, hem 4 cm
+ * above the quilt, which keeps every horizontal face a step of its own (the
+ * decal-ladder rule in this file's header, writ soft).
+ *
+ * `decal` because it exists only mid-nap: a shadow popping in and out with it
+ * would read as a glitch, and nothing about a quilt needs one.
+ */
+export function napBlanket(colour: number): Group {
+  const group = new Group();
+  group.name = 'hotel.napBlanket';
+
+  const quilt = decal(new Mesh(new BoxGeometry(1.5, 0.38, 1.42), toonMaterial(colour)));
+  quilt.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.19, 0.25);
+  addOutline(quilt, 0.018);
+  group.add(quilt);
+
+  const hem = decal(
+    new Mesh(new BoxGeometry(1.54, 0.42, 0.3), toonMaterial(PALETTE.blossomWhite)),
+  );
+  hem.position.set(0, BED_MATTRESS_TOP + 0.02 + 0.21, -0.3);
+  group.add(hem);
   return group;
 }
 

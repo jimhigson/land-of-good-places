@@ -53,9 +53,12 @@
  */
 
 import './headless-canvas.mjs';
-import { Box3, Mesh, Vector3 } from 'three';
+import { Box3, Mesh, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { Player } from '../src/entities/Player.ts';
+import { BED_MATTRESS_TOP } from '../src/art/models/hotelAssets.ts';
 import {
   NPC_RADIUS,
   PLAYER_MAX_SPEED,
@@ -88,7 +91,7 @@ const FLOOR_OF_THE_WORLD = -2;
 const SETTLE_SECONDS = 8;
 
 const problems: string[] = [];
-const { world } = quietly(() => buildHeadlessPark());
+const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision, npcs, hotel } = world;
 
 // ---------------------------------------------------------------- 1. falling
@@ -891,6 +894,125 @@ if (fallenPlayer.position.y < 0) {
         `pushing west across the stair fan leaves a player at y=${trapY.toFixed(2)} m — ` +
           `under the flight at ground level, on the way into the gallery's hollow`,
       );
+    }
+  }
+}
+
+// ------------------------------ 16. a napping child is visibly in bed
+//
+// Jim, live play, 8 Aug 2026: *"the hotel room beds, once the character gets
+// into them, they sort-of vanish — they should lie in a bed visibly with a
+// blanket on them."* Measured cause: `Hotel.nap` reclined her twice — the
+// shared `'reclined'` ride posture (model root −1.35) **and** a −π/2 pitch on
+// the player group — ≈ −167° in all, folding her backwards through the
+// mattress: her head ended 0.64 m *below the floor*.
+//
+// This runs the real thing: a real `Player`, stood at the first suite bed,
+// running the bed zone's own Sleep action, ticked one frame so the ride pose
+// is applied exactly as the game applies it. Then three claims, measured on
+// the posed kid and the built bed:
+//  * her head is **above the mattress top** and at the pillow end;
+//  * a straight-down ray at her head hits *her*, not a blanket — head out;
+//  * a straight-down ray over her body hits the bed's nap blanket — tucked in.
+//
+// Proven red before trusted green, on the pre-fix build:
+//   x a napping child's head is at y=-0.66 m — the mattress top is 0.55 m,
+//     so she has vanished into the bed
+//   x nothing over the napping child's body says 'blanket' — no blanket mesh
+{
+  const napCamera = new IsoCamera();
+  const napper = quietly(
+    () => new Player(collision, napCamera, new Vector3(SUITE.originX, 0, SUITE.originZ)),
+  );
+  scene.add(napper.group);
+  hotel.attachPlayer(napper as never);
+  hotel.adoptRestoredPlayer();
+  const spot = SUITE_BED_SPOTS[0];
+  const bedX = SUITE.originX + (spot?.[0] ?? 0);
+  const bedZ = SUITE.originZ + (spot?.[1] ?? 0);
+  napper.position.set(bedX, BED_MATTRESS_TOP, bedZ + 1.4);
+  napper.group.position.copy(napper.position);
+
+  const bedZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bed-bed-0');
+  if (!bedZone) {
+    problems.push('the suite offers no zone for bed 0 — Sleep! cannot be reached');
+  } else {
+    const sleep = bedZone.actions?.()[0];
+    if (!sleep) {
+      problems.push('bed 0 offers no Sleep action');
+    } else {
+      sleep.run();
+      napper.update({
+        dt: 1 / 60,
+        elapsed: 0,
+        input: { justPressed: () => false, isDown: () => false },
+      } as never);
+      hotel.hotelRoot.updateMatrixWorld(true);
+      napper.group.updateMatrixWorld(true);
+
+      const head = new Vector3();
+      napper.model.head.getWorldPosition(head);
+      if (head.y < BED_MATTRESS_TOP + 0.1) {
+        problems.push(
+          `a napping child's head is at y=${head.y.toFixed(2)} m — the mattress top is ` +
+            `${BED_MATTRESS_TOP.toFixed(2)} m, so she has vanished into the bed`,
+        );
+      }
+      // The pillow is the −Z end of the bed (halfZ 1.0); "on the pillow" is
+      // the outer half-metre of that end, under her head's own plan position.
+      if (head.z > bedZ - 0.35 || head.z < bedZ - 1.1 || Math.abs(head.x - bedX) > 0.4) {
+        problems.push(
+          `a napping child's head is at (${(head.x - bedX).toFixed(2)}, ` +
+            `${(head.z - bedZ).toFixed(2)}) bed-local — not on the pillow end (z −1.1…−0.35)`,
+        );
+      }
+
+      // What a straight-down look actually meets: her at the pillow, the
+      // blanket over her body.
+      const downcast = new Raycaster();
+      // The player's name label is a Sprite, and Sprite.raycast wants to know
+      // the camera; without one it throws headless.
+      downcast.camera = napCamera.camera;
+      const isKid = (object: unknown): boolean => {
+        let walk = object as { parent?: unknown } | null;
+        while (walk) {
+          if (walk === napper.group) return true;
+          walk = (walk as { parent?: null }).parent ?? null;
+        }
+        return false;
+      };
+      const isBlanket = (object: unknown): boolean => {
+        let walk = object as { name?: string; parent?: unknown } | null;
+        while (walk) {
+          if (walk.name === 'hotel.napBlanket') return true;
+          walk = (walk as { parent?: null }).parent ?? null;
+        }
+        return false;
+      };
+      const firstHit = (x: number, z: number): unknown => {
+        downcast.set(new Vector3(x, BED_MATTRESS_TOP + 4, z), new Vector3(0, -1, 0));
+        const hits = downcast.intersectObjects([...hotel.hotelRoot.children, napper.group], true);
+        return hits[0]?.object ?? null;
+      };
+      const overHead = firstHit(head.x, head.z);
+      if (!overHead || !isKid(overHead)) {
+        problems.push(
+          'looking straight down at a napping child\'s head does not meet the child — ' +
+            'her face is covered or buried',
+        );
+      }
+      const overBody = firstHit(bedX, bedZ + 0.35);
+      if (!overBody || !isBlanket(overBody)) {
+        problems.push(
+          "nothing over the napping child's body says 'blanket' — she is lying on the " +
+            'covers, not under them',
+        );
+      }
+
+      // Hand the room back the way the earlier probes left it: one giant tick
+      // outlasts any nap.
+      hotel.update({ dt: 999, elapsed: 0 } as never);
+      scene.remove(napper.group);
     }
   }
 }

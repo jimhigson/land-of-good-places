@@ -83,6 +83,7 @@ import {
   flowerTuft,
   hedge,
   lilyPond,
+  napBlanket,
   picture,
   porthole,
   rainbowRing,
@@ -397,6 +398,8 @@ interface Bed {
   readonly x: number;
   readonly z: number;
   readonly id: string;
+  /** The tucked-over blanket, hidden until {@link Hotel.nap} shows it. */
+  readonly blanket: Group;
 }
 
 /** What `Hotel.hangOnWalls` puts on the two walls the camera can see. */
@@ -1133,9 +1136,10 @@ export class Hotel implements GameSystem {
       this.napping -= dt;
       if (this.napping <= 0) {
         this.napping = 0;
+        this.nappingAt.blanket.visible = false;
         this.nappingAt = null;
-        player.group.rotation.order = 'XYZ';
-        player.group.rotation.x = 0;
+        // `endRide` stands the model back up itself; the group was never
+        // pitched (see `nap` — the posture owns the recline).
         player.endRide();
         player.model.setExpression('happy');
       }
@@ -1772,13 +1776,32 @@ export class Hotel implements GameSystem {
     feast.pet.head.rotation.x = 0.5 + Math.sin(elapsed * 4.5) * 0.28;
   }
 
+  /**
+   * Sleep — visibly, in the bed (Jim, 8 August 2026: *"they should lie in a
+   * bed visibly with a blanket on them"*).
+   *
+   * **One recline, not two.** The first version set the shared `'reclined'`
+   * posture *and* pitched the whole player group −π/2 — the model root's own
+   * −1.35 recline stacked on top made ≈ −167°, folding her backwards through
+   * the mattress: `check:hotel` probe 16 measured her head 0.64 m below the
+   * floor. `applyRidePose`'s `'reclined'` is the game's one owner of "lying
+   * on your back" (the slide's pose), so the group stays upright and only the
+   * posture lies her down.
+   *
+   * The reclined pose swings her back from her feet (the root origin), her
+   * head landing 1.33 m behind them and 0.30 m up — measured on the real rig,
+   * see `applyReclinedRidePose`. Feet at +0.61 on a 2 m bed therefore put her
+   * head at −0.72: on the pillow, which the bed asset authors at the −Z end,
+   * with the tucked blanket (built with the bed, hidden until now) over her
+   * body and her face in the open air. Probe 16 measures all three.
+   */
   private nap(bed: Bed): void {
     const player = this.player;
     if (!player || player.riding) return;
     player.beginRide();
     player.ridePosture = 'reclined';
-    player.group.rotation.order = 'YXZ';
-    player.setRidePose(bed.x, BED_MATTRESS_TOP + 0.16, bed.z, Math.PI, -Math.PI / 2);
+    player.setRidePose(bed.x, BED_MATTRESS_TOP + 0.16, bed.z + 0.61, 0);
+    bed.blanket.visible = true;
     this.napping = NAP_SECONDS;
     this.nappingAt = bed;
     player.model.setExpression('blink');
@@ -3157,7 +3180,14 @@ export class Hotel implements GameSystem {
         solid: false,
       });
       const id = `bed-${index}`;
-      this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id });
+      // The tucked blanket she naps under, in the bed's own rainbow, hidden
+      // until `nap` shows it — built here so a bed and its blanket can never
+      // drift apart.
+      const blanket = napBlanket(ART.rainbow[index * 2] ?? PALETTE.markerMint);
+      blanket.position.set(x, 0, z);
+      blanket.visible = false;
+      shell.add(blanket);
+      this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id, blanket });
       this.surfaces.addPlatform(
         new Plate(
           BED_MATTRESS_TOP,
