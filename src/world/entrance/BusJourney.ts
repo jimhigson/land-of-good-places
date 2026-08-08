@@ -24,18 +24,13 @@ import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { createRandom, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
-import {
-  createKid,
-  KID_HEIGHT,
-  KID_SKIN_TONES,
-  TALLEST_CHILD_HEIGHT,
-  type KidHandle,
-} from '../../art/models/kid';
+import { createKid, KID_HEIGHT, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
 import {
   createCatBus,
   CAT_BUS_CABIN_CEILING_Y,
+  CAT_BUS_CABIN_FRONT_Z,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_LENGTH,
   type CatBusHandle,
@@ -245,6 +240,21 @@ const CAMERA_BACK = 26;
 const CAMERA_LIFT = 11;
 const CAMERA_FOV = 42;
 
+/**
+ * A narrower lens for the view from inside, and it is doing real work.
+ *
+ * The front row sits 0.53 m either side of the gangway — a child is 1.53 m
+ * across — so at the outside camera's 42 degrees two enormous heads fill the
+ * left and right edges of every interior frame and the busload behind them is
+ * squeezed into the middle third. There is nowhere to retreat to: everything
+ * ahead of the front row is the cat's own face.
+ *
+ * Narrowing the lens is the one move available, and it is the right one anyway:
+ * it crops the two heads flanking the lens out of shot and fills the frame with
+ * the rows in front of it, which are the faces there to be looked at.
+ */
+const INSIDE_FOV = 33;
+
 const DEG = Math.PI / 180;
 
 /**
@@ -369,8 +379,12 @@ export class BusJourney {
     this.bus.driverSeat.add(this.driver.root);
 
     this.seatRiders(rider);
-    this.aimTheInsideCamera();
+    // `place` first: `aimTheInsideCamera` converts the seated children's heads
+    // out of world space through the bus's own matrix, so the bus has to be
+    // somewhere before it can be asked where its passengers' faces are.
     this.place(0);
+    this.bus.root.updateMatrixWorld(true);
+    this.aimTheInsideCamera();
   }
 
   /**
@@ -413,15 +427,29 @@ export class BusJourney {
     // is rows of faces either side — which is what Jim asked to be able to look
     // at, and it is the only place in this vehicle it can be had from.
     //
-    // **Under the header band, not under the roof.** Placed at
-    // `TALLEST_CHILD_HEIGHT` above the floor first — a height the cabin really
-    // does have — which put the lens 0.08 m *inside* `cat-bus-shell-upper`, the
-    // solid slab between the window heads and the roof. `CAT_BUS_CABIN_CEILING_Y`
-    // exists so that the clear interior is a thing this file can ask about
-    // rather than infer from the bus's overall height.
+    // **At the children's own eye level**, measured off the heads that were
+    // actually seated rather than computed from a height constant.
+    //
+    // Up near the ceiling was the first version that was *clear* of everything,
+    // and the captured frame showed twelve children from above: hair, foreheads
+    // and the tops of heads. Faces point forwards, so a camera looking down at
+    // them sees no faces at all — and "the children riding it and looking
+    // excited" is a shot of faces or it is nothing.
+    //
+    // Clamped under `CAT_BUS_CABIN_CEILING_Y` — the underside of the header
+    // band, which is the cabin's real ceiling and 0.47 m below what the bus's
+    // overall height suggests.
+    let heads = 0;
+    let headHeight = 0;
+    for (const kid of this.riders) {
+      kid.head.getWorldPosition(this.worldEye);
+      this.bus.root.worldToLocal(this.worldEye);
+      headHeight += this.worldEye.y;
+      heads += 1;
+    }
     const eyeHeight = Math.min(
       CAT_BUS_CABIN_CEILING_Y - INSIDE_CAMERA_HEADROOM,
-      floor + TALLEST_CHILD_HEIGHT,
+      heads > 0 ? headHeight / heads : floor + KID_HEIGHT * 0.8,
     );
     // **Directly over the front row**, which is as far forward as anything can
     // go. Everything ahead of it is the cat's own face — a squashed sphere
@@ -431,11 +459,18 @@ export class BusJourney {
     // *inside the cat's head*, where the ray hit the inside of the face's
     // BackSide outline shell 0.15 m away and the frame was a solid cream wall.
     //
-    // Above the front row there is no number to choose and nothing to be wrong
-    // about: the rows behind fall away down the gangway, which is the shot.
-    this.insideEye.set(0, eyeHeight, front);
-    // Aimed down the gangway at the back row, at the height their faces are.
-    this.insideAim.set(0, floor + KID_HEIGHT * 0.72, back);
+    // As far forward as the cabin's clear interior allows, which buys the shot
+    // its only breathing room: the front row's heads are 0.53 m either side of
+    // the lens whatever happens, and every centimetre forward pushes them
+    // further towards the edge of the frame. `CAT_BUS_CABIN_FRONT_Z` is where
+    // the cat's own face begins; the headroom below it is the same clearance
+    // the ceiling gets, so the guard's *"nothing within 0.3 m of the lens"*
+    // holds in this direction too.
+    const eyeZ = Math.max(front, CAT_BUS_CABIN_FRONT_Z - INSIDE_CAMERA_HEADROOM);
+    this.insideEye.set(0, eyeHeight, eyeZ);
+    // Straight down the gangway, at the same height: level with their faces, so
+    // what fills the frame is faces.
+    this.insideAim.set(0, eyeHeight, back);
   }
 
   /** Seconds since the ride began — the clock everything else here reads. */
@@ -450,11 +485,16 @@ export class BusJourney {
 
   setView(view: JourneyView): void {
     this.viewMode = view;
+    const fov = view === 'inside' ? INSIDE_FOV : CAMERA_FOV;
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   /** Swaps inside for outside. What the button on screen does. */
   toggleView(): JourneyView {
-    this.viewMode = this.viewMode === 'outside' ? 'inside' : 'outside';
+    this.setView(this.viewMode === 'outside' ? 'inside' : 'outside');
     return this.viewMode;
   }
 
@@ -496,9 +536,22 @@ export class BusJourney {
         backpack: false,
       });
       kid.setExpression('happy');
-      // Facing forward down the bus, as a passenger does, with a little
-      // variation so twelve children are not one child twelve times.
-      kid.root.rotation.y = rng() * 0.5 - 0.25;
+      // **Turned in towards the gangway**, which is where the excitement is.
+      //
+      // A kid's painted face points along its own +Z (measured, not assumed),
+      // so twelve children all facing the bus's nose sit in two lines with
+      // their faces pointing *past* anyone in the aisle: from the inside camera
+      // they are a corridor of profiles and the backs of heads. Turned inboard
+      // they are children talking to each other on a bus, which is both what
+      // happens on a bus and the only arrangement that puts faces where they
+      // can be seen.
+      //
+      // Kept to 0.6 rad rather than a full quarter turn because they are also
+      // looked at side-on **through the side windows from outside**, which is
+      // the thing the previous round's glazing work existed to make possible.
+      // At this angle they read as three-quarter faces from both places.
+      const inboard = -Math.sign(seat.position.x || 1) * 0.6;
+      kid.root.rotation.y = inboard + rng() * 0.4 - 0.2;
       seat.add(kid.root);
       this.riders.push(kid);
     }
@@ -889,7 +942,10 @@ export class BusJourney {
       // Bouncing on the seat. `body` is the rig's own bob target.
       kid.body.position.y = Math.abs(Math.sin(elapsed * 3.2 + phase)) * 0.13;
       // Looking out at what is going past, and up at each other.
-      kid.head.rotation.y = Math.sin(elapsed * 0.9 + phase) * 0.55;
+      // Glancing about, not turning away: at ±0.55 rad most of the bus had its
+      // face pointed somewhere other than forward, and the inside view is a
+      // shot of faces or it is nothing.
+      kid.head.rotation.y = Math.sin(elapsed * 0.9 + phase) * 0.26;
       kid.head.rotation.z = Math.sin(elapsed * 1.7 + phase) * 0.09;
       if (kid.limbs) {
         // Arms up: negative `rotation.x` raises an arm, as the ferris wheel's

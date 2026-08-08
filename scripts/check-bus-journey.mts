@@ -283,6 +283,17 @@ if (busRoot) {
   /** Bits of *bus* found standing between the camera and a child. */
   const blocked = new Map<string, number>();
   let blockedByTheBus = 0;
+  /**
+   * How close the nearest surface ever came to the inside camera.
+   *
+   * The simplest statement of every inside-view bug this round produced, and
+   * the one that catches them all: a lens 0.08 m inside the header band, and
+   * then 0.15 m inside the cat's face, are both just "something is touching the
+   * camera". A camera buried in a child's hair would read the same and would
+   * otherwise pass, because hair belongs to a child and so counts as seeing
+   * one.
+   */
+  let nearestToTheLens = Infinity;
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
@@ -358,6 +369,7 @@ if (busRoot) {
       // so far has been bodywork: the cabin's header band, and then the cat's
       // own face blob, whose BackSide outline shell filled the frame from
       // 0.15 m away.
+      nearestToTheLens = Math.min(nearestToTheLens, blocker.distance);
       const onAChild = seats.some((seat) => isDescendant(blocker.object, seat));
       if (onAChild) inShot += 1;
       else {
@@ -373,6 +385,7 @@ if (busRoot) {
     `from inside, at worst ${fewestChildrenInShot} children could actually be seen; their heads moved ` +
       `${headMotion.toFixed(1)} m between them over the ride`,
   );
+  said.push(`nothing came closer than ${nearestToTheLens.toFixed(2)} m to the inside camera's lens`);
   said.push(
     `bodywork standing between the inside camera and a child: ${
       blockedByTheBus === 0
@@ -393,6 +406,13 @@ if (busRoot) {
     fouls.push(
       `looking inside the bus, at one point a ray towards only ${fewestChildrenInShot} of the ` +
         `${heads.length} children landed on a child at all — the camera is not pointed at them`,
+    );
+  }
+
+  if (nearestToTheLens < 0.3) {
+    fouls.push(
+      `something is ${nearestToTheLens.toFixed(2)} m from the inside camera's lens — it is buried in ` +
+        'geometry, and the view inside the bus is whatever that surface happens to be',
     );
   }
 

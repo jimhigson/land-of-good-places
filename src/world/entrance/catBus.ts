@@ -248,6 +248,19 @@ const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
  */
 export const CAT_BUS_FLOOR_Y = BODY_BOTTOM_Y;
 export const CAT_BUS_CABIN_CEILING_Y = WINDOW_HEAD_Y;
+
+/**
+ * **How far forward the clear interior goes**, before the cat's own face fills
+ * the vehicle.
+ *
+ * The face is a squashed sphere `FACE_RADIUS` across, flattened to 0.6 in z, and
+ * it is not a shell on the front — it *is* the whole front of the bus, with the
+ * driver sitting inside it. Anything placed forward of this is inside the cat's
+ * head, which is where the ride's interior camera spent a round: the frame was
+ * the inside of the face's own BackSide outline shell, 0.15 m from the lens.
+ */
+export const CAT_BUS_CABIN_FRONT_Z =
+  BODY_LENGTH / 2 - FACE_RADIUS * 0.62 - FACE_RADIUS * 0.6;
 /** Thickness of the posts between one window and the next. */
 const PILLAR_Z = 0.26;
 
