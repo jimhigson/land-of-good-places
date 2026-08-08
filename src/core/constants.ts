@@ -199,6 +199,21 @@ export const HOTEL_LOBBY_Z = 600;
 export const HOTEL_BREAKFAST_Z = 860;
 export const HOTEL_CORRIDOR_Z = 1120;
 export const HOTEL_SUITE_Z = 1380;
+/**
+ * Two more floors a child can actually press a button for — Jim, 7 August
+ * 2026: *"you should be able to go to certain other floors with their own
+ * schemes."* Floor 12 is the garden floor and Floor 33 the ocean floor
+ * (`world/hotel/layout.ts` owns what they look like).
+ *
+ * **Same 260 m step as every room above**, continuing the one axis: the
+ * spacing is what keeps a room's warm fill (`hotel/lighting.ts`'s 34 m
+ * `POOL_DISTANCE`) and its play boundary (`HOTEL_PLAY_RADIUS`, 24 m) from
+ * ever reaching its neighbour, and `spaces.ts`'s 70 m room radius from ever
+ * matching two rooms at once. A floor added at any other spacing would be a
+ * floor that quietly lights the one next door.
+ */
+export const HOTEL_GARDEN_Z = 1640;
+export const HOTEL_OCEAN_Z = 1900;
 /** The rooms' shared floor level. Terrain out there is ~-16 m; a flat plate
  * at zero keeps every hotel Y a plain human number. */
 export const HOTEL_FLOOR_Y = 0;

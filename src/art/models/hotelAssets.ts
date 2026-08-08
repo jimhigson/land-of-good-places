@@ -155,6 +155,57 @@ const STYLES: Record<string, PartStyle> = {
     outline: 0.018,
     material: { emissive: PALETTE.flowerYellow, emissiveIntensity: 0.3 },
   },
+
+  // --- the pet's four-poster bed --------------------------------------------
+  'petbed-base': { colour: PALETTE.markerLilac, outline: 0.018 },
+  'petbed-cushion': { colour: ART.cream, outline: 0.016 },
+  'petbed-bolster': { colour: PALETTE.blossomPink, outline: 0.018 },
+  'petbed-posts': { colour: PALETTE.woodLight, outline: 0.014 },
+  'petbed-canopy': { colour: PALETTE.markerSky, outline: 0.016 },
+  'petbed-pillow': { colour: PALETTE.blossomWhite, outline: 0.014 },
+  'petbed-blanket': { colour: PALETTE.markerMint, outline: 0.014 },
+  'petbed-toy': { colour: PALETTE.slideChute, outline: 0.014 },
+  'petbed-toy-eye': { colour: PALETTE.eyeDark },
+  'petbowl-bowl': { colour: PALETTE.markerSky, outline: 0.012 },
+  'petbowl-food': { colour: ART.biscuitFur },
+
+  // --- the lift -------------------------------------------------------------
+  'lift-door-left': { colour: PALETTE.glassTint, outline: 0.02 },
+  'lift-door-right': { colour: PALETTE.glassTint, outline: 0.02 },
+  'lift-frame': { colour: PALETTE.flowerViolet, outline: 0.02 },
+  'lift-frame-sill': { colour: PALETTE.liftFrame, outline: 0.014 },
+  'lift-car': { colour: PALETTE.woodLight, outline: 0.02 },
+  'lift-car-floor': { colour: PALETTE.wood, outline: 0.016 },
+  'lift-car-rail': { colour: PALETTE.liftFrame },
+  'lift-dial': { colour: PALETTE.liftFrame, outline: 0.016 },
+  // No outline: the face is a disc *inside* a brass bezel, and an inverted
+  // hull round it would push a dark ring straight out through the bezel it is
+  // recessed into. §4 — silhouette parts only.
+  'lift-dial-face': { colour: PALETTE.signBoard },
+  'lift-dial-ticks': { colour: PALETTE.ink },
+  'lift-dial-needle': { colour: PALETTE.flowerRed, outline: 0.008 },
+
+  // --- the tower's sliding front doors --------------------------------------
+  'entrance-door-left': { colour: PALETTE.glassTint, outline: 0.022 },
+  'entrance-door-right': { colour: PALETTE.glassTint, outline: 0.022 },
+
+  // --- the suite's television, and the Game Boy on the table ----------------
+  'tv-body': { colour: PALETTE.wood, outline: 0.02 },
+  'tv-screen': {
+    colour: PALETTE.buildingWindow,
+    flat: true,
+    material: { emissive: PALETTE.buildingWindow, emissiveIntensity: 0.45 },
+  },
+  'tv-knobs': { colour: PALETTE.liftFrame },
+  'tv-stand': { colour: PALETTE.woodDark, outline: 0.016 },
+  'tv-aerial': { colour: PALETTE.liftFrame, outline: 0.012 },
+  'gameboy-body': { colour: ART.statueStone, outline: 0.01 },
+  'gameboy-screen': {
+    colour: PALETTE.markerMint,
+    flat: true,
+    material: { emissive: PALETTE.markerMint, emissiveIntensity: 0.35 },
+  },
+  'gameboy-buttons': { colour: PALETTE.markerPink },
 };
 
 /** One authored part, by name. Throws rather than returning a hole. */
@@ -439,6 +490,357 @@ export function createYoursDoor(): YoursDoorHandle {
     height: measuredHeight(root),
     plaque: required(meshes, 'door-plaque'),
     star: required(meshes, 'door-star'),
+    dispose: () => disposeTree(root),
+  };
+}
+
+// ===========================================================================
+// The second batch, 7 August 2026 — the pet's bed, the lift, the tower's own
+// sliding front doors, and the television in the suite.
+// ===========================================================================
+
+/** Height of the pet bed's flat cushion, in metres above its floor. */
+export const PET_BED_CUSHION_TOP = 0.3;
+
+/**
+ * Radius of the **clear** part of that cushion: 0.84 m across, nothing in it.
+ *
+ * Whoever poses a pet lying in this bed should ask for these two numbers
+ * rather than measure the mesh or copy them — CLAUDE.md's "two definitions of
+ * one thing". They are the same two literals `hotel_build.py` builds from.
+ */
+export const PET_BED_CUSHION_RADIUS = 0.42;
+
+export interface PetBedHandle extends AssetHandle {
+  /** {@link PET_BED_CUSHION_TOP} — where a lying pet's lowest point goes. */
+  readonly cushionTop: number;
+  /** {@link PET_BED_CUSHION_RADIUS} — how much room it has, about the origin. */
+  readonly cushionRadius: number;
+  /** The plush goldfish. Its own mesh so it can be hidden, or made bouncy. */
+  readonly toy: Mesh;
+}
+
+/**
+ * **The pet's four-poster.** Eleri's brief, word for word: *"half-human
+ * half-cat bed, in a circular shape with four poster type design. With a
+ * pillow and a blanket and even a toy for them to play with."*
+ *
+ * 1.34 m across the bolster, 1.15 m to the post finials, plus a plush goldfish
+ * on the floor beside it. Origin at the floor, centred; the pillow is at −Z
+ * (the far side), so a pet lying with its head on it faces the camera.
+ *
+ * **The bed is bigger than the "about 1.1 m" first sketched, on purpose.**
+ * Every pet renders at `PET_RENDER_HEIGHT` (1.46 m standing, `pets.ts`), and a
+ * bed sized to that first number read as a saucer with a rabbit spilling out
+ * of it. For the same reason the pillow is propped on the bolster rim rather
+ * than laid on the cushion: it leaves the whole {@link PET_BED_CUSHION_RADIUS}
+ * disc clear, so the poser gets a circle to work with instead of a crescent.
+ */
+export function createPetBed(): PetBedHandle {
+  const { root, meshes } = assemble('hotel.petBed', [
+    'petbed-base',
+    'petbed-cushion',
+    'petbed-bolster',
+    'petbed-posts',
+    'petbed-canopy',
+    'petbed-pillow',
+    'petbed-blanket',
+    'petbed-toy',
+    'petbed-toy-eye',
+  ]);
+  return {
+    root,
+    height: measuredHeight(root),
+    cushionTop: PET_BED_CUSHION_TOP,
+    cushionRadius: PET_BED_CUSHION_RADIUS,
+    toy: required(meshes, 'petbed-toy'),
+    dispose: () => disposeTree(root),
+  };
+}
+
+/**
+ * The pet's own breakfast bowl — 0.26 m across, origin at the bottom.
+ *
+ * Deliberately *not* one of the {@link createBreakfastBowl} bowls with a
+ * different colour: those are 25 cm cereal bowls with a foot and a tall wall,
+ * and one of them beside a child's chair reads as a second person's breakfast
+ * rather than as the pet's. This one is wide, low and shallow, which is what
+ * makes it read as a pet bowl from above at ten metres.
+ */
+export function createPetBowl(): AssetHandle {
+  const { root } = assemble('hotel.petBowl', ['petbowl-bowl', 'petbowl-food']);
+  return { root, height: measuredHeight(root), dispose: () => disposeTree(root) };
+}
+
+export interface SlidingDoorsHandle extends AssetHandle {
+  readonly left: Mesh;
+  readonly right: Mesh;
+  /** How far each leaf travels, in metres, from shut to wide open. */
+  readonly travel: number;
+  /** Clear width of the doorway once they are wide open. */
+  readonly openWidth: number;
+  /**
+   * Slides the pair: 0 shut, 1 wide open. Clamped, so an eased value that
+   * overshoots cannot pull a leaf out of its own wall.
+   */
+  setOpen(open01: number): void;
+}
+
+function slidingDoors(
+  key: string,
+  prefix: string,
+  travel: number,
+  openWidth: number,
+): SlidingDoorsHandle {
+  const { root, meshes } = assemble(key, [`${prefix}-door-left`, `${prefix}-door-right`]);
+  const left = required(meshes, `${prefix}-door-left`);
+  const right = required(meshes, `${prefix}-door-right`);
+  return {
+    root,
+    height: measuredHeight(root),
+    left,
+    right,
+    travel,
+    openWidth,
+    setOpen(open01: number) {
+      const t = Math.min(1, Math.max(0, open01)) * travel;
+      left.position.x = -t;
+      right.position.x = t;
+    },
+    dispose: () => disposeTree(root),
+  };
+}
+
+/** Each lift leaf is 0.90 m wide, so that is exactly how far it has to slide. */
+export const LIFT_DOOR_TRAVEL = 0.9;
+/** The clear doorway {@link createLiftFrame} leaves for them. */
+export const LIFT_DOOR_OPEN_WIDTH = 1.84;
+/** Leaf height. The player kid is 2.12 m (ART_DIRECTION §4). */
+export const LIFT_DOOR_HEIGHT = 2.44;
+
+/**
+ * The lift's two sliding leaves, authored **shut**, side by side, with a 1 cm
+ * seam you can see between them.
+ *
+ * Each leaf is its own node with its own vertices, so opening them is two
+ * `position.x` writes and nothing else — no pivot, no hinge, no second formula
+ * that can fall out of step with the first. `setOpen(1)` tucks each leaf
+ * behind its own jamb panel and, past that, into the room's west wall.
+ *
+ * The leaf front is three crystal facets rather than a flat slab, which is what
+ * makes it belong to the tower: a plain box read as a kitchen cupboard.
+ * Origin at the floor between the two leaves; they face **+Z**, so a caller
+ * yaws `root.rotation.y` to point them out of the alcove.
+ */
+export function createLiftDoors(): SlidingDoorsHandle {
+  return slidingDoors('hotel.liftDoors', 'lift', LIFT_DOOR_TRAVEL, LIFT_DOOR_OPEN_WIDTH);
+}
+
+export interface LiftFrameHandle extends AssetHandle {
+  readonly openingWidth: number;
+  readonly openingHeight: number;
+  /** The brass threshold. Its own mesh so a floor's theme can retint it. */
+  readonly sill: Mesh;
+}
+
+/**
+ * The architrave round the lift, and the brass step you cross to get in.
+ *
+ * **3.28 m wide, which is not a round number by accident**: `layout.ts` cuts a
+ * 3.2 m gap in each room's west wall for the lift (`gaps.west = [-1.6, 1.6]`),
+ * and this plugs it with 4 cm of overlap onto the wall either side — so there
+ * is no seam, and a leaf slid wide open passes behind solid wall rather than
+ * appearing beyond the frame. 2.96 m tall, which is flush under the 3.0 m
+ * walls of the breakfast room and corridor; the lobby's walls are 3.4 m and
+ * leave a 0.44 m strip above, which reads as a transom and is the only place a
+ * caller may want to fill something in.
+ *
+ * A faceted crystal pilaster stands either side of the opening — the same
+ * six-sided gem the tower is grown from, at door scale.
+ */
+export function createLiftFrame(): LiftFrameHandle {
+  const { root, meshes } = assemble('hotel.liftFrame', ['lift-frame', 'lift-frame-sill']);
+  return {
+    root,
+    height: measuredHeight(root),
+    openingWidth: LIFT_DOOR_OPEN_WIDTH,
+    openingHeight: 2.5,
+    sill: required(meshes, 'lift-frame-sill'),
+    dispose: () => disposeTree(root),
+  };
+}
+
+/**
+ * The car the player stands in: 2.2 × 2.2 m inside, 2.5 m to the ceiling, open
+ * at the front (+Z), panelled, with a brass handrail round three sides.
+ *
+ * Sized to drop into the alcove `Hotel.buildRoomShell` already walls off
+ * (3.0 m clear × 3.4 m deep) with room to spare, and to answer Jim's *"no
+ * doors, no floor and also no lift to speak of"* with all three at once.
+ *
+ * **`lift-car-floor`'s top is at exactly y = 0 and its 5 cm of thickness is
+ * below the origin**, so the plate lies flush *under* the walkable surface the
+ * hotel already registers at the alcove's floor rather than standing on it as
+ * a step a child would trip up. `visibleBounds().bottom` therefore reads about
+ * −0.06 (the plate plus its outline), which is deliberate — the same kind of
+ * documented exception as the tower's leaning feet.
+ */
+export function createLiftCar(): AssetHandle {
+  const { root } = assemble('hotel.liftCar', ['lift-car-floor', 'lift-car', 'lift-car-rail']);
+  return { root, height: measuredHeight(root), dispose: () => disposeTree(root) };
+}
+
+export interface LiftDialHandle extends AssetHandle {
+  /** Rotate this and nothing else. See {@link LiftDialHandle.setSweep}. */
+  readonly needle: Mesh;
+  /** The blank cream face. Code paints the floor numbers onto its UVs. */
+  readonly face: Mesh;
+  /**
+   * Points the needle: 0 at the left-hand end of the arc, 1 at the right.
+   *
+   * A lift dial reads left-to-right as bottom-to-top, so pass
+   * `storey / topStorey`. Intermediate values are the whole point — the needle
+   * should *sweep* between floors, not snap, which is the thing that makes a
+   * pointer display better than a number.
+   */
+  setSweep(t01: number): void;
+}
+
+/**
+ * **A classic pointer floor indicator** — Jim: *"a classic style lift pointer
+ * style display"*. A brass plaque with a 0.90 m semicircular dial, eleven
+ * protruding tick marks, and a red needle on a hub.
+ *
+ * ## Its origin is the needle's pivot, not its base
+ *
+ * The documented exception, for the same reason the disco ball's origin is its
+ * hook: the one point a caller must line up is the point code rotates about.
+ * `lift-dial-needle`'s vertices radiate from (0, 0, 0), so `setSweep` is a
+ * single `rotation.z` write with no compensating offset — and there is no
+ * second copy of the pivot position anywhere to drift from this one. Geometry
+ * therefore sits both above and below y = 0; `height` is the full extent.
+ *
+ * ## The face is blank on purpose
+ *
+ * `lift-dial-face` carries a UV map spanning its own front, authored off the
+ * same vertices as the shape (ART_DIRECTION §7, CLAUDE.md's hood-face rule).
+ * Hand it a canvas with the floor numbers on it; do **not** float a second
+ * mesh in front of the dial to carry them.
+ */
+export function createLiftDial(): LiftDialHandle {
+  const { root, meshes } = assemble('hotel.liftDial', [
+    'lift-dial',
+    'lift-dial-face',
+    'lift-dial-ticks',
+    'lift-dial-needle',
+  ]);
+  const { top, bottom } = visibleBounds(root);
+  const needle = required(meshes, 'lift-dial-needle');
+  return {
+    root,
+    height: top - bottom,
+    needle,
+    face: required(meshes, 'lift-dial-face'),
+    setSweep(t01: number) {
+      // Authored pointing straight up; +Z is out of the face toward the
+      // player, so a positive angle swings the tip to her left.
+      needle.rotation.z = (0.5 - Math.min(1, Math.max(0, t01))) * Math.PI;
+    },
+    dispose: () => disposeTree(root),
+  };
+}
+
+/** Each entrance leaf is 1.09 m wide — half of the tower's `DOOR_W`, less a seam. */
+export const ENTRANCE_DOOR_TRAVEL = 1.09;
+/** The clear doorway once they are open: the tower's `DOOR_W` less the seam. */
+export const ENTRANCE_DOOR_OPEN_WIDTH = 2.18;
+/** Leaf height: the tower's `DOOR_H` less 2 cm of clearance. */
+export const ENTRANCE_DOOR_HEIGHT = 2.58;
+
+/**
+ * The hotel's front doors, so the tower *"slides open as you approach"*.
+ *
+ * The same construction as {@link createLiftDoors} and taller: two leaves
+ * 1.09 × 2.58 m, which is `DOOR_W` × `DOOR_H` of the doorway `hotel_build.py`
+ * already cuts into the tower's face, less a centimetre of clearance all
+ * round. **`hotel_build.py` asserts that**, rather than trusting these numbers
+ * to stay in step by hand, because a door that no longer fits its own hole is
+ * exactly the kind of thing nobody notices until a child walks into it.
+ *
+ * Wide open, each leaf slides its full width and is swallowed by the crystal
+ * mass of the prism the doorway is cut into — there is no pocket to build
+ * because the tower is solid.
+ */
+export function createEntranceDoors(): SlidingDoorsHandle {
+  return slidingDoors(
+    'hotel.entranceDoors',
+    'entrance',
+    ENTRANCE_DOOR_TRAVEL,
+    ENTRANCE_DOOR_OPEN_WIDTH,
+  );
+}
+
+export interface ScreenedHandle extends AssetHandle {
+  /** The blank screen panel. Code paints a picture onto its own UVs. */
+  readonly screen: Mesh;
+}
+
+/**
+ * **The suite's television**: a big chunky wooden set on splayed legs, with two
+ * brass knobs, a speaker grille and a pair of rabbit ears. 1.62 m wide, 2.06 m
+ * to the top of the taller aerial. Origin on the floor, facing +Z.
+ *
+ * A flat panel was the obvious reading of *"a large TV"* and the wrong one: a
+ * dark rectangle on a stick has no silhouette and no roundness, and there is no
+ * black in this game to draw it with anyway (§1). A set made of the same
+ * painted wood as the breakfast table reads instantly from the iso camera, and
+ * the aerials are the asymmetric feature that keeps it out of placeholder
+ * territory (§4 — nothing is plumb; the two ears differ in both length and
+ * angle, and each ball is placed at its own ear's computed tip).
+ *
+ * `tv-screen` is an inset panel of the cabinet's **own** front with its own UV
+ * map — not a decal floated in front of it. Hand `screen.material.map` a
+ * canvas.
+ */
+export function createHotelTv(): ScreenedHandle {
+  const { root, meshes } = assemble('hotel.tv', [
+    'tv-stand',
+    'tv-body',
+    'tv-screen',
+    'tv-knobs',
+    'tv-aerial',
+  ]);
+  return {
+    root,
+    height: measuredHeight(root),
+    screen: required(meshes, 'tv-screen'),
+    dispose: () => disposeTree(root),
+  };
+}
+
+/**
+ * The Game Boy on the lounge table: 0.22 × 0.34 m, **lying flat, face up**,
+ * origin at the surface it rests on.
+ *
+ * Three times life size, and it has to be. A 90 × 148 mm handheld on a 0.45 m
+ * table, seen from a camera 38° up and several metres back, is four pixels of
+ * speckle. Everything in this park is already scaled to be read rather than
+ * measured (§4 — the kid's skull is 59% of her height), and a console a child
+ * can recognise as *her* Game Boy beats one that is correct and invisible.
+ *
+ * Its screen lies flat, so its UV comes off X and Z of the panel rather than
+ * X and Y — same rule, same authored-off-the-same-vertices guarantee.
+ */
+export function createGameBoy(): ScreenedHandle {
+  const { root, meshes } = assemble('hotel.gameBoy', [
+    'gameboy-body',
+    'gameboy-screen',
+    'gameboy-buttons',
+  ]);
+  return {
+    root,
+    height: measuredHeight(root),
+    screen: required(meshes, 'gameboy-screen'),
     dispose: () => disposeTree(root),
   };
 }

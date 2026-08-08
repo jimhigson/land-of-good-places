@@ -98,7 +98,16 @@ export class World implements GameSystem {
     // leads to rooms that are each their own space. Shares the building's
     // WalkSurfaces sampler — its floor plates and mattress tops are ordinary
     // static platforms to it.
-    this.hotel = new Hotel(this.collision, this.anchorPlots, interiorControls, this.building.surfaces);
+    // The camera sizes the receptionist's speech bubble on screen; the clock is
+    // read as a closure because `dayNight` is built further down this
+    // constructor and a time read eagerly here would be dawn for ever.
+    this.hotel = new Hotel(
+      this.collision,
+      this.anchorPlots,
+      interiorControls,
+      this.building.surfaces,
+      { camera, clock: () => this.dayNight.timeOfDay },
+    );
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a

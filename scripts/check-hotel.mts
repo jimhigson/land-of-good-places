@@ -46,7 +46,20 @@ import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NPC_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
-import { ROOMS, BREAKFAST, CORRIDOR, LOBBY, SUITE } from '../src/world/hotel/layout.ts';
+import {
+  ROOMS,
+  BREAKFAST,
+  CORRIDOR,
+  GARDEN_FLOOR,
+  HOTEL_FLOORS,
+  LOBBY,
+  OCEAN_FLOOR,
+  SUITE,
+  SUITE_BEDSIDE_X,
+  SUITE_BEDSIDE_Z,
+  SUITE_BED_SPOTS,
+} from '../src/world/hotel/layout.ts';
+import { spaceAt } from '../src/world/spaces.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -125,13 +138,20 @@ collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 
 const mustBeSolid: readonly [string, number, number][] = [
   ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ - 1],
-  ['the reception desk', LOBBY.originX + 5, LOBBY.originZ - 7.2],
+  // Reception moved to the east bay when the gallery took the north strip —
+  // its old spot at (5, −7.2) is now inside the gallery's own solid mass,
+  // where this probe would have passed for entirely the wrong reason.
+  ['the reception desk', LOBBY.originX + 10, LOBBY.originZ - 9.5],
   ['a lobby sofa', LOBBY.originX + 5.8, LOBBY.originZ + 2.4],
-  ['a lobby crystal column', LOBBY.originX + 2.2, LOBBY.originZ - 7.4],
+  ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
+  ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
+  ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
+  ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
+  ['a Floor 33 bench', OCEAN_FLOOR.originX + 0, OCEAN_FLOOR.originZ + 5.4],
   ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4],
-  ['a suite bedside table', SUITE.originX - 2.6, SUITE.originZ - 3.4],
+  ['a suite bedside table', SUITE.originX + (SUITE_BEDSIDE_X[0] ?? 0), SUITE.originZ + SUITE_BEDSIDE_Z],
 ];
 for (const [what, x, z] of mustBeSolid) {
   if (deflection(x, z) < 0.1) problems.push(`${what} is not solid — a child walks straight through it`);
@@ -155,11 +175,13 @@ if (deflection(chairX, chairZ) < 0.1) {
   problems.push('a breakfast chair is not solid — Jim asked for exactly this one');
 }
 
-for (const [what, x, z] of [
-  ['bed 1', SUITE.originX - 4.6, SUITE.originZ - 3.4],
-  ['bed 2', SUITE.originX - 0.6, SUITE.originZ - 3.4],
-  ['bed 3', SUITE.originX + 3.4, SUITE.originZ - 3.4],
-] as const) {
+// Read off `layout.ts` rather than copied: these three pairs used to live here
+// as literals, and the day the suite became four rooms every one of them went
+// stale at once — six failures about beds that had simply moved.
+for (const [index, spot] of SUITE_BED_SPOTS.entries()) {
+  const what = `bed ${index + 1}`;
+  const x = SUITE.originX + spot[0];
+  const z = SUITE.originZ + spot[1];
   if (deflection(x, z) > 0.01) {
     problems.push(
       `${what} is solid — it is a walk surface, so a child stood on it would be shoved off ` +
@@ -168,6 +190,19 @@ for (const [what, x, z] of [
   }
   const top = world.building.surfaces.sample(x, z, 1);
   if (top < 0.4) problems.push(`${what} has no standing surface — sample says ${top.toFixed(2)} m`);
+
+  // **Each bed is in its own bedroom**, not in a partition. The suite's
+  // internal walls and its beds are two lists in `layout.ts`, and nothing but
+  // this stops somebody moving one without the other — which would put a bed
+  // half inside a wall, looking almost right from above and unusable from
+  // inside. Measured against the built collision world, so it is about where
+  // the wall actually went.
+  if (deflection(x, z + 1.3) > 0.01 && deflection(x, z - 1.3) > 0.01) {
+    problems.push(
+      `${what} is boxed in at (${spot[0]}, ${spot[1]}) — solid within 1.3 m on both sides, so it ` +
+        `is standing in a partition rather than in a bedroom`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------- 4. windows
@@ -189,6 +224,123 @@ for (const room of ROOMS) {
     );
   }
   if (wanted === 0) problems.push(`${room.space} has no windows at all`);
+}
+
+// ------------------------------------------------- 5. every room is findable
+//
+// **A room the position test cannot see does not exist.** Every hotel room is
+// its own space at its own far-off origin, and `spaceAt` is the *only* thing
+// that turns a coordinate back into a room: `Hotel.currentRoom` asks it, and
+// so does the floor pill, the lift's `floors()` and every interact zone.
+//
+// The trap this closes is specific and was live in this repo until Floor 12
+// and Floor 33 landed: the room→origin table existed **twice**, once in
+// `spaces.ts`'s `ORIGINS` and once written out again inside `spaceAt` itself.
+// A floor added to only one of them builds, lights, furnishes and dresses
+// perfectly, and then the lift drops you into a room the game thinks is the
+// garden — no pill, no zones, no way back. Nothing else in this check would
+// have noticed, because every other assertion here is about geometry.
+for (const room of ROOMS) {
+  const found = spaceAt(room.originX, room.originZ);
+  if (found !== room.space) {
+    problems.push(
+      `${room.space}'s own origin reports as '${found}' — spaceAt cannot see this room, so the ` +
+        `lift lands in it and the game believes she is somewhere else`,
+    );
+  }
+}
+
+// …and every lift button points at a room that is really there.
+HOTEL_FLOORS.forEach((floor, index) => {
+  if (floor.room.liftFloor !== index && ROOMS.every((room) => room.liftFloor !== index)) {
+    problems.push(
+      `lift button ${index} ('${floor.name}') is not the lift floor of any room — ` +
+        `HOTEL_FLOORS was reordered without fixing the rooms' liftFloor indexes`,
+    );
+  }
+});
+
+// ------------------------------------------- 6. the mezzanine holds her up
+//
+// Two facts, and they are the two the whole design rests on (see
+// `layout.ts`'s `Mezzanine`): the deck is somewhere you can stand, and the
+// mass under it is solid from the lobby floor — because the balustrade on top
+// is deliberately *not* a collider, and the front face is the only thing
+// standing between a child and a three-metre drop.
+const mezzanine = LOBBY.mezzanine;
+if (!mezzanine) {
+  problems.push('the lobby has no mezzanine — Jim asked for a double-height lobby with one');
+} else {
+  const deckX = LOBBY.originX + (mezzanine.minX + mezzanine.maxX) / 2;
+  const deckZ = LOBBY.originZ + (mezzanine.minZ + mezzanine.maxZ) / 2;
+  const top = world.building.surfaces.sample(deckX, deckZ, mezzanine.height);
+  if (Math.abs(top - mezzanine.height) > 0.01) {
+    problems.push(
+      `the mezzanine deck is not standable: sample says ${top.toFixed(2)} m where the deck is ` +
+        `${mezzanine.height.toFixed(2)} m`,
+    );
+  }
+  // Its front, probed from the lobby side.
+  if (deflection(deckX, LOBBY.originZ + mezzanine.maxZ + 0.5) < 0.1) {
+    problems.push(
+      'the mezzanine has no solid front — a child walks under the gallery, and the balustrade ' +
+        'above her is deliberately not a collider, so nothing is holding anyone up',
+    );
+  }
+
+  // The sweeping stair: every tread standable, and each step within one stride
+  // of the last. A stair whose rise exceeds `BUILDING_STEP_UP` is a stair that
+  // looks perfect and cannot be climbed.
+  const { stair } = mezzanine;
+  let previous = 0;
+  for (let i = 0; i < stair.treads; i += 1) {
+    const angle = stair.fromAngle + ((stair.toAngle - stair.fromAngle) * (i + 0.5)) / stair.treads;
+    const radius = (stair.innerRadius + stair.outerRadius) / 2;
+    const x = LOBBY.originX + stair.centreX - Math.sin(angle) * radius;
+    const z = LOBBY.originZ + stair.centreZ + Math.cos(angle) * radius;
+    const height = world.building.surfaces.sample(x, z, previous);
+    if (height <= previous - 0.01) {
+      problems.push(
+        `sweeping-stair tread ${i} does not rise: sample says ${height.toFixed(2)} m, standing on ` +
+          `${previous.toFixed(2)} m — the flight cannot be climbed past here`,
+      );
+      break;
+    }
+    previous = height;
+  }
+  if (Math.abs(previous - mezzanine.height) > 0.01) {
+    problems.push(
+      `the sweeping stair tops out at ${previous.toFixed(2)} m but the deck is at ` +
+        `${mezzanine.height.toFixed(2)} m — the flight does not climb the full height`,
+    );
+  }
+
+  // **…and the top tread has to be ON the gallery.**
+  //
+  // Reaching 3.2 m is not the same claim, and asserting only that is a green
+  // that cannot fail: a stair swept about the wrong centre still climbs its
+  // full height perfectly and simply tops out in mid-air, one step from a deck
+  // it never touches. That is the exact bug this file caught on the first run
+  // after the stair landed (the arc's centre had never been updated from a
+  // first draft), and re-mutating the centre afterwards showed the height
+  // check sailing through it. Measured on the built numbers, so it is a claim
+  // about where the flight actually ends.
+  const topAngle = stair.toAngle - (stair.toAngle - stair.fromAngle) / (stair.treads * 2);
+  const topRadius = (stair.innerRadius + stair.outerRadius) / 2;
+  const topX = stair.centreX - Math.sin(topAngle) * topRadius;
+  const topZ = stair.centreZ + Math.cos(topAngle) * topRadius;
+  const onDeck =
+    topX >= mezzanine.minX &&
+    topX <= mezzanine.maxX &&
+    topZ >= mezzanine.minZ &&
+    topZ <= mezzanine.maxZ;
+  if (!onDeck) {
+    problems.push(
+      `the sweeping stair's top tread is at (${topX.toFixed(1)}, ${topZ.toFixed(1)}), outside the ` +
+        `gallery's (${mezzanine.minX}…${mezzanine.maxX}, ${mezzanine.minZ}…${mezzanine.maxZ}) — ` +
+        `it climbs the full height and stops in mid-air beside the deck`,
+    );
+  }
 }
 
 // ----------------------------------------------------------------- report

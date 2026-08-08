@@ -215,6 +215,38 @@ def flat_top_box(sx: float, sy: float, sz: float, radius: float, segments: int =
     return bm_lists(bm)
 
 
+def box(sx: float, sy: float, sz: float):
+    """A plain cube — **eight** vertices, where :func:`rounded_box` costs 24.
+
+    ART_DIRECTION §1's "no sharp edges" is about shapes a child looks at. A
+    2 cm tick mark on a dial, a 4 cm biscuit in a pet bowl and a raised panel
+    on a lift wall are not those, and a bevel on them is a corner nobody can
+    see paid for in shipped bytes. Swapping this in for the nine smallest parts
+    of the second batch, together with a few coarser revolutions, took 1532
+    triangles and 12.7 KB off the `.glb` (407,320 → 394,580 bytes, measured).
+    Anything a silhouette depends on still gets a real bevel.
+
+    Worth knowing before optimising further: this asset costs a steady **~36
+    bytes per triangle** whatever it is made of, because almost every edge in
+    it is over the 46° split-normal threshold and a split normal is a whole
+    duplicated vertex. Shaving triangles is therefore linear and slow going;
+    the only step change available is not drawing something at all.
+    """
+    hx, hy, hz = sx * 0.5, sy * 0.5, sz * 0.5
+    verts = [
+        (-hx, -hy, -hz),
+        (hx, -hy, -hz),
+        (hx, hy, -hz),
+        (-hx, hy, -hz),
+        (-hx, -hy, hz),
+        (hx, -hy, hz),
+        (hx, hy, hz),
+        (-hx, hy, hz),
+    ]
+    faces = [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
+    return verts, faces
+
+
 def icosphere(radius: float, subdivisions: int = 2):
     bm = bmesh.new()
     bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=radius)
@@ -427,6 +459,87 @@ def star_outline(points_count: int, r_outer: float, r_inner: float, phase: float
         angle = phase + i * math.pi / points_count
         out.append((r * math.cos(angle), r * math.sin(angle)))
     return out
+
+
+def revolve_profiles(profiles):
+    """:func:`revolve` with a **different** closed (r, z) cross-section per step.
+
+    The canopy's scalloped pelmet needs its bottom edge to rise and fall around
+    the ring while its top stays level, which a single profile cannot say. Every
+    profile must have the same number of points; the angle for step *s* is
+    ``s * TAU / len(profiles)``, exactly as in :func:`revolve`.
+    """
+    segments = len(profiles)
+    count = len(profiles[0])
+    verts = []
+    for s, profile in enumerate(profiles):
+        angle = s * TAU / segments
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        for r, z in profile:
+            verts.append((r * cos_a, r * sin_a, z))
+    faces = []
+    for s in range(segments):
+        s_next = (s + 1) % segments
+        for p in range(count):
+            p_next = (p + 1) % count
+            faces.append(
+                (s * count + p, s * count + p_next, s_next * count + p_next, s_next * count + p)
+            )
+    return verts, faces
+
+
+def loft(rings, centre=(0.0, 0.0)):
+    """Skins a stack of equal-length **XY** outlines at given heights, capped.
+
+    The vertical counterpart of :func:`extrude_outline` (which works in XZ and
+    extrudes along Y). Two rings make a plain prism; four make one with a
+    chamfer top and bottom, which is how every sliding door leaf here loses its
+    razor edges without paying for a bevel modifier.
+    """
+    count = len(rings[0][0])
+    verts = []
+    for outline, z in rings:
+        verts.extend((x, y, z) for x, y in outline)
+    bottom_c = len(verts)
+    verts.append((centre[0], centre[1], rings[0][1]))
+    top_c = len(verts)
+    verts.append((centre[0], centre[1], rings[-1][1]))
+    faces = []
+    for r in range(len(rings) - 1):
+        for i in range(count):
+            j = (i + 1) % count
+            faces.append((r * count + i, r * count + j, (r + 1) * count + j, (r + 1) * count + i))
+    last = (len(rings) - 1) * count
+    for i in range(count):
+        j = (i + 1) % count
+        faces.append((bottom_c, j, i))
+        faces.append((top_c, last + i, last + j))
+    return verts, faces
+
+
+def lozenge(width: float, height: float, shoulder: float = 0.14):
+    """An elongated hexagon in the XZ plane — the crystal panel on a door leaf."""
+    hw, hh = width * 0.5, height * 0.5
+    return [
+        (hw, -hh + shoulder),
+        (hw, hh - shoulder),
+        (0.0, hh),
+        (-hw, hh - shoulder),
+        (-hw, -hh + shoulder),
+        (0.0, -hh),
+    ]
+
+
+def uv_from_xy(verts, faces, width: float, depth: float):
+    """:func:`uv_from_xz` for a panel that lies **flat** — the Game Boy's screen.
+
+    Same rule and the same reason: the UV is read off the very vertices the
+    shape is made of, so it cannot drift from them.
+    """
+    return [
+        [(v[0] / width + 0.5, v[1] / depth + 0.5) for v in (verts[i] for i in face)]
+        for face in faces
+    ]
 
 
 # =============================================================================
@@ -1130,6 +1243,694 @@ def build_door(coll: bpy.types.Collection) -> float:
 
 
 # =============================================================================
+# 7. PET BED — Eleri's brief, verbatim: "half-human half-cat bed, in a circular
+#    shape with four poster type design. With a pillow and a blanket and even a
+#    toy for them to play with."
+# =============================================================================
+
+PET_BED_CUSHION_TOP = 0.30
+"""The flat cushion disc a pet is posed lying on. `hotelAssets.ts` exports it."""
+
+PET_BED_CUSHION_RADIUS = 0.42
+"""Radius of the **clear** part of that disc: 0.84 m across, nothing standing in it.
+
+The brief asked for at least 0.5 m and this is deliberately much more. Every
+pet in this park renders at `PET_RENDER_HEIGHT` = 1.46 m standing
+(`src/art/models/pets.ts`), and a bunny that tall curled up is a good deal more
+than half a metre long — a bed sized to the number in the brief would have read
+as a saucer with a rabbit spilling over it. Hence a 1.34 m bed rather than the
+1.1 m first sketched, and hence the pillow rests **on the bolster rim** rather
+than on the cushion: that keeps the whole disc clear for whoever poses the pet,
+instead of leaving them a crescent to fit a creature into.
+"""
+
+PET_BED_BOLSTER_R = 0.545
+"""Ring radius of the padded rim. The four posts stand on it, at 45° intervals."""
+
+
+def build_pet_bed(coll: bpy.types.Collection) -> float:
+    # ---- the tub -------------------------------------------------------------
+    base = Part("petbed-base")
+    base.add(
+        *revolve(
+            [
+                (0.0, 0.24),
+                (0.46, 0.24),
+                (0.52, 0.27),
+                (0.58, 0.22),
+                (0.60, 0.14),
+                (0.58, 0.03),
+                (0.50, 0.0),
+                (0.0, 0.0),
+            ],
+            18,
+        )
+    )
+    base.emit(coll)
+
+    # ---- the cushion pad, its own node and its own colour --------------------
+    #
+    # Split out of the tub after the first review render, where a lilac pad in
+    # a lilac tub 17 cm below the rim read as a **hole in the bed** rather than
+    # as something soft to lie on. A cream pad against the lilac says "this is
+    # the bit you get into" from across the room, which is the whole job of the
+    # only surface in this asset a pet is ever posed on.
+    cushion = Part("petbed-cushion")
+    cushion.add(
+        *revolve(
+            [
+                (0.0, PET_BED_CUSHION_TOP),
+                (PET_BED_CUSHION_RADIUS, PET_BED_CUSHION_TOP),
+                (0.48, 0.26),
+                (0.46, 0.21),
+                (0.0, 0.21),
+            ],
+            18,
+        )
+    )
+    cushion.emit(coll)
+
+    # ---- the bolster: a squashed torus, wider than it is tall ----------------
+    bolster = Part("petbed-bolster")
+    rx, rz, cz = 0.125, 0.115, 0.355
+    bolster.add(
+        *revolve(
+            [
+                (PET_BED_BOLSTER_R + rx * math.cos(i * TAU / 6), cz + rz * math.sin(i * TAU / 6))
+                for i in range(6)
+            ],
+            18,
+        )
+    )
+    bolster.emit(coll)
+
+    # ---- four posts, and this is where the "half-human" half comes in --------
+    posts = Part("petbed-posts")
+    for i in range(4):
+        angle = math.radians(45.0 + i * 90.0)
+        px, py = PET_BED_BOLSTER_R * math.cos(angle), PET_BED_BOLSTER_R * math.sin(angle)
+        posts.add(*tube(0.055, 0.78, sides=8, z0=0.20), matrix=Matrix.Translation((px, py, 0.0)))
+    # Four small finials, back on the post tops now the crown is open: the
+    # single apex ball belongs to the canopy's own boss, which is where the
+    # ribs actually meet.
+    for i in range(4):
+        angle = math.radians(45.0 + i * 90.0)
+        posts.add(
+            *icosphere(0.062, 1),
+            matrix=Matrix.Translation(
+                (PET_BED_BOLSTER_R * math.cos(angle), PET_BED_BOLSTER_R * math.sin(angle), 1.00)
+            )
+            @ Matrix.Scale(0.76, 4, (0.0, 0.0, 1.0)),
+        )
+    posts.emit(coll)
+
+    # ---- canopy: a ring, a scalloped pelmet, and an OPEN crown of ribs -------
+    #
+    # **Take three, and the third one is a gameplay constraint rather than a
+    # taste one.** Take one was the ring and pelmet alone: a blue hula hoop on
+    # four sticks, nothing overhead, nothing that says *canopy*. Take two put a
+    # solid conical roof on it, which read as a canopy immediately — and hid the
+    # entire inside of the bed. The park's camera looks **down** at 38°
+    # (ART_DIRECTION §4), and the one thing this asset exists to show off is a
+    # pet lying in it, so a lid over it is the one shape it may not have,
+    # however well it reads on its own.
+    #
+    # So: four slender ribs arcing from the ring to a boss, like a crown or a
+    # bandstand frame. It is unmistakably a four-poster canopy from the side and
+    # it is **open sky** from above, which is where the player is.
+    #
+    # The pelmet is a **solid band**, not a one-sided skirt. A single sheet of
+    # quads would have been half the vertices and invisible from inside the bed
+    # — `MeshToonMaterial` is `FrontSide`, which is exactly how the hood faces
+    # went missing for a fortnight (CLAUDE.md). Anything a camera can get behind
+    # gets two skins here.
+    canopy = Part("petbed-canopy")
+    canopy.add(
+        *revolve(
+            [
+                (PET_BED_BOLSTER_R + 0.05 * math.cos(i * TAU / 6), 0.95 + 0.05 * math.sin(i * TAU / 6))
+                for i in range(6)
+            ],
+            14,
+        )
+    )
+    for i in range(4):
+        angle = math.radians(45.0 + i * 90.0)
+        rib = []
+        for step in range(8):
+            t = step / 7.0
+            r = PET_BED_BOLSTER_R * (1.0 - t)
+            rib.append(
+                (r * math.cos(angle), r * math.sin(angle), 0.95 + 0.26 * math.sin(t * math.pi * 0.5))
+            )
+        canopy.add(*sweep_path(rib, 0.030, sides=5, closed=False))
+    canopy.add(
+        *icosphere(0.070, 1),
+        matrix=Matrix.Translation((0.0, 0.0, 1.20)) @ Matrix.Scale(0.72, 4, (0.0, 0.0, 1.0)),
+    )
+    pelmet = []
+    for s in range(20):
+        angle = s * TAU / 20
+        z_bot = 0.795 + 0.062 * math.cos(6.0 * angle)
+        pelmet.append([(0.512, 0.935), (0.578, 0.935), (0.578, z_bot), (0.512, z_bot)])
+    canopy.add(*revolve_profiles(pelmet))
+    canopy.emit(coll, sharp_deg=80.0)
+
+    # ---- pillow, propped against the back of the rim -------------------------
+    # Bigger and leaned back further than the first pass, where it sat almost
+    # flat behind the bolster and the render showed a grey sliver.
+    pillow = Part("petbed-pillow")
+    pillow.add(
+        *rounded_box(0.54, 0.26, 0.17, 0.065, segments=1),
+        matrix=Matrix.Translation((0.0, 0.36, 0.53)) @ Matrix.Rotation(math.radians(-34.0), 4, "X"),
+    )
+    pillow.emit(coll)
+
+    # ---- blanket, folded over the right-hand rim between two posts -----------
+    #
+    # Take two as well. The first was a big slab cantilevered out sideways with
+    # a roll along it, and it read as a **lever** sticking out of the bed — the
+    # give-away being that it did not touch the bolster it was supposed to be
+    # lying on anywhere along its length. Now it is two short panels that
+    # follow the rim over and down its outside, which is what a throw does.
+    blanket = Part("petbed-blanket")
+    blanket.add(
+        *rounded_box(0.23, 0.35, 0.055, 0.022, segments=1),
+        matrix=Matrix.Translation((0.545, -0.02, 0.495)),
+    )
+    blanket.add(
+        *rounded_box(0.21, 0.32, 0.050, 0.020, segments=1),
+        matrix=Matrix.Translation((0.553, 0.01, 0.545)) @ Matrix.Rotation(math.radians(7.0), 4, "Z"),
+    )
+    blanket.emit(coll)
+
+    # ---- the toy: a plush goldfish, on the floor beside the bed --------------
+    #
+    # A ball was the other option in the brief and a fish is the better one for
+    # a bed that is half cat: a sphere beside a round bed reads as a second,
+    # smaller bed, and the fish's tail is the one silhouette in this asset that
+    # is not a circle.
+    fish = (
+        Matrix.Translation((0.70, -0.46, 0.095))
+        @ Matrix.Rotation(math.radians(28.0), 4, "Z")
+        @ Matrix.Rotation(math.radians(-8.0), 4, "Y")
+    )
+    toy = Part("petbed-toy")
+    toy.add(
+        *icosphere(0.115, 1),
+        matrix=fish
+        @ Matrix.Scale(1.25, 4, (1.0, 0.0, 0.0))
+        @ Matrix.Scale(0.60, 4, (0.0, 1.0, 0.0))
+        @ Matrix.Scale(0.80, 4, (0.0, 0.0, 1.0)),
+    )
+    toy.add(
+        *extrude_outline([(0.0, 0.0), (-0.14, 0.10), (-0.14, -0.055)], 0.05, centre=(-0.085, 0.015)),
+        matrix=fish @ Matrix.Translation((-0.115, 0.0, 0.0)),
+    )
+    toy.add(
+        *extrude_outline([(0.05, 0.0), (-0.06, 0.0), (-0.02, 0.085)], 0.04, centre=(-0.01, 0.02)),
+        matrix=fish @ Matrix.Translation((0.0, 0.0, 0.070)),
+    )
+    toy.emit(coll)
+
+    eye = Part("petbed-toy-eye")
+    for side in (-1, 1):
+        eye.add(
+            *icosphere(0.024, 1),
+            matrix=fish @ Matrix.Translation((0.085, side * 0.056, 0.036)),
+        )
+    eye.emit(coll)
+
+    return 1.24
+
+
+# =============================================================================
+# 8. PET BOWL — so the pet can eat breakfast too
+# =============================================================================
+
+
+def build_pet_bowl(coll: bpy.types.Collection) -> float:
+    bowl = Part("petbowl-bowl")
+    bowl.add(
+        *revolve(
+            [
+                (0.0, 0.0),
+                (0.090, 0.004),
+                (0.125, 0.030),
+                (0.130, 0.072),
+                (0.108, 0.076),
+                (0.100, 0.036),
+                (0.0, 0.024),
+            ],
+            16,
+        )
+    )
+    bowl.emit(coll)
+
+    # Nine chunks, hand-placed like every other "scatter" in this file.
+    food = Part("petbowl-food")
+    for x, y, z, yaw in (
+        (0.000, 0.000, 0.038, 10.0),
+        (-0.042, 0.016, 0.036, 38.0),
+        (0.040, 0.020, 0.036, -26.0),
+        (0.014, -0.044, 0.037, 55.0),
+        (-0.038, -0.032, 0.038, -44.0),
+        (-0.010, 0.046, 0.036, 14.0),
+        (-0.022, -0.004, 0.060, 28.0),
+        (0.024, 0.026, 0.061, -52.0),
+        (0.006, -0.028, 0.062, 42.0),
+    ):
+        food.add(
+            *box(0.040, 0.040, 0.022),
+            matrix=Matrix.Translation((x, y, z)) @ Matrix.Rotation(math.radians(yaw), 4, "Z"),
+        )
+    food.emit(coll)
+    return 0.076
+
+
+# =============================================================================
+# 9. LIFT — Jim: the alcove has "no doors, no floor and also no lift to speak
+#    of". A pair of sliding leaves, the surround they slide behind, the car you
+#    stand in, and a classic pointer dial over the top.
+# =============================================================================
+
+LIFT_LEAF_W = 0.90
+LIFT_LEAF_H = 2.44
+LIFT_LEAF_D = 0.11
+"""One lift door leaf. Two of them close on a 1.80 m opening, 2.44 m tall."""
+
+LIFT_FRAME_W = 3.28
+LIFT_FRAME_H = 2.96
+LIFT_OPENING_W = 1.84
+LIFT_OPENING_H = 2.50
+"""The surround plugs the room's 3.2 m west wall gap (`layout.ts`'s
+``gaps.west = [-1.6, 1.6]``) and leaves a 1.84 × 2.50 hole for the leaves."""
+
+
+def door_leaf(width: float, height: float, depth: float, chamfer: float = 0.045):
+    """A chunky sliding leaf whose front is **three crystal facets**, not a slab.
+
+    The tower is a cut gem and the doors have to belong to it, so the leaf's
+    horizontal cross-section is a flattened hexagon — flat at the back, three
+    planes at the front — and the 46° shading threshold in :meth:`Part.emit`
+    keeps every one of those creases crisp. A plain box front read as a
+    cupboard door in the first review render.
+
+    The top and bottom rings are inset by `chamfer`, which is a bevel bought
+    for four extra vertices instead of a bevel modifier's forty.
+    """
+
+    def section(inset: float):
+        w, d = width * 0.5 - inset, depth * 0.5 - inset
+        return [
+            (-w, d),
+            (w, d),
+            (w, -d * 0.34),
+            (w * 0.42, -d),
+            (-w * 0.42, -d),
+            (-w, -d * 0.34),
+        ]
+
+    return loft(
+        [
+            (section(chamfer), 0.0),
+            (section(0.0), chamfer),
+            (section(0.0), height - chamfer),
+            (section(chamfer), height),
+        ]
+    )
+
+
+def build_sliding_pair(
+    coll: bpy.types.Collection, prefix: str, width: float, height: float, depth: float, y0: float
+) -> float:
+    """Two leaves, authored **closed**, each its own node with its own vertices.
+
+    Left spans x ∈ [−w, −0.005] and right x ∈ [0.005, w], so the seam is a real
+    5 mm gap you can see rather than two coincident faces z-fighting. Code opens
+    them by sliding each leaf ±`width` along its own X — no rotation, no pivot,
+    nothing that can fall out of step with the other leaf.
+    """
+    # Narrower than the leaf's flat middle facet (±0.42 of the half-width), so
+    # the panel sits **on** that facet instead of sinking into the two angled
+    # shoulders either side of it.
+    panel = lozenge(width * 0.40, height * 0.58)
+    for name, sign in ((f"{prefix}-door-left", -1.0), (f"{prefix}-door-right", 1.0)):
+        leaf = Part(name)
+        centre_x = sign * (width * 0.5 + 0.0025)
+        leaf.add(
+            *door_leaf(width - 0.005, height, depth),
+            matrix=Matrix.Translation((centre_x, y0 + depth * 0.5, 0.0)),
+        )
+        # The crystal panel, standing 0.014 proud of that facet (§5: a marking
+        # that sits *in* a surface reads as a rip where it pokes through).
+        leaf.add(
+            *extrude_outline(panel, 0.036),
+            matrix=Matrix.Translation((centre_x, y0 + 0.004, height * 0.52)),
+        )
+        leaf.emit(coll)
+    return height
+
+
+def build_lift(coll: bpy.types.Collection) -> dict[str, float]:
+    # ---- the leaves ---------------------------------------------------------
+    # Blender −Y is the game's +Z, so "toward the room" is −Y. The surround
+    # stands 0.12 m proud into the room and the leaves run 0.10–0.21 m behind
+    # the wall plane, which is where a real lift's doors sit: in the reveal.
+    build_sliding_pair(coll, "lift", LIFT_LEAF_W, LIFT_LEAF_H, LIFT_LEAF_D, 0.10)
+
+    # ---- the surround -------------------------------------------------------
+    frame = Part("lift-frame")
+    jamb_w = (LIFT_FRAME_W - LIFT_OPENING_W) * 0.5
+    for sx in (-1, 1):
+        frame.add(
+            *rounded_box(jamb_w, 0.22, LIFT_FRAME_H, 0.035, segments=1),
+            matrix=Matrix.Translation((sx * (LIFT_OPENING_W + jamb_w) * 0.5, -0.01, LIFT_FRAME_H * 0.5)),
+        )
+        # A slender faceted pilaster either side of the opening: the same
+        # six-sided gem the tower is made of, at door scale.
+        frame.add(
+            *crystal(6, 0.088, 0.112, 0.072, 0.24, 2.42, 0.30, math.radians(15.0)),
+            matrix=Matrix.Translation((sx * (LIFT_OPENING_W * 0.5 + 0.16), -0.11, 0.0)),
+        )
+    frame.add(
+        *rounded_box(LIFT_OPENING_W + 0.06, 0.22, LIFT_FRAME_H - LIFT_OPENING_H, 0.035, segments=1),
+        matrix=Matrix.Translation((0.0, -0.01, (LIFT_FRAME_H + LIFT_OPENING_H) * 0.5)),
+    )
+    frame.emit(coll)
+
+    # ---- the threshold ------------------------------------------------------
+    sill = Part("lift-frame-sill")
+    sill.add(
+        *flat_top_box(LIFT_OPENING_W + 0.10, 0.46, 0.055, 0.02, segments=1),
+        matrix=Matrix.Translation((0.0, 0.06, 0.0275)),
+    )
+    sill.emit(coll)
+
+    # ---- the car ------------------------------------------------------------
+    # Open-fronted (the front is −Y, the game's +Z), 2.2 × 2.2 × 2.5 inside, so
+    # it drops into the 3.0 × 3.4 m alcove `Hotel.buildRoomShell` already walls
+    # off with room to spare.
+    car = Part("lift-car")
+    car.add(*rounded_box(2.40, 0.10, 2.50, 0.04, segments=1), matrix=Matrix.Translation((0.0, 1.15, 1.25)))
+    for sx in (-1, 1):
+        car.add(
+            *rounded_box(0.10, 2.30, 2.50, 0.04, segments=1),
+            matrix=Matrix.Translation((sx * 1.15, 0.0, 1.25)),
+        )
+    car.add(*rounded_box(2.40, 2.40, 0.10, 0.04, segments=1), matrix=Matrix.Translation((0.0, 0.05, 2.55)))
+    # Cosy panelling: raised fielded panels, three across the back and two a
+    # side, standing 3 cm proud the way ART_DIRECTION §5 wants a marking to.
+    for px in (-0.70, 0.0, 0.70):
+        car.add(
+            *box(0.62, 0.06, 1.50),
+            matrix=Matrix.Translation((px, 1.07, 1.30)),
+        )
+    for sx in (-1, 1):
+        for py in (-0.52, 0.52):
+            car.add(
+                *box(0.06, 0.70, 1.50),
+                matrix=Matrix.Translation((sx * 1.07, py, 1.30)),
+            )
+    car.emit(coll)
+
+    floor = Part("lift-car-floor")
+    # **Top at exactly z = 0**, so the plate lies flush under the walkable
+    # surface `Hotel.buildRoomShell` already registers at the alcove's y = 0
+    # rather than standing on it as a 5 cm step. The geometry is therefore
+    # below the origin, documented in `hotelAssets.ts` the way the tower's
+    # leaning feet are.
+    floor.add(
+        *flat_top_box(2.30, 2.30, 0.05, 0.03, segments=1),
+        matrix=Matrix.Translation((0.0, 0.0, -0.025)),
+    )
+    floor.emit(coll)
+
+    rail = Part("lift-car-rail")
+    back_v, back_f = tube(0.032, 2.00, sides=8)
+    rail.add(back_v, back_f, matrix=Matrix.Translation((-1.00, 1.02, 0.92)) @ Matrix.Rotation(math.radians(90.0), 4, "Y"))
+    for sx in (-1, 1):
+        side_v, side_f = tube(0.032, 1.90, sides=8)
+        rail.add(
+            side_v,
+            side_f,
+            matrix=Matrix.Translation((sx * 1.02, -0.88, 0.92)) @ Matrix.Rotation(math.radians(-90.0), 4, "X"),
+        )
+    # Brackets, each running from its own rail **outward into the wall behind
+    # it**. The first pass turned every side bracket the same way with one
+    # `90.0 if …` — right for the +X wall and backwards for the −X one, where
+    # two brackets stuck out into the middle of the car instead of holding
+    # anything up. Visible in the review render as brass stubs floating in mid
+    # air; the sign has to come off the bracket's own side, not be a constant.
+    for bx, by in ((-0.70, 1.02), (0.70, 1.02), (-1.02, -0.55), (-1.02, 0.55), (1.02, -0.55), (1.02, 0.55)):
+        bracket_v, bracket_f = tube(0.026, 0.11, sides=6)
+        if abs(bx) > 1.0:
+            turn = Matrix.Rotation(math.radians(90.0 if bx > 0 else -90.0), 4, "Y")
+        else:
+            turn = Matrix.Rotation(math.radians(-90.0), 4, "X")
+        rail.add(bracket_v, bracket_f, matrix=Matrix.Translation((bx, by, 0.92)) @ turn)
+    rail.emit(coll)
+
+    return {"lift-doors": LIFT_LEAF_H, "lift-frame": LIFT_FRAME_H, "lift-car": 2.60}
+
+
+# =============================================================================
+# 10. LIFT DIAL — Jim: "a classic style lift pointer style display"
+# =============================================================================
+
+DIAL_R = 0.45
+"""Radius of the dial face. The plaque is 1.02 m wide over its bezel; the arc
+the needle sweeps is 0.90 m across, as briefed."""
+
+
+def build_lift_dial(coll: bpy.types.Collection) -> float:
+    """A semicircular brass plaque with a needle, built about the **pivot**.
+
+    Every asset in this file has its origin at its own base. This one does not,
+    and for the same reason the disco ball does not: the one point a caller has
+    to line up is the point code rotates about. `lift-dial-needle`'s vertices
+    radiate from (0, 0, 0), so `needle.rotation.z = θ` just works — no offset
+    group, no second copy of the pivot position to keep in step with this file.
+
+    The needle is authored pointing **straight up**. Rotating about the game's
+    +Z (this file's +Y, under `export_yup`) by a positive angle sweeps it to the
+    player's left, which is the ground-floor end of the arc.
+    """
+    plaque = Part("lift-dial")
+    outer = [(-0.51, -0.13), (0.51, -0.13), (0.51, 0.02)]
+    outer += [
+        (0.51 * math.cos(i * math.pi / 16), 0.02 + 0.51 * math.sin(i * math.pi / 16))
+        for i in range(1, 16)
+    ]
+    outer += [(-0.51, 0.02)]
+    plaque.add(*extrude_outline(outer, 0.06), matrix=Matrix.Translation((0.0, 0.0, 0.0)))
+    # The bezel: a raised rim following the arc, so the face reads as recessed
+    # into brass rather than printed on it.
+    bezel_in = [
+        (DIAL_R * math.cos(i * math.pi / 16), DIAL_R * math.sin(i * math.pi / 16)) for i in range(17)
+    ]
+    bezel_out = [
+        (0.505 * math.cos(i * math.pi / 16), 0.505 * math.sin(i * math.pi / 16)) for i in range(17)
+    ]
+    plaque.add(*ring_outline(bezel_in, bezel_out, 0.105), matrix=Matrix.Translation((0.0, -0.0225, 0.0)))
+    plaque.add(
+        *rounded_box(1.02, 0.105, 0.10, 0.03, segments=1),
+        matrix=Matrix.Translation((0.0, -0.0225, -0.055)),
+    )
+    plaque.emit(coll)
+
+    # ---- the face: blank, UV-mapped, painted with floor numbers by code -----
+    face = Part("lift-dial-face")
+    disc = [
+        (DIAL_R * math.cos(i * math.pi / 20), DIAL_R * math.sin(i * math.pi / 20)) for i in range(21)
+    ] + [(-DIAL_R, -0.055), (DIAL_R, -0.055)]
+    fv, ff = extrude_outline(disc, 0.025, centre=(0.0, 0.10))
+    face.add(fv, ff, matrix=Matrix.Translation((0.0, -0.0375, 0.0)), uvs=uv_from_xz(fv, ff, DIAL_R * 2, DIAL_R * 2))
+    face.emit(coll, recalc=False)
+
+    # ---- ticks: geometry, not paint (ART_DIRECTION §5) ----------------------
+    ticks = Part("lift-dial-ticks")
+    for i in range(11):
+        angle = i * math.pi / 10
+        long = i in (0, 5, 10)
+        length = 0.075 if long else 0.045
+        r_mid = DIAL_R - 0.035 - length * 0.5
+        ticks.add(
+            *box(0.026 if long else 0.020, 0.028, length),
+            matrix=Matrix.Translation(
+                (r_mid * math.cos(angle), -0.062, r_mid * math.sin(angle))
+            )
+            @ Matrix.Rotation(math.pi * 0.5 - angle, 4, "Y"),
+        )
+    ticks.emit(coll)
+
+    # ---- the needle ---------------------------------------------------------
+    needle = Part("lift-dial-needle")
+    pointer = [(0.032, -0.085), (0.024, 0.300), (0.0, 0.370), (-0.024, 0.300), (-0.032, -0.085)]
+    needle.add(*extrude_outline(pointer, 0.034, centre=(0.0, 0.06)), matrix=Matrix.Translation((0.0, -0.090, 0.0)))
+    # +90° about X sends the tube down −Y, i.e. **toward the viewer**, so the
+    # hub caps the front of the blade rather than hiding behind it.
+    hub_v, hub_f = tube(0.052, 0.05, sides=12)
+    needle.add(
+        hub_v,
+        hub_f,
+        matrix=Matrix.Translation((0.0, -0.075, 0.0)) @ Matrix.Rotation(math.radians(90.0), 4, "X"),
+    )
+    needle.emit(coll)
+
+    return 0.53 + 0.13
+
+
+# =============================================================================
+# 11. ENTRANCE DOORS — the tower's own front door, so it "slides open as you
+#     approach". Same construction as the lift's, sized to the doorway that is
+#     already cut in the tower's face.
+# =============================================================================
+
+ENTRANCE_LEAF_W = 1.09
+ENTRANCE_LEAF_H = 2.58
+"""Two leaves inside `DOOR_W` × `DOOR_H` with 1 cm of clearance all round —
+**derived from the tower's own doorway, not typed again.** Asserted below."""
+
+
+def build_entrance_doors(coll: bpy.types.Collection) -> float:
+    assert abs(ENTRANCE_LEAF_W * 2 - (DOOR_W - 0.02)) < 1e-9, "entrance leaves must fill DOOR_W"
+    assert abs(ENTRANCE_LEAF_H - (DOOR_H - 0.02)) < 1e-9, "entrance leaves must fit DOOR_H"
+    return build_sliding_pair(coll, "entrance", ENTRANCE_LEAF_W, ENTRANCE_LEAF_H, 0.12, 0.0)
+
+
+# =============================================================================
+# 12. THE SUITE'S TELEVISION — Jim: "1 with a large TV and a sofa and a game boy
+#     on the table"
+# =============================================================================
+
+
+def build_tv(coll: bpy.types.Collection) -> float:
+    """A big chunky set on splayed legs, with rabbit ears. Faces −Y (game +Z).
+
+    A flat panel was the obvious read of "a large TV" and the wrong one: a
+    black rectangle on a stick has no silhouette, no roundness and nothing a
+    six-year-old would call a toy — and there is no black in this game to draw
+    it with anyway (§1). A wooden set with a domed screen, two brass knobs and
+    a pair of aerials is chunky, reads instantly from the iso camera, and is
+    made of the same painted-wood vocabulary as the breakfast table.
+    """
+    body = Part("tv-body")
+    body.add(*rounded_box(1.62, 0.56, 1.08, 0.075), matrix=Matrix.Translation((0.0, 0.0, 0.84)))
+    body.emit(coll)
+
+    # The screen is a **panel of the set's own front**, given its own node
+    # because it is its own colour and its own UV map — code paints the picture
+    # onto it. Not a decal floated in front of the cabinet (CLAUDE.md's hood
+    # face): it is a solid inset that shares the cabinet's front plane.
+    screen = Part("tv-screen")
+    sw, sh = 1.06, 0.74
+    sv, sf = extrude_outline(rounded_rect(sw, sh, 0.10, samples=4), 0.09)
+    screen.add(sv, sf, matrix=Matrix.Translation((-0.18, -0.255, 0.88)), uvs=uv_from_xz(sv, sf, sw, sh))
+    screen.emit(coll, recalc=False)
+
+    knobs = Part("tv-knobs")
+    for kz in (1.06, 0.88):
+        knob_v, knob_f = tube(0.072, 0.055, sides=12)
+        knobs.add(
+            knob_v,
+            knob_f,
+            matrix=Matrix.Translation((0.57, -0.30, kz)) @ Matrix.Rotation(math.radians(-90.0), 4, "X"),
+        )
+    for gz in (0.60, 0.53, 0.46):
+        knobs.add(
+            *box(0.30, 0.03, 0.030),
+            matrix=Matrix.Translation((0.57, -0.285, gz)),
+        )
+    knobs.emit(coll)
+
+    stand = Part("tv-stand")
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            leg_v, leg_f = tube(0.055, 0.34, sides=8)
+            stand.add(
+                leg_v,
+                leg_f,
+                matrix=Matrix.Translation((sx * 0.60, sy * 0.20, 0.0))
+                @ Matrix.Rotation(math.radians(sx * -9.0), 4, "Y")
+                @ Matrix.Rotation(math.radians(sy * 8.0), 4, "X"),
+            )
+    stand.add(*rounded_box(1.30, 0.42, 0.09, 0.035, segments=1), matrix=Matrix.Translation((0.0, 0.0, 0.325)))
+    stand.emit(coll)
+
+    # Rabbit ears. **Different angles and different lengths**, per §4's "nothing
+    # is plumb" — a symmetrical V is the placeholder look. Each ball is put
+    # exactly where its own ear ends, computed rather than typed: a hand-written
+    # tip position is one retune away from a floating ball, and this file's own
+    # `main_face_y` exists for the same reason.
+    aerial = Part("tv-aerial")
+    aerial.add(*rounded_box(0.22, 0.18, 0.09, 0.03, segments=1), matrix=Matrix.Translation((0.0, 0.10, 1.42)))
+    top = 0.0
+    for sx, tilt_deg, length in ((-1, 41.0, 0.58), (1, 31.0, 0.65)):
+        base = Vector((sx * 0.05, 0.10, 1.45))
+        tilt = math.radians(sx * tilt_deg)
+        ear_v, ear_f = tube(0.026, length, sides=6)
+        aerial.add(ear_v, ear_f, matrix=Matrix.Translation(base) @ Matrix.Rotation(tilt, 4, "Y"))
+        tip = base + Vector((math.sin(tilt) * length, 0.0, math.cos(tilt) * length))
+        aerial.add(*icosphere(0.048, 1), matrix=Matrix.Translation(tip))
+        top = max(top, tip.z + 0.048)
+    aerial.emit(coll)
+    return top
+
+
+# =============================================================================
+# 13. GAME BOY — on the lounge table, lying face up
+# =============================================================================
+
+GAMEBOY_W = 0.22
+GAMEBOY_L = 0.34
+GAMEBOY_H = 0.055
+"""Three times life size, and it has to be.
+
+A 90 × 148 mm handheld on a 0.45 m table, seen from a camera 38° up and some
+metres back, is four pixels of speckle. Everything in this park is already
+scaled to be read rather than measured (§4 — the kid's head is 59% of her),
+and a toy console that a child can actually see her Game Boy in is worth more
+than one that is correct and invisible."""
+
+
+def build_gameboy(coll: bpy.types.Collection) -> float:
+    body = Part("gameboy-body")
+    body.add(
+        *rounded_box(GAMEBOY_W, GAMEBOY_L, GAMEBOY_H, 0.022),
+        matrix=Matrix.Translation((0.0, 0.0, GAMEBOY_H * 0.5)),
+    )
+    body.emit(coll)
+
+    # Lies flat, so its UV comes off X and Y rather than X and Z. Same rule.
+    screen = Part("gameboy-screen")
+    scw, scl = 0.150, 0.125
+    sv, sf = extrude_outline(rounded_rect(scw, scl, 0.022, samples=2), 0.022)
+    sv = [(v[0], v[2], v[1]) for v in sv]  # stand the panel down flat, face up
+    screen.add(sv, sf, matrix=Matrix.Translation((0.0, 0.085, GAMEBOY_H)), uvs=uv_from_xy(sv, sf, scw, scl))
+    screen.emit(coll, recalc=True)
+
+    buttons = Part("gameboy-buttons")
+    # The d-pad: two crossed bars, one node, one colour.
+    for bar in ((0.062, 0.020), (0.020, 0.062)):
+        buttons.add(
+            *box(bar[0], bar[1], 0.016),
+            matrix=Matrix.Translation((-0.052, -0.045, GAMEBOY_H)),
+        )
+    for bx, by in ((0.038, -0.030), (0.070, -0.012)):
+        btn_v, btn_f = tube(0.019, 0.016, sides=10)
+        buttons.add(btn_v, btn_f, matrix=Matrix.Translation((bx, by, GAMEBOY_H - 0.002)))
+    for i in range(2):
+        buttons.add(
+            *box(0.044, 0.016, 0.012),
+            matrix=Matrix.Translation((-0.014 + i * 0.052, -0.120, GAMEBOY_H - 0.002))
+            @ Matrix.Rotation(math.radians(-16.0), 4, "Z"),
+        )
+    buttons.emit(coll)
+    return GAMEBOY_H + 0.018
+
+
+# =============================================================================
 
 
 def summarise() -> str:
@@ -1153,6 +1954,13 @@ def main() -> None:
     heights.update(build_breakfast(collection("hotel-breakfast")))
     heights["desk"] = build_desk(collection("hotel-desk"))
     heights["door"] = build_door(collection("hotel-door"))
+    heights["petBed"] = build_pet_bed(collection("hotel-petbed"))
+    heights["petBowl"] = build_pet_bowl(collection("hotel-petbowl"))
+    heights.update(build_lift(collection("hotel-lift")))
+    heights["liftDial"] = build_lift_dial(collection("hotel-lift-dial"))
+    heights["entranceDoors"] = build_entrance_doors(collection("hotel-entrance"))
+    heights["tv"] = build_tv(collection("hotel-tv"))
+    heights["gameBoy"] = build_gameboy(collection("hotel-gameboy"))
 
     print("\nhotel_build")
     print(summarise())

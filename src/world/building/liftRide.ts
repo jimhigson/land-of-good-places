@@ -94,6 +94,21 @@ export interface LiftPanelState {
   readonly mode: LiftPanelMode;
   /** The little floor readout above the buttons. */
   readonly indicator: string;
+  /**
+   * True on the frames the doors are opening **at the floor she asked for**.
+   *
+   * The panel dings on the false→true edge of this, which is the one moment a
+   * lift makes a noise that means something. It cannot be derived from
+   * {@link mode}: arriving and travelling are both `'going'` as far as the
+   * panel's *face* is concerned — the buttons look identical — and the whole
+   * point of a mode is what to draw. So the arrival is its own fact.
+   *
+   * Optional because `LiftRide` (the castle's real car) does not report it
+   * yet; `exactOptionalPropertyTypes` means it must be **omitted** rather than
+   * set to `undefined`, so an implementation that has nothing to say simply
+   * does not mention it.
+   */
+  readonly arrived?: boolean;
 }
 
 /** {@link LiftControl}, plus the bits that are only true of today's real car. */

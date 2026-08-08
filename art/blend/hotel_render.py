@@ -63,6 +63,38 @@ COLOURS = {
     "door-plaque": 0xFFF2DC,  # PALETTE.signBoard
     "door-star": 0xFFE066,  # PALETTE.flowerYellow
     "desk-keys": 0xFFD76E,  # PALETTE.liftFrame
+    "petbed-base": 0xC9A9FF,  # PALETTE.markerLilac
+    "petbed-cushion": 0xFFF3E2,  # ART.cream
+    "petbed-bolster": 0xFFA9D4,  # PALETTE.blossomPink
+    "petbed-posts": 0xE6BD8C,  # PALETTE.woodLight
+    "petbed-canopy": 0x87C9FF,  # PALETTE.markerSky
+    "petbed-pillow": 0xFFF3F8,  # PALETTE.blossomWhite
+    "petbed-blanket": 0x7FE3C0,  # PALETTE.markerMint
+    "petbed-toy": 0xFFC95C,  # PALETTE.slideChute
+    "petbed-toy-eye": 0x3B2D3F,  # PALETTE.eyeDark
+    "petbowl-bowl": 0x87C9FF,  # PALETTE.markerSky
+    "petbowl-food": 0xDCA873,  # ART.biscuitFur
+    "lift-door-left": 0xCDEEFF,  # PALETTE.glassTint
+    "lift-door-right": 0xCDEEFF,
+    "lift-frame": 0xD7B3FF,  # PALETTE.flowerViolet
+    "lift-frame-sill": 0xFFD76E,  # PALETTE.liftFrame
+    "lift-car": 0xE6BD8C,  # PALETTE.woodLight
+    "lift-car-floor": 0xD2A06A,  # PALETTE.wood
+    "lift-car-rail": 0xFFD76E,  # PALETTE.liftFrame
+    "lift-dial": 0xFFD76E,  # PALETTE.liftFrame
+    "lift-dial-face": 0xFFF2DC,  # PALETTE.signBoard
+    "lift-dial-ticks": 0x4A3A52,  # PALETTE.ink
+    "lift-dial-needle": 0xFF8F8F,  # PALETTE.flowerRed
+    "entrance-door-left": 0xCDEEFF,  # PALETTE.glassTint
+    "entrance-door-right": 0xCDEEFF,
+    "tv-body": 0xD2A06A,  # PALETTE.wood
+    "tv-screen": 0x9ADCFF,  # PALETTE.buildingWindow
+    "tv-knobs": 0xFFD76E,  # PALETTE.liftFrame
+    "tv-stand": 0xB37F4F,  # PALETTE.woodDark
+    "tv-aerial": 0xFFD76E,  # PALETTE.liftFrame
+    "gameboy-body": 0xD3CACB,  # ART.statueStone
+    "gameboy-screen": 0x7FE3C0,  # PALETTE.markerMint
+    "gameboy-buttons": 0xFF8FC0,  # PALETTE.markerPink
 }
 
 # Every asset's origin is its own base, so a whole collection rendered as-authored
@@ -89,10 +121,25 @@ LAYOUTS = {
         "food-yoghurt": (0.34, 0.0, 0.0),
         "food-yoghurt-honey": (0.34, 0.0, 0.0),
     },
+    # The lift's four parts are four separate factories and are authored, like
+    # everything else here, each about its own origin — so as built they sit
+    # inside one another. This is the arrangement the game puts them in: car
+    # behind the wall, leaves slid wide open in front of it.
+    "lift-open": {
+        "lift-door-left": (-0.90, 0.0, 0.0),
+        "lift-door-right": (0.90, 0.0, 0.0),
+        "lift-car": (0.0, 1.45, 0.0),
+        "lift-car-floor": (0.0, 1.45, 0.0),
+        "lift-car-rail": (0.0, 1.45, 0.0),
+    },
 }
 
 # Objects a shot leaves out entirely, by shot name.
-OMIT = {"breakfast-bowls": {"table-top", "table-leg", "chair"}}
+OMIT = {
+    "breakfast-bowls": {"table-top", "table-leg", "chair"},
+    "lift-doors": {"lift-car", "lift-car-floor", "lift-car-rail"},
+    "lift-car": {"lift-frame", "lift-frame-sill", "lift-door-left", "lift-door-right"},
+}
 
 # file stem -> (collection, camera azimuth in degrees off the front, elevation)
 # Azimuth 0 looks straight along +Y (at the asset's front face, which is −Y).
@@ -105,6 +152,18 @@ SHOTS = [
     ("breakfast-bowls", "hotel-breakfast", 30.0, 34.0),
     ("reception-desk", "hotel-desk", 34.0, 26.0),
     ("yours-door", "hotel-door", 26.0, 16.0),
+    ("pet-bed", "hotel-petbed", 32.0, 26.0),
+    ("pet-bowl", "hotel-petbowl", 30.0, 40.0),
+    ("lift-doors", "hotel-lift", 16.0, 12.0),
+    ("lift-open", "hotel-lift", 26.0, 16.0),
+    ("lift-car", "hotel-lift", 18.0, 18.0),
+    ("lift-dial", "hotel-lift-dial", 12.0, 8.0),
+    ("entrance-doors", "hotel-entrance", 22.0, 12.0),
+    ("tv", "hotel-tv", 30.0, 20.0),
+    # Nearly overhead: the Game Boy is the one asset in this file that lies
+    # face **up**, so the shot that says whether it reads is the one the iso
+    # camera almost takes.
+    ("game-boy", "hotel-gameboy", 20.0, 58.0),
 ]
 
 

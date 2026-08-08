@@ -4086,6 +4086,7 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
     );
   }
   return complaints;
+};
 
 /**
  * **The park really is twice the park** — the missing half of #115, added

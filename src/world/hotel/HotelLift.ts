@@ -30,8 +30,6 @@ export interface HotelLiftDeps {
   atLiftDoors(player: Player): boolean;
   /** Teleport the player to `room`'s lift alcove, behind the iris. */
   travelTo(room: HotelRoom): void;
-  /** Has reception given her the key? Floor 50 is hers, and needs it. */
-  hasKey(): boolean;
   cancelWalk(): void;
   player(): Player | null;
 }
@@ -70,8 +68,13 @@ export class HotelLift implements LiftPanelSource {
         name: floor.name,
         glyph: floor.glyph,
         here: index === here,
-        // Your floor is yours once you have your key — reception's whole job.
-        reachable: this.phase === 'aboard' && (index !== 2 || this.deps.hasKey()),
+        // **Every floor is reachable.** Floor 50 used to refuse without the
+        // key, which meant a child who had walked past reception met a dead
+        // button with nothing to tell her why. Jim, 7 August 2026: *"go to
+        // level 50 before you have your key but not through the door to the
+        // room."* The lift is transport; the lock is the suite's own door
+        // (`Hotel.checkDoorways`), where the sign explaining it is standing.
+        reachable: this.phase === 'aboard',
       });
     }
     return list;
@@ -87,7 +90,6 @@ export class HotelLift implements LiftPanelSource {
       this.beginAlight(room);
       return;
     }
-    if (target === HOTEL_FLOORS[2] && !this.deps.hasKey()) return;
     this.from = HOTEL_FLOORS[room.liftFloor ?? 0] ?? HOTEL_FLOORS[0]!;
     this.to = target;
     this.phase = 'going';
@@ -108,7 +110,8 @@ export class HotelLift implements LiftPanelSource {
       case 'going':
         return { mode: 'going', indicator: `${this.tickingFloorName()}…` };
       case 'alighting':
-        return { mode: 'going', indicator: this.hereName() };
+        // The doors are opening on the floor she pressed — the ding.
+        return { mode: 'going', indicator: this.hereName(), arrived: true };
       default:
         return null;
     }
@@ -118,6 +121,62 @@ export class HotelLift implements LiftPanelSource {
     if (this.phase !== 'waiting') return;
     this.phase = 'coming';
     this.phaseT = 0;
+  }
+
+  // ------------------------------------------------- what the alcove shows
+
+  /**
+   * **Are the doors open?** 0 shut, 1 wide open — an eased value, so the
+   * leaves slide rather than snap.
+   *
+   * Deliberately a *number* and not the phase itself. The alcove needs one
+   * fact — how far apart the leaves are — and handing it the phase would put a
+   * copy of this switch statement in `Hotel`, where it would go stale the next
+   * time a phase is added. This is Decision 3's seam habit applied one level
+   * down: the lift owns when, the room owns what it looks like.
+   *
+   * Open while she is **in** the car and while she is stepping **out** of it,
+   * shut the rest of the time. `coming` eases them open over its last moments
+   * so the doors are already parting as she is drawn in, which is what stops
+   * the glide looking like she walks through them.
+   */
+  doorOpenness(): number {
+    switch (this.phase) {
+      case 'aboard':
+        return 1;
+      case 'alighting':
+        // Closing again behind her as she steps out.
+        return 1 - smooth(Math.min(1, this.phaseT / STEP_SECONDS));
+      case 'coming':
+        return smooth(Math.min(1, Math.max(0, (this.phaseT - COMING_SECONDS * 0.45) / (COMING_SECONDS * 0.55))));
+      default:
+        return 0;
+    }
+  }
+
+  /**
+   * Which room's alcove the doors and dial belong to right now.
+   *
+   * While travelling this is the room she is **going to**, because that is the
+   * alcove she is about to be standing in: the portal has not fired yet, but
+   * the doors that matter are the ones that will open.
+   */
+  activeRoom(): HotelRoom | null {
+    if (this.phase === 'going') return this.to.room;
+    return this.deps.currentRoom();
+  }
+
+  /**
+   * The storey the needle should point at — the same number the indicator
+   * already counts through, so the dial and the words can never disagree.
+   *
+   * Public because the dial above every alcove is driven from it; it was
+   * already being computed for {@link tickingFloorName}.
+   */
+  indicatedStorey(): number {
+    if (this.phase === 'going') return this.tickingStorey();
+    const room = this.deps.currentRoom();
+    return HOTEL_FLOORS[room?.liftFloor ?? 0]?.storey ?? 0;
   }
 
   // -------------------------------------------------------------- the frame
@@ -238,10 +297,9 @@ export class HotelLift implements LiftPanelSource {
   /** The storey the indicator shows mid-travel — counting, like a real lift. */
   private tickingStorey(): number {
     const t = Math.min(1, this.phaseT / TRAVEL_SECONDS);
-    const eased = t * t * (3 - 2 * t);
     const from = this.from.storey;
     const to = this.to.storey;
-    return Math.round(from + (to - from) * eased);
+    return Math.round(from + (to - from) * smooth(t));
   }
 
   /**
@@ -254,4 +312,9 @@ export class HotelLift implements LiftPanelSource {
     const storey = this.tickingStorey();
     return storey === 0 ? 'Ground floor' : `Floor ${storey}`;
   }
+}
+
+/** Ease in and out. Named once here rather than inlined at four call sites. */
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t);
 }

@@ -27,27 +27,40 @@ packGlbAsset({
   constantName: 'HOTEL_GLB_BASE64',
   label: 'pack:hotel',
   /**
-   * 288 KB, against the 150 KB every other asset gets.
+   * 432 KB, against the 150 KB every other asset gets.
    *
    * The 150 KB figure is Jim's ruling of 31 July for **one character**. This
-   * file is not one asset: it is six — a 28 m building plus a bed, a hanging
-   * disco ball, a breakfast table with three bowls of cereal, a reception desk
-   * and a door — so the comparable per-asset figure is about 41 KB, well
-   * inside it. Raising a shared budget for one file would have been the wrong
-   * move; raising this one, with the arithmetic written down, is the point of
-   * the knob being per-asset.
+   * file is not one asset: it is fifteen factories' worth — a 28 m building,
+   * plus the furniture of a hotel (bed, hanging disco ball, breakfast table,
+   * three bowls of cereal, reception desk, suite door), plus the second batch
+   * of 7 August (a four-poster pet bed and its bowl, the lift's doors, frame,
+   * car and pointer dial, the tower's sliding front doors, the suite's
+   * television and its Game Boy). At 394 KB that is about **26 KB per
+   * factory**, well inside the per-character figure, and 130 KB over the wire
+   * after gzip. Raising a *shared* budget for one file would have been the
+   * wrong move; raising this one, with the arithmetic written down, is the
+   * whole point of the knob being per-asset.
    *
-   * Where the bytes are, so a future change knows what it is trading: about
-   * 30% of the file is `tower-windows` alone — 640-odd little quads whose only
-   * job is to say "fifty storeys" from across the park. If this ever needs to
-   * shrink, that is the one lever worth pulling (a painted window texture on
-   * six tall quads would cost a few hundred bytes), and everything else in
-   * here is already down to the vertex.
+   * Where the bytes are, so a future change knows what it is trading:
+   *
+   * - The file costs a flat **~36 bytes per triangle** and always has. Nearly
+   *   every edge in it is over `hotel_build.py`'s 46° split-normal threshold,
+   *   and a split normal is a duplicated vertex, so triangles and bytes track
+   *   each other almost exactly. Trimming is therefore linear: a 10% cut in
+   *   geometry buys a 10% cut in bytes and no more.
+   * - `tower-windows` is still the single largest node — 570 loose quads,
+   *   ~62 KB, whose only job is to say "fifty storeys" from across the park.
+   *   It is the one place a *step* change is available (a painted window
+   *   texture on six tall quads would cost a few hundred bytes) and it is
+   *   deliberately untouched, because it is shipped, QA'd art.
+   * - 43 KB is glTF JSON: 66 nodes × 66 meshes × 195 accessors. Merging parts
+   *   would reclaim some of it and cost the game a colour per part, which is
+   *   the trade the whole no-materials-in-the-glb design refuses.
    */
-  budgetBytes: 288 * 1024,
+  budgetBytes: 432 * 1024,
   docLines: [
-    'The Land Hotel, as authored geometry: the crystal tower and the five',
-    'pieces of furniture that go inside it.',
+    'The Land Hotel, as authored geometry: the crystal tower, the furniture',
+    'that goes inside it, the lift, and the suite’s television.',
     '',
     '**Generated — do not edit.** `npm run pack:hotel` rebuilds it from',
     '`hotel.glb`, which is itself written by `npm run blend:hotel` (from',

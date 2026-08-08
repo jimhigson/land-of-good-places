@@ -1,14 +1,19 @@
 import {
   BoxGeometry,
+  Color,
   ConeGeometry,
   CylinderGeometry,
   Group,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   OctahedronGeometry,
+  Quaternion,
   RingGeometry,
   Shape,
   ShapeGeometry,
   SphereGeometry,
+  Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
@@ -615,6 +620,426 @@ export function buffetCounter(length: number): Group {
     rail.rotation.z = Math.PI / 2;
     rail.position.set(0, y, 0.5);
     group.add(rail);
+  }
+  return group;
+}
+
+/**
+ * The sparkle on a mirror ball: facet glints that twinkle as it turns, and a
+ * slow drift of motes falling through the light under it.
+ *
+ * Jim, 7 August 2026: the lobby's ball should be *"as sparkly as possible"*.
+ * The five `SpotLight`s (`Hotel.hangDiscoBall`) are the beams going round the
+ * room; this is the ball itself catching the light, which is the half a real
+ * one does with its own surface.
+ *
+ * ## Two `InstancedMesh`es and not one particle system
+ *
+ * Ninety glints and forty motes is a hundred and thirty little objects, and as
+ * separate `Mesh`es that is a hundred and thirty draw calls hanging in the
+ * middle of the lobby. Instanced, it is two. This is the same idiom the
+ * dodgems' arena and the park's own crowd use, and the reason it is worth
+ * naming here is the second half of it: **nothing is allocated per frame.**
+ * The matrix, the vectors and the quaternion below are built once and written
+ * over, and every random the animation needs was drawn at construction into a
+ * `Float32Array` of phases. A twinkle that allocated a `Vector3` per instance
+ * per frame would be 7,800 objects a second for the garbage collector, in a
+ * game that already has a note in ORDER-OF-WORK about exactly that
+ * (the balloon strings).
+ *
+ * Glints are **not** lit and cast nothing: they are `decal`, self-lit chips of
+ * colour. A glint that took the toon ramp would go dark on the side of the
+ * ball facing away from the key light, which is precisely the half a mirror
+ * ball is *most* interesting on.
+ */
+export interface DiscoSparkle {
+  /** Add to the ball's rotating group — they turn with the facets. */
+  readonly glints: InstancedMesh;
+  /** Add to the room, at the ball's height — these drift on their own. */
+  readonly motes: InstancedMesh;
+  update(elapsed: number): void;
+}
+
+/** Chips of light on the ball's surface, and specks drifting below it. */
+const SPARKLE_GLINTS = 90;
+const SPARKLE_MOTES = 40;
+
+export function createDiscoSparkle(ballRadius: number, seed: number): DiscoSparkle {
+  const rng = new Rng(seed);
+  const tones: readonly number[] = [
+    PALETTE.blossomWhite,
+    PALETTE.markerPink,
+    PALETTE.markerSky,
+    PALETTE.markerMint,
+    PALETTE.markerLemon,
+  ];
+
+  // --- the glints ----------------------------------------------------------
+  const glints = new InstancedMesh(
+    new OctahedronGeometry(ballRadius * 0.085, 0),
+    toonMaterial(PALETTE.blossomWhite, {
+      emissive: PALETTE.blossomWhite,
+      emissiveIntensity: 1,
+    }),
+    SPARKLE_GLINTS,
+  );
+  decal(glints);
+  glints.name = 'hotel.disco.glints';
+
+  // Where each one sits on the ball, and when it twinkles. Drawn once.
+  const glintAt = new Float32Array(SPARKLE_GLINTS * 3);
+  const glintPhase = new Float32Array(SPARKLE_GLINTS);
+  const glintRate = new Float32Array(SPARKLE_GLINTS);
+  const colour = new Color();
+  for (let i = 0; i < SPARKLE_GLINTS; i += 1) {
+    // Evenly over the sphere: `acos(1 - 2u)` rather than a uniform angle, or
+    // they bunch at the poles and the ball's equator looks bald.
+    const theta = rng.range(0, TAU);
+    const phi = Math.acos(1 - 2 * rng.unit());
+    const r = ballRadius * 1.015;
+    glintAt[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
+    glintAt[i * 3 + 1] = Math.cos(phi) * r;
+    glintAt[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
+    glintPhase[i] = rng.range(0, TAU);
+    glintRate[i] = rng.range(1.7, 3.4);
+    colour.setHex(rng.pick(tones));
+    glints.setColorAt(i, colour);
+  }
+  if (glints.instanceColor) glints.instanceColor.needsUpdate = true;
+
+  // --- the motes -----------------------------------------------------------
+  const motes = new InstancedMesh(
+    new SphereGeometry(0.055, 6, 5),
+    toonMaterial(PALETTE.blossomWhite, {
+      emissive: PALETTE.blossomWhite,
+      emissiveIntensity: 0.85,
+    }),
+    SPARKLE_MOTES,
+  );
+  decal(motes);
+  motes.name = 'hotel.disco.motes';
+
+  const moteRadius = new Float32Array(SPARKLE_MOTES);
+  const moteAngle = new Float32Array(SPARKLE_MOTES);
+  const moteSpin = new Float32Array(SPARKLE_MOTES);
+  const moteFall = new Float32Array(SPARKLE_MOTES);
+  const moteDrop = new Float32Array(SPARKLE_MOTES);
+  for (let i = 0; i < SPARKLE_MOTES; i += 1) {
+    moteRadius[i] = rng.range(0.6, 4.6);
+    moteAngle[i] = rng.range(0, TAU);
+    moteSpin[i] = rng.range(0.06, 0.2) * (rng.chance(0.5) ? 1 : -1);
+    // How long one mote takes to fall its whole run, and where in that run it
+    // starts — so they are not a curtain descending in unison.
+    moteFall[i] = rng.range(7, 15);
+    moteDrop[i] = rng.range(0, 1);
+    colour.setHex(rng.pick(tones));
+    motes.setColorAt(i, colour);
+  }
+  if (motes.instanceColor) motes.instanceColor.needsUpdate = true;
+
+  // Written over every frame, never replaced. See this function's header.
+  const matrix = new Matrix4();
+  const position = new Vector3();
+  const quaternion = new Quaternion();
+  const scale = new Vector3();
+  /** How far below the ball a mote has fallen by the end of its run. */
+  const FALL = 5.2;
+
+  return {
+    glints,
+    motes,
+    update(elapsed: number): void {
+      for (let i = 0; i < SPARKLE_GLINTS; i += 1) {
+        // Twinkle: a sine sharpened by squaring, so each glint is dark most of
+        // the time and briefly very bright — which is what catching the light
+        // looks like, where a gentle pulse reads as a row of fairy lights.
+        const wave = Math.sin(elapsed * glintRate[i]! + glintPhase[i]!);
+        const bright = wave > 0 ? wave * wave : 0;
+        const size = 0.25 + bright * 1.5;
+        position.set(glintAt[i * 3]!, glintAt[i * 3 + 1]!, glintAt[i * 3 + 2]!);
+        scale.setScalar(size);
+        matrix.compose(position, quaternion, scale);
+        glints.setMatrixAt(i, matrix);
+      }
+      glints.instanceMatrix.needsUpdate = true;
+
+      for (let i = 0; i < SPARKLE_MOTES; i += 1) {
+        // A sawtooth down: reaches the floor, reappears at the ball. `%` on a
+        // rising number is the whole particle system.
+        const t = (moteDrop[i]! + elapsed / moteFall[i]!) % 1;
+        const angle = moteAngle[i]! + elapsed * moteSpin[i]!;
+        position.set(
+          Math.cos(angle) * moteRadius[i]!,
+          -t * FALL,
+          Math.sin(angle) * moteRadius[i]!,
+        );
+        // Fading in and out at both ends of the fall, so nothing pops.
+        const fade = Math.min(1, Math.min(t, 1 - t) * 6);
+        scale.setScalar(0.25 + fade * 0.95);
+        matrix.compose(position, quaternion, scale);
+        motes.setMatrixAt(i, matrix);
+      }
+      motes.instanceMatrix.needsUpdate = true;
+    },
+  };
+}
+
+// ----------------------------------------------------- Floor 12, the garden
+
+/**
+ * A tuft of meadow: a low dome of leaves with a few flower heads poking out.
+ *
+ * The garden floor's smallest unit and the one it repeats most, so it is one
+ * group of four or five squashed spheres rather than anything cleverer. Flower
+ * heads are `decal` — they are little self-lit dots of colour, and a shadow
+ * from a 6 cm daisy is a shadow nobody has ever seen.
+ */
+export function flowerTuft(seed: number, scale = 1): Group {
+  const group = new Group();
+  group.name = 'hotel.tuft';
+  const rng = new Rng(seed);
+
+  const leaves = toonMaterial(rng.pick([PALETTE.leafMid, PALETTE.leafLight, PALETTE.grass]));
+  for (let i = 0; i < 3; i += 1) {
+    const r = rng.range(0.22, 0.34) * scale;
+    const dome = solid(new Mesh(new SphereGeometry(r, 12, 8), leaves));
+    dome.scale.set(1.15, 0.72, 1.05);
+    dome.position.set(rng.range(-0.22, 0.22) * scale, r * 0.6, rng.range(-0.22, 0.22) * scale);
+    group.add(dome);
+  }
+
+  const blooms: readonly number[] = [
+    PALETTE.flowerYellow,
+    PALETTE.blossomPink,
+    PALETTE.flowerRed,
+    PALETTE.markerLilac,
+  ];
+  for (let i = 0; i < rng.int(2, 4); i += 1) {
+    const colour = rng.pick(blooms);
+    const head = decal(
+      new Mesh(
+        new SphereGeometry(0.09 * scale, 10, 8),
+        toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.3 }),
+      ),
+    );
+    head.position.set(
+      rng.range(-0.3, 0.3) * scale,
+      rng.range(0.34, 0.52) * scale,
+      rng.range(-0.3, 0.3) * scale,
+    );
+    group.add(head);
+  }
+  return group;
+}
+
+/**
+ * A clipped hedge with flowers growing along the top of it, front on +Z.
+ *
+ * The garden floor's answer to the other rooms' crystal clusters: the thing
+ * that fills a corner and gives the eye something with a *shape* in it. Its
+ * footprint is registered by the caller as a rectangle, the way the buffet's
+ * is — you walk along a hedge, you do not walk round a single fat disc of it.
+ */
+export function hedge(width: number, seed: number): Group {
+  const group = new Group();
+  group.name = 'hotel.hedge';
+  const rng = new Rng(seed);
+
+  const body = solid(
+    new Mesh(new BoxGeometry(width, 0.78, 0.62), toonMaterial(PALETTE.leafDeep)),
+  );
+  body.position.y = 0.39;
+  addOutline(body, 0.02);
+  group.add(body);
+
+  // Bobbly top — a straight-edged box is a wall painted green.
+  const bobbles = Math.max(2, Math.round(width / 0.55));
+  for (let i = 0; i < bobbles; i += 1) {
+    const dome = solid(
+      new Mesh(new SphereGeometry(rng.range(0.26, 0.34), 12, 8), toonMaterial(PALETTE.leafMid)),
+    );
+    dome.scale.set(1.1, 0.66, 1);
+    dome.position.set(-width / 2 + ((i + 0.5) / bobbles) * width, 0.8, rng.range(-0.08, 0.08));
+    group.add(dome);
+  }
+  return group;
+}
+
+/**
+ * A rose arch: two posts, a curved top, and blossom growing over it.
+ *
+ * The one prop on the garden floor taller than a grown-up, and the reason the
+ * room reads as a garden the moment the lift doors open rather than as a green
+ * room. You walk **through** it — the footprint the caller registers is the two
+ * posts, never the span.
+ */
+export function trellisArch(width: number, height: number, seed: number): Group {
+  const group = new Group();
+  group.name = 'hotel.arch';
+  const rng = new Rng(seed);
+  const timber = toonMaterial(PALETTE.woodLight);
+
+  for (const side of [-1, 1]) {
+    const post = solid(new Mesh(new CylinderGeometry(0.09, 0.11, height, 8), timber));
+    post.position.set((side * width) / 2, height / 2, 0);
+    addOutline(post, 0.018);
+    group.add(post);
+  }
+
+  // The curve, as a shallow ring segment — chunky, flat, and one draw call.
+  const arch = solid(
+    new Mesh(new CylinderGeometry(width / 2 + 0.1, width / 2 + 0.1, 0.18, 14, 1, true), timber),
+  );
+  arch.rotation.x = Math.PI / 2;
+  arch.rotation.z = Math.PI / 2;
+  arch.position.y = height;
+  arch.scale.set(1, 1, 0.42);
+  group.add(arch);
+
+  for (let i = 0; i < 7; i += 1) {
+    const t = (i + 0.5) / 7;
+    const angle = Math.PI * t;
+    const tuft = flowerTuft(seed + i * 31, 0.62);
+    tuft.position.set(
+      -Math.cos(angle) * (width / 2 + 0.1),
+      height + Math.sin(angle) * 0.42 - 0.1,
+      rng.range(-0.12, 0.12),
+    );
+    group.add(tuft);
+  }
+  return group;
+}
+
+/**
+ * A little pond, inlaid in the floor: water, a foam rim and two lily pads.
+ *
+ * Flat floor inlay in the same height ladder as the rugs (see this file's
+ * header), so a child walks straight over it — a pond you can fall into is a
+ * pond that needs a whole swimming system behind it, and this is scenery.
+ */
+export function lilyPond(radius: number, seed: number): Group {
+  const group = new Group();
+  group.name = 'hotel.pond';
+  const rng = new Rng(seed);
+
+  const rim = decal(
+    new Mesh(new CylinderGeometry(radius, radius, 0.04, 32), toonMaterial(PALETTE.stonePinkLight)),
+  );
+  rim.position.y = RUG_Y - 0.02;
+  group.add(rim);
+
+  const water = decal(
+    new Mesh(
+      new CylinderGeometry(radius - 0.26, radius - 0.26, 0.04, 32),
+      toonMaterial(PALETTE.waterTop, { emissive: PALETTE.waterTop, emissiveIntensity: 0.32 }),
+    ),
+  );
+  water.position.y = RUG_Y;
+  group.add(water);
+
+  for (let i = 0; i < 3; i += 1) {
+    const pad = decal(
+      new Mesh(new CylinderGeometry(0.3, 0.3, 0.04, 12), toonMaterial(PALETTE.leafMid)),
+    );
+    const angle = rng.range(0, TAU);
+    const out = rng.range(0, radius - 0.7);
+    pad.position.set(Math.cos(angle) * out, RUG_Y + 0.01, Math.sin(angle) * out);
+    group.add(pad);
+  }
+  return group;
+}
+
+// ------------------------------------------------------ Floor 33, the ocean
+
+/**
+ * A chunky flat fish, nose on **+X**, front face on **+Z**.
+ *
+ * Traced as one `Shape` for the same reason `flatStar` and `floorChevron` are:
+ * it is the shape this floor repeats most, it is genuinely flat, and one
+ * outline is one draw call where a body-plus-two-fins assembly would be three.
+ * Nose on +X rather than +Z because a fish is drawn side-on — you see a fish by
+ * looking at its flank, which is exactly what the camera does to anything hung
+ * on the north wall.
+ */
+export function fishShape(length: number, colour: number): Mesh {
+  const h = length * 0.42;
+  const shape = new Shape();
+  shape.moveTo(length * 0.5, 0);
+  shape.quadraticCurveTo(length * 0.1, h, -length * 0.18, h * 0.52);
+  shape.lineTo(-length * 0.5, h * 0.86);
+  shape.lineTo(-length * 0.34, 0);
+  shape.lineTo(-length * 0.5, -h * 0.86);
+  shape.lineTo(-length * 0.18, -h * 0.52);
+  shape.quadraticCurveTo(length * 0.1, -h, length * 0.5, 0);
+  shape.closePath();
+  return decal(
+    new Mesh(
+      new ShapeGeometry(shape),
+      toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.36 }),
+    ),
+  );
+}
+
+/**
+ * A brass-ish ring hung round a window, front on **+Z** — a porthole.
+ *
+ * **It is a frame and nothing else.** The glass is the room's own declared
+ * window (`layout.ts`'s `WindowWall`, built by `Hotel.glazeWall`), and this
+ * goes round it. That split is deliberate and it is CLAUDE.md's hood-face rule
+ * in a different costume: a second self-lit disc floated in front of the real
+ * pane would be a surface whose position has to independently agree with the
+ * pane's, for ever, and the moment somebody edits `at` by half a metre the
+ * porthole is a brass ring round a bit of wall.
+ */
+export function porthole(radius: number, colour: number = PALETTE.liftFrame): Group {
+  const group = new Group();
+  group.name = 'hotel.porthole';
+
+  const ring = solid(new Mesh(new CylinderGeometry(radius, radius, 0.14, 20, 1, true), toonMaterial(colour)));
+  ring.rotation.x = Math.PI / 2;
+  addOutline(ring, 0.018);
+  group.add(ring);
+
+  // Four rivets, at the compass points. It is the detail that says *ship*.
+  for (let i = 0; i < 4; i += 1) {
+    const angle = (i / 4) * TAU + Math.PI / 4;
+    const rivet = decal(
+      new Mesh(new SphereGeometry(0.055, 8, 6), toonMaterial(PALETTE.stonePinkDark)),
+    );
+    rivet.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0.05);
+    group.add(rivet);
+  }
+  return group;
+}
+
+/**
+ * A frond of seaweed: three tapering blades leaning off a common foot.
+ *
+ * The ocean floor's crystal cluster — the corner-filler with a silhouette.
+ * Leaned about their own feet exactly the way `crystalCluster`'s shards are,
+ * because "grew here" and "was stood up here" look completely different and
+ * only one of them is right for a plant.
+ */
+export function seaweed(seed: number, scale = 1): Group {
+  const group = new Group();
+  group.name = 'hotel.seaweed';
+  const rng = new Rng(seed);
+  const greens: readonly number[] = [PALETTE.leafBlue, PALETTE.markerMint, PALETTE.buildingTrimDeep];
+
+  for (let i = 0; i < rng.int(3, 4); i += 1) {
+    const height = rng.range(0.9, 1.7) * scale;
+    const colour = rng.pick(greens);
+    const blade = solid(
+      new Mesh(
+        new ConeGeometry(rng.range(0.13, 0.2) * scale, height, 5),
+        toonMaterial(colour, { emissive: colour, emissiveIntensity: 0.2 }),
+      ),
+    );
+    const angle = rng.range(0, TAU);
+    blade.position.set(Math.cos(angle) * 0.2 * scale, height / 2, Math.sin(angle) * 0.2 * scale);
+    blade.rotation.set(rng.range(-0.3, 0.3), rng.range(0, TAU), rng.range(-0.3, 0.3));
+    addOutline(blade, 0.018);
+    group.add(blade);
   }
   return group;
 }
