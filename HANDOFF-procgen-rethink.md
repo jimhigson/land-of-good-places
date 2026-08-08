@@ -319,33 +319,58 @@ one disease: two numbers for one thing, agreeing only by coincidence.**
    `paths.ts` routes around them (Decision 6: publish what you solved). **Fixed
    seed 5; seed 11 is still red.**
 
-## The one that is still red, and what it needs
+## GREEN — final tally, verbatim
 
-`seed 11 > the Rail Race finish rainbow stands on the ground`.
+```
+ Test Files  10 passed (10)
+      Tests  265 passed (265)
+```
+`npm run test:procgen` EXIT 0 · `npm run build` EXIT 0 · `npx tsc --noEmit`
+EXIT 0 · `npm run typecheck:test` EXIT 0 — every one read from the command,
+never through a pipe.
 
-Measured, not guessed (`scripts/diag-arch.mts` in the gate snapshot): seed 11's
-arch inner feet run from (67.4, -21.4) to (65.1, -19.9) and the rail race
-booth's doormat is at **(65.9, -20.7) — in the middle of that line**. The
-nearest path is `spur-stall.railRacer`, and `routeAround` will not detour it
-*by design*: a spur has to arrive at the door it serves. The arch and the
-doormat are placed by the same bearing, so on this seed they are placed on top
-of each other.
+Run against a `git archive HEAD` snapshot, so no other agent's in-flight edits
+are in it.
 
-**I tried the obvious fix and backed it out, which is the useful part of this
-note.** Sliding `startDistance` along the ring is the only lever that moves the
-finish line and everything scored from it *together* (duck bars, spark zones,
-`RACE_DISTANCE`, cart placement). Nudging it clear of the doormat worked — seed
-11 went green, `48 passed` — but `startDistance` is the whole ride's datum, so
-moving it moved seed 5's ride too, and **seed 5 went red on two tests**
-(rainbow on paths again, plus a Sky Cruiser strike). One failure traded for two.
-Reverted; the tree is at the better state.
+### Solve-rate, unregressed and better
 
-What it actually needs: the nudge search must clear *everything the ride's datum
-can collide with* — the doormat and plots (done, in the reverted patch), **and
-the Sky Cruiser's loop, and the ride's own exit** — all of which are plan-time
-knowable except the exit, which `railRace/plan.ts` computes after the rings and
-would need reordering. That is a contained piece of work with a clear
-acceptance test; it is not a knob to tune.
+```
+                    ROUND-2 START    NOW
+SOLVE RATE            46/60 (77%)    48/60 (80%)
+TOTAL   median          32658 ms      7137 ms     4.6x
+        p90             83821        23454       3.6x
+        max            227113        56277       4.0x
+cruiser median          13807         3127
+slide   median           7642         1538
+stage that killed each failure:  cruiser 11 (was 11) · slide 1 (was 3)
+```
+
+The last red — seed 11's arch on the doormat — was fixed by sliding
+`startDistance`, the one lever that moves the finish line and everything scored
+from it together. **The first attempt checked the doormat and plots only, went
+green on seed 11 and red on seed 5, and was backed out.** The datum moves the
+whole ride, so the nudge has to clear everything the datum can hit: doormat and
+plots inside the route, plus the ride's own exit and the Sky Cruiser's sampled
+loop passed in from `plan.ts`. That needed `planExit()` to run *before* the
+rings — it never needed one, it just used to run second.
+
+### What is still not fixed, and it is the same thing as ever
+
+**Eleven of the twelve remaining sweep failures are the cruiser, and they are
+byte-identical to the very first baseline** — same seeds, same attempt counts,
+same candidate counts. Nothing in either round touched them, because the fix is
+the one Decision 10 part 4 specifies and it is structural:
+
+- seeds 4, 29, 30 die after **8, 14, 10 start poses**, sixteen candidate pieces
+  each — one joint, then nothing. `stationPoses` proposes 1,408 and a rejection
+  filter throws away 1,400.
+- `stationWindowIsClear` tests bounding circles at 1.2 m while the search tests
+  footprints at 3.6 m, so a pose can qualify and have no legal first piece.
+  Two authorities for one question.
+
+Construct the start poses in the free region instead of filtering down to
+eight, and make the qualification ask the question the search will ask. Seed 53
+is the one remaining slide failure (all six ladder rungs exhausted).
 
 ## Discipline notes for whoever is next
 
@@ -353,9 +378,10 @@ acceptance test; it is not a knob to tune.
   railRace/plan -> train/plan -> coaster/plan` typechecks perfectly and dies at
   module load with "Cannot access 'COASTER_PLANS' before initialization".
   `EXIT_INSIDE_EDGE` moved to `boundary.ts` to break it.
-- **`snapToFree`'s doc still lies.** It claims "greedy continuity — the profile
-  stays in whichever gap it is already in"; it snaps to the nearest interval
-  with no memory of the previous bearing at all. Fix 3 removed the temptation on
-  the seeds we test, not the capability.
+- **`snapToFree`'s doc now tells the truth** (it claimed "greedy continuity"
+  and never had it). The profile CAN still hop a blocked band; what stops it is
+  `freeIntervals` no longer offering a sliver to hop into. That removed the
+  temptation, not the capability — a profile that tracks which interval it is in
+  and may only change where two merge is the real fix, and is still unwritten.
 - Measure against a `git archive HEAD` snapshot: other agents are editing this
   worktree live, and a suite run against their in-flight edits proves nothing.
