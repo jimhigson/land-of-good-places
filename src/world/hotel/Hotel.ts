@@ -144,6 +144,13 @@ const REFUSE_SECONDS = 1.8;
 /** How far back the camera stands to look at a painting. */
 const ART_VIEW_DISTANCE = 1.15;
 
+/** Height of a hung picture's centre. Module-wide: `hangOnWalls` hangs at it
+ *  and `clearOfGlass` tests window overlap against the band around it. */
+const PICTURE_Y = 1.9;
+
+/** Clear air demanded between a picture's frame and a pane's edge, metres. */
+const PICTURE_GLASS_MARGIN = 0.15;
+
 /** The breakfast tables' flat top, metres — the asset's own figure. */
 const TABLE_TOP = 0.74;
 
@@ -2253,11 +2260,10 @@ export class Hotel implements GameSystem {
       emissiveIntensity: 0.42,
     });
 
-    for (const at of plan.at) {
-      const wanted: [number, number] = [at - plan.width / 2, at + plan.width / 2];
+    for (const glazed of glazedSpans(room, side)) {
       for (const [from, to] of spans) {
-        const a = Math.max(wanted[0], from);
-        const b = Math.min(wanted[1], to);
+        const a = Math.max(glazed.from, from);
+        const b = Math.min(glazed.to, to);
         if (b - a < MIN_PANE_WIDTH) continue;
         const width = b - a;
         const along = (a + b) / 2;
@@ -3397,7 +3403,6 @@ export class Hotel implements GameSystem {
    */
   private hangOnWalls(shell: Group, room: HotelRoom, plan: WallPlan): void {
     const SCONCE_Y = 1.85;
-    const PICTURE_Y = 1.9;
     for (const x of plan.north ?? []) {
       const light = sconce(room.theme.glow);
       light.position.set(x, SCONCE_Y, -room.halfZ + 0.28);
@@ -3422,15 +3427,30 @@ export class Hotel implements GameSystem {
     // to allocate them by hand.
     (plan.pictures ?? []).forEach((frame, index) => {
       const art = frame.seed % ARTWORK_COUNT;
+      // **Never across the glass.** Jim, live play, 7 Aug 2026: *"some
+      // paintings overlap the windows and clip into them."* The declared
+      // spot is only a wish: the same glazed-span authority `glazeWall`
+      // builds the panes from decides whether a picture may hang there, and
+      // slides it along the wall to the nearest clear stretch when not —
+      // so moving a window can never quietly re-cover a painting.
+      // `check:hotel` probe 12 measures the built frames against the built
+      // panes.
+      const along = clearOfGlass(room, frame.wall, frame.along, frame.width, frame.height);
+      if (along === null) {
+        console.warn(
+          `hotel: no clear wall for the ${room.space} ${frame.wall} picture at ${frame.along} — dropped`,
+        );
+        return;
+      }
       const painting = paintedPicture(frame.width, frame.height, art);
       // The way the picture faces, which is also the way the camera has to
       // come at it. North-wall pictures face +Z; west-wall ones face +X.
       const normalX = frame.wall === 'north' ? 0 : 1;
       const normalZ = frame.wall === 'north' ? 1 : 0;
       if (frame.wall === 'north') {
-        painting.position.set(frame.along, PICTURE_Y, -room.halfZ + 0.31);
+        painting.position.set(along, PICTURE_Y, -room.halfZ + 0.31);
       } else {
-        painting.position.set(-room.halfX + 0.31, PICTURE_Y, frame.along);
+        painting.position.set(-room.halfX + 0.31, PICTURE_Y, along);
         painting.rotation.y = Math.PI / 2;
       }
       shell.add(painting);
@@ -3717,6 +3737,67 @@ export class Hotel implements GameSystem {
 }
 
 // ----------------------------------------------------------------- helpers
+
+/**
+ * The glazed stretches of one wall, straight from the room's declaration —
+ * **the one owner of "where is there glass"**. Two readers: `glazeWall`
+ * builds the panes inside these spans (clipped to the wall's solid spans),
+ * and `clearOfGlass` refuses to hang a picture across them. They used to
+ * read the declaration independently — which is to say the pictures did not
+ * read it at all, and hung straight over the lobby's west window.
+ */
+function glazedSpans(
+  room: HotelRoom,
+  side: WallSide,
+): readonly { readonly from: number; readonly to: number; readonly sill: number; readonly head: number }[] {
+  const plan = room.windows[side];
+  if (!plan) return [];
+  return plan.at.map((at) => ({
+    from: at - plan.width / 2,
+    to: at + plan.width / 2,
+    sill: plan.sill,
+    head: plan.head,
+  }));
+}
+
+/**
+ * Where a picture of `width` × `height` may actually hang on this wall, at or
+ * near the declared `along` — slid to the nearest clear stretch when the
+ * declared spot would put it over a pane (at the picture's own heights) or
+ * across the wall's doorway gap, or `null` when the whole wall is spoken
+ * for. The declared position is a wish; the glazing is the law.
+ */
+function clearOfGlass(
+  room: HotelRoom,
+  side: 'north' | 'west',
+  along: number,
+  width: number,
+  height: number,
+): number | null {
+  const bandLow = PICTURE_Y - height / 2;
+  const bandHigh = PICTURE_Y + height / 2;
+  // Panes that share any height with the picture, plus the doorway gap,
+  // which is forbidden at every height.
+  const forbidden: [number, number][] = glazedSpans(room, side)
+    .filter((pane) => pane.sill < bandHigh && pane.head > bandLow)
+    .map((pane) => [pane.from, pane.to]);
+  const gap = room.gaps[side];
+  if (gap) forbidden.push([gap[0], gap[1]]);
+
+  const wallHalf = side === 'north' ? room.halfX : room.halfZ;
+  const reach = width / 2 + PICTURE_GLASS_MARGIN;
+  const fits = (at: number): boolean =>
+    at - reach >= -wallHalf + 0.3 &&
+    at + reach <= wallHalf - 0.3 &&
+    forbidden.every(([from, to]) => at + reach <= from || at - reach >= to);
+
+  if (fits(along)) return along;
+  for (let step = 0.1; step <= wallHalf * 2; step += 0.1) {
+    if (fits(along + step)) return along + step;
+    if (fits(along - step)) return along - step;
+  }
+  return null;
+}
 
 /**
  * Moves `current` toward `target` at the automatic doors' own rate.

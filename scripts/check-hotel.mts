@@ -574,6 +574,47 @@ if (keyedReach < 1) {
   }
 }
 
+// ---------------------------------------- 12. no painting hangs over a window
+//
+// Jim, live play, 7 Aug 2026: *"some paintings overlap the windows and clip
+// into them."* Confirmed numerically by QA on the lobby's west wall: painting
+// span 3.15–4.85 across a pane spanning 2.3–4.1 at overlapping heights.
+// Pictures used to be hung with no knowledge of the glazing; now
+// `Hotel.hangOnWalls` asks the same declared-pane authority `glazeWall`
+// builds from and slides along the wall to clear the glass.
+//
+// Measured on the built scene, not the declarations: every 'hotel.artwork'
+// group's world box against every 'hotel.window' pane's. Proven red before
+// trusted green — pre-fix this reported exactly the lobby overlap above.
+{
+  hotel.hotelRoot.updateMatrixWorld(true);
+  const panes2: Box3[] = [];
+  const frames2: Box3[] = [];
+  hotel.hotelRoot.traverse((object) => {
+    if (object.name === 'hotel.window' && object instanceof Mesh) {
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (bounds) panes2.push(bounds.clone().applyMatrix4(object.matrixWorld));
+    }
+    if (object.name === 'hotel.artwork') {
+      frames2.push(new Box3().setFromObject(object));
+    }
+  });
+  for (const frame of frames2) {
+    for (const pane of panes2) {
+      const shrunk = frame.clone().expandByScalar(-0.01);
+      if (!shrunk.intersectsBox(pane)) continue;
+      const centre = new Vector3();
+      shrunk.getCenter(centre);
+      problems.push(
+        `a painting centred at (${centre.x.toFixed(1)}, ${centre.y.toFixed(1)}, ` +
+          `${centre.z.toFixed(1)}) intersects a window pane — it is hung across the glass`,
+      );
+    }
+  }
+  if (frames2.length === 0) problems.push('no hotel.artwork groups found — the paintings are gone');
+}
+
 // ------------------------------------------ 9. the close-ups keep their distance
 //
 // Jim, live play, 7 Aug 2026: the breakfast push-in *"often zooms in to
