@@ -359,12 +359,95 @@ export const PARK_LAYOUT: ParkLayout = cachedSolve(
   },
 );
 
+/**
+ * The plots as a flat array, built once.
+ *
+ * `PARK_LAYOUT.entries` is a `Map`, and `for (const e of map.values())`
+ * allocates an iterator on every call. That is invisible when a lamp post
+ * asks once; the Sky Cruiser's route search asks {@link clearOfFootprints}
+ * on **every sample of every candidate piece** — a Node CPU profile put the
+ * two functions below at 14% of the whole solve, most of it iterator churn
+ * and property loads off a `ReadonlyMap`. Same entries, same order, no
+ * allocation. Lazily built because `PARK_LAYOUT` is initialised in this very
+ * module and a top-level `[...values()]` here would read it mid-definition.
+ */
+interface PlotColumns {
+  readonly count: number;
+  readonly x: Float64Array;
+  readonly z: Float64Array;
+  readonly boundingRadius: Float64Array;
+  /** A circle's radius, or a rectangle's half-extent in x. */
+  readonly halfX: Float64Array;
+  /** A circle's radius again, or a rectangle's half-extent in z. */
+  readonly halfZ: Float64Array;
+  readonly isRect: Uint8Array;
+  readonly ids: readonly string[];
+}
+
+let plotColumns: PlotColumns | null = null;
+
+function plots(): PlotColumns {
+  if (plotColumns) return plotColumns;
+  const entries = [...PARK_LAYOUT.entries.values()];
+  const count = entries.length;
+  const columns: PlotColumns = {
+    count,
+    x: new Float64Array(count),
+    z: new Float64Array(count),
+    boundingRadius: new Float64Array(count),
+    halfX: new Float64Array(count),
+    halfZ: new Float64Array(count),
+    isRect: new Uint8Array(count),
+    ids: entries.map((entry) => entry.id),
+  };
+  for (let i = 0; i < count; i += 1) {
+    const entry = entries[i] as PlacedEntry;
+    columns.x[i] = entry.x;
+    columns.z[i] = entry.z;
+    columns.boundingRadius[i] = entry.boundingRadius;
+    if (entry.footprint.kind === 'circle') {
+      columns.halfX[i] = entry.footprint.radius;
+      columns.halfZ[i] = entry.footprint.radius;
+    } else {
+      columns.isRect[i] = 1;
+      columns.halfX[i] = entry.footprint.halfX;
+      columns.halfZ[i] = entry.footprint.halfZ;
+    }
+  }
+  plotColumns = columns;
+  return columns;
+}
+
+/** The index of an id in {@link plots}, or -1. Cached: the callers below ask
+ * with the same constant id millions of times in one route solve. */
+const exceptIndices = new Map<string, number>();
+function exceptIndex(exceptId: string | undefined): number {
+  if (exceptId === undefined) return -1;
+  const known = exceptIndices.get(exceptId);
+  if (known !== undefined) return known;
+  const found = plots().ids.indexOf(exceptId);
+  exceptIndices.set(exceptId, found);
+  return found;
+}
+
 /** Clear of every plot's bounding circle by `radius`. Pure, for the plans
  * solved at module load (train, coaster, ferris exit) — lives here so none
  * of them has to import another ride's plan just to ask about the layout. */
 export function clearOfPlots(x: number, z: number, radius: number): boolean {
-  for (const entry of PARK_LAYOUT.entries.values()) {
-    if (Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + radius) return false;
+  const plot = plots();
+  const px = plot.x;
+  const pz = plot.z;
+  const pr = plot.boundingRadius;
+  for (let i = 0; i < plot.count; i += 1) {
+    const reach = (pr[i] as number) + radius;
+    // `hypot(a, b) >= |a|` always, so either axis alone being out of reach
+    // settles it — and settles it exactly as the hypot would have, for a
+    // fraction of the cost. This is a prefilter, never a second rule.
+    const dx = x - (px[i] as number);
+    if (dx >= reach || -dx >= reach) continue;
+    const dz = z - (pz[i] as number);
+    if (dz >= reach || -dz >= reach) continue;
+    if (Math.hypot(dx, dz) < reach) return false;
   }
   return true;
 }
@@ -379,14 +462,33 @@ export function clearOfPlots(x: number, z: number, radius: number): boolean {
  * the near-relation just arranged. The footprint is what is really built.
  */
 export function clearOfFootprints(x: number, z: number, margin: number, exceptId?: string): boolean {
-  for (const entry of PARK_LAYOUT.entries.values()) {
-    if (entry.id === exceptId) continue;
-    if (entry.footprint.kind === 'circle') {
-      if (Math.hypot(x - entry.x, z - entry.z) < entry.footprint.radius + margin) return false;
+  const plot = plots();
+  const skip = exceptIndex(exceptId);
+  const px = plot.x;
+  const pz = plot.z;
+  const hx = plot.halfX;
+  const hz = plot.halfZ;
+  const rect = plot.isRect;
+  for (let i = 0; i < plot.count; i += 1) {
+    if (i === skip) continue;
+    if (rect[i] === 0) {
+      const reach = (hx[i] as number) + margin;
+      // Axis prefilters, exact rather than approximate: `hypot(a, b) >= |a|`,
+      // so either axis alone exceeding the reach settles the hypot too.
+      const dx = x - (px[i] as number);
+      if (dx >= reach || -dx >= reach) continue;
+      const dz = z - (pz[i] as number);
+      if (dz >= reach || -dz >= reach) continue;
+      if (Math.hypot(dx, dz) < reach) return false;
       continue;
     }
-    const dx = Math.abs(x - entry.x) - entry.footprint.halfX;
-    const dz = Math.abs(z - entry.z) - entry.footprint.halfZ;
+    const dx = Math.abs(x - (px[i] as number)) - (hx[i] as number);
+    // Same argument on the rectangle: `outside >= max(dx, 0)`, so a `dx` at or
+    // past the margin cannot be inside it, and `dx > 0` rules out the
+    // both-negative case as well.
+    if (dx >= margin) continue;
+    const dz = Math.abs(z - (pz[i] as number)) - (hz[i] as number);
+    if (dz >= margin) continue;
     const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
     if ((dx <= 0 && dz <= 0) || outside < margin) return false;
   }

@@ -1056,6 +1056,34 @@ function planSlide(): PlannedSlide {
     seed: PARK_SEED ^ 0x511de,
     vocabulary: SLIDE_VOCABULARY,
     desiredLength: DESIRED_LENGTH,
+    // **`maxLength: MAX_RIDEABLE_LENGTH` belongs here and is deliberately not
+    // set yet. Do not add it without reading this.**
+    //
+    // `unrideableComplaint` has always known that a chute past
+    // {@link MAX_RIDEABLE_LENGTH} is a lazy river rather than a slide, but it
+    // only ever gets to say so about a *finished* route — so the search grows
+    // routes past the ceiling, solves them, and has them thrown away one at a
+    // time. Measured on seed 5: **123 complete routes rejected, and no park at
+    // all.** `RouteBrief.maxLength` exists (see its doc) to hand the search the
+    // same number, turning a verdict into a wall.
+    //
+    // Switched on, measured over 60 seeds (7 Aug 2026): the slide's median
+    // solve fell **7.6 s -> 2.0 s**, seed 38 went from failing to solving, and
+    // seed 53's wasted work fell from 47 rejected routes to 2. But it reshapes
+    // the chute on *every* seed, and `test/procgen/invariants.ts`'s **`the
+    // ginormous slide stands on legs a child can walk between` then fails on
+    // seed 2** — the same invariant that `generate.ts`'s `scoreOf` comment
+    // records catching an unaimed route on seed 5. The check is right and the
+    // change is incomplete: the supports (`slide/supports.ts`) have to be able
+    // to stand under the reshaped chute before the ceiling can go in.
+    //
+    // Two other things to fix in the same pass: seed 5 becomes an honest "no
+    // route exists" rather than a dishonest "123 too-long routes", but spends
+    // **18.7 million candidate pieces** discovering it (an attempt should bail
+    // once nothing fits under the ceiling, rather than re-deriving that at
+    // every joint); and seed 5's slide may simply be infeasible at 75 m from
+    // the door and pit poses it is given, which is a question for the family
+    // rather than for the solver.
     closed: false,
     startPoses: doorPoses(),
     endPoses: pitPoses(),
