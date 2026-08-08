@@ -63,12 +63,12 @@
  * in the Y-Z plane (X held constant — a real roll about the axle) by the
  * angle its own circumference implies, not by re-deriving the formula.
  */
-import { Box3, Mesh, Raycaster, Vector3 } from 'three';
+import { Box3, BufferGeometry, Mesh, Raycaster, Vector3 } from 'three';
 import { createCart, WHEEL_RADIUS, SEAT_HEIGHT, CART_PARTS } from '../src/world/railRace/cart.ts';
 import { cartAssetPart, cartAssetGeometry, cartAssetPartNames } from '../src/art/models/cartAsset.ts';
 import { isShared } from '../src/art/style/materials.ts';
 import { RAIL_GAUGE } from '../src/world/railRace/track.ts';
-import { RIDE_SCALE } from '../src/world/railRace/route.ts';
+import { RIDE_SCALE, CART_WIDTH_AT_PARK_SCALE } from '../src/world/railRace/route.ts';
 import { RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
 import { RaceCamera } from '../src/world/railRace/camera.ts';
 import { PLAYER_LANE } from '../src/world/railRace/route.ts';
@@ -102,6 +102,136 @@ assert(
   Math.abs(Math.abs(wheelFl.position.x) - expectedHalfGauge) < 1e-6,
   `wheel-fl's baked x (${wheelFl.position.x.toFixed(4)}) equals RAIL_GAUGE / RIDE_SCALE / 2 (${expectedHalfGauge.toFixed(4)})`,
 );
+
+// --- the tub really is CART_WIDTH_AT_PARK_SCALE wide -------------------------
+//
+// The tub's shape is authored in `art/blend/cart.blend`; `CART_WIDTH_AT_PARK_SCALE`
+// in `railRace/route.ts` is the number **the park is built around** — every
+// lane's spacing, the trestle beams, the duck bars' span and the finish arch's
+// own half-width all come off it. Two definitions of one thing kept in step by
+// hand is this repo's most common bug, and here the two live in different
+// languages in different directories, so nothing but this line can catch them
+// disagreeing. It is exactly the shape of the `wheel-fl` gauge assertion above.
+{
+  const hopper = cartAssetPart('hopper');
+  hopper.geometry.computeBoundingBox();
+  const box = hopper.geometry.boundingBox!;
+  const halfWidth = Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) * hopper.scale.x;
+  const expected = CART_WIDTH_AT_PARK_SCALE / 2;
+  assert(
+    Math.abs(halfWidth - expected) < 1e-3,
+    `the built hopper's widest vertices (±${halfWidth.toFixed(4)}) match ` +
+      `CART_WIDTH_AT_PARK_SCALE / 2 (${expected.toFixed(4)}) — the asset and the number the ring ` +
+      `is derived from agree`,
+  );
+}
+
+// --- every part is a CLOSED shell: no hole to see the park through ----------
+//
+// Round five. Jim, 7 August 2026, riding it: *"plus can see the corners though
+// the cart model, it needs to be a single complete mesh"*.
+//
+// The `hopper` was a zero-thickness open tub — a floor and four walls with no
+// inside at all, 12 boundary edges in one loop right round its rim, while every
+// other part of the cart was already a closed solid. Its faces all point
+// outward and `toonMaterial()` leaves `side` at three.js's default `FrontSide`,
+// so each interior surface presented a *back* face to the ride camera and was
+// culled: you saw straight through the tub into the park wherever the seat, the
+// seat back and the rider did not cover its inside — which is the corners.
+//
+// **Why counting faces or checking the asset loads would not have caught it.**
+// Both pass perfectly on a cart with a hole in it; the file was never
+// malformed, the shape was. The only thing that distinguishes a solid from a
+// paper shell is whether every edge has a face on both sides of it, so that is
+// what this measures — on the built asset the game actually renders, not on
+// `cart.blend` and not on the build script's intentions.
+//
+// **Welded by position first, and that is the load-bearing detail.** A glTF
+// export splits one vertex into several wherever its normal or UV differs, so
+// two triangles sharing an edge in Blender arrive here quoting *different*
+// indices for the same corner. Counting raw index pairs would report every
+// smoothing split as a hole and call a flawless solid the worst mesh in the
+// park. Quantising positions to the micron and merging on that measures the
+// surface rather than the buffer layout.
+function openEdgesOf(geometry: BufferGeometry): {
+  boundary: number;
+  nonManifold: number;
+  where: string[];
+} {
+  const position = geometry.getAttribute('position');
+  const index = geometry.getIndex();
+
+  const QUANTUM = 1e5; // a micron, far below any real feature on a 1.1 m tub
+  const canonical = new Map<string, number>();
+  const idOf = new Int32Array(position.count);
+  for (let i = 0; i < position.count; i += 1) {
+    const key =
+      `${Math.round(position.getX(i) * QUANTUM)},` +
+      `${Math.round(position.getY(i) * QUANTUM)},` +
+      `${Math.round(position.getZ(i) * QUANTUM)}`;
+    let id = canonical.get(key);
+    if (id === undefined) {
+      id = canonical.size;
+      canonical.set(key, id);
+    }
+    idOf[i] = id;
+  }
+
+  const cornerAt = (n: number): number => idOf[index ? index.getX(n) : n]!;
+  const triangles = (index ? index.count : position.count) / 3;
+
+  const uses = new Map<string, number>();
+  for (let t = 0; t < triangles; t += 1) {
+    const corners = [cornerAt(t * 3), cornerAt(t * 3 + 1), cornerAt(t * 3 + 2)];
+    for (let e = 0; e < 3; e += 1) {
+      const p = corners[e]!;
+      const q = corners[(e + 1) % 3]!;
+      if (p === q) continue; // a degenerate sliver has no edge to speak of
+      uses.set(`${Math.min(p, q)}_${Math.max(p, q)}`, (uses.get(`${Math.min(p, q)}_${Math.max(p, q)}`) ?? 0) + 1);
+    }
+  }
+
+  // A vertex id back to a readable position, so a failure names a real place on
+  // the model rather than an opaque index.
+  const positionOfId = new Map<number, string>();
+  for (let i = 0; i < position.count; i += 1) {
+    if (!positionOfId.has(idOf[i]!)) {
+      positionOfId.set(
+        idOf[i]!,
+        `(${position.getX(i).toFixed(3)}, ${position.getY(i).toFixed(3)}, ${position.getZ(i).toFixed(3)})`,
+      );
+    }
+  }
+
+  let boundary = 0;
+  let nonManifold = 0;
+  const where: string[] = [];
+  for (const [key, count] of uses) {
+    if (count >= 2) {
+      if (count > 2) nonManifold += 1;
+      continue;
+    }
+    boundary += 1;
+    if (where.length < 4) {
+      const [p, q] = key.split('_').map(Number) as [number, number];
+      where.push(`${positionOfId.get(p)}–${positionOfId.get(q)}`);
+    }
+  }
+  return { boundary, nonManifold, where };
+}
+
+for (const name of CART_PARTS) {
+  const { boundary, nonManifold, where } = openEdgesOf(cartAssetGeometry(name));
+  assert(
+    boundary === 0 && nonManifold === 0,
+    `${name} is a closed shell — every edge has a face on both sides of it` +
+      (boundary === 0 && nonManifold === 0
+        ? ''
+        : `; found ${boundary} open edge(s) and ${nonManifold} non-manifold edge(s). ` +
+          `An open edge is a hole you can see the park through, because ` +
+          `MeshToonMaterial culls the back faces behind it. First few: ${where.join('  ')}`),
+  );
+}
 
 // --- the seat's own top surface is exactly SEAT_HEIGHT -----------------------
 const seatBase = cartAssetPart('seat-base');

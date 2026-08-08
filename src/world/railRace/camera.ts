@@ -1,5 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { damp } from '../../core/mathUtils';
+import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
 
 /**
@@ -233,6 +233,122 @@ const LOOKAHEAD_STATIONS = 512;
 const FOLLOW = 0.12;
 
 /**
+ * **How much further back the rig stands at full speed** — 0.34 means a third
+ * again as far away when flat out as when crawling.
+ *
+ * Jim, 6 August 2026: the camera should pull back as she speeds up, showing more
+ * track ahead, *eased not snapped* — and he named why it matters: a duck bar
+ * slows her hard, so the transition happens right where she is looking.
+ *
+ * ### Why this can be a plain multiplier and change nothing else
+ *
+ * It scales {@link RaceCamera.stand} **and** {@link RaceCamera.look} by the same
+ * factor, which is a uniform scaling of the whole rig *about the rider*. That
+ * changes every distance and no direction: the camera's aim, its tilt, its swing
+ * and the rider's own position on screen all come out bit-identical, and the only
+ * thing that moves is how many metres of the world the lens covers. So none of
+ * the framing the family signed off is at risk — {@link AHEAD} is a floor and
+ * this only ever raises it.
+ *
+ * That is also why it is applied here rather than by re-running {@link solve}:
+ * solving per frame would re-derive the swing and the stand-off from a moving
+ * number and could walk the rider off her mark.
+ */
+const SPEED_PULL_BACK = 0.34;
+
+/**
+ * The speed {@link SPEED_PULL_BACK} is reached at, m/s.
+ *
+ * `simulate.ts`'s `MAX_SPEED` is a hard ceiling that nothing actually touches —
+ * a strong player cruises about 33.5 and a child about 30 — so pinning the zoom
+ * to it would spend most of its range on speeds the ride never sees. 32 is where
+ * real racing happens, and the factor is clamped, so going faster simply holds
+ * the widest framing.
+ */
+const PULL_BACK_AT = 32;
+
+/**
+ * Half-life of the zoom's easing, seconds.
+ *
+ * Much slower than {@link FOLLOW}, deliberately: the follower has to keep the
+ * rider on her mark and so must be quick, while the zoom is the thing Jim asked
+ * to be *eased*. A bonk drops her speed by two thirds in one frame, and at
+ * `FOLLOW`'s 0.12 s that would read as the picture flinching. 0.55 s lets the
+ * camera drift in over about a second, which reads as a camera operator easing
+ * off rather than a cut.
+ *
+ * A half-life, not a per-frame lerp, so it behaves the same on a 120 Hz monitor
+ * as on a struggling phone.
+ */
+const ZOOM_HALF_LIFE = 0.55;
+
+/**
+ * **How far the rig stands scaled out from a rider travelling at `speed`** — the
+ * resting value the easing in {@link RaceCamera.update} is always heading for.
+ *
+ * One owner, because two things need this number and they used to disagree in
+ * the way that matters: `update` eased towards it, and `reset` simply assumed 1.
+ * That was correct for `reset`'s own job (snapping to a rider on the start line,
+ * who really is stationary) and quietly wrong for everything that *measured* the
+ * rig through `reset`. The camera invariant in `test/procgen` did exactly that,
+ * so it probed a stand-off 34% shorter than the one the game holds for almost
+ * the whole race — and passed, while the rig a child actually rides ran
+ * backwards on 2.7% of the lap. See {@link RaceCamera.reset}.
+ *
+ * **The zoom is the quantity the reversal is decided by**, which is what makes
+ * that a bug in the check rather than a detail: it scales the stand-off, and a
+ * rig standing further out along the normal of a bend tighter than its own
+ * stand-off is precisely what runs the picture the wrong way.
+ */
+export function zoomAtSpeed(speed: number): number {
+  return 1 + SPEED_PULL_BACK * clamp(speed / PULL_BACK_AT, 0, 1);
+}
+
+/**
+ * **The speed the zoom stops growing at**, re-exported so a check can probe the
+ * rig at the framing the game actually holds rather than at the resting one.
+ *
+ * Anything at or above this is the widest the picture ever gets, and a race is
+ * spent there: a child cruises about 30 m/s and a strong player 33.5.
+ */
+export const FULL_PULL_BACK_SPEED = PULL_BACK_AT;
+
+/**
+ * **How much forward progress the rig insists on keeping**, metres of camera per
+ * metre of rider, when deciding how far it may pull back. See
+ * {@link RaceCamera.measureZoomCeiling}.
+ *
+ * Deliberately **not** `CAMERA_MIN_FORWARD_PROGRESS`, the floor the procgen
+ * invariant asserts against, and the gap between them is the point. If the rig
+ * aimed at exactly the number the check tests for, the check would be reading
+ * back this constant and would go green on a ceiling that had stopped being
+ * applied at all — it is the same hollow-check shape this ride has already been
+ * bitten by four times. The rig keeps 0.15; the invariant demands 0.05 of the
+ * *built* ring; neither can satisfy the other.
+ */
+const FORWARD_MARGIN = 0.15;
+
+/**
+ * Stations the zoom ceiling is solved at — about one every 0.6 m of a 600 m lap.
+ *
+ * Finer than {@link LOOKAHEAD_STATIONS} because a hairpin's reversal spans only
+ * ~16 m of track and the ceiling has to sit *under* it, not average through it.
+ */
+const CEILING_STATIONS = 1024;
+
+/**
+ * How far either side of a station the ceiling is pulled down to its
+ * neighbours', metres.
+ *
+ * The table is sampled and the ring is not, so a bend that peaks between two
+ * stations would otherwise be missed entirely. It also sets how far ahead of a
+ * hairpin the rig starts easing in — 8 m is a quarter-second at racing speed,
+ * fast enough to be in place before the corner and slow enough not to read as a
+ * step.
+ */
+const CEILING_ERODE = 8;
+
+/**
  * The lag a follower with that half-life settles into behind a target moving at
  * constant speed, in seconds — `halfLife / ln 2`.
  *
@@ -278,6 +394,119 @@ export const RIDER_RIDE_HEIGHT = 1.9;
 
 const UP = new Vector3(0, 1, 0);
 
+/**
+ * **How far a rider turns towards this camera so her face can be seen at all.**
+ *
+ * Jim, riding it on 5 August 2026: *"we can't see the face because the player
+ * needs to face towards the camera so you can see their expression."* He is
+ * right, and it is the whole of PR #223: a frowning face nobody can ever look
+ * at is a feature that does not exist.
+ *
+ * The rig above stands square-on to the chord it frames, which measures
+ * **81.1° off the rider's own forward** — identically at every window shape and
+ * every point on the ring, because a ring is the same shape everywhere and
+ * {@link RaceCamera.solve} only ever changes how *far* out it stands, never the
+ * bearing. So she was in near-perfect profile: measured by projecting her real
+ * eyes through this real rig, one of them sat at a facing of −0.25 on a monitor
+ * and −0.35 on a phone — round the back of her head, not drawn at all — while
+ * the other grazed at 0.48, and both landed on the same screen x.
+ *
+ * Turning the whole 81.1° would point her face straight down the lens and her
+ * shoulders straight out of the cart. This turns **50° of it**, which leaves a
+ * three-quarter view rather than a mugshot, and she still plainly races
+ * forwards.
+ *
+ * **And only while she is sad.** Jim, 6 August 2026: *"they need turn their
+ * head to the camera only on sad expression, not all the time"* — which is the
+ * better feature, because the turn exists to make a bonk *readable* and turning
+ * permanently spends that readability on every ordinary moment of the race. She
+ * looks round at you **because** she is sad about it, and the rest of the time
+ * she watches where she is going. `sadness` is `RailRace`'s own eased
+ * `Cart.sad`, driven by `riderIsSad` and by nothing else, so the frown and the
+ * turn are one feature and cannot disagree about whether it is happening.
+ *
+ * **50 and not more, because on a phone the two pull against each other.** She
+ * is framed hard left in portrait (`RIDER_SCREEN_X_PORTRAIT`, a documented
+ * floor), and turning her swings an eye — 0.6 m off the skull's centre, 1.5 m
+ * once `RIDE_SCALE` has had it — further towards that edge. Swept with
+ * `check:rail-race`'s own measurement, worst case anywhere on the ring, as
+ * (how squarely the worse eye faces the lens) / (how far it stays inside the
+ * picture, in NDC):
+ *
+ * ```
+ *          monitor          phone
+ *   0°     -0.272 / 0.227   -0.371 / 0.268   ← one eye behind the head
+ *  40°      0.392 / 0.238    0.279 / 0.116
+ *  50°      0.546 / 0.241    0.437 / 0.061   ← here
+ *  60°      0.685 / 0.244    0.003 of margin left
+ * ```
+ *
+ * A monitor would happily take 60°; a phone runs out of picture. One number
+ * serves both, so it is set where the phone still has real room.
+ *
+ * Nothing here touches steering. GAME_DESIGN.md's CONTROL rule governs what a
+ * *button* does; this is a pose, and the cart, the rails and the direction she
+ * travels are all exactly as they were.
+ */
+export const FACE_TURN_MAX = (50 * Math.PI) / 180;
+
+/**
+ * Of {@link FACE_TURN_MAX}, the share the **head** contributes rather than the
+ * body — so 21° of head on top of 29° of shoulder.
+ *
+ * Split, rather than all neck, because `ferrisWheel/gondola.ts` has already
+ * settled this exact question for a seated figure — *"the whole toy turns, not
+ * its neck"* — and this kid has no neck to turn: `art/models/kid.ts` puts the
+ * head pivot *inside* the top of the torso ("what hides the neck"), so a large
+ * yaw on its own is a skull revolving inside a jumper. 21° also keeps the head
+ * inside the 20°–35.5° band of head yaws the park already uses elsewhere (the
+ * shopkeeper's idle, the backpack pet's peek); nothing in the game had ever
+ * yawed a person's head further.
+ */
+export const FACE_TURN_HEAD_SHARE = 0.42;
+
+/** A rider's turn towards the camera, split between the two things that turn. */
+export interface FaceTurn {
+  /** Radians to add to the cart's own yaw, for the rider's root. */
+  readonly body: number;
+  /** Radians of `head.rotation.y` on top of that. */
+  readonly head: number;
+}
+
+const NO_TURN: FaceTurn = { body: 0, head: 0 };
+
+/**
+ * How far a rider facing `cartYaw` at `at` should come round towards a camera
+ * standing at `cameraAt` — see {@link FACE_TURN_MAX}.
+ *
+ * Takes the camera's **live** position rather than a bearing written down
+ * somewhere: this rig has already been re-solved twice on family feedback, and
+ * a second constant elsewhere saying "the camera is over there" is exactly the
+ * kind of copy that goes quietly stale the next time it moves.
+ *
+ * Pure, and exported, so `scripts/check-rail-race.mts` can pose a real kid with
+ * the very function the ride poses her with and then measure whether her eyes
+ * are actually visible — rather than re-deriving the turn and proving only that
+ * arithmetic agrees with itself. That check now runs it **both ways**: a check
+ * that only ever passed `sadness = 1` would go green while she stood turned
+ * towards the camera for the whole race, which is the bug Jim reported in the
+ * first place, inverted.
+ */
+export function faceTurnTowardsCamera(
+  cartYaw: number,
+  at: Vector3,
+  cameraAt: Vector3,
+  sadness: number,
+): FaceTurn {
+  const dx = cameraAt.x - at.x;
+  const dz = cameraAt.z - at.z;
+  if (sadness <= 0 || (dx === 0 && dz === 0)) return NO_TURN;
+  const full = clamp(angleDelta(cartYaw, Math.atan2(dx, dz)), -FACE_TURN_MAX, FACE_TURN_MAX);
+  const turn = full * clamp(sadness, 0, 1);
+  const head = turn * FACE_TURN_HEAD_SHARE;
+  return { body: turn - head, head };
+}
+
 /** Linear ramp from `a` to `b` as `t` runs from `lo` to `hi`, flat outside. */
 function ramp(t: number, lo: number, hi: number, a: number, b: number): number {
   const f = Math.min(1, Math.max(0, (t - lo) / (hi - lo)));
@@ -320,6 +549,17 @@ export class RaceCamera {
   private anchor = 0;
   private lastTravelled = 0;
   private speed = 0;
+  /**
+   * How far the rig is scaled out from the rider right now, 1 at a standstill.
+   * Eased on its own half-life — see {@link SPEED_PULL_BACK}.
+   */
+  private zoom = 1;
+  /**
+   * The largest zoom each point of the lap can carry — see
+   * {@link measureZoomCeiling}. Rebuilt by {@link solve}, because it depends on
+   * the stand-off that solves.
+   */
+  private zoomCeiling: readonly number[] = [];
 
   private readonly rider = new Vector3();
   private readonly out = new Vector3();
@@ -340,7 +580,9 @@ export class RaceCamera {
     const table: { along: number; out: number }[] = [];
     for (let i = 0; i < LOOKAHEAD_STATIONS; i += 1) {
       const station = (i / LOOKAHEAD_STATIONS) * this.route.path.length;
-      const frame = this.route.path.sampleAt(station);
+      // The rig's own frame — the smoothed one, so `solve` decomposes the
+      // look-ahead in exactly the frame `place` will rebuild the rig against.
+      const frame = this.route.path.guideAt(station);
       this.ringPoint(station, rider);
       this.ringPoint(station + AHEAD, ahead);
       const dx = ahead.x - rider.x;
@@ -353,11 +595,24 @@ export class RaceCamera {
     return table;
   }
 
-  /** Snaps the rig to a rider without a chase, for the start of a race. */
-  reset(travelled: number): void {
+  /**
+   * Snaps the rig to a rider without a chase, for the start of a race.
+   *
+   * `speed` is how fast that rider is already going, and it defaults to 0
+   * because the ride's own call is made on the start line. It exists because
+   * **everything that measures this rig does so through `reset`**, and a `reset`
+   * that always assumed a standstill made those measurements describe a camera
+   * nobody rides: the zoom reaches {@link zoomAtSpeed}(32) = 1.34 within a
+   * second of the lights going out and stays there, and the zoom is what scales
+   * the stand-off the reversal is decided by. Snapping *settled at a speed* is
+   * the honest thing to hand a probe, so it is the same call with the number
+   * filled in rather than a second entry point that could drift from this one.
+   */
+  reset(travelled: number, speed = 0): void {
     this.anchor = this.route.startDistance + travelled;
     this.lastTravelled = travelled;
-    this.speed = 0;
+    this.speed = speed;
+    this.zoom = zoomAtSpeed(speed);
     this.place();
   }
 
@@ -367,6 +622,11 @@ export class RaceCamera {
       this.speed = damp(this.speed, (travelled - this.lastTravelled) / dt, FOLLOW, dt);
     }
     this.lastTravelled = travelled;
+    // Stand further back the faster she is going, eased on its own much slower
+    // half-life than the follower's. See SPEED_PULL_BACK and `zoomAtSpeed` —
+    // the resting value lives there so `reset` cannot hold a different opinion
+    // of it, which is exactly what it used to do.
+    this.zoom = damp(this.zoom, zoomAtSpeed(this.speed), ZOOM_HALF_LIFE, dt);
     // Lead by the lag the follower is about to have, so it settles on the rider
     // at every speed rather than at one. See FOLLOW_LAG.
     const target = this.route.startDistance + travelled + FOLLOW_LAG * this.speed;
@@ -391,20 +651,36 @@ export class RaceCamera {
     // Both taken from the path's own frame. These used to be rebuilt here from
     // the bearing — a second, independent copy of the ring's geometry that only
     // agreed with `route.ts` for as long as both described the same circle.
-    const sample = this.route.path.sampleAt(s);
+    //
+    // The **guide** frame, not the geometry one: the rig stands far enough out
+    // along this normal that the ring's own tight bends would run it backwards.
+    // The rider still comes from `ringPoint`, which is exact, and the rider sits
+    // at the origin of this frame — so smoothing it rotates the whole rig about
+    // her and leaves her screen position untouched. See `CAMERA_GUIDE_WINDOW`.
+    const sample = this.route.path.guideAt(s);
     this.out.set(sample.normalX, 0, sample.normalZ);
     this.along.set(sample.tangentX, 0, sample.tangentZ);
 
+    // One factor on both, which is a uniform scaling of the rig about the rider:
+    // every direction survives it untouched and only the distances grow. See
+    // SPEED_PULL_BACK.
+    //
+    // Capped by what the ring can carry *here*. The pull-back is a want; the
+    // ceiling is the geometry, and on this ring's two hairpins the geometry wins
+    // — see `measureZoomCeiling`. It is a function of arc length alone, so it
+    // adds nothing that can drift or wind up: at the same point of the same lap
+    // it is the same number, at any speed and any frame rate.
+    const zoom = Math.min(this.zoom, this.zoomCeilingAt(s));
     this.camera.position
       .copy(this.rider)
-      .addScaledVector(this.out, this.stand.out)
-      .addScaledVector(this.along, this.stand.along)
-      .addScaledVector(UP, this.stand.rise);
+      .addScaledVector(this.out, this.stand.out * zoom)
+      .addScaledVector(this.along, this.stand.along * zoom)
+      .addScaledVector(UP, this.stand.rise * zoom);
     this.aim
       .copy(this.rider)
-      .addScaledVector(this.out, this.look.out)
-      .addScaledVector(this.along, this.look.along)
-      .addScaledVector(UP, this.look.rise);
+      .addScaledVector(this.out, this.look.out * zoom)
+      .addScaledVector(this.along, this.look.along * zoom)
+      .addScaledVector(UP, this.look.rise * zoom);
     this.camera.lookAt(this.aim);
     this.camera.updateMatrixWorld();
   }
@@ -547,6 +823,152 @@ export class RaceCamera {
     this.look.out = this.stand.out - (reach * cos) / SEC_TILT;
     this.look.along = this.stand.along + (reach * sin) / SEC_TILT;
     this.look.rise = 0;
+
+    // The rig has just changed size, so what the ring can carry has changed with
+    // it. See `measureZoomCeiling`.
+    this.zoomCeiling = this.measureZoomCeiling();
+  }
+
+  /**
+   * **How far the ring can let the rig pull back at each point on the lap**,
+   * before the picture starts running backwards — one entry per station, solved
+   * from the built ring's own geometry.
+   *
+   * ### Why a per-station ceiling and not a smaller {@link SPEED_PULL_BACK}
+   *
+   * The camera stands outside the ring, so on a bend that curves *away* from it
+   * the camera rides a tighter circle than the rider does — and once the
+   * stand-off exceeds that bend's radius, the camera physically moves backwards
+   * along the track while the rider moves forwards. The rider is still exactly on
+   * her screen mark (the whole rig is a rigid rotation about her), so what a child
+   * sees is the world swinging the wrong way behind her: the lurch Jim reported.
+   *
+   * The ring is the park's boundary pushed outward, and pushing a boundary
+   * outward *tightens* its concave corners. On the canonical seed that leaves two
+   * hairpins of about **22 m radius**, at 68 m and 473 m from the arch. The
+   * smoothed camera frame ({@link CAMERA_GUIDE_WINDOW}) is what makes those
+   * carriable at all, and 10 m of smoothing was measured to just clear them at
+   * the resting stand-off of 27.5 m.
+   *
+   * Then {@link SPEED_PULL_BACK} landed in the same PR and multiplied that
+   * stand-off by 1.34 — to 35.5 m, well inside a 22 m hairpin — and nothing
+   * caught it, because the procgen invariant that owns this drives the rig
+   * through `reset`, which pinned the zoom to 1. Measured on the canonical seed:
+   * the resting rig clears at 0.094 m of camera per metre of rider, and the
+   * racing rig reaches **−0.150 and runs backwards over 2.67% of the lap**.
+   *
+   * Both of the obvious levers are walled off, and both walls are measured:
+   *
+   * ```
+   *   guide window   racing reversal   check:rail-race
+   *      10 m         -0.150 (2.67%)   passes            <- shipping
+   *      12 m         -0.043 (0.79%)   FAILS  side-scroller 0.897
+   *      14 m         +0.055 (0.00%)   FAILS  swing 27.3°, eye facing 0.348
+   * ```
+   *
+   * — the drift a wider window adds and the reversal it removes live at the *same*
+   * two hairpins, so no window fixes one without breaking the other. And clamping
+   * the zoom globally to what the ring carries everywhere gives **1.062**, i.e. a
+   * 6% pull-back in place of the 34% Jim asked for and rode: the feature deleted
+   * to satisfy a constraint that only bites over ~30 m of a 600 m lap.
+   *
+   * So the ceiling is local. The rig pulls back the full 34% for the whole lap
+   * *except* through the two hairpins, where it eases in to its resting framing —
+   * which is what a camera operator does on a tight corner anyway.
+   *
+   * ### How it is solved rather than tuned
+   *
+   * The camera's position is `rider(s) + zoom · V(s)` with `V` the horizontal
+   * part of the rig's offset, so its forward progress is **affine in zoom**:
+   * `A(s) + zoom · B(s)`. Where `B` is negative the bend is working against the
+   * camera, and the largest zoom that still makes progress `FORWARD_MARGIN` falls
+   * straight out of rearranging that. No search, no tuning constant beyond the
+   * margin itself.
+   *
+   * Two passes finish it. **Erode** by {@link CEILING_ERODE} so a station never
+   * exceeds what its neighbours can take (the table is sampled, the ring is not),
+   * then **blur** over half that, which cannot raise any value above the raw
+   * ceiling — every term of the average is a minimum over a window that contains
+   * `s` — so the guarantee survives the smoothing that keeps the zoom from
+   * kinking.
+   *
+   * Floored at 1: the ceiling may take the *pull-back* away, never the resting
+   * stand-off, which is solved from the framing the family signed off and is not
+   * this function's to move.
+   */
+  private measureZoomCeiling(): readonly number[] {
+    const step = this.route.path.length / CEILING_STATIONS;
+    const here = new Vector3();
+    const next = new Vector3();
+    const raw: number[] = [];
+    for (let i = 0; i < CEILING_STATIONS; i += 1) {
+      const s = i * step;
+      // The rider's own tangent, from the faithful frame — the same direction
+      // "forwards" means everywhere else in this ride.
+      const sample = this.route.path.sampleAt(s);
+      this.ringPoint(s, here);
+      this.ringPoint(s + step, next);
+      const a = this.route.path.guideAt(s);
+      const b = this.route.path.guideAt(s + step);
+      // V(s), the horizontal offset the zoom scales.
+      const vax = a.normalX * this.stand.out + a.tangentX * this.stand.along;
+      const vaz = a.normalZ * this.stand.out + a.tangentZ * this.stand.along;
+      const vbx = b.normalX * this.stand.out + b.tangentX * this.stand.along;
+      const vbz = b.normalZ * this.stand.out + b.tangentZ * this.stand.along;
+      const riderTerm =
+        ((next.x - here.x) * sample.tangentX + (next.z - here.z) * sample.tangentZ) / step;
+      const zoomTerm =
+        ((vbx - vax) * sample.tangentX + (vbz - vaz) * sample.tangentZ) / step;
+      // progress = riderTerm + zoom * zoomTerm, and we want it >= FORWARD_MARGIN.
+      //
+      // Clamped into [1, the most the rig would ever ask for] rather than left
+      // open at the top, and that is not tidiness. Three quarters of this ring's
+      // stations are bending the camera's way and impose no ceiling at all; as
+      // `Infinity` they poison both passes below — an average of infinities is
+      // infinite, and interpolating between two of them is `Infinity - Infinity`,
+      // i.e. **NaN**, which then flows into the camera's position. It found me
+      // the way this repo's own notes say it always does: silently. Every
+      // `forward < least` comparison against NaN is false, so the reversal sweep
+      // reported a clean 0.094 while 1763 of its 2400 probes were placing the
+      // camera at NaN and being skipped. The stand-off, a running `Math.max`,
+      // was the only number on the line that had the decency to say so.
+      const unlimited = zoomAtSpeed(PULL_BACK_AT);
+      raw.push(
+        zoomTerm < -1e-9
+          ? clamp((FORWARD_MARGIN - riderTerm) / zoomTerm, 1, unlimited)
+          : unlimited,
+      );
+    }
+    const erodeSpan = Math.max(1, Math.round(CEILING_ERODE / step));
+    const eroded = raw.map((_, i) => {
+      let lowest = Number.POSITIVE_INFINITY;
+      for (let d = -erodeSpan; d <= erodeSpan; d += 1) {
+        const value = raw[(i + d + CEILING_STATIONS) % CEILING_STATIONS] as number;
+        if (value < lowest) lowest = value;
+      }
+      return lowest;
+    });
+    const blurSpan = Math.max(1, Math.round(erodeSpan / 2));
+    return eroded.map((_, i) => {
+      let total = 0;
+      let count = 0;
+      for (let d = -blurSpan; d <= blurSpan; d += 1) {
+        total += eroded[(i + d + CEILING_STATIONS) % CEILING_STATIONS] as number;
+        count += 1;
+      }
+      return total / count;
+    });
+  }
+
+  /** {@link zoomCeiling} at an arbitrary arc distance, linearly interpolated. */
+  private zoomCeilingAt(s: number): number {
+    const length = this.route.path.length;
+    const t = (((s % length) + length) % length) / length;
+    const exact = t * CEILING_STATIONS;
+    const i = Math.floor(exact);
+    const a = this.zoomCeiling[i % CEILING_STATIONS] as number;
+    const b = this.zoomCeiling[(i + 1) % CEILING_STATIONS] as number;
+    return a + (b - a) * (exact - i);
   }
 
   dispose(): void {

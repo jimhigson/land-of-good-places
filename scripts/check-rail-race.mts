@@ -90,11 +90,70 @@ import { RAIL_GAUGE_AT_PARK_SCALE } from '../src/world/railRace/track.ts';
 import {
   RACE_LAPS,
   RIVAL_SKILL,
+  CHILD_TAPS_PER_SECOND,
+  PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
   simulateField,
   simulateRailRace,
+  createRider,
+  stepRider,
+  scheduleForLevel,
   type Strategy,
+  type RaceLevel,
 } from '../src/world/railRace/simulate.ts';
-import { AHEAD, RaceCamera, RIDER_RIDE_HEIGHT } from '../src/world/railRace/camera.ts';
+import {
+  AHEAD,
+  FACE_TURN_MAX,
+  RaceCamera,
+  RIDER_RIDE_HEIGHT,
+  faceTurnTowardsCamera,
+} from '../src/world/railRace/camera.ts';
+import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
+import { DUCK_CLEARANCE_AT_PARK_SCALE } from '../src/world/railRace/hazards.ts';
+import {
+  BONK_SWAY,
+  poseRailRaceRider,
+  setRiderLegsVisible,
+  riderLegsShow,
+  cheerAt,
+  SEATED,
+  RESULT_SECONDS,
+  type RidePhase,
+  type RiderPose,
+} from '../src/world/railRace/duckPose.ts';
+import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
+import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
+import { createCart } from '../src/world/railRace/cart.ts';
+import { PALETTE } from '../src/core/palette.ts';
+import { Box3, DoubleSide, Group, Mesh, Object3D, Raycaster } from 'three';
+import { Player } from '../src/entities/Player.ts';
+import { CollisionWorld } from '../src/world/Collision.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import type { FrameContext } from '../src/core/types.ts';
+import type { InputSystem } from '../src/core/input/index.ts';
+
+/**
+ * A bounding box over only the parts that are actually **drawn**.
+ *
+ * `Box3.setFromObject` includes hidden children, which is wrong for a ride that
+ * switches its riders' legs off (`RailRace.legsShow`): it would report clipping
+ * nobody can see, and could pass a torso that genuinely went through the floor
+ * because a hidden foot was lower still.
+ */
+function visibleBox(root: Object3D): Box3 {
+  const box = new Box3();
+  root.updateWorldMatrix(true, true);
+  root.traverse((child) => {
+    if (!child.visible) return;
+    let node: Object3D | null = child;
+    while (node && node !== root) {
+      if (!node.visible) return;
+      node = node.parent;
+    }
+    if (child instanceof Mesh) box.expandByObject(child);
+  });
+  return box;
+}
 
 const problems: string[] = [];
 const say = (line: string): void => console.log(line);
@@ -565,6 +624,167 @@ require(
     'See MAX_V_FOV in railRace/camera.ts.',
 );
 
+// --- does it stand further back when she is going faster? --------------------
+//
+// Jim, 6 August 2026: the camera should pull back as she speeds up, showing more
+// track ahead, **eased not snapped**. Three separate claims live in that, and
+// each is asserted here against the real `RaceCamera`, driven frame by frame:
+//
+// 1. **It pulls back at all**, and by an amount worth the code.
+// 2. **The rider does not move on screen while it does.** This is the one that
+//    could quietly wreck the ride: `RIDER_SCREEN_X` is a promise the family
+//    signed off twice, and a zoom that walked her towards the edge would undo
+//    it. The rig is scaled about the rider, so this should be exact.
+// 3. **The easing is frame-rate independent**, i.e. a real half-life rather than
+//    a per-frame lerp. A per-frame lerp is the ordinary way to write this and it
+//    ties the camera's feel to the frame rate — the same ramp settles at a
+//    different place on a 240 Hz monitor than on a phone dropping frames. Asked
+//    for explicitly, so measured explicitly.
+//
+// All three drive `rig.update` with the same wall-clock ramp and differ only in
+// the step, so nothing here can agree with itself by construction.
+
+rig.resize(1280, 720);
+
+/** Drives the real rig at a constant speed for `seconds`, from a standstill. */
+function settle(speed: number, dt: number, seconds = 6): number {
+  rig.reset(0);
+  let travelled = 0;
+  for (let t = 0; t < seconds; t += dt) {
+    travelled += speed * dt;
+    rig.update(travelled, dt);
+  }
+  return travelled;
+}
+
+/** How far the lens ends up from the rider it is framing, in metres. */
+function standOff(travelled: number): number {
+  return rig.camera.position.distanceTo(onLane(route.startDistance + travelled, probe));
+}
+
+/** Where the rider sits across the picture, 0 at the left edge — her mark. */
+function riderMark(travelled: number): number {
+  return (onLane(route.startDistance + travelled, probe).project(rig.camera).x + 1) / 2;
+}
+
+const TICK = 1 / 60;
+const crawlRun = settle(2, TICK);
+const crawlStand = standOff(crawlRun);
+const crawlMark = riderMark(crawlRun);
+const racingRun = settle(32, TICK);
+const racingStand = standOff(racingRun);
+const racingMark = riderMark(racingRun);
+
+say('');
+say(
+  `zoom       stands ${crawlStand.toFixed(1)} m off at a crawl, ${racingStand.toFixed(1)} m at ` +
+    `racing speed (${((racingStand / crawlStand - 1) * 100).toFixed(1)}% further back)   ` +
+    `rider holds her mark at ${crawlMark.toFixed(4)} / ${racingMark.toFixed(4)} across`,
+);
+
+// 1. It has to actually pull back, and by enough to notice.
+require(
+  racingStand > crawlStand * 1.1,
+  `the camera stands ${racingStand.toFixed(2)} m off at racing speed against ` +
+    `${crawlStand.toFixed(2)} m at a crawl — under a tenth further back, which is not a zoom. See ` +
+    'SPEED_PULL_BACK in railRace/camera.ts.',
+);
+// ...and not so far that the ride turns into a map.
+require(
+  racingStand < crawlStand * 1.6,
+  `the camera pulls back to ${(racingStand / crawlStand).toFixed(2)}x its resting distance, which ` +
+    'is a different shot rather than the same shot with more road in it. See SPEED_PULL_BACK.',
+);
+
+// 2. **She holds her mark at every speed.** `RIDER_SCREEN_X` is a promise the
+//    family signed off twice, and a camera that walked her towards the edge as
+//    she sped up would undo it silently.
+//
+//    Measured end to end rather than as "the zoom contributes exactly zero",
+//    which is what this assertion said first and is a subtly different claim.
+//    The zoom really is a uniform scaling of the rig about the rider, so on its
+//    own it moves her not at all — but the **follower** does, a little: leading
+//    by `FOLLOW_LAG × speed` cancels the chase lag at every speed only to first
+//    order, leaving a residual that grows with speed. Watched at
+//    `SPEED_PULL_BACK = 0`, the drift is **0.0078** of the picture; with the
+//    pull-back switched on it is **0.0057**, i.e. the zoom slightly *improves*
+//    it. An assertion that blamed the zoom for the follower's residual would
+//    have been red on arrival for the wrong reason, and would have gone green
+//    again if someone deleted the lead-ahead.
+//
+//    So the bound is on what a child actually sees — under 2% of the picture
+//    across the entire speed range — and it catches a broken zoom easily,
+//    because scaling `stand` without `look` swings the aim and moves her by far
+//    more than that.
+const markDrift = Math.abs(racingMark - crawlMark);
+require(
+  markDrift < 0.02,
+  `the rider slides from ${crawlMark.toFixed(4)} to ${racingMark.toFixed(4)} across the picture ` +
+    `between a crawl and racing speed — ${(markDrift * 100).toFixed(1)}% of the width, and ` +
+    'RIDER_SCREEN_X is a promise the family signed off. Either the pull-back is not a uniform ' +
+    'scaling of the rig about the rider (it must scale `stand` and `look` by one factor, or the ' +
+    'aim swings), or FOLLOW_LAG has stopped cancelling the follower lag. See camera.ts.',
+);
+
+// 3. **Frame-rate independence**: the same wall clock at 30 Hz and at 240 Hz has
+//    to put the camera in the same place. A per-frame lerp — the ordinary way
+//    to write this — ties the camera's feel to the frame rate, so the ride
+//    behaves differently on a 240 Hz monitor than on a phone dropping frames.
+//
+//    **Sampled all the way along the ramp, not at one moment**, and that is not
+//    caution: watched at a single 1.2 s probe, a per-frame lerp of 0.05 was
+//    caught 1.768 m apart, but one of 0.2 slipped through at 0.028 m — a plain
+//    hand-tuned value, fast enough that both rates had already settled by the
+//    time the probe looked. The disagreement only exists *while the easing is
+//    easing*, so the probe has to be there for it. Taking the worst of a sweep
+//    catches a lerp of any speed: a slow one diverges late, a fast one early.
+//
+//    **The bound is not zero, and the reason is worth knowing before anyone
+//    tightens it.** `damp` is exact for a target that is standing still, but
+//    both followers here chase a target that is itself moving — the anchor
+//    chases a rider accelerating away, and the zoom chases a speed that is still
+//    settling — and stepping an exponential over a moving target carries an
+//    inherent first-order-in-`dt` error. That is a property of discrete time,
+//    not of a per-frame lerp, and it is most of what is left. Swept:
+//
+//    ```
+//      SPEED_PULL_BACK = 0 (no zoom at all)     0.071 m   <- the follower alone
+//      SPEED_PULL_BACK = 0.34 (shipping)        0.260 m   <- here
+//      SPEED_PULL_BACK = 1.5                    1.306 m
+//      per-frame lerp, 0.2 per frame            2.018 m   <- nearest failure
+//      per-frame lerp, 0.05 per frame           4.063 m
+//    ```
+//
+//    So 1.0 m: four times the shipping value, half the cheapest thing that is
+//    genuinely wrong. Tightening it towards 0.26 would be fitting the bound to
+//    today's `dt`s rather than to the fault it is looking for.
+const RAMP_PROBES = [0.1, 0.2, 0.3, 0.5, 0.8, 1.2];
+let worstRateGap = 0;
+let worstRateAt = 0;
+let worstSlow = 0;
+let worstFast = 0;
+for (const at of RAMP_PROBES) {
+  const slow = standOff(settle(32, 1 / 30, at));
+  const fast = standOff(settle(32, 1 / 240, at));
+  if (Math.abs(slow - fast) > worstRateGap) {
+    worstRateGap = Math.abs(slow - fast);
+    worstRateAt = at;
+    worstSlow = slow;
+    worstFast = fast;
+  }
+}
+say(
+  `           worst 30 Hz vs 240 Hz disagreement ${worstRateGap.toFixed(4)} m, ` +
+    `${worstRateAt.toFixed(1)} s into the ramp (${worstSlow.toFixed(3)} vs ${worstFast.toFixed(3)} m)`,
+);
+require(
+  worstRateGap < 1.0,
+  `${worstRateAt.toFixed(1)} s into the same acceleration the camera stands ${worstSlow.toFixed(3)} m ` +
+    `out at 30 Hz and ${worstFast.toFixed(3)} m at 240 Hz — ${worstRateGap.toFixed(3)} m apart, so ` +
+    'the easing is tied to the frame rate. Both the follower and the zoom must ease on a half-life ' +
+    'in seconds (see `damp`), never a per-frame lerp.',
+);
+
 // --- and is it pointed the right way, all the way round? ---------------------
 
 const forward = new Vector3();
@@ -700,6 +920,868 @@ for (const shape of POSES) {
       'becomes a map.',
   );
 }
+
+// --- does a duck bar actually clear a ducked head, and meet a standing one? --
+//
+// Jim, 5 August 2026: *"their head just passes through the bonkers like a ghost
+// which looks very bad"*. A duck bar has no collider — a bonk is decided by
+// button state at the crossing — so nothing in the game ever compared a bar's
+// height to a head's, and `DUCK_CLEARANCE_AT_PARK_SCALE` had been set twice
+// from a live reading that turns out to be 1.40 m out. The bar sat inside her
+// head in *both* states, so ducking looked exactly as wrong as not ducking.
+//
+// Measured by composing the real transform chain rather than re-doing the sum:
+// a real kid, parented into a real cart group at the ring's own scale, world
+// matrices updated, and her head's bounding box read back — hair and all,
+// because hair is what a family watches pass through a bar.
+
+say('');
+{
+  const barGeometry = duckBarAssetGeometry('bar');
+  barGeometry.computeBoundingBox();
+  const barHalfDepth = barGeometry.boundingBox
+    ? -barGeometry.boundingBox.min.y
+    : 0;
+
+  const railPoint = route.pointAt(
+    PLAYER_LANE,
+    route.wrap(route.startDistance),
+    new Vector3(),
+  );
+  const cartGroup = new Group();
+  cartGroup.position.copy(railPoint);
+  cartGroup.scale.setScalar(route.scale);
+  // A real cart, because the complaint was about her going through *it*.
+  const rideCart = createCart(PALETTE.markerPink);
+  cartGroup.add(rideCart.root);
+
+  // --- the rider is a real `Player`, driven through her real update order ----
+  //
+  // **This used to pose a bare `createKid` and it is the reason this PR was
+  // still broken behind a green build.** `poseRailRaceRider` is genuinely the
+  // single owner of `body.rotation.x` — but on the player it was not the last
+  // *writer*: `Player.update`'s riding branch runs `animate()` (where the pose
+  // is applied) and *then* `applyRidePose`, which assigned `body.rotation.x =
+  // 0.3` unconditionally. Calling the pose function directly, as this check
+  // did, skips that second write entirely — so seated / duck / boost /
+  // celebration measured 0.160 / 0.860 / 0.580 / −0.148 here while the game
+  // drew 0.300 for all four, and this file printed "clears by 0.73" about a bar
+  // that went through her head.
+  //
+  // So the rider below is a **real `Player`**, boarded the way `RailRace` boards
+  // her and posed the way `RailRace.poseRider` poses her, and every height on
+  // this page is read off the model *after* `Player.update` has finished with
+  // it. A check that cannot see the player's own pipeline cannot see the player's
+  // own bugs, however faithfully it calls the ride's functions.
+  const player = new Player(new CollisionWorld(), new IsoCamera(), new Vector3());
+  // `RailRace.requestBoard()`, in order.
+  player.beginRide();
+  player.model.root.scale.setScalar(RIDE_SCALE);
+  // Her group sits where `poseRider` puts it: on the cart's seat, at ring scale.
+  // `route.scale` for the seat and `RIDE_SCALE` for the model is not a slip — it
+  // is exactly the split the ride makes, kept so a third ring would show up here
+  // as a disagreement rather than as a silent pass.
+  const seatY = railPoint.y + SEAT_HEIGHT * route.scale;
+
+  /** A player who is aboard and pressing nothing — the riding branch reads no input. */
+  const idleInput = {
+    isDown: () => false,
+    wasPressed: () => false,
+    moveX: 0,
+    moveY: 0,
+  } as unknown as InputSystem;
+  let riderFrame = 0;
+
+  /**
+   * Poses her by `rider` and returns the top of her head, hair included, in
+   * metres over the rail head — **and her whole body's box**, because the
+   * complaint that started this was not about her head at all.
+   *
+   * Everything here is the game's own: `RailRace.poseRider` sets the pose field
+   * and the root's place, then `Player.update` runs the whole animation
+   * pipeline over it. Nothing re-creates a pose — a check that re-created one
+   * would prove only that two copies of the arithmetic agree with each other
+   * while she folded through the floor in the game.
+   */
+  const pose = (
+    rider: { duck: number; pump: number; cheer: number },
+    /**
+     * Sideways slide of the rider **relative to the cart**, in world metres.
+     *
+     * `RailRace.poseRider` places her at `cart.position.x + wobble` while the
+     * cart itself stays at `cart.position.x`, so after a bonk she really does
+     * travel across the tub she is sitting in. It is not part of `RiderPose`,
+     * which is exactly why sweeping the pose cube alone said everything was
+     * fine while Jim watched her hands come through.
+     */
+    sway = 0,
+  ): { headTop: number; headAt: Vector3; headDepth: number; body: Box3 } => {
+    // Seat her **first**, then pose — this order is `poseRider`'s and it is
+    // load-bearing. Posing first and seating afterwards would quietly undo any
+    // translation the pose performed, so the "root is still on the seat"
+    // assertion below would be asserting the line above it rather than the
+    // thing it names. That is the hollow-check disease this whole PR keeps
+    // running into.
+    player.setRidePose(railPoint.x + sway, seatY, railPoint.z, 0, 0);
+    player.railRaceRide = rider;
+    player.update({
+      dt: 1 / 60,
+      elapsed: 1,
+      input: idleInput,
+      playerPosition: player.position,
+      cameraForward: new Vector3(0, 0, 1),
+      frame: riderFrame++,
+    } satisfies FrameContext);
+    player.group.updateMatrixWorld(true);
+    const head = player.model.head;
+    return {
+      headTop: new Box3().setFromObject(head).max.y - railPoint.y,
+      headAt: head.getWorldPosition(new Vector3()),
+      // Along the track: the rider's group is positioned and scaled but never
+      // rotated here, so the model's own forward is world +Z.
+      headDepth: new Box3().setFromObject(head).getSize(new Vector3()).z,
+      body: visibleBox(player.model.root),
+    };
+  };
+
+  // Raced with the legs off, exactly as `RailRace.legsShow` has them — so what
+  // is measured below is what a family can actually see. Measuring hidden legs
+  // would fail the ride for clipping nobody will ever witness, and would miss
+  // a torso that really did go through the floor.
+  setRiderLegsVisible(player.model, false);
+
+  const uprightPose = pose({ duck: 0, pump: 0, cheer: 0 });
+  const duckedPose = pose({ duck: 1, pump: 0, cheer: 0 });
+  const standing = uprightPose.headTop;
+  const ducked = duckedPose.headTop;
+  const barUnderside = DUCK_CLEARANCE_AT_PARK_SCALE * route.scale - barHalfDepth;
+
+  say(
+    `duck bar   underside ${barUnderside.toFixed(2)} m over the rail   ` +
+      `head top ${ducked.toFixed(2)} ducked / ${standing.toFixed(2)} standing   ` +
+      `clears by ${(barUnderside - ducked).toFixed(2)}, strikes by ` +
+      `${(standing - barUnderside).toFixed(2)}`,
+  );
+
+  // Ducking has to work. This is the half that was broken: at the old 2.1 the
+  // underside sat at 4.88 m against a ducked head top of 6.42, so a bar went
+  // through her whichever way she played it.
+  require(
+    ducked < barUnderside,
+    `a ducked rider's head reaches ${ducked.toFixed(2)} m over the rail and the duck bar's ` +
+      `underside is at ${barUnderside.toFixed(2)} m — the bar passes through her head even when ` +
+      'she does the one thing the ride asks of her. See DUCK_CLEARANCE_AT_PARK_SCALE.',
+  );
+  // ...and not ducking has to be worth avoiding, or the bar is decoration and
+  // the whole mechanic is untaught. Raising the clearance until everything
+  // clears would "fix" the complaint above and quietly delete the game.
+  require(
+    standing > barUnderside,
+    `a standing rider's head only reaches ${standing.toFixed(2)} m over the rail and the duck ` +
+      `bar's underside is at ${barUnderside.toFixed(2)} m — she passes under it without ducking, ` +
+      'so there is nothing to duck for. See DUCK_CLEARANCE_AT_PARK_SCALE.',
+  );
+  // --- and does she stay inside the cart while she does it? -----------------
+  //
+  // The half of Jim's complaint that was never about the bar: *"ducking still
+  // just lowers the player and clips them through the car."* A check that the
+  // duck clears the bar would pass happily while her feet hung out of the
+  // bottom of the cart, which is exactly what the translation this replaced
+  // did — so the floor is asserted separately from the bar.
+  cartGroup.updateMatrixWorld(true);
+  const cartBox = new Box3().setFromObject(rideCart.root);
+  // The tub's own floor, which `cart.ts` builds at the wheels' axle height so
+  // the hopper clears them — the real surface she would come through, not the
+  // bounding box's bottom (which is the underside of the wheels and would let a
+  // torso sink through the whole cart before complaining).
+  const tubFloor = cartBox.min.y + WHEEL_RADIUS * route.scale;
+  say(
+    `ducked rider   lowest visible ${duckedPose.body.min.y.toFixed(2)} against a tub floor at ` +
+      `${tubFloor.toFixed(2)} (${(duckedPose.body.min.y - tubFloor).toFixed(2)} m clear)`,
+  );
+  require(
+    duckedPose.body.min.y > tubFloor,
+    `ducking puts the lowest part of the rider at ${duckedPose.body.min.y.toFixed(2)}, only ` +
+      `${(duckedPose.body.min.y - tubFloor).toFixed(2)} m above the cart's tub floor — she has ` +
+      `sunk out of the seat and through it. That is the whole of what "that's not ` +
+      `what ducking means" was about: the fold must move \`body\`, never \`root\` — see ` +
+      'railRace/duckPose.ts.',
+  );
+  // ...and the fold must be a fold. A pose that got its clearance by sliding
+  // the whole child down would leave her somewhere other than the seat — either
+  // by moving the model's own root, or by moving the group `setRidePose` put on
+  // the seat. Both are checked, because either would be the translation Jim
+  // rejected and only one of them is where the old bug lived.
+  require(
+    Math.abs(player.model.root.position.y) < 1e-6 &&
+      Math.abs(player.group.position.y - seatY) < 1e-6,
+    `the duck pose moved the rider off the seat — model root at ` +
+      `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
+      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)}. That is a ` +
+      'translation, not a duck.',
+  );
+
+  // --- the boost rock, the win jump, and the two of them meeting a duck ------
+  //
+  // **Assert the movement, not the flag.** Four times this PR has shipped a
+  // "boost is active"/"she won" boolean that was set correctly while nothing on
+  // screen moved a millimetre. So every one of these measures where her head
+  // actually ends up, through the real pose function, in the real cart.
+  // **The celebration is driven by the curve the game actually runs.** Feeding a
+  // hand-picked `cheer: 1` in here would measure only that the pose *can* lift
+  // her — it would stay green with `cheerAt` returning 0 forever, which is the
+  // "she won, and nothing moved" bug in its purest form. And 1 is not even a
+  // number the ride produces: the fade means the curve peaks near 0.90.
+  //
+  // Sampled at 60 Hz across the whole result phase, so the peak below is the
+  // highest she is ever actually posed at, on the frame she is posed at it.
+  const CHEER_TICK = 1 / 60;
+  const cheerCurve: number[] = [];
+  for (let t = 0; t <= RESULT_SECONDS; t += CHEER_TICK) cheerCurve.push(cheerAt(t));
+  const cheerPeak = Math.max(...cheerCurve);
+  // A hop is a run of frames off the ground: `max(0, sin)` leaves her at exactly
+  // 0 between them, which is what makes it hopping rather than bobbing.
+  let hops = 0;
+  for (let i = 1; i < cheerCurve.length; i += 1) {
+    if (cheerCurve[i]! > 0 && cheerCurve[i - 1]! === 0) hops += 1;
+  }
+
+  const pumpedPose = pose({ duck: 0, pump: 1, cheer: 0 });
+  const cheeringPose = pose({ duck: 0, pump: 0, cheer: cheerPeak });
+  const duckPumpPose = pose({ duck: 1, pump: 1, cheer: 0 });
+
+  // --- ONE OWNER, AND THAT OWNER IS THE LAST WRITER --------------------------
+  //
+  // **The bug this whole PR exists to fix hid behind a green build for three
+  // days, and this is the assertion that would have caught it on day one.**
+  //
+  // `poseRailRaceRider` is the single owner of `body.rotation.x` — that much was
+  // true and was checked. What nobody checked is that it is the last thing to
+  // *write* it. `Player.update`'s riding branch ran `animate()` (which ends by
+  // applying the pose) and then `applyRidePose`, which assigned
+  // `body.rotation.x = RIDE_POSE_BODY_PITCH` unconditionally. So the owner wrote
+  // 0.160 / 0.860 / 0.580 / −0.148 for seated / duck / boost / celebration, and
+  // the screen showed **0.300 for all four**: the waist fold, the boost rock and
+  // the celebration lean were invisible for the player, every frame, and only
+  // the squash and the hip drop survived — 0.42 m of duck against the 0.73 m the
+  // clearance is sized for, so the duck bar went through her head *while she was
+  // ducking* and the line above printed "clears by 0.73".
+  //
+  // "One owner" is therefore not a property of a module; it is a property of an
+  // **order**, and an order can only be checked by running it. So this compares
+  // what the real `Player` ends up drawing against what the owner asked for on a
+  // bare kid — two numbers from genuinely different places, neither able to
+  // satisfy the other. Any fourth claimant assigning to the body after the pose
+  // fires it, whatever it is called and however well-meant.
+  const reference = createKid({ outfit: 0xffffff, hairStyle: 'short' });
+  const POSE_STATES: readonly { readonly name: string; readonly rider: RiderPose }[] = [
+    { name: 'seated', rider: SEATED },
+    { name: 'duck', rider: { duck: 1, pump: 0, cheer: 0 } },
+    { name: 'boost', rider: { duck: 0, pump: 1, cheer: 0 } },
+    { name: 'celebration', rider: { duck: 0, pump: 0, cheer: cheerPeak } },
+  ];
+  const poseReport: string[] = [];
+  for (const state of POSE_STATES) {
+    pose(state.rider);
+    poseRailRaceRider(reference, state.rider);
+    const drawn = player.model.body.rotation.x;
+    const asked = reference.body.rotation.x;
+    poseReport.push(`${state.name} ${drawn.toFixed(3)}`);
+    require(
+      Math.abs(drawn - asked) < 1e-6,
+      `the player's '${state.name}' pose never reaches the screen: poseRailRaceRider asks for ` +
+        `body.rotation.x = ${asked.toFixed(3)} and Player.update leaves it at ` +
+        `${drawn.toFixed(3)}. Something writes the body AFTER the pose does — check the order in ` +
+        'Player.update/Player.animate. The owner of a property has to be its last writer, and ' +
+        'the answer is never a fourth writer to patch over the third.',
+    );
+  }
+  say(`pose drawn   ${poseReport.join('   ')}   (as poseRailRaceRider asked)`);
+  reference.dispose?.();
+
+  const rockThrow = pumpedPose.headAt.distanceTo(uprightPose.headAt);
+  const cheerLift = cheeringPose.headTop - uprightPose.headTop;
+  say(
+    `boost rock   head throws ${rockThrow.toFixed(2)} m on a pump   ` +
+      `win jump ${cheerLift.toFixed(2)} m of lift`,
+  );
+  say(
+    `celebration  ${hops} hops, peaking at ${cheerPeak.toFixed(3)} of the jump, ` +
+      `settled by ${(cheerCurve.findLastIndex((v) => v > 0) * CHEER_TICK).toFixed(2)} s of ` +
+      `${RESULT_SECONDS} s on screen`,
+  );
+  // Jim asked for the boost to be *felt*. A rock nobody can see is the same
+  // non-feature as a face nobody can look at.
+  //
+  // **The floor moved 0.4 → 0.2 of the ride scale (1.0 m → 0.5 m) when Jim cut
+  // the rock by 50%** — deliberately, and this is what it is still for. The two
+  // failures it has to keep catching are both *disappearances*, not shrinkages:
+  // `BOOST_ROCK` at 0, and round 8's bug where the pose was computed correctly
+  // and then stamped over by a later writer, which read as exactly 0.00 m here.
+  // A rock of 0.713 m clears 0.5 m by 1.43x, so the bound is not a restatement
+  // of the constant — it sits between "halved, as asked" and "gone".
+  require(
+    rockThrow > 0.2 * route.scale,
+    `a full pump moves the rider's head by only ${rockThrow.toFixed(3)} m — at the ~37 px/m this ` +
+      'ride draws her at, that is not visual feedback. See BOOST_ROCK in railRace/duckPose.ts.',
+  );
+  // The win jump has to leave the seat, upwards and visibly — **at the height
+  // the real curve reaches**, not at a 1 it never gets to.
+  require(
+    cheerLift > 0.3 * route.scale,
+    `winning lifts the rider only ${cheerLift.toFixed(3)} m at the celebration's own peak of ` +
+      `${cheerPeak.toFixed(3)} — she is meant to jump in the cart, and this would read as sitting ` +
+      'still. See CHEER_HOP in duckPose.ts, and cheerAt for the curve that drives it.',
+  );
+  // Jumping, not hovering: she has to come down and go again.
+  require(
+    hops >= 2,
+    `the celebration is ${hops} hop(s) — Jim asked for her to jump while the camera holds, and ` +
+      'one long rise reads as being lifted. See cheerAt.',
+  );
+  // And it has to be over while the camera is still on her, so the last hop
+  // lands rather than being cut off in mid-air by the result card.
+  require(
+    cheerCurve[cheerCurve.length - 1] === 0,
+    `she is still ${cheerCurve[cheerCurve.length - 1]!.toFixed(3)} of the way through a jump when ` +
+      `the result card goes at ${RESULT_SECONDS} s — the last hop is cut off in the air. ` +
+      'See CHEER_SECONDS.',
+  );
+  // ...and she must still be *in* it, not launched through the seat.
+  require(
+    cheeringPose.body.min.y > tubFloor,
+    `the win jump puts her lowest visible part at ${cheeringPose.body.min.y.toFixed(2)}, below the ` +
+      `cart's tub floor at ${tubFloor.toFixed(2)}.`,
+  );
+  require(
+    Math.abs(player.model.root.position.y) < 1e-6 &&
+      Math.abs(player.group.position.y - seatY) < 1e-6,
+    `the celebration moved the rider off the seat — model root at ` +
+      `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
+      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)} — the ride ` +
+      'never moves the root.',
+  );
+
+  // --- her arms stay inside the tub -----------------------------------------
+  //
+  // Jim, 7 August 2026: *"the characters arm clips through the mine cart - make
+  // the box of the cart wider until this no longer happens"*. Measured then: her
+  // hand reached **0.285 m outside** the tub's own surface at ride scale.
+  //
+  // **Ray-cast across the built hopper, not compared against a half-width**, for
+  // two reasons. The tub is not a box — it was a taper, and is now a vertical
+  // wall over a flared foot, so "the cart's width" is a different number at every
+  // height and a single constant would be wrong nearly everywhere. And the whole
+  // point of the fix was a change of *shape*: a check written against a width
+  // would have gone green on a uniform scale-up that never touched the taper.
+  //
+  // Every vertex her arms actually draw, outlines included, in each pose that
+  // moves them. The victory jump lifts her arms clear over the rim, so it has
+  // nothing beside the tub at all and says so rather than silently passing.
+  {
+    const hopperMesh = rideCart.root.getObjectByName('hopper');
+    if (!(hopperMesh instanceof Mesh)) {
+      problems.push('check:rail-race: the built cart has no hopper mesh to measure her arms against');
+    } else {
+      // Both faces must register or a ray leaving the solid is invisible.
+      (hopperMesh.material as { side: number }).side = DoubleSide;
+      cartGroup.updateMatrixWorld(true);
+      const hopperBox = new Box3().setFromObject(hopperMesh);
+      const armCaster = new Raycaster();
+      armCaster.far = 500;
+
+      /** Where a line straight across the cart at this height and depth meets the tub. */
+      const wallAt = (y: number, z: number, x: number): number | null => {
+        armCaster.set(new Vector3(hopperBox.min.x - 10, y, z), new Vector3(1, 0, 0));
+        const xs = armCaster
+          .intersectObject(hopperMesh, false)
+          .map((hit) => hit.point.x)
+          .sort((a, b) => a - b);
+        if (xs.length < 2) return null;
+        // How far past the tub's **outer** skin on this point's own side.
+        // Positive is through it, and out in the open air beside the cart —
+        // which is the thing Jim can actually see and the thing he reported.
+        //
+        // First and last crossing, deliberately, rather than the middle pair
+        // this used to take. When the tub was a zero-thickness paper shell a
+        // ray across it hit exactly twice, so the middle pair *was* the outer
+        // skin and the two spellings agreed. Closing the tub into a real solid
+        // (7 August, the see-through corners) gives every ray four crossings,
+        // and the middle pair silently becomes the **inner** skin — which asks
+        // a completely different question: not "does her arm come out of the
+        // cart" but "does her arm touch the wall's material". Her forearm rests
+        // against the inside of the wall and enters it by ~0.017 m, buried
+        // invisibly inside a 0.030 m wall, so the middle-pair spelling failed
+        // this check on an asset where nothing was visibly wrong at all.
+        //
+        // This is not a loosened bar: measured against the outer skin the five
+        // poses report 0.057 / 0.116 / 0.057 / 0.116 / clear — identical to the
+        // numbers this same check gave on the open-shelled asset before the tub
+        // was closed. The guarantee is exactly the one that landed this
+        // morning; it is now just written so that it cannot change meaning the
+        // next time the tub's wall gains or loses thickness.
+        return x >= hopperBox.getCenter(new Vector3()).x
+          ? x - xs[xs.length - 1]!
+          : xs[0]! - x;
+      };
+
+      const armReport: string[] = [];
+      let worstThrough = -Infinity;
+      let worstPose = '';
+      // **Every pose the ride can produce, swept — not a list of the ones
+      // somebody remembered.**
+      //
+      // `RiderPose` is exactly three numbers, each clamped to 0..1 by
+      // `poseRailRaceRider`, so the set of poses that exist *is* this cube and
+      // enumerating it is a finite job. The hand-written list this replaces held
+      // five named corners, and Jim's 7 August report — "after a head bonk the
+      // players hands clip through the cart" — landed between them: a bonk
+      // drives `duck` through `knockdown(wobble)`, which eases continuously from
+      // 1 back to 0 as the wobble decays, so the knock-down pose is every
+      // intermediate fold and not the `duck: 1` corner that was being checked.
+      const AXIS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+      const sweep: {
+        name: string;
+        rider: { duck: number; pump: number; cheer: number };
+        sway: number;
+      }[] = [];
+      for (const duck of AXIS) {
+        for (const pump of AXIS) {
+          for (const cheer of AXIS) {
+            for (const sway of [-BONK_SWAY, 0, BONK_SWAY]) {
+              sweep.push({
+                name:
+                  `duck ${duck.toFixed(1)} pump ${pump.toFixed(1)} cheer ${cheer.toFixed(1)} ` +
+                  `sway ${sway.toFixed(3)}`,
+                rider: { duck, pump, cheer },
+                sway,
+              });
+            }
+          }
+        }
+      }
+      for (const state of sweep) {
+        pose(state.rider, state.sway);
+        let through = -Infinity;
+        let beside = 0;
+        for (const limb of [player.model.leftArm, player.model.rightArm]) {
+          if (!limb) continue;
+          limb.updateMatrixWorld(true);
+          limb.traverse((object) => {
+            if (!(object instanceof Mesh)) return;
+            const position = object.geometry.getAttribute('position');
+            if (!position) return;
+            const vertex = new Vector3();
+            for (let i = 0; i < position.count; i += 1) {
+              vertex
+                .set(position.getX(i), position.getY(i), position.getZ(i))
+                .applyMatrix4(object.matrixWorld);
+              // Above the rim there is no tub to go through.
+              if (vertex.y > hopperBox.max.y) continue;
+              beside += 1;
+              const past = wallAt(vertex.y, vertex.z, vertex.x);
+              if (past !== null && Number.isFinite(past) && past > through) through = past;
+            }
+          });
+        }
+        if (beside === 0) {
+          armReport.push(`${state.name} clear of the tub`);
+          continue;
+        }
+        if (through > -Infinity) armReport.push(`${state.name} ${(-through).toFixed(3)}`);
+        if (through > worstThrough) {
+          worstThrough = through;
+          worstPose = state.name;
+        }
+      }
+      say(`arms in the tub   worst of ${sweep.length} poses: ${worstPose} at ${(-worstThrough).toFixed(3)} m clearance`);
+      require(
+        worstThrough < 0,
+        `the rider's arm goes ${worstThrough.toFixed(3)} m through the side of the cart at ` +
+          `'${worstPose}' — this is Jim's 7 August report. ` +
+          '**Do not widen the cart.** CART_WIDTH_AT_PARK_SCALE is 1.10 and that is a measured ' +
+          'ceiling, not a preference: 1.12 fails raceCameraNeverRunsBackwards on seed 5, and ' +
+          'lane spacing derives from it. Change what moves her instead — the pose ' +
+          '(railRace/duckPose.ts) or the bonk sway (BONK_SWAY in the same file), whichever the ' +
+          'name above points at.',
+      );
+    }
+  }
+
+  // **Boosting while ducking.** A child will hold boost under a bar — keyboard
+  // duck and keyboard boost are genuinely independent signals — and `Rider.bob`
+  // is set from the raw press whether or not it registered as thrust. If the
+  // rock were not gated by the fold, she would throw forward on top of a 40°
+  // crouch and her head would come up out of the duck she is relying on.
+  say(
+    `ducking while boosting   head top ${duckPumpPose.headTop.toFixed(2)} against ` +
+      `${duckedPose.headTop.toFixed(2)} ducked alone (bar underside ${barUnderside.toFixed(2)})`,
+  );
+  require(
+    duckPumpPose.headTop < barUnderside,
+    `a rider who holds boost while ducking reaches ${duckPumpPose.headTop.toFixed(2)} m over the ` +
+      `rail, and the bar's underside is at ${barUnderside.toFixed(2)} — mashing under a bar takes ` +
+      'the duck away from her. The rock must be gated by the fold; see poseRailRaceRider.',
+  );
+  require(
+    duckPumpPose.body.min.y > tubFloor,
+    `ducking while boosting puts her lowest visible part at ${duckPumpPose.body.min.y.toFixed(2)}, ` +
+      `through the cart's tub floor at ${tubFloor.toFixed(2)}.`,
+  );
+
+  // **Boosting into the celebration**, which is the other pair that shares
+  // `body.rotation.x` — a pump throws the torso forward, the jump leans it back,
+  // so where they overlap they subtract and she straightens up out of her own
+  // celebration.
+  //
+  // They are kept apart not by a gate but by the clock, and this is the guard on
+  // that: `simulate.ts`'s spring is empty `BOB_SECONDS` after her last press,
+  // and the first hop of `cheerAt` does not peak until later, so by the time the
+  // jump is worth looking at the rock is already zero. A gate was tried instead
+  // and thrown away — being proportional it leaked 9.5% of the rock at the
+  // curve's own peak, i.e. it did not do the thing it was named for.
+  //
+  // This compares two numbers from genuinely different modules, so lengthening
+  // the spring or quickening the hop fires it.
+  const cheerPeakAt = cheerCurve.indexOf(cheerPeak) * CHEER_TICK;
+  say(
+    `spring vs jump   pump spring empty at ${BOB_SECONDS.toFixed(2)} s, jump peaks at ` +
+      `${cheerPeakAt.toFixed(2)} s`,
+  );
+  require(
+    BOB_SECONDS < cheerPeakAt,
+    `the pump spring is still unwinding (${BOB_SECONDS.toFixed(2)} s) when the victory jump peaks ` +
+      `at ${cheerPeakAt.toFixed(2)} s, so the boost rock is subtracting from the celebration lean ` +
+      'at the top of her jump and she straightens up instead of throwing her arms open. Either ' +
+      'shorten BOB_SECONDS, slow CHEER_HOP_SECONDS, or gate the pump on the cheer inside ' +
+      'poseRailRaceRider.',
+  );
+
+  // --- the approach-frame skull graze, rechecked at the new speeds ----------
+  //
+  // Her head is enormous (a cartoon child at ride scale), so its *front* reaches
+  // a bar well before her centre does — and the bonk fires at her centre. For
+  // the frames in between, the bar is inside the top of her skull while she is
+  // still upright, before the knock-down folds her.
+  //
+  // Reported rather than asserted, deliberately. The fix is a ~1.9 m contact
+  // lead subtracted inside `planHazards` so every consumer sees one number, and
+  // it moves *when the bonk fires* — immediately after a PR that fixed the bonk
+  // firing in the wrong place. It wants eyes on it before it ships, and this
+  // line is here so the size of the artefact is on the screen at every build
+  // rather than being rediscovered by measurement each round.
+  const skullReach = uprightPose.headDepth / 2 + barHalfDepth;
+  const childRace = simulateRailRace('childPace', 3);
+  // Her top speed, not her average: she arrives at a bar still mashing, and a
+  // race's average is dragged down by the standing start and every bonk in it.
+  const frames = skullReach / (childRace.topSpeed / 60);
+  say(
+    `skull graze   bar is inside her head for the last ${skullReach.toFixed(2)} m of the approach ` +
+      `— ${frames.toFixed(1)} frames at a child's ${childRace.topSpeed.toFixed(1)} m/s top speed ` +
+      `(fix: a BAR_CONTACT_LEAD in planHazards; not shipped, wants eyes)`,
+  );
+
+  // --- the legs: off racing, on to celebrate, on when she leaves -------------
+  //
+  // Jim asked for three states in one ride, and the rule is a **derivation from
+  // the phase**, never a remembered list — `TreeClimbing.hidePlayerBody` kept
+  // such a list, recorded an empty restore set on its second call, and left her
+  // a floating head on every other ride in the park until it was deleted.
+  //
+  // So this puts the real rule through the real setter for **every** phase the
+  // ride has, and reads the result back off the model — including the box, so a
+  // rule that set a flag nobody drew from would still be caught.
+  const PHASES: readonly RidePhase[] = [
+    'waiting',
+    'levelSelect',
+    'countdown',
+    'racing',
+    'finishing',
+  ];
+  const WANT_LEGS: Record<RidePhase, boolean> = {
+    waiting: true,
+    levelSelect: true,
+    countdown: false,
+    racing: false,
+    finishing: true,
+  };
+  pose(SEATED);
+  const legParts = [player.model.leftLeg, player.model.rightLeg];
+  require(
+    legParts.every((part) => part !== undefined && part !== null),
+    'the rider has no legs to show or hide, so everything below this line is vacuous.',
+  );
+  const legReport: string[] = [];
+  for (const phase of PHASES) {
+    setRiderLegsVisible(player.model, riderLegsShow(phase));
+    player.group.updateMatrixWorld(true);
+    const drawn = legParts.every((part) => part?.visible === true);
+    const reach = visibleBox(player.model.root).min.y;
+    legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
+    require(
+      drawn === WANT_LEGS[phase],
+      `in phase '${phase}' the rider's legs are ${drawn ? 'drawn' : 'hidden'} and they should be ` +
+        `${WANT_LEGS[phase] ? 'drawn' : 'hidden'} — off while racing because they clip through the ` +
+        'cart, on for the win because Jim asked to see her jump, on once she is off. See ' +
+        'riderLegsShow in duckPose.ts.',
+    );
+    // The flag has to reach the picture. A `visible` that no bounding box
+    // notices is a `visible` nothing renders from either.
+    require(
+      Number.isFinite(reach),
+      `phase '${phase}' leaves the rider with no drawable geometry at all (box min ${reach}).`,
+    );
+  }
+  const legsRacing = (() => {
+    setRiderLegsVisible(player.model, riderLegsShow('racing'));
+    player.group.updateMatrixWorld(true);
+    return visibleBox(player.model.root).min.y;
+  })();
+  const legsWinning = (() => {
+    setRiderLegsVisible(player.model, riderLegsShow('finishing'));
+    player.group.updateMatrixWorld(true);
+    return visibleBox(player.model.root).min.y;
+  })();
+  say(`legs         ${legReport.join('   ')}`);
+  say(
+    `             racing reaches down to ${legsRacing.toFixed(2)}, celebrating to ` +
+      `${legsWinning.toFixed(2)} (tub floor ${tubFloor.toFixed(2)})`,
+  );
+  // The two states must differ *in the drawn geometry*, or the rule is switching
+  // something that was never on screen — which is how a "hidden" leg goes on
+  // clipping through the cart in front of a six-year-old.
+  require(
+    legsWinning < legsRacing - 1e-6,
+    `hiding the legs changes nothing about what is drawn: racing reaches ${legsRacing.toFixed(3)} ` +
+      `and celebrating ${legsWinning.toFixed(3)}. The legs were never the lowest thing, so this ` +
+      'rule is not doing what it is documented to do.',
+  );
+
+  // --- the pump spring unwinds after the line --------------------------------
+  //
+  // `stepRider` returns early once a rider has finished, and the `bob` decay sat
+  // below that return — so `bob` froze at whatever the last racing frame held,
+  // which for a child mashing across the line is exactly 1, for the whole result
+  // phase. Nothing read it until the boost rock did; then the winner spent her
+  // victory jump thrown forward over the handlebars, and every finished rival
+  // sat locked at the bottom of its seat dip.
+  //
+  // Driven through the real stepper, with the button **still held** — a child
+  // does not stop tapping the instant she crosses the line, and a fix that only
+  // worked for a released button would not have covered the case that broke.
+  const springRider = createRider(0);
+  const springHazards = scheduleForLevel(3);
+  const dtSpring = 1 / 60;
+  let springSeconds = 0;
+  while (!springRider.finished && springSeconds < 400) {
+    stepRider(
+      route,
+      springRider,
+      springHazards,
+      { pressed: true, ducking: false },
+      dtSpring,
+      1,
+      PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
+    );
+    springSeconds += dtSpring;
+  }
+  const bobAtLine = springRider.bob;
+  // A full result phase of standing at the line, still mashing.
+  for (let t = 0; t < RESULT_SECONDS; t += dtSpring) {
+    stepRider(
+      route,
+      springRider,
+      springHazards,
+      { pressed: true, ducking: false },
+      dtSpring,
+      1,
+      PLAYER_BOOST_ADVANTAGE,
+  BOB_SECONDS,
+    );
+  }
+  say(
+    `pump spring  ${bobAtLine.toFixed(2)} crossing the line, ${springRider.bob.toFixed(2)} after ` +
+      `${RESULT_SECONDS} s of celebrating (still holding the button)`,
+  );
+  require(
+    springRider.bob === 0,
+    `the pump spring is still wound to ${springRider.bob.toFixed(3)} ${RESULT_SECONDS} s after the ` +
+      'race ended, so the winner celebrates thrown forward on a pump that is long over (BOOST_ROCK) ' +
+      'and finished rivals sit stuck in their seat dip (BOB_DROP). The decay must run before ' +
+      "stepRider's `if (rider.finished)` return.",
+  );
+
+  player.dispose();
+}
+
+// --- can you actually SEE her face? ------------------------------------------
+//
+// PR #223 gave the riders a frowning expression for a bonk. It was invisible in
+// normal play, and every check passed anyway, because "the frown state was set"
+// is not the same claim as "somebody can see a frown" — the face was pointing
+// 81° away from the lens. Jim, riding it on 5 August 2026: *"we can't see the
+// face because the player needs to face towards the camera so you can see their
+// expression."*
+//
+// So this asserts **visibility**, and does it the only way that cannot be
+// fooled: it builds a real kid, poses her with `faceTurnTowardsCamera` — the
+// very function the ride poses her with, not a copy of it — and then asks each
+// of her two eyes two questions off the real projection matrix.
+//
+//   1. Is this eye on the near side of her head at all? Every eye sits on the
+//      skull's own surface (the face is baked into its UVs, ART_DIRECTION §3),
+//      so the outward normal there dotted with the direction to the camera is
+//      exactly "is this bit of face turned towards the lens or round the back".
+//      Zero or less means the eye is behind the silhouette and is not drawn.
+//   2. Does it land on screen?
+//
+// Measured before the turn existed, for the record: the far eye sat at −0.254
+// on a monitor and −0.348 on a phone — genuinely not rendered — while the near
+// one grazed at 0.48/0.39 and *both* projected to the same screen x, which is
+// what a profile looks like in numbers.
+
+say('');
+
+/**
+ * How square-on the *worse* of the two eyes must sit to the lens to read as an
+ * eye. Zero is the hard floor — at zero it is behind the silhouette and simply
+ * is not rendered — so this is a real margin over "technically drawn".
+ */
+const EYE_FACING_MIN = 0.35;
+
+/**
+ * ...and how far inside the picture it must stay, in NDC. Small, because a
+ * phone in portrait frames her hard left on purpose (`RIDER_SCREEN_X_PORTRAIT`)
+ * and there is genuinely not much room out there — but not zero, or "just
+ * barely on screen" would pass and the next tweak to the framing would push her
+ * face off the edge with nothing complaining.
+ */
+const EYE_MARGIN_MIN = 0.03;
+
+interface FaceView {
+  readonly worstFacing: number;
+  readonly worstOnScreen: number;
+  readonly eyeSpread: number;
+  readonly turn: number;
+}
+
+function faceView(width: number, height: number, sadness: number): FaceView {
+  rig.resize(width, height);
+  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
+  const root = new Group();
+  root.add(kid.root);
+  const crown = kid.hatAnchor.parent;
+  if (!crown) throw new Error('check-rail-race: the kid rig has no crown under its hat anchor');
+
+  let worstFacing = 1;
+  let worstOnScreen = 1;
+  let eyeSpread = 1;
+  let turn = 0;
+  const eye = new Vector3();
+  const normal = new Vector3();
+  const toCamera = new Vector3();
+  const skull = new Vector3();
+
+  for (let i = 0; i < 48; i += 1) {
+    const travelled = (i / 48) * route.length;
+    rig.reset(travelled);
+    const at = route.wrap(route.startDistance + travelled);
+    const point = route.pointAt(PLAYER_LANE, at, new Vector3());
+    const tangent = route.tangentAt(PLAYER_LANE, at, new Vector3());
+    const cartYaw = Math.atan2(tangent.x, tangent.z);
+
+    // Exactly `RailRace.poseRider`'s pose: the cart's yaw plus the body's share
+    // of the turn on the root, the head's share on the head.
+    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position, sadness);
+    turn = facing.body + facing.head;
+    root.position.set(point.x, point.y + SEAT_HEIGHT * route.scale, point.z);
+    root.rotation.y = cartYaw + facing.body;
+    root.scale.setScalar(route.scale);
+    kid.head.rotation.y = facing.head;
+    root.updateMatrixWorld(true);
+
+    crown.getWorldPosition(skull);
+    const screenX: number[] = [];
+    for (const side of [-1, 1] as const) {
+      crown.localToWorld(eye.copy(kidEyeCentre(side)));
+      normal.subVectors(eye, skull).normalize();
+      toCamera.subVectors(rig.camera.position, eye).normalize();
+      worstFacing = Math.min(worstFacing, normal.dot(toCamera));
+      const ndc = eye.clone().project(rig.camera);
+      worstOnScreen = Math.min(worstOnScreen, 1 - Math.max(Math.abs(ndc.x), Math.abs(ndc.y)));
+      screenX.push(ndc.x);
+    }
+    eyeSpread = Math.min(eyeSpread, Math.abs((screenX[0] ?? 0) - (screenX[1] ?? 0)));
+  }
+  kid.dispose?.();
+  return { worstFacing, worstOnScreen, eyeSpread, turn };
+}
+
+for (const shape of POSES) {
+  // --- sad: she looks round at you, and the frown is worth having ------------
+  const view = faceView(shape.w, shape.h, 1);
+  say(
+    `face ${shape.name.padEnd(9)} sad: turned ${((view.turn * 180) / Math.PI).toFixed(1)}°   ` +
+      `worst eye facing ${view.worstFacing.toFixed(3)}   ` +
+      `on screen by ${view.worstOnScreen.toFixed(3)}   ` +
+      `eyes ${view.eyeSpread.toFixed(3)} apart across the picture`,
+  );
+
+  require(
+    view.worstFacing > EYE_FACING_MIN,
+    `in a ${shape.name} window one of the rider's eyes is only ${view.worstFacing.toFixed(3)} ` +
+      `turned towards the lens (needs > ${EYE_FACING_MIN}); at 0 it is round the back of her ` +
+      'head and not drawn at all, and an expression nobody can see is not a feature. See ' +
+      'FACE_TURN_MAX in railRace/camera.ts.',
+  );
+  require(
+    view.worstOnScreen > EYE_MARGIN_MIN,
+    `in a ${shape.name} window one of the rider's eyes is only ` +
+      `${view.worstOnScreen.toFixed(3)} inside the edge of the picture (needs > ` +
+      `${EYE_MARGIN_MIN}). She is framed by RIDER_SCREEN_X and turning her pushes her face ` +
+      'towards that edge — see the sweep table on FACE_TURN_MAX.',
+  );
+  // A profile puts both eyes on the same pixel column. Any real turn separates
+  // them, and the separation is the plainest possible statement that we are
+  // looking at a face rather than at the side of a head.
+  require(
+    view.eyeSpread > 0.01,
+    `in a ${shape.name} window the rider's two eyes land ${view.eyeSpread.toFixed(4)} apart ` +
+      'across the picture — they are stacked, which is what a face in profile looks like.',
+  );
+
+  // --- and NOT sad: she watches where she is going ---------------------------
+  //
+  // The other half, and it is not optional. Jim asked for the turn *"only on
+  // sad expression, not all the time"*, and a check that only ever exercised
+  // the sad case would sail through while she rode the entire race with her
+  // head cricked round at the camera — which is the complaint that started all
+  // this, inverted. So the happy case is asserted just as hard: no turn at all,
+  // and a face genuinely back in profile, watching the track.
+  const calm = faceView(shape.w, shape.h, 0);
+  say(
+    `face ${shape.name.padEnd(9)} calm: turned ${((calm.turn * 180) / Math.PI).toFixed(1)}°   ` +
+      `eyes ${calm.eyeSpread.toFixed(4)} apart (stacked = facing down the track)`,
+  );
+  require(
+    calm.turn === 0,
+    `in a ${shape.name} window a rider who is not sad is still turned ` +
+      `${((calm.turn * 180) / Math.PI).toFixed(1)}° towards the camera. The turn is meant to be ` +
+      'part of the frown, not the resting pose — see FACE_TURN_MAX in railRace/camera.ts.',
+  );
+  require(
+    calm.eyeSpread < 0.01,
+    `in a ${shape.name} window a rider who is not sad has her eyes ${calm.eyeSpread.toFixed(4)} ` +
+      'apart across the picture, so she is angled towards the camera rather than watching the ' +
+      'track. Only a frown should turn her.',
+  );
+}
+require(
+  FACE_TURN_MAX > 0,
+  'FACE_TURN_MAX is zero, so nobody turns towards the camera and every face in the race is ' +
+    'in profile again.',
+);
 
 // --- is it still a game? -----------------------------------------------------
 //
@@ -862,25 +1944,53 @@ const FIELD_SEEDS = [
   28657, 46368, 75025,
 ];
 
-function fieldSummary(strategy: Strategy): {
+/**
+ * **`marginMetres` is only meaningful on a win.** `simulateField` samples it as
+ * `RACE_DISTANCE - max(rival.travelled)` at the moment the *player* crosses, so
+ * when she loses a rival is already on the line and it reads ≈ −0.2 m whatever
+ * happened. A mean taken over seeds she lost is therefore diluted by zeros
+ * rather than by near-misses, and it is not a "how close was it" number.
+ *
+ * That is why the bounds below take their mean from a level she wins *every*
+ * seed of, and use win **count** for the level she does not.
+ */
+function fieldSummary(
+  strategy: Strategy,
+  level: RaceLevel = 3,
+): {
   wins: number;
   margins: number[];
   rivalBonks: number[];
+  meanMargin: number;
 } {
   const margins: number[] = [];
   const rivalBonks: number[] = [];
   let wins = 0;
   for (const seed of FIELD_SEEDS) {
-    const outcome = simulateField(strategy, 3, seed);
+    const outcome = simulateField(strategy, level, seed);
     if (outcome.playerPlace === 1) wins += 1;
     margins.push(outcome.marginMetres);
     rivalBonks.push(outcome.rivalBonks);
   }
-  return { wins, margins, rivalBonks };
+  return {
+    wins,
+    margins,
+    rivalBonks,
+    meanMargin: margins.reduce((a, b) => a + b, 0) / margins.length,
+  };
 }
 
 const perfectField = fieldSummary('mashPerfect');
 const sloppyField = fieldSummary('mashSloppy');
+const childField = fieldSummary('childPace');
+const badlyField = fieldSummary('playsBadly');
+// The same child, on the two levels she will actually pick. Level 3 is the only
+// one with duck bars at all (`BARS_FROM_LEVEL`), so it is hard mode by
+// construction and the other two are where "can a six-year-old win this?" is
+// really answered. Cheap: 24 more races each, and the whole field sweep is
+// about a second.
+const childEasyField = fieldSummary('childPace', 1);
+const childMidField = fieldSummary('childPace', 2);
 const perfectMeanMargin = perfectField.margins.reduce((a, b) => a + b, 0) / perfectField.margins.length;
 const perfectMeanBonks = perfectField.rivalBonks.reduce((a, b) => a + b, 0) / perfectField.rivalBonks.length;
 say(
@@ -894,6 +2004,18 @@ say(
     `margin ${Math.min(...sloppyField.margins).toFixed(1)}–${Math.max(...sloppyField.margins).toFixed(1)} m ` +
     `(mean ${sloppyMeanMargin.toFixed(1)} m)`,
 );
+const childMeanMargin = childField.meanMargin;
+say(
+  `child pace vs field       ${childField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `margin ${Math.min(...childField.margins).toFixed(1)}–${Math.max(...childField.margins).toFixed(1)} m ` +
+    `(mean ${childMeanMargin.toFixed(1)} m)   ${CHILD_TAPS_PER_SECOND} taps/s, half the bars`,
+);
+say(
+  `child pace, level 1       ${childEasyField.wins}/${FIELD_SEEDS.length} wins   ` +
+    `(mean ${childEasyField.meanMargin.toFixed(1)} m)        level 2   ` +
+    `${childMidField.wins}/${FIELD_SEEDS.length} wins   (mean ${childMidField.meanMargin.toFixed(1)} m)`,
+);
+say(`plays badly vs field      ${badlyField.wins}/${FIELD_SEEDS.length} wins   (must not be all of them)`);
 
 // She has to be able to win playing well — every seed, not just on average,
 // because an "on average" pass hides individual seeds where the rivals are
@@ -906,21 +2028,159 @@ require(
     'are still beating a child who plays every hazard cleanly. Lower RIVAL_SKILL or raise the ' +
     "rubber band's SWING_BEHIND in simulate.ts.",
 );
-// ...but not a procession. A margin the checker itself thinns to "generous
-// but bounded" rather than a fixed historical figure, because that figure
-// belongs to whatever the current physics happens to produce — re-measure,
-// don't rescale, same rule as the rest of this file.
+// ...and nobody gets lapped.
+//
+// **This bound was 170 m and had to be re-derived on 6 August 2026 — not
+// loosened to make a seed pass, but rebuilt, because the number it held was
+// arithmetically incompatible with the instruction the game is now tuned to.**
+// Jim: *"it's just too hard ffs, you go too slow and the computer goes too
+// fast."* Work the 170 backwards and it demands rivals cruising at 27.8 m/s,
+// which needs them mashing at 5.7 taps a second — a `RIVAL_SKILL` of ~0.86,
+// i.e. almost exactly the 0.62/0.72/0.82 the family had already rejected once
+// as "far too good". The old bound was held up by an aggressive rubber band
+// that towed a far-behind rival to *38.9 m/s*, faster than the player's own top
+// speed, so it came screaming back into shot: the very thing Jim is describing.
+// A bound that can only be met by reinstating the complaint is not a bound.
+//
+// So it is replaced by the one that is a real, physical fact about the race
+// rather than a tuning preference: **the nearest rival must not have been
+// lapped.** It is taken from the game's own geometry (`route.length`), in the
+// spirit of CLAUDE.md's rule about thresholds coming from the game rather than
+// from the generator's target, and it still fires loudly if the field ever
+// becomes scenery. It also protects something concrete — three rivals still on
+// the track when she crosses the line, which is what the win celebration needs
+// to hold a camera on.
 require(
-  Math.max(...perfectField.margins) < 140,
+  Math.max(...perfectField.margins) < route.length,
   `playing well finishes as much as ${Math.max(...perfectField.margins).toFixed(1)} m clear of the ` +
-    'nearest rival on one of the fixed seeds — a procession, not a race. Raise RIVAL_SKILL or the ' +
-    "rubber band's CATCHUP_BEHIND.",
+    `nearest rival, which laps them on a ${route.length.toFixed(1)} m lap — the rivals have become ` +
+    "scenery. Raise RIVAL_SKILL or the rubber band's SWING_BEHIND.",
 );
-// A sloppy player must not always win — losing sometimes is what makes
-// playing well worth doing — but must not be hopeless either.
+// A bound on a *competent* player's mean winning margin used to sit here, and
+// was **deleted on 7 August 2026 at Jim's instruction**: "I never signed off
+// that check as a requirement, if you want me to, tell me what it is, otherwise
+// delete it."
+//
+// It was added the same morning by the Overseer rather than asked for by the
+// family. It asserted the mean margin stayed under half a lap, on the theory
+// that a larger margin would leave no rival in frame for the winner's
+// celebration — a staging consequence **nobody had ever looked at**. It is gone
+// rather than loosened, deliberately: a guess about an unobserved problem is not
+// made better by a bigger number. The child-facing bound further down is a
+// different assertion and stays.
+//
+// `perfectMeanMargin` is still measured and still printed above, because the
+// number is worth seeing; nothing asserts on it.
+
+// **The assertion Jim's complaint needed, and the build did not have.**
+//
+// Every strategy above taps 6 times a second. A child does not, and that single
+// axis decided the whole race: measured at 3 taps/s with half the bars ducked,
+// she won *1 of 24 seeds* while `mashPerfect` and `mashSloppy` both read as
+// comfortable and every check in the build was green. Assert the player the
+// game is actually for, not a metronome. See `PLAYER_BOOST_ADVANTAGE`.
+// **Re-derived on 7 August 2026, when Jim asked for the difficulty to go
+// halfway back — not slid down to fit the new numbers. Read this before
+// touching either bound.**
+//
+// It used to be one assertion at level 3: `childField.wins >= 22` with a mean
+// margin over 40 m. That encoded "a child wins essentially every race on the
+// hardest level", which was the right reading of the *previous* instruction
+// (*"it's just too hard ffs"*) and is arithmetically incompatible with the
+// current one. Halfway between a child who never wins and a child who always
+// wins is a child who wins about half, so a 22/24 bound makes "halfway"
+// impossible by construction — and a bound only satisfiable by ignoring the
+// instruction is not a bound, it is a veto.
+//
+// So the question was split by level, which is where it always belonged.
+// **Level 3 is the only level with duck bars at all** (`BARS_FROM_LEVEL`), so it
+// is hard mode by construction; levels 1 and 2 are where a six-year-old
+// actually plays. Measured across the three settings the family has ridden:
+//
+//   config                       child L1    child L2    child L3   competent L3
+//   old      (Jim: "too hard")     0/24        0/24        0/24        100.1 m
+//   halfway  (shipping)           24/24       24/24       11/24        298.0 m
+//   current  (Jim: "too easy")    24/24       24/24       24/24        461.2 m
+//
+// The old settings — the actual complaint — lose 0/24 at *every* level, so a
+// level-1 bound catches them just as loudly as the level-3 one did, and catches
+// them at 24/24 rather than 22/24. **This is a tighter assertion than the one it
+// replaces**, in the place that decides whether the game is playable at all.
 require(
-  sloppyField.wins < FIELD_SEEDS.length,
-  'playing sloppily still wins every single seed — the rivals have nothing to teach a careless player.',
+  childEasyField.wins === FIELD_SEEDS.length && childMidField.wins === FIELD_SEEDS.length,
+  `a child tapping ${CHILD_TAPS_PER_SECOND}/s wins ${childEasyField.wins}/${FIELD_SEEDS.length} at ` +
+    `level 1 and ${childMidField.wins}/${FIELD_SEEDS.length} at level 2 — she must win every seed on ` +
+    'the levels with no duck bars, or the game is the "too hard" complaint again on the settings a ' +
+    'six-year-old actually picks. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
+);
+// The mean is taken from level 1, and only from level 1, because that is the
+// one sweep she wins on every seed — see `fieldSummary`'s note. A mean over a
+// level she loses half of is diluted by ≈0 rather than by near-misses, so it
+// measures win *rate* while pretending to measure closeness.
+require(
+  childEasyField.meanMargin > 20,
+  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins level 1 by a mean of only ` +
+    `${childEasyField.meanMargin.toFixed(1)} m — close enough to read as a photo finish every time ` +
+    'rather than a win, on the easiest setting in the game.',
+);
+// And level 3 must still be a *race* rather than a wall. A quarter of the seeds
+// is the floor: below that a child who picks hard mode is not losing a close
+// one, she is being told the level is not for her. Fires at the old settings
+// (0/24) — which is the failure this half of the guard exists for.
+require(
+  childField.wins >= FIELD_SEEDS.length / 4,
+  `a child tapping ${CHILD_TAPS_PER_SECOND}/s and ducking half the bars wins only ${childField.wins}/` +
+    `${FIELD_SEEDS.length} seeds at level 3 — hard mode is meant to be hard, not shut. Raise ` +
+    'PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL.',
+);
+// ...and the other end of it, because after 6 August nothing guarded that end at
+// all. The floor above says a child's win must be *visible*; this says it must
+// still be a **race**. Between them the margin is bounded on both sides, which is
+// what the retired 140 m bound used to do for a different player before it went
+// 140 → 170 → `route.length` and moved onto `mashPerfect`.
+//
+// **A bound on the *worst* seed cannot do this job, and that is measured, not
+// assumed.** `SWING_BEHIND`'s rubber band tows a far-behind rival forward, which
+// compresses exactly the number a max-bound would read. Sweeping the rivals down
+// to a quarter of their skill:
+//
+//   RIVAL_SKILL              child margin (24 seeds)      mean
+//   0.40 / 0.48 / 0.56        27.3 – 306.2 m             114.8   <- shipping
+//   0.30 / 0.36 / 0.42        64.3 – 389.9 m             219.4
+//   0.20 / 0.24 / 0.28       187.9 – 484.5 m             316.4
+//   0.10 / 0.12 / 0.14       308.0 – 529.1 m             425.4
+//
+// The max never reaches even one lap (600.2 m) however absurd the rivals get, so
+// `max(...) < route.length` — the shape the `mashPerfect` bound uses — would be a
+// guard incapable of failing here. The mean separates all four cleanly, and the
+// handoff already says so about a different question: win count is seed noise,
+// mean margin is the signal.
+//
+// Half a lap, from the game's own geometry rather than a preference, and it
+// protects something you can see: the camera holds on her for the whole
+// celebration, and a rival half a lap back is round the far side of the ring and
+// not in the picture at all. Met today at 114.8 m with 2.6x of room — the point
+// is to catch a runaway, not to pin the tuning Jim has already approved — and it
+// fires at rivals cut to half skill (316.4 m).
+const CHILD_PROCESSION_MARGIN = route.length / 2;
+require(
+  childMeanMargin < CHILD_PROCESSION_MARGIN,
+  `a child at ${CHILD_TAPS_PER_SECOND} taps/s wins by a mean of ${childMeanMargin.toFixed(1)} m on a ` +
+    `${(route.length * RACE_LAPS).toFixed(1)} m race — over the ${CHILD_PROCESSION_MARGIN.toFixed(1)} m ` +
+    'half-lap bound, so the field is half a ring behind her and off screen for the entire finish. ' +
+    'That is a procession, not a race she won. Raise RIVAL_SKILL, or lower PLAYER_BOOST_ADVANTAGE ' +
+    'in simulate.ts.',
+);
+// The one guard rail Jim left standing: *"she must still be able to lose if she
+// plays badly"*. This replaces the old `sloppyField.wins < 24`, which asserted
+// the right idea about the wrong player — `mashSloppy` taps at 6/s, so it is
+// not a careless child, it is a metronome that forgets bars, and it now wins
+// every seed by design. `playsBadly` is the careless one: 1.2 taps/s, ducks a
+// tenth of the bars, mashes through every black stretch.
+require(
+  badlyField.wins < FIELD_SEEDS.length / 4,
+  `playing badly still wins ${badlyField.wins}/${FIELD_SEEDS.length} seeds — a race that cannot be ` +
+    'lost teaches nothing and is the one thing Jim ruled out. Raise RIVAL_SKILL.',
 );
 require(
   sloppyField.wins > 0,

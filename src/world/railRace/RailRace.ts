@@ -1,6 +1,6 @@
 import { Group, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { Rng } from '../../core/mathUtils';
+import { Rng, damp } from '../../core/mathUtils';
 import { PLAYER_RADIUS } from '../../core/constants';
 import type { InputSystem } from '../../core/input';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -13,7 +13,16 @@ import { terrainHeight } from '../terrain';
 import { resolveDismount } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 import { createRailRaceExitCrowd, type RailRaceExitCrowd } from './exitCrowd';
-import { RaceCamera } from './camera';
+import { RaceCamera, faceTurnTowardsCamera, type FaceTurn } from './camera';
+import {
+  BONK_SWAY,
+  poseRailRaceRider,
+  setRiderLegsVisible,
+  riderLegsShow,
+  cheerAt,
+  RESULT_SECONDS,
+  type RidePhase,
+} from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
@@ -23,6 +32,7 @@ import type { RaceLevel } from './hazards';
 import {
   HAZARD_LAYOUT,
   RACE_LAPS,
+  PLAYER_BOOST_ADVANTAGE,
   RIVAL_SKILL,
   createRider,
   rivalBand,
@@ -73,9 +83,6 @@ const COUNTDOWN_SECONDS = 3;
 /** How long a countdown digit (or "GO!") stays on screen. */
 const COUNT_HOLD = 0.9;
 
-/** How long the result card sits there before she is set down at the booth. */
-const RESULT_SECONDS = 5;
-
 /** Safety net: no race may run longer than this. Nobody has ever reached it. */
 const RACE_TIME_LIMIT = 180;
 
@@ -118,8 +125,12 @@ const RIVALS: readonly {
 /**
  * How far `poseRider()` drops the player when she is off the button, in this
  * ride's own pre-`RIDE_SCALE` metres — see the comment where it is used.
+ *
+ * Exported so `scripts/check-rail-race.mts` can pose a real kid in both states
+ * and measure her head against a real duck bar with the ride's own number,
+ * rather than a copy of it that could drift.
  */
-const DUCK_DROP = 0.5;
+export const DUCK_DROP = 0.5;
 
 /**
  * How far the seat dips on the per-press pump/pedal bob, same pre-`RIDE_SCALE`
@@ -132,6 +143,82 @@ const BOB_DROP = 0.12;
 
 /** `Rider.boost` above which a rival's cart pose reads as "actively mashing". */
 const PRESSING_POSE_THRESHOLD = 0.15;
+
+/** Nobody is racing, so nobody turns — see `faceTurn`. */
+const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
+
+/**
+ * **The one owner of "this rider is having a bad time."**
+ *
+ * Both the frowning face and the turn towards the camera read *this*, and
+ * nothing else. Jim, 5 August 2026: *"they need turn their head to the camera
+ * only on sad expression, not all the time"* — so the two are now one feature
+ * (she looks round at you **because** she is sad about it) and must not be
+ * able to disagree about whether it is happening.
+ *
+ * That is not a stylistic preference here. The rule used to be written out
+ * twice — once for the player's `railRaceFrown` and once for the rivals'
+ * `setExpression` — as two copies of the same literal expression, which is
+ * exactly the shape CLAUDE.md's most-repeated warning is about: two conditions
+ * that agree today and drift the day one is edited. One function now, read by
+ * every consumer.
+ *
+ * The two moments the family asked to be readable, unchanged: mid-wobble right
+ * after a bonk, and while actively powering over a sparking black stretch. No
+ * separate lockout timer is needed for the second — `simulate.ts` only sets
+ * `sparking` while a rider is in a black zone *and* still mashing, so easing
+ * off clears it by itself, which is the lesson.
+ */
+function riderIsSad(rider: Rider): boolean {
+  return rider.sparking || rider.wobble > 0.2;
+}
+
+/**
+ * Half-life of the turn towards the camera, in seconds.
+ *
+ * She *turns* to look at you as the frown lands and turns back as it clears; a
+ * hard cut on a frame boundary reads as a glitch rather than a glance. Short
+ * enough that the turn is plainly part of the bonk it belongs to — a bonk's
+ * wobble runs 1.3 s (`WOBBLE_SECONDS`), so at this half-life she is most of the
+ * way round well inside it.
+ */
+const SAD_TURN_HALF_LIFE = 0.12;
+
+
+/**
+ * **A bonk shoves you down into the cart**, and this is how much of
+ * {@link DUCK_DROP} it is worth at a given {@link Rider.wobble}.
+ *
+ * Jim, riding it on 5 August 2026: *"their head just passes through the
+ * bonkers like a ghost which looks very bad"*. He is right, and the reason is
+ * that a duck bar has no collider of any kind — a bonk is decided by button
+ * state at the crossing (`hazards.ts`'s header says so outright), and nothing
+ * anywhere compared the bar's height to a head's.
+ *
+ * That had **two** causes, and this is only the second of them. The first was
+ * that the bar was hung far too low to begin with: at the old clearance its
+ * underside sat 1.54 m *below* the top of a ducked head, so it went through her
+ * whichever way she played the moment — fixed in `hazards.ts`, where
+ * `DUCK_CLEARANCE_AT_PARK_SCALE` is now derived from head heights that are
+ * actually right.
+ *
+ * What is left after that is the moment of the bonk itself. Rather than grow a
+ * collider for a hazard that is deliberately decided by input, the response
+ * becomes *physical*: the bar knocks her down into the seat, exactly as far as
+ * ducking would have. That is the drop the clearance is now sized against — a
+ * ducked head top clears the bar's underside by 0.26 m — so it needs no second
+ * number of its own, and the bar sweeps over her instead of through her. Being
+ * knocked into the same place ducking would have put you is also the joke: duck
+ * yourself, or the bar will do it for you.
+ *
+ * Full drop while the wobble is fresh, easing back up as it fades — down for
+ * about 0.7 s of {@link WOBBLE_SECONDS}' 1.3, so it reads as a shove and a
+ * recovery rather than a second, slower duck. The curve is the *only* thing
+ * timing this; there is no separate lockout to fall out of step with.
+ */
+function knockdown(wobble: number): number {
+  return Math.max(0, Math.min(1, (wobble - 0.45) / 0.3));
+}
 
 /**
  * What the race wants said on screen, for whoever is holding the DOM.
@@ -176,8 +263,12 @@ export type RaceMoment =
  * `levelSelect` sits between boarding and the countdown: everybody is at the
  * line, the ride view is up, but nothing moves until `chooseLevel` picks a
  * hazard composition and starts the clock.
+ *
+ * The list itself lives in `duckPose.ts`, beside {@link riderLegsShow} and
+ * {@link cheerAt}, the two rules derived from it — so there is one list, not a
+ * copy here and a copy the checks test against.
  */
-type Phase = 'waiting' | 'levelSelect' | 'countdown' | 'racing' | 'finishing';
+type Phase = RidePhase;
 
 /**
  * One racer, as the HUD needs them.
@@ -200,6 +291,12 @@ interface Cart {
   readonly isPlayer: boolean;
   /** The child aboard. Null for the player's cart, and in a headless park. */
   readonly kid: KidHandle | null;
+  /**
+   * How far round towards the camera this rider currently is, 0..1 — the eased
+   * form of {@link riderIsSad}, and the *only* thing that scales the turn. See
+   * {@link SAD_TURN_HALF_LIFE}.
+   */
+  sad: number;
 }
 
 /**
@@ -400,13 +497,20 @@ export class RailRace implements GameSystem {
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid });
+      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0 });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
     const group = playerCart.root;
     this.group.add(group);
-    this.carts.push({ rider: createRider(PLAYER_LANE), group, cart: playerCart, isPlayer: true, kid: null });
+    this.carts.push({
+      rider: createRider(PLAYER_LANE),
+      group,
+      cart: playerCart,
+      isPlayer: true,
+      kid: null,
+      sad: 0,
+    });
   }
 
   /** Lazily, as the train does: the headless park has no player and no DOM. */
@@ -491,7 +595,7 @@ export class RailRace implements GameSystem {
    * The player rides as herself: her own hair colour off the save, exactly as
    * the dodgems do it, so the head at the top of the screen is recognisably
    * hers. Accents come from `LANE_COLOURS`, the same array that paints the
-   * rails, the carts and the droppers, so "my colour" is one fact from the
+   * rails and the carts, so "my colour" is one fact from the
    * rail under her all the way up to the portrait in the corner.
    */
   private racers(): RaceRacer[] {
@@ -649,10 +753,23 @@ export class RailRace implements GameSystem {
         band = rivalBand(me.travelled - rider.travelled);
       }
 
-      const events = stepRider(this.activeRing.route, rider, this.activeSchedule, riderInput, dt, band);
+      const events = stepRider(
+        this.activeRing.route,
+        rider,
+        this.activeSchedule,
+        riderInput,
+        dt,
+        band,
+        cart.isPlayer ? PLAYER_BOOST_ADVANTAGE : 1,
+      );
 
       if (cart.isPlayer) {
         this.ducking = rider.ducking;
+        // Same "that hurt" moments as the rivals get (see `poseRider` below),
+        // but for her own face, which nothing in this file otherwise touches —
+        // her cart carries no `kid`, only the live `Player` model riding it.
+        // Cleared in `arrive()` so it can never outlive the ride.
+        if (this.player) this.player.railRaceFrown = riderIsSad(rider);
         if (events.bonked) {
           this.confetti?.burst(cart.group.position.x, cart.group.position.y + 1.4, cart.group.position.z, 10, 0.55);
           // Only the player's own bonk gets a message — a rival's bonk has no
@@ -750,6 +867,60 @@ export class RailRace implements GameSystem {
     this.countHold = COUNT_HOLD;
   }
 
+  /**
+   * **Whether riders' legs are drawn right now**, derived — never remembered.
+   *
+   * The rule itself is {@link riderLegsShow} in `duckPose.ts`, so `check:rail-race`
+   * can put it through every phase; this only supplies the phase.
+   */
+  private get legsShow(): boolean {
+    return riderLegsShow(this.phase);
+  }
+
+  /**
+   * **How far through a celebration jump she is, 0..1** — derived every frame
+   * from the ride's own state, never held in a timer of its own.
+   *
+   * Jim: the win wants the camera to hold on her for a few seconds while she
+   * *jumps in the cart*, with her legs showing. The hold was already there —
+   * finishing freezes `Rider.travelled` (`stepRider` returns early), so
+   * `RaceCamera` settles on her and {@link RESULT_SECONDS} keeps the phase
+   * alive for five seconds — and {@link legsShow} already turns the legs back
+   * on for `'finishing'`. What was missing was the jump.
+   *
+   * The curve is {@link cheerAt}, in `duckPose.ts`, so the check can drive the
+   * real one through the real pose. This decides only *whether* she is
+   * celebrating and how far in she is.
+   *
+   * Zero unless she actually won: fourth place gets confetti and a kind
+   * sentence (see this file's header), not a victory jump.
+   */
+  private get cheer(): number {
+    if (this.phase !== 'finishing' || this.me.rider.place !== 1) return 0;
+    return cheerAt(RESULT_SECONDS - this.resultTimer);
+  }
+
+  /**
+   * How far a rider facing `cartYaw` at `at` should turn towards the race
+   * camera — see {@link FACE_TURN_MAX}.
+   *
+   * Read off the live camera every frame rather than written down as a bearing
+   * of its own. `camera.ts` solves where the rig stands from the shape of the
+   * window, and has been re-solved twice already on family feedback; a second
+   * constant here saying "the camera is over there" is exactly the kind of
+   * copy that goes quietly stale the next time it moves.
+   *
+   * Zero unless a race is actually on: the ambient rivals doing laps of the
+   * walk-past ring between races are seen by the park's own fixed camera, and
+   * turning them towards a race camera nobody is looking through would leave
+   * three children riding round the park permanently facing sideways.
+   */
+  private faceTurn(cartYaw: number, at: Vector3, sadness: number): FaceTurn {
+    const view = this.rideView;
+    if (!view || this.activeRing !== this.raceRing) return NO_FACE_TURN;
+    return faceTurnTowardsCamera(cartYaw, at, view.camera.position, sadness);
+  }
+
   private placeCarts(): void {
     const route = this.activeRing.route;
     for (const cart of this.carts) {
@@ -801,6 +972,13 @@ export class RailRace implements GameSystem {
     // (which resets `travelled` to 0) resets the wheels too. See `cart.ts`.
     for (const cart of this.carts) cart.cart.spinWheels(cart.rider.travelled);
 
+    // Ease every rider's turn towards the camera, the player's included — her
+    // cart carries no `kid`, so this cannot live in the loop below. One eased
+    // number per cart, driven by `riderIsSad` and nothing else.
+    for (const cart of this.carts) {
+      cart.sad = damp(cart.sad, riderIsSad(cart.rider) ? 1 : 0, SAD_TURN_HALF_LIFE, dt);
+    }
+
     for (const cart of this.carts) {
       const kid = cart.kid;
       if (!kid) continue;
@@ -809,16 +987,48 @@ export class RailRace implements GameSystem {
       // The pump/pedal bob: a quick dip on every fresh press, springing back
       // up between them (`Rider.bob`, see `simulate.ts`'s header) — the seat
       // itself moves, on top of whatever pose the arms are holding.
+      // A rival's own duck, and the shove a bar gives one who forgot — both as
+      // a **fold**, never a drop. `kid.root` stays at the seat; see
+      // `duckPose.ts`. A rival is the one a watching child learns the rule
+      // from, so a rival who ducks has to look like she is ducking.
+      const fold = Math.max(cart.rider.ducking ? 1 : 0, knockdown(cart.rider.wobble));
       kid.root.position.y = SEAT_HEIGHT - cart.rider.bob * BOB_DROP;
-      if (cart.rider.finished) {
+      // Rivals turn towards the camera too — see `FACE_TURN_MAX`. A rival's
+      // face is the one a watching child reads the rule off, so it is no more
+      // use in profile than the player's is. `kid.root` is a child of the cart
+      // group, so this local yaw simply adds to the cart's own.
+      const turn = this.faceTurn(cart.group.rotation.y, cart.group.position, cart.sad);
+      kid.root.rotation.y = turn.body;
+      kid.head.rotation.y = turn.head;
+      // Seated, always — she is aboard a cart whether or not she is ducking.
+      // Applied before the arm chain below so that chain can still own the
+      // arms while she is upright; the fold takes them over when it happens.
+      // The pump rock rivals get too — a child reads the rhythm of the control
+      // off the cart beside her as much as off her own.
+      poseRailRaceRider(kid, { duck: fold, pump: cart.rider.bob, cheer: 0 });
+      setRiderLegsVisible(kid, this.legsShow);
+      if (fold > 0) {
+        // Folded: `poseRailRaceRider` owns the whole pose, arms included.
+      } else if (cart.rider.finished) {
         // Arms up, cheering.
         const flap = Math.sin(elapsed * 11) * 0.3;
         limbs.rightArm.rotation.x = -2.5 + flap;
         limbs.leftArm.rotation.x = -2.5 - flap;
+      } else if (knockdown(cart.rider.wobble) > 0) {
+        // Just bonked: hands over the head, chin tucked. Reads as "ow" from
+        // the far side of the ring, which is where a child watching a rival
+        // miss a bar is standing.
+        limbs.rightArm.rotation.x = -2.2;
+        limbs.rightArm.rotation.z = -0.35;
+        limbs.leftArm.rotation.x = -2.2;
+        limbs.leftArm.rotation.z = 0.35;
+        kid.head.rotation.x = 0.7;
       } else if (cart.rider.ducking) {
         // Ducked: head down, arms tucked in.
         limbs.rightArm.rotation.x = -0.4;
+        limbs.rightArm.rotation.z = 0;
         limbs.leftArm.rotation.x = -0.4;
+        limbs.leftArm.rotation.z = 0;
         kid.head.rotation.x = 0.5;
       } else if (cart.rider.boost > PRESSING_POSE_THRESHOLD) {
         // Mashing: hands on the rail, leaning into it.
@@ -835,7 +1045,13 @@ export class RailRace implements GameSystem {
         limbs.leftArm.rotation.z = 0;
         kid.head.rotation.x = 0;
       }
-      kid.setExpression(cart.rider.wobble > 0.2 ? 'surprised' : 'happy');
+      // Frown for the two moments the family asked to be readable from
+      // watching a rival: mid-wobble right after a bonk, and while actively
+      // powering over a sparking black stretch. No separate lockout timer is
+      // needed for the second — `simulate.ts` only sets `sparking` while a
+      // rider is in a black zone *and* still mashing (`sparkGuard > 0`), so
+      // easing off clears the frown by itself, which is the lesson.
+      kid.setExpression(riderIsSad(cart.rider) ? 'frown' : 'happy');
     }
   }
 
@@ -861,13 +1077,33 @@ export class RailRace implements GameSystem {
     // one exists, and it is the same rule every other size in this file now
     // follows.
     const rideScale = this.activeRing.route.scale;
-    const duckDrop = this.ducking && this.phase === 'racing' ? DUCK_DROP * rideScale : 0;
-    const wobble = rider.wobble > 0 ? Math.sin(rider.wobble * 34) * 0.08 * rider.wobble : 0;
+    // Whichever is deeper: the duck she chose, or the one the bar just gave
+    // her. Handed to `Player` as a number rather than posed here, because her
+    // own animation rewrites the very transforms the fold needs — see
+    // `Player.railRaceDuck` and `duckPose.ts`.
+    setRiderLegsVisible(this.player.model, this.legsShow);
+    // Everything her body is doing, stated at once. See `RiderPose` — four
+    // things want `body.rotation.x` and handing them over one at a time is how
+    // they end up fighting.
+    this.player.railRaceRide = {
+      duck: Math.max(this.ducking && this.phase === 'racing' ? 1 : 0, knockdown(rider.wobble)),
+      pump: rider.bob,
+      cheer: this.cheer,
+    };
+    // Sideways across the tub, bounded by {@link BONK_SWAY} — she must not be
+    // shaken out through the side of the cart she is sitting in.
+    const wobble =
+      rider.wobble > 0 ? Math.sin(rider.wobble * 34) * BONK_SWAY * rider.wobble : 0;
+    // Round towards the camera far enough for her face to be worth painting —
+    // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
+    // and is set below because `setRidePose` only owns the root.
+    const turn = this.faceTurn(cart.rotation.y, cart.position, this.me.sad);
+    this.player.model.head.rotation.y = turn.head;
     this.player.setRidePose(
       cart.position.x + wobble,
-      cart.position.y + SEAT_HEIGHT * rideScale - duckDrop,
+      cart.position.y + SEAT_HEIGHT * rideScale,
       cart.position.z,
-      cart.rotation.y,
+      cart.rotation.y + turn.body,
       // Rivals get this for free — `kid.root` is a child of the same group
       // `placeCarts()` pitches — but the player's own model is positioned
       // independently every frame, so it never inherited the cart's tilt on
@@ -880,6 +1116,27 @@ export class RailRace implements GameSystem {
     this.phase = 'waiting';
     if (this.riding && this.player) {
       this.riding = false;
+      // Otherwise a frown caught mid-race would ride home with her forever —
+      // `driveRiders` (the only place that sets it) stops running the moment
+      // `phase` leaves 'racing'/'finishing'.
+      this.player.railRaceFrown = false;
+      // ...and the same for the turn towards the camera (`FACE_TURN_MAX`). The
+      // eased `Cart.sad` that scales it is zeroed on every cart below, so
+      // nobody is left standing at the station facing sideways.
+      for (const cart of this.carts) cart.sad = 0;
+      // Nothing else in the game ever writes `head.rotation.y`, so nothing
+      // else would ever put it back: without this she walks around the park
+      // for the rest of the session with her head cricked to one side. Exactly
+      // the frown's own bug, one field along.
+      this.player.model.head.rotation.y = 0;
+      // ...and unfold her, or she walks the park permanently doubled over.
+      // Back on her feet: `Player.animate` owns every transform the ride was
+      // holding, from the very next frame, so this one line is the whole of
+      // the restore. Nothing is stashed, so nothing can be stranded.
+      this.player.railRaceRide = null;
+      // Unconditional, whatever happened during the race — see
+      // `setRiderLegsVisible` for the bug this shape exists to avoid.
+      setRiderLegsVisible(this.player.model, true);
       // The planned exit (`railRace/plan.ts`) — a clear patch beside the booth
       // — with the runtime safety net on top (see `world/dismount.ts`).
       const { x, z } = resolveDismount(
