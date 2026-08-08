@@ -378,8 +378,9 @@ export function clearOfPlots(x: number, z: number, radius: number): boolean {
  * low-altitude window against the castle's 19 m circle rejects every pose
  * the near-relation just arranged. The footprint is what is really built.
  */
-export function clearOfFootprints(x: number, z: number, margin: number): boolean {
+export function clearOfFootprints(x: number, z: number, margin: number, exceptId?: string): boolean {
   for (const entry of PARK_LAYOUT.entries.values()) {
+    if (entry.id === exceptId) continue;
     if (entry.footprint.kind === 'circle') {
       if (Math.hypot(x - entry.x, z - entry.z) < entry.footprint.radius + margin) return false;
       continue;

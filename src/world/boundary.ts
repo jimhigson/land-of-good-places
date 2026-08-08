@@ -288,6 +288,66 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
   };
 }
 
+/**
+ * A fast read-only view of a star-shaped boundary, for the ride solvers.
+ *
+ * `profileBoundary`'s `distanceToEdge` scans all 512 vertices per query so a
+ * one-off ask (a lamp, a plot candidate) is exact even at the eccentric
+ * near-tie its comment documents. A route search is a different customer: it
+ * asks per CANDIDATE PIECE — measured at 776k pieces on one seed, the scan
+ * was most of a 31-second solve. This view answers in O(1) from two lookup
+ * tables: the radius per bearing, and the cosine of the angle between the
+ * radial and the edge NORMAL per bearing (the obliquity), so
+ * `distance ≈ (radiusAt(θ) − |p|) · cosAt(θ)` — exact on a circle, and on
+ * these deliberately gentle curves (curvature radius ≥ 20 m by construction)
+ * within a few percent, erring by UNDER-stating distance wherever the edge
+ * runs oblique, which for a solver holding a corridor INSIDE the park is the
+ * safe direction: it can only reject a piece the exact test would allow,
+ * never accept one it would forbid.
+ *
+ * Only `contains`/`distanceToEdge` are re-derived; everything else delegates.
+ */
+export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
+  const points = boundary.outline();
+  const count = points.length;
+  const radii = new Float64Array(count);
+  const obliquity = new Float64Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const [x, z] = points[i] as readonly [number, number];
+    const [nx, nz] = points[(i + 1) % count] as readonly [number, number];
+    const [px, pz] = points[(i - 1 + count) % count] as readonly [number, number];
+    const radius = Math.hypot(x, z) || 1;
+    radii[i] = radius;
+    // Edge direction by central difference; its normal versus the radial.
+    const ex = nx - px;
+    const ez = nz - pz;
+    const edge = Math.hypot(ex, ez) || 1;
+    // normal = (-ez, ex)/edge; radial = (x, z)/radius; |dot| is the cosine.
+    obliquity[i] = Math.abs((-ez * x + ex * z) / (edge * radius));
+  }
+  const at = (table: Float64Array, bearing: number): number => {
+    const t = ((bearing % TAU) + TAU) % TAU;
+    const scaled = (t / TAU) * count;
+    const i = Math.floor(scaled) % count;
+    const frac = scaled - Math.floor(scaled);
+    const a = table[i] as number;
+    const b = table[(i + 1) % count] as number;
+    return a + (b - a) * frac;
+  };
+  return {
+    contains: (x, z) => Math.hypot(x, z) <= at(radii, Math.atan2(z, x)),
+    distanceToEdge: (x, z) => {
+      const bearing = Math.atan2(z, x);
+      return (at(radii, bearing) - Math.hypot(x, z)) * at(obliquity, bearing);
+    },
+    area: boundary.area,
+    perimeter: boundary.perimeter,
+    maxRadius: boundary.maxRadius,
+    extent: boundary.extent,
+    outline: () => points,
+  };
+}
+
 // ------------------------------------------------------------- the generator
 
 /**

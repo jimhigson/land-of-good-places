@@ -4,7 +4,7 @@ import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
 import { clearOfFootprints, PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { terrainHeight } from '../terrain';
-import { circleBoundary, insetBoundary, PARK_BOUNDARY } from '../boundary';
+import { circleBoundary, insetBoundary, PARK_BOUNDARY, solverBoundary } from '../boundary';
 import {
   type RouteBrief,
   type RouteInfluence,
@@ -574,7 +574,7 @@ export class CoasterRoute {
     const boundary =
       options.outerRadius !== undefined
         ? circleBoundary(options.outerRadius)
-        : insetBoundary(PARK_BOUNDARY, RIM_INSET);
+        : solverBoundary(insetBoundary(PARK_BOUNDARY, RIM_INSET));
 
     // --- horizontal: the generator solves the plan view --------------------
     const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
@@ -599,8 +599,17 @@ export class CoasterRoute {
       // dodges the published low corridor itself (train/route.ts), because
       // it solves later and threads intervals — Decision 6's arrow: publish
       // what you solved, the next system treats it as an obstacle.
+      // The castle is EXEMPT from the low-ground rule: the booth is parked
+      // beside it by the near relation and the ride legally passes through
+      // its walls, so pieces near the station are always near the castle —
+      // holding them to its footprint made the search reject nearly every
+      // early piece and burn its whole restart budget (measured: the solve
+      // went 31 s with the blanket rule, 1.1 s without it; the castle's own
+      // safety is `castleClear`'s crossing-band rule, checked above, plus
+      // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
+      // through the ball pit's balls is what it exists to stop (seed 18).
       const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
-      if (nearStation && !clearOfFootprints(x, z, radius + 0.6)) return false;
+      if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
       return true;
     };
     const brief: RouteBrief = {

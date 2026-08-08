@@ -20,7 +20,7 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
-import { PARK_BOUNDARY } from '../boundary';
+import { PARK_BOUNDARY, solverBoundary } from '../boundary';
 import { type OpenRouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { terrainHeight } from '../terrain';
@@ -1044,7 +1044,7 @@ function planSlide(): PlannedSlide {
   // whose corridor comes within `corridorRadius` of this boundary's edge, so
   // handing over the real spline keeps the chute inside the park with the
   // same clearance the old circle pretended to give (issue #241).
-  const boundary = PARK_BOUNDARY;
+  const boundary = solverBoundary(PARK_BOUNDARY);
   const brief: OpenRouteBrief = {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.
