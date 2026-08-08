@@ -316,6 +316,16 @@ function solveProfile(): Float64Array {
   // under with Decision 4's {@link RAIL_OVER_RAIL_AIR} becomes a small
   // no-go disc; at cruise height it is not an obstacle at all, and the
   // crossing rule is satisfied by the cruise floor itself.
+  // The cruiser's DISMOUNT POINT too: the exit is chosen before the train
+  // exists (solve order), so the avoidance lives here — a fence across the
+  // spot a ride sets a child down is the seed-18 failure shape.
+  circles.push({
+    centreX: COASTER_PLANS.cruiser.exitX,
+    centreZ: COASTER_PLANS.cruiser.exitZ,
+    radius: 1.6,
+    clearance: 4.0,
+  });
+
   {
     const cruiser = COASTER_PLANS.cruiser.route;
     const probe = new Vector3();
@@ -323,7 +333,10 @@ function solveProfile(): Float64Array {
     for (let d = 0; d < cruiser.length; d += 2) {
       cruiser.pointAt(d, probe);
       if (probe.y - terrainHeight(probe.x, probe.z) >= lowCeiling) continue;
-      circles.push({ centreX: probe.x, centreZ: probe.z, radius: 1.6, clearance: 2.2 });
+      // Clearance covers the FENCE the track carries, not just the track:
+      // rails at r means fence pickets at r + 2.0, and the cruiser's car is
+      // 1.45 m half-wide — 2.2 left the fence inside the car on seed 18.
+      circles.push({ centreX: probe.x, centreZ: probe.z, radius: 1.6, clearance: 4.0 });
     }
   }
 

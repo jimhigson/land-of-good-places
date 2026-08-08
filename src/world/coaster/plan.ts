@@ -69,6 +69,9 @@ function planExit(route: CoasterRoute, stationStallId: string): { exitX: number;
     const x = station.x + nx * distance;
     const z = station.z + nz * distance;
     // 2.6, from 1.4 — same reasoning as railRace/plan.ts's exit margin.
+    // The railway cannot be asked here — the coaster solves BEFORE the
+    // train exists — so the avoidance points the other way: the train's
+    // own solver keeps its track and fence off this exit (train/route.ts).
     if (clearOfPlots(x, z, 2.6)) return { exitX: x, exitZ: z };
   }
   // Never found clear ground out to 24 m — hand back the nearest try rather

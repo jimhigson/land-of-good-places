@@ -124,7 +124,10 @@ function planExit(): { exitX: number; exitZ: number } {
       // 2.6, from 1.4 (issue #241): an exit inside a booth's INFLATED circle is
       // one `routeAround` cannot dodge on the way in — the spur leg then
       // grazes the booth's counter and the exit's waypoints strand behind it.
-      if (clearOfPlots(x, z, 2.6)) return { exitX: x, exitZ: z };
+      // And off the railway with its fence, like every exit.
+      if (clearOfPlots(x, z, 2.6) && distanceToRailCorridor(x, z) >= RAIL_CORRIDOR_CLEARANCE) {
+        return { exitX: x, exitZ: z };
+      }
     }
   }
 

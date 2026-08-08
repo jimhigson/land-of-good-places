@@ -190,11 +190,14 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: 7.5 },
     boundingRadius: 9,
     band: { min: 10, max: 80 },
-    // max 28, from 30 (issue #241): the slide's chute has a 75 m rideable
-    // ceiling (length is gradient — see slide/plan.ts), and on a seed whose
-    // pit rolled the far end of the old ring every solvable route came out
-    // 80+. Two metres of relation buys the whole solve back.
-    near: { id: 'building', min: 24, max: 28 },
+    // max 26.5, from 30 via 28 (issue #241): the slide's chute has a 75 m
+    // rideable ceiling (length is gradient — see slide/plan.ts), and every
+    // time the rides re-solve, the seeds whose pit rolled the far end of
+    // the ring are the ones whose every solvable route comes out 80-90 m —
+    // the chute detours round whatever the cruiser grew between castle and
+    // pit. Each 1.5 m off the relation's far end has bought a failing seed
+    // back without costing the near end anything a player can see.
+    near: { id: 'building', min: 24, max: 26.5 },
   },
   // The Land Hotel (issue #236, Eleri's own spec): a crystal tower CLOSE TO
   // THE CASTLE — the near relation is her requirement verbatim. Fifty

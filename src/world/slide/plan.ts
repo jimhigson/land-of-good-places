@@ -21,6 +21,7 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
 import { PARK_BOUNDARY, solverBoundary } from '../boundary';
+import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
 import { type OpenRouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { terrainHeight } from '../terrain';
@@ -930,6 +931,10 @@ function planExit(): { exitX: number; exitZ: number } {
       const x = BALL_PIT_X + Math.cos(bearing) * distance;
       const z = BALL_PIT_Z + Math.sin(bearing) * distance;
       if (PARK_BOUNDARY.distanceToEdge(x, z) < 2) continue;
+      // Off the railway and its fence — the slide solves after the train,
+      // so unlike the cruiser's exit it can simply ask (seed 18 landed the
+      // exit against the fence).
+      if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) continue;
       if (insideCastle(x, z, clearance)) continue;
       let blocked = false;
       for (const [id, entry] of PARK_LAYOUT.entries) {

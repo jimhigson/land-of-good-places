@@ -267,7 +267,18 @@ function tallObstacles(): TallObstacle[] {
     // Nothing kept the loop off the plaza at all before this, which is the
     // actual hole; the statue merely made it visible.
     { x: PARK_LAYOUT.fountain.x, z: PARK_LAYOUT.fountain.z, radius: STATUE_TALL_RADIUS },
+    // The Land Hotel (#236): 28 m of crystal against a 6.2 m cruise floor —
+    // the third member of the statue's category, added the way the statue's
+    // own comment predicted the next one would be: a tall thing merged on a
+    // branch with no cruiser sweep to run, made visible when the loop
+    // re-rolled (seed 5 flew the car straight through the tower's spires).
+    hotelTallObstacle(),
   ];
+}
+
+function hotelTallObstacle(): TallObstacle {
+  const hotel = placedEntry('hotel');
+  return { x: hotel.x, z: hotel.z, radius: hotel.boundingRadius + 1 };
 }
 
 /**
