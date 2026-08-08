@@ -570,6 +570,7 @@ export function createCatBus(): CatBusHandle {
       // The doorway is an opening too: no post may stand in it.
       if (side < 0 && Math.abs(z - doorZ) < SEAT_PITCH * 0.6) continue;
       const pillar = solid(new Mesh(pillarGeometry, bodyMaterial));
+      pillar.name = 'cat-bus-pillar';
       pillar.position.set(side * (BODY_WIDTH / 2 - WALL_THICKNESS / 2), (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, z);
       chassis.add(pillar);
     }
@@ -594,6 +595,7 @@ export function createCatBus(): CatBusHandle {
       toonMaterial(new Color(PALETTE.woodLight).multiplyScalar(0.8).getHex()),
     ),
   );
+  floorPan.name = 'cat-bus-floor-pan';
   floorPan.position.set(0, CAT_BUS_FLOOR_Y - FLOOR_PAN_THICKNESS / 2, bodyCentreZ);
   chassis.add(floorPan);
 
@@ -700,6 +702,7 @@ export function createCatBus(): CatBusHandle {
       // No glass across the doorway — that opening is a door, not a window.
       if (side < 0 && Math.abs(z - doorZ) < SEAT_PITCH * 0.6) continue;
       const win = decal(new Mesh(glassGeometry, windowMaterial));
+      win.name = 'cat-bus-window';
       win.position.set(side * (BODY_WIDTH / 2 - WALL_THICKNESS / 2), (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2, z);
       chassis.add(win);
     }
@@ -739,10 +742,12 @@ export function createCatBus(): CatBusHandle {
 
       // The cushion stands on the floor, so its top is `CAT_BUS_SEAT_Y`.
       const pad = solid(new Mesh(seatPadGeometry, seatMaterial));
+      pad.name = 'cat-bus-cushion';
       pad.position.set(x, CAT_BUS_FLOOR_Y + SEAT_PAD_HEIGHT / 2, z);
       chassis.add(pad);
 
       const back = solid(new Mesh(seatBackGeometry, seatMaterial));
+      back.name = 'cat-bus-backrest';
       back.position.set(x, CAT_BUS_SEAT_Y + seatBackHeight / 2, z - SEAT_PITCH * 0.3);
       chassis.add(back);
 

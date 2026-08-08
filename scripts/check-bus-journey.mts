@@ -45,6 +45,15 @@ import { JourneyTitle, JOURNEY_TITLE_TEXT } from '../src/ui/JourneyTitle.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
 import { CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
 
+/**
+ * How finely the inside frame is sampled. 24 x 14 is 336 rays — enough that a
+ * surface owning a third of the picture cannot hide between them, and few
+ * enough to run a handful of times without the check getting slow.
+ */
+const FRAME_GRID_X = 24;
+const FRAME_GRID_Y = 14;
+
+
 const fouls: string[] = [];
 const said: string[] = [];
 
@@ -349,6 +358,20 @@ if (busRoot) {
    * one.
    */
   let nearestToTheLens = Infinity;
+  /**
+   * The biggest share of the inside frame any **single** surface takes.
+   *
+   * The shipped shot had one mesh — the top of `cat-bus-shell-lower`, which
+   * everybody including this check called "the floor" — owning better than a
+   * third of it. See the sampling block below.
+   */
+  let worstSurfaceShare = 0;
+  let worstSurfaceName = '';
+  /** How much of the frame is seating, and how much is children. */
+  let seatShare = 0;
+  let childShare = 0;
+  let compositionSaid = '';
+  const probe = new Vector3();
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
@@ -445,6 +468,83 @@ if (busRoot) {
       }
     }
     fewestChildrenInShot = Math.min(fewestChildrenInShot, inShot);
+
+    // ------------------------------------------- does the shot read as a bus?
+    //
+    // **The fault QA refused to sign off was a composition, and no assertion
+    // here could see a composition.** Their words, 8 August 2026: *"the bottom
+    // 35–40% is featureless cream floor […] there is no seat, window, pillar or
+    // ceiling in shot — you cannot tell it is a bus."* Every guard in this file
+    // passed on that frame, because each of them asks about one object at a
+    // time and the fault was in the proportions of the whole picture.
+    //
+    // So this one fires a grid of rays through the frame itself and asks what
+    // fills it. Two things, both taken straight from the complaint:
+    //
+    // - **no single surface may own the shot** — one flat mesh covering better
+    //   than a third of the frame *is* "featureless cream floor", whichever
+    //   mesh it happens to be;
+    // - **a seat and a child must both be in it** — that is the difference
+    //   between the inside of a bus and a corridor.
+    //
+    // Sampled rather than every frame: 336 rays is not free, and the camera is
+    // rigidly mounted in the bus, so the composition changes only as the world
+    // outside does.
+    if (insideFrames % 40 === 1) {
+      const perSurface = new Map<Object3D, number>();
+      const perKind = new Map<string, number>();
+      let rays = 0;
+      for (let gx = 0; gx < FRAME_GRID_X; gx += 1) {
+        for (let gy = 0; gy < FRAME_GRID_Y; gy += 1) {
+          probe
+            .set(((gx + 0.5) / FRAME_GRID_X) * 2 - 1, ((gy + 0.5) / FRAME_GRID_Y) * 2 - 1, 0.5)
+            .unproject(inside.camera)
+            .sub(inside.camera.position)
+            .normalize();
+          sight.set(inside.camera.position, probe);
+          sight.near = inside.camera.near;
+          sight.far = 80;
+          // **What the camera can actually see**, which is not the same as what
+          // is there: `Raycaster` ignores `visible`, and the ride hides the
+          // lower body's outline shell for exactly these frames (`setCutaway`).
+          // A guard that counted hidden geometry would report the cabin as a
+          // solid box and would have passed the shot it is here to fail.
+          const seen = sight.intersectObject(inside.scene, true).find((hit) => {
+            if (!isDrawn(hit.object)) return false;
+            const material = (hit.object as Mesh).material as
+              | { transparent?: boolean; opacity?: number }
+              | undefined;
+            if (material?.transparent === true && (material.opacity ?? 1) < 0.9) return false;
+            return true;
+          });
+          rays += 1;
+          if (!seen) {
+            perKind.set('out of the bus', (perKind.get('out of the bus') ?? 0) + 1);
+            continue;
+          }
+          perSurface.set(seen.object, (perSurface.get(seen.object) ?? 0) + 1);
+          const kind = describeInsideHit(seen.object, seats);
+          perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
+        }
+      }
+      for (const [object, count] of perSurface) {
+        const share = count / rays;
+        if (share > worstSurfaceShare) {
+          worstSurfaceShare = share;
+          worstSurfaceName =
+            object.name || `(unnamed ${(object as Mesh).geometry?.type ?? '?'})`;
+        }
+      }
+      const shareOf = (kind: string): number => (perKind.get(kind) ?? 0) / rays;
+      seatShare = Math.max(seatShare, shareOf('a seat'));
+      childShare = Math.max(childShare, shareOf('a child'));
+      if (compositionSaid === '') {
+        compositionSaid = [...perKind]
+          .sort((a, b) => b[1] - a[1])
+          .map(([kind, count]) => `${kind} ${((100 * count) / rays).toFixed(0)}%`)
+          .join(', ');
+      }
+    }
   }
 
   // **Both shots get real time, and the cut actually happens on the built
@@ -492,14 +592,6 @@ if (busRoot) {
     );
   }
 
-  // Enough of them to be a busload rather than one child in a seat.
-  if (fewestChildrenInShot < 4) {
-    fouls.push(
-      `looking inside the bus, at one point a ray towards only ${fewestChildrenInShot} of the ` +
-        `${heads.length} children landed on a child at all — the camera is not pointed at them`,
-    );
-  }
-
   if (nearestToTheLens < 0.3) {
     fouls.push(
       `something is ${nearestToTheLens.toFixed(2)} m from the inside camera's lens — it is buried in ` +
@@ -507,15 +599,50 @@ if (busRoot) {
     );
   }
 
-  // **Nothing of the bus may stand between the camera and its passengers.**
-  // This is the assertion that would have caught both of this round's inside-
-  // view bugs, and neither the frustum test nor the bounding-box test could.
-  if (blockedByTheBus > 0) {
+  // -------------------------------------------------- the shot reads as a bus
+  //
+  // **Two assertions used to stand here and both have been replaced, because
+  // the property they enforced is the one Jim overruled.** They were
+  // *"a ray towards at least four children must land on a child"* and
+  // *"no bodywork may stand between the camera and a passenger"*, and together
+  // they meant: fill the frame with faces. That is precisely the shot QA would
+  // not sign off — from the front of the cabin looking aft, faces are all there
+  // is, and a bus made only of faces is not recognisably a bus.
+  //
+  // Turning the camera round to look forward makes both of them impossible to
+  // satisfy by construction: the seats face the nose, so every sightline to a
+  // child behind the front row passes through the back of somebody's seat, and
+  // a seat back is bodywork. Keeping them would have meant keeping the shot.
+  //
+  // **They are not weakened, they are aimed at the real complaint instead.**
+  // What is measured now is the composition of the frame, which is what the
+  // complaint was about, and the old failures are still caught: a camera buried
+  // in a wall is one surface owning the whole frame, and a camera pointed away
+  // from the passengers is `childShare` at zero.
+  said.push(`the inside shot is made of: ${compositionSaid || 'nothing measured'}`);
+  said.push(
+    `its largest single surface is ${worstSurfaceName || '(none)'} at ` +
+      `${(100 * worstSurfaceShare).toFixed(0)}% of the frame; seating ${(100 * seatShare).toFixed(0)}%, ` +
+      `children ${(100 * childShare).toFixed(0)}%`,
+  );
+
+  if (worstSurfaceShare > 0.30) {
     fouls.push(
-      `the bus's own bodywork stands between the inside camera and its passengers on ${blockedByTheBus} ` +
-        `sightlines — ${[...blocked]
-          .map(([name, count]) => `${name} (${count})`)
-          .join(', ')}. The camera is buried in the vehicle, and the view inside is a wall`,
+      `one surface — ${worstSurfaceName} — fills ${(100 * worstSurfaceShare).toFixed(0)}% of the view ` +
+        'inside the bus. That is a wall or a floor with nothing on it, which is what "you cannot tell ' +
+        'it is a bus" looks like from the inside',
+    );
+  }
+  if (seatShare < 0.05) {
+    fouls.push(
+      `seating is ${(100 * seatShare).toFixed(0)}% of the view inside the bus — there is no seat in ` +
+        'shot, and a vehicle with no seats in it does not read as a bus however many children are aboard',
+    );
+  }
+  if (childShare < 0.05) {
+    fouls.push(
+      `children are ${(100 * childShare).toFixed(0)}% of the view inside the bus — the camera is not ` +
+        'pointed at the passengers, which is the whole reason the inside shot exists',
     );
   }
 
@@ -551,6 +678,52 @@ if (busRoot) {
   }
 
   inside.dispose();
+}
+
+/**
+ * Would this actually be drawn?
+ *
+ * `Raycaster` does not consult `visible` — it walks the graph and hits whatever
+ * geometry is there. The ride hides the lower body's outline shell for the
+ * inside beats, so a check that did not ask this would measure a cabin the
+ * camera cannot see and pass the very shot it exists to fail.
+ */
+function isDrawn(node: Object3D): boolean {
+  let at: Object3D | null = node;
+  while (at) {
+    if (!at.visible) return false;
+    at = at.parent;
+  }
+  return true;
+}
+
+/** What a ray landing on `object` has found, in words a foul can use. */
+function describeInsideHit(object: Object3D, seats: readonly Object3D[]): string {
+  if (seats.some((seat) => isDescendant(object, seat))) return 'a child';
+  let at: Object3D | null = object;
+  while (at) {
+    switch (at.name) {
+      case 'cat-bus-cushion':
+      case 'cat-bus-backrest':
+        return 'a seat';
+      case 'cat-bus-floor-pan':
+        return 'the floor';
+      case 'cat-bus-pillar':
+        return 'a pillar';
+      case 'cat-bus-window':
+        return 'the glazing';
+      case 'cat-bus-shell-lower':
+      case 'cat-bus-shell-upper':
+      case 'cat-bus-face':
+        return 'bare bodywork';
+      case 'cat-bus-driver':
+        return 'the driver';
+      default:
+        break;
+    }
+    at = at.parent;
+  }
+  return 'the lane outside';
 }
 
 /** Is `node` somewhere under `ancestor`? */
