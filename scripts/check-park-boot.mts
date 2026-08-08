@@ -197,13 +197,21 @@ if (worstAdvanceMs > ADVANCE_CEILING_MS) {
 // evaluation to ~157 ms — and this file was the only place in the repo carrying
 // the stale claim, so issue #252 quoted it as evidence against the train.
 //
-// Measured now, on this branch, with the cruiser sliced: the worst legitimate
-// block is `train/plan.ts`'s own evaluation at **157-169 ms**. So 250 ms is
-// about 1.5x above the legitimate worst and eight times below the cheapest
-// failure. **That margin is thinner than it should be, and deliberately not
-// papered over**: the fix is to bring the train's own cost back down (PR #253
-// measures it at 40-47 ms after its `repair()` fix), not to raise this ceiling.
-// If that lands and this is re-measured, the 5x separation returns.
+// Measured on this branch with the cruiser sliced, twice, because the answer
+// moved under us mid-session:
+//
+// - before #253 landed, the worst legitimate block was `train/plan.ts`'s own
+//   evaluation at **153-169 ms**, leaving 250 ms only ~1.5x clear of it. That
+//   was recorded here as too thin rather than papered over, with the fix named:
+//   bring the train's own cost down, do not raise this ceiling.
+// - #253 then merged, doing exactly that. Re-measured over three runs: the
+//   worst block is **39.3-40.3 ms**.
+//
+// So 250 ms now sits about **6x above the worst legitimate block and 32x below
+// the cheapest failure** (an unsliced cruiser at ~1.3 s). That is the separation
+// this ceiling was chosen for, restored by fixing the cost rather than by moving
+// the line — which is the whole point of writing the thin version down instead
+// of quietly living with it.
 //
 // It does not need to be tighter: the mutation that makes slices too coarse is
 // caught by ADVANCE_CEILING_MS above, which is the assertion that owns that

@@ -2,7 +2,9 @@
 
 Branch: `e-cruiser-slice-work`, pushed to `e/cat-bus-stage-a`
 Worktree: `.claude/worktrees/e-cruiser-slice`
-Base: `origin/e/cat-bus-stage-a` @ `6fa1c51`, with `origin/main` @ `876ff9e` merged in.
+Base: `origin/e/cat-bus-stage-a` @ `6fa1c51`, with `origin/main` merged in twice —
+`876ff9e` (#254 walls/taps/naps/rugs) and then `9271ee0` (#253, the train fix,
+which landed mid-session).
 
 ## The job, and why the last attempt went to the wrong file
 
@@ -53,9 +55,9 @@ the same set of points and cannot return a different answer.
 
 | | before | after |
 |---|---|---|
-| `check:park-boot` worst event-loop block | **1424.4 ms** | **153–169 ms** (ceiling 250, unchanged) |
+| `check:park-boot` worst event-loop block | **1424.4 ms** | **39.3–40.3 ms** (ceiling 250, unchanged) |
 | worst single `advance()` | 14.6 ms | 18.6–19.2 ms (ceiling 24, unchanged) |
-| unbudgeted work | **1510 ms** | **241–264 ms** (ceiling 1000, unchanged) |
+| unbudgeted work | **1510 ms** | **128 ms** (ceiling 1000, unchanged) |
 | `check:park-boot` exit | **1 (FAILED)** | **0 (passed)** |
 
 Cruiser stage decomposed: brief ~19 ms, search ~1170 ms (29141 yields), finish
@@ -89,21 +91,38 @@ moved the slide's route too, and the slide's own comparison still said
 ## Corrections carried into the check
 
 - The **"~44 ms" train figure lived here**, in `check-park-boot.mts` (not in
-  `train/plan.ts`), and predated the hotel merge. Re-measured to ~157 ms, with
-  the consequence stated plainly: 250 ms now sits only ~1.5x above the worst
-  legitimate block. **The fix is PR #253 bringing the train's own cost down, not
-  raising this ceiling.**
+  `train/plan.ts`), and predated the hotel merge. Re-measured to ~157 ms, and
+  recorded as leaving only ~1.5x of margin — too thin, written down rather than
+  lived with, with the fix named as PR #253 rather than a higher ceiling. #253
+  then landed mid-session and did exactly that: re-measured over three runs the
+  worst block is **39.3–40.3 ms**, so 250 ms is back to ~6x clear. The margin was
+  restored by fixing the cost, not by moving the line.
 - The unbudgeted-work message asserted *"it is the slide being solved a second
   time"*. It never measured that. It now reports what it measured and warns that
   the module billed for a solve is whichever imports it first.
 
-## The `main` merge
+## The `main` merges
 
-One conflict, `package.json`'s build chain. Resolved as the **union**, verified
-mechanically rather than by eye: 40 chained steps, every one defined, no script
-key lost from either side, `check:tap-spacing` (main's new gate) and
-`check:cat-bus` / `check:bus-journey` / `check:park-boot` (the branch's) all
-present and chained.
+Two of them, one conflict each, both `package.json`'s build chain, both resolved
+as the **union** and verified mechanically rather than by eye — a script list is
+exactly where taking one side silently deletes the other's gates.
+
+| merge | conflict | result |
+|---|---|---|
+| `876ff9e` (#254) | build chain | 40 steps; adds main's `check:tap-spacing` |
+| `9271ee0` (#253) | build chain | 41 steps; adds main's `check:solve-cost` |
+
+Verified after each: every chained script defined, no script key lost from
+either side, and `check:cat-bus` / `check:bus-journey` / `check:park-boot` (the
+branch's) still present and chained alongside main's.
+
+`check:solve-cost` arrives from #253 and is compatible: it measures the
+*straight-through* module-scope cost of each stage, which this change does not
+alter (nothing in Node pre-warms, so `COASTER_PLANS` still solves synchronously).
+Its header asks whoever merges the cat bus to reconcile the two checks' numbers —
+that is done: `check:park-boot`'s stale "~44 ms" train figure is corrected above,
+and the two own different questions (raw module cost vs. fitting the ride's
+frame slices), so both stay.
 
 ## Still to do / watch
 
