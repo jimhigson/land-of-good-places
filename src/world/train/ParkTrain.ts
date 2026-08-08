@@ -301,6 +301,18 @@ export class ParkTrain implements GameSystem, TrainService {
     }));
   }
 
+  /**
+   * The platforms' tap areas, for the flower scatter to keep its blooms out
+   * of (the tap-spacing rule, `world/tapSpacing.ts`) — the stations only
+   * exist once the loop is solved, which is after the meadow is planted.
+   */
+  stationTapAreas(): readonly { x: number; z: number; pickRadius: number }[] {
+    return this.stations.map((station) => {
+      const zone = station.interactZone();
+      return { x: zone.x, z: zone.z, pickRadius: zone.pickRadius };
+    });
+  }
+
   /** "Get on" / "Get off" / nothing, for the platform at `index`. */
   private stationActions(index: number): readonly ZoneAction[] {
     // Only ever the platform she is actually standing at: the train cannot be

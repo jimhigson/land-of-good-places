@@ -110,6 +110,7 @@ import {
   DOOR_HALF,
   GARDEN_FLOOR,
   HOTEL_FLOORS,
+  hotelDoorBands,
   LIFT_ALCOVE_DEPTH,
   LOBBY,
   OCEAN_FLOOR,
@@ -121,11 +122,18 @@ import {
   SUITE_BEDSIDE_Z,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
+  type HotelDoorBand,
   type HotelRoom,
   type Mezzanine,
   type SuitePartition,
   type WallSide,
 } from './layout';
+import {
+  bandContains,
+  distanceToBand,
+  TAP_FINGER_METRES,
+  type PortalBand,
+} from '../tapSpacing';
 import { HotelLift } from './HotelLift';
 import { HotelCinematic, type Shot } from './cinematic';
 import { PLAZA } from '../paths';
@@ -198,6 +206,9 @@ const AUTO_DOOR_SECONDS = 1.2;
 
 /** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
 const WALL_HALF_DEPTH = 0.25;
+
+/** How close a tap must land to a wall's "Look out" pane to select it. */
+const WINDOW_PICK_RADIUS = 2.2;
 
 /**
  * How far the grand staircase is sunk below the lobby floor, so its top
@@ -939,17 +950,37 @@ export class Hotel implements GameSystem {
     for (const side of ['north', 'west'] as const) {
       const wall = room.windows[side];
       if (!wall || wall.at.length === 0) continue;
+      const stand = 1.8;
+      const paneX = (at: number): number =>
+        side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4;
+      const paneZ = (at: number): number =>
+        side === 'north' ? room.originZ - room.halfZ + 0.4 : room.originZ + at;
+      // **Only a pane the tap-spacing rule allows.** The suite's west panes
+      // flank the corridor doorway, and a zone there ate every tap aimed at
+      // the door — Jim's "isn't possible to leave the hotel room on mobile"
+      // (8 Aug 2026). The rule lives in `world/tapSpacing.ts`; a wall with no
+      // compliant pane simply offers no zone, and the room's other wall
+      // carries "Look out".
+      const bands = hotelDoorBands(room);
+      const clearOfDoors = (at: number): boolean =>
+        bands.every(
+          (band) =>
+            distanceToBand(band, paneX(at), paneZ(at)) - WINDOW_PICK_RADIUS >=
+            TAP_FINGER_METRES,
+        );
+      const candidates = wall.at.filter(clearOfDoors);
+      if (candidates.length === 0) continue;
       // Middle pane by preference — but only a pane a child can actually
       // stand at. The breakfast room's middle north pane is behind the
       // buffet counter, and a zone whose stand spot is inside a counter is
       // a chip that never comes in range (QA, 8 Aug 2026). The collision
       // world is the authority on "can stand here", so ask it, nearest the
-      // middle first.
-      const stand = 1.8;
+      // middle first. A layout that knows better says so with `zoneAt`.
       const middleOf = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
       const probe = new Vector3();
       const middle =
-        [...wall.at]
+        wall.zoneAt ??
+        [...candidates]
           .sort((a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf))
           .find((at) => {
             const sx =
@@ -959,16 +990,18 @@ export class Hotel implements GameSystem {
             probe.set(sx, 0, sz);
             this.collision.resolve(probe, PLAYER_RADIUS);
             return Math.hypot(probe.x - sx, probe.z - sz) < 0.05;
-          }) ?? middleOf;
-      const x = side === 'north' ? room.originX + middle : room.originX - room.halfX + 0.4;
-      const z = side === 'north' ? room.originZ - room.halfZ + 0.4 : room.originZ + middle;
+          }) ??
+        candidates[0] ??
+        0;
+      const x = paneX(middle);
+      const z = paneZ(middle);
       zones.push({
         id: `hotel-window-${room.space}-${side}`,
         label: 'window',
         x,
         y: (wall.sill + wall.head) / 2,
         z,
-        pickRadius: 2.2,
+        pickRadius: WINDOW_PICK_RADIUS,
         standX: side === 'north' ? x : x + stand,
         standZ: side === 'north' ? z + stand : z,
         standRadius: 2.6,
@@ -1184,32 +1217,53 @@ export class Hotel implements GameSystem {
 
   // ------------------------------------------------------ changing space
 
+  /**
+   * The tower's front-door trigger, in world metres — the same rectangle
+   * {@link checkDoorways} walks through, published so
+   * `scripts/check-tap-spacing.mts` can hold the park's tap targets clear of
+   * it. Room doorways get the same treatment from `layout.ts`'s
+   * `hotelDoorBands`; this one alone lives here because only the built hotel
+   * knows where the solver put its facade.
+   */
+  towerDoorBand(): PortalBand {
+    return {
+      what: "the hotel tower's front door",
+      centreX: this.facadeX + Math.sin(this.facadeYaw) * 5.5,
+      centreZ: this.facadeZ + Math.cos(this.facadeYaw) * 5.5,
+      halfAlong: 1.1,
+      halfAcross: DOOR_HALF + 0.4,
+      yaw: this.facadeYaw,
+      y: 0,
+    };
+  }
+
   private checkDoorways(player: Player): void {
     if (this.spaceCooldown > 0) return;
+    const { x, z } = player.position;
 
     if (!this.inside) {
-      // The tower door, in the facade's own frame: `forward` is metres from
-      // the tower's centre along the doormat direction, `side` across it.
-      const dx = player.position.x - this.facadeX;
-      const dz = player.position.z - this.facadeZ;
-      const forward = dx * Math.sin(this.facadeYaw) + dz * Math.cos(this.facadeYaw);
-      const side = dx * Math.cos(this.facadeYaw) - dz * Math.sin(this.facadeYaw);
-      if (Math.abs(side) > DOOR_HALF + 0.4) return;
-      if (forward > 6.6 || forward < 4.4) return;
-      this.changeSpace(() => this.enterLobby());
+      if (bandContains(this.towerDoorBand(), x, z)) {
+        this.changeSpace(() => this.enterLobby());
+      }
       return;
     }
 
     const room = this.currentRoom();
     if (!room) return;
     const localX = player.position.x - room.originX;
-    const localZ = player.position.z - room.originZ;
+    // The doorway rectangles themselves are layout data — `hotelDoorBands`,
+    // the same list the tap-spacing check holds every zone clear of.
+    const bands = hotelDoorBands(room);
+    const inBand = (kind: HotelDoorBand['kind']): boolean => {
+      const band = bands.find((candidate) => candidate.kind === kind);
+      return band !== undefined && bandContains(band, x, z);
+    };
 
-    if (room === LOBBY && localZ > LOBBY.halfZ - 0.6 && Math.abs(localX) < DOOR_HALF + 0.4) {
+    if (room === LOBBY && inBand('exit')) {
       this.changeSpace(() => this.leaveToPark());
       return;
     }
-    if (room === CORRIDOR && localX > CORRIDOR.halfX - 1.6 && Math.abs(localZ) < 1.5) {
+    if (room === CORRIDOR && inBand('suite-door')) {
       // **The lock lives here, not in the lift.** Jim, 7 August 2026: *"go to
       // level 50 before you have your key but not through the door to the
       // room."* Every lift button is now pressable, so a child can ride up and
@@ -1234,7 +1288,7 @@ export class Hotel implements GameSystem {
       }
       return;
     }
-    if (room === SUITE && localX < -SUITE.halfX + 0.6 && Math.abs(localZ) < 1.5) {
+    if (room === SUITE && inBand('corridor-door')) {
       this.changeSpace(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
     }
   }
@@ -1819,10 +1873,9 @@ export class Hotel implements GameSystem {
 
   private atLiftDoors(player: Player): boolean {
     const room = this.currentRoom();
-    if (!room || room.liftZ === null) return false;
-    const localX = player.position.x - room.originX;
-    const localZ = player.position.z - room.originZ - room.liftZ;
-    return localX < -room.halfX + 3.4 && Math.abs(localZ) < 2.6;
+    if (!room) return false;
+    const lift = hotelDoorBands(room).find((band) => band.kind === 'lift');
+    return lift !== undefined && bandContains(lift, player.position.x, player.position.z);
   }
 
   // ------------------------------------------------------------- builders
@@ -2675,10 +2728,17 @@ export class Hotel implements GameSystem {
       // the gallery's solid mass, and a lamp inside a wall lights nothing.
       // The gallery's own front carries the rest — see `dressMezzanine`.
       north: [7.2, 12],
-      west: [-6, 2],
+      // The southern sconce moved off z = -6 when the west wall's northern
+      // pane did (see `LOBBY.windows` — a sconce on glass lights nothing).
+      west: [-4.6, 2],
+      // Both on the north wall's east bay now. The second used to hang on the
+      // west wall at z ~5, where its "Look" zone sat inside a finger of the
+      // lift's boarding band *and* of a café chair — the tap-spacing rule
+      // (`world/tapSpacing.ts`, 8 Aug 2026). The west wall by the café keeps
+      // its glass; the paintings hang where taps have room.
       pictures: [
         { wall: 'north', along: 6.2, width: 1.7, height: 1.25, seed: 0x10c2 },
-        { wall: 'west', along: 4, width: 1.7, height: 1.25, seed: 0x10c3 },
+        { wall: 'north', along: 10.2, width: 1.7, height: 1.25, seed: 0x10c3 },
       ],
     });
     this.dressMezzanine(shell);
@@ -2713,12 +2773,16 @@ export class Hotel implements GameSystem {
     // people have been sitting in rather than as a grid — the chairs, the
     // bowls and the sit-down pose all rotate with it, so the mechanics do not
     // notice.
+    // Tables a and e moved east/south on 8 Aug 2026: each had a chair whose
+    // "Sit" zone reached inside a finger of the lift's boarding band, so a
+    // tap aimed at the lift sat a child down instead (the tap-spacing rule,
+    // `world/tapSpacing.ts` — `check:tap-spacing` measures every chair).
     const tables: readonly (readonly [number, number, string, number])[] = [
-      [-7.6, 5.4, 'b1-a', 0.34],
+      [-6.4, 6.2, 'b1-a', 0.34],
       [-2.4, 6.4, 'b1-b', -0.52],
       [3.4, 5.6, 'b1-c', 0.18],
       [8.8, 4.6, 'b1-d', -0.3],
-      [-6.6, 0.4, 'b1-e', 0.62],
+      [-4.6, 0.2, 'b1-e', 0.62],
       [-2.6, -3, 'b1-f', -0.16],
       [7.4, -0.8, 'b1-g', 0.46],
     ];
@@ -2781,10 +2845,12 @@ export class Hotel implements GameSystem {
       // lights it, and anything mounted lower would be behind the buffet.
       north: [],
       west: [-7, 7],
-      pictures: [
-        { wall: 'west', along: -5, width: 1.6, height: 1.2, seed: 0x20c1 },
-        { wall: 'west', along: 5, width: 1.6, height: 1.2, seed: 0x20c2 },
-      ],
+      // One painting here now, south of the lift on the west wall's only
+      // stretch a finger clear of the boarding band (tap-spacing rule,
+      // 8 Aug 2026) — its old twin at z 5 sat 0.40 m from the band, and the
+      // matching compliant stretch north of the lift belongs to the wall's
+      // own "Look out" pane at 8.1.
+      pictures: [{ wall: 'west', along: -6.4, width: 1.6, height: 1.2, seed: 0x20c1 }],
     });
   }
 
@@ -2972,12 +3038,14 @@ export class Hotel implements GameSystem {
     this.hangOnWalls(shell, room, {
       north: [-9.8, 9.8],
       west: [-4.2, 4.2],
-      // **Not at z = 0**, which is the lift alcove's own doorway: a painting
-      // hung there is a painting across the lift doors, and the spot a child
-      // stands on to look at it is inside the architrave. `check:hotel` found
-      // exactly that the first time it was asked, which is the whole reason
-      // the viewing spots are now measured rather than assumed.
-      pictures: [{ wall: 'west', along: 2.9, width: 1.6, height: 1.2, seed: 0x50c1 }],
+      // **Not on the west wall at all any more.** First it could not hang at
+      // z = 0 (the lift's own doorway — a painting across the lift doors,
+      // `check:hotel`'s find); then z 2.9 turned out to sit *beside* the
+      // doorway with its "Look" zone still covering the boarding band by
+      // 1.7 m, eating taps aimed at the lift (tap-spacing rule, 8 Aug 2026).
+      // The north wall's stretch between two panes has room to stand and
+      // nothing to fight with.
+      pictures: [{ wall: 'north', along: 6.3, width: 1.6, height: 1.2, seed: 0x50c1 }],
     });
     this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0);
   }
@@ -3241,10 +3309,12 @@ export class Hotel implements GameSystem {
       north: [-3.6, 3.6],
       west: [-5.6, 5.6],
       // Nudged out to make room for the suite's two west windows
-      // (`SUITE.windows`), which sit either side of your own front door.
+      // (`SUITE.windows`), which sit either side of your own front door —
+      // and a hand further (4.6 → 4.8, 8 Aug 2026) to give the corridor
+      // doorway its full finger of tap clearance.
       pictures: [
-        { wall: 'west', along: -4.6, width: 1.5, height: 1.15, seed: 0x40c1 },
-        { wall: 'west', along: 4.6, width: 1.5, height: 1.15, seed: 0x40c2 },
+        { wall: 'west', along: -4.8, width: 1.5, height: 1.15, seed: 0x40c1 },
+        { wall: 'west', along: 4.8, width: 1.5, height: 1.15, seed: 0x40c2 },
       ],
     });
 

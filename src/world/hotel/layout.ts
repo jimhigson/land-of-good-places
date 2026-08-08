@@ -17,6 +17,7 @@ import {
   SPACE_HOTEL_SUITE,
   type SpaceId,
 } from '../spaces';
+import type { PortalBand } from '../tapSpacing';
 
 /**
  * The Land Hotel's floor plan — rooms as data, in each room's own local
@@ -104,6 +105,15 @@ export interface WindowWall {
   /** Bottom and top of the glass, metres above the floor. */
   readonly sill: number;
   readonly head: number;
+  /**
+   * The pane the wall's "Look out" zone stands at, when the default choice —
+   * the middle-most pane a child can stand in front of, kept a finger clear
+   * of every doorway band (`world/tapSpacing.ts`) — would land somewhere the
+   * tap-spacing rule forbids for reasons the picker cannot see (the lobby's
+   * café tables crowd its northern pane). `check:tap-spacing` measures the
+   * chosen pane either way, so this cannot be used to break the rule.
+   */
+  readonly zoneAt?: number;
 }
 
 /**
@@ -345,8 +355,12 @@ export const LOBBY: HotelRoom = {
   windows: {
     north: { at: [-11, -6, -1, 4, 9], width: 2.2, sill: 3.9, head: 5.7 },
     // West: only the stretch south of the gallery, for the same reason — plus
-    // the lift gap, which `glazeWall` clips these to automatically.
-    west: { at: [-3.8, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6 },
+    // the lift gap, which `glazeWall` clips these to automatically. The
+    // northernmost pane used to sit at -3.8; it moved to -6.6 (8 Aug 2026) so
+    // one pane stands a clear finger outside the lift's boarding band, and
+    // `zoneAt` pins "Look out" to it — the default picker's other candidates
+    // are the pane over the lift band and the pane the café tables crowd.
+    west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
   },
   mezzanine: {
     minX: -13,
@@ -539,7 +553,20 @@ export const SUITE: HotelRoom = {
   // through them (`dressSuite` lays the stripes to 2.6 m, the sills start at
   // 1.5 m on the wall's own upper half).
   windows: {
-    north: { at: [-7, 0, 7], width: 2.2, sill: 1.5, head: 2.6 },
+    // One per bedroom still, but between each bed and its partition rather
+    // than dead over the bed (8 Aug 2026): a pane centred on a bed put the
+    // wall's "Look out" zone and the bed's "Sleep" zone a quarter-metre
+    // apart, and the tap-spacing rule (`world/tapSpacing.ts`) wants a full
+    // finger between different actions.
+    // `zoneAt` pins "Look out" to the third bedroom's pane: the middle one's
+    // stand spot is blocked (the pet's four-poster lives in that bedroom), so
+    // the default picker slid to the first bedroom's pane — 3.04 m from the
+    // west wall's painting, inside the tap rule's finger.
+    north: { at: [-9.5, -2.9, 9.7], width: 2.2, sill: 1.5, head: 2.6, zoneAt: 9.7 },
+    // Flanking your own front door — kept for the light, but no "Look out"
+    // zone can stand here: both panes sit inside a finger of the corridor
+    // doorway, which is the exact tap Jim reported eaten. The picker skips
+    // walls with no compliant pane; the north wall carries the suite's zone.
     west: { at: [-1.95, 1.95], width: 1.5, sill: 0.9, head: 2.6 },
   },
   liftZ: null,
@@ -610,6 +637,82 @@ export const ROOMS: readonly HotelRoom[] = [
   CORRIDOR,
   SUITE,
 ];
+
+/**
+ * The walk-through trigger bands of every doorway in the hotel — **the** list,
+ * in world metres.
+ *
+ * `Hotel.checkDoorways` and `Hotel.atLiftDoors` fire on exactly these
+ * rectangles, and `scripts/check-tap-spacing.mts` holds every interact zone
+ * clear of them (the tap-spacing rule, `world/tapSpacing.ts`). They were
+ * inline comparisons in `checkDoorways` until 8 August 2026, which meant the
+ * only way a check could know where the doors were was to copy the
+ * arithmetic — the "two definitions of one thing" trap, resolved the usual
+ * way: one owner, everyone else asks.
+ */
+export interface HotelDoorBand extends PortalBand {
+  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift';
+}
+
+export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
+  const bands: HotelDoorBand[] = [];
+  if (room === LOBBY) {
+    // The front door out to the park: the south wall's gap, 0.6 m deep.
+    bands.push({
+      kind: 'exit',
+      what: "the lobby's front door",
+      centreX: room.originX,
+      centreZ: room.originZ + room.halfZ,
+      halfAlong: 0.6,
+      halfAcross: DOOR_HALF + 0.4,
+      yaw: 0,
+      y: 0,
+    });
+  }
+  if (room === CORRIDOR) {
+    // The "yours" door into the suite. The outer envelope is the refusal
+    // band (checkDoorways turns a keyless child away from 1.6 m out); the
+    // step-through itself needs the innermost 0.6 m. Its own sign zone is
+    // the door's handle and may cover it.
+    bands.push({
+      kind: 'suite-door',
+      what: 'the suite door',
+      centreX: room.originX + room.halfX - 0.5,
+      centreZ: room.originZ,
+      halfAlong: 1.1,
+      halfAcross: 1.5,
+      yaw: Math.PI / 2,
+      y: 0,
+      ownZoneId: 'hotel-yours-door',
+    });
+  }
+  if (room === SUITE) {
+    bands.push({
+      kind: 'corridor-door',
+      what: "the suite's door back to the corridor",
+      centreX: room.originX - room.halfX,
+      centreZ: room.originZ,
+      halfAlong: 0.6,
+      halfAcross: 1.5,
+      yaw: Math.PI / 2,
+      y: 0,
+    });
+  }
+  if (room.liftZ !== null) {
+    // The lift's auto-boarding band: the alcove and the floor in front of it.
+    bands.push({
+      kind: 'lift',
+      what: `${room.floorLabel}'s lift alcove`,
+      centreX: room.originX - room.halfX,
+      centreZ: room.originZ + room.liftZ,
+      halfAlong: LIFT_ALCOVE_DEPTH,
+      halfAcross: 2.6,
+      yaw: Math.PI / 2,
+      y: 0,
+    });
+  }
+  return bands;
+}
 
 export function roomFor(space: SpaceId): HotelRoom | null {
   return ROOMS.find((room) => room.space === space) ?? null;

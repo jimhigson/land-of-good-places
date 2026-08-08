@@ -2,6 +2,7 @@ import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import { bandContains, type PortalBand } from '../tapSpacing';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
@@ -261,6 +262,44 @@ export interface InteriorControls {
  * - {@link FloorFader} fades away every floor above the one the player is on,
  *   which is what gives the Theme Park cutaway look indoors.
  */
+
+/**
+ * The castle's front-door trigger, out in the garden — the rectangle
+ * `Building.checkDoorways` walks through, published (like the hotel's
+ * `hotelDoorBands`) so `scripts/check-tap-spacing.mts` can hold every tap
+ * target clear of it.
+ */
+export function castleEntranceBand(): PortalBand {
+  return {
+    what: "the castle's front door",
+    centreX: BUILDING_CENTRE_X + (ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2,
+    centreZ: BUILDING_CENTRE_Z + BUILDING_HALF_Z - 0.85,
+    halfAlong: 1.35,
+    halfAcross: (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4,
+    yaw: 0,
+    y: BUILDING_BASE_Y,
+    // The 'frontDoor' zone *is* this door — its "Enter!" chip walks you in —
+    // so it alone may cover the band.
+    ownZoneId: 'frontDoor',
+  };
+}
+
+/**
+ * The interior's way back out — everything south of the door wall counts, so
+ * the band runs deep rather than guessing how far the porch reaches.
+ */
+export function castleExitBand(): PortalBand {
+  return {
+    what: "the castle interior's exit door",
+    centreX: INTERIOR_ORIGIN_X + (INTERIOR_DOOR_MIN_X + INTERIOR_DOOR_MAX_X) / 2,
+    centreZ: INTERIOR_ORIGIN_Z + INTERIOR_HALF_Z + 11.7,
+    halfAlong: 10,
+    halfAcross: (INTERIOR_DOOR_MAX_X - INTERIOR_DOOR_MIN_X) / 2 + 1.4,
+    yaw: 0,
+    y: BUILDING_BASE_Y,
+  };
+}
+
 export class Building implements GameSystem {
   readonly name = 'building';
   readonly surfaces = new WalkSurfaces();
@@ -645,6 +684,16 @@ export class Building implements GameSystem {
    * Rebuilt per call rather than cached — it is a handful of object literals and
    * it is only ever called on a tap.
    */
+  /**
+   * Both castle doorways' trigger bands, off the instance so
+   * `check:tap-spacing` and the procgen invariants can reach them through the
+   * built world — a static import of this module fixes the park's seed before
+   * a test harness can set it (the `test/procgen` trap CLAUDE.md describes).
+   */
+  doorBands(): PortalBand[] {
+    return [castleEntranceBand(), castleExitBand()];
+  }
+
   interactZones(): InteractZone[] {
     return buildingInteractZones({
       bubbleSurfaceY: this.bubble.surfaceY,
@@ -802,21 +851,18 @@ export class Building implements GameSystem {
   private checkDoorways(player: Player): void {
     if (this.spaceCooldown > 0) return;
     if (Math.abs(player.position.y - BUILDING_BASE_Y) > 1.6) return;
+    const { x, z } = player.position;
 
     if (!this.inside) {
-      const localX = player.position.x - BUILDING_CENTRE_X;
-      const localZ = player.position.z - BUILDING_CENTRE_Z;
-      if (localX < ENTRANCE_MIN_X - 0.4 || localX > ENTRANCE_MAX_X + 0.4) return;
-      if (localZ > BUILDING_HALF_Z + 0.5 || localZ < BUILDING_HALF_Z - 2.2) return;
-      this.changeSpace(() => this.enterInterior());
+      if (bandContains(castleEntranceBand(), x, z)) {
+        this.changeSpace(() => this.enterInterior());
+      }
       return;
     }
 
-    const localX = player.position.x - INTERIOR_ORIGIN_X;
-    const localZ = player.position.z - INTERIOR_ORIGIN_Z;
-    if (localZ < INTERIOR_HALF_Z + 1.7) return;
-    if (localX < INTERIOR_DOOR_MIN_X - 1.4 || localX > INTERIOR_DOOR_MAX_X + 1.4) return;
-    this.changeSpace(() => this.leaveInterior());
+    if (bandContains(castleExitBand(), x, z)) {
+      this.changeSpace(() => this.leaveInterior());
+    }
   }
 
   private changeSpace(midpoint: () => void): void {

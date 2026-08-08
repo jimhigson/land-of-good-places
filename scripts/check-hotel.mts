@@ -171,7 +171,9 @@ const mustBeSolid: readonly [string, number, number][] = [
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
   ['a Floor 33 seaweed clump', OCEAN_FLOOR.originX - 8.4, OCEAN_FLOOR.originZ - 6.4],
   ['a Floor 33 bench', OCEAN_FLOOR.originX + 0, OCEAN_FLOOR.originZ + 5.4],
-  ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4],
+  // Table b1-a's spot — moved 8 Aug 2026 for the tap-spacing rule; if it
+  // moves again, `dressBreakfast`'s table list is the owner to copy from.
+  ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4],
   ['a suite bedside table', SUITE.originX + (SUITE_BEDSIDE_X[0] ?? 0), SUITE.originZ + SUITE_BEDSIDE_Z],
@@ -192,8 +194,8 @@ for (const [what, x, z] of mustBeSolid) {
 // and the chair still can (0.4 m against 0.3 + 0.62), so the answer is about
 // the chair.
 const chairYaw = 0.34;
-const chairX = BREAKFAST.originX - 7.6 + Math.sin(chairYaw) * 1.45;
-const chairZ = BREAKFAST.originZ + 5.4 + Math.cos(chairYaw) * 1.45;
+const chairX = BREAKFAST.originX - 6.4 + Math.sin(chairYaw) * 1.45;
+const chairZ = BREAKFAST.originZ + 6.2 + Math.cos(chairYaw) * 1.45;
 if (deflection(chairX, chairZ) < 0.1) {
   problems.push('a breakfast chair is not solid — Jim asked for exactly this one');
 }
@@ -226,7 +228,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 const mustBeMountable: readonly [string, number, number, number][] = [
   ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
-  ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4, 0.74],
+  ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
 ];
 for (const [what, x, z, top] of mustBeMountable) {
