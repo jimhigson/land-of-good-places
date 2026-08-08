@@ -52,8 +52,9 @@
  */
 
 import './headless-canvas.mjs';
-import { Vector3 } from 'three';
+import { Box3, Mesh, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { NPC_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
 import {
   ROOMS,
@@ -458,6 +459,70 @@ if (keyedReach < 1) {
     `with the key, the same march stops ${(-keyedReach).toFixed(2)} m short of the doorway — ` +
       `the suite door never unlocks`,
   );
+}
+
+// ------------------------------------------ 9. the close-ups keep their distance
+//
+// Jim, live play, 7 Aug 2026: the breakfast push-in *"often zooms in to
+// inside the characters head"*. The old end pose was offset in **world** axes
+// (`+0.9, +0.9`), so a chair facing south-west put the lens ~1.06 m from the
+// diner — inside near-plane-plus-head range. Every shot the hotel can produce
+// is measured here, exactly as the game would play it, against the machine's
+// own MIN_SHOT_DISTANCE — and against the walls of the room it plays in,
+// because an end pose outside the room is a camera in the void.
+//
+// Proven red before trusted green: with the world-axis formula in place this
+// reported `shot food-b1-e-0 ends 1.09 m from its subject` — under the 1.10 m
+// floor — before the chair-frame fix took it to a uniform 2.2 m.
+for (const { id, room, shot } of hotel.cinematicShots) {
+  const gap = shot.to.distanceTo(shot.lookAt);
+  if (gap < MIN_SHOT_DISTANCE - 1e-6) {
+    problems.push(
+      `shot ${id} ends ${gap.toFixed(2)} m from its subject — closer than the ` +
+        `${MIN_SHOT_DISTANCE.toFixed(2)} m the near plane plus a head needs`,
+    );
+  }
+  const outX = Math.abs(shot.to.x - room.originX) - (room.halfX - 0.2);
+  const outZ = Math.abs(shot.to.z - room.originZ) - (room.halfZ - 0.2);
+  if (outX > 0 || outZ > 0) {
+    problems.push(
+      `shot ${id} ends ${Math.max(outX, outZ).toFixed(2)} m outside ${room.space}'s walls at ` +
+        `(${shot.to.x.toFixed(1)}, ${shot.to.z.toFixed(1)}) — the camera would sit in a wall or the void`,
+    );
+  }
+  if (shot.to.y < 0.35) {
+    problems.push(`shot ${id} ends at y=${shot.to.y.toFixed(2)} m — in the floor`);
+  }
+}
+
+// …and the machine itself refuses an end pose inside the subject, whatever a
+// call site asks for. This is the belt to probe 9's braces: a *future* call
+// site with bad arithmetic hits this clamp, not a child's face. Proven red by
+// knocking the clamp out of `HotelCinematic.play` — the camera then holds
+// 0.05 m from the subject.
+{
+  const fakeIso = {
+    camera: { position: new Vector3(45, 55, 45) },
+    focusPoint: new Vector3(0, 0, 0),
+    viewHalfHeight: 7.5,
+  } as never;
+  const cine = new HotelCinematic(fakeIso);
+  const subject = new Vector3(5, 1.2, 5);
+  cine.play({
+    from: new Vector3(8, 1.2, 5),
+    to: new Vector3(5.05, 1.2, 5),
+    lookAt: subject,
+    easeSeconds: 0.01,
+    holdSeconds: 0,
+  });
+  cine.update(1);
+  const gap = cine.camera.position.distanceTo(subject);
+  if (gap < MIN_SHOT_DISTANCE - 1e-6) {
+    problems.push(
+      `HotelCinematic accepted an end pose ${gap.toFixed(2)} m from its subject — the ` +
+        `MIN_SHOT_DISTANCE clamp is not holding`,
+    );
+  }
 }
 
 // ------------------------------------------------- 6. the void backstop

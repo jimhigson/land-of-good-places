@@ -123,7 +123,7 @@ import {
   type WallSide,
 } from './layout';
 import { HotelLift } from './HotelLift';
-import { HotelCinematic } from './cinematic';
+import { HotelCinematic, type Shot } from './cinematic';
 import { PLAZA } from '../paths';
 import { spaceAt, SPACE_GARDEN } from '../spaces';
 
@@ -1494,30 +1494,95 @@ export class Hotel implements GameSystem {
     pet.root.visible = true;
     petBowl.visible = true;
 
-    // The shot: in over her shoulder from where the camera already is, to a
-    // little above and in front of her, looking at her head. A long-ish lens
-    // (30°) so the room behind her compresses and she is unmistakably the
-    // subject.
-    const eyeY = 1.35;
-    const inFront = 1.9;
     this.moment = 'food';
-    this.cine.play(
-      {
-        from: 'here',
-        to: new Vector3(
-          chair.x + Math.sin(chair.facing) * inFront + 0.9,
-          eyeY + 0.85,
-          chair.z + Math.cos(chair.facing) * inFront + 0.9,
-        ),
-        lookAt: new Vector3(chair.x, eyeY, chair.z),
-        easeSeconds: FOOD_EASE_SECONDS,
-        holdSeconds: FOOD_HOLD_SECONDS,
-        fov: 30,
-      },
-      () => {
-        this.moment = null;
-      },
-    );
+    this.cine.play(this.foodShotFor(chair), () => {
+      this.moment = null;
+    });
+  }
+
+  /**
+   * The breakfast push-in for one chair — a shot over her shoulder to a spot
+   * above the table, looking back at her over her cereal. A long-ish lens
+   * (30°) so the room behind her compresses and she is unmistakably the
+   * subject.
+   *
+   * A method rather than inline in {@link eat} because `check:hotel` measures
+   * every one of these (via {@link cinematicShots}) against
+   * `MIN_SHOT_DISTANCE` and the room's own walls.
+   */
+  private foodShotFor(chair: Chair): Shot {
+    // **Everything in the chair's own frame.** The first version offset the
+    // end pose `+0.9` on world X *and* world Z, which is a different shot for
+    // every facing — for chairs facing south-west it landed ~1.06 m from the
+    // diner, inside her head (Jim, live play, 7 Aug 2026). Forward and side
+    // are the chair's, so every table in the hotel gets the same framing.
+    const forwardX = Math.sin(chair.facing);
+    const forwardZ = Math.cos(chair.facing);
+    const sideX = Math.sin(chair.facing + Math.PI / 2);
+    const sideZ = Math.cos(chair.facing + Math.PI / 2);
+    // Framed on her chest, not over her head: she sits at CHAIR_SEAT_Y and a
+    // seated child's chest is about 0.55 m above the seat.
+    const chestY = CHAIR_SEAT_Y + 0.55;
+    // Across the table (1.9 m ahead is 0.85 m past its centre), stepped to the
+    // pet's side so the trot-in arrives on camera, from just above head
+    // height looking gently down.
+    return {
+      from: 'here',
+      to: new Vector3(
+        chair.x + forwardX * 1.9 + sideX * 0.9,
+        1.7,
+        chair.z + forwardZ * 1.9 + sideZ * 0.9,
+      ),
+      lookAt: new Vector3(chair.x, chestY, chair.z),
+      easeSeconds: FOOD_EASE_SECONDS,
+      holdSeconds: FOOD_HOLD_SECONDS,
+      fov: 30,
+    };
+  }
+
+  /**
+   * The "Look!" shot for one painting — see {@link lookAtArt}, and
+   * {@link cinematicShots} for why it is a method.
+   */
+  private artShotFor(art: (typeof this.artworks)[number]): Shot {
+    return {
+      from: 'here',
+      to: new Vector3(
+        art.x + art.normalX * ART_VIEW_DISTANCE,
+        art.y,
+        art.z + art.normalZ * ART_VIEW_DISTANCE,
+      ),
+      lookAt: new Vector3(art.x, art.y, art.z),
+      easeSeconds: 1.1,
+      holdSeconds: null,
+      fov: 24,
+    };
+  }
+
+  /**
+   * Every close-up shot the hotel can produce, one per chair and one per
+   * painting, exactly as the game would play them.
+   *
+   * **Public because `check:hotel` asserts on it** — the alternative is the
+   * check recomputing the end-pose formula from the same inputs, which is a
+   * check that agrees with a copy of the code rather than with the code. The
+   * bug this guards against was real: the old end pose was offset in *world*
+   * axes rather than the chair's own, so chairs facing south-west put the
+   * lens inside the diner's head (Jim, live play, 7 Aug 2026).
+   */
+  get cinematicShots(): readonly { readonly id: string; readonly room: HotelRoom; readonly shot: Shot }[] {
+    return [
+      ...this.chairs.map((chair) => ({
+        id: `food-${chair.id}`,
+        room: chair.room,
+        shot: this.foodShotFor(chair),
+      })),
+      ...this.artworks.map((art) => ({
+        id: `art-${art.id}`,
+        room: art.room,
+        shot: this.artShotFor(art),
+      })),
+    ];
   }
 
   /**
@@ -3291,20 +3356,10 @@ export class Hotel implements GameSystem {
       Math.atan2(-art.normalX, -art.normalZ),
     );
     this.moment = 'art';
-    this.cine.play(
-      {
-        from: 'here',
-        to: new Vector3(art.x + art.normalX * ART_VIEW_DISTANCE, art.y, art.z + art.normalZ * ART_VIEW_DISTANCE),
-        lookAt: new Vector3(art.x, art.y, art.z),
-        easeSeconds: 1.1,
-        holdSeconds: null,
-        fov: 24,
-      },
-      () => {
-        this.moment = null;
-        player.endRide();
-      },
-    );
+    this.cine.play(this.artShotFor(art), () => {
+      this.moment = null;
+      player.endRide();
+    });
   }
 
   /**
