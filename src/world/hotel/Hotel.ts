@@ -20,7 +20,7 @@ import { ART } from '../../art/style/artPalette';
 import { Rng } from '../../core/mathUtils';
 import { mosaicTexture } from '../../core/textures';
 import type { FrameContext, GameSystem } from '../../core/types';
-import type { CollisionWorld } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
 import type { AnchorPlots } from '../AnchorPlots';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { Player } from '../../entities/Player';
@@ -478,6 +478,18 @@ export class Hotel implements GameSystem {
   } | null = null;
   /** Seconds of "that door is not yours yet" left to run. See {@link refuseSuite}. */
   private refusing = 0;
+  /**
+   * The real lock on the suite door: a collision wall across the corridor's
+   * east doorway, present until reception hands over the key. The lock lived
+   * only in {@link checkDoorways} once, as a trigger — and a trigger is not a
+   * wall: its own refusal cooldown gated the whole doorway check, so a second
+   * push walked clean through the open gap and off the floor slab into the
+   * void (Jim, live play, 7 Aug 2026). Removed in {@link update} the moment
+   * `hasHotelKey()` flips, wherever the key came from — check-in downstairs
+   * or a restored save — so nothing that grants the key needs to know a wall
+   * exists.
+   */
+  private suiteLock: WallCollider | null = null;
   /** Every lift alcove's sliding leaves and pointer dial. See {@link fitLiftAlcove}. */
   private readonly alcoves: {
     readonly room: HotelRoom;
@@ -549,6 +561,15 @@ export class Hotel implements GameSystem {
 
     this.props = new HotelProps(collision);
     for (const room of ROOMS) this.buildRoomShell(room);
+    if (!saveFlags.hasHotelKey()) {
+      this.suiteLock = collision.addWall(
+        CORRIDOR.originX + CORRIDOR.halfX,
+        CORRIDOR.originZ - (DOOR_HALF + 0.4),
+        CORRIDOR.originX + CORRIDOR.halfX,
+        CORRIDOR.originZ + (DOOR_HALF + 0.4),
+        0.3,
+      );
+    }
     this.statue = this.dressLobby();
     this.dressBreakfast();
     this.dressGarden();
@@ -933,6 +954,13 @@ export class Hotel implements GameSystem {
     const { dt, elapsed } = context;
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
 
+    // The key turning in the lock. Before the player-null return, so a
+    // headless world (check:hotel) can watch the door open too.
+    if (this.suiteLock && saveFlags.hasHotelKey()) {
+      this.collision.removeWall(this.suiteLock);
+      this.suiteLock = null;
+    }
+
     this.lift.update(dt);
     // After the lift, so the leaves answer to this frame's phase rather than
     // to last frame's — a door that lags the ride by a frame is a door you can
@@ -1021,6 +1049,16 @@ export class Hotel implements GameSystem {
     }
 
     if (!this.changingSpace && !player.riding) this.checkDoorways(player);
+
+    // Nobody falls out of the world. Every doorway is a portal or a wall, but
+    // the proof is a backstop rather than an audit of doorways: anything that
+    // still slips a trigger — a cooldown window, a dropped frame, a door not
+    // written yet — lands back in the room it fell from, not in the void.
+    if (this.inside && !this.changingSpace && player.position.y < -2) {
+      const room = this.currentRoom() ?? LOBBY;
+      player.teleportTo(room.originX, 0, room.originZ, Math.PI);
+      this.controls.snapCamera();
+    }
   }
 
   // ------------------------------------------------------ changing space
@@ -1050,7 +1088,7 @@ export class Hotel implements GameSystem {
       this.changeSpace(() => this.leaveToPark());
       return;
     }
-    if (room === CORRIDOR && localX > CORRIDOR.halfX - 0.6 && Math.abs(localZ) < 1.5) {
+    if (room === CORRIDOR && localX > CORRIDOR.halfX - 1.6 && Math.abs(localZ) < 1.5) {
       // **The lock lives here, not in the lift.** Jim, 7 August 2026: *"go to
       // level 50 before you have your key but not through the door to the
       // room."* Every lift button is now pressable, so a child can ride up and
@@ -1059,11 +1097,20 @@ export class Hotel implements GameSystem {
       // a refusal at the door happens *at the sign that says what to do next*,
       // where a greyed-out lift button was a dead end three rooms away from
       // any explanation.
+      //
+      // What she cannot do is *physically* cannot: `suiteLock` is a real wall
+      // and this branch is only the words at it. Its band starts a metre
+      // further out than the portal's because the wall itself stops her at
+      // `halfX − 0.92` (0.3 half-thickness + 0.62 player radius) — a refusal
+      // triggered at the old 0.6 band would sit beyond her reach, and the
+      // door would be a mute invisible wall.
       if (!saveFlags.hasHotelKey()) {
         this.refuseSuite(player);
         return;
       }
-      this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+      if (localX > CORRIDOR.halfX - 0.6) {
+        this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+      }
       return;
     }
     if (room === SUITE && localX < -SUITE.halfX + 0.6 && Math.abs(localZ) < 1.5) {
@@ -1348,7 +1395,10 @@ export class Hotel implements GameSystem {
     );
     player.model.setExpression('sad');
     this.refusing = REFUSE_SECONDS;
-    this.spaceCooldown = SPACE_COOLDOWN;
+    // Deliberately NOT `spaceCooldown` here: that gate silences the whole of
+    // `checkDoorways`, and granting it on refusal was precisely the hole that
+    // let a second push through the doorway unchecked. The wall is the lock;
+    // `refusing` alone stops the words repeating every frame.
   }
 
   private sitAt(chair: Chair): void {

@@ -35,11 +35,20 @@
  *    `layout.ts` and `Hotel.glazeWall` clips them to the wall's solid spans,
  *    so a careless number is silently dropped rather than left floating in a
  *    doorway. Silent is the problem: this counts them.
+ * 5. **The suite door is locked by collision, not by dialogue** — and the key
+ *    genuinely opens it. Jim walked through the "locked" door and fell into
+ *    the void: the lock was a trigger, and its own refusal cooldown gated the
+ *    check that was the lock.
+ * 6. **A player below the floor is caught.** The backstop in `Hotel.update`
+ *    stands anyone under y = −2 back in their room — the net under every
+ *    doorway bug not written yet.
  *
  * Proven red before it was trusted green: restoring the old settle height
  * fails (1) with all seven residents at −16.5 m; making a chair soft fails
  * (2); making a bed solid fails (3); widening a declared window past its
- * doorway fails (4).
+ * doorway fails (4); removing the lock wall fails (5) with the march 3.00 m
+ * past the plane; disabling the backstop fails (6) with the player still at
+ * −6 m.
  */
 
 import './headless-canvas.mjs';
@@ -61,6 +70,7 @@ import {
 } from '../src/world/hotel/layout.ts';
 import { spaceAt } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
+import { saveFlags } from '../src/state/flags.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -410,6 +420,68 @@ for (const floor of HOTEL_FLOORS) {
   }
   previousStorey = floor.storey;
   previousHeight = eye.y;
+}
+
+// ------------------------------------------------- 5. the locked suite door
+
+// Jim, live play, 7 Aug 2026: *"if you don't have the key, the corridor to
+// your room lets you walk through the door and then fall into a void."* The
+// lock was a trigger in `checkDoorways`, and its own refusal cooldown gated
+// the very check that was the lock — so a second push walked through the open
+// doorway and off the floor slab. Now the lock is a collision wall, and this
+// walks into it the way she did: a player-sized probe marched at the doorway
+// in 5 cm steps, resolved by the collision world after each one.
+function marchAtSuiteDoor(): number {
+  const probe = new Vector3(CORRIDOR.originX + CORRIDOR.halfX - 3, 0, CORRIDOR.originZ);
+  for (let step = 0; step < 120; step += 1) {
+    probe.x += 0.05;
+    collision.resolve(probe, PLAYER_RADIUS);
+  }
+  return probe.x - (CORRIDOR.originX + CORRIDOR.halfX);
+}
+
+const keylessReach = marchAtSuiteDoor();
+if (keylessReach > -0.5) {
+  problems.push(
+    `without the key, a march at the suite door reaches ${keylessReach.toFixed(2)} m past ` +
+      `the wall plane it should be held at least 0.5 m short of — the door is not locked`,
+  );
+}
+
+// And the key must actually open it: grant it, let one frame turn the lock,
+// and the same march must now pass clean through the doorway.
+saveFlags.giveHotelKey();
+hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
+const keyedReach = marchAtSuiteDoor();
+if (keyedReach < 1) {
+  problems.push(
+    `with the key, the same march stops ${(-keyedReach).toFixed(2)} m short of the doorway — ` +
+      `the suite door never unlocks`,
+  );
+}
+
+// ------------------------------------------------- 6. the void backstop
+
+// The doorway audit above proves the door; this proves the net under
+// everything else. A player already 6 m below the corridor's floor — however
+// they got there — must be stood back in the room within a frame, not left
+// falling for ever.
+const fallenPlayer = {
+  position: new Vector3(CORRIDOR.originX, -6, CORRIDOR.originZ),
+  riding: false,
+  model: { setExpression: () => {} },
+  teleportTo(x: number, y: number, z: number) {
+    fallenPlayer.position.set(x, y, z);
+  },
+};
+hotel.attachPlayer(fallenPlayer as never);
+hotel.adoptRestoredPlayer();
+hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
+if (fallenPlayer.position.y < 0) {
+  problems.push(
+    `a player 6 m below the corridor floor is still at y=${fallenPlayer.position.y.toFixed(2)} m ` +
+      `after a frame — the void backstop did not catch them`,
+  );
 }
 
 // ----------------------------------------------------------------- report

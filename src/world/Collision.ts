@@ -42,7 +42,7 @@ interface CircleCollider {
   autoHoppable: boolean;
 }
 
-interface WallCollider {
+export interface WallCollider {
   x1: number;
   z1: number;
   x2: number;
@@ -383,9 +383,23 @@ export class CollisionWorld {
     halfThickness = 0.35,
     topHeight = Infinity,
     autoHoppable = false,
-  ): void {
-    this.walls.push({ x1, z1, x2, z2, halfThickness, topHeight, autoHoppable });
+  ): WallCollider {
+    const wall: WallCollider = { x1, z1, x2, z2, halfThickness, topHeight, autoHoppable };
+    this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
+    this.revisionCounter += 1;
+    return wall;
+  }
+
+  /**
+   * Takes back a wall {@link addWall} returned — a locked door opening.
+   * `thinnestHalfWidth` is left as the running minimum it was; it can only be
+   * conservative after a removal, never wrong.
+   */
+  removeWall(wall: WallCollider): void {
+    const at = this.walls.indexOf(wall);
+    if (at === -1) return;
+    this.walls.splice(at, 1);
     this.revisionCounter += 1;
   }
 
