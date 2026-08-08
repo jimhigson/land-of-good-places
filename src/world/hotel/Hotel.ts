@@ -679,18 +679,22 @@ export class Hotel implements GameSystem {
     // Proportional up the spire, and never right at the tip — the top floor
     // looks out of the tower, not off the end of it.
     const height = ground + 2.5 + (storey / TOP_STOREY) * (this.towerHeight - 5);
-    // **Clear of the crystal, not just off its face.** The old 3.2 m was
-    // measured from the tower's centre, and the base cluster is 7.2 m wide —
-    // the vantage sat *inside* the crystal, which is why the view opened with
-    // facets filling a third of the frame (QA, 7 Aug 2026). 8.5 m clears the
-    // widest part with margin, and the sideways step keeps the spire out of
-    // the drift's opening arc.
+    // **On the plaza's side of the tower, by construction.** Two drafts got
+    // this wrong by measuring off the doorway: 3.2 m from the tower's centre
+    // was *inside* the 7.2 m-wide base cluster, and 8.5 m out along the
+    // facade's yaw still left the spire between the camera and the plaza it
+    // was about to look at — both watched as crystal filling a third of the
+    // frame (QA, then /view, 7 Aug 2026). Standing 8.5 m out along the line
+    // from the tower **toward the plaza** puts the crystal behind the lens,
+    // whatever yaw the solver gave the doorway.
+    const toPlazaX = PLAZA.x - this.facadeX;
+    const toPlazaZ = PLAZA.z - this.facadeZ;
+    const along = Math.hypot(toPlazaX, toPlazaZ) || 1;
     const out = 8.5;
-    const side = 2.0;
     return new Vector3(
-      this.facadeX + Math.sin(this.facadeYaw) * out + Math.sin(this.facadeYaw + Math.PI / 2) * side,
+      this.facadeX + (toPlazaX / along) * out,
       height,
-      this.facadeZ + Math.cos(this.facadeYaw) * out + Math.cos(this.facadeYaw + Math.PI / 2) * side,
+      this.facadeZ + (toPlazaZ / along) * out,
     );
   }
 
@@ -1623,17 +1627,21 @@ export class Hotel implements GameSystem {
     // pet trots in on `facing + PI/2`, so the camera stands on the other
     // side (`-side`), a touch ahead of her: her face three-quarters on, the
     // bowl in front of her, and the pet arriving in the background.
+    // 2.7 m out through a 40° lens frames ~1.9 m at her — the whole seated
+    // child, her bowl and the pet, not a face-filling close-up: these kids
+    // are chibi-proportioned (the head is half the body), so a tight
+    // portrait lens on a chair is all head (watched in the browser, twice).
     return {
       from: 'here',
       to: new Vector3(
-        chair.x + forwardX * 0.7 - sideX * 2.1,
-        1.6,
-        chair.z + forwardZ * 0.7 - sideZ * 2.1,
+        chair.x + forwardX * 0.9 - sideX * 2.4,
+        1.7,
+        chair.z + forwardZ * 0.9 - sideZ * 2.4,
       ),
       lookAt: new Vector3(chair.x, chestY, chair.z),
       easeSeconds: FOOD_EASE_SECONDS,
       holdSeconds: FOOD_HOLD_SECONDS,
-      fov: 30,
+      fov: 40,
     };
   }
 
