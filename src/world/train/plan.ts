@@ -170,14 +170,44 @@ function clearStationDistance(route: TrainRoute, target: number): number {
   return best;
 }
 
+let cruiserLowXs: Float64Array | null = null;
+let cruiserLowZs: Float64Array | null = null;
+
+/**
+ * The Sky Cruiser's low-flying sample points, walked once and kept.
+ *
+ * {@link clearStationDistance} asks {@link nearCruiserLowCorridor} for every
+ * candidate offset of every station — 122 calls a solve — and each call used
+ * to re-walk the whole cruiser curve through `pointAt` (an arc-length lookup
+ * per sample). The walk depends only on the cruiser's solved route, so it is
+ * the same walk every time: same `d` sequence, same height test, same points
+ * in the same order. Caching it changes when the points are computed, never
+ * which points come back — the queries below compare against an identical
+ * list and so return identical booleans.
+ */
+function cruiserLowPoints(): { readonly xs: Float64Array; readonly zs: Float64Array } {
+  if (!cruiserLowXs || !cruiserLowZs) {
+    const cruiser = COASTER_PLANS.cruiser.route;
+    const probe = new Vector3();
+    const xs: number[] = [];
+    const zs: number[] = [];
+    for (let d = 0; d < cruiser.length; d += 3) {
+      cruiser.pointAt(d, probe);
+      if (probe.y - terrainHeight(probe.x, probe.z) >= 5.9) continue;
+      xs.push(probe.x);
+      zs.push(probe.z);
+    }
+    cruiserLowXs = Float64Array.from(xs);
+    cruiserLowZs = Float64Array.from(zs);
+  }
+  return { xs: cruiserLowXs, zs: cruiserLowZs };
+}
+
 /** Is (x, z) within `reach` of anywhere the Sky Cruiser flies low? */
 function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
-  const cruiser = COASTER_PLANS.cruiser.route;
-  const probe = new Vector3();
-  for (let d = 0; d < cruiser.length; d += 3) {
-    cruiser.pointAt(d, probe);
-    if (probe.y - terrainHeight(probe.x, probe.z) >= 5.9) continue;
-    if (Math.hypot(probe.x - x, probe.z - z) < reach) return true;
+  const { xs, zs } = cruiserLowPoints();
+  for (let i = 0; i < xs.length; i += 1) {
+    if (Math.hypot((xs[i] ?? 0) - x, (zs[i] ?? 0) - z) < reach) return true;
   }
   return false;
 }
