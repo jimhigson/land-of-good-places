@@ -24,11 +24,18 @@ import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { createRandom, clamp01, lerp, smoothstep } from '../../core/mathUtils';
 import { toonMaterial } from '../../art/style/materials';
-import { createKid, KID_HEIGHT, KID_SKIN_TONES, type KidHandle } from '../../art/models/kid';
+import {
+  createKid,
+  KID_HEIGHT,
+  KID_SKIN_TONES,
+  TALLEST_CHILD_HEIGHT,
+  type KidHandle,
+} from '../../art/models/kid';
 import { CROWD_HAIR_STYLES, type HairStyle } from '../../art/models/hair';
 import { HAIR_COLOURS, OUTFIT_COLOURS } from '../../art/models/kidLooks';
 import {
   createCatBus,
+  CAT_BUS_CABIN_CEILING_Y,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_LENGTH,
   type CatBusHandle,
@@ -125,6 +132,14 @@ const BUS_PITCH_SPAN = CAT_BUS_LENGTH * 0.78;
  * is the stretch where a child works out where she is going.
  */
 const PARK_STANDOFF = 30;
+
+/**
+ * How far below the cabin's ceiling the inside camera hangs.
+ *
+ * Enough that the lens is in open air rather than grazing the header band, and
+ * small enough that it still looks *down* the gangway over everybody's heads.
+ */
+const INSIDE_CAMERA_HEADROOM = 0.3;
 
 /** Where the park's gate stands, down the lane. Derived from where the ride ends. */
 const PARK_AHEAD_Z = -JOURNEY_SECONDS * BUS_SPEED - PARK_STANDOFF;
@@ -226,15 +241,6 @@ const ORBIT = {
  * top-left. The distance is derived from the bus's own length rather than
  * chosen, so a bus that grows is still fully in shot.
  */
-/**
- * How far ahead of the front row the inside camera sits.
- *
- * Enough that the front row is whole in the frame rather than a shoulder
- * filling it, and short enough that the back row is still a face rather than a
- * dot: this is a small bus and the whole shot is twelve children in it.
- */
-const INSIDE_CAMERA_AHEAD = 2.1;
-
 const CAMERA_BACK = 26;
 const CAMERA_LIFT = 11;
 const CAMERA_FOV = 42;
@@ -328,7 +334,9 @@ export class BusJourney {
     // somewhere, and it should end in haze rather than in a visible edge.
     this.scene.fog = new Fog(PALETTE.skyDayBottom, 60, 235);
 
-    this.camera = new PerspectiveCamera(CAMERA_FOV, 1, 0.5, 900);
+    // `near` at 0.2 rather than 0.5 because this camera also goes *inside* the
+    // bus, where 0.5 m clips away the nearest row of children entirely.
+    this.camera = new PerspectiveCamera(CAMERA_FOV, 1, 0.2, 900);
 
     // --- lighting -----------------------------------------------------------
     // `DayNight`'s own daytime rig, at its daytime values. Not shared with it:
@@ -389,12 +397,45 @@ export class BusJourney {
       back = Math.min(back, seat.position.z);
       floor = seat.position.y;
     }
-    // A seated child's head sits a standing height above their seat's origin —
-    // the rig has no knees, which `catBus.ts` explains where it sizes the cabin.
-    const eyeHeight = floor + KID_HEIGHT * 0.82;
-    this.insideEye.set(0, eyeHeight, front + INSIDE_CAMERA_AHEAD);
-    // Aimed a little low, at the back of the bus: heads, not ceiling.
-    this.insideAim.set(0, eyeHeight - 0.35, back);
+    // **Above the aisle**, and that is the whole of the problem.
+    //
+    // A child is 1.53 m across and the seats are at x = ±1.3, so the twelve of
+    // them fill this bus almost solid: there is no head height anywhere in the
+    // cabin from which anything can be seen, because whatever is put there is
+    // inside somebody. The first attempt sat at a seated child's eye level a
+    // couple of metres ahead of the front row — which is *past the driver's own
+    // seat*, in the nose — and the ride's inside view was a flat brown wall
+    // 1.32 m from the lens.
+    //
+    // The one genuinely clear volume is the gangway: `AISLE_WIDTH` is 0.8 m and
+    // the heads start 0.53 m off the centre line, so `x = 0` is open the whole
+    // length of the bus. Up near the ceiling, looking back and down it, the shot
+    // is rows of faces either side — which is what Jim asked to be able to look
+    // at, and it is the only place in this vehicle it can be had from.
+    //
+    // **Under the header band, not under the roof.** Placed at
+    // `TALLEST_CHILD_HEIGHT` above the floor first — a height the cabin really
+    // does have — which put the lens 0.08 m *inside* `cat-bus-shell-upper`, the
+    // solid slab between the window heads and the roof. `CAT_BUS_CABIN_CEILING_Y`
+    // exists so that the clear interior is a thing this file can ask about
+    // rather than infer from the bus's overall height.
+    const eyeHeight = Math.min(
+      CAT_BUS_CABIN_CEILING_Y - INSIDE_CAMERA_HEADROOM,
+      floor + TALLEST_CHILD_HEIGHT,
+    );
+    // **Directly over the front row**, which is as far forward as anything can
+    // go. Everything ahead of it is the cat's own face — a squashed sphere
+    // 2.7 m across whose back reaches to within a centimetre of the front row's
+    // heads — and the driver sits inside that same blob. Putting the lens
+    // midway between the front row and the driver's seat therefore parked it
+    // *inside the cat's head*, where the ray hit the inside of the face's
+    // BackSide outline shell 0.15 m away and the frame was a solid cream wall.
+    //
+    // Above the front row there is no number to choose and nothing to be wrong
+    // about: the rows behind fall away down the gangway, which is the shot.
+    this.insideEye.set(0, eyeHeight, front);
+    // Aimed down the gangway at the back row, at the height their faces are.
+    this.insideAim.set(0, floor + KID_HEIGHT * 0.72, back);
   }
 
   /** Seconds since the ride began — the clock everything else here reads. */

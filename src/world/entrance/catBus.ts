@@ -229,6 +229,25 @@ export const CAT_BUS_WIDTH = BODY_WIDTH;
  */
 const WINDOW_SILL_Y = BODY_BOTTOM_Y + 0.55;
 const WINDOW_HEAD_Y = BODY_BOTTOM_Y + CABIN_HEIGHT * 0.86;
+
+/**
+ * **The floor and the real ceiling of the cabin**, for anything that has to fit
+ * inside the bus.
+ *
+ * The ceiling is *not* the roof. Between the window head and the roof sits the
+ * header band (`cat-bus-shell-upper`), a solid slab the full width and length of
+ * the cabin, so the clear interior stops at {@link WINDOW_HEAD_Y} — 0.47 m lower
+ * than `BODY_BOTTOM_Y + BODY_HEIGHT` suggests.
+ *
+ * Exported because that difference is invisible from outside this file and cost
+ * a round: the ride's inside camera was placed at `TALLEST_CHILD_HEIGHT` above
+ * the floor, which is a height the cabin genuinely has — and is 0.08 m *inside*
+ * the header band. The captured frame was a flat brown wall filling the screen,
+ * and every check passed, because the camera really was within the bus's
+ * bounding box and every child really was within its frustum.
+ */
+export const CAT_BUS_FLOOR_Y = BODY_BOTTOM_Y;
+export const CAT_BUS_CABIN_CEILING_Y = WINDOW_HEAD_Y;
 /** Thickness of the posts between one window and the next. */
 const PILLAR_Z = 0.26;
 

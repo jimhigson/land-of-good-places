@@ -19,7 +19,7 @@
  * has been solved.
  */
 import './headless-canvas.mjs';
-import { Box3, Frustum, Matrix4, type Object3D, Quaternion, Vector3 } from 'three';
+import { Box3, Frustum, Matrix4, type Mesh, type Object3D, Quaternion, Raycaster, Vector3 } from 'three';
 import {
   BusJourney,
   JOURNEY_SECONDS,
@@ -278,6 +278,11 @@ if (busRoot) {
 
   const previous = new Map<Object3D, Vector3>();
   const here = new Vector3();
+  const toHead = new Vector3();
+  const sight = new Raycaster();
+  /** Bits of *bus* found standing between the camera and a child. */
+  const blocked = new Map<string, number>();
+  let blockedByTheBus = 0;
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
   let fewestChildrenInShot = Infinity;
@@ -302,20 +307,78 @@ if (busRoot) {
     projection.multiplyMatrices(inside.camera.projectionMatrix, inside.camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(projection);
 
+    // **Visible, not merely in the frustum.**
+    //
+    // The first version of this counted heads inside the frustum and reported a
+    // comfortable ten of twelve — on a build whose inside view was a flat brown
+    // slab, because the camera was buried in the bodywork and every child was
+    // dutifully inside a frustum that could see none of them. A containment
+    // test is a test of where things are, not of what can be seen, and this is
+    // the third time on this feature that the difference has mattered.
+    //
+    // So: fire a ray from the camera at each child and require it to arrive.
+    // Same technique as the cat's face and the windows.
     let inShot = 0;
     for (const head of heads) {
       head.getWorldPosition(here);
-      if (frustum.containsPoint(here)) inShot += 1;
       const was = previous.get(head);
       if (was) headMotion += was.distanceTo(here);
       previous.set(head, here.clone());
+
+      if (!frustum.containsPoint(here)) continue;
+      if (!insideBus) continue;
+      toHead.subVectors(here, inside.camera.position);
+      const reach = toHead.length();
+      sight.set(inside.camera.position, toHead.normalize());
+      sight.near = inside.camera.near;
+      sight.far = reach + 0.5;
+      const hits = sight.intersectObject(inside.scene, true);
+      // The first thing the ray meets that is not see-through. Glass is not an
+      // obstruction — looking at children through the bus's own windows is the
+      // whole point of the glazing.
+      const blocker = hits.find((hit) => {
+        const material = (hit.object as Mesh).material as
+          | { transparent?: boolean; opacity?: number }
+          | undefined;
+        if (material?.transparent === true && (material.opacity ?? 1) < 0.9) return false;
+        return true;
+      });
+      if (!blocker) continue;
+
+      // **Landing on a child is the test — on *any* child, not on this one.**
+      //
+      // A busload of children occlude each other, and that is what a busload of
+      // children looks like: the ray aimed at the back row lands on the hair of
+      // the row in front, which is correct and is not a fault. Requiring each
+      // ray to reach its own target made the check red on a perfectly good shot
+      // — the reported obstructions were `hair.shell.bowl` and `hair.shell.crop`,
+      // which is the picture Jim asked for, described as a defect.
+      //
+      // What must never be in the way is the **bus**. Every version of this bug
+      // so far has been bodywork: the cabin's header band, and then the cat's
+      // own face blob, whose BackSide outline shell filled the frame from
+      // 0.15 m away.
+      const onAChild = seats.some((seat) => isDescendant(blocker.object, seat));
+      if (onAChild) inShot += 1;
+      else {
+        blockedByTheBus += 1;
+        const name = blocker.object.name || `(unnamed ${(blocker.object as Mesh).geometry?.type ?? '?'})`;
+        blocked.set(name, (blocked.get(name) ?? 0) + 1);
+      }
     }
     fewestChildrenInShot = Math.min(fewestChildrenInShot, inShot);
   }
 
   said.push(
-    `from inside, at worst ${fewestChildrenInShot} children were in frame; their heads moved ` +
+    `from inside, at worst ${fewestChildrenInShot} children could actually be seen; their heads moved ` +
       `${headMotion.toFixed(1)} m between them over the ride`,
+  );
+  said.push(
+    `bodywork standing between the inside camera and a child: ${
+      blockedByTheBus === 0
+        ? 'none'
+        : [...blocked].map(([name, count]) => `${name} (${count})`).join(', ')
+    }`,
   );
 
   if (framesCameraOutsideTheBus > 0) {
@@ -328,8 +391,20 @@ if (busRoot) {
   // Enough of them to be a busload rather than one child in a seat.
   if (fewestChildrenInShot < 4) {
     fouls.push(
-      `looking inside the bus, at one point only ${fewestChildrenInShot} of the ${heads.length} children ` +
-        'are in frame — the camera is not pointed at the children',
+      `looking inside the bus, at one point a ray towards only ${fewestChildrenInShot} of the ` +
+        `${heads.length} children landed on a child at all — the camera is not pointed at them`,
+    );
+  }
+
+  // **Nothing of the bus may stand between the camera and its passengers.**
+  // This is the assertion that would have caught both of this round's inside-
+  // view bugs, and neither the frustum test nor the bounding-box test could.
+  if (blockedByTheBus > 0) {
+    fouls.push(
+      `the bus's own bodywork stands between the inside camera and its passengers on ${blockedByTheBus} ` +
+        `sightlines — ${[...blocked]
+          .map(([name, count]) => `${name} (${count})`)
+          .join(', ')}. The camera is buried in the vehicle, and the view inside is a wall`,
     );
   }
 
