@@ -3260,9 +3260,19 @@ def build_landing_nose(coll: bpy.types.Collection) -> float:
         f"landing-nose runs x={lo:.4f}..{hi:.4f} and must run exactly {-half:.4f}..{half:.4f}, "
         "or a run of them leaves a gap at every join"
     )
-    assert abs(max(v.co.z for v in mesh.vertices) - LANDING_NOSE_PROUD) < 1e-6, (
-        "the nosing's top must stand exactly LANDING_NOSE_PROUD above the floor it finishes, "
-        "or it is coplanar with the slab and the two z-fight"
+    top = max(v.co.z for v in mesh.vertices)
+    # **Both halves of this, and the first one is the one that matters.** The
+    # first version asserted only `top == LANDING_NOSE_PROUD`, which is a
+    # constant compared with geometry made from that same constant: setting the
+    # constant to zero left it green while producing exactly the coplanar
+    # surfaces it exists to forbid. Found by breaking it on purpose, which is
+    # the only way this class of check is ever found (CLAUDE.md).
+    assert top >= 0.001, (
+        f"the nosing's top is {top * 1000:.1f} mm above the floor it caps; below about a "
+        "millimetre it is coplanar with the slab and the two z-fight along the whole edge"
+    )
+    assert abs(top - LANDING_NOSE_PROUD) < 1e-6, (
+        f"the nosing stands {top:.4f} m proud and LANDING_NOSE_PROUD says {LANDING_NOSE_PROUD}"
     )
     assert min(v.co.y for v in mesh.vertices) < 0.0 < max(v.co.y for v in mesh.vertices), (
         "the nosing must overhang the face (−y) *and* lap back into the slab (+y); one without "
