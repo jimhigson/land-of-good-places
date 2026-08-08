@@ -212,8 +212,16 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
 }
 
 // The build order, on its own: not before something has been drawn.
+//
+// **Generation is marked finished up front on purpose**, so that this block
+// tests exactly one thing — the frame rule. `shouldBuildPark()` has two
+// preconditions now (a drawn frame, and generation complete) and the other one
+// is owned by `check:park-boot`; leaving both in play here would mean a green
+// result that could not say which of them was doing the work, and a broken
+// frame rule would hide behind the generation gate.
 {
   const director = new JourneyDirector();
+  director.noteGenerationReady();
   director.advance(1 / 60);
   const onFirst = director.shouldBuildPark();
   director.advance(1 / 60);
@@ -223,6 +231,24 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
     fouls.push(
       `the park build is requested on frame ${onFirst ? '1' : 'never'} — it must wait until a frame of ` +
         'the ride has been drawn, or the whole World construction lands in front of the first pixel',
+    );
+  }
+
+  // And generation must be advanced from frame two as well, or there is nothing
+  // for the ride to be covering.
+  const idle = new JourneyDirector();
+  idle.advance(1 / 60);
+  const generatesOnFirst = idle.shouldAdvanceGeneration();
+  idle.advance(1 / 60);
+  const generatesOnSecond = idle.shouldAdvanceGeneration();
+  said.push(
+    `generation advanced on frame 1: ${generatesOnFirst}, on frame 2: ${generatesOnSecond}`,
+  );
+  if (generatesOnFirst || !generatesOnSecond) {
+    fouls.push(
+      `generation is advanced on frame ${generatesOnFirst ? '1' : 'never'} — the first slice is a ` +
+        'dynamic import whose module evaluation the browser drains before it paints, so starting ' +
+        'it on frame one pushes back the very first pixel of the bus',
     );
   }
 }

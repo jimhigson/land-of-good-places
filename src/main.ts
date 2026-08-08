@@ -393,9 +393,27 @@ function rideInThenPlay(
   // ride time and wall-clock time are an order of magnitude apart — a capture
   // script that sleeps is measuring the wrong clock.
   if (import.meta.env.DEV) {
-    (window as unknown as { journey: { ride: BusJourney; skipOffered: () => boolean } }).journey = {
+    (
+      window as unknown as {
+        journey: {
+          ride: BusJourney;
+          skipOffered: () => boolean;
+          // The generation's own view of itself, for a capture to watch the
+          // loading screen actually loading. Read-only questions; nothing here
+          // can drive the boot.
+          stage: () => string;
+          generationReady: () => boolean;
+          framesWorked: () => number;
+          parkReady: () => boolean;
+        };
+      }
+    ).journey = {
       ride: journey,
       skipOffered: () => director.skipOffered,
+      stage: () => generation.stage,
+      generationReady: () => generation.ready,
+      framesWorked: () => generation.framesWorked,
+      parkReady: () => director.parkReady,
     };
   }
   let done = false;
@@ -437,6 +455,17 @@ function rideInThenPlay(
     if (director.shouldAdvanceGeneration()) {
       generation.advance(GENERATION_BUDGET_MS);
       if (generation.ready) director.noteGenerationReady();
+      // A park that cannot be generated is not something to keep driving a bus
+      // in front of. Without this the ride idles at the kerb for ever waiting
+      // for a `ready` that will never come — see `showBootFailure`.
+      const problem = generation.failed;
+      if (problem) {
+        loop.stop();
+        skip.dispose();
+        journey.dispose();
+        showBootFailure(problem);
+        return;
+      }
     }
 
     // The `World`, once — and only once every route it reads has been solved.
@@ -592,17 +621,34 @@ function setupUpdateGate(uiRoot: HTMLElement): void {
 // than asking late.
 askForOrientationOnFirstGesture();
 
-try {
-  boot();
-} catch (error) {
+/**
+ * The apology card, for when the park cannot be opened at all.
+ *
+ * Its own function because there are now **two** ways to get here and they are
+ * not both a `throw` past `boot()`. Generation that fails during the cat-bus
+ * ride is caught inside `ParkGeneration` — a rejected promise, several frames
+ * deep in a `requestAnimationFrame` loop, a long way from any `try` — and
+ * before this existed that case simply hung: the bus would idle at the kerb
+ * forever, waiting for a park that was never going to arrive. A loading screen
+ * that lies is worse than one that waits, and one that waits for ever is worse
+ * than either.
+ */
+function showBootFailure(error: unknown): void {
   console.error(error);
   const splash = document.getElementById('boot-splash');
   if (splash) {
+    splash.classList.remove('hidden');
     splash.innerHTML =
       '<div class="boot-card"><h1>Oh no!</h1>' +
       '<p class="boot-sub">The park could not open.</p>' +
       '<p class="boot-hint">Check the browser console for details.</p></div>';
   }
+}
+
+try {
+  boot();
+} catch (error) {
+  showBootFailure(error);
 }
 
 // Outside `boot()`'s own try/catch on purpose — see `setupUpdateGate`'s doc
