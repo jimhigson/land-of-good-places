@@ -19,6 +19,12 @@
  * has been solved.
  */
 import './headless-canvas.mjs';
+// The richer element stubs, for the title card. Imported *after*
+// `headless-canvas.mjs` (it layers on top) and before anything from `src/`.
+import { installHeadlessDom } from './headless-dom.mjs';
+
+installHeadlessDom();
+
 import { Box3, Frustum, Matrix4, type Mesh, type Object3D, Quaternion, Raycaster, Vector3 } from 'three';
 import {
   BusJourney,
@@ -29,7 +35,13 @@ import {
   laneHeight,
   planJourneyShots,
 } from '../src/world/entrance/BusJourney.ts';
-import { CAT_BUS_SEAT_COUNT } from '../src/world/entrance/catBus.ts';
+import {
+  CAT_BUS_CABIN_CEILING_Y,
+  CAT_BUS_FLOOR_Y,
+  CAT_BUS_SEAT_COUNT,
+  CAT_BUS_SEAT_Y,
+} from '../src/world/entrance/catBus.ts';
+import { JourneyTitle, JOURNEY_TITLE_TEXT } from '../src/ui/JourneyTitle.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
 import { CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
 
@@ -696,6 +708,366 @@ if (LANE_MAX_GRADIENT < Math.tan((3 * Math.PI) / 180)) {
       `generation is advanced on frame ${generatesOnFirst ? '1' : 'never'} — the first slice is a ` +
         'dynamic import whose module evaluation the browser drains before it paints, so starting ' +
         'it on frame one pushes back the very first pixel of the bus',
+    );
+  }
+}
+
+// ------------------------------------------------- sitting, not merely aboard
+/**
+ * **Is each child actually resting on the seat, and is any part of one below the
+ * floor?**
+ *
+ * There was already a guard that twelve seats exist and are occupied. It passed
+ * for weeks with every one of those twelve **underground** — Jim, riding it on
+ * 7 August: *"the children on the bus aren't sitting on seats, they're clipped
+ * through the floor while on the inside view"*. Occupancy is not sitting, and
+ * containment is not contact; this file's own header records the third time
+ * that distinction has cost this feature a round.
+ *
+ * So this measures the two things the old one could not:
+ *
+ * 1. every child's lowest drawn point is **on** her cushion, within a tolerance
+ *    taken from the rig rather than from the seat plan — the kid model's own
+ *    geometry hangs {@link RIG_HEM_OVERHANG} below its origin, so "resting on
+ *    the cushion" means "no lower than that";
+ * 2. **nothing** of any child is below {@link CAT_BUS_FLOOR_Y}.
+ *
+ * Both are measured in the **bus's own frame**, not the world's: the bus tilts
+ * with the lane, so a world-space `y` comparison is a measurement of the hill
+ * and would report a different answer on every frame of the ride. That is not
+ * hypothetical — the first version of this probe did exactly that and produced
+ * twelve different "depths" for twelve children sitting identically.
+ *
+ * And over four seconds of riding rather than one frame, because the children
+ * bounce: a child who clears the floor at rest and dips through it at the bottom
+ * of her bob is the fault, not the fix.
+ */
+{
+  const chassis = journey.scene.getObjectByName('chassis');
+  if (!chassis) {
+    fouls.push('there is no `chassis` node in the journey scene — nothing to measure the cabin against');
+  } else {
+    /**
+     * How far the kid rig's own geometry hangs below its origin, in metres.
+     *
+     * Measured off a built, posed kid rather than assumed to be zero: the torso
+     * hem and the outline shell both reach a little under the feet. A tolerance
+     * of zero would report every correctly-seated child as sunk, and a generous
+     * round number would have hidden the 0.174 m this exists to catch.
+     */
+    const RIG_HEM_OVERHANG = 0.02;
+
+    const seatNodes: Object3D[] = [];
+    chassis.traverse((object) => {
+      if (object.name.startsWith('cat-bus-seat-')) seatNodes.push(object);
+    });
+
+    /** Exact bounds of everything `object` draws, in the frame given by `inverse`. */
+    const boxIn = (object: Object3D, inverse: Matrix4): Box3 => {
+      const box = new Box3();
+      const point = new Vector3();
+      const local = new Matrix4();
+      object.traverse((node) => {
+        const mesh = node as Mesh;
+        if (!mesh.isMesh || !mesh.geometry || !mesh.visible) return;
+        const positions = mesh.geometry.getAttribute('position');
+        if (!positions) return;
+        local.multiplyMatrices(inverse, mesh.matrixWorld);
+        for (let i = 0; i < positions.count; i += 1) {
+          box.expandByPoint(point.fromBufferAttribute(positions, i).applyMatrix4(local));
+        }
+      });
+      return box;
+    };
+
+    const lowest = new Map<string, number>();
+    const highest = new Map<string, number>();
+    const toBus = new Matrix4();
+    for (let frame = 0; frame < 240; frame += 1) {
+      journey.update(STEP);
+      journey.scene.updateMatrixWorld(true);
+      toBus.copy(chassis.matrixWorld).invert();
+      for (const seat of seatNodes) {
+        // The child is the only non-mesh child of the seat group; the cushion
+        // and its back are siblings on the chassis, not children of the anchor.
+        const occupants = seat.children.filter((child) => !(child as Mesh).isMesh);
+        if (occupants.length === 0) continue;
+        const box = new Box3();
+        for (const occupant of occupants) box.union(boxIn(occupant, toBus));
+        lowest.set(seat.name, Math.min(lowest.get(seat.name) ?? Infinity, box.min.y));
+        highest.set(seat.name, Math.max(highest.get(seat.name) ?? -Infinity, box.max.y));
+      }
+    }
+
+    if (lowest.size < CAT_BUS_SEAT_COUNT) {
+      fouls.push(
+        `only ${lowest.size} of the ${CAT_BUS_SEAT_COUNT} seats had a child in them to measure — ` +
+          'the seating check has nothing to check',
+      );
+    }
+
+    let deepest = { name: '', below: -Infinity };
+    let floating = { name: '', above: -Infinity };
+    let tallest = { name: '', through: -Infinity };
+    for (const [name, low] of lowest) {
+      const belowFloor = CAT_BUS_FLOOR_Y - low;
+      if (belowFloor > deepest.below) deepest = { name, below: belowFloor };
+      const offCushion = low - CAT_BUS_SEAT_Y;
+      if (offCushion > floating.above) floating = { name, above: offCushion };
+      const throughCeiling = (highest.get(name) ?? -Infinity) - CAT_BUS_CABIN_CEILING_Y;
+      if (throughCeiling > tallest.through) tallest = { name, through: throughCeiling };
+    }
+
+    said.push(
+      `seated children: deepest reaches ${deepest.below > 0 ? '' : '-'}` +
+        `${Math.abs(deepest.below).toFixed(3)} m ${deepest.below > 0 ? 'below' : 'clear of'} the cabin floor; ` +
+        `worst gap under a bottom ${floating.above.toFixed(3)} m; ` +
+        `closest head to the ceiling ${(-tallest.through).toFixed(3)} m`,
+    );
+
+    if (deepest.below > 0) {
+      fouls.push(
+        `${deepest.name} has a child ${deepest.below.toFixed(3)} m below the cabin floor — she is not ` +
+          `sitting in the bus, she is inside its floor. Nothing may reach under ` +
+          `CAT_BUS_FLOOR_Y (${CAT_BUS_FLOOR_Y.toFixed(3)}).`,
+      );
+    }
+    if (floating.above > RIG_HEM_OVERHANG) {
+      fouls.push(
+        `${floating.name} has a child sitting ${floating.above.toFixed(3)} m above her own cushion — ` +
+          `she is hovering over the seat rather than resting on it (tolerance ` +
+          `${RIG_HEM_OVERHANG.toFixed(3)} m, the rig's own hem overhang)`,
+      );
+    }
+    if (tallest.through > 0) {
+      fouls.push(
+        `${tallest.name} has a child whose head goes ${tallest.through.toFixed(3)} m through the cabin ` +
+          'ceiling at the top of her bounce — a head through the header band is the same defect as ' +
+          'feet through the floor, seen from the other end',
+      );
+    }
+
+    // ------------------------------------------- nothing floats off the bus
+    /**
+     * **Is every drawn part of the bus attached to the bus?**
+     *
+     * Jim, same ride: *"there is a strange block floating off the back of it"*.
+     * It was the rear bumper, positioned at `-BODY_LENGTH / 2` while the
+     * bodywork actually ends 1.51 m forward of that, leaving a 5 m slab hanging
+     * in clear air 1.05 m behind the vehicle. Two more were found the same way:
+     * the tail grew from a point 0.88 m behind the bus, and the door step
+     * floated 0.20 m under it.
+     *
+     * **Not "is it inside the bounding box"** — that is the containment test
+     * this feature keeps being caught by, and it would have passed the bumper,
+     * which sat comfortably inside the length `CAT_BUS_LENGTH` claimed. What is
+     * measured is *contact*: every top-level part's own bounds against the
+     * bodywork's, and a part separated from it by clear air is a foul however
+     * near the middle of the vehicle it is.
+     *
+     * The bodywork is the two shell bands plus the cat's face, which really is
+     * the whole front of the bus — see `catBus.ts`. Everything else has to touch
+     * that.
+     */
+    const bodywork = new Box3();
+    for (const name of ['cat-bus-shell-lower', 'cat-bus-shell-upper', 'cat-bus-face']) {
+      const part = chassis.getObjectByName(name);
+      if (part) bodywork.union(boxIn(part, toBus));
+    }
+    if (bodywork.isEmpty()) {
+      fouls.push('could not find the bus bodywork to measure its parts against');
+    } else {
+      const adrift: string[] = [];
+      let worstGap = 0;
+      for (const part of chassis.children) {
+        const box = boxIn(part, toBus);
+        if (box.isEmpty()) continue;
+        // The clear air between this part and the bodywork, on whichever axis
+        // separates them most. Negative or zero means they touch or overlap.
+        const gap = Math.max(
+          bodywork.min.x - box.max.x,
+          box.min.x - bodywork.max.x,
+          bodywork.min.y - box.max.y,
+          box.min.y - bodywork.max.y,
+          bodywork.min.z - box.max.z,
+          box.min.z - bodywork.max.z,
+        );
+        if (gap > 0.001) {
+          adrift.push(`${part.name || '(unnamed)'} by ${gap.toFixed(2)} m`);
+          worstGap = Math.max(worstGap, gap);
+        }
+      }
+      said.push(
+        `every part of the bus against its bodywork: ${adrift.length} adrift` +
+          (adrift.length > 0 ? ` (worst ${worstGap.toFixed(2)} m)` : ''),
+      );
+      if (adrift.length > 0) {
+        fouls.push(
+          `${adrift.length} piece(s) of the bus are drawn floating in clear air, attached to ` +
+            `nothing: ${adrift.join(', ')}. A part that does not touch the bodywork reads as ` +
+            'debris hanging off the vehicle.',
+        );
+      }
+    }
+
+    // --------------------------------------------- the glass starts up the side
+    /**
+     * **Does any glazing reach below the window sill?**
+     *
+     * Jim: *"the windows of the bus go all the way down to the floor of the bus
+     * […] windows should only start about halfway up the sides"*. The sill is
+     * now derived from a seated child's chin rather than picked, so this asserts
+     * the thing that stays true whatever that derivation yields: **no pane of
+     * glass may start below a seated child's seat.** A window whose bottom edge
+     * is under the cushion she is sitting on is a window down to the floor,
+     * which is the fault.
+     *
+     * Found by material rather than by name — the glazing is the only
+     * transparent material on the bus — so a pane added later is measured too
+     * without anybody remembering to name it.
+     */
+    const glass = new Box3();
+    let panes = 0;
+    chassis.traverse((node) => {
+      const mesh = node as Mesh;
+      if (!mesh.isMesh) return;
+      const material = mesh.material as { transparent?: boolean; opacity?: number } | undefined;
+      if (!material?.transparent || (material.opacity ?? 1) >= 1) return;
+      panes += 1;
+      glass.union(boxIn(mesh, toBus));
+    });
+    if (panes === 0) {
+      fouls.push('the bus has no transparent glazing at all — there is nothing to see the children through');
+    } else {
+      // **The side, not the silhouette.** Measured between the two shell bands
+      // — the flat flank you actually look at — rather than off `bodywork`,
+      // which includes the cat's face sphere and its 0.14 m chin. Using that
+      // reported the sill at 48% "up the side" when it is 34% up the side of
+      // the bus, and a number quoted to Jim has to be the one he can see.
+      const lowerShell = chassis.getObjectByName('cat-bus-shell-lower');
+      const upperShell = chassis.getObjectByName('cat-bus-shell-upper');
+      const sideBottom = lowerShell ? boxIn(lowerShell, toBus).min.y : bodywork.min.y;
+      const sideTop = upperShell ? boxIn(upperShell, toBus).max.y : CAT_BUS_CABIN_CEILING_Y;
+      const upTheSide = ((glass.min.y - sideBottom) / (sideTop - sideBottom)) * 100;
+      said.push(
+        `glazing starts at ${glass.min.y.toFixed(3)} m, ${upTheSide.toFixed(0)}% up the cabin side, ` +
+          `${(glass.min.y - CAT_BUS_SEAT_Y).toFixed(3)} m above the seat cushions (${panes} panes)`,
+      );
+      if (glass.min.y < CAT_BUS_SEAT_Y) {
+        fouls.push(
+          `glazing reaches down to ${glass.min.y.toFixed(3)} m, which is ` +
+            `${(CAT_BUS_SEAT_Y - glass.min.y).toFixed(3)} m below the seat cushions at ` +
+            `${CAT_BUS_SEAT_Y.toFixed(3)} — the windows run down past the children rather than ` +
+            'starting up the side of the bus',
+        );
+      }
+    }
+  }
+}
+
+// -------------------------------------------------- the title over the ride
+/**
+ * **Is the game's name on screen, and are its characters actually moving?**
+ *
+ * Jim asked for the title *"overlaid on the screen […] characters in different
+ * colours […] animate the characters to bounce up and down like they are
+ * jumping"*. Three separate claims, and the guard has to be able to fail each:
+ * a title that exists but is never mounted, one whose letters are all one
+ * colour, and — the one this feature keeps shipping — one that is drawn and
+ * perfectly still.
+ *
+ * The last is why `JourneyTitle` animates from JS rather than a CSS keyframe.
+ * A keyframe is invisible to anything without a rendering browser, so a check
+ * could only ever assert the element exists, which is exactly the *"ten of
+ * twelve children are in the frustum"* shape of guard — true of a brown wall.
+ * Sampling the transforms the code actually writes is a test of the animation.
+ */
+{
+  const title = new JourneyTitle();
+  const body = (globalThis as { document?: { body?: { children: unknown[] } } }).document?.body;
+  const mounted = Array.isArray(body?.children) && body.children.length > 0;
+
+  type Stub = { textContent?: string; style?: { transform?: string; color?: string }; children?: Stub[] };
+  const collect = (node: Stub, out: Stub[]): Stub[] => {
+    for (const child of node.children ?? []) {
+      if ((child.children ?? []).length === 0) out.push(child);
+      else collect(child, out);
+    }
+    return out;
+  };
+  const root = (body?.children as Stub[])?.[0];
+  const letters = root ? collect(root, []) : [];
+
+  const spelled = letters.map((letter) => letter.textContent ?? '').join('');
+  const wanted = JOURNEY_TITLE_TEXT.replace(/ /g, '');
+  const colours = new Set(letters.map((letter) => letter.style?.color ?? ''));
+
+  said.push(
+    `title: ${mounted ? 'mounted' : 'NOT MOUNTED'}, ${letters.length} characters spelling ` +
+      `"${spelled}", in ${colours.size} colours`,
+  );
+
+  if (!mounted) {
+    fouls.push('the journey title is never added to the document — nothing of it reaches the screen');
+  }
+  if (spelled !== wanted) {
+    fouls.push(
+      `the title spells "${spelled}" rather than "${wanted}" — the game's name is not what is on screen`,
+    );
+  }
+  if (colours.size < 2) {
+    fouls.push(
+      `all ${letters.length} characters of the title are the same colour (${colours.size} distinct) — ` +
+        'Jim asked for characters in different colours',
+    );
+  }
+
+  // **Do they move?** Sampled across a whole bounce cycle. Two things have to be
+  // true and they are different: that the letters move *at all* over time, and
+  // that at any one instant they are not all at the same height — a title where
+  // every character rises and falls together is a title bobbing as one block,
+  // not characters jumping.
+  const trail = new Map<number, Set<string>>();
+  let raggedest = 0;
+  for (let t = 0; t < 4; t += 1 / 30) {
+    title.update(t);
+    const nowAt = new Set<string>();
+    letters.forEach((letter, index) => {
+      const at = letter.style?.transform ?? '';
+      nowAt.add(at);
+      const seen = trail.get(index) ?? new Set<string>();
+      seen.add(at);
+      trail.set(index, seen);
+    });
+    raggedest = Math.max(raggedest, nowAt.size);
+  }
+  const stillest = Math.min(...[...trail.values()].map((seen) => seen.size));
+  said.push(
+    `title motion: every character took at least ${stillest} distinct positions, and at the ` +
+      `raggedest instant the ${letters.length} of them were at ${raggedest} different heights`,
+  );
+
+  if (letters.length === 0 || stillest < 5) {
+    fouls.push(
+      `a character of the title only ever took ${Number.isFinite(stillest) ? stillest : 0} position(s) ` +
+        'over four seconds — the title is drawn but not animated, which is the failure this feature ' +
+        'has shipped three times',
+    );
+  }
+  if (raggedest < 3) {
+    fouls.push(
+      `at no instant were the title's characters at more than ${raggedest} different heights — they ` +
+        'are moving as one block rather than jumping individually',
+    );
+  }
+
+  title.dispose();
+  const leftBehind = Array.isArray(body?.children) ? body.children.length : -1;
+  said.push(`title disposed: ${leftBehind} elements left on the body`);
+  if (leftBehind !== 0) {
+    fouls.push(
+      `disposing the title left ${leftBehind} element(s) on the document — it would survive the cut ` +
+        'into the park and sit over the game',
     );
   }
 }

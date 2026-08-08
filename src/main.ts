@@ -19,6 +19,7 @@ import { JourneyDirector } from './world/entrance/journeyDirector';
 import { GENERATION_BUDGET_MS, ParkGeneration } from './boot/parkGeneration';
 import { ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
+import { JourneyTitle } from './ui/JourneyTitle';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
@@ -388,6 +389,11 @@ function rideInThenPlay(
   const director = new JourneyDirector();
   const generation = new ParkGeneration();
   const skip = new JourneySkip();
+  // The opening credit, over the whole ride. Mounted on `document.body` for the
+  // same reason the skip button is — `Hud` empties `#ui-root` from `new Game()`,
+  // which happens mid-ride — and disposed everywhere the ride tears down, of
+  // which there are two: `finish()` and the generation-failure path below.
+  const title = new JourneyTitle();
   // Same spirit as `window.game` below: something to poke from a console, and
   // the only practical way to drive a capture. Headless WebGL runs the park at
   // one or two frames a second and `Loop` clamps `dt` to `MAX_FRAME_DELTA`, so
@@ -444,6 +450,7 @@ function rideInThenPlay(
     done = true;
     loop.stop();
     skip.dispose();
+    title.dispose();
     journey.dispose();
     handOver();
   };
@@ -466,6 +473,10 @@ function rideInThenPlay(
     // place that distinction is made — driving both off a single clamped clock
     // froze twelve passengers mid-bounce.
     journey.update(tick.dt, !director.overrunning);
+    // Driven off the ride's own clock, not wall time and not a CSS keyframe: the
+    // letters then stop hopping exactly when the bus stops, and a check can see
+    // that they moved at all. See `ui/JourneyTitle.ts`.
+    title.update(journey.elapsed);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
     journey.render(renderer, engine.width, engine.height);
@@ -486,6 +497,7 @@ function rideInThenPlay(
       if (problem) {
         loop.stop();
         skip.dispose();
+        title.dispose();
         journey.dispose();
         showBootFailure(problem);
         return;
