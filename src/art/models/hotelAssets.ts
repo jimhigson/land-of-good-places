@@ -1288,9 +1288,11 @@ function staircaseParts(handedness: StairHandedness): readonly string[] {
  * Pick `C` so the run between the two **top newels** is a whole number of
  * {@link BRIDGE_RAIL_TILE}s — `C = STAIR_RAIL_RADIUS + n·BRIDGE_RAIL_TILE/2` —
  * because that run is the landing's front balustrade and a part-tile is the one
- * thing the tile cannot do. At `n = 6`, `C = 7.99`: a 6.12 m balustrade, a 6.0 m
- * clear archway between the two flights' masses, and a composition 16.25 m
- * across and 5.12 m deep.
+ * thing the tile cannot do. **Measured at `n = 6`, `C = 7.99`**: a 6.12 m
+ * balustrade run, a **5.85 m clear archway** between the two flights' masses, a
+ * composition **16.21 m across**, and each flight reaching 5.07 m forward of its
+ * own centre — so with a 5.10 m landing behind it the whole thing is 10.17 m
+ * deep, foot to gallery.
  *
  * ## The mirror is authored, not scaled
  *

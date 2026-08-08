@@ -165,6 +165,15 @@ C = hb.STAIR_RAIL_R + 3.0 * hb.BRIDGE_RAIL_TILE
 """Half the distance between the two arcs' centres: six tiles between the two
 top newels, which stand at x = ±(C − STAIR_RAIL_R) = ±3.06."""
 
+CHILD_AT = (1.35, 2.4)
+"""(x, y) where the scale figure stands — **under the landing**, off the centre
+line so the front elevation shows it against the open arch rather than against
+the straight flight behind it.
+
+It is in the assembly shots because the whole of Jim's 8 August ruling is a
+claim about a child's head, and a claim about a child's head is not really
+reviewable in a picture that has no child in it."""
+
 FRONT_HALF = C - hb.STAIR_RAIL_R
 """…that run's half-length, and where the front balustrade stops each side."""
 
@@ -195,14 +204,14 @@ def composition():
     round of review.
     """
     places: list[tuple[str, tuple[float, float, float], float]] = []
-    # The two curves. `fromAngle = ±45°` — a rotation of ∓45° in both Blender
-    # and three.js — is what lands their top treads *square* to the landing,
-    # running along x with the climber heading into the room. With a 45° sweep
-    # you can have the foot square or the top square and not both; a floor takes
-    # a stair at any angle and a landing does not.
+    # The two curves, at **no rotation at all** — the quarter turn's dividend.
+    # At 90° a flight's foot comes out square to the room *and* its top square
+    # to the landing; the 45° cut of this composition had to choose (a floor
+    # takes a stair at any angle and a landing does not), chose the top, and so
+    # stood both feet diagonally in the room to buy it.
     for hand, sign in (("right", 1.0), ("left", -1.0)):
         for part in PART_SUFFIXES:
-            places.append((f"stair-{hand}-{part}", (sign * C, 0.0, 0.0), -sign * 45.0))
+            places.append((f"stair-{hand}-{part}", (sign * C, 0.0, 0.0), 0.0))
     # The wide flight, standing on the landing with its bottom riser facing the
     # entrance.
     for part in PART_SUFFIXES:
@@ -243,16 +252,33 @@ def composition():
 # more would start to look like art this file owns.
 STANDIN_SLAB = 0xD8CCEC
 STANDIN_FLOOR = 0xF4EEF9
+STANDIN_CHILD = 0xE86F9B
+"""The scale figure, in a colour nothing in the hotel is, so nobody mistakes it
+for a piece of the asset."""
+
+KID_HEIGHT = hb.ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+"""2.12 m — a child in the **default** hair and no hat, read from `kid.ts`."""
 
 
 def standins():
-    """(name, size, centre) boxes for the assembly shot, in Blender metres."""
-    slab = 0.30
+    """(name, size, centre, colour) boxes for the assembly shot, in Blender metres.
+
+    The floor, the landing and the gallery deck are the **room's** to build and
+    are boxes here on purpose; the fourth is a child, and she is the point.
+    """
+    # The thinnest landing the room is allowed to build — which is the one that
+    # gives the arch its *most* headroom, so a slab drawn any thicker than this
+    # in this picture would be flattering the design. `hotel_build` says the
+    # room may go to LANDING_SLAB_MAX and no further.
+    slab = hb.LANDING_SLAB_MIN
+    front = -(hb.STAIR_OUTER_R + 2.2)
+    back = LANDING_BACK + 1.9
+    child_x, child_y = CHILD_AT
     return [
         (
             "standin-floor",
-            (2 * (C - 0.8), LANDING_BACK + 4.6, 0.30),
-            (0.0, LANDING_BACK * 0.5 - 1.6, -0.15),
+            (2 * (C + 1.0), back - front, 0.30),
+            (0.0, (front + back) * 0.5, -0.15),
             STANDIN_FLOOR,
         ),
         (
@@ -266,6 +292,24 @@ def standins():
             (2 * (LANDING_HALF_X + 1.0), 3.4, slab),
             (0.0, LANDING_BACK + 1.7, hb.STAIR_RISE - slab * 0.5),
             STANDIN_SLAB,
+        ),
+        # **The scale figure, in two pieces, because it is two constants.** The
+        # body is `KID_HEIGHT` (2.12, the default style) and the block on top of
+        # it is the 0.85 m a party hat adds — together `TALLEST_CHILD_HEIGHT`,
+        # 2.97, which is the number the landing's height was worked back from.
+        # Seeing the join is the whole value of it: hats, not hair, are what
+        # this arch had to be built for.
+        (
+            "standin-child",
+            (0.55, 0.34, KID_HEIGHT),
+            (child_x, child_y, KID_HEIGHT * 0.5),
+            STANDIN_CHILD,
+        ),
+        (
+            "standin-child-hat",
+            (0.78, 0.78, hb.TALLEST_CHILD - KID_HEIGHT),
+            (child_x, child_y, (KID_HEIGHT + hb.TALLEST_CHILD) * 0.5),
+            STANDIN_CHILD,
         ),
     ]
 
@@ -312,12 +356,32 @@ PLACEMENTS = {
     "staircase-assembly": composition(),
     "staircase-assembly-front": composition(),
     "staircase-assembly-landing": composition(),
+    "staircase-assembly-arch": composition(),
 }
 
 STANDINS = {
     "staircase-assembly": standins(),
     "staircase-assembly-front": standins(),
     "staircase-assembly-landing": standins(),
+    "staircase-assembly-arch": standins(),
+}
+
+EYE_HEIGHT = hb.ts_const("src/art/models/kid.ts", "KID_HEAD_HEIGHT") + 0.20
+"""Where a child's eyes are, in metres: the head pivot `kid.ts` puts at 1.36 m,
+plus a fifth of a metre for the eyes sitting above it in a skull `KID_HEAD_SCALE`
+makes big. Approximate on purpose — nothing is derived from it, it only says
+where to stand the camera."""
+
+# stem -> (camera position, what it looks at, lens in mm). A **perspective**
+# shot, unlike everything else in this file.
+#
+# Every other render here is orthographic and framed automatically, which is the
+# right way to judge a shape and the wrong way to answer "can you walk through
+# it": an ortho camera has no viewpoint, and headroom is a thing you experience
+# from one particular height. So this one stands where a child stands, at her
+# eye height, seven and a half metres back in the lobby, and looks at the arch.
+EYE_SHOTS = {
+    "staircase-assembly-arch": ((0.0, -7.5, EYE_HEIGHT), (0.0, 2.5, 2.05), 28.0),
 }
 
 # stem -> {object: [extra offsets]}. Linked copies made just for that shot and
@@ -405,6 +469,12 @@ SHOTS = [
     # …and a closer, lower look at the one join that is new: three flights and
     # two balustrade runs meeting on the landing.
     ("staircase-assembly-landing", (), 24.0, 26.0, 0.72),
+    # **The shot Jim's 8 August ruling has to be judged on.** Standing in the
+    # lobby at a child's eye height, looking at the arch under the landing, with
+    # a 2.97 m scale figure standing in it. Everything else about this
+    # composition can be argued from an elevation; whether the see-through
+    # survives cannot.
+    ("staircase-assembly-arch", (), 0.0, 0.0),
     # The nosing, tiled, and **cropped to the joins**. Same question as
     # `bridge-rail`: can you see where one segment stops and the next starts?
     # A 3 m run of a 0.2 m moulding framed whole is a stick, and a stick answers
@@ -578,7 +648,15 @@ def main() -> None:
             copies.append(box)
         shown.extend(copies)
         bpy.context.view_layer.update()
-        frame(shown, azimuth, elevation, camera, pad)
+        if stem in EYE_SHOTS:
+            eye, target, lens = EYE_SHOTS[stem]
+            camera.location = Vector(eye)
+            camera.rotation_mode = "QUATERNION"
+            camera.rotation_quaternion = (Vector(eye) - Vector(target)).to_track_quat("Z", "Y")
+            camera.data.type = "PERSP"
+            camera.data.lens = lens
+        else:
+            frame(shown, azimuth, elevation, camera, pad)
         path = os.path.join(OUT, f"{stem}.png")
         bpy.context.scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
