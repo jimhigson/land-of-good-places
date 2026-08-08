@@ -742,10 +742,35 @@ export function createCatBus(): CatBusHandle {
   doorGroup.add(doorPanel);
   addOutline(doorPanel, 0.014 * DETAIL);
 
+  // **The door's window is in the same band as every other window**, and it was
+  // not: it was `DOOR_HEIGHT * 0.42` tall at `DOOR_HEIGHT * 0.68`, a fraction of
+  // the door rather than a part of the glazing. On the bus Jim complained about,
+  // the side windows started at 1.17 m and this one at 2.11 — **0.94 m out of
+  // step**, so the door had a letterbox up by the roof while the flanks were
+  // glazed to the floor.
+  //
+  // They happened to come within 12 mm of each other once the sill moved to the
+  // shoulder line, which is the dangerous kind of agreement: it made this look
+  // correct while still being a second, independent definition of where a window
+  // starts. It was found by mutation — raising the sill 0.7 m moved the flank
+  // glass and left this behind, and the guard went on reading *this* as the
+  // lowest glass on the bus and passing.
+  //
+  // Derived from the band now, in the door's own frame (the hinge sits at
+  // `BODY_BOTTOM_Y`), so the glazing runs continuously round the vehicle and
+  // there is one answer to "where do the windows start".
+  const doorWindowHeight = WINDOW_HEAD_Y - WINDOW_SILL_Y;
   const doorWindow = decal(
-    new Mesh(new RoundedBoxGeometry(0.04 * DETAIL, DOOR_HEIGHT * 0.42, DOOR_WIDTH * 0.7, 2, 0.06 * DETAIL), windowMaterial),
+    new Mesh(
+      new RoundedBoxGeometry(0.04 * DETAIL, doorWindowHeight, DOOR_WIDTH * 0.7, 2, 0.06 * DETAIL),
+      windowMaterial,
+    ),
   );
-  doorWindow.position.set(0.02, DOOR_HEIGHT * 0.68, DOOR_WIDTH / 2);
+  doorWindow.position.set(
+    0.02,
+    (WINDOW_SILL_Y + WINDOW_HEAD_Y) / 2 - BODY_BOTTOM_Y,
+    DOOR_WIDTH / 2,
+  );
   doorGroup.add(doorWindow);
 
   // A dark opening **behind** the door, so swinging it away reveals a doorway
