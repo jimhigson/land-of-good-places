@@ -263,3 +263,80 @@ recorded capture without a four-minute browser run.
 The shadow pass at 57% of draw calls, and 3.64 M triangles against a documented
 400 k budget. Both change how the park looks. The issue also carries the two
 documentation corrections and the allocation figures (191 MB/s, 1.6 MB/frame).
+
+---
+
+# Round 3: rebased onto round 5 of the cat bus (`5c0d426`)
+
+The base moved while this was in review — seven more faults, including **a
+self-cutting inside/outside shot director on the very ride this hooks into**.
+Rebased rather than merged, so the three commits stay readable.
+
+## The one real conflict, and it was additive
+
+`src/main.ts`, in the dev-only `window.journey` handle: round 5 added
+`view: () => string`, this branch added the five `warm*` accessors. Both kept.
+Nothing else conflicted — `journeyDirector.ts` was untouched by round 5, and
+`scripts/check-bus-journey.mts` auto-merged (both sides' assertions verified
+present afterwards rather than assumed).
+
+## Is there still exactly one definition of "the ride may hand over"? Yes.
+
+This was the thing most likely to have broken, and it did not:
+
+- The shot list is `JOURNEY_BEAT_SECONDS = JOURNEY_SECONDS / JOURNEY_BEATS`
+  — **derived from the same `JOURNEY_SECONDS` constant** that
+  `JourneyDirector.rideOver` reads. It is not a second clock.
+- Nothing in the shot director gates hand-over. `main.ts`'s ride loop still has
+  exactly one exit: `if (director.readyToHandOver) finish();`
+- `parkFitToPlay` (built **and** warmed) is still the single owner, read by both
+  `readyToHandOver` and `overrunning`.
+
+**And the overrun case now composes correctly**, which is worth writing down
+because this branch is what made that state reachable at all: `shotAt()` falls
+back to the last shot past the end of the ride, and the last beat is
+**`outside`** (odd `JOURNEY_BEATS` opens and closes outside). So a bus idling at
+the gate waiting for the warm-up idles on the outside shot — which is the one
+the arrival's 0.00-degree hand-over depends on. Had `JOURNEY_BEATS` been even,
+an overrun would have handed over from *inside* the bus. It is not, and round
+5's own comment explains why, but the two features only agree by that
+reasoning — **if anyone makes `JOURNEY_BEATS` even, this breaks.**
+
+## The measurements after the rebase
+
+Round 5's ride is heavier (an inside camera with children in shot, a detailed
+road), so it was re-measured rather than assumed.
+
+| | before rebase | after rebase |
+|---|---|---|
+| park built at | 5.6 s | 5.8 s |
+| **warm-up finished at** | 5.7 s | **6.0 s** |
+| frames it took work on | 10 | 10 |
+| total compile time | 77.2 ms | 76.5 ms |
+| worst single `compile()` | 3.7 ms | **3.7 ms** (budget 8) |
+| slices left at hand-over | 0 | 0 |
+| in-play frames > 30 ms | 2 (83, 75) | **2** (92, 83) |
+| in-play p99.9 | 9.40 ms | **9.40 ms** |
+| worst blocking GL call in play | 7.3 ms | **7.4 ms** |
+| ride frames > 30 ms | 6 | 6 |
+
+The warm-up now finishes during **beat 2** (4–8 s, the first *inside* shot),
+still inside the first third of a 20 s ride with ~14 s spare. The ride's own
+profile did not degrade.
+
+## Re-proved after the rebase, not carried over
+
+- mutation `parkFitToPlay` → `parkReadyFlag` alone: `check:bus-journey`
+  **exit 1** on both new assertions; restored **exit 0**.
+- `npm run build` **exit 0**, `npm run test:procgen` **exit 0**.
+- **236 tests / 11 files / 0 skipped**, reconciled rather than accepted: 231 was
+  this branch's own earlier baseline, round 5 added 97 lines to
+  `test/procgen/invariants.ts` worth 5 tests, and this branch touches **0** files
+  under `test/` (its guards are `scripts/` checks run by `build`). 231 + 5 = 236.
+- `check:frame-time` **exit 0** on the post-rebase capture.
+
+## Trap worth repeating
+
+A backgrounded `npm run build` notification reports the *harness's* exit code,
+not npm's. Every exit code in this handoff was read from an `echo "X_EXIT=$?"`
+recorded into the log, never from a notification.
