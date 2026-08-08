@@ -22,7 +22,12 @@ import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
 import { PARK_BOUNDARY, solverBoundary } from '../boundary';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
-import { type OpenRouteBrief, type SolvedRailRoute, solveRailRoute } from '../rail/generate';
+import {
+  type OpenRouteBrief,
+  RailRouteUnsolvable,
+  type SolvedRailRoute,
+  solveRailRoute,
+} from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { terrainHeight } from '../terrain';
 
@@ -115,36 +120,41 @@ export const GIANT_SLIDE_SPEED = 6.5;
  *
  * That is not merely long, it is the wrong ride: the drop is fixed at 13.75 m,
  * so length *is* gradient. Over 140 m the steepest part of the chute was 8°,
- * which is a lazy river with hand-rails. {@link MAX_LENGTH} is therefore
- * enforced as a rejection in this ride's own clearance predicate — a sample
- * further along than that is simply not a legal place to be, so the search
- * backtracks instead of wandering — and it gives roughly 14° average and 21°
+ * which is a lazy river with hand-rails. {@link MAX_RIDEABLE_LENGTH} is
+ * therefore enforced as a rejection during the search — a piece that would take
+ * the chute past it is simply not a legal piece, so the search backtracks
+ * instead of wandering — and what survives gives roughly 14° average and 21°
  * steepest, which reads as a slide from the ground and rides like one.
  */
 const DESIRED_LENGTH = 60;
 
-/** The ceiling. See {@link DESIRED_LENGTH}. */
-const MAX_LENGTH = 92;
-
 /**
- * The longest route that is still the ride we asked for, in metres.
+ * **The longest route that is still the ride we asked for, in metres — and the
+ * only number that decides it.**
  *
- * {@link MAX_LENGTH} is the per-piece hard stop: a sample further along than
- * that is not a legal place to be, so the search backs up. This is the softer
- * one, asked of a finished route, and it exists because the search now keeps
- * looking until a route is *safe* rather than taking what it is given. Safety
- * and length pull in opposite directions — a longer route is higher everywhere,
- * so it clears the coaster more easily — and with nothing pushing back the
- * search was answering "is it safe?" with 83-87 m rides on a brief that asked
- * for 60.
+ * There used to be two. `MAX_LENGTH = 92` was a per-sample hard stop inside
+ * this ride's own `clear` predicate; this one, 75, was the verdict asked of a
+ * finished route. **The search's hard stop therefore sat 17 m above the
+ * standard that judged its answer**, so on a seed where the geometry was
+ * awkward the search dutifully produced routes in the 75-92 m band and had
+ * every one of them thrown away. Measured on seed 5: **123 complete routes
+ * rejected, and no park at all** — while the shortest chute the seed's own door
+ * and pit geometry admits is **30.4 m** (`npm run measure:slide-feasibility`).
+ * Nothing was wrong with the layout, the ceiling or the search; the two numbers
+ * simply disagreed, and nothing was checking that they agreed.
  *
- * The drop is fixed at 13.75 m, so length is gradient: at 87 m the canonical
- * seed's chute also ran too flat and too far to stand on legs. Both complaints
- * have the same cure, which is why this is one number rather than two.
+ * So there is one number now, enforced in one place — `RouteBrief.maxLength`,
+ * which rejects a piece that would cross it before it is ever sampled — and
+ * asked again of the finished route by `unrideableComplaint`, the same one
+ * owner as before. A route in the 75-92 m band is no longer *reachable*, so it
+ * can no longer be built and discarded.
  *
- * Kept above {@link DESIRED_LENGTH} by a wide margin on purpose. An open route
- * overshoots what it is asked for — see {@link DESIRED_LENGTH} — so a ceiling
- * near 60 would reject nearly everything and put the boot time straight back.
+ * Why 75 and not something nearer {@link DESIRED_LENGTH}: an open route
+ * overshoots what it is asked for (see there), so a ceiling near 60 would
+ * reject nearly everything and put the boot time straight back. The drop is
+ * fixed at 13.75 m, so length is gradient — at 87 m the canonical seed's chute
+ * ran too flat *and* too far to stand on legs, which is why one number cures
+ * both complaints.
  */
 const MAX_RIDEABLE_LENGTH = 75;
 
@@ -574,9 +584,11 @@ function chuteMayPass(
   nominalLength: number,
 ): boolean {
   // Length is gradient on a ride whose drop is fixed, so an over-long chute is
-  // as wrong as one that goes through a wall. Rejecting the sample rather than
-  // trimming afterwards makes the search back up and find a tidier way round.
-  if (distanceAlong > MAX_LENGTH) return false;
+  // as wrong as one that goes through a wall — but that rule lives on the brief
+  // now, as `maxLength: MAX_RIDEABLE_LENGTH`, which rejects an over-long piece
+  // before it is sampled at all. It used to be a second, *laxer* copy here (92 m
+  // against a 75 m verdict), which is what made seed 5 solve 123 routes it was
+  // always going to throw away. See {@link MAX_RIDEABLE_LENGTH}.
   if (insideCastle(x, z, radius)) return false;
   const height = heightAtArc(distanceAlong, nominalLength);
   // The castle is a rectangle *plus* four towers. Neither alone is the castle.
@@ -1044,7 +1056,42 @@ export interface PlannedSlide {
  * `test/procgen/invariants.ts` asks the same question of every seed, so a
  * regression shows up as a red test rather than as a park that will not boot.
  */
-function planSlide(): PlannedSlide {
+/**
+ * The targets tried, in order, until one produces a rideable chute.
+ *
+ * **Why a ladder and not a number.** Every threshold the search steers by is a
+ * *fraction of the target*: `generate.ts` wanders on pure jitter until
+ * `BIAS_FROM` (0.45) of it, only attempts to finish from `CLOSE_AFTER` (0.68)
+ * of it, and refuses anything but closure past `CLOSE_ONLY_AFTER` (1.45). So
+ * the target is not a wish — it is the whole shape of the search, expressed in
+ * one number. A fixed 60 quietly asserts that every seed's door-to-pit journey
+ * is about the same length, and they are nothing like: measured with
+ * `npm run measure:slide-feasibility`, the shortest possible chute is **8.7 m
+ * on the canonical seed and 30.4 m on seed 5**.
+ *
+ * On seed 5 that mis-fit was fatal. Asked for 60 the search wandered its first
+ * 27 m without steering at all, and every route it then closed came back over
+ * the ceiling: **123 solved, 123 thrown away, and no park**. The seed is not
+ * hard — it is solvable at **62 m (69.7 m of chute) and at 65 m (74.1 m)** —
+ * it simply was never asked at a target that suited it.
+ *
+ * Achieved length is *not* monotonic in the target (measured on seed 5: 42, 45,
+ * 48, 50, 52, 55, 58 all fail, 62 and 65 solve, 68 fails again), because the
+ * target moves the steering thresholds rather than scaling the answer. That is
+ * exactly why this is a ladder to walk and not a formula to evaluate.
+ *
+ * 60 stays first, so **every seed that solves today solves identically today**:
+ * the later rungs cost nothing on a park that already works, and the whole cost
+ * lands on one that does not. That is the Sky Cruiser's castle-weight retry
+ * (Decision 7) applied to the other knob, and Decision 6's rule that a park
+ * which will not start is far worse than a park that took another second.
+ */
+const DESIRED_LENGTH_LADDER: readonly number[] = [DESIRED_LENGTH, 65, 62, 55, 68, 50];
+
+/** One attempt at a chute, at one target. Null if it did not produce a rideable one. */
+function solveChuteAt(
+  desiredLength: number,
+): { route: SolvedRailRoute; complaint: string | null } | null {
   // The slide's territory is the park itself. `generate.ts` rejects any piece
   // whose corridor comes within `corridorRadius` of this boundary's edge, so
   // handing over the real spline keeps the chute inside the park with the
@@ -1055,35 +1102,13 @@ function planSlide(): PlannedSlide {
     // other ride changed how many random draws it takes.
     seed: PARK_SEED ^ 0x511de,
     vocabulary: SLIDE_VOCABULARY,
-    desiredLength: DESIRED_LENGTH,
-    // **`maxLength: MAX_RIDEABLE_LENGTH` belongs here and is deliberately not
-    // set yet. Do not add it without reading this.**
-    //
-    // `unrideableComplaint` has always known that a chute past
-    // {@link MAX_RIDEABLE_LENGTH} is a lazy river rather than a slide, but it
-    // only ever gets to say so about a *finished* route — so the search grows
-    // routes past the ceiling, solves them, and has them thrown away one at a
-    // time. Measured on seed 5: **123 complete routes rejected, and no park at
-    // all.** `RouteBrief.maxLength` exists (see its doc) to hand the search the
-    // same number, turning a verdict into a wall.
-    //
-    // Switched on, measured over 60 seeds (7 Aug 2026): the slide's median
-    // solve fell **7.6 s -> 2.0 s**, seed 38 went from failing to solving, and
-    // seed 53's wasted work fell from 47 rejected routes to 2. But it reshapes
-    // the chute on *every* seed, and `test/procgen/invariants.ts`'s **`the
-    // ginormous slide stands on legs a child can walk between` then fails on
-    // seed 2** — the same invariant that `generate.ts`'s `scoreOf` comment
-    // records catching an unaimed route on seed 5. The check is right and the
-    // change is incomplete: the supports (`slide/supports.ts`) have to be able
-    // to stand under the reshaped chute before the ceiling can go in.
-    //
-    // Two other things to fix in the same pass: seed 5 becomes an honest "no
-    // route exists" rather than a dishonest "123 too-long routes", but spends
-    // **18.7 million candidate pieces** discovering it (an attempt should bail
-    // once nothing fits under the ceiling, rather than re-deriving that at
-    // every joint); and seed 5's slide may simply be infeasible at 75 m from
-    // the door and pit poses it is given, which is a question for the family
-    // rather than for the solver.
+    desiredLength,
+    // The ceiling, as a wall the search cannot cross rather than a verdict
+    // passed on what it brings back. This is the SAME number
+    // `unrideableComplaint` judges the finished route by — see
+    // {@link MAX_RIDEABLE_LENGTH} for the 92-versus-75 disagreement this
+    // replaced, and what it cost seed 5.
+    maxLength: MAX_RIDEABLE_LENGTH,
     closed: false,
     startPoses: doorPoses(),
     endPoses: pitPoses(),
@@ -1091,7 +1116,7 @@ function planSlide(): PlannedSlide {
     // enough to keep the search away from the castle and out of the coaster's
     // general area; `satisfies` below is what actually decides.
     clear: (x, z, radius, distanceAlong) =>
-      chuteMayPass(x, z, radius, distanceAlong, DESIRED_LENGTH),
+      chuteMayPass(x, z, radius, distanceAlong, desiredLength),
     satisfies: (candidate) => unrideableComplaint(candidate) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
@@ -1106,8 +1131,19 @@ function planSlide(): PlannedSlide {
     // will not start is worse than one that takes another second to solve.
     budgets: { perJoint: 16, restarts: 2400 },
   };
-  const route = solveRailRoute(brief);
-  const points = chutePoints(route);
+  let route: SolvedRailRoute;
+  try {
+    route = solveRailRoute(brief);
+  } catch (error) {
+    // A target that admits no route at all is a rung that did not work, not a
+    // park that cannot be built — the next rung gets its turn.
+    if (error instanceof RailRouteUnsolvable) return null;
+    throw error;
+  }
+  return { route, complaint: unrideableComplaint(route) };
+}
+
+function planSlide(): PlannedSlide {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1121,14 +1157,31 @@ function planSlide(): PlannedSlide {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  const complaint = unrideableComplaint(route);
-  if (complaint) {
+  let route: SolvedRailRoute | null = null;
+  let lastComplaint = 'never solved a route at all';
+  let rungsTried = 0;
+  for (const target of DESIRED_LENGTH_LADDER) {
+    rungsTried += 1;
+    const attempt = solveChuteAt(target);
+    if (!attempt) {
+      lastComplaint = `admitted no route at a ${target} m target`;
+      continue;
+    }
+    if (attempt.complaint === null) {
+      route = attempt.route;
+      break;
+    }
+    lastComplaint = `${attempt.complaint} (at a ${target} m target)`;
+  }
+
+  if (!route) {
     throw new Error(
       `the ginormous slide never solved to a chute a child could ride: ` +
-        `after ${route.report.satisfyRejects} rejected routes across ` +
-        `${route.report.startPoseCount} attempts, the best on offer ${complaint}.`,
+        `after ${rungsTried} target lengths (${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
+        `the best on offer ${lastComplaint}.`,
     );
   }
+  const points = chutePoints(route);
 
   const { exitX, exitZ } = planExit();
 
