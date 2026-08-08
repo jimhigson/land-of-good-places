@@ -9,7 +9,7 @@ import { createDodgems } from './dodgems/Dodgems';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
 import { createWaterFight } from './waterFight/WaterFight';
 import { createStallProp, type StallProp } from './stallProp';
-import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
+import { STALL_PICK_RADIUS, STALL_PLACEMENTS, STALL_STANDS_BY_ID } from './stallPlacement';
 import type { StallDefinition } from './types';
 
 /**
@@ -269,7 +269,7 @@ export class MiniGameStalls implements GameSystem {
           x: stall.x,
           y: terrainHeight(stall.x, stall.z),
           z: stall.z,
-          pickRadius: 3.2,
+          pickRadius: STALL_PICK_RADIUS,
           standX: stall.standX,
           standZ: stall.standZ,
           sign: {
