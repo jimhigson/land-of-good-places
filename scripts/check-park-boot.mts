@@ -36,15 +36,25 @@
  * Slicing a search is only safe if it cannot move the result. That is argued in
  * `rail/generate.ts` — the search's whole state is generator locals, so
  * suspending it cannot reorder an `Rng` draw — and it is *proved* here, in one
- * process: the `SLIDE_PLAN` the game gets from the pre-warmed path is hashed
- * against a straight-through `planSlide()`, over 4000 sampled route points and
- * every point of the built chute.
+ * process, for **both** sliced rides:
+ *
+ * - the `SLIDE_PLAN` the game gets from the pre-warmed path is hashed against a
+ *   straight-through `planSlide()`, over 4000 sampled route points and every
+ *   point of the built chute;
+ * - `COASTER_PLANS.cruiser` likewise against a straight-through `planCruiser()`,
+ *   over 4000 sampled loop points plus the station and the exit.
+ *
+ * The cruiser is asked separately rather than being assumed to follow from the
+ * slide, because it is solved *first*: the train's low corridor, the slide's own
+ * air and the castle's window are all measured against whatever loop it
+ * produced.
  *
  * `ParkGeneration` is reachable from here at all because it deliberately has no
  * DOM, no renderer and no `Game` in it — the same property that lets
  * `journeyDirector.ts` and `arrivalSpawn.ts` be checked.
  */
 import { createHash } from 'node:crypto';
+import { Vector3 } from 'three';
 import { performance } from 'node:perf_hooks';
 import { GENERATION_BUDGET_MS, ParkGeneration } from '../src/boot/parkGeneration.ts';
 import { JourneyDirector } from '../src/world/entrance/journeyDirector.ts';
@@ -62,8 +72,10 @@ const nextFrame = (): Promise<void> =>
 // The event loop's own lateness. A 2 ms timer that fires 40 ms late was blocked
 // for 38 ms, and a blocked main thread is precisely what a dropped frame is.
 // This sees work that `advance()` does not — above all a dynamic import's
-// module evaluation, which is where the boundary's 43 ms and the train's 44 ms
-// actually get spent.
+// module evaluation, which is where the boundary's ~55 ms and the train's own
+// ~157 ms actually get spent. (The train's figure is its own cost, measured by
+// importing its dependencies first; imported cold it also carries the cruiser's
+// ~1.3 s, which is the misreading behind issue #252.)
 // ---------------------------------------------------------------------------
 const LAG_INTERVAL_MS = 2;
 let worstBlockMs = 0;
@@ -173,11 +185,25 @@ if (worstAdvanceMs > ADVANCE_CEILING_MS) {
 // A threshold taken from one idle observation is the same mistake as taking one
 // from the generator's own target instead of the game's.
 //
-// So: the largest *legitimate* block here is one ride plan's module evaluation,
-// and the train's is ~44 ms (measured 47 ms idle, 70 ms under load). The
-// smallest *illegitimate* one is the slide being solved a second time, at
-// ~3460 ms. Anything between the two is unambiguous, and 250 ms sits about five
-// times above the legitimate worst and fourteen times below the failure.
+// So: the largest *legitimate* block here is one ride plan's module evaluation.
+// The smallest *illegitimate* one is a ride's whole solve landing in a single
+// block instead of being sliced — the Sky Cruiser at ~1300 ms, the slide at
+// ~3460 ms.
+//
+// **Re-measured 8 August 2026, because the number that used to be here was
+// wrong in the way that costs the most.** It said "the train's is ~44 ms
+// (measured 47 ms idle, 70 ms under load)". That figure predated the Land Hotel
+// merge (#241), which doubled the park's area and took the train's own module
+// evaluation to ~157 ms — and this file was the only place in the repo carrying
+// the stale claim, so issue #252 quoted it as evidence against the train.
+//
+// Measured now, on this branch, with the cruiser sliced: the worst legitimate
+// block is `train/plan.ts`'s own evaluation at **157-169 ms**. So 250 ms is
+// about 1.5x above the legitimate worst and eight times below the cheapest
+// failure. **That margin is thinner than it should be, and deliberately not
+// papered over**: the fix is to bring the train's own cost back down (PR #253
+// measures it at 40-47 ms after its `repair()` fix), not to raise this ceiling.
+// If that lands and this is re-measured, the 5x separation returns.
 //
 // It does not need to be tighter: the mutation that makes slices too coarse is
 // caught by ADVANCE_CEILING_MS above, which is the assertion that owns that
@@ -224,17 +250,29 @@ if (takePrewarmedSlide() !== null) {
 // re-solves the slide inside the `world/paths` import, which is wall-clock time
 // that never passed through `advance()` and was never budgeted.
 //
-// The five ride plans' own module evaluations live in this gap too and cost
-// ~140 ms between them; a second slide solve costs 3.46 s. A one-second ceiling
-// sits an order of magnitude clear of both.
+// The ride plans' own module evaluations live in this gap too and cost ~240 ms
+// between them; an unsliced ride solve costs 1.3 s (cruiser) or 3.46 s (slide).
+// A one-second ceiling sits clear of the first and below both of the others.
 const unbudgetedMs = wallClockMs - totalAdvanceMs;
 said.push(`${unbudgetedMs.toFixed(0)} ms of generation happened outside a budgeted slice`);
 const UNBUDGETED_CEILING_MS = 1000;
 if (unbudgetedMs > UNBUDGETED_CEILING_MS) {
+  // **This message used to name the cause, and named the wrong one.** It said
+  // "at this size it is the slide being solved a second time" — but when this
+  // check first went red after the hotel merge it was neither the slide nor the
+  // train: it was the Sky Cruiser's ~1.3 s solve, evaluated whole inside
+  // whichever module imported `COASTER_PLANS` first. A message asserting a cause
+  // it did not measure sent an agent to `train/plan.ts` for a day.
+  //
+  // So it now reports what it actually measured and lists the candidates by
+  // size, leaving the diagnosis to whoever reads the number.
   fouls.push(
     `${(unbudgetedMs / 1000).toFixed(2)} s of work happened outside any budgeted slice — ` +
-      'generation the ride does not control is generation the ride cannot spread, and at this ' +
-      'size it is the slide being solved a second time',
+      'generation the ride does not control is generation the ride cannot spread. At this size ' +
+      'it is a whole ride solve landing in one module evaluation rather than being sliced: the ' +
+      'Sky Cruiser is ~1.3 s and the ginormous slide ~3.46 s. Check which module evaluation the ' +
+      'worst block above lands in — and note that whichever module imports a solved plan FIRST ' +
+      'is billed for it, so the expensive module is not always the one named',
   );
 }
 
@@ -279,6 +317,66 @@ if (ridden.chute !== plain.chute) {
 }
 if (ridden.route === plain.route && ridden.chute === plain.chute) {
   said.push('sliced and straight-through solves are identical: same route SHA, same chute SHA');
+}
+
+// ---------------------------------------------------------------------------
+// The same two questions for the Sky Cruiser, which is sliced the same way.
+//
+// Asked separately rather than folded into the slide's, because they can fail
+// independently: the cruiser is solved *first* and everything downstream —
+// the train's low corridor, the slide's air, the castle's window — is measured
+// against whatever loop it produced. A cruiser that came out of the sliced path
+// different from the straight-through one would move all three, and the slide's
+// own hash would only show it by accident.
+// ---------------------------------------------------------------------------
+const { takePrewarmedCruiser } = await import('../src/world/coaster/prewarm.ts');
+if (takePrewarmedCruiser() !== null) {
+  fouls.push(
+    'a pre-warmed Sky Cruiser is still sitting in coaster/prewarm.ts after the whole park has ' +
+      'generated — coaster/plan.ts is not collecting it, so the ~1.3 s solve ran twice and the ' +
+      'ride covered none of it',
+  );
+}
+
+const { COASTER_PLANS } = await import('../src/world/coaster/plan.ts');
+const { planCruiser } = await import('../src/world/coaster/solve.ts');
+const cruiserStraightThrough = planCruiser();
+
+const hashOfLoop = (plan: typeof COASTER_PLANS.cruiser): string => {
+  const hash = createHash('sha256');
+  const at = new Vector3();
+  for (let i = 0; i < 4000; i += 1) {
+    plan.route.pointAt((i / 4000) * plan.route.length, at);
+    hash.update(`${at.x.toFixed(6)},${at.y.toFixed(6)},${at.z.toFixed(6)};`);
+  }
+  // The exit and the station are what the rest of the park is built against, so
+  // they are hashed too rather than assumed to follow from the curve.
+  hash.update(
+    `|${plan.route.stationDistance.toFixed(6)}|${plan.exitX.toFixed(6)},${plan.exitZ.toFixed(6)}`,
+  );
+  return hash.digest('hex');
+};
+
+const cruiserRidden = hashOfLoop(COASTER_PLANS.cruiser);
+const cruiserPlain = hashOfLoop(cruiserStraightThrough);
+said.push(
+  `cruiser solved in slices: ${COASTER_PLANS.cruiser.route.length.toFixed(4)} m, ` +
+    `loop ${cruiserRidden.slice(0, 12)}`,
+);
+said.push(
+  `cruiser solved straight through: ${cruiserStraightThrough.route.length.toFixed(4)} m, ` +
+    `loop ${cruiserPlain.slice(0, 12)}`,
+);
+if (cruiserRidden !== cruiserPlain) {
+  fouls.push(
+    `the Sky Cruiser solved a slice at a time is a DIFFERENT LOOP from the one solved straight ` +
+      `through (${COASTER_PLANS.cruiser.route.length.toFixed(2)} m vs ` +
+      `${cruiserStraightThrough.route.length.toFixed(2)} m) — the train's low corridor, the ` +
+      "slide's air and the castle's window are all measured against this loop, so the park a " +
+      'child boots into is not the park CI checks',
+  );
+} else {
+  said.push('sliced and straight-through Sky Cruiser are identical: same loop SHA');
 }
 
 // ---------------------------------------------------------------------------
