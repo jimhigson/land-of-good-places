@@ -6,6 +6,7 @@ import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { ANCHORS_BY_ID } from '../anchors';
 import { PARK_LAYOUT } from '../parkLayout';
+import { FENCE_OFFSET } from './fence';
 import { BALL_PIT_RADIUS, BALL_PIT_X, BALL_PIT_Z } from '../building/layout';
 import { terrainHeight } from '../terrain';
 import { cachedSolve } from '../../core/solveCache';
@@ -453,8 +454,27 @@ function freeIntervals(blocked: Interval[], floor: number, ceiling: number): Int
     if (cursor >= ceiling) break;
   }
   if (cursor < ceiling) out.push([cursor, ceiling]);
-  // A sliver the track cannot actually sit in is not a choice.
-  return out.filter(([from, to]) => to - from >= 1);
+  // A sliver the track cannot actually sit in is not a choice — and "the
+  // track" is the fenced railway, not the centre line.
+  //
+  // This filter used to say `>= 1`, which let a **1.7 m** gap between the Sky
+  // Cruiser's low corridor and the park wall count as somewhere the railway
+  // could go. On seed 2 the profile duly put itself in that sliver at bearings
+  // 169-170 and back in the inner interval by 175; the curve is built from
+  // every fifth bearing (`CONTROL_STRIDE`), so the Catmull-Rom ran straight
+  // through the blocked band between them, and the lineside fence — 2 m off
+  // the rails, and taller than the ballast — ended up inside the cruiser's car
+  // at 1.10 m. The invariant reported it as the *cruiser* striking the fence,
+  // which is the last place anyone would look for a bug in the train's profile.
+  //
+  // `FENCE_OFFSET` either side is what the railway genuinely occupies, so a
+  // gap narrower than that cannot hold one however the centre line is drawn.
+  // Taken from `fence.ts` rather than typed again here: the two numbers used to
+  // agree by coincidence, and that is what this whole failure is made of.
+  const usable = out.filter(([from, to]) => to - from >= FENCE_OFFSET * 2);
+  // Never hand back nothing: a bearing with no interval at all throws in
+  // `snapToFree`, and a too-narrow gap is still better than a sealed park.
+  return usable.length > 0 ? usable : out.filter(([from, to]) => to - from >= 1);
 }
 
 /** Is [from, to] wholly inside one free interval? */

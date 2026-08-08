@@ -25,7 +25,7 @@ import { terrainHeight } from '../terrain';
  * finally closes `check:park`'s rail.exclusion and rail.walkable ratchets.
  */
 
-const FENCE_OFFSET = 2.0;
+export const FENCE_OFFSET = 2.0;
 const STEP = 2.4;
 // A crossing's fence gap is its own `halfGap` — self-measured for obliquity.
 /** Fence gap half-length around a station, along the loop. Exported so
