@@ -41,6 +41,8 @@ shadow flags all stay in `src/art/models/hotelAssets.ts`.
 
 import math
 import os
+import sys
+import traceback
 
 import bmesh
 import bpy
@@ -120,6 +122,17 @@ class Part:
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
         if recalc:
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        # Drop edges that ended up with no face on either side. `revolve` makes
+        # one every time a profile opens *and* closes on the axis (a bowl, the
+        # chandelier's teardrop): the band from the last profile point back to
+        # the first is degenerate there, `validate()` deletes the face, and the
+        # edge between the two poles is left behind. It exports as nothing —
+        # glTF carries triangles — but it is the difference between "this mesh
+        # is a closed solid" being true and being nearly true, and a check that
+        # has to say "nearly" is a check nobody trusts. See :func:`assert_closed`.
+        loose = [edge for edge in bm.edges if not edge.link_faces]
+        if loose:
+            bmesh.ops.delete(bm, geom=loose, context="EDGES")
         threshold = math.radians(sharp_deg)
         for face in bm.faces:
             face.smooth = smooth
@@ -2056,6 +2069,10 @@ STAIR_RAIL_H = 0.86
 where the stair lands instead of stepping."""
 STAIR_BALUSTERS = 13
 
+STAIR_PART_SUFFIXES = ("tread", "stringer", "rail", "baluster", "newel")
+"""The five nodes a flight is made of. Named once so the mirror check, the
+closed-solid check and `hotelAssets.ts`'s part list cannot drift apart."""
+
 STAIR_OUTER_STRING = (
     STAIR_OUTER_R - STAIR_STRING_BITE,
     STAIR_OUTER_R - STAIR_STRING_BITE + STAIR_STRING_T,
@@ -2067,8 +2084,88 @@ STAIR_INNER_STRING = (
 STAIR_RAIL_R = sum(STAIR_OUTER_STRING) * 0.5
 STAIR_COPING_R = sum(STAIR_INNER_STRING) * 0.5
 
+STAIR_HANDRAIL_SECTION = (
+    (-0.045, -0.060),
+    (0.045, -0.060),
+    (0.090, 0.0),
+    (0.045, 0.062),
+    (-0.045, 0.062),
+    (-0.090, 0.0),
+)
+"""The handrail's cross-section, as (across, up) offsets from its centre-line.
 
-def stair_point(u: float, radius: float, z: float):
+A module constant rather than a local because **the bridge balustrade sweeps the
+same six points straight** (§15). A hand slides off the stair's rail and onto
+the gallery's without noticing a join, which it cannot do if the two profiles
+are typed twice and drift by a millimetre."""
+
+STAIR_COPING_SECTION = (
+    (-0.115, -0.030),
+    (0.115, -0.030),
+    (0.115, 0.050),
+    (0.075, 0.085),
+    (-0.075, 0.085),
+    (-0.115, 0.050),
+)
+"""The moulded coping along the inner string's top — and, swept straight, the
+bridge balustrade's plinth. Same reason as :data:`STAIR_HANDRAIL_SECTION`."""
+
+def baluster_rings(foot: float, head: float):
+    """One turned spindle as (radius, height) rings, from `foot` up to `head`.
+
+    Chunky, and barely tapered. The first pass ran 0.072 → 0.055 and rendered as
+    a row of tent pegs: on a 0.75 m spindle a taper the eye can *see* reads as a
+    **point**, and ART_DIRECTION §1's "no thin parts" is exactly about this.
+    0.18 m across the belly is the same chunk the gallery's own rail uses.
+
+    Shared by the stair and the bridge balustrade so the two rows of balusters
+    are the same piece of joinery rather than two guesses at one."""
+    return ((0.082, foot), (0.090, foot + 0.15), (0.070, head))
+
+
+def newel_rings(ground: float, cap: float):
+    """The post of a newel as (radius, height) rings, `ground` to `cap`.
+
+    The gem that finishes it is added separately, because it is a different
+    primitive and not because it is a different piece — see :func:`build_stair`.
+    Shared with the bridge balustrade's newel: a run of gallery rail ends in the
+    same post the stair starts and finishes with."""
+    return (
+        (0.132, ground),
+        (0.115, ground + 0.13),
+        (0.115, cap - 0.10),
+        (0.134, cap),
+    )
+
+
+NEWEL_GEM = (6, 0.092, 0.13, 0.10)
+"""`gem()`'s arguments for a newel's finial, less its spin. 0.23 m tall."""
+
+
+STAIR_HANDS = {"right": 1.0, "left": -1.0}
+"""The two chiralities, **named for the climber and never for a side of a room**.
+
+`'right'` is the flight that shipped on 7 August: climbing it you turn to your
+right, the bottom tread sits at game **+Z** from the origin and the top one at
+game **−X**, which is `LOBBY.mezzanine.stair` at `fromAngle = 0`. `'left'` is
+its mirror image through the plane `x = originX`: same foot, top at game **+X**,
+and climbing it you turn to your left.
+
+**Why this is authored rather than done with `scale.x = -1` in the game.** A
+negative scale on a node flips the winding of every triangle under it, and this
+park's `MeshToonMaterial` is `FrontSide` — so a mirrored flight would be
+*culled*, invisible, while the mesh, the code and every render of the original
+looked correct. That is exactly the fortnight the critter hood faces cost us
+(CLAUDE.md). Sweeping the arc the other way round costs one sign and one
+reversed cross-section, and there is then nothing to get wrong at runtime.
+
+Both hands are built from the **same** `STAIR_*` constants, so the walk
+surfaces, flank colliders and tread heights the game derives are identical for
+either — only the sign of the angle changes.
+"""
+
+
+def stair_point(u: float, radius: float, z: float, hand: float = 1.0):
     """One point on the arc: `u` in treads, `radius` in metres, `z` in metres.
 
     **The one place the angle convention is written down.** The game measures
@@ -2076,12 +2173,34 @@ def stair_point(u: float, radius: float, z: float):
     point at game-angle *a* sits at `(centreX − sin a · r, centreZ + cos a · r)`.
     `export_yup` maps Blender (x, y, z) → glTF (x, z, −y), so the game's X is
     Blender's x and the game's Z is Blender's **−y** — which is where the second
-    minus sign comes from. Nine call sites go through this rather than repeating
-    it, because a sign slip here is the entire asset facing the wrong way and
-    nothing else (the reception desk lost an afternoon to exactly that).
+    minus sign comes from. Every call site goes through this rather than
+    repeating it, because a sign slip here is the entire asset facing the wrong
+    way and nothing else (the reception desk lost an afternoon to exactly that).
+
+    `hand` is +1 for the shipped chirality and −1 for its mirror (see
+    :data:`STAIR_HANDS`). It multiplies **x only**, which is a reflection in the
+    plane x = 0 — the game's own left/right — and leaves every radius, every
+    height and the whole of `u` alone.
     """
     a = STAIR_SWEEP_ANGLE * u / STAIR_TREADS
-    return (-math.sin(a) * radius, -math.cos(a) * radius, z)
+    return (-hand * math.sin(a) * radius, -math.cos(a) * radius, z)
+
+
+def stair_section(points, hand: float):
+    """A swept cross-section, wound so the solid faces **outward** for either hand.
+
+    A reflection reverses orientation: mirror a ring of points and leave the
+    order alone and every quad :func:`sweep_rings` builds from it comes out
+    inside-out. Reversing the ring restores it. `Part.emit`'s
+    `recalc_face_normals` would mostly rescue this anyway; doing it here means
+    the mesh is right *before* anything has to rescue it, which is the whole
+    argument for authoring the mirror instead of scaling it by −1.
+
+    The lofted parts (balusters, newels) need no such treatment: they build a
+    fresh counter-clockwise `ring()` about their own mirrored centre rather than
+    reflecting one, so their winding was never reversed to begin with.
+    """
+    return list(points) if hand > 0 else list(reversed(points))
 
 
 def stair_nosing(u: float) -> float:
@@ -2146,14 +2265,27 @@ def stair_samples(count: int, *breaks: float):
     return out
 
 
-def build_stair(coll: bpy.types.Collection) -> float:
+def build_stair(coll: bpy.types.Collection, handedness: str = "right") -> float:
+    """One flight, in the chirality named by `handedness` (see :data:`STAIR_HANDS`).
+
+    Every part is named `stair-<handedness>-<part>`, because two flights that
+    are mirror images of each other want names that say which is which — a bare
+    `stair-tread` beside a `stair-left-tread` reads as though the first one were
+    *both*.
+    """
+    hand = STAIR_HANDS[handedness]
+    tag = f"stair-{handedness}"
+
+    def point(u: float, radius: float, z: float):
+        return stair_point(u, radius, z, hand)
+
     # --- the flight -----------------------------------------------------------
     # One swept solid, not ten. Its cross-section is the same radial rectangle
     # everywhere — inner radius to outer radius, soffit to the tread it is
     # under — and the *steps* come from where the rings are put, not from
     # separate objects: two rings at (nearly) the same angle make a vertical
     # riser, a third makes the nosing chamfer, and the rest ride the tread.
-    treads = Part("stair-tread")
+    treads = Part(f"{tag}-tread")
     profile: list[tuple[float, float]] = []
     for i in range(STAIR_TREADS):
         top = STAIR_RISER * (i + 1)
@@ -2167,12 +2299,15 @@ def build_stair(coll: bpy.types.Collection) -> float:
     treads.add(
         *sweep_rings(
             [
-                [
-                    stair_point(u, STAIR_INNER_R, stair_soffit(u)),
-                    stair_point(u, STAIR_OUTER_R, stair_soffit(u)),
-                    stair_point(u, STAIR_OUTER_R, top),
-                    stair_point(u, STAIR_INNER_R, top),
-                ]
+                stair_section(
+                    [
+                        point(u, STAIR_INNER_R, stair_soffit(u)),
+                        point(u, STAIR_OUTER_R, stair_soffit(u)),
+                        point(u, STAIR_OUTER_R, top),
+                        point(u, STAIR_INNER_R, top),
+                    ],
+                    hand,
+                )
                 for u, top in profile
             ]
         )
@@ -2183,7 +2318,7 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # The sample list has to contain the `u` where the rake eases into the
     # landing, or the loft cuts that corner and the string's top edge sags
     # away from the handrail running parallel to it.
-    strings = Part("stair-stringer")
+    strings = Part(f"{tag}-stringer")
     string_us = stair_samples(12, 8.5, 9.0, 9.5)
     chamfer = STAIR_STRING_CHAMFER
     # `face` says which of the two radii is the one nobody's shin touches, and
@@ -2207,18 +2342,21 @@ def build_stair(coll: bpy.types.Collection) -> float:
             bottom, top = stair_string_bottom(u), stair_string_top(u)
             waist = top - STAIR_STRING_CAP
             sections.append(
-                [
-                    stair_point(u, lo_f, bottom),
-                    stair_point(u, hi_f, bottom),
-                    stair_point(u, hi_f, waist),
-                    stair_point(u, hi, waist + STAIR_STRING_FACET),
-                    stair_point(u, hi, top - chamfer),
-                    stair_point(u, hi - chamfer, top),
-                    stair_point(u, lo + chamfer, top),
-                    stair_point(u, lo, top - chamfer),
-                    stair_point(u, lo, waist + STAIR_STRING_FACET),
-                    stair_point(u, lo_f, waist),
-                ]
+                stair_section(
+                    [
+                        point(u, lo_f, bottom),
+                        point(u, hi_f, bottom),
+                        point(u, hi_f, waist),
+                        point(u, hi, waist + STAIR_STRING_FACET),
+                        point(u, hi, top - chamfer),
+                        point(u, hi - chamfer, top),
+                        point(u, lo + chamfer, top),
+                        point(u, lo, top - chamfer),
+                        point(u, lo, waist + STAIR_STRING_FACET),
+                        point(u, lo_f, waist),
+                    ],
+                    hand,
+                )
             )
         strings.add(*sweep_rings(sections))
     # Flat, like `desk-front` and for the same reason: a 4 cm facet across a
@@ -2231,22 +2369,17 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # One node, two sweeps, one colour: the thing a hand goes on and the thing
     # that answers it across the flight are the same piece of brass, which is
     # what makes the two edges of the stair read as a pair.
-    rail = Part("stair-rail")
-    handrail_section = [
-        (-0.045, -0.060),
-        (0.045, -0.060),
-        (0.090, 0.0),
-        (0.045, 0.062),
-        (-0.045, 0.062),
-        (-0.090, 0.0),
-    ]
+    rail = Part(f"{tag}-rail")
     rail.add(
         *sweep_rings(
             [
-                [
-                    stair_point(u, STAIR_RAIL_R + dr, stair_rail_line(u) + dz)
-                    for dr, dz in handrail_section
-                ]
+                stair_section(
+                    [
+                        point(u, STAIR_RAIL_R + dr, stair_rail_line(u) + dz)
+                        for dr, dz in STAIR_HANDRAIL_SECTION
+                    ],
+                    hand,
+                )
                 for u in stair_samples(30, 8.5, 9.0, 9.5)
             ]
         )
@@ -2255,21 +2388,16 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # handrail down here would be a rail on the side of the stair nobody can
     # fall off — the inner string is already a collider floor-to-tread — and it
     # would have doubled the balusters for a line the camera barely sees.
-    coping_section = [
-        (-0.115, -0.030),
-        (0.115, -0.030),
-        (0.115, 0.050),
-        (0.075, 0.085),
-        (-0.075, 0.085),
-        (-0.115, 0.050),
-    ]
     rail.add(
         *sweep_rings(
             [
-                [
-                    stair_point(u, STAIR_COPING_R + dr, stair_string_top(u) + dz)
-                    for dr, dz in coping_section
-                ]
+                stair_section(
+                    [
+                        point(u, STAIR_COPING_R + dr, stair_string_top(u) + dz)
+                        for dr, dz in STAIR_COPING_SECTION
+                    ],
+                    hand,
+                )
                 for u in stair_samples(24, 8.5, 9.0, 9.5)
             ]
         )
@@ -2282,10 +2410,10 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # 0.62 m `dressMezzanine` uses on the gallery's own rail. Plumb, not radial
     # — a real curved balustrade's balusters are vertical, and the slight fan
     # they make in plan is the whole charm of one.
-    balusters = Part("stair-baluster")
+    balusters = Part(f"{tag}-baluster")
     for k in range(STAIR_BALUSTERS):
         u = 0.40 + (STAIR_TREADS - 0.80) * k / (STAIR_BALUSTERS - 1)
-        cx, cy, _ = stair_point(u, STAIR_RAIL_R, 0.0)
+        cx, cy, _ = point(u, STAIR_RAIL_R, 0.0)
         spin = math.atan2(cy, cx)
         foot = stair_string_top(u) - 0.04
         head = stair_rail_line(u) - 0.045
@@ -2293,17 +2421,7 @@ def build_stair(coll: bpy.types.Collection) -> float:
             *loft(
                 [
                     ([(x, y) for x, y, _ in ring(6, r, 0.0, spin)], z)
-                    # Chunky, and barely tapered. The first pass ran
-                    # 0.072 → 0.055 and rendered as a row of tent pegs: on a
-                    # 0.75 m spindle a taper the eye can see reads as a *point*,
-                    # and ART_DIRECTION §1's "no thin parts" is exactly about
-                    # this. 0.18 m across the belly is the same chunk as the
-                    # gallery's own balusters.
-                    for r, z in (
-                        (0.082, foot),
-                        (0.090, foot + 0.15),
-                        (0.070, head),
-                    )
+                    for r, z in baluster_rings(foot, head)
                 ]
             ),
             matrix=Matrix.Translation((cx, cy, 0.0)),
@@ -2314,27 +2432,22 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # One on the lobby floor where the flight starts, one on the deck where it
     # lands, each capped with the same six-sided gem the tower is grown from —
     # the cheapest way to say "this staircase belongs to that building".
-    newels = Part("stair-newel")
+    newels = Part(f"{tag}-newel")
     for u, ground in ((0.0, 0.0), (float(STAIR_TREADS), STAIR_RISE)):
-        cx, cy, _ = stair_point(u, STAIR_RAIL_R, 0.0)
+        cx, cy, _ = point(u, STAIR_RAIL_R, 0.0)
         spin = math.atan2(cy, cx)
         cap = stair_rail_line(u) + 0.062
         newels.add(
             *loft(
                 [
                     ([(x, y) for x, y, _ in ring(6, r, 0.0, spin)], z)
-                    for r, z in (
-                        (0.132, ground),
-                        (0.115, ground + 0.13),
-                        (0.115, cap - 0.10),
-                        (0.134, cap),
-                    )
+                    for r, z in newel_rings(ground, cap)
                 ]
             ),
             matrix=Matrix.Translation((cx, cy, 0.0)),
         )
         newels.add(
-            *gem(6, 0.092, 0.13, 0.10, spin),
+            *gem(*NEWEL_GEM, spin),
             matrix=Matrix.Translation((cx, cy, cap - 0.012)),
         )
     newels.emit(coll)
@@ -2347,7 +2460,7 @@ def build_stair(coll: bpy.types.Collection) -> float:
     # Measured off the emitted mesh, never off the numbers that made it —
     # `check:assets`' founding lesson, and the reason the desk's splayed
     # counter was found at all.
-    flight = bpy.data.objects["stair-tread"].data
+    flight = bpy.data.objects[f"{tag}-tread"].data
     heights = {round(v.co.z, 4) for v in flight.vertices}
     for i in range(STAIR_TREADS):
         top = round(STAIR_RISER * (i + 1), 4)
@@ -2365,8 +2478,364 @@ def build_stair(coll: bpy.types.Collection) -> float:
         tread_top = STAIR_RISER * min(STAIR_TREADS, math.floor(u) + 1)
         assert stair_string_top(u) > tread_top, f"string sinks below its tread at u={u:.3f}"
         assert stair_string_bottom(u) <= stair_soffit(u) + 1e-9, f"string floats at u={u:.3f}"
+    # The flight must land on the side the convention promises, or every note
+    # about which stair goes where in the room is quietly wrong. At the top
+    # (u = TREADS) a right-hand flight is at −x and a left-hand one at +x.
+    top_x = point(float(STAIR_TREADS), STAIR_RAIL_R, 0.0)[0]
+    assert math.copysign(1.0, top_x) == -hand, (
+        f"the {handedness}-hand flight tops out at x={top_x:.3f}, which is the wrong side"
+    )
 
     return stair_rail_line(float(STAIR_TREADS)) + 0.062 + 0.23
+
+
+def assert_closed(*names: str) -> None:
+    """Every named mesh must be a **closed** solid — no edge with one face.
+
+    An open mesh is three bugs waiting: `recalc_face_normals` cannot orient what
+    is not closed, the inverted-hull outline the game draws round it breaks open
+    along the same seam, and a `FrontSide` toon material shows the hole as a hole
+    the moment the camera gets round it. `sweep_rings` caps both its ends for
+    exactly this reason and this is the check that says it worked.
+
+    Only the assets this file has authored since 8 August are checked, not every
+    node: `tower-windows` is 570 deliberately-loose quads standing off a wall,
+    and a rule that would condemn shipped art is a rule nobody will keep."""
+    for name in names:
+        mesh = bpy.data.objects[name].data
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        open_edges = [e for e in bm.edges if len(e.link_faces) != 2]
+        count = len(open_edges)
+        bm.free()
+        assert count == 0, f"{name} is not a closed solid: {count} edges have a face on one side only"
+
+
+def assert_stairs_mirror() -> None:
+    """The two flights must be **exact** mirror images through the plane x = 0.
+
+    Measured off the two emitted meshes rather than argued from the sign in
+    :func:`stair_point`, because the whole point of building the mirror instead
+    of scaling it by −1 is that nothing at runtime has to be trusted to get it
+    right — and a claim about geometry that is never measured is the class of
+    bug this repo keeps paying for.
+
+    Vertex *sets*, not vertex order: `remove_doubles` welds in whatever order it
+    likes, and reversing a cross-section reorders a ring, neither of which
+    changes the shape by a millimetre.
+    """
+    for part in STAIR_PART_SUFFIXES:
+        right = bpy.data.objects[f"stair-right-{part}"].data
+        left = bpy.data.objects[f"stair-left-{part}"].data
+        assert len(right.vertices) == len(left.vertices), (
+            f"stair-*-{part}: {len(right.vertices)} vertices right, {len(left.vertices)} left"
+        )
+        flipped = sorted((round(-v.co.x, 5), round(v.co.y, 5), round(v.co.z, 5)) for v in left.vertices)
+        original = sorted((round(v.co.x, 5), round(v.co.y, 5), round(v.co.z, 5)) for v in right.vertices)
+        assert flipped == original, (
+            f"stair-left-{part} is not the mirror image of stair-right-{part}: "
+            f"{sum(1 for a, b in zip(flipped, original) if a != b)} vertices differ"
+        )
+
+
+# =============================================================================
+# 15. BRIDGE BALUSTRADE — one repeatable segment, and the post that ends a run
+# =============================================================================
+#
+# Jim, 8 August 2026, with a photograph of a grand resort lobby: lay the hotel
+# lobby out like this — two mirrored sweeping staircases rising toward each
+# other to a **mezzanine bridge** across the room, framing an archway at ground
+# level you can see straight through, with ornate white-and-gold balustrades.
+#
+# A bridge is however wide the room is, and the room is not this file's to know.
+# So the balustrade ships as a **tile**: one segment, `BRIDGE_RAIL_TILE` long,
+# authored about its own centre, that the placing code repeats along a span. The
+# alternative — one long bespoke railing per run — is a mesh that has to be
+# rebuilt in Blender every time a wall moves, which is exactly the coupling
+# `layout.ts` owning the arc was introduced to avoid.
+#
+# **Everything about it is the stair's own joinery**, and literally so: the
+# handrail is `STAIR_HANDRAIL_SECTION` swept straight, the plinth is
+# `STAIR_COPING_SECTION` swept straight, the balusters are `baluster_rings` and
+# the newel is `newel_rings` + `NEWEL_GEM`. A hand runs off the stair's rail
+# onto the gallery's without meeting a join, because there is one profile and
+# not two — CLAUDE.md's "two definitions of one thing" applied to a shape rather
+# than to a number.
+#
+# It runs along **x**, which is the game's X, centred on its own origin with its
+# base at z = 0. The face you look over is −y here, which is the game's +Z —
+# the direction ART_DIRECTION §7 says an asset faces. A run along the game's Z
+# is the same tile at `rotation.y = π/2`.
+
+BRIDGE_RAIL_TILE = 1.02
+"""Length of one segment, metres. Two balusters at **0.51 m centres**, which is
+the staircase's own spacing measured along its outer radius — not the 0.62 m
+`Hotel.dressMezzanine` uses, because a bridge that a sweeping stair lands on is
+the same balustrade continuing, and a rail that changes rhythm at the join is
+two railings. It is also the denser of the two, which is what "ornate" means
+here at no cost but a spindle.
+
+Tiles butt end to end: place them at `x0 + (i + 0.5) * BRIDGE_RAIL_TILE` and the
+balusters stay evenly spaced straight across every join."""
+
+BRIDGE_RAIL_H = STAIR_RAIL_H
+"""Handrail centre-line above the deck. **`STAIR_RAIL_H` is the owner** — the
+stair's handrail eases level at exactly this height over its last tread, and
+these two lines are meant to be one continuous line where they meet."""
+
+BRIDGE_RAIL_BALUSTERS = 2
+
+BRIDGE_PLINTH_BASE = 0.030
+"""Where the coping profile's reference line sits so its underside lands on
+z = 0 exactly. The profile's own bottom offset, and no more than that."""
+
+BRIDGE_PLINTH_TOP = BRIDGE_PLINTH_BASE + 0.085
+"""…and where its top lands: 0.115 m, which is what the balusters stand on."""
+
+
+def straight_sweep(section, x0: float, x1: float, height: float):
+    """A prism from an (across, up) cross-section, run along **x** from x0 to x1.
+
+    The straight counterpart of the stair's `sweep_rings(... stair_point ...)`
+    calls: `across` becomes y and `up` becomes z + `height`, which is what turns
+    a profile authored for a curved rail into the same rail run flat."""
+    return sweep_rings([[(x, dr, height + dz) for dr, dz in section] for x in (x0, x1)])
+
+
+def build_bridge_rail(coll: bpy.types.Collection) -> float:
+    half = BRIDGE_RAIL_TILE * 0.5
+
+    # --- the plinth -----------------------------------------------------------
+    # A moulded kerb, not a bare box: the balusters have to stand *on* something
+    # or the whole run reads as spindles growing out of the floor, and a plinth
+    # is also what stops a six-year-old seeing daylight under her own bridge.
+    plinth = Part("bridge-rail-plinth")
+    plinth.add(*straight_sweep(STAIR_COPING_SECTION, -half, half, BRIDGE_PLINTH_BASE))
+    plinth.emit(coll)
+
+    # --- the balusters --------------------------------------------------------
+    # Bedded 3 cm into the plinth and 4.5 cm up into the handrail, so neither
+    # joint is two faces meeting in one plane. Overlapping solids, never
+    # coincident ones — the same rule the stair's strings follow.
+    balusters = Part("bridge-rail-baluster")
+    for k in range(BRIDGE_RAIL_BALUSTERS):
+        x = -half + BRIDGE_RAIL_TILE * (k + 0.5) / BRIDGE_RAIL_BALUSTERS
+        balusters.add(
+            *loft(
+                [
+                    ([(px, py) for px, py, _ in ring(6, r, 0.0)], z)
+                    for r, z in baluster_rings(BRIDGE_PLINTH_TOP - 0.03, BRIDGE_RAIL_H - 0.045)
+                ]
+            ),
+            matrix=Matrix.Translation((x, 0.0, 0.0)),
+        )
+    balusters.emit(coll)
+
+    # --- the handrail ---------------------------------------------------------
+    # Spans the tile exactly, so two tiles meet face to face. The inverted-hull
+    # outline of each end cap pushes along +x or −x only (a 90° edge is over
+    # `emit`'s split-normal threshold, so the cap's normals are its own), which
+    # means it pushes *into* the neighbouring tile's solid and is hidden by it.
+    # A cap whose normals were averaged with the sides would have poked a dark
+    # ring out of every joint.
+    rail = Part("bridge-rail-hand")
+    rail.add(*straight_sweep(STAIR_HANDRAIL_SECTION, -half, half, BRIDGE_RAIL_H))
+    rail.emit(coll)
+
+    # --- what a caller is entitled to assume ---------------------------------
+    # **Both ends, separately.** The first version of this took
+    # `max(abs(v.co.x))`, which is one number for two ends and therefore passes
+    # a rail that is short at one of them — deliberately shortening the +x end
+    # by 2 cm left it green. CLAUDE.md's "a check can pass without checking
+    # anything", found by breaking it on purpose, which is the only way it ever
+    # is found.
+    for name in ("bridge-rail-hand", "bridge-rail-plinth"):
+        mesh = bpy.data.objects[name].data
+        lo = min(v.co.x for v in mesh.vertices)
+        hi = max(v.co.x for v in mesh.vertices)
+        assert abs(lo + half) < 1e-6 and abs(hi - half) < 1e-6, (
+            f"{name} runs x={lo:.4f}..{hi:.4f} and must run exactly {-half:.4f}..{half:.4f}, "
+            "or tiled segments leave a gap or an overlap at every join"
+        )
+    # 1e-6, not 1e-9: Blender stores vertex coordinates as **float32**, so a
+    # number this file computed in double precision comes back with about
+    # seven digits. A tolerance tighter than the storage is a check that fails
+    # for a reason that has nothing to do with the shape.
+    plinth_mesh = bpy.data.objects["bridge-rail-plinth"].data
+    assert abs(min(v.co.z for v in plinth_mesh.vertices)) < 1e-6, "the plinth must sit on z = 0"
+    assert abs(max(v.co.z for v in plinth_mesh.vertices) - BRIDGE_PLINTH_TOP) < 1e-6, (
+        "the plinth's top is what the balusters stand on and must be BRIDGE_PLINTH_TOP"
+    )
+    spindles = bpy.data.objects["bridge-rail-baluster"].data
+    assert min(v.co.z for v in spindles.vertices) < BRIDGE_PLINTH_TOP, "balusters float above the plinth"
+    assert max(v.co.z for v in spindles.vertices) < BRIDGE_RAIL_H, "balusters poke through the handrail"
+
+    return BRIDGE_RAIL_H + 0.062
+
+
+def build_bridge_newel(coll: bpy.types.Collection) -> float:
+    """The post that ends a run of tiles — and turns a corner.
+
+    One piece serves both, because a newel is what a balustrade does wherever it
+    stops being straight: at the end of the bridge, at the head of a flight, at
+    the corner where the gallery turns. It is the **same** post the staircase
+    already starts and finishes with (`newel_rings`, `NEWEL_GEM`), standing on
+    the deck instead of on a string."""
+    cap = BRIDGE_RAIL_H + 0.062
+    newel = Part("bridge-newel")
+    newel.add(*loft([([(x, y) for x, y, _ in ring(6, r, 0.0)], z) for r, z in newel_rings(0.0, cap)]))
+    newel.add(*gem(*NEWEL_GEM, 0.0), matrix=Matrix.Translation((0.0, 0.0, cap - 0.012)))
+    newel.emit(coll)
+    mesh = bpy.data.objects["bridge-newel"].data
+    return max(v.co.z for v in mesh.vertices)
+
+
+# =============================================================================
+# 16. PENDANT-CLUSTER CHANDELIER — a dozen glowing drops over the archway
+# =============================================================================
+#
+# The other half of the reference photograph: a loose cluster of small pendants
+# at varied heights hanging in the middle of the double-height space, over the
+# archway the two staircases frame.
+#
+# **The origin is the hang point**, at the ceiling, with every vertex below it —
+# the disco ball's exception (ART_DIRECTION §7's balloon rule) for the same
+# reason: this thing hangs, so `ceilingAnchor.add(chandelier.root)` should need
+# no offset arithmetic. It is the fourth documented case in this file, after the
+# disco ball, the lift dial's needle pivot and the staircase's centre of
+# curvature.
+#
+# **It has a small rose and fanning cords, and the first version did not.** The
+# first version hung twelve vertical cords from a 2.9 m saucer spanning the whole
+# cluster, which is what a real ceiling fitting has and exactly the wrong shape
+# here: the park's camera looks *down* at 38° and hotel rooms are open-topped
+# (`HotelRoom.wallHeight` — the camera looks in), so a plate as wide as the
+# cluster is a lid over the only part of the asset anybody was meant to see.
+# That is the pet bed's canopy all over again (HANDOFF-hotel-art.md, round 2:
+# *"a shape that reads well in elevation can still be the one shape a top-down
+# game may not have"*), and it took one render to say so a second time.
+#
+# So: a 0.60 m rose at the hang point, and the cords fan out and down from a
+# gather point just under it. Every cord is between 19° and 29° off plumb — a
+# bouquet, which is a real chandelier form (a cascade) and the one that leaves
+# the drops in full view of a camera looking down on them. The radius grows with
+# the drop, which is what keeps that angle even; the *variation* around it is
+# what stops the cluster being a cone.
+
+CHANDELIER_GATHER = -0.26
+"""Where every cord leaves the rose. Inside the boss above it, so a cord's top
+is buried in solid geometry rather than meeting it face to face."""
+
+CHANDELIER_GLOBE = (
+    (0.000, 0.000),
+    (0.098, -0.072),
+    (0.168, -0.210),
+    (0.148, -0.348),
+    (0.078, -0.414),
+    (0.000, -0.440),
+)
+"""One drop, as (radius, height) about its own top pole. A teardrop rather than
+a sphere, 0.34 m across and 0.44 m tall — chunky enough to read from the far
+side of a 26 m lobby, which is the only size test that matters (§1's "no thin
+parts" is about apparent size, and this hangs 3 m over a child's head)."""
+
+CHANDELIER_DROPS = (
+    # (bearing°, radius m, z of that drop's top pole, size)
+    (0.0, 0.00, -1.00, 0.90),
+    (40.0, 0.34, -1.28, 1.06),
+    (155.0, 0.30, -1.12, 0.88),
+    (268.0, 0.38, -1.46, 1.00),
+    (96.0, 0.62, -1.66, 0.92),
+    (210.0, 0.58, -1.90, 1.12),
+    (322.0, 0.66, -1.52, 0.86),
+    (22.0, 0.94, -2.06, 1.08),
+    (128.0, 1.02, -1.84, 0.94),
+    (180.0, 0.88, -2.34, 0.86),
+    (240.0, 0.98, -2.52, 1.10),
+    (300.0, 1.06, -2.16, 0.96),
+)
+"""Twelve drops: one on the axis, three close in, three at mid radius, five out
+at the rim. Bearings are deliberately not multiples of anything and no two
+lengths are the same — a dozen pendants on a dozen different cords is the whole
+subject of the photograph, and a ring of twelve equal ones is a lampshade.
+
+Radius rises with depth so every cord makes roughly the same angle with plumb
+(19°–29°, asserted below); the variation *around* that trend is what makes it a
+loose cluster instead of a cone. `size` scales the globe 0.86–1.12 for the same
+reason — twelve identical beads read as a manufactured part and a dozen slightly
+different ones read as a thing somebody arranged. It scales the geometry, never
+`root.scale` (§7), because these are baked into one node.
+
+No randomness, per this file's rule: each one is a literal."""
+
+CHANDELIER_FAN_LIMIT = 34.0
+"""How far off plumb a cord may lean, degrees. Past about here a "cord" is
+reading as an arm and the fitting wants a frame to justify it; the table above
+is checked against this rather than trusted."""
+
+
+def aimed_tube(start, end, radius: float, sides: int = 6):
+    """A capped cylinder running from `start` to `end`, in the asset's own metres.
+
+    :func:`tube` stands on Z, and the cords do not. `sweep_path` is the other
+    way to bend a tube along a direction and is the wrong one here: its frame is
+    `tangent × up` with `up` the Z axis, which is undefined for the cord that
+    hangs straight down the middle."""
+    a, b = Vector(start), Vector(end)
+    span = b - a
+    verts, faces = tube(radius, span.length, sides=sides)
+    turn = Vector((0.0, 0.0, 1.0)).rotation_difference(span.normalized()).to_matrix().to_4x4()
+    place = Matrix.Translation(a) @ turn
+    return [tuple(place @ Vector(v)) for v in verts], faces
+
+
+def build_chandelier(coll: bpy.types.Collection) -> float:
+    frame = Part("chandelier-frame")
+    # The rose: a hexagonal ceiling plate narrowing to the boss the cords leave
+    # from. 0.60 m across — small enough that the drops under it are still the
+    # asset, which is the whole lesson of the first version.
+    frame.add(
+        *loft(
+            [
+                ([(x, y) for x, y, _ in ring(6, r, 0.0)], z)
+                for r, z in ((0.300, 0.0), (0.286, -0.10), (0.190, -0.16), (0.160, -0.30))
+            ]
+        )
+    )
+    drops = Part("chandelier-drop")
+    for bearing, radius, top, size in CHANDELIER_DROPS:
+        angle = math.radians(bearing)
+        x, y = radius * math.cos(angle), radius * math.sin(angle)
+        # The cord, and the collar that caps the globe it holds. Both brass, so
+        # both live on the frame's node: a cord is not a separately-coloured
+        # thing, it is the last two metres of the fitting. The collar stays
+        # **plumb** while the cord leans — a pendant hangs level however its
+        # cord arrives, and a tilted globe would read as one that had been
+        # knocked.
+        frame.add(*aimed_tube((0.0, 0.0, CHANDELIER_GATHER), (x, y, top + 0.055), 0.030))
+        frame.add(
+            *tube(0.052 * size, 0.095, sides=6, z0=top - 0.05),
+            matrix=Matrix.Translation((x, y, 0.0)),
+        )
+        drops.add(
+            *revolve(CHANDELIER_GLOBE, 8),
+            matrix=Matrix.Translation((x, y, top)) @ Matrix.Scale(size, 4),
+        )
+        lean = math.degrees(math.atan2(radius, CHANDELIER_GATHER - (top + 0.055)))
+        assert lean <= CHANDELIER_FAN_LIMIT, (
+            f"the drop at {bearing}° leans {lean:.1f}° off plumb, past "
+            f"{CHANDELIER_FAN_LIMIT}° — it needs a frame to hang from, not a longer cord"
+        )
+    frame.emit(coll)
+    drops.emit(coll)
+
+    # Everything must hang **below** the origin, which is the hang point. This is
+    # the assertion the disco ball never had, and the one that would catch a sign
+    # slip in the table above before a chandelier grew up through a ceiling.
+    for name in ("chandelier-frame", "chandelier-drop"):
+        mesh = bpy.data.objects[name].data
+        assert max(v.co.z for v in mesh.vertices) <= 1e-6, f"{name} rises above its own hang point"
+    return -min(v.co.z for v in bpy.data.objects["chandelier-drop"].data.vertices)
 
 
 # =============================================================================
@@ -2400,7 +2869,23 @@ def main() -> None:
     heights["entranceDoors"] = build_entrance_doors(collection("hotel-entrance"))
     heights["tv"] = build_tv(collection("hotel-tv"))
     heights["gameBoy"] = build_gameboy(collection("hotel-gameboy"))
-    heights["stair"] = build_stair(collection("hotel-stair"))
+    for handedness in STAIR_HANDS:
+        heights[f"stair-{handedness}"] = build_stair(
+            collection(f"hotel-stair-{handedness}"), handedness
+        )
+    assert_stairs_mirror()
+    heights["bridgeRail"] = build_bridge_rail(collection("hotel-bridge-rail"))
+    heights["bridgeNewel"] = build_bridge_newel(collection("hotel-bridge-newel"))
+    heights["chandelier"] = build_chandelier(collection("hotel-chandelier"))
+    assert_closed(
+        *(f"stair-{hand}-{part}" for hand in STAIR_HANDS for part in STAIR_PART_SUFFIXES),
+        "bridge-rail-plinth",
+        "bridge-rail-baluster",
+        "bridge-rail-hand",
+        "bridge-newel",
+        "chandelier-frame",
+        "chandelier-drop",
+    )
 
     print("\nhotel_build")
     print(summarise())
@@ -2411,4 +2896,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # **Blender exits 0 on an uncaught Python exception.** Found on 8 August
+    # 2026 by watching a genuine assertion fire in here: the traceback printed,
+    # `save_as_mainfile` never ran, and the shell reported success — so
+    # `npm run blend:hotel` would have gone on to export the *previous*
+    # `.blend`, pack it, and pass CI, while this file's whole purpose is to
+    # fail loudly when the geometry stops agreeing with `layout.ts`. Every
+    # assertion above was, until this line, a check that could not fail.
+    # (CLAUDE.md: "a check can pass without checking anything".)
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)

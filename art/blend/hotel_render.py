@@ -95,11 +95,25 @@ COLOURS = {
     "gameboy-body": 0xD3CACB,  # ART.statueStone
     "gameboy-screen": 0x7FE3C0,  # PALETTE.markerMint
     "gameboy-buttons": 0xFF8FC0,  # PALETTE.markerPink
-    "stair-tread": 0xCDEEFF,  # PALETTE.glassTint (the lobby's floor colour)
-    "stair-stringer": 0xC9A9FF,  # PALETTE.markerLilac (the lobby's trim)
-    "stair-rail": 0xFFD76E,  # PALETTE.liftFrame
-    "stair-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
-    "stair-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    # Both hands of the staircase are the same five colours: they are one piece
+    # of architecture seen twice, and a pair that did not match would be two
+    # staircases rather than a composition.
+    "stair-right-tread": 0xCDEEFF,  # PALETTE.glassTint (the lobby's floor colour)
+    "stair-right-stringer": 0xC9A9FF,  # PALETTE.markerLilac (the lobby's trim)
+    "stair-right-rail": 0xFFD76E,  # PALETTE.liftFrame
+    "stair-right-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
+    "stair-right-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    "stair-left-tread": 0xCDEEFF,
+    "stair-left-stringer": 0xC9A9FF,
+    "stair-left-rail": 0xFFD76E,
+    "stair-left-baluster": 0xFFF3F8,
+    "stair-left-newel": 0xD7B3FF,
+    "bridge-rail-plinth": 0xFFF2DC,  # PALETTE.signBoard
+    "bridge-rail-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
+    "bridge-rail-hand": 0xFFD76E,  # PALETTE.liftFrame
+    "bridge-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    "chandelier-frame": 0xFFD76E,  # PALETTE.liftFrame
+    "chandelier-drop": 0xFFF2DC,  # PALETTE.signBoard (lit warm in code)
 }
 
 # Every asset's origin is its own base, so a whole collection rendered as-authored
@@ -108,6 +122,21 @@ COLOURS = {
 # **preview placements only**, applied to a scene this script never saves. Where
 # an asset has a natural place (a bowl on the table, a chair at it) the preview
 # uses it, because that is the arrangement the shapes have to work in.
+PART_SUFFIXES = ("tread", "stringer", "rail", "baluster", "newel")
+
+# The twin-stair placement, shared by both composition shots below. Written out
+# rather than inlined twice: the first version gave it only to the isometric
+# shot, and the front shot silently rendered both flights **stacked at the
+# origin** — which looks so plausible (a symmetric V of two mirrored flights
+# meeting at their feet) that it took measuring the picture to notice it was not
+# the composition at all. It is kept as its own shot below, because overlaid at
+# the origin is in fact the best mirror check there is.
+STAIR_PAIR_PLACES = {
+    f"stair-{hand}-{part}": (sign * 7.0, 0.0, 0.0)
+    for hand, sign in (("right", 1.0), ("left", -1.0))
+    for part in PART_SUFFIXES
+}
+
 LAYOUTS = {
     "breakfast": {
         "chair": (0.0, -1.02, 0.0),
@@ -137,6 +166,29 @@ LAYOUTS = {
         "lift-car-floor": (0.0, 1.45, 0.0),
         "lift-car-rail": (0.0, 1.45, 0.0),
     },
+    # **The composition shots.** Both flights are authored about the same origin,
+    # so as built they sit inside one another. This is the arrangement the
+    # reference photograph asks for: centres 14 m apart (game x = ±7, which is
+    # Blender's x unchanged), the two feet side by side toward the entrance, the
+    # two tops facing each other across a 5.6 m gap — which is the bridge's span
+    # and the width of the archway underneath it.
+    "staircase-pair": STAIR_PAIR_PLACES,
+    "staircase-pair-front": STAIR_PAIR_PLACES,
+    # A newel centred on each end of a three-tile run. The handrail dies into
+    # the post, which is what joinery does and what hides both end caps.
+    "bridge-rail": {"bridge-newel": (-1.53, 0.0, 0.0)},
+}
+
+# stem -> {object: [extra offsets]}. Linked copies made just for that shot and
+# removed after it, so a run of tiled segments can be judged as a run — the one
+# thing a single tile cannot show is whether two of them meet cleanly.
+COPIES = {
+    "bridge-rail": {
+        "bridge-rail-plinth": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-rail-baluster": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-rail-hand": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-newel": [(3.06, 0.0, 0.0)],
+    },
 }
 
 # Objects a shot leaves out entirely, by shot name.
@@ -146,8 +198,11 @@ OMIT = {
     "lift-car": {"lift-frame", "lift-frame-sill", "lift-door-left", "lift-door-right"},
 }
 
-# file stem -> (collection, camera azimuth in degrees off the front, elevation)
+# file stem -> (collection(s), camera azimuth in degrees off the front, elevation)
 # Azimuth 0 looks straight along +Y (at the asset's front face, which is −Y).
+# The collection field takes a name or a tuple of names, because the twin-stair
+# composition is two collections and judging a mirror image means seeing both
+# in one frame.
 # An optional fifth field widens the frame: `frame()` sizes the ortho view off
 # the asset's largest single dimension, which crops anything whose diagonal is
 # much longer than that — a quarter-turn staircase is 4.4 m in three directions
@@ -177,11 +232,34 @@ SHOTS = [
     # looks from focus + (+X, +Y, +Z) at 38° of pitch; the game's +Z is
     # Blender's −Y, so +45° of azimuth here puts the camera at (+X, −Y), which
     # is the same corner. This is the shot that says whether the sweep reads.
-    ("staircase", "hotel-stair", 45.0, 36.0, 1.6),
+    ("staircase", "hotel-stair-right", 45.0, 36.0, 1.6),
     # …and a low one from the foot of the flight, which is the only angle that
     # shows the rake: strings, handrail and coping should be three parallel
     # straight lines, and any tread out of step shows up as a kink in them.
-    ("staircase-rake", "hotel-stair", 8.0, 10.0, 1.45),
+    ("staircase-rake", "hotel-stair-right", 8.0, 10.0, 1.45),
+    # The mirror, from the same two angles. Printed side by side with the two
+    # above they are the check a human can actually do; `hotel_build.py`'s
+    # `assert_stairs_mirror` is the check a machine does, vertex for vertex.
+    ("staircase-left", "hotel-stair-left", 45.0, 36.0, 1.6),
+    ("staircase-left-rake", "hotel-stair-left", 8.0, 10.0, 1.45),
+    # **The mirror check a human can do in one glance.** Both flights left at
+    # the origin, seen from dead ahead — which is *in* the mirror plane, so a
+    # true pair renders as an exactly left–right symmetric picture and anything
+    # that is not a true pair renders as a picture that is not.
+    ("staircase-mirror", ("hotel-stair-right", "hotel-stair-left"), 0.0, 14.0, 1.3),
+    # **The composition.** Both flights placed as the reference photograph has
+    # them: rising toward each other, tops facing across the bridge's span, an
+    # archway you can see straight through underneath.
+    ("staircase-pair", ("hotel-stair-right", "hotel-stair-left"), 45.0, 30.0, 1.15),
+    ("staircase-pair-front", ("hotel-stair-right", "hotel-stair-left"), 0.0, 12.0, 1.1),
+    # Three tiles and a newel at each end. The only question this shot exists to
+    # answer: can you see where one segment stops and the next starts?
+    ("bridge-rail", ("hotel-bridge-rail", "hotel-bridge-newel"), 34.0, 22.0, 1.35),
+    ("bridge-newel", "hotel-bridge-newel", 30.0, 20.0),
+    # Hangs, so it is framed like the disco ball. Low elevation on purpose: a
+    # chandelier is looked *up* at, and the varied drop lengths are the whole
+    # point of the asset — from above they all read as one flat ring.
+    ("chandelier", "hotel-chandelier", 26.0, 12.0, 1.3),
 ]
 
 
@@ -262,24 +340,43 @@ def main() -> None:
     bpy.context.scene.camera = camera
 
     print("\nhotel_render")
-    for stem, coll_name, azimuth, elevation, *rest in SHOTS:
+    for stem, coll_names, azimuth, elevation, *rest in SHOTS:
         pad = rest[0] if rest else 1.22
-        coll = bpy.data.collections.get(coll_name)
-        if coll is None:
-            raise SystemExit(f"hotel_render: no collection '{coll_name}' — rerun hotel_build.py")
+        names = (coll_names,) if isinstance(coll_names, str) else coll_names
+        shown = []
+        for coll_name in names:
+            coll = bpy.data.collections.get(coll_name)
+            if coll is None:
+                raise SystemExit(f"hotel_render: no collection '{coll_name}' — rerun hotel_build.py")
+            shown.extend(coll.objects)
         layout = LAYOUTS.get(stem, {})
         omit = OMIT.get(stem, set())
-        shown = [obj for obj in coll.objects if obj.name not in omit]
+        shown = [obj for obj in shown if obj.name not in omit]
         for obj in bpy.data.objects:
             obj.hide_render = obj.type == "MESH" and obj not in shown
             if obj.type == "MESH":
                 obj.location = layout.get(obj.name, (0.0, 0.0, 0.0))
+        # Linked copies for a tiled run. Made here and removed below, because
+        # this script must leave the scene exactly as it found it — it never
+        # saves, but the next shot in this same loop would inherit them.
+        copies = []
+        for name, offsets in COPIES.get(stem, {}).items():
+            source = bpy.data.objects[name]
+            for offset in offsets:
+                clone = source.copy()
+                clone.location = Vector(source.location) + Vector(offset)
+                clone.color = source.color
+                bpy.context.scene.collection.objects.link(clone)
+                copies.append(clone)
+        shown.extend(copies)
         bpy.context.view_layer.update()
         frame(shown, azimuth, elevation, camera, pad)
         path = os.path.join(OUT, f"{stem}.png")
         bpy.context.scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
-        print(f"  {stem:<16} {os.path.getsize(path):>8} bytes")
+        print(f"  {stem:<22} {os.path.getsize(path):>8} bytes")
+        for clone in copies:
+            bpy.data.objects.remove(clone, do_unlink=True)
     print()
 
 

@@ -78,6 +78,44 @@ interface PartStyle {
 }
 
 /**
+ * Which way a flight turns **as you climb it** — never which side of a room it
+ * is on. `'right'` is the flight that shipped on 7 August; `'left'` is its
+ * mirror image. See {@link createGrandStaircase} for the full convention.
+ */
+export type StairHandedness = 'right' | 'left';
+
+export const STAIR_HANDEDNESS: readonly StairHandedness[] = ['right', 'left'];
+
+/** The five nodes a flight is made of, in `hotel_build.py`'s own order. */
+const STAIR_PART_SUFFIXES = ['tread', 'stringer', 'rail', 'baluster', 'newel'] as const;
+
+/**
+ * How a flight is dressed, by part suffix — **one table for both hands**.
+ *
+ * The treads take the lobby's *floor* colour and the strings its *trim*, which
+ * is the same pairing the gallery they lead to already uses, so the stair reads
+ * as part of that piece of architecture rather than as furniture parked against
+ * it. One colour for all ten treads, deliberately: the old code-built stack
+ * alternated floor and trim per tread, and alternating stripes are most of what
+ * made ten boxes read as ten boxes.
+ */
+const STAIR_PART_STYLES: Record<(typeof STAIR_PART_SUFFIXES)[number], PartStyle> = {
+  tread: { colour: PALETTE.glassTint, outline: 0.02 },
+  stringer: { colour: PALETTE.markerLilac, outline: 0.022 },
+  rail: { colour: PALETTE.liftFrame, outline: 0.016 },
+  baluster: { colour: PALETTE.blossomWhite, outline: 0.014 },
+  newel: { colour: PALETTE.flowerViolet, outline: 0.018 },
+};
+
+function stairStyles(): Record<string, PartStyle> {
+  const out: Record<string, PartStyle> = {};
+  for (const hand of STAIR_HANDEDNESS) {
+    for (const part of STAIR_PART_SUFFIXES) out[`stair-${hand}-${part}`] = STAIR_PART_STYLES[part];
+  }
+  return out;
+}
+
+/**
  * Every node in the file, dressed.
  *
  * One table rather than a line of code per part, so that "which colour is the
@@ -207,18 +245,40 @@ const STYLES: Record<string, PartStyle> = {
   },
   'gameboy-buttons': { colour: PALETTE.markerPink },
 
-  // --- the lobby's grand staircase -----------------------------------------
-  // The treads take the lobby's *floor* colour and the strings its *trim*,
-  // which is the same pairing the gallery they lead to already uses — so the
-  // stair reads as part of that piece of architecture rather than as furniture
-  // parked against it. One colour for all ten treads, deliberately: the old
-  // code-built stack alternated floor and trim per tread, and alternating
-  // stripes are most of what made ten boxes read as ten boxes.
-  'stair-tread': { colour: PALETTE.glassTint, outline: 0.02 },
-  'stair-stringer': { colour: PALETTE.markerLilac, outline: 0.022 },
-  'stair-rail': { colour: PALETTE.liftFrame, outline: 0.016 },
-  'stair-baluster': { colour: PALETTE.blossomWhite, outline: 0.014 },
-  'stair-newel': { colour: PALETTE.flowerViolet, outline: 0.018 },
+  // --- the lobby's grand staircase, both hands -----------------------------
+  // Spread from `STAIR_PART_STYLES` below rather than typed twice. Two mirrored
+  // flights that were dressed by two hand-written tables would be one edit away
+  // from a staircase in two colour schemes, which is CLAUDE.md's "two
+  // definitions of one thing" applied to a colour.
+  ...stairStyles(),
+
+  // --- the mezzanine bridge's balustrade ------------------------------------
+  // White and gold, which is the reference photograph's whole palette for a
+  // balustrade, with the hotel's own violet on the newel so the bridge belongs
+  // to the same building as the stair it continues from.
+  'bridge-rail-plinth': { colour: PALETTE.signBoard, outline: 0.02 },
+  'bridge-rail-baluster': { colour: PALETTE.blossomWhite, outline: 0.014 },
+  'bridge-rail-hand': { colour: PALETTE.liftFrame, outline: 0.016 },
+  'bridge-newel': { colour: PALETTE.flowerViolet, outline: 0.018 },
+
+  // --- the pendant-cluster chandelier ---------------------------------------
+  // The drops carry a gentle emissive here so they read as lit at the moment
+  // they are added and never as twelve grey eggs. It is deliberately *low*:
+  // lighting the lobby is `hotel/lighting.ts`'s job and a fitting bright enough
+  // to be a light source blows the park's pastels straight to white (the disco
+  // ball's lesson). Raise it, or hang a `PointLight` in the cluster, from there.
+  // No outline on the frame, like `disco-rod` and for a sharper reason: a cord
+  // is 60 mm across, and an inverted hull at the props' 0.014 would put 28 mm
+  // of ink on it and render it half as thick again. ART_DIRECTION §4 — outlines
+  // go on silhouette parts, and here the drops are the silhouette. It also
+  // keeps every drawn pixel of this asset **below** its own hang point, which
+  // an outline standing 14 mm proud of the rose's top face did not.
+  'chandelier-frame': { colour: PALETTE.liftFrame },
+  'chandelier-drop': {
+    colour: PALETTE.signBoard,
+    outline: 0.012,
+    material: { emissive: PALETTE.buildingWindowWarm, emissiveIntensity: 0.45 },
+  },
 };
 
 /** One authored part, by name. Throws rather than returning a hole. */
@@ -900,8 +960,19 @@ export const STAIR_RISER = STAIR_RISE / STAIR_TREADS;
 export const STAIR_RAIL_HEIGHT = 0.86;
 
 export interface GrandStaircaseHandle extends AssetHandle {
+  /** Which way it turns as you climb it. @see createGrandStaircase */
+  readonly handedness: StairHandedness;
   readonly innerRadius: number;
   readonly outerRadius: number;
+  /**
+   * The quarter turn, **signed in the game's yaw** — `+STAIR_SWEEP` for a
+   * right-hand flight and `−STAIR_SWEEP` for a left-hand one.
+   *
+   * Signed rather than absolute because the sign *is* the difference between
+   * the two, and a caller that reads `Math.PI / 2` for both places one of them
+   * back to front. It is the direction a climber travels; for an angular range
+   * that is safe to hand to a collider, use {@link treadArc}.
+   */
   readonly sweep: number;
   readonly rise: number;
   readonly treads: number;
@@ -915,15 +986,27 @@ export interface GrandStaircaseHandle extends AssetHandle {
    * geometry a child sees are then the same arithmetic, done once.
    */
   treadTop(index: number): number;
+  /**
+   * Tread `index`'s angular span in the game's yaw, relative to the flight's own
+   * start — **always ascending**, `from < to`, whichever hand this flight is.
+   *
+   * Index 0 is the bottom tread for both hands, so `treadArc(i)` and
+   * `treadTop(i)` describe the same step.
+   *
+   * This exists because `ArcTread.covers` tests `angle >= from && angle < to`
+   * and a left-hand flight climbs through **decreasing** angles: subdividing
+   * `fromAngle → fromAngle + sweep` by hand produces ranges in descending order
+   * for it, `covers` then returns false everywhere, and what a child meets is a
+   * staircase she walks straight through. Nothing about that failure is
+   * visible in a render — which is exactly why the ordering lives here, once,
+   * instead of in every caller.
+   */
+  treadArc(index: number): { readonly from: number; readonly to: number };
 }
 
-const STAIRCASE_PARTS = [
-  'stair-tread',
-  'stair-stringer',
-  'stair-rail',
-  'stair-baluster',
-  'stair-newel',
-] as const;
+function staircaseParts(handedness: StairHandedness): readonly string[] {
+  return STAIR_PART_SUFFIXES.map((part) => `stair-${handedness}-${part}`);
+}
 
 /**
  * **The lobby's grand staircase**: a quarter-turn sweep of ten treads from the
@@ -952,20 +1035,48 @@ const STAIRCASE_PARTS = [
  * and nothing else — no half-width offset to get wrong, and no second formula
  * that has to track the arc when the arc moves.
  *
- * ## Which way it sweeps
+ * ## Which way it sweeps, and what `handedness` means
  *
- * Authored at **`fromAngle = 0`** in the yaw the rest of the game measures
- * (`Mezzanine`: 0 is +Z, turning toward −X). So the bottom tread sits at
- * `+Z` from the origin and the top one at `−X`, which is `LOBBY`'s arc exactly
- * and needs no rotation at all. A room that wanted a different start angle
- * would set `root.rotation.y = -fromAngle` — negative, because three.js yaws
+ * Handedness is named for **the climber**, never for a side of a room:
+ *
+ * | `handedness` | climbing, you turn | bottom tread | top tread | game yaw |
+ * | --- | --- | --- | --- | --- |
+ * | `'right'` | right | `+Z` from the origin | `−X` | 0 → `+π/2` |
+ * | `'left'` | left | `+Z` from the origin (**the same place**) | `+X` | 0 → `−π/2` |
+ *
+ * Both are authored at **`fromAngle = 0`** in the yaw the rest of the game
+ * measures (`Mezzanine`: 0 is +Z, turning toward −X), so `'right'` is `LOBBY`'s
+ * arc exactly and needs no rotation at all. A room that wants a different start
+ * angle sets `root.rotation.y = -fromAngle` — negative, because three.js yaws
  * +Z toward +X and this game's stair angle turns it toward −X.
+ *
+ * The two share a foot and differ in where the top lands, which is what makes
+ * the twin-staircase composition fall out of the placement rather than out of
+ * arithmetic: put the two origins at `(±C, Zc)` with the **right** hand on the
+ * `+X` side and the **left** on `−X`, and each flight's top swings *inward*.
+ * The feet then stand side by side at `z = Zc + r` and the two tops face each
+ * other across a clear `2·(C − STAIR_OUTER_RADIUS)` at `z = Zc` — which is the
+ * bridge's span, and the width of the archway underneath it. (At `C = 7`, in a
+ * lobby of `halfX = 13`: outer edges at `±11.2`, a 5.6 m span.)
+ *
+ * ## The mirror is authored, not scaled
+ *
+ * There is no `scale.x = -1` anywhere near this and there must not be. A
+ * negative scale flips the winding of every triangle under the node, and this
+ * park's `MeshToonMaterial` is `FrontSide`: the whole flight would be *culled* —
+ * invisible in the running game while the mesh, the code and every render of
+ * the original looked correct. That is the fortnight the critter hood faces cost
+ * us (CLAUDE.md). `hotel_build.py` sweeps the arc the other way round instead,
+ * and asserts the two meshes are exact mirror images vertex for vertex
+ * (`assert_stairs_mirror`) so the claim is measured rather than believed.
  *
  * ## What it was built to
  *
  * `STAIR_RISE` = 3.2 m, which is `LOBBY_MEZZANINE_Y`. Ten treads of a 0.32 m
- * riser, inner radius 2.4 m, outer 4.2 m, a 90° sweep. The measured top is
- * ~4.36 m — the top newel's finial, standing on the deck, not a walkable
+ * riser, inner radius 2.4 m, outer 4.2 m, a 90° sweep — **identical for both
+ * hands**, so anything derived from the constants (walk slices, flank
+ * colliders, guest keep-outs) is derived the same way for either. The measured
+ * top is ~4.35 m — the top newel's finial, standing on the deck, not a walkable
  * height; the *walkable* top is `STAIR_RISE`.
  *
  * ## What the strings mean for collision
@@ -978,19 +1089,233 @@ const STAIRCASE_PARTS = [
  * `buildMezzanine`'s header for why a solid tread is a wall to the child on the
  * step below it.
  */
-export function createGrandStaircase(): GrandStaircaseHandle {
-  const { root } = assemble('hotel.grandStaircase', STAIRCASE_PARTS);
+export function createGrandStaircase(
+  handedness: StairHandedness = 'right',
+): GrandStaircaseHandle {
+  const { root } = assemble(`hotel.grandStaircase.${handedness}`, staircaseParts(handedness));
+  const sign = handedness === 'right' ? 1 : -1;
   return {
     root,
+    handedness,
     height: measuredHeight(root),
     innerRadius: STAIR_INNER_RADIUS,
     outerRadius: STAIR_OUTER_RADIUS,
-    sweep: STAIR_SWEEP,
+    sweep: STAIR_SWEEP * sign,
     rise: STAIR_RISE,
     treads: STAIR_TREADS,
     riser: STAIR_RISER,
     railHeight: STAIR_RAIL_HEIGHT,
     treadTop: (index: number) => (STAIR_RISE * (index + 1)) / STAIR_TREADS,
+    treadArc: (index: number) => {
+      const a = (STAIR_SWEEP * sign * index) / STAIR_TREADS;
+      const b = (STAIR_SWEEP * sign * (index + 1)) / STAIR_TREADS;
+      return { from: Math.min(a, b), to: Math.max(a, b) };
+    },
+    dispose: () => disposeTree(root),
+  };
+}
+
+// ===========================================================================
+// The mezzanine bridge's balustrade, and the chandelier over the archway —
+// 8 August 2026, from Jim's reference photograph of a grand resort lobby: two
+// mirrored stairs rising to a bridge across the room, an archway at ground
+// level you can see straight through, ornate white-and-gold balustrades, and a
+// cluster of pendant lights in the double-height space.
+// ===========================================================================
+
+/**
+ * Length of one balustrade segment, metres. **Tile at exactly this pitch.**
+ *
+ * Two balusters at 0.51 m centres, which is the staircase's own spacing
+ * measured along its outer radius — a bridge a sweeping stair lands on is that
+ * balustrade continuing, and a rail that changes rhythm at the join is two
+ * railings. Segments butt end to end: place tile `i` at
+ * `x0 + (i + 0.5) * BRIDGE_RAIL_TILE` and the balusters stay evenly spaced
+ * straight across every join, with no seam (see {@link createBridgeRailing}).
+ */
+export const BRIDGE_RAIL_TILE = 1.02;
+
+/**
+ * Handrail centre-line above the deck, metres.
+ *
+ * **`STAIR_RAIL_HEIGHT` is the owner** and this is an alias, not a second
+ * number: over its last tread the stair's handrail eases level at
+ * `STAIR_RISE + STAIR_RAIL_HEIGHT`, which is exactly where this one sits when
+ * the balustrade stands on the deck. They are meant to be one continuous line,
+ * and a copied literal is how they would stop being one.
+ */
+export const BRIDGE_RAIL_HEIGHT = STAIR_RAIL_HEIGHT;
+
+/**
+ * How thick the balustrade is across its run, metres — the plinth's own width.
+ *
+ * What a caller needs to inset the run from the edge it guards, and what a
+ * collider along it should be. Measured off the built asset, not asserted here.
+ */
+export const BRIDGE_RAIL_DEPTH = 0.23;
+
+/**
+ * Circumradius of a newel post, metres. Half its width across corners.
+ *
+ * A newel is centred **on the end of a run**, not beyond it: the handrail dies
+ * into the post, which is what joinery does and what hides the end caps of both
+ * the rail and the plinth.
+ */
+export const BRIDGE_NEWEL_RADIUS = 0.134;
+
+export interface BridgeRailingHandle extends AssetHandle {
+  /** @see BRIDGE_RAIL_TILE */
+  readonly tile: number;
+  /** @see BRIDGE_RAIL_HEIGHT */
+  readonly railHeight: number;
+  /** @see BRIDGE_RAIL_DEPTH */
+  readonly depth: number;
+}
+
+const BRIDGE_RAIL_PARTS = [
+  'bridge-rail-plinth',
+  'bridge-rail-baluster',
+  'bridge-rail-hand',
+] as const;
+
+/**
+ * **One repeatable segment of the mezzanine bridge's balustrade** — a moulded
+ * plinth, two turned balusters and a length of handrail, 1.02 m long.
+ *
+ * ## It is a tile, and that is the whole design
+ *
+ * A bridge is however wide the room is, and a room is not an asset's to know.
+ * One long bespoke railing per span would be a mesh that has to be rebuilt in
+ * Blender every time a wall moves — the coupling `layout.ts` owning the stair's
+ * arc was introduced to avoid. So: repeat this along the run at
+ * {@link BRIDGE_RAIL_TILE}, and cap each end (or turn each corner) with
+ * {@link createBridgeNewel}.
+ *
+ * Origin at the **centre** of the segment, on the deck (`y = 0`), running along
+ * **X** with the face you look over toward `+Z`. A run along Z is the same tile
+ * at `root.rotation.y = Math.PI / 2`.
+ *
+ * ## Why the joins do not show
+ *
+ * The handrail and the plinth span the tile *exactly*, so two tiles meet face
+ * to face. Their inverted-hull outlines push along ±X only — a 90° end cap is
+ * over `hotel_build.py`'s split-normal threshold, so the cap carries its own
+ * normals rather than ones averaged with the sides — which means each outline
+ * pushes *into* the neighbour's solid and is hidden by it. `hotel_build.py`
+ * asserts both ends of both sweeps land exactly on ±`BRIDGE_RAIL_TILE / 2`;
+ * that check was written measuring `max(abs(x))`, which is one number for two
+ * ends and passed a rail deliberately shortened at one of them, so it now
+ * measures the two ends separately.
+ *
+ * ## It is the stair's own joinery
+ *
+ * Not "matching" — the same. The handrail is the stair's handrail section swept
+ * straight, the plinth is the stair's coping section swept straight, and the
+ * balusters are the stair's spindle. One profile, one place it is written down.
+ */
+export function createBridgeRailing(): BridgeRailingHandle {
+  const { root } = assemble('hotel.bridgeRailing', BRIDGE_RAIL_PARTS);
+  return {
+    root,
+    height: measuredHeight(root),
+    tile: BRIDGE_RAIL_TILE,
+    railHeight: BRIDGE_RAIL_HEIGHT,
+    depth: BRIDGE_RAIL_DEPTH,
+    dispose: () => disposeTree(root),
+  };
+}
+
+export interface BridgeNewelHandle extends AssetHandle {
+  /** @see BRIDGE_NEWEL_RADIUS */
+  readonly radius: number;
+}
+
+/**
+ * **The post that ends a run of balustrade — and turns a corner.**
+ *
+ * One piece serves both, because a newel is what a balustrade does wherever it
+ * stops being straight: at the end of the bridge, at the head of a flight, at
+ * the corner where a gallery turns. It is the *same* post the staircase already
+ * starts and finishes with, standing on the deck instead of on a string, so a
+ * bridge that meets a stair meets it post to post.
+ *
+ * Origin at its base, centred. Centre it **on** the end of the run
+ * ({@link BRIDGE_NEWEL_RADIUS} is how far it reaches past that point) and let
+ * the handrail run into it.
+ */
+export function createBridgeNewel(): BridgeNewelHandle {
+  const { root } = assemble('hotel.bridgeNewel', ['bridge-newel']);
+  return {
+    root,
+    height: measuredHeight(root),
+    radius: BRIDGE_NEWEL_RADIUS,
+    dispose: () => disposeTree(root),
+  };
+}
+
+/** How many pendant drops hang in one chandelier. */
+export const CHANDELIER_LAMPS = 12;
+
+export interface ChandelierHandle extends AssetHandle {
+  /**
+   * All twelve glass drops, in **one** mesh.
+   *
+   * The node to light from: raise its `emissive`/`emissiveIntensity` for a
+   * brighter fitting, or hang a `PointLight` in the middle of the cluster. It is
+   * one mesh rather than twelve on purpose — the park's whole lighting budget is
+   * fourteen point lights, so twelve drops were never going to be twelve lamps,
+   * and twelve nodes would have cost ~8 KB of glTF JSON to say so.
+   */
+  readonly drops: Mesh;
+  /** Radius of the cluster at its widest, metres. Measured. */
+  readonly spread: number;
+  /** @see CHANDELIER_LAMPS */
+  readonly lamps: number;
+}
+
+/**
+ * **A cluster of twelve pendant drops** hanging in the lobby's double-height
+ * space, over the archway the two staircases frame.
+ *
+ * ## Origin at the hang point
+ *
+ * The disco ball's exception (ART_DIRECTION §7's balloon rule) for the same
+ * reason: this thing hangs, so its origin is the point it hangs *from* and
+ * `ceilingAnchor.add(chandelier.root)` needs no offset arithmetic. Every vertex
+ * is below `y = 0`, and `height` reports the **drop** — how far the lowest globe
+ * reaches below the hook — rather than a height above a floor. It is the fourth
+ * documented case in this asset, after the disco ball, the lift dial's needle
+ * pivot and the staircase's centre of curvature.
+ *
+ * ## Why it has a small rose and fanning cords
+ *
+ * The first version hung twelve plumb cords from a 2.9 m saucer spanning the
+ * whole cluster, which is what a real ceiling fitting has and exactly the wrong
+ * shape here: the park's camera looks *down* at 38° and hotel rooms are
+ * open-topped, so a plate as wide as the cluster is a lid over the only part of
+ * the asset anybody was meant to see. That is the pet bed's canopy again, and it
+ * took one render to say so a second time. What ships is a 0.60 m rose with the
+ * cords fanning out and down from it, 19°–29° off plumb — a cascade, and the
+ * form that leaves every drop in full view from above.
+ *
+ * ## Placing it
+ *
+ * ~3.0 m of drop and ~2.5 m across. In the 6.4 m lobby, hung from the top of the
+ * tall walls, the lowest globe sits ~3.4 m up — above the 3.2 m mezzanine deck
+ * and well clear of a 2.12 m child underneath it.
+ */
+export function createChandelier(): ChandelierHandle {
+  const { root, meshes } = assemble('hotel.chandelier', ['chandelier-frame', 'chandelier-drop']);
+  const { top, bottom } = visibleBounds(root);
+  const drops = required(meshes, 'chandelier-drop');
+  drops.geometry.computeBoundingBox();
+  const box = drops.geometry.boundingBox;
+  return {
+    root,
+    height: top - bottom,
+    drops,
+    spread: box ? Math.max(box.max.x, -box.min.x, box.max.z, -box.min.z) : 0,
+    lamps: CHANDELIER_LAMPS,
     dispose: () => disposeTree(root),
   };
 }
