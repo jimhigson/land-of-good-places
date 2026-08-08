@@ -62,8 +62,8 @@ cached (same d sequence, same order, same comparisons → same booleans).
 |---|---|---|
 | train stage, canonical | 152.3 ms | 40.4–41.3 ms (3 runs) |
 | bare import of train/plan | ~1480 ms | ~1370 ms (cruiser dominates) |
-| train sweep (60 seeds) median/p90/max | 202.8 / 255.9 / 294.3 | (after-sweep pending) |
-| solve rate 60 seeds | 48/60 | (after-sweep pending) |
+| train sweep (60 seeds) median/p90/max | 202.8 / 255.9 / 294.3 | 53.8 / 63.2 / 73.2 |
+| solve rate 60 seeds | 48/60 | 48/60, failure list character-identical |
 
 ## Fingerprint proof — identical before/after
 
@@ -81,8 +81,8 @@ seed 18        325a88f7b92c8093594632bf5383774b71159a8b0cb46fae3abd841a32f08bc8
 ```
 Byte-for-byte the same hashes before and after the fix, all five CI seeds.
 
-`npm run test:procgen`: **Test Files 10 passed (10) · Tests 265 passed (265)**
-(after the fix; bare-exit-code re-run pending in background).
+`npm run test:procgen`: **Test Files 10 passed (10) · Tests 265 passed (265)**,
+exit 0 read from the command itself (output redirected to a file, no pipe).
 
 ## The new check: `check:solve-cost` (bridge, not rival owner)
 
@@ -99,8 +99,9 @@ Byte-for-byte the same hashes before and after the fix, all five CI seeds.
   are guarded at ~15-30x — stated trade, it is a tripwire not a profiler.
 - Measured medians recorded in the file: boundary 54, layout 9, cruiser 1274,
   train 41, slide 4609, railRace 13, paths 12 (canonical, idle, 3 runs).
-- Red proof: pending (busy-wait scratch mutation in train/plan.ts, after the
-  bare vitest re-run finishes — src must not move mid-suite).
+- Red proof DONE (commit a7ae8e9): 800 ms busy-wait at train/plan.ts module
+  scope tripped exactly the train line (844.3 ms vs 328 budget, exit 1, all
+  other stages ok); reverted via git checkout, clean status, green after.
 
 ## Coordinator addendum, to flag in the PR body (Jim, via coordinator)
 
@@ -121,8 +122,8 @@ Byte-for-byte the same hashes before and after the fix, all five CI seeds.
 
 ## Still to do
 
-- [ ] bare-exit-code `test:procgen` re-run (background task bxajb0gz0)
-- [ ] red-proof the check (busy-wait mutation, record, restore), commit check
-- [ ] after-fix 60-seed sweep (train medians + solve-rate for the PR table)
-- [ ] `npm run build` full chain, exit code from the command
+- [x] bare-exit-code `test:procgen` re-run — exit 0, 265/265
+- [x] red-proof the check — done, commit a7ae8e9
+- [x] after-fix 60-seed sweep — 48/60, train 53.8/63.2/73.2, failures identical
+- [ ] `npm run build` full chain, exit code from the command (running)
 - [ ] PR (`gh pr create`), before/after + addendum; do NOT merge
