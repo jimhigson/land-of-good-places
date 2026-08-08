@@ -384,7 +384,30 @@ export function buildRailRaceTrack(
         attribute.needsUpdate = true;
       }
     }
+    // This has just overwritten the very buffers `setSparking` caches against,
+    // so its "nothing has changed" answer is no longer true. The one other
+    // writer telling the cache it is stale is what stops the guard below from
+    // pinning a stale paint on screen — see issue #190.
+    sparkPaintDirty = true;
   };
+
+  /**
+   * Whether {@link setSparking}'s last painted state still stands.
+   *
+   * `setSparking` reuploads eight rail colour buffers — about 473 KB — and
+   * before this it did so on **every frame**, including every frame of ordinary
+   * walking-about play, because `RailRace.update` runs `animate()` in its
+   * `'waiting'` phase too. The output only depends on two things (the flash
+   * phase and which zone×lane pairs are sparking), so when neither has moved
+   * the buffers already hold the right bytes and the whole thing is skippable.
+   */
+  let sparkPaintDirty = true;
+  let lastFlash = -1;
+  const sparkSlots = railZoneVertexRanges.length * LANE_COUNT;
+  // Two reused masks, never reallocated: this is called every frame, and the
+  // guard existing to save bandwidth must not spend garbage collection instead.
+  const activeMask = new Uint8Array(sparkSlots);
+  const lastActiveMask = new Uint8Array(sparkSlots);
 
   // --- where the trestles actually stand, computed before the duck bars ------
   // A duck bar's own visible support comes from here — see `hazards.ts`'s
@@ -656,6 +679,30 @@ export function buildRailRaceTrack(
       // One shared clock for every active zone — they don't need independent
       // phases to read as "sparking", only as not-a-smooth-pulse.
       const flash = Math.sin(elapsed * 47) > 0 ? 1 : 0.35;
+
+      // **Nothing to do if nothing has changed.** The painted result is a pure
+      // function of `flash` and the active zone×lane set, so when both match the
+      // last call the buffers already say exactly this and there is no reason to
+      // rewrite 473 KB and mark eight attributes for re-upload. Issue #190.
+      activeMask.fill(0);
+      for (const { zoneIndex, lane } of active) {
+        const slot = zoneIndex * LANE_COUNT + lane;
+        if (slot >= 0 && slot < sparkSlots) activeMask[slot] = 1;
+      }
+      let sameAsLast = !sparkPaintDirty && flash === lastFlash;
+      if (sameAsLast) {
+        for (let i = 0; i < sparkSlots; i += 1) {
+          if (activeMask[i] !== lastActiveMask[i]) {
+            sameAsLast = false;
+            break;
+          }
+        }
+      }
+      if (sameAsLast) return;
+      lastFlash = flash;
+      lastActiveMask.set(activeMask);
+      sparkPaintDirty = false;
+
       sparkColour.copy(INK).lerp(FLASH, flash);
       const array = sparkColourAttribute.array as Float32Array;
       // Every vertex starts each frame calm, so a zone that stopped sparking

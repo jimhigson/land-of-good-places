@@ -615,11 +615,6 @@ export class NpcSystem implements GameSystem {
     return this.characters;
   }
 
-  /** How many draw calls the crowd costs. Reported in the debug overlay. */
-  get drawCallCost(): number {
-    return this.kids.crowd.partCount + this.pets.partCount;
-  }
-
   /**
    * Every child in the crowd, for a system that wants to read or briefly take
    * over one of them — currently just `world/TreeClimbing.ts`, which reads

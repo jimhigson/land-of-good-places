@@ -545,6 +545,12 @@ export class RailRace implements GameSystem {
 
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
+    // **A paused park is not a frame of animation.** `dt` is zero while the
+    // pause menu is up and while `/view` holds the clock, and everything below
+    // is either time-driven or a repaint of what is already on screen — so
+    // running it spends a full frame's worth of buffer uploads to redraw an
+    // identical picture. Nothing here has a side effect a paused game needs.
+    if (dt <= 0) return;
     this.input = context.input;
 
     // The countdown digit ticks off the screen on its own clock, so it keeps

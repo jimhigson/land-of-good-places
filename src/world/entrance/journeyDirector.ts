@@ -43,6 +43,7 @@ import { JOURNEY_SECONDS } from './BusJourney';
 export class JourneyDirector {
   private elapsedSeconds = 0;
   private parkReadyFlag = false;
+  private warmupReadyFlag = false;
   private generationReadyFlag = false;
   private framesDrawn = 0;
   private parkStartedOnFrame = -1;
@@ -142,6 +143,35 @@ export class JourneyDirector {
   }
 
   /**
+   * **The park's shader programs have all been compiled.**
+   *
+   * Set from `ShaderWarmup.ready`, the same shape as {@link parkReady}: a real
+   * completion signal from the thing doing the work, never a timer hoping to
+   * match it.
+   *
+   * This exists because 64 of the park's 116 shader links were happening
+   * *after* hand-over — while a child was walking about — and one of them
+   * stalled a frame for 1.29 s. See `boot/shaderWarmup.ts`.
+   */
+  noteWarmupReady(): void {
+    this.warmupReadyFlag = true;
+  }
+
+  get warmupReady(): boolean {
+    return this.warmupReadyFlag;
+  }
+
+  /**
+   * May the shader warm-up take a slice this frame?
+   *
+   * Only once a park exists to compile — there is nothing in the scene before
+   * that — and only until it is finished.
+   */
+  shouldWarmShaders(): boolean {
+    return this.parkReadyFlag && !this.warmupReadyFlag;
+  }
+
+  /**
    * Is the skip on offer?
    *
    * Deliberately **only** `parkReady`. No duration, no elapsed time, nothing
@@ -157,23 +187,41 @@ export class JourneyDirector {
   }
 
   /**
+   * **Is the park actually fit to play?** Built, *and* its shaders compiled.
+   *
+   * One definition, read by both {@link readyToHandOver} and
+   * {@link overrunning}, so "hand over now" and "keep the bus at the kerb" are
+   * two answers to the same question rather than two questions that can drift
+   * apart. This repo's most common bug by a distance is two definitions of one
+   * thing kept in step by hand; this is that thing, so it gets one owner.
+   *
+   * A park whose shaders are not compiled is not half-built, but it does
+   * stutter for the first few seconds of play, which is the same promise
+   * broken in a quieter way.
+   */
+  get parkFitToPlay(): boolean {
+    return this.parkReadyFlag && this.warmupReadyFlag;
+  }
+
+  /**
    * May the park take the screen? Both, always.
    *
    * A skip press is the other way through — and it is only reachable once
    * {@link skipOffered}, so it cannot bypass this either.
    */
   get readyToHandOver(): boolean {
-    return this.rideOver && this.parkReadyFlag;
+    return this.rideOver && this.parkFitToPlay;
   }
 
   /**
-   * The ride has finished and the park has not. The bus is waiting.
+   * The ride has finished and the park is not fit to play. The bus is waiting.
    *
-   * Never true today — the park builds in under half a second against a twenty
-   * second ride — which is exactly why it needs a guard rather than a comment
-   * claiming it cannot happen.
+   * Never true today — the park builds in under half a second and warms its
+   * shaders in well under the remaining ride (see the PR's measured margin) —
+   * which is exactly why it needs a guard rather than a comment claiming it
+   * cannot happen.
    */
   get overrunning(): boolean {
-    return this.rideOver && !this.parkReadyFlag;
+    return this.rideOver && !this.parkFitToPlay;
   }
 }
