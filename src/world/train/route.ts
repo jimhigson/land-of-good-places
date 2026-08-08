@@ -69,6 +69,27 @@ import { PARK_SEED } from '../parkManifest';
  * clearing every plot by at least a metre, crossing no path at all (the
  * path network tops out at r ≈ 37), with its tightest bend where it hooks round
  * the back corner of the building.
+ *
+ * ### What it costs — measured, not promised
+ *
+ * **~41 ms on the canonical seed** (40.4–41.3 ms over three runs, 8 Aug 2026,
+ * M-series laptop, idle) for the whole train stage: this solve, the curve
+ * build and the station planning together. That is the *incremental* cost —
+ * what importing `train/plan.ts` adds once boundary, layout and the cruiser
+ * are already loaded, which is how every stage is billed. Re-measure it
+ * rather than trusting this prose:
+ *
+ *     npm run check:solve-cost          # asserts it against a budget
+ *     node --experimental-transform-types --no-warnings \
+ *       --import ./scripts/ts-extension-resolver-register.mjs \
+ *       scripts/measure-procgen.mts --no-world     # per-stage breakdown
+ *
+ * A *bare* import of `train/plan.ts` costs ~1.5 s — that is the cruiser
+ * stage (`COASTER_PLANS`, ~1.3 s) being pulled in as a dependency, not the
+ * train. The Land Hotel merge (#241) doubled the obstacle census this solver
+ * scans and took the stage from ~44 ms to ~153 ms unnoticed; the per-bearing
+ * shortlists below bought it back. `scripts/fingerprint-train.mts` is how a
+ * change here is proved not to have moved the route.
  */
 
 /** Bearings the profile is solved on. 1° ≈ 0.85 m of track at this radius. */
@@ -351,11 +372,15 @@ function solveProfile(): Float64Array {
   // the solver keeps the profile inside whichever interval it is nearest —
   // greedy continuity, smoothed by the same relaxation as ever.
   const walls = new Float64Array(BEARINGS);
+  const dirXs = new Float64Array(BEARINGS);
+  const dirZs = new Float64Array(BEARINGS);
   const free: Interval[][] = [];
   for (let i = 0; i < BEARINGS; i += 1) {
     const angle = (i / BEARINGS) * Math.PI * 2;
     const dirX = Math.cos(angle);
     const dirZ = Math.sin(angle);
+    dirXs[i] = dirX;
+    dirZs[i] = dirZ;
     walls[i] = wallInnerRadiusAt(angle);
 
     const blocked: Interval[] = [];
@@ -369,6 +394,57 @@ function solveProfile(): Float64Array {
       if (span) blocked.push([span[0] - keep, span[1] + keep]);
     }
     free.push(freeIntervals(blocked, INNER_FLOOR, walls[i] as number));
+  }
+
+  // Per-bearing obstacle shortlists — a speed-up that provably cannot move
+  // the route. {@link repair} runs RELAX_PASSES × BEARINGS = 252,000 times,
+  // and used to measure every obstacle every time: 37 obstacles on the
+  // canonical seed (the Land Hotel merge roughly doubled the census — more
+  // layout entries, a longer cruiser low corridor) ≈ 9.3M distance
+  // evaluations, which a CPU profile put at 108 ms of the train stage's
+  // 153. But an obstacle can only raise repair's deficit when the probed
+  // point comes within that obstacle's own clearance of it, and every probe
+  // on bearing i lies on that bearing's ray inside [lo, hi] — so an
+  // obstacle whose clearance disc the whole segment misses contributes
+  // d ≤ 0 to a running max that starts at 0, and dropping it cannot change
+  // the max's value. The rare probe pushed beyond the segment is handled in
+  // repair itself, by re-running the full scan (see the guard there).
+  let wallMax = 0;
+  for (let i = 0; i < BEARINGS; i += 1) wallMax = Math.max(wallMax, walls[i] ?? 0);
+  const probeLo = INNER_FLOOR - PROBE_MARGIN;
+  const probeHi = wallMax + PROBE_MARGIN;
+  const near: NearObstacles[] = [];
+  for (let i = 0; i < BEARINGS; i += 1) {
+    const dirX = dirXs[i] ?? 0;
+    const dirZ = dirZs[i] ?? 0;
+    near.push({
+      lo: probeLo,
+      hi: probeHi,
+      rects: rects.filter((rect) =>
+        segmentReaches(
+          dirX,
+          dirZ,
+          probeLo,
+          probeHi,
+          rect.centreX,
+          rect.centreZ,
+          // The rect fits inside its corner-circumscribing circle, so its
+          // clearance disc fits inside that circle grown by the clearance.
+          Math.hypot(rect.halfX, rect.halfZ) + TRACK_PLOT_CLEARANCE,
+        ),
+      ),
+      circles: circles.filter((circle) =>
+        segmentReaches(
+          dirX,
+          dirZ,
+          probeLo,
+          probeHi,
+          circle.centreX,
+          circle.centreZ,
+          circle.radius + (circle.clearance ?? TRACK_PLOT_CLEARANCE),
+        ),
+      ),
+    });
   }
 
   // The per-bearing target: the wall behind plots, the dip floor in gaps.
@@ -418,10 +494,9 @@ function solveProfile(): Float64Array {
       const pull = want < wall - RIM_STANDOFF - 1 ? PULL * 5 : PULL;
       let radius = here + SMOOTHING * (before + after - 2 * here) + pull * (want - here);
 
-      const angle = (i / BEARINGS) * Math.PI * 2;
-      const dirX = Math.cos(angle);
-      const dirZ = Math.sin(angle);
-      radius = repair(radius, dirX, dirZ, rects, circles, free[i] as Interval[]);
+      const dirX = dirXs[i] ?? 0;
+      const dirZ = dirZs[i] ?? 0;
+      radius = repair(radius, dirX, dirZ, rects, circles, free[i] as Interval[], near[i]);
 
       next[i] = snapToFree(free[i] as Interval[], radius);
     }
@@ -537,11 +612,63 @@ function snapToFree(free: readonly Interval[], value: number): number {
 }
 
 /**
+ * How far past its normal range ({@link INNER_FLOOR} to the outermost wall)
+ * a bearing's probe segment extends for the {@link NearObstacles} shortlist.
+ * The value entering {@link repair} is a near-convex blend of snapped radii
+ * (all inside [INNER_FLOOR, wall]) plus the pull term (bounded by a few
+ * metres), and each repair attempt then moves it by one deficit — usually
+ * under {@link TRACK_PLOT_CLEARANCE}, more only when a probe lands *inside*
+ * an obstacle. 16 m absorbs all of that in practice; the guard in repair
+ * catches the pathological remainder exactly rather than by argument.
+ */
+const PROBE_MARGIN = 16;
+
+/**
+ * One bearing's shortlist for {@link repair}: the obstacles whose clearance
+ * disc the bearing's probe segment [lo, hi]·dir can enter at all. Everything
+ * else measures d ≤ 0 at every probe on this bearing and can never change
+ * repair's running max.
+ */
+interface NearObstacles {
+  readonly lo: number;
+  readonly hi: number;
+  readonly rects: readonly RectObstacle[];
+  readonly circles: readonly CircleObstacle[];
+}
+
+/**
+ * Can a point r·(dirX, dirZ), r ∈ [lo, hi], come within `reach` of
+ * (centreX, centreZ)? The direction is unit, so the nearest r is the plain
+ * dot product clamped into the segment. The `+ 1e-6` keeps the test
+ * conservative: a borderline obstacle is kept on the shortlist, which costs
+ * one extra scan and can change nothing.
+ */
+function segmentReaches(
+  dirX: number,
+  dirZ: number,
+  lo: number,
+  hi: number,
+  centreX: number,
+  centreZ: number,
+  reach: number,
+): boolean {
+  const along = Math.min(hi, Math.max(lo, dirX * centreX + dirZ * centreZ));
+  return Math.hypot(dirX * along - centreX, dirZ * along - centreZ) < reach + 1e-6;
+}
+
+/**
  * Pushes a radius until the *point* clears everything, not just the bearing.
  *
  * A plot corner sticks into the corridor diagonally: the ray along a bearing can
  * leave the rectangle a comfortable distance out and still pass within a few
  * centimetres of the corner itself.
+ *
+ * `near`, when given, is this bearing's precomputed shortlist: the scan runs
+ * over only the obstacles that any probe on this bearing could measure a
+ * positive deficit against — same maxima, same arithmetic, ~5x fewer terms.
+ * A probe outside the shortlist's segment falls back to the full scan,
+ * re-run from the original arguments so its answer is the one the full scan
+ * always gave.
  */
 function repair(
   radius: number,
@@ -550,9 +677,19 @@ function repair(
   rects: readonly RectObstacle[],
   circles: readonly CircleObstacle[],
   free: readonly Interval[],
+  near?: NearObstacles,
 ): number {
   let value = radius;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (near && (value < near.lo || value > near.hi)) {
+      // The shortlist only vouches for probes on its own segment. Replaying
+      // from the original radius with the full lists costs one redundant
+      // walk of the in-range prefix (identical by the shortlist's own
+      // guarantee) and then continues soundly wherever the probe went.
+      return repair(radius, dirX, dirZ, rects, circles, free);
+    }
+    const scanRects = near ? near.rects : rects;
+    const scanCircles = near ? near.circles : circles;
     const x = dirX * value;
     const z = dirZ * value;
 
@@ -564,11 +701,11 @@ function repair(
     // clearance: plots the fence-and-lane figure, the cruiser's low
     // corridor just enough to keep the track out from under it.
     let deficit = 0;
-    for (const rect of rects) {
+    for (const rect of scanRects) {
       const d = TRACK_PLOT_CLEARANCE - rectDistance(x, z, rect);
       if (d > deficit) deficit = d;
     }
-    for (const circle of circles) {
+    for (const circle of scanCircles) {
       const keep = circle.clearance ?? TRACK_PLOT_CLEARANCE;
       const d = keep - (Math.hypot(x - circle.centreX, z - circle.centreZ) - circle.radius);
       if (d > deficit) deficit = d;
