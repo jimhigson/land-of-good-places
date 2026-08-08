@@ -151,11 +151,11 @@ collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 
 const mustBeSolid: readonly [string, number, number][] = [
   ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ - 1],
-  // Reception moved to the east bay when the gallery took the north strip —
-  // its old spot at (5, −7.2) is now inside the gallery's own solid mass,
-  // where this probe would have passed for entirely the wrong reason.
-  ['the reception desk', LOBBY.originX + 10, LOBBY.originZ - 9.5],
-  ['a lobby sofa', LOBBY.originX + 5.8, LOBBY.originZ + 2.4],
+  // Reception sits on the entrance axis now (the 7 Aug relayout): straight up
+  // the runner from the doors, against the gallery face. Probe 13 separately
+  // asserts the interact zone is anchored on this same footprint.
+  ['the reception desk', LOBBY.originX + 0, LOBBY.originZ - 5.9],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6],
   ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
@@ -214,7 +214,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 }
 
 const mustBeMountable: readonly [string, number, number, number][] = [
-  ['a lobby sofa', LOBBY.originX + 5.8, LOBBY.originZ + 2.4, SOFA_SEAT_TOP],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
   ['a breakfast table', BREAKFAST.originX - 7.6, BREAKFAST.originZ + 5.4, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
@@ -701,6 +701,74 @@ if (fallenPlayer.position.y < 0) {
     `a player 6 m below the corridor floor is still at y=${fallenPlayer.position.y.toFixed(2)} m ` +
       `after a frame — the void backstop did not catch them`,
   );
+}
+
+// ------------------------------------- 13. the signs stand where the things are
+//
+// Jim, live play, 7 Aug 2026: *"the hotel reception suggests getting a key
+// near the staircase."* QA's root cause: the reception zone hardcoded the
+// desk's OLD spot (lobby local 5, −6.2 — beside the stair's bottom tread)
+// while the desk itself had moved. So: the zone's anchor must stand **on the
+// desk's own solid footprint**, asked of the collision world — one owner,
+// measured, immune to the desk moving again.
+//
+// And the "yours" door's sign must actually be able to appear:
+// `Selection.selectable` drops any zone whose `actions()` is empty, and the
+// door zone deliberately returned [] — a sign that could never be shown.
+//
+// Proven red before trusted green: pre-fix, the zone anchor deflected 0.00 m
+// (open floor beside the staircase) and the door zone offered 0 actions.
+{
+  fallenPlayer.position.set(LOBBY.originX, 0, LOBBY.originZ);
+  const receptionZone = hotel.interactZones().find((zone) => zone.id === 'hotel-reception');
+  if (!receptionZone) {
+    problems.push('the lobby offers no reception zone at all');
+  } else {
+    // Solid alone is not proof it is the desk: the stale anchor sat inside
+    // the *staircase* wedge, which is also solid — the first draft of this
+    // probe passed on the broken build for exactly that reason. So: anchor
+    // solid, anchor not on the stair's arc, and the stand spot walkable.
+    if (deflection(receptionZone.x, receptionZone.z) < 0.1) {
+      problems.push(
+        `the reception zone's anchor at (${receptionZone.x.toFixed(1)}, ` +
+          `${receptionZone.z.toFixed(1)}) is open floor, not the desk — its "get your key" sign ` +
+          `floats somewhere else`,
+      );
+    }
+    const stair = LOBBY.mezzanine?.stair;
+    if (stair) {
+      const toStair = Math.hypot(
+        receptionZone.x - (LOBBY.originX + stair.centreX),
+        receptionZone.z - (LOBBY.originZ + stair.centreZ),
+      );
+      if (toStair > stair.innerRadius - 0.8 && toStair < stair.outerRadius + 0.8) {
+        problems.push(
+          `the reception zone's anchor is ${toStair.toFixed(1)} m from the stair's centre — on ` +
+            `the staircase, which is QA's "get a key near the staircase" bug exactly`,
+        );
+      }
+    }
+    if (
+      receptionZone.standX !== undefined &&
+      receptionZone.standZ !== undefined &&
+      deflection(receptionZone.standX, receptionZone.standZ) > 0.01
+    ) {
+      problems.push(
+        'the reception zone asks her to stand inside something solid — the walk-to never arrives',
+      );
+    }
+  }
+
+  fallenPlayer.position.set(CORRIDOR.originX + CORRIDOR.halfX - 2, 0, CORRIDOR.originZ);
+  const doorZone = hotel.interactZones().find((zone) => zone.id === 'hotel-yours-door');
+  if (!doorZone) {
+    problems.push('the corridor offers no yours-door zone at all');
+  } else if ((doorZone.actions?.() ?? []).length === 0) {
+    problems.push(
+      'the yours-door zone offers no actions — Selection.selectable filters it out, so its ' +
+        '"get your key at reception!" sign can never appear',
+    );
+  }
 }
 
 // ----------------------------------------------------------------- report

@@ -235,11 +235,24 @@ const DISCO_COLOURS: readonly number[] = [
  *
  * Named because four things need it — the desk, the receptionist behind it, her
  * speech bubble above her, and the interact zone a child presses — and because
- * it moved once already (the gallery now stands where it used to be), which is
- * exactly the sort of edit that leaves a bubble hanging over an empty floor.
+ * getting those four from two sources is a proven live bug: the desk moved to
+ * the east bay while the zone kept the old literal, so the *"check in and get
+ * your key!"* sign floated beside the staircase, ten metres from any desk
+ * (Jim, live play, 7 Aug 2026; QA pinned the stale pair). Every consumer now
+ * derives from these two numbers, and `check:hotel` probe 13 asserts the
+ * zone's anchor really stands on something solid that is not the staircase.
+ *
+ * **On the entrance axis**, per the grand-hotel research for this rework: you
+ * come through the south doors, pass the statue under the disco ball, and the
+ * desk is straight ahead against the gallery's face, facing you — a clear
+ * axis from the door to a focal reception, with the sweeping stair rising to
+ * its left.
  */
-const RECEPTION_X = 10;
-const RECEPTION_Z = -9.5;
+const RECEPTION_X = 0;
+const RECEPTION_Z = -5.9;
+
+/** Where the receptionist herself stands: between her desk and the gallery face. */
+const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
 
 /**
  * Seat height of a breakfast chair — the asset's own 0.42 m.
@@ -793,8 +806,11 @@ export class Hotel implements GameSystem {
     if (!room) return zones;
 
     if (room === LOBBY) {
-      const x = LOBBY.originX + 5;
-      const z = LOBBY.originZ - 6.2;
+      // Derived from RECEPTION_X/Z — the same numbers the desk itself is
+      // placed by — never a second literal. The zone used to keep the desk's
+      // *old* spot and sent a child to check in beside the staircase.
+      const x = LOBBY.originX + RECEPTION_X;
+      const z = LOBBY.originZ + RECEPTION_Z;
       zones.push({
         id: 'hotel-reception',
         label: 'reception',
@@ -822,8 +838,14 @@ export class Hotel implements GameSystem {
 
     // The suite door, from the corridor side — a sign that says whose door it
     // is and, until reception has handed the key over, what to do about it.
-    // It is a sign rather than a chip on purpose: there is no action to offer,
-    // and a button that refuses is worse than no button.
+    //
+    // **The actions are real, or the sign never appears at all**:
+    // `Selection.selectable` drops any zone whose `actions()` is empty, so
+    // the first version of this — `actions: () => []`, on the theory that a
+    // sign needs no button — was a sign a child could never see (QA, 7 Aug
+    // 2026). With the key the chip walks her in, which the door would also do
+    // by touch; without it the chip blinks the star and says where the key
+    // lives, which is the gentle refusal Jim asked for with a button on it.
     if (room === CORRIDOR) {
       const hasKey = saveFlags.hasHotelKey();
       zones.push({
@@ -843,7 +865,10 @@ export class Hotel implements GameSystem {
           glyph: hasKey ? '⭐' : '🔑',
           accent: hasKey ? PALETTE.flowerYellow : PALETTE.markerPink,
         },
-        actions: () => [],
+        actions: () =>
+          hasKey
+            ? pressAction('Go in!', () => this.enterSuiteThroughDoor(), '⭐')
+            : pressAction('Where is my key?', () => this.blinkYoursStar(), '🔑'),
       });
     }
 
@@ -1022,7 +1047,7 @@ export class Hotel implements GameSystem {
     this.updateSpeech(dt);
     if (this.speech) {
       const x = LOBBY.originX + RECEPTION_X;
-      const z = LOBBY.originZ + RECEPTION_Z - 1.4;
+      const z = LOBBY.originZ + RECEPTIONIST_Z;
       const camera = this.deps.camera;
       this.receptionBubble.updateScreenSize(
         camera.worldUnitsPerPixel,
@@ -1152,7 +1177,14 @@ export class Hotel implements GameSystem {
     this.boundTo(LOBBY);
     // Just inside the front door, facing the statue.
     player.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2, Math.PI);
-    if (!saveFlags.hasHotelKey()) this.greet();
+    if (!saveFlags.hasHotelKey()) {
+      this.greet();
+      // …and the receptionist calls out from the desk straight ahead of her,
+      // so the first words and the room agree about where checking in
+      // happens. The desk is on the entrance axis now — she is looking
+      // straight at it as this line appears.
+      this.say([`${greetingFor(this.deps.clock())}! Come to the desk and check in!`], -1);
+    }
   }
 
   private leaveToPark(): void {
@@ -1414,6 +1446,28 @@ export class Hotel implements GameSystem {
     // `checkDoorways`, and granting it on refusal was precisely the hole that
     // let a second push through the doorway unchecked. The wall is the lock;
     // `refusing` alone stops the words repeating every frame.
+  }
+
+  /**
+   * The "Go in!" chip on her own door — the same portal hop the doorway
+   * trigger makes, offered as a button so the sign is selectable at all
+   * (see the zone in {@link interactZones}).
+   */
+  private enterSuiteThroughDoor(): void {
+    const player = this.player;
+    if (!player || player.riding || this.changingSpace) return;
+    this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
+  }
+
+  /**
+   * The keyless "Where is my key?" chip: the star over the door blinks — the
+   * same star the check-in lights for good — and the sign underneath is
+   * already saying "get your key at reception!". No teleport, no refusal
+   * noise: she asked a question and the door winked at her.
+   */
+  private blinkYoursStar(): void {
+    if (this.refusing > 0) return;
+    this.refusing = REFUSE_SECONDS;
   }
 
   private sitAt(chair: Chair): void {
@@ -2353,10 +2407,10 @@ export class Hotel implements GameSystem {
     // rather than a disc, or a child could not walk along it to reach the far
     // end of it.
     //
-    // **In the east bay**, which is the half of the lobby the gallery does not
-    // stand on: reception used to be at (5, −7.2), which is now inside the
-    // gallery's solid mass. It is also clear of the sweeping stair's quarter
-    // circle, which occupies the wedge south-west of (8.7, −8.5).
+    // **On the entrance axis, facing the doors**, against the gallery's front
+    // face — see RECEPTION_X's header. Clear of the sweeping stair, whose
+    // quarter circle rises to its east, and of the statue, which stands
+    // between it and the doors the way a grand lobby's centrepiece does.
     const desk = createReceptionDesk();
     this.props.place(shell, LOBBY, desk.root, {
       x: RECEPTION_X,
@@ -2374,7 +2428,7 @@ export class Hotel implements GameSystem {
     // than a wall). She stands behind her own solid desk regardless.
     this.props.place(shell, LOBBY, reception.root, {
       x: RECEPTION_X,
-      z: RECEPTION_Z - 1.4,
+      z: RECEPTIONIST_Z,
       radius: 0.7,
       top: reception.height,
       solid: false,
@@ -2387,35 +2441,56 @@ export class Hotel implements GameSystem {
     this.receptionBubble.sprite.position.set(
       RECEPTION_X,
       reception.height + 0.42,
-      RECEPTION_Z - 1.4,
+      RECEPTIONIST_Z,
     );
     shell.add(this.receptionBubble.sprite);
 
-    // The breakfast corner, ground floor — "breakfast ... at the ground floor".
-    // Two tables only: the *room* full of them is Floor 1 now, and this is the
-    // café nook Eleri asked for downstairs as well.
-    this.placeBreakfastTable(shell, LOBBY, -8, 4.5, 'lobby-a');
-    this.placeBreakfastTable(shell, LOBBY, -8, -2.5, 'lobby-b', 0.3);
+    // **The axis.** A runner from the doors up the middle of the room — the
+    // first of the grand-lobby moves this layout is built on (researched for
+    // this rework: a clear axis from the entrance to a focal desk, a
+    // centrepiece on that axis, symmetric seating either side, the stair
+    // sweeping up one flank). You walk it from the doors, round the statue's
+    // rainbow ring, to the desk.
+    const runner = rug(3.2, 8.8, LOBBY.theme.accent, PALETTE.blossomWhite);
+    runner.position.set(0, 0, 7);
+    shell.add(runner);
 
-    // A little lounge in the east half — the one part of the lobby with no
-    // job, and therefore the part that read as empty floor. Both sofas face
-    // +Z so you see who is sitting on them.
-    const lounge = roundRug(3.6, LOBBY.theme.accent, PALETTE.stonePinkLight);
-    lounge.position.set(7.4, 0, 2.6);
-    shell.add(lounge);
-    for (const [x, z, colour] of [
-      [5.8, 2.4, PALETTE.markerSky],
-      [9.0, 2.4, PALETTE.markerMint],
-    ] as const) {
-      this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
-        x,
-        z,
-        halfX: 1.3,
-        halfZ: 0.48,
-        // The seat: what a jump lands on. Sailing over the backrest on the
-        // way is a visual graze a six-year-old reads as bouncing onto the
-        // cushions, which is the whole point.
-        top: SOFA_SEAT_TOP,
+    // The breakfast corner — "breakfast ... at the ground floor". Two tables
+    // only (the *room* full of them is Floor 1 now), tucked in the south-west
+    // corner by the west windows, where a café by the glass belongs — not
+    // scattered mid-floor where they read as lost furniture.
+    this.placeBreakfastTable(shell, LOBBY, -9.6, 8.6, 'lobby-a', 0.15);
+    this.placeBreakfastTable(shell, LOBBY, -9.4, 5.2, 'lobby-b', 0.45);
+
+    // **Two mirrored seating groups flanking the axis** — the symmetric pair
+    // every grand lobby seats its guests in. Both groups face +Z so you see
+    // who is sitting on them (the camera rule), each on its own round rug
+    // with a little table before it.
+    for (const side of [-1, 1] as const) {
+      const lounge = roundRug(2.9, LOBBY.theme.accent, PALETTE.stonePinkLight);
+      lounge.position.set(side * 7.6, 0, 4.1);
+      shell.add(lounge);
+      for (const [x, colour] of [
+        [side * 5.9, PALETTE.markerSky],
+        [side * 9.2, PALETTE.markerMint],
+      ] as const) {
+        this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
+          x,
+          z: 3.6,
+          halfX: 1.3,
+          halfZ: 0.48,
+          // The seat: what a jump lands on. Sailing over the backrest on the
+          // way is a visual graze a six-year-old reads as bouncing onto the
+          // cushions, which is the whole point.
+          top: SOFA_SEAT_TOP,
+        });
+      }
+      this.props.place(shell, LOBBY, bedsideTable(), {
+        x: side * 7.6,
+        z: 5.4,
+        radius: 0.36,
+        top: 1.0,
+        stand: false,
       });
     }
 
@@ -2430,13 +2505,17 @@ export class Hotel implements GameSystem {
     // are the only place a five-metre prop is free. (Same rule as
     // `nearWallHeight`, applied to furniture.) They are set between the west
     // windows rather than across them.
+    // The two grand columns hold the west wall; the stub 3 m column is gone
+    // (a stub mid-floor was exactly the "pretty random" scatter Jim called
+    // out). Planters now flank the entrance — the symmetric welcome — and the
+    // clusters keep to corners, out of the lift's approach.
     this.placeProps(shell, LOBBY, [
       { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: -6.6, radius: 0.62, top: 5.8 },
       { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: 6.6, radius: 0.62, top: 5.8 },
-      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: -9.2, z: -4.6, radius: 0.62, top: 3 },
-      { prop: () => crystalCluster(0x10b1), x: -11.8, z: -1, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8, top: CLUSTER_TOP },
       { prop: () => crystalCluster(0x10b2), x: 12, z: -10.4, top: CLUSTER_TOP },
-      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 2.6, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8, top: PLANTER_TOP },
+      { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6, top: PLANTER_TOP },
     ]);
 
@@ -2457,8 +2536,10 @@ export class Hotel implements GameSystem {
     this.dressMezzanine(shell);
 
     // A painted arrow on the floor pointing at the lift — "an arrow showing
-    // the way to your floor, on the floors of the hotel".
-    this.paintArrow(shell, 2.5, 5.5, -LOBBY.halfX + 2.5, 0);
+    // the way to your floor, on the floors of the hotel". Peels off the
+    // runner's west edge and threads between the west seating group and the
+    // café to the lift's mouth.
+    this.paintArrow(shell, -2.4, 9.2, -10.8, 0.4);
 
     return statue;
   }
