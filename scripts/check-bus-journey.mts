@@ -25,7 +25,17 @@ import { installHeadlessDom } from './headless-dom.mjs';
 
 installHeadlessDom();
 
-import { Box3, Frustum, Matrix4, type Mesh, type Object3D, Quaternion, Raycaster, Vector3 } from 'three';
+import {
+  Box3,
+  Frustum,
+  Matrix4,
+  type Mesh,
+  type Object3D,
+  Quaternion,
+  Raycaster,
+  Vector3,
+  type WebGLRenderer,
+} from 'three';
 import {
   BusJourney,
   JOURNEY_SECONDS,
@@ -58,6 +68,37 @@ import { CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
 const FRAME_GRID_X = 24;
 const FRAME_GRID_Y = 14;
 
+/**
+ * **The two windows the ride is actually watched in.**
+ *
+ * This check used to write `camera.aspect = 16 / 10` and stop, which is the
+ * whole reason QA's complaint survived a guard written to catch it: the fault
+ * they photographed was on a phone, and nothing here had ever looked at one.
+ * A phone is not a narrow desktop — `fitCameraToViewport` opens the vertical
+ * field from 52 degrees to **83.9** to fit a wide subject into a tall frame,
+ * and inside a 2.7 m cabin that extra 32 degrees can only find floor and
+ * ceiling. Landscape passing says nothing whatever about it.
+ *
+ * Real pixel sizes rather than bare ratios, because the ride is handed a width
+ * and a height and derives the ratio itself; handing it a ratio would be this
+ * check doing the ride's arithmetic for it.
+ */
+const VIEWPORTS = [
+  { label: 'a 1440x900 desktop', width: 1440, height: 900 },
+  { label: 'a 390x844 phone', width: 390, height: 844 },
+] as const;
+
+/**
+ * Fitting the ride's camera to a window is **the ride's own job**, and it is
+ * asked to do it rather than told the answer.
+ *
+ * `BusJourney.render` is where `fitCameraToViewport` — the declared one owner
+ * of the portrait rule — is consulted, and it is also where the shot's own
+ * `baseFov` is applied. Setting `camera.aspect` and `camera.fov` here instead
+ * would be a second copy of that rule inside the check that is supposed to
+ * police it, and it would quietly measure a 52-degree lens on a phone.
+ */
+const noDrawing = { render: () => {} } as unknown as WebGLRenderer;
 
 const fouls: string[] = [];
 const said: string[] = [];
@@ -364,18 +405,40 @@ if (busRoot) {
    */
   let nearestToTheLens = Infinity;
   /**
-   * The biggest share of the inside frame any **single** surface takes.
+   * What the inside frame is made of, **kept per window rather than pooled**.
    *
-   * The shipped shot had one mesh — the top of `cat-bus-shell-lower`, which
-   * everybody including this check called "the floor" — owning better than a
-   * third of it. See the sampling block below.
+   * Pooling them would let a comfortable desktop average carry a phone that is
+   * two thirds bare floor, which is the shape of the fault this is here to
+   * catch. One of these per entry in {@link VIEWPORTS}.
    */
-  let worstSurfaceShare = 0;
-  let worstSurfaceName = '';
-  /** How much of the frame is seating, and how much is children. */
-  let seatShare = 0;
-  let childShare = 0;
-  let compositionSaid = '';
+  interface Composition {
+    /** The biggest share of the whole frame any **single** surface takes. */
+    worstShare: number;
+    worstName: string;
+    /** The same, within whichever horizontal third of the frame is worst. */
+    worstBandShare: number;
+    worstBandName: string;
+    worstBandLabel: string;
+    /** How much of the frame is seating, and how much is children. */
+    seatShare: number;
+    childShare: number;
+    said: string;
+  }
+  const composition = new Map<string, Composition>(
+    VIEWPORTS.map((viewport) => [
+      viewport.label,
+      {
+        worstShare: 0,
+        worstName: '',
+        worstBandShare: 0,
+        worstBandName: '',
+        worstBandLabel: '',
+        seatShare: 0,
+        childShare: 0,
+        said: '',
+      },
+    ]),
+  );
   const probe = new Vector3();
   let headMotion = 0;
   let framesCameraOutsideTheBus = 0;
@@ -396,8 +459,11 @@ if (busRoot) {
       continue;
     }
     insideFrames += 1;
-    inside.camera.aspect = 16 / 10;
-    inside.camera.updateProjectionMatrix();
+    // The occlusion tests below are about what stands between the lens and a
+    // child, which is a property of the cabin rather than of the window; they
+    // are measured on the desktop frame. The **composition** is measured on
+    // every window, further down, because that is the part that changes.
+    inside.render(noDrawing, VIEWPORTS[0].width, VIEWPORTS[0].height);
     inside.camera.updateMatrixWorld(true);
     inside.scene.updateMatrixWorld(true);
 
@@ -484,70 +550,131 @@ if (busRoot) {
     // time and the fault was in the proportions of the whole picture.
     //
     // So this one fires a grid of rays through the frame itself and asks what
-    // fills it. Two things, both taken straight from the complaint:
+    // fills it. Three things, all taken straight from the complaint:
     //
     // - **no single surface may own the shot** — one flat mesh covering better
     //   than a third of the frame *is* "featureless cream floor", whichever
     //   mesh it happens to be;
+    // - **no single surface may own a band of it either.** QA did not say "the
+    //   frame is a third floor", they said *"the **bottom** 35–40% is
+    //   featureless cream floor"*, and a picture can be healthy overall while
+    //   one horizontal band of it is blank. So the same question is asked of
+    //   each third of the frame separately;
     // - **a seat and a child must both be in it** — that is the difference
     //   between the inside of a bus and a corridor.
     //
-    // Sampled rather than every frame: 336 rays is not free, and the camera is
-    // rigidly mounted in the bus, so the composition changes only as the world
-    // outside does.
+    // **And all of it is asked once per window.** The version that shipped set
+    // `aspect = 16 / 10` and never looked further, so the one frame QA actually
+    // photographed — a phone — was outside everything this file could see.
+    //
+    // Sampled rather than every frame: 336 rays per window is not free, and the
+    // camera is rigidly mounted in the bus, so the composition changes only as
+    // the world outside does.
     if (insideFrames % 40 === 1) {
-      const perSurface = new Map<Object3D, number>();
-      const perKind = new Map<string, number>();
-      let rays = 0;
-      for (let gx = 0; gx < FRAME_GRID_X; gx += 1) {
-        for (let gy = 0; gy < FRAME_GRID_Y; gy += 1) {
-          probe
-            .set(((gx + 0.5) / FRAME_GRID_X) * 2 - 1, ((gy + 0.5) / FRAME_GRID_Y) * 2 - 1, 0.5)
-            .unproject(inside.camera)
-            .sub(inside.camera.position)
-            .normalize();
-          sight.set(inside.camera.position, probe);
-          sight.near = inside.camera.near;
-          sight.far = 80;
-          // **What the camera can actually see**, which is not the same as what
-          // is there: `Raycaster` ignores `visible`, and the ride hides the
-          // lower body's outline shell for exactly these frames (`setCutaway`).
-          // A guard that counted hidden geometry would report the cabin as a
-          // solid box and would have passed the shot it is here to fail.
-          const seen = sight.intersectObject(inside.scene, true).find((hit) => {
-            if (!isDrawn(hit.object)) return false;
-            const material = (hit.object as Mesh).material as
-              | { transparent?: boolean; opacity?: number }
-              | undefined;
-            if (material?.transparent === true && (material.opacity ?? 1) < 0.9) return false;
-            return true;
-          });
-          rays += 1;
-          if (!seen) {
-            perKind.set('out of the bus', (perKind.get('out of the bus') ?? 0) + 1);
-            continue;
+      for (const viewport of VIEWPORTS) {
+        const seen = composition.get(viewport.label);
+        if (!seen) continue;
+        inside.render(noDrawing, viewport.width, viewport.height);
+        inside.camera.updateMatrixWorld(true);
+
+        const perSurface = new Map<Object3D, number>();
+        const perKind = new Map<string, number>();
+        /** The same two, per horizontal third: 0 is the bottom of the frame. */
+        const perSurfaceBand = [
+          new Map<Object3D, number>(),
+          new Map<Object3D, number>(),
+          new Map<Object3D, number>(),
+        ];
+        const bandRays = [0, 0, 0];
+        let rays = 0;
+        for (let gx = 0; gx < FRAME_GRID_X; gx += 1) {
+          for (let gy = 0; gy < FRAME_GRID_Y; gy += 1) {
+            const ny = ((gy + 0.5) / FRAME_GRID_Y) * 2 - 1;
+            probe
+              .set(((gx + 0.5) / FRAME_GRID_X) * 2 - 1, ny, 0.5)
+              .unproject(inside.camera)
+              .sub(inside.camera.position)
+              .normalize();
+            sight.set(inside.camera.position, probe);
+            sight.near = inside.camera.near;
+            sight.far = 80;
+            // **What the camera can actually see**, which is not the same as
+            // what is there: `Raycaster` ignores `visible`, and the ride hides
+            // the lower body's outline shell for exactly these frames
+            // (`setCutaway`). A guard that counted hidden geometry would report
+            // the cabin as a solid box and would have passed the shot it is
+            // here to fail.
+            const hits = sight
+              .intersectObject(inside.scene, true)
+              .filter((hit) => isDrawn(hit.object));
+            let landedOn: Object3D | null = null;
+            let throughGlass: Object3D | null = null;
+            for (const hit of hits) {
+              if (seeThrough(hit.object)) {
+                // **A ray that crosses the glass is looking out of a window**,
+                // and that is the single strongest "this is a bus" signal there
+                // is. Every previous version of this dropped see-through hits
+                // and then scored the ray as *out of the bus*, which is why
+                // `describeInsideHit`'s `cat-bus-window` arm was unreachable
+                // and glazing has always measured exactly 0%.
+                if (!throughGlass && busPartOf(hit.object) === 'cat-bus-window') {
+                  throughGlass = hit.object;
+                }
+                continue;
+              }
+              landedOn = hit.object;
+              break;
+            }
+            rays += 1;
+            const band = ny < -1 / 3 ? 0 : ny < 1 / 3 ? 1 : 2;
+            bandRays[band] = (bandRays[band] ?? 0) + 1;
+
+            const surface = landedOn ?? throughGlass;
+            const kind = landedOn
+              ? describeInsideHit(landedOn, seats)
+              : throughGlass
+                ? 'out of a window'
+                : 'out of the bus';
+            perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
+            if (!surface) continue;
+            perSurface.set(surface, (perSurface.get(surface) ?? 0) + 1);
+            const inBand = perSurfaceBand[band];
+            if (inBand) inBand.set(surface, (inBand.get(surface) ?? 0) + 1);
           }
-          perSurface.set(seen.object, (perSurface.get(seen.object) ?? 0) + 1);
-          const kind = describeInsideHit(seen.object, seats);
-          perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
         }
-      }
-      for (const [object, count] of perSurface) {
-        const share = count / rays;
-        if (share > worstSurfaceShare) {
-          worstSurfaceShare = share;
-          worstSurfaceName =
-            object.name || `(unnamed ${(object as Mesh).geometry?.type ?? '?'})`;
+
+        const nameOf = (object: Object3D): string =>
+          object.name || `(unnamed ${(object as Mesh).geometry?.type ?? '?'})`;
+        for (const [object, count] of perSurface) {
+          const share = count / rays;
+          if (share > seen.worstShare) {
+            seen.worstShare = share;
+            seen.worstName = nameOf(object);
+          }
         }
-      }
-      const shareOf = (kind: string): number => (perKind.get(kind) ?? 0) / rays;
-      seatShare = Math.max(seatShare, shareOf('a seat'));
-      childShare = Math.max(childShare, shareOf('a child'));
-      if (compositionSaid === '') {
-        compositionSaid = [...perKind]
-          .sort((a, b) => b[1] - a[1])
-          .map(([kind, count]) => `${kind} ${((100 * count) / rays).toFixed(0)}%`)
-          .join(', ');
+        const BAND_NAMES = ['the bottom third', 'the middle third', 'the top third'];
+        for (let band = 0; band < perSurfaceBand.length; band += 1) {
+          const counts = perSurfaceBand[band];
+          const total = bandRays[band] ?? 0;
+          if (!counts || total === 0) continue;
+          for (const [object, count] of counts) {
+            const share = count / total;
+            if (share > seen.worstBandShare) {
+              seen.worstBandShare = share;
+              seen.worstBandName = nameOf(object);
+              seen.worstBandLabel = BAND_NAMES[band] ?? `band ${band}`;
+            }
+          }
+        }
+        const shareOf = (kind: string): number => (perKind.get(kind) ?? 0) / rays;
+        seen.seatShare = Math.max(seen.seatShare, shareOf('a seat'));
+        seen.childShare = Math.max(seen.childShare, shareOf('a child'));
+        if (seen.said === '') {
+          seen.said = [...perKind]
+            .sort((a, b) => b[1] - a[1])
+            .map(([kind, count]) => `${kind} ${((100 * count) / rays).toFixed(0)}%`)
+            .join(', ');
+        }
       }
     }
   }
@@ -624,31 +751,54 @@ if (busRoot) {
   // complaint was about, and the old failures are still caught: a camera buried
   // in a wall is one surface owning the whole frame, and a camera pointed away
   // from the passengers is `childShare` at zero.
-  said.push(`the inside shot is made of: ${compositionSaid || 'nothing measured'}`);
-  said.push(
-    `its largest single surface is ${worstSurfaceName || '(none)'} at ` +
-      `${(100 * worstSurfaceShare).toFixed(0)}% of the frame; seating ${(100 * seatShare).toFixed(0)}%, ` +
-      `children ${(100 * childShare).toFixed(0)}%`,
-  );
+  //
+  // **Every one of them is asked once per window.** Landscape was fixed on 8
+  // August and portrait was not, and a check that pooled the two would have
+  // reported the average of a good shot and QA's own screenshot.
+  for (const viewport of VIEWPORTS) {
+    const seen = composition.get(viewport.label);
+    if (!seen) continue;
+    said.push(`inside, on ${viewport.label}, the shot is made of: ${seen.said || 'nothing measured'}`);
+    said.push(
+      `  its largest single surface is ${seen.worstName || '(none)'} at ` +
+        `${(100 * seen.worstShare).toFixed(0)}% of the frame, and ${seen.worstBandName || '(none)'} owns ` +
+        `${(100 * seen.worstBandShare).toFixed(0)}% of ${seen.worstBandLabel || 'no band'}; seating ` +
+        `${(100 * seen.seatShare).toFixed(0)}%, children ${(100 * seen.childShare).toFixed(0)}%`,
+    );
 
-  if (worstSurfaceShare > 0.30) {
-    fouls.push(
-      `one surface — ${worstSurfaceName} — fills ${(100 * worstSurfaceShare).toFixed(0)}% of the view ` +
-        'inside the bus. That is a wall or a floor with nothing on it, which is what "you cannot tell ' +
-        'it is a bus" looks like from the inside',
-    );
-  }
-  if (seatShare < 0.05) {
-    fouls.push(
-      `seating is ${(100 * seatShare).toFixed(0)}% of the view inside the bus — there is no seat in ` +
-        'shot, and a vehicle with no seats in it does not read as a bus however many children are aboard',
-    );
-  }
-  if (childShare < 0.05) {
-    fouls.push(
-      `children are ${(100 * childShare).toFixed(0)}% of the view inside the bus — the camera is not ` +
-        'pointed at the passengers, which is the whole reason the inside shot exists',
-    );
+    if (seen.worstShare > 0.3) {
+      fouls.push(
+        `on ${viewport.label}, one surface — ${seen.worstName} — fills ` +
+          `${(100 * seen.worstShare).toFixed(0)}% of the view inside the bus. That is a wall or a floor ` +
+          'with nothing on it, which is what "you cannot tell it is a bus" looks like from the inside',
+      );
+    }
+    // **Half a band is the point at which a surface stops being part of the
+    // picture and becomes the picture.** QA's sentence was about a band, not
+    // about the whole frame — *"the bottom 35–40% is featureless cream floor"* —
+    // and a shot can hold a healthy overall mix while its lower third is one
+    // blank slab, which is exactly what a phone's widened lens produces in here.
+    if (seen.worstBandShare > 0.5) {
+      fouls.push(
+        `on ${viewport.label}, ${seen.worstBandName} is ${(100 * seen.worstBandShare).toFixed(0)}% of ` +
+          `${seen.worstBandLabel} of the view inside the bus — that band is one unbroken surface, which ` +
+          'is QA\'s "the bottom 35–40% is featureless cream floor" whichever way up it happens to be',
+      );
+    }
+    if (seen.seatShare < 0.05) {
+      fouls.push(
+        `on ${viewport.label}, seating is ${(100 * seen.seatShare).toFixed(0)}% of the view inside the ` +
+          'bus — there is no seat in shot, and a vehicle with no seats in it does not read as a bus ' +
+          'however many children are aboard',
+      );
+    }
+    if (seen.childShare < 0.05) {
+      fouls.push(
+        `on ${viewport.label}, children are ${(100 * seen.childShare).toFixed(0)}% of the view inside ` +
+          'the bus — the camera is not pointed at the passengers, which is the whole reason the inside ' +
+          'shot exists',
+      );
+    }
   }
 
   // **Moving.** The bus itself travels 220 m, and the heads are carried along
@@ -702,33 +852,61 @@ function isDrawn(node: Object3D): boolean {
   return true;
 }
 
+/**
+ * Can a lens see past this? Glass can be looked through; bodywork cannot.
+ *
+ * Its own function because two separate things ask it — the sightline to a
+ * child, and the composition grid — and they disagreed once already, which is
+ * how a window came to be scored as "out of the bus".
+ */
+function seeThrough(object: Object3D): boolean {
+  const material = (object as Mesh).material as
+    | { transparent?: boolean; opacity?: number }
+    | undefined;
+  return material?.transparent === true && (material.opacity ?? 1) < 0.9;
+}
+
+/** Which named part of the bus `object` belongs to, or '' for anything else. */
+function busPartOf(object: Object3D): string {
+  let at: Object3D | null = object;
+  while (at) {
+    if (at.name.startsWith('cat-bus-')) return at.name;
+    at = at.parent;
+  }
+  return '';
+}
+
 /** What a ray landing on `object` has found, in words a foul can use. */
 function describeInsideHit(object: Object3D, seats: readonly Object3D[]): string {
   if (seats.some((seat) => isDescendant(object, seat))) return 'a child';
-  let at: Object3D | null = object;
-  while (at) {
-    switch (at.name) {
-      case 'cat-bus-cushion':
-      case 'cat-bus-backrest':
-        return 'a seat';
-      case 'cat-bus-floor-pan':
-        return 'the floor';
-      case 'cat-bus-pillar':
-        return 'a pillar';
-      case 'cat-bus-window':
-        return 'the glazing';
-      case 'cat-bus-shell-lower':
-      case 'cat-bus-shell-upper':
-      case 'cat-bus-face':
-        return 'bare bodywork';
-      case 'cat-bus-driver':
-        return 'the driver';
-      default:
-        break;
-    }
-    at = at.parent;
+  switch (busPartOf(object)) {
+    case 'cat-bus-cushion':
+    case 'cat-bus-backrest':
+      return 'a seat';
+    case 'cat-bus-floor-pan':
+      return 'the floor';
+    case 'cat-bus-aisle-paw':
+      return 'a paw print on the floor';
+    case 'cat-bus-grab-rail':
+      return 'a grab rail';
+    case 'cat-bus-ceiling-lamp':
+      return 'a ceiling lamp';
+    case 'cat-bus-pillar':
+      return 'a pillar';
+    // Reached only by an **opaque** pane. A real one is see-through, and a ray
+    // that crosses it is scored `out of a window` by the caller instead — so
+    // this arm firing means the glass has stopped being glass.
+    case 'cat-bus-window':
+      return 'a solid pane where the glazing should be';
+    case 'cat-bus-shell-lower':
+    case 'cat-bus-shell-upper':
+    case 'cat-bus-face':
+      return 'bare bodywork';
+    case 'cat-bus-driver':
+      return 'the driver';
+    default:
+      return 'the lane outside';
   }
-  return 'the lane outside';
 }
 
 /** Is `node` somewhere under `ancestor`? */
