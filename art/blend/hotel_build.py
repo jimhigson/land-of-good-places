@@ -517,6 +517,36 @@ def loft(rings, centre=(0.0, 0.0)):
     return verts, faces
 
 
+def sweep_rings(rings, cap_start: bool = True, cap_end: bool = True):
+    """Skins an **open** run of equal-length rings of arbitrary 3-D points.
+
+    :func:`loft` is the same idea for a stack of level XY outlines and
+    :func:`revolve_profiles` for a closed ring of them; this is the version for
+    a path that starts somewhere and ends somewhere else, with each ring already
+    positioned in space by the caller. The staircase is built entirely out of
+    it — flight, strings, handrail and coping are four sweeps of four different
+    cross-sections along one arc.
+
+    Both ends are capped by default, because an uncapped sweep is a solid with
+    a hole in it: `Part.emit`'s `recalc_face_normals` cannot orient what is not
+    closed, and the inverted-hull outline the game draws round it would break
+    open along the same seam.
+    """
+    count = len(rings[0])
+    verts = [v for ring_ in rings for v in ring_]
+    faces = []
+    for i in range(len(rings) - 1):
+        for p in range(count):
+            q = (p + 1) % count
+            faces.append((i * count + p, i * count + q, (i + 1) * count + q, (i + 1) * count + p))
+    if cap_start:
+        faces.append(tuple(range(count - 1, -1, -1)))
+    if cap_end:
+        base = (len(rings) - 1) * count
+        faces.append(tuple(range(base, base + count)))
+    return verts, faces
+
+
 def lozenge(width: float, height: float, shoulder: float = 0.14):
     """An elongated hexagon in the XZ plane — the crystal panel on a door leaf."""
     hw, hh = width * 0.5, height * 0.5
@@ -1931,6 +1961,415 @@ def build_gameboy(coll: bpy.types.Collection) -> float:
 
 
 # =============================================================================
+# 14. GRAND STAIRCASE — the lobby's sweeping quarter-turn stair to the gallery
+# =============================================================================
+#
+# Jim, playing on 7 August 2026: *"the staircase is also poorly modelled,
+# looking like a random stack of boxes more than anything… Model the staircase
+# properly in blender, with a rail and a nice consistent sweep all the way up
+# and a hand rail."*
+#
+# It **was** a stack of boxes, and knowing why is worth the paragraph. The old
+# `Hotel.buildMezzanine` drew each tread as a `BoxGeometry` running from the
+# floor all the way up to that tread's own top — ten nested slabs of ten
+# different heights, sharing no surface with each other — and then yawed each
+# one by `rotation.y = angle`, which is 90° out from the rotation that would
+# have pointed its 1.8 m radial dimension along the radius (three.js yaws +X
+# toward −Z; the arc's outward normal at angle *a* is (−sin a, cos a), so the
+# box wanted `−a − π/2`). So every tread lay across the flight rather than
+# along it, at ten different heights, in two alternating colours. Nothing about
+# that was a modelling *style* problem: it was ten boxes.
+#
+# What replaces it is one continuous sweep. Everything below is a function of a
+# single parameter `u`, measured in **treads** (0 at the bottom riser, 10 at the
+# deck), which is what makes the flight even by construction rather than by
+# ten literals agreeing: constant riser, constant tread depth, a soffit and two
+# string top edges that are all straight rakes in (u, height), and a handrail
+# that is one more of those.
+
+STAIR_INNER_R = 2.40
+STAIR_OUTER_R = 4.20
+STAIR_SWEEP_ANGLE = math.pi / 2
+STAIR_RISE = 3.20
+STAIR_TREADS = 10
+"""The arc. **`src/world/hotel/layout.ts` owns these five numbers, not this
+file** — `LOBBY.mezzanine.stair` and `LOBBY_MEZZANINE_Y`. The game derives its
+walkable `ArcTread` surfaces and the stair's two flank colliders from them, so
+an asset built to a different arc is a staircase a child falls through.
+`src/art/models/hotelAssets.ts` re-exports them as `STAIR_*` for the placing
+code to read back, which keeps it at one owner and two readers rather than
+three hand-kept copies (CLAUDE.md, "two definitions of one thing")."""
+
+STAIR_RISER = STAIR_RISE / STAIR_TREADS
+assert abs(STAIR_RISER - 0.32) < 1e-9, "layout.ts promises a 0.32 m riser; the arc has moved"
+
+# The flight's own timber, none of which anything outside this file needs.
+STAIR_NOSE_DROP = 0.045
+"""Chamfer down the leading edge of every tread. Under the toon ramp this is
+what draws the line along each nosing — without it ten treads of one colour
+read as a ramp, which is the opposite failure to ten boxes and just as wrong."""
+STAIR_NOSE_RUN = 0.075
+"""…and how far along the tread it runs, in **treads** (≈39 mm at mid radius)."""
+STAIR_RISER_LEAN = 0.03
+"""Each riser leans back by this much (in treads, ≈16 mm), so the nosing above
+it very slightly overhangs. Real stairs do it, and it also keeps the two rings
+at each step off each other: coincident rings would weld into a zero-area quad
+and leave `validate()` to tidy up after us."""
+STAIR_WAIST = 0.55
+"""Thickness of the flight measured **down from the pitch line**, so the soffit
+is a rake parallel to the stair rather than a staircase upside-down. Clamped at
+the floor, which makes the bottom ~1.7 treads solid — a flight growing out of
+the floor rather than one balanced on a knife edge."""
+STAIR_STRING_T = 0.20
+STAIR_STRING_BITE = 0.03
+"""How far each string laps *over* the tread ends. Overlapping solids, never
+coincident faces — two faces in the same plane is what z-fights."""
+STAIR_STRING_UPSTAND = 0.10
+"""How far the string's top edge stands above the nosing line. This is what
+makes it a **closed** string: the tread ends are housed inside it and the flight
+reads as solid masonry from the side, which is also exactly what the game's
+flank colliders claim it is."""
+STAIR_STRING_CHAMFER = 0.055
+STAIR_STRING_FACET = 0.04
+"""How far each string's exposed face steps in and out between samples.
+
+The reception desk's trick, and the same reason: a 6.6 m run of flat lilac is a
+slab, and a slab in this park reads as a placeholder however well it is
+proportioned. Twelve samples of a shallow arc read as a smooth curve; twelve
+samples pushed in and out by 4 cm read as cut crystal. The string's *top edge*
+is untouched by it — the rake is the thing the eye follows up the flight, and
+it stays a straight line."""
+STAIR_STRING_CAP = 0.34
+"""Depth of the un-faceted capping band along each string's top edge."""
+STAIR_STRING_EASE = 0.16
+"""Radius of the easing curve where the rake meets the landing, in metres.
+
+A handrail that climbs at 32° and then turns level in one vertex has a visible
+elbow in it, which is the one place a "consistent sweep all the way up" stops
+being consistent. Real joinery puts an easing there. Kept small on purpose: the
+ease dips the pitch line by at most `k/4` = 4 cm, and the string's 10 cm upstand
+is what has to survive that — at 6 cm it still does, and a bigger radius would
+start to sink the string below the top tread it is meant to hide the end of."""
+STAIR_RAIL_H = 0.86
+"""Handrail centre-line above the nosing line — the same 0.86 m
+`Hotel.dressMezzanine` already puts the gallery's own rail at, so the two meet
+where the stair lands instead of stepping."""
+STAIR_BALUSTERS = 13
+
+STAIR_OUTER_STRING = (
+    STAIR_OUTER_R - STAIR_STRING_BITE,
+    STAIR_OUTER_R - STAIR_STRING_BITE + STAIR_STRING_T,
+)
+STAIR_INNER_STRING = (
+    STAIR_INNER_R + STAIR_STRING_BITE - STAIR_STRING_T,
+    STAIR_INNER_R + STAIR_STRING_BITE,
+)
+STAIR_RAIL_R = sum(STAIR_OUTER_STRING) * 0.5
+STAIR_COPING_R = sum(STAIR_INNER_STRING) * 0.5
+
+
+def stair_point(u: float, radius: float, z: float):
+    """One point on the arc: `u` in treads, `radius` in metres, `z` in metres.
+
+    **The one place the angle convention is written down.** The game measures
+    this yaw as *0 is +Z, turning toward −X* (`layout.ts`'s `Mezzanine`), so a
+    point at game-angle *a* sits at `(centreX − sin a · r, centreZ + cos a · r)`.
+    `export_yup` maps Blender (x, y, z) → glTF (x, z, −y), so the game's X is
+    Blender's x and the game's Z is Blender's **−y** — which is where the second
+    minus sign comes from. Nine call sites go through this rather than repeating
+    it, because a sign slip here is the entire asset facing the wrong way and
+    nothing else (the reception desk lost an afternoon to exactly that).
+    """
+    a = STAIR_SWEEP_ANGLE * u / STAIR_TREADS
+    return (-math.sin(a) * radius, -math.cos(a) * radius, z)
+
+
+def stair_nosing(u: float) -> float:
+    """The pitch line through the front top corner of every tread.
+
+    Clamped at the deck, so over the last tread it goes level: the handrail and
+    both strings then arrive at the gallery flat rather than continuing to climb
+    past it, which is what a flight meeting a landing does. The clamp is a
+    **smooth** minimum (`STAIR_STRING_EASE`) so that meeting is a curve rather
+    than an elbow — every line that follows this one inherits the easing for
+    free, which is what keeps rail, coping and both strings parallel through it.
+    """
+    rake = STAIR_RISER * (u + 1.0)
+    k = STAIR_STRING_EASE
+    h = max(0.0, k - abs(rake - STAIR_RISE)) / k
+    return min(rake, STAIR_RISE) - h * h * k * 0.25
+
+
+def stair_soffit(u: float) -> float:
+    return max(0.0, STAIR_RISER * u - STAIR_WAIST)
+
+
+def stair_string_top(u: float) -> float:
+    return stair_nosing(u) + STAIR_STRING_UPSTAND
+
+
+def stair_string_bottom(u: float) -> float:
+    """The floor. Both strings are solid all the way down, and that is a
+    **collision** decision before it is a look one.
+
+    `Hotel.buildMezzanine` walls each radius off with a chain of colliders that
+    are solid *from the floor to the tread* — which is what the side of a
+    masonry stair is, and what stops a child walking into the flank of the
+    flight from the open lobby. A string that floated on the soffit rake would
+    leave a metre of daylight under the middle of the stair with an invisible
+    wall standing in it: the one thing worse than a wall you can see is a wall
+    you cannot.
+
+    It is also, separately, the grander shape. A hotel staircase is a solid
+    sweep of masonry that meets the floor; an open flight with its soffit on
+    display is a modern stair, and this is not a modern hotel. The flight's own
+    raked soffit (:func:`stair_soffit`) is kept regardless — it is now enclosed
+    between the two strings and nobody sees it, but it means the geometry stays
+    honest if anyone ever opens an arch under the stair."""
+    return 0.0
+
+
+def stair_rail_line(u: float) -> float:
+    return stair_nosing(u) + STAIR_RAIL_H
+
+
+def stair_samples(count: int, *breaks: float):
+    """`count` even samples along the sweep, plus every `u` where a rake kinks.
+
+    Sampling a straight-in-(u, h) line only needs enough points for the *arc* to
+    read round — but a sample must land exactly on each kink (where a clamp
+    bites), or the loft cuts the corner and the rail sags there."""
+    out: list[float] = []
+    for u in sorted([STAIR_TREADS * i / count for i in range(count + 1)] + list(breaks)):
+        if not out or u - out[-1] > 1e-6:
+            out.append(u)
+    return out
+
+
+def build_stair(coll: bpy.types.Collection) -> float:
+    # --- the flight -----------------------------------------------------------
+    # One swept solid, not ten. Its cross-section is the same radial rectangle
+    # everywhere — inner radius to outer radius, soffit to the tread it is
+    # under — and the *steps* come from where the rings are put, not from
+    # separate objects: two rings at (nearly) the same angle make a vertical
+    # riser, a third makes the nosing chamfer, and the rest ride the tread.
+    treads = Part("stair-tread")
+    profile: list[tuple[float, float]] = []
+    for i in range(STAIR_TREADS):
+        top = STAIR_RISER * (i + 1)
+        # The bottom step has no riser below it to lean off — it rises straight
+        # off the lobby floor, and its end cap *is* that first riser.
+        lean = 0.0 if i == 0 else STAIR_RISER_LEAN
+        profile.append((i + lean, top - STAIR_NOSE_DROP))
+        profile.append((i + lean + STAIR_NOSE_RUN, top))
+        profile.append((i + 0.55, top))
+        profile.append((i + 1.0, top))
+    treads.add(
+        *sweep_rings(
+            [
+                [
+                    stair_point(u, STAIR_INNER_R, stair_soffit(u)),
+                    stair_point(u, STAIR_OUTER_R, stair_soffit(u)),
+                    stair_point(u, STAIR_OUTER_R, top),
+                    stair_point(u, STAIR_INNER_R, top),
+                ]
+                for u, top in profile
+            ]
+        )
+    )
+    treads.emit(coll)
+
+    # --- the two closed strings ----------------------------------------------
+    # The sample list has to contain the `u` where the rake eases into the
+    # landing, or the loft cuts that corner and the string's top edge sags
+    # away from the handrail running parallel to it.
+    strings = Part("stair-stringer")
+    string_us = stair_samples(12, 8.5, 9.0, 9.5)
+    chamfer = STAIR_STRING_CHAMFER
+    # `face` says which of the two radii is the one nobody's shin touches, and
+    # is therefore the one free to facet: the outer string shows its outside,
+    # the inner string its inside. The other radius stays exactly where it is,
+    # because that is the edge lapping over the ends of the treads.
+    for (r0, r1), face in ((STAIR_OUTER_STRING, 1), (STAIR_INNER_STRING, -1)):
+        sections = []
+        for index, u in enumerate(string_us):
+            push = STAIR_STRING_FACET if index % 2 == 0 else -STAIR_STRING_FACET
+            lo, hi = r0, r1
+            # The facet lives on the wall, never on the top edge. Faceting the
+            # whole section wobbled the string's top edge by ±4 cm and the
+            # nosings showing over it turned into a sawtooth — the one line in
+            # the whole asset that has to read as a clean rake, chewed up by a
+            # detail meant for the blank surface below it. So the top
+            # `STAIR_STRING_CAP` of the section stays at the true radius and
+            # the crystal facets stop under it, which is a plinth-and-capping
+            # reading rather than a mistake.
+            lo_f, hi_f = (lo - push, hi) if face < 0 else (lo, hi + push)
+            bottom, top = stair_string_bottom(u), stair_string_top(u)
+            waist = top - STAIR_STRING_CAP
+            sections.append(
+                [
+                    stair_point(u, lo_f, bottom),
+                    stair_point(u, hi_f, bottom),
+                    stair_point(u, hi_f, waist),
+                    stair_point(u, hi, waist + STAIR_STRING_FACET),
+                    stair_point(u, hi, top - chamfer),
+                    stair_point(u, hi - chamfer, top),
+                    stair_point(u, lo + chamfer, top),
+                    stair_point(u, lo, top - chamfer),
+                    stair_point(u, lo, waist + STAIR_STRING_FACET),
+                    stair_point(u, lo_f, waist),
+                ]
+            )
+        strings.add(*sweep_rings(sections))
+    # Flat, like `desk-front` and for the same reason: a 4 cm facet across a
+    # 45 cm chord is a 20° crease, which is *under* `emit`'s 46° threshold — so
+    # smooth shading would average the facets back into a soft wobble, which
+    # reads as a modelling mistake rather than as cut stone.
+    strings.emit(coll, smooth=False)
+
+    # --- the handrail, and the matching coping on the inner string ------------
+    # One node, two sweeps, one colour: the thing a hand goes on and the thing
+    # that answers it across the flight are the same piece of brass, which is
+    # what makes the two edges of the stair read as a pair.
+    rail = Part("stair-rail")
+    handrail_section = [
+        (-0.045, -0.060),
+        (0.045, -0.060),
+        (0.090, 0.0),
+        (0.045, 0.062),
+        (-0.045, 0.062),
+        (-0.090, 0.0),
+    ]
+    rail.add(
+        *sweep_rings(
+            [
+                [
+                    stair_point(u, STAIR_RAIL_R + dr, stair_rail_line(u) + dz)
+                    for dr, dz in handrail_section
+                ]
+                for u in stair_samples(30, 8.5, 9.0, 9.5)
+            ]
+        )
+    )
+    # A coping stone, overhanging its string by 15 mm each side. A second full
+    # handrail down here would be a rail on the side of the stair nobody can
+    # fall off — the inner string is already a collider floor-to-tread — and it
+    # would have doubled the balusters for a line the camera barely sees.
+    coping_section = [
+        (-0.115, -0.030),
+        (0.115, -0.030),
+        (0.115, 0.050),
+        (0.075, 0.085),
+        (-0.075, 0.085),
+        (-0.115, 0.050),
+    ]
+    rail.add(
+        *sweep_rings(
+            [
+                [
+                    stair_point(u, STAIR_COPING_R + dr, stair_string_top(u) + dz)
+                    for dr, dz in coping_section
+                ]
+                for u in stair_samples(24, 8.5, 9.0, 9.5)
+            ]
+        )
+    )
+    rail.emit(coll)
+
+    # --- balusters ------------------------------------------------------------
+    # Evenly spaced in `u`, which on a curve is what the eye reads as even:
+    # thirteen of them at 0.51 m centres along the outer radius, against the
+    # 0.62 m `dressMezzanine` uses on the gallery's own rail. Plumb, not radial
+    # — a real curved balustrade's balusters are vertical, and the slight fan
+    # they make in plan is the whole charm of one.
+    balusters = Part("stair-baluster")
+    for k in range(STAIR_BALUSTERS):
+        u = 0.40 + (STAIR_TREADS - 0.80) * k / (STAIR_BALUSTERS - 1)
+        cx, cy, _ = stair_point(u, STAIR_RAIL_R, 0.0)
+        spin = math.atan2(cy, cx)
+        foot = stair_string_top(u) - 0.04
+        head = stair_rail_line(u) - 0.045
+        balusters.add(
+            *loft(
+                [
+                    ([(x, y) for x, y, _ in ring(6, r, 0.0, spin)], z)
+                    # Chunky, and barely tapered. The first pass ran
+                    # 0.072 → 0.055 and rendered as a row of tent pegs: on a
+                    # 0.75 m spindle a taper the eye can see reads as a *point*,
+                    # and ART_DIRECTION §1's "no thin parts" is exactly about
+                    # this. 0.18 m across the belly is the same chunk as the
+                    # gallery's own balusters.
+                    for r, z in (
+                        (0.082, foot),
+                        (0.090, foot + 0.15),
+                        (0.070, head),
+                    )
+                ]
+            ),
+            matrix=Matrix.Translation((cx, cy, 0.0)),
+        )
+    balusters.emit(coll)
+
+    # --- the two newels -------------------------------------------------------
+    # One on the lobby floor where the flight starts, one on the deck where it
+    # lands, each capped with the same six-sided gem the tower is grown from —
+    # the cheapest way to say "this staircase belongs to that building".
+    newels = Part("stair-newel")
+    for u, ground in ((0.0, 0.0), (float(STAIR_TREADS), STAIR_RISE)):
+        cx, cy, _ = stair_point(u, STAIR_RAIL_R, 0.0)
+        spin = math.atan2(cy, cx)
+        cap = stair_rail_line(u) + 0.062
+        newels.add(
+            *loft(
+                [
+                    ([(x, y) for x, y, _ in ring(6, r, 0.0, spin)], z)
+                    for r, z in (
+                        (0.132, ground),
+                        (0.115, ground + 0.13),
+                        (0.115, cap - 0.10),
+                        (0.134, cap),
+                    )
+                ]
+            ),
+            matrix=Matrix.Translation((cx, cy, 0.0)),
+        )
+        newels.add(
+            *gem(6, 0.092, 0.13, 0.10, spin),
+            matrix=Matrix.Translation((cx, cy, cap - 0.012)),
+        )
+    newels.emit(coll)
+
+    # --- the contract with the game, asserted rather than promised -----------
+    # The game registers a walkable `ArcTread` per step from `layout.ts`'s arc
+    # and two flank colliders down the two radii. If this asset ever stops
+    # agreeing with that arc it should stop *building*, not quietly ship a
+    # staircase whose treads are somewhere other than where a child's feet go.
+    # Measured off the emitted mesh, never off the numbers that made it —
+    # `check:assets`' founding lesson, and the reason the desk's splayed
+    # counter was found at all.
+    flight = bpy.data.objects["stair-tread"].data
+    heights = {round(v.co.z, 4) for v in flight.vertices}
+    for i in range(STAIR_TREADS):
+        top = round(STAIR_RISER * (i + 1), 4)
+        assert top in heights, f"tread {i + 1} should top out at {top} m and no vertex does"
+    radii = [math.hypot(v.co.x, v.co.y) for v in flight.vertices]
+    assert abs(min(radii) - STAIR_INNER_R) < 1e-6 and abs(max(radii) - STAIR_OUTER_R) < 1e-6, (
+        "the walkable flight must span exactly the arc the game puts `ArcTread`s "
+        f"over, and spans {min(radii):.4f}..{max(radii):.4f}"
+    )
+    assert abs(max(v.co.z for v in flight.vertices) - STAIR_RISE) < 1e-6, "top tread ≠ deck height"
+    # …and both strings have to house those tread ends at every point along the
+    # arc, top and bottom, or the flight's bare side face shows through the
+    # masonry that is meant to be hiding it.
+    for u in stair_samples(120):
+        tread_top = STAIR_RISER * min(STAIR_TREADS, math.floor(u) + 1)
+        assert stair_string_top(u) > tread_top, f"string sinks below its tread at u={u:.3f}"
+        assert stair_string_bottom(u) <= stair_soffit(u) + 1e-9, f"string floats at u={u:.3f}"
+
+    return stair_rail_line(float(STAIR_TREADS)) + 0.062 + 0.23
+
+
+# =============================================================================
 
 
 def summarise() -> str:
@@ -1961,6 +2400,7 @@ def main() -> None:
     heights["entranceDoors"] = build_entrance_doors(collection("hotel-entrance"))
     heights["tv"] = build_tv(collection("hotel-tv"))
     heights["gameBoy"] = build_gameboy(collection("hotel-gameboy"))
+    heights["stair"] = build_stair(collection("hotel-stair"))
 
     print("\nhotel_build")
     print(summarise())

@@ -27,19 +27,28 @@ packGlbAsset({
   constantName: 'HOTEL_GLB_BASE64',
   label: 'pack:hotel',
   /**
-   * 432 KB, against the 150 KB every other asset gets.
+   * 512 KB, against the 150 KB every other asset gets.
    *
    * The 150 KB figure is Jim's ruling of 31 July for **one character**. This
-   * file is not one asset: it is fifteen factories' worth — a 28 m building,
+   * file is not one asset: it is sixteen factories' worth — a 28 m building,
    * plus the furniture of a hotel (bed, hanging disco ball, breakfast table,
    * three bowls of cereal, reception desk, suite door), plus the second batch
    * of 7 August (a four-poster pet bed and its bowl, the lift's doors, frame,
    * car and pointer dial, the tower's sliding front doors, the suite's
-   * television and its Game Boy). At 394 KB that is about **26 KB per
-   * factory**, well inside the per-character figure, and 130 KB over the wire
-   * after gzip. Raising a *shared* budget for one file would have been the
-   * wrong move; raising this one, with the arithmetic written down, is the
-   * whole point of the knob being per-asset.
+   * television and its Game Boy), plus the lobby's grand staircase. At 480 KB
+   * that is about **30 KB per factory**, well inside the per-character figure,
+   * and 172 KB over the wire after gzip. Raising a *shared* budget for one
+   * file would have been the wrong move; raising this one, with the arithmetic
+   * written down, is the whole point of the knob being per-asset.
+   *
+   * The staircase (7 August) is what took it past 432 KB: 2,300 triangles and
+   * 89 KB for the flight, its two closed strings, thirteen balusters, the
+   * swept handrail and two newels. It is worth saying what that bought,
+   * because "the model got bigger" is not on its own a reason. It **replaced**
+   * ten `BoxGeometry` treads built in `Hotel.ts` that Jim, playing on 7 August,
+   * called *"a random stack of boxes"* — so the game draws fewer meshes than
+   * before, and the bytes bought a staircase with a rail on it rather than a
+   * second version of something that already existed.
    *
    * Where the bytes are, so a future change knows what it is trading:
    *
@@ -57,10 +66,11 @@ packGlbAsset({
    *   would reclaim some of it and cost the game a colour per part, which is
    *   the trade the whole no-materials-in-the-glb design refuses.
    */
-  budgetBytes: 432 * 1024,
+  budgetBytes: 512 * 1024,
   docLines: [
     'The Land Hotel, as authored geometry: the crystal tower, the furniture',
-    'that goes inside it, the lift, and the suite’s television.',
+    'that goes inside it, the lift, the suite’s television, and the lobby’s',
+    'grand staircase.',
     '',
     '**Generated — do not edit.** `npm run pack:hotel` rebuilds it from',
     '`hotel.glb`, which is itself written by `npm run blend:hotel` (from',

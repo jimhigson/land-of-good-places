@@ -16,7 +16,7 @@ import { visibleBounds } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
 
 /**
- * **The Land Hotel** — a crystal tower and the five things that furnish it.
+ * **The Land Hotel** — a crystal tower and everything that furnishes it.
  *
  * The **fourth** asset through the `.glb` pipeline (`ART-AGENT-NOTES.md` §6a,
  * after the kid, the cart and the duck bar), and the first authored by a
@@ -35,7 +35,7 @@ import type { AssetHandle } from '../style/asset';
  * is what lets `src/art/style/glb.ts` stay the small, synchronous, no-materials
  * reader it is.
  *
- * ## Six assets, one file
+ * ## Sixteen factories, one file
  *
  * They share a `.glb` because they share a build script and are used together,
  * not because they are one object. Each factory returns its own `AssetHandle`
@@ -206,6 +206,19 @@ const STYLES: Record<string, PartStyle> = {
     material: { emissive: PALETTE.markerMint, emissiveIntensity: 0.35 },
   },
   'gameboy-buttons': { colour: PALETTE.markerPink },
+
+  // --- the lobby's grand staircase -----------------------------------------
+  // The treads take the lobby's *floor* colour and the strings its *trim*,
+  // which is the same pairing the gallery they lead to already uses — so the
+  // stair reads as part of that piece of architecture rather than as furniture
+  // parked against it. One colour for all ten treads, deliberately: the old
+  // code-built stack alternated floor and trim per tread, and alternating
+  // stripes are most of what made ten boxes read as ten boxes.
+  'stair-tread': { colour: PALETTE.glassTint, outline: 0.02 },
+  'stair-stringer': { colour: PALETTE.markerLilac, outline: 0.022 },
+  'stair-rail': { colour: PALETTE.liftFrame, outline: 0.016 },
+  'stair-baluster': { colour: PALETTE.blossomWhite, outline: 0.014 },
+  'stair-newel': { colour: PALETTE.flowerViolet, outline: 0.018 },
 };
 
 /** One authored part, by name. Throws rather than returning a hole. */
@@ -841,6 +854,143 @@ export function createGameBoy(): ScreenedHandle {
     root,
     height: measuredHeight(root),
     screen: required(meshes, 'gameboy-screen'),
+    dispose: () => disposeTree(root),
+  };
+}
+
+// ===========================================================================
+// The grand staircase, 7 August 2026 — Jim, playing: *"the staircase is also
+// poorly modelled, looking like a random stack of boxes more than anything…
+// Model the staircase properly in blender, with a rail and a nice consistent
+// sweep all the way up and a hand rail."*
+// ===========================================================================
+
+/**
+ * The stair's arc, and **this file is not its owner** —
+ * `src/world/hotel/layout.ts`'s `LOBBY.mezzanine` is.
+ *
+ * They are re-exported here because the asset had to be *built* to them and
+ * the game has to *place* it on them, and a number that two files must agree
+ * about is the single most reliable bug in this repo (CLAUDE.md, "two
+ * definitions of one thing"). So: `layout.ts` decides, `hotel_build.py` builds
+ * to it, and everything that places, walks or collides with the staircase asks
+ * these constants rather than re-typing the literals. If `layout.ts` ever
+ * moves the arc, `hotel_build.py` asserts its way to a loud failure instead of
+ * shipping a staircase whose treads are not where a child's feet go.
+ */
+export const STAIR_INNER_RADIUS = 2.4;
+/** @see STAIR_INNER_RADIUS */
+export const STAIR_OUTER_RADIUS = 4.2;
+/** A quarter turn. @see STAIR_INNER_RADIUS */
+export const STAIR_SWEEP = Math.PI / 2;
+/** Floor to gallery deck — `layout.ts`'s `LOBBY_MEZZANINE_Y`. */
+export const STAIR_RISE = 3.2;
+/** @see STAIR_INNER_RADIUS */
+export const STAIR_TREADS = 10;
+/** 0.32 m — half the game's `BUILDING_STEP_UP`, so every tread is walkable. */
+export const STAIR_RISER = STAIR_RISE / STAIR_TREADS;
+/**
+ * Handrail centre-line above the tread it stands over, in metres.
+ *
+ * The same 0.86 m `Hotel.dressMezzanine` puts the gallery's own rail at, and
+ * not by coincidence: over its last tread the stair's handrail eases level at
+ * `STAIR_RISE + STAIR_RAIL_HEIGHT` (4.06 m), which is exactly where a rail
+ * standing on the deck meets it. The two are meant to be one continuous line.
+ */
+export const STAIR_RAIL_HEIGHT = 0.86;
+
+export interface GrandStaircaseHandle extends AssetHandle {
+  readonly innerRadius: number;
+  readonly outerRadius: number;
+  readonly sweep: number;
+  readonly rise: number;
+  readonly treads: number;
+  readonly riser: number;
+  readonly railHeight: number;
+  /**
+   * The walking height of tread `index` (0-based), in metres above the origin.
+   *
+   * `treadTop(treads - 1) === rise` exactly. Ask this rather than recomputing
+   * `rise * (i + 1) / treads`: the walk surface the game registers and the
+   * geometry a child sees are then the same arithmetic, done once.
+   */
+  treadTop(index: number): number;
+}
+
+const STAIRCASE_PARTS = [
+  'stair-tread',
+  'stair-stringer',
+  'stair-rail',
+  'stair-baluster',
+  'stair-newel',
+] as const;
+
+/**
+ * **The lobby's grand staircase**: a quarter-turn sweep of ten treads from the
+ * floor to the gallery, between two closed crystal strings, with a balustrade
+ * of thirteen balusters carrying a continuous swept handrail, a newel at each
+ * end, and a matching moulded coping along the inner string.
+ *
+ * ## Its origin is the arc's centre, not the foot of the flight
+ *
+ * The documented exception, like the disco ball's hang point and the lift
+ * dial's needle pivot, and for the same reason: **the one point a caller has
+ * to line up is the point the shape is defined about.** Every tread, both
+ * strings and the handrail are swept about the centre of curvature, so that is
+ * where the origin goes — on the floor (`y = 0`), at the centre, with no
+ * geometry anywhere near it. `layout.ts` already names that point
+ * (`stair.centreX`, `stair.centreZ`), so placing this is:
+ *
+ * ```ts
+ * stair.root.position.set(
+ *   room.originX + plan.stair.centreX,
+ *   floorY,
+ *   room.originZ + plan.stair.centreZ,
+ * );
+ * ```
+ *
+ * and nothing else — no half-width offset to get wrong, and no second formula
+ * that has to track the arc when the arc moves.
+ *
+ * ## Which way it sweeps
+ *
+ * Authored at **`fromAngle = 0`** in the yaw the rest of the game measures
+ * (`Mezzanine`: 0 is +Z, turning toward −X). So the bottom tread sits at
+ * `+Z` from the origin and the top one at `−X`, which is `LOBBY`'s arc exactly
+ * and needs no rotation at all. A room that wanted a different start angle
+ * would set `root.rotation.y = -fromAngle` — negative, because three.js yaws
+ * +Z toward +X and this game's stair angle turns it toward −X.
+ *
+ * ## What it was built to
+ *
+ * `STAIR_RISE` = 3.2 m, which is `LOBBY_MEZZANINE_Y`. Ten treads of a 0.32 m
+ * riser, inner radius 2.4 m, outer 4.2 m, a 90° sweep. The measured top is
+ * ~4.36 m — the top newel's finial, standing on the deck, not a walkable
+ * height; the *walkable* top is `STAIR_RISE`.
+ *
+ * ## What the strings mean for collision
+ *
+ * Both strings are solid masonry **from the floor to the tread**, which is what
+ * `Hotel.buildMezzanine`'s flank colliders already claim. That is why they are
+ * not the prettier open flight: a floating string would show a metre of
+ * daylight under the middle of the stair with an invisible wall standing in it.
+ * The treads themselves are walk surfaces and never colliders — see
+ * `buildMezzanine`'s header for why a solid tread is a wall to the child on the
+ * step below it.
+ */
+export function createGrandStaircase(): GrandStaircaseHandle {
+  const { root } = assemble('hotel.grandStaircase', STAIRCASE_PARTS);
+  return {
+    root,
+    height: measuredHeight(root),
+    innerRadius: STAIR_INNER_RADIUS,
+    outerRadius: STAIR_OUTER_RADIUS,
+    sweep: STAIR_SWEEP,
+    rise: STAIR_RISE,
+    treads: STAIR_TREADS,
+    riser: STAIR_RISER,
+    railHeight: STAIR_RAIL_HEIGHT,
+    treadTop: (index: number) => (STAIR_RISE * (index + 1)) / STAIR_TREADS,
     dispose: () => disposeTree(root),
   };
 }

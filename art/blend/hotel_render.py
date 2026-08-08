@@ -95,6 +95,11 @@ COLOURS = {
     "gameboy-body": 0xD3CACB,  # ART.statueStone
     "gameboy-screen": 0x7FE3C0,  # PALETTE.markerMint
     "gameboy-buttons": 0xFF8FC0,  # PALETTE.markerPink
+    "stair-tread": 0xCDEEFF,  # PALETTE.glassTint (the lobby's floor colour)
+    "stair-stringer": 0xC9A9FF,  # PALETTE.markerLilac (the lobby's trim)
+    "stair-rail": 0xFFD76E,  # PALETTE.liftFrame
+    "stair-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
+    "stair-newel": 0xD7B3FF,  # PALETTE.flowerViolet
 }
 
 # Every asset's origin is its own base, so a whole collection rendered as-authored
@@ -164,6 +169,15 @@ SHOTS = [
     # face **up**, so the shot that says whether it reads is the one the iso
     # camera almost takes.
     ("game-boy", "hotel-gameboy", 20.0, 58.0),
+    # **The park's own camera, as nearly as this script can take it.** The game
+    # looks from focus + (+X, +Y, +Z) at 38° of pitch; the game's +Z is
+    # Blender's −Y, so +45° of azimuth here puts the camera at (+X, −Y), which
+    # is the same corner. This is the shot that says whether the sweep reads.
+    ("staircase", "hotel-stair", 45.0, 36.0),
+    # …and a low one from the foot of the flight, which is the only angle that
+    # shows the rake: strings, handrail and coping should be three parallel
+    # straight lines, and any tread out of step shows up as a kink in them.
+    ("staircase-rake", "hotel-stair", 8.0, 10.0),
 ]
 
 
