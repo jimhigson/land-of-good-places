@@ -602,6 +602,23 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  * than level with it.
  */
 /** Ground beyond the crest, so the cut edge sits below the horizon not level with it. */
+/**
+ * How far inside the park's edge a ride's exit must sit, in metres.
+ *
+ * A statement about the boundary, so it lives with the boundary: a point can
+ * be clear of every plot and still be somewhere a child cannot be put down,
+ * because it is on the wrong side of the park's own edge — which is also
+ * exactly what "not reachable from the entrance" turns out to mean.
+ *
+ * Both the Rail Race (`railRace/plan.ts`, which re-exports this so
+ * `check:rail-race` keeps its one owner) and the Sky Cruiser
+ * (`coaster/plan.ts`) clamp their exits with it. It is here rather than in
+ * either of them because those two modules cannot import from each other:
+ * `coaster/plan -> railRace/plan -> train/plan -> coaster/plan` is a cycle that
+ * `tsc` accepts and Node fails at load.
+ */
+export const EXIT_INSIDE_EDGE = 2;
+
 export const TERRAIN_APRON = RIM_OUTSET_END + 1.5;
 
 export const TERRAIN_EDGE_RADIUS = PARK_BOUNDARY.maxRadius + TERRAIN_APRON;

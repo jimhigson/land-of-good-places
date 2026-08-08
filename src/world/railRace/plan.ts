@@ -1,5 +1,5 @@
 import { TAU } from '../../core/mathUtils';
-import { PARK_BOUNDARY } from '../boundary';
+import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
 import { RailRaceRoute, RIDE_SCALE } from './route';
@@ -29,8 +29,16 @@ const STATION_STALL_ID = 'stall.railRacer';
  * on a plan that broke the planner's own rule, which is the entire failure it
  * exists to catch. Same number declared twice is this week's most-repeated bug;
  * one owner, one import.
+ *
+ * It now *lives* in `boundary.ts` and is re-exported here, because the Sky
+ * Cruiser's exit wants the same rule and importing it from this module would
+ * close a cycle: `coaster/plan -> railRace/plan -> train/plan -> coaster/plan`.
+ * `tsc` is perfectly happy with that cycle; Node is not, and it fails at module
+ * load with "Cannot access 'COASTER_PLANS' before initialization". The number
+ * belongs to the boundary anyway — it is a statement about how far inside the
+ * park's edge a person can stand.
  */
-export const EXIT_INSIDE_EDGE = 2;
+export { EXIT_INSIDE_EDGE };
 
 export interface PlannedRailRace {
   /** Matches `PlannedCoaster.name` — `paths.ts` names the exit node with it. */
