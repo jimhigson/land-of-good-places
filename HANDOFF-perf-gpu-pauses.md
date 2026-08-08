@@ -1,5 +1,11 @@
 # HANDOFF — perf/gpu-pauses
 
+> **Round 2 (7 Aug) — the fixes are built and measured.** Jump to
+> "Round 2: what was built" at the bottom for the A/B. Everything above it is
+> the investigation that found the cause, kept because the *method* is the part
+> worth reusing.
+
+
 Investigating Jim's report: *"The frame rate is generally ok but there seem to
 be large GPU pauses from time to time."* Jim's own hypothesis, via the Overseer:
 *"I'm not sure the pauses are GPU related, may be GC"*.
@@ -159,3 +165,101 @@ Traps found the hard way:
 `npm run test:procgen` → **exit 0, 11 files passed, 231 tests passed**.
 Ports: dev 5437, preview 5438 (both mine, `--strictPort`). Not pushed to
 `e/cat-bus-stage-a`. No URL handed to Jim.
+
+---
+
+# Round 2: what was built, and what it actually bought
+
+Three commits on `perf/gpu-pauses`, cut from `e/cat-bus-stage-a` at `a43127f`.
+
+## The A/B, same harness, same 170 s walk, dev server both sides
+
+Baseline is `316bb10` (the `checkShaderErrors` change alone), so this isolates
+the **warm-up's** contribution rather than re-counting the earlier win.
+
+| during ordinary play | before | after |
+|---|---|---|
+| frames > 30 ms | 6 (267, 167, 159, 100, 42, 33) | **2** (83, 75) |
+| worst frame | 266.6 ms | **83.4 ms** |
+| time lost to those frames | 767 ms | **159 ms** |
+| p99.9 frame time | 16.70 ms | **9.40 ms** |
+| worst blocking GL call | **120.3 ms** | **7.3 ms** |
+| shader links after hand-over | 94 of 146 | 65 of 174 |
+
+The mechanism line is the last but one: a single synchronous GL call blocking
+the main thread went from **120.3 ms to 7.3 ms**. That is the pause, gone.
+
+## The warm-up does not lengthen the ride
+
+| | measured |
+|---|---|
+| park built at | 5.6 s |
+| **warm-up finished at** | **5.7 s** |
+| ride length | 20 s |
+| frames it took work on | 10 |
+| total time spent compiling | 77.2 ms |
+| **worst single `compile()` call** | **3.7 ms** (budget 8 ms) |
+| slices left over at hand-over | 0 |
+
+So it finishes inside the *first third* of the ride with ~14 s to spare, and no
+single slice came close to overrunning a frame. The ride's own frame profile did
+not get worse (6 spikes vs 7; 1067 ms lost vs 1291 ms). **The ride's big spikes
+are pre-existing and are not this**: they are `new Game(...)`, the 442 ms
+synchronous `World` constructor that `main.ts` already documents.
+
+The "bus idles at the gate" safety net now covers warm-up too, via **one**
+definition — `JourneyDirector.parkFitToPlay` (built **and** warmed), read by
+both `readyToHandOver` and `overrunning`, so they cannot drift apart. It never
+fires today; it is a guard, not a mechanism in use.
+
+## What is left, and it is honest
+
+**65 links still happen after hand-over.** The warm-up did not catch them, and
+the remaining two 75–83 ms frames are presumably them. Two known reasons:
+
+1. **`compile()` does not prepare shadow-pass depth materials.** The shadow pass
+   draws with its own `MeshDepthMaterial`/VSM variants, compiled when the shadow
+   map first draws them.
+2. **Materials that do not exist yet at warm-up time** — `floorFade` clones a
+   material per floor, highlight shells, speech bubbles, foliage-fade
+   look-alikes.
+
+Total links went *up* (146 → 174) because the warm-up compiles things a 170 s
+walk never reaches. That is the intended trade and it is paid behind the bus.
+
+**Next lever if the residue matters**: warm the shadow materials too, by
+rendering one throwaway shadow-map frame during the ride.
+
+## The standing measurement
+
+`npm run check:frame-time` (+ `scripts/frame-time-probe.js`). Asserts the
+**tail**, not the mean: p99.9 against two refresh intervals *derived from the
+run's own measured p50*, zero frames over 100 ms, and no single blocking GL call
+over 25 ms.
+
+**Deliberately not part of `npm run build`** — it drives a real browser against a
+real GPU for minutes, and CI has neither; wiring it in would make it fail always
+or be skipped always, and a check that is quietly skipped is worse than none.
+
+**Proven red before trusted green**, per CLAUDE.md, using the two real captures:
+
+```
+FRAMES_JSON=<baseline capture> npm run check:frame-time   -> RED_EXIT=1
+FRAMES_JSON=<fixed capture>    npm run check:frame-time   -> GREEN_EXIT=0
+```
+
+and the red message carries real numbers, not `NaN`:
+
+```
+- 4 frame(s) over 100 ms during play: 167, 159, 267, 100 ms
+- a single getProgramInfoLog call blocked the main thread for 120.3 ms (limit 25 ms)
+```
+
+Note `FRAMES_JSON` exists precisely so the thresholds can be re-proved against a
+recorded capture without a four-minute browser run.
+
+## Deliberately not done — Jim's call, written up as a GitHub issue
+
+The shadow pass at 57% of draw calls, and 3.64 M triangles against a documented
+400 k budget. Both change how the park looks. The issue also carries the two
+documentation corrections and the allocation figures (191 MB/s, 1.6 MB/frame).

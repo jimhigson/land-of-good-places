@@ -331,14 +331,24 @@ if (ridden.route === plain.route && ridden.chute === plain.chute) {
     fouls.push('the ride hands over before the World has been built');
   }
 
-  // And now the park itself exists.
+  // And now the park itself exists — but its shaders are not compiled yet, so
+  // hand-over still waits. See `boot/shaderWarmup.ts`: handing over here gives
+  // a park that stutters through its first seconds of play, which is the same
+  // promise broken as handing over a half-built one.
   director.noteParkReady();
   if (!director.skipOffered) fouls.push('the skip is never offered even once the park exists');
-  if (!director.readyToHandOver) fouls.push('the park exists and the ride still will not hand over');
+  if (director.readyToHandOver) {
+    fouls.push('the ride hands over before the park\'s shaders have been warmed');
+  }
+  director.noteWarmupReady();
+  if (!director.readyToHandOver) {
+    fouls.push('the park exists and is warmed, and the ride still will not hand over');
+  }
   said.push(
     'the World is withheld until generation finishes, and the skip until the World exists — ' +
       'checked in both directions',
   );
+  said.push('hand-over additionally waits for the shader warm-up, checked in both directions');
 }
 
 for (const line of said) console.log(`  ${line}`);
