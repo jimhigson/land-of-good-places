@@ -5,7 +5,34 @@ Scope set by Jim: build the hotel to delivery; fold in #241 (the hotel
 needs the space); every hotel room its OWN disjoint space; all new hotel
 art Blender-authored by an Opus artist agent (done — HANDOFF-hotel-art.md).
 
-## State: DELIVERED — PR #247 open, reviewer dispatched
+## State: PR #247 open — hotel COMPLETE, two sweep seeds red, robustness pass needed
+
+**Current truth (end of 7 Aug session):** the hotel itself is finished,
+browser-QA'd, themed, alive, fast (cruiser solve 31 s -> 1.1 s), with all
+of Jim's live feedback generalised into owned rules (one crowd; placement
+registers solidity; rooms declare windows; interiors off the sky's clock;
+all assets face the camera; every ride exit kept clear by one list). The
+canonical park + seeds 3, 11, 18 are fully green.
+
+**Red, and why:** seed 2 (cruiser's low corridor clips the train fence at
+one rim point — check whether the escalated re-solve's route is what the
+train's low-corridor discs sampled) and seed 5 (slide's best route 80.7 m
+vs the 75 m rideable ceiling). Worse finding: auditioning replacement
+sweep seeds (3, 7, 9, 13, 14, 21) found only seed 3 builds at all — the
+day's accumulated constraints (station low-window, exit margins, rail
+avoidances, pit relation now 24-26.5) have made the generator brittle
+across arbitrary seeds. THE NEXT MOVE IS A ROBUSTNESS PASS, not another
+knob: give each hard constraint an escalation valve like the cruiser's
+castle-weight retry, re-widen the relations, and sweep MANY seeds (the
+rail-race sweep.sh pattern) measuring solve-rate as the metric. Consider
+whether sweep seeds 2/5 should be swapped per CLAUDE.md's own escape
+valve once solve-rate is healthy — not before, or the swap hides the
+brittleness.
+
+Coordination: the staged-procgen/loading-screen agent overlaps every
+solver file; land or rebase around them deliberately.
+
+## Earlier delivered state
 
 PR: https://github.com/jimhigson/land-of-good-places/pull/247
 npm run build EXIT 0 (full battery) · test:procgen green all seeds ·
