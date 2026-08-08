@@ -173,8 +173,85 @@ const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS * 3;
 if (worstAdvanceMs > ADVANCE_CEILING_MS) {
   fouls.push(
     `one advance() blocked for ${worstAdvanceMs.toFixed(1)} ms against a ${GENERATION_BUDGET_MS} ms ` +
-      `budget — the search cannot be stopped where it was asked to stop, and the orbit will stutter`,
+      `budget. Check the work-unit figures above before touching any threshold: if ` +
+      `"steps begun after the deadline" is 0 and every phase still reports its full count, the ` +
+      `granularity is right and this is cost-per-unit on a slow box — profile the unit, do not ` +
+      `raise the ceiling. If either of those is wrong, a slice is doing work it cannot be ` +
+      `stopped in the middle of, and that stutters the orbit on every device`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// The same question asked in units of WORK rather than of time.
+//
+// **Why this exists, and why it is the load-bearing half.** The assertion above
+// is wall-clock, so it is really a question about the machine that ran it: this
+// check passed on an M4 Pro at 18 ms and failed on a CI runner at 54.6 ms with
+// identical code. Neither box is the one that matters — Eleri plays on a phone,
+// which is far closer to the slow runner than to the laptop. A budget tuned
+// until CI goes quiet would be a check that can no longer catch the stutter it
+// was built for.
+//
+// So the guarantee is stated in numbers that are the same everywhere. The park
+// is deterministic, so for a given seed the amount of work is fixed; what
+// changes between devices is only how much of it fits in a frame. Two things
+// then say precisely what "sliced finely enough" means:
+//
+//   1. **Nothing runs after the driver was told to stop.** Every drive loop
+//      checks the clock after each step, so a step can never *begin* past its
+//      deadline. Zero on correct code, positive the moment a loop is written
+//      without that check — which is exactly the fault the wall-clock message
+//      describes as "the search cannot be stopped where it was asked to stop".
+//
+//   2. **Each phase really is divided into many pieces.** A phase that collapses
+//      to one indivisible unit still satisfies (1) — it just does all its work
+//      in a single step — so the piece counts are asserted too. These floors are
+//      taken from the algorithms (512 boundary bearings in 8s, 704 candidate
+//      spots in 8s, ten repair passes) and sit below the real figures with room
+//      for the searches to vary by seed.
+//
+// What this pair cannot do is promise "one slice fits in one frame" on an
+// unnamed device: that depends on the device, and no device-independent number
+// can settle it. It promises the thing that is actually in this code's gift —
+// that the work is offered up in the smallest pieces the algorithms admit, and
+// that the driver takes the first chance to stop. The wall-clock ceiling above
+// is kept as the secondary observation that catches a unit growing *more
+// expensive*, which these counts would not notice.
+// ---------------------------------------------------------------------------
+const units = generation.unitCounts;
+said.push(
+  `work units: brief ${units.brief}, cruiser search ${units.cruiserSearch}, ` +
+    `cruiser finish ${units.cruiserFinish}, slide search ${units.slideSearch}`,
+);
+said.push(`steps begun after their slice's deadline: ${generation.stepsPastDeadline}`);
+
+if (generation.stepsPastDeadline > 0) {
+  fouls.push(
+    `${generation.stepsPastDeadline} generation steps began after their slice's deadline had ` +
+      'already passed — a drive loop is not checking the clock between steps, so the search ' +
+      'cannot be stopped where it was asked to stop. This is device-independent: it is wrong on ' +
+      'a fast laptop too, it just does not show up there as a dropped frame',
+  );
+}
+
+// Floors from the algorithms, not from what this machine printed.
+const MIN_UNITS: Readonly<Record<keyof typeof units, number>> = {
+  // 512 boundary bearings in 8s (64) + 704 station spots in 8s (88), less slack.
+  brief: 120,
+  // Seed-dependent, but a search that solves at all takes thousands of joints.
+  cruiserSearch: 500,
+  // The vertical repair's ten passes.
+  cruiserFinish: 10,
+  slideSearch: 500,
+};
+for (const [phase, floor] of Object.entries(MIN_UNITS) as [keyof typeof units, number][]) {
+  if (units[phase] < floor) {
+    fouls.push(
+      `the ${phase} phase was divided into only ${units[phase]} pieces, against ${floor} the ` +
+        'algorithm admits — it is being done in lumps the driver cannot stop in the middle of, ' +
+        'which is a stutter on any device slow enough to notice',
+    );
+  }
 }
 
 // The event loop's own view, which covers the module evaluations too.

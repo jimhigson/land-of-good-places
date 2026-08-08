@@ -3,6 +3,7 @@ import {
   type CoasterBriefs,
   CoasterRoute,
   type CoasterRouteOptions,
+  coasterProfileSearch,
   coasterRouteBriefSearch,
 } from './route';
 import type { SolvedRailRoute } from '../rail/generate';
@@ -219,8 +220,33 @@ export function* cruiserStartSearch(): Generator<number, CruiserSearchStart, voi
  * ~10 ms, so it runs in one slice; it was never the expensive half.
  */
 export function finishCruiserPlan(solved: SolvedRailRoute, rng: Rng): PlannedCoaster {
+  const search = finishCruiserPlanSearch(solved, rng);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * {@link finishCruiserPlan}, a repair pass at a time.
+ *
+ * **This is the block CI actually failed on.** As one call it measured 18.9 ms
+ * on an M4 Pro and 54.6 ms on CI's hardware, against a 24 ms ceiling — the
+ * vertical repair rebuilds the whole curve ten times and never converged early,
+ * with no yield anywhere inside it. `coasterProfileSearch` yields per pass.
+ *
+ * `planExit` stays un-sliced deliberately: it is a bounded ring search that
+ * measured well under a millisecond, and slicing work that already fits buys
+ * nothing but places for a bug to hide.
+ */
+export function* finishCruiserPlanSearch(
+  solved: SolvedRailRoute,
+  rng: Rng,
+): Generator<number, PlannedCoaster, void> {
   const options = cruiserOptions();
-  const route = new CoasterRoute(options, { plan: solved, rng });
+  const stall = placedEntry(CRUISER_SEED.stationStallId);
+  const profile = yield* coasterProfileSearch(solved, rng, stall);
+  const route = new CoasterRoute(options, { plan: solved, rng, profile });
   const { exitX, exitZ } = planExit(route, CRUISER_SEED.stationStallId);
   return {
     name: CRUISER_SEED.name,

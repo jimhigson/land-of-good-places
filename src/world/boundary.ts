@@ -96,8 +96,48 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
  * {@link GENTLE_CURVATURE_RADIUS}, which every caller's few metres does.
  */
 export function insetBoundary(boundary: ParkBoundary, inset: number): ParkBoundary {
+  const search = insetBoundarySearch(boundary, inset);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * Bearings resolved between yields in {@link insetBoundarySearch}.
+ *
+ * 8 of the 512 — 1/64th of the job, ~0.4 ms on an M4 Pro. Deliberately a
+ * fraction of the whole rather than a millisecond count: how long 8 bearings
+ * take is a property of the machine, but "the driver can stop 64 times on the
+ * way through" is a property of this code and true on every device.
+ */
+const INSET_BEARINGS_PER_SLICE = 8;
+
+/**
+ * {@link insetBoundary}, a handful of bearings at a time.
+ *
+ * **Why this one is sliced and the rest of the file is not.** It is 512
+ * bearings times a 24-step binary search, and every probe calls
+ * `distanceToEdge`, which itself scans 512 vertices — about 12,000 of them, for
+ * **~25 ms measured, cold and warm alike**. That made it the single largest
+ * uninterruptible block in the Sky Cruiser's brief, which `boot/parkGeneration.ts`
+ * builds inside one frame of the cat-bus ride. It passed on a fast laptop and
+ * failed in CI, which is the signature of a unit of work that is too big rather
+ * than a budget that is too small.
+ *
+ * The straight-through {@link insetBoundary} above is a thin driver over this,
+ * so there is one algorithm and two cadences — the same relationship
+ * `solveRailRoute` has with `railRouteSearch`. Suspending cannot move the
+ * result: every piece of state is a local, and there is no randomness here at
+ * all.
+ */
+export function* insetBoundarySearch(
+  boundary: ParkBoundary,
+  inset: number,
+): Generator<number, ParkBoundary, void> {
   const radii: number[] = [];
   for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
+    if (i > 0 && i % INSET_BEARINGS_PER_SLICE === 0) yield i;
     const angle = (i / PROFILE_SAMPLES) * TAU;
     const dirX = Math.cos(angle);
     const dirZ = Math.sin(angle);
