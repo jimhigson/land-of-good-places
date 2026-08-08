@@ -393,6 +393,15 @@ check(
   kids.length === ARRIVAL_KID_COUNT,
   `the park built ${kids.length} children for the bus, expected ${ARRIVAL_KID_COUNT}`,
 );
+
+// The whole cast as the built world defines it — park children AND the
+// hotel's residents, who live in `npcs.all` too since the Land Hotel merge.
+// Captured here, before the arrival plays, so the disposal assertion below
+// measures "nobody the world built has gone" rather than repeating a
+// hand-counted 24 that goes stale every time the population rule changes
+// (it already did once: NPC_COUNT is density-derived now, and the residents
+// made a literal 24 wrong the day the hotel landed).
+const populationAtStart = world.npcs.all.length;
 check(
   kids.every((kid) => kid.scripted),
   'not every bus passenger was handed to the arrival — some are wandering the park while their bus arrives',
@@ -586,8 +595,9 @@ check(
 // half-minute after the bus drove away.
 const stillInTheWorld = world.npcs.all.length;
 check(
-  stillInTheWorld === 24,
-  `the park has ${stillInTheWorld} children ${AFTERWARDS_SECONDS} s after the arrival, expected 24 — somebody was disposed of`,
+  stillInTheWorld === populationAtStart,
+  `the park has ${stillInTheWorld} children ${AFTERWARDS_SECONDS} s after the arrival, ` +
+    `but the built world started with ${populationAtStart} — somebody was disposed of`,
 );
 // **Is anything actually being DRAWN where each of them is?**
 //
@@ -652,10 +662,24 @@ for (let extra = 0; extra < Math.ceil(10 / DT); extra += 1) {
 const movedAfterwards = kids.filter(
   (kid, index) => kid.position.distanceTo(restingPlaces[index]!) > 0.5,
 ).length;
+// "Alive" is moved OR legitimately engaged, not moved alone. Since the Land
+// Hotel merge the park's train station can stand near the gate (#241 spreads
+// the attractions), and measured on the merged park five of the eleven
+// arrivals walked straight over and queued for the train — `trainTrip` busy,
+// stood honestly still on the platform. That is the wander system working,
+// not a child who was never handed back. A disposed or frozen proxy has no
+// busy activity and no displacement, so the original disease is still caught.
+const busyAfterwards = kids.filter((kid, index) => {
+  if (kid.position.distanceTo(restingPlaces[index]!) > 0.5) return false;
+  const activities = (kid.driver as never as { activities?: { busy?: boolean }[] }).activities;
+  return (activities ?? []).some((activity) => activity.busy === true);
+}).length;
+const aliveAfterwards = movedAfterwards + busyAfterwards;
 check(
-  movedAfterwards >= ARRIVAL_KID_COUNT - 3,
-  `only ${movedAfterwards} of ${ARRIVAL_KID_COUNT} bus children moved at all in the 10 s after that — ` +
-    'they are present but not alive; the hand-back to the wander driver did not take',
+  aliveAfterwards >= ARRIVAL_KID_COUNT - 3,
+  `only ${movedAfterwards} of ${ARRIVAL_KID_COUNT} bus children moved in the 10 s after that, and ` +
+    `only ${busyAfterwards} more were busy with an activity — the rest are present but not alive; ` +
+    'the hand-back to the wander driver did not take',
 );
 
 // --- 3. they got off at genuinely different times -------------------------
@@ -1039,7 +1063,7 @@ notes.push(
 notes.push(`closest two children ever got: ${closestPairEver.toFixed(2)} m (needs ${REQUIRED_CLEARANCE.toFixed(2)})`);
 notes.push(`walking speed ${slowest.toFixed(2)}-${fastest.toFixed(2)} m/s against the park's ${NPC_WALK_SPEED}`);
 notes.push(`controls at ${ARRIVAL_CONTROL_AT.toFixed(1)} s, whole arrival ${ARRIVAL_DURATION.toFixed(1)} s`);
-notes.push(`${stillInTheWorld} children in the park ${AFTERWARDS_SECONDS} s later; ${movedAfterwards} of the ${ARRIVAL_KID_COUNT} arrivals still walking about`);
+notes.push(`${stillInTheWorld} children in the park ${AFTERWARDS_SECONDS} s later; ${movedAfterwards} of the ${ARRIVAL_KID_COUNT} arrivals walking about, ${busyAfterwards} more busy with an activity (the train, usually)`);
 notes.push(`bus is ${TALLEST_CHILD_HEIGHT.toFixed(2)} m child-friendly; seat plan from CHILD_FOOTPRINT ${CHILD_FOOTPRINT} m`);
 
 for (const note of notes) console.log(`  ${note}`);
