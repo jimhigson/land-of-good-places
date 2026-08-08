@@ -1,5 +1,7 @@
 import type { SolvedRailRoute } from '../world/rail/generate';
 import { railRouteSearch, RailRouteUnsolvable } from '../world/rail/generate';
+import type { CoasterBriefs } from '../world/coaster/route';
+import { offerPrewarmedCruiser } from '../world/coaster/prewarm';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
 
 /**
@@ -30,13 +32,25 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
  * on separate frames. Dynamic `import()` gives that for free — the module
  * evaluation that runs the top-level `const` happens when the promise settles,
  * and settling returns to the event loop, so one import is one frame.
- * {@link ORDERED_MODULES} is that list, in dependency order.
+ * {@link MODULES_BEFORE_CRUISER} and {@link MODULES_AFTER_CRUISER} are those
+ * lists, in dependency order.
  *
- * **The slide is not**, at 3.46 s, and no import boundary will help. It is one
- * `solveRailRoute` call, so it is sliced from the inside: `railRouteSearch`
- * suspends at every joint (~35 us of work), and {@link advance} runs it until a
- * millisecond budget is spent. That is the "many small tasks" half of the ask,
- * and it is the only part of the park that needed inventing anything.
+ * **Two of them are not small**, and no import boundary helps either: each is
+ * one `solveRailRoute` call. They are sliced from the inside instead —
+ * `railRouteSearch` suspends at every joint (~35 us of work), and {@link advance}
+ * runs it until a millisecond budget is spent. That is the "many small tasks"
+ * half of the ask, and it is the only part of the park that needed inventing
+ * anything.
+ *
+ * - **the ginormous slide**, at ~3.46 s;
+ * - **the Sky Cruiser**, at ~1.3 s, sliced second (#252) once the cost stopped
+ *   being billed to the train that merely imports it — see
+ *   {@link MODULES_AFTER_CRUISER}.
+ *
+ * The two sit either side of the module list rather than together, because
+ * `train/plan.ts` and everything after it read `COASTER_PLANS`: the cruiser has
+ * to be in its letterbox before the first module that imports it is evaluated,
+ * or the const it feeds has already initialised the slow way.
  *
  * ## Why this class has no DOM, no `Game` and no renderer in it
  *
@@ -74,27 +88,49 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
 export const GENERATION_BUDGET_MS = 8;
 
 /**
- * The park's solved artefacts, in the order one depends on the next.
+ * The ground the Sky Cruiser measures itself against, before it is solved.
  *
- * Each entry is a module whose top-level `const` solves something: the boundary
- * (~43 ms), the layout (~3), the train (~44), the Sky Cruiser (~37), the rail
- * race (~13). Importing them one per frame is what turns a ~140 ms block into
- * five frames nobody notices.
+ * The boundary (~55 ms) and the layout (~9 ms). Each is one module whose
+ * top-level `const` solves something, and importing them one per frame is what
+ * turns one block into two frames nobody notices.
  *
- * **The order matters and the list does not have to be complete.** It matters
- * because a module that is imported already-solved costs nothing, so getting
- * the order wrong just means one frame does two solves. It does not have to be
- * complete because `main.ts` imports `Game` at the end regardless, which pulls
- * in anything missed — so the failure mode of this list falling out of date as
- * the park grows is *a slightly lumpier boot*, never a wrong or half-built
- * park. That is the safe direction, and it is why this is allowed to be a
- * hand-kept list at all.
+ * They are listed separately from {@link MODULES_AFTER_CRUISER} rather than
+ * being pulled in transitively by `coaster/solve` — which imports both — because
+ * a single import settling would evaluate all three in **one** block. Naming
+ * them here is what buys them a frame each.
  */
-const ORDERED_MODULES: readonly (() => Promise<unknown>)[] = [
+const MODULES_BEFORE_CRUISER: readonly (() => Promise<unknown>)[] = [
   () => import('../world/boundary'),
   () => import('../world/parkLayout'),
+];
+
+/**
+ * The park's remaining solved artefacts, in the order one depends on the next.
+ *
+ * The train (~157 ms of its own) and the rail race (~13 ms). **Both are after
+ * the cruiser, and that ordering is the fix for a real bug rather than a
+ * tidy-up.**
+ *
+ * `train/plan.ts` imports `COASTER_PLANS`, and this list used to load
+ * `train/plan` *first* — so the cruiser's entire ~1.3 s solve was evaluated
+ * inside the train's import and billed to the train's frame. Measured in that
+ * order: `train/plan` 1439.6 ms, `coaster/plan` **0.3 ms**. Issue #252 read that
+ * number off this list and went after the train's search, which could not have
+ * fixed it: with PR #253's train fix applied the worst block moved 1354 ms to
+ * 1300 ms against a 250 ms ceiling, because ~1288 ms of it was never the train.
+ *
+ * A module whose measured cost is really its dependency's is a measurement that
+ * lies in the most expensive way — it sends the next person to the wrong file.
+ * Solving the cruiser above means each of these is now billed for its own work.
+ *
+ * **The list does not have to be complete.** `main.ts` imports `Game` at the end
+ * regardless, which pulls in anything missed — so the failure mode of this list
+ * falling out of date as the park grows is *a slightly lumpier boot*, never a
+ * wrong or half-built park. That is the safe direction, and it is why this is
+ * allowed to be a hand-kept list at all.
+ */
+const MODULES_AFTER_CRUISER: readonly (() => Promise<unknown>)[] = [
   () => import('../world/train/plan'),
-  () => import('../world/coaster/plan'),
   () => import('../world/railRace/plan'),
 ];
 
@@ -102,6 +138,7 @@ const ORDERED_MODULES: readonly (() => Promise<unknown>)[] = [
 export type GenerationStage =
   | 'waiting'
   | 'measuring out the park'
+  | 'flying the sky cruiser'
   | 'shaping the ginormous slide'
   | 'joining up the paths'
   | 'ready';
@@ -116,8 +153,25 @@ export type GenerationStage =
  */
 export class ParkGeneration {
   private moduleIndex = 0;
+  private afterIndex = 0;
   private importInFlight = false;
   private search: Generator<number, SolvedRailRoute, void> | null = null;
+
+  /** The cruiser's how-module, once loaded. Holds no solved route itself. */
+  private cruiserModule: typeof import('../world/coaster/solve') | null = null;
+  private cruiserBriefs: CoasterBriefs | null = null;
+  private cruiserSearch: Generator<number, SolvedRailRoute, void> | null = null;
+  /**
+   * Whether the harder-pulling retry is the one being searched.
+   *
+   * The straight-through path solves the first brief, and re-solves with twice
+   * the castle influence if the loop it got never crossed the castle. This walks
+   * the same two steps in the same order — one policy, two cadences, exactly as
+   * the slide's length ladder is walked by both `planSlide()` and this class.
+   */
+  private cruiserEscalated = false;
+  private cruiserSolved = false;
+  private cruiserAttemptsSeen = 0;
 
   /**
    * Which rung of `DESIRED_LENGTH_LADDER` the sliced search is on. The hotel
@@ -161,7 +215,8 @@ export class ParkGeneration {
   get stage(): GenerationStage {
     if (this.pathsDone) return 'ready';
     if (this.slideSolved) return 'joining up the paths';
-    if (this.moduleIndex >= ORDERED_MODULES.length) return 'shaping the ginormous slide';
+    if (this.cruiserSolved) return 'shaping the ginormous slide';
+    if (this.moduleIndex >= MODULES_BEFORE_CRUISER.length) return 'flying the sky cruiser';
     if (this.moduleIndex > 0 || this.importInFlight) return 'measuring out the park';
     return 'waiting';
   }
@@ -176,6 +231,11 @@ export class ParkGeneration {
     return this.attemptsSeen;
   }
 
+  /** How many of the Sky Cruiser search's attempts have been started. */
+  get cruiserAttempts(): number {
+    return this.cruiserAttemptsSeen;
+  }
+
   /**
    * Generate for up to `budgetMs`, then get out of the way.
    *
@@ -185,12 +245,41 @@ export class ParkGeneration {
   advance(budgetMs: number): void {
     if (this.pathsDone || this.failure || this.importInFlight) return;
 
-    // The small solves: one module, one frame.
-    const next = ORDERED_MODULES[this.moduleIndex];
-    if (next) {
+    // The ground the cruiser is measured against: one module, one frame.
+    const before = MODULES_BEFORE_CRUISER[this.moduleIndex];
+    if (before) {
       this.moduleIndex += 1;
       this.workingFrames += 1;
-      this.runImport(next());
+      this.runImport(before());
+      return;
+    }
+
+    // The cruiser's own how-module. Nothing in it solves at module scope —
+    // that is the whole point of the `solve.ts`/`plan.ts` split.
+    if (!this.cruiserModule) {
+      this.workingFrames += 1;
+      this.runImport(
+        import('../world/coaster/solve').then((module) => {
+          this.cruiserModule = module;
+        }),
+      );
+      return;
+    }
+
+    // The ~1.3 s, in eight-millisecond pieces. Everything below imports
+    // `COASTER_PLANS` sooner or later, so this has to finish first or the
+    // letterbox is read after the const it feeds has already initialised.
+    if (!this.cruiserSolved) {
+      this.advanceCruiser(this.cruiserModule, budgetMs);
+      return;
+    }
+
+    // The small solves that depend on the cruiser: one module, one frame.
+    const after = MODULES_AFTER_CRUISER[this.afterIndex];
+    if (after) {
+      this.afterIndex += 1;
+      this.workingFrames += 1;
+      this.runImport(after());
       return;
     }
 
@@ -220,6 +309,60 @@ export class ParkGeneration {
         this.pathsDone = true;
       }),
     );
+  }
+
+  /**
+   * Runs the Sky Cruiser's search until the budget is gone.
+   *
+   * The same driver as {@link advanceSlide} over the same generator, and the
+   * same argument for why the cadence cannot move the route: the search's whole
+   * state is generator locals, so suspending it cannot reorder an `Rng` draw
+   * (`rail/generate.ts`). `check:park-boot` proves it rather than asserting it,
+   * by hashing this loop against a straight-through `planCruiser()`.
+   *
+   * A `RailRouteUnsolvable` is **not** caught, unlike the slide's per-rung
+   * throw. The straight-through path does not catch it either — it comes out of
+   * `COASTER_PLANS`'s initialiser and `check:cruiser-solves` is what reports it —
+   * so swallowing it here would make the two cadences disagree about what a
+   * park that cannot be built looks like. It becomes `failed`, nothing is
+   * offered to the letterbox, and `COASTER_PLANS` re-solves and throws in
+   * exactly the place and shape it always did.
+   */
+  private advanceCruiser(
+    solve: typeof import('../world/coaster/solve'),
+    budgetMs: number,
+  ): void {
+    this.workingFrames += 1;
+    // Built once, on the frame the search starts — the briefs are pure but
+    // `stationPoses()` is not free.
+    const briefs = (this.cruiserBriefs ??= solve.cruiserBriefs());
+    const search = (this.cruiserSearch ??= railRouteSearch(
+      this.cruiserEscalated ? briefs.escalated : briefs.first,
+    ));
+
+    const deadline = performance.now() + budgetMs;
+    try {
+      for (;;) {
+        const step = search.next();
+        if (step.done) {
+          // **The same verdict, in the same order, as the constructor's**:
+          // a loop that never crossed the castle earns one re-solve at twice
+          // the influence, and whatever the second search returns is taken.
+          if (!this.cruiserEscalated && !step.value.report.satisfied) {
+            this.cruiserEscalated = true;
+            this.cruiserSearch = null;
+            return;
+          }
+          offerPrewarmedCruiser(solve.finishCruiserPlan(step.value));
+          this.cruiserSolved = true;
+          return;
+        }
+        this.cruiserAttemptsSeen = step.value;
+        if (performance.now() >= deadline) return;
+      }
+    } catch (error) {
+      this.failure = error instanceof Error ? error : new Error(String(error));
+    }
   }
 
   /**

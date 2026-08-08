@@ -582,100 +582,31 @@ export class CoasterRoute {
 
   private readonly scratch = new Vector3();
 
-  constructor(options: CoasterRouteOptions) {
+  /**
+   * Builds the loop.
+   *
+   * `presolved` is the plan a driver already searched **a slice at a time** —
+   * `boot/parkGeneration.ts`, spreading the ~1.3 s solve across the cat-bus
+   * ride's frames. Handed one, this skips the search and does only the
+   * finishing work (the height profile, the carves, the vertical repair), which
+   * is the part that was never the expensive half.
+   *
+   * **The briefs are built either way, and that is load-bearing rather than
+   * wasteful.** `stationPoses` draws from `rng`, and `hillPhase` below draws
+   * from it next; skipping the brief on the pre-solved path would leave the
+   * height profile reading a different point in the stream and every hill in
+   * the park would move. Same draws, same order, both cadences.
+   */
+  constructor(options: CoasterRouteOptions, presolved?: SolvedRailRoute) {
     const rng = new Rng(PARK_SEED ^ options.salt);
     const stall = placedEntry(options.stationStallId);
-    const obstacles = tallObstacles();
-    const other = options.avoid ?? null;
-    const boundary =
-      options.outerRadius !== undefined
-        ? circleBoundary(options.outerRadius)
-        : solverBoundary(insetBoundary(PARK_BOUNDARY, RIM_INSET));
-
-    // --- horizontal: the generator solves the plan view --------------------
-    const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
-    const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
-    const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
-      for (const tall of obstacles) {
-        if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
-      }
-      if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
-      if (other) {
-        const nearest = other.nearestPoint(x, z);
-        if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
-      }
-      // The station and its ramps are the one stretch that flies LOW, and the
-      // vertical repair may never lift it (a half-lift tilts the boarding
-      // deck) — so while the track is below cruise height it must only ever
-      // be over open ground: no plot may sit under the ramp. Footprints, not
-      // bounding circles, because the near-relation deliberately parks this
-      // ride's booth beside the castle and the castle's 19 m circle would
-      // reject every pose the relation just arranged. This is what keeps the
-      // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
-      // dodges the published low corridor itself (train/route.ts), because
-      // it solves later and threads intervals — Decision 6's arrow: publish
-      // what you solved, the next system treats it as an obstacle.
-      // The castle is EXEMPT from the low-ground rule: the booth is parked
-      // beside it by the near relation and the ride legally passes through
-      // its walls, so pieces near the station are always near the castle —
-      // holding them to its footprint made the search reject nearly every
-      // early piece and burn its whole restart budget (measured: the solve
-      // went 31 s with the blanket rule, 1.1 s without it; the castle's own
-      // safety is `castleClear`'s crossing-band rule, checked above, plus
-      // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
-      // through the ball pit's balls is what it exists to stop (seed 18).
-      const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
-      if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
-      return true;
-    };
-    const brief: RouteBrief = {
-      // A stream of its own, so changing how many random draws the height
-      // profile takes cannot silently reshape the loop.
-      seed: PARK_SEED ^ options.salt ^ 0x5a17,
-      vocabulary: CRUISER_VOCABULARY,
-      desiredLength: options.desiredLength ?? DESIRED_LENGTH,
-      closed: true,
-      startPoses: stationPoses(options.stationStallId, rng, boundary),
-      clear,
-      boundary,
-      corridorRadius: CORRIDOR_RADIUS,
-      selfClearance: SELF_CLEARANCE,
-      minRadius: PLAN_TURN_RADIUS,
-      // Enough that the cap is never the thing that gives up (Decision 6:
-      // "only bail if backtracking fails for a very large number of tries").
-      //
-      // `stationPoses` offers 210 candidates on the canonical seed and the
-      // search takes index 0, so at 200 this abandoned the last ten for no
-      // reason — and the reason it can afford not to is measured, not hoped:
-      // `npm run measure:solver-budget` times a deliberately unsolvable brief
-      // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
-      // about 0.1 ms each. A successful solve stops at the first start pose
-      // that works, so this costs nothing on a park that works; the whole cost
-      // lands on one that does not, and a park that bails is far worse than a
-      // park that took a fifth of a second longer to decide it could not.
-      budgets: { perJoint: 16, restarts: 2000 },
-      // The family asked that the ride always flies through the castle. The
-      // influence makes that likely at the decision point; the backstop makes
-      // it required. See `CASTLE_INFLUENCE` and `crossesTheCastle`.
-      influences: [CASTLE_INFLUENCE],
-      satisfies: crossesTheCastle,
-    };
-    let plan = solveRailRoute(brief);
-    if (!plan.report.satisfied) {
-      // The escalation valve Decision 7 implies but never built: a weight
-      // makes the castle crossing likely, the backstop makes it required —
-      // and on a seed where the geometry fights (the booth's bearing, the
-      // spread plots), a fixed weight can exhaust every start pose without
-      // one crossing. Rather than raise the weight for every park until the
-      // hardest seed passes (which makes every OTHER park's loop less free —
-      // the cost Decision 7 warns about), the seeds that need more pull are
-      // the only ones that pay for it: one re-solve, twice the weight.
-      plan = solveRailRoute({
-        ...brief,
-        seed: brief.seed ^ 0xe5ca,
-        influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
-      });
-    }
+    const briefs = coasterRouteBriefs(options, rng);
+    // Two cadences over one policy, exactly as the ginormous slide runs its
+    // length ladder in both `planSlide()` and `ParkGeneration`: the *briefs*
+    // have one owner (below), and each cadence writes only its own loop over
+    // them. `report.satisfied` is the single verdict both consult.
+    let plan = presolved ?? solveRailRoute(briefs.first);
+    if (!presolved && !plan.report.satisfied) plan = solveRailRoute(briefs.escalated);
     this.plan = plan;
 
     const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));
@@ -921,6 +852,128 @@ export class CoasterRoute {
     }
     return best;
   }
+}
+
+/** The Sky Cruiser's search brief, and the harder-pulling retry behind it. */
+export interface CoasterBriefs {
+  /** What the loop is asked for first. */
+  readonly first: RouteBrief;
+  /** Twice the castle pull, its own stream — tried only if `first` fell short. */
+  readonly escalated: RouteBrief;
+}
+
+/**
+ * **What the Sky Cruiser's search is asked, in one place, for both cadences.**
+ *
+ * Split out of the constructor so that something which is *not* the module
+ * owning `COASTER_PLANS` can build the brief and drive the search a slice at a
+ * time — importing that module is precisely what runs the ~1.3 s solve, so the
+ * loading screen could not otherwise get at the brief without paying for the
+ * thing it is trying to spread out. The same split, for the same reason, as
+ * `slide/solve.ts`'s `slideRouteBriefAt`; see `coaster/prewarm.ts` for why the
+ * cruiser turned out to need it too.
+ *
+ * **`rng` is a parameter rather than a local so the two callers can differ in
+ * the one way that matters.** `CoasterRoute` passes its own, because
+ * `stationPoses` draws from it and the height profile draws next; the
+ * pre-warmer omits it and gets a throwaway seeded identically, because it wants
+ * the poses and not the stream. Either way `stationPoses` is called exactly
+ * once on a freshly seeded `Rng`, so the draw sequence is the same sequence.
+ */
+export function coasterRouteBriefs(
+  options: CoasterRouteOptions,
+  rng: Rng = new Rng(PARK_SEED ^ options.salt),
+): CoasterBriefs {
+  const obstacles = tallObstacles();
+  const other = options.avoid ?? null;
+  const boundary =
+    options.outerRadius !== undefined
+      ? circleBoundary(options.outerRadius)
+      : solverBoundary(insetBoundary(PARK_BOUNDARY, RIM_INSET));
+
+  // --- horizontal: the generator solves the plan view --------------------
+  const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
+  const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
+  const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
+    for (const tall of obstacles) {
+      if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
+    }
+    if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
+    if (other) {
+      const nearest = other.nearestPoint(x, z);
+      if (Math.hypot(nearest.x - x, nearest.z - z) < 5 + radius) return false;
+    }
+    // The station and its ramps are the one stretch that flies LOW, and the
+    // vertical repair may never lift it (a half-lift tilts the boarding
+    // deck) — so while the track is below cruise height it must only ever
+    // be over open ground: no plot may sit under the ramp. Footprints, not
+    // bounding circles, because the near-relation deliberately parks this
+    // ride's booth beside the castle and the castle's 19 m circle would
+    // reject every pose the relation just arranged. This is what keeps the
+    // ramp out of the ball pit's balls and everyone's roofs; the TRAIN
+    // dodges the published low corridor itself (train/route.ts), because
+    // it solves later and threads intervals — Decision 6's arrow: publish
+    // what you solved, the next system treats it as an obstacle.
+    // The castle is EXEMPT from the low-ground rule: the booth is parked
+    // beside it by the near relation and the ride legally passes through
+    // its walls, so pieces near the station are always near the castle —
+    // holding them to its footprint made the search reject nearly every
+    // early piece and burn its whole restart budget (measured: the solve
+    // went 31 s with the blanket rule, 1.1 s without it; the castle's own
+    // safety is `castleClear`'s crossing-band rule, checked above, plus
+    // the carved pass). Every OTHER plot keeps the rule — a boarding ramp
+    // through the ball pit's balls is what it exists to stop (seed 18).
+    const nearStation = distanceAlong < lowWindow || distanceAlong > wantedLength - lowWindow;
+    if (nearStation && !clearOfFootprints(x, z, radius + 0.6, 'building')) return false;
+    return true;
+  };
+  const brief: RouteBrief = {
+    // A stream of its own, so changing how many random draws the height
+    // profile takes cannot silently reshape the loop.
+    seed: PARK_SEED ^ options.salt ^ 0x5a17,
+    vocabulary: CRUISER_VOCABULARY,
+    desiredLength: options.desiredLength ?? DESIRED_LENGTH,
+    closed: true,
+    startPoses: stationPoses(options.stationStallId, rng, boundary),
+    clear,
+    boundary,
+    corridorRadius: CORRIDOR_RADIUS,
+    selfClearance: SELF_CLEARANCE,
+    minRadius: PLAN_TURN_RADIUS,
+    // Enough that the cap is never the thing that gives up (Decision 6:
+    // "only bail if backtracking fails for a very large number of tries").
+    //
+    // `stationPoses` offers 210 candidates on the canonical seed and the
+    // search takes index 0, so at 200 this abandoned the last ten for no
+    // reason — and the reason it can afford not to is measured, not hoped:
+    // `npm run measure:solver-budget` times a deliberately unsolvable brief
+    // at **24 ms for 200 attempts, 89 ms for 1000 and 483 ms for 5000**,
+    // about 0.1 ms each. A successful solve stops at the first start pose
+    // that works, so this costs nothing on a park that works; the whole cost
+    // lands on one that does not, and a park that bails is far worse than a
+    // park that took a fifth of a second longer to decide it could not.
+    budgets: { perJoint: 16, restarts: 2000 },
+    // The family asked that the ride always flies through the castle. The
+    // influence makes that likely at the decision point; the backstop makes
+    // it required. See `CASTLE_INFLUENCE` and `crossesTheCastle`.
+    influences: [CASTLE_INFLUENCE],
+    satisfies: crossesTheCastle,
+  };
+
+    // The escalation valve Decision 7 implies but never built: a weight
+    // makes the castle crossing likely, the backstop makes it required —
+    // and on a seed where the geometry fights (the booth's bearing, the
+    // spread plots), a fixed weight can exhaust every start pose without
+    // one crossing. Rather than raise the weight for every park until the
+    // hardest seed passes (which makes every OTHER park's loop less free —
+    // the cost Decision 7 warns about), the seeds that need more pull are
+    // the only ones that pay for it: one re-solve, twice the weight.
+  const escalated: RouteBrief = {
+    ...brief,
+    seed: brief.seed ^ 0xe5ca,
+    influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
+  };
+  return { first: brief, escalated };
 }
 
 /**
