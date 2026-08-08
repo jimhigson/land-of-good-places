@@ -1345,6 +1345,101 @@ for (const room of ROOMS) {
   }
 }
 
+// ------------------------- 21. the suite has a bathroom with the manners
+//
+// Jim, 8 Aug 2026: *"Add a bathroom using the models and rules from the
+// bathroom in the other big building."* The castle's rules
+// (`building/Toilets.ts`, from GAME_DESIGN.md): the pan and basin are the
+// shared factories, using one is the two-beat flush-then-wash routine, and a
+// **privacy roof** slides over the room while she is in it and lifts at the
+// wash beat — on before she is out of sight, never able to trap her. The
+// suite's bathroom reuses those exact owners; this probe checks the built
+// result behaves like the castle's:
+//  * the pan and basin are solid (place.ts registered them), the pan
+//    mountable like any low flat-topped prop;
+//  * a bathroom zone exists, offers a real action, and its stand spot is
+//    walkable;
+//  * a player standing in the bathroom is covered by the roof, and the wash
+//    beat lifts it while she is still inside.
+{
+  const bathX = SUITE.originX - 5.2;
+  const bathZ = SUITE.originZ + 2.8;
+  if (deflection(bathX, bathZ) < 0.1) {
+    problems.push('the suite bathroom pan is not solid — a child walks straight through it');
+  }
+  if (deflection(SUITE.originX - 9.7, SUITE.originZ + 2.45) < 0.1) {
+    problems.push('the suite bathroom basin is not solid — a child walks straight through it');
+  }
+  const atopPan = deflectionAt(bathX, 0.75, bathZ);
+  if (atopPan > 0.01) {
+    problems.push(
+      `the suite bathroom pan pushes a child stood on its top ${atopPan.toFixed(2)} m sideways — ` +
+        'solid and standable are fighting (place.ts)',
+    );
+  }
+
+  hotel.attachPlayer(fallenPlayer as never);
+  fallenPlayer.position.set(SUITE.originX - 7.6, 0, SUITE.originZ + 4.8);
+  hotel.adoptRestoredPlayer();
+  const bathroomZone = hotel.interactZones().find((zone) => zone.id === 'hotel-bathroom');
+  if (!bathroomZone) {
+    problems.push('the suite offers no bathroom zone at all — nothing to tap, no routine to run');
+  } else {
+    if ((bathroomZone.actions?.() ?? []).length === 0) {
+      problems.push('the bathroom zone offers no actions — its sign can never appear');
+    }
+    if (
+      bathroomZone.standX !== undefined &&
+      bathroomZone.standZ !== undefined &&
+      deflection(bathroomZone.standX, bathroomZone.standZ) > 0.01
+    ) {
+      problems.push('the bathroom zone asks her to stand inside something solid');
+    }
+
+    // The privacy roof, driven exactly as the game drives it: she stands in
+    // the room, frames pass, the lid covers; the wash beat lifts it while
+    // she is still there (the castle's rule, `building/Toilets.ts`).
+    const suiteShell = hotel.hotelRoot.children.find(
+      (child) => child.name === `hotel:${SUITE.space}`,
+    );
+    let roofGroup: { visible: boolean } | null = null;
+    suiteShell?.traverse((object) => {
+      if (object.name === 'toilet-roof') roofGroup = object;
+    });
+    if (!roofGroup) {
+      problems.push('the suite bathroom has no privacy roof — the castle rule it must honour');
+    } else {
+      const tick = (seconds: number): void => {
+        for (let i = 0; i < Math.ceil(seconds * 60); i += 1) {
+          hotel.update({ dt: 1 / 60, elapsed: i / 60 } as never);
+        }
+      };
+      tick(1.2);
+      if (!(roofGroup as { visible: boolean }).visible) {
+        problems.push(
+          'a child standing in the suite bathroom is not covered by the privacy roof — ' +
+            'the lid must lead her in',
+        );
+      }
+      const useAction = (bathroomZone.actions?.() ?? [])[0];
+      useAction?.run();
+      tick(3.0);
+      if ((roofGroup as { visible: boolean }).visible) {
+        problems.push(
+          'the privacy roof is still down after the wash beat — the lid must lift while she ' +
+            'washes her hands, not trap her',
+        );
+      }
+      // Out of the room: nothing remembered, the roof stays up.
+      fallenPlayer.position.set(SUITE.originX, 0, SUITE.originZ);
+      tick(1.0);
+      if ((roofGroup as { visible: boolean }).visible) {
+        problems.push('the privacy roof stayed on over an empty bathroom');
+      }
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(

@@ -28,6 +28,13 @@ import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
 import type { LiftPanelSource } from '../building/liftRide';
 import { interiorMaterial, softMaterial } from '../building/parts';
+import {
+  buildBasin,
+  buildPan,
+  buildPrivacyRoof,
+  TOILET_APPROACH,
+  ToiletRoutine,
+} from '../building/Toilets';
 import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import { toonMaterial, solid, decal, inkTint } from '../../art/style/materials';
 import {
@@ -108,6 +115,7 @@ import { pressAction, type InteractZone } from '../interact';
 import {
   BREAKFAST,
   clearFloorAround,
+  type ClearRect,
   CORRIDOR,
   DOOR_HALF,
   GARDEN_FLOOR,
@@ -501,6 +509,19 @@ export class Hotel implements GameSystem {
   private readonly diners: { model: CharacterModel; phase: number }[] = [];
   /** The pet asleep in the suite's four-poster — kept so it breathes. */
   private sleepingPet: CreatureHandle | null = null;
+  /**
+   * The suite bathroom: the shared flush-wash-roof behaviour
+   * (`building/Toilets.ts`'s `ToiletRoutine` — the castle's own, imported
+   * rather than copied), the clear-floor rectangle it watches for occupancy,
+   * and where the pan stands (the zone anchors on it). See
+   * {@link dressBathroom}.
+   */
+  private bathroom: {
+    readonly routine: ToiletRoutine;
+    readonly rect: ClearRect;
+    readonly panX: number;
+    readonly panZ: number;
+  } | null = null;
 
   // -------------------------------------------------- the camera moments
   /**
@@ -1064,6 +1085,34 @@ export class Hotel implements GameSystem {
       });
     }
 
+    // The bathroom — the castle's toilets zone, in your own suite. One zone
+    // for the whole two-beat routine (flush, then wash), anchored on the pan
+    // with its stand spot inside the room, so tapping it walks her in and the
+    // privacy roof has already closed over her by the time the flush plays.
+    if (room === SUITE && this.bathroom) {
+      const { routine, panX, panZ } = this.bathroom;
+      zones.push({
+        id: 'hotel-bathroom',
+        label: 'bathroom',
+        x: SUITE.originX + panX,
+        y: 1,
+        z: SUITE.originZ + panZ,
+        pickRadius: 2.4,
+        standX: SUITE.originX + panX,
+        standZ: SUITE.originZ + panZ + 1.1,
+        standRadius: 2.2,
+        verb: 'Use',
+        sign: {
+          title: 'Bathroom',
+          note: 'wash your hands!',
+          glyph: '🚽',
+          accent: PALETTE.markerMint,
+        },
+        actions: () =>
+          routine.busy ? [] : pressAction('Use the toilet!', () => routine.use(), '🚽'),
+      });
+    }
+
     for (const bed of this.beds) {
       if (room !== SUITE) continue;
       zones.push({
@@ -1133,6 +1182,11 @@ export class Hotel implements GameSystem {
     // pets' own idle — no stride, just the body's bob — so a sleeping pet uses
     // the same one line every other pet in the park uses to stand still.
     this.sleepingPet?.setWalkPhase(elapsed * 0.7, 0);
+
+    // The bathroom's flush-wash-roof clock — the same call the castle makes,
+    // every frame, occupancy asked fresh from where she is standing (the roof
+    // must lead her in and can never trap her; `building/Toilets.ts`).
+    this.bathroom?.routine.update(dt, elapsed, this.playerInBathroom());
 
     // Children at breakfast, rocking gently over their cereal. Three lines of
     // motion is the difference between somebody eating and a mannequin.
@@ -3327,6 +3381,7 @@ export class Hotel implements GameSystem {
     shell.add(mat);
 
     this.dressLounge(shell);
+    this.dressBathroom(shell);
 
     const suiteCrystals: readonly number[] = [
       PALETTE.markerPink,
@@ -3543,6 +3598,94 @@ export class Hotel implements GameSystem {
       top: PLANTER_TOP,
       stand: false,
     });
+  }
+
+  /**
+   * The suite's bathroom — Jim, 8 Aug 2026: *"Add a bathroom using the models
+   * and rules from the bathroom in the other big building."*
+   *
+   * The models ARE the castle's: `buildPan`, `buildBasin` and
+   * `buildPrivacyRoof` are imported from `building/Toilets.ts`, and the rules
+   * ride along in the shared `ToiletRoutine` — walk in and the roof slides
+   * over you (on before you are out of sight); use it and the flush plays,
+   * then the tap while you wash (*"good manners are part of the game"*); the
+   * wash beat lifts the roof, and stepping out always clears everything, so
+   * it can never trap her. The one thing the castle's room could not have is
+   * the one thing this room adds: **real solidity** — the castle's collision
+   * is height-blind across decks so its toilet room is open geometry, while
+   * the hotel's fixtures go through `place.ts` like every other prop, solid
+   * and (the pan) mountable.
+   *
+   * The room itself is partition data in `layout.ts` (the z-run at x = −4.2
+   * across the south half, doorway off the hall at −7.6); everything here is
+   * derived from `clearFloorAround` inside it, so the walls own the room and
+   * the fittings follow.
+   */
+  private dressBathroom(shell: Group): void {
+    // Any interior point of the bathroom yields its whole clear floor.
+    const rect = clearFloorAround(SUITE, -7.6, 4.8);
+    const centreX = (rect.minX + rect.maxX) / 2;
+    const centreZ = (rect.minZ + rect.maxZ) / 2;
+
+    // Shiny tiles wall to wall — the castle's "a different sort of place the
+    // moment you catch sight of it" — as the bottom rung of the rug ladder,
+    // fitted to the clear floor like every rug now is, with a soft mat on the
+    // tier above.
+    const tiles = rug(
+      rect.maxX - rect.minX - 2 * RUG_CLEARANCE,
+      rect.maxZ - rect.minZ - 2 * RUG_CLEARANCE,
+      PALETTE.glassTint,
+      PALETTE.blossomWhite,
+    );
+    tiles.position.set(centreX, 0, centreZ);
+    shell.add(tiles);
+    const bathMat = rug(2.2, 1.5, PALETTE.markerMint, PALETTE.blossomWhite, 1);
+    bathMat.position.set(centreX, 0, 4.4);
+    shell.add(bathMat);
+
+    // The pan against the hall wall, east of the doorway, facing the room
+    // (which is also facing the camera); the basin west of the doorway, its
+    // mirror against the same wall. Both derived off the rect, both solid
+    // through `place.ts`: the pan's flat lid is a jumpable top like any low
+    // prop, a basin's bowl is a real height but no floor.
+    const panX = rect.maxX - 0.8;
+    const panZ = rect.minZ + 0.9;
+    const pan = buildPan(0, 0);
+    this.props.place(shell, SUITE, pan.group, { x: panX, z: panZ, radius: 0.45, top: 0.7 });
+    const basin = buildBasin(0, 0);
+    this.props.place(shell, SUITE, basin.group, {
+      x: rect.minX + 1.1,
+      z: rect.minZ + 0.55,
+      radius: 0.4,
+      top: 1.0,
+      stand: false,
+    });
+
+    const roof = buildPrivacyRoof(
+      centreX,
+      centreZ,
+      rect.maxX - rect.minX,
+      rect.maxZ - rect.minZ,
+    );
+    shell.add(roof.group);
+
+    this.bathroom = { routine: new ToiletRoutine(pan, basin, roof), rect, panX, panZ };
+  }
+
+  /** Whether the player is in the suite's bathroom, by the castle's own
+   *  generous-margin rule ({@link TOILET_APPROACH} — the roof has to lead her). */
+  private playerInBathroom(): boolean {
+    const player = this.player;
+    const bathroom = this.bathroom;
+    if (!player || !bathroom || !this.inside) return false;
+    const x = player.position.x - SUITE.originX;
+    const z = player.position.z - SUITE.originZ;
+    return (
+      x >= bathroom.rect.minX - TOILET_APPROACH &&
+      x <= bathroom.rect.maxX + TOILET_APPROACH &&
+      z >= bathroom.rect.minZ - TOILET_APPROACH &&
+      z <= bathroom.rect.maxZ + TOILET_APPROACH
+    );
   }
 
   /**

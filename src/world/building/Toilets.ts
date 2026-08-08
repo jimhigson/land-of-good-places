@@ -54,8 +54,8 @@ import {
  *
  * 1. **It is on before she is out of sight, not after.** A lid that arrives a
  *    beat late reads as a bug rather than as discretion, so the trigger
- *    rectangle reaches {@link APPROACH} metres past the doorway and the fade
- *    takes `BUILDING_FADE_SECONDS` — she crosses the threshold and it has
+ *    rectangle reaches {@link TOILET_APPROACH} metres past the doorway and the
+ *    fade takes `BUILDING_FADE_SECONDS` — she crosses the threshold and it has
  *    already closed over her.
  * 2. **She can never be stuck under it.** `updateRoof` recomputes the target
  *    from her position every frame; nothing latches except `lifted`, and
@@ -68,7 +68,9 @@ import {
 
 /** Seconds: flush, then a beat, then the tap, then everything settles. */
 const FLUSH_AT = 0.05;
-const WASH_AT = 1.5;
+/** When the wash beat lands — exported because the wash beat is also the cue
+ *  that lifts the privacy roof, and `check:hotel` measures exactly that. */
+export const TOILET_WASH_AT = 1.5;
 const ROUTINE_LENGTH = 3.4;
 
 /**
@@ -77,8 +79,11 @@ const ROUTINE_LENGTH = 3.4;
  * Rule 1 above: the lid has to lead her, so it starts closing as she reaches
  * the doorway rather than once she is through it. At a walking pace this is
  * very nearly `BUILDING_FADE_SECONDS` of travel, so the two land together.
+ *
+ * Exported with the fittings: the hotel suite's bathroom answers the same
+ * question with the same margin.
  */
-const APPROACH = 0.9;
+export const TOILET_APPROACH = 0.9;
 
 /**
  * Underside of the lid.
@@ -90,34 +95,37 @@ const APPROACH = 0.9;
  */
 const ROOF_Y = 2.42;
 
-interface PanParts {
+export interface PanParts {
   readonly group: Group;
   /** Hinged at the back, so a rotation on x swings it up like a real one. */
   readonly lid: Group;
   readonly swirl: Mesh;
 }
 
-interface BasinParts {
+export interface BasinParts {
   readonly group: Group;
   readonly stream: Mesh;
 }
 
-interface RoofParts {
+export interface RoofParts {
   readonly group: Group;
   /** Every material the lid is made of, faded together. */
   readonly materials: readonly MeshToonMaterial[];
 }
 
-export class Toilets {
-  readonly deck = TOILET_DECK;
-  /** Interior-local spot a child stands on to use them. */
-  readonly standX = TOILET_STAND_X;
-  readonly standZ = TOILET_STAND_Z;
-
-  private readonly pan: PanParts;
-  private readonly basin: BasinParts;
-  private readonly roof: RoofParts;
-
+/**
+ * The flush-then-wash routine and the privacy roof it drives — **the rules of
+ * a bathroom, separated from the room they were written in.**
+ *
+ * The castle's toilets and the hotel suite's bathroom are the two rooms that
+ * have one, and they must behave identically: use it and the lid flips, the
+ * pan swirls and flushes, then the tap runs while you wash — and the roof
+ * covers whoever is in the room until the wash beat lifts it (see the file
+ * header for the two rules that shape the roof; both are unchanged, this
+ * class is that logic moved verbatim so a second bathroom could share it
+ * rather than copy it).
+ */
+export class ToiletRoutine {
   /** Seconds into the routine, or `null` when nobody is using them. */
   private timer: number | null = null;
   private flushed = false;
@@ -137,6 +145,127 @@ export class Toilets {
 
   /** 0 = fully lifted, 1 = fully covering. */
   private roofAmount = 0;
+
+  constructor(
+    private readonly pan: PanParts,
+    private readonly basin: BasinParts,
+    private readonly roof: RoofParts,
+  ) {
+    this.applyRoof();
+  }
+
+  /** True while the flush-and-wash routine is playing. */
+  get busy(): boolean {
+    return this.timer !== null;
+  }
+
+  /** Use the toilet. Ignored while a routine is already running. */
+  use(): void {
+    if (this.timer !== null) return;
+    this.timer = 0;
+    this.flushed = false;
+    this.washed = false;
+  }
+
+  /**
+   * @param occupied Whether a child is in the room right now. The roof is
+   * driven entirely by this and by the routine's own clock — a question asked
+   * every frame, never a state the sequence sets.
+   */
+  update(dt: number, elapsed: number, occupied: boolean): void {
+    this.updateFittings(dt, elapsed);
+    this.updateRoof(dt, occupied);
+  }
+
+  // -------------------------------------------------------------- internals
+
+  private updateFittings(dt: number, elapsed: number): void {
+    const { lid, swirl } = this.pan;
+    const { stream } = this.basin;
+
+    if (this.timer === null) {
+      lid.rotation.x = Math.min(0, lid.rotation.x + dt * 3);
+      swirl.visible = false;
+      stream.visible = false;
+      return;
+    }
+
+    this.timer += dt;
+
+    if (!this.flushed && this.timer >= FLUSH_AT) {
+      this.flushed = true;
+      playFlush();
+    }
+    if (!this.washed && this.timer >= TOILET_WASH_AT) {
+      this.washed = true;
+      playHandwash();
+    }
+
+    // The lid flips up for the flush and drops back once the washing starts.
+    const lidUp = this.timer > FLUSH_AT && this.timer < TOILET_WASH_AT + 0.4;
+    lid.rotation.x = lidUp
+      ? Math.max(-1.5, lid.rotation.x - dt * 8)
+      : Math.min(0, lid.rotation.x + dt * 4);
+
+    // Water in the pan for the first beat, water at the tap for the second.
+    swirl.visible = this.timer > FLUSH_AT && this.timer < TOILET_WASH_AT;
+    swirl.rotation.y = elapsed * 9;
+    swirl.scale.setScalar(0.85 + Math.sin(elapsed * 14) * 0.12);
+
+    stream.visible = this.timer > TOILET_WASH_AT && this.timer < TOILET_WASH_AT + 1.5;
+    stream.scale.y = 0.85 + Math.sin(elapsed * 22) * 0.15;
+
+    if (this.timer > ROUTINE_LENGTH) this.timer = null;
+  }
+
+  /**
+   * The lid, driven from where she is.
+   *
+   * Runs after `updateFittings`, so the frame the tap starts running is the
+   * same frame the roof begins to lift — the two halves of the joke land
+   * together rather than a beat apart.
+   */
+  private updateRoof(dt: number, occupied: boolean): void {
+    if (occupied) {
+      this.visiting = true;
+      // The wash beat is the cue to lift, and it stays lifted for the rest of
+      // the visit however long she dawdles at the basin afterwards.
+      if (this.timer !== null && this.timer >= TOILET_WASH_AT) this.lifted = true;
+    } else {
+      // Out of the room: nothing is remembered, so however far the sequence
+      // had got, the next visit starts clean and this one ends uncovered.
+      this.visiting = false;
+      this.lifted = false;
+    }
+
+    const target = this.visiting && !this.lifted ? 1 : 0;
+    if (this.roofAmount !== target) {
+      const step = BUILDING_FADE_SECONDS > 0 ? dt / BUILDING_FADE_SECONDS : 1;
+      const delta = target - this.roofAmount;
+      this.roofAmount += Math.sign(delta) * Math.min(Math.abs(delta), step);
+    }
+    // Applied unconditionally, not only while it is moving. The lid may live
+    // in a floor group whose `FloorFader` has claimed its materials and will
+    // write their opacity whenever the deck fades; re-stating ours every
+    // frame costs two number writes and means the two can never disagree.
+    this.applyRoof();
+  }
+
+  private applyRoof(): void {
+    const amount = this.roofAmount;
+    this.roof.group.visible = amount > 0.002;
+    for (const material of this.roof.materials) material.opacity = amount;
+  }
+}
+
+export class Toilets {
+  readonly deck = TOILET_DECK;
+  /** Interior-local spot a child stands on to use them. */
+  readonly standX = TOILET_STAND_X;
+  readonly standZ = TOILET_STAND_Z;
+
+  /** The flush-wash-roof behaviour, shared with the hotel suite's bathroom. */
+  private readonly routine: ToiletRoutine;
 
   constructor(floorGroups: readonly Group[]) {
     const room = new Group();
@@ -173,11 +302,11 @@ export class Toilets {
     wall(minX + 1.1, maxZ - 0.15, 2.2, 0.3);
     wall(maxX - 1.1, maxZ - 0.15, 2.2, 0.3);
 
-    this.pan = buildPan(TOILET_PAN_X, TOILET_PAN_Z);
-    this.basin = buildBasin(TOILET_BASIN_X, TOILET_BASIN_Z);
-    this.roof = buildRoof(centreX, centreZ, width, depth);
-    room.add(this.pan.group, this.basin.group, this.roof.group);
-    this.applyRoof();
+    const pan = buildPan(TOILET_PAN_X, TOILET_PAN_Z);
+    const basin = buildBasin(TOILET_BASIN_X, TOILET_BASIN_Z);
+    const roof = buildPrivacyRoof(centreX, centreZ, width, depth);
+    room.add(pan.group, basin.group, roof.group);
+    this.routine = new ToiletRoutine(pan, basin, roof);
 
     // The "Toilets / wash your hands!" board over the door is gone with every
     // other sign in the park (28 July 2026). Its words live on the `toilets`
@@ -186,131 +315,45 @@ export class Toilets {
 
   /** True while the flush-and-wash routine is playing. */
   get busy(): boolean {
-    return this.timer !== null;
+    return this.routine.busy;
   }
 
   /** Use the toilet. Ignored while a routine is already running. */
   use(): void {
-    if (this.timer !== null) return;
-    this.timer = 0;
-    this.flushed = false;
-    this.washed = false;
+    this.routine.use();
   }
 
   /**
    * Is a child at these interior-local coordinates in the room?
    *
-   * Generous by {@link APPROACH} on every side, because this drives the roof
-   * and the roof has to lead her. The *strict* rectangle — the one that says
-   * whether she has really gone in far enough to use the loo — is
+   * Generous by {@link TOILET_APPROACH} on every side, because this drives
+   * the roof and the roof has to lead her. The *strict* rectangle — the one
+   * that says whether she has really gone in far enough to use the loo — is
    * `TOILET_ROOM` itself, tested by `Building.handleInteractPress`.
    */
   occupies(localX: number, localZ: number): boolean {
     return (
-      localX >= TOILET_ROOM.minX - APPROACH &&
-      localX <= TOILET_ROOM.maxX + APPROACH &&
-      localZ >= TOILET_ROOM.minZ - APPROACH &&
-      localZ <= TOILET_ROOM.maxZ + APPROACH
+      localX >= TOILET_ROOM.minX - TOILET_APPROACH &&
+      localX <= TOILET_ROOM.maxX + TOILET_APPROACH &&
+      localZ >= TOILET_ROOM.minZ - TOILET_APPROACH &&
+      localZ <= TOILET_ROOM.maxZ + TOILET_APPROACH
     );
   }
 
   /**
-   * @param occupied Whether a child is in the room right now. The roof is
-   * driven entirely by this and by the routine's own clock — see the class
-   * comment on why it is a question asked every frame rather than a state the
-   * sequence sets.
+   * @param occupied Whether a child is in the room right now — see
+   * {@link ToiletRoutine.update}.
    */
   update(dt: number, elapsed: number, occupied: boolean): void {
-    this.updateFittings(dt, elapsed);
-    this.updateRoof(dt, occupied);
-  }
-
-  // -------------------------------------------------------------- internals
-
-  private updateFittings(dt: number, elapsed: number): void {
-    const { lid, swirl } = this.pan;
-    const { stream } = this.basin;
-
-    if (this.timer === null) {
-      lid.rotation.x = Math.min(0, lid.rotation.x + dt * 3);
-      swirl.visible = false;
-      stream.visible = false;
-      return;
-    }
-
-    this.timer += dt;
-
-    if (!this.flushed && this.timer >= FLUSH_AT) {
-      this.flushed = true;
-      playFlush();
-    }
-    if (!this.washed && this.timer >= WASH_AT) {
-      this.washed = true;
-      playHandwash();
-    }
-
-    // The lid flips up for the flush and drops back once the washing starts.
-    const lidUp = this.timer > FLUSH_AT && this.timer < WASH_AT + 0.4;
-    lid.rotation.x = lidUp
-      ? Math.max(-1.5, lid.rotation.x - dt * 8)
-      : Math.min(0, lid.rotation.x + dt * 4);
-
-    // Water in the pan for the first beat, water at the tap for the second.
-    swirl.visible = this.timer > FLUSH_AT && this.timer < WASH_AT;
-    swirl.rotation.y = elapsed * 9;
-    swirl.scale.setScalar(0.85 + Math.sin(elapsed * 14) * 0.12);
-
-    stream.visible = this.timer > WASH_AT && this.timer < WASH_AT + 1.5;
-    stream.scale.y = 0.85 + Math.sin(elapsed * 22) * 0.15;
-
-    if (this.timer > ROUTINE_LENGTH) this.timer = null;
-  }
-
-  /**
-   * The lid, driven from where she is.
-   *
-   * Runs after `updateFittings`, so the frame the tap starts running is the
-   * same frame the roof begins to lift — the two halves of the joke land
-   * together rather than a beat apart.
-   */
-  private updateRoof(dt: number, occupied: boolean): void {
-    if (occupied) {
-      this.visiting = true;
-      // The wash beat is the cue to lift, and it stays lifted for the rest of
-      // the visit however long she dawdles at the basin afterwards.
-      if (this.timer !== null && this.timer >= WASH_AT) this.lifted = true;
-    } else {
-      // Out of the room: nothing is remembered, so however far the sequence
-      // had got, the next visit starts clean and this one ends uncovered.
-      this.visiting = false;
-      this.lifted = false;
-    }
-
-    const target = this.visiting && !this.lifted ? 1 : 0;
-    if (this.roofAmount !== target) {
-      const step = BUILDING_FADE_SECONDS > 0 ? dt / BUILDING_FADE_SECONDS : 1;
-      const delta = target - this.roofAmount;
-      this.roofAmount += Math.sign(delta) * Math.min(Math.abs(delta), step);
-    }
-    // Applied unconditionally, not only while it is moving. The lid lives in a
-    // floor group, so `FloorFader` has claimed its materials and will write
-    // their opacity whenever deck one fades; re-stating ours every frame costs
-    // two number writes and means the two can never disagree.
-    this.applyRoof();
-  }
-
-  private applyRoof(): void {
-    const amount = this.roofAmount;
-    this.roof.group.visible = amount > 0.002;
-    for (const material of this.roof.materials) material.opacity = amount;
+    this.routine.update(dt, elapsed, occupied);
   }
 }
 
 // ------------------------------------------------------------ privacy roof
 
 /**
- * A lid over `TOILET_ROOM`, in the tower's own roof colours so it reads as the
- * little room having grown a roof rather than as a slab dropped on it.
+ * A lid over the little room, in the tower's own roof colours so it reads as
+ * the room having grown a roof rather than as a slab dropped on it.
  *
  * Built once and faded, never rebuilt. The materials start transparent at zero
  * opacity on purpose: `FloorFader` claims every material on the deck and
@@ -321,8 +364,18 @@ export class Toilets {
  * It does not cast a shadow. A shadow is a lid you can see from outside the
  * room, and the whole point is that from outside nothing has changed except
  * that you cannot see in.
+ *
+ * `roofY` defaults to the castle's own {@link ROOF_Y}; the hotel suite's
+ * bathroom passes the same number because its partitions are 2.2 m and the
+ * same lid height reads as a roof over them too.
  */
-function buildRoof(centreX: number, centreZ: number, width: number, depth: number): RoofParts {
+export function buildPrivacyRoof(
+  centreX: number,
+  centreZ: number,
+  width: number,
+  depth: number,
+  roofY = ROOF_Y,
+): RoofParts {
   const group = new Group();
   group.name = 'toilet-roof';
   group.visible = false;
@@ -345,12 +398,12 @@ function buildRoof(centreX: number, centreZ: number, width: number, depth: numbe
   // "Toilets" sign stands 6cm clear of the front edge — an overhang would put
   // the lid straight through it.
   const band = new Mesh(new BoxGeometry(width, 0.1, depth), fading(PALETTE.buildingRoofDeep));
-  band.position.set(centreX, ROOF_Y + 0.05, centreZ);
+  band.position.set(centreX, roofY + 0.05, centreZ);
   group.add(band);
 
   // An inset panel on top, the same two-tone as the tower's own roof.
   const panel = new Mesh(new BoxGeometry(width - 0.5, 0.12, depth - 0.5), fading(PALETTE.buildingRoof));
-  panel.position.set(centreX, ROOF_Y + 0.16, centreZ);
+  panel.position.set(centreX, roofY + 0.16, centreZ);
   group.add(panel);
 
   return { group, materials };
@@ -358,7 +411,7 @@ function buildRoof(centreX: number, centreZ: number, width: number, depth: numbe
 
 // --------------------------------------------------------------- fittings
 
-function buildPan(x: number, z: number): PanParts {
+export function buildPan(x: number, z: number): PanParts {
   const group = new Group();
   group.name = 'toilet-pan';
   group.position.set(x, 0, z);
@@ -423,7 +476,7 @@ function buildPan(x: number, z: number): PanParts {
   return { group, lid, swirl };
 }
 
-function buildBasin(x: number, z: number): BasinParts {
+export function buildBasin(x: number, z: number): BasinParts {
   const group = new Group();
   group.name = 'toilet-basin';
   group.position.set(x, 0, z);

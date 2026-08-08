@@ -64,15 +64,40 @@ add a bathroom reusing the castle's toilet models+rules.
   20 (theme contrast), 21 (bathroom)
 - scripts/check-tap-spacing.mts + src/world/tapSpacing.ts — finger = 1.13 m
 
-## State
+## State (checkpoint 2)
 
-- Worktree created from origin/main (876ff9e, post-#254), npm ci done.
-- No code changes yet.
+Committed and pushed on fix/suite-polish:
+- abddb1c item 2: partitions reach walls (probe 18, red: two −9.4 ends).
+  Knock-ons: west windows → one pane at 5.9; west painting +4.8 removed;
+  sconce 5.6→3.6; TV −3.4→−3.0; bathroom wall carved as data (z-run at
+  x=−4.2, south half) + doorway at −7.6 in the long run at z=1.7.
+- decbbd8 item 1: clearFloorAround(room,x,z) owner in layout.ts (+
+  WALL_HALF_DEPTH/SUITE_PARTITION_HALF moved there); probe 19 red found the
+  suite rainbow rug AND the lobby nook rug through the north wall/past the
+  deck edge; all rugs fitted. Garden-lawn-under-trellis is design → probe 19
+  takes walls by name+shape.
+- dd79257 item 3: relativeLuminance + THEME_FLOOR_CONTRAST_MIN (0.15) in
+  layout.ts; probe 20 red: suite 0.115, breakfast 0.009 vs good readers
+  0.186–0.274. Suite floor → stonePink (0.27), breakfast → pathSandDark
+  (0.31). Needs screenshot judgement in QA.
 
-## Next
+## Item 4 plan (in progress)
 
-- Read: core/palette.ts, ART_DIRECTION.md, test/procgen/invariants.ts (tap
-  invariant + count), building/interactZones.ts ('toilets' zone),
-  Building.handleInteractPress, Hotel.interactZones/update.
-- Then probes red → fixes → build/test → browser QA (headless playwright,
-  pattern in scratchpad live-stair.mjs) → PR.
+Bathroom = suite SW: rect clearFloorAround(SUITE, −7.6, 4.8) →
+x −10.8..−4.4, z 1.9..7.8. Door off the hall at x=−7.6 (already in data).
+- Refactor building/Toilets.ts: export buildPan/buildBasin/buildPrivacyRoof
+  + ToiletRoutine (timer/flush/wash/roof state machine — moved verbatim);
+  castle Toilets becomes thin wrapper. DO NOT copy geometry.
+- Hotel.dressSuite → dressBathroom: tiles rug (fitted) + bath mat (tier 1),
+  pan at (rect.maxX−0.8, rect.minZ+0.65)=(−5.2,2.55) facing +Z, basin at
+  (rect.minX+1.1, 2.55) mirror against north partition; props.place: pan
+  solid+standable top 0.7, basin solid stand:false top 1.0. Privacy roof
+  over rect at castle ROOF_Y. Zone 'hotel-bathroom' at pan, pick 2.4,
+  stand (−5.2,3.65), verb 'Use' — spacing verified: ≥3.9 m clear of window
+  zone, door band clearance ✓ by construction.
+- Hotel.update ticks routine with occupied = player in rect+APPROACH.
+- Probe 21 (red first): pan/basin solid, pan mountable, zone exists w/
+  action + walkable stand, roof covers when occupied and lifts at wash beat.
+- Then: npm run build (full chain), test:procgen (expect 270+, 0 skips),
+  headless-playwright screenshots (rug edges, partition ends, recolour,
+  bathroom wide+detail, phone-viewport tap in bathroom doorway), PR.
