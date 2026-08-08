@@ -223,12 +223,18 @@ said.push(
   `work units: brief ${units.brief}, cruiser search ${units.cruiserSearch}, ` +
     `cruiser finish ${units.cruiserFinish}, slide search ${units.slideSearch}`,
 );
-said.push(`steps begun after their slice's deadline: ${generation.stepsPastDeadline}`);
+const lateByPhase = Object.entries(generation.lateStepsByPhase)
+  .map(([phase, count]) => `${phase} ${count}`)
+  .join(', ');
+said.push(
+  `steps begun after their slice's deadline: ${generation.stepsPastDeadline}` +
+    (lateByPhase ? ` (${lateByPhase})` : ''),
+);
 
 if (generation.stepsPastDeadline > 0) {
   fouls.push(
     `${generation.stepsPastDeadline} generation steps began after their slice's deadline had ` +
-      'already passed — a drive loop is not checking the clock between steps, so the search ' +
+      `already passed (${lateByPhase}) — that loop is not checking the clock between steps, so the search ` +
       'cannot be stopped where it was asked to stop. This is device-independent: it is wrong on ' +
       'a fast laptop too, it just does not show up there as a dropped frame',
   );

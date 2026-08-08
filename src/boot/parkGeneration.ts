@@ -208,6 +208,8 @@ export class ParkGeneration {
   /** The last rung's complaint, for the error if the whole ladder fails. */
   private lastComplaint = 'never solved a route at all';
   private solveModule: typeof import('../world/slide/solve') | null = null;
+  /** A solved chute waiting to be judged and built, on a frame of its own. */
+  private slidePending: { readonly route: SolvedRailRoute; readonly target: number } | null = null;
   private slideSolved = false;
   private pathsDone = false;
   private failure: Error | null = null;
@@ -226,6 +228,9 @@ export class ParkGeneration {
    * a fact about this code.
    */
   private overrunSteps = 0;
+
+  /** Which phase began a step late, so the report names the loop at fault. */
+  private overrunByPhase: Record<string, number> = {};
 
   /**
    * How many pieces each sliced phase was divided into.
@@ -298,6 +303,11 @@ export class ParkGeneration {
   /** Steps begun after a slice's deadline had passed. Zero, on correct code. */
   get stepsPastDeadline(): number {
     return this.overrunSteps;
+  }
+
+  /** Which loops began a step late — the diagnosis, not just the count. */
+  get lateStepsByPhase(): Readonly<Record<string, number>> {
+    return this.overrunByPhase;
   }
 
   /** How many pieces each sliced phase was divided into. Device-independent. */
@@ -410,7 +420,7 @@ export class ParkGeneration {
     if (!this.cruiserStart) {
       const building = (this.cruiserStartSearch ??= solve.cruiserStartSearch());
       for (;;) {
-        if (performance.now() >= deadline) this.overrunSteps += 1;
+        if (performance.now() >= deadline) this.noteLateStep('brief');
         const step = building.next();
         this.units.brief += 1;
         if (step.done) {
@@ -443,7 +453,7 @@ export class ParkGeneration {
           this.cruiserEscalated ? start.briefs.escalated : start.briefs.first,
         ));
         for (;;) {
-          if (performance.now() >= deadline) this.overrunSteps += 1;
+          if (performance.now() >= deadline) this.noteLateStep('cruiserSearch');
           const step = search.next();
           this.units.cruiserSearch += 1;
           if (step.done) {
@@ -472,7 +482,7 @@ export class ParkGeneration {
         start.rng,
       ));
       for (;;) {
-        if (performance.now() >= deadline) this.overrunSteps += 1;
+        if (performance.now() >= deadline) this.noteLateStep('cruiserFinish');
         const step = finishing.next();
         this.units.cruiserFinish += 1;
         if (step.done) {
@@ -496,6 +506,32 @@ export class ParkGeneration {
    */
   private advanceSlide(solve: typeof import('../world/slide/solve'), budgetMs: number): void {
     this.workingFrames += 1;
+    const deadline = performance.now() + budgetMs;
+
+    // **A finished route is judged and built on its own frame.**
+    //
+    // `unrideableComplaint` rebuilds the whole chute and measures it in three
+    // dimensions, and `finishSlidePlan` builds it again for keeps. Doing both on
+    // the same frame as the search step that produced the route made that frame
+    // the worst in the entire park build — a budget's worth of searching plus
+    // two chute builds, none of it interruptible. Deferring by one frame does
+    // not make the work smaller, but it stops it being *added* to a slice that
+    // had already spent its budget.
+    const pending = this.slidePending;
+    if (pending) {
+      this.slidePending = null;
+      const complaint = solve.unrideableComplaint(pending.route);
+      if (complaint === null) {
+        offerPrewarmedSlide(solve.finishSlidePlan(pending.route));
+        this.slideSolved = true;
+      } else {
+        this.lastComplaint = `${complaint} (at a ${pending.target} m target)`;
+        this.rung += 1;
+        this.search = null;
+      }
+      return;
+    }
+
     const ladder = solve.DESIRED_LENGTH_LADDER;
     const target = ladder[this.rung];
     if (target === undefined) {
@@ -508,29 +544,25 @@ export class ParkGeneration {
       );
       return;
     }
-    // Built once per rung, on the frame that rung starts — the brief is pure
-    // but `doorPoses()` and `pitPoses()` are not free.
-    const search = (this.search ??= railRouteSearch(solve.slideRouteBriefAt(target)));
 
-    const deadline = performance.now() + budgetMs;
+    // The brief gets its own frame too: it is pure, but `doorPoses()` and
+    // `pitPoses()` both filter their candidates through `PARK_BOUNDARY`, which
+    // is not free, and it measured 13.7 ms sharing a frame with the search.
+    if (!this.search) {
+      this.search = railRouteSearch(solve.slideRouteBriefAt(target));
+      return;
+    }
+    const search = this.search;
+
     try {
       for (;;) {
-        if (performance.now() >= deadline) this.overrunSteps += 1;
+        if (performance.now() >= deadline) this.noteLateStep('slideSearch');
         const step = search.next();
         this.units.slideSearch += 1;
         if (step.done) {
-          // **The same verdict, in the same order, as `planSlide()`**: judge
-          // the rung's route, step to the next rung on a complaint, finish
-          // and hand over on a clean one.
-          const complaint = solve.unrideableComplaint(step.value);
-          if (complaint === null) {
-            offerPrewarmedSlide(solve.finishSlidePlan(step.value));
-            this.slideSolved = true;
-          } else {
-            this.lastComplaint = `${complaint} (at a ${target} m target)`;
-            this.rung += 1;
-            this.search = null;
-          }
+          // **The same verdict, in the same order, as `planSlide()`** — just
+          // taken on the next frame rather than this one. See above.
+          this.slidePending = { route: step.value, target };
           return;
         }
         this.attemptsSeen = step.value;
@@ -579,6 +611,17 @@ export class ParkGeneration {
    * `importInFlight` is still set **synchronously**, so the very next
    * `advance()` cannot start a second import on top of this one.
    */
+  /**
+   * Records a step that began after its slice's deadline, and which loop did it.
+   *
+   * The count alone says a driver overran; the phase says which one, which is
+   * the difference between a diagnosis and a hunt. Both are device-independent.
+   */
+  private noteLateStep(phase: string): void {
+    this.overrunSteps += 1;
+    this.overrunByPhase[phase] = (this.overrunByPhase[phase] ?? 0) + 1;
+  }
+
   private runImport(begin: () => Promise<unknown>): void {
     this.importInFlight = true;
     queueMicrotask(() => {
