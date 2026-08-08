@@ -4088,7 +4088,98 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The park really is twice the park** — the missing half of #115, added
+ * with issue #241. `generateParkBoundary` is handed a target area and solves
+ * an outline that hits it in closed form, and for a year of Augusts nothing
+ * compared the two: the park was 2x by intention and unmeasured by result.
+ * The tolerance is generous against the construction (the sampled polygon
+ * differs from the analytic curve by ~0.001%) precisely so that a failure
+ * here can only ever mean the construction itself broke.
+ */
+const parkAreaIsWhatWasAsked: Invariant = (facts) => {
+  const drift = Math.abs(facts.boundary.area - facts.boundaryTargetArea) / facts.boundaryTargetArea;
+  if (drift < 0.01) return [];
+  return [
+    `the built boundary encloses ${facts.boundary.area.toFixed(0)} m2 against a target of ` +
+      `${facts.boundaryTargetArea.toFixed(0)} m2 — ${(drift * 100).toFixed(2)}% off, over the 1% tolerance`,
+  ];
+};
+
+/**
+ * **Every plot stands wholly inside the park's edge**, with a walkable lane
+ * to spare — the constraint that replaced `PLOT_EXTENT_LIMIT = 52` (issue
+ * #241), measured on what was built: the solver promises 2.5 m of lane, and
+ * this asserts the game's own minimum ({@link WALKABLE_GAP}) so the check
+ * only fires when a child genuinely cannot squeeze round the outside.
+ */
+const plotsStayInsideTheBoundary: Invariant = (facts) => {
+  const outside: string[] = [];
+  for (const plot of facts.plots) {
+    const lane = facts.boundary.distanceToEdge(plot.x, plot.z) - plot.boundingRadius;
+    if (lane < WALKABLE_GAP) {
+      outside.push(`${plot.id} leaves only ${lane.toFixed(2)} m of lane to the park's edge`);
+    }
+  }
+  return outside;
+};
+
+/**
+ * **The attractions use the park that exists** — issue #241's whole point,
+ * measured as coverage: no walkable point of the park may be desolate, i.e.
+ * further from every attraction than half the park's largest span. On the
+ * pre-#241 layouts this fails resoundingly (the plots huddled inside the old
+ * 52 m circle while the boundary bulged to 100+), which is how the threshold
+ * was chosen: the worst desolate distance across the five CI seeds AFTER the
+ * spread is 52-61 m; before it, 70-90. 66 splits the two populations with
+ * headroom on the honest side, and it is derived from the boundary the seed
+ * actually built rather than hand-tuned per seed.
+ */
+const attractionsUseTheWholePark: Invariant = (facts) => {
+  let worst = 0;
+  let worstAt: readonly [number, number] = [0, 0];
+  for (let x = Math.ceil(facts.boundary.extent.minX); x <= facts.boundary.extent.maxX; x += 4) {
+    for (let z = Math.ceil(facts.boundary.extent.minZ); z <= facts.boundary.extent.maxZ; z += 4) {
+      if (facts.boundary.distanceToEdge(x, z) < 4) continue;
+      let nearest = Infinity;
+      for (const plot of facts.plots) {
+        const d = Math.hypot(x - plot.x, z - plot.z) - plot.boundingRadius;
+        if (d < nearest) nearest = d;
+      }
+      if (nearest > worst) {
+        worst = nearest;
+        worstAt = [x, z];
+      }
+    }
+  }
+  if (worst < 66) return [];
+  return [
+    `the lawn at (${worstAt[0]}, ${worstAt[1]}) is ${worst.toFixed(1)} m from the nearest ` +
+      'attraction — the park has a desolate quarter, which is what #241 exists to prevent',
+  ];
+};
+
+/**
+ * **The Land Hotel stands close to the castle** — Eleri's requirement,
+ * verbatim from issue #236, measured on the built layout. 45 m centre to
+ * centre is the widest that still reads as "next to" against the castle's
+ * own 19 m bulk: the doormats end up a short walk apart on every seed.
+ */
+const hotelIsCloseToTheCastle: Invariant = (facts) => {
+  const hotel = facts.plots.find((plot) => plot.id === 'hotel');
+  const castle = facts.plots.find((plot) => plot.id === 'building');
+  if (!hotel) return ['the layout placed no hotel at all'];
+  if (!castle) return ['the layout placed no castle at all'];
+  const gap = Math.hypot(hotel.x - castle.x, hotel.z - castle.z);
+  if (gap < 45) return [];
+  return [`the hotel stands ${gap.toFixed(1)} m from the castle — Eleri asked for close`];
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['the park really is twice the park', parkAreaIsWhatWasAsked],
+  ['every plot stands wholly inside the boundary', plotsStayInsideTheBoundary],
+  ['the attractions use the whole park', attractionsUseTheWholePark],
+  ['the Land Hotel stands close to the castle', hotelIsCloseToTheCastle],
   ['no two wall runs cross or crowd each other', wallsDoNotClash],
   ['no wall run stands on the railway', wallsClearTheRailway],
   ['no tree stands on the railway', treesClearTheRailway],

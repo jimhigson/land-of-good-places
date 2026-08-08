@@ -9,6 +9,141 @@ sources you actually read.
 
 ---
 
+## Decision 10 — Solve-rate is a metric with a name; a constraint lives where candidates are made; and an optimisation proves it moved nothing
+
+**Date:** 7 August 2026 · **Status:** decided; parts 1-3 implemented, part 4 is
+the work this decision hands on
+**Sources:** Jim's brief ("the procgen is crazy slow — in the 90s games did
+almost instant procgen on much slower hardware… it is basically an optimisation
+/ space-searching problem"); HANDOFF-hotel-236's finding that the generator
+solves few arbitrary seeds; `scripts/measure-procgen.mts` (written for this);
+Node `--cpu-prof` of a Sky Cruiser solve; Decisions 5, 6 and 7, none of which
+this changes.
+
+### What was actually wrong
+
+Two complaints — "it is slow" and "it only builds some seeds" — turned out to
+be one disease, and neither was the algorithm everyone assumed.
+
+**Measured over 60 seeds, before any change:** 46 of 60 built at all; the median
+park took **32.7 seconds** and the worst **227 seconds**. The Sky Cruiser was
+42% of that and the ginormous slide 23%. The canonical seed, at 6.7 s, is one of
+the lucky ones — *everything tuned against it has been tuned against the easy
+case*, which is why the slowness kept being described as tolerable.
+
+**A CPU profile of one cruiser solve** found 58% of it in three places, none of
+them a search decision: a self-clearance grid keyed by `` `${gx},${gz}` `` —
+nine freshly built strings per sample (21%); `clearOfFootprints` walking a `Map`
+iterator over every plot per sample (14%); and the castle's masonry distance
+measuring seven rectangles and four towers for points nowhere near it (14%).
+Eleven final track segments cost 236,320 candidate pieces.
+
+**The failures divide in two**, and the split is the finding. Seeds 4, 29 and 30
+gave up after **8, 14 and 10 start poses**, having tried sixteen candidate
+pieces each — one joint, then nothing. They did not run out of budget; the
+outermost level of the search was nearly empty before it began, because
+`stationPoses` proposes 1,408 candidates and a rejection filter threw away 1,400.
+Seeds 25, 48 and 56 ground through 350k-810k pieces instead. Both are the same
+fault: **candidates are produced by rejection sampling and then filtered, rather
+than constructed inside the region that is actually free.** When the free region
+is large the filter is merely wasteful; when it is small the filter starves and
+the park does not build. Slow and brittle are one bug.
+
+### The decision
+
+**1. Solve-rate is a first-class metric, measured beside time, by one tool.**
+`scripts/measure-procgen.mts` reports both: per-stage time distribution across
+many seeds, *and* what fraction of seeds build at all with the stage that killed
+each failure. A change to procgen is judged on both numbers or it is not judged.
+This is the instrument Decision 5 never got, and without it "the generator is
+slow" stayed an anecdote about one seed for a fortnight.
+
+**2. A hard constraint belongs in the search that MAKES candidates, never only
+in the predicate that MARKS them.** The ginormous slide had a 75 m
+`MAX_RIDEABLE_LENGTH` — past it the drop is spread so thin the ride is a lazy
+river — that the search could not see. It was told to want 60 m, allowed to grow
+to `60 × 1.45` plus a closer, and had its finished routes rejected afterwards.
+On seed 5 it solved **123 complete routes and threw all 123 away**, and the park
+did not build. `RouteBrief.maxLength` hands the search the same number, so a
+piece that would cross the ceiling is rejected like a piece that hits a tree and
+the whole branch below it is never grown. This is not a second rule: the
+post-solve guard still asks `unrideableComplaint`, the one owner, exactly as
+before.
+
+**The mechanism is built and the slide does not yet use it**, which is part of
+the decision rather than an omission. Switched on it is a large win — the
+slide's median solve falls **7.6 s → 2.0 s** over 60 seeds and seed 38 goes from
+failing to solving — but it reshapes the chute on every seed, and
+`the ginormous slide stands on legs a child can walk between` then fails on seed
+2. Per CLAUDE.md the check is right and the change is incomplete: the supports
+have to be able to stand under the reshaped chute first. The call it is worth
+recording is that **a measured 3.8× is not worth one red invariant**, and the
+one-line switch is left in `slide/plan.ts` behind a comment saying exactly what
+must be fixed alongside it.
+
+This generalises Decision 7's pairing. Decision 7 says a weight makes an outcome
+*likely* and a `satisfies` predicate makes it *required*. What it did not say is
+that `satisfies` is the **wrong instrument for a constraint the search could
+have honoured while building** — it is a backstop for properties only knowable
+about a finished route (the slide's real 3D clearance against the cruiser), and
+using it for anything cheaper buys a search that solves in order to discard.
+
+**3. An optimisation claims byte-identity or it is a redesign.** Every park in
+this repo is a deterministic function of its seed, and the invariants and
+`check:park` ratchets are calibrated against the parks we have. So a change sold
+as "just faster" must be *proved* not to have moved anything, with
+`fingerprint-cruiser.mts` / `fingerprint-slide.mts` and the solve report's own
+counters (candidates tried, backtracks, closure attempts, per-reason rejection
+counts). The prefilters added here are exact rather than approximate for this
+reason — `hypot(a, b) >= |a|`, so an axis alone settles the test the hypot would
+have — and the cruiser is byte-identical on all five CI seeds while running
+twice as fast.
+
+Two corollaries, both learned the hard way in one session:
+
+- **A fingerprint that spans somebody else's commit proves nothing.** An
+  apparent divergence in seed 18 was chased all the way to stashing every one of
+  my own files — and it still moved, because another agent's edits and PR #223
+  had landed underneath. Before/after numbers now come from two frozen snapshots
+  built from one `rsync`, differing in exactly the files under test.
+- **Do not accept a speedup that is only faster in the last ulp.** Replacing
+  `Math.hypot(a, b)` with `Math.sqrt(a*a + b*b)` is materially quicker and is
+  *not* correctly rounded, so it can flip a comparison at a boundary and re-roll
+  a park for nothing. It was deliberately not taken.
+
+**4. What this decision does NOT yet do, and what should come next.** The
+constant factor is fixed; the brittleness is not. The eleven cruiser failures
+are unchanged and byte-identical before and after, because the fix for them is
+structural rather than arithmetic: **stop proposing start poses by rejection and
+construct them inside the free region** (a Minkowski-inflated obstacle map on a
+coarse grid, sampled directly — the 90s answer), and **make the pose
+qualification ask the same question the search will ask**. Today
+`stationWindowIsClear` tests bounding circles at 1.2 m while the search tests
+footprints at 3.6 m, so a pose can qualify and have no legal first piece — which
+is precisely what seeds 4, 29 and 30 die of. Two authorities for one question,
+the failure mode Decision 6 already names.
+
+### What it costs
+
+Two rebuilt hot paths that are now written for the machine rather than for the
+reader — flat typed-array columns instead of a `Map`, integer cell keys instead
+of readable ones, two cubic derivatives written out instead of called. Each
+carries a comment saying what it measured and why, because the next person's
+instinct will rightly be to tidy them back.
+
+Nothing else: what ships is byte-identical to the parks we had, which is the
+whole of part 3. The slide's ceiling — the one change that *would* move a park —
+is the part held back.
+
+### What it unblocks
+
+The staged-procgen work (a loading screen over the solve) has half as much to
+hide, and the vitest hook budget — 240 s, sized for seed 11's slide — stops
+being the binding constraint on adding a seed. More importantly, the next
+person to touch procgen has a number to move rather than an anecdote.
+
+---
+
 ## Decision 8 — A bridge is a `covers(x, z)` walkable surface; `NavGrid` stays 2D
 
 *(GitHub #116, REQUIREMENTS-2026-07-28.md §7. Unblocks check:park invariant 2.)*
@@ -170,6 +305,38 @@ every deck already placed — exactly the rework ORDER-OF-WORK.md exists to
 prevent. The constant itself is safe either way, because every term is imported
 and the invariant re-measures; it is the geometry built on top that is expensive
 to redo. **Never shave the constant to avoid the conversation.**
+
+## Decision 9 — The limit is the boundary, and the manifest is unpinned
+
+**Date:** 7 August 2026 · **Status:** decided and implemented (issue #241,
+with the Land Hotel #236 as its first new resident)
+**Sources:** issue #241; Decision 5 and 6; `parkLayout.ts`, `boundary.ts`.
+
+1. **A plot may stand wherever the spline boundary lets it** — the fit test
+   is `PARK_BOUNDARY.distanceToEdge >= boundingRadius + BOUNDARY_CLEARANCE`,
+   per candidate, replacing `PLOT_EXTENT_LIMIT = 52` (the old circle, which
+   left half the doubled park empty).
+2. **Nothing is pinned.** Every entry draws from a stream of its own
+   (`candidateRng(hash(id) ^ seed, restart)`), so a manifest edit cannot
+   move any other entry's candidates — the coupling that forced pins is
+   gone, and "every park is unique" (5 Aug ruling) is true again.
+3. **Spread is a preference, not a reservation**: of twelve legal
+   candidates, the one whose nearest neighbour is furthest wins. Decision 6
+   stands untouched.
+4. **Rim systems ask the boundary, never a radius**: the train's wall clamp
+   is per-bearing; its obstacle model is free radial intervals (a plot may
+   sit beyond the loop now); the cruiser and slide solve inside the real
+   park; and a camera-facing booth's doormat derives from the same bearing
+   its counter is built with (GAME_DESIGN #16), because the solver and the
+   booth were two authorities for "which side is the front".
+5. **Solve order for the rails**: layout, then cruiser, then train — the
+   cruiser publishes its low corridor and the train (the most flexible
+   router) threads it, per Decision 6's arrow. The cruiser's cruise floor
+   alone satisfies Decision 4's rail-over-rail air at any grade crossing.
+6. Four invariants guard it: the park's area really is its target (the
+   check #115 asked for and never got), every plot stays inside the edge
+   with a walkable lane, no quarter of the park is desolate, and the hotel
+   stays close to the castle.
 
 ## Decision 7 — A route can be *weighted* towards something, but never has space reserved for it
 

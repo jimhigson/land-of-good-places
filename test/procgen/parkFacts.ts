@@ -556,6 +556,12 @@ export interface ParkFacts {
    * reaches an invariant through `ParkFacts`, never through a static import.
    */
   readonly boundary: ParkBoundary;
+  /**
+   * What "twice the park" was asked to be, in square metres — the target
+   * `generateParkBoundary` was handed (#115 asked for area-within-tolerance
+   * and it was never checked until issue #241).
+   */
+  readonly boundaryTargetArea: number;
   /** Half the width the boundary masonry occupies, off `Garden.ts`. */
   readonly masonryHalfWidth: number;
   /** Half-thickness of the boundary wall as collision sees it, off `Garden.ts`. */
@@ -609,6 +615,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } = await import(
     '../../src/world/Garden.ts'
   );
+  const { CIRCULAR_PARK_AREA, PARK_AREA_MULTIPLIER } = await import('../../src/world/boundary.ts');
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PATH_GRAPH, PLAZA } = await import('../../src/world/paths.ts');
@@ -1423,6 +1430,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     routes,
     nearPairs,
     boundary: world.collision.playBounds,
+    boundaryTargetArea: CIRCULAR_PARK_AREA * PARK_AREA_MULTIPLIER,
     masonryHalfWidth: BOUNDARY_MASONRY_HALF_WIDTH,
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,

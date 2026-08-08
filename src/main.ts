@@ -110,6 +110,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // without walking up to invite them first.
   '/slide': 'ginormousSlide',
   '/slide-with-grownup': 'ginormousSlideWithGrownUp',
+  // The Land Hotel's lobby (#236) — not a ride at all, but exactly the same
+  // QA problem the slide had: reaching it means a walk across the park on a
+  // layout that is different on every seed. Drops her just inside the front
+  // door, key not yet given, so the whole check-in flow is testable.
+  '/hotel': 'hotelLobby',
 };
 
 /** What `/view` needs to drop a debug camera into the built park. See {@link parseDebugView}. */

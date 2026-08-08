@@ -141,6 +141,18 @@ const TRACKSIDE_ELEVATION = (55 * Math.PI) / 180;
 const TRACKSIDE_STANDOFF = 7;
 
 /**
+ * The worst eye-to-rider distance a beat may reach before its eye steps in.
+ *
+ * 10.2 m is the far end of the 6.8–10.5 m band the framing above was tuned
+ * on, taken just inside it: at {@link TRACKSIDE_FOV} it is where a reclining
+ * child grazes `check:slide-rider`'s 0.40% body floor with a whisker over it.
+ */
+const TRACKSIDE_MAX_RIDER_DISTANCE = 10.2;
+
+/** How close the eye may step in — under this the pan whips as she passes. */
+const TRACKSIDE_STANDOFF_FLOOR = 4.5;
+
+/**
  * The trackside camera's field of view, in degrees, before the portrait phone
  * widening (`fitCameraToViewport`).
  *
@@ -246,10 +258,43 @@ export function planSlideShots(
     const outward = new Vector3(covers.x - awayFrom.x, 0, covers.z - awayFrom.z);
     const side = outward.dot(right) >= 0 ? 1 : -1;
 
-    const eye = covers
-      .clone()
-      .addScaledVector(right, side * TRACKSIDE_STANDOFF * Math.cos(TRACKSIDE_ELEVATION))
-      .addScaledVector(up, TRACKSIDE_STANDOFF * Math.sin(TRACKSIDE_ELEVATION));
+    // The standoff yields to the beat itself. Seven metres frames her at a
+    // quarter of the shot at the OLD chute's beat spans; the generated chute
+    // now stretches with the park (issue #241) and a long or bendy beat can
+    // carry her past the distance at which the body-fraction floor holds
+    // (`check:slide-rider`'s 0.40%). So the eye is placed, MEASURED against
+    // every point of its own beat, and stepped closer until the worst
+    // eye-to-rider distance across the beat fits the allowance the framing
+    // maths was built for — on a short beat nothing changes at all.
+    // The 55° floor was measured against the OLD chute's pitches: the rail
+    // cut is about the eye's elevation in the TROUGH'S OWN tilted frame, so
+    // a steeper beat eats the margin degree for degree. Adding the beat's
+    // own downhill pitch back on keeps the relative elevation the tuning
+    // proved out, on whatever chute this seed grew ("steeper is always
+    // safe; shallower is a cliff" — the note above).
+    const pitch = Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
+    const elevation = TRACKSIDE_ELEVATION + Math.max(0, pitch);
+    const eyeAt = (standoff: number): Vector3 =>
+      covers
+        .clone()
+        .addScaledVector(right, side * standoff * Math.cos(elevation))
+        .addScaledVector(up, standoff * Math.sin(elevation));
+    const probe = new Vector3();
+    const worstFrom = (eyePoint: Vector3): number => {
+      let worst = 0;
+      for (let i = 0; i <= 10; i += 1) {
+        curve.pointAt(from + ((to - from) * i) / 10, probe);
+        const d = eyePoint.distanceTo(probe);
+        if (d > worst) worst = d;
+      }
+      return worst;
+    };
+    let standoff = TRACKSIDE_STANDOFF;
+    let eye = eyeAt(standoff);
+    while (standoff > TRACKSIDE_STANDOFF_FLOOR && worstFrom(eye) > TRACKSIDE_MAX_RIDER_DISTANCE) {
+      standoff -= 0.25;
+      eye = eyeAt(standoff);
+    }
 
     shots.push({ kind: 'trackside', from, to, eye, covers });
   }

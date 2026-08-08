@@ -1,8 +1,10 @@
+import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
-import { PARK_BOUNDARY } from '../boundary';
+import { COASTER_PLANS } from '../coaster/plan';
+import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
-import { RailRaceRoute, RIDE_SCALE } from './route';
+import { type KeepOff, RailRaceRoute, RIDE_SCALE } from './route';
 
 /**
  * The Rail Race as *data*, solved at module load from the park layout alone —
@@ -29,8 +31,16 @@ const STATION_STALL_ID = 'stall.railRacer';
  * on a plan that broke the planner's own rule, which is the entire failure it
  * exists to catch. Same number declared twice is this week's most-repeated bug;
  * one owner, one import.
+ *
+ * It now *lives* in `boundary.ts` and is re-exported here, because the Sky
+ * Cruiser's exit wants the same rule and importing it from this module would
+ * close a cycle: `coaster/plan -> railRace/plan -> train/plan -> coaster/plan`.
+ * `tsc` is perfectly happy with that cycle; Node is not, and it fails at module
+ * load with "Cannot access 'COASTER_PLANS' before initialization". The number
+ * belongs to the boundary anyway — it is a statement about how far inside the
+ * park's edge a person can stand.
  */
-export const EXIT_INSIDE_EDGE = 2;
+export { EXIT_INSIDE_EDGE };
 
 export interface PlannedRailRace {
   /** Matches `PlannedCoaster.name` — `paths.ts` names the exit node with it. */
@@ -121,7 +131,13 @@ function planExit(): { exitX: number; exitZ: number } {
       // edge instead.
       if (PARK_BOUNDARY.distanceToEdge(x, z) < EXIT_INSIDE_EDGE) continue;
       if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) continue;
-      if (clearOfPlots(x, z, 1.4)) return { exitX: x, exitZ: z };
+      // 2.6, from 1.4 (issue #241): an exit inside a booth's INFLATED circle is
+      // one `routeAround` cannot dodge on the way in — the spur leg then
+      // grazes the booth's counter and the exit's waypoints strand behind it.
+      // And off the railway with its fence, like every exit.
+      if (clearOfPlots(x, z, 2.6) && distanceToRailCorridor(x, z) >= RAIL_CORRIDOR_CLEARANCE) {
+        return { exitX: x, exitZ: z };
+      }
     }
   }
 
@@ -137,9 +153,35 @@ function planExit(): { exitX: number; exitZ: number } {
 
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
 export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
-  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1);
-  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE);
+  // **The exit is solved BEFORE the rings, and that ordering is load-bearing.**
+  // `slideArchClear` slides the finish arch off anything its feet must not come
+  // down on, and the ride's own exit is one of those things — the paving is
+  // obliged to reach it, so a foot on the exit is a foot on the exit's spur.
+  // `planExit` never needed a ring: it asks the booth, the boundary and the
+  // railway corridor, all of which exist already. It simply used to run second.
   const { exitX, exitZ } = planExit();
+
+  // Everything the arch's feet must miss that only this module can see. The
+  // doormat and the plots are checked inside the route (it has them); these two
+  // are not, and leaving the cruiser out of the list is what turned seed 11
+  // green and seed 5 red on the first attempt — `startDistance` is the whole
+  // ride's datum, so moving the arch moves the ride.
+  const keepArchOff: KeepOff[] = [
+    // The exit, plus the room a dismounting child needs around it.
+    { x: exitX, z: exitZ, radius: 4 },
+  ];
+  // The Sky Cruiser's loop, sampled. Its own low run is what the arch collided
+  // with on seed 5; `RAIL_OVER_RAIL`-style air does not help here because an
+  // arch foot is on the ground, so this is a plan-view keep-off like any other.
+  const cruiser = COASTER_PLANS.cruiser.route;
+  const cruiserStep = 2;
+  for (let d = 0; d < cruiser.length; d += cruiserStep) {
+    const point = cruiser.pointAt(d, new Vector3());
+    keepArchOff.push({ x: point.x, z: point.z, radius: 5 });
+  }
+
+  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff);
+  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff);
   return {
     name: 'railRace',
     walkPastRing,

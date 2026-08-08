@@ -23,6 +23,7 @@ import { terrainHeight } from './terrain';
 import { distanceToPath, ROUTES } from './paths';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
+import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -460,6 +461,9 @@ const LAMP_GAP = 4;
 /** The lamp's own collider radius, as registered below. */
 const LAMP_RADIUS = 0.22;
 
+/** Top of the finial: base + shaft + housing + cap, with their overlaps. */
+const LAMP_TOP = 3.6;
+
 /**
  * Every lamp in the park, walked off the **real** path network.
  *
@@ -506,15 +510,23 @@ function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[
       // preferred verge alone left a 23 m unlit stretch of ring road.
       const nudge = (route.closed ? 1 / count : 1 / count) * 0.25;
       let stood = false;
-      for (const along of [0, nudge, -nudge]) {
-        for (const trySide of [preferred, -preferred as 1 | -1]) {
-          const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
-          const candidate = offsetFromCurve(curve, at, offset, trySide);
-          if (!candidate) continue;
-          if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
-          positions.push(candidate);
-          stood = true;
-          break;
+      // The widened offsets are for verges the Sky Cruiser's low ramp flies
+      // along (issue #241 let the two land together): a lamp three metres
+      // off the kerb clears the car's swept corridor and still lights the
+      // path many times over (LAMP_REACH is 15). Tried last, so the kerbside
+      // look wins everywhere the ride allows it.
+      for (const reach of [offset, offset + 2.2, offset + 3.4]) {
+        for (const along of [0, nudge, -nudge]) {
+          for (const trySide of [preferred, -preferred as 1 | -1]) {
+            const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
+            const candidate = offsetFromCurve(curve, at, reach, trySide);
+            if (!candidate) continue;
+            if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
+            positions.push(candidate);
+            stood = true;
+            break;
+          }
+          if (stood) break;
         }
         if (stood) break;
       }
@@ -545,6 +557,20 @@ function lampFits(
   // the station platforms, neither of which exists yet when lamps are built
   // (see `World`) — the corridor is wider than both.
   if (distanceToRailCorridor(x, z) < RAIL_CORRIDOR_CLEARANCE) return false;
+
+  // And out from under the Sky Cruiser wherever it flies low. The station
+  // spurs it now lights (issue #241 spread the plots, so paths follow them
+  // everywhere) can run right along the coaster's boarding ramp, and a lamp
+  // is 3.5 m of pole and housing under a rail that dips to 1 m — the
+  // procgen sweep caught the car passing straight through one on three of
+  // the five seeds. The whole finished curve is known by lamp time; only
+  // its low stretches matter, because the cruise floor clears a lamp.
+  if (!clearOfCruiser(x, z, LAMP_RADIUS + 0.8, LAMP_TOP)) return false;
+
+  // Never where a ride sets a child down — the same list the scenery keeps
+  // off. A lamp is thinner than a tree and stood on the ferris exit anyway
+  // (seed 2, the exit-clear invariant).
+  if (onRideExit(x, z, LAMP_RADIUS + 0.4)) return false;
 
   // Never in front of a door.
   for (const anchor of ANCHORS) {

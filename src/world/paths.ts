@@ -6,6 +6,7 @@ import {
   MeshStandardMaterial,
   Vector3,
 } from 'three';
+import { PLAYER_RADIUS } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
@@ -14,6 +15,7 @@ import { PARK_LAYOUT, edgeDistanceAlong } from './parkLayout';
 import { TRAIN_PLAN } from './train/plan';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
+import { archFeet } from './railRace/arch';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
@@ -120,9 +122,42 @@ interface Blocker {
   readonly radius: number; // bounding circle, already inflated for kerbs
 }
 
-const BLOCKERS: readonly Blocker[] = [...PARK_LAYOUT.entries.values()]
-  .filter((e) => e.id !== 'fountain')
-  .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 }));
+/**
+ * How much room to leave round a rail-race arch foot: the post itself, plus
+ * the width a child genuinely needs to walk past it.
+ *
+ * `PLAYER_RADIUS * 2` is `test/procgen/invariants.ts`'s `WALKABLE_GAP` — the
+ * same number, taken from the game rather than from the check, because
+ * `NavGrid` fattens every collider by a player radius before deciding a cell is
+ * walkable. A margin narrower than this is a gap only on paper.
+ */
+const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4;
+
+/**
+ * Everything the ring road and the spurs must steer around: every plot, and
+ * the feet of the Rail Race's finish rainbow.
+ *
+ * **The arch is in this list because it cannot move and the paving can.** Its
+ * radius is solved from rider head height and lane span, and its position is
+ * the ride's own finish line — the datum the duck bars, the spark zones and
+ * `RACE_DISTANCE` are all measured from, so nudging it would decouple the drawn
+ * finish from the scored one. Meanwhile nothing told the paving it was there:
+ * on seeds 5 and 11 twelve legs came down between 1.14 m *inside* the path and
+ * 0.40 m from its edge. Decision 6's rule settles which one gives way — the
+ * ride publishes what it solved (`railRace/arch.ts`), and the walk network
+ * treats it as an obstacle exactly as it does a plot.
+ *
+ * Both rings, because both arches are built and they stand at the same place
+ * at different scales.
+ */
+const BLOCKERS: readonly Blocker[] = [
+  ...[...PARK_LAYOUT.entries.values()]
+    .filter((e) => e.id !== 'fountain')
+    .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2 })),
+  ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
+    .flatMap((ring) => archFeet(ring))
+    .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN })),
+];
 
 /** Distance from `(px,pz)` along unit `(dx,dz)` to `blocker`, or Infinity. */
 function rayToBlocker(px: number, pz: number, dx: number, dz: number, b: Blocker): number {
@@ -407,9 +442,27 @@ function buildGraph(): PathGraph {
       l > 1e-6 && pastReach > 1e-6
         ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
         : []; // no "past the doormat" when the node is its own destination
+    // Arrive HEAD-ON, not obliquely. The doormat faces the park middle (the
+    // solver put it there), and the booth's own counter walls flank it — a
+    // branch point far off that axis used to draw a straight leg that grazed
+    // the counter's side at centimetres (seed 2's rim stall stranded its
+    // whole doormat that way). Routing via a lead a few metres out along the
+    // facing line makes the last leg run the way a visitor actually walks
+    // in; for a branch already on-axis the lead is collinear and free.
+    const lead: (readonly [number, number])[] = [];
+    if (placedTarget) {
+      // Along the doormat's own outward ray (entrance minus plot centre) —
+      // which is the counter's facing for a camera-facing booth and the
+      // toward-middle line for everything else, because the solver derived
+      // the entrance that way. One source of truth for "which way in".
+      const outX = ex - placedTarget.x;
+      const outZ = ez - placedTarget.z;
+      const out = Math.hypot(outX, outZ);
+      if (out > 1e-6) lead.push([ex + (outX / out) * 3.5, ez + (outZ / out) * 3.5]);
+    }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    const routed = [...routeAround(start, [ex, ez])];
+    const routed = [...routeAround(start, lead.length ? (lead[0] as [number, number]) : [ex, ez]), ...(lead.length ? [[ex, ez] as readonly [number, number]] : [])];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
       const head = routed[0] as readonly [number, number];
       const tail = routed[routed.length - 1] as readonly [number, number];
@@ -493,7 +546,10 @@ function buildGraph(): PathGraph {
   for (const station of TRAIN_PLAN.stations) {
     const id = `station-${station.index}`;
     nodes.push({ id, kind: 'station', x: station.standX, z: station.standZ });
-    const start = bestBranchPoint(network(), ringPoints, station.approachX, station.approachZ);
+    // Via the lead — past the platform's empty end, stepped into the park —
+    // so the incoming leg can arrive from any bearing without paving through
+    // the canopy posts on the furnished half (see `PlannedStation.leadX`).
+    const start = bestBranchPoint(network(), ringPoints, station.leadX, station.leadZ);
     edges.push({
       from: 'ring',
       to: id,
@@ -503,7 +559,8 @@ function buildGraph(): PathGraph {
         width: 2.6,
         closed: false,
         points: [
-          ...routeAround(start, [station.approachX, station.approachZ]),
+          ...routeAround(start, [station.leadX, station.leadZ]),
+          [station.approachX, station.approachZ],
           [station.standX, station.standZ],
         ],
       },

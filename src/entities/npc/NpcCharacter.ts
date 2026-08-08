@@ -42,7 +42,8 @@ const NPC_ACCELERATION = 18;
 const NPC_DECELERATION = 16;
 
 /** Narrower than the player, so two children pass each other on a path. */
-export const NPC_RADIUS = 0.5;
+export { NPC_RADIUS } from '../../core/constants';
+import { NPC_RADIUS } from '../../core/constants';
 
 const NPC_JUMP_SPEED = 4.6;
 const GRAVITY = 17;
@@ -185,6 +186,36 @@ export class NpcCharacter {
   /** Nudges the walk cycle at spawn so children are not in lockstep. */
   setWalkPhase(phase: number): void {
     this.walkPhase = phase;
+  }
+
+  /**
+   * Puts the character down on whatever the ground sampler finds under it,
+   * looking from the height `from`.
+   *
+   * The constructor has to guess a starting height and it guesses
+   * `terrainHeight` — right for anybody spawned in the park, and meaningless
+   * for anybody spawned somewhere the terrain function has never heard of. A
+   * hotel room six hundred metres out is a floor *plate* registered with
+   * `WalkSurfaces`, not a hill; `terrainHeight` there is whatever the park's
+   * falloff happens to say, tens of metres down.
+   *
+   * That is why `from` is a parameter rather than "wherever you currently
+   * are": `WalkSurfaces.sample` only offers a platform that is within a step
+   * *up* of where you are asking from, so a body that begins the frame far
+   * below its own floor is told there is no floor, decides it is falling, and
+   * falls for ever. Measured before this existed: hotel guests at y = −16.5 m
+   * and still going after ninety seconds. Only the space knows where its own
+   * floor is, so only the space can answer this — see `NpcSystem`'s
+   * `ResidentSpec.floorY`.
+   *
+   * Called by whoever installs the sampler, once, immediately after doing so:
+   * a body cannot ask the question before it has been handed the thing that
+   * answers it.
+   */
+  settle(from: number): void {
+    this.position.y = this.groundAt(this.position.x, this.position.z, from);
+    this.previousPosition.copy(this.position);
+    this.avatar.rig.root.position.copy(this.position);
   }
 
   /**

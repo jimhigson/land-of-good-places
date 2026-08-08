@@ -1,4 +1,5 @@
 import { Rng, TAU } from '../core/mathUtils';
+import { cachedSolve } from '../core/solveCache';
 import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';
@@ -73,6 +74,45 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
       return points;
     },
   };
+}
+
+/**
+ * The same park, `inset` metres smaller all the way round.
+ *
+ * For the rides that solve *inside* the park — the ginormous slide and the
+ * Sky Cruiser hand their route search a territory, and until issue #241 that
+ * territory was a hand-sized circle (`GARDEN_PLAY_RADIUS`, `OUTER_RADIUS`)
+ * which quietly stopped meaning "the park" when the park became a spline:
+ * plots now spread to the real edge, and a ride whose start pose sits beyond
+ * its own territory circle rejects every candidate piece as out of bounds
+ * and cannot solve at all.
+ *
+ * Built by walking each bearing in from the true edge until the signed
+ * distance field reads `inset`, then wrapping those radii in
+ * {@link profileBoundary} — so the result is a full, honest `ParkBoundary`
+ * (area, perimeter, outline and all), not a wrapper that lies about
+ * everything but distance. The inset curve of a gentle star-shaped curve is
+ * still star-shaped while `inset` stays far below
+ * {@link GENTLE_CURVATURE_RADIUS}, which every caller's few metres does.
+ */
+export function insetBoundary(boundary: ParkBoundary, inset: number): ParkBoundary {
+  const radii: number[] = [];
+  for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
+    const angle = (i / PROFILE_SAMPLES) * TAU;
+    const dirX = Math.cos(angle);
+    const dirZ = Math.sin(angle);
+    let low = 0;
+    let high = edgeRadiusAt(boundary, angle);
+    // The signed distance shrinks towards the edge along the ray, so binary
+    // search finds where it crosses `inset` to well under geometry noise.
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (low + high) / 2;
+      if (boundary.distanceToEdge(dirX * mid, dirZ * mid) >= inset) low = mid;
+      else high = mid;
+    }
+    radii.push(low);
+  }
+  return profileBoundary(radii);
 }
 
 // --------------------------------------------------------------- the profile
@@ -248,6 +288,66 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
   };
 }
 
+/**
+ * A fast read-only view of a star-shaped boundary, for the ride solvers.
+ *
+ * `profileBoundary`'s `distanceToEdge` scans all 512 vertices per query so a
+ * one-off ask (a lamp, a plot candidate) is exact even at the eccentric
+ * near-tie its comment documents. A route search is a different customer: it
+ * asks per CANDIDATE PIECE — measured at 776k pieces on one seed, the scan
+ * was most of a 31-second solve. This view answers in O(1) from two lookup
+ * tables: the radius per bearing, and the cosine of the angle between the
+ * radial and the edge NORMAL per bearing (the obliquity), so
+ * `distance ≈ (radiusAt(θ) − |p|) · cosAt(θ)` — exact on a circle, and on
+ * these deliberately gentle curves (curvature radius ≥ 20 m by construction)
+ * within a few percent, erring by UNDER-stating distance wherever the edge
+ * runs oblique, which for a solver holding a corridor INSIDE the park is the
+ * safe direction: it can only reject a piece the exact test would allow,
+ * never accept one it would forbid.
+ *
+ * Only `contains`/`distanceToEdge` are re-derived; everything else delegates.
+ */
+export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
+  const points = boundary.outline();
+  const count = points.length;
+  const radii = new Float64Array(count);
+  const obliquity = new Float64Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const [x, z] = points[i] as readonly [number, number];
+    const [nx, nz] = points[(i + 1) % count] as readonly [number, number];
+    const [px, pz] = points[(i - 1 + count) % count] as readonly [number, number];
+    const radius = Math.hypot(x, z) || 1;
+    radii[i] = radius;
+    // Edge direction by central difference; its normal versus the radial.
+    const ex = nx - px;
+    const ez = nz - pz;
+    const edge = Math.hypot(ex, ez) || 1;
+    // normal = (-ez, ex)/edge; radial = (x, z)/radius; |dot| is the cosine.
+    obliquity[i] = Math.abs((-ez * x + ex * z) / (edge * radius));
+  }
+  const at = (table: Float64Array, bearing: number): number => {
+    const t = ((bearing % TAU) + TAU) % TAU;
+    const scaled = (t / TAU) * count;
+    const i = Math.floor(scaled) % count;
+    const frac = scaled - Math.floor(scaled);
+    const a = table[i] as number;
+    const b = table[(i + 1) % count] as number;
+    return a + (b - a) * frac;
+  };
+  return {
+    contains: (x, z) => Math.hypot(x, z) <= at(radii, Math.atan2(z, x)),
+    distanceToEdge: (x, z) => {
+      const bearing = Math.atan2(z, x);
+      return (at(radii, bearing) - Math.hypot(x, z)) * at(obliquity, bearing);
+    },
+    area: boundary.area,
+    perimeter: boundary.perimeter,
+    maxRadius: boundary.maxRadius,
+    extent: boundary.extent,
+    outline: () => points,
+  };
+}
+
 // ------------------------------------------------------------- the generator
 
 /**
@@ -350,6 +450,21 @@ export interface ParkBoundaryOptions {
  * circle after {@link ATTEMPTS} failures.
  */
 export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary {
+  const radii = cachedSolve(
+    'boundary',
+    `${options.seed}:${options.targetArea.toFixed(0)}:${options.gateBearing.toFixed(4)}:${options.gateRadius}`,
+    () => solveBoundaryRadii(options),
+    (value) => value,
+    (raw) => {
+      const list = raw as number[];
+      if (!Array.isArray(list) || list.length !== PROFILE_SAMPLES) throw new Error('stale profile');
+      return list;
+    },
+  );
+  return profileBoundary(radii);
+}
+
+function solveBoundaryRadii(options: ParkBoundaryOptions): number[] {
   const { seed, targetArea, gateBearing, gateRadius } = options;
   const rng = new Rng(seed);
   const areaOverPi = targetArea / Math.PI;
@@ -416,7 +531,7 @@ export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary
         `with the gate pinned at ${gateRadius} m may be geometrically impossible.`,
     );
   }
-  return profileBoundary(best.radii);
+  return best.radii;
 }
 
 /**
@@ -487,6 +602,23 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  * than level with it.
  */
 /** Ground beyond the crest, so the cut edge sits below the horizon not level with it. */
+/**
+ * How far inside the park's edge a ride's exit must sit, in metres.
+ *
+ * A statement about the boundary, so it lives with the boundary: a point can
+ * be clear of every plot and still be somewhere a child cannot be put down,
+ * because it is on the wrong side of the park's own edge — which is also
+ * exactly what "not reachable from the entrance" turns out to mean.
+ *
+ * Both the Rail Race (`railRace/plan.ts`, which re-exports this so
+ * `check:rail-race` keeps its one owner) and the Sky Cruiser
+ * (`coaster/plan.ts`) clamp their exits with it. It is here rather than in
+ * either of them because those two modules cannot import from each other:
+ * `coaster/plan -> railRace/plan -> train/plan -> coaster/plan` is a cycle that
+ * `tsc` accepts and Node fails at load.
+ */
+export const EXIT_INSIDE_EDGE = 2;
+
 export const TERRAIN_APRON = RIM_OUTSET_END + 1.5;
 
 export const TERRAIN_EDGE_RADIUS = PARK_BOUNDARY.maxRadius + TERRAIN_APRON;
