@@ -1164,7 +1164,24 @@ function solveChuteAt(
   return { route, complaint: unrideableComplaint(route) };
 }
 
-function planSlide(): PlannedSlide {
+/**
+ * **Solves the ginormous slide, start to finish, right now.**
+ *
+ * The straight-through cadence: `slide/plan.ts` calls this when nothing has
+ * pre-warmed a plan, which is every context except the game's own boot — the
+ * park harness, `check:park`, `test:procgen`, the fingerprint scripts. It is
+ * still one synchronous call that returns a finished plan, so none of them
+ * changed.
+ *
+ * The loading screen's cadence walks the SAME {@link DESIRED_LENGTH_LADDER},
+ * building each rung's brief with {@link slideRouteBriefAt}, advancing
+ * {@link railRouteSearch} a few milliseconds at a time, judging the rung with
+ * {@link unrideableComplaint} and finishing with {@link finishSlidePlan} —
+ * the same steps in the same order over the same briefs, which is why the two
+ * cadences cannot produce two different slides. `check:park-boot` proves it
+ * by running both in one process and comparing a hash of the finished chute.
+ */
+export function planSlide(): PlannedSlide {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1337,26 +1354,6 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
   }
 
   return null;
-}
-
-/**
- * **Solves the ginormous slide, start to finish, right now.**
- *
- * The straight-through cadence: `slide/plan.ts` calls this when nothing has
- * pre-warmed a plan, which is every context except the game's own boot — the
- * park harness, `check:park`, `test:procgen`, the fingerprint scripts. It is
- * still one synchronous call that returns a finished plan, so none of them
- * changed.
- *
- * The loading screen's cadence calls {@link slideRouteBrief},
- * {@link railRouteSearch} and {@link finishSlidePlan} itself, advancing the
- * middle one a few milliseconds at a time. **Both cadences run the same three
- * steps in the same order over the same brief**, which is why they cannot
- * produce two different slides — and `check:park-boot` proves it by running
- * both in one process and comparing a hash of the finished chute.
- */
-export function planSlide(): PlannedSlide {
-  return finishSlidePlan(solveRailRoute(slideRouteBrief()));
 }
 
 /**
