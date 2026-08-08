@@ -1,7 +1,8 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_X, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, deckY } from './layout';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
@@ -675,6 +676,21 @@ export class Building implements GameSystem {
    */
   get playerInRoofedInterior(): boolean {
     return this.inside && (this.currentDeck === null || this.currentDeck < TOP_DECK);
+  }
+
+  /**
+   * The height above which surfaces are hidden from the player right now —
+   * what the tap's pick treats as tappable (`pickWalkable.ts`).
+   *
+   * Derived from the same `currentDeck` that drives `FloorFader`, so "what a
+   * tap can land on" and "what the cutaway shows" cannot disagree: inside the
+   * castle the ceiling is the top of the deck she is standing on (plus the
+   * step her foot could take anyway), and everywhere else — the park, the
+   * hotel's open-topped rooms — everything is on show.
+   */
+  get visibleSurfaceCeiling(): number {
+    if (this.currentDeck === null) return Infinity;
+    return deckY(this.currentDeck) + BUILDING_STEP_UP;
   }
 
   /**

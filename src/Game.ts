@@ -358,14 +358,30 @@ export class Game {
     // on the P1 where a stuttering frame walked her clean through a wall.
     this.world.collision.checkSubstepBudget(PLAYER_RADIUS, PLAYER_LONGEST_STEP);
 
-    this.navGrid = new NavGrid(this.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+    this.navGrid = new NavGrid(
+      this.world.collision,
+      PLAYER_RADIUS,
+      JUMP_APEX_HEIGHT,
+      // The declared ways between levels — the lobby's sweeping stair, and
+      // whatever the imperial rebuild declares after it. Read at lattice
+      // build; see NavGrid's header and Decision 11.
+      () => this.world.building.surfaces.connectors,
+    );
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
     // the building installed. `treeClimbing` is constructed further down (it
     // needs the HUD), but this closure only reads it once play starts, by
     // which point construction has finished.
-    this.tapNavigator = new TapNavigator(this.player, this.camera, this.input, this.navGrid);
+    this.tapNavigator = new TapNavigator(
+      this.player,
+      this.camera,
+      this.input,
+      this.navGrid,
+      // What a tap may land on is what the castle's cutaway leaves visible —
+      // one owner: the same `currentDeck` that drives the floor fade.
+      () => this.world.building.visibleSurfaceCeiling,
+    );
     this.engine.scene.add(this.tapNavigator.group);
 
     this.pointer = new PointerControls(canvas, {

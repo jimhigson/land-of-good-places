@@ -56,7 +56,7 @@ import {
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
-import { LOBBY } from '../src/world/hotel/layout.ts';
+import { LOBBY, mezzanineWalkConnectors } from '../src/world/hotel/layout.ts';
 
 const failures: string[] = [];
 const check = (ok: boolean, what: string): void => {
@@ -71,25 +71,30 @@ park.world.collision.setPlayBounds(
   circleBoundary(HOTEL_PLAY_RADIUS, LOBBY.originX, LOBBY.originZ),
 );
 
-const navGrid = new NavGrid(park.world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+const navGrid = new NavGrid(
+  park.world.collision,
+  PLAYER_RADIUS,
+  JUMP_APEX_HEIGHT,
+  () => park.world.building.surfaces.connectors,
+);
 
 // ---------------------------------------------------------------- the plan
 // Everything below is derived from LOBBY's own declaration. If the stair
 // moves, these move with it; nothing here can go stale.
 const plan = LOBBY.mezzanine;
 if (!plan) throw new Error('the lobby no longer declares a mezzanine — retire or rewrite this probe');
-const { stair } = plan;
-const midRadius = (stair.innerRadius + stair.outerRadius) / 2;
 const world = (x: number, z: number): { x: number; z: number } => ({
   x: LOBBY.originX + x,
   z: LOBBY.originZ + z,
 });
 
-/** The stair's mouth: where its arc meets the floor, one stride out. */
-const mouth = world(
-  stair.centreX - Math.sin(stair.fromAngle) * midRadius + Math.cos(stair.fromAngle) * 1.2,
-  stair.centreZ + Math.cos(stair.fromAngle) * midRadius + Math.sin(stair.fromAngle) * 1.2,
-);
+// The stair's mouth: the floor end of the declared walk path — the same
+// derivation `Hotel.buildMezzanine` registers, asked of the same owner.
+const stairPath = mezzanineWalkConnectors(plan)[0];
+if (!stairPath || stairPath.length < 2) throw new Error('the lobby declares no stair walk path');
+const mouthLocal = stairPath[0];
+if (!mouthLocal) throw new Error('empty stair walk path');
+const mouth = world(mouthLocal.x, mouthLocal.z);
 
 /** A point on the deck, mid-gallery, clear of the balustrade band. */
 const deckPoint = world((plan.minX + plan.maxX) / 2, (plan.minZ + plan.maxZ) / 2);
@@ -118,7 +123,7 @@ function route(
   to: { x: number; z: number },
   toY: number,
 ): Route {
-  const count = navGrid.findRoute(from.x, from.z, to.x, to.z, park.sample, fromY, out);
+  const count = navGrid.findRoute(from.x, from.z, fromY, to.x, to.z, toY, park.sample, out);
   const endX = count > 0 ? (out[(count - 1) * 2] ?? NaN) : from.x;
   const endZ = count > 0 ? (out[(count - 1) * 2 + 1] ?? NaN) : from.z;
   let viaMouth = false;
@@ -131,7 +136,9 @@ function route(
     count,
     reachedGoal: navGrid.lastRouteReachedGoal,
     end: { x: endX, z: endZ },
-    endY: park.sample(endX, endZ, toY),
+    // The level the route itself says it ends on — never re-derived from a
+    // sampler that could flatter the wrong level into looking right.
+    endY: navGrid.lastRouteEndY,
     viaMouth,
   };
 }
@@ -176,7 +183,8 @@ assertRoute(
   const origin = target.clone().add(back);
   const ray = new Ray(origin, target.clone().sub(origin).normalize());
   const hit = new Vector3();
-  const found = pickWalkablePoint(ray, park.sample, FLOOR_Y, hit);
+  // Infinity: the lobby is an open-topped room, everything in it is visible.
+  const found = pickWalkablePoint(ray, park.sample, Infinity, hit);
   check(
     found && Math.abs(hit.y - DECK_Y) <= 0.62 && Math.hypot(hit.x - deckPoint.x, hit.z - deckPoint.z) <= 1.2,
     `pick from the floor lands on the deck's top (hit ${found ? `(${hit.x.toFixed(1)}, ${hit.y.toFixed(2)}, ${hit.z.toFixed(1)})` : 'nothing'}, wanted y ≈ ${DECK_Y})`,
