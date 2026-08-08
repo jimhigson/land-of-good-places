@@ -49,8 +49,8 @@ branch's last function. Both blocks kept, main's given its own opener.
   on the cushion top *is* sitting on it, with no offset to derive.
 - **A seated child's head pivot is `KID_HEAD_HEIGHT * cos(RIDE_POSE_BODY_PITCH)`
   above her origin**, not `KID_HEAD_HEIGHT` — the pose leans her forward 0.3 rad,
-  which is 6 cm. The window sill is derived through that angle, not through a
-  copy of the 6 cm.
+  which is 6 cm. Worth knowing if you ever aim anything at their faces; the sill
+  ended up not needing it (it uses the shoulder line, which needs no trig).
 - **`applyRidePose` had to be extracted** to `src/entities/ridePose.ts`. It could
   not be imported from `Player.ts`: that reaches `world/terrain`, which reaches
   `PARK_BOUNDARY`, and the ride's whole job is to draw before the park is solved.
@@ -58,10 +58,20 @@ branch's last function. Both blocks kept, main's given its own opener.
 - **`BusDriver.setWalkPhase(0, 0)` silently un-seats the driver.** Both call
   sites passed zeroes; `applyWalk` at speed 0 writes *zero* into all four limb
   rotations. Removed the method and both calls — he never walks.
-- **The sill cannot reach halfway.** Chibi children: head is 59% of height and
-  1.32 m across. Sill at the seated chin = 34% up the side. Raising the children
-  is not available — the tallest already clears the header band by 90 mm. Only a
-  taller bus buys a higher sill, and that changes an approved silhouette.
+- **The sill is the seated shoulder line, and that *is* "about halfway".** The
+  first attempt used the **chin** and reached only 34% — safe, but it still read
+  as a glasshouse. `KID_SHOULDER_HEIGHT` (0.99, measured off the built `torso`)
+  is where a real coach's glazing starts: panel below is bodies, band above is
+  heads. That lands **44%**. It hides the bottom 25% of the skull — the jaw —
+  and the mouth is painted 60% down the face canvas, so faces stay whole.
+- **The door had its own idea of where windows start.** `DOOR_HEIGHT * 0.68`,
+  not `WINDOW_SILL_Y` — **0.94 m out of step** on the bus Jim complained about.
+  It then landed within 12 mm of the new sill by accident, which kept the guard
+  green by being the lowest glass it could find. Found only by mutation.
+- **The title's colours have to avoid the park's colours.** All six rainbow
+  bands were used; the green vanishes over grass and the blue over sky, and the
+  lane is grass, trees and sky. Now the four warm bands. A hue problem, not a
+  weight problem — the chunky font was already there.
 
 ## Measured results
 
@@ -69,7 +79,11 @@ branch's last function. Both blocks kept, main's given its own opener.
   0.794. **Nothing under the floor.**
 - worst head **3.428** vs ceiling 3.518 — clears by 0.090 m, over 4 s of bouncing.
 - **every drawn part touches the bodywork** (was: three detached).
-- glass band 1.751..3.500; sill **34%** up the bodywork side (was 16%).
+- glazing starts **2.084 m**, **44%** up the bus's side (was 16%), 0.003 m off
+  the lowest shoulder aboard, hiding **24%** of a head. Solid lower panel 0.55 m
+  -> 1.50 m.
+- title: 16 characters, 4 colours, `background-color` `rgba(0,0,0,0)`, weight
+  900, 3.4rem, present and moving on all 12 captured frames.
 
 ## Status
 
@@ -78,6 +92,31 @@ branch's last function. Both blocks kept, main's given its own opener.
 - [x] Seating: floor constant, cushion anchors, shared pose, driver, per-rider bounce
 - [x] Window sill derived from a seated child's chin
 - [x] Floating block (rear bumper) + tail + step reattached
-- [ ] Title card — bold, no background, palette per character, bouncing
-- [ ] Guards, each proved red
-- [ ] Browser: interior on several beats, plus rear and side exteriors
+- [x] Title card — chunky, no background, warm palette per character, bouncing
+- [x] Guards, **ten mutations each proved red** (two of them found guards that
+      could not fail; both rewritten)
+- [x] Browser: 12 ride frames (both inside beats, three outside), plus a frozen
+      orbit for rear/flank. Headless Chromium, throwaway profile, port 5473,
+      killed by PID.
+
+## Known, unchanged, and worth Jim seeing
+
+- **The inside view is two enormous near heads and a lot of aisle floor.** The
+  near pair are 0.53 m from the lens and there is nowhere to retreat to
+  (round 5's finding, unchanged). Sitting the children 0.47 m higher moved the
+  lens up with them — it is derived from the seats — so the floor's share of the
+  frame grew about a fifth. It reads as a busy bus, and the faces beyond the
+  near pair are clear and smiling, but it is the thing I would change next.
+- Round 5's open items 1, 3, 4, 5 are untouched: the destination board crowding
+  the face, the park being off to one side at the settle, the rail-race arch
+  crossing the arrival, and `NPC_COUNT` unmeasured on a device.
+
+## Capture recipe (worked, reuse it)
+
+`playwright` at `~/.npm/_npx/e41f203b7505f1fb/node_modules`. **A fresh profile
+lands on character creation, not on the ride** — click `.charcreate-go` first;
+that cost a run. `page.waitForFunction(fn, arg, options)` — the second argument
+is the *arg*, so `{ timeout }` in that slot is silently ignored and you get the
+30 s default. Poll `window.journey.ride.elapsed`, never sleep. To inspect the
+bus from an arbitrary angle, set `ride.update = () => {}` to freeze the whole
+ride, then drive `ride.camera` yourself; the loop keeps rendering.
