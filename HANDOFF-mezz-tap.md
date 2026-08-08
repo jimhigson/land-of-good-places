@@ -83,16 +83,44 @@ ArcTread slices per tread (wedges, Hotel.ts ~2469).
 - Pick: must become level-aware for "tap the deck from the floor" (respect
   castle cutaway visibility — do not let taps land on hidden decks).
 
-## Status
+## Status — IMPLEMENTED, verified, PR pending
 
-- [x] Worktree + npm ci
-- [x] Static code diagnosis (above)
-- [ ] Live repro with telemetry (headless Playwright, lobby world origin
-      (-600, 600); scratchpad live-stair.mjs pattern; ~6 fps software GL)
-- [ ] NPC routing audit (poiGraph), castle deck audit, park platform audit
-- [ ] Probes RED (check:hotel or new script; + park-side multi-level case)
-- [ ] Implementation
-- [ ] Live verify 390x844 phone viewport, screenshots
-- [ ] Build + test:procgen + PR
+- [x] Live repro (scratchpad diag-mezz.mjs / diag-mezz2.mjs, port 5877):
+      confirmed both directions broken; hypotheses above all confirmed, plus:
+      the over-the-rail tap "arrives" instantly (marker jumps to her feet) and
+      floor→deck pick buries the hit inside the mass (or at raw terrain
+      −16.9 m in the headless park). One first-run tap was eaten by Selection
+      (a zone on the deck) — unrelated, not pursued.
+- [x] Audits: NPC routing (poiGraph park children; HotelGuests room sampler)
+      is single-level, destination-graph, never crosses levels on foot — NOT
+      migrated, seam recorded in ARCHITECTURE-DECISIONS.md Decision 11. The
+      castle changes decks by stair MENU + lifts (Game.openStairMenu,
+      GlassLift, Bubble — scripted walks/portals), so no cross-deck tap route
+      exists to fix there; its within-deck taps ride the same lattice. The
+      PARK has no walkable surface more than a step above ground today
+      (station platform 0.34 m < 0.62 m step; Decision 8's bridges not built
+      yet), so there is no park-side multi-level route to probe; check:park's
+      entrance sweep guards the park through the rewrite.
+- [x] Probes: scripts/check-nav-routes.mts (npm run check:nav-routes, in the
+      build chain). Proven RED against the 2D router (8 failures, commit
+      history has the numbers), re-proven red by deleting the connector
+      registration (9 failures incl. 3.20 m vertical on every case), green
+      after.
+- [x] Implementation (one commit, "Level-aware routing"): see Decision 11.
+      NavGrid nodes are (cell, level); blocked stays 2D deliberately;
+      connectors are declared edges (WalkSurfaces.addConnector) derived from
+      plan data (layout.ts mezzanineWalkConnectors); pickWalkable tests the
+      topmost VISIBLE surface (Building.visibleSurfaceCeiling = the cutaway's
+      currentDeck, one owner); TapNavigator arrives only on the target's
+      level. findRoute signature changed (startY/goalY) — all callers updated
+      (TapNavigator, parkFacts, check-park).
+- [x] Live verify, phone 390x844, REAL touch taps (scratchpad
+      qa-mezz-phone.mjs; screenshots scratchpad/mezz-shots/): climb ✓
+      descend ✓ over-the-rail long way ✓, pick drift ≤ 0.16 m, console CLEAN.
+      Note for reruns: /hotel deep link runs an entry sequence — wait for
+      x < −400 and zero velocity before teleporting, and wait for the camera
+      to settle before projecting tap pixels.
+- [x] npm run build EXIT 0 (full chain incl. check:nav-routes)
+- [ ] test:procgen (running), PR
 
-No commits yet beyond this file.
+Dev server: vite on port 5877, PID 54365 — kill it (kill 54365) when done.
