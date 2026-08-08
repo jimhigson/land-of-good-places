@@ -67,6 +67,7 @@ import {
   bedsideTable,
   buffetCounter,
   BUFFET_TOP,
+  DECAL_STEP,
   SOFA_SEAT_TOP,
   cloud,
   crystalCluster,
@@ -1888,13 +1889,22 @@ export class Hotel implements GameSystem {
 
     // The floor plate, in this floor's own colour, with a soft emissive lift
     // so an open-topped room at night is cosy rather than cave-dark.
+    //
+    // **Its west apron stops short of the lift alcove.** The plate used to
+    // run 0.6 m past every wall, and under the alcove that put its top face
+    // at exactly the lift car's own floor height — y = 0 against y = 0,
+    // measured by probe 17 as a genuine z-fight. The pullback tucks the edge
+    // under the west wall's band, so nothing shows and nothing fights; the
+    // invisible walk `Plate` below still covers the alcove.
+    const westEdge = room.liftZ !== null ? -room.halfX + 0.2 : -room.halfX - 0.6;
+    const eastEdge = room.halfX + 0.6;
     const floor = solid(
       new Mesh(
-        new BoxGeometry(room.halfX * 2 + 1.2, 0.5, room.halfZ * 2 + 1.2),
+        new BoxGeometry(eastEdge - westEdge, 0.5, room.halfZ * 2 + 1.2),
         interiorMaterial(room.theme.floor),
       ),
     );
-    floor.position.y = -0.25;
+    floor.position.set((westEdge + eastEdge) / 2, -0.25, 0);
     shell.add(floor);
     this.surfaces.addPlatform(
       new Plate(
@@ -2963,7 +2973,10 @@ export class Hotel implements GameSystem {
     const shell = this.roomShell(room);
 
     // The lawn, straight down the middle — the lane from the lift.
-    const lawn = roundRug(3.4, PALETTE.grass, PALETTE.grassLight);
+    // The lawn lies over the sand path where they cross, so it rides one rug
+    // tier up — two rugs on the same rungs are exactly the coplanar flicker
+    // probe 17 measures.
+    const lawn = roundRug(3.4, PALETTE.grass, PALETTE.grassLight, 1);
     lawn.position.set(1.5, 0, 1.2);
     shell.add(lawn);
     const path = rug(17, 2.4, PALETTE.pathSand, PALETTE.pathEdge);
@@ -3005,7 +3018,8 @@ export class Hotel implements GameSystem {
     }
 
     // The pond, off the lane so it is something you walk *to*.
-    const pond = lilyPond(2.1, 0x50c0);
+    // Tier 2: the pond's rim laps over the tier-1 lawn.
+    const pond = lilyPond(2.1, 0x50c0, 2);
     pond.position.set(6.2, 0, 2.4);
     shell.add(pond);
 
@@ -3047,7 +3061,8 @@ export class Hotel implements GameSystem {
       // nothing to fight with.
       pictures: [{ wall: 'north', along: 6.3, width: 1.6, height: 1.2, seed: 0x50c1 }],
     });
-    this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0);
+    // Six ladder steps, not four: this arrow crosses the stacked lawn rug.
+    this.paintArrow(shell, 6.4, -2.6, -room.halfX + 2.5, 0, 6 * DECAL_STEP);
   }
 
   /**
@@ -3154,7 +3169,8 @@ export class Hotel implements GameSystem {
       halfZ: 0.48,
       top: SOFA_SEAT_TOP,
     });
-    const mat = roundRug(2.2, PALETTE.markerSky, PALETTE.bubbleSkin);
+    // Tier 1: the mat lies on the sandy sea bed, not beside it.
+    const mat = roundRug(2.2, PALETTE.markerSky, PALETTE.bubbleSkin, 1);
     mat.position.set(0, 0, 3.4);
     shell.add(mat);
 
@@ -3679,7 +3695,7 @@ export class Hotel implements GameSystem {
       ),
     );
     plate.rotation.x = -Math.PI / 2;
-    plate.position.y = 0.02;
+    plate.position.y = DECAL_STEP;
     shell.add(plate);
   }
 
@@ -4063,7 +4079,19 @@ export class Hotel implements GameSystem {
    * wayfinding, and a way-out sign that changes colour per storey is one a
    * child has to re-learn each time she leaves the lift.
    */
-  private paintArrow(shell: Group, fromX: number, fromZ: number, toX: number, toZ: number): void {
+  /**
+   * `y` rides the decal ladder (`dressing.ts`): four steps clears the rugs a
+   * chevron ordinarily crosses; the garden passes six because its arrow runs
+   * over the *stacked* lawn rug.
+   */
+  private paintArrow(
+    shell: Group,
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    y: number = 4 * DECAL_STEP,
+  ): void {
     const dx = toX - fromX;
     const dz = toZ - fromZ;
     const length = Math.hypot(dx, dz);
@@ -4072,7 +4100,7 @@ export class Hotel implements GameSystem {
     for (let i = 0; i < chevrons; i += 1) {
       const t = (i + 0.5) / chevrons;
       const chevron = floorChevron(PALETTE.markerLemon);
-      chevron.position.set(fromX + dx * t, 0.06, fromZ + dz * t);
+      chevron.position.set(fromX + dx * t, y, fromZ + dz * t);
       chevron.rotation.set(-Math.PI / 2, yaw, 0);
       shell.add(chevron);
     }

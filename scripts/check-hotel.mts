@@ -53,13 +53,15 @@
  */
 
 import './headless-canvas.mjs';
-import { Box3, Mesh, Raycaster, Vector3 } from 'three';
+import { BackSide, Box3, Mesh, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { Player } from '../src/entities/Player.ts';
 import { BED_MATTRESS_TOP } from '../src/art/models/hotelAssets.ts';
 import {
+  CAMERA_DISTANCE,
+  CAMERA_PITCH_DEGREES,
   NPC_RADIUS,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
@@ -1093,6 +1095,99 @@ if (fallenPlayer.position.y < 0) {
         `${room.space}'s perimeter has ${openings} unwalled sample(s) outside its doorways ` +
           `(${spots.join(', ')}…) — walls that stop short of abutting, i.e. a see-through gap`,
       );
+    }
+  }
+}
+
+// ------------------------- 17. the floor-decal ladder keeps its steps apart
+//
+// Jim, live play, 8 Aug 2026: *"Rugs etc are coplanar with floors, so they
+// snap in and out and flicker due to z-buffer rounding."* The camera is
+// orthographic (far = CAMERA_DISTANCE·3) and WebGL guarantees only a 16-bit
+// depth buffer on the family's phones, so one depth step is ~4.1 mm along the
+// view axis — ~6.7 mm of height at the 38° pitch. Any two upward faces closer
+// than about two steps and overlapping in plan dither per pixel: measured on
+// the pre-fix build, the garden's lawn rug sat *exactly* coplanar with its
+// path rug over 5.4 m², the lobby mosaic 10 mm under every rug, the sunburst's
+// own discs 8 mm apart, and the lift car's floor at exactly the room plate's
+// 0.000.
+//
+// So: across every room, no two upward faces in the floor band (top ≤ 0.35 m)
+// that overlap by more than a hand's area may sit within two depth steps of
+// each other. The threshold is derived from the same constants the renderer
+// uses, not invented; the fix (`DECAL_STEP` in `hotel/dressing.ts`) spaces the
+// ladder at three steps, comfortably clear. Outline shells (back-side
+// materials) are not faces a viewer ever sees from above and are skipped.
+//
+// Proven red before trusted green: 12 problem(s) on the pre-fix build — see
+// the commit message for the run.
+{
+  const DEPTH_STEP = (CAMERA_DISTANCE * 3 - 0.1) / 65536;
+  const MIN_DECAL_GAP = (2 * DEPTH_STEP) / Math.sin((CAMERA_PITCH_DEGREES * Math.PI) / 180);
+  hotel.hotelRoot.updateMatrixWorld(true);
+  for (const room of ROOMS) {
+    const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${room.space}`);
+    if (!shell) continue;
+    // Only geometry with a genuinely *flat* top can shimmer plane-on-plane:
+    // spheres and cones (tufts, crystals) meet their neighbours along curves,
+    // which is ordinary intersection, not a depth fight. Baked assets come in
+    // as plain BufferGeometry and are kept — the lift car's floor is one.
+    const FLAT_TOPPED = new Set([
+      'BoxGeometry',
+      'BufferGeometry',
+      'CylinderGeometry',
+      'ExtrudeGeometry',
+      'PlaneGeometry',
+      'RingGeometry',
+      'ShapeGeometry',
+    ]);
+    const tops: { readonly what: string; readonly box: Box3; readonly mesh: Mesh }[] = [];
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (!FLAT_TOPPED.has(object.geometry.type)) return;
+      const material = object.material as { side?: number } | { side?: number }[];
+      const side = Array.isArray(material) ? material[0]?.side : material.side;
+      if (side === BackSide) return; // an outline shell, never seen from above
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      const box = bounds.clone().applyMatrix4(object.matrixWorld);
+      if (box.max.y > 0.35 || box.max.y < -0.1) return;
+      if (box.max.x - box.min.x < 0.05 || box.max.z - box.min.z < 0.05) return;
+      tops.push({ what: object.name || object.parent?.name || object.geometry.type, box, mesh: object });
+    });
+    const reported = new Set<string>();
+    for (let a = 0; a < tops.length; a += 1) {
+      for (let b = a + 1; b < tops.length; b += 1) {
+        const one = tops[a]!;
+        const two = tops[b]!;
+        // Two rings of one inlay are concentric annuli: disjoint by
+        // construction, coplanar by design, and only their *bounding boxes*
+        // overlap (a ring's box includes its own hole).
+        if (
+          one.mesh.geometry.type === 'RingGeometry' &&
+          two.mesh.geometry.type === 'RingGeometry' &&
+          one.mesh.parent === two.mesh.parent
+        ) {
+          continue;
+        }
+        const gap = Math.abs(one.box.max.y - two.box.max.y);
+        if (gap >= MIN_DECAL_GAP) continue;
+        const overlapX =
+          Math.min(one.box.max.x, two.box.max.x) - Math.max(one.box.min.x, two.box.min.x);
+        const overlapZ =
+          Math.min(one.box.max.z, two.box.max.z) - Math.max(one.box.min.z, two.box.min.z);
+        if (overlapX <= 0 || overlapZ <= 0 || overlapX * overlapZ < 0.05) continue;
+        const key = `${room.space}|${one.what}|${two.what}`;
+        if (reported.has(key)) continue;
+        reported.add(key);
+        problems.push(
+          `${room.space}: '${one.what}' (top ${one.box.max.y.toFixed(3)} m) and '${two.what}' ` +
+            `(top ${two.box.max.y.toFixed(3)} m) overlap ${(overlapX * overlapZ).toFixed(1)} m² ` +
+            `${(gap * 1000).toFixed(1)} mm apart — inside the ${(MIN_DECAL_GAP * 1000).toFixed(1)} mm ` +
+            `a 16-bit depth buffer can tell apart, so they flicker`,
+        );
+      }
     }
   }
 }
