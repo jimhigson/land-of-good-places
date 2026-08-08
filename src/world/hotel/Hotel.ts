@@ -14,7 +14,7 @@ import {
   Vector3,
 } from 'three';
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { HOTEL_PLAY_RADIUS } from '../../core/constants';
+import { HOTEL_PLAY_RADIUS, PLAYER_RADIUS } from '../../core/constants';
 import { hexToCss, PALETTE } from '../../core/palette';
 import { ART } from '../../art/style/artPalette';
 import { Rng } from '../../core/mathUtils';
@@ -187,7 +187,12 @@ const AUTO_DOOR_REACH = 4.2;
 const AUTO_DOOR_SIDE = 2.4;
 
 /** Seconds an automatic door takes to slide fully open, or fully shut. */
-const AUTO_DOOR_SECONDS = 0.55;
+// 1.2, up from 0.55: at 0.55 s the slide was over before the fixed camera's
+// oblique view of the recess could register it — QA staged ten approaches and
+// never caught a legible mid-slide frame. A door a person is meant to SEE
+// open (Jim asked for exactly that) has to open at the pace of a person
+// arriving, not a sensor firing.
+const AUTO_DOOR_SECONDS = 1.2;
 
 /** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
 const WALL_HALF_DEPTH = 0.25;
@@ -930,7 +935,27 @@ export class Hotel implements GameSystem {
     for (const side of ['north', 'west'] as const) {
       const wall = room.windows[side];
       if (!wall || wall.at.length === 0) continue;
-      const middle = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
+      // Middle pane by preference — but only a pane a child can actually
+      // stand at. The breakfast room's middle north pane is behind the
+      // buffet counter, and a zone whose stand spot is inside a counter is
+      // a chip that never comes in range (QA, 8 Aug 2026). The collision
+      // world is the authority on "can stand here", so ask it, nearest the
+      // middle first.
+      const stand = 1.8;
+      const middleOf = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
+      const probe = new Vector3();
+      const middle =
+        [...wall.at]
+          .sort((a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf))
+          .find((at) => {
+            const sx =
+              side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4 + stand;
+            const sz =
+              side === 'north' ? room.originZ - room.halfZ + 0.4 + stand : room.originZ + at;
+            probe.set(sx, 0, sz);
+            this.collision.resolve(probe, PLAYER_RADIUS);
+            return Math.hypot(probe.x - sx, probe.z - sz) < 0.05;
+          }) ?? middleOf;
       const x = side === 'north' ? room.originX + middle : room.originX - room.halfX + 0.4;
       const z = side === 'north' ? room.originZ - room.halfZ + 0.4 : room.originZ + middle;
       zones.push({
@@ -940,8 +965,8 @@ export class Hotel implements GameSystem {
         y: (wall.sill + wall.head) / 2,
         z,
         pickRadius: 2.2,
-        standX: side === 'north' ? x : x + 1.8,
-        standZ: side === 'north' ? z + 1.8 : z,
+        standX: side === 'north' ? x : x + stand,
+        standZ: side === 'north' ? z + stand : z,
         standRadius: 2.6,
         verb: 'Look out',
         sign: {
@@ -3287,14 +3312,19 @@ export class Hotel implements GameSystem {
     mat.position.set(2.5, 0, FLOOR_Z);
     shell.add(mat);
 
-    // The sofa, at the east end, turned partway between "facing the telly"
-    // (−X) and "facing the lens" (+Z) — the same both-at-once compromise the
-    // telly itself plays in the other direction (see the method header). A
-    // square −90° yaw showed the camera nothing but its back panel for the
-    // whole life of the room (QA, 7 Aug 2026).
+    // The sofa, mid-room on the rug, turned partway between "facing the
+    // telly" (−X) and "facing the lens" (+Z) — the same both-at-once
+    // compromise the telly itself plays in the other direction (see the
+    // method header). A square −90° yaw showed the camera nothing but its
+    // back panel (QA, 7 Aug 2026); the east end at x = 8.2 stood it inside
+    // the low east wall's sight shadow, where the fixed lens sees only the
+    // sliver above the wall top — "a teal sliver, barely recognisable"
+    // (QA, 8 Aug 2026). Same rule as the lobby's crystal columns: the
+    // camera looks along (−X, −Z), so nothing worth seeing lives close
+    // behind a +X or +Z wall.
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
-      x: 8.2,
-      z: FLOOR_Z,
+      x: 5.6,
+      z: 3.4,
       spin: -0.9,
       halfX: 1.1,
       halfZ: 1.3,
@@ -3675,8 +3705,15 @@ export class Hotel implements GameSystem {
       Math.atan2(-art.normalX, -art.normalZ),
     );
     this.moment = 'art';
+    // The camera is her eyes for this moment, so the body steps out of the
+    // frame entirely. The lens ends 0.3 m in front of where her face is
+    // posed — inside the hair shell, a screenful of colour bands (QA, on
+    // all three paintings tested) — and no offset that keeps the canvas
+    // square-on can also miss a head posed on the canvas's own normal.
+    player.group.visible = false;
     this.cine.play(this.artShotFor(art), () => {
       this.moment = null;
+      player.group.visible = true;
       player.endRide();
     });
   }
