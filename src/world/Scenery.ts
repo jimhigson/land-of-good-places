@@ -38,6 +38,9 @@ import { terrainHeight } from './terrain';
 import { isOnPath, PLAZA } from './paths';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
+import { RAIL_RACE_PLAN } from './railRace/plan';
+import { SLIDE_PLAN } from './slide/plan';
+import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
 
@@ -972,9 +975,27 @@ const RIDE_EXIT_CLEAR = 1.5;
  * would make `Scenery` and `coaster/plan` import each other), whereas the
  * scatter can trivially see the exit. The dependency only points one way.
  */
-function onRideExit(x: number, z: number, clearance: number): boolean {
-  const cruiser = COASTER_PLANS.cruiser;
-  return Math.hypot(x - cruiser.exitX, z - cruiser.exitZ) < RIDE_EXIT_CLEAR + clearance;
+/**
+ * EVERY ride's dismount point, not one of them. This guarded only the
+ * cruiser's for a while, and on a spread park (issue #241) a tree duly
+ * grew over the ferris wheel's exit — the invariant that proves every exit
+ * is clear ground caught it on seed 2. The list is the same one `paths.ts`
+ * grows exit spurs from, so a ride added there gains its scenery clearance
+ * the same day.
+ */
+/** Exported for `LampPosts`, which found the OTHER way to stand on a
+ * dismount point — one list of exits, two keep-off customers. */
+export function onRideExit(x: number, z: number, clearance: number): boolean {
+  const exits: readonly { readonly exitX: number; readonly exitZ: number }[] = [
+    COASTER_PLANS.cruiser,
+    RAIL_RACE_PLAN,
+    SLIDE_PLAN,
+    { exitX: FERRIS_WHEEL_EXIT.x, exitZ: FERRIS_WHEEL_EXIT.z },
+  ];
+  for (const exit of exits) {
+    if (Math.hypot(x - exit.exitX, z - exit.exitZ) < RIDE_EXIT_CLEAR + clearance) return true;
+  }
+  return false;
 }
 
 /** Somewhere we are allowed to plant: not on paving, not in a reserved plot,

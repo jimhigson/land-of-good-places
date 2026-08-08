@@ -184,11 +184,20 @@ export class World implements GameSystem {
     // driver (see `entities/npc/wanderDriver.ts`), which is what lets an NPC
     // occasionally climb one — the actual climbing (posing, hiding the body)
     // is `world/TreeClimbing.ts`, built in `Game.ts` alongside the player.
+    // …and the hotel's guests, who are these same children: `NpcCharacter`
+    // bodies with the same walk cycle, the same collision and the same
+    // push-apart, pinned to a circuit inside their own room rather than
+    // wandering the park's graph. Jim, having played the hotel: *"even other
+    // children can be walked through even though in the park NPCs are solid —
+    // they should be the same code."* This is where that stops being two
+    // implementations. The hotel is built above, before this, precisely so it
+    // has guests to offer by the time the crowd is made.
     this.npcs = new NpcSystem(
       this.collision,
       camera,
       (x, z, y) => this.building.surfaces.sample(x, z, y),
       this.scenery.climbableTrees,
+      this.hotel.residents,
     );
 
     // Everything the park *is*, as far as the scene is concerned. Kept as a
@@ -258,11 +267,38 @@ export class World implements GameSystem {
     for (const group of this.parkGroups) group.visible = visible;
   }
 
+  /**
+   * **Is the player in an interior — any interior?**
+   *
+   * The one question `DayNight.setIndoors` is asked, and the reason it is a
+   * question rather than a field: it used to read `building.playerInRoofedInterior`
+   * directly, which quietly meant "indoors" was defined as *the castle*. Then
+   * the hotel arrived with four more indoor spaces, and Jim, having played it:
+   * *"the hotel shouldn't have a night/day cycle like outdoors."* It was not
+   * that the hotel had been forgotten — it was that there was nowhere for it to
+   * be remembered. Anything with an inside adds itself to this line, and gets
+   * the whole indoor rule (a still sun, no travelling shadows, daytime fog)
+   * without knowing that any of that is what it is asking for.
+   *
+   * Each space owns what "inside" means for itself, which is not the same
+   * answer twice: the castle's roof terrace is genuinely outdoors and excluded
+   * by `playerInRoofedInterior`, while every hotel room counts, because a
+   * hotel room being open-topped is a *camera* decision (the iso view looks
+   * in) rather than a claim that it is outside.
+   *
+   * Each interior is also responsible for lighting itself once the sky's own
+   * lights go out — `building/InteriorLighting.ts` for the castle,
+   * `hotel/lighting.ts` for the hotel.
+   */
+  private get playerInAnyInterior(): boolean {
+    return this.building.playerInRoofedInterior || this.hotel.playerIsInside;
+  }
+
   update(context: FrameContext): void {
     // Read before `building.update()` runs this frame, so it is a frame behind
     // — invisible in practice, since every doorway crossing already happens
     // behind a closed iris (see `Building.changeSpace`).
-    this.dayNight.setIndoors(this.building.playerInRoofedInterior);
+    this.dayNight.setIndoors(this.playerInAnyInterior);
     this.dayNight.update(context);
 
     // Fan the time-of-day out to everything that changes with it. Systems read

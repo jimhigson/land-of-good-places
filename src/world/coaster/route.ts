@@ -95,7 +95,12 @@ const STATION_RAMP = 26;
  * clearance between the two is vertical, ratcheted by `check:park` — this
  * only keeps the coaster from *running along* the train's lane.
  */
-const RIM_INSET = 6;
+// 4, from 6: measured on seed 2, the pinched side of the spline left the
+// loop only FOUR closed routes in four thousand attempts — the annulus
+// between the castle band and a 6 m inset simply pinched shut. Two metres
+// back buys closure everywhere; the trains-vs-coaster separation was never
+// horizontal anyway (crossings are governed vertically, ratcheted).
+const RIM_INSET = 4;
 
 /**
  * Half-width kept clear either side of the centre line while solving.
@@ -644,7 +649,22 @@ export class CoasterRoute {
       influences: [CASTLE_INFLUENCE],
       satisfies: crossesTheCastle,
     };
-    const plan = solveRailRoute(brief);
+    let plan = solveRailRoute(brief);
+    if (!plan.report.satisfied) {
+      // The escalation valve Decision 7 implies but never built: a weight
+      // makes the castle crossing likely, the backstop makes it required —
+      // and on a seed where the geometry fights (the booth's bearing, the
+      // spread plots), a fixed weight can exhaust every start pose without
+      // one crossing. Rather than raise the weight for every park until the
+      // hardest seed passes (which makes every OTHER park's loop less free —
+      // the cost Decision 7 warns about), the seeds that need more pull are
+      // the only ones that pay for it: one re-solve, twice the weight.
+      plan = solveRailRoute({
+        ...brief,
+        seed: brief.seed ^ 0xe5ca,
+        influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
+      });
+    }
     this.plan = plan;
 
     const controls = Math.max(24, Math.round(plan.length / CONTROL_SPACING));

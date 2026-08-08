@@ -58,7 +58,10 @@ import {
   sofa,
   sunburst,
 } from './dressing';
-import { HotelGuests } from './HotelGuests';
+import { hotelResidents } from './HotelGuests';
+import { HotelProps } from './place';
+import { HotelLighting } from './lighting';
+import type { ResidentSpec } from '../../entities/npc';
 import { placedEntry } from '../parkLayout';
 import { saveFlags } from '../../state/flags';
 import { pressAction, type InteractZone } from '../interact';
@@ -72,6 +75,7 @@ import {
   roomFor,
   SUITE,
   type HotelRoom,
+  type WallSide,
 } from './layout';
 import { HotelLift } from './HotelLift';
 import { spaceAt, SPACE_GARDEN } from '../spaces';
@@ -84,6 +88,18 @@ const NAP_SECONDS = 2.6;
 
 /** How long the lobby celebrates a check-in. Long enough to see, short enough to want again. */
 const CHEER_SECONDS = 2.4;
+
+/** Half the thickness of a room's walls — the one number `glazeWall` needs from them. */
+const WALL_HALF_DEPTH = 0.25;
+
+/** How far a window's painted outside-glow spreads past the glass. */
+const GLOW_MARGIN = 0.34;
+
+/**
+ * Narrowest pane worth building. A declared window clipped by a doorway down
+ * to a slit is not a window; dropping it is tidier than drawing a sliver.
+ */
+const MIN_PANE_WIDTH = 0.6;
 
 /** The three breakfasts, exactly as Eleri listed them. */
 const BREAKFASTS: readonly { kind: BreakfastKind; label: string; glyph: string }[] = [
@@ -119,17 +135,6 @@ interface Bed {
   readonly x: number;
   readonly z: number;
   readonly id: string;
-}
-
-/**
- * Somewhere in a room a strolling guest must not stand, in that room's own
- * local metres. Built as the furniture goes down — see `Hotel.blockLocal`.
- */
-export interface RoomKeepOut {
-  readonly room: HotelRoom;
-  readonly x: number;
-  readonly z: number;
-  readonly radius: number;
 }
 
 /** What `Hotel.hangOnWalls` puts on the two walls the camera can see. */
@@ -186,8 +191,14 @@ export class Hotel implements GameSystem {
   private readonly keepers: KeeperHandle[] = [];
   private readonly chairs: Chair[] = [];
   private readonly beds: Bed[] = [];
-  private readonly keepOuts: RoomKeepOut[] = [];
-  private readonly guests: HotelGuests;
+  /**
+   * The one way a prop gets put down in this hotel — see `place.ts`. It is
+   * what makes a prop solid *and* what tells the guests to walk round it, from
+   * a single description of its footprint.
+   */
+  private readonly props: HotelProps;
+  /** The guests, handed to `NpcSystem` — see {@link residents}. */
+  private readonly guests: readonly ResidentSpec[];
   private seatedAt: string | null = null;
   /** Seconds of check-in celebration left to run. See {@link checkIn}. */
   private cheer = 0;
@@ -237,6 +248,13 @@ export class Hotel implements GameSystem {
     this.hotelRoot.name = 'the-land-hotel-inside';
     this.hotelRoot.visible = false;
 
+    // Its own constant warm light, because `World` now tells `DayNight` the
+    // player is indoors in here and the sky's own lights switch off — see
+    // `hotel/lighting.ts`. Inside `hotelRoot`, so it costs nothing at all
+    // while she is out in the park.
+    this.hotelRoot.add(new HotelLighting().group);
+
+    this.props = new HotelProps(collision);
     for (const room of ROOMS) this.buildRoomShell(room);
     this.statue = this.dressLobby();
     this.dressBreakfast();
@@ -248,7 +266,12 @@ export class Hotel implements GameSystem {
     // above filled in as it put its furniture down, so nobody strolls through
     // a sofa. Building it earlier would hand it an empty list, and the failure
     // would be silent — which is why it is here rather than beside them.
-    this.guests = new HotelGuests((room) => this.roomShell(room), this.keepOuts);
+    //
+    // Parented to `hotelRoot` rather than to a room's shell: an `NpcCharacter`
+    // writes **world** positions onto its model's root, and `hotelRoot` is the
+    // only node here with an identity transform. It is also what hides them
+    // with the hotel.
+    this.guests = hotelResidents(this.hotelRoot, this.props.roomKeepOuts);
 
     // ------------------------------------------------------------- the lift
     this.lift = new HotelLift({
@@ -265,8 +288,30 @@ export class Hotel implements GameSystem {
     return this.lift;
   }
 
+  /**
+   * True while the player is in any of the hotel's own spaces.
+   *
+   * `World` OR-s this with the castle's `playerInRoofedInterior` into the one
+   * question it asks `DayNight`: *is the player in **any** interior?* Jim,
+   * having played it: *"the hotel shouldn't have a night/day cycle like
+   * outdoors."* Every room here counts — there is no roof terrace to be an
+   * exception, and a hotel room being open-topped is a *camera* decision, not
+   * a statement that it is outdoors.
+   */
   get playerIsInside(): boolean {
     return this.inside;
+  }
+
+  /**
+   * The hotel's guests, as park-NPC bodies for `NpcSystem` to run.
+   *
+   * Read once, by `World`, when it builds the crowd — which is why the hotel
+   * is constructed before `NpcSystem` there. See `NpcSystem`'s `ResidentSpec`
+   * for the split, and `HotelGuests.ts` for why there is no movement code left
+   * in this building at all.
+   */
+  get residents(): readonly ResidentSpec[] {
+    return this.guests;
   }
 
   /** What the HUD's floor pill shows — Eleri: "It shows which floor you are on". */
@@ -409,7 +454,9 @@ export class Hotel implements GameSystem {
 
     this.lift.update(dt);
     this.statue.update(dt, elapsed);
-    this.guests.update(dt, elapsed);
+    // No guest update here any more: they are ordinary `NpcCharacter`s in
+    // `NpcSystem`'s own array and are stepped by it, with the park's crowd,
+    // by the park's code — which is the whole point (see `HotelGuests.ts`).
     for (const ball of this.discoBalls) ball.spin.rotation.y = elapsed * 0.5;
     for (const keeper of this.keepers) keeper.setWalkPhase(elapsed * 0.4, 0.5);
 
@@ -679,6 +726,11 @@ export class Hotel implements GameSystem {
             [gap[1], to],
           ]
         : [[from, to]];
+      // Every pane this side declares, clipped to the wall's own solid spans
+      // below — so a window can never end up floating across a doorway, and
+      // `layout.ts` never has to repeat where the doorways are.
+      this.glazeWall(shell, room, side, spans);
+
       for (const [a, b] of spans) {
         if (b - a < 0.05) continue;
         const length = b - a;
@@ -745,6 +797,98 @@ export class Hotel implements GameSystem {
     }
   }
 
+  /**
+   * The windows in one wall — Jim's *"a room without windows is not
+   * inviting"*, and *"the windowless building is weird and claustrophobic"*.
+   *
+   * **The room declares, this builds** (`layout.ts`'s `WindowWall`). It
+   * replaced a single hand-built glowing band bolted to the breakfast room's
+   * north wall — a fact about one room, written somewhere no other room could
+   * inherit it — with a mechanism every floor gets for four numbers.
+   *
+   * Two meshes per pane, and both of them earn their place:
+   *
+   * - a **soft glow** flat against the wall, a little larger all round, in
+   *   that floor's own `glow` colour. This is the light *spilling in*, and it
+   *   is what stops a bright rectangle reading as a poster. Painted rather
+   *   than lit: a real light per pane would be twenty-odd lights for a effect
+   *   that never moves (see `hotel/lighting.ts` for what is actually lit).
+   * - the **pane** itself, standing proud of it: `glassTint`, self-lit, the
+   *   same crystal the floor plate and the tower outside are made of.
+   *
+   * `spans` is the wall's *solid* stretches, handed in by the caller that just
+   * worked them out to leave the doorways alone. Clipping to them here is what
+   * makes the declared numbers safe to edit: the doorway is respected by
+   * construction rather than by everybody remembering it.
+   */
+  private glazeWall(
+    shell: Group,
+    room: HotelRoom,
+    side: WallSide,
+    spans: readonly (readonly [number, number])[],
+  ): void {
+    const plan = room.windows[side];
+    if (!plan) return;
+
+    const alongX = side === 'north' || side === 'south';
+    // Distance from the room's centre to the wall's inner face, and which way
+    // "into the room" points on this side.
+    const face = (alongX ? room.halfZ : room.halfX) - WALL_HALF_DEPTH;
+    const inward = side === 'north' || side === 'west' ? 1 : -1;
+    const height = plan.head - plan.sill;
+    if (height <= 0) return;
+    const centreY = (plan.sill + plan.head) / 2;
+
+    const glassMaterial = new MeshToonMaterial({
+      color: PALETTE.glassTint,
+      emissive: PALETTE.glassTint,
+      emissiveIntensity: 0.92,
+    });
+    const glowMaterial = new MeshToonMaterial({
+      color: PALETTE.blossomWhite,
+      emissive: room.theme.glow,
+      emissiveIntensity: 0.42,
+    });
+
+    for (const at of plan.at) {
+      const wanted: [number, number] = [at - plan.width / 2, at + plan.width / 2];
+      for (const [from, to] of spans) {
+        const a = Math.max(wanted[0], from);
+        const b = Math.min(wanted[1], to);
+        if (b - a < MIN_PANE_WIDTH) continue;
+        const width = b - a;
+        const along = (a + b) / 2;
+
+        const glow = decal(
+          new Mesh(
+            alongX
+              ? new BoxGeometry(width + GLOW_MARGIN * 2, height + GLOW_MARGIN * 2, 0.06)
+              : new BoxGeometry(0.06, height + GLOW_MARGIN * 2, width + GLOW_MARGIN * 2),
+            glowMaterial,
+          ),
+        );
+        const pane = decal(
+          new Mesh(
+            alongX
+              ? new BoxGeometry(width, height, 0.14)
+              : new BoxGeometry(0.14, height, width),
+            glassMaterial,
+          ),
+        );
+        glow.name = 'hotel.window-glow';
+        pane.name = 'hotel.window';
+        if (alongX) {
+          glow.position.set(along, centreY, -inward * face + inward * 0.04);
+          pane.position.set(along, centreY, -inward * face + inward * 0.1);
+        } else {
+          glow.position.set(-inward * face + inward * 0.04, centreY, along);
+          pane.position.set(-inward * face + inward * 0.1, centreY, along);
+        }
+        shell.add(glow, pane);
+      }
+    }
+  }
+
   private dressLobby(): RipikaStatueHandle {
     const shell = this.roomShell(LOBBY);
 
@@ -759,8 +903,9 @@ export class Hotel implements GameSystem {
     // the middle of a rainbow inlaid in the floor. Inner radius 2.0 clears the
     // plinth's 1.15 m footing with room for a child to walk round it.
     const statue = createRipikaStatue();
-    statue.root.position.set(0, 0, -1);
-    shell.add(statue.root);
+    // Solid at its plinth's own 1.15 m footing — Jim: *"the statues and chairs
+    // you can clip through are weird."*
+    this.props.place(shell, LOBBY, statue.root, { x: 0, z: -1, radius: 1.2 });
     this.hangDiscoBall(shell, 0, 9.6, -1);
     const ring = rainbowRing(2, 0.34);
     ring.position.set(0, 0, -1);
@@ -781,12 +926,21 @@ export class Hotel implements GameSystem {
       }
     }
 
+    // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
+    // rather than a disc, or a child could not walk along it to reach the far
+    // end of it.
     const desk = createReceptionDesk();
-    desk.root.position.set(5, 0, -7.2);
-    shell.add(desk.root);
+    this.props.place(shell, LOBBY, desk.root, { x: 5, z: -7.2, halfX: 1.35, halfZ: 0.45 });
     const reception = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
-    reception.root.position.set(5, 0, -8.6);
-    shell.add(reception.root);
+    // The receptionist is a person, and people in this park are scenery-soft
+    // (see `NpcSystem.separate` for the one exception, which is a push rather
+    // than a wall). She stands behind her own solid desk regardless.
+    this.props.place(shell, LOBBY, reception.root, {
+      x: 5,
+      z: -8.6,
+      radius: 0.7,
+      solid: false,
+    });
     this.keepers.push(reception);
 
     // The breakfast corner, ground floor — "breakfast ... at the ground floor".
@@ -805,9 +959,12 @@ export class Hotel implements GameSystem {
       [5.8, 2.4, PALETTE.markerSky],
       [9.0, 2.4, PALETTE.markerMint],
     ] as const) {
-      const seat = sofa(2.6, colour, PALETTE.blossomWhite);
-      seat.position.set(x, 0, z);
-      shell.add(seat);
+      this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
+        x,
+        z,
+        halfX: 1.3,
+        halfZ: 0.48,
+      });
     }
 
     // Crystal columns — the lobby's theme is "a grand crystal welcome", and a
@@ -815,23 +972,19 @@ export class Hotel implements GameSystem {
     // frames reception; a pair marks the west side, clear of the arrow's run
     // to the lift.
     this.placeProps(shell, LOBBY, [
-      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: 2.2, z: -7.4, radius: 1.3 },
-      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: 8.4, z: -7.4, radius: 1.3 },
-      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: -9.2, z: -4.6, radius: 1.3 },
-      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: -10.4, z: 6.6, radius: 1.3 },
+      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: 2.2, z: -7.4, radius: 0.62 },
+      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: 8.4, z: -7.4, radius: 0.62 },
+      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: -9.2, z: -4.6, radius: 0.62 },
+      { prop: () => crystalColumn(3, LOBBY.theme.floor), x: -10.4, z: 6.6, radius: 0.62 },
       { prop: () => crystalCluster(0x10b1), x: -11.4, z: -8.3 },
       { prop: () => crystalCluster(0x10b2), x: 11.4, z: -8.3 },
       { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 2.6 },
       { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6 },
     ]);
 
-    // The statue, the desk and the spot a child stands on to check in — the
-    // three things in the lobby a guest must never be found standing in.
-    this.blockLocal(LOBBY, 0, -1, 2.4);
-    this.blockLocal(LOBBY, 5, -7.9, 2.6);
-    this.blockLocal(LOBBY, 5, -4, 2);
-    this.blockLocal(LOBBY, 5.8, 2.4, 2);
-    this.blockLocal(LOBBY, 9, 2.4, 2);
+    // The one keep-out in the lobby that is not a prop: the patch of floor a
+    // child stands on to check in. See `HotelProps.reserve`.
+    this.props.reserve(LOBBY, 5, -4, 2);
     this.hangOnWalls(shell, LOBBY, {
       north: [-9.5, -4.5, 6.2],
       west: [-6, 2],
@@ -886,31 +1039,30 @@ export class Hotel implements GameSystem {
     // The buffet, along the north wall — the wall the camera looks straight
     // at (see `hotel/dressing.ts`'s header on which walls are visible), so the
     // food is the thing you see when you walk in.
-    const counter = buffetCounter(14);
-    counter.position.set(1.5, 0, -7.4);
-    shell.add(counter);
+    // Fourteen metres of counter, registered as fourteen metres of counter:
+    // one footprint, which makes it solid *and* which `place.ts` covers with a
+    // chain of keep-out discs so a guest can still stroll along it.
+    this.props.place(shell, BREAKFAST, buffetCounter(14), {
+      x: 1.5,
+      z: -7.4,
+      halfX: 7.12,
+      halfZ: 0.47,
+    });
     this.layBuffet(shell, 1.5, -7.4, 14);
 
     const server = createKeeper({ colour: PALETTE.flowerRed, hair: PALETTE.markerPink });
-    server.root.position.set(1.5, 0, -8.25);
-    shell.add(server.root);
+    this.props.place(shell, BREAKFAST, server.root, {
+      x: 1.5,
+      z: -8.25,
+      radius: 0.7,
+      solid: false,
+    });
     this.keepers.push(server);
 
-    // A band of glowing crystal panes where Floor 1's windows would be — moved
-    // onto the north wall when the room grew, so the lit band is on the wall
-    // the camera can see rather than on the one it looks over the top of.
-    const band = decal(
-      new Mesh(
-        new BoxGeometry(BREAKFAST.halfX * 2 - 2, 1.0, 0.15),
-        new MeshToonMaterial({
-          color: PALETTE.glassTint,
-          emissive: PALETTE.glassTint,
-          emissiveIntensity: 0.5,
-        }),
-      ),
-    );
-    band.position.set(0, 2.3, -BREAKFAST.halfZ + 0.2);
-    shell.add(band);
+    // (Floor 1's windows are `BREAKFAST.windows` now — seven declared panes
+    // along this same north wall, built by `glazeWall`. The single hand-built
+    // glowing band that used to be nailed here is gone: it was a fact about
+    // one room, kept somewhere no other room could inherit it.)
 
     // The runner from the lift into the room, and the corners.
     const runner = rug(5, 3, BREAKFAST.theme.trim, PALETTE.blossomWhite);
@@ -960,18 +1112,20 @@ export class Hotel implements GameSystem {
       PALETTE.buildingRoof,
     ];
 
-    // Life-sized statues of all the cute pets, on little plinths.
+    // Life-sized statues of all the cute pets, on little plinths. The plinth
+    // is what carries the footprint — Jim's "the statues … you can clip
+    // through are weird" — and the pet standing on it needs none of its own,
+    // since anything that can reach the pet is already stopped by the plinth.
     PET_KINDS.forEach((kind, index) => {
       const plinth = solid(
         new Mesh(new CylinderGeometry(0.85, 0.95, 0.4, 16), softMaterial(PALETTE.stonePink)),
       );
       const x = -7.5 + index * 5;
-      plinth.position.set(x, 0.2, -CORRIDOR.halfZ + 1.4);
-      shell.add(plinth);
+      const z = -CORRIDOR.halfZ + 1.4;
+      this.props.place(shell, CORRIDOR, plinth, { x, y: 0.2, z, radius: 0.95 });
       const pet = createPet(kind);
-      pet.root.position.set(x, 0.4, -CORRIDOR.halfZ + 1.4);
+      pet.root.position.set(x, 0.4, z);
       shell.add(pet.root);
-      this.blockLocal(CORRIDOR, x, -CORRIDOR.halfZ + 1.4, 1.6);
     });
 
     // The runner from the lift to the door. It is also the plainest possible
@@ -1062,12 +1216,16 @@ export class Hotel implements GameSystem {
     ];
     spots.forEach(([x, z], index) => {
       const bed = createHotelBed();
-      bed.root.position.set(x, 0, z);
       repaintPart(bed.root, 'bed-blanket', ART.rainbow[index * 2] ?? PALETTE.markerMint);
-      shell.add(bed.root);
+      // **Soft on purpose.** A bed is a `WalkSurfaces` platform — Eleri's
+      // "sleep, or go jumpy jumpy!" — and `Collision`'s height rule is fed
+      // the player's height above *the sampler's* ground, which is 0 when she
+      // is stood on the mattress. A wall round its edge would therefore shove
+      // her straight back off the thing she climbed onto. See `place.ts`'s
+      // header: anything you can stand on is placed soft.
+      this.props.place(shell, SUITE, bed.root, { x, z, halfX: 0.7, halfZ: 1, solid: false });
       const id = `bed-${index}`;
       this.beds.push({ x: SUITE.originX + x, z: SUITE.originZ + z, id });
-      this.blockLocal(SUITE, x, z, 1.7);
       this.surfaces.addPlatform(
         new Plate(
           BED_MATTRESS_TOP,
@@ -1081,10 +1239,7 @@ export class Hotel implements GameSystem {
 
     // A bedside table and its little crystal lamp between each pair of beds.
     for (const x of [-2.6, 1.4, 5.5]) {
-      const table = bedsideTable();
-      table.position.set(x, 0, -3.4);
-      shell.add(table);
-      this.blockLocal(SUITE, x, -3.4, 1);
+      this.props.place(shell, SUITE, bedsideTable(), { x, z: -3.4, radius: 0.36 });
     }
 
     // The rainbow rug, under the disco ball — the middle of the room, which
@@ -1108,9 +1263,11 @@ export class Hotel implements GameSystem {
     this.hangOnWalls(shell, SUITE, {
       north: [-4.6, 3.4],
       west: [-5, 5],
+      // Nudged out from ±3.2 to make room for the suite's two west windows
+      // (`SUITE.windows`), which sit either side of your own front door.
       pictures: [
-        { wall: 'west', along: -3.2, width: 1.5, height: 1.15, seed: 0x40c1 },
-        { wall: 'west', along: 3.2, width: 1.5, height: 1.15, seed: 0x40c2 },
+        { wall: 'west', along: -3.6, width: 1.5, height: 1.15, seed: 0x40c1 },
+        { wall: 'west', along: 3.6, width: 1.5, height: 1.15, seed: 0x40c2 },
       ],
     });
 
@@ -1167,24 +1324,30 @@ export class Hotel implements GameSystem {
       );
       shell.add(bowl.root);
     }
-    // Three keep-out discs along the counter rather than one huge one: a
-    // guest strolling past the buffet should be able to walk *along* it.
-    for (const along of [-0.35, 0, 0.35]) {
-      this.blockLocal(BREAKFAST, x + along * length, z + 0.6, 1.5);
-    }
+    // The bowls need no footprint of their own: they stand on the counter,
+    // whose own footprint (registered where it was placed) is already between
+    // them and anybody who could reach them.
   }
 
-  /** Stands a list of props on the floor, each registering its own keep-out. */
+  /**
+   * Stands a list of small round props on the floor.
+   *
+   * A thin wrapper over {@link HotelProps.place} for the case that repeats —
+   * a scatter of crystals, all round, all on the floor. The default radius is
+   * a crystal cluster's own spread; anything with a different shape is placed
+   * directly instead, so the call site shows what shape it is.
+   */
   private placeProps(
     shell: Group,
     room: HotelRoom,
     items: readonly { prop: () => Group; x: number; z: number; radius?: number }[],
   ): void {
     for (const item of items) {
-      const group = item.prop();
-      group.position.set(item.x, 0, item.z);
-      shell.add(group);
-      this.blockLocal(room, item.x, item.z, item.radius ?? 1);
+      this.props.place(shell, room, item.prop(), {
+        x: item.x,
+        z: item.z,
+        radius: item.radius ?? 0.6,
+      });
     }
   }
 
@@ -1220,19 +1383,6 @@ export class Hotel implements GameSystem {
       }
       shell.add(art);
     }
-  }
-
-  /**
-   * Records somewhere a strolling guest must not stand, in the room's own
-   * local metres. `HotelGuests` is handed the whole list.
-   *
-   * Registered by the placement helpers themselves rather than written out a
-   * second time next to the guest code — a hand-kept copy of "where the
-   * furniture is" is CLAUDE.md's most-repeated bug, and this one would fail
-   * silently as a child walking through a sofa.
-   */
-  private blockLocal(room: HotelRoom, x: number, z: number, radius: number): void {
-    this.keepOuts.push({ room, x, z, radius });
   }
 
   private roomShell(room: HotelRoom): Group {
@@ -1275,13 +1425,10 @@ export class Hotel implements GameSystem {
     id: string,
     spin = 0,
   ): void {
+    // The table top is 1.2 m across, so a disc is the honest footprint —
+    // which is also why `spin` never has to reach the collider.
     const table = createBreakfastTable();
-    table.root.position.set(x, 0, z);
-    table.root.rotation.y = spin;
-    shell.add(table.root);
-    // A table plus both chairs is 1.05 m of furniture each way; 2.2 keeps a
-    // strolling guest from clipping the back of a chair.
-    this.blockLocal(room, x, z, 2.2);
+    this.props.place(shell, room, table.root, { x, z, spin, radius: 0.6 });
     BREAKFASTS.forEach((food, index) => {
       const bowl = createBreakfastBowl(food.kind);
       const angle = (index / BREAKFASTS.length) * Math.PI * 2 + 0.4 + spin;
@@ -1292,9 +1439,16 @@ export class Hotel implements GameSystem {
       const chair = createBreakfastChair();
       const cx = x + Math.sin(yaw) * 1.05;
       const cz = z + Math.cos(yaw) * 1.05;
-      chair.root.position.set(cx, 0, cz);
-      chair.root.rotation.y = yaw + Math.PI;
-      shell.add(chair.root);
+      // 0.3 m — the seat is 0.44 across and the legs sit inside that, so this
+      // is the chair's own outline and not a metre of air around it. Small
+      // enough that the zone's stand point (0.9 m out, and a player is 0.62 m
+      // wide) is still reachable, which is the number that had to be checked.
+      this.props.place(shell, room, chair.root, {
+        x: cx,
+        z: cz,
+        spin: yaw + Math.PI,
+        radius: 0.3,
+      });
       this.chairs.push({
         x: room.originX + cx,
         z: room.originZ + cz,

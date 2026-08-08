@@ -23,7 +23,7 @@ import { terrainHeight } from './terrain';
 import { distanceToPath, ROUTES } from './paths';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
-import { clearOfCruiser } from './Scenery';
+import { clearOfCruiser, onRideExit } from './Scenery';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -566,6 +566,11 @@ function lampFits(
   // the five seeds. The whole finished curve is known by lamp time; only
   // its low stretches matter, because the cruise floor clears a lamp.
   if (!clearOfCruiser(x, z, LAMP_RADIUS + 0.8, LAMP_TOP)) return false;
+
+  // Never where a ride sets a child down — the same list the scenery keeps
+  // off. A lamp is thinner than a tree and stood on the ferris exit anyway
+  // (seed 2, the exit-clear invariant).
+  if (onRideExit(x, z, LAMP_RADIUS + 0.4)) return false;
 
   // Never in front of a door.
   for (const anchor of ANCHORS) {

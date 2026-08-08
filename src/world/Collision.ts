@@ -213,6 +213,40 @@ const SHALLOW_OVERLAP = 0.5;
 export const MAX_DEPENETRATION_SPEED = 3;
 
 /**
+ * How far outside the soft play boundary that boundary still has an opinion,
+ * in metres.
+ *
+ * The play bounds are the leash for **the space you are in** — `setPlayBounds`
+ * is called on every change of space, and the garden, the castle interior and
+ * each hotel room take it in turn. Nothing in the world says so, though, and
+ * `resolve` below happily applied whichever leash was currently fitted to
+ * *anybody* who asked, however far away they were: signed distance is negative
+ * outside, so a character standing in a hotel room six hundred metres from the
+ * park read as "outside the park by 754 m" and was pushed the whole way in.
+ * Not gradually, either — `NpcCharacter` calls `resolve` with the default
+ * `dt = Infinity`, so the escort budget is infinite and the correction lands
+ * in a single frame. Measured on 7 August 2026: a body at the hotel lobby's
+ * origin, with the garden bounds set, arrives at (−75, 57) after **one** call.
+ *
+ * That was a live bug before any of this: every park child was teleported into
+ * the castle interior's own bounds circle the instant the player stepped
+ * indoors, and teleported back out to the park's rim when she left. It became
+ * unignorable when the hotel's guests became real NPC bodies (Jim's "they
+ * should be the same code"), because they would have been dragged out of the
+ * hotel and into the park the moment the player left.
+ *
+ * So: **something this far outside the current boundary is not outside the
+ * park, it is somewhere else, and the park's edge has nothing to say about
+ * it.** 100 m is chosen to be far larger than any overshoot a walker can
+ * legitimately produce against a boundary they are actually stood next to (the
+ * whole garden is ~110 m across, and a leashed walker is only ever their own
+ * radius past the line), and far smaller than the gap between two spaces — the
+ * hotel's rooms are 260 m apart and the castle interior is 848 m from the park.
+ * Inside the garden, nothing about the leash changes.
+ */
+const BOUNDARY_LEASH_REACH = 100;
+
+/**
  * How much of a collider's own half-footprint a single movement sub-step is
  * allowed to cover — see {@link CollisionWorld.resolveMovement}.
  *
@@ -700,7 +734,9 @@ export class CollisionWorld {
       }
 
       // Soft boundary — you can never walk out of the park, nor off the edge of
-      // the building's own space.
+      // the building's own space. Only for movers actually near it, though:
+      // see {@link BOUNDARY_LEASH_REACH} for why somebody in another space
+      // entirely is not "outside the park".
       //
       // Pushed along the boundary's own gradient rather than straight at a
       // centre, because the park's edge is no longer a circle and "towards the
@@ -711,7 +747,7 @@ export class CollisionWorld {
       // own radius of the edge, which is rare — everywhere else this is the one
       // `distanceToEdge` call it always was.
       const edgeGap = this.bounds.distanceToEdge(position.x, position.z);
-      if (edgeGap < radius) {
+      if (edgeGap < radius && edgeGap > -BOUNDARY_LEASH_REACH) {
         const e = 0.25;
         const gradientX =
           this.bounds.distanceToEdge(position.x + e, position.z) -

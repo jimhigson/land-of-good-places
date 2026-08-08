@@ -31,11 +31,22 @@ function planFerrisExit(): FerrisExit {
   const sideX = -towardMiddleZ / length;
   const sideZ = towardMiddleX / length;
 
-  for (let distance = 2.5; distance <= 12; distance += 0.5) {
-    const x = ex - sideX * distance;
-    const z = ez - sideZ * distance;
-    // 2.6, from 1.2 — same reasoning as railRace/plan.ts's exit margin.
-    if (clearOfPlots(x, z, 2.6)) return { x, z };
+  // One ray was never enough on a spread park (issue #241): seed 2's only
+  // clear spots on the anti-kiosk ray were under a tree by the time the
+  // scatter ran. Sweep a small fan — anti-kiosk side first so the exit
+  // still prefers to land opposite the booth — and take the first spot
+  // clear of plots AND the doormat's own approach.
+  for (const swing of [0, -0.35, 0.35, -0.7, 0.7, Math.PI / 2, -Math.PI / 2]) {
+    const cos = Math.cos(swing);
+    const sin = Math.sin(swing);
+    const dirX = -(sideX * cos - sideZ * sin);
+    const dirZ = -(sideZ * cos + sideX * sin);
+    for (let distance = 2.5; distance <= 12; distance += 0.5) {
+      const x = ex + dirX * distance;
+      const z = ez + dirZ * distance;
+      // 2.6, from 1.2 — same reasoning as railRace/plan.ts's exit margin.
+      if (clearOfPlots(x, z, 2.6)) return { x, z };
+    }
   }
   return { x: ex - sideX * 2.5, z: ez - sideZ * 2.5 };
 }

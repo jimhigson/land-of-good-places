@@ -1,5 +1,7 @@
-import type { Object3D } from 'three';
+import { Group, type Object3D } from 'three';
 import type { Expression } from '../../art/style/faces';
+import type { CreatureHandle } from '../../art/style/asset';
+import type { CharacterModel } from '../CharacterModel';
 import type { CrowdMember } from './InstancedCrowd';
 
 /** The joints a walk cycle needs, resolved once per child. */
@@ -48,4 +50,79 @@ export interface NpcAvatar {
    * instance buffer to flush, so it has none.
    */
   readonly member?: CrowdMember;
+}
+
+/**
+ * The player's own model, as an NPC body.
+ *
+ * The one adapter between {@link CharacterModel} — individually rendered, real
+ * `hatAnchor`, simulated ponytail — and what `NpcCharacter` poses. There is
+ * deliberately **one** of these rather than one per caller: `NpcSystem`'s
+ * pinned cast (Eleri, Rumi) and the hotel's own residents are the same body
+ * built by the same factory, and a second copy of this seven-line mapping is
+ * exactly the "two definitions of one thing, kept in step by hand" CLAUDE.md
+ * opens with — the copy would be found wrong by a child, as a guest whose head
+ * did not turn.
+ *
+ * `tick` is wired to `CharacterModel.update`, so a resident wearing a swishy
+ * ponytail simulates it without anybody here knowing that is what it does.
+ */
+export function characterModelAvatar(model: CharacterModel): NpcAvatar {
+  return {
+    rig: {
+      root: model.root,
+      body: model.body,
+      head: model.head,
+      leftArm: model.leftArm,
+      rightArm: model.rightArm,
+      leftLeg: model.leftLeg,
+      rightLeg: model.rightLeg,
+    },
+    headBaseY: model.head.position.y,
+    height: model.height,
+    setExpression: (expression) => model.setExpression(expression),
+    tick: (dt) => model.update(dt),
+  };
+}
+
+/**
+ * Any creature in the park's own asset language, as an NPC body.
+ *
+ * Every `CreatureHandle` (`art/style/asset.ts`) already carries the two joints
+ * a walk cycle actually needs — a `body` that bobs and squashes and a `head`
+ * that turns — so a pet is a perfectly good {@link NpcAvatar} and gets the
+ * shared movement, collision, ground handling and push-apart for free. That is
+ * the whole point of {@link NpcAvatar} being an interface rather than "a child
+ * in the crowd": a bunny padding round the breakfast room is not a second
+ * movement system, it is the same one with a smaller model on it.
+ *
+ * **Limbs are optional and usually absent.** `createPet` reports
+ * `limbs: null` — a pet's legs are part of its body blob, and its own
+ * `setWalkPhase` passes `null` straight to `applyWalk`. `NpcCharacter.animate`
+ * writes arm and leg rotations unconditionally, so they are given four
+ * throwaway `Group`s that are never parented to anything: writing a rotation
+ * onto an object outside the scene graph costs one assignment and draws
+ * nothing, which is cheaper *and* simpler than four `if`s in the frame path.
+ */
+export function creatureAvatar(handle: CreatureHandle): NpcAvatar {
+  const limbs = handle.limbs ?? {
+    leftArm: new Group(),
+    rightArm: new Group(),
+    leftLeg: new Group(),
+    rightLeg: new Group(),
+  };
+  return {
+    rig: {
+      root: handle.root,
+      body: handle.body,
+      head: handle.head,
+      leftArm: limbs.leftArm,
+      rightArm: limbs.rightArm,
+      leftLeg: limbs.leftLeg,
+      rightLeg: limbs.rightLeg,
+    },
+    headBaseY: handle.head.position.y,
+    height: handle.height,
+    setExpression: (expression) => handle.setExpression(expression),
+  };
 }

@@ -67,6 +67,41 @@ export interface HotelTheme {
   readonly glow: number;
 }
 
+/** A wall of a room. `north` is −Z, `west` is −X — the two the camera sees. */
+export type WallSide = 'north' | 'south' | 'east' | 'west';
+
+/**
+ * The windows in one wall — **declared here, built by
+ * `Hotel.buildRoomShell`**.
+ *
+ * Jim, having played it: *"a room without windows is not inviting"* and *"the
+ * windowless building is weird and claustrophobic"*. The first answer to that
+ * was one hand-built glowing band nailed to the breakfast room's north wall,
+ * which is exactly the shape of problem this repo keeps filing: a fact about
+ * a room, written down somewhere that is not the room, that only one room has
+ * and no other room can inherit. It is gone. A room now *says* where its
+ * windows are and the builder puts them there, so a new floor gets windows by
+ * adding four numbers rather than by remembering to copy a block of geometry.
+ *
+ * The builder clips every pane to the wall's **own solid spans** — the spans
+ * it is already computing to leave the doorways out — so a pane can never end
+ * up floating across a doorway however carelessly `at` is written. That is the
+ * part that makes this data safe to edit: the doorway is not repeated here,
+ * it is respected automatically.
+ */
+export interface WindowWall {
+  /**
+   * Pane centres along the wall's own axis: x on the north and south walls,
+   * z on the east and west ones.
+   */
+  readonly at: readonly number[];
+  /** Pane width along that same axis. */
+  readonly width: number;
+  /** Bottom and top of the glass, metres above the floor. */
+  readonly sill: number;
+  readonly head: number;
+}
+
 export interface HotelRoom {
   readonly space: SpaceId;
   /** This floor's colours. See {@link HotelTheme}. */
@@ -79,7 +114,17 @@ export interface HotelRoom {
   /** Wall height. Rooms are open-topped — the iso camera looks in. */
   readonly wallHeight: number;
   /** Gaps in the walls, per side, as [from, to] along that wall's axis. */
-  readonly gaps: Partial<Record<'north' | 'south' | 'east' | 'west', readonly [number, number]>>;
+  readonly gaps: Partial<Record<WallSide, readonly [number, number]>>;
+  /**
+   * Where the daylight comes in. See {@link WindowWall}.
+   *
+   * The camera sits at focus + (+X, +Y, +Z), so it looks at the inside faces
+   * of the **north and west** walls and at the *outside* of the other two —
+   * a window on the south or east wall is a window nobody will ever look
+   * through. Every room therefore declares north, west, or both, and where
+   * one of those two is missing the room's own entry below says why.
+   */
+  readonly windows: Partial<Record<WallSide, WindowWall>>;
   /** The lift alcove's centre on the west wall, local Z. */
   readonly liftZ: number | null;
   /** Which lift floor this room answers to (index into HOTEL_FLOORS). */
@@ -157,6 +202,12 @@ export const LOBBY: HotelRoom = {
   wallHeight: 3.4,
   // South: the front door back out to the park. West: the lift.
   gaps: { south: [-DOOR_HALF, DOOR_HALF], west: [-1.6, 1.6] },
+  // Tall crystal lights the full height of a grand lobby, threaded between the
+  // sconces and the pictures already hung on these two walls.
+  windows: {
+    north: { at: [-12, -2.4, 1.4, 4, 7.6, 11.8], width: 1.8, sill: 0.9, head: 2.9 },
+    west: { at: [-8.6, -3.8, 6.6], width: 1.8, sill: 0.9, head: 2.9 },
+  },
   liftZ: 0,
   liftFloor: 0,
   floorLabel: 'Lobby',
@@ -181,6 +232,14 @@ export const BREAKFAST: HotelRoom = {
   halfZ: 9,
   wallHeight: 3.0,
   gaps: { west: [-1.6, 1.6] },
+  // Seven of them along the north wall, above the buffet — this is the room
+  // you eat breakfast in, so it is the room that has to read as *morning*.
+  // They replace the one hand-built glowing band that used to be nailed here,
+  // and which no other room could have.
+  windows: {
+    north: { at: [-10, -6.6, -3.2, 0.2, 3.6, 7, 10.4], width: 2.2, sill: 1.5, head: 2.75 },
+    west: { at: [-8.1, -3, 2.9, 8.1], width: 1.4, sill: 1.1, head: 2.6 },
+  },
   liftZ: 0,
   liftFloor: 1,
   floorLabel: 'Floor 1',
@@ -196,6 +255,14 @@ export const CORRIDOR: HotelRoom = {
   wallHeight: 3.0,
   // East: the "yours" door into the suite. West: the lift.
   gaps: { east: [-1.1, 1.1], west: [-1.6, 1.6] },
+  // Fifty storeys up, so these are the windows with the view — set between the
+  // wall's five stars and below them, with a pet statue silhouetted against
+  // each. **No west windows**: that wall is 8 m deep, has the lift gap through
+  // the middle of it and a sconce in each remaining 2.4 m span, and a pane
+  // squeezed into what is left would read as a mistake rather than a window.
+  windows: {
+    north: { at: [-7.3, -2.5, 2.5, 7.3], width: 2, sill: 0.9, head: 1.95 },
+  },
   liftZ: 0,
   liftFloor: 2,
   floorLabel: 'Floor 50',
@@ -211,6 +278,14 @@ export const SUITE: HotelRoom = {
   wallHeight: 3.0,
   // West: back out to the corridor.
   gaps: { west: [-1.1, 1.1] },
+  // Two, flanking your own front door. **No north windows**: that wall — and
+  // the east one — is the rainbow Eleri asked for by name, painted right
+  // across it, and a rainbow with a hole cut in it is not a rainbow. The
+  // suite gets its brightness from the west pair, its disco ball and the open
+  // sky overhead instead.
+  windows: {
+    west: { at: [-1.95, 1.95], width: 1.5, sill: 0.9, head: 2.6 },
+  },
   liftZ: null,
   liftFloor: 2,
   floorLabel: 'Floor 50',
