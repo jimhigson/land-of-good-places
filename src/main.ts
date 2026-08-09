@@ -16,10 +16,15 @@ import { BusJourney } from './world/entrance/BusJourney';
 // sequence drags in `terrain` and `boundary` and solves the park's outline.
 import { arrivalIsDue } from './world/entrance/arrivalFlag';
 import { JourneyDirector } from './world/entrance/journeyDirector';
-import { GENERATION_BUDGET_MS, ParkGeneration } from './boot/parkGeneration';
-import { ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
+import {
+  GENERATION_BUDGET_MS,
+  OVERRUN_GENERATION_BUDGET_MS,
+  ParkGeneration,
+} from './boot/parkGeneration';
+import { OVERRUN_WARMUP_BUDGET_MS, ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
 import { JourneyTitle } from './ui/JourneyTitle';
+import { JourneyWait } from './ui/JourneyWait';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore } from './state';
@@ -399,6 +404,11 @@ function rideInThenPlay(
   // which happens mid-ride — and disposed everywhere the ride tears down, of
   // which there are two: `finish()` and the generation-failure path below.
   const title = new JourneyTitle();
+  // The loading caption, shown only while the bus is parked at the gate waiting
+  // for a slow device to finish the park (`director.overrunning`). Idle and
+  // invisible for the whole of an on-time ride. Mounted and torn down alongside
+  // the title, for the same `#ui-root`-is-emptied reason.
+  const wait = new JourneyWait();
   // Same spirit as `window.game` below: something to poke from a console, and
   // the only practical way to drive a capture. Headless WebGL runs the park at
   // one or two frames a second and `Loop` clamps `dt` to `MAX_FRAME_DELTA`, so
@@ -456,6 +466,7 @@ function rideInThenPlay(
     loop.stop();
     skip.dispose();
     title.dispose();
+    wait.dispose();
     journey.dispose();
     handOver();
   };
@@ -484,6 +495,11 @@ function rideInThenPlay(
     // as a wait. Anything drawn that must keep moving reads the clock that
     // never stops. See `ui/JourneyTitle.ts` and `BusJourney.animationTime`.
     title.update(journey.animationTime);
+    // **The loading caption.** Shown only while the bus is parked at the gate
+    // waiting for a slow device to finish the park (`overrunning`), and told
+    // which part is being built so the wait reads as progress rather than a
+    // stall. Idle and invisible for the whole of an on-time ride.
+    wait.update(director.overrunning, generation.stage);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
     journey.render(renderer, engine.width, engine.height);
@@ -495,7 +511,13 @@ function rideInThenPlay(
     // all that is decided here is *when* it may have the CPU, which is: after
     // the bus has been drawn, and before anything downstream of it.
     if (director.shouldAdvanceGeneration()) {
-      generation.advance(GENERATION_BUDGET_MS);
+      // Eight milliseconds while the bus is rolling and the orbit must not
+      // stutter; most of the frame once it has parked at the gate and the only
+      // thing left to do is finish. `JourneyDirector` owns which it is — see
+      // `overrunAwareBudgetMs`, and the measured minutes-long wait it removes.
+      generation.advance(
+        director.overrunAwareBudgetMs(GENERATION_BUDGET_MS, OVERRUN_GENERATION_BUDGET_MS),
+      );
       if (generation.ready) director.noteGenerationReady();
       // A park that cannot be generated is not something to keep driving a bus
       // in front of. Without this the ride idles at the kerb for ever waiting
@@ -505,6 +527,7 @@ function rideInThenPlay(
         loop.stop();
         skip.dispose();
         title.dispose();
+        wait.dispose();
         journey.dispose();
         showBootFailure(problem);
         return;
@@ -546,6 +569,7 @@ function rideInThenPlay(
           loop.stop();
           skip.dispose();
           title.dispose();
+          wait.dispose();
           journey.dispose();
           showBootFailure(error);
         });
@@ -559,7 +583,7 @@ function rideInThenPlay(
     // compiled while she was walking about, one of them freezing a frame for
     // 1.29 s. See `boot/shaderWarmup.ts`.
     if (warmup && director.shouldWarmShaders()) {
-      warmup.advance(WARMUP_BUDGET_MS);
+      warmup.advance(director.overrunAwareBudgetMs(WARMUP_BUDGET_MS, OVERRUN_WARMUP_BUDGET_MS));
       if (warmup.ready) director.noteWarmupReady();
     }
 

@@ -11,6 +11,17 @@ import type { Camera, Object3D, Scene, WebGLRenderer } from 'three';
 export const WARMUP_BUDGET_MS = 8;
 
 /**
+ * How long a frame may spend compiling shaders **once the ride is over and the
+ * bus has parked** — the warm-up's half of `JourneyDirector.overrunAwareBudgetMs`,
+ * and for exactly the reason `OVERRUN_GENERATION_BUDGET_MS` gives: the 8 ms cap
+ * protects the orbit, and there is no orbit once the ride has ended. Warming the
+ * park's shaders is the last thing the wait is spent on, and holding it to 8 ms a
+ * frame rations it against a mostly-idle frame. During the wait it gets most of
+ * the frame so it finishes in a handful of frames rather than hundreds.
+ */
+export const OVERRUN_WARMUP_BUDGET_MS = 200;
+
+/**
  * The largest number of meshes {@link ShaderWarmup} will hand to one
  * `renderer.compile()` call.
  *
