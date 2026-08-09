@@ -4808,7 +4808,15 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
 
     beforeAll(async () => {
       facts = await buildParkFacts(seed);
-    }, 120_000);
+      // 300 s, up from 120: a park build is solver work, and the cruiser's
+      // search legitimately runs tens of seconds on an awkward seed (58 s
+      // worst measured locally, PR #253's report) — a 2-3x slower CI runner
+      // put seed 5 on the old cliff and it began failing roughly every
+      // other run, on branches AND on main (both 8 Aug 2026), with no code
+      // at fault either time. The ceiling still exists to catch a genuine
+      // hang; it just no longer prosecutes an honest solve. The structural
+      // fix is the cruiser's own cost, tracked separately.
+    }, 300_000);
 
     it('built the park it was asked for', () => {
       expect(facts.seed).toBe(seed);

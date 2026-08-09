@@ -430,6 +430,97 @@ function exceptIndex(exceptId: string | undefined): number {
   return found;
 }
 
+/**
+ * Which plots could possibly matter near each patch of ground.
+ *
+ * {@link clearOfFootprints} and {@link clearOfPlots} scanned every plot per
+ * query — with exact axis prefilters, and it was *still* 12-14% of a Sky
+ * Cruiser solve, because the route search asks on every sample of every
+ * candidate piece. This is the grid-bucket the prefilters were standing in
+ * for: per cell, the indices of every plot whose bounding box, inflated by
+ * {@link GRID_MARGIN_CEILING}, touches that cell. A query at `margin` at most
+ * the ceiling walks its cell's shortlist and runs the **same per-plot test in
+ * the same index order**; plots not on the shortlist provably cannot answer
+ * "blocked" for any point in the cell at any admissible margin, so skipping
+ * them is exact, never approximate. A query wider than the ceiling — nothing
+ * in the park's own generation makes one — falls back to the full scan.
+ */
+const GRID_CELL = 12;
+const GRID_MARGIN_CEILING = 8;
+
+interface PlotGrid {
+  readonly minGx: number;
+  readonly minGz: number;
+  readonly cellsWide: number;
+  readonly cellsDeep: number;
+  /** Plot indices per cell, indexed `gx * cellsDeep + gz`. */
+  readonly shortlists: readonly (readonly number[])[];
+}
+
+let plotGridCache: PlotGrid | null = null;
+
+function plotGrid(): PlotGrid {
+  if (plotGridCache) return plotGridCache;
+  const plot = plots();
+  // Reach: the furthest a plot can matter from its centre, at the widest
+  // admissible margin. `boundingRadius` is taken alongside the half-extents
+  // rather than trusted to contain them, so a manifest entry whose bounding
+  // radius understates its rectangle cannot silently fall off a shortlist.
+  const reaches = new Float64Array(plot.count);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < plot.count; i += 1) {
+    const reach =
+      Math.max(
+        plot.boundingRadius[i] as number,
+        plot.halfX[i] as number,
+        plot.halfZ[i] as number,
+      ) + GRID_MARGIN_CEILING;
+    reaches[i] = reach;
+    minX = Math.min(minX, (plot.x[i] as number) - reach);
+    maxX = Math.max(maxX, (plot.x[i] as number) + reach);
+    minZ = Math.min(minZ, (plot.z[i] as number) - reach);
+    maxZ = Math.max(maxZ, (plot.z[i] as number) + reach);
+  }
+  const minGx = Math.floor(minX / GRID_CELL);
+  const minGz = Math.floor(minZ / GRID_CELL);
+  const cellsWide = Math.floor(maxX / GRID_CELL) - minGx + 1;
+  const cellsDeep = Math.floor(maxZ / GRID_CELL) - minGz + 1;
+  const shortlists: number[][] = Array.from({ length: cellsWide * cellsDeep }, () => []);
+  for (let i = 0; i < plot.count; i += 1) {
+    const reach = reaches[i] as number;
+    const loGx = Math.floor(((plot.x[i] as number) - reach) / GRID_CELL) - minGx;
+    const hiGx = Math.floor(((plot.x[i] as number) + reach) / GRID_CELL) - minGx;
+    const loGz = Math.floor(((plot.z[i] as number) - reach) / GRID_CELL) - minGz;
+    const hiGz = Math.floor(((plot.z[i] as number) + reach) / GRID_CELL) - minGz;
+    for (let gx = loGx; gx <= hiGx; gx += 1) {
+      for (let gz = loGz; gz <= hiGz; gz += 1) {
+        (shortlists[gx * cellsDeep + gz] as number[]).push(i);
+      }
+    }
+  }
+  plotGridCache = { minGx, minGz, cellsWide, cellsDeep, shortlists };
+  return plotGridCache;
+}
+
+/**
+ * The shortlist for (x, z) at `margin`, or `null` meaning "scan everything".
+ *
+ * A point outside the grid entirely is beyond every plot's inflated reach, so
+ * the empty shortlist it gets is the honest answer, not a fallback.
+ */
+const EMPTY_SHORTLIST: readonly number[] = [];
+function shortlistFor(x: number, z: number, margin: number): readonly number[] | null {
+  if (margin > GRID_MARGIN_CEILING) return null;
+  const g = plotGrid();
+  const gx = Math.floor(x / GRID_CELL) - g.minGx;
+  const gz = Math.floor(z / GRID_CELL) - g.minGz;
+  if (gx < 0 || gx >= g.cellsWide || gz < 0 || gz >= g.cellsDeep) return EMPTY_SHORTLIST;
+  return g.shortlists[gx * g.cellsDeep + gz] as readonly number[];
+}
+
 /** Clear of every plot's bounding circle by `radius`. Pure, for the plans
  * solved at module load (train, coaster, ferris exit) — lives here so none
  * of them has to import another ride's plan just to ask about the layout. */
@@ -438,7 +529,10 @@ export function clearOfPlots(x: number, z: number, radius: number): boolean {
   const px = plot.x;
   const pz = plot.z;
   const pr = plot.boundingRadius;
-  for (let i = 0; i < plot.count; i += 1) {
+  const shortlist = shortlistFor(x, z, radius);
+  const count = shortlist ? shortlist.length : plot.count;
+  for (let at = 0; at < count; at += 1) {
+    const i = shortlist ? (shortlist[at] as number) : at;
     const reach = (pr[i] as number) + radius;
     // `hypot(a, b) >= |a|` always, so either axis alone being out of reach
     // settles it — and settles it exactly as the hypot would have, for a
@@ -469,7 +563,10 @@ export function clearOfFootprints(x: number, z: number, margin: number, exceptId
   const hx = plot.halfX;
   const hz = plot.halfZ;
   const rect = plot.isRect;
-  for (let i = 0; i < plot.count; i += 1) {
+  const shortlist = shortlistFor(x, z, margin);
+  const count = shortlist ? shortlist.length : plot.count;
+  for (let at = 0; at < count; at += 1) {
+    const i = shortlist ? (shortlist[at] as number) : at;
     if (i === skip) continue;
     if (rect[i] === 0) {
       const reach = (hx[i] as number) + margin;
