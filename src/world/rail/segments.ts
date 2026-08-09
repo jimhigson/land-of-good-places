@@ -318,8 +318,30 @@ const CURVATURE_SAMPLES = 64;
  * catch, so a cusp cannot be caught reliably by curvature alone. It is caught
  * directly instead — a piece whose speed collapses relative to its own average
  * is reported as radius zero, which fails every minimum-radius test there is.
+ *
+ * ### `bailBelow` — for the caller that only asks "is it under the limit?"
+ *
+ * The route search rejects a candidate the moment this returns anything under
+ * the brief's minimum radius, and **half of all candidates die exactly here**
+ * (canonical seed: 165,228 of 236,320; a Node CPU profile put this function at
+ * 14-18% of the whole cruiser solve). A vocabulary arc has near-constant
+ * curvature, so a too-tight piece is usually under the limit at the very first
+ * sample — yet the full scan carried on through all 65.
+ *
+ * Passing `bailBelow` returns the first sampled radius found under it, at once.
+ * That changes no verdict anywhere: the full-scan result is the *minimum* over
+ * all samples, so one sample under the threshold proves the minimum is under it
+ * too (and a cusp's 0 is under every threshold), and the caller's
+ * `< brief.minRadius` comparison comes out identical. What it may change is the
+ * *value* returned for a rejected piece — which that caller never reads. Every
+ * caller that uses the value (the solve report's `minRadius`, `buildRoute`'s
+ * `minCurvature`) omits `bailBelow` and gets the full scan, unchanged.
  */
-export function minCurvatureRadius(seg: CubicSegment, samples = CURVATURE_SAMPLES): number {
+export function minCurvatureRadius(
+  seg: CubicSegment,
+  samples = CURVATURE_SAMPLES,
+  bailBelow?: number,
+): number {
   // The two derivatives, written out rather than called.
   //
   // This is asked of **every candidate piece the route search draws** — a Node
@@ -361,6 +383,7 @@ export function minCurvatureRadius(seg: CubicSegment, samples = CURVATURE_SAMPLE
     // radius = |r'|^3 / |r' x r''|
     const radius = cross < 1e-9 ? Infinity : (speed * speed * speed) / cross;
     if (radius < worst) worst = radius;
+    if (bailBelow !== undefined && worst < bailBelow) return worst;
   }
   const meanSpeed = totalSpeed / (samples + 1);
   if (meanSpeed > 0 && slowest < meanSpeed * 0.2) return 0;

@@ -817,8 +817,18 @@ export function* coasterRouteBriefSearch(
   const wantedLength = options.desiredLength ?? DESIRED_LENGTH;
   const lowWindow = STATION_FLAT + STATION_RAMP * 0.65;
   const clear = (x: number, z: number, radius: number, distanceAlong: number): boolean => {
-    for (const tall of obstacles) {
-      if (Math.hypot(x - tall.x, z - tall.z) < tall.radius + radius) return false;
+    for (let i = 0; i < obstacles.length; i += 1) {
+      const tall = obstacles[i] as TallObstacle;
+      const reach = tall.radius + radius;
+      // The same exact axis prefilter `clearOfPlots` uses: `hypot(a, b) >= |a|`
+      // always, so either axis alone being out of reach settles the hypot too.
+      // Asked on every sample of every candidate piece, and the three tall
+      // obstacles are almost never near the sample being asked about.
+      const dx = x - tall.x;
+      if (dx >= reach || -dx >= reach) continue;
+      const dz = z - tall.z;
+      if (dz >= reach || -dz >= reach) continue;
+      if (Math.hypot(dx, dz) < reach) return false;
     }
     if (!castleClear(x, z, radius, CROSSING_BAND)) return false;
     if (other) {
