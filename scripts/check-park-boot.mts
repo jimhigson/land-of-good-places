@@ -217,10 +217,12 @@ said.push(`the slide's search reached attempt ${generation.attempts}`);
 // **How fast is this box?** Measured from the run itself, not assumed.
 //
 // The park is deterministic, so the number of work units it is divided into is
-// the same everywhere — measured byte-identical on an M4 Max laptop and on the
-// GitHub runner that failed run 31288279104 (152 / 29142 / 19 / 415337). The
-// time those units took is therefore a clean measurement of the machine, and it
-// is free: the run has already done it.
+// the same everywhere: the GitHub runner that failed run 31288279104 printed
+// `152 / 29142 / 11 / 415337`, byte-identical to this laptop on the same
+// commit, differing only in taking 14.33 s over it against 5.82 s. (The 11 is
+// 19 now — that phase gained its seam yields on this branch.) The time those
+// units took is therefore a clean measurement of the machine, and it is free:
+// the run has already done it.
 //
 // This is `check-solve-cost.mts`'s idiom — "budgets stated as a multiple of
 // measured cost" — with the multiplier measured here rather than written down,
@@ -313,6 +315,19 @@ if (frames < MIN_WORKING_FRAMES) {
 // headroom — room for a garbage collection landing inside a slice, which is
 // real (a handful of steps a run already begin late for that reason) and which
 // no amount of correct code prevents.
+//
+// **Confirmed on the machine that was actually failing.** The same code on a
+// GitHub runner (run 31293136532) measures itself at **2.45x** and reports:
+//
+//     worst single advance() 19.0 ms against a 8 ms budget
+//     that worst slice was cruiserFinish, 5 work units in 19.0 ms
+//     this box costs 101.7 us per cruiser joint against the reference 41.5 us
+//     so one slice may block for 37.4 ms
+//
+// 27.6 ms before this branch, 19.0 ms after, against a ceiling that scaled to
+// 37.4 — so the same ~2x headroom the laptop has, which is the whole point of
+// scaling it. Note what the new diagnostic line buys: the worst slice is still
+// `cruiserFinish`, but it is five units now rather than one.
 //
 // **Measured sensitivity, stated rather than assumed.** Mutations run against
 // this on 9 August 2026:
