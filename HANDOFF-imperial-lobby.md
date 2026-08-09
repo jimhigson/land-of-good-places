@@ -51,6 +51,63 @@ Lesson worth keeping: the probe that caught this **walks the legs** with the
 real resolver and the player's own ground damp. Every route probe that only
 asks where a route *ends* stayed green through the whole bug.
 
+## QA round 2 (gate said "lobby asks met: NO") — 3 of 4 fixed
+
+1. **Fall-through rail — fixed.** The landing's north edge had no collider at
+   landing height; the gallery's balustrade is drawn on that line but banded
+   to 4.94. Edges are now a schedule (`mezzanineGuardedEdges`) that the
+   builder and the probe both read.
+2. **"Look outside!" — fixed.** The zone existed at y 2.4 and
+   `ZONE_HEIGHT_TOLERANCE` is 2.2, so it could never be offered from the
+   floor. Clamped to her height. Exposed and fixed a second one: the
+   corridor's fixed 1.8 m stand spot is inside the pet statues.
+3. **Player invisible under the overhang — fixed.** The castle's `FloorFader`
+   with a new `hiddenAmount`; the mezzanine is one group that ghosts to 0.24
+   when `mezzanineHidesPoint` says it is between her and the camera.
+   Measured live: 436/436 materials at 0.24 and transparent underneath, 1.0
+   and opaque in the open.
+4. **The composition does not read from the entrance — NOT fixed.** See below.
+
+## Item 4: what the measurements actually say (do not skip this)
+
+Measured through the game's own camera, desktop 1280x800, spawn is local
+(0, +10.2):
+
+* the gallery's front edge **centre** first enters frame at local z = **+1.5**
+  — an 8.7 m walk in. Its **west end never enters frame at all**.
+* seven candidate entry positions were tried (south centre, south-east
+  corner, east wall, south-west corner, further in): best was 4 of 7 key
+  features, and **the gallery was in frame from none of them**. Moving the
+  door does not fix this.
+* at the doors roughly **40% of the frame is empty ground outside the
+  building**, because the camera centres on a child standing at the room's
+  south edge while the composition runs away up-screen.
+
+**The rotation option is worse, not better — this contradicts the QA hint.**
+The camera is orthographic, pitch 38°, yaw 45°, frame 15 m tall (±7.5 m) and
+~24 m wide (±12 m). Screen-vertical is the tight axis. Today the
+entrance→gallery displacement (0, −17.8) splits into 12.6 m along-view and
+12.6 m sideways, which is 7.75 m of screen-vertical against a 7.5 m limit and
+12.6 m sideways against 12.0 — marginal on *both*, which is exactly why it
+appears after a short walk. Rotating the composition onto the camera diagonal
+puts the whole 17.8 m along-view: **11.0 m of screen-vertical against the same
+7.5 m limit**, i.e. further out of frame than it is now. Rotation buys the
+left-right symmetry the reference photo has, and costs entrance visibility.
+
+So the two goals are in tension and cannot both be had by rotating. What
+would actually make it read from the doors is **less distance** (~3 m of it:
+moving the composition south, or shrinking the room's depth) **or a wider
+view**. Both change numbers Jim and the artist agreed — the room was
+deliberately deepened by exactly the gallery's own 4.8 m to keep the open
+floor — so this is an art call, not a features call, and it is left for Jim
+with the numbers above rather than guessed at.
+
+(A camera-zoom experiment was inconclusive and is **not** evidence: setting
+`IsoCamera.zoomValue`/`zoomTarget` left `camera.zoom` and the frustum `top`
+unchanged at 1 and 7.5, so the frame never widened and every zoom reported
+the same 3/7. Do not cite it either way without finding how zoom really
+reaches the projection.)
+
 ## Browser QA (both viewports 9/9, zero page errors)
 
 `scratchpad/imperial-qa.mjs`, desktop 1280x800 and phone 390x844. Four of its
