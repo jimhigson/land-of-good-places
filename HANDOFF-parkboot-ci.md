@@ -68,8 +68,42 @@ Next tier down is the slide search's route-closure steps at 2.2-2.7 ms
 steps** and 54.5 ms in 2 steps — i.e. scheduler preemption, not unit cost. That
 is why a *constant* wall-clock ceiling cannot be the guarantee.
 
-## Status
+## What landed
 
-- worktree `.claude/worktrees/parkboot-ci`, branch `fix/park-boot-ci`
-- route.ts prologue/tail sliced (done)
-- next: calibrated ceiling + raised `MIN_UNITS.cruiserFinish` in the check
+1. **`src/world/coaster/route.ts`** — eight seam yields in `coasterProfileSearch`
+   (six in the prologue, two in the tail). Worst unit 6.66 -> 4.85 ms;
+   `cruiserFinish` 11 -> 19 pieces. Route/loop SHAs unchanged, proved by the
+   check's own sliced-vs-straight-through hashes.
+2. **`scripts/check-park-boot.mts`** —
+   - the per-slice ceiling is `GENERATION_BUDGET_MS + 12 ms x slowness`, where
+     `slowness` is this box's measured us-per-cruiser-joint over a reference
+     recorded in the file (41.5 us, `Mac16,8`, median of five idle runs),
+     floored at 1;
+   - **calibrate on the cruiser's joints, not on the run's mean** — the mean
+     rises with any regression in the units, so the ceiling would rise to meet
+     the fault (measured: 1.17x under M3 vs 1.07x for the joints);
+   - `MIN_UNITS.cruiserFinish` 10 -> 12, counting every seam rather than just
+     the repair passes. This is what should have caught the bug and did not;
+   - prints which phase the worst slice was in and how many units it ran.
+
+## Mutations (final code, 9 Aug)
+
+| | mutation | result |
+|-|-|-|
+| M1 | the eight seam yields removed | RED on piece count (11 vs 12); NOT red on the ceiling (10.7 / 12.8 ms vs ~20) |
+| M2 | driver checks the clock every 4096 steps | RED: 61.1 ms vs 20.2 ms |
+| M3 | slide `satisfies` 5x dearer | NOT caught: 17.7 vs 20.0 — documented in the file as the limit, not tuned away |
+
+## Verification
+
+- `npm run build` exit **0** (read from the command, not a pipe)
+- `npm run test:procgen` exit **0**, 306 tests
+- under a full build running alongside: worst slice 11.8 ms, ceiling scaled to
+  21.0 ms — the calibration doing its job
+
+## Not done / left for someone
+
+- The slide's route-closure step (2.2-2.7 ms, ~375 of them) is the next-largest
+  unit: `satisfies` calls `unrideableComplaint`, which rebuilds the whole chute.
+  Slicing it means generator-ising a callback inside `rail/generate.ts`.
+- The residual 4.85 ms cruiser unit is V8 warm-up, not work. Only movable.
