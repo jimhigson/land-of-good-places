@@ -33,9 +33,8 @@
  *
  * The per-slice ceiling additionally **calibrates itself to the box it is
  * running on**, because the park is deterministic and so does the same number
- * of work units everywhere: the time this run took over the Sky Cruiser's
- * 29,142 plan-view joints is a free and honest measurement of how fast this
- * machine is, and the grace the ceiling allows for the one unit a slice can
+ * of work units everywhere: a fixed arithmetic loop that belongs to nothing else in
+ * this repo is a free and honest measurement of how fast this machine is, and the grace the ceiling allows for the one unit a slice can
  * overrun by is scaled by it. A constant in milliseconds was tried twice and
  * blocked main's deploy twice — see `ADVANCE_CEILING_MS` for the reasoning, the
  * numbers, and what it deliberately does not catch.
@@ -241,19 +240,59 @@ said.push(`the slide's search reached attempt ${generation.attempts}`);
 // machine.
 // ---------------------------------------------------------------------------
 const units = generation.unitCounts;
-const msPerCruiserJoint = phaseMs.cruiserSearch / Math.max(1, units.cruiserSearch);
 
 /**
- * Median of five idle runs on the machine named here: 41.2, 41.2, **41.5**,
- * 44.1, 44.2 us.
+ * **The ruler is a fixed arithmetic loop, not any of this repo's own work.**
  *
- * Machine: Apple `Mac16,8`, 14 cores, macOS 25.5, Node 24, idle.
- * Date: 9 August 2026.
- * Re-measure by running `npm run check:park-boot` and reading the "us per
- * cruiser joint" line it prints — and if you change it, say which machine and
- * when, because this is the only place the two are tied together.
+ * The first version timed the Sky Cruiser's plan-view search, reasoning that
+ * 29,142 homogeneous steps measure the machine and only the machine. It was
+ * right about regressions and wrong about *improvements*, which is the same
+ * hazard from the other side: #258 made a cruiser joint 13x cheaper, so the
+ * reference recorded hours earlier (41.5 us) was met by every box on earth.
+ * `slowness` floored at 1.00 everywhere, CI lost all its grace, and this check
+ * went red on an unrelated PR — a gate failing for a reason its author could
+ * not have caused, which is exactly what the file's own comments say must not
+ * happen. Measured on this laptop after that merge: **3.1 us** per joint
+ * against a 41.5 us reference.
+ *
+ * A calibration constant has to be tied to work nobody is trying to make
+ * faster, or it is two definitions of one thing kept in step by hand — the
+ * repo's most common bug, wearing a stopwatch. So the ruler below is a
+ * deterministic float loop that exists for no other purpose: it cannot be
+ * optimised by a solver change, cannot regress when a unit gets dearer, and
+ * has no cold start worth speaking of after its own warm-up pass.
  */
-const REFERENCE_MS_PER_JOINT = 0.0415;
+function msPerMegaflop(): number {
+  const run = (): number => {
+    const started = performance.now();
+    let x = 1.000001;
+    let sum = 0;
+    for (let i = 0; i < 1_000_000; i += 1) {
+      x = x * 1.0000001 + 1e-9;
+      sum += Math.sqrt(x) * 0.5;
+    }
+    // Consumed so no engine can fold the loop away.
+    if (!Number.isFinite(sum)) throw new Error('calibration loop diverged');
+    return performance.now() - started;
+  };
+  run();
+  return Math.min(run(), run(), run());
+}
+
+const calibrationMs = msPerMegaflop();
+
+/**
+ * Five best-of-three passes on the machine named here: 1.41, 1.38, **1.34**,
+ * 1.30, 1.28 ms — median 1.34.
+ *
+ * Machine: Apple `Mac16,8`, macOS 26.5.2, Node v25.6.1, idle.
+ * Date: 9 August 2026.
+ * Re-measure by running `npm run check:park-boot` and reading the calibration
+ * line it prints — and if you change it, say which machine and when, because
+ * this is the only place the two are tied together. Changing the loop's body
+ * invalidates this number: change both together or not at all.
+ */
+const REFERENCE_CALIBRATION_MS = 1.34;
 
 /**
  * How much slower this box is than the reference, never below 1.
@@ -263,10 +302,10 @@ const REFERENCE_MS_PER_JOINT = 0.0415;
  * gets stricter on its author's next laptop is a check that starts failing for
  * reasons nobody chose.
  */
-const slowness = Math.max(1, msPerCruiserJoint / REFERENCE_MS_PER_JOINT);
+const slowness = Math.max(1, calibrationMs / REFERENCE_CALIBRATION_MS);
 said.push(
-  `this box costs ${(msPerCruiserJoint * 1000).toFixed(1)} us per cruiser joint against the ` +
-    `reference ${(REFERENCE_MS_PER_JOINT * 1000).toFixed(1)} us — ${slowness.toFixed(2)}x`,
+  `this box runs the calibration loop in ${calibrationMs.toFixed(2)} ms against the ` +
+    `reference ${REFERENCE_CALIBRATION_MS.toFixed(2)} ms — ${slowness.toFixed(2)}x`,
 );
 
 // --- it is SPREAD, not merely done -----------------------------------------
