@@ -23,3 +23,21 @@ export function hasArrivedBefore(): boolean {
 export function markArrived(): void {
   saveFlags.markArrived();
 }
+
+/**
+ * **Is the arrival due for this player?** One question, asked in one place.
+ *
+ * It lives *here*, in the file that owns the flag, rather than in
+ * `ArrivalSequence.ts` where it used to — and that move is load-bearing rather
+ * than tidying. `main.ts` has to ask this **before** it decides whether to play
+ * the ride, and therefore before the park may be imported: importing
+ * `ArrivalSequence.ts` pulls in `terrain`, `entrance/layout` and `boundary`,
+ * which solves `PARK_BOUNDARY` at module scope. Asking the question would have
+ * paid for a chunk of the very generation the ride exists to hide.
+ *
+ * `ArrivalSequence.ts` re-exports it so `Entrance` still reads it from where it
+ * always did, and there is still exactly one definition.
+ */
+export function arrivalIsDue(): boolean {
+  return !hasArrivedBefore();
+}

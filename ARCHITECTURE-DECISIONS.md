@@ -9,6 +9,96 @@ sources you actually read.
 
 ---
 
+## Decision 11 — Routing is level-aware: nodes are *(cell, level)*, and a stair is an edge its own plan declares
+
+**Date:** 8 August 2026 · **Status:** decided and implemented (player routing);
+NPC adoption deliberately deferred — see the seam, below.
+**Jim's ruling, verbatim:** *"Route planning in general needs to work between
+levels. It can't be a purely 2D algo."* — given after playing the deployed
+lobby: he climbed the mezzanine, tapped the floor below, and *"tapping back on
+the lower level didn't path find correctly down the stairs"*.
+
+### What was measured before anything was designed
+
+Live, with real taps and telemetry (not inferred from code):
+
+- **Deck → floor:** the 2D lattice, built at the walker's own height, had no
+  way off the deck — the stair channel between its solid flanks is 1.8 m wide,
+  and fattening those flanks by the walker's 0.62 m radius leaves a free band
+  of centre positions **0.12 m** wide, which no half-metre lattice can see. A*
+  therefore ended at the balustrade, `TapNavigator` moved the marker there,
+  and she stopped on the deck, 3.2 m above where the child pointed.
+- **Floor → deck:** worse, one organ earlier. The pick tested the ray against
+  the surface within a step of *her feet*, so a tap on the plainly visible
+  deck sailed through it and buried the target at ground level inside the
+  gallery's solid mass; she walked to the front face and gave up.
+- **Tap just over the rail:** planar distance 0.35 m, so the walk "arrived"
+  without moving — the marker jumped to her own feet.
+
+### The representation
+
+- **A route node is *(cell, level)*.** `NavGrid` keeps every walkable surface
+  over each free cell — asked of `WalkSurfaces.sample` top-down, the same one
+  authority as ever — and two nodes at the same `x, z` on different levels are
+  different places. Neighbours connect when their heights are within
+  `BUILDING_STEP_UP`, the same rule a walking foot obeys, which joins a ramp's
+  levels with no declaration beyond being walkable. The lattice no longer
+  cares how high the walker stands, so changing floor no longer rebuilds it.
+- **Blocked stays two-dimensional, deliberately.** `CollisionWorld` is
+  height-agnostic for everything but a jump; a per-level blocked bit would
+  promise routes the resolver refuses. One bit per cell mirrors the physics
+  that actually runs. **Decision 8's load-bearing constraint carries forward
+  untouched: nothing reads collider tops, and the rail fence's
+  `topHeight = Infinity` stays `Infinity`.** (Decision 8 rejected "a second
+  nav layer" *until several needs forced one*; the mezzanine's two broken
+  directions, the coming imperial lobby and Jim's ruling are that forcing.
+  Its bridge mechanism — a deck `covers(x, z)` exempting its cells from
+  stamping — slots into this representation strictly better than into the
+  flat one, because the exemption can be granted to the deck's own level
+  while the fenced ground level under it stays blocked.)
+- **A stair is an edge, declared by the plan that built the stair.** Where
+  solid flanks pinch the lattice shut (measured above: 0.12 m), no grid of
+  any layering routes through — so the room's plan declares the way:
+  `WalkSurfaces.addConnector` takes the walk path, **derived from the same
+  numbers as the treads** (`hotel/layout.ts` `mezzanineWalkConnectors`; never
+  typed in beside them), and the router consumes it as an ordinary A* edge
+  whose cost is the path's real length and whose geometry is spliced into the
+  route. Multi-flight compositions — the imperial lobby's two curved flights
+  to a landing, one straight flight up — only declare more edges; a route
+  through two of them is just a route, so floor → landing → deck falls out.
+- **The pick lands on what the child can see.** `pickWalkable` tests the ray
+  against the topmost surface below `Building.visibleSurfaceCeiling` — the
+  same `currentDeck` fact that drives the castle's cutaway fade, one owner —
+  `Infinity` in the park and the hotel's open-topped rooms. Which level was
+  tapped travels in the hit's `y`, and the router treats it as part of the
+  destination.
+
+### The seam that is deliberately left
+
+**NPCs do not use this router yet.** The park children walk `poiGraph` (a
+hand-seeded, straight-line-validated destination graph; its own header says
+why it is not the player's map) and the hotel guests walk `HotelGuests`' room
+sampler with keep-outs; both are single-level and neither crosses levels today
+— guests are kept off the stair by the tread keep-outs, and castle floors
+change by lift and stair rides, not by walking. Migrating them in the same PR
+as the representation would have been a half-migrated monolith. The adoption
+path, when an NPC first needs to cross levels on foot: give its graph the same
+`WalkSurfaces.connectors` as edges between its nodes (the data is already
+world-space and body-agnostic), or route it over `NavGrid` directly with its
+own radius. Until then there are two planners **on purpose, and this entry is
+the record of that seam** — one router owns "how do feet get between levels"
+(`NavGrid`), and the NPC graphs remain destination-choosers on one level.
+
+### Guards
+
+`check:nav-routes` (build chain, blocks merge): deck → floor, floor → deck and
+over-the-rail routes on the built lobby must reach on both axes and pass the
+stair mouth, and the pick must land on the deck top — all derived from
+`LOBBY`'s own plan, proven red against the 2D router first (8 failures,
+3.20 m vertical errors) and re-proven red by deleting the connector
+registration. `check:park`'s entrance-to-everywhere sweep guards the park's
+single-level routing through the same rewrite.
+
 ## Decision 10 — Solve-rate is a metric with a name; a constraint lives where candidates are made; and an optimisation proves it moved nothing
 
 **Date:** 7 August 2026 · **Status:** decided; parts 1-3 implemented, part 4 is

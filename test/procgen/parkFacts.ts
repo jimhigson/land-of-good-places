@@ -15,9 +15,22 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
+import { createKid } from '../../src/art/models/kid.ts';
+import { HAIR_STYLES } from '../../src/state/types.ts';
+import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
+
+/** One planted thing found standing in front of the arriving cat bus. */
+export interface HidingFact {
+  readonly x: number;
+  readonly z: number;
+  /** Its highest point, in world metres — what the grazing ray is cast from. */
+  readonly top: number;
+  /** Which `InstancedMesh` it came out of, so a failure names the population. */
+  readonly what: string;
+}
 
 /** A wall run flattened to what a clearance test needs. */
 export interface WallFact {
@@ -90,6 +103,40 @@ export interface EntranceFact {
   readonly id: string;
   readonly x: number;
   readonly z: number;
+}
+
+/**
+ * The cat bus, measured off the built scene graph rather than asked for.
+ *
+ * Every number here is read back from world matrices after
+ * `scene.updateMatrixWorld(true)`, so it describes a bus that is genuinely in
+ * the park at a genuine place — not one that a constructor returned.
+ */
+export interface CatBusFact {
+  /** Where the bus root actually sits, in world space. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** How many meshes hang off it. A bus with no geometry is not a bus. */
+  readonly meshCount: number;
+  /** Its world-space bounding box height, in metres. */
+  readonly height: number;
+  /** True if a driver was found seated in the cabin. */
+  readonly hasDriver: boolean;
+  /** Seats actually built on it. */
+  readonly seatCount: number;
+  /**
+   * How far the worst of twelve seated children sticks out through the cabin,
+   * and how deeply the worst pair overlap each other — both in metres, both
+   * measured on real models in the real seats. Zero or less is a bus that fits
+   * its passengers.
+   */
+  readonly worstOccupantProtrusion: number;
+  readonly worstOccupantOverlap: number;
+  /** The widest bare-headed child the park can build, for `CHILD_FOOTPRINT`. */
+  readonly widestRealChild: number;
+  /** How many disembarking children were found in the arrival's group. */
+  readonly kidCount: number;
 }
 
 /** One drawn path, sampled along its centre line. */
@@ -355,6 +402,40 @@ export interface ParkFacts {
   readonly lamps: readonly (readonly [number, number])[];
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
+  /**
+   * **The cat bus, as actually found in the built scene graph.** `null` if
+   * there is no node named `cat-bus` anywhere in it.
+   *
+   * Read by traversing the real `Scene` rather than by asking the entrance
+   * whether it made one, and that distinction is the entire point of this
+   * field. The arrival shipped in PR #27 on 26 July 2026 and never once ran:
+   * six new files, zero call sites, `Entrance` never constructed, and the
+   * string `cat-bus` absent from the shipped bundle altogether. Every check in
+   * the repo stayed green for twelve days because none of them looked at
+   * whether the thing was *there*.
+   *
+   * So this looks. If the wiring from `World` to `Entrance` to
+   * `ArrivalSequence` is broken anywhere along its length, or the bus is built
+   * but never added to a group that reaches the scene, this goes `null` and
+   * `theCatBusIsInThePark` fails.
+   */
+  readonly catBus: CatBusFact | null;
+  /**
+   * **Every planted thing standing between the camera and the arriving bus.**
+   *
+   * Gathered by walking the `foliage` and `treeline` groups' own
+   * `InstancedMesh`es in the built scene and reading **instance matrices** —
+   * not by re-running the scatter's own rules, and not from a list the
+   * generator kept. The distinction earned its keep twice on this feature
+   * already: a guard that asks the builder what it intended stays green while
+   * the park shows something else, and a crowd child's rig is a detached proxy
+   * so scene *attachment* proves nothing either. What reaches the screen is an
+   * instance matrix, so an instance matrix is what is measured.
+   *
+   * Empty is the healthy state. Each entry is a thing a child would see the bus
+   * from behind.
+   */
+  readonly hidingTheArrivingBus: readonly HidingFact[];
   readonly routes: readonly RouteFact[];
   readonly exits: readonly ExitFact[];
   /** The destination graph `paths.ts` grows the network from. */
@@ -595,6 +676,96 @@ export function pairKey(a: string, b: string): string {
  * would hand every seed the same park and six green suites would be measuring
  * one park six times.
  */
+/**
+ * **Does the cat bus fit the children it carries?**
+ *
+ * Measured here rather than in `invariants.ts` for a reason worth keeping. The
+ * first attempt put it in the invariant file, which meant statically importing
+ * `catBus.ts` and `ArrivalSequence.ts` into `test/`. Those reach `layout.ts`
+ * and then the seeded park manifest, so the manifest loaded **before the seed
+ * was set**, every seed but the canonical one threw — *"asked for seed 11 but
+ * the park built with 20260728"* — and 156 tests went down as silent skips.
+ * That is precisely the failure CLAUDE.md documents (*"a skipped test is not a
+ * passing test... the tell was the pass count, not the fail count"*), and the
+ * repo's own seed guard caught it within a minute of it being written.
+ *
+ * `parkFacts.ts` is loaded after the seed is chosen, so it is the safe place to
+ * touch seed-dependent modules. Invariants read these numbers from here.
+ *
+ * The measurement is seed-independent — the bus is the same on every seed — but
+ * it costs a few milliseconds, so running it per seed is free.
+ */
+function measureCatBusFit(): {
+  seatCount: number;
+  worstProtrusion: number;
+  worstOverlap: number;
+  widestChild: number;
+} {
+  const size = new Vector3();
+  let widestChild = 0;
+  for (const style of HAIR_STYLES) {
+    const bare = createKid({ hairStyle: style });
+    bare.root.updateMatrixWorld(true);
+    new Box3().setFromObject(bare.root).getSize(size);
+    widestChild = Math.max(widestChild, size.x, size.z);
+  }
+
+  const bus = createCatBus();
+  const shell = new Box3();
+  shell.makeEmpty();
+  let bands = 0;
+  bus.root.traverse((object) => {
+    if (object.name === 'cat-bus-shell-lower' || object.name === 'cat-bus-shell-upper') {
+      shell.expandByObject(object);
+      bands += 1;
+    }
+  });
+  const seatCount = bus.seats.length;
+  if (bands !== 2) {
+    bus.dispose();
+    // Reported as an impossible protrusion rather than silently as zero: a
+    // measurement that cannot find its subject must not read as a pass.
+    return { seatCount, worstProtrusion: Infinity, worstOverlap: Infinity, widestChild };
+  }
+
+  for (const seat of bus.seats) seat.add(createKid({ hairStyle: 'short' }).root);
+  bus.root.updateMatrixWorld(true);
+  const boxes = bus.seats.map((seat) =>
+    new Box3().setFromObject(seat.children[seat.children.length - 1]!),
+  );
+
+  let worstProtrusion = -Infinity;
+  for (const box of boxes) {
+    worstProtrusion = Math.max(
+      worstProtrusion,
+      box.max.y - shell.max.y,
+      shell.min.x - box.min.x,
+      box.max.x - shell.max.x,
+      box.max.z - shell.max.z,
+      shell.min.z - box.min.z,
+    );
+  }
+
+  let worstOverlap = 0;
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i]!;
+      const b = boxes[j]!;
+      if (!a.intersectsBox(b)) continue;
+      worstOverlap = Math.max(
+        worstOverlap,
+        Math.min(
+          Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x),
+          Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z),
+        ),
+      );
+    }
+  }
+
+  bus.dispose();
+  return { seatCount, worstProtrusion, worstOverlap, widestChild };
+}
+
 export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
 
@@ -708,7 +879,96 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     });
   }
 
+  // --- the cat bus -----------------------------------------------------------
+  // Found by walking the scene, not by asking `world.entrance` whether it built
+  // one. Asking the builder is how a feature stays green while being absent
+  // from the game; this is the check that would have caught PR #27 on the day
+  // it merged. See `ParkFacts.catBus`.
+  let catBus: CatBusFact | null = null;
+  {
+    let busRoot: import('three').Object3D | null = null;
+    scene.traverse((object) => {
+      if (object.name === 'cat-bus') busRoot = object;
+    });
+    if (busRoot) {
+      // Narrowed through a local: `scene.traverse`'s callback is not a closure
+      // TypeScript can follow, so `busRoot` is still `null`-typed out here.
+      const root = busRoot as import('three').Object3D;
+      const box = new Box3().setFromObject(root);
+      const where = new Vector3();
+      root.getWorldPosition(where);
+      let meshCount = 0;
+      let hasDriver = false;
+      root.traverse((object) => {
+        if ((object as { isMesh?: boolean }).isMesh) meshCount += 1;
+        if (object.name === 'cat-bus-driver') hasDriver = true;
+      });
+      // **Counted off the crowd, not off the scene graph.** The children who
+      // ride in are park NPCs now — instanced members of `KidCrowd`, drawn from
+      // one `InstancedMesh` — so there are no per-child nodes named
+      // `entrance-kid-N` to find any more, and looking for them would report
+      // an empty bus for ever. "Who is aboard" is "who is under scripted
+      // control", which is the thing the arrival actually asserts.
+      const kidCount = world.npcs.all.filter((child) => child.scripted).length;
+      const fit = measureCatBusFit();
+      catBus = {
+        seatCount: fit.seatCount,
+        worstOccupantProtrusion: fit.worstProtrusion,
+        worstOccupantOverlap: fit.worstOverlap,
+        widestRealChild: fit.widestChild,
+        x: where.x,
+        y: where.y,
+        z: where.z,
+        meshCount,
+        height: Number.isFinite(box.max.y - box.min.y) ? box.max.y - box.min.y : 0,
+        hasDriver,
+        kidCount,
+      };
+    }
+  }
+
   const { InstancedMesh: InstancedMeshClass, Matrix4 } = await import('three');
+
+  // --- what stands in front of the arriving bus ------------------------------
+  // Dynamically imported for the reason this file's header gives: a *static*
+  // import of anything under `src/world/` into `test/` reaches the seeded park
+  // manifest and loads it before the seed is set, which silently skips 156
+  // tests rather than failing one.
+  const { hidesTheArrivingBus } = await import('../../src/world/entrance/arrivalSightline.ts');
+  const hidingTheArrivingBus: HidingFact[] = [];
+  {
+    // Only the two groups the scatter owns. The boundary wall and the Rail
+    // Race's trestles also cross this corridor — 20 wall blocks and 40-odd
+    // trestle parts, measured — but neither is scenery and neither can be
+    // moved by refusing a spot, so sweeping them in here would make an
+    // assertion that can never go green and therefore never means anything.
+    // What this owns is *where things are planted*.
+    const roots: import('three').Object3D[] = [];
+    scene.traverse((object) => {
+      if (object.name === 'foliage' || object.name === 'treeline') roots.push(object);
+    });
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    const scale = new Vector3();
+    for (const root of roots) {
+      root.traverse((object) => {
+        if (!(object instanceof InstancedMeshClass)) return;
+        object.geometry.computeBoundingBox();
+        const bounds = object.geometry.boundingBox;
+        if (!bounds) return;
+        for (let index = 0; index < object.count; index += 1) {
+          object.getMatrixAt(index, matrix);
+          matrix.premultiply(object.matrixWorld);
+          at.setFromMatrixPosition(matrix);
+          scale.setFromMatrixScale(matrix);
+          const top = at.y + bounds.max.y * scale.y;
+          if (!hidesTheArrivingBus(at.x, at.z, top)) continue;
+          hidingTheArrivingBus.push({ x: at.x, z: at.z, top, what: object.name });
+        }
+      });
+    }
+  }
+
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
     name: string; x: number; z: number;
@@ -1013,10 +1273,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     const count = navGrid.findRoute(
       ENTRANCE_PLAYER_X,
       ENTRANCE_PLAYER_Z,
+      sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0),
       x,
       z,
+      sample(x, z, 0),
       sample,
-      0,
       routeBuffer,
     );
     if (count === 0) return false;
@@ -1412,6 +1673,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     plots,
     entrances,
+    catBus,
+    hidingTheArrivingBus,
     exits,
     pathNodes,
     pathEdges,
