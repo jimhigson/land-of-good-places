@@ -104,14 +104,53 @@ its own at 20 s. Measured, both. Urgent as a first-impression defect; not a bloc
 One sentence: **a dozen checks confirmed properties of the sequence; none confirmed the
 sequence did its job.**
 
+## The guard that could not fail, and how it was found
+
+The first draft of the carriageway measurement walked each node's ancestry
+looking for `cat-bus` **or `cat-bus-journey`** and exempted it. `cat-bus-journey`
+is `BusJourney`'s name for the **whole scene** (`BusJourney.ts:716`), so every
+node's ancestry reached it and everything was let through: **zero fouls on a
+lane with a six-metre cone standing in it.** It reported green against `main`
+with the fix reverted, which is the only reason it was caught. CLAUDE.md's
+"break it and watch it go red before you trust it green" earned its place again.
+
 ## Status
 
 - [x] Reproduced, object identified and measured
-- [x] Screenshots of the cone
-- [ ] Guard: the arrival reaches its end (primary)
-- [ ] Guard: the lane's carriageway is clear
-- [ ] Fix the scatter
-- [ ] Production-build repro
+- [x] Screenshots of the cone (dev and production build)
+- [x] Fix the scatter — placed by its own width, not rejection-sampled
+- [x] Guard: `nothing stands in the journey lane carriageway` — **red on main**,
+      `1 failed | 56 passed (57)`, naming four intruders with their metres
+- [x] Guard: `the arrival reaches its end and hands over` — green on main
+      (correctly: the sequence *does* complete), proven capable of failing by
+      breaking `ShaderWarmup.ready` and watching both runs go red with
+      `warmupReady=false` in the message
+- [x] Two more offenders the guard found on its own, both fixed: the roadside
+      hedge (0.65 m onto the tarmac) and the lane trees' canopies (0.17 m over
+      the road at 5.4 m, where the bus's roof goes)
+- [ ] Full five-seed `test:procgen`
+- [ ] Full `npm run build`
 - [ ] PR
 
-`scripts/probe-lane-cone.mts` is a throwaway — delete or fold into the real check.
+## The honest correction on "the bus does not arrive"
+
+It does. Measured twice — dev and a `vite preview` production build — hand-over
+at ride-elapsed 20.0 s with `parkReady`, `warmReady` true and `warmRemaining` 0.
+What failed was what the player *saw*. So the guard that goes red on today's
+`main` is the carriageway one; the completion guard is green on `main` and is a
+regression guard, not a reproduction. Both are worth having and both are here.
+
+## Left deliberately alone
+
+The gate's crossbar is a half-`TorusGeometry` with `rotation.z = Math.PI`, which
+points the arc **downward** — its lowest vertices sit 0.86 m *below* the road at
+x = 0, and only its ends show above ground as two brackets. `Entrance.ts:125-128`
+does exactly the same thing, so the two gates agree and this is not a drift bug;
+it is either intentional or a shared one. Out of scope here. The carriageway
+invariant exempts `journey-park-gate` for this reason and says why: a gate is a
+thing the road goes through, and `theGateIsAHoleInTheWall` already owns whether
+its opening is passable.
+
+`scripts/probe-lane-cone.mts` is a throwaway kept on the branch because it
+prints the whole intrusion table in one line of output; the shipped guard is the
+invariant. Delete it if it is not earning its keep.

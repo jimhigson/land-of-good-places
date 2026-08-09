@@ -523,14 +523,32 @@ function rideInThenPlay(
       uiRoot.style.visibility = 'hidden';
       // Already fetched and evaluated by the generation above, so this settles
       // on the next frame rather than going to the network.
-      void loadGame().then((GameClass) => {
-        handOverGame = new GameClass(engine, uiRoot, options);
-        // **The completion signal, and there is only one.** A park object in
-        // hand — not a timer that hopes to match how long one takes to build.
-        director.noteParkReady();
-        warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
-        skip.show();
-      });
+      void loadGame()
+        .then((GameClass) => {
+          handOverGame = new GameClass(engine, uiRoot, options);
+          // **The completion signal, and there is only one.** A park object in
+          // hand — not a timer that hopes to match how long one takes to build.
+          director.noteParkReady();
+          warmup = new ShaderWarmup(engine.renderer, handOverGame.engine.scene, handOverGame.camera.camera);
+          skip.show();
+        })
+        // **Without this the ride has no bottom.** The generation-failure path
+        // above covers a park that cannot be *solved*; this covers the chunk
+        // failing to load and the constructor throwing, and neither of those
+        // sets `generation.failed`. Every escape route is downstream of
+        // `noteParkReady()`: the skip is only shown here, `skipOffered` reads
+        // `parkReady`, and `shouldBuildPark()` will not fire twice because
+        // `parkStartedOnFrame` is already set. So a rejection here left the bus
+        // idling at the gate for ever with no skip, no error and no retry —
+        // the one way a first-run player could genuinely be stuck, and the
+        // exact shape of the thing Jim reported seeing.
+        .catch((error: unknown) => {
+          loop.stop();
+          skip.dispose();
+          title.dispose();
+          journey.dispose();
+          showBootFailure(error);
+        });
     }
 
     // **The park's shader programs, a few milliseconds at a time.**
