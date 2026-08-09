@@ -32,6 +32,17 @@ export class FloorFader {
   private readonly layers: FloorLayer[] = [];
   private readonly claimed = new Set<Material>();
 
+  /**
+   * @param hiddenAmount what "hidden" means for this fader, 0…1.
+   *
+   * The castle wants 0: you are inside it, and a storey above your head is
+   * simply in the way. The hotel lobby's gallery is not — it is the thing the
+   * room is *for*, and a child walking under the arch should still see it
+   * overhead while she can see herself through it. So it ghosts rather than
+   * vanishes. Same fade, same material claiming, same timing; one number.
+   */
+  constructor(private readonly hiddenAmount = 0) {}
+
   /** Registers a floor group. Call once per floor, bottom to top, once built. */
   addLayer(group: Group): void {
     const materials: FadeMaterial[] = [];
@@ -81,7 +92,7 @@ export class FloorFader {
     for (let index = 0; index < this.layers.length; index += 1) {
       const layer = this.layers[index];
       if (!layer) continue;
-      layer.target = highest === null || index <= highest ? 1 : 0;
+      layer.target = highest === null || index <= highest ? 1 : this.hiddenAmount;
     }
   }
 

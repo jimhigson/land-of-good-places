@@ -53,7 +53,7 @@
  */
 
 import './headless-canvas.mjs';
-import { BackSide, Box3, Mesh, Raycaster, Vector3 } from 'three';
+import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
@@ -61,6 +61,7 @@ import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
 import { BED_MATTRESS_TOP, STAIR_RAIL_RADIUS } from '../src/art/models/hotelAssets.ts';
 import {
   CAMERA_DISTANCE,
+  CAMERA_YAW_DEGREES,
   CAMERA_PITCH_DEGREES,
   NPC_RADIUS,
   PLAYER_MAX_SPEED,
@@ -84,8 +85,10 @@ import {
   relativeLuminance,
   THEME_FLOOR_CONTRAST_MIN,
   mezzanineGuardedEdges,
+  mezzanineHidesPoint,
 } from '../src/world/hotel/layout.ts';
 import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.ts';
+import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt } from '../src/world/spaces.ts';
@@ -1753,13 +1756,108 @@ for (const room of ROOMS) {
   }
 }
 
+let occlusionReport = 'occlusion not measured';
+
+// ------------- 23. a child can see herself anywhere in the lobby
+//
+// **The headline feature led somewhere she could not see herself.** The
+// gallery deck is 4.8 m deep and 26 m wide at 5.44 m; at the camera's 38°
+// that hid roughly the northern 10 m of a 24.8 m room, and QA walking under
+// the arch saw only her pet's head and a sliver of hat. Nothing in the hotel
+// had ever faded anything.
+//
+// `Hotel.updateOverhangCutaway` ghosts the overhang using
+// `mezzanineHidesPoint`, which is arithmetic. This probe does **not** re-run
+// that arithmetic — it casts a real ray at the **built meshes**, along the
+// rig's own view direction, from three heights up her body, exactly the way
+// `check:statue-occlusion` does. So the fade's answer and the geometry's
+// answer are two independent questions, and the probe fails if the real room
+// hides her anywhere the fade would not have fired.
+{
+  const plan = LOBBY.mezzanine;
+  const lobbyShell = hotel.hotelRoot.children.find(
+    (child) => child.name === `hotel:${LOBBY.space}`,
+  );
+  if (!plan || !lobbyShell) {
+    problems.push('the lobby has no mezzanine or no shell to measure occlusion against');
+  } else {
+    hotel.hotelRoot.updateMatrixWorld(true);
+    const overhang = lobbyShell.children.find(
+      (child) => child.name === 'hotel:lobby/overhang',
+    );
+    if (!overhang) {
+      problems.push(
+        'the lobby has no overhang group — nothing can be faded, so a child under the ' +
+          'gallery is drawn behind 4.8 m of deck',
+      );
+    } else {
+      const eye = cameraOffset(
+        (CAMERA_YAW_DEGREES * Math.PI) / 180,
+        (CAMERA_PITCH_DEGREES * Math.PI) / 180,
+        CAMERA_DISTANCE,
+      );
+      const toCamera = new Vector3(eye.x, eye.y, eye.z).normalize();
+      const meshes: Object3D[] = [];
+      overhang.traverse((node) => {
+        if ((node as Mesh).isMesh === true) meshes.push(node);
+      });
+      const ray = new Raycaster();
+      ray.far = 400;
+      const PLAYER_HEIGHT = 2.12;
+      let sampled = 0;
+      let hiddenNotFaded = 0;
+      const worst: string[] = [];
+      // Every spot on the lobby floor a child can actually stand.
+      for (let lx = -LOBBY.halfX + 1; lx <= LOBBY.halfX - 1; lx += 0.5) {
+        for (let lz = -LOBBY.halfZ + 1; lz <= LOBBY.halfZ - 1; lz += 0.5) {
+          const x = LOBBY.originX + lx;
+          const z = LOBBY.originZ + lz;
+          if (Math.abs(world.building.surfaces.sample(x, z, 0.3)) > 0.05) continue;
+          if (deflection(x, z) > 0.01) continue;
+          sampled += 1;
+          let hidden = false;
+          for (const fraction of [1, 0.75, 0.5]) {
+            ray.set(new Vector3(x, PLAYER_HEIGHT * fraction, z), toCamera);
+            if (ray.intersectObjects(meshes, false).length > 0) {
+              hidden = true;
+              break;
+            }
+          }
+          if (!hidden) continue;
+          // The room really does hide her here. The fade must know it.
+          const fades = [1, 0.75, 0.5].some((fraction) =>
+            mezzanineHidesPoint(plan, lx, PLAYER_HEIGHT * fraction, lz),
+          );
+          if (!fades) {
+            hiddenNotFaded += 1;
+            if (worst.length < 6) worst.push(`(${lx.toFixed(1)}, ${lz.toFixed(1)})`);
+          }
+        }
+      }
+      if (sampled === 0) {
+        problems.push('no standable lobby floor was sampled for occlusion — the probe is blind');
+      }
+      if (hiddenNotFaded > 0) {
+        problems.push(
+          `${hiddenNotFaded} of ${sampled} standable lobby spots hide the player behind the ` +
+            `overhang with nothing fading it — she is invisible at ${worst.join(', ')}` +
+            `${hiddenNotFaded > worst.length ? ' and more' : ''}`,
+        );
+      }
+      occlusionReport =
+        `${sampled} standable lobby spots, ${hiddenNotFaded} where the overhang hides her ` +
+        `unfaded`;
+    }
+  }
+}
+
 // ----------------------------------------------------------------- report
 
 console.log(
   `check:hotel — ${npcs.all.length} children (${hotel.residents.length} of them hotel residents), ` +
     `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
-    `${panes}/${declared} declared window panes built.`,
+    `${panes}/${declared} declared window panes built; ${occlusionReport}.`,
 );
 
 if (problems.length > 0) {

@@ -131,6 +131,7 @@ import { placedEntry } from '../parkLayout';
 import { saveFlags } from '../../state/flags';
 import { gameStore } from '../../state';
 import { ZONE_HEIGHT_TOLERANCE, pressAction, type InteractZone } from '../interact';
+import { FloorFader } from '../building/floorFade';
 import {
   BREAKFAST,
   clearFloorAround,
@@ -158,6 +159,7 @@ import {
   type Mezzanine,
   mezzanineWalkConnectors,
   mezzanineGuardedEdges,
+  mezzanineHidesPoint,
   RAIL_BASE_DROP,
   type SuitePartition,
   type WallSide,
@@ -240,6 +242,30 @@ const AUTO_DOOR_SECONDS = 1.2;
 
 /** How close a tap must land to a wall's "Look out" pane to select it. */
 const WINDOW_PICK_RADIUS = 2.2;
+
+/**
+ * How solid the lobby's overhang stays while it is hiding the player.
+ *
+ * Not zero. The castle's cutaway removes a storey you are standing under
+ * because it is simply in the way; the lobby's gallery is the composition —
+ * a child under the arch should still see the deck, the balustrade and the
+ * colonnade overhead, just see *through* them to herself. Close to
+ * `FoliageFade`'s own `MIN_ALPHA` (0.26), which is the value this game
+ * already decided a faded-but-present thing looks like.
+ */
+const OVERHANG_GHOST_ALPHA = 0.24;
+
+/**
+ * Where up her body the overhang is asked whether it hides her — head, chest,
+ * waist, the same three `check:statue-occlusion` has always used, and the
+ * same three `check:hotel` raycasts. Her head clearing the deck while her
+ * body does not is exactly the state QA reported ("only the pet's head / a
+ * sliver of hat"), so any one of them being hidden is enough to fade.
+ */
+const OVERHANG_BODY_FRACTIONS = [1, 0.75, 0.5] as const;
+
+/** How tall the player reads for occlusion. Matches `check:statue-occlusion`. */
+const PLAYER_HEIGHT = 2.12;
 
 /**
  * How high above her own floor a window's "Look out" zone may sit.
@@ -594,6 +620,26 @@ export class Hotel implements GameSystem {
   private inside = false;
   private changingSpace = false;
   private spaceCooldown = 0;
+
+  /**
+   * The lobby's gallery-and-landing mass, and the fader that ghosts it.
+   *
+   * **The headline feature led somewhere a six-year-old could not see
+   * herself.** Walking under the arch or anywhere in the colonnade, QA found
+   * only her pet's head and a sliver of hat showing: the deck is 4.8 m deep
+   * and 26 m wide at 5.44 m, and at the camera's 38° that hid roughly the
+   * northern 10 m of a 24.8 m room. Nothing in the hotel had ever faded —
+   * `FloorFader` was the castle's, and `FoliageFade` explicitly reasons that
+   * the building interior is a separate space that can never occlude anyone.
+   *
+   * So the castle's fader does the work, with one number added to it: the
+   * castle hides a storey outright, this one ghosts, because the gallery is
+   * the thing the room is *for* and a child should still see it overhead
+   * while she can see herself through it.
+   */
+  private lobbyOverhang: Group | null = null;
+  private readonly overhangFader = new FloorFader(OVERHANG_GHOST_ALPHA);
+  private overhangRegistered = false;
 
   private readonly statue: RipikaStatueHandle;
   private readonly discoBalls: { spin: Group }[] = [];
@@ -1283,11 +1329,47 @@ export class Hotel implements GameSystem {
     return zones;
   }
 
+  /**
+   * Ghost the lobby's overhang whenever it is between the player and the
+   * camera — the hotel's answer to the castle's cutaway.
+   *
+   * The test is exact rather than sampled, because the camera is orthographic
+   * (one fixed view direction everywhere) and the decks are axis-aligned
+   * rectangles: `mezzanineHidesPoint` marches from a point along the view
+   * direction to each deck's walking surface and asks whether it lands on it.
+   * Three heights up her body, the same three `check:hotel` raycasts, so what
+   * fades and what the probe calls hidden are the same question asked twice
+   * in two different ways.
+   */
+  private updateOverhangCutaway(context: FrameContext): void {
+    if (this.lobbyOverhang && !this.overhangRegistered) {
+      this.overhangFader.addLayer(this.lobbyOverhang);
+      this.overhangRegistered = true;
+    }
+    if (!this.overhangRegistered) return;
+    const plan = LOBBY.mezzanine;
+    const player = context.playerPosition;
+    let hidden = false;
+    if (plan && player && this.inside && this.currentRoom() === LOBBY) {
+      const localX = player.x - LOBBY.originX;
+      const localZ = player.z - LOBBY.originZ;
+      for (const fraction of OVERHANG_BODY_FRACTIONS) {
+        if (mezzanineHidesPoint(plan, localX, player.y + PLAYER_HEIGHT * fraction, localZ)) {
+          hidden = true;
+          break;
+        }
+      }
+    }
+    this.overhangFader.setVisibleUpTo(hidden ? -1 : null);
+    this.overhangFader.update(context.dt);
+  }
+
   // ---------------------------------------------------------------- frame
 
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
+    this.updateOverhangCutaway(context);
 
     // The key turning in the lock. Before the player-null return, so a
     // headless world (check:hotel) can watch the door open too.
@@ -2492,7 +2574,15 @@ export class Hotel implements GameSystem {
       ),
     );
     deckSlab.position.set((minX + maxX) / 2, height - 0.2, (minZ + maxZ) / 2);
-    shell.add(deckSlab);
+    // **The mass that can hide a child.** One group for both slabs and every
+    // rail and stick of furniture that stands on them, so the whole overhang
+    // ghosts as one thing when the camera would otherwise be looking at the
+    // top of it with her underneath.
+    const overhang = new Group();
+    overhang.name = 'hotel:lobby/overhang';
+    shell.add(overhang);
+    this.lobbyOverhang = overhang;
+    overhang.add(deckSlab);
     this.surfaces.addPlatform(
       new Plate(
         height,
@@ -2534,7 +2624,7 @@ export class Hotel implements GameSystem {
       landing.height - landing.slab / 2,
       (landing.minZ + landing.maxZ) / 2,
     );
-    shell.add(landingSlab);
+    overhang.add(landingSlab);
     this.surfaces.addPlatform(
       new Plate(
         landing.height,
@@ -3926,6 +4016,10 @@ export class Hotel implements GameSystem {
   private dressMezzanine(shell: Group): void {
     const plan = LOBBY.mezzanine;
     if (!plan) return;
+    // Everything this method makes stands at 3.84 m or 5.44 m — rails,
+    // newels, nosings, the gallery's own seating — so it all belongs to the
+    // mass that can hide a child underneath, and all of it ghosts together.
+    const overhang = this.lobbyOverhang ?? shell;
     const { maxX, minZ, maxZ, height, landing, straight } = plan;
     const tile = BRIDGE_RAIL_TILE;
     // Set in from the edge by half the rail's depth, so the plinth's outer
@@ -3938,18 +4032,18 @@ export class Hotel implements GameSystem {
       const segment = createBridgeRailing();
       segment.root.position.set(x, y, z);
       segment.root.rotation.y = yaw;
-      shell.add(segment.root);
+      overhang.add(segment.root);
     };
     const addNewel = (x: number, z: number, y: number): void => {
       const post = createBridgeNewel();
       post.root.position.set(x, y, z);
-      shell.add(post.root);
+      overhang.add(post.root);
     };
     const addNose = (x: number, z: number, yaw: number, y: number): void => {
       const nose = createLandingNosing();
       nose.root.position.set(x, y, z);
       nose.root.rotation.y = yaw;
-      shell.add(nose.root);
+      overhang.add(nose.root);
     };
 
     // --- the landing's front: six tiles between the curves' top newels ------
@@ -4006,12 +4100,12 @@ export class Hotel implements GameSystem {
       // found by probe 19 on the first build of this gallery.
       const nook = roundRug(1.7, LOBBY.theme.accent, PALETTE.stonePinkLight);
       nook.position.set(nookX, height + 0.01, -10.4);
-      shell.add(nook);
+      overhang.add(nook);
       for (const [x, colour] of [
         [nookX - side * 1.2, PALETTE.markerLilac],
         [nookX + side * 1.3, PALETTE.markerPink],
       ] as const) {
-        this.props.place(shell, LOBBY, sofa(2.3, colour, PALETTE.blossomWhite), {
+        this.props.place(overhang, LOBBY, sofa(2.3, colour, PALETTE.blossomWhite), {
           x,
           y: height,
           z: -10.9,
@@ -4021,7 +4115,7 @@ export class Hotel implements GameSystem {
           top: SOFA_SEAT_TOP,
         });
       }
-      this.props.place(shell, LOBBY, bedsideTable(), {
+      this.props.place(overhang, LOBBY, bedsideTable(), {
         x: nookX,
         y: height,
         z: -9.4,
@@ -4041,7 +4135,7 @@ export class Hotel implements GameSystem {
       [-4.1, -7.0, landing.height, 0x11a3],
       [4.1, -7.0, landing.height, 0x11a4],
     ] as const) {
-      this.props.place(shell, LOBBY, crystalPlanter(seed), {
+      this.props.place(overhang, LOBBY, crystalPlanter(seed), {
         x,
         y: base,
         z,
@@ -4058,7 +4152,7 @@ export class Hotel implements GameSystem {
     for (const x of [-8.4, -3.6, 1.6, 6.4]) {
       const light = sconce(LOBBY.theme.glow);
       light.position.set(x, height + 1.85, minZ + 0.28);
-      shell.add(light);
+      overhang.add(light);
     }
   }
 

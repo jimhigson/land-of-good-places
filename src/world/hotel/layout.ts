@@ -1,4 +1,6 @@
 import {
+  CAMERA_PITCH_DEGREES,
+  CAMERA_YAW_DEGREES,
   HOTEL_BREAKFAST_Z,
   HOTEL_CORRIDOR_Z,
   HOTEL_GARDEN_Z,
@@ -272,6 +274,110 @@ export const CONNECTOR_APPROACH = 1.2;
  * owner of which edges are guarded, and `check:hotel` reads that schedule.
  */
 export const RAIL_BASE_DROP = 0.5;
+
+/**
+ * The direction from any point in the world **towards the camera**.
+ *
+ * A single vector works because the camera is orthographic: it looks along
+ * one fixed direction from everywhere, so "can the camera see this point" is
+ * one ray, not a per-position calculation. Derived from the rig's own numbers
+ * rather than transcribed — a hardcoded triple would go quietly stale the
+ * first time anyone touched `CAMERA_PITCH_DEGREES`.
+ */
+/**
+ * How far above a deck's walking surface its rails and furniture stand.
+ *
+ * Measured off the built room rather than guessed: the tallest thing on the
+ * landing is a balustrade baluster whose box tops out at 4.65 m over a 3.84 m
+ * deck, so 1.1 m clears it with a little room for the sofas and planters on
+ * the gallery.
+ */
+const DECK_CLUTTER_HEIGHT = 1.1;
+
+const TO_CAMERA = ((): { x: number; y: number; z: number } => {
+  const yaw = (CAMERA_YAW_DEGREES * Math.PI) / 180;
+  const pitch = (CAMERA_PITCH_DEGREES * Math.PI) / 180;
+  const horizontal = Math.cos(pitch);
+  const x = Math.sin(yaw) * horizontal;
+  const z = Math.cos(yaw) * horizontal;
+  const y = Math.sin(pitch);
+  const length = Math.hypot(x, y, z);
+  return { x: x / length, y: y / length, z: z / length };
+})();
+
+/**
+ * Does the mezzanine stand between this point and the camera?
+ *
+ * Room-local metres. This is what decides whether the overhang ghosts itself
+ * so a child can see where she is: under the arch and under the whole
+ * colonnade she was drawn *behind* 4.8 m of gallery deck, and QA found only
+ * her pet's head and a sliver of hat showing across roughly the northern
+ * 10 m of a 24.8 m room. A theme park you cannot see yourself in is not a
+ * theme park a six-year-old can play.
+ *
+ * Exact rather than approximate, because the camera is orthographic and the
+ * decks are axis-aligned rectangles: march from the point along
+ * {@link TO_CAMERA} to each deck's walking surface and ask whether it lands
+ * inside that deck. `check:hotel` proves this against the *built meshes* with
+ * a real raycast rather than against this arithmetic, so the two cannot agree
+ * with each other while both being wrong.
+ */
+export function mezzanineHidesPoint(
+  plan: Mezzanine,
+  localX: number,
+  localY: number,
+  localZ: number,
+): boolean {
+  // Each deck is a **box**, not a plane, and it is taller than its slab.
+  // Both of those were learned by raycasting the built room: a ray from the
+  // colonnade meets the gallery slab on its *underside* at 5.04 m, 0.4 m
+  // below the walking surface, and a ray from beside the landing meets a
+  // balustrade baluster standing at 4.65 m — a metre above the landing it
+  // guards. Marching to the walking surface alone missed 59 of 1,487
+  // standable spots that the real geometry hides.
+  const decks = [
+    {
+      minX: plan.minX,
+      maxX: plan.maxX,
+      minZ: plan.minZ,
+      maxZ: plan.maxZ,
+      minY: plan.height - plan.landing.slab,
+      maxY: plan.height + DECK_CLUTTER_HEIGHT,
+    },
+    {
+      minX: plan.landing.minX,
+      maxX: plan.landing.maxX,
+      minZ: plan.landing.minZ,
+      maxZ: plan.landing.maxZ,
+      minY: plan.landing.height - plan.landing.slab,
+      maxY: plan.landing.height + DECK_CLUTTER_HEIGHT,
+    },
+  ];
+  for (const deck of decks) {
+    // Standing on it (or above it) is never standing under it.
+    if (deck.minY <= localY + 0.05) continue;
+    let near = 0;
+    let far = Number.POSITIVE_INFINITY;
+    const axes: readonly [number, number, number, number][] = [
+      [localX, TO_CAMERA.x, deck.minX, deck.maxX],
+      [localY, TO_CAMERA.y, deck.minY, deck.maxY],
+      [localZ, TO_CAMERA.z, deck.minZ, deck.maxZ],
+    ];
+    let missed = false;
+    for (const [origin, direction, low, high] of axes) {
+      if (Math.abs(direction) < 1e-9) {
+        if (origin < low || origin > high) missed = true;
+        continue;
+      }
+      const t1 = (low - origin) / direction;
+      const t2 = (high - origin) / direction;
+      near = Math.max(near, Math.min(t1, t2));
+      far = Math.min(far, Math.max(t1, t2));
+    }
+    if (!missed && far >= near) return true;
+  }
+  return false;
+}
 
 /**
  * One stretch of deck edge that a walker must not be able to step off.
