@@ -33,11 +33,12 @@
  *
  * The per-slice ceiling additionally **calibrates itself to the box it is
  * running on**, because the park is deterministic and so does the same number
- * of work units everywhere: the run's own `advance()` time divided by its own
- * unit count is a free, honest measurement of how fast this machine is, and the
- * grace the ceiling allows for the one unit a slice can overrun by is scaled by
- * it. A constant in milliseconds was tried twice and blocked main's deploy
- * twice — see `ADVANCE_CEILING_MS` for the reasoning and the numbers.
+ * of work units everywhere: the time this run took over the Sky Cruiser's
+ * 29,142 plan-view joints is a free and honest measurement of how fast this
+ * machine is, and the grace the ceiling allows for the one unit a slice can
+ * overrun by is scaled by it. A constant in milliseconds was tried twice and
+ * blocked main's deploy twice — see `ADVANCE_CEILING_MS` for the reasoning, the
+ * numbers, and what it deliberately does not catch.
  *
  * ## And that the pre-warmed park is the same park
  *
@@ -143,6 +144,13 @@ const unitsSeen: Record<Phase, number> = {
   slideSearch: 0,
 };
 let worstSlice = { ms: 0, phase: 'no generator step at all', steps: 0, stage: 'waiting' };
+/** Wall clock spent in slices that did each phase's work — the calibration. */
+const phaseMs: Record<Phase, number> = {
+  brief: 0,
+  cruiserSearch: 0,
+  cruiserFinish: 0,
+  slideSearch: 0,
+};
 
 const startedAt = performance.now();
 
@@ -154,17 +162,23 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   const spent = performance.now() - before;
   frames += 1;
   totalAdvanceMs += spent;
-  if (spent > worstAdvanceMs) {
-    worstAdvanceMs = spent;
-    // Exactly one phase does work in any one `advance()` — every branch of it
-    // returns — so the single non-zero delta names the slice.
-    worstSlice = { ms: spent, phase: 'no generator step at all', steps: 0, stage };
-    for (const phase of PHASES) {
-      const did = generation.unitCounts[phase] - unitsSeen[phase];
-      if (did > 0) worstSlice = { ms: spent, phase, steps: did, stage };
+  // Exactly one phase does work in any one `advance()` — every branch of it
+  // returns — so the single non-zero delta names the slice.
+  let did: Phase | null = null;
+  let steps = 0;
+  for (const phase of PHASES) {
+    const done = generation.unitCounts[phase] - unitsSeen[phase];
+    unitsSeen[phase] = generation.unitCounts[phase];
+    if (done > 0) {
+      did = phase;
+      steps = done;
     }
   }
-  for (const phase of PHASES) unitsSeen[phase] = generation.unitCounts[phase];
+  if (did) phaseMs[did] += spent;
+  if (spent > worstAdvanceMs) {
+    worstAdvanceMs = spent;
+    worstSlice = { ms: spent, phase: did ?? 'no generator step at all', steps, stage };
+  }
   if (spent > 1) framesThatBlockedMeasurably += 1;
   await nextFrame();
 }
@@ -211,23 +225,33 @@ said.push(`the slide's search reached attempt ${generation.attempts}`);
 // This is `check-solve-cost.mts`'s idiom — "budgets stated as a multiple of
 // measured cost" — with the multiplier measured here rather than written down,
 // because the thing being calibrated out is precisely the box.
+//
+// **The Sky Cruiser's plan-view search is the ruler, and not just because it is
+// convenient.** A calibration has to be taken from work that will not itself
+// change when somebody regresses the thing being guarded, or the ceiling rises
+// to meet the regression and the guard goes quiet. Tried first on the run's
+// whole mean: a mutation making the slide's `satisfies` five times dearer took
+// the worst slice from 9.7 ms to 18.2 ms *and* the mean from 13.2 to 15.7 us,
+// which lifted the ceiling by nearly as much as the fault it was supposed to
+// catch. The cruiser's search is 29,142 steps of one homogeneous kind — laying
+// rail pieces in plan view, no terrain, no chute rebuilds, no cold start,
+// nothing a future ride will touch — so it measures the machine and only the
+// machine.
 // ---------------------------------------------------------------------------
 const units = generation.unitCounts;
-const totalUnits = units.brief + units.cruiserSearch + units.cruiserFinish + units.slideSearch;
-const msPerUnit = totalAdvanceMs / totalUnits;
+const msPerCruiserJoint = phaseMs.cruiserSearch / Math.max(1, units.cruiserSearch);
 
 /**
- * Median of four idle runs on the machine named here, **after** the cruiser
- * prologue was sliced (a coarser prologue makes the mean per-unit cost higher,
- * so this number and that fix belong to the same commit).
+ * Median of five idle runs on the machine named here: 41.2, 41.2, **41.5**,
+ * 44.1, 44.2 us.
  *
  * Machine: Apple `Mac16,8`, 14 cores, macOS 25.5, Node 24, idle.
- * Date: 9 August 2026. Measured 13.2, 13.3, 13.6, 14.1 us.
- * Re-measure by running `npm run check:park-boot` and reading the "us per work
- * unit" line it prints — and if you change it, say which machine and when,
- * because this is the only place the two are tied together.
+ * Date: 9 August 2026.
+ * Re-measure by running `npm run check:park-boot` and reading the "us per
+ * cruiser joint" line it prints — and if you change it, say which machine and
+ * when, because this is the only place the two are tied together.
  */
-const REFERENCE_MS_PER_UNIT = 0.0135;
+const REFERENCE_MS_PER_JOINT = 0.0415;
 
 /**
  * How much slower this box is than the reference, never below 1.
@@ -237,10 +261,10 @@ const REFERENCE_MS_PER_UNIT = 0.0135;
  * gets stricter on its author's next laptop is a check that starts failing for
  * reasons nobody chose.
  */
-const slowness = Math.max(1, msPerUnit / REFERENCE_MS_PER_UNIT);
+const slowness = Math.max(1, msPerCruiserJoint / REFERENCE_MS_PER_JOINT);
 said.push(
-  `this box costs ${(msPerUnit * 1000).toFixed(1)} us per work unit against the reference ` +
-    `${(REFERENCE_MS_PER_UNIT * 1000).toFixed(1)} us — ${slowness.toFixed(2)}x`,
+  `this box costs ${(msPerCruiserJoint * 1000).toFixed(1)} us per cruiser joint against the ` +
+    `reference ${(REFERENCE_MS_PER_JOINT * 1000).toFixed(1)} us — ${slowness.toFixed(2)}x`,
 );
 
 // --- it is SPREAD, not merely done -----------------------------------------
@@ -281,18 +305,40 @@ if (frames < MIN_WORKING_FRAMES) {
 // so nothing here has to be re-tuned when the hardware changes.
 //
 // **12 ms is ~2.5x the largest unit in the build.** Profiled a unit at a time —
-// drive `advance(0)` and every drive loop does exactly one step — the worst is
-// the castle-window carve at 4.85 ms (cold; 0.27 ms once V8 has tiered
-// `terrainHeight` up), then the slide's route-closure steps at 2.2-2.7 ms where
-// `satisfies` rebuilds the whole chute. 2.5x leaves room for a garbage
-// collection landing inside a slice — six steps a run already begin late for
-// that reason — without leaving room for a unit that has genuinely doubled.
+// drive `advance(0)` and every drive loop does exactly one step, so the slice
+// time *is* the unit cost — the worst is the castle-window carve at 4.85 ms
+// (cold; 0.27 ms once V8 has tiered `terrainHeight` up), then the slide's
+// route-closure steps at 2.2-2.7 ms where `satisfies` rebuilds the whole chute.
+// Idle, this machine's worst slice is 9.5-10.7 ms, so 2.5x leaves about 2x
+// headroom — room for a garbage collection landing inside a slice, which is
+// real (a handful of steps a run already begin late for that reason) and which
+// no amount of correct code prevents.
 //
-// **What this deliberately cannot catch, and who does.** If every unit in the
-// park got three times more expensive, `slowness` would absorb it and this
-// would stay quiet. That is not a hole: `check:solve-cost` owns exactly that
-// question, holding each solver stage's whole cost to 8x its measured median.
-// One owner per question — this one owns *granularity*, not *total cost*.
+// **Measured sensitivity, stated rather than assumed.** Mutations run against
+// this on 9 August 2026:
+//
+// - removing the eight seam yields from `coasterProfileSearch` — the exact
+//   shape that blocked main — is **red on the piece counts below**, at 11
+//   pieces against 12, and *not* red here: its worst slice measured 10.7 and
+//   12.8 ms on two runs against a ~20 ms ceiling. That is the division of
+//   labour working as written. The counts are the guarantee; this is the
+//   secondary observation.
+// - a driver that only looks at the clock every 4096 steps is **red here**, at
+//   61.1 ms against a 20.2 ms ceiling, naming "slideSearch, 4096 work units".
+// - making the slide's `satisfies` five times dearer (its unit 2.7 -> 13.5 ms)
+//   is **not caught**: the worst slice came out at 17.7 ms against 20.0. It sits
+//   just inside, because a fat unit only shows in full when it happens to start
+//   right on a deadline. Tightening the grace until that went red leaves ~1.4x
+//   headroom on CI, and a guard that goes red when the runner is busy is one
+//   people learn to re-run rather than read. So: this catches a unit about three
+//   times the largest, not two, and that is a choice rather than an oversight.
+//
+// **What it deliberately cannot catch, and who does.** If the park's units got
+// uniformly more expensive, that is a cost regression rather than a granularity
+// one, and `check:solve-cost` owns it — each solver stage against 8x its
+// measured median. One owner per question. The tell here is the printed "us per
+// cruiser joint" line: on a machine you believe is fast, a number far above the
+// reference means the work got dearer, not that the box got slower.
 const WORST_UNIT_GRACE_MS = 12;
 const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS + WORST_UNIT_GRACE_MS * slowness;
 said.push(
