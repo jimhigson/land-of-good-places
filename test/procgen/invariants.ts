@@ -4703,7 +4703,101 @@ const tapTargetsKeepTheirDistance: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The arrival reaches its end, and the controls change hands.**
+ *
+ * Jim, playing the deployed game, 9 August 2026: *"the cat bus never reached
+ * its destination due to there being a cone shaped object in the middle of the
+ * road."*
+ *
+ * A whole feature shipped, and then failed on the first thing a player ever
+ * sees, with a dozen checks green over it. Every one of them measured a
+ * *property* of the sequence — the 45-degree aisle pan, the composition
+ * percentages, the glazing line, twelve seated children, byte-identical parks,
+ * the skip offered in both directions — and **not one asked whether the ride
+ * finishes.** Both existing director checks reach `readyToHandOver === true` by
+ * hand-calling `noteParkReady()` and `noteWarmupReady()` on a bare
+ * `JourneyDirector` wired to no scene, no world and no player, which proves
+ * three booleans AND together correctly and nothing else at all.
+ *
+ * This is the assertion whose absence let that happen: the sequence runs, and
+ * it ends. See `parkFacts.ts`'s `runTheArrival` for what is real in the run
+ * (the director, the journey, the shader queue over this seed's own park scene,
+ * the ordering) and the one thing that is not (`renderer.compile` needs a GPU).
+ *
+ * **Both runs matter.** The overrun — generation outlasting the ride — is a
+ * legitimate wait, and `JourneyDirector.overrunning`'s own doc says it is
+ * "never true today", which is precisely the kind of claim that needs a run
+ * rather than a comment. A bus that idles at the gate for ever is what a stuck
+ * child actually experiences.
+ */
+const theArrivalReachesItsEnd: Invariant = (facts) => {
+  const fouls: string[] = [];
+  for (const run of [facts.arrivalRuns.onTime, facts.arrivalRuns.overrun]) {
+    if (!run.handedOver) {
+      fouls.push(
+        `the arrival never ended — ${run.what}. It ran ${run.seconds.toFixed(1)} s ` +
+          `(${run.frames} frames) to the ${run.ceilingSeconds} s ceiling without ` +
+          `\`readyToHandOver\` ever coming true, so the bus idles and the park never ` +
+          `takes the screen. Director at the end: ${run.finalState}`,
+      );
+      continue;
+    }
+    // A hand-over that fires before the ride has run is not the sequence
+    // ending, it is the sequence being skipped — and it would pass a bare
+    // "did it finish" question while putting a child in the park mid-shot.
+    if (run.handOverSeconds < run.rideSeconds - 1e-6) {
+      fouls.push(
+        `the arrival ended early at ${run.handOverSeconds.toFixed(2)} s, before the ` +
+          `${run.rideSeconds} s ride was over — ${run.what}`,
+      );
+    }
+    // The skip is the child's own way out, and it is the only one she has
+    // while the bus is waiting. If it is never offered, an overrun is a trap.
+    if (run.skipOfferedSeconds < 0) {
+      fouls.push(
+        `the arrival ended, but the skip was never offered along the way — ${run.what}. ` +
+          `A run that can only end by itself has no way out when it cannot.`,
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
+ * **Nothing stands in the road the cat bus drives up to the park on.**
+ *
+ * The other half of the same bug. `BusJourney.buildParkAhead` scattered the
+ * silhouettes that stand over the park's wall across `x = (rng() - 0.5) * 120`
+ * with nothing excluding the carriageway, while `journey-road` runs seventy
+ * metres *past* the gate — so a six-metre `ConeGeometry` rooftop stood at
+ * `x = -1.46, z = -258.7`, filling the arch. That is the cone Jim saw, and the
+ * road ran straight at it for the whole approach.
+ *
+ * Nothing collides on the journey — the bus's `z` is arithmetic off the ride
+ * clock — so this is not a guard against the bus being *stopped*. It is a guard
+ * against the lane telling a child something that is not true: that the road
+ * she is watching goes nowhere.
+ *
+ * **The threshold is the game's**, `road.ts`'s `ROAD_HALF_WIDTH`, which is
+ * derived from the bus's own width — not `BusJourney`'s `PARK_AHEAD_CLEAR`,
+ * which is what the generator aims for. Measuring against the generator's own
+ * target would make this a tautology; measuring against the road leaves the
+ * 1.6 m of headroom that says the fix has room rather than sitting on the line.
+ */
+const nothingStandsInTheLanesCarriageway: Invariant = (facts) => {
+  return facts.laneCarriageway.map(
+    (hit) =>
+      `\`${hit.node}\`${hit.instance >= 0 ? ` #${hit.instance}` : ''} stands in the journey ` +
+      `lane's carriageway: it reaches ${hit.reach.toFixed(2)} m inside the road edge, at ` +
+      `x=${hit.x.toFixed(2)} y=${hit.y.toFixed(2)} z=${hit.z.toFixed(1)}. The road is ` +
+      `${(facts.laneRoadHalfWidth * 2).toFixed(2)} m wide and the bus drives down the middle of it.`,
+  );
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ['no two tap targets crowd each other or a doorway', tapTargetsKeepTheirDistance],
   ['the park really is twice the park', parkAreaIsWhatWasAsked],
   ['every plot stands wholly inside the boundary', plotsStayInsideTheBoundary],
