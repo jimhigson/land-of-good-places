@@ -377,8 +377,25 @@ export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
   return {
     contains: (x, z) => Math.hypot(x, z) <= at(radii, Math.atan2(z, x)),
     distanceToEdge: (x, z) => {
+      // Both tables looked up from ONE bearing reduction. This is `at` twice
+      // with the index arithmetic hoisted — the same operations on the same
+      // values in the same order, so the same doubles — because the route
+      // search asks this on every sample of every candidate piece and the
+      // mod/floor/lerp was being derived twice for one bearing.
       const bearing = Math.atan2(z, x);
-      return (at(radii, bearing) - Math.hypot(x, z)) * at(obliquity, bearing);
+      const t = ((bearing % TAU) + TAU) % TAU;
+      const scaled = (t / TAU) * count;
+      const i = Math.floor(scaled) % count;
+      const frac = scaled - Math.floor(scaled);
+      const j = (i + 1) % count;
+      const radiusA = radii[i] as number;
+      const radiusB = radii[j] as number;
+      const cosA = obliquity[i] as number;
+      const cosB = obliquity[j] as number;
+      return (
+        (radiusA + (radiusB - radiusA) * frac - Math.hypot(x, z)) *
+        (cosA + (cosB - cosA) * frac)
+      );
     },
     area: boundary.area,
     perimeter: boundary.perimeter,

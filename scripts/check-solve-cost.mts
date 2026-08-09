@@ -27,7 +27,12 @@
  * ### How the budgets were chosen — measured, then multiplied
  *
  * Measured 8 Aug 2026, canonical seed, M-series laptop, idle, median of
- * three runs (the `measuredMs` column below). Re-measure with:
+ * three runs (the `measuredMs` column below). The cruiser and slide rows
+ * were re-measured the same day, same machine, same method, after the
+ * cruiser hot-path pass (fix/cruiser-solve-cost) cut the shared rail
+ * generator's cost: cruiser 1274 → 788, slide 4609 → 4070 — byte-identical
+ * routes both, proven by fingerprint, so this is the same work measured
+ * cheaper, not different work. Re-measure with:
  *
  *     node --experimental-transform-types --no-warnings \
  *       --import ./scripts/ts-extension-resolver-register.mjs \
@@ -63,9 +68,9 @@ const budgetMs = (measured: number): number => Math.max(8 * measured, 250);
 const STAGES: readonly Stage[] = [
   { stage: 'boundary', load: () => import('../src/world/boundary.ts'), measuredMs: 54 },
   { stage: 'layout', load: () => import('../src/world/parkLayout.ts'), measuredMs: 9 },
-  { stage: 'cruiser', load: () => import('../src/world/coaster/plan.ts'), measuredMs: 1274 },
+  { stage: 'cruiser', load: () => import('../src/world/coaster/plan.ts'), measuredMs: 788 },
   { stage: 'train', load: () => import('../src/world/train/plan.ts'), measuredMs: 41 },
-  { stage: 'slide', load: () => import('../src/world/slide/plan.ts'), measuredMs: 4609 },
+  { stage: 'slide', load: () => import('../src/world/slide/plan.ts'), measuredMs: 4070 },
   { stage: 'railRace', load: () => import('../src/world/railRace/plan.ts'), measuredMs: 13 },
   { stage: 'paths', load: () => import('../src/world/paths.ts'), measuredMs: 12 },
 ];

@@ -11,8 +11,11 @@ import type { PlannedCoaster } from './solve';
  *
  * ### Why the cruiser needed one too
  *
- * `COASTER_PLANS` solves at module scope and costs **~1.3 s** on the canonical
- * seed. That was invisible for a long time because of a billing accident:
+ * `COASTER_PLANS` solves at module scope and costs **~0.8 s** on the canonical
+ * seed (~1.3 s when this letterbox was built; the 8 Aug 2026 hot-path pass cut
+ * it, and `scripts/check-solve-cost.mts` owns the current measurement — still
+ * far too much for one frame). That was invisible for a long time because of a
+ * billing accident:
  * `train/plan.ts` imports `COASTER_PLANS`, and `ParkGeneration`'s ordered module
  * list loaded `train/plan` **first**, so the cruiser's entire solve was charged
  * to the train's frame. Measured in that order the train read 1439.6 ms and the
