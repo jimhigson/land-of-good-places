@@ -94,9 +94,80 @@ export function distanceToBand(band: PortalBand, x: number, z: number): number {
   return Math.hypot(outAlong, outAcross);
 }
 
-/** True when a walker at (x, z) is inside the band — the trigger test itself. */
+/** True when a walker at (x, z) is inside the band. */
 export function bandContains(band: PortalBand, x: number, z: number): boolean {
   return distanceToBand(band, x, z) === 0;
+}
+
+/**
+ * **Did a walker who was at (`fromX`, `fromZ`) and is now at (`toX`, `toZ`) go
+ * through this doorway?** The walk-through trigger itself.
+ *
+ * ### Why this is swept and {@link bandContains} is not enough
+ *
+ * `bandContains` asks where somebody *is*, once a frame. A band is a couple of
+ * metres deep and a sprint through a long frame is 0.93 m
+ * (`PLAYER_LONGEST_STEP`), so most of the time she is sampled inside it and the
+ * door fires — but only *most of the time*, and the misses cluster exactly
+ * where a stopped clock does: on the long frames, on a phone, mid-stutter.
+ * Jim, playing, 9 August 2026: *"it only occasionally triggers the entry if I
+ * step into exactly the right point."* A doorway that answers "sometimes" is a
+ * doorway a six-year-old learns to distrust.
+ *
+ * This is the same reasoning `CollisionWorld.resolveMovement` applies to
+ * tunnelling — *what did she cross getting here?*, not *where did she land?* —
+ * and it is asked the same way, of the same segment. A door and a wall are the
+ * same geometry problem pointed in opposite directions.
+ *
+ * The segment against the whole rectangle rather than against a plane through
+ * its middle, because a doorway can have something solid a step behind it (the
+ * hotel tower's lobby back wall stops her 0.5 m short of the tower band's own
+ * centre line) and a plane she can never reach is a door that never opens. A
+ * rectangle she has entered is a rectangle she is through. Note that a
+ * zero-length segment reduces to exactly `bandContains(band, toX, toZ)`, so
+ * nothing that fires today stops firing.
+ *
+ * **Teleports are safe by construction, with nothing to remember.** Hand this
+ * `Player.previousPosition`, which every `teleportTo`/`setRidePose` collapses
+ * onto the destination — so the segment across six hundred metres of nothing
+ * that a change of space would otherwise sweep does not exist to be tested.
+ */
+export function bandCrossed(
+  band: PortalBand,
+  fromX: number,
+  fromZ: number,
+  toX: number,
+  toZ: number,
+): boolean {
+  const sin = Math.sin(band.yaw);
+  const cos = Math.cos(band.yaw);
+  const fromDX = fromX - band.centreX;
+  const fromDZ = fromZ - band.centreZ;
+  const toDX = toX - band.centreX;
+  const toDZ = toZ - band.centreZ;
+
+  // The segment in the band's own frame, then the standard slab clip: the
+  // sub-interval of [0, 1] that is inside both the along and the across slab.
+  // Non-empty means the walk passed through the rectangle.
+  let enter = 0;
+  let exit = 1;
+  const clip = (start: number, end: number, half: number): boolean => {
+    const delta = end - start;
+    if (Math.abs(delta) < 1e-12) return Math.abs(start) <= half;
+    const low = Math.min((-half - start) / delta, (half - start) / delta);
+    const high = Math.max((-half - start) / delta, (half - start) / delta);
+    enter = Math.max(enter, low);
+    exit = Math.min(exit, high);
+    return enter <= exit;
+  };
+
+  const alongInside = clip(
+    fromDX * sin + fromDZ * cos,
+    toDX * sin + toDZ * cos,
+    band.halfAlong,
+  );
+  if (!alongInside) return false;
+  return clip(fromDX * cos - fromDZ * sin, toDX * cos - toDZ * sin, band.halfAcross);
 }
 
 /**

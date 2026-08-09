@@ -143,6 +143,7 @@ import {
 } from './layout';
 import {
   bandContains,
+  bandCrossed,
   distanceToBand,
   TAP_FINGER_METRES,
   type PortalBand,
@@ -1296,23 +1297,54 @@ export class Hotel implements GameSystem {
    * knows where the solver put its facade.
    */
   towerDoorBand(): PortalBand {
+    // **The doorway, as built**, rather than three numbers that have to be
+    // kept level with it by hand: from the lobby back wall out to the outer
+    // face of the facade she walks through. The old band stopped 0.45 m
+    // *inside* the facade plane, so there was a sliver in which she was
+    // through the door and the trigger said she was not — the sort of gap
+    // between two hand-copied depths this repo has been bitten by six times
+    // in a day (CLAUDE.md, "Two definitions of one thing").
+    const outer = TOWER_FACADE_ALONG + 0.4;
+    const centre = (TOWER_BACK_ALONG + outer) / 2;
     return {
       what: "the hotel tower's front door",
-      centreX: this.facadeX + Math.sin(this.facadeYaw) * 5.5,
-      centreZ: this.facadeZ + Math.cos(this.facadeYaw) * 5.5,
-      halfAlong: 1.1,
+      centreX: this.facadeX + Math.sin(this.facadeYaw) * centre,
+      centreZ: this.facadeZ + Math.cos(this.facadeYaw) * centre,
+      halfAlong: (outer - TOWER_BACK_ALONG) / 2,
       halfAcross: DOOR_HALF + 0.4,
       yaw: this.facadeYaw,
       y: 0,
     };
   }
 
+  /**
+   * **Every doorway in the hotel is one question, asked of the line she just
+   * walked**: did that line pass through this door's rectangle?
+   *
+   * Not "is she standing in it", which is what this used to ask. A band is
+   * a couple of metres deep and a walk samples it once a frame, so the point
+   * test mostly worked and *occasionally* did not — Jim, playing, 9 August
+   * 2026: *"the entry is too hard to trigger… it only occasionally triggers
+   * if I step into exactly the right point."* The tower's front door was the
+   * worst of them, because the lobby back wall stops her 5.97 m out and the
+   * band's outer edge is 6.60 m, so the whole trigger was 0.63 m of reachable
+   * depth against a 0.93 m sprint stride (`PLAYER_LONGEST_STEP`): at full
+   * pelt through a long frame she could step over the entire doorway.
+   *
+   * `bandCrossed` (`world/tapSpacing.ts`) is the one owner of the answer, and
+   * `player.previousPosition` is the line — which every teleport collapses to
+   * a point, so a change of space cannot sweep a segment through some other
+   * door on the way. Same reasoning as `CollisionWorld.resolveMovement`
+   * against wall tunnelling, asked of the same segment.
+   */
   private checkDoorways(player: Player): void {
     if (this.spaceCooldown > 0) return;
     const { x, z } = player.position;
+    const fromX = player.previousPosition.x;
+    const fromZ = player.previousPosition.z;
 
     if (!this.inside) {
-      if (bandContains(this.towerDoorBand(), x, z)) {
+      if (bandCrossed(this.towerDoorBand(), fromX, fromZ, x, z)) {
         this.changeSpace(() => this.enterLobby());
       }
       return;
@@ -1320,20 +1352,19 @@ export class Hotel implements GameSystem {
 
     const room = this.currentRoom();
     if (!room) return;
-    const localX = player.position.x - room.originX;
     // The doorway rectangles themselves are layout data — `hotelDoorBands`,
     // the same list the tap-spacing check holds every zone clear of.
     const bands = hotelDoorBands(room);
-    const inBand = (kind: HotelDoorBand['kind']): boolean => {
+    const walkedThrough = (kind: HotelDoorBand['kind']): boolean => {
       const band = bands.find((candidate) => candidate.kind === kind);
-      return band !== undefined && bandContains(band, x, z);
+      return band !== undefined && bandCrossed(band, fromX, fromZ, x, z);
     };
 
-    if (room === LOBBY && inBand('exit')) {
+    if (room === LOBBY && walkedThrough('exit')) {
       this.changeSpace(() => this.leaveToPark());
       return;
     }
-    if (room === CORRIDOR && inBand('suite-door')) {
+    if (room === CORRIDOR && walkedThrough('suite-door')) {
       // **The lock lives here, not in the lift.** Jim, 7 August 2026: *"go to
       // level 50 before you have your key but not through the door to the
       // room."* Every lift button is now pressable, so a child can ride up and
@@ -1347,18 +1378,19 @@ export class Hotel implements GameSystem {
       // and this branch is only the words at it. Its band starts a metre
       // further out than the portal's because the wall itself stops her at
       // `halfX − 0.92` (0.3 half-thickness + 0.62 player radius) — a refusal
-      // triggered at the old 0.6 band would sit beyond her reach, and the
-      // door would be a mute invisible wall.
+      // triggered at the portal's own depth would sit beyond her reach, and
+      // the door would be a mute invisible wall. Both depths are `layout.ts`'s
+      // (`suite-door` and `suite-portal`), so nothing here re-derives one.
       if (!saveFlags.hasHotelKey()) {
         this.refuseSuite(player);
         return;
       }
-      if (localX > CORRIDOR.halfX - 0.6) {
+      if (walkedThrough('suite-portal')) {
         this.changeSpace(() => this.stepThroughDoor(SUITE, -SUITE.halfX + 1.6, 0, Math.PI / 2));
       }
       return;
     }
-    if (room === SUITE && inBand('corridor-door')) {
+    if (room === SUITE && walkedThrough('corridor-door')) {
       this.changeSpace(() => this.stepThroughDoor(CORRIDOR, CORRIDOR.halfX - 1.6, 0, -Math.PI / 2));
     }
   }
@@ -4710,10 +4742,61 @@ function paintYours(plaque: Mesh): void {
 }
 
 /**
- * The tower's collision: eight walls around the crystal cluster with the
- * doorway open, and a lobby back wall a couple of metres in — walking on
- * through is what enters the hotel, and the wall is what stops a sprinting
- * child ending up inside solid crystal while the iris closes.
+ * The tower's collision shell — an octagon of this circumradius, in metres.
+ * Sized to the crystal cluster's own standing-height mass (measured 6.0–8.4 m
+ * out from the plot centre), so what looks solid is solid.
+ */
+export const TOWER_SHELL_RADIUS = 7.2;
+
+/** The shell walls' own half-thickness. */
+const TOWER_SHELL_HALF_THICKNESS = 0.4;
+
+/**
+ * Half the doorway's clear width, in metres — where its jambs stand. Wider
+ * than the door leaves themselves ({@link DOOR_HALF}) so the aperture is
+ * generous to walk at, and it is this, not the octagon's own corners, that
+ * says how much of the facade is open.
+ */
+export const TOWER_DOOR_HALF = DOOR_HALF + 0.5;
+
+/** How far in the lobby back wall stands, along the door's axis. */
+export const TOWER_BACK_ALONG = TOWER_SHELL_RADIUS - 2.2;
+
+/**
+ * The facade plane: the flat of the octagon face the doorway is cut into,
+ * along the door's axis. The doorway sits in the *middle* of a face rather
+ * than across a corner, so this is a single distance rather than a range.
+ */
+export const TOWER_FACADE_ALONG = TOWER_SHELL_RADIUS * Math.cos(Math.PI / 8);
+
+/**
+ * The tower's collision: a **closed** octagon around the crystal cluster with
+ * exactly one hole in it — the doorway, as wide as the gap between its own
+ * jambs — plus those jambs and a lobby back wall a couple of metres in.
+ * Walking on through the doorway is what enters the hotel, and the back wall
+ * is what stops a sprinting child ending up inside solid crystal while the
+ * iris closes.
+ *
+ * ### It was not closed, and a child found it
+ *
+ * Jim, playing, 9 August 2026: *"the hotel building is not solid, I can walk
+ * straight through it."* The ring was built by walking eight sectors and
+ * trimming each one's *start* by the door's arc, when only the two sectors
+ * beside the doorway ever wanted trimming. Every face therefore began 0.32 rad
+ * late and ended on the nominal line, leaving **six 0.32 rad gaps** evenly
+ * spaced round the tower — 2.29 m of arc each, 1.49 m of it clear of both
+ * walls' half-thickness, against a 1.24 m-wide child. Measured on the built
+ * park before the fix: of 48 bearings marched at the facade, 22 got inside the
+ * 7.2 m shell and 8 reached the middle of it (radius 0.00 m). The doorway
+ * itself was a 1.43 rad hole — 9.4 m of chord for a 2.6 m door — so three
+ * quarters of the "doorway" was open wall you could walk in through beside the
+ * jambs and miss the entry trigger entirely, which is the other half of what
+ * he reported.
+ *
+ * So it is built as geometry now rather than as trimmed angles: a ring of
+ * chords that closes, and one aperture cut in the middle of the face the door
+ * is in. `scripts/check-hotel.mts` marches at it from 32 bearings and is the
+ * thing that would say so again.
  */
 function registerTowerCollision(
   collision: CollisionWorld,
@@ -4721,42 +4804,70 @@ function registerTowerCollision(
   z: number,
   yaw: number,
 ): void {
-  const R = 7.2;
-  const doorArc = 0.32;
-  for (let i = 0; i < 8; i += 1) {
-    const a1 = yaw + (i / 8) * Math.PI * 2 + doorArc;
-    const a2 = yaw + ((i + 1) / 8) * Math.PI * 2 - (i === 7 ? doorArc : -0.001);
-    // The doorway faces `yaw`; skip the segment straddling it.
-    if (i === 0) continue;
+  const R = TOWER_SHELL_RADIUS;
+  const SIDES = 8;
+  const sector = (Math.PI * 2) / SIDES;
+
+  // The facade's own frame: `along` runs out through the door, `across` it.
+  const alongX = Math.sin(yaw);
+  const alongZ = Math.cos(yaw);
+  const acrossX = Math.sin(yaw + Math.PI / 2);
+  const acrossZ = Math.cos(yaw + Math.PI / 2);
+  const wall = (
+    along1: number,
+    across1: number,
+    along2: number,
+    across2: number,
+    halfThickness: number,
+  ): void => {
+    collision.addWall(
+      x + alongX * along1 + acrossX * across1,
+      z + alongZ * along1 + acrossZ * across1,
+      x + alongX * along2 + acrossX * across2,
+      z + alongZ * along2 + acrossZ * across2,
+      halfThickness,
+    );
+  };
+
+  // Vertices half a sector either side of the door's axis, so the doorway sits
+  // in the **middle of one face** rather than straddling a corner: the face it
+  // is in is then a chord at a constant distance out
+  // ({@link TOWER_FACADE_ALONG}), and the aperture is a plain gap in the
+  // middle of it.
+  const vertexAcross = R * Math.sin(sector / 2);
+
+  // The seven faces the door is not in — the ring, closed, corner to corner.
+  for (let face = 1; face < SIDES; face += 1) {
+    const a1 = yaw + (face - 0.5) * sector;
+    const a2 = yaw + (face + 0.5) * sector;
     collision.addWall(
       x + Math.sin(a1) * R,
       z + Math.cos(a1) * R,
       x + Math.sin(a2) * R,
       z + Math.cos(a2) * R,
-      0.4,
+      TOWER_SHELL_HALF_THICKNESS,
     );
   }
-  // The doorway's jambs and the lobby back wall.
-  const doorSin = Math.sin(yaw);
-  const doorCos = Math.cos(yaw);
-  const sideSin = Math.sin(yaw + Math.PI / 2);
-  const sideCos = Math.cos(yaw + Math.PI / 2);
-  const jamb = (side: number) => {
-    collision.addWall(
-      x + doorSin * (R - 2.2) + sideSin * side * (DOOR_HALF + 0.5),
-      z + doorCos * (R - 2.2) + sideCos * side * (DOOR_HALF + 0.5),
-      x + doorSin * (R + 0.4) + sideSin * side * (DOOR_HALF + 0.5),
-      z + doorCos * (R + 0.4) + sideCos * side * (DOOR_HALF + 0.5),
-      0.35,
+
+  // The facade itself: the same chord, in two stubs either side of the
+  // doorway. `TOWER_DOOR_HALF` (1.80 m) is well inside `vertexAcross`
+  // (2.76 m), so each stub is a real 0.96 m of wall meeting its jamb at the
+  // corner — and probe 22 in `scripts/check-hotel.mts` is what would notice
+  // if a wider door ever turned a stub inside out and reopened the shell.
+  for (const side of [-1, 1]) {
+    wall(
+      TOWER_FACADE_ALONG,
+      side * TOWER_DOOR_HALF,
+      TOWER_FACADE_ALONG,
+      side * vertexAcross,
+      TOWER_SHELL_HALF_THICKNESS,
     );
-  };
-  jamb(1);
-  jamb(-1);
-  collision.addWall(
-    x + doorSin * (R - 2.2) + sideSin * (DOOR_HALF + 0.5),
-    z + doorCos * (R - 2.2) + sideCos * (DOOR_HALF + 0.5),
-    x + doorSin * (R - 2.2) - sideSin * (DOOR_HALF + 0.5),
-    z + doorCos * (R - 2.2) - sideCos * (DOOR_HALF + 0.5),
-    0.35,
-  );
+  }
+
+  // The jambs, running from the back wall out past the facade plane, and the
+  // lobby back wall across the far end between them.
+  for (const side of [-1, 1]) {
+    wall(TOWER_BACK_ALONG, side * TOWER_DOOR_HALF, R + 0.4, side * TOWER_DOOR_HALF, 0.35);
+  }
+  wall(TOWER_BACK_ALONG, TOWER_DOOR_HALF, TOWER_BACK_ALONG, -TOWER_DOOR_HALF, 0.35);
 }
