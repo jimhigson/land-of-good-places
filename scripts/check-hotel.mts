@@ -88,7 +88,7 @@ import {
 } from '../src/world/hotel/layout.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
-import { spaceAt } from '../src/world/spaces.ts';
+import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import { TOWER_DOOR_HALF, TOWER_FACADE_ALONG } from '../src/world/hotel/Hotel.ts';
 import { saveFlags } from '../src/state/flags.ts';
@@ -1469,9 +1469,12 @@ for (const room of ROOMS) {
 // reach the shell is asserted too — otherwise a park that happened to fence
 // the tower off with trees would pass this without ever testing the tower.
 //
-// Proven red before trusted green, on the pre-fix build: 22 of 48 bearings
-// got inside the 7.2 m shell and 8 of them reached its middle (closest
-// approach 0.00 m from the centre).
+// Proven red before trusted green, on the pre-fix build: **19 of the 64
+// marches walked inside the 6.65 m shell**, at nine distinct bearings from 23°
+// to 169° off the doorway, and the closest approach was 0.00 m — the middle of
+// the tower. It also trips the reach guard ("only 25 of 64 marches reached the
+// shell"), because a body that walks straight through a wall never stops
+// against it.
 {
   // The bounds are still the 1e6 sentinel section 2 fitted; the tower is out
   // in the park and its own leash is nothing to do with this.
@@ -1544,33 +1547,49 @@ for (const room of ROOMS) {
   }
 }
 
-// ------- 23. a doorway fires on the line she walked, not the point she landed
+// -------- 23. every doorway fires on the line she walked, at any stride
 //
 // Jim, playing, 9 Aug 2026: *"The entry is too hard to trigger… it only
 // occasionally triggers the entry if I step into exactly the right point. It
 // should trigger precisely when walking through the doors but also reliably."*
 //
 // `checkDoorways` used to ask `bandContains(band, where she is)` once a frame.
-// A door tested that way is only as reliable as the arithmetic coincidence
-// that its band is deeper than a stride — four numbers in three files, none of
-// which knows about the others. It now asks `bandCrossed(band, where she was,
-// where she is)`: the same question `CollisionWorld.resolveMovement` asks
-// about walls, of the same segment.
+// A door tested that way works only for as long as its band stays deeper than
+// a stride — and the band's depth, the wall behind it, the sprint speed and
+// the frame clamp are four numbers in four files, none of which knows the
+// others exist. It now asks `bandCrossed(band, where she was, where she is)`:
+// the same question `CollisionWorld.resolveMovement` asks about walls, of the
+// same segment, so a door and a wall stop being two different geometry
+// problems.
 //
-// This walks her in through the tower's front door for real — the built park's
-// own band, the real collision world resolving each step, `Hotel.update`
-// driving `checkDoorways` — at four stride lengths and eight phases of the
-// frame clock each, and requires the entry to fire on **the very frame she
-// passes the facade**. The two longest strides are past what `Loop` clamps a
-// frame to; they are here on purpose, for the reason
-// `CollisionWorld.checkSubstepBudget` exists: the wall code already refuses to
-// take another file's clamp on trust, and a doorway is the same geometry
-// pointed the other way.
+// This walks every portal in the hotel for real — the built park's own bands,
+// the real collision world resolving each step, `Hotel.update` driving
+// `checkDoorways` — in **both** directions, at four stride lengths, eight
+// phases of the frame clock each. Every walk must arrive.
 //
-// Proven red before trusted green, with `checkDoorways` back on the point
-// test: 16 of 32 walk-throughs missed the frame they crossed on, 8 of them
-// never firing at all — she ends up standing inside the lobby's back wall in
-// the park, which is exactly what Jim described.
+// The two longest strides are past what `Loop` clamps a frame to, and they are
+// the point: they are here for exactly the reason
+// `CollisionWorld.checkSubstepBudget` exists — the wall code already refuses to
+// take another file's clamp on trust, because the day somebody shortens a
+// band, moves the wall behind it or lifts the clamp, the failure is silent and
+// only on the stuttering frames. A doorway is the same geometry pointed the
+// other way.
+//
+// Proven red before trusted green, three ways:
+//
+//  * `checkDoorways` put back on the point test — **9 of the 128 walks never
+//    arrived**, all at the 1.85 m stride, and all three portals whose band is
+//    1.2 m deep (the lobby's way out, and the suite pair both ways). A child
+//    walked clean through the doorway and out the far side with the door never
+//    noticing. The tower's own door survives the point test, because its band
+//    is 2.05 m deep and the lobby back wall happens to stop her inside it —
+//    which is the coincidence this replaces, not a reason to keep leaning on
+//    it.
+//  * the tower band fattened to stand 2.5 m proud of the facade — **4 false
+//    entries**, so the "walking past does not fire" half is not vacuous.
+//  * and, for what Jim actually felt: it is probe 22, the open shell, that
+//    made the entry seem to need "exactly the right point" — you could walk in
+//    beside the jambs and never touch the band at all.
 {
   const plot = placedEntry('hotel');
   const facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
@@ -1590,24 +1609,6 @@ for (const room of ROOMS) {
   };
   hotel.attachPlayer(walker as never);
 
-  /** How far out along the door's axis a point is, from the tower's centre. */
-  const alongOf = (point: Vector3): number =>
-    (point.x - plot.x) * alongX + (point.z - plot.z) * alongZ;
-
-  /** One frame of walking `step` metres in (`toward` −1) or out (+1). */
-  const stride = (step: number, toward: number): void => {
-    walker.previousPosition.copy(walker.position);
-    collision.resolveMovement(
-      walker.position,
-      alongX * step * toward,
-      alongZ * step * toward,
-      PLAYER_RADIUS,
-      0,
-      MAX_FRAME_DELTA,
-    );
-    hotel.update({ dt: MAX_FRAME_DELTA, elapsed: 0 } as never);
-  };
-
   /** Frames with nobody moving — how a change of space's cooldown runs off. */
   const settle = (frames: number): void => {
     for (let frame = 0; frame < frames; frame += 1) {
@@ -1615,110 +1616,161 @@ for (const room of ROOMS) {
     }
   };
 
+  interface Portal {
+    readonly what: string;
+    /** Where she sets off from, and which way she walks. */
+    readonly startX: number;
+    readonly startZ: number;
+    readonly dirX: number;
+    readonly dirZ: number;
+    /** The space she must end up in. */
+    readonly arrive: string;
+    /** True if she starts indoors — the hotel has to be told she is. */
+    readonly indoors: boolean;
+    /** How far she should have to walk; twice this is given up as failed. */
+    readonly reach: number;
+  }
+
+  // Every walk-through portal the hotel has, both ways round. The suite pair
+  // needs the key, which section 5 has already granted.
+  const portals: Portal[] = [
+    {
+      what: "the tower's front door, from the park",
+      startX: plot.x + alongX * 11,
+      startZ: plot.z + alongZ * 11,
+      dirX: -alongX,
+      dirZ: -alongZ,
+      arrive: LOBBY.space,
+      indoors: false,
+      reach: 6,
+    },
+    {
+      what: 'the lobby, back out to the park',
+      startX: LOBBY.originX,
+      startZ: LOBBY.originZ + LOBBY.halfZ - 4,
+      dirX: 0,
+      dirZ: 1,
+      arrive: SPACE_GARDEN,
+      indoors: true,
+      reach: 6,
+    },
+    {
+      what: 'the "yours" door, into the suite',
+      startX: CORRIDOR.originX + CORRIDOR.halfX - 4,
+      startZ: CORRIDOR.originZ,
+      dirX: 1,
+      dirZ: 0,
+      arrive: SUITE.space,
+      indoors: true,
+      reach: 6,
+    },
+    {
+      what: 'the suite, back out to the corridor',
+      startX: SUITE.originX - SUITE.halfX + 4,
+      startZ: SUITE.originZ,
+      dirX: -1,
+      dirZ: 0,
+      arrive: CORRIDOR.space,
+      indoors: true,
+      reach: 6,
+    },
+  ];
+
   /**
-   * Out of the lobby the way a child leaves it — walking south, through its
-   * own front doors — which is Jim's other requirement ("leave the lobby the
-   * same way") and the only exit there is. Then the sentinel bounds back,
-   * because `leaveToPark` re-fits the *park's* leash and a probe marching
-   * about outside the tower is not being leashed by the park's edge.
+   * Put the hotel back to *she is outside*, honestly — by walking her out of
+   * the lobby through its own doors, which is the only way out there is.
+   * Needed because being outdoors is a fact the hotel holds, not one the
+   * walker's coordinates imply, and the probe before this one left a player
+   * standing in the suite.
    */
-  const leaveLobby = (): void => {
-    // The cooldown from however she got in, first: a walk started under it
-    // spends the whole gate crossing the doorway and arrives at the far wall.
+  const standInPark = (): void => {
+    walker.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 4);
+    hotel.adoptRestoredPlayer();
     settle(24);
-    for (let frame = 0; frame < 200; frame += 1) {
-      if (spaceAt(walker.position.x, walker.position.z) !== LOBBY.space) break;
+    for (let frame = 0; frame < 60; frame += 1) {
+      if (spaceAt(walker.position.x, walker.position.z) === SPACE_GARDEN) break;
       walker.previousPosition.copy(walker.position);
       collision.resolveMovement(
         walker.position,
         0,
-        PLAYER_LONGEST_STEP,
+        PLAYER_LONGEST_STEP / 2,
         PLAYER_RADIUS,
         0,
         MAX_FRAME_DELTA,
       );
       hotel.update({ dt: MAX_FRAME_DELTA, elapsed: frame / 12 } as never);
     }
-    if (spaceAt(walker.position.x, walker.position.z) === LOBBY.space) {
-      problems.push(
-        'walking south out of the hotel lobby never leaves it — the way back to the park is shut',
-      );
-    }
     collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
   };
 
-  /** Stand her back outside, cooldown run off, ready to walk in again. */
-  const resetOutside = (from: number): void => {
-    leaveLobby();
-    walker.teleportTo(plot.x + alongX * from, 0, plot.z + alongZ * from);
+  /** One walk at one stride and one phase. Returns the frame she arrived on. */
+  const walkThrough = (portal: Portal, step: number, offset: number): number => {
+    // Stand her at the start — offset back along her own path by a fraction of
+    // a stride, so the samples land at every phase relative to the doorway.
+    const x = portal.startX - portal.dirX * offset;
+    const z = portal.startZ - portal.dirZ * offset;
+    if (!portal.indoors) standInPark();
+    walker.teleportTo(x, 0, z);
+    if (portal.indoors) hotel.adoptRestoredPlayer();
     settle(24);
-    walker.teleportTo(plot.x + alongX * from, 0, plot.z + alongZ * from);
+    walker.teleportTo(x, 0, z);
+
+    const frames = Math.ceil((portal.reach * 2 + offset) / step) + 4;
+    for (let frame = 0; frame < frames; frame += 1) {
+      walker.previousPosition.copy(walker.position);
+      collision.resolveMovement(
+        walker.position,
+        portal.dirX * step,
+        portal.dirZ * step,
+        PLAYER_RADIUS,
+        0,
+        MAX_FRAME_DELTA,
+      );
+      hotel.update({ dt: MAX_FRAME_DELTA, elapsed: frame / 12 } as never);
+      if (spaceAt(walker.position.x, walker.position.z) === portal.arrive) return frame;
+    }
+    return -1;
   };
 
-  // Start from *inside*. Section 21 left a probe player standing in the suite,
-  // so the hotel still believes she is indoors; walking her out through the
-  // lobby's own doors is both the honest way to reset that and Jim's "leave
-  // the lobby the same way" in its own right.
-  walker.teleportTo(LOBBY.originX, 0, LOBBY.originZ + LOBBY.halfZ - 2.2);
-  hotel.adoptRestoredPlayer();
-  leaveLobby();
-
   const PHASES = 8;
-  let missedTheFrame = 0;
-  let neverFired = 0;
+  const strides = [0.05, PLAYER_LONGEST_STEP / 2, PLAYER_LONGEST_STEP, PLAYER_LONGEST_STEP * 2];
   let walks = 0;
-  for (const step of [0.05, PLAYER_LONGEST_STEP / 2, PLAYER_LONGEST_STEP, PLAYER_LONGEST_STEP * 2]) {
-    for (let phase = 0; phase < PHASES; phase += 1) {
-      walks += 1;
-      // Start well outside, offset by a fraction of a stride so the samples
-      // land at every phase of the frame clock relative to the facade.
-      resetOutside(11 + (phase / PHASES) * step);
-      let firedOnFrame = -1;
-      let crossedOnFrame = -1;
-      for (let frame = 0; frame < 200 && firedOnFrame < 0; frame += 1) {
-        stride(step, -1);
-        const nowInside = spaceAt(walker.position.x, walker.position.z) === LOBBY.space;
-        if (crossedOnFrame < 0 && (nowInside || alongOf(walker.position) < TOWER_FACADE_ALONG)) {
-          crossedOnFrame = frame;
+  let missed = 0;
+  for (const portal of portals) {
+    for (const step of strides) {
+      for (let phase = 0; phase < PHASES; phase += 1) {
+        walks += 1;
+        if (walkThrough(portal, step, (phase / PHASES) * step) < 0) {
+          missed += 1;
+          problems.push(
+            `walking through ${portal.what} in ${step.toFixed(2)} m strides (phase ` +
+              `${phase}/${PHASES}) never arrived — the doorway did not notice her going ` +
+              `through it (world/tapSpacing.ts bandCrossed, Hotel.checkDoorways)`,
+          );
         }
-        if (nowInside) firedOnFrame = frame;
-      }
-      if (firedOnFrame < 0) {
-        neverFired += 1;
-        problems.push(
-          `walking into the hotel's front door in ${step.toFixed(2)} m strides (phase ` +
-            `${phase}/${PHASES}) never entered the lobby at all — she ended up at ` +
-            `${alongOf(walker.position).toFixed(2)} m along the door's axis, still in the park`,
-        );
-      } else if (firedOnFrame !== crossedOnFrame) {
-        missedTheFrame += 1;
-        problems.push(
-          `walking into the hotel's front door in ${step.toFixed(2)} m strides (phase ` +
-            `${phase}/${PHASES}) crossed the facade on frame ${crossedOnFrame} but only entered ` +
-            `on frame ${firedOnFrame} — the door does not fire on the frame she walks through it`,
-        );
       }
     }
   }
 
-  // …and walking *past* the facade, parallel to it, must not fire. Eight
-  // passes at 1 m spacings out from the shell, both ways, at a full stride:
-  // a swept test that fired on these would open the hotel every time she
-  // walked round it.
+  // …and walking *past* the tower's facade, parallel to it, must not fire.
+  // Eight passes at 1 m spacings out from the shell, both ways, at a full
+  // stride: a swept test that fired on these would open the hotel every time
+  // she walked round the outside of it.
   let falseEntries = 0;
   for (let out = 1; out <= 8; out += 1) {
     for (const direction of [1, -1]) {
       const from = TOWER_FACADE_ALONG + out;
-      leaveLobby();
+      standInPark();
+      // Start 14 m off to one side and walk *across* the doorway's axis, so
+      // every pass genuinely goes past the front of the building.
       walker.teleportTo(
-        plot.x + alongX * from - alongZ * 14 * direction,
+        plot.x + alongX * from + alongZ * 14 * direction,
         0,
-        plot.z + alongZ * from + alongX * 14 * direction,
+        plot.z + alongZ * from - alongX * 14 * direction,
       );
-      for (let frame = 0; frame < 24; frame += 1) {
-        hotel.update({ dt: MAX_FRAME_DELTA, elapsed: frame / 12 } as never);
-      }
-      for (let frame = 0; frame < 60; frame += 1) {
+      settle(24);
+      let entered = false;
+      for (let frame = 0; frame < 40 && !entered; frame += 1) {
         walker.previousPosition.copy(walker.position);
         collision.resolveMovement(
           walker.position,
@@ -1729,22 +1781,22 @@ for (const room of ROOMS) {
           MAX_FRAME_DELTA,
         );
         hotel.update({ dt: MAX_FRAME_DELTA, elapsed: frame / 12 } as never);
-        if (spaceAt(walker.position.x, walker.position.z) === LOBBY.space) {
-          falseEntries += 1;
-          problems.push(
-            `walking past the hotel facade ${out} m clear of it, parallel to the doors, entered ` +
-              `the lobby — the door fires on somebody who never went through it`,
-          );
-          break;
-        }
+        entered = spaceAt(walker.position.x, walker.position.z) === LOBBY.space;
+      }
+      if (entered) {
+        falseEntries += 1;
+        problems.push(
+          `walking past the hotel facade ${out} m clear of it, parallel to the doors, entered ` +
+            `the lobby — the door fires on somebody who never went through it`,
+        );
       }
     }
   }
 
   console.log(
-    `check:hotel — ${walks} walk-throughs of the tower door across four stride lengths: ` +
-      `${neverFired} never fired, ${missedTheFrame} fired late, ${falseEntries} false entries ` +
-      `from walking past.`,
+    `check:hotel — ${walks} walk-throughs of ${portals.length} portals across ` +
+      `${strides.length} stride lengths: ${missed} never arrived; ${falseEntries} false entries ` +
+      `from walking past the facade.`,
   );
 }
 
