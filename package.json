@@ -72,6 +72,7 @@
     "check:bus-journey": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-bus-journey.mts",
     "check:park-boot": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park-boot.mts",
     "check:arrival-completes": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-completes.mts",
+    "check:arrival-starts": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-arrival-starts.mts",
     "check:frame-time": "node --experimental-transform-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-frame-time.mts"
   },
   "dependencies": {
