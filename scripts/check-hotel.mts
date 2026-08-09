@@ -166,12 +166,14 @@ function deflection(worldX: number, worldZ: number): number {
 collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 
 const mustBeSolid: readonly [string, number, number][] = [
-  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ - 1],
-  // Reception sits on the entrance axis now (the 7 Aug relayout): straight up
-  // the runner from the doors, against the gallery face. Probe 13 separately
-  // asserts the interact zone is anchored on this same footprint.
-  ['the reception desk', LOBBY.originX + 0, LOBBY.originZ - 5.9],
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6],
+  // On the axis south of the arch (the imperial relayout) — the walk-through
+  // runs entrance → statue medallion → under the arch, and you go round it.
+  ['the lobby RiPika statue', LOBBY.originX + 0, LOBBY.originZ + 4.6],
+  // Reception moved off the axis into the east bay (the axis runs through
+  // the arch now). Probe 13 separately asserts the interact zone is anchored
+  // on this same footprint.
+  ['the reception desk', LOBBY.originX + 8.6, LOBBY.originZ - 5.2],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8],
   ['a lobby crystal column', LOBBY.originX - 11.9, LOBBY.originZ - 6.6],
   ['a Floor 12 hedge', GARDEN_FLOOR.originX - 6.4, GARDEN_FLOOR.originZ - 6.4],
   ['a Floor 12 bench', GARDEN_FLOOR.originX + 2.2, GARDEN_FLOOR.originZ + 5.2],
@@ -232,7 +234,7 @@ function deflectionAt(worldX: number, worldY: number, worldZ: number): number {
 }
 
 const mustBeMountable: readonly [string, number, number, number][] = [
-  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 3.6, SOFA_SEAT_TOP],
+  ['a lobby sofa', LOBBY.originX + 5.9, LOBBY.originZ + 4.8, SOFA_SEAT_TOP],
   ['the buffet counter', BREAKFAST.originX + 1.5, BREAKFAST.originZ - 7.4, BUFFET_TOP],
   ['a breakfast table', BREAKFAST.originX - 6.4, BREAKFAST.originZ + 6.2, 0.74],
   ['a Floor 50 pet plinth', CORRIDOR.originX - 7.5, CORRIDOR.originZ - CORRIDOR.halfZ + 1.4, 0.4],
@@ -354,86 +356,192 @@ HOTEL_FLOORS.forEach((floor, index) => {
   }
 });
 
-// ------------------------------------------- 6. the mezzanine holds her up
+// ------------------------------------------- 6. the composition holds her up
 //
-// Two facts, and they are the two the whole design rests on (see
-// `layout.ts`'s `Mezzanine`): the deck is somewhere you can stand, and the
-// mass under it is solid from the lobby floor — because the balustrade on top
-// is deliberately *not* a collider, and the front face is the only thing
-// standing between a child and a three-metre drop.
+// The imperial rework's facts, each measured on the built lobby:
+//  * the gallery deck and the landing are standable at their own heights;
+//  * every flight climbs, tread by tread, and *ends on the level it serves* —
+//    reaching the right height in mid-air beside the landing is the exact bug
+//    this file caught on the first run after the original stair landed;
+//  * the arch under the landing is genuinely open: a walker crosses the whole
+//    room on the axis, entrance to north wall, and is never pushed;
+//  * the banded balustrades hold **both ways**: a deck-height body at the rail
+//    is deflected, a ground body at the same XZ is not (Collision.ts
+//    `baseHeight` — the mechanism the whole overhang design rests on).
+//
+// Proven red both ways on 9 Aug 2026: removing the banded rails greens the
+// walk-through and lets the deck body sail off the edge (held-at-rail probe
+// fails); registering them height-agnostic (base −Infinity) holds the deck
+// body and *fails the axis march*, which stalls at the arch mouth at
+// z ≈ −2.0 local.
 const mezzanine = LOBBY.mezzanine;
 if (!mezzanine) {
-  problems.push('the lobby has no mezzanine — Jim asked for a double-height lobby with one');
+  problems.push('the lobby has no mezzanine — Jim asked for the imperial composition');
 } else {
+  const { landing, straight } = mezzanine;
   const deckX = LOBBY.originX + (mezzanine.minX + mezzanine.maxX) / 2;
   const deckZ = LOBBY.originZ + (mezzanine.minZ + mezzanine.maxZ) / 2;
   const top = world.building.surfaces.sample(deckX, deckZ, mezzanine.height);
   if (Math.abs(top - mezzanine.height) > 0.01) {
     problems.push(
-      `the mezzanine deck is not standable: sample says ${top.toFixed(2)} m where the deck is ` +
+      `the gallery deck is not standable: sample says ${top.toFixed(2)} m where the deck is ` +
         `${mezzanine.height.toFixed(2)} m`,
     );
   }
-  // Its front, probed from the lobby side.
-  if (deflection(deckX, LOBBY.originZ + mezzanine.maxZ + 0.5) < 0.1) {
+  // On the landing's open stage — between the front balustrade and the
+  // straight flight's bottom riser. The landing's *centre* is under the
+  // flight, whose first ramp slice answers instead (measured: 3.92).
+  const landingX = LOBBY.originX + (landing.minX + landing.maxX) / 2;
+  const landingZ = LOBBY.originZ + (landing.maxZ + straight.frontZ) / 2;
+  const landingTop = world.building.surfaces.sample(landingX, landingZ, landing.height);
+  if (Math.abs(landingTop - landing.height) > 0.01) {
     problems.push(
-      'the mezzanine has no solid front — a child walks under the gallery, and the balustrade ' +
-        'above her is deliberately not a collider, so nothing is holding anyone up',
+      `the landing is not standable: sample says ${landingTop.toFixed(2)} m where it is ` +
+        `${landing.height.toFixed(2)} m`,
     );
   }
 
-  // The sweeping stair: every tread standable, and each step within one stride
-  // of the last. A stair whose rise exceeds `BUILDING_STEP_UP` is a stair that
-  // looks perfect and cannot be climbed.
-  const { stair } = mezzanine;
-  let previous = 0;
-  for (let i = 0; i < stair.treads; i += 1) {
-    const angle = stair.fromAngle + ((stair.toAngle - stair.fromAngle) * (i + 0.5)) / stair.treads;
+  // Each curve: every tread standable, each step within one stride of the
+  // last, and the top tread ON the landing.
+  for (const stair of mezzanine.stairs) {
+    const hand = stair.toAngle > stair.fromAngle ? 'right' : 'left';
     const radius = (stair.innerRadius + stair.outerRadius) / 2;
-    const x = LOBBY.originX + stair.centreX - Math.sin(angle) * radius;
-    const z = LOBBY.originZ + stair.centreZ + Math.cos(angle) * radius;
-    const height = world.building.surfaces.sample(x, z, previous);
-    if (height <= previous - 0.01) {
-      problems.push(
-        `sweeping-stair tread ${i} does not rise: sample says ${height.toFixed(2)} m, standing on ` +
-          `${previous.toFixed(2)} m — the flight cannot be climbed past here`,
-      );
-      break;
+    let previous = 0;
+    for (let i = 0; i < stair.treads; i += 1) {
+      const angle =
+        stair.fromAngle + ((stair.toAngle - stair.fromAngle) * (i + 0.5)) / stair.treads;
+      const x = LOBBY.originX + stair.centreX - Math.sin(angle) * radius;
+      const z = LOBBY.originZ + stair.centreZ + Math.cos(angle) * radius;
+      const height = world.building.surfaces.sample(x, z, previous);
+      if (height <= previous - 0.01) {
+        problems.push(
+          `the ${hand} curve's tread ${i} does not rise: sample says ${height.toFixed(2)} m, ` +
+            `standing on ${previous.toFixed(2)} m — the flight cannot be climbed past here`,
+        );
+        break;
+      }
+      previous = height;
     }
-    previous = height;
-  }
-  if (Math.abs(previous - mezzanine.height) > 0.01) {
-    problems.push(
-      `the sweeping stair tops out at ${previous.toFixed(2)} m but the deck is at ` +
-        `${mezzanine.height.toFixed(2)} m — the flight does not climb the full height`,
+    // The last tread's *mid* sits inside its own ramp slices (a quarter or
+    // half riser shy of the top — that is the slices working), so the "tops
+    // out" claim is made where the flight actually delivers her: one stride
+    // past the top tread, on the landing, along the climb direction — the
+    // same point the nav connector exits at. This is also the mid-air check:
+    // a curve swept about the wrong centre climbs perfectly and its exit
+    // point simply is not the landing.
+    const sign = Math.sign(stair.toAngle - stair.fromAngle);
+    const exitX = stair.centreX - Math.sin(stair.toAngle) * radius - Math.cos(stair.toAngle) * 1.2 * sign;
+    const exitZ = stair.centreZ + Math.cos(stair.toAngle) * radius - Math.sin(stair.toAngle) * 1.2 * sign;
+    const delivered = world.building.surfaces.sample(
+      LOBBY.originX + exitX,
+      LOBBY.originZ + exitZ,
+      previous,
     );
+    if (Math.abs(delivered - landing.height) > 0.01) {
+      problems.push(
+        `the ${hand} curve delivers onto ${delivered.toFixed(2)} m at (${exitX.toFixed(1)}, ` +
+          `${exitZ.toFixed(1)}), but the landing is at ${landing.height.toFixed(2)} m — the ` +
+          `flight climbs and stops in mid-air beside the landing`,
+      );
+    }
   }
 
-  // **…and the top tread has to be ON the gallery.**
-  //
-  // Reaching 3.2 m is not the same claim, and asserting only that is a green
-  // that cannot fail: a stair swept about the wrong centre still climbs its
-  // full height perfectly and simply tops out in mid-air, one step from a deck
-  // it never touches. That is the exact bug this file caught on the first run
-  // after the stair landed (the arc's centre had never been updated from a
-  // first draft), and re-mutating the centre afterwards showed the height
-  // check sailing through it. Measured on the built numbers, so it is a claim
-  // about where the flight actually ends.
-  const topAngle = stair.toAngle - (stair.toAngle - stair.fromAngle) / (stair.treads * 2);
-  const topRadius = (stair.innerRadius + stair.outerRadius) / 2;
-  const topX = stair.centreX - Math.sin(topAngle) * topRadius;
-  const topZ = stair.centreZ + Math.cos(topAngle) * topRadius;
-  const onDeck =
-    topX >= mezzanine.minX &&
-    topX <= mezzanine.maxX &&
-    topZ >= mezzanine.minZ &&
-    topZ <= mezzanine.maxZ;
-  if (!onDeck) {
-    problems.push(
-      `the sweeping stair's top tread is at (${topX.toFixed(1)}, ${topZ.toFixed(1)}), outside the ` +
-        `gallery's (${mezzanine.minX}…${mezzanine.maxX}, ${mezzanine.minZ}…${mezzanine.maxZ}) — ` +
-        `it climbs the full height and stops in mid-air beside the deck`,
+  // The straight flight: landing to gallery, same tread-by-tread claim.
+  {
+    let previous = landing.height;
+    const run = straight.frontZ - mezzanine.maxZ;
+    for (let i = 0; i < straight.treads; i += 1) {
+      const z = LOBBY.originZ + straight.frontZ - (run * (i + 0.5)) / straight.treads;
+      const x = LOBBY.originX + straight.centreX;
+      const height = world.building.surfaces.sample(x, z, previous);
+      if (height <= previous - 0.01) {
+        problems.push(
+          `the straight flight's tread ${i} does not rise: sample says ${height.toFixed(2)} m, ` +
+            `standing on ${previous.toFixed(2)} m`,
+        );
+        break;
+      }
+      previous = height;
+    }
+    // Same delivered-onto claim as the curves: one stride past the top edge,
+    // on the gallery deck.
+    const delivered = world.building.surfaces.sample(
+      LOBBY.originX + straight.centreX,
+      LOBBY.originZ + mezzanine.maxZ - 1.2,
+      previous,
     );
+    if (Math.abs(delivered - mezzanine.height) > 0.01) {
+      problems.push(
+        `the straight flight delivers onto ${delivered.toFixed(2)} m but the gallery is at ` +
+          `${mezzanine.height.toFixed(2)} m`,
+      );
+    }
+  }
+
+  // **The arch is a walk-through.** A ground body marched up the axis crosses
+  // the whole room — under the landing, through the colonnade, to the north
+  // wall — without being pushed off the line. This is the see-through Jim
+  // asked for, as a walk; a naive (height-agnostic) balustrade collider
+  // stalls it at the arch mouth, measured before the banded mechanism landed.
+  {
+    const probe = new Vector3(LOBBY.originX, 0, LOBBY.originZ + 2);
+    const steps = Math.ceil((2 - (-LOBBY.halfZ + 1.2)) / 0.05);
+    for (let step = 0; step < steps; step += 1) {
+      probe.z -= 0.05;
+      collision.resolve(probe, PLAYER_RADIUS);
+    }
+    const reachedZ = probe.z - LOBBY.originZ;
+    if (reachedZ > -LOBBY.halfZ + 2.0) {
+      problems.push(
+        `a walker on the axis is stopped at local z = ${reachedZ.toFixed(2)} — the arch under ` +
+          `the landing is not a walk-through (something invisible stands in it)`,
+      );
+    }
+    if (Math.abs(probe.x - LOBBY.originX) > 0.5) {
+      problems.push(
+        `a walker on the axis is pushed ${(probe.x - LOBBY.originX).toFixed(2)} m sideways — ` +
+          `the arch is not clear on the centre line`,
+      );
+    }
+  }
+
+  // **The banded rails hold both ways.** The same XZ, two heights: the
+  // landing's front rail must deflect a landing-height body and ignore a
+  // ground one; likewise the gallery's front rail. This is the collider the
+  // whole overhang design rests on, so it is proven in both directions.
+  const bandedRails: readonly [string, number, number, number][] = [
+    ['the landing front balustrade', LOBBY.originX, LOBBY.originZ + landing.maxZ, landing.height],
+    [
+      "the landing's west balustrade",
+      LOBBY.originX + landing.minX,
+      LOBBY.originZ + (landing.minZ + landing.maxZ) / 2,
+      landing.height,
+    ],
+    [
+      "the gallery's front balustrade",
+      LOBBY.originX + 6,
+      LOBBY.originZ + mezzanine.maxZ,
+      mezzanine.height,
+    ],
+  ];
+  for (const [what, x, z, level] of bandedRails) {
+    const held = new Vector3(x, level, z);
+    collision.resolve(held, PLAYER_RADIUS);
+    if (Math.hypot(held.x - x, held.z - z) < 0.05) {
+      problems.push(
+        `${what} does not hold a body at its own level (${level.toFixed(2)} m) — a child ` +
+          `walks off the edge`,
+      );
+    }
+    const free = new Vector3(x, 0, z);
+    collision.resolve(free, PLAYER_RADIUS);
+    const pushed = Math.hypot(free.x - x, free.z - z);
+    if (pushed > 0.05) {
+      problems.push(
+        `${what} pushes a GROUND body ${pushed.toFixed(2)} m at the same XZ — an invisible ` +
+          `wall stands under the overhang, which is the exact disease baseHeight exists to cure`,
+      );
+    }
   }
 }
 
@@ -562,32 +670,40 @@ if (keyedReach < 1) {
 {
   hotel.hotelRoot.updateMatrixWorld(true);
   const shell = hotel.hotelRoot.children.find((child) => child.name === `hotel:${LOBBY.space}`);
-  const deckBand: [number, number] = [2.5, 3.3];
-  const tops: { readonly what: string; readonly box: Box3 }[] = [];
-  shell?.traverse((object) => {
-    if (!(object instanceof Mesh)) return;
-    if (object.geometry.type !== 'BoxGeometry') return;
-    object.geometry.computeBoundingBox();
-    const bounds = object.geometry.boundingBox;
-    if (!bounds) return;
-    const box = bounds.clone().applyMatrix4(object.matrixWorld);
-    if (box.max.y < deckBand[0] || box.max.y > deckBand[1]) return;
-    tops.push({ what: object.name || object.parent?.name || 'a box', box });
-  });
-  for (let a = 0; a < tops.length; a += 1) {
-    for (let b = a + 1; b < tops.length; b += 1) {
-      const one = tops[a]!;
-      const two = tops[b]!;
-      if (Math.abs(one.box.max.y - two.box.max.y) > 5e-4) continue;
-      const overlapX =
-        Math.min(one.box.max.x, two.box.max.x) - Math.max(one.box.min.x, two.box.min.x);
-      const overlapZ =
-        Math.min(one.box.max.z, two.box.max.z) - Math.max(one.box.min.z, two.box.min.z);
-      if (overlapX < 0.03 || overlapZ < 0.03) continue;
-      problems.push(
-        `mezzanine z-fight: two slab-like faces both top at y=${one.box.max.y.toFixed(3)} m and ` +
-          `overlap ${(overlapX * overlapZ).toFixed(2)} m^2 in plan — the deck plane needs one owner`,
-      );
+  // Two walking planes now — the landing and the gallery deck — so two bands,
+  // each around its own slab top.
+  const landingY = LOBBY.mezzanine?.landing.height ?? 0;
+  const deckY = LOBBY.mezzanine?.height ?? 0;
+  for (const deckBand of [
+    [landingY - 0.35, landingY + 0.1],
+    [deckY - 0.35, deckY + 0.1],
+  ] as const) {
+    const tops: { readonly what: string; readonly box: Box3 }[] = [];
+    shell?.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (object.geometry.type !== 'BoxGeometry') return;
+      object.geometry.computeBoundingBox();
+      const bounds = object.geometry.boundingBox;
+      if (!bounds) return;
+      const box = bounds.clone().applyMatrix4(object.matrixWorld);
+      if (box.max.y < deckBand[0] || box.max.y > deckBand[1]) return;
+      tops.push({ what: object.name || object.parent?.name || 'a box', box });
+    });
+    for (let a = 0; a < tops.length; a += 1) {
+      for (let b = a + 1; b < tops.length; b += 1) {
+        const one = tops[a]!;
+        const two = tops[b]!;
+        if (Math.abs(one.box.max.y - two.box.max.y) > 5e-4) continue;
+        const overlapX =
+          Math.min(one.box.max.x, two.box.max.x) - Math.max(one.box.min.x, two.box.min.x);
+        const overlapZ =
+          Math.min(one.box.max.z, two.box.max.z) - Math.max(one.box.min.z, two.box.min.z);
+        if (overlapX < 0.03 || overlapZ < 0.03) continue;
+        problems.push(
+          `mezzanine z-fight: two slab-like faces both top at y=${one.box.max.y.toFixed(3)} m and ` +
+            `overlap ${(overlapX * overlapZ).toFixed(2)} m^2 in plan — the deck plane needs one owner`,
+        );
+      }
     }
   }
 }
@@ -753,16 +869,26 @@ if (fallenPlayer.position.y < 0) {
           `floats somewhere else`,
       );
     }
-    const stair = LOBBY.mezzanine?.stair;
-    if (stair) {
-      const toStair = Math.hypot(
-        receptionZone.x - (LOBBY.originX + stair.centreX),
-        receptionZone.z - (LOBBY.originZ + stair.centreZ),
-      );
-      if (toStair > stair.innerRadius - 0.8 && toStair < stair.outerRadius + 0.8) {
+    // "Not on a staircase" is radial band AND angular sweep now: the desk in
+    // the east bay is radially inside the right arc's band but 90°+ outside
+    // its quarter-turn, which is open floor. The radial test alone would
+    // false-alarm on every legal spot east of the composition.
+    for (const stair of LOBBY.mezzanine?.stairs ?? []) {
+      const dx = receptionZone.x - (LOBBY.originX + stair.centreX);
+      const dz = receptionZone.z - (LOBBY.originZ + stair.centreZ);
+      const toStair = Math.hypot(dx, dz);
+      const angle = Math.atan2(-dx, dz);
+      const lo = Math.min(stair.fromAngle, stair.toAngle) - 0.35;
+      const hi = Math.max(stair.fromAngle, stair.toAngle) + 0.35;
+      if (
+        toStair > stair.innerRadius - 0.8 &&
+        toStair < stair.outerRadius + 0.8 &&
+        angle >= lo &&
+        angle <= hi
+      ) {
         problems.push(
-          `the reception zone's anchor is ${toStair.toFixed(1)} m from the stair's centre — on ` +
-            `the staircase, which is QA's "get a key near the staircase" bug exactly`,
+          `the reception zone's anchor is ${toStair.toFixed(1)} m from a curve's centre, inside ` +
+            `its sweep — on the staircase, which is QA's "get a key near the staircase" bug exactly`,
         );
       }
     }
@@ -789,24 +915,31 @@ if (fallenPlayer.position.y < 0) {
   }
 }
 
-// --------------------------------- 14. the stair climbs at walking pace too
+// --------------------------------- 14. the stairs climb at walking pace too
 //
 // Probe 6 asks each tread "are you standable?" from the tread below — an
 // instant query, which is exactly how it stayed green while no real player
 // could climb the thing (QA, 8 Aug 2026). A real player's y *damps* onto the
 // ground (`Player`'s 0.04 s time constant), so at speed her sampled height
 // lags the surface, and once the lag eats the step-up ceiling the next tread
-// is never offered: the floor snaps to the slab and she walks under the
-// flight into the gallery's hollow. This probe walks the way she walks — a
-// damped y, sprint pace — along the mid-radius spiral, and straight west
-// across the fan on QA's exact trap line. The stair's quarter-riser slices
-// are what make both end well; registering one flat wedge per tread fails
-// this with the spiral march finishing on the slab.
+// is never offered. This probe walks the way she walks — a damped y, sprint
+// pace — up all **three** flights of the imperial composition: both curves'
+// mid-radius spirals from the floor to the landing, and the straight flight
+// from the landing to the gallery. The quarter-riser slices are what make
+// every march end well; registering one flat wedge per tread fails with the
+// march finishing on the floor it started from.
+//
+// The damp-lag rule is then asserted on the surface itself: no sprint-pace
+// stride up any flight may present a full riser at once (the slices present
+// a quarter each; a flat wedge presents 0.32–0.64, which the ground damp was
+// measured unable to climb). The old "push west across the fan" trap line is
+// deliberately gone: it proved a walker could not end up under the flight
+// inside the gallery's solid mass's hollow, and the colonnade design has no
+// hollow — under the flights is honest walkable floor now, guarded by probe
+// 6's walk-through and banded-rail assertions instead.
 {
   const mez = LOBBY.mezzanine;
   if (mez) {
-    const { stair } = mez;
-    const midR = (stair.innerRadius + stair.outerRadius) / 2;
     const surfaces = world.building.surfaces;
     const dt = 1 / 60;
     // Player's own ground damp: `damp(y, groundY, 0.04, dt)` — the real
@@ -816,8 +949,12 @@ if (fallenPlayer.position.y < 0) {
     const GROUND_DAMP_HALF_LIFE = 0.04;
     const sprint = PLAYER_MAX_SPEED * PLAYER_SPRINT_MULTIPLIER;
 
-    const dampWalk = (points: (s: number) => [number, number], metres: number): number => {
-      let y = 0;
+    const dampWalk = (
+      points: (s: number) => [number, number],
+      metres: number,
+      startY: number,
+    ): number => {
+      let y = startY;
       const steps = Math.ceil(metres / (sprint * dt));
       for (let s = 0; s <= steps; s += 1) {
         const [x, z] = points(s / steps);
@@ -828,80 +965,112 @@ if (fallenPlayer.position.y < 0) {
       return y;
     };
 
-    const arcLength = (stair.toAngle - stair.fromAngle) * midR;
-    const spiralEnd = dampWalk((t) => {
-      const a = stair.fromAngle + (stair.toAngle - stair.fromAngle) * t;
-      return [
-        LOBBY.originX + stair.centreX - Math.sin(a) * midR,
-        LOBBY.originZ + stair.centreZ + Math.cos(a) * midR,
-      ];
-    }, arcLength);
-    if (Math.abs(spiralEnd - mez.height) > 0.45) {
-      problems.push(
-        `sprinting up the stair's own spiral ends at y=${spiralEnd.toFixed(2)} m, not the deck's ` +
-          `${mez.height.toFixed(2)} m — the flight defeats the ground damp and cannot be climbed`,
+    for (const stair of mez.stairs) {
+      const hand = stair.toAngle > stair.fromAngle ? 'right' : 'left';
+      const midR = (stair.innerRadius + stair.outerRadius) / 2;
+      const arcLength = Math.abs(stair.toAngle - stair.fromAngle) * midR;
+      const spiralEnd = dampWalk(
+        (t) => {
+          const a = stair.fromAngle + (stair.toAngle - stair.fromAngle) * t;
+          return [
+            LOBBY.originX + stair.centreX - Math.sin(a) * midR,
+            LOBBY.originZ + stair.centreZ + Math.cos(a) * midR,
+          ];
+        },
+        arcLength,
+        0,
       );
-    }
+      if (Math.abs(spiralEnd - mez.landing.height) > 0.45) {
+        problems.push(
+          `sprinting up the ${hand} curve's spiral ends at y=${spiralEnd.toFixed(2)} m, not the ` +
+            `landing's ${mez.landing.height.toFixed(2)} m — the flight defeats the ground damp ` +
+            `and cannot be climbed`,
+        );
+      }
 
-    // The damp-lag rule, asserted on the surface itself. The march above is
-    // a smoke test — an idealised walker turns out to climb geometry a real
-    // one cannot (measured live, 8 Aug 2026: teleporting onto any tread
-    // stood her at its height while walking up never rose above 0.00), so
-    // the discriminating assertion is geometric: no sprint-pace stride up
-    // the flight may present a full riser at once. The slices present a
-    // quarter-riser each (measured 0.16 a stride here); the one flat wedge
-    // per tread this replaced presents 0.32–0.64 a stride, which the ground
-    // damp demonstrably cannot follow. The boundary sits between the two at
-    // the riser's own height minus a shim. The scan stops where it enters
-    // the deck rectangle: the deck's edge is a legitimate step *onto* the
-    // deck from the top treads, and probe 6 owns the deck.
-    let worstStepRise = 0;
-    const stride = sprint * dt;
-    for (const r of [stair.innerRadius + 0.2, midR, stair.outerRadius - 0.2]) {
-      let floorHere = 0;
-      for (let along = stride; along < arcLength; along += stride) {
-        const a = stair.fromAngle + along / r;
-        if (a > stair.toAngle) break;
-        const x = LOBBY.originX + stair.centreX - Math.sin(a) * r;
-        const z = LOBBY.originZ + stair.centreZ + Math.cos(a) * r;
-        const lx = x - LOBBY.originX;
-        const lz = z - LOBBY.originZ;
-        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) break;
-        const next = surfaces.sample(x, z, floorHere + 0.01);
-        worstStepRise = Math.max(worstStepRise, next - floorHere);
-        floorHere = next;
+      // The damp-lag rule on the surface itself, along three radii; the scan
+      // stops where it enters the landing (probe 6 owns the landing's edge).
+      let worstStepRise = 0;
+      const stride = sprint * dt;
+      const sweepSign = Math.sign(stair.toAngle - stair.fromAngle);
+      for (const r of [stair.innerRadius + 0.2, midR, stair.outerRadius - 0.2]) {
+        let floorHere = 0;
+        for (let along = stride; along < arcLength; along += stride) {
+          const a = stair.fromAngle + (sweepSign * along) / r;
+          if (Math.abs(a - stair.fromAngle) > Math.abs(stair.toAngle - stair.fromAngle)) break;
+          const x = LOBBY.originX + stair.centreX - Math.sin(a) * r;
+          const z = LOBBY.originZ + stair.centreZ + Math.cos(a) * r;
+          const lx = x - LOBBY.originX;
+          const lz = z - LOBBY.originZ;
+          if (
+            lx > mez.landing.minX &&
+            lx < mez.landing.maxX &&
+            lz > mez.landing.minZ &&
+            lz < mez.landing.maxZ
+          ) {
+            break;
+          }
+          const next = surfaces.sample(x, z, floorHere + 0.01);
+          worstStepRise = Math.max(worstStepRise, next - floorHere);
+          floorHere = next;
+        }
+      }
+      const riser = mez.landing.height / stair.treads;
+      if (worstStepRise > riser - 0.02) {
+        problems.push(
+          `one sprint-pace step up the ${hand} curve raises the floor ` +
+            `${worstStepRise.toFixed(2)} m — a whole riser (${riser.toFixed(2)} m) or more at ` +
+            `once, which is exactly the geometry the ground damp was measured unable to climb`,
+        );
       }
     }
-    const riser = mez.height / stair.treads;
-    const stepBudget = riser - 0.02;
-    if (worstStepRise > stepBudget) {
-      problems.push(
-        `one sprint-pace step up the stair raises the floor ${worstStepRise.toFixed(2)} m — ` +
-          `a whole riser (${riser.toFixed(2)} m) or more at once, which is exactly the ` +
-          `geometry the ground damp was measured unable to climb`,
-      );
-    }
 
-    // QA's trap line: pushing due west across the fan from the open floor,
-    // with the real collision world deflecting the body as it goes — the
-    // strings and balustrade are what turn "across the fan" into "up the
-    // fan", so a kinematic line without them walks through the outer string
-    // and proves nothing. Pre-fix this ends at y = 0 inside the gallery's
-    // hollow; post-fix the body is carried up the flight as it slides.
-    const trap = new Vector3(LOBBY.originX + 7.9, 0, LOBBY.originZ - 5.4);
-    let trapY = 0;
-    for (let s = 0; s < Math.ceil(6.0 / (sprint * dt)); s += 1) {
-      trap.x -= sprint * dt;
-      collision.resolve(trap, PLAYER_RADIUS, trapY, dt);
-      const floor = surfaces.sample(trap.x, trap.z, trapY);
-      trapY = damp(trapY, floor, GROUND_DAMP_HALF_LIFE, dt);
-      if (trapY - floor > 0.5) trapY = floor;
-    }
-    if (trapY < 0.9) {
-      problems.push(
-        `pushing west across the stair fan leaves a player at y=${trapY.toFixed(2)} m — ` +
-          `under the flight at ground level, on the way into the gallery's hollow`,
+    // The straight flight, from the landing: the same damped sprint, and the
+    // same stride rule along three lanes of its width.
+    {
+      const { straight } = mez;
+      const run = straight.frontZ - mez.maxZ;
+      const start = straight.frontZ + 1.0;
+      const total = start - (mez.maxZ - 1.0);
+      const flightEnd = dampWalk(
+        (t) => [LOBBY.originX + straight.centreX, LOBBY.originZ + start - total * t],
+        total,
+        mez.landing.height,
       );
+      if (Math.abs(flightEnd - mez.height) > 0.45) {
+        problems.push(
+          `sprinting up the straight flight ends at y=${flightEnd.toFixed(2)} m, not the ` +
+            `gallery's ${mez.height.toFixed(2)} m — the grand flight defeats the ground damp`,
+        );
+      }
+
+      let worstStepRise = 0;
+      const stride = sprint * dt;
+      for (const lane of [
+        straight.centreX - straight.walkWidth / 2 + 0.2,
+        straight.centreX,
+        straight.centreX + straight.walkWidth / 2 - 0.2,
+      ]) {
+        let floorHere = mez.landing.height;
+        for (let along = stride; along < run; along += stride) {
+          const z = straight.frontZ - along;
+          if (z < mez.maxZ) break;
+          const next = surfaces.sample(
+            LOBBY.originX + lane,
+            LOBBY.originZ + z,
+            floorHere + 0.01,
+          );
+          worstStepRise = Math.max(worstStepRise, next - floorHere);
+          floorHere = next;
+        }
+      }
+      const riser = straight.rise / straight.treads;
+      if (worstStepRise > riser - 0.02) {
+        problems.push(
+          `one sprint-pace step up the straight flight raises the floor ` +
+            `${worstStepRise.toFixed(2)} m — a whole riser (${riser.toFixed(2)} m) or more at once`,
+        );
+      }
     }
   }
 }

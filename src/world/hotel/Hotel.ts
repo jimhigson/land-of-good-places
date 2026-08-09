@@ -3978,7 +3978,10 @@ export class Hotel implements GameSystem {
     // reason to climb, and it is now two flights up instead of one.
     for (const side of [-1, 1] as const) {
       const nookX = side * 8.4;
-      const nook = roundRug(1.9, LOBBY.theme.accent, PALETTE.stonePinkLight);
+      // Radius fitted to the deck's own clear depth: the north wall's face is
+      // at −12.15, and a 1.9 m rug at this centre reached 0.15 m under it —
+      // found by probe 19 on the first build of this gallery.
+      const nook = roundRug(1.7, LOBBY.theme.accent, PALETTE.stonePinkLight);
       nook.position.set(nookX, height + 0.01, -10.4);
       shell.add(nook);
       for (const [x, colour] of [
