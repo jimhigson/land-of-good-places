@@ -9,7 +9,10 @@ import {
 } from './foliageFadeTuning';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
-import { FOLIAGE_GEOMETRY, type FoliageOccluder, type Scenery } from './Scenery';
+import { type FoliageOccluder, type Scenery } from './Scenery';
+// The geometry itself comes from the tree model both the park and the cat bus's
+// lane build from — sharing the object is what makes a stand-in pixel-identical.
+import { FOLIAGE_GEOMETRY } from './treeModel';
 
 /**
  * Fades out any tree standing between the camera and the player.

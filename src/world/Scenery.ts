@@ -1,17 +1,12 @@
 import {
   BoxGeometry,
   BufferGeometry,
-  Color,
-  ConeGeometry,
   CylinderGeometry,
   Group,
   IcosahedronGeometry,
   InstancedMesh,
-  Material,
   Matrix4,
   Mesh,
-  MeshToonMaterial,
-  Quaternion,
   SphereGeometry,
   Vector3,
 } from 'three';
@@ -49,6 +44,22 @@ import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
+// **The trees are not this file's to define.** See `world/treeModel.ts`: the
+// lane the cat bus drives up plants the same trees from the same rolls, so
+// they live in a module neither scene owns and both ask.
+import {
+  CANOPY_GREENS,
+  FOLIAGE_GEOMETRY,
+  TREE_REACH,
+  TREE_TOP,
+  fileTreeParts,
+  foliageMaterial,
+  makeInstanced,
+  pickTreeKind,
+  rollTree,
+  type InstanceItem,
+  type TreePart,
+} from './treeModel';
 
 /**
  * Everything scattered across the lawn: lollipop trees, bushes, flowers, the
@@ -60,8 +71,6 @@ import type { CollisionWorld } from './Collision';
  *  2. Placement is seeded (see `Rng`), so the park is laid out identically on
  *     every reload — no wandering trees between playtests.
  */
-
-type TreeKind = 'lollipop' | 'stack' | 'pine' | 'blossom';
 
 /** Which palette a run is built from — and how thick it therefore is. */
 type WallKind = 'wood' | 'stone';
@@ -126,33 +135,6 @@ const WALL_RUN_GAP = 2;
  */
 const TREE_WALL_GAP = PLAYER_RADIUS * 2 + 0.2;
 
-interface InstanceItem {
-  readonly position: Vector3;
-  readonly scale: Vector3;
-  readonly rotationY: number;
-  readonly colour: number;
-  /** Optional per-instance brightness multiplier, 1 = unchanged. */
-  readonly shade: number;
-}
-
-/**
- * The three unit shapes every tree is built from — a `1`-scaled cylinder,
- * icosahedron and cone, stretched per-instance by the matrices in `trunks` /
- * `roundCanopies` / `coneCanopies` below.
- *
- * Hoisted to module scope (rather than local to `buildFoliage`) so that
- * `world/FoliageFade.ts` can build a stand-in `Mesh` for a fading tree out of
- * the exact same geometry the instanced original uses — sharing one
- * `BufferGeometry` across many meshes (instanced or not) is ordinary
- * three.js, and it is what guarantees the stand-in is pixel-identical rather
- * than a hand-tuned approximation.
- */
-export const FOLIAGE_GEOMETRY = {
-  trunk: new CylinderGeometry(0.19, 0.3, 1, 8),
-  round: new IcosahedronGeometry(1, 2),
-  cone: new ConeGeometry(1, 1, 10),
-};
-
 /**
  * A lollipop tree with a generous enough canopy to climb (see
  * `world/TreeClimbing.ts`). Read-only geometry facts only — Scenery has no
@@ -172,10 +154,12 @@ export interface ClimbableTreeSeed {
  * One trunk, canopy blob or cone layer belonging to a {@link FoliageOccluder}
  * — everything a stand-in needs to look exactly like the instanced original
  * it is briefly replacing. See `world/FoliageFade.ts`.
+ *
+ * The park's name for `treeModel.ts`'s {@link TreePart}: same thing, and the
+ * alias exists only so the fade machinery keeps reading in the vocabulary of
+ * the file it was written against.
  */
-export interface FoliagePart extends InstanceItem {
-  readonly kind: 'trunk' | 'round' | 'cone';
-}
+export type FoliagePart = TreePart;
 
 /**
  * A whole tree, as far as `world/FoliageFade.ts` is concerned: enough to test
@@ -340,62 +324,6 @@ export class Scenery {
 const CLIMBABLE_MIN_CANOPY_RADIUS = 2 * SKULL_RADIUS;
 
 /**
- * How far each kind of tree can possibly reach sideways from its trunk.
- *
- * These are the **ceilings of the rolls below**, not tuned spacing numbers, and
- * they have to be read off the rolls whenever those change:
- *
- * - `pine` — cone widths roll `rng.range(1.7, 2.3)`, narrowing with height, all
- *   centred on the trunk. Ceiling 2.3.
- * - `stack` — canopy radii roll `rng.range(1.6, 2.05)`, narrowing per layer,
- *   centred. Ceiling 2.05.
- * - `lollipop` / `blossom` — a main ball of up to 2.5, plus the optional small
- *   ball tucked beside it at `radius * 0.7` carrying its own `radius * 0.72`.
- *   Ceiling `2.5 * (0.7 + 0.72)` = 3.55, and it is the side ball that makes
- *   these the widest thing on the lawn.
- *
- * Reserved before a tree is rolled in detail, so a candidate is refused for
- * the space it *could* take rather than the space it happens to take. That
- * over-reserves a little; two canopies growing through each other is the thing
- * being prevented, and 53 pairs of them were doing exactly that.
- */
-const TREE_REACH: Record<TreeKind, number> = {
-  pine: 2.3,
-  stack: 2.05,
-  lollipop: 3.55,
-  blossom: 3.55,
-};
-
-/**
- * How high each kind of tree can reach above its own ground, in metres.
- *
- * {@link TREE_REACH}'s vertical twin, reserved the same way and for the same
- * reason: a candidate is refused for the height it *could* take rather than the
- * height it happens to roll, because {@link clearOfCruiser} is asked before the
- * tree is rolled in detail. Ceilings, from the same literals the scatter below
- * draws from — trunk `rng.range(2.3, 3.7)`, so 3.7 of trunk in every case, plus:
- *
- * - `pine` — the top cone sits at most `1.5 * 2/3 - 0.6` above the trunk and is
- *   at most `2.2` tall on a `ConeGeometry(1, 1)`, so half of it clears the
- *   centre. Ceiling 3.7 + 1.36, rounded to 5.2.
- * - `stack` — the third blob rides `2 * radius * 0.92` up and adds its own
- *   radius on an `IcosahedronGeometry(1, …)`, which spans ±1. Ceiling 6.6.
- * - `lollipop` / `blossom` — a ball of up to 2.5 centred `radius * 0.42` above
- *   the trunk and standing `radius * 1.0` above that: `2.5 * 1.42` = 3.55, so
- *   7.25. These are the tallest thing on the lawn as well as the widest, and
- *   they are the reason this is a table rather than one number.
- *
- * The measured tallest canopy in the canonical park is 6.68 m, which sits
- * between the `stack` and `lollipop` ceilings exactly as it should.
- */
-const TREE_TOP: Record<TreeKind, number> = {
-  pine: 5.2,
-  stack: 6.6,
-  lollipop: 7.25,
-  blossom: 7.25,
-};
-
-/**
  * A bush clump's reach and height ceilings.
  *
  * Blobs roll `rng.range(0.7, 1.3)` and are nudged up to `0.85` off centre, so
@@ -454,8 +382,6 @@ function buildFoliage(collision: CollisionWorld): {
   // `InstancedMesh`es below exist — kept as plain indices until then because
   // the meshes don't exist yet while this loop is still filling the arrays.
   const occluderRefs: { kind: 'trunk' | 'round' | 'cone'; index: number }[][] = [];
-
-  const canopyGreens = [PALETTE.leafMid, PALETTE.leafLight, PALETTE.leafDeep, PALETTE.leafBlue];
 
   // --- trees ---------------------------------------------------------------
   let attempts = 0;
@@ -550,127 +476,27 @@ function buildFoliage(collision: CollisionWorld): {
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
     if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) continue;
     planted.push({ x, z, reach });
-    const height = rng.range(2.3, 3.7);
     const y = terrainHeight(x, z);
-    const rotationY = rng.range(0, TAU);
-    const lean = rng.range(0.92, 1.1);
+
+    // **The tree itself is not built here.** `world/treeModel.ts` owns what a
+    // tree of each kind is, down to the order it draws its randoms in, and the
+    // cat bus's lane plants the very same ones — so a new kind, or a wider
+    // canopy, reaches both scenes at once instead of only this one.
+    const tree = rollTree(rng, kind, x, y, z);
+    const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
     // `world/FoliageFade.ts`): every part that makes it up, in world space,
     // plus a rough bounding sphere (the widest blob's centre and radius) —
     // good enough for a cheap "does the sightline pass near here" test
-    // without needing the real silhouette.
-    const refs: { kind: 'trunk' | 'round' | 'cone'; index: number }[] = [];
-    const parts: FoliagePart[] = [];
-    let wideRadius = 0;
-    let wideCentreY = y + height;
-    // The highest *ball* on this tree, and how big it is — what decides whether
-    // a child can climb it. Tracked here, across all three canopy branches,
-    // rather than asked inside one of them: see `climbableTrees` below.
-    let topBallTopY = -Infinity;
-    let topBallRadius = 0;
-    const noteBall = (centreY: number, radius: number, halfHeight: number): void => {
-      const top = centreY + halfHeight;
-      if (top > topBallTopY) {
-        topBallTopY = top;
-        topBallRadius = radius;
-      }
-    };
-
-    const trunkColour = rng.chance(0.4) ? PALETTE.barkDark : PALETTE.bark;
-    const trunkShade = rng.range(0.92, 1.08);
-    const trunkItem: InstanceItem = {
-      position: new Vector3(x, y + height / 2, z),
-      scale: new Vector3(lean, height, lean),
-      rotationY,
-      colour: trunkColour,
-      shade: trunkShade,
-    };
-    refs.push({ kind: 'trunk', index: trunks.length });
-    parts.push({ ...trunkItem, kind: 'trunk' });
-    trunks.push(trunkItem);
-
-    const canopyBase = y + height;
-    if (kind === 'pine') {
-      const layers = rng.int(2, 3);
-      for (let i = 0; i < layers; i += 1) {
-        const t = i / layers;
-        const width = rng.range(1.7, 2.3) * (1 - t * 0.42);
-        const coneItem: InstanceItem = {
-          position: new Vector3(x, canopyBase - 0.6 + t * 1.5, z),
-          scale: new Vector3(width, rng.range(1.6, 2.2) * (1 - t * 0.2), width),
-          rotationY,
-          colour: rng.chance(0.5) ? PALETTE.leafDeep : PALETTE.leafMid,
-          shade: rng.range(0.94, 1.06),
-        };
-        refs.push({ kind: 'cone', index: coneCanopies.length });
-        parts.push({ ...coneItem, kind: 'cone' });
-        if (width > wideRadius) {
-          wideRadius = width;
-          wideCentreY = coneItem.position.y;
-        }
-        coneCanopies.push(coneItem);
-      }
-    } else if (kind === 'stack') {
-      const layers = 3;
-      for (let i = 0; i < layers; i += 1) {
-        const radius = rng.range(1.6, 2.05) * (1 - i * 0.22);
-        const canopyItem: InstanceItem = {
-          position: new Vector3(x, canopyBase - 0.3 + i * radius * 0.92, z),
-          scale: new Vector3(radius, radius * rng.range(0.8, 0.95), radius),
-          rotationY: rotationY + i,
-          colour: rng.pick(canopyGreens),
-          shade: rng.range(0.95, 1.08),
-        };
-        refs.push({ kind: 'round', index: roundCanopies.length });
-        parts.push({ ...canopyItem, kind: 'round' });
-        if (radius > wideRadius) {
-          wideRadius = radius;
-          wideCentreY = canopyItem.position.y;
-        }
-        noteBall(canopyItem.position.y, radius, canopyItem.scale.y);
-        roundCanopies.push(canopyItem);
-      }
-    } else {
-      // Lollipop and blossom: one big friendly ball, sometimes with a smaller
-      // one tucked beside it so the silhouette isn't a perfect circle.
-      const radius = rng.range(1.75, 2.5);
-      const colour = kind === 'blossom' ? PALETTE.blossomPink : rng.pick(canopyGreens);
-      const canopyVScale = rng.range(0.82, 1.0);
-      const canopyCentreY = canopyBase + radius * 0.42;
-      const canopyItem: InstanceItem = {
-        position: new Vector3(x, canopyCentreY, z),
-        scale: new Vector3(radius, radius * canopyVScale, radius),
-        rotationY,
-        colour,
-        shade: rng.range(0.95, 1.06),
-      };
-      refs.push({ kind: 'round', index: roundCanopies.length });
-      parts.push({ ...canopyItem, kind: 'round' });
-      wideRadius = radius;
-      wideCentreY = canopyCentreY;
-      noteBall(canopyCentreY, radius, canopyItem.scale.y);
-      roundCanopies.push(canopyItem);
-      if (rng.chance(0.55)) {
-        const small = radius * rng.range(0.5, 0.72);
-        const offset = rng.range(0, TAU);
-        const smallItem: InstanceItem = {
-          position: new Vector3(
-            x + Math.cos(offset) * radius * 0.7,
-            canopyBase + radius * rng.range(0.1, 0.5),
-            z + Math.sin(offset) * radius * 0.7,
-          ),
-          scale: new Vector3(small, small * 0.9, small),
-          rotationY: rotationY + 1.3,
-          colour: kind === 'blossom' ? PALETTE.blossomWhite : colour,
-          shade: rng.range(0.92, 1.04),
-        };
-        refs.push({ kind: 'round', index: roundCanopies.length });
-        parts.push({ ...smallItem, kind: 'round' });
-        noteBall(smallItem.position.y, small, smallItem.scale.y);
-        roundCanopies.push(smallItem);
-      }
-    }
+    // without needing the real silhouette. `fileTreeParts` files each part
+    // into the instance array for its geometry and hands back where it went.
+    const parts = tree.parts;
+    const refs = fileTreeParts(parts, {
+      trunk: trunks,
+      round: roundCanopies,
+      cone: coneCanopies,
+    });
 
     // **Climbable: any tree whose topmost canopy is a ball big enough to come
     // out of.** Asked here, of the finished tree, rather than inside one
@@ -707,11 +533,11 @@ function buildFoliage(collision: CollisionWorld): {
     // What remains required is that her *head* reads as coming out of foliage
     // rather than balancing on a pea, so the bar is set against the head —
     // see {@link CLIMBABLE_MIN_CANOPY_RADIUS}.
-    if (topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS) {
-      climbableTrees.push({ x, z, canopyTopY: topBallTopY, trunkRadius: 0.55 * lean });
+    if (tree.topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS) {
+      climbableTrees.push({ x, z, canopyTopY: tree.topBallTopY, trunkRadius: 0.55 * lean });
     }
 
-    occluders.push({ x, z, centreY: wideCentreY, radius: wideRadius, parts });
+    occluders.push({ x, z, centreY: tree.wideCentreY, radius: tree.wideRadius, parts });
     occluderRefs.push(refs);
 
     collision.addCircle(x, z, 0.55 * lean);
@@ -778,7 +604,7 @@ function buildFoliage(collision: CollisionWorld): {
 
     // Bushes come in clumps of two or three overlapping blobs.
     const blobs = rng.int(2, 3);
-    const colour = rng.pick(canopyGreens);
+    const colour = rng.pick(CANOPY_GREENS);
     const y = terrainHeight(x, z);
     for (let i = 0; i < blobs; i += 1) {
       const radius = rng.range(0.7, 1.3);
@@ -942,26 +768,6 @@ function buildTreeline(): Group {
   );
 
   return group;
-}
-
-function pickTreeKind(rng: Rng): TreeKind {
-  const roll = rng.unit();
-  if (roll < 0.44) return 'lollipop';
-  if (roll < 0.68) return 'stack';
-  if (roll < 0.86) return 'blossom';
-  return 'pine';
-}
-
-/**
- * Foliage is toon-shaded like every other toy object in the park.
- *
- * `roughness` is retained in the signature for call-site compatibility and is
- * deliberately ignored — under toon shading it is the ramp, not a roughness
- * value, that decides how leaves shade. (Dead parameter; delete it once nothing
- * passes one.)
- */
-function foliageMaterial(_roughness: number): MeshToonMaterial {
-  return toonMaterial(0xffffff);
 }
 
 /**
@@ -1736,35 +1542,6 @@ function pointToSegment(
 
 // ----------------------------------------------------------------- helpers
 
-function makeInstanced(
-  name: string,
-  geometry: BufferGeometry,
-  material: Material,
-  items: readonly InstanceItem[],
-  shadows: boolean,
-): InstancedMesh {
-  const mesh = new InstancedMesh(geometry, material, Math.max(1, items.length));
-  mesh.name = name;
-  mesh.castShadow = shadows;
-  mesh.receiveShadow = shadows;
-  mesh.count = items.length;
-
-  const matrix = new Matrix4();
-  const quaternion = new Quaternion();
-  const colour = new Color();
-
-  items.forEach((item, index) => {
-    quaternion.setFromAxisAngle(UP, item.rotationY);
-    matrix.compose(item.position, quaternion, item.scale);
-    mesh.setMatrixAt(index, matrix);
-    colour.setHex(item.colour).multiplyScalar(item.shade);
-    mesh.setColorAt(index, colour);
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  return mesh;
-}
-
 /** Multiplies a geometry's UVs so a tiling texture keeps a constant scale. */
 function scaleUvs(geometry: BufferGeometry, sx: number, sy: number): void {
   const uv = geometry.getAttribute('uv');
@@ -1775,4 +1552,3 @@ function scaleUvs(geometry: BufferGeometry, sx: number, sy: number): void {
   uv.needsUpdate = true;
 }
 
-const UP = new Vector3(0, 1, 0);
