@@ -78,9 +78,16 @@ why no sixth suite seed was added; proposed as follow-up in the PR.
    plan.ts, prewarm.ts, parkGeneration.ts, check-park-boot.mts (incl. the
    honest 3x-separation note), train/route.ts, coaster/route.ts.
 
-## Still open / follow-ups proposed
+## FINAL STATE — PR #258 raised, not merged (per policy)
 
-- test:procgen + npm run build runs (in progress at last checkpoint).
+- `npm run test:procgen`: **Test Files 11 passed (11), Tests 306 passed
+  (306)**, EXIT 0 — quoted off the screen.
+- `npm run build`: **EXIT 0** (whole gate chain + vite; log in scratchpad).
+- `check:solve-cost` green against re-derived budgets (in-build and alone).
+- PR: https://github.com/jimhigson/land-of-good-places/pull/258
+- Worktree left in place for review follow-ups.
+
+## Still open / follow-ups proposed
 - Rescued parks and the castle: a third rescue rung at 4x influence might
   buy crossings on 4/9/10/29/48/56; Decision 7's cost argument says only
   those seeds would pay. Not attempted (scope/time).
