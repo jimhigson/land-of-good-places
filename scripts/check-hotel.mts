@@ -85,6 +85,7 @@ import {
   THEME_FLOOR_CONTRAST_MIN,
   mezzanineGuardedEdges,
 } from '../src/world/hotel/layout.ts';
+import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt } from '../src/world/spaces.ts';
@@ -1680,6 +1681,74 @@ for (const room of ROOMS) {
       if ((roofGroup as { visible: boolean }).visible) {
         problems.push('the privacy roof stayed on over an empty bathroom');
       }
+    }
+  }
+}
+
+// ------------- 22. a room with windows can actually be looked out of
+//
+// **Built is not offered.** Probe 4 counts panes and probe 8 checks where the
+// camera would fly to; between them a room can have all its glass, a vantage
+// worked out for it, and no way for a child to ask. That is what happened to
+// the lobby: its west wall carries the "Look out" zone, the zone is created
+// every frame, its stand spot is clear floor — and `y` is the midpoint of the
+// glass, which for a grand room's 1.2–3.6 m glazing is 2.4 m. Every selection
+// path drops a zone more than `ZONE_HEIGHT_TOLERANCE` (2.2 m) from the
+// player's own `y`, so from the lobby floor at 0 the verb could never appear,
+// at any spot in the room. 19 sampled spots along the west wall offered
+// nothing but "🏨 Lobby".
+//
+// So this asks the question the child asks: **standing where the game says to
+// stand, on the floor she is on, does `pickInteractZone` hand back the
+// window?** It uses the game's own picker rather than re-deriving the rule,
+// so it cannot agree with a stale copy of the tolerance.
+{
+  for (const room of ROOMS) {
+    const lookable = (['north', 'west'] as const).filter((side) => {
+      const wall = room.windows?.[side];
+      return wall && wall.at.length > 0 && wall.lookZone !== false;
+    });
+    if (lookable.length === 0) continue;
+    fallenPlayer.position.set(room.originX, 0, room.originZ);
+    const zones = hotel.interactZones();
+    const windows = zones.filter((zone) => zone.id.startsWith(`hotel-window-${room.space}`));
+    if (windows.length === 0) {
+      problems.push(
+        `${room.space} declares ${lookable.length} lookable window wall(s) and offers no ` +
+          `"Look out" zone at all`,
+      );
+      continue;
+    }
+    // At least one of them must be selectable from where she actually ends
+    // up. The stand spot is resolved through collision first, because that is
+    // what the walk does to her: a spot nudged a couple of centimetres by a
+    // skirting is not a broken stand spot, and demanding a pixel-perfect one
+    // failed two rooms whose verb works perfectly well in the game.
+    const standing = (zone: (typeof windows)[number]): { x: number; z: number } => {
+      const probe = new Vector3(zone.standX ?? zone.x, 0, zone.standZ ?? zone.z);
+      collision.resolve(probe, PLAYER_RADIUS);
+      return { x: probe.x, z: probe.z };
+    };
+    const usable = windows.some((zone) => {
+      const at = standing(zone);
+      return pickInteractZone(zones, at.x, 0, at.z)?.id === zone.id;
+    });
+    if (!usable) {
+      const shown = windows
+        .map((zone) => {
+          const at = standing(zone);
+          const picked = pickInteractZone(zones, at.x, 0, at.z);
+          return (
+            `${zone.id} at y=${zone.y.toFixed(2)} m ` +
+            `(picker returns ${picked ? picked.id : 'nothing'})`
+          );
+        })
+        .join('; ');
+      problems.push(
+        `${room.space} has windows but no child standing on its floor can ever be offered ` +
+          `"Look outside!" — ${shown}. A zone further than ZONE_HEIGHT_TOLERANCE ` +
+          `(${ZONE_HEIGHT_TOLERANCE} m) from her own y is dropped by every selection path`,
+      );
     }
   }
 }

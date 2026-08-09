@@ -130,7 +130,7 @@ import type { ResidentSpec } from '../../entities/npc';
 import { placedEntry } from '../parkLayout';
 import { saveFlags } from '../../state/flags';
 import { gameStore } from '../../state';
-import { pressAction, type InteractZone } from '../interact';
+import { ZONE_HEIGHT_TOLERANCE, pressAction, type InteractZone } from '../interact';
 import {
   BREAKFAST,
   clearFloorAround,
@@ -240,6 +240,25 @@ const AUTO_DOOR_SECONDS = 1.2;
 
 /** How close a tap must land to a wall's "Look out" pane to select it. */
 const WINDOW_PICK_RADIUS = 2.2;
+
+/**
+ * How high above her own floor a window's "Look out" zone may sit.
+ *
+ * The zone used to be pinned to the middle of the glass, which is fine for a
+ * normal room and wrong for a grand one: the lobby's west windows are
+ * 1.2–3.6 m of double-height glazing, so the midpoint came out at 2.4 m —
+ * and every selection path in the game drops a zone further than
+ * `ZONE_HEIGHT_TOLERANCE` (2.2 m) from the player's own `y`. The verb was
+ * built, placed, and impossible to offer to a child standing on the floor, at
+ * any spot in the room. 19 sampled spots along that wall gave nothing but
+ * "🏨 Lobby".
+ *
+ * A window is looked out of by someone standing on the floor, so the zone
+ * belongs at her height, not the glass's centre. Derived from the tolerance
+ * rather than typed as a number, with room to spare for a damped `y` that
+ * dips a little as she walks.
+ */
+const LOOK_ZONE_MAX_Y = ZONE_HEIGHT_TOLERANCE - 0.4;
 
 /**
  * How much floor a fitted rug leaves between its own edge and a wall face.
@@ -1109,32 +1128,56 @@ export class Hotel implements GameSystem {
       // middle first. A layout that knows better says so with `zoneAt`.
       const middleOf = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
       const probe = new Vector3();
-      const middle =
-        wall.zoneAt ??
-        [...candidates]
-          .sort((a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf))
-          .find((at) => {
-            const sx =
-              side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4 + stand;
-            const sz =
-              side === 'north' ? room.originZ - room.halfZ + 0.4 + stand : room.originZ + at;
+      /**
+       * Somewhere clear to stand and look through this pane, or `null`.
+       *
+       * **Searched, not assumed.** A fixed 1.8 m straight out from the glass
+       * is one guess, and in the corridor it is wrong at every single pane:
+       * the row of pet statues stands right across that line, so every
+       * candidate stand spot was pushed 0.77 m and landed outside the zone's
+       * own 2.2 m pick radius — the verb existed and could never come into
+       * range. There are clear gaps between those statues, and this finds
+       * them: straight out first, then further out, then to either side,
+       * never further from the pane than the pick radius, or she would arrive
+       * and still not be offered it.
+       */
+      const standSpotFor = (at: number): { x: number; z: number } | null => {
+        const px = paneX(at);
+        const pz = paneZ(at);
+        // Inward from the glass, and along the wall.
+        const inX = side === 'north' ? 0 : 1;
+        const inZ = side === 'north' ? 1 : 0;
+        for (const lateral of [0, 0.8, -0.8, 1.6, -1.6, 2.4, -2.4]) {
+          for (const depth of [stand, 1.4, 2.2, 1.0, 2.6, 0.8]) {
+            // She must end up inside the pick radius, or the walk arrives at
+            // a spot the picker will not answer from.
+            if (Math.hypot(depth, lateral) > WINDOW_PICK_RADIUS - 0.1) continue;
+            const sx = px + inX * depth + inZ * lateral;
+            const sz = pz + inZ * depth + inX * lateral;
             probe.set(sx, 0, sz);
             this.collision.resolve(probe, PLAYER_RADIUS);
-            return Math.hypot(probe.x - sx, probe.z - sz) < 0.05;
-          }) ??
-        candidates[0] ??
-        0;
+            if (Math.hypot(probe.x - sx, probe.z - sz) < 0.05) return { x: sx, z: sz };
+          }
+        }
+        return null;
+      };
+      const ordered = [...candidates].sort(
+        (a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf),
+      );
+      const middle =
+        wall.zoneAt ?? ordered.find((at) => standSpotFor(at) !== null) ?? candidates[0] ?? 0;
       const x = paneX(middle);
       const z = paneZ(middle);
+      const spot = standSpotFor(middle);
       zones.push({
         id: `hotel-window-${room.space}-${side}`,
         label: 'window',
         x,
-        y: (wall.sill + wall.head) / 2,
+        y: Math.min((wall.sill + wall.head) / 2, LOOK_ZONE_MAX_Y),
         z,
         pickRadius: WINDOW_PICK_RADIUS,
-        standX: side === 'north' ? x : x + stand,
-        standZ: side === 'north' ? z + stand : z,
+        standX: spot ? spot.x : side === 'north' ? x : x + stand,
+        standZ: spot ? spot.z : side === 'north' ? z + stand : z,
         standRadius: 2.6,
         verb: 'Look out',
         sign: {
