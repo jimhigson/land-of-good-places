@@ -517,6 +517,30 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
 
   const restartLimit = Math.min(brief.budgets.restarts, attempts.length);
 
+  /**
+   * The self-clearance grid's geometry, shared by every attempt.
+   *
+   * A **dense array over the brief's own extent**, not a `Map` keyed by an
+   * integer: `selfClear` walks nine buckets per validated sample and was still
+   * 19-23% of a cruiser solve after the integer keys landed, most of the
+   * remainder being `Map.get`'s hashing against a plain array read. Every
+   * sample stored or queried here has already passed the boundary check
+   * (`validate` asks `clear`, then the boundary, then `selfClear`, in that
+   * order), so it lies at least the corridor inside `boundary.extent` and the
+   * two-cell pad covers the ±1-cell neighbour scan. Buckets are truncated and
+   * reused between attempts rather than reallocated; `usedCells` records which
+   * ones this attempt touched so the next one clears only those.
+   */
+  const cell = Math.max(brief.selfClearance, 1);
+  const minGx = Math.floor(brief.boundary.extent.minX / cell) - 2;
+  const minGz = Math.floor(brief.boundary.extent.minZ / cell) - 2;
+  const cellsDeep = Math.floor(brief.boundary.extent.maxZ / cell) + 3 - minGz;
+  const cellsWide = Math.floor(brief.boundary.extent.maxX / cell) + 3 - minGx;
+  const grid: (Sample[] | null)[] = new Array(cellsWide * cellsDeep).fill(null);
+  const usedCells: number[] = [];
+  const cellIndexOf = (x: number, z: number): number =>
+    (Math.floor(x / cell) - minGx) * cellsDeep + (Math.floor(z / cell) - minGz);
+
   for (let startIndex = 0; startIndex < restartLimit; startIndex += 1) {
     // The coarse suspension point: one whole attempt is the natural unit of
     // work, and on the slide's brief one costs tens of milliseconds — too long
@@ -577,25 +601,19 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
      * sample of every candidate — quadratic in the length of the route, run
      * thousands of times, and by far the most expensive thing the search did.
      * A grid whose cell is the clearance distance turns it into a look at nine
-     * cells. Pieces are added and removed strictly last-in-first-out as the
-     * search advances and backtracks, so a cell's most recent entry is always
-     * the one being taken back out.
+     * cells (the dense array above; it went `${gx},${gz}` string keys →
+     * integer `Map` keys → flat array, each step measured). Pieces are added
+     * and removed strictly last-in-first-out as the search advances and
+     * backtracks, so a cell's most recent entry is always the one being taken
+     * back out. The same samples land in the same buckets in the same order as
+     * under either `Map` form, so the search sees an identical world.
      */
-    const cell = Math.max(brief.selfClearance, 1);
-    const grid = new Map<number, Sample[]>();
+    for (let i = 0; i < usedCells.length; i += 1) {
+      const used = grid[usedCells[i] as number];
+      if (used) used.length = 0;
+    }
+    usedCells.length = 0;
     const laid: Sample[] = [];
-    // An INTEGER cell key, not `${gx},${gz}`. The string form built a fresh
-    // string on every one of the nine cell lookups `selfClear` does per
-    // sample — measured at 29% of the Sky Cruiser's whole solve in a Node CPU
-    // profile, nearly all of it string building and the garbage that follows.
-    // The park is tens of metres across and the cell is metres wide, so a
-    // signed 12-bit index each way covers it with room to spare, and
-    // `cellKey` is a bijection onto the integers exactly as the string was
-    // onto strings: the same samples land in the same buckets in the same
-    // order, so the search sees an identical world.
-    const cellKey = (gx: number, gz: number): number => (gx + 2048) * 4096 + (gz + 2048);
-    const keyOf = (x: number, z: number): number =>
-      cellKey(Math.floor(x / cell), Math.floor(z / cell));
 
     const headPose = (): Pose2 => {
       const last = chosen[chosen.length - 1];
@@ -607,10 +625,18 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       sampleCounts.push(produced.length);
       for (const s of produced) {
         laid.push(s);
-        const key = keyOf(s.x, s.z);
-        const bucket = grid.get(key);
-        if (bucket) bucket.push(s);
-        else grid.set(key, [s]);
+        const index = cellIndexOf(s.x, s.z);
+        const bucket = grid[index];
+        if (bucket) {
+          // A bucket left empty — by this attempt's own backtracking or by a
+          // previous attempt's clear-down — is being used afresh, and the next
+          // attempt has to know to truncate it.
+          if (bucket.length === 0) usedCells.push(index);
+          bucket.push(s);
+        } else {
+          grid[index] = [s];
+          usedCells.push(index);
+        }
       }
       accumulated += seg.length;
     };
@@ -622,7 +648,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       for (let i = 0; i < count; i += 1) {
         const s = laid.pop();
         if (!s) break;
-        grid.get(keyOf(s.x, s.z))?.pop();
+        grid[cellIndexOf(s.x, s.z)]?.pop();
       }
       accumulated -= seg.length;
     };
@@ -645,6 +671,13 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
     const selfClearance = brief.selfClearance;
     const ignoreStart = brief.closed;
     const selfClear =(x: number, z: number, s: number, closing: boolean): boolean => {
+      // Copied out of the closure context once per call: this is the hottest
+      // function in the whole generator (30% of a grinding solve), and every
+      // context read inside the nine-bucket loop is a load the engine cannot
+      // hoist for us.
+      const cells = grid;
+      const deep = cellsDeep;
+      const clearance = selfClearance;
       const gx = Math.floor(x / cell);
       const gz = Math.floor(z / cell);
       // A loop's closer is aiming at the start pose, so the start is not an
@@ -653,9 +686,10 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       // business running into — so this relaxation stays with loops.
       const skipStart = closing && ignoreStart;
       for (let ix = gx - 1; ix <= gx + 1; ix += 1) {
+        const column = (ix - minGx) * deep - minGz;
         for (let iz = gz - 1; iz <= gz + 1; iz += 1) {
-          const bucket = grid.get(cellKey(ix, iz));
-          if (bucket === undefined) continue;
+          const bucket = cells[column + iz];
+          if (!bucket || bucket.length === 0) continue;
           for (let i = 0; i < bucket.length; i += 1) {
             const earlier = bucket[i] as Sample;
             // The track immediately behind the head is not a collision, it is
@@ -663,7 +697,15 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
             // any further behind, so there is nothing left to look at.
             if (s - earlier.s < SELF_IGNORE_ARC) break;
             if (skipStart && earlier.s < SELF_IGNORE_ARC) continue;
-            if (Math.hypot(x - earlier.x, z - earlier.z) < selfClearance) return false;
+            // The same exact axis prefilter the plot scans use: the cell is
+            // `selfClearance` wide, so most entries in a *neighbouring* cell
+            // are a whole axis out of reach, and `hypot(a, b) >= |a|` settles
+            // those without the hypot.
+            const dx = x - earlier.x;
+            if (dx >= clearance || -dx >= clearance) continue;
+            const dz = z - earlier.z;
+            if (dz >= clearance || -dz >= clearance) continue;
+            if (Math.hypot(dx, dz) < clearance) return false;
           }
         }
       }
@@ -686,10 +728,6 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         rejected.tooLong += 1;
         return null;
       }
-      if (minCurvatureRadius(seg) < brief.minRadius) {
-        rejected.curvature += 1;
-        return null;
-      }
       const steps = Math.max(2, Math.ceil(seg.length / SAMPLE_STEP));
       const produced: Sample[] = [];
       const point: Vec2 = { x: 0, z: 0 };
@@ -710,6 +748,33 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
           return null;
         }
         produced.push({ x: point.x, z: point.z, s });
+      }
+      // Curvature LAST, and `brief.minRadius` doubles as a bail threshold —
+      // the answer used here is only ever the comparison below, which
+      // `bailBelow` provably cannot flip (see the parameter's doc in
+      // `segments.ts`); the report's `minRadius` and `buildRoute`'s
+      // `minCurvature` come from *accepted* pieces via the full scan, as ever.
+      //
+      // It used to run first, on the instinct that it was the cheap test. It
+      // is the expensive one: 65 samples of hypot-and-divide, and measured on
+      // seed 55 it rejected 13,241 pieces out of the 5.32 MILLION it fully
+      // scanned — every piece the vocabulary or the analytic biarc had
+      // already built at a legal nominal radius, and 2.1 million of which the
+      // world checks above then rejected anyway. That was 40% of all
+      // curvature sampling spent proving doomed pieces doomed twice over.
+      //
+      // **Which pieces are accepted is unchanged** — a piece must pass every
+      // test whatever the order, no test draws randomness, and each test's own
+      // verdict is untouched — so the search takes the same pieces in the same
+      // order and the route is byte-identical (proven by fingerprint across
+      // every solving sweep seed). What DOES move is diagnostic attribution:
+      // a piece failing curvature *and* a world check now counts against the
+      // world check it hit first. One increment per rejected piece, total
+      // unchanged; only `measure-slide-route.mts` and failure messages print
+      // the breakdown, and nothing asserts on it.
+      if (minCurvatureRadius(seg, undefined, brief.minRadius) < brief.minRadius) {
+        rejected.curvature += 1;
+        return null;
       }
       return produced;
     };
@@ -764,7 +829,30 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       return out;
     };
 
-    const tryFinish = (): { seg: CubicSegment; samples: Sample[] }[] | null => {
+    /**
+     * A generator, so the via fan below is not one indivisible unit of work.
+     *
+     * The whole closer used to run inside a single yield of the outer search:
+     * up to {@link CLOSER_VIA_TRIES} seeded detours, each validating several
+     * long pieces sample by sample — measured at up to 7.2 ms in one step on
+     * the canonical slide (M4; roughly 3x that on the CI runner), which is
+     * what actually tripped `check:park-boot`'s 3x-budget advance ceiling
+     * there: a driver that checks the clock between steps cannot stop inside
+     * a step. One yield per via try makes the worst step a single detour
+     * instead of sixteen.
+     *
+     * Suspending here cannot move the route, by the same argument the outer
+     * search makes: every piece of state is a local or the generator's own,
+     * the `rng` draws happen in the same order whatever cadence the caller
+     * advances at, and the yielded value is the attempt index like every
+     * other yield. `check:park-boot` proves it, hashing sliced against
+     * straight-through for cruiser and slide alike.
+     */
+    function* tryFinish(): Generator<
+      number,
+      { seg: CubicSegment; samples: Sample[] }[] | null,
+      void
+    > {
       closerAttempts += 1;
       const head = headPose();
 
@@ -785,6 +873,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       const alongZ = (finishPose.z - head.z) / span;
 
       for (let attempt = 0; attempt < CLOSER_VIA_TRIES; attempt += 1) {
+        yield startIndex;
         const sideways = rng.range(-span * 0.7, span * 0.7);
         const forward = rng.range(-span * 0.3, span * 0.3);
         const swing = rng.range(-0.9, 0.9);
@@ -813,7 +902,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         }
       }
       return null;
-    };
+    }
 
     /**
      * How good a piece is, lower being better: how near its end lands to the
@@ -925,7 +1014,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       // asking the same question.
       if (!closerTried[depth] && accumulated >= brief.desiredLength * CLOSE_AFTER) {
         closerTried[depth] = true;
-        const closer = tryFinish();
+        const closer = yield* tryFinish();
         if (closer) {
           // Accepted exactly as validated — never re-validated, because a
           // second pass could disagree and quietly drop a piece, leaving a

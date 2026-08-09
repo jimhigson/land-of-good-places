@@ -6,6 +6,11 @@ import {
   coasterProfileSearch,
   coasterRouteBriefSearch,
 } from './route';
+
+// The retry ladder, re-exported so `boot/parkGeneration.ts` (which imports
+// this module lazily, by design) can drive the SAME policy generator the
+// constructor drives — one owner, two cadences. See its doc in `route.ts`.
+export { cruiserRouteSearch } from './route';
 import type { SolvedRailRoute } from '../rail/generate';
 import { PARK_SEED } from '../parkManifest';
 import { Rng } from '../../core/mathUtils';

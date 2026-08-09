@@ -43,9 +43,9 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
  * anything.
  *
  * - **the ginormous slide**, at ~3.46 s;
- * - **the Sky Cruiser**, at ~1.3 s, sliced second (#252) once the cost stopped
- *   being billed to the train that merely imports it — see
- *   {@link MODULES_AFTER_CRUISER}.
+ * - **the Sky Cruiser**, at ~0.8 s (~1.3 s when it was sliced), sliced second
+ *   (#252) once the cost stopped being billed to the train that merely imports
+ *   it — see {@link MODULES_AFTER_CRUISER}.
  *
  * The two sit either side of the module list rather than together, because
  * `train/plan.ts` and everything after it read `COASTER_PLANS`: the cruiser has
@@ -181,16 +181,16 @@ export class ParkGeneration {
   private cruiserModule: typeof import('../world/coaster/solve') | null = null;
   private cruiserStart: CruiserSearchStart | null = null;
   private cruiserStartSearch: Generator<number, CruiserSearchStart, void> | null = null;
-  private cruiserSearch: Generator<number, SolvedRailRoute, void> | null = null;
   /**
-   * Whether the harder-pulling retry is the one being searched.
-   *
-   * The straight-through path solves the first brief, and re-solves with twice
-   * the castle influence if the loop it got never crossed the castle. This walks
-   * the same two steps in the same order — one policy, two cadences, exactly as
-   * the slide's length ladder is walked by both `planSlide()` and this class.
+   * The whole retry ladder — first brief, escalated castle pull, rescue —
+   * as ONE generator, `coaster/route.ts`'s `cruiserRouteSearch`. This class
+   * used to walk the first-then-escalated steps by hand ("the same verdict,
+   * in the same order, as the constructor's"), which was a second writer of
+   * one policy held in step by a comment; when the rescue tier arrived the
+   * ladder became a generator with one owner and this became a driver over
+   * it, exactly as `advance()` already is over the slide's search.
    */
-  private cruiserEscalated = false;
+  private cruiserSearch: Generator<number, SolvedRailRoute, void> | null = null;
   /** The solved plan view, held between the search finishing and the finisher. */
   private cruiserRoute: SolvedRailRoute | null = null;
   private cruiserFinish: Generator<number, PlannedCoaster, void> | null = null;
@@ -408,7 +408,8 @@ export class ParkGeneration {
    * (`rail/generate.ts`). `check:park-boot` proves it rather than asserting it,
    * by hashing this loop against a straight-through `planCruiser()`.
    *
-   * A `RailRouteUnsolvable` is **not** caught, unlike the slide's per-rung
+   * A `RailRouteUnsolvable` out of the ladder — which now means even the
+   * rescue tier found nothing — is **not** caught, unlike the slide's per-rung
    * throw. The straight-through path does not catch it either — it comes out of
    * `COASTER_PLANS`'s initialiser and `check:cruiser-solves` is what reports it —
    * so swallowing it here would make the two cadences disagree about what a
@@ -460,9 +461,13 @@ export class ParkGeneration {
       // `undefined` and then read `.report` off it. Phases that have completed
       // must be skipped, not merely finished.
       if (!this.cruiserRoute) {
-        const search = (this.cruiserSearch ??= railRouteSearch(
-          this.cruiserEscalated ? start.briefs.escalated : start.briefs.first,
-        ));
+        // The tier transitions (escalation, rescue) happen INSIDE the policy
+        // generator, between two of its yields — they are not this driver's
+        // to sequence, which is the whole point of the ladder having one
+        // owner. The rescue tier's pose construction is one ~20 ms un-yielding
+        // block, and it is reachable only on a seed where the park previously
+        // failed to build at all, which is a trade a loading screen takes.
+        const search = (this.cruiserSearch ??= solve.cruiserRouteSearch(start.briefs));
         let steps = 0;
         for (;;) {
           if (steps > 0 && performance.now() >= deadline) this.noteLateStep('cruiserSearch');
@@ -470,14 +475,6 @@ export class ParkGeneration {
           const step = search.next();
           this.units.cruiserSearch += 1;
           if (step.done) {
-            // **The same verdict, in the same order, as the constructor's**:
-            // a loop that never crossed the castle earns one re-solve at twice
-            // the influence, and whatever the second search returns is taken.
-            if (!this.cruiserEscalated && !step.value.report.satisfied) {
-              this.cruiserEscalated = true;
-              this.cruiserSearch = null;
-              return;
-            }
             this.cruiserRoute = step.value;
             break;
           }
