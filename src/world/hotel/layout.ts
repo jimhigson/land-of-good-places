@@ -161,57 +161,88 @@ export interface WindowWall {
 }
 
 /**
- * A raised upper level inside a room, and the sweeping stair up to it —
+ * One curved flight of the imperial staircase: a quarter-turn arc of treads,
+ * swept about `(centreX, centreZ)` from `fromAngle` to `toAngle` (radians,
+ * measured the way the rest of this game measures a yaw — 0 is +Z, turning
+ * toward −X; a **descending** range is a left-hand flight). The last tread
+ * lands level with the landing.
+ */
+export interface StairArc {
+  readonly centreX: number;
+  readonly centreZ: number;
+  readonly innerRadius: number;
+  readonly outerRadius: number;
+  readonly fromAngle: number;
+  readonly toAngle: number;
+  readonly treads: number;
+}
+
+/**
+ * The lobby's raised levels and the imperial staircase between them —
  * **declared here, built by `Hotel.buildMezzanine`**, exactly like
  * {@link WindowWall}.
  *
- * Jim, 7 August 2026: *"Make the lobby a double-height room with a sweeping
- * staircase to the mezzanine level."*
+ * Jim's commission, 8 August 2026, from his reference photograph of a grand
+ * resort lobby: two mirrored curved flights sweep up to an intermediate
+ * **landing**, a single wide straight flight carries on to the **gallery**
+ * (the true mezzanine level), and the arch *under* the landing is the whole
+ * subject — you can see, and walk, straight through it along the room's axis.
  *
- * ## Why it is a raised terrace and not an overhanging balcony
+ * ## Why the landing may overhang now (the law changed)
  *
- * `CollisionWorld` is **height-agnostic for everything but a jump**: a collider
- * carries a `topHeight` measured above its *own* local ground, and the height
- * test (`clearsTop`) is fed the player's clearance above *the sampler's*
- * ground. A child on the lobby floor and a child on a balcony 3.2 m up are both
- * at clearance 0, so the two cannot be told apart — which means a balustrade
- * that stops her walking off the balcony is the *same* collider that walls off
- * the lobby floor beneath it, at head height, invisibly. (This is the same law
- * `place.ts` runs into from the other side, where it makes beds soft.)
+ * This used to be a solid mass, and the doc here said why: `CollisionWorld`
+ * was height-agnostic, so the balustrade holding a child on the deck was the
+ * same collider that invisibly walled off the floor beneath it. The imperial
+ * composition's entire point is the see-through arch, so the law grew a third
+ * answer: a **banded collider** (`Collision.ts`'s `baseHeight`) exists only
+ * for movers at or above its own base. The landing's rails carry
+ * `height − 0.5` — solid to a child stood on the landing, thin air to the
+ * child walking under the arch below, unreachable by a ground jump. The
+ * gallery is a **colonnade**: open underneath all the way to the north wall,
+ * its deck held up by columns, so the axis genuinely goes through.
  *
- * There are only two honest ways out, and the castle takes the other one: its
- * internal deck edges have no collider at all and you fall through them. That
- * is right for a five-storey castle and wrong for a lobby a six-year-old is
- * meant to enjoy standing about on.
- *
- * So the deck sits on a **solid mass** whose front and side faces are real
- * full-height walls: nothing overhangs, there is no space underneath to be
- * invisibly walled off, and the balustrade on top can therefore be as solid as
- * it looks. You go up a sweeping quarter-turn stair; you cannot fall off; and
- * the whole thing is one rectangle plus one arc of numbers.
+ * The plan's numbers are the artist's, frozen here as data; `Hotel.ts`'s
+ * `assertStairMatches` compares every one against `art/models/hotelAssets.ts`
+ * at build time, so the two cannot drift apart silently (this file must stay
+ * a leaf data module and cannot import the asset itself).
  */
 export interface Mezzanine {
-  /** The deck, in room-local metres. Its faces below `height` are solid. */
+  /** The gallery deck — the true level — in room-local metres. */
   readonly minX: number;
   readonly maxX: number;
   readonly minZ: number;
   readonly maxZ: number;
-  /** Height of the walking surface. */
+  /** Height of the gallery's walking surface (`LOBBY_MEZZANINE_Y`). */
   readonly height: number;
   /**
-   * The sweeping stair: a quarter-turn arc of chunky treads, swept about
-   * `(centreX, centreZ)` from `fromAngle` to `toAngle` (radians, measured the
-   * way the rest of this game measures a yaw — 0 is +Z, turning toward −X).
-   * The last tread lands level with the deck.
+   * The intermediate landing the curves gather onto. A true overhang: the
+   * arch under it is open, walkable floor. `slab` is its visual thickness —
+   * bounded by the asset's `LANDING_SLAB_MIN`/`MAX`, because past MAX the
+   * arch stops clearing a hatted child and Jim's ruling is silently undone.
    */
-  readonly stair: {
+  readonly landing: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    readonly height: number;
+    readonly slab: number;
+  };
+  /** The two mirrored curved flights, floor → landing. */
+  readonly stairs: readonly StairArc[];
+  /**
+   * The wide straight flight, landing → gallery. Centred on `centreX`, its
+   * bottom riser at `frontZ`, climbing toward −Z; it lands exactly on the
+   * gallery's `minZ`-side edge at `height`. `flankX` is where its solid
+   * flanks stand either side of the walk.
+   */
+  readonly straight: {
     readonly centreX: number;
-    readonly centreZ: number;
-    readonly innerRadius: number;
-    readonly outerRadius: number;
-    readonly fromAngle: number;
-    readonly toAngle: number;
+    readonly frontZ: number;
+    readonly walkWidth: number;
+    readonly flankX: number;
     readonly treads: number;
+    readonly rise: number;
   };
 }
 
@@ -234,57 +265,93 @@ export interface LocalConnectorPoint {
 }
 
 /**
- * The walk paths between a room's floor and its mezzanine — **declared here,
+ * The walk paths between the lobby's three levels — **declared here,
  * registered by `Hotel.buildMezzanine`**, consumed by `NavGrid` as graph
- * edges between the two levels (ARCHITECTURE-DECISIONS.md Decision 11).
+ * edges (ARCHITECTURE-DECISIONS.md Decision 11).
  *
- * Everything is derived from {@link Mezzanine.stair}: a point one stride out
- * from the arc's bottom on the floor, the centre of every tread's top along
- * the arc's mid-radius, and a point one stride past the top tread on the
- * deck. Move the stair and the path moves with it; there is no coordinate
- * here to go stale — the same one-owner rule `Hotel.stairMouth` follows for
- * the hole in the gallery's front face.
+ * Three paths, one per flight, each derived from the plan that builds the
+ * flight's treads: both curves (floor ↔ landing) and the straight flight
+ * (landing ↔ gallery). Each is just an edge to the router, so
+ * floor → landing → gallery multi-hops with no further declaration — the
+ * exact property Decision 11 named this composition as the test of. Move a
+ * flight and its path moves with it; there is no coordinate here to go stale.
  *
- * Today that is one path. When the lobby becomes the imperial composition —
- * two mirrored curved flights to a landing, one straight flight to the deck —
- * this returns one path per flight, each ending on the level it serves, and
- * the router chains them without changing: a route is free to pass
- * floor → landing → deck because each flight is just an edge.
+ * The climb direction along an arc at angle `a` is `(−cos a, −sin a)` for an
+ * **ascending** sweep and its negation for a descending one — the left-hand
+ * flight climbs through decreasing angles (the same fact that makes
+ * hand-subdivided tread ranges silently fail `covers()`, per the asset's
+ * `treadArc` warning). The first cut of this function assumed ascending and
+ * put the left flight's floor approach on the wrong side of its foot —
+ * *inside* the flight's own mass — so the sign is taken from the sweep, once,
+ * here.
  */
 export function mezzanineWalkConnectors(
   plan: Mezzanine,
 ): readonly (readonly LocalConnectorPoint[])[] {
-  const { stair, height } = plan;
-  const midRadius = (stair.innerRadius + stair.outerRadius) / 2;
-  const riser = height / stair.treads;
-  const sweep = stair.toAngle - stair.fromAngle;
-  const at = (angle: number): { x: number; z: number } => ({
-    x: stair.centreX - Math.sin(angle) * midRadius,
-    z: stair.centreZ + Math.cos(angle) * midRadius,
-  });
+  const paths: LocalConnectorPoint[][] = [];
 
-  const points: LocalConnectorPoint[] = [];
-  // One stride out from the bottom tread, on the floor. The walk direction
-  // along the arc at angle a is (-cos a, -sin a) for increasing a, so the
-  // floor-side approach continues it backwards: (+cos, +sin).
-  const bottom = at(stair.fromAngle);
-  points.push({
-    x: bottom.x + Math.cos(stair.fromAngle) * CONNECTOR_APPROACH,
-    y: 0,
-    z: bottom.z + Math.sin(stair.fromAngle) * CONNECTOR_APPROACH,
-  });
-  for (let i = 0; i < stair.treads; i += 1) {
-    const centre = at(stair.fromAngle + (sweep * (i + 0.5)) / stair.treads);
-    points.push({ x: centre.x, y: riser * (i + 1), z: centre.z });
+  for (const stair of plan.stairs) {
+    const midRadius = (stair.innerRadius + stair.outerRadius) / 2;
+    const riser = plan.landing.height / stair.treads;
+    const sweep = stair.toAngle - stair.fromAngle;
+    const sign = Math.sign(sweep);
+    const at = (angle: number): { x: number; z: number } => ({
+      x: stair.centreX - Math.sin(angle) * midRadius,
+      z: stair.centreZ + Math.cos(angle) * midRadius,
+    });
+
+    const points: LocalConnectorPoint[] = [];
+    // One stride out from the bottom tread, on the floor — backwards along
+    // the climb direction, whichever hand the flight is.
+    const bottom = at(stair.fromAngle);
+    points.push({
+      x: bottom.x + Math.cos(stair.fromAngle) * CONNECTOR_APPROACH * sign,
+      y: 0,
+      z: bottom.z + Math.sin(stair.fromAngle) * CONNECTOR_APPROACH * sign,
+    });
+    for (let i = 0; i < stair.treads; i += 1) {
+      const centre = at(stair.fromAngle + (sweep * (i + 0.5)) / stair.treads);
+      points.push({ x: centre.x, y: riser * (i + 1), z: centre.z });
+    }
+    // One stride past the top tread, on the landing.
+    const top = at(stair.toAngle);
+    points.push({
+      x: top.x - Math.cos(stair.toAngle) * CONNECTOR_APPROACH * sign,
+      y: plan.landing.height,
+      z: top.z - Math.sin(stair.toAngle) * CONNECTOR_APPROACH * sign,
+    });
+    paths.push(points);
   }
-  // One stride past the top tread, on the deck.
-  const top = at(stair.toAngle);
-  points.push({
-    x: top.x - Math.cos(stair.toAngle) * CONNECTOR_APPROACH,
-    y: height,
-    z: top.z - Math.sin(stair.toAngle) * CONNECTOR_APPROACH,
-  });
-  return [points];
+
+  // The straight flight: landing → gallery, climbing toward −Z.
+  {
+    const { straight, landing } = plan;
+    // It lands on the gallery's near (maxZ) edge, so that is what the run is.
+    const run = straight.frontZ - plan.maxZ;
+    const going = run / straight.treads;
+    const riser = straight.rise / straight.treads;
+    const points: LocalConnectorPoint[] = [];
+    points.push({
+      x: straight.centreX,
+      y: landing.height,
+      z: straight.frontZ + CONNECTOR_APPROACH,
+    });
+    for (let i = 0; i < straight.treads; i += 1) {
+      points.push({
+        x: straight.centreX,
+        y: landing.height + riser * (i + 1),
+        z: straight.frontZ - going * (i + 0.5),
+      });
+    }
+    points.push({
+      x: straight.centreX,
+      y: plan.height,
+      z: straight.frontZ - run - CONNECTOR_APPROACH,
+    });
+    paths.push(points);
+  }
+
+  return paths;
 }
 
 export interface HotelRoom {
@@ -306,8 +373,8 @@ export interface HotelRoom {
    * walls are the ones *between it and the room*: a wall of height H hides the
    * floor for 1.28·H metres behind it. At the 3.0–3.4 m every room used to be
    * that is a 4 m shadow you never notice, because you are rarely that close to
-   * a near wall. The lobby is 6.4 m tall now (Jim: *"make the lobby a
-   * double-height room"*), and 6.4 m of near wall would hide eight metres —
+   * a near wall. The lobby is 8.9 m tall now (the imperial composition stands
+   * 5.44 m to its gallery), and 8.9 m of near wall would hide eleven metres —
    * which is a child standing in her own hotel and seeing a wall.
    *
    * So the two walls the camera looks *through* stay low and the two it looks
@@ -502,13 +569,39 @@ const OCEAN_THEME: HotelTheme = {
 };
 
 /**
- * Where the lobby's raised gallery stands, and how high.
+ * The gallery deck — the composition's **true level** — and the intermediate
+ * landing under it, in metres above the lobby floor.
  *
- * Named rather than inlined because four separate things need the same
- * numbers — the deck, its solid front, the stair's landing and the dressing
- * that goes on top — and this is the file that owns them.
+ * These stopped being this file's choice on 8 August 2026 (the artist's
+ * handoff calls it "the arrow turned round"): the landing is now derived from
+ * how tall a child in a party hat is (`hotelAssets.ts`'s `ARCH_CLEAR`, twelve
+ * 0.32 m risers → 3.84) and the gallery is wherever the five-tread straight
+ * flight lands (another 1.60 → 5.44). They are written here as data because
+ * this file must stay a leaf module; `Hotel.assertStairMatches` proves them
+ * against the asset's own exports at build time.
  */
-export const LOBBY_MEZZANINE_Y = 3.2;
+export const LOBBY_MEZZANINE_Y = 5.44;
+export const LOBBY_LANDING_Y = 3.84;
+
+/**
+ * How thick the landing's slab is drawn: 0.40, the artist's recommended
+ * build, leaving the arch 3.44 m clear — 0.07 m over `ARCH_CLEAR` and 7 cm
+ * inside `LANDING_SLAB_MAX`, past which the arch stops clearing a hatted
+ * child and Jim's ruling is undone by a thickness nobody thought was
+ * load-bearing. `assertStairMatches` holds it inside the asset's range.
+ */
+export const LOBBY_LANDING_SLAB = 0.4;
+
+/**
+ * The arc centres stand at `(±STAIR_ARC_C, STAIR_ARC_Z)`: the artist's
+ * `C = STAIR_RAIL_RADIUS + n·BRIDGE_RAIL_TILE/2` at n = 6, so the landing's
+ * front balustrade between the two curves' top newels is exactly six whole
+ * tiles (6.12 m), the clear archway between the flights' masses is 5.85 m,
+ * and the whole composition spans 16.21 m — all measured off the placed
+ * meshes in the artist's handoff.
+ */
+export const STAIR_ARC_C = 7.99;
+const STAIR_ARC_Z = -2.5;
 
 export const LOBBY: HotelRoom = {
   space: SPACE_HOTEL_LOBBY,
@@ -520,55 +613,86 @@ export const LOBBY: HotelRoom = {
   // the lobby is the room it always was and the mezzanine is *added* space
   // rather than space taken off a child.
   halfZ: 12.4,
-  // Double height — Jim: *"make the lobby a double-height room with a sweeping
-  // staircase to the mezzanine level."* Only the two far walls are this tall;
-  // see `nearWallHeight` for why the two the camera looks through are not.
-  wallHeight: 6.4,
+  // The imperial composition stands 5.44 m to the gallery and a child on it
+  // wants `ARCH_CLEAR` of air over her head, so the two far walls rise to
+  // 8.9 — over the asset's `LOBBY_MIN_WALL_HEIGHT` (8.81), which
+  // `assertStairMatches` enforces. Only the two far walls are this tall; see
+  // `nearWallHeight` for why the two the camera looks through are not.
+  wallHeight: 8.9,
   nearWallHeight: 3.4,
   // South: the front door back out to the park. West: the lift.
   gaps: { south: [-DOOR_HALF, DOOR_HALF], west: [-1.6, 1.6] },
-  // **Clerestory.** Both rows sit above `LOBBY_MEZZANINE_Y`, because the north
-  // wall's lower half west of x = 5 is inside the gallery's own solid mass and
-  // a pane there would be a lit rectangle buried in a wall. High windows are
-  // also simply what a double-height lobby has: they light the gallery from
-  // behind and throw the room's brightest band across the top of the statue.
+  // **Clerestory.** The north row sits above the gallery deck (5.44), so the
+  // panes read as the windows the gallery looks out of and throw the room's
+  // brightest band high across the double-height space. `lookZone: false`:
+  // a ground-level "Look out" stand spot for a pane 6 m up would put a child
+  // in the colonnade staring at a wall — the west wall carries the zone.
   windows: {
-    north: { at: [-11, -6, -1, 4, 9], width: 2.2, sill: 3.9, head: 5.7 },
-    // West: only the stretch south of the gallery, for the same reason — plus
-    // the lift gap, which `glazeWall` clips these to automatically. The
-    // northernmost pane used to sit at -3.8; it moved to -6.6 (8 Aug 2026) so
-    // one pane stands a clear finger outside the lift's boarding band, and
-    // `zoneAt` pins "Look out" to it — the default picker's other candidates
-    // are the pane over the lift band and the pane the café tables crowd.
+    north: { at: [-11, -6, -1, 4, 9], width: 2.2, sill: 5.9, head: 7.7, lookZone: false },
+    // West: the stretch south of the colonnade — plus the lift gap, which
+    // `glazeWall` clips these to automatically. The northernmost pane used to
+    // sit at -3.8; it moved to -6.6 (8 Aug 2026) so one pane stands a clear
+    // finger outside the lift's boarding band, and `zoneAt` pins "Look out"
+    // to it — the default picker's other candidates are the pane over the
+    // lift band and the pane the café tables crowd.
     west: { at: [-6.6, 3.2, 9.6], width: 1.8, sill: 1.2, head: 3.6, zoneAt: -6.6 },
   },
+  // The imperial plan — see {@link Mezzanine} for what each piece is, and
+  // HANDOFF-lobby-art.md for where every number comes from. The derivations,
+  // for the reader (assertStairMatches proves them):
+  //   arc centres (±7.99, −2.5); radii 3.06/4.86; twelve treads over ±90°;
+  //   landing x ±4.93 (= C − innerRadius, lapping 3 cm into each curve's
+  //   inner string — the designed STAIR_STRING_BITE overlap), z −7.6…−2.5
+  //   (five balustrade tiles deep), at 3.84;
+  //   straight flight centred on the axis, bottom riser at
+  //   −7.6 + STRAIGHT_RUN (2.592) = −5.008, landing on the gallery at −7.6;
+  //   gallery full-width at 5.44, a colonnade — open underneath to the
+  //   north wall, which is what makes the arch a genuine see-through.
   mezzanine: {
     minX: -13,
-    maxX: 5,
+    maxX: 13,
     minZ: -12.4,
     maxZ: -7.6,
     height: LOBBY_MEZZANINE_Y,
-    // A quarter turn, swept about a point inside the gallery's south-east
-    // corner: the bottom tread faces into the open lobby and the top one lands
-    // **on the deck**, so a child walks a curve rather than a ramp. Ten treads
-    // over 90° is a 0.32 m rise each — half the game's own `BUILDING_STEP_UP`,
-    // so every tread is comfortably walkable up *and* back down.
-    //
-    // The centre is the load-bearing number and it is worth checking by hand
-    // if it ever moves: at `toAngle` the treads sit at
-    // `(centreX − r, centreZ)`, which must land inside the deck rectangle, and
-    // at `fromAngle` at `(centreX, centreZ + r)`, which must be clear lobby
-    // floor. With these, the top tread spans x 2.6–4.4 at z = −8.5 (on the
-    // deck, which reaches x ≤ 5 and z ≤ −7.6) and the bottom one x = 6.8 at
-    // z −6.1…−4.3 (open floor, and clear of reception at x = 10).
-    stair: {
-      centreX: 6.8,
-      centreZ: -8.5,
-      innerRadius: 2.4,
-      outerRadius: 4.2,
-      fromAngle: 0,
-      toAngle: Math.PI / 2,
-      treads: 10,
+    landing: {
+      minX: -4.93,
+      maxX: 4.93,
+      minZ: -7.6,
+      maxZ: STAIR_ARC_Z,
+      height: LOBBY_LANDING_Y,
+      slab: LOBBY_LANDING_SLAB,
+    },
+    stairs: [
+      // 'right' — the flight that turns right as you climb it — on +X, and
+      // its mirror on −X, both at fromAngle 0 (no rotation at all): at a
+      // quarter turn a flight's foot is square to the room AND its top square
+      // to the landing, which is the whole reason the sweep is 90°.
+      {
+        centreX: STAIR_ARC_C,
+        centreZ: STAIR_ARC_Z,
+        innerRadius: 3.06,
+        outerRadius: 4.86,
+        fromAngle: 0,
+        toAngle: Math.PI / 2,
+        treads: 12,
+      },
+      {
+        centreX: -STAIR_ARC_C,
+        centreZ: STAIR_ARC_Z,
+        innerRadius: 3.06,
+        outerRadius: 4.86,
+        fromAngle: 0,
+        toAngle: -Math.PI / 2,
+        treads: 12,
+      },
+    ],
+    straight: {
+      centreX: 0,
+      frontZ: -5.008,
+      walkWidth: 3.6,
+      flankX: 2.01,
+      treads: 5,
+      rise: LOBBY_MEZZANINE_Y - LOBBY_LANDING_Y,
     },
   },
   liftZ: 0,
