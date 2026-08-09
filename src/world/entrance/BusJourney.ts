@@ -1193,13 +1193,21 @@ export class BusJourney {
 
     for (let i = 0; i < TREES; i += 1) {
       const side = i % 2 === 0 ? 1 : -1;
-      // Clear of the tarmac, thinning outwards so the lane has a near edge and
-      // a soft far one.
-      const x = side * (ROAD_HALF_WIDTH + 2.6 + rng() * rng() * 62);
-      const z = LANE_AHEAD - rng() * LANE_OPEN_RUN;
-      const ground = groundHeight(x, z);
       const height = 3.4 + rng() * 4.2;
       const radius = 1.5 + rng() * 1.6;
+      // Clear of the tarmac, thinning outwards so the lane has a near edge and
+      // a soft far one.
+      //
+      // **The canopy is what has to clear it, not the trunk.** This offset used
+      // to be applied to the trunk with the canopy — up to 3.1 m of it — left
+      // to hang wherever it landed, which put leaves 0.17 m over the
+      // carriageway at 5.4 m, right where the bus's roof goes. So the tree is
+      // pushed out by its own canopy radius and the 2.6 m verge is measured
+      // from the leaves inward. Same discipline as `PARK_AHEAD_CLEAR`: the
+      // thing's own size decides where it may stand.
+      const x = side * (ROAD_HALF_WIDTH + radius + 2.6 + rng() * rng() * 60);
+      const z = LANE_AHEAD - rng() * LANE_OPEN_RUN;
+      const ground = groundHeight(x, z);
 
       spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI * 2);
       at.set(x, ground + height / 2, z);
@@ -1231,10 +1239,18 @@ export class BusJourney {
       const side = i % 2 === 0 ? 1 : -1;
       const along = (i / HEDGE) * LANE_OPEN_RUN;
       const z = LANE_AHEAD - along;
-      const x = side * (ROAD_HALF_WIDTH + 0.9 + rng() * 0.5);
       const radius = 0.75 + rng() * 0.45;
+      // **Its own width, again.** The offset used to be applied to the blob's
+      // *centre* while the blob was scaled 1.35× wider than `radius`, so up to
+      // 1.62 m of hedge hung off a 0.9 m verge and the worst instance sat
+      // 0.65 m inside the carriageway — measured, on the road, where the bus
+      // drives. Placing the near face at the kerb instead keeps the hedge
+      // hugging the road, which is the whole reason it is here, without any of
+      // it being *on* the road.
+      const spread = radius * 1.35;
+      const x = side * (ROAD_HALF_WIDTH + spread + rng() * 0.4);
       at.set(x, groundHeight(x, z) + radius * 0.55, z);
-      scale.set(radius * 1.35, radius, radius * 1.35);
+      scale.set(spread, radius, spread);
       spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI);
       matrix.compose(at, spin, scale);
       hedge.setMatrixAt(i, matrix);

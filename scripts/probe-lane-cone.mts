@@ -40,7 +40,7 @@ journey.scene.traverse((node) => {
   if (EXEMPT.has(node.name)) return;
   // Anything hanging off the bus is the bus, and the bus is meant to be on the road.
   for (let a: typeof node | null = node; a; a = a.parent) {
-    if (a.name === 'cat-bus' || a.name === 'cat-bus-journey') return;
+    if (a.name === 'cat-bus') return;
   }
   const mesh = node as Mesh;
   if (!(node instanceof Mesh) && !(node instanceof InstancedMesh)) return;

@@ -32,6 +32,48 @@ export interface HidingFact {
   readonly what: string;
 }
 
+/**
+ * One thing found standing in the journey lane's carriageway — the road the cat
+ * bus drives up to the park on.
+ */
+export interface LaneObstructionFact {
+  /** The scene node it came out of, so a failure names the population. */
+  readonly node: string;
+  /** Which instance, or -1 for a plain `Mesh`. */
+  readonly instance: number;
+  /** The world-space vertex that reaches furthest in. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** How far inside the carriageway edge that vertex sits, in metres. */
+  readonly reach: number;
+}
+
+/**
+ * One run of the arrival, from the first frame of the bus ride to the moment
+ * the park takes the screen.
+ */
+export interface ArrivalRunFact {
+  /** What this run was set up to reproduce, for the failure message. */
+  readonly what: string;
+  /** Did it end? The whole point. */
+  readonly handedOver: boolean;
+  /** Ride seconds at hand-over, or -1 if it never came. */
+  readonly handOverSeconds: number;
+  /** Ride seconds when the skip became available, or -1 if it never did. */
+  readonly skipOfferedSeconds: number;
+  /** Frames the run took before it ended or the ceiling stopped it. */
+  readonly frames: number;
+  /** Ride seconds simulated. */
+  readonly seconds: number;
+  /** The ceiling it was stopped at, if it was. */
+  readonly ceilingSeconds: number;
+  /** `JOURNEY_SECONDS` — carried here so the invariant never static-imports it. */
+  readonly rideSeconds: number;
+  /** The director's own account of itself at the end. */
+  readonly finalState: string;
+}
+
 /** A wall run flattened to what a clearance test needs. */
 export interface WallFact {
   readonly from: readonly [number, number];
@@ -436,6 +478,29 @@ export interface ParkFacts {
    * from behind.
    */
   readonly hidingTheArrivingBus: readonly HidingFact[];
+  /**
+   * **Everything standing in the journey lane's carriageway**, measured off the
+   * built `BusJourney` scene in world space.
+   *
+   * Real vertices through real instance matrices, never the scatter's own rules
+   * — the whole bug was a scatter whose rules said one thing and whose output
+   * did another.
+   */
+  readonly laneCarriageway: readonly LaneObstructionFact[];
+  /**
+   * `road.ts`'s `ROAD_HALF_WIDTH`, carried on the facts for the same reason
+   * every other number here is: an invariant that static-imports a `src/`
+   * module pins every seed to the default park.
+   */
+  readonly laneRoadHalfWidth: number;
+  /**
+   * **The arrival, run to its end.** Twice: once with the park arriving on
+   * time, once with it arriving long after the ride is over.
+   */
+  readonly arrivalRuns: {
+    readonly onTime: ArrivalRunFact;
+    readonly overrun: ArrivalRunFact;
+  };
   readonly routes: readonly RouteFact[];
   readonly exits: readonly ExitFact[];
   /** The destination graph `paths.ts` grows the network from. */
@@ -1657,7 +1722,237 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     });
   }
 
+  // --- the journey lane, and whether the arrival ever finishes --------------
+  //
+  // Dynamically imported like everything else here. `BusJourney` is not itself
+  // seed-dependent — its scatter takes a literal seed — but it reaches
+  // `art/style/materials.ts` and the character models, and a static import of
+  // any of that at the top of this file is the documented way to pin every seed
+  // to the default park (CLAUDE.md's 76-silent-skips trap). It is cheap to
+  // build and running it on all five seeds is what *proves* it is
+  // seed-independent rather than asserting it: five identical measurements.
+  const { BusJourney, JOURNEY_SECONDS, laneHeight } = await import(
+    '../../src/world/entrance/BusJourney.ts'
+  );
+  const { JourneyDirector } = await import('../../src/world/entrance/journeyDirector.ts');
+  const { ShaderWarmup, WARMUP_BUDGET_MS } = await import('../../src/boot/shaderWarmup.ts');
+  const { ROAD_HALF_WIDTH } = await import('../../src/world/entrance/road.ts');
+  const { CROWD_HAIR_STYLES } = await import('../../src/art/models/hair.ts');
+  // `Box3` is already bound further up this same function scope (the castle
+  // tower block), so it is aliased here — the same move `Mat4`/`Vec3`/
+  // `Instanced` already make a few hundred lines above.
+  const { Box3: LaneBox3, PerspectiveCamera } = await import('three');
+
+  const aRider = {
+    skin: 0xffd9be,
+    hair: 0x8b5a3c,
+    outfit: 0xff9fc4,
+    hairStyle: CROWD_HAIR_STYLES[0]!,
+  };
+
+  // --- what stands in the carriageway --------------------------------------
+  //
+  // Every renderable vertex in the lane, through its own instance matrix, in
+  // world space. Not bounding boxes: a rotated box's AABB over-reports by up to
+  // 41%, which would make the guard fire on things that are genuinely clear and
+  // teach everyone to widen it. The road and the ground it is painted on are
+  // exempt for the obvious reason, and so is the bus and everything hanging off
+  // it — the bus is *supposed* to be on the road.
+  const laneCarriageway: LaneObstructionFact[] = (() => {
+    const lane = new BusJourney(aRider);
+    lane.scene.updateMatrixWorld(true);
+
+    // **The height that matters is the bus's own.** A branch overhanging the
+    // road nine metres up is scenery; the same shape at wheel height is a
+    // roadblock, and only one of those is worth a failing build. Taken off the
+    // built bus rather than from a literal, so it stays true the next time
+    // somebody resizes it — which has already happened once, from 11 m to
+    // 18.2 m long (`layout.ts`).
+    let busTop = 0;
+    const busBox = new LaneBox3();
+    lane.scene.traverse((node) => {
+      if (node.name === 'cat-bus') busTop = busBox.setFromObject(node).max.y;
+    });
+
+    const exempt = new Set(['journey-road', 'journey-ground']);
+    const worstPerNode = new Map<string, LaneObstructionFact>();
+    const localVertex = new Vec3();
+    const worldVertex = new Vec3();
+    const instanceMatrix = new Mat4();
+
+    const note = (node: string, instance: number, p: InstanceType<typeof Vec3>): void => {
+      const reach = ROAD_HALF_WIDTH - Math.abs(p.x);
+      if (reach <= 0) return;
+      // Only what a bus would hit. The road rides the hills, so the ceiling is
+      // measured from the lane surface under *this* point, not from y = 0.
+      if (p.y > laneHeight(p.z) + busTop) return;
+      const held = worstPerNode.get(node);
+      if (held && held.reach >= reach) return;
+      worstPerNode.set(node, { node, instance, x: p.x, y: p.y, z: p.z, reach });
+    };
+
+    lane.scene.traverse((node) => {
+      if (exempt.has(node.name)) return;
+      // **Only the bus and the gate.** `cat-bus-journey` is the name of the
+      // *whole scene* (`BusJourney.ts`'s constructor), so exempting it here —
+      // as the first draft of this did — walked every node's ancestry straight
+      // up to the root and let everything through: zero fouls on a lane with a
+      // cone standing in it. Found by reverting the fix and watching the guard
+      // stay green, which is the only reason it is not still in here.
+      //
+      // The gate is exempt because a gate is a thing the road goes *through* by
+      // design; whether its opening is passable is `theGateIsAHoleInTheWall`'s
+      // question, and one owner per question.
+      for (let up: typeof node | null = node; up; up = up.parent) {
+        if (up.name === 'cat-bus' || up.name === 'journey-park-gate') return;
+      }
+      const drawn = node instanceof Instanced || node instanceof Mesh;
+      if (!drawn) return;
+      const position = (node as InstanceType<typeof Mesh>).geometry?.getAttribute('position');
+      if (!position) return;
+      const name = node.name || `(unnamed ${node.type})`;
+
+      if (node instanceof Instanced) {
+        for (let i = 0; i < node.count; i += 1) {
+          node.getMatrixAt(i, instanceMatrix);
+          for (let v = 0; v < position.count; v += 1) {
+            localVertex.fromBufferAttribute(position, v);
+            worldVertex
+              .copy(localVertex)
+              .applyMatrix4(instanceMatrix)
+              .applyMatrix4(node.matrixWorld);
+            note(name, i, worldVertex);
+          }
+        }
+        return;
+      }
+      for (let v = 0; v < position.count; v += 1) {
+        localVertex.fromBufferAttribute(position, v);
+        worldVertex.copy(localVertex).applyMatrix4(node.matrixWorld);
+        note(name, -1, worldVertex);
+      }
+    });
+
+    lane.dispose();
+    return [...worstPerNode.values()].sort((a, b) => b.reach - a.reach);
+  })();
+
+  // --- does the arrival reach its end? --------------------------------------
+  //
+  // **The assertion that was missing.** Everything already checked around this
+  // sequence measured a property of it — the 45-degree pan, the floor
+  // percentages, the glazing, twelve seated children, the skip in both
+  // directions — and both existing director checks flip `readyToHandOver` true
+  // by *hand-calling* `noteParkReady()` and `noteWarmupReady()` on a bare
+  // `JourneyDirector` that is joined to no scene at all. That proves the
+  // director's boolean algebra. It cannot prove the signals ever arrive, which
+  // is the only thing a child cares about.
+  //
+  // So this drives the real `JourneyDirector` and the real `BusJourney` through
+  // the same steps, in the same order, that `main.ts`'s ride loop does, and
+  // nothing is set by fiat: `parkReady` is only ever noted after
+  // `shouldBuildPark()` has asked for it, and `warmupReady` only ever from a
+  // real `ShaderWarmup` draining a real queue built over this seed's real park
+  // scene.
+  //
+  // **What is honestly not real here:** `renderer.compile()` needs a GPU, so the
+  // renderer is inert and the queue drains faster than it would on a phone.
+  // That makes this a guard on *termination*, not on warm-up cost — which is
+  // `check:park-boot`'s job and is measured there. The failure it exists to
+  // catch is a signal that never comes at all, and an inert compile cannot hide
+  // one of those.
+  const RIDE_STEP = 1 / 60;
+  /**
+   * Frames between `shouldBuildPark()` and the park being in hand.
+   *
+   * `main.ts` builds it inside `loadGame().then(...)`, so it settles on a later
+   * frame rather than the same one. Two, because the module is already
+   * evaluated by then and the promise is only waiting on a microtask turn.
+   */
+  const PARK_SETTLE_FRAMES = 2;
+
+  const runTheArrival = (what: string, generationReadyAt: number): ArrivalRunFact => {
+    const director = new JourneyDirector();
+    const journey = new BusJourney(aRider);
+    const inertRenderer = { compile: () => {} } as unknown as ConstructorParameters<
+      typeof ShaderWarmup
+    >[0];
+    let warmup: InstanceType<typeof ShaderWarmup> | null = null;
+    let parkDueOnFrame = -1;
+    let skipOfferedSeconds = -1;
+    let handOverSeconds = -1;
+    let ridden = 0;
+    let frames = 0;
+    // Six rides' worth. Generous on purpose: a ceiling that a healthy run comes
+    // anywhere near would go red for being slow rather than for being stuck.
+    const ceilingSeconds = JOURNEY_SECONDS * 6;
+
+    while (ridden < ceilingSeconds) {
+      director.advance(RIDE_STEP);
+      journey.update(RIDE_STEP, !director.overrunning);
+
+      if (director.shouldAdvanceGeneration() && ridden >= generationReadyAt) {
+        director.noteGenerationReady();
+      }
+      if (director.shouldBuildPark()) {
+        director.noteParkBuildStarted();
+        parkDueOnFrame = director.frames + PARK_SETTLE_FRAMES;
+      }
+      if (parkDueOnFrame >= 0 && director.frames >= parkDueOnFrame && !director.parkReady) {
+        director.noteParkReady();
+        warmup = new ShaderWarmup(inertRenderer, scene, new PerspectiveCamera());
+        skipOfferedSeconds = ridden;
+      }
+      if (warmup && director.shouldWarmShaders()) {
+        warmup.advance(WARMUP_BUDGET_MS);
+        if (warmup.ready) director.noteWarmupReady();
+      }
+
+      ridden += RIDE_STEP;
+      frames += 1;
+
+      if (director.readyToHandOver) {
+        handOverSeconds = ridden;
+        break;
+      }
+    }
+
+    const finalState =
+      `rideOver=${director.rideOver} generationReady=${director.generationReady} ` +
+      `parkReady=${director.parkReady} warmupReady=${director.warmupReady} ` +
+      `parkFitToPlay=${director.parkFitToPlay} overrunning=${director.overrunning} ` +
+      `skipOffered=${director.skipOffered} parkBuildFrame=${director.parkBuildFrame}`;
+
+    journey.dispose();
+    return {
+      what,
+      handedOver: handOverSeconds >= 0,
+      handOverSeconds,
+      skipOfferedSeconds,
+      frames,
+      seconds: ridden,
+      ceilingSeconds,
+      rideSeconds: JOURNEY_SECONDS,
+      finalState,
+    };
+  };
+
+  const arrivalRuns = {
+    onTime: runTheArrival('the park generated during the ride, as it normally does', 1),
+    // The case `JourneyDirector.overrunning` exists for, and the one its own
+    // doc calls "never true today" — which is exactly why it needs driving
+    // rather than reasoning about. The bus pulls in to the gate and idles; the
+    // question is whether it ever stops idling.
+    overrun: runTheArrival(
+      'the park generated long after the ride ran out (the overrun)',
+      JOURNEY_SECONDS + 8,
+    ),
+  };
+
   return {
+    laneCarriageway,
+    laneRoadHalfWidth: ROAD_HALF_WIDTH,
+    arrivalRuns,
     archClearance,
     archLegs,
     duckBars,
