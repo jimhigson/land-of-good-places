@@ -2629,7 +2629,13 @@ export class Hotel implements GameSystem {
     }
     // Its flanks hold a climber on the flight and a landing walker out of its
     // strings — **banded**, because beneath them is the open recess a ground
-    // walker crosses on the axis, not floor-to-flank masonry.
+    // walker crosses on the axis, not floor-to-flank masonry. They are also
+    // `navStamped`, the one banded case the lattice's level rule cannot
+    // refuse on its own: the flight's lowest treads run within a step of the
+    // landing beside them, so an unstamped flank let the router connect the
+    // landing to the flight *sideways* and the walk wedged against a rail it
+    // could not see (found live, 9 Aug 2026; check:nav-routes walks the legs
+    // now). The axis keeps its channel — the flanks stand 4 m apart.
     for (const flankSign of [-1, 1]) {
       this.collision.addWall(
         room.originX + straight.centreX + flankSign * straight.flankX,
@@ -2641,6 +2647,7 @@ export class Hotel implements GameSystem {
         false,
         false,
         landing.height - RAIL_BASE_DROP,
+        true,
       );
     }
 

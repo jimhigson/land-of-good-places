@@ -54,8 +54,10 @@ import { circleBoundary } from '../src/world/boundary.ts';
 import {
   CAMERA_PITCH_DEGREES,
   HOTEL_PLAY_RADIUS,
+  PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
 } from '../src/core/constants.ts';
+import { damp } from '../src/core/mathUtils.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { LOBBY, mezzanineWalkConnectors } from '../src/world/hotel/layout.ts';
 
@@ -135,6 +137,7 @@ interface Route {
   readonly endY: number;
   readonly viaCurveMouth: boolean;
   readonly viaStraight: boolean;
+  readonly points: readonly { x: number; z: number }[];
 }
 
 function route(
@@ -148,9 +151,11 @@ function route(
   const endZ = count > 0 ? (out[(count - 1) * 2 + 1] ?? NaN) : from.z;
   let viaCurveMouth = false;
   let viaStraight = false;
+  const points: { x: number; z: number }[] = [];
   for (let i = 0; i < count; i += 1) {
     const wx = out[i * 2] ?? NaN;
     const wz = out[i * 2 + 1] ?? NaN;
+    points.push({ x: wx, z: wz });
     if (curveMouths.some((m) => Math.hypot(wx - m.x, wz - m.z) <= 1.6)) viaCurveMouth = true;
     const lx = wx - LOBBY.originX;
     const lz = wz - LOBBY.originZ;
@@ -172,7 +177,60 @@ function route(
     endY: navGrid.lastRouteEndY,
     viaCurveMouth,
     viaStraight,
+    points,
   };
+}
+
+/**
+ * Walks a route's smoothed waypoints with the real resolver and the player's
+ * own ground damp — the flesh of the walk, not the graph of it. Returns the
+ * body's final position, or where it wedged when a leg could not be finished.
+ *
+ * Exists because a route can be valid end-to-end while a *smoothed leg* is
+ * unwalkable: string-pulling collapsed the grand flight's ramp waypoints
+ * into a chord across the landing beside it, and the live walk ground
+ * against the gallery rail at 3.84 m for ever, seeking a 5.44 m waypoint
+ * (9 Aug 2026). Every route probe above stayed green through that, because
+ * they ask where the route ends and never whether legs can be walked.
+ */
+function walkRoute(
+  from: { x: number; z: number },
+  fromY: number,
+  r: Route,
+): { x: number; z: number; y: number; wedgedAt: number } {
+  const dt = 1 / 60;
+  const position = new Vector3(from.x, fromY, from.z);
+  let wedgedAt = -1;
+  for (let leg = 0; leg < r.points.length; leg += 1) {
+    const wp = r.points[leg]!;
+    let arrived = false;
+    for (let step = 0; step < 60 * 12; step += 1) {
+      const dx = wp.x - position.x;
+      const dz = wp.z - position.z;
+      const planar = Math.hypot(dx, dz);
+      if (planar < 0.4) {
+        arrived = true;
+        break;
+      }
+      const stride = Math.min(PLAYER_MAX_SPEED * dt, planar);
+      park.world.collision.resolveMovement(
+        position,
+        (dx / planar) * stride,
+        (dz / planar) * stride,
+        PLAYER_RADIUS,
+        0,
+        dt,
+      );
+      const floor = park.sample(position.x, position.z, position.y);
+      position.y = damp(position.y, floor, 0.04, dt);
+      if (position.y - floor > 0.5) position.y = floor;
+    }
+    if (!arrived) {
+      wedgedAt = leg;
+      break;
+    }
+  }
+  return { x: position.x, z: position.z, y: position.y, wedgedAt };
 }
 
 function assertRoute(
@@ -235,6 +293,27 @@ assertRoute(
   FLOOR_Y,
   { curve: true, straight: true },
 );
+
+// 4b. **The route's legs are walkable flesh.** The live repro: a tap on the
+// gallery's east lane beside the grand flight. The route was valid — and its
+// smoothed chord cut across the landing beside the flight's ramp, wedging the
+// walk against the gallery rail at 3.84 m (see `walkRoute`'s header). So the
+// smoothed waypoints are *walked*, with the resolver and the ground damp, and
+// the body must genuinely arrive on the gallery. Proven red against
+// `lineIsWalkable` without its arrival-level term: wedged on leg 19 at
+// (2.9, 3.84, −6.8).
+{
+  const eastLane = world(2.9, -9.2);
+  const r = route(floorPoint, FLOOR_Y, eastLane, DECK_Y);
+  const walked = walkRoute(floorPoint, FLOOR_Y, r);
+  const planar = Math.hypot(walked.x - eastLane.x, walked.z - eastLane.z);
+  check(
+    walked.wedgedAt === -1 && planar <= 1.0 && Math.abs(walked.y - DECK_Y) <= 0.62,
+    `walking the floor → gallery-east route arrives (body at (${(walked.x - LOBBY.originX).toFixed(1)}, ` +
+      `${walked.y.toFixed(2)}, ${(walked.z - LOBBY.originZ).toFixed(1)}) local` +
+      `${walked.wedgedAt >= 0 ? `, wedged on leg ${walked.wedgedAt}` : ''})`,
+  );
+}
 
 // A tap ray exactly as the game casts one: backed out along the iso camera's
 // own offset, aimed at the target.

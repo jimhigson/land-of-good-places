@@ -79,11 +79,22 @@ import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
  * a floor walker. Defaults to `-Infinity` — every existing caller keeps
  * today's behaviour for free. Not combinable with `autoHoppable` (the hop
  * planner reasons in relative clearances; `checkHoppableColliders` demotes
- * offenders). `NavGrid` deliberately does **not** stamp banded colliders into
- * its lattice: the lattice's own level rule (no edge between nodes more than
- * a step apart) already refuses every route the rail guards against, and
- * stamping one would wall off the walkable floor beneath it — the exact
- * disease the band cures in the resolver.
+ * offenders).
+ *
+ * `NavGrid` does **not** stamp a banded collider into its lattice by default:
+ * stamping one would wall off the walkable floor beneath it at every level —
+ * the exact disease the band cures in the resolver — and for an *edge* rail
+ * (a balustrade on a drop) the lattice's own level rule already refuses every
+ * route the rail refuses, because nothing walkable sits within a step across
+ * it. `navStamped` is for the one banded collider that rule cannot cover: the
+ * **flank of a ramp** whose edge levels run within a step of the floor beside
+ * it. The imperial lobby's grand flight stands on its landing, and its lowest
+ * treads are half a riser above it — so the lattice happily connected the
+ * landing to the flight *sideways through the flank*, and the walk wedged
+ * against a rail the router could not see (found live, 9 Aug 2026, and held
+ * red by check:nav-routes' walked-legs probe). A `navStamped` banded collider
+ * is stamped like any wall — ground routes detour around its shadow, which is
+ * the honest price of the lattice staying two-dimensional.
  */
 
 interface CircleCollider {
@@ -95,6 +106,8 @@ interface CircleCollider {
   topIsAbsolute: boolean;
   /** World Y below which this collider does not exist. See the header. */
   baseHeight: number;
+  /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
+  navStamped: boolean;
 }
 
 export interface WallCollider {
@@ -108,6 +121,8 @@ export interface WallCollider {
   topIsAbsolute: boolean;
   /** World Y below which this collider does not exist. See the header. */
   baseHeight: number;
+  /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
+  navStamped: boolean;
 }
 
 /**
@@ -439,8 +454,18 @@ export class CollisionWorld {
     autoHoppable = false,
     topIsAbsolute = false,
     baseHeight = -Infinity,
+    navStamped = false,
   ): void {
-    this.circles.push({ x, z, radius, topHeight, autoHoppable, topIsAbsolute, baseHeight });
+    this.circles.push({
+      x,
+      z,
+      radius,
+      topHeight,
+      autoHoppable,
+      topIsAbsolute,
+      baseHeight,
+      navStamped,
+    });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
   }
@@ -455,6 +480,7 @@ export class CollisionWorld {
     autoHoppable = false,
     topIsAbsolute = false,
     baseHeight = -Infinity,
+    navStamped = false,
   ): WallCollider {
     const wall: WallCollider = {
       x1,
@@ -466,6 +492,7 @@ export class CollisionWorld {
       autoHoppable,
       topIsAbsolute,
       baseHeight,
+      navStamped,
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
@@ -530,6 +557,7 @@ export class CollisionWorld {
       topHeight: number,
       autoHoppable: boolean,
       baseHeight: number,
+      navStamped: boolean,
     ) => void,
   ): void {
     for (const circle of this.circles) {
@@ -540,6 +568,7 @@ export class CollisionWorld {
         circle.topHeight,
         circle.autoHoppable,
         circle.baseHeight,
+        circle.navStamped,
       );
     }
   }
@@ -554,6 +583,7 @@ export class CollisionWorld {
       topHeight: number,
       autoHoppable: boolean,
       baseHeight: number,
+      navStamped: boolean,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -566,6 +596,7 @@ export class CollisionWorld {
         wall.topHeight,
         wall.autoHoppable,
         wall.baseHeight,
+        wall.navStamped,
       );
     }
   }

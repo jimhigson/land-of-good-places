@@ -450,15 +450,17 @@ export class NavGrid {
     // the rail refuses, and stamping it would block the walkable floor
     // *beneath* the overhang — the lobby's walk-through arch — at every
     // level. See `Collision.ts`'s `baseHeight` header.
-    this.collision.forEachCircle((x, z, colliderRadius, topHeight, autoHoppable, baseHeight) => {
-      if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-      if (Number.isFinite(baseHeight)) return;
-      this.stampCircle(x, z, colliderRadius + this.walkerRadius);
-    });
-    this.collision.forEachWall(
-      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight) => {
+    this.collision.forEachCircle(
+      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped) => {
         if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-        if (Number.isFinite(baseHeight)) return;
+        if (Number.isFinite(baseHeight) && !navStamped) return;
+        this.stampCircle(x, z, colliderRadius + this.walkerRadius);
+      },
+    );
+    this.collision.forEachWall(
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped) => {
+        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
+        if (Number.isFinite(baseHeight) && !navStamped) return;
         this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
       },
     );
@@ -914,6 +916,7 @@ export class NavGrid {
             this.pointY[anchor] ?? 0,
             this.pointX[furthest + 1] ?? 0,
             this.pointZ[furthest + 1] ?? 0,
+            this.pointY[furthest + 1] ?? 0,
           )
         ) {
           furthest += 1;
@@ -942,12 +945,26 @@ export class NavGrid {
    * the nearest level along, so a line that crosses a deck edge or a drop
    * fails for the same reason a step across one does.
    */
+  /**
+   * `bHeight` is the level the route's own node at `(bx, bz)` stands on, and
+   * the line must genuinely **arrive** there. Following the floor under the
+   * line step by step is not enough on its own: beside a wide walkable ramp,
+   * a chord between two of the route's ramp waypoints can swing sideways onto
+   * the level plateau next to it and read walkable the whole way — at the
+   * plateau's height, not the ramp's. The route then tells a walker to cut
+   * across ground that never climbs, and she grinds at the ramp's flank a
+   * level below her next waypoint. Found live on the imperial lobby's grand
+   * flight (9 Aug 2026): string-pulling collapsed the flight's ramp waypoints
+   * into a chord across the landing, and the walk wedged at 3.84 m against
+   * the gallery's rail seeking a 5.44 m waypoint.
+   */
   private lineIsWalkable(
     ax: number,
     az: number,
     aHeight: number,
     bx: number,
     bz: number,
+    bHeight: number,
   ): boolean {
     const startCell = this.cellAt(ax, az);
     if (startCell < 0 || this.blocked[startCell] === 1) return false;
@@ -966,7 +983,7 @@ export class NavGrid {
       if (Math.abs(height - previousHeight) > MAX_STEP) return false;
       previousHeight = height;
     }
-    return true;
+    return Math.abs(previousHeight - bHeight) <= MAX_STEP;
   }
 
   // ---------------------------------------------------------------- plumbing
