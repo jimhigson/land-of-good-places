@@ -1212,9 +1212,10 @@ export function* coasterProfileSearch(
   const probe = new Vector3();
   for (let pass = 0; pass < 10; pass += 1) {
     // One repair pass per slice. The loop rebuilds the whole curve and its
-    // 1600-sample arc-length table each pass and never converges early, so
-    // all ten always run: as one block that measured 18.9 ms here and 54.6 ms
-    // on CI, against a 24 ms ceiling. A pass is ~1.9 ms, which fits.
+    // 1600-sample arc-length table each pass and, on the canonical seed, never
+    // converges early — so all ten always run, and as one block they measured
+    // 18.9 ms here and 54.6 ms on CI. Re-measured 9 August 2026, a pass is
+    // **0.55-0.8 ms**, comfortably inside the 8 ms a frame is given.
     yield pass;
     // Worst deficit per control point, so a run of low samples under one
     // control raises it once by what it needs, not once per sample. The same
