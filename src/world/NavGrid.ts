@@ -442,15 +442,26 @@ export class NavGrid {
     }
 
     // Then everything solid, fattened by the walker's own width — skipping the
-    // walls she hops without being asked, which are not obstacles to her.
-    this.collision.forEachCircle((x, z, colliderRadius, topHeight, autoHoppable) => {
+    // walls she hops without being asked, which are not obstacles to her, and
+    // skipping **banded** colliders (a finite `baseHeight` — the balustrade on
+    // an overhanging deck's edge). A banded collider guards an edge rather
+    // than occupying the column of space: the lattice's own level rule (no
+    // edge between nodes more than a step apart) already refuses every route
+    // the rail refuses, and stamping it would block the walkable floor
+    // *beneath* the overhang — the lobby's walk-through arch — at every
+    // level. See `Collision.ts`'s `baseHeight` header.
+    this.collision.forEachCircle((x, z, colliderRadius, topHeight, autoHoppable, baseHeight) => {
       if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
+      if (Number.isFinite(baseHeight)) return;
       this.stampCircle(x, z, colliderRadius + this.walkerRadius);
     });
-    this.collision.forEachWall((x1, z1, x2, z2, halfThickness, topHeight, autoHoppable) => {
-      if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-      this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
-    });
+    this.collision.forEachWall(
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight) => {
+        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
+        if (Number.isFinite(baseHeight)) return;
+        this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
+      },
+    );
 
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive

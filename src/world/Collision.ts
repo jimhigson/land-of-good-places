@@ -57,6 +57,33 @@ import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
  * relative clearances, and nothing a child did not choose to jump onto
  * should auto-fire anyway. `world/hotel/place.ts` is the caller this exists
  * for.
+ *
+ * ## `baseHeight` — a collider that exists only above its own base
+ *
+ * The mirror of `topIsAbsolute`, for the opposite problem: a balustrade on
+ * the edge of an **overhanging** deck. The imperial lobby's landing hangs
+ * 3.84 m over an open, walk-through arch (its whole design — Jim's reference
+ * photograph is the see-through), so the rail that stops a child walking off
+ * the landing stands directly above floor a child on the ground must walk
+ * under freely. A height-agnostic collider there is an invisible wall across
+ * the archway; no collider at all is a six-year-old walking off a 3.84 m
+ * drop. `baseHeight` is the third answer: a **world-space Y** below which the
+ * collider simply does not exist. The landing's rails carry
+ * `baseHeight = landingY − 0.5` — active for anyone stood on the landing
+ * (feet at landingY, damp-lag included), inert for anyone on the floor below,
+ * unreachable by a ground jump (apex 1.28 m, far under the base).
+ *
+ * Absolute-only, deliberately, for exactly the reason `topIsAbsolute` exists:
+ * `clearance` is measured above the mover's *own* ground, so every walker on
+ * every level reads 0 and a relative base could never tell a deck walker from
+ * a floor walker. Defaults to `-Infinity` — every existing caller keeps
+ * today's behaviour for free. Not combinable with `autoHoppable` (the hop
+ * planner reasons in relative clearances; `checkHoppableColliders` demotes
+ * offenders). `NavGrid` deliberately does **not** stamp banded colliders into
+ * its lattice: the lattice's own level rule (no edge between nodes more than
+ * a step apart) already refuses every route the rail guards against, and
+ * stamping one would wall off the walkable floor beneath it — the exact
+ * disease the band cures in the resolver.
  */
 
 interface CircleCollider {
@@ -66,6 +93,8 @@ interface CircleCollider {
   topHeight: number;
   autoHoppable: boolean;
   topIsAbsolute: boolean;
+  /** World Y below which this collider does not exist. See the header. */
+  baseHeight: number;
 }
 
 export interface WallCollider {
@@ -77,6 +106,8 @@ export interface WallCollider {
   topHeight: number;
   autoHoppable: boolean;
   topIsAbsolute: boolean;
+  /** World Y below which this collider does not exist. See the header. */
+  baseHeight: number;
 }
 
 /**
@@ -323,9 +354,13 @@ export class CollisionWorld {
    */
   isClearCircle(x: number, z: number, radius: number): boolean {
     for (const circle of this.circles) {
+      // A ground-plane planning query: a banded collider (baseHeight above the
+      // ground) is not solid to anything standing here.
+      if (circle.baseHeight > 0) continue;
       if (Math.hypot(x - circle.x, z - circle.z) < radius + circle.radius) return false;
     }
     for (const wall of this.walls) {
+      if (wall.baseHeight > 0) continue;
       const abx = wall.x2 - wall.x1;
       const abz = wall.z2 - wall.z1;
       const lengthSq = abx * abx + abz * abz || 1;
@@ -403,8 +438,9 @@ export class CollisionWorld {
     topHeight = Infinity,
     autoHoppable = false,
     topIsAbsolute = false,
+    baseHeight = -Infinity,
   ): void {
-    this.circles.push({ x, z, radius, topHeight, autoHoppable, topIsAbsolute });
+    this.circles.push({ x, z, radius, topHeight, autoHoppable, topIsAbsolute, baseHeight });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
   }
@@ -418,6 +454,7 @@ export class CollisionWorld {
     topHeight = Infinity,
     autoHoppable = false,
     topIsAbsolute = false,
+    baseHeight = -Infinity,
   ): WallCollider {
     const wall: WallCollider = {
       x1,
@@ -428,6 +465,7 @@ export class CollisionWorld {
       topHeight,
       autoHoppable,
       topIsAbsolute,
+      baseHeight,
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
@@ -491,10 +529,18 @@ export class CollisionWorld {
       radius: number,
       topHeight: number,
       autoHoppable: boolean,
+      baseHeight: number,
     ) => void,
   ): void {
     for (const circle of this.circles) {
-      visit(circle.x, circle.z, circle.radius, circle.topHeight, circle.autoHoppable);
+      visit(
+        circle.x,
+        circle.z,
+        circle.radius,
+        circle.topHeight,
+        circle.autoHoppable,
+        circle.baseHeight,
+      );
     }
   }
 
@@ -507,6 +553,7 @@ export class CollisionWorld {
       halfThickness: number,
       topHeight: number,
       autoHoppable: boolean,
+      baseHeight: number,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -518,6 +565,7 @@ export class CollisionWorld {
         wall.halfThickness,
         wall.topHeight,
         wall.autoHoppable,
+        wall.baseHeight,
       );
     }
   }
@@ -746,6 +794,9 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
+        // A banded collider does not exist for a mover below its base — the
+        // landing rail over the open archway. See the header.
+        if (position.y < circle.baseHeight) continue;
         // Absolute tops compare against the mover's real feet height, so a
         // prop she is stood on holds still under her — see the header.
         if (clearsTop(circle.topHeight, circle.topIsAbsolute ? position.y : clearance)) {
@@ -778,6 +829,8 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
+        // Same banded-base rule as the circles above.
+        if (position.y < wall.baseHeight) continue;
         // Same absolute-top rule as the circles above.
         if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
@@ -977,6 +1030,13 @@ export class CollisionWorld {
         demoted += 1;
         continue;
       }
+      if (Number.isFinite(circle.baseHeight)) {
+        // Same reasoning for a banded base: the planner cannot see one.
+        problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
+        circle.autoHoppable = false;
+        demoted += 1;
+        continue;
+      }
       if (inspect(circle.topHeight, circle.radius, where)) {
         circle.autoHoppable = false;
         demoted += 1;
@@ -989,6 +1049,12 @@ export class CollisionWorld {
         `[${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}]`;
       if (wall.topIsAbsolute) {
         problems.push(`${where} is autoHoppable with an absolute top, which is unsupported`);
+        wall.autoHoppable = false;
+        demoted += 1;
+        continue;
+      }
+      if (Number.isFinite(wall.baseHeight)) {
+        problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
         wall.autoHoppable = false;
         demoted += 1;
         continue;
