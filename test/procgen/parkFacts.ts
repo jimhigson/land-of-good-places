@@ -50,6 +50,28 @@ export interface LaneObstructionFact {
 }
 
 /**
+ * One drawn thing in the journey lane, and where its geometry came from.
+ *
+ * **Identity, not shape.** `parkTreeGeometry` is non-null only when the node
+ * draws *the very same* `BufferGeometry` object the park's own lawn draws. A
+ * pixel-perfect copy of a lollipop tree, constructed locally, reads as `null`
+ * here — and is meant to. What is being prevented is a second definition of a
+ * tree, not an ugly one.
+ */
+export interface LaneGreeneryFact {
+  /** The node's own name, or `''` for the anonymous meshes inside a group. */
+  readonly node: string;
+  /** Nearest named ancestor including itself — the population it belongs to. */
+  readonly population: string;
+  /** Instances drawn, or 1 for a plain `Mesh`. */
+  readonly instances: number;
+  /** Which park foliage shape this is, by object identity, or `null`. */
+  readonly parkTreeGeometry: 'trunk' | 'round' | 'cone' | null;
+  /** The geometry's own type name, so a failure can say what it found. */
+  readonly geometryType: string;
+}
+
+/**
  * One run of the arrival, from the first frame of the bus ride to the moment
  * the park takes the screen.
  */
@@ -487,6 +509,11 @@ export interface ParkFacts {
    * did another.
    */
   readonly laneCarriageway: readonly LaneObstructionFact[];
+  /**
+   * **Everything the journey lane draws, and whose geometry it is** — the
+   * measurement behind `nothing grows in the lane but the park's own trees`.
+   */
+  readonly laneGreenery: readonly LaneGreeneryFact[];
   /**
    * `road.ts`'s `ROAD_HALF_WIDTH`, carried on the facts for the same reason
    * every other number here is: an invariant that static-imports a `src/`
@@ -1724,19 +1751,24 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   // --- the journey lane, and whether the arrival ever finishes --------------
   //
-  // Dynamically imported like everything else here. `BusJourney` is not itself
-  // seed-dependent — its scatter takes a literal seed — but it reaches
-  // `art/style/materials.ts` and the character models, and a static import of
-  // any of that at the top of this file is the documented way to pin every seed
-  // to the default park (CLAUDE.md's 76-silent-skips trap). It is cheap to
-  // build and running it on all five seeds is what *proves* it is
-  // seed-independent rather than asserting it: five identical measurements.
+  // Dynamically imported like everything else here, and now for the first-order
+  // reason as well as the second-order one. `BusJourney`'s scatters used to take
+  // *literal* seeds, which is why the cone in the road was identical on every
+  // seed and no sweep could find it; they now draw from `PARK_SEED` like the
+  // rest of the park, so this lane is a different lane on each of the five
+  // seeds below and the guards over it are worth their runtime. The import has
+  // to stay dynamic regardless: `BusJourney` reaches `parkManifest.ts` directly
+  // now, and before that it already reached `art/style/materials.ts` and the
+  // character models — a static import of any of it at the top of this file is
+  // the documented way to pin every seed to the default park (CLAUDE.md's
+  // 76-silent-skips trap).
   const { BusJourney, JOURNEY_SECONDS, laneHeight } = await import(
     '../../src/world/entrance/BusJourney.ts'
   );
   const { JourneyDirector } = await import('../../src/world/entrance/journeyDirector.ts');
   const { ShaderWarmup, WARMUP_BUDGET_MS } = await import('../../src/boot/shaderWarmup.ts');
   const { ROAD_HALF_WIDTH } = await import('../../src/world/entrance/road.ts');
+  const { FOLIAGE_GEOMETRY } = await import('../../src/world/treeModel.ts');
   const { CROWD_HAIR_STYLES } = await import('../../src/art/models/hair.ts');
   // `Box3` is already bound further up this same function scope (the castle
   // tower block), so it is aliased here — the same move `Mat4`/`Vec3`/
@@ -1758,7 +1790,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // teach everyone to widen it. The road and the ground it is painted on are
   // exempt for the obvious reason, and so is the bus and everything hanging off
   // it — the bus is *supposed* to be on the road.
-  const laneCarriageway: LaneObstructionFact[] = (() => {
+  const { laneCarriageway, laneGreenery } = ((): {
+    laneCarriageway: LaneObstructionFact[];
+    laneGreenery: LaneGreeneryFact[];
+  } => {
     const lane = new BusJourney(aRider);
     lane.scene.updateMatrixWorld(true);
 
@@ -1833,8 +1868,51 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       }
     });
 
+    // --- and what the lane is planted with -----------------------------------
+    //
+    // Jim, 9 August 2026: *"Use the actual tree models same as the game uses by
+    // the side of the road but not on it."* Whether that stayed true is a
+    // question about object identity, so identity is what is recorded: the
+    // three shapes in `FOLIAGE_GEOMETRY` are looked up in a `Map` keyed by the
+    // geometry *objects themselves*, which no copy can accidentally match.
+    const parkShape = new Map<unknown, 'trunk' | 'round' | 'cone'>([
+      [FOLIAGE_GEOMETRY.trunk, 'trunk'],
+      [FOLIAGE_GEOMETRY.round, 'round'],
+      [FOLIAGE_GEOMETRY.cone, 'cone'],
+    ]);
+    const laneGreenery: LaneGreeneryFact[] = [];
+    lane.scene.traverse((node) => {
+      // The bus and the children riding in it are not planting.
+      for (let up: typeof node | null = node; up; up = up.parent) {
+        if (up.name === 'cat-bus') return;
+      }
+      const drawn = node instanceof Instanced || node instanceof Mesh;
+      if (!drawn) return;
+      const geometry = (node as InstanceType<typeof Mesh>).geometry;
+      if (!geometry?.getAttribute('position')) return;
+      let population = '(unrooted)';
+      // Typed as the base class rather than `typeof node`: by here `node` has
+      // been narrowed to `Mesh | InstancedMesh`, and a parent is neither.
+      for (let up: import('three').Object3D | null = node; up; up = up.parent) {
+        if (up.name) {
+          population = up.name;
+          break;
+        }
+      }
+      laneGreenery.push({
+        node: node.name,
+        population,
+        instances: node instanceof Instanced ? node.count : 1,
+        parkTreeGeometry: parkShape.get(geometry) ?? null,
+        geometryType: geometry.type,
+      });
+    });
+
     lane.dispose();
-    return [...worstPerNode.values()].sort((a, b) => b.reach - a.reach);
+    return {
+      laneCarriageway: [...worstPerNode.values()].sort((a, b) => b.reach - a.reach),
+      laneGreenery,
+    };
   })();
 
   // --- does the arrival reach its end? --------------------------------------
@@ -1951,6 +2029,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   return {
     laneCarriageway,
+    laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,
     arrivalRuns,
     archClearance,
