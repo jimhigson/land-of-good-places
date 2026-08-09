@@ -4734,3 +4734,98 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .journey-skip--ready .journey-skip__button { animation: none; }
 }
+
+/* --------------------------------------------------------------- journey wait
+   "Getting your park ready!" — the loading caption shown only while the bus is
+   parked at the gate waiting for a slow device to finish generating the park
+   (`JourneyDirector.overrunning`). Invisible for the whole of an on-time ride.
+
+   The dots' motion is a compositor-thread animation (transform/opacity only),
+   on purpose: during this wait the main thread is blocked ~200 ms at a time
+   building the park, so anything animated in JS would freeze exactly here. See
+   `ui/JourneyWait.ts`. Sizes are all `rem`, per this file's TEXT RULE. */
+.journey-wait {
+  position: fixed;
+  left: 50%;
+  bottom: 6.5rem;
+  transform: translateX(-50%);
+  z-index: 41;
+  pointer-events: none;
+  max-width: 92vw;
+}
+
+.journey-wait--idle {
+  display: none;
+}
+
+.journey-wait--busy .journey-wait__card {
+  animation: journey-wait-in 420ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.journey-wait__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.8rem 1.6rem;
+  border-radius: 1.2rem;
+  background: rgba(58, 34, 74, 0.82);
+  border: 0.16rem solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0.4rem 1.4rem rgba(0, 0, 0, 0.3);
+  text-align: center;
+  font-family: 'Baloo 2', 'Arial Rounded MT Bold', 'Nunito', var(--lgp-font);
+}
+
+.journey-wait__heading {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #fff4d8;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.journey-wait__dots {
+  display: inline-flex;
+  margin-left: 0.15rem;
+}
+
+.journey-wait__dots span {
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-left: 0.12rem;
+  border-radius: 999px;
+  background: #ffd36b;
+  /* Compositor-only, so it keeps bouncing while the main thread builds the park. */
+  animation: journey-wait-bounce 1s ease-in-out infinite both;
+  will-change: transform, opacity;
+}
+
+.journey-wait__dots span:nth-child(2) { animation-delay: 0.16s; }
+.journey-wait__dots span:nth-child(3) { animation-delay: 0.32s; }
+
+.journey-wait__stage {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+@keyframes journey-wait-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+  40%           { transform: translateY(-0.4rem); opacity: 1; }
+}
+
+@keyframes journey-wait-in {
+  from { transform: scale(0.6) translateY(0.8rem); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@media (orientation: portrait) {
+  .journey-wait { bottom: 5.5rem; }
+  .journey-wait__heading { font-size: 1.3rem; }
+  .journey-wait__stage { font-size: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-wait__dots span { animation: none; opacity: 0.9; }
+  .journey-wait--busy .journey-wait__card { animation: none; }
+}

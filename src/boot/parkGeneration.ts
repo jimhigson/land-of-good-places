@@ -88,6 +88,30 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
 export const GENERATION_BUDGET_MS = 8;
 
 /**
+ * How long a frame may spend generating **once the ride is over and the bus has
+ * parked at the gate** — see `JourneyDirector.overrunAwareBudgetMs`.
+ *
+ * The 8 ms above is a promise to the orbit: never stutter the shot. That promise
+ * is void the instant the ride ends, because there is no longer a shot to keep
+ * smooth — the bus is stopped and the child is watching a loading screen whose
+ * only remaining job is to finish. Holding the frame to 8 ms from here on leaves
+ * ~90% of every frame idle while she waits on the very work that 8 ms is
+ * rationing, which on a slow phone is the difference between a few seconds and a
+ * few minutes. So during the wait the generator gets most of the frame.
+ *
+ * Not the whole frame: a slice yields every ~200 ms so the loading caption's
+ * text keeps updating and the tab never trips the browser's "page unresponsive"
+ * guard. Liveness during the wait is carried by a CSS-animated caption (compositor
+ * thread, unaffected by this block), so this can be generous without the screen
+ * reading as frozen. The residual wait is then the device's *raw* generation cost
+ * spread over near-fully-used frames — which is the floor, and which no schedule
+ * can go below. If that floor is itself too long on real hardware, the fix is to
+ * make generation cheaper, not to widen this further; this only stops the ride
+ * from adding an idle multiple on top of it.
+ */
+export const OVERRUN_GENERATION_BUDGET_MS = 200;
+
+/**
  * The ground the Sky Cruiser measures itself against, before it is solved.
  *
  * The boundary (~55 ms) and the layout (~9 ms). Each is one module whose

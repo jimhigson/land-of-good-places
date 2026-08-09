@@ -216,12 +216,44 @@ export class JourneyDirector {
   /**
    * The ride has finished and the park is not fit to play. The bus is waiting.
    *
-   * Never true today — the park builds in under half a second and warms its
-   * shaders in well under the remaining ride (see the PR's measured margin) —
-   * which is exactly why it needs a guard rather than a comment claiming it
-   * cannot happen.
+   * **Not the rare branch its old comment claimed.** It was written as "never
+   * true today — the park builds in under half a second", which is true only on
+   * a dev laptop. Generation is budgeted in wall-clock milliseconds per frame
+   * ({@link overrunAwareBudgetMs}), so a slower device completes fewer steps per
+   * frame and needs proportionally *more* frames — while the ride is a fixed 240
+   * frames (twenty seconds of `dt` clamped to 1/12 s). Below roughly twelve
+   * frames a second, generation outlasts the ride every time, so this is the
+   * *common* state on the device a six-year-old actually holds. That is why the
+   * budget below exists: overrunning is not an edge case to survive, it is a
+   * phase to get through as fast as the machine can.
    */
   get overrunning(): boolean {
     return this.rideOver && !this.parkFitToPlay;
+  }
+
+  /**
+   * **How many milliseconds of park-building work this frame may spend.**
+   *
+   * The small slice ({@link whileTravelling}) while the bus is still rolling and
+   * the orbit is the shot — a camera that stutters once a second is a worse
+   * failure than a park that is a moment slower, *because nobody is waiting on
+   * it yet: the bus has the rest of its ride to fill*. That reasoning is the
+   * whole justification for the 8 ms cap, and it holds **only while the ride is
+   * running**.
+   *
+   * Once the ride is over ({@link overrunning}) the bus has parked at the gate,
+   * there is no orbit left to keep smooth, and the child *is* waiting — on a
+   * loading screen whose only job now is to end. The cap that protected the
+   * orbit is, from here on, the thing making her wait minutes: each frame is
+   * almost entirely idle (only the parked ride draws), yet only 8 ms of it goes
+   * to the generation she is waiting for. So the budget opens right up
+   * ({@link whileWaiting}) and the remaining work drains flat-out.
+   *
+   * One owner for the whole "travelling vs waiting" question, so `main.ts` cannot
+   * feed the generator one answer and the warm-up another, and so a check can
+   * drive the same decision the game does.
+   */
+  overrunAwareBudgetMs(whileTravelling: number, whileWaiting: number): number {
+    return this.overrunning ? whileWaiting : whileTravelling;
   }
 }
