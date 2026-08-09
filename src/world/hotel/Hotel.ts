@@ -1369,28 +1369,16 @@ export class Hotel implements GameSystem {
       this.controls.snapCamera();
     }
 
-    // The same net for the one pocket that is not a fall: inside a gallery's
-    // solid mass at ground level — where a pre-fix save may still restore a
-    // player, invisible and pinned (QA, 8 Aug 2026). The stair's slices make
-    // it unreachable on foot now, but a save is not on foot.
-    if (this.inside && !this.changingSpace) {
-      const room = this.currentRoom();
-      const mez = room?.mezzanine;
-      // Threshold well below the flight's own crossing heights: the top
-      // treads enter the deck rectangle at 2.88–3.2 m and a climber's damped
-      // y can lag them by most of a metre — 1.5 m is unreachable on the
-      // stair but still far above the pocket's floor. (First cut used
-      // `height − 0.4` and teleported a legitimate climber off the top
-      // treads, measured live.)
-      if (room && mez && player.position.y < 1.5) {
-        const lx = player.position.x - room.originX;
-        const lz = player.position.z - room.originZ;
-        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) {
-          player.teleportTo(room.originX, 0, room.originZ, Math.PI);
-          this.controls.snapCamera();
-        }
-      }
-    }
+    // There used to be a second net here: anyone at ground level inside the
+    // mezzanine's rectangle was stood back at the room's origin, because that
+    // rectangle was the inside of the gallery's *solid mass* — a pocket a
+    // pre-fix save could restore a player into, invisible and pinned. The
+    // imperial rework made that rectangle the **colonnade**: open, walkable,
+    // and on the room's own axis, so the net was teleporting a child to the
+    // middle of the lobby for the crime of walking under her own gallery
+    // (found live, 9 Aug 2026 — the axis walk reset at z ≈ −7.5 on every
+    // attempt). A stale save restoring inside the old mass region now lands
+    // on honest floor, which needs no rescue.
   }
 
   // ------------------------------------------------------ changing space

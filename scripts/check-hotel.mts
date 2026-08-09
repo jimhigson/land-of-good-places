@@ -503,6 +503,36 @@ if (!mezzanine) {
           `the arch is not clear on the centre line`,
       );
     }
+
+    // …and `Hotel.update` must leave her there. The resolver march above
+    // passed on 9 Aug 2026 while the LIVE walk reset to the room's origin at
+    // z ≈ −7.5 on every attempt: the old solid-mass rescue net still covered
+    // the mezzanine rectangle, which the colonnade made honest floor. A
+    // frame's update on a player standing in the colonnade must not move her.
+    {
+      const walker = {
+        position: new Vector3(LOBBY.originX, 0, LOBBY.originZ - 9),
+        riding: false,
+        model: { setExpression: () => {} },
+        teleportTo(x: number, y: number, z: number) {
+          walker.position.set(x, y, z);
+        },
+      };
+      hotel.attachPlayer(walker as never);
+      hotel.adoptRestoredPlayer();
+      hotel.update({ dt: 1 / 60, elapsed: 0 } as never);
+      const moved = Math.hypot(
+        walker.position.x - LOBBY.originX,
+        walker.position.z - (LOBBY.originZ - 9),
+      );
+      if (moved > 0.05) {
+        problems.push(
+          `a frame of Hotel.update moved a walker standing in the colonnade ${moved.toFixed(2)} m ` +
+            `(to y=${walker.position.y.toFixed(2)}) — a stale rescue net is teleporting her off ` +
+            `her own room's floor`,
+        );
+      }
+    }
   }
 
   // **The banded rails hold both ways.** The same XZ, two heights: the
