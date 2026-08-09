@@ -42,16 +42,33 @@ independent parts:
 
 - [x] Worktree, npm ci, all required reading done
 - [x] Canonical baseline measured (below)
-- [ ] 60-seed sweep baseline + per-seed fingerprint baseline
-- [ ] CPU profile of a slow seed
-- [ ] Hot-path fixes
-- [ ] Rescue-tier constructive poses
-- [ ] After-numbers, budget update, PR
+- [x] 60-seed sweep baseline (48/60; failures 4,8,9,10,21,25,29,30,37,48,56
+      cruiser + 53 slide; cruiser median 2834 / p90 14551 / max 51950 ms)
+- [x] Per-seed fingerprint baseline: scratchpad/fp-base (50 solving files)
+- [x] CPU profile (canonical + seed 55): selfClear 19-23%,
+      minCurvatureRadius 14-18%, clearOfFootprints 12-14%, clear 7-9%,
+      boundary ~8%. KEY FINDING: sampled-curvature rejections are only 13k
+      of the 1M "curvature" rejections (rest are analytic biarc); validate
+      full-scanned 5.3M pieces at 65 samples each, 2.1M of which the world
+      checks reject anyway → curvature moved LAST + bailBelow.
+- [x] Hot-path fixes (commit 28300da): canonical 1245 → 812 ms; seed 55
+      ~18 s → 10.6 s. Fingerprints identical on all 5 CI seeds. NOTE:
+      rejected-cause ATTRIBUTION redistributes (total per piece unchanged,
+      route bytes + structural counters identical) — documented in validate.
+- [x] Rescue tier (commit 7d1d2d3): one policy generator cruiserRouteSearch
+      (route.ts), both cadences drive it. Seed 4 flips (94 poses, was 8),
+      seed 29 flips (274, was 14), seed 30 honestly unsolvable (268 poses,
+      1M pieces, cannot close).
+- [ ] After-sweep running (btw9wrl7k) → flip list + after-numbers
+- [ ] 60-seed fingerprint re-run (must equal fp-base on all 50 solving)
+- [ ] check:solve-cost budget re-derive (8x fresh median), stale prose
+- [ ] test:procgen + npm run build + PR
 
 ## Baseline (this machine, M-series, idle)
 
-Canonical seed 20260728, `measure:procgen --no-world`, runs so far:
-cruiser 1223 / 1245 ms · slide 4650 / 4615 ms · train 42 · boundary 48-50.
+Canonical seed 20260728, `measure:procgen --no-world`, median of 3:
+cruiser 1244.9 ms · slide 4635.6 · boundary 50.3 · layout 8.8 · train 42.2
+· railRace 12.2 · paths 11.9. After hot paths: cruiser ~812 ms.
 
 ## Key file map (for a replacement)
 
