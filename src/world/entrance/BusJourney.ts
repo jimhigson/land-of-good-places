@@ -298,6 +298,42 @@ const LANE_OPEN_FROM = PARK_AHEAD_Z + 7;
 const LANE_OPEN_RUN = LANE_AHEAD - LANE_OPEN_FROM;
 
 /**
+ * **How far out the park-behind-the-wall silhouettes have to start.**
+ *
+ * Jim, playing the deployed game, 9 August 2026: *"the cat bus never reached
+ * its destination due to there being a cone shaped object in the middle of the
+ * road."*
+ *
+ * He was right about the cone and right about where it was. `buildParkAhead`
+ * scattered its rooftops over `x = (rng() - 0.5) * 120` and its trees over
+ * `* 130`, with nothing excluding the carriageway — and `journey-road` runs
+ * from `z = 120` all the way to `z = -320`, seventy metres **past** the gate,
+ * so the scatter's whole range sat on top of the road it was scattered around.
+ * Measured off the built scene, a six-metre `ConeGeometry` rooftop stood at
+ * `x = -1.46, z = -258.7`, spanning `x = -6.3 .. 3.4` against a 7.78 m
+ * carriageway: it filled the arch. Four more intruded by 6.9 m or worse. The
+ * scatter's seed is a literal (`20260808`), so this was **identical on every
+ * park seed, in dev and in production** — which is why nobody ever saw it vary
+ * and why no seed sweep could have found it.
+ *
+ * Nothing collided: the bus's `z` is arithmetic off the ride clock, so a cone
+ * could not stop it and did not. The ride simply ends {@link PARK_STANDOFF}
+ * short of the gate, which put the cone squarely between the stopped bus and
+ * the arch — and a bus that halts short of a park with a cone in the road ahead
+ * of it has exactly one reading available to a player.
+ *
+ * **The number is the wall's own.** `buildParkAhead` already lays its masonry
+ * from `GATE_HALF_WIDTH + 1.2` outward; the things standing behind that wall
+ * now start at the same place, so they line up with it instead of floating in
+ * the gateway. Taking the gate's number rather than the road's is deliberate:
+ * it is the wider of the two (4.3 against `ROAD_HALF_WIDTH`'s 3.89), so the
+ * guard in `test/procgen/invariants.ts` — which measures against the *road*,
+ * the game's own number, never this one — keeps real headroom rather than
+ * sitting exactly on the line it is checking.
+ */
+const PARK_AHEAD_CLEAR = GATE_HALF_WIDTH + 1.2;
+
+/**
  * The hills, as a function of distance down the lane.
  *
  * Two sines of incommensurable wavelength plus a long swell, so the ride never
@@ -1310,20 +1346,36 @@ export class BusJourney {
     canopies.name = 'journey-park-trees';
     const scale = new Vector3();
     for (let i = 0; i < PARK_THINGS; i += 1) {
-      const x = (rng() - 0.5) * 120;
+      // Alternate sides, and start each one where the masonry starts. Both
+      // populations are placed **outward from the edge of the gate opening**
+      // rather than sampled across the whole width and hoped to miss — see
+      // {@link PARK_AHEAD_CLEAR}. `reach` is the thing's own horizontal
+      // half-extent, so the *near face* begins at the clearance rather than
+      // its centre: a wide roof is pushed out by its own width.
+      const side = i % 2 === 0 ? 1 : -1;
+
+      const roofAcross = 2.4 + rng() * 2.2;
+      const roofAlong = 2.4 + rng() * 2.2;
+      const roofHeight = 5 + rng() * 7;
+      // A cone spun about Y sweeps an ellipse, whose furthest reach in any
+      // direction is its longer semi-axis — so this bounds the spin as well as
+      // the scale, and there is no orientation that can put it back on the road.
+      const roofReach = Math.max(roofAcross, roofAlong);
+      const x = side * (PARK_AHEAD_CLEAR + roofReach + rng() * 52);
       const z = gateZ - 6 - rng() * 55;
       const ground = groundHeight(x, z);
 
-      const roofHeight = 5 + rng() * 7;
       spin.setFromAxisAngle(new Vector3(0, 1, 0), rng() * Math.PI * 2);
       at.set(x, ground + roofHeight / 2, z);
-      scale.set(2.4 + rng() * 2.2, roofHeight, 2.4 + rng() * 2.2);
+      scale.set(roofAcross, roofHeight, roofAlong);
       matrix.compose(at, spin, scale);
       roofs.setMatrixAt(i, matrix);
 
-      const treeX = (rng() - 0.5) * 130;
-      const treeZ = gateZ - 4 - rng() * 60;
+      // The trees take the opposite side to the roof of the same index, which
+      // keeps both populations spread across both verges.
       const radius = 2.6 + rng() * 2.4;
+      const treeX = -side * (PARK_AHEAD_CLEAR + radius + rng() * 57);
+      const treeZ = gateZ - 4 - rng() * 60;
       at.set(treeX, groundHeight(treeX, treeZ) + radius * 1.5, treeZ);
       scale.set(radius, radius * 1.15, radius);
       matrix.compose(at, spin, scale);
