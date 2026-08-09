@@ -1039,10 +1039,34 @@ function wrapAround(distance: number, length: number): number {
  * That is the number CI failed on. It is one block because the repair loop
  * rebuilds the curve ten times and nothing inside it ever yielded.
  *
+ * ### Why the prologue and the tail yield too (9 August 2026)
+ *
+ * The first version yielded **only** inside the repair loop, which left
+ * everything before the first pass — sampling the plan, finding the station on
+ * it, the hill profile, both carves, and the first build of the curve and its
+ * 1600-sample arc-length table — as one indivisible step, and everything after
+ * the last pass as another. Profiled a unit at a time (drive `advance(0)` and
+ * every loop does exactly one step), that prologue was **6.2 ms cold on an M4
+ * Max against an 8 ms frame budget**: by a distance the largest single
+ * un-interruptible piece of work in the whole park build, and 2.6x the next
+ * one. Scaled by the ~2.4x a GitHub runner measures, it is the 27.6 ms
+ * `check:park-boot` went red on (run 31288279104), and on a phone it is a
+ * dropped frame in the orbit whatever CI says.
+ *
+ * It is *cold* that costs: run a second time in the same process the same
+ * prologue is 1.1 ms, so most of it is first-execution compilation of this
+ * body, `spanInsideCastle`, `terrainHeight` and `CatmullRomCurve3`. A boot is
+ * always cold, so the cold number is the real one.
+ *
+ * The yields below are placed between the phases that already existed rather
+ * than inside any of them — each is a natural seam where the next phase reads
+ * only what the previous one finished writing.
+ *
  * Suspending cannot move the result, by the same argument the searches make:
  * every piece of state is a local of this function, the single `rng` draw
  * (`hillPhase`) happens before the first yield, and there is no clock or shared
- * state to interleave with.
+ * state to interleave with. `check:park-boot` proves it rather than asserting
+ * it, by hashing the sliced cruiser against a straight-through `planCruiser()`.
  */
 export function* coasterProfileSearch(
   plan: SolvedRailRoute,
@@ -1056,6 +1080,7 @@ export function* coasterProfileSearch(
     plan.pointAt((i / controls) * plan.length, probe2);
     flat.push({ x: probe2.x, z: probe2.z });
   }
+  yield 0;
 
   // Where along the plan the station sits — measured, not assumed to be zero,
   // even though the loop starts there.
@@ -1069,6 +1094,7 @@ export function* coasterProfileSearch(
       stationS = d;
     }
   }
+  yield 0;
 
   // --- vertical: seeded hills over the cruise floor ----------------------
   // Authored along **arc length**, in metres. Integer harmonics of the loop
@@ -1097,6 +1123,7 @@ export function* coasterProfileSearch(
       heights[i] = STATION_HEIGHT + (heights[i]! - STATION_HEIGHT) * eased;
     }
   }
+  yield 0;
 
   // The castle window carve (issue #113). Applied **after** the station's,
   // and that order is load-bearing rather than incidental.
@@ -1125,6 +1152,7 @@ export function* coasterProfileSearch(
   // so the span stopped just before the second wall crossing and one of the
   // two windows was silently never cut. Three of the five CI seeds caught it.
   const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
+  yield 0;
   if (castleSpan) {
     const windowY = castleY(WINDOW_TRACK_Y);
     for (let i = 0; i < controls; i += 1) {
@@ -1140,6 +1168,7 @@ export function* coasterProfileSearch(
       }
     }
   }
+  yield 0;
 
   const makeCurve = (): CatmullRomCurve3 => {
     const points: Vector3[] = [];
@@ -1178,13 +1207,15 @@ export function* coasterProfileSearch(
   // deficit, and re-measure until the track really clears.
   let curve = makeCurve();
   let length = curve.getLength();
+  yield 0;
   let station = stationOn(curve, length);
   const probe = new Vector3();
   for (let pass = 0; pass < 10; pass += 1) {
     // One repair pass per slice. The loop rebuilds the whole curve and its
-    // 1600-sample arc-length table each pass and never converges early, so
-    // all ten always run: as one block that measured 18.9 ms here and 54.6 ms
-    // on CI, against a 24 ms ceiling. A pass is ~1.9 ms, which fits.
+    // 1600-sample arc-length table each pass and, on the canonical seed, never
+    // converges early — so all ten always run, and as one block they measured
+    // 18.9 ms here and 54.6 ms on CI. Re-measured 9 August 2026, a pass is
+    // **0.55-0.8 ms**, comfortably inside the 8 ms a frame is given.
     yield pass;
     // Worst deficit per control point, so a run of low samples under one
     // control raises it once by what it needs, not once per sample. The same
@@ -1238,7 +1269,7 @@ export function* coasterProfileSearch(
     length = curve.getLength();
     station = stationOn(curve, length);
   }
-
+  yield 0;
 
   // The span riders actually fly, in the metres every other consumer counts
   // in: `openingsFor`, the swept-car assert and the station-overlap check all
@@ -1253,6 +1284,7 @@ export function* coasterProfileSearch(
     into.x = built.x;
     into.z = built.z;
   }, length);
+  yield 0;
 
   let crest = 0;
   for (let d = 0; d < length; d += 1) {
