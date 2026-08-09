@@ -11,10 +11,11 @@ import {
   solverBoundary,
 } from '../boundary';
 import {
+  RailRouteUnsolvable,
   type RouteBrief,
   type RouteInfluence,
   type SolvedRailRoute,
-  solveRailRoute,
+  railRouteSearch,
 } from '../rail/generate';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../building/layout';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
@@ -621,6 +622,98 @@ function stationPoses(
  * arrives along it too, so a straight line is a fair stand-in for the track
  * either side of the platform.
  */
+/**
+ * {@link stationWindowIsClear}, asking **the search's own question** — the
+ * rescue tier's pose qualification (Decision 10 part 4).
+ *
+ * The original filter above tests bounding circles at 1.2 m while the search
+ * it feeds tests footprints at the corridor radius through its `clear`
+ * predicate — two authorities for one question, and both directions of the
+ * disagreement cost parks. A pose can pass at 1.2 m and have no legal first
+ * piece at 3.6 m (seeds 4, 29 and 30 died of exactly this: eight to fourteen
+ * poses offered, sixteen candidate pieces each — one joint, then nothing).
+ * And a pose the search could genuinely use can be rejected because a
+ * *neighbour's bounding circle* overstates its rectangular footprint by
+ * metres, which is how `stationPoses` proposes ~1,408 candidates and throws
+ * ~1,400 away.
+ *
+ * This asks the identical geometry (the same seven window samples) the
+ * identical question the search will ask of every low-flying piece: the
+ * brief's own `clear` at the brief's own corridor radius, against the brief's
+ * own boundary. `distanceAlong` is 0 because every window sample stands for
+ * track within {@link STATION_FLAT} + a piece of the ramp — inside the low
+ * window at both ends of the loop — so the near-station footprint rule is in
+ * force for all of them, exactly as it is for the real first and last pieces.
+ *
+ * **Why the primary filter is not simply replaced with this** (Decision 10
+ * part 3 beats part 4 where they collide): every accepted pose draws
+ * `rng.unit()` for its shuffle key, so changing which poses qualify re-rolls
+ * the pose ordering and with it every park — including the 48 in 60 that
+ * solve today and are byte-identical back to the first baseline. The one
+ * truth therefore arrives as a **rescue tier**: seeds the primary pipeline
+ * solves never see it, and seeds the primary pipeline kills get the outermost
+ * level of their search rebuilt on the honest predicate. See
+ * {@link cruiserRouteSearch}.
+ */
+function stationWindowHasLegalTrack(
+  pose: Pose2,
+  boundary: ReturnType<typeof circleBoundary>,
+  clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean,
+): boolean {
+  const reach = 6;
+  for (let along = -reach; along <= reach; along += 2) {
+    const x = pose.x + pose.hx * along;
+    const z = pose.z + pose.hz * along;
+    if (!clear(x, z, CORRIDOR_RADIUS, 0)) return false;
+    if (boundary.distanceToEdge(x, z) < CORRIDOR_RADIUS) return false;
+  }
+  return true;
+}
+
+/**
+ * Start poses for the rescue tier: the same rings around the same booth, each
+ * candidate qualified by {@link stationWindowHasLegalTrack} — so every pose
+ * offered is a pose whose station window the search itself would accept, and
+ * the outermost level of the search cannot be starved by a filter answering a
+ * different question than the search asks.
+ *
+ * Its own seeded stream, drawn from nothing else: this list only exists on
+ * seeds where the primary tiers already exhausted themselves, so nothing here
+ * can perturb a park that solves without it.
+ */
+function rescueStationPoses(
+  stallId: string,
+  rng: Rng,
+  boundary: ReturnType<typeof circleBoundary>,
+  clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean,
+): Pose2[] {
+  const stall = placedEntry(stallId);
+  const poses: { pose: Pose2; key: number }[] = [];
+  for (let ring = 0; ring < 11; ring += 1) {
+    const distance = 5 + ring;
+    for (let i = 0; i < 64; i += 1) {
+      const angle = (i / 64) * TAU;
+      const x = stall.x + Math.cos(angle) * distance;
+      const z = stall.z + Math.sin(angle) * distance;
+      const hxBase = -Math.sin(angle);
+      const hzBase = Math.cos(angle);
+      // One verdict per spot, two headings per qualifying spot, and a plain
+      // seeded shuffle — the same shape as the primary pipeline, for the same
+      // measured reasons its comments record (roomiest-first ordering was
+      // slower, straight-line reachability as a filter was catastrophic;
+      // diversity beats cleverness).
+      if (!stationWindowHasLegalTrack({ x, z, hx: hxBase, hz: hzBase }, boundary, clear)) {
+        continue;
+      }
+      for (const sign of [1, -1] as const) {
+        poses.push({ pose: { x, z, hx: hxBase * sign, hz: hzBase * sign }, key: rng.unit() });
+      }
+    }
+  }
+  poses.sort((a, b) => a.key - b.key);
+  return poses.map((entry) => entry.pose);
+}
+
 function stationWindowIsClear(
   pose: Pose2,
   boundary: ReturnType<typeof circleBoundary>,
@@ -698,13 +791,12 @@ export class CoasterRoute {
     if (presolved) {
       plan = presolved.plan;
     } else {
-      // Two cadences over one policy, exactly as the ginormous slide runs its
-      // length ladder in both `planSlide()` and `ParkGeneration`: the *briefs*
-      // have one owner (below), and each cadence writes only its own loop over
-      // them. `report.satisfied` is the single verdict both consult.
+      // Two cadences over one policy — literally one, now: the retry ladder
+      // itself is `cruiserRouteSearch`, and this constructor and
+      // `boot/parkGeneration.ts` are both nothing but drivers over it, the
+      // same relationship `solveRailRoute` has with `railRouteSearch`.
       const briefs = coasterRouteBriefs(options, rng);
-      plan = solveRailRoute(briefs.first);
-      if (!plan.report.satisfied) plan = solveRailRoute(briefs.escalated);
+      plan = solveCruiserRoute(briefs);
     }
     this.plan = plan;
     const profile = presolved?.profile ?? coasterProfile(plan, rng, stall);
@@ -774,12 +866,28 @@ export interface PresolvedCoaster {
   readonly profile?: CoasterProfile;
 }
 
-/** The Sky Cruiser's search brief, and the harder-pulling retry behind it. */
-export interface CoasterBriefs {
+/** A brief and the harder-pulling retry behind it — one tier of the policy. */
+export interface CoasterBriefPair {
   /** What the loop is asked for first. */
   readonly first: RouteBrief;
   /** Twice the castle pull, its own stream — tried only if `first` fell short. */
   readonly escalated: RouteBrief;
+}
+
+/** The Sky Cruiser's search briefs, all tiers, for both cadences. */
+export interface CoasterBriefs extends CoasterBriefPair {
+  /**
+   * The rescue tier: the same brief over start poses **constructed against the
+   * search's own clearance truth** (Decision 10 part 4), built only when asked.
+   *
+   * A thunk rather than a field because building it costs a full pose sweep
+   * (~20 ms) that the 48-in-60 seeds which solve on the primary tiers must not
+   * pay — and, more importantly, must not observe: nothing about a solving
+   * park may change, and a list that is never built cannot change anything.
+   * Only {@link cruiserRouteSearch} calls it, and only after the primary
+   * tiers have thrown.
+   */
+  readonly rescue: () => CoasterBriefPair;
 }
 
 /**
@@ -908,7 +1016,34 @@ export function* coasterRouteBriefSearch(
     seed: brief.seed ^ 0xe5ca,
     influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
   };
-  return { first: brief, escalated };
+
+  // The rescue tier's pair: identical policy, its own seed streams, and start
+  // poses qualified by the search's own `clear` — the closures captured here
+  // are the very objects the primary brief hands the search, so the rescue
+  // cannot drift into asking a third question. See `stationWindowHasLegalTrack`
+  // for the whole argument, and `cruiserRouteSearch` for when this runs.
+  const rescue = (): CoasterBriefPair => {
+    const rescuePoses = rescueStationPoses(
+      options.stationStallId,
+      new Rng(PARK_SEED ^ options.salt ^ 0x9e5c),
+      boundary,
+      clear,
+    );
+    const rescueFirst: RouteBrief = {
+      ...brief,
+      seed: brief.seed ^ 0x7e5c,
+      startPoses: rescuePoses,
+    };
+    return {
+      first: rescueFirst,
+      escalated: {
+        ...rescueFirst,
+        seed: rescueFirst.seed ^ 0xe5ca,
+        influences: [{ ...CASTLE_INFLUENCE, weight: CASTLE_INFLUENCE.weight * 2 }],
+      },
+    };
+  };
+  return { first: brief, escalated, rescue };
 }
 
 /**
@@ -923,6 +1058,88 @@ export function coasterRouteBriefs(
   rng: Rng = new Rng(PARK_SEED ^ options.salt),
 ): CoasterBriefs {
   const search = coasterRouteBriefSearch(options, rng);
+  for (;;) {
+    const step = search.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * **The whole retry policy, in one place, for both cadences.**
+ *
+ * The constructor and `boot/parkGeneration.ts` used to each walk the
+ * first-then-escalated ladder by hand — two writers of one policy, kept in
+ * step by a comment ("the same verdict, in the same order") and a hash check.
+ * Adding a third tier to both copies is exactly how the two-definitions bug
+ * gets written, so the ladder is now this generator and both cadences drive
+ * it: the constructor via {@link solveCruiserRoute}, the loading screen a
+ * joint at a time. The yielded values are the inner searches' own attempt
+ * indices, purely for progress reporting.
+ *
+ * The tiers, and precisely who reaches each:
+ *
+ * 1. `first` — unchanged. Every park that solves today takes this (or 2) and
+ *    is byte-identical, which is the constraint the whole design serves.
+ * 2. `escalated` — unchanged: only if 1 solved without crossing the castle,
+ *    and its result is taken whatever it says, exactly as before.
+ * 3. `rescue()` — **only where the park previously failed to build at all**:
+ *    tier 1 exhausted every pose without one closed route. The same ladder
+ *    runs again over poses constructed against the search's own clearance
+ *    truth (Decision 10 part 4; see {@link stationWindowHasLegalTrack}).
+ *
+ * Two lesser rungs fall out of writing the ladder down, both reachable only
+ * on parks that today die: an escalated tier that *throws* (rather than
+ * merely missing the castle) hands back the lower tier's solved loop instead
+ * of failing the park — the search's own belt-and-braces rule, "a park with
+ * no coaster is far worse than one whose coaster missed", applied one level
+ * up — and a rescue that throws reports **both** failures, because the seed
+ * that hits it will be diagnosed from that message alone.
+ */
+export function* cruiserRouteSearch(
+  briefs: CoasterBriefs,
+): Generator<number, SolvedRailRoute, void> {
+  let plan: SolvedRailRoute | null = null;
+  let primaryFailure: RailRouteUnsolvable | null = null;
+  try {
+    plan = yield* railRouteSearch(briefs.first);
+  } catch (error) {
+    if (!(error instanceof RailRouteUnsolvable)) throw error;
+    primaryFailure = error;
+  }
+  if (plan) {
+    if (plan.report.satisfied) return plan;
+    try {
+      return yield* railRouteSearch(briefs.escalated);
+    } catch (error) {
+      if (!(error instanceof RailRouteUnsolvable)) throw error;
+      return plan;
+    }
+  }
+
+  const rescue = briefs.rescue();
+  let rescued: SolvedRailRoute;
+  try {
+    rescued = yield* railRouteSearch(rescue.first);
+  } catch (error) {
+    if (!(error instanceof RailRouteUnsolvable) || !primaryFailure) throw error;
+    throw new RailRouteUnsolvable(
+      `${primaryFailure.message} The rescue tier (start poses constructed against the ` +
+        `search's own clearance — Decision 10 part 4) then also failed: ${error.message}`,
+      error.report,
+    );
+  }
+  if (rescued.report.satisfied) return rescued;
+  try {
+    return yield* railRouteSearch(rescue.escalated);
+  } catch (error) {
+    if (!(error instanceof RailRouteUnsolvable)) throw error;
+    return rescued;
+  }
+}
+
+/** {@link cruiserRouteSearch}, driven straight through — the constructor's cadence. */
+export function solveCruiserRoute(briefs: CoasterBriefs): SolvedRailRoute {
+  const search = cruiserRouteSearch(briefs);
   for (;;) {
     const step = search.next();
     if (step.done) return step.value;
