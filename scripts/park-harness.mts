@@ -37,6 +37,17 @@ import type { InteriorControls } from '../src/world/building/Building.ts';
  * stepping `update()` frames (check:hotel walks a fallen player back into a
  * room, which snaps the camera) is deliberately doing what the game would do,
  * and headless there is simply no camera to snap.
+ *
+ * **`iris` is the one exception, and it has to be.** It is not a thing to
+ * draw, it is the mechanism by which a change of space *completes*: the
+ * midpoint it is handed is what moves the player, flips `inside` and swaps the
+ * play bounds. A no-op `iris` therefore leaves every door in the game half
+ * pressed — the trigger fires, `changingSpace` latches true, and nothing ever
+ * happens — so no headless check could ever have proved a doorway works. That
+ * is CLAUDE.md's "a check that cannot fail", sitting in the harness rather
+ * than in a check. Headless there is no wipe to wait for, so the midpoint is
+ * *now*, which is the honest answer and the one that lets a probe walk through
+ * a door and see where it came out.
  */
 let worldUnderConstruction = true;
 
@@ -49,12 +60,16 @@ function inertInteriorControls(): InteriorControls {
         'player or the camera — see scripts/park-harness.mts.',
     );
   };
+  const refuseIris = refuse('iris');
   return {
     walkTo: refuse('walkTo'),
     cancelWalk: refuse('cancelWalk'),
     setTimeScale: refuse('setTimeScale'),
     setWhoosh: refuse('setWhoosh'),
-    iris: refuse('iris'),
+    iris: (midpoint) => {
+      refuseIris();
+      midpoint();
+    },
     flash: refuse('flash'),
     snapCamera: refuse('snapCamera'),
     openStairMenu: refuse('openStairMenu'),

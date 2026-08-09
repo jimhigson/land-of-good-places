@@ -266,6 +266,48 @@ a backpack rule four of five shapes obeyed, three disagreeing exhibit lists.
 not a mechanism, and the copy is always found wrong by a child rather than by a
 check. The next section is the worked example.
 
+## Anything that looks solid must be solid
+
+**A mesh a child can see and lean on has a collider that covers it, from every
+approach.** Nothing derives a collider from a mesh, so the two are only ever
+kept together on purpose — and a mesh whose collider has a hole in it is the
+same disease as a check that cannot fail: it reads correctly, renders
+correctly, screenshots correctly, and is wrong only when somebody walks
+through it.
+
+Jim, playing, 9 August 2026: *"The hotel building is not solid. I can walk
+straight through it."* The tower's collision was a ring of eight chords built
+by trimming **every** sector's start by the door's arc, when only the two
+beside the doorway wanted trimming — so six evenly-spaced 0.32 rad gaps stood
+open round the building, 1.49 m of clear air each against a 1.24 m-wide child,
+and the "doorway" itself was 1.43 rad, nearly four times the door. Nobody could
+see it: the crystals were drawn, the collider list was long, the code read
+plausibly, and `check:hotel` had twenty probes about the *inside* of the hotel
+and none about walking up to it. Measured afterwards on the built park, of 48
+bearings marched at the facade, **22 got inside the shell and 8 reached its
+middle**.
+
+It also caused the *second* complaint the same day — *"the entry only
+occasionally triggers if I step into exactly the right point"* — because you
+could walk in beside the jambs and never touch the door's trigger band at all.
+One hole, two bug reports, and neither found by a build.
+
+So, for anything a child can walk up to:
+
+- **Build the shell as geometry, not as trimmed angles.** A ring that closes,
+  with the aperture cut where you want it, cannot lose a face to an
+  off-by-one; a ring assembled from per-sector trims can, silently.
+- **Probe it from outside, from many bearings, at more than one stride.**
+  Marching a player-sized body at the thing and asserting where it stops is
+  four lines (`scripts/check-hotel.mts` probe 22) and it is the only kind of
+  check that can see this class of bug. A gap you cannot walk into at 5 cm a
+  step you may still tunnel into at `PLAYER_LONGEST_STEP`.
+- **Give the doorway the same treatment as the wall.** `CollisionWorld`
+  sub-steps so a long frame cannot carry a child through a wall; a trigger band
+  sampled once a frame has exactly the same hole pointed the other way. Ask
+  what she *crossed*, not where she *landed* — `tapSpacing.ts`'s `bandCrossed`,
+  against `Player.previousPosition`, is the one owner of that question.
+
 ## A face on a worn thing goes in its own UV texture, not a floating patch
 
 RiPika's and Trilla's hood faces (`hoodShell.ts`/`hats.ts`) were built as a
