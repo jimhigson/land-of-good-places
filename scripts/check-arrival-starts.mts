@@ -144,22 +144,26 @@ if (handedOverAt === null) {
   await page.waitForTimeout(1500); // let any settle-in camera finish
   const before = await state();
   await page.screenshot({ path: `${SHOT_DIR}/20-playable.png` }).catch(() => {});
-  if (!before.hasGame || !before.pos) {
-    said.push('  (no window.game — skipping the movement read; run against a dev build for it)');
+
+  // Hold a movement key and screenshot the result — on every build, so a
+  // production run (no `window.game`) still captures the player walking.
+  await page.keyboard.down('ArrowUp');
+  await page.waitForTimeout(1600);
+  await page.keyboard.up('ArrowUp');
+  await page.waitForTimeout(300);
+  const after = await state();
+  await page.screenshot({ path: `${SHOT_DIR}/30-after-walk.png` }).catch(() => {});
+
+  // The position read is the *assertion*, and it needs `window.game` (dev). The
+  // bug is not production-only, so a dev build exercises the identical boot path;
+  // production coverage is the screenshots above plus the handed-over HUD.
+  if (!before.hasGame || !before.pos || !after.pos) {
+    said.push('  (no window.game — movement screenshotted but not measured; run against a dev build to assert it)');
   } else {
-    await page.keyboard.down('ArrowUp');
-    await page.waitForTimeout(1600);
-    await page.keyboard.up('ArrowUp');
-    await page.waitForTimeout(300);
-    const after = await state();
-    await page.screenshot({ path: `${SHOT_DIR}/30-after-walk.png` }).catch(() => {});
-    const moved =
-      after.pos && before.pos
-        ? Math.hypot(after.pos.x - before.pos.x, after.pos.z - before.pos.z)
-        : 0;
+    const moved = Math.hypot(after.pos.x - before.pos.x, after.pos.z - before.pos.z);
     said.push(
       `player moved ${moved.toFixed(2)} m on ArrowUp (from ${before.pos.x.toFixed(1)},${before.pos.z.toFixed(1)} ` +
-        `to ${after.pos?.x.toFixed(1)},${after.pos?.z.toFixed(1)})`,
+        `to ${after.pos.x.toFixed(1)},${after.pos.z.toFixed(1)})`,
     );
     if (moved < 0.3) {
       fouls.push(`the player barely moved (${moved.toFixed(2)} m) when a movement key was held — the game started but cannot be played`);
