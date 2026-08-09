@@ -829,7 +829,30 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       return out;
     };
 
-    const tryFinish = (): { seg: CubicSegment; samples: Sample[] }[] | null => {
+    /**
+     * A generator, so the via fan below is not one indivisible unit of work.
+     *
+     * The whole closer used to run inside a single yield of the outer search:
+     * up to {@link CLOSER_VIA_TRIES} seeded detours, each validating several
+     * long pieces sample by sample — measured at up to 7.2 ms in one step on
+     * the canonical slide (M4; roughly 3x that on the CI runner), which is
+     * what actually tripped `check:park-boot`'s 3x-budget advance ceiling
+     * there: a driver that checks the clock between steps cannot stop inside
+     * a step. One yield per via try makes the worst step a single detour
+     * instead of sixteen.
+     *
+     * Suspending here cannot move the route, by the same argument the outer
+     * search makes: every piece of state is a local or the generator's own,
+     * the `rng` draws happen in the same order whatever cadence the caller
+     * advances at, and the yielded value is the attempt index like every
+     * other yield. `check:park-boot` proves it, hashing sliced against
+     * straight-through for cruiser and slide alike.
+     */
+    function* tryFinish(): Generator<
+      number,
+      { seg: CubicSegment; samples: Sample[] }[] | null,
+      void
+    > {
       closerAttempts += 1;
       const head = headPose();
 
@@ -850,6 +873,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       const alongZ = (finishPose.z - head.z) / span;
 
       for (let attempt = 0; attempt < CLOSER_VIA_TRIES; attempt += 1) {
+        yield startIndex;
         const sideways = rng.range(-span * 0.7, span * 0.7);
         const forward = rng.range(-span * 0.3, span * 0.3);
         const swing = rng.range(-0.9, 0.9);
@@ -878,7 +902,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         }
       }
       return null;
-    };
+    }
 
     /**
      * How good a piece is, lower being better: how near its end lands to the
@@ -990,7 +1014,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       // asking the same question.
       if (!closerTried[depth] && accumulated >= brief.desiredLength * CLOSE_AFTER) {
         closerTried[depth] = true;
-        const closer = tryFinish();
+        const closer = yield* tryFinish();
         if (closer) {
           // Accepted exactly as validated — never re-validated, because a
           // second pass could disagree and quietly drop a piece, leaving a
