@@ -50,8 +50,36 @@ collision world, at the right coordinates, with `topHeight` Infinity (no
 - `scripts/check-hotel.mts` — probes 22 (solid from 32 bearings × 2 stride
   lengths) and 23 (32 walk-throughs × 4 strides × 8 phases; parallel passes).
 
-## State
+- `CLAUDE.md` — new section "Anything that looks solid must be solid".
+- `ARCHITECTURE.md` — the collision contract spelled out beside `addWall`.
 
-- Probes green with the fix; red proofs below.
-- TODO when picking this up: browser QA, `npm run build`, `npm run test:procgen`,
-  PR.
+## Red proofs (all measured, all reverted)
+
+- old octagon restored → **19 of 64 marches inside the 6.65 m shell**, nine
+  bearings 23°–169° off the door, closest approach 0.00 m, plus the reach
+  guard ("only 25 of 64 marches reached the shell").
+- `checkDoorways` back on `bandContains` → **9 of 128 walks never arrived**,
+  all at the 1.85 m stride, on the three portals whose band is 1.2 m deep.
+  The tower's own door survives the point test *once the shell is closed* —
+  worth knowing: closing the shell is what fixed what Jim felt.
+- tower band fattened to stand 2.5 m proud of the facade → **4 false
+  entries** from walking past, so that half is not vacuous.
+
+## State — done
+
+- `npm run build` exit 0; `npm run test:procgen` exit 0.
+- Browser QA (dev server on 5731, killed): desktop 8 bearings — the doorway
+  bearing enters, the other seven stop at 7.70 m from the centre (the shell's
+  apothem + wall + player radius = 7.67); walk ×2 and sprint ×2 through the
+  doors all entered; leaves the lobby by walking south out of its own doors.
+  Phone 390×844 — one tap-walk into the doors entered the Lobby; a tap-walk at
+  the tower's side stopped at 7.81 m.
+- Screenshots in the scratchpad: `hs-desk-blocked-side.png`,
+  `hs-desk-inside-lobby.png`, `hs-phone-inside-lobby.png`,
+  `hs-phone-blocked-side.png`.
+
+**QA trap worth knowing:** `hotel.floorLabel()` returns null both for "outside"
+and for "inside is true but she is standing on a park coordinate". A QA script
+that teleports her to the park without the hotel having *left* reads as a
+broken door. Wait for `floorLabel() === 'Lobby'` after the `/hotel` deep link
+before capturing anything.
