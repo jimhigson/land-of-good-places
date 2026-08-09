@@ -768,7 +768,7 @@ export class CoasterRoute {
    * Builds the loop.
    *
    * `presolved` is the work a driver already did **a slice at a time** —
-   * `boot/parkGeneration.ts`, spreading the ~1.3 s solve across the cat-bus
+   * `boot/parkGeneration.ts`, spreading the ~0.8 s solve across the cat-bus
    * ride's frames. Handed one, this skips both the brief and the search and
    * does only the finishing work (the height profile, the carves, the vertical
    * repair), which is ~10 ms and was never the expensive half.
@@ -848,7 +848,7 @@ export class CoasterRoute {
  * A loop somebody else already searched, ready to be finished.
  *
  * Both halves are needed and neither can be rebuilt cheaply: the plan view is
- * the ~1.3 s the ride spread out, and the `Rng` is the stream `stationPoses`
+ * the ~0.8 s the ride spread out, and the `Rng` is the stream `stationPoses`
  * advanced on the way to producing the brief that plan was searched from.
  */
 export interface PresolvedCoaster {
@@ -895,7 +895,7 @@ export interface CoasterBriefs extends CoasterBriefPair {
  *
  * Split out of the constructor so that something which is *not* the module
  * owning `COASTER_PLANS` can build the brief and drive the search a slice at a
- * time — importing that module is precisely what runs the ~1.3 s solve, so the
+ * time — importing that module is precisely what runs the ~0.8 s solve, so the
  * loading screen could not otherwise get at the brief without paying for the
  * thing it is trying to spread out. The same split, for the same reason, as
  * `slide/solve.ts`'s `slideRouteBriefAt`; see `coaster/prewarm.ts` for why the

@@ -5,81 +5,87 @@ Base: e932396 (origin/main, 8 Aug)
 
 ## The commission
 
-The Sky Cruiser is the park's dominant solve cost (canonical 1.26-1.70 s,
-sweep median 3.3 s, p90 17.4 s, worst 58.2 s) and the cause of 11 of the 12
-sweep failures — `stationPoses` proposes ~1,408 start poses,
-`stationWindowIsClear` throws away ~1,400 of them, because the window tests
-**bounding circles at 1.2 m** while the search tests **footprints at 3.6 m**
-(corridor 3 + 0.6). Decision 10 part 4 names this: two authorities for one
-question. Seeds 4/29/30 die after 8/14/10 poses. Seed 5's CI hook timeout
-(stopgap: 120→300 s, PR #257) is the same disease.
+The Sky Cruiser was the park's dominant solve cost and the cause of 11 of the
+12 sweep failures: `stationWindowIsClear` qualifies start poses with bounding
+circles at 1.2 m while the search tests footprints at 3.6 m — Decision 10
+part 4's "two authorities for one question". Constraints: byte-identical
+routes on every currently-solving seed (fingerprint proof); failed seeds
+flipping to solving is a win; solve-rate ≥ 48/60; budgets re-derived; tests
+and build green; PR, no self-merge.
 
-Constraints (from the brief, verbatim intent):
-- Every seed that currently SOLVES must produce a **byte-identical** cruiser
-  route (fingerprint-cruiser.mts before/after, all solving seeds).
-- Seeds that currently FAIL flipping to solving is a WIN. Solve-rate must not
-  drop below 48/60.
-- Re-derive check:solve-cost budgets from fresh medians (8x rule).
-- test:procgen + full npm run build green. PR, no self-merge.
+## RESULTS (all measured this machine, M-series, idle, 8 Aug 2026)
 
-## Design (decided up front, before code)
+### Speed — canonical seed, median of 3, `measure:procgen --no-world`
+| stage | before | after |
+|---|---|---|
+| cruiser | 1244.9 ms | **788 ms** (1.58x) |
+| slide | 4635.6 ms | **4070 ms** (1.14x, same shared generator) |
+| TOTAL | ~6000 ms | ~4990 ms |
 
-Byte-identity forbids touching the pose list on seeds where the search
-succeeds — any change to the filter changes which poses draw `rng.unit()`,
-which scrambles the shuffle and re-rolls every park. So the fix has two
-independent parts:
+### Sweep, seeds 1-60, 8-wide, `--no-world`
+| | before | after |
+|---|---|---|
+| SOLVE RATE | 48/60 (80%) | **56/60 (93%)** |
+| cruiser median | 2834 | **1849** |
+| cruiser p90 | 14551 | **8427** |
+| cruiser max | 51950 | **30108** |
+| TOTAL median | 6719 | **4728** |
+| sweep wall | 170.0 s | 150.7 s (with 8 more seeds actually solving) |
 
-1. **Hot paths**: exact identity transforms only (Decision 10 part 3's rule),
-   verified by fingerprints + unchanged solve-report counters.
-2. **The two-authorities fix as a rescue tier**: the existing pose pipeline
-   runs byte-identically first; only when the search EXHAUSTS it (today: park
-   fails to build) does a second brief run with poses constructed against the
-   search's own truth — `clear`-predicate-qualified windows (footprints at
-   corridor radius), per Decision 10 part 4. Solving seeds never reach it;
-   failing seeds get a real outermost level.
+### Byte-identity proof
+- Cruiser fingerprints (curve SHA256 + counters): **50/50 solving seeds
+  identical** (49 sweep + canonical) — scratchpad fp-base vs fp-after.
+- Train fingerprints vs a `git archive e932396` snapshot: **5/5 CI seeds
+  identical**. Slide: **5/5 CI seeds identical** (both ride the same
+  generator I touched).
 
-## State
+### Flipped seeds (failed → solving)
+4, 9, 10, 21, 29, 37, 48, 56. Of these, **21 and 37 fully satisfied**
+(castle crossing); 4, 9, 10, 29, 48, 56 build WITHOUT the castle crossing
+(the search's own "a park with no coaster is far worse" fallback).
+Still failing: 8, 25, 30 (cruiser — rescue also exhausts; seed 30's error
+message now carries both tiers' reports), 53 (slide, out of scope).
 
-- [x] Worktree, npm ci, all required reading done
-- [x] Canonical baseline measured (below)
-- [x] 60-seed sweep baseline (48/60; failures 4,8,9,10,21,25,29,30,37,48,56
-      cruiser + 53 slide; cruiser median 2834 / p90 14551 / max 51950 ms)
-- [x] Per-seed fingerprint baseline: scratchpad/fp-base (50 solving files)
-- [x] CPU profile (canonical + seed 55): selfClear 19-23%,
-      minCurvatureRadius 14-18%, clearOfFootprints 12-14%, clear 7-9%,
-      boundary ~8%. KEY FINDING: sampled-curvature rejections are only 13k
-      of the 1M "curvature" rejections (rest are analytic biarc); validate
-      full-scanned 5.3M pieces at 65 samples each, 2.1M of which the world
-      checks reject anyway → curvature moved LAST + bailBelow.
-- [x] Hot-path fixes (commit 28300da): canonical 1245 → 812 ms; seed 55
-      ~18 s → 10.6 s. Fingerprints identical on all 5 CI seeds. NOTE:
-      rejected-cause ATTRIBUTION redistributes (total per piece unchanged,
-      route bytes + structural counters identical) — documented in validate.
-- [x] Rescue tier (commit 7d1d2d3): one policy generator cruiserRouteSearch
-      (route.ts), both cadences drive it. Seed 4 flips (94 poses, was 8),
-      seed 29 flips (274, was 14), seed 30 honestly unsolvable (268 poses,
-      1M pieces, cannot close).
-- [ ] After-sweep running (btw9wrl7k) → flip list + after-numbers
-- [ ] 60-seed fingerprint re-run (must equal fp-base on all 50 solving)
-- [ ] check:solve-cost budget re-derive (8x fresh median), stale prose
-- [ ] test:procgen + npm run build + PR
+### Known quality gaps on rescued parks (measured, seed 4, not committed)
+Ran the full invariant suite against seed 4's new park: 52/55 pass. The 3
+reds: castle crossing absent; a 97.4 m unsupported track span (pylon
+placement can't support part of the rescued loop); a Rail Race duck bar
+that doesn't slow riders (unrelated to the cruiser). So a rescued park is
+*playable but imperfect* — where yesterday it did not exist at all. This is
+why no sixth suite seed was added; proposed as follow-up in the PR.
 
-## Baseline (this machine, M-series, idle)
+## What shipped (commits)
 
-Canonical seed 20260728, `measure:procgen --no-world`, median of 3:
-cruiser 1244.9 ms · slide 4635.6 · boundary 50.3 · layout 8.8 · train 42.2
-· railRace 12.2 · paths 11.9. After hot paths: cruiser ~812 ms.
+1. `28300da` hot paths, all exact identity transforms: curvature check moved
+   LAST in validate + bailBelow (the 65-sample scan ran on 5.3M pieces and
+   rejected 13k — the 1M "curvature" rejections are the cheap analytic biarc
+   check); dense self-clear grid over the brief's extent (Map→flat array,
+   buckets reused across attempts, axis prefilter); plot-grid shortlists in
+   parkLayout (12 m cells, 8 m margin ceiling, full-scan fallback); tall-
+   obstacle axis prefilter; solverBoundary single-derivation lookup.
+   NOTE: rejected-cause ATTRIBUTION redistributes (one increment per
+   rejected piece either way; routes + structural counters identical).
+2. `7d1d2d3` the rescue tier: `stationWindowHasLegalTrack` asks the brief's
+   own `clear` at CORRIDOR_RADIUS (one truth); `rescueStationPoses` rebuilds
+   the rings over it, lazily (`CoasterBriefs.rescue()` thunk — solving seeds
+   never build it, so cannot be perturbed); the whole retry ladder is now
+   ONE generator `cruiserRouteSearch` in coaster/route.ts, driven by both
+   the constructor and boot/parkGeneration (ends the hand-mirrored policy).
+   Two lesser rungs, reachable only on previously-dead parks: escalated
+   throwing returns tier-1's plan; rescue throwing reports both failures.
+3. Budgets: check-solve-cost cruiser 1274→788, slide 4609→4070 (8x rule,
+   fresh medians, noted in its header). Stale "~1.3 s" prose updated in
+   plan.ts, prewarm.ts, parkGeneration.ts, check-park-boot.mts (incl. the
+   honest 3x-separation note), train/route.ts, coaster/route.ts.
 
-## Key file map (for a replacement)
+## Still open / follow-ups proposed
 
-- `src/world/coaster/route.ts` — stationPoseSearch (rings, the 1.2 m filter
-  `stationWindowIsClear`), coasterRouteBriefSearch (builds `clear`), the
-  profile pipeline.
-- `src/world/coaster/solve.ts` — CRUISER_SEED, planCruiser, brief drivers.
-- `src/world/rail/generate.ts` — railRouteSearch (the search; throws
-  RailRouteUnsolvable on exhaustion), solveRailRoute.
-- `CoasterRoute` constructor: `first` brief, then `escalated` (2x castle
-  weight) only if `!satisfied`. RailRouteUnsolvable from either kills the
-  park today — that is where the rescue tier hooks in.
-- Fingerprint: `scripts/fingerprint-cruiser.mts` (LGP_SEED=n selects seed).
-- CI seeds: canonical(20260728), 2, 5, 11, 18 (test/procgen/seed-*.test.ts).
+- test:procgen + npm run build runs (in progress at last checkpoint).
+- Rescued parks and the castle: a third rescue rung at 4x influence might
+  buy crossings on 4/9/10/29/48/56; Decision 7's cost argument says only
+  those seeds would pay. Not attempted (scope/time).
+- Pylon support gaps on rescued loops (seed 4: 97.4 m span) — pylons
+  module can't stand under crowded ground; same crowding that starved the
+  poses.
+- Seed 5's park build is now slide-dominated (40 s of 40.4 s locally) —
+  the CI hook pressure is the SLIDE's now, not the cruiser's.

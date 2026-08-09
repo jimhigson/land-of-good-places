@@ -85,7 +85,7 @@ import { PARK_SEED } from '../parkManifest';
  *       scripts/measure-procgen.mts --no-world     # per-stage breakdown
  *
  * A *bare* import of `train/plan.ts` costs ~1.5 s — that is the cruiser
- * stage (`COASTER_PLANS`, ~1.3 s) being pulled in as a dependency, not the
+ * stage (`COASTER_PLANS`, ~0.8 s) being pulled in as a dependency, not the
  * train. The Land Hotel merge (#241) doubled the obstacle census this solver
  * scans and took the stage from ~44 ms to ~153 ms unnoticed; the per-bearing
  * shortlists below bought it back. `scripts/fingerprint-train.mts` is how a

@@ -314,11 +314,13 @@ for (const [phase, floor] of Object.entries(MIN_UNITS) as [keyof typeof units, n
 // - #253 then merged, doing exactly that. Re-measured over three runs: the
 //   worst block is **39.3-40.3 ms**.
 //
-// So 250 ms now sits about **6x above the worst legitimate block and 32x below
-// the cheapest failure** (an unsliced cruiser at ~1.3 s). That is the separation
-// this ceiling was chosen for, restored by fixing the cost rather than by moving
-// the line — which is the whole point of writing the thin version down instead
-// of quietly living with it.
+// So 250 ms now sits about **6x above the worst legitimate block and 3x below
+// the cheapest failure** — an unsliced cruiser, ~0.8 s since the 8 Aug 2026
+// hot-path pass (this line said "32x below … ~1.3 s" before that pass; the
+// failure got cheaper, which narrows the margin on that side, and 3x is still
+// separation, not a coin toss). The separation was restored by fixing the cost
+// rather than by moving the line — which is the whole point of writing the
+// thin version down instead of quietly living with it.
 //
 // It does not need to be tighter: the mutation that makes slices too coarse is
 // caught by ADVANCE_CEILING_MS above, which is the assertion that owns that
@@ -366,7 +368,7 @@ if (takePrewarmedSlide() !== null) {
 // that never passed through `advance()` and was never budgeted.
 //
 // The ride plans' own module evaluations live in this gap too and cost ~240 ms
-// between them; an unsliced ride solve costs 1.3 s (cruiser) or 3.46 s (slide).
+// between them; an unsliced ride solve costs ~0.8 s (cruiser) or 3.46 s (slide).
 // A one-second ceiling sits clear of the first and below both of the others.
 // `wallClock - advance` is everything that was not inside a slice, which
 // includes this check's own frame loop as well as the module evaluations it is
@@ -396,7 +398,7 @@ if (unbudgetedMs > UNBUDGETED_CEILING_MS) {
     `${(unbudgetedMs / 1000).toFixed(2)} s of work happened outside any budgeted slice — ` +
       'generation the ride does not control is generation the ride cannot spread. At this size ' +
       'it is a whole ride solve landing in one module evaluation rather than being sliced: the ' +
-      'Sky Cruiser is ~1.3 s and the ginormous slide ~3.46 s. Check which module evaluation the ' +
+      'Sky Cruiser is ~0.8 s and the ginormous slide ~3.46 s. Check which module evaluation the ' +
       'worst block above lands in — and note that whichever module imports a solved plan FIRST ' +
       'is billed for it, so the expensive module is not always the one named',
   );
@@ -459,7 +461,7 @@ const { takePrewarmedCruiser } = await import('../src/world/coaster/prewarm.ts')
 if (takePrewarmedCruiser() !== null) {
   fouls.push(
     'a pre-warmed Sky Cruiser is still sitting in coaster/prewarm.ts after the whole park has ' +
-      'generated — coaster/plan.ts is not collecting it, so the ~1.3 s solve ran twice and the ' +
+      'generated — coaster/plan.ts is not collecting it, so the ~0.8 s solve ran twice and the ' +
       'ride covered none of it',
   );
 }

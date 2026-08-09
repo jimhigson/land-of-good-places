@@ -16,7 +16,9 @@ import { takePrewarmedCruiser } from './prewarm';
  *
  * The identical reason `slide/plan.ts` split from `slide/solve.ts`, and this is
  * deliberately that same shape rather than a second design. The cruiser's solve
- * costs **~1.3 s** on the canonical seed, and the cat-bus ride is meant to cover
+ * costs **~0.8 s** on the canonical seed (was ~1.3 s until the 8 Aug 2026
+ * hot-path pass; `scripts/check-solve-cost.mts` owns the current measurement),
+ * and the cat-bus ride is meant to cover
  * it, which means solving it a few milliseconds at a time *while the bus is on
  * screen*.
  *

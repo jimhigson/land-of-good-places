@@ -43,9 +43,9 @@ import { offerPrewarmedSlide } from '../world/slide/prewarm';
  * anything.
  *
  * - **the ginormous slide**, at ~3.46 s;
- * - **the Sky Cruiser**, at ~1.3 s, sliced second (#252) once the cost stopped
- *   being billed to the train that merely imports it — see
- *   {@link MODULES_AFTER_CRUISER}.
+ * - **the Sky Cruiser**, at ~0.8 s (~1.3 s when it was sliced), sliced second
+ *   (#252) once the cost stopped being billed to the train that merely imports
+ *   it — see {@link MODULES_AFTER_CRUISER}.
  *
  * The two sit either side of the module list rather than together, because
  * `train/plan.ts` and everything after it read `COASTER_PLANS`: the cruiser has
