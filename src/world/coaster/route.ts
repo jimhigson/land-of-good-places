@@ -615,14 +615,6 @@ function stationPoses(
 
 
 /**
- * Is the low, flat run through a candidate station on clear ground?
- *
- * Checked along the pose's heading in both directions: the loop leaves the
- * station along that heading and — because closure matches the tangent —
- * arrives along it too, so a straight line is a fair stand-in for the track
- * either side of the platform.
- */
-/**
  * {@link stationWindowIsClear}, asking **the search's own question** — the
  * rescue tier's pose qualification (Decision 10 part 4).
  *
@@ -714,6 +706,14 @@ function rescueStationPoses(
   return poses.map((entry) => entry.pose);
 }
 
+/**
+ * Is the low, flat run through a candidate station on clear ground?
+ *
+ * Checked along the pose's heading in both directions: the loop leaves the
+ * station along that heading and — because closure matches the tangent —
+ * arrives along it too, so a straight line is a fair stand-in for the track
+ * either side of the platform.
+ */
 function stationWindowIsClear(
   pose: Pose2,
   boundary: ReturnType<typeof circleBoundary>,
