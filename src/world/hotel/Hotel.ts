@@ -39,9 +39,13 @@ import { cornerClosedSpans, segmentsMinusGaps } from '../wallRuns';
 import { toonMaterial, solid, decal, inkTint } from '../../art/style/materials';
 import {
   BED_MATTRESS_TOP,
+  BRIDGE_RAIL_TILE,
   createBreakfastBowl,
   createBreakfastChair,
   createBreakfastTable,
+  createBridgeNewel,
+  createBridgeRailing,
+  createChandelier,
   createDiscoBall,
   createEntranceDoors,
   createGameBoy,
@@ -49,6 +53,7 @@ import {
   createHotelTv,
   createHotelBed,
   createHotelTower,
+  createLandingNosing,
   createLiftCar,
   createLiftDial,
   createLiftDoors,
@@ -56,7 +61,22 @@ import {
   createPetBed,
   createPetBowl,
   createReceptionDesk,
+  createStraightStaircase,
   createYoursDoor,
+  LANDING_HEIGHT,
+  LANDING_SLAB_MAX,
+  LANDING_SLAB_MIN,
+  LOBBY_MIN_WALL_HEIGHT,
+  STAIR_INNER_RADIUS,
+  STAIR_OUTER_RADIUS,
+  STAIR_RAIL_RADIUS,
+  STAIR_RISE,
+  STAIR_SWEEP,
+  STAIR_TREADS,
+  STRAIGHT_RISE,
+  STRAIGHT_RUN,
+  STRAIGHT_TREADS,
+  STRAIGHT_WALK_WIDTH,
   type BreakfastKind,
   type LiftDialHandle,
   PET_BED_CUSHION_RADIUS,
@@ -92,7 +112,6 @@ import {
   hedge,
   lilyPond,
   napBlanket,
-  picture,
   porthole,
   rainbowRing,
   rainbowRug,
@@ -106,12 +125,13 @@ import {
 } from './dressing';
 import { hotelResidents } from './HotelGuests';
 import { HotelProps, Plate } from './place';
-import { HotelLighting } from './lighting';
+import { HotelLighting, pendantLight } from './lighting';
 import type { ResidentSpec } from '../../entities/npc';
 import { placedEntry } from '../parkLayout';
 import { saveFlags } from '../../state/flags';
 import { gameStore } from '../../state';
-import { pressAction, type InteractZone } from '../interact';
+import { ZONE_HEIGHT_TOLERANCE, pressAction, type InteractZone } from '../interact';
+import { FloorFader } from '../building/floorFade';
 import {
   BREAKFAST,
   clearFloorAround,
@@ -138,6 +158,9 @@ import {
   type HotelRoom,
   type Mezzanine,
   mezzanineWalkConnectors,
+  mezzanineGuardedEdges,
+  mezzanineHidesPoint,
+  RAIL_BASE_DROP,
   type SuitePartition,
   type WallSide,
 } from './layout';
@@ -222,6 +245,49 @@ const AUTO_DOOR_SECONDS = 1.2;
 const WINDOW_PICK_RADIUS = 2.2;
 
 /**
+ * How solid the lobby's overhang stays while it is hiding the player.
+ *
+ * Not zero. The castle's cutaway removes a storey you are standing under
+ * because it is simply in the way; the lobby's gallery is the composition —
+ * a child under the arch should still see the deck, the balustrade and the
+ * colonnade overhead, just see *through* them to herself. Close to
+ * `FoliageFade`'s own `MIN_ALPHA` (0.26), which is the value this game
+ * already decided a faded-but-present thing looks like.
+ */
+const OVERHANG_GHOST_ALPHA = 0.24;
+
+/**
+ * Where up her body the overhang is asked whether it hides her — head, chest,
+ * waist, the same three `check:statue-occlusion` has always used, and the
+ * same three `check:hotel` raycasts. Her head clearing the deck while her
+ * body does not is exactly the state QA reported ("only the pet's head / a
+ * sliver of hat"), so any one of them being hidden is enough to fade.
+ */
+const OVERHANG_BODY_FRACTIONS = [1, 0.75, 0.5] as const;
+
+/** How tall the player reads for occlusion. Matches `check:statue-occlusion`. */
+const PLAYER_HEIGHT = 2.12;
+
+/**
+ * How high above her own floor a window's "Look out" zone may sit.
+ *
+ * The zone used to be pinned to the middle of the glass, which is fine for a
+ * normal room and wrong for a grand one: the lobby's west windows are
+ * 1.2–3.6 m of double-height glazing, so the midpoint came out at 2.4 m —
+ * and every selection path in the game drops a zone further than
+ * `ZONE_HEIGHT_TOLERANCE` (2.2 m) from the player's own `y`. The verb was
+ * built, placed, and impossible to offer to a child standing on the floor, at
+ * any spot in the room. 19 sampled spots along that wall gave nothing but
+ * "🏨 Lobby".
+ *
+ * A window is looked out of by someone standing on the floor, so the zone
+ * belongs at her height, not the glass's centre. Derived from the tolerance
+ * rather than typed as a number, with room to spare for a damped `y` that
+ * dips a little as she walks.
+ */
+const LOOK_ZONE_MAX_Y = ZONE_HEIGHT_TOLERANCE - 0.4;
+
+/**
  * How much floor a fitted rug leaves between its own edge and a wall face.
  * Rug extents are derived from `layout.ts`'s `clearFloorAround` minus this —
  * never hand-sized against a wall a partition move could bring closer.
@@ -285,16 +351,19 @@ const DISCO_COLOURS: readonly number[] = [
  * your key!"* sign floated beside the staircase, ten metres from any desk
  * (Jim, live play, 7 Aug 2026; QA pinned the stale pair). Every consumer now
  * derives from these two numbers, and `check:hotel` probe 13 asserts the
- * zone's anchor really stands on something solid that is not the staircase.
+ * zone's anchor really stands on something solid that is not a staircase.
  *
- * **On the entrance axis**, per the grand-hotel research for this rework: you
- * come through the south doors, pass the statue under the disco ball, and the
- * desk is straight ahead against the gallery's face, facing you — a clear
- * axis from the door to a focal reception, with the sweeping stair rising to
- * its left.
+ * **Beside the axis now, not on it.** The 7 August relayout put the desk dead
+ * on the entrance axis against the gallery's face — and the imperial rework's
+ * whole subject is that the axis runs *through* that spot: doors → statue →
+ * under the arch → the colonnade beyond. A desk on the axis is a desk in the
+ * archway. So it stands in the east bay between the right-hand flight and the
+ * gallery, still facing the entrance, the way a grand lobby seats its
+ * reception to one side of the promenade. The spot is radially inside the
+ * right arc's band but far outside its sweep — probe 13 measures both.
  */
-const RECEPTION_X = 0;
-const RECEPTION_Z = -5.9;
+const RECEPTION_X = 8.6;
+const RECEPTION_Z = -5.2;
 
 /** Where the receptionist herself stands: between her desk and the gallery face. */
 const RECEPTIONIST_Z = RECEPTION_Z - 1.15;
@@ -405,6 +474,79 @@ class ArcTread implements MovingPlatform {
   }
 }
 
+/**
+ * Proves the lobby's declared plan against the staircase asset's own exports,
+ * at build time, before anything is placed.
+ *
+ * `layout.ts` is a leaf data module and cannot import the asset (it would drag
+ * the GLB decode into every script that reads a room rectangle), so its
+ * numbers are written as data — and six numbers kept in step by two files'
+ * comments is this repo's most reliable bug. The artist's handoff asked for
+ * exactly this mechanism by name. Throws, because a lobby built around the
+ * wrong staircase is not a lobby with a cosmetic problem: the walk surfaces,
+ * colliders and nav connectors are all derived from the plan, and every one
+ * of them would be describing a flight that is not there.
+ */
+function assertStairMatches(room: HotelRoom, plan: Mezzanine): void {
+  const problems: string[] = [];
+  const expect = (what: string, got: number, want: number, eps = 0.005): void => {
+    if (Math.abs(got - want) > eps) {
+      problems.push(`${what} is ${got.toFixed(3)} but the asset says ${want.toFixed(3)}`);
+    }
+  };
+
+  expect('the landing height', plan.landing.height, LANDING_HEIGHT);
+  expect('the gallery height', plan.height, STAIR_RISE);
+  expect("the straight flight's rise", plan.straight.rise, STRAIGHT_RISE);
+  expect("the straight flight's walk width", plan.straight.walkWidth, STRAIGHT_WALK_WIDTH);
+  expect("the straight flight's run", plan.straight.frontZ - plan.maxZ, STRAIGHT_RUN);
+  expect("the straight flight's tread count", plan.straight.treads, STRAIGHT_TREADS, 0);
+
+  if (plan.stairs.length !== 2) {
+    problems.push(`the plan declares ${plan.stairs.length} curved flights — the composition is two`);
+  }
+  for (const stair of plan.stairs) {
+    expect('a curve inner radius', stair.innerRadius, STAIR_INNER_RADIUS);
+    expect('a curve outer radius', stair.outerRadius, STAIR_OUTER_RADIUS);
+    expect('a curve tread count', stair.treads, STAIR_TREADS, 0);
+    expect('a curve sweep', Math.abs(stair.toAngle - stair.fromAngle), STAIR_SWEEP);
+    // C = STAIR_RAIL_RADIUS + n·BRIDGE_RAIL_TILE/2 for whole n, so the run
+    // between the two top newels — the landing's front balustrade — is a
+    // whole number of tiles, which is the one thing the tile cannot fake.
+    const tiles = ((Math.abs(stair.centreX) - STAIR_RAIL_RADIUS) * 2) / BRIDGE_RAIL_TILE;
+    if (Math.abs(tiles - Math.round(tiles)) > 0.02) {
+      problems.push(
+        `a curve centre at |x| = ${Math.abs(stair.centreX).toFixed(2)} puts ` +
+          `${tiles.toFixed(2)} balustrade tiles between the top newels — it must be whole`,
+      );
+    }
+    // The landing laps the inner strings by the designed bite and no more.
+    expect('the landing half-width', plan.landing.maxX, Math.abs(stair.centreX) - STAIR_INNER_RADIUS, 0.02);
+  }
+
+  if (plan.landing.slab < LANDING_SLAB_MIN - 1e-6 || plan.landing.slab > LANDING_SLAB_MAX + 1e-6) {
+    problems.push(
+      `the landing slab is ${plan.landing.slab.toFixed(2)} m thick, outside the asset's ` +
+        `${LANDING_SLAB_MIN.toFixed(2)}–${LANDING_SLAB_MAX.toFixed(2)} m — past the maximum the ` +
+        `arch stops clearing a child in a party hat, which silently undoes Jim's ruling`,
+    );
+  }
+  if (room.wallHeight < LOBBY_MIN_WALL_HEIGHT) {
+    problems.push(
+      `the lobby's far walls are ${room.wallHeight.toFixed(2)} m against the asset's minimum ` +
+        `${LOBBY_MIN_WALL_HEIGHT.toFixed(2)} — a child on the gallery has no air over her head`,
+    );
+  }
+
+  if (problems.length > 0) {
+    throw new Error(
+      `the lobby plan and the staircase asset disagree — layout.ts must follow ` +
+        `art/models/hotelAssets.ts (the arrow turned round on 8 Aug 2026):\n  ` +
+        problems.join('\n  '),
+    );
+  }
+}
+
 interface Chair {
   readonly x: number;
   readonly z: number;
@@ -479,6 +621,26 @@ export class Hotel implements GameSystem {
   private inside = false;
   private changingSpace = false;
   private spaceCooldown = 0;
+
+  /**
+   * The lobby's gallery-and-landing mass, and the fader that ghosts it.
+   *
+   * **The headline feature led somewhere a six-year-old could not see
+   * herself.** Walking under the arch or anywhere in the colonnade, QA found
+   * only her pet's head and a sliver of hat showing: the deck is 4.8 m deep
+   * and 26 m wide at 5.44 m, and at the camera's 38° that hid roughly the
+   * northern 10 m of a 24.8 m room. Nothing in the hotel had ever faded —
+   * `FloorFader` was the castle's, and `FoliageFade` explicitly reasons that
+   * the building interior is a separate space that can never occlude anyone.
+   *
+   * So the castle's fader does the work, with one number added to it: the
+   * castle hides a storey outright, this one ghosts, because the gallery is
+   * the thing the room is *for* and a child should still see it overhead
+   * while she can see herself through it.
+   */
+  private lobbyOverhang: Group | null = null;
+  private readonly overhangFader = new FloorFader(OVERHANG_GHOST_ALPHA);
+  private overhangRegistered = false;
 
   private readonly statue: RipikaStatueHandle;
   private readonly discoBalls: { spin: Group }[] = [];
@@ -894,10 +1056,10 @@ export class Hotel implements GameSystem {
         y: 1,
         z,
         pickRadius: 2.6,
-        // A step east of the axis: dead on it, the statue's head stands
-        // between the fixed camera and a child at the desk (watched in the
-        // browser, 7 Aug relayout). One stride east clears its silhouette.
-        standX: x + 1.6,
+        // Straight in front of the counter. The old step-east dodge was for
+        // the statue's silhouette when the desk sat on the axis; the desk is
+        // in the east bay now and nothing stands between her and the lens.
+        standX: x,
         standZ: z + 2.4,
         verb: 'Check in',
         sign: {
@@ -1013,32 +1175,56 @@ export class Hotel implements GameSystem {
       // middle first. A layout that knows better says so with `zoneAt`.
       const middleOf = wall.at[Math.floor(wall.at.length / 2)] ?? 0;
       const probe = new Vector3();
-      const middle =
-        wall.zoneAt ??
-        [...candidates]
-          .sort((a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf))
-          .find((at) => {
-            const sx =
-              side === 'north' ? room.originX + at : room.originX - room.halfX + 0.4 + stand;
-            const sz =
-              side === 'north' ? room.originZ - room.halfZ + 0.4 + stand : room.originZ + at;
+      /**
+       * Somewhere clear to stand and look through this pane, or `null`.
+       *
+       * **Searched, not assumed.** A fixed 1.8 m straight out from the glass
+       * is one guess, and in the corridor it is wrong at every single pane:
+       * the row of pet statues stands right across that line, so every
+       * candidate stand spot was pushed 0.77 m and landed outside the zone's
+       * own 2.2 m pick radius — the verb existed and could never come into
+       * range. There are clear gaps between those statues, and this finds
+       * them: straight out first, then further out, then to either side,
+       * never further from the pane than the pick radius, or she would arrive
+       * and still not be offered it.
+       */
+      const standSpotFor = (at: number): { x: number; z: number } | null => {
+        const px = paneX(at);
+        const pz = paneZ(at);
+        // Inward from the glass, and along the wall.
+        const inX = side === 'north' ? 0 : 1;
+        const inZ = side === 'north' ? 1 : 0;
+        for (const lateral of [0, 0.8, -0.8, 1.6, -1.6, 2.4, -2.4]) {
+          for (const depth of [stand, 1.4, 2.2, 1.0, 2.6, 0.8]) {
+            // She must end up inside the pick radius, or the walk arrives at
+            // a spot the picker will not answer from.
+            if (Math.hypot(depth, lateral) > WINDOW_PICK_RADIUS - 0.1) continue;
+            const sx = px + inX * depth + inZ * lateral;
+            const sz = pz + inZ * depth + inX * lateral;
             probe.set(sx, 0, sz);
             this.collision.resolve(probe, PLAYER_RADIUS);
-            return Math.hypot(probe.x - sx, probe.z - sz) < 0.05;
-          }) ??
-        candidates[0] ??
-        0;
+            if (Math.hypot(probe.x - sx, probe.z - sz) < 0.05) return { x: sx, z: sz };
+          }
+        }
+        return null;
+      };
+      const ordered = [...candidates].sort(
+        (a, b) => Math.abs(a - middleOf) - Math.abs(b - middleOf),
+      );
+      const middle =
+        wall.zoneAt ?? ordered.find((at) => standSpotFor(at) !== null) ?? candidates[0] ?? 0;
       const x = paneX(middle);
       const z = paneZ(middle);
+      const spot = standSpotFor(middle);
       zones.push({
         id: `hotel-window-${room.space}-${side}`,
         label: 'window',
         x,
-        y: (wall.sill + wall.head) / 2,
+        y: Math.min((wall.sill + wall.head) / 2, LOOK_ZONE_MAX_Y),
         z,
         pickRadius: WINDOW_PICK_RADIUS,
-        standX: side === 'north' ? x : x + stand,
-        standZ: side === 'north' ? z + stand : z,
+        standX: spot ? spot.x : side === 'north' ? x : x + stand,
+        standZ: spot ? spot.z : side === 'north' ? z + stand : z,
         standRadius: 2.6,
         verb: 'Look out',
         sign: {
@@ -1144,11 +1330,47 @@ export class Hotel implements GameSystem {
     return zones;
   }
 
+  /**
+   * Ghost the lobby's overhang whenever it is between the player and the
+   * camera — the hotel's answer to the castle's cutaway.
+   *
+   * The test is exact rather than sampled, because the camera is orthographic
+   * (one fixed view direction everywhere) and the decks are axis-aligned
+   * rectangles: `mezzanineHidesPoint` marches from a point along the view
+   * direction to each deck's walking surface and asks whether it lands on it.
+   * Three heights up her body, the same three `check:hotel` raycasts, so what
+   * fades and what the probe calls hidden are the same question asked twice
+   * in two different ways.
+   */
+  private updateOverhangCutaway(context: FrameContext): void {
+    if (this.lobbyOverhang && !this.overhangRegistered) {
+      this.overhangFader.addLayer(this.lobbyOverhang);
+      this.overhangRegistered = true;
+    }
+    if (!this.overhangRegistered) return;
+    const plan = LOBBY.mezzanine;
+    const player = context.playerPosition;
+    let hidden = false;
+    if (plan && player && this.inside && this.currentRoom() === LOBBY) {
+      const localX = player.x - LOBBY.originX;
+      const localZ = player.z - LOBBY.originZ;
+      for (const fraction of OVERHANG_BODY_FRACTIONS) {
+        if (mezzanineHidesPoint(plan, localX, player.y + PLAYER_HEIGHT * fraction, localZ)) {
+          hidden = true;
+          break;
+        }
+      }
+    }
+    this.overhangFader.setVisibleUpTo(hidden ? -1 : null);
+    this.overhangFader.update(context.dt);
+  }
+
   // ---------------------------------------------------------------- frame
 
   update(context: FrameContext): void {
     const { dt, elapsed } = context;
     if (this.spaceCooldown > 0) this.spaceCooldown -= dt;
+    this.updateOverhangCutaway(context);
 
     // The key turning in the lock. Before the player-null return, so a
     // headless world (check:hotel) can watch the door open too.
@@ -1262,28 +1484,16 @@ export class Hotel implements GameSystem {
       this.controls.snapCamera();
     }
 
-    // The same net for the one pocket that is not a fall: inside a gallery's
-    // solid mass at ground level — where a pre-fix save may still restore a
-    // player, invisible and pinned (QA, 8 Aug 2026). The stair's slices make
-    // it unreachable on foot now, but a save is not on foot.
-    if (this.inside && !this.changingSpace) {
-      const room = this.currentRoom();
-      const mez = room?.mezzanine;
-      // Threshold well below the flight's own crossing heights: the top
-      // treads enter the deck rectangle at 2.88–3.2 m and a climber's damped
-      // y can lag them by most of a metre — 1.5 m is unreachable on the
-      // stair but still far above the pocket's floor. (First cut used
-      // `height − 0.4` and teleported a legitimate climber off the top
-      // treads, measured live.)
-      if (room && mez && player.position.y < 1.5) {
-        const lx = player.position.x - room.originX;
-        const lz = player.position.z - room.originZ;
-        if (lx > mez.minX && lx < mez.maxX && lz > mez.minZ && lz < mez.maxZ) {
-          player.teleportTo(room.originX, 0, room.originZ, Math.PI);
-          this.controls.snapCamera();
-        }
-      }
-    }
+    // There used to be a second net here: anyone at ground level inside the
+    // mezzanine's rectangle was stood back at the room's origin, because that
+    // rectangle was the inside of the gallery's *solid mass* — a pocket a
+    // pre-fix save could restore a player into, invisible and pinned. The
+    // imperial rework made that rectangle the **colonnade**: open, walkable,
+    // and on the room's own axis, so the net was teleporting a child to the
+    // middle of the lobby for the crime of walking under her own gallery
+    // (found live, 9 Aug 2026 — the axis walk reset at z ≈ −7.5 on every
+    // attempt). A stale save restoring inside the old mass region now lands
+    // on honest floor, which needs no rescue.
   }
 
   // ------------------------------------------------------ changing space
@@ -2346,75 +2556,65 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * The lobby's raised gallery and the sweeping stair up to it — Jim, 7 August
-   * 2026: *"Make the lobby a double-height room with a sweeping staircase to
-   * the mezzanine level."*
+   * The imperial composition — Jim's reference photograph, realised: two
+   * mirrored curved flights sweep up to a landing at 3.84 m, a single wide
+   * straight flight carries on to the gallery at 5.44 m, and the 5.85 m arch
+   * **under** the landing is open — the room's axis runs from the entrance,
+   * under the arch, through the colonnade beneath the gallery to the north
+   * wall. Read {@link Mezzanine}'s header for why the overhang is legal now
+   * (`Collision.ts`'s banded `baseHeight`), and HANDOFF-lobby-art.md for
+   * where every number comes from.
    *
-   * Read {@link Mezzanine}'s own header first: it explains why this is a
-   * gallery standing on a solid mass rather than a balcony hanging over the
-   * floor, and that reason is a fact about `CollisionWorld`, not about
-   * architecture.
+   * The pieces, and who holds whom up:
    *
-   * Three pieces, and the way they fit together is the whole trick:
+   * - **The curves** are the artist's `createGrandStaircase`, one hand each,
+   *   origins at their arcs' centres, no rotation at all. Treads are
+   *   `WalkSurfaces` only (a solid tread is a wall to the child on the step
+   *   below); the closed strings are honest height-agnostic collider chains,
+   *   solid floor-to-tread.
+   * - **The landing** is a true overhang: a slab whose walk surface is a
+   *   plate, whose balustrades are **banded** colliders (base
+   *   `height − RAIL_BASE_DROP`) that hold a child on the landing and do not
+   *   exist for the child walking under the arch below her.
+   * - **The straight flight** stands on the landing, which is carried the
+   *   whole `LANDING_BACK` under it — the one thing the artist's handoff says
+   *   can be got wrong and not seen. Its flanks are banded too: below them is
+   *   the open recess, not floor-to-flank masonry.
+   * - **The gallery** is a colonnade: a full-width deck on columns, open
+   *   underneath all the way to the north wall so the arch genuinely sees
+   *   through. Its front edge carries a banded balustrade collider with a gap
+   *   where the flight lands.
    *
-   * - **The mass.** Hollow — a front face, an east face, and the room's own
-   *   north and west walls behind them — with the deck slab as its lid. The
-   *   two faces are real colliders at every height, so nothing can walk under
-   *   the gallery except through the stair's own mouth, and the balustrade on
-   *   top needs no collider of its own because it stands on exactly the plane
-   *   the front face already occupies.
-   * - **The stair.** Its treads are `WalkSurfaces` only, never colliders: a
-   *   solid tread would be a wall to the child standing on the tread below it
-   *   (`clearsTop` is fed her height above *her own* ground, which on a step is
-   *   zero), so a stair built out of colliders is a stair nobody can climb.
-   * - **The stair's two sides**, at the inner and outer radius, *are* colliders
-   *   — and correctly so at both heights, because the side of a masonry stair
-   *   is solid from the floor all the way to the tread. They are what stops a
-   *   child walking off the side, and what stops her walking into the flank of
-   *   the staircase from the lobby.
+   * Every number is proven against the asset's own exports first
+   * ({@link assertStairMatches}) — six numbers kept in step by comments was
+   * this repo's most reliable bug, and the artist asked for the mechanism by
+   * name.
    */
   private buildMezzanine(shell: Group, room: HotelRoom, plan: Mezzanine): void {
-    const { minX, maxX, minZ, maxZ, height, stair } = plan;
-    const midX = (minX + maxX) / 2;
-    const midZ = (minZ + maxZ) / 2;
-    const width = maxX - minX;
-    const depth = maxZ - minZ;
+    assertStairMatches(room, plan);
 
-    // Where the stair breaks through the mass's front face — **derived from
-    // the arc** by {@link stairMouth}, never typed in beside it: move the stair
-    // and the hole in the wall (and the gap in the balustrade) move with it.
-    const gap = this.stairMouth(plan);
+    const { minX, maxX, minZ, maxZ, height, landing, straight } = plan;
 
-    // Nobody strolls into the mass. The gallery's faces are already colliders,
-    // so this is only the guests' half of the same fact — registered through
-    // the same helper every prop goes through (`place.ts`), which covers a long
-    // rectangle with a chain of discs rather than one enormous one. Without it
-    // a lobby guest is handed a waypoint inside a solid block and leans on it
-    // for ever; `check:hotel` asserts exactly that and would have found it.
-    this.props.footprint(room, {
-      x: midX,
-      z: midZ,
-      halfX: width / 2,
-      halfZ: depth / 2,
-      top: height,
-      solid: false,
-    });
-
-    // --- the deck ------------------------------------------------------------
-    // **The slab abuts the two faces instead of running through them.** Slab,
-    // faces and the stair's last tread all used to top out at exactly
-    // `height` with overlapping footprints — four authors of one plane, which
-    // is a per-pixel coin toss for the renderer: Jim, live play, 7 Aug 2026,
-    // *"the mezzanine level flickers like crazy on the floor due to two faces
-    // overlapping."* The slab now stops where the face boxes begin (each face
-    // is 0.5 m thick, centred on the deck's edge line), so the faces' own
-    // tops finish the rim as a trim-coloured border and no two boxes share a
-    // pixel of the deck plane. check:hotel probe 10 measures exactly this.
-    const slab = solid(
-      new Mesh(new BoxGeometry(width - 0.25, 0.4, depth - 0.25), interiorMaterial(room.theme.floor)),
+    // --- the gallery deck ----------------------------------------------------
+    // One slab, full width: its top is the deck plane's single owner (probe
+    // 10) and its underside is the colonnade's soffit. The walk surface is
+    // the plate; the box is its portrait.
+    const deckSlab = solid(
+      new Mesh(
+        new BoxGeometry(maxX - minX, 0.4, maxZ - minZ),
+        interiorMaterial(room.theme.floor),
+      ),
     );
-    slab.position.set(midX - 0.125, height - 0.2, midZ - 0.125);
-    shell.add(slab);
+    deckSlab.position.set((minX + maxX) / 2, height - 0.2, (minZ + maxZ) / 2);
+    // **The mass that can hide a child.** One group for both slabs and every
+    // rail and stick of furniture that stands on them, so the whole overhang
+    // ghosts as one thing when the camera would otherwise be looking at the
+    // top of it with her underneath.
+    const overhang = new Group();
+    overhang.name = 'hotel:lobby/overhang';
+    shell.add(overhang);
+    this.lobbyOverhang = overhang;
+    overhang.add(deckSlab);
     this.surfaces.addPlatform(
       new Plate(
         height,
@@ -2425,158 +2625,222 @@ export class Hotel implements GameSystem {
       ),
     );
 
-    // --- the two faces that hold it up --------------------------------------
-    // The front, in the room's trim colour so the gallery reads as one piece of
-    // architecture with the lift alcove rather than as furniture.
-    const frontSpans: [number, number][] = gap
-      ? [
-          [minX, gap[0]],
-          [gap[1], maxX],
-        ]
-      : [[minX, maxX]];
-    for (const [a, b] of frontSpans) {
-      if (b - a < 0.05) continue;
-      // The last span carries the outer corner (its box runs half a thickness
-      // past `maxX`), so the side face below can stop short of this box and
-      // abut it rather than pass through it — two boxes sharing the corner's
-      // top pixels was one of probe 10's measured flickers.
-      const bx = b === maxX ? maxX + 0.25 : b;
-      const face = solid(
-        new Mesh(new BoxGeometry(bx - a, height, 0.5), interiorMaterial(room.theme.trim)),
-      );
-      face.position.set((a + bx) / 2, height / 2, maxZ);
-      shell.add(face);
-      this.collision.addWall(
-        room.originX + a,
-        room.originZ + maxZ,
-        room.originX + b,
-        room.originZ + maxZ,
-        0.3,
-      );
-    }
-    // Stops at the front face's south edge (maxZ − 0.25) — abutting, never
-    // interpenetrating. See probe 10 and the slab comment above.
-    const side = solid(
-      new Mesh(new BoxGeometry(0.5, height, depth - 0.25), interiorMaterial(room.theme.trim)),
-    );
-    side.position.set(maxX, height / 2, midZ - 0.125);
-    shell.add(side);
-    this.collision.addWall(
-      room.originX + maxX,
-      room.originZ + minZ,
-      room.originX + maxX,
-      room.originZ + maxZ,
-      0.3,
-    );
-
-    // --- the sweeping stair --------------------------------------------------
-    // **The artist's grand staircase** (hotelAssets.ts's
-    // `createGrandStaircase`) replaces the code-built box stack Jim called
-    // out (*"looking like a random stack of boxes more than anything"*).
-    // Placement is one line because the asset's origin is the arc's centre
-    // of curvature, which `layout.ts` already names; it is authored at
-    // `fromAngle = 0` in the game's own yaw convention, so a room whose arc
-    // starts elsewhere spins it by `-fromAngle` (three.js yaws the opposite
-    // way round from this game's stair angle).
-    //
-    // Sunk {@link STAIR_SINK} so the top tread's surface sits just below the
-    // deck plane the slab owns — probe 10's one-owner rule; without it the
-    // tread and the slab are coplanar where the flight crosses onto the
-    // deck. The walk surfaces keep the true heights, so her feet still land
-    // level; `dressMezzanine`'s gallery rail drops the same 2 cm so it keeps
-    // butting the stair's handrail, which eases level at
-    // `rise + railHeight`.
-    const flight = createGrandStaircase();
-    flight.root.position.set(stair.centreX, STAIR_SINK, stair.centreZ);
-    flight.root.rotation.y = -stair.fromAngle;
-    shell.add(flight.root);
-
-    // Everything a child's feet or body meet is derived from the **handle**
-    // of the asset she can actually see — wedge treads, flank colliders and
-    // guest keep-outs from one set of numbers (which the factory itself
-    // re-exports from `layout.ts`, so the plan and the asset cannot
-    // disagree without `hotel_build.py` failing loudly first).
-    const sweep = flight.sweep;
-    const midRadius = (flight.innerRadius + flight.outerRadius) / 2;
-    const treadDepth = flight.outerRadius - flight.innerRadius;
-    for (let i = 0; i < flight.treads; i += 1) {
-      const from = stair.fromAngle + (sweep * i) / flight.treads;
-      const to = stair.fromAngle + (sweep * (i + 1)) / flight.treads;
-      const top = flight.treadTop(i);
-      const angle = (from + to) / 2;
-
-      // Four walk-surface slices per visual tread, ramping up to its top —
-      // NOT one flat wedge at the tread's own height. A flat 0.32 riser is
-      // walkable in theory (half of `BUILDING_STEP_UP`) but not in practice
-      // at speed: `Player` *damps* onto the ground (time constant 0.04 s),
-      // so her sampled `y` lags the surface under her, and two treads in
-      // the lag has eaten the whole step-up ceiling — `sample` stops
-      // offering the next tread, the floor snaps back to the slab, and she
-      // walks clean under the flight at y = 0 into the gallery's hollow.
-      // Found live (8 Aug 2026): teleporting ONTO any tread stood her at
-      // its height while walking up never engaged, which is exactly the
-      // stand/walk split a lag bug produces. Slices of a quarter-riser keep
-      // the lag far inside the ceiling at sprint; her feet still finish on
-      // the tread's true top, and the transient shin-dip on a nose is
-      // hidden by the same damp that caused all this.
-      const slices = 4;
-      for (let slice = 0; slice < slices; slice += 1) {
-        this.surfaces.addPlatform(
-          new ArcTread(
-            top - (flight.riser * (slices - 1 - slice)) / slices,
-            room.originX + stair.centreX,
-            room.originZ + stair.centreZ,
-            flight.innerRadius,
-            flight.outerRadius,
-            from + ((to - from) * slice) / slices,
-            from + ((to - from) * (slice + 1)) / slices,
-          ),
-        );
-      }
-
-      // …and a keep-out over the same tread, so no guest is handed a waypoint
-      // on the staircase. The flanks are already colliders, so a waypoint in
-      // here is one a body can never reach: it walks at the side of the stair
-      // until its own leg timeout gives up, for ever. `check:hotel` catches
-      // exactly this, and did — on the first run after the stair landed.
-      this.props.footprint(room, {
-        x: stair.centreX - Math.sin(angle) * midRadius,
-        z: stair.centreZ + Math.cos(angle) * midRadius,
-        radius: treadDepth * 0.62,
-        top,
-        solid: false,
+    // The columns that hold it up — real, solid, and honest about their tops
+    // (the soffit): a ground walker goes round one, a deck walker crosses
+    // over it. Symmetric pairs, clear of the straight flight's mouth and of
+    // the connector's own exit stride (which `NavGrid` routes through).
+    for (const columnX of [-8.6, -4.4, 4.4, 8.6]) {
+      this.props.place(shell, room, crystalColumn(height - 0.4, room.theme.trim), {
+        x: columnX,
+        z: (minZ + maxZ) / 2 + 1.6,
+        radius: 0.62,
+        top: height - 0.4,
+        stand: false,
       });
     }
 
-    // The way between the two levels, declared for the router. The path is
-    // derived from the same plan the treads were built from
-    // (`mezzanineWalkConnectors`), so it descends the real arc; `NavGrid`
-    // consumes it as an edge between the floor and the deck — the lattice
-    // itself can never route the channel between the fattened flanks. See
-    // ARCHITECTURE-DECISIONS.md Decision 11.
+    // --- the landing ---------------------------------------------------------
+    // The slab is drawn at its declared thickness — the number that turns
+    // `LANDING_HEIGHT` into headroom, held inside the asset's range by
+    // `assertStairMatches` — and the walk plate covers the whole rectangle,
+    // which also carries the straight flight standing on it (the artist's
+    // "the platform has to be under all of it").
+    const landingSlab = solid(
+      new Mesh(
+        new BoxGeometry(landing.maxX - landing.minX, landing.slab, landing.maxZ - landing.minZ),
+        interiorMaterial(room.theme.floor),
+      ),
+    );
+    landingSlab.position.set(
+      (landing.minX + landing.maxX) / 2,
+      landing.height - landing.slab / 2,
+      (landing.minZ + landing.maxZ) / 2,
+    );
+    overhang.add(landingSlab);
+    this.surfaces.addPlatform(
+      new Plate(
+        landing.height,
+        room.originX + landing.minX,
+        room.originX + landing.maxX,
+        room.originZ + landing.minZ,
+        room.originZ + landing.maxZ,
+      ),
+    );
+
+    // --- the two curved flights ---------------------------------------------
+    for (const stair of plan.stairs) {
+      const handedness = stair.toAngle > stair.fromAngle ? 'right' : 'left';
+      const flight = createGrandStaircase(handedness);
+      // Sunk {@link STAIR_SINK} so the top tread's surface rides just below
+      // the landing plane the slab owns (probe 10's one-owner rule). The walk
+      // surfaces keep the true heights, so her feet still land level.
+      flight.root.position.set(stair.centreX, STAIR_SINK, stair.centreZ);
+      flight.root.rotation.y = -stair.fromAngle;
+      shell.add(flight.root);
+
+      const sweep = flight.sweep;
+      const midRadius = (flight.innerRadius + flight.outerRadius) / 2;
+      const treadDepth = flight.outerRadius - flight.innerRadius;
+      const climbSign = Math.sign(sweep);
+      for (let i = 0; i < flight.treads; i += 1) {
+        // **Ask the handle for the tread's angular span — never subdivide the
+        // sweep by hand.** A left-hand flight climbs through *decreasing*
+        // angles; hand-built ranges come out descending, `ArcTread.covers`'s
+        // `angle >= from && angle < to` is then false everywhere, and the
+        // child walks straight through a staircase that renders perfectly.
+        // The artist's handoff calls this the loaded gun, and `treadArc` is
+        // its safety: always ascending, whichever hand.
+        const arc = flight.treadArc(i);
+        const from = stair.fromAngle + arc.from;
+        const to = stair.fromAngle + arc.to;
+        const top = flight.treadTop(i);
+        const angle = stair.fromAngle + (sweep * (i + 0.5)) / flight.treads;
+
+        // Four walk-surface slices per visual tread, ramping up to its top —
+        // NOT one flat wedge at the tread's own height. A flat 0.32 riser is
+        // walkable in theory (half of `BUILDING_STEP_UP`) but not at speed:
+        // `Player` *damps* onto the ground (time constant 0.04 s), her
+        // sampled `y` lags the surface, and two treads into the lag the
+        // step-up ceiling is gone — `sample` stops offering the next tread
+        // and she walks under the flight at y = 0. Probe 14 measures exactly
+        // this, at sprint, on all three flights. Within the tread the ramp
+        // ascends **in the climb direction**, which for a left-hand flight is
+        // from `to` down to `from`.
+        const slices = 4;
+        for (let slice = 0; slice < slices; slice += 1) {
+          const stepsBelowTop = climbSign > 0 ? slices - 1 - slice : slice;
+          this.surfaces.addPlatform(
+            new ArcTread(
+              top - (flight.riser * stepsBelowTop) / slices,
+              room.originX + stair.centreX,
+              room.originZ + stair.centreZ,
+              flight.innerRadius,
+              flight.outerRadius,
+              from + ((to - from) * slice) / slices,
+              from + ((to - from) * (slice + 1)) / slices,
+            ),
+          );
+        }
+
+        // …and a keep-out over the tread, so no guest is handed a waypoint on
+        // the staircase — a waypoint between the flank colliders is one a
+        // body can never reach, and it leans there for ever. `check:hotel`
+        // caught exactly this on the first run after the original stair.
+        this.props.footprint(room, {
+          x: stair.centreX - Math.sin(angle) * midRadius,
+          z: stair.centreZ + Math.cos(angle) * midRadius,
+          radius: treadDepth * 0.62,
+          top,
+          solid: false,
+        });
+      }
+
+      // The flanks: chains of short walls along each radius. The asset's
+      // closed strings are solid from the floor to the tread at every point
+      // (its own doc says so, and why), so height-agnostic is honest here —
+      // and it is the only collision a curved flight has.
+      for (const radius of [flight.innerRadius, flight.outerRadius]) {
+        const segments = Math.max(4, Math.ceil((Math.abs(sweep) * radius) / 0.8));
+        for (let i = 0; i < segments; i += 1) {
+          const a = stair.fromAngle + (sweep * i) / segments;
+          const b = stair.fromAngle + (sweep * (i + 1)) / segments;
+          this.collision.addWall(
+            room.originX + stair.centreX - Math.sin(a) * radius,
+            room.originZ + stair.centreZ + Math.cos(a) * radius,
+            room.originX + stair.centreX - Math.sin(b) * radius,
+            room.originZ + stair.centreZ + Math.cos(b) * radius,
+            0.22,
+          );
+        }
+      }
+    }
+
+    // --- the straight flight -------------------------------------------------
+    // Origin at the centre of its bottom riser, standing on the landing,
+    // climbing toward −Z onto the gallery — the asset's own frame, so no
+    // rotation and no half-anything arithmetic.
+    const grand = createStraightStaircase();
+    grand.root.position.set(straight.centreX, landing.height + STAIR_SINK, straight.frontZ);
+    shell.add(grand.root);
+    for (let i = 0; i < grand.treads; i += 1) {
+      const top = landing.height + grand.treadTop(i);
+      const near = straight.frontZ - grand.treadFront(i);
+      // The same quarter-riser slices as the curves, for the same damp-lag
+      // reason (probe 14's rule: no sprint stride may present a whole riser).
+      // Climb is toward −Z, so the ramp ascends as z falls.
+      const slices = 4;
+      for (let slice = 0; slice < slices; slice += 1) {
+        this.surfaces.addPlatform(
+          new Plate(
+            top - (grand.riser * (slices - 1 - slice)) / slices,
+            room.originX + straight.centreX - straight.walkWidth / 2,
+            room.originX + straight.centreX + straight.walkWidth / 2,
+            room.originZ + near - (grand.going * (slice + 1)) / slices,
+            room.originZ + near - (grand.going * slice) / slices,
+          ),
+        );
+      }
+    }
+    // Its flanks hold a climber on the flight and a landing walker out of its
+    // strings — **banded**, because beneath them is the open recess a ground
+    // walker crosses on the axis, not floor-to-flank masonry. They are also
+    // `navStamped`, the one banded case the lattice's level rule cannot
+    // refuse on its own: the flight's lowest treads run within a step of the
+    // landing beside them, so an unstamped flank let the router connect the
+    // landing to the flight *sideways* and the walk wedged against a rail it
+    // could not see (found live, 9 Aug 2026; check:nav-routes walks the legs
+    // now). The axis keeps its channel — the flanks stand 4 m apart.
+    for (const flankSign of [-1, 1]) {
+      this.collision.addWall(
+        room.originX + straight.centreX + flankSign * straight.flankX,
+        room.originZ + straight.frontZ,
+        room.originX + straight.centreX + flankSign * straight.flankX,
+        room.originZ + maxZ,
+        0.18,
+        Infinity,
+        false,
+        false,
+        landing.height - RAIL_BASE_DROP,
+        true,
+      );
+    }
+
+    // --- the banded balustrade colliders -------------------------------------
+    // The visual balustrade is `dressMezzanine`'s (the artist's tiles); these
+    // are the rails' physics, and the whole reason `baseHeight` exists: a
+    // deck walker pushed at the rail is held, a ground walker walks under the
+    // same XZ freely. Proven both ways by `check:hotel`.
+    // **Straight off the schedule.** `mezzanineGuardedEdges` is the one owner
+    // of which deck edges are drops and how each is banded, and `check:hotel`
+    // walks a body off every edge in that same list. These used to be five
+    // `addWall` calls written out here, and the landing's *north* edge was in
+    // neither them nor the three spot checks that were supposed to cover
+    // them: the gallery's balustrade is drawn along that line but banded to
+    // its own 4.94 m, so a child on the landing at 3.84 m walked through the
+    // rail she could see and fell to the lobby floor.
+    for (const edge of mezzanineGuardedEdges(plan, STAIR_RAIL_RADIUS)) {
+      this.collision.addWall(
+        room.originX + edge.x1,
+        room.originZ + edge.z1,
+        room.originX + edge.x2,
+        room.originZ + edge.z2,
+        0.15,
+        Infinity,
+        false,
+        false,
+        edge.base,
+      );
+    }
+
+    // --- the ways between the levels, declared for the router ---------------
+    // Three edges — each curve (floor ↔ landing) and the straight flight
+    // (landing ↔ gallery) — derived from the same plan as the treads, so a
+    // route from the floor to the gallery multi-hops through the landing with
+    // no further declaration. ARCHITECTURE-DECISIONS.md Decision 11.
     for (const path of mezzanineWalkConnectors(plan)) {
       this.surfaces.addConnector(
         path.map((p) => ({ x: room.originX + p.x, y: p.y, z: room.originZ + p.z })),
       );
-    }
-
-    // The stair's own two flanks, as a chain of short walls along each radius.
-    // The asset's closed strings are solid from the floor to the tread at
-    // every point (its own doc says so, and why), so this is honest at both
-    // heights — and it is the only collision the staircase has.
-    for (const radius of [flight.innerRadius, flight.outerRadius]) {
-      const segments = Math.max(4, Math.ceil((sweep * radius) / 0.8));
-      for (let i = 0; i < segments; i += 1) {
-        const a = stair.fromAngle + (sweep * i) / segments;
-        const b = stair.fromAngle + (sweep * (i + 1)) / segments;
-        this.collision.addWall(
-          room.originX + stair.centreX - Math.sin(a) * radius,
-          room.originZ + stair.centreZ + Math.cos(a) * radius,
-          room.originX + stair.centreX - Math.sin(b) * radius,
-          room.originZ + stair.centreZ + Math.cos(b) * radius,
-          0.22,
-        );
-      }
     }
   }
 
@@ -2680,16 +2944,18 @@ export class Hotel implements GameSystem {
     // answer here and a material colour is not.
     this.layMosaic(shell, LOBBY);
 
-    // The giant RiPika, spinning gently exactly like the fountain's, with the
-    // disco ball above — Eleri: "a disco ball above the ripika statue" — in
-    // the middle of a rainbow inlaid in the floor. Inner radius 2.0 clears the
-    // plinth's 1.15 m footing with room for a child to walk round it.
+    // The giant RiPika on its floor medallion, with the disco ball above —
+    // Eleri: "a disco ball above the ripika statue" — **on the axis, south of
+    // the arch**: doors → runner → the statue's medallion → under the arch →
+    // the colonnade. A grand lobby's centrepiece stands on the promenade and
+    // you walk round it, which the rainbow ring invites; it must not stand IN
+    // the archway, which the old spot (0, −1) now is.
     const statue = createRipikaStatue();
     // Solid at its plinth's own 1.15 m footing — Jim: *"the statues and chairs
     // you can clip through are weird."*
     this.props.place(shell, LOBBY, statue.root, {
       x: 0,
-      z: -1,
+      z: 4.6,
       radius: 1.2,
       // The statue's real height — far above any jump, so no plate; honest
       // rather than Infinity so probe 11's pillar sweep stays meaningful.
@@ -2697,14 +2963,16 @@ export class Hotel implements GameSystem {
       stand: false,
     });
     // **Three times the size, and it lights the room** (Jim, 7 August 2026).
-    // Hung so the ball's middle sits just above the gallery deck: from up
-    // there it is at eye height and close enough to touch, and from the lobby
-    // floor it is the thing hanging in the middle of a double-height room.
-    // Its own beams then sweep both levels, which is the whole reason the two
-    // heights were worth building.
-    this.hangDiscoBall(shell, 0, 6, -1, { scale: 3, lit: true, room: LOBBY });
-    const ring = rainbowRing(2, 0.34);
-    ring.position.set(0, 0, -1);
+    // Hung so the ball's middle rides just above the gallery deck (5.44):
+    // from up there it is at eye height and close enough to touch, and from
+    // the lobby floor it hangs in the middle of the tall room over the
+    // statue. Its beams sweep all three levels.
+    this.hangDiscoBall(shell, 0, 8.3, 4.6, { scale: 3, lit: true, room: LOBBY });
+    // The medallion: Eleri's rainbow ring, inlaid round the plinth. Inner
+    // radius 1.4 clears the 1.15 m footing; six 0.22 m bands keep the whole
+    // medallion inside the runner's line so the axis stays one composition.
+    const ring = rainbowRing(1.4, 0.22);
+    ring.position.set(0, 0, 4.6);
     shell.add(ring);
     // Kept, because checking in flashes them — see `checkIn`. The ring is six
     // meshes with six materials and this is the only handle on them; asking
@@ -2722,14 +2990,26 @@ export class Hotel implements GameSystem {
       }
     }
 
+    // **The chandelier** — the artist's pendant cluster, hung on the axis
+    // over the arch's mouth, high in the double-height space: the lowest
+    // globe stays above the gallery's own deck, and a hatted child on the
+    // landing walks nowhere near it. Its glow is a real light, built by
+    // `hotel/lighting.ts`'s own helper so the fitting and the room's lamps
+    // stay one system.
+    const chandelier = createChandelier();
+    chandelier.root.position.set(0, 8.7, -0.7);
+    shell.add(chandelier.root);
+    const pendant = pendantLight();
+    pendant.position.set(0, 8.7 - chandelier.height / 2, -0.7);
+    shell.add(pendant);
+
     // The desk is 2.67 m of bowed crystal counter — a run, so a rectangle
     // rather than a disc, or a child could not walk along it to reach the far
     // end of it.
     //
-    // **On the entrance axis, facing the doors**, against the gallery's front
-    // face — see RECEPTION_X's header. Clear of the sweeping stair, whose
-    // quarter circle rises to its east, and of the statue, which stands
-    // between it and the doors the way a grand lobby's centrepiece does.
+    // **Beside the axis, facing the doors** — see RECEPTION_X's header for
+    // why it came off the axis (the axis runs through the arch now). It holds
+    // the east bay between the right-hand flight and the colonnade.
     const desk = createReceptionDesk();
     this.props.place(shell, LOBBY, desk.root, {
       x: RECEPTION_X,
@@ -2764,15 +3044,17 @@ export class Hotel implements GameSystem {
     );
     shell.add(this.receptionBubble.sprite);
 
-    // **The axis.** A runner from the doors up the middle of the room — the
-    // first of the grand-lobby moves this layout is built on (researched for
-    // this rework: a clear axis from the entrance to a focal desk, a
-    // centrepiece on that axis, symmetric seating either side, the stair
-    // sweeping up one flank). You walk it from the doors, round the statue's
-    // rainbow ring, to the desk.
-    const runner = rug(3.2, 8.8, LOBBY.theme.accent, PALETTE.blossomWhite);
-    runner.position.set(0, 0, 7);
-    shell.add(runner);
+    // **The axis.** A runner in two lengths — doors to the medallion, then
+    // medallion to the arch's mouth — so the promenade reads as one line from
+    // the entrance, round the statue, under the arch and into the colonnade.
+    // Two pieces rather than one because a decal under the medallion's own
+    // bands would sit inside the depth ladder's two-step window (probe 17).
+    const runnerSouth = rug(3.2, 4.6, LOBBY.theme.accent, PALETTE.blossomWhite);
+    runnerSouth.position.set(0, 0, 9.8);
+    shell.add(runnerSouth);
+    const runnerNorth = rug(3.2, 3.9, LOBBY.theme.accent, PALETTE.blossomWhite);
+    runnerNorth.position.set(0, 0, -0.35);
+    shell.add(runnerNorth);
 
     // The breakfast corner — "breakfast ... at the ground floor". Two tables
     // only (the *room* full of them is Floor 1 now), tucked in the south-west
@@ -2787,12 +3069,12 @@ export class Hotel implements GameSystem {
     this.placeBreakfastTable(shell, LOBBY, -10.3, 7.7, 'lobby-b', 1.35);
 
     // **Two mirrored seating groups flanking the axis** — the symmetric pair
-    // every grand lobby seats its guests in. Both groups face +Z so you see
-    // who is sitting on them (the camera rule), each on its own round rug
-    // with a little table before it.
+    // every grand lobby seats its guests in, shifted a stride south of the
+    // old spots so the rugs stay clear of the flights' feet. Both groups face
+    // +Z so you see who is sitting on them (the camera rule).
     for (const side of [-1, 1] as const) {
-      const lounge = roundRug(2.9, LOBBY.theme.accent, PALETTE.stonePinkLight);
-      lounge.position.set(side * 7.6, 0, 4.1);
+      const lounge = roundRug(2.6, LOBBY.theme.accent, PALETTE.stonePinkLight);
+      lounge.position.set(side * 7.6, 0, 5.3);
       shell.add(lounge);
       for (const [x, colour] of [
         [side * 5.9, PALETTE.markerSky],
@@ -2800,7 +3082,7 @@ export class Hotel implements GameSystem {
       ] as const) {
         this.props.place(shell, LOBBY, sofa(2.6, colour, PALETTE.blossomWhite), {
           x,
-          z: 3.6,
+          z: 4.8,
           halfX: 1.3,
           halfZ: 0.48,
           // The seat: what a jump lands on. Sailing over the backrest on the
@@ -2811,7 +3093,7 @@ export class Hotel implements GameSystem {
       }
       this.props.place(shell, LOBBY, bedsideTable(), {
         x: side * 7.6,
-        z: 5.4,
+        z: 6.4,
         radius: 0.36,
         top: 1.0,
         stand: false,
@@ -2819,25 +3101,23 @@ export class Hotel implements GameSystem {
     }
 
     // Crystal columns — the lobby's theme is "a grand crystal welcome", and a
-    // column is the only prop in the hotel taller than a grown-up. Two of them
-    // now run the room's **full** 5.8 m, because a 3 m column in a 6.4 m room
-    // reads as a stub rather than as height.
+    // column is the only prop in the hotel taller than a grown-up. The two on
+    // the west wall now rise 8.3 m, because the room grew to 8.9 with the
+    // composition and a 5.8 m column under an 8.9 m wall reads as a stub.
     //
     // Both stand against the **west** wall, and that is not decoration: the
     // camera looks along (−X, −Z) and down 38°, so anything tall on the +X or
     // +Z side of a child stands between her and the lens. The far two walls
-    // are the only place a five-metre prop is free. (Same rule as
-    // `nearWallHeight`, applied to furniture.) They are set between the west
-    // windows rather than across them.
-    // The two grand columns hold the west wall; the stub 3 m column is gone
-    // (a stub mid-floor was exactly the "pretty random" scatter Jim called
-    // out). Planters now flank the entrance — the symmetric welcome — and the
-    // clusters keep to corners, out of the lift's approach.
+    // are the only place a tall prop is free. (Same rule as `nearWallHeight`,
+    // applied to furniture.) They are set between the west windows rather
+    // than across them. The old cluster at (12, −10.4) stood where the
+    // colonnade now runs; it holds the east bay's corner instead, mirroring
+    // the west one.
     this.placeProps(shell, LOBBY, [
-      { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: -6.6, radius: 0.62, top: 5.8 },
-      { prop: () => crystalColumn(5.8, LOBBY.theme.floor), x: -11.9, z: 6.6, radius: 0.62, top: 5.8 },
+      { prop: () => crystalColumn(8.3, LOBBY.theme.floor), x: -11.9, z: -6.6, radius: 0.62, top: 8.3 },
+      { prop: () => crystalColumn(8.3, LOBBY.theme.floor), x: -11.9, z: 6.6, radius: 0.62, top: 8.3 },
       { prop: () => crystalCluster(0x10b1), x: -12.2, z: -5.8, top: CLUSTER_TOP },
-      { prop: () => crystalCluster(0x10b2), x: 12, z: -10.4, top: CLUSTER_TOP },
+      { prop: () => crystalCluster(0x10b2), x: 12.2, z: -5.8, top: CLUSTER_TOP },
       { prop: () => crystalPlanter(0x10b3), x: 3.4, z: 10.8, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b5), x: -3.4, z: 10.8, top: PLANTER_TOP },
       { prop: () => crystalPlanter(0x10b4), x: -6.2, z: -6.6, top: PLANTER_TOP },
@@ -2847,21 +3127,20 @@ export class Hotel implements GameSystem {
     // child stands on to check in. See `HotelProps.reserve`.
     this.props.reserve(LOBBY, RECEPTION_X, RECEPTION_Z + 2.2, 2);
     this.hangOnWalls(shell, LOBBY, {
-      // North sconces only in the east bay: west of x = 5 that wall is behind
-      // the gallery's solid mass, and a lamp inside a wall lights nothing.
-      // The gallery's own front carries the rest — see `dressMezzanine`.
-      north: [7.2, 12],
+      // Ground-level sconces on the north wall light the colonnade — the
+      // north wall is the end of the axis now, the far side of the
+      // see-through, and a dark terminus reads as a hole rather than a room.
+      north: [-8.4, 0, 8.4],
       // The southern sconce moved off z = -6 when the west wall's northern
       // pane did (see `LOBBY.windows` — a sconce on glass lights nothing).
       west: [-4.6, 2],
-      // Both on the north wall's east bay now. The second used to hang on the
-      // west wall at z ~5, where its "Look" zone sat inside a finger of the
-      // lift's boarding band *and* of a café chair — the tap-spacing rule
-      // (`world/tapSpacing.ts`, 8 Aug 2026). The west wall by the café keeps
-      // its glass; the paintings hang where taps have room.
+      // The paintings hang at the end of the axis, in the colonnade, either
+      // side of the centre sconce: walk under the arch and there is something
+      // to arrive at. Their "Look" stands are open colonnade floor, a clear
+      // finger from every other zone (`world/tapSpacing.ts`).
       pictures: [
-        { wall: 'north', along: 6.2, width: 1.7, height: 1.25, seed: 0x10c2 },
-        { wall: 'north', along: 10.2, width: 1.7, height: 1.25, seed: 0x10c3 },
+        { wall: 'north', along: -3.2, width: 1.7, height: 1.25, seed: 0x10c2 },
+        { wall: 'north', along: 3.2, width: 1.7, height: 1.25, seed: 0x10c3 },
       ],
     });
     this.dressMezzanine(shell);
@@ -3748,170 +4027,165 @@ export class Hotel implements GameSystem {
   }
 
   /**
-   * What is *on* the lobby's gallery — the half of the mezzanine that is not
-   * structure.
+   * What stands **on** the landing and the gallery — the artist's balustrade,
+   * newels and nosing, and the furniture that makes the gallery worth the
+   * climb. The rails' *physics* are `buildMezzanine`'s banded colliders;
+   * these are their portrait, tiled at exactly `BRIDGE_RAIL_TILE` so the
+   * baluster rhythm runs unbroken across every join. The artist's schedule,
+   * followed to the tile:
    *
-   * Jim asked for *"a seating nook, planters, view over the statue"*, and the
-   * view is the point: both sofas face **+Z**, out over the balustrade, down
-   * at the giant RiPika and level with a disco ball three times the size of
-   * the one that used to hang up here out of reach. That is the whole reason
-   * to climb the stairs, and a mezzanine you climb for no reason is a
-   * staircase to a shelf.
+   * - landing front: **6 tiles**, no newels — the curves' own top newels are
+   *   the run's ends;
+   * - landing sides: **5 tiles** each, a newel at each end;
+   * - gallery front: **11 tiles** each side of a 4.06 m gap for the straight
+   *   flight, a newel each side of the gap, the last tile buried a quarter
+   *   metre in the side wall — overlapping solids, never a part-tile, which
+   *   is the one thing the tile cannot do.
    *
-   * The balustrade is **visual only, and correctly so**: it stands on exactly
-   * the plane the gallery's own front face already occupies, and that face is a
-   * collider from the floor to the deck. A second collider along the same line
-   * would stop nothing that is not stopped already. See {@link Mezzanine}.
+   * Everything rail-like drops by `STAIR_SINK` with the flights, so the
+   * bridge rail keeps meeting the stair's handrail where it eases level.
    */
   private dressMezzanine(shell: Group): void {
     const plan = LOBBY.mezzanine;
     if (!plan) return;
-    const { minX, maxX, minZ, maxZ, height } = plan;
+    // Everything this method makes stands at 3.84 m or 5.44 m — rails,
+    // newels, nosings, the gallery's own seating — so it all belongs to the
+    // mass that can hide a child underneath, and all of it ghosts together.
+    const overhang = this.lobbyOverhang ?? shell;
+    const { maxX, minZ, maxZ, height, landing, straight } = plan;
+    const tile = BRIDGE_RAIL_TILE;
+    // Set in from the edge by half the rail's depth, so the plinth's outer
+    // face lands exactly on the edge line — the artist's placing recipe.
+    const railInset = 0.115;
+    const landingRailY = landing.height + STAIR_SINK;
+    const deckRailY = height + STAIR_SINK;
 
-    // --- the balustrade -----------------------------------------------------
-    // A chunky rail on stubby posts, round the two edges you can walk to. It
-    // stops at the stair's mouth, which is where the rail of a real staircase
-    // stops too.
-    const mouth = this.stairMouth(plan);
-    const rail = (
-      from: [number, number],
-      to: [number, number],
-    ): void => {
-      const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
-      if (length < 0.3) return;
-      const yaw = Math.atan2(to[0] - from[0], to[1] - from[1]);
-      const midX = (from[0] + to[0]) / 2;
-      const midZ = (from[1] + to[1]) / 2;
-      const top = solid(
-        new Mesh(new BoxGeometry(0.22, 0.16, length), interiorMaterial(LOBBY.theme.trim)),
-      );
-      // `+ STAIR_SINK`: the whole flight is sunk 2 cm (see `buildMezzanine`),
-      // so the gallery rail drops the same 2 cm to keep meeting the stair's
-      // handrail where it eases level. One constant, both readers.
-      top.position.set(midX, height + 0.86 + STAIR_SINK, midZ);
-      top.rotation.y = yaw;
-      shell.add(top);
-      const posts = Math.max(2, Math.round(length / 0.62));
-      for (let i = 0; i <= posts; i += 1) {
-        const t = i / posts;
-        const baluster = solid(
-          new Mesh(
-            new CylinderGeometry(0.06, 0.075, 0.82, 6),
-            interiorMaterial(PALETTE.blossomWhite),
-          ),
-        );
-        baluster.position.set(
-          from[0] + (to[0] - from[0]) * t,
-          height + 0.41,
-          from[1] + (to[1] - from[1]) * t,
-        );
-        shell.add(baluster);
-      }
+    const addRail = (x: number, z: number, yaw: number, y: number): void => {
+      const segment = createBridgeRailing();
+      segment.root.position.set(x, y, z);
+      segment.root.rotation.y = yaw;
+      overhang.add(segment.root);
     };
-    rail([minX, maxZ], [mouth ? mouth[0] : maxX, maxZ]);
-    if (mouth) rail([mouth[1], maxZ], [maxX, maxZ]);
-    rail([maxX, maxZ], [maxX, minZ]);
+    const addNewel = (x: number, z: number, y: number): void => {
+      const post = createBridgeNewel();
+      post.root.position.set(x, y, z);
+      overhang.add(post.root);
+    };
+    const addNose = (x: number, z: number, yaw: number, y: number): void => {
+      const nose = createLandingNosing();
+      nose.root.position.set(x, y, z);
+      nose.root.rotation.y = yaw;
+      overhang.add(nose.root);
+    };
 
-    // --- the seating nook ---------------------------------------------------
-    // The nook's rug is fitted to the deck it lies on: its old hand-sized
-    // 3.2 m radius at z = −10.2 ran a metre through the lobby's north wall
-    // *and* hung 0.6 m past the gallery's front edge over the floor below
-    // (found by check:hotel probe 19). Bounded by the north wall's face and
-    // the deck's own front, the same derived-not-tuned rule as the suite's
-    // rugs.
-    const NOOK_X = -6.4;
-    const nookZ = ((-LOBBY.halfZ + WALL_HALF_DEPTH) + maxZ) / 2;
-    const nookRadius =
-      (maxZ - (-LOBBY.halfZ + WALL_HALF_DEPTH)) / 2 - RUG_CLEARANCE;
-    const nook = roundRug(nookRadius, LOBBY.theme.accent, PALETTE.stonePinkLight);
-    nook.position.set(NOOK_X, height + 0.01, nookZ);
-    shell.add(nook);
-    for (const [x, colour] of [
-      [-8, PALETTE.markerLilac],
-      [-4.8, PALETTE.markerPink],
-    ] as const) {
-      this.props.place(shell, LOBBY, sofa(2.4, colour, PALETTE.blossomWhite), {
-        x,
+    // --- the landing's front: six tiles between the curves' top newels ------
+    const frontHalf = Math.abs(plan.stairs[0]?.centreX ?? 0) - STAIR_RAIL_RADIUS;
+    const frontTiles = Math.round((frontHalf * 2) / tile);
+    for (let i = 0; i < frontTiles; i += 1) {
+      addRail(-frontHalf + (i + 0.5) * tile, landing.maxZ - railInset, 0, landingRailY);
+    }
+    // The nosing finishes the whole front edge — nine tiles centred, their
+    // ends tucked into the curves' string laps. Origin on the edge line,
+    // overhang toward the face a child below looks up at.
+    const noseTiles = Math.floor((landing.maxX - landing.minX) / tile);
+    for (let i = 0; i < noseTiles; i += 1) {
+      addNose((i - (noseTiles - 1) / 2) * tile, landing.maxZ, 0, landingRailY);
+    }
+
+    // --- the landing's sides: five tiles and a newel each end ---------------
+    const sideTiles = Math.round((landing.maxZ - landing.minZ) / tile);
+    for (const side of [-1, 1] as const) {
+      const railX = side * (landing.maxX - railInset);
+      // rotation.y maps the authored +Z face to ±X — outward, over the edge.
+      const yaw = (side * Math.PI) / 2;
+      for (let i = 0; i < sideTiles; i += 1) {
+        addRail(railX, landing.minZ + (i + 0.5) * tile, yaw, landingRailY);
+        addNose(side * landing.maxX, landing.minZ + (i + 0.5) * tile, yaw, landingRailY);
+      }
+      addNewel(railX, landing.minZ, landingRailY);
+      addNewel(railX, landing.maxZ, landingRailY);
+    }
+
+    // --- the gallery front: tiles from the flight's gap out to the walls ----
+    // Eleven per side: ten whole tiles reach 0.77 m short of the wall, and a
+    // gap at a rail's end is a place to fall through, so the eleventh runs
+    // its surplus quarter-metre *into* the wall's own solid box.
+    const gapX = straight.centreX + straight.flankX + 0.02;
+    const deckEdgeTiles = Math.ceil((maxX - gapX) / tile);
+    for (const side of [-1, 1] as const) {
+      const start = side * gapX;
+      for (let i = 0; i < deckEdgeTiles; i += 1) {
+        addRail(start + side * (i + 0.5) * tile, maxZ - railInset, 0, deckRailY);
+        addNose(start + side * (i + 0.5) * tile, maxZ, 0, deckRailY);
+      }
+      addNewel(start, maxZ - railInset, deckRailY);
+    }
+
+    // --- the seating nooks, one each end of the gallery ---------------------
+    // Mirrored, because the whole composition below is; both face +Z, out
+    // over the balustrade at the statue and the disco ball — the view is the
+    // reason to climb, and it is now two flights up instead of one.
+    for (const side of [-1, 1] as const) {
+      const nookX = side * 8.4;
+      // Radius fitted to the deck's own clear depth: the north wall's face is
+      // at −12.15, and a 1.9 m rug at this centre reached 0.15 m under it —
+      // found by probe 19 on the first build of this gallery.
+      const nook = roundRug(1.7, LOBBY.theme.accent, PALETTE.stonePinkLight);
+      nook.position.set(nookX, height + 0.01, -10.4);
+      overhang.add(nook);
+      for (const [x, colour] of [
+        [nookX - side * 1.2, PALETTE.markerLilac],
+        [nookX + side * 1.3, PALETTE.markerPink],
+      ] as const) {
+        this.props.place(overhang, LOBBY, sofa(2.3, colour, PALETTE.blossomWhite), {
+          x,
+          y: height,
+          z: -10.9,
+          halfX: 1.15,
+          halfZ: 0.48,
+          base: height,
+          top: SOFA_SEAT_TOP,
+        });
+      }
+      this.props.place(overhang, LOBBY, bedsideTable(), {
+        x: nookX,
         y: height,
-        z: -10.6,
-        halfX: 1.2,
-        halfZ: 0.48,
-        // Standing ON the deck: base lifts collider top and plate with it.
+        z: -9.4,
+        radius: 0.36,
         base: height,
-        top: SOFA_SEAT_TOP,
+        top: 1.0,
+        stand: false,
       });
     }
 
-    // Planters along the gallery, and a low table between the sofas.
-    for (const [x, z, seed] of [
-      [-11.6, -8.6, 0x11a1],
-      [-6.4, -8.4, 0x11a2],
-      [1.4, -8.6, 0x11a3],
-      [3.6, -11.2, 0x11a4],
+    // Planters bookending the gallery, and a pair on the landing's back
+    // corners so the stage a child arrives on is dressed without being
+    // cluttered — its middle stays clear for the walk to the grand flight.
+    for (const [x, z, base, seed] of [
+      [-11.8, -8.8, height, 0x11a1],
+      [11.8, -8.8, height, 0x11a2],
+      [-4.1, -7.0, landing.height, 0x11a3],
+      [4.1, -7.0, landing.height, 0x11a4],
     ] as const) {
-      this.props.place(shell, LOBBY, crystalPlanter(seed), {
+      this.props.place(overhang, LOBBY, crystalPlanter(seed), {
         x,
-        y: height,
+        y: base,
         z,
         radius: 0.6,
-        base: height,
+        base,
         top: PLANTER_TOP,
         stand: false,
       });
     }
-    this.props.place(shell, LOBBY, bedsideTable(), {
-      x: -6.4,
-      y: height,
-      z: -10.2,
-      radius: 0.36,
-      base: height,
-      top: 1.0,
-      stand: false,
-    });
 
-    // Sconces on the gallery's front face, which is now the wall a child on the
-    // lobby floor actually looks at where the north wall used to be.
-    for (const x of [-10.4, -5.4, 0.4]) {
-      const light = sconce(LOBBY.theme.glow);
-      light.position.set(x, 1.95, maxZ + 0.28);
-      shell.add(light);
-    }
-    for (const [x, seed] of [
-      [-8, 0x11c1],
-      [-2.6, 0x11c2],
-    ] as const) {
-      const art = picture(1.7, 1.25, seed);
-      art.position.set(x, 2, maxZ + 0.31);
-      shell.add(art);
-    }
-
-    // And two on the north wall *above* the gallery, which is the only wall up
-    // here and is otherwise four metres of blank paint.
-    for (const x of [-9.4, -2.4, 2.4]) {
+    // Sconces on the north wall above the deck — the one wall up here, and
+    // otherwise three metres of blank paint under the clerestory. Spaced
+    // between the panes, never across them.
+    for (const x of [-8.4, -3.6, 1.6, 6.4]) {
       const light = sconce(LOBBY.theme.glow);
       light.position.set(x, height + 1.85, minZ + 0.28);
-      shell.add(light);
+      overhang.add(light);
     }
-  }
-
-  /**
-   * Where the sweeping stair breaks through the gallery's front face.
-   *
-   * The same two roots `buildMezzanine` solves, in one place both it and
-   * `dressMezzanine` ask — so the hole in the wall and the gap in the
-   * balustrade cannot end up in different places.
-   */
-  private stairMouth(plan: Mezzanine): [number, number] | null {
-    const { stair, maxZ } = plan;
-    const crossing = (radius: number): number | null => {
-      const cos = (maxZ - stair.centreZ) / radius;
-      if (cos < -1 || cos > 1) return null;
-      return stair.centreX - radius * Math.sqrt(1 - cos * cos);
-    };
-    const a = crossing(stair.innerRadius);
-    const b = crossing(stair.outerRadius);
-    if (a === null || b === null) return null;
-    return [Math.min(a, b) - 0.2, Math.max(a, b) + 0.2];
   }
 
   // ------------------------------------------------------ dressing helpers

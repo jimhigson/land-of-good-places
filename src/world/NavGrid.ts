@@ -442,15 +442,28 @@ export class NavGrid {
     }
 
     // Then everything solid, fattened by the walker's own width — skipping the
-    // walls she hops without being asked, which are not obstacles to her.
-    this.collision.forEachCircle((x, z, colliderRadius, topHeight, autoHoppable) => {
-      if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-      this.stampCircle(x, z, colliderRadius + this.walkerRadius);
-    });
-    this.collision.forEachWall((x1, z1, x2, z2, halfThickness, topHeight, autoHoppable) => {
-      if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
-      this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
-    });
+    // walls she hops without being asked, which are not obstacles to her, and
+    // skipping **banded** colliders (a finite `baseHeight` — the balustrade on
+    // an overhanging deck's edge). A banded collider guards an edge rather
+    // than occupying the column of space: the lattice's own level rule (no
+    // edge between nodes more than a step apart) already refuses every route
+    // the rail refuses, and stamping it would block the walkable floor
+    // *beneath* the overhang — the lobby's walk-through arch — at every
+    // level. See `Collision.ts`'s `baseHeight` header.
+    this.collision.forEachCircle(
+      (x, z, colliderRadius, topHeight, autoHoppable, baseHeight, navStamped) => {
+        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
+        if (Number.isFinite(baseHeight) && !navStamped) return;
+        this.stampCircle(x, z, colliderRadius + this.walkerRadius);
+      },
+    );
+    this.collision.forEachWall(
+      (x1, z1, x2, z2, halfThickness, topHeight, autoHoppable, baseHeight, navStamped) => {
+        if (autoHoppable && autoHopClears(topHeight, this.hopApex)) return;
+        if (Number.isFinite(baseHeight) && !navStamped) return;
+        this.stampSegment(x1, z1, x2, z2, halfThickness + this.walkerRadius);
+      },
+    );
 
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive
@@ -930,6 +943,18 @@ export class NavGrid {
    * Samples at half a cell, which cannot step over a blocked cell, and follows
    * the nearest level along, so a line that crosses a deck edge or a drop
    * fails for the same reason a step across one does.
+   *
+   * It reads the floor, and only the floor. That is deliberate, and it is why
+   * a ramp's flank must be stamped into the lattice (`navStamped`, see
+   * `Collision.ts`): given an unstamped flank, a chord between two of a
+   * ramp's waypoints can swing sideways onto the level plateau beside it and
+   * read walkable the whole way, because every step of it *is* walkable —
+   * just not on the ramp. Making this function also demand that the line
+   * arrive at the level of the node it is pulling to was tried as the cure on
+   * 9 Aug 2026 and rejected: with the flank stamped it never once changes an
+   * answer (measured, 0 firings in 1,678 lobby routes across all three levels
+   * and 13,053 park-wide routes), so it bought nothing but an untestable
+   * branch on the router's hot path.
    */
   private lineIsWalkable(
     ax: number,

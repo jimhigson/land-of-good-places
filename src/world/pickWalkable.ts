@@ -92,6 +92,15 @@ export function pickWalkablePoint(
 /**
  * Height of the ray above the topmost visible surface at `distance` along it.
  * Negative means the ray has passed through that surface. `out` is scratch.
+ *
+ * The reference is bounded by the **ray's own height**, so a surface the ray
+ * has already passed *under* stops being a candidate: a tap through the
+ * lobby's walk-through arch lands on the floor the child can see through it,
+ * not on the front edge of the landing overhanging it. Before this bound, the
+ * march compared the ray against the topmost surface outright, and the first
+ * sample under the landing read "below the landing's top" and snapped the tap
+ * 3.84 m up onto its edge — the same one-organ-earlier failure the topmost
+ * rule itself fixed for the deck, inverted for an overhang.
  */
 function surfaceGap(
   ray: Ray,
@@ -101,7 +110,7 @@ function surfaceGap(
   out: Vector3,
 ): number {
   ray.at(distance, out);
-  return out.y - sample(out.x, out.z, reference);
+  return out.y - sample(out.x, out.z, Math.min(reference, out.y));
 }
 
 /** Bisects the bracketing interval down to a centimetre and writes the hit. */
@@ -122,6 +131,8 @@ function refine(
   }
   ray.at(high, out);
   // Snap to the surface itself rather than to wherever on it the ray stopped, so
-  // the marker sits flat on the floor.
-  out.y = sample(out.x, out.z, reference);
+  // the marker sits flat on the floor — bounded by the ray's own height for the
+  // same overhang reason as `surfaceGap`, or the snap would lift a hit made
+  // under the landing back up onto its top.
+  out.y = sample(out.x, out.z, Math.min(reference, out.y + 0.05));
 }

@@ -54,6 +54,23 @@ const POOL_INTENSITY = 3.6;
 /** How far above the floor a room's fill hangs. Clear of every wall in the hotel. */
 const POOL_HEIGHT = 5.2;
 
+/**
+ * The light a hung fitting casts — the lobby chandelier's, so far.
+ *
+ * Here rather than beside the fitting because this file owns what hotel light
+ * *is*: the same decay and no-shadow rules as the room pools, warm like the
+ * chandelier's own drops, a shade under the pools' intensity so the fitting
+ * reads as a glowing ornament in an already-lit room rather than fighting to
+ * be the room's key (the disco ball's lesson — a fitting bright enough to be
+ * the light source blows the pastels to white). Position it at the cluster's
+ * middle; it lives in the hotel root, so it costs nothing outdoors.
+ */
+export function pendantLight(): PointLight {
+  const light = new PointLight(PALETTE.buildingWindowWarm, POOL_INTENSITY * 0.75, 24, POOL_DECAY);
+  light.castShadow = false;
+  return light;
+}
+
 export class HotelLighting {
   readonly group = new Group();
 

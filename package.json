@@ -58,7 +58,7 @@
     "pack:duckbar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-duckbar-asset.mts",
     "blend:duckbar": "blender --background --factory-startup --python art/blend/duckbar_export.py && npm run pack:duckbar",
     "pack:hotel": "node --experimental-strip-types --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/pack-hotel-asset.mts",
-    "blend:hotel": "blender --background --factory-startup --python art/blend/hotel_build.py && blender --background --factory-startup --python art/blend/hotel_export.py && npm run pack:hotel",
+    "blend:hotel": "blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_build.py && blender --background --factory-startup --python-exit-code 1 --python art/blend/hotel_export.py && npm run pack:hotel",
     "check:wall-tunnelling": "node --experimental-strip-types --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:all": "npm run build && npm run test:procgen && npm run check:wall-tunnelling",
     "preview": "vite preview",

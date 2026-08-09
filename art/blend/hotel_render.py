@@ -17,11 +17,28 @@ two disagree, the model file is right and this one is stale.
 
 import math
 import os
+import sys
 
 import bpy
 from mathutils import Vector
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+# No `__pycache__` beside the authoring scripts: `art/blend/` is a tracked
+# directory and `.gitignore` says nothing about `.pyc`, so importing a sibling
+# would leave a binary in `git status` after every review render.
+sys.dont_write_bytecode = True
+
+# **The composition shots take their arithmetic from the builder itself.**
+# `hotel_build` is import-safe (everything is behind `main()`), so the recipe
+# below is written in terms of the very constants the geometry was made from —
+# a stair whose sweep changes moves the review render with it instead of
+# quietly rendering a composition that no longer exists. Which is exactly what
+# happened to `staircase-pair-front` the first time round.
+import hotel_build as hb  # noqa: E402
+
+REPO = os.path.dirname(os.path.dirname(HERE))
 BLEND = os.path.join(REPO, "art", "blend", "hotel.blend")
 OUT = os.path.join(REPO, "art", "renders", "hotel")
 
@@ -95,11 +112,31 @@ COLOURS = {
     "gameboy-body": 0xD3CACB,  # ART.statueStone
     "gameboy-screen": 0x7FE3C0,  # PALETTE.markerMint
     "gameboy-buttons": 0xFF8FC0,  # PALETTE.markerPink
-    "stair-tread": 0xCDEEFF,  # PALETTE.glassTint (the lobby's floor colour)
-    "stair-stringer": 0xC9A9FF,  # PALETTE.markerLilac (the lobby's trim)
-    "stair-rail": 0xFFD76E,  # PALETTE.liftFrame
-    "stair-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
-    "stair-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    # Both hands of the staircase are the same five colours: they are one piece
+    # of architecture seen twice, and a pair that did not match would be two
+    # staircases rather than a composition.
+    "stair-right-tread": 0xCDEEFF,  # PALETTE.glassTint (the lobby's floor colour)
+    "stair-right-stringer": 0xC9A9FF,  # PALETTE.markerLilac (the lobby's trim)
+    "stair-right-rail": 0xFFD76E,  # PALETTE.liftFrame
+    "stair-right-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
+    "stair-right-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    "stair-left-tread": 0xCDEEFF,
+    "stair-left-stringer": 0xC9A9FF,
+    "stair-left-rail": 0xFFD76E,
+    "stair-left-baluster": 0xFFF3F8,
+    "stair-left-newel": 0xD7B3FF,
+    "stair-straight-tread": 0xCDEEFF,
+    "stair-straight-stringer": 0xC9A9FF,
+    "stair-straight-rail": 0xFFD76E,
+    "stair-straight-baluster": 0xFFF3F8,
+    "stair-straight-newel": 0xD7B3FF,
+    "landing-nose": 0xC9A9FF,  # PALETTE.markerLilac — the strings' own masonry
+    "bridge-rail-plinth": 0xFFF2DC,  # PALETTE.signBoard
+    "bridge-rail-baluster": 0xFFF3F8,  # PALETTE.blossomWhite
+    "bridge-rail-hand": 0xFFD76E,  # PALETTE.liftFrame
+    "bridge-newel": 0xD7B3FF,  # PALETTE.flowerViolet
+    "chandelier-frame": 0xFFD76E,  # PALETTE.liftFrame
+    "chandelier-drop": 0xFFF2DC,  # PALETTE.signBoard (lit warm in code)
 }
 
 # Every asset's origin is its own base, so a whole collection rendered as-authored
@@ -108,6 +145,175 @@ COLOURS = {
 # **preview placements only**, applied to a scene this script never saves. Where
 # an asset has a natural place (a bowl on the table, a chair at it) the preview
 # uses it, because that is the arrangement the shapes have to work in.
+PART_SUFFIXES = ("tread", "stringer", "rail", "baluster", "newel")
+
+# =============================================================================
+# The imperial composition, laid out from `hotel_build`'s own constants
+# =============================================================================
+#
+# Blender is the game's frame with **z up and y reversed**: game +Z is Blender
+# −y. The recipe below is written in Blender's, with the landing's front edge on
+# y = 0 and the composition climbing toward +y (which is the game's −Z, deeper
+# into the room, away from the entrance).
+#
+# `C` is the free parameter: how far apart the two arcs' centres are. It is
+# chosen so the two curves' **top newels** — which are the two ends of the
+# landing's front balustrade — come out a whole number of balustrade tiles
+# apart. A part-tile is the one thing that run cannot do.
+
+C = hb.STAIR_RAIL_R + 3.0 * hb.BRIDGE_RAIL_TILE
+"""Half the distance between the two arcs' centres: six tiles between the two
+top newels, which stand at x = ±(C − STAIR_RAIL_R) = ±3.06."""
+
+CHILD_AT = (1.35, 2.4)
+"""(x, y) where the scale figure stands — **under the landing**, off the centre
+line so the front elevation shows it against the open arch rather than against
+the straight flight behind it.
+
+It is in the assembly shots because the whole of Jim's 8 August ruling is a
+claim about a child's head, and a claim about a child's head is not really
+reviewable in a picture that has no child in it."""
+
+FRONT_HALF = C - hb.STAIR_RAIL_R
+"""…that run's half-length, and where the front balustrade stops each side."""
+
+SIDE_TILES = 5
+LANDING_BACK = SIDE_TILES * hb.BRIDGE_RAIL_TILE
+"""How far the platform reaches back from the curves' tops to the gallery it
+delivers you to — five tiles, so each side edge is a whole run too."""
+
+LANDING_DEPTH = LANDING_BACK - hb.STRAIGHT_RUN
+"""…and therefore where the straight flight's foot sits: what is left of the
+platform once the flight has taken its run out of it."""
+
+LANDING_HALF_X = C - hb.STAIR_INNER_R
+"""The platform's half width: out to the far end of each curve's top tread."""
+
+RAIL_INSET = 0.115
+"""Half the balustrade's depth. A run is set in by this much from the edge it
+guards, so its outer face lands exactly on that edge and the nosing below it
+still has its overhang in clear air."""
+
+
+def composition():
+    """Every piece of the assembly, as (object name, location, yaw°) in Blender.
+
+    One list, built once, so the isometric and the front elevation cannot
+    disagree about what they are showing — the exact bug that let
+    `staircase-pair-front` render two flights stacked at the origin for a whole
+    round of review.
+    """
+    places: list[tuple[str, tuple[float, float, float], float]] = []
+    # The two curves, at **no rotation at all** — the quarter turn's dividend.
+    # At 90° a flight's foot comes out square to the room *and* its top square
+    # to the landing; the 45° cut of this composition had to choose (a floor
+    # takes a stair at any angle and a landing does not), chose the top, and so
+    # stood both feet diagonally in the room to buy it.
+    for hand, sign in (("right", 1.0), ("left", -1.0)):
+        for part in PART_SUFFIXES:
+            places.append((f"stair-{hand}-{part}", (sign * C, 0.0, 0.0), 0.0))
+    # The wide flight, standing on the landing with its bottom riser facing the
+    # entrance.
+    for part in PART_SUFFIXES:
+        places.append(
+            (f"stair-straight-{part}", (0.0, LANDING_DEPTH, hb.LANDING_HEIGHT), 0.0)
+        )
+    # The landing's front balustrade: six tiles between the two curves' top
+    # newels, which are the run's end posts — no extra newel there, because the
+    # stair already finishes with one and two posts in one place is a lump.
+    for i in range(6):
+        x = -FRONT_HALF + (i + 0.5) * hb.BRIDGE_RAIL_TILE
+        places.append(("bridge-rail-plinth", (x, RAIL_INSET, hb.LANDING_HEIGHT), 0.0))
+        places.append(("bridge-rail-baluster", (x, RAIL_INSET, hb.LANDING_HEIGHT), 0.0))
+        places.append(("bridge-rail-hand", (x, RAIL_INSET, hb.LANDING_HEIGHT), 0.0))
+        places.append(("landing-nose", (x, 0.0, hb.LANDING_HEIGHT), 0.0))
+    # …and its two side edges, the same tiles turned a quarter turn, from the
+    # front corner back to the gallery, with a newel on each end of each run.
+    for sign in (1.0, -1.0):
+        edge = sign * LANDING_HALF_X
+        yaw = sign * 90.0
+        for i in range(SIDE_TILES):
+            y = (i + 0.5) * hb.BRIDGE_RAIL_TILE
+            inset = edge - sign * RAIL_INSET
+            places.append(("bridge-rail-plinth", (inset, y, hb.LANDING_HEIGHT), yaw))
+            places.append(("bridge-rail-baluster", (inset, y, hb.LANDING_HEIGHT), yaw))
+            places.append(("bridge-rail-hand", (inset, y, hb.LANDING_HEIGHT), yaw))
+            places.append(("landing-nose", (edge, y, hb.LANDING_HEIGHT), yaw))
+        for y in (0.0, LANDING_BACK):
+            places.append(("bridge-newel", (edge - sign * RAIL_INSET, y, hb.LANDING_HEIGHT), 0.0))
+    return places
+
+
+# The floor, the landing and the gallery deck are the **room's** to build, not
+# this asset's — but a composition rendered without them is three flights
+# floating in white, and the whole question this shot exists to answer is
+# whether they land on each other. So the review render stands in for them with
+# plain boxes, in a scene it never saves. They are boxes on purpose: anything
+# more would start to look like art this file owns.
+STANDIN_SLAB = 0xD8CCEC
+STANDIN_FLOOR = 0xF4EEF9
+STANDIN_CHILD = 0xE86F9B
+"""The scale figure, in a colour nothing in the hotel is, so nobody mistakes it
+for a piece of the asset."""
+
+KID_HEIGHT = hb.ts_const("src/art/models/kid.ts", "KID_HEIGHT")
+"""2.12 m — a child in the **default** hair and no hat, read from `kid.ts`."""
+
+
+def standins():
+    """(name, size, centre, colour) boxes for the assembly shot, in Blender metres.
+
+    The floor, the landing and the gallery deck are the **room's** to build and
+    are boxes here on purpose; the fourth is a child, and she is the point.
+    """
+    # The thinnest landing the room is allowed to build — which is the one that
+    # gives the arch its *most* headroom, so a slab drawn any thicker than this
+    # in this picture would be flattering the design. `hotel_build` says the
+    # room may go to LANDING_SLAB_MAX and no further.
+    slab = hb.LANDING_SLAB_MIN
+    front = -(hb.STAIR_OUTER_R + 2.2)
+    back = LANDING_BACK + 1.9
+    child_x, child_y = CHILD_AT
+    return [
+        (
+            "standin-floor",
+            (2 * (C + 1.0), back - front, 0.30),
+            (0.0, (front + back) * 0.5, -0.15),
+            STANDIN_FLOOR,
+        ),
+        (
+            "standin-landing",
+            (2 * LANDING_HALF_X, LANDING_BACK, slab),
+            (0.0, LANDING_BACK * 0.5, hb.LANDING_HEIGHT - slab * 0.5),
+            STANDIN_SLAB,
+        ),
+        (
+            "standin-gallery",
+            (2 * (LANDING_HALF_X + 1.0), 3.4, slab),
+            (0.0, LANDING_BACK + 1.7, hb.STAIR_RISE - slab * 0.5),
+            STANDIN_SLAB,
+        ),
+        # **The scale figure, in two pieces, because it is two constants.** The
+        # body is `KID_HEIGHT` (2.12, the default style) and the block on top of
+        # it is the 0.85 m a party hat adds — together `TALLEST_CHILD_HEIGHT`,
+        # 2.97, which is the number the landing's height was worked back from.
+        # Seeing the join is the whole value of it: hats, not hair, are what
+        # this arch had to be built for.
+        (
+            "standin-child",
+            (0.55, 0.34, KID_HEIGHT),
+            (child_x, child_y, KID_HEIGHT * 0.5),
+            STANDIN_CHILD,
+        ),
+        (
+            "standin-child-hat",
+            (0.78, 0.78, hb.TALLEST_CHILD - KID_HEIGHT),
+            (child_x, child_y, (KID_HEIGHT + hb.TALLEST_CHILD) * 0.5),
+            STANDIN_CHILD,
+        ),
+    ]
+
+
 LAYOUTS = {
     "breakfast": {
         "chair": (0.0, -1.02, 0.0),
@@ -137,6 +343,58 @@ LAYOUTS = {
         "lift-car-floor": (0.0, 1.45, 0.0),
         "lift-car-rail": (0.0, 1.45, 0.0),
     },
+    # A newel centred on each end of a three-tile run. The handrail dies into
+    # the post, which is what joinery does and what hides both end caps.
+    "bridge-rail": {"bridge-newel": (-1.53, 0.0, 0.0)},
+}
+
+# Shots built entirely out of linked copies at absolute places, rather than out
+# of one collection sitting at its own origin: the composition is three flights,
+# twenty-odd balustrade tiles and a nosing run, and every one of them is a
+# *repeat* of an asset authored about its own origin.
+PLACEMENTS = {
+    "staircase-assembly": composition(),
+    "staircase-assembly-front": composition(),
+    "staircase-assembly-landing": composition(),
+    "staircase-assembly-arch": composition(),
+}
+
+STANDINS = {
+    "staircase-assembly": standins(),
+    "staircase-assembly-front": standins(),
+    "staircase-assembly-landing": standins(),
+    "staircase-assembly-arch": standins(),
+}
+
+EYE_HEIGHT = hb.ts_const("src/art/models/kid.ts", "KID_HEAD_HEIGHT") + 0.20
+"""Where a child's eyes are, in metres: the head pivot `kid.ts` puts at 1.36 m,
+plus a fifth of a metre for the eyes sitting above it in a skull `KID_HEAD_SCALE`
+makes big. Approximate on purpose — nothing is derived from it, it only says
+where to stand the camera."""
+
+# stem -> (camera position, what it looks at, lens in mm). A **perspective**
+# shot, unlike everything else in this file.
+#
+# Every other render here is orthographic and framed automatically, which is the
+# right way to judge a shape and the wrong way to answer "can you walk through
+# it": an ortho camera has no viewpoint, and headroom is a thing you experience
+# from one particular height. So this one stands where a child stands, at her
+# eye height, seven and a half metres back in the lobby, and looks at the arch.
+EYE_SHOTS = {
+    "staircase-assembly-arch": ((0.0, -7.5, EYE_HEIGHT), (0.0, 2.5, 2.05), 28.0),
+}
+
+# stem -> {object: [extra offsets]}. Linked copies made just for that shot and
+# removed after it, so a run of tiled segments can be judged as a run — the one
+# thing a single tile cannot show is whether two of them meet cleanly.
+COPIES = {
+    "bridge-rail": {
+        "bridge-rail-plinth": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-rail-baluster": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-rail-hand": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)],
+        "bridge-newel": [(3.06, 0.0, 0.0)],
+    },
+    "landing-nose": {"landing-nose": [(-1.02, 0.0, 0.0), (1.02, 0.0, 0.0)]},
 }
 
 # Objects a shot leaves out entirely, by shot name.
@@ -146,8 +404,11 @@ OMIT = {
     "lift-car": {"lift-frame", "lift-frame-sill", "lift-door-left", "lift-door-right"},
 }
 
-# file stem -> (collection, camera azimuth in degrees off the front, elevation)
+# file stem -> (collection(s), camera azimuth in degrees off the front, elevation)
 # Azimuth 0 looks straight along +Y (at the asset's front face, which is −Y).
+# The collection field takes a name or a tuple of names, because the twin-stair
+# composition is two collections and judging a mirror image means seeing both
+# in one frame.
 # An optional fifth field widens the frame: `frame()` sizes the ortho view off
 # the asset's largest single dimension, which crops anything whose diagonal is
 # much longer than that — a quarter-turn staircase is 4.4 m in three directions
@@ -177,11 +438,56 @@ SHOTS = [
     # looks from focus + (+X, +Y, +Z) at 38° of pitch; the game's +Z is
     # Blender's −Y, so +45° of azimuth here puts the camera at (+X, −Y), which
     # is the same corner. This is the shot that says whether the sweep reads.
-    ("staircase", "hotel-stair", 45.0, 36.0, 1.6),
+    ("staircase", "hotel-stair-right", 45.0, 36.0, 1.6),
     # …and a low one from the foot of the flight, which is the only angle that
     # shows the rake: strings, handrail and coping should be three parallel
     # straight lines, and any tread out of step shows up as a kink in them.
-    ("staircase-rake", "hotel-stair", 8.0, 10.0, 1.45),
+    ("staircase-rake", "hotel-stair-right", 8.0, 10.0, 1.45),
+    # The mirror, from the same two angles. Printed side by side with the two
+    # above they are the check a human can actually do; `hotel_build.py`'s
+    # `assert_stairs_mirror` is the check a machine does, vertex for vertex.
+    ("staircase-left", "hotel-stair-left", 45.0, 36.0, 1.6),
+    ("staircase-left-rake", "hotel-stair-left", 8.0, 10.0, 1.45),
+    # **The mirror check a human can do in one glance.** Both flights left at
+    # the origin, seen from dead ahead — which is *in* the mirror plane, so a
+    # true pair renders as an exactly left–right symmetric picture and anything
+    # that is not a true pair renders as a picture that is not.
+    ("staircase-mirror", ("hotel-stair-right", "hotel-stair-left"), 0.0, 14.0, 1.3),
+    # The wide flight on its own, from the park's camera and from the foot.
+    # The low one is the shot that says whether the two sides match: two
+    # handrails, two rows of balusters and four newels, all of which have to
+    # read as one flight rather than as two railings with a floor between them.
+    ("staircase-straight", "hotel-stair-straight", 45.0, 36.0, 1.35),
+    ("staircase-straight-rake", "hotel-stair-straight", 14.0, 9.0, 1.2),
+    # **The composition, assembled.** Three flights, the landing's balustrade
+    # and its nosing, at the spacing the placement recipe gives — standing on
+    # plain stand-in slabs for the floor, the landing and the gallery, because
+    # the question this shot exists to answer is whether they land on each
+    # other.
+    ("staircase-assembly", (), 45.0, 30.0, 1.12),
+    ("staircase-assembly-front", (), 0.0, 10.0, 1.06),
+    # …and a closer, lower look at the one join that is new: three flights and
+    # two balustrade runs meeting on the landing.
+    ("staircase-assembly-landing", (), 24.0, 26.0, 0.72),
+    # **The shot Jim's 8 August ruling has to be judged on.** Standing in the
+    # lobby at a child's eye height, looking at the arch under the landing, with
+    # a 2.97 m scale figure standing in it. Everything else about this
+    # composition can be argued from an elevation; whether the see-through
+    # survives cannot.
+    ("staircase-assembly-arch", (), 0.0, 0.0),
+    # The nosing, tiled, and **cropped to the joins**. Same question as
+    # `bridge-rail`: can you see where one segment stops and the next starts?
+    # A 3 m run of a 0.2 m moulding framed whole is a stick, and a stick answers
+    # nothing — the pad crops to the middle 1.7 m, which holds both joins.
+    ("landing-nose", "hotel-landing-nose", 30.0, 26.0, 0.55),
+    # Three tiles and a newel at each end. The only question this shot exists to
+    # answer: can you see where one segment stops and the next starts?
+    ("bridge-rail", ("hotel-bridge-rail", "hotel-bridge-newel"), 34.0, 22.0, 1.35),
+    ("bridge-newel", "hotel-bridge-newel", 30.0, 20.0),
+    # Hangs, so it is framed like the disco ball. Low elevation on purpose: a
+    # chandelier is looked *up* at, and the varied drop lengths are the whole
+    # point of the asset — from above they all read as one flat ring.
+    ("chandelier", "hotel-chandelier", 26.0, 12.0, 1.3),
 ]
 
 
@@ -223,6 +529,35 @@ def configure() -> None:
         obj.color = linear_rgba(COLOURS.get(obj.name, 0xCCCCCC))
 
 
+def standin_box(name: str, size, centre, colour: int):
+    """A plain box for a floor this asset does not own. Removed after the shot."""
+    hx, hy, hz = (s * 0.5 for s in size)
+    verts = [
+        (-hx, -hy, -hz),
+        (hx, -hy, -hz),
+        (hx, hy, -hz),
+        (-hx, hy, -hz),
+        (-hx, -hy, hz),
+        (hx, -hy, hz),
+        (hx, hy, hz),
+        (-hx, hy, hz),
+    ]
+    # Wound outward by hand. `hotel_build`'s `box()` is wound the other way and
+    # gets away with it because `Part.emit` recalculates normals; nothing does
+    # that here, and a slab whose top face points at the floor renders as a
+    # sheet of mid grey — which reads as a lighting choice rather than as the
+    # mistake it is.
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate(verbose=False)
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = centre
+    obj.color = linear_rgba(colour)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def frame(objects, azimuth_deg: float, elevation_deg: float, camera, pad: float = 1.22) -> None:
     lo = Vector((1e9, 1e9, 1e9))
     hi = Vector((-1e9, -1e9, -1e9))
@@ -262,24 +597,75 @@ def main() -> None:
     bpy.context.scene.camera = camera
 
     print("\nhotel_render")
-    for stem, coll_name, azimuth, elevation, *rest in SHOTS:
+    for stem, coll_names, azimuth, elevation, *rest in SHOTS:
         pad = rest[0] if rest else 1.22
-        coll = bpy.data.collections.get(coll_name)
-        if coll is None:
-            raise SystemExit(f"hotel_render: no collection '{coll_name}' — rerun hotel_build.py")
+        names = (coll_names,) if isinstance(coll_names, str) else coll_names
+        shown = []
+        for coll_name in names:
+            coll = bpy.data.collections.get(coll_name)
+            if coll is None:
+                raise SystemExit(f"hotel_render: no collection '{coll_name}' — rerun hotel_build.py")
+            shown.extend(coll.objects)
         layout = LAYOUTS.get(stem, {})
         omit = OMIT.get(stem, set())
-        shown = [obj for obj in coll.objects if obj.name not in omit]
+        shown = [obj for obj in shown if obj.name not in omit]
         for obj in bpy.data.objects:
             obj.hide_render = obj.type == "MESH" and obj not in shown
             if obj.type == "MESH":
                 obj.location = layout.get(obj.name, (0.0, 0.0, 0.0))
+        # Linked copies for a tiled run. Made here and removed below, because
+        # this script must leave the scene exactly as it found it — it never
+        # saves, but the next shot in this same loop would inherit them.
+        copies = []
+        for name, offsets in COPIES.get(stem, {}).items():
+            source = bpy.data.objects[name]
+            for offset in offsets:
+                clone = source.copy()
+                clone.location = Vector(source.location) + Vector(offset)
+                clone.color = source.color
+                bpy.context.scene.collection.objects.link(clone)
+                copies.append(clone)
+        # …and the same mechanism for a whole assembly: absolute places and a
+        # yaw each, plus the plain boxes that stand in for the room's floors.
+        for name, location, yaw in PLACEMENTS.get(stem, ()):
+            source = bpy.data.objects[name]
+            clone = source.copy()
+            clone.location = location
+            clone.rotation_mode = "XYZ"
+            clone.rotation_euler = (0.0, 0.0, math.radians(yaw))
+            clone.color = source.color
+            # **The clone inherits `hide_render` from its source**, and the
+            # source was hidden three lines ago because it is not in this shot's
+            # collection list — a placement shot has no collection. The first
+            # run of the assembly render was three stand-in slabs and nothing
+            # else, which is a picture that looks like a composition problem and
+            # is a visibility one.
+            clone.hide_render = False
+            bpy.context.scene.collection.objects.link(clone)
+            copies.append(clone)
+        for name, size, centre, colour in STANDINS.get(stem, ()):
+            box = standin_box(name, size, centre, colour)
+            copies.append(box)
+        shown.extend(copies)
         bpy.context.view_layer.update()
-        frame(shown, azimuth, elevation, camera, pad)
+        if stem in EYE_SHOTS:
+            eye, target, lens = EYE_SHOTS[stem]
+            camera.location = Vector(eye)
+            camera.rotation_mode = "QUATERNION"
+            camera.rotation_quaternion = (Vector(eye) - Vector(target)).to_track_quat("Z", "Y")
+            camera.data.type = "PERSP"
+            camera.data.lens = lens
+        else:
+            frame(shown, azimuth, elevation, camera, pad)
         path = os.path.join(OUT, f"{stem}.png")
         bpy.context.scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
-        print(f"  {stem:<16} {os.path.getsize(path):>8} bytes")
+        print(f"  {stem:<22} {os.path.getsize(path):>8} bytes")
+        for clone in copies:
+            mesh = clone.data if clone.name.startswith("standin-") else None
+            bpy.data.objects.remove(clone, do_unlink=True)
+            if mesh is not None:
+                bpy.data.meshes.remove(mesh)
     print()
 
 
