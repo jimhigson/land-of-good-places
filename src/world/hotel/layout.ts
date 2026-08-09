@@ -1241,12 +1241,18 @@ export const ROOMS: readonly HotelRoom[] = [
 export interface HotelDoorBand extends PortalBand {
   /**
    * `room-door` is an internal doorway between sub-rooms — no walk-through
-   * trigger fires on it (`Hotel.checkDoorways` looks bands up by the other
-   * four kinds), it exists so `check:tap-spacing` holds every zone a finger
-   * clear of it: a doorway a zone's pick area covers is a doorway a phone
-   * cannot use, which is the exact bug the tap rule was written for.
+   * trigger fires on it (`Hotel.checkDoorways` looks bands up by the kinds
+   * that change space), it exists so `check:tap-spacing` holds every zone a
+   * finger clear of it: a doorway a zone's pick area covers is a doorway a
+   * phone cannot use, which is the exact bug the tap rule was written for.
    */
-  readonly kind: 'exit' | 'suite-door' | 'corridor-door' | 'lift' | 'room-door';
+  readonly kind:
+    | 'exit'
+    | 'suite-door'
+    | 'suite-portal'
+    | 'corridor-door'
+    | 'lift'
+    | 'room-door';
 }
 
 export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
@@ -1265,16 +1271,37 @@ export function hotelDoorBands(room: HotelRoom): HotelDoorBand[] {
     });
   }
   if (room === CORRIDOR) {
-    // The "yours" door into the suite. The outer envelope is the refusal
-    // band (checkDoorways turns a keyless child away from 1.6 m out); the
-    // step-through itself needs the innermost 0.6 m. Its own sign zone is
-    // the door's handle and may cover it.
+    // The "yours" door into the suite, as **two** rectangles, because the
+    // door does two different things at two different distances and the
+    // depths are not a detail somebody should re-derive in `checkDoorways`:
+    //
+    //  * `suite-door` is the refusal envelope — a keyless child is turned
+    //    away from 1.6 m out, because `Hotel`'s lock wall stops her at
+    //    `halfX − 0.92` and a refusal she cannot reach is a mute wall;
+    //  * `suite-portal` is the doorway itself, the 0.6 m either side of the
+    //    wall plane that she actually steps *through* once she has the key —
+    //    the same depth every other portal in the hotel uses.
+    //
+    // Both carry `ownZoneId`, because the "yours" sign is this door's own
+    // handle and may sit on it. The portal is a strict subset of the
+    // refusal envelope, so the tap-spacing rule sees no new keep-out.
     bands.push({
       kind: 'suite-door',
       what: 'the suite door',
       centreX: room.originX + room.halfX - 0.5,
       centreZ: room.originZ,
       halfAlong: 1.1,
+      halfAcross: 1.5,
+      yaw: Math.PI / 2,
+      y: 0,
+      ownZoneId: 'hotel-yours-door',
+    });
+    bands.push({
+      kind: 'suite-portal',
+      what: "the suite door's own threshold",
+      centreX: room.originX + room.halfX,
+      centreZ: room.originZ,
+      halfAlong: 0.6,
       halfAcross: 1.5,
       yaw: Math.PI / 2,
       y: 0,

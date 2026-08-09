@@ -371,7 +371,25 @@ export class Player implements GameSystem {
 
   private readonly desiredVelocity = new Vector3();
   private readonly moveDirection = new Vector3();
-  private readonly previousPosition = new Vector3();
+  /**
+   * Where she was when this frame's movement started — so `previousPosition →
+   * position` is the *line she walked this frame*, not just the point she
+   * ended on.
+   *
+   * Public because a walk-through trigger needs the line rather than the
+   * point: a doorway sampled once a frame is a doorway a long frame steps
+   * clean over (`tapSpacing.ts`'s `bandCrossed`, the same reasoning
+   * `CollisionWorld.resolveMovement` applies to walls). It is read after
+   * `Game.ts` has run `player.update()` — step 2, before `world.update()` at
+   * step 4 — so what a trigger sees is this frame's own resolved movement.
+   *
+   * **Every teleport collapses it onto the destination** (`teleportTo`,
+   * `setRidePose`, the constructor), which is what makes a swept test against
+   * it safe for free: a change of space leaves a zero-length segment, not a
+   * six-hundred-metre one sweeping through every door in the game. That
+   * property is load-bearing — do not add a way of moving her that skips it.
+   */
+  readonly previousPosition = new Vector3();
   /** Scratch point for the auto-hop lookahead — see `wouldAutoHopClear` below. */
   private readonly hopProbe = new Vector3();
 

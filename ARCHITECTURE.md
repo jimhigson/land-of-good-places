@@ -353,6 +353,14 @@ game.world.collision.addRectangle(cx, cz, hx, hz);     // buildings
 
 Collision coordinates are **world space**, not plot-local.
 
+**The contract is: what looks solid is solid, from every approach.** A mesh a
+child can see and lean on has a collider that covers it, and the shell has no
+gaps except the ones you meant — a door. Nothing infers a collider from a mesh,
+so the two are only ever kept together on purpose; and a mesh with a hole in
+its collider looks completely correct in code review, on screen and in a
+screenshot. It shows up when somebody walks through the wall. See CLAUDE.md,
+"Anything that looks solid must be solid".
+
 ### Textures
 
 `core/textures.ts` generates and caches canvas textures by key. Authored image
